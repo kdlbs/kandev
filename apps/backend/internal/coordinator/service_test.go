@@ -14,12 +14,16 @@ import (
 
 // fakeWorkspaceAuthorizer is a test double for WorkspaceAuthorizer: err, when
 // set, simulates AuthorizeWorkspaceScope failing (e.g.
-// repoerrors.ErrWorkspaceNotFound or service.ErrForbidden).
+// repoerrors.ErrWorkspaceNotFound or service.ErrForbidden). It also records
+// every scope it was called with, so tests can assert a read route never
+// authorizes with the manage scope (or vice versa).
 type fakeWorkspaceAuthorizer struct {
-	err error
+	err    error
+	scopes []authz.Scope
 }
 
-func (f *fakeWorkspaceAuthorizer) AuthorizeWorkspaceScope(context.Context, string, authz.Scope) error {
+func (f *fakeWorkspaceAuthorizer) AuthorizeWorkspaceScope(_ context.Context, _ string, scope authz.Scope) error {
+	f.scopes = append(f.scopes, scope)
 	return f.err
 }
 
@@ -52,6 +56,24 @@ func assertFieldError(t *testing.T, err error, field string) {
 	}
 	if fieldErr.Field != field {
 		t.Errorf("FieldError.Field = %q, want %q", fieldErr.Field, field)
+	}
+}
+
+// assertLastScope fails unless svc's fakeWorkspaceAuthorizer was last called
+// with want, catching a read/write scope swap on a coordinator route
+// (RV-005: previously only the return value was asserted, never which
+// authz.Scope constant was requested).
+func assertLastScope(t *testing.T, svc *Service, want authz.Scope) {
+	t.Helper()
+	fake, ok := svc.authz.(*fakeWorkspaceAuthorizer)
+	if !ok {
+		t.Fatalf("svc.authz is %T, want *fakeWorkspaceAuthorizer", svc.authz)
+	}
+	if len(fake.scopes) == 0 {
+		t.Fatal("AuthorizeWorkspaceScope was not called")
+	}
+	if got := fake.scopes[len(fake.scopes)-1]; got != want {
+		t.Errorf("AuthorizeWorkspaceScope scope = %v, want %v", got, want)
 	}
 }
 
@@ -127,6 +149,7 @@ func TestServiceCreateCoordinator(t *testing.T) {
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("CreateCoordinator() error = %v, want %v", err, wantErr)
 		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceManage)
 	})
 }
 
@@ -192,6 +215,7 @@ func TestServiceGetCoordinator(t *testing.T) {
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("GetCoordinator() error = %v, want %v", err, wantErr)
 		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
 	})
 }
 
@@ -247,6 +271,7 @@ func TestServiceListCoordinators(t *testing.T) {
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("ListCoordinators() error = %v, want %v", err, wantErr)
 		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
 	})
 }
 
@@ -379,6 +404,7 @@ func TestServicePatchCoordinator(t *testing.T) {
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("PatchCoordinator() error = %v, want %v", err, wantErr)
 		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceManage)
 	})
 }
 
@@ -427,6 +453,7 @@ func TestServiceDeleteCoordinator(t *testing.T) {
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("DeleteCoordinator() error = %v, want %v", err, wantErr)
 		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceManage)
 	})
 }
 
@@ -503,9 +530,11 @@ func TestServiceProposalReads(t *testing.T) {
 		if _, err := svc.ListProposals(context.Background(), workspaceID, "cid", ListProposalsPending); !errors.Is(err, wantErr) {
 			t.Fatalf("ListProposals() error = %v, want %v", err, wantErr)
 		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
 		if _, err := svc.GetProposal(context.Background(), workspaceID, "cid", "pid"); !errors.Is(err, wantErr) {
 			t.Fatalf("GetProposal() error = %v, want %v", err, wantErr)
 		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
 	})
 }
 
@@ -550,5 +579,6 @@ func TestServiceListStalls(t *testing.T) {
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("ListStalls() error = %v, want %v", err, wantErr)
 		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
 	})
 }

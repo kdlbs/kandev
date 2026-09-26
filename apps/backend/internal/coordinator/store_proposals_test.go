@@ -502,6 +502,47 @@ func TestListProposals_AllOrderedDescendingLimited(t *testing.T) {
 	}
 }
 
+// TestListProposals_AllRespectsFiftyRowCap verifies the LIMIT 50 clause
+// (RV-006): status=all must never return more than 50 rows, newest first,
+// even when more than 50 proposals exist. Each proposal is rejected right
+// after insertion so the open-proposal count never approaches the unrelated
+// 25-cap that InsertProposal enforces.
+func TestListProposals_AllRespectsFiftyRowCap(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	c := newTestCoordinator(t, store, "ws-1")
+
+	const total = 55
+	ids := make([]string, 0, total)
+	for i := 0; i < total; i++ {
+		p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
+		if err := store.InsertProposal(ctx, p); err != nil {
+			t.Fatalf("InsertProposal[%d]: %v", i, err)
+		}
+		ids = append(ids, p.ID)
+		if _, err := store.RejectProposal(ctx, p.ID, "", "user-1", time.Now().UTC()); err != nil {
+			t.Fatalf("RejectProposal[%d]: %v", i, err)
+		}
+	}
+
+	list, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsAll)
+	if err != nil {
+		t.Fatalf("ListProposals: %v", err)
+	}
+	if len(list) != 50 {
+		t.Fatalf("ListProposals(all) returned %d rows, want 50 (the LIMIT 50 cap)", len(list))
+	}
+
+	// Newest first: the last 50 inserted ids, most recent first.
+	wantNewestFirst := ids[total-50:]
+	for i, p := range list {
+		want := wantNewestFirst[len(wantNewestFirst)-1-i]
+		if p.ID != want {
+			t.Fatalf("ListProposals(all)[%d].ID = %q, want %q (newest-first order mismatch)", i, p.ID, want)
+		}
+	}
+}
+
 func TestGetProposal_WrongCoordinatorOrWorkspaceIsNotFound(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
