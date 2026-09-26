@@ -324,18 +324,29 @@ on the request's `Sec-Fetch-Site` header:
 
 | `Sec-Fetch-Site` | Read recovers stale claims |
 | --- | --- |
-| absent (non-browser client, no ambient cookie) | yes |
+| absent | no; rows returned as stored, as for a `workspace.read` caller |
 | `same-origin` | yes |
 | `none` (typed or bookmarked navigation) | yes |
 | `same-site` or `cross-site` | no; rows returned as stored, as for a `workspace.read` caller |
 | any other value | no |
 
+An absent header is not proof of a non-browser, cookie-less caller: a browser
+predating the Fetch Metadata spec (Safari <16.4, Firefox <90) or sitting
+behind a header-stripping proxy or extension still attaches the ambient
+`SameSite=Lax` session cookie on a cross-site top-level navigation while
+sending no `Sec-Fetch-Site` at all. `webhookSameOriginRequest`
+(`internal/plugins/handlers.go`) already treats an absent header as refused
+by default for the same reason; this gate matches it by treating absent the
+same as `cross-site`.
+
 The gate applies only to the recovery; the read itself answers 200 either
 way. Even an ungated recovery could only replay a decision a
 `workspace.manage` caller already committed: it takes no request input, uses
 the frozen `final_spec_json` and the first `decided_by`, and creates at most
-the one task the claim authorised, which is what the startup pass would do.
-The gate removes that write from cross-site reach so the read routes stay
+the one task the claim authorised, which is what the startup pass would do:
+refusing recovery here only delays it, since the next startup pass, approve,
+or a same-origin read still recovers the row. The gate removes that write from
+cross-site, same-site and no-header reach so the read routes stay
 side-effect free for any request another site can cause. Approve and reject
 are `POST` with a JSON body, which `SameSite=Lax` and the origin check
 already protect.
@@ -362,7 +373,7 @@ The prefix is enforced in the task service, so every entry point inherits it:
 
 | Route | Scope | Result |
 | --- | --- | --- |
-| `GET .../coordinators/:cid/proposals?status=pending\|all` | `workspace.read` | open, `created_at` asc then id asc; or newest 50, desc |
+| `GET .../coordinators/:cid/proposals?status=pending\|all` | `workspace.read` | open, `created_at` asc then id asc; or newest 50, desc; 400 naming `status` for any other value |
 | `GET .../coordinators/:cid/proposals/:pid` | `workspace.read` | one proposal |
 | `POST .../proposals/:pid/approve` | `workspace.manage` | proposal, 400, 403, 404 or 409 |
 | `POST .../proposals/:pid/reject` | `workspace.manage` | proposal, 400, 403, 404 or 409 |

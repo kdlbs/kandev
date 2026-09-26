@@ -124,7 +124,17 @@ rerun of `proposals.spec.ts` under a different project.
 variants: a `failed` row with no task id renders Approve, Edit and Reject
 with the "Nothing was created" copy, and a `failed` row with a task id set
 renders only Approve and Reject with the "could not be finalized" copy and
-Approve completing with the existing task. `proposals.spec.ts` also covers
+Approve completing with the existing task. `use-proposals.test.ts` also
+covers the reader case of `AC-COORDINATOR-PROPOSALS-005.1` ("for managers"):
+`ProposalCard` given a `workspace.read`-scoped context renders the title,
+workflow, step and "Proposed by" line with no Approve, Edit or Reject. The
+end-to-end reader assertion for this same card lives in task 04's
+`tests/auth/coordinator-needs-you-reader.spec.ts` (the card renders on Needs
+you); the copilot transcript surface needs no separate `auth`-project spec of
+its own, because `AC-COORDINATOR-COPILOT-004.1` already keeps the launcher,
+and so the popover the chat card renders inside, unreachable to a reader.
+
+`proposals.spec.ts` also covers
 the rest of REQ-COORDINATOR-PROPOSALS-005 directly: the `pending` card's
 Approve/Edit/Reject set and copy (AC-005.1), the `approving` card's disabled,
 action-less state (AC-005.2), Edit's in-place fields and empty-title refusal

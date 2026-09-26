@@ -139,9 +139,9 @@ never settle or release it; `coordinator.updated` published once after the
 completion, and not on a zero-row write; a coordinator deleted during an
 approval returns 404 with the task kept; a reader's list of a stale claim
 writes nothing while a manager's list recovers it; a manager's list or get
-with `Sec-Fetch-Site` `cross-site`, `same-site` or an unknown value writes
-nothing and returns the rows as stored, while `same-origin`, `none` and an
-absent header recover; the created task gets no
+with `Sec-Fetch-Site` `cross-site`, `same-site`, an absent header or an
+unknown value writes nothing and returns the rows as stored, while
+`same-origin` and `none` recover; the created task gets no
 agent on a step whose `on_enter` has `auto_start_agent` (no
 `auto_start_on_create` marker); crash after claim and after create recover to one
 task; two readers of a stale claim, one wins, keeping the first

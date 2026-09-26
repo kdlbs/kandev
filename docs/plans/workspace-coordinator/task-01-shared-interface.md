@@ -21,6 +21,7 @@ acceptance_criteria:
   - AC-COORDINATOR-COORDINATORS-002.5
   - AC-COORDINATOR-COORDINATORS-002.6
   - AC-COORDINATOR-COORDINATORS-002.9
+  - AC-COORDINATOR-COORDINATORS-002.11
   - AC-COORDINATOR-COORDINATORS-003.1
   - AC-COORDINATOR-COORDINATORS-003.2
   - AC-COORDINATOR-COORDINATORS-003.3
@@ -73,8 +74,10 @@ the coordinators and proposals system designs, not a local edit.
   `executor_profile_status` fields on the coordinator GET
   ([coordinators design](../../specs/coordinator/system-design/coordinators.md#validation));
   a profile whose `WorkspaceID` is non-empty and differs from the
-  coordinator's own workspace is refused at save (400) and reported as
-  `missing` by `profileStatus`, the same as an unreadable or absent profile;
+  coordinator's own workspace is refused at save (400,
+  `AC-COORDINATOR-COORDINATORS-002.11`) and reported as `missing` by
+  `profileStatus` (`AC-COORDINATOR-COORDINATORS-005.4`), the same as an
+  unreadable or absent profile;
   `open_proposals` on the coordinator list; the proposals list and get
   routes (without the stale-claim recovery on read, which is task 07's), with
   the list route returning 400 naming `status` for any `status` value other

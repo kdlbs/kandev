@@ -121,13 +121,19 @@ mockup's `mockup/e2e/tests/`, outside this repository; see the plan's [Mockup sc
 cd apps/web && pnpm test -- hooks/domains/coordinator app/coordinator/copilot
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/copilot.spec.ts tests/config-chat
+cd apps/web && pnpm e2e:run --project=auth tests/auth/coordinator-copilot-reader.spec.ts
 cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-copilot.spec.ts
 ```
 
 The `mobile-chrome` project matches on the `mobile-*.spec.ts` filename prefix
 (`apps/web/e2e/playwright.config.ts`), not on project scope, so the 390px
 layout assertions live in their own `mobile-copilot.spec.ts` file rather than
-a rerun of `copilot.spec.ts` under a different project.
+a rerun of `copilot.spec.ts` under a different project. The `auth` project's
+`testMatch` requires an `auth/` path segment, so the reader-visibility case
+(`AC-COORDINATOR-COPILOT-004.1`) lives in its own
+`tests/auth/coordinator-copilot-reader.spec.ts`: a `workspace.manage` fixture
+sees the launcher on both Coordinator screens, and a `workspace.read` fixture
+sees neither launcher, with no popover reachable by URL or keyboard.
 
 `tests/coordinator/copilot.spec.ts` includes a permission-request case: the
 mock agent calls one of its own tools, the popover shows Approve and Deny
@@ -139,7 +145,9 @@ auto-approval policy) for a coordinator session.
 A component test on the coordinator controller asserts the flag-off case
 directly: with `features.coordinator` off, no launcher renders on the
 Coordinator screens, so the "In scope" summary's "no launcher renders" claim
-is a checked assertion, not an inference from the reader-visibility test.
+is a checked assertion, not an inference from
+`coordinator-copilot-reader.spec.ts`, which covers the flag-on,
+scope-gated case instead.
 
 ## Likely files
 
@@ -147,6 +155,7 @@ is a checked assertion, not an inference from the reader-visibility test.
 - `apps/web/hooks/domains/coordinator/use-copilot.ts` and test
 - `apps/web/src/locales/*/`
 - `apps/web/e2e/tests/coordinator/copilot.spec.ts`, `mobile-copilot.spec.ts`
+- `apps/web/e2e/tests/auth/coordinator-copilot-reader.spec.ts`
 
 ## Dependencies
 
@@ -161,3 +170,5 @@ is a checked assertion, not an inference from the reader-visibility test.
 
 - Tasks 03, 04 and 05 land in any order; start only when all three have
   passed Review, so the controller is built on their final interfaces.
+- The reader case needs the `auth` project with `KANDEV_FEATURES_AUTH=true`;
+  without it the local user holds every scope and the test proves nothing.

@@ -159,8 +159,10 @@ the request returns 404, so the task stays on its board
 
 - name trimmed, 1 to 60 Unicode code points;
 - context at most 4,000 code points;
-- agent profile exists and is not CLI-passthrough (the agent settings
-  service's existing passthrough flag), else 400 with the field;
+- agent profile exists, belongs to the coordinator's own workspace (a
+  non-empty `WorkspaceID` that differs is refused the same as not found), and
+  is not CLI-passthrough (the agent settings service's existing passthrough
+  flag), else 400 with the field;
 - executor profile exists, else 400.
 
 The conversation route and session start repeat both profile checks, so an
@@ -174,7 +176,7 @@ and the GET, the conversation route and session start all use it:
 
 | Field | Values | Meaning |
 | --- | --- | --- |
-| `agent_profile_status` | `ok`, `missing`, `passthrough` | `missing`: no agent profile with the stored id; `passthrough`: the profile exists and its `CLIPassthrough` (`internal/agent/settings/models`) is true; else `ok` |
+| `agent_profile_status` | `ok`, `missing`, `passthrough` | `missing`: no agent profile with the stored id, or one whose `WorkspaceID` is non-empty and differs from the coordinator's own workspace; `passthrough`: the profile exists, is in-workspace, and its `CLIPassthrough` (`internal/agent/settings/models`) is true; else `ok` |
 | `executor_profile_status` | `ok`, `missing` | `missing`: no executor profile with the stored id; else `ok` |
 
 A profile read that fails for any reason other than not found returns 500

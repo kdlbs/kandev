@@ -65,7 +65,12 @@ see [Residual](#residual-external-surface).
      value read in step 2. One row updated: go to step 6 with the new task.
      Zero rows: re-read the coordinator row, delete the task just created
      through the task service and go to step 6 with the row's current task,
-     so racing opens converge on one task with one session.
+     so racing opens converge on one task with one session. When the re-read
+     instead finds `conversation_task_id` NULL (a concurrent context or
+     profile change cleared it after the stale value was read in step 2, so
+     no other task exists to converge on), restart from step 2 once with the
+     fresh row; a second NULL on that retry's re-read returns 409 instead of
+     looping again.
   5. When the re-read in step 4 finds no coordinator row (the coordinator was
      deleted between steps 1 and 4), the route deletes the task it created and
      returns 404. When a delete in step 4 or 5 fails, the route still answers

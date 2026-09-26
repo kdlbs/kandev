@@ -127,17 +127,22 @@ Mockup:
   set the proposal `failed` with the error; a later approve shall claim it
   again.
 - **AC-COORDINATOR-PROPOSALS-002.7:** When the process stops after a claim or
-  after the task was created, the next startup, or the next approve, or the
-  next proposal read by a caller holding `workspace.manage` that reads the
-  stale claim, shall complete the approval with the same single task, using
-  the frozen spec without validating it again; a read
-  by a caller holding only `workspace.read`, or a read the browser marks as
-  cross-site or same-site (`Sec-Fetch-Site`), shall change nothing; when two readers see the same stale claim, exactly one shall
-  complete it, using the spec frozen by the first claim and keeping the first
-  approver as the approving user. A list read by a caller holding
-  `workspace.manage` shall recover every stale claim among the rows it
-  returns before answering, and a recovery that fails shall not fail the
-  read.
+  after the task was created, the next startup, the next approve, or the next
+  proposal read by a caller holding `workspace.manage` whose request the
+  browser does not mark `cross-site` or `same-site` and does not leave
+  `Sec-Fetch-Site` absent, and that reads the stale claim, shall re-check the
+  frozen spec's target step against the eligible-step rule (the frozen spec
+  itself is not re-validated); when the step is still eligible, it shall
+  complete the approval with the same single task using the frozen spec; when
+  the step is no longer eligible, it shall set the proposal `failed` with a
+  descriptive error and create no task. A read by a caller holding only
+  `workspace.read`, or a read the browser marks as cross-site or same-site, or
+  a read with `Sec-Fetch-Site` absent, shall change nothing; when two readers
+  see the same stale claim, exactly one shall attempt the recovery, using the
+  spec frozen by the first claim and keeping the first approver as the
+  approving user. A list read by a caller holding `workspace.manage` shall
+  recover every stale claim among the rows it returns before answering, and a
+  recovery that fails shall not fail the read.
 - **AC-COORDINATOR-PROPOSALS-002.8:** No caller other than the coordinator
   service shall be able to create a task with an external id starting
   `coordinator-proposal:`, and no caller shall be able to release such an
@@ -194,7 +199,8 @@ Mockup:
   every open proposal of the coordinator ordered
   by `created_at` ascending, then id ascending; listing with `status=all` shall
   return the newest 50 in any status ordered by `created_at` descending, then id
-  descending. `pending` is the default.
+  descending. `pending` is the default. A `status` value other than `pending`
+  or `all` shall be refused with 400 naming `status`.
 - **AC-COORDINATOR-PROPOSALS-004.2:** Readers shall be able to list and read
   proposals; approve and reject shall require `workspace.manage` and return 403
   otherwise.

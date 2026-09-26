@@ -20,6 +20,7 @@ acceptance_criteria:
   - AC-COORDINATOR-COORDINATORS-005.1
   - AC-COORDINATOR-COORDINATORS-005.2
   - AC-COORDINATOR-COORDINATORS-005.3
+  - AC-COORDINATOR-COORDINATORS-005.4
   - AC-COORDINATOR-COPILOT-001.1
   - AC-COORDINATOR-COPILOT-001.2
   - AC-COORDINATOR-COPILOT-001.3
@@ -28,6 +29,7 @@ acceptance_criteria:
   - AC-COORDINATOR-COPILOT-001.6
   - AC-COORDINATOR-COPILOT-001.7
   - AC-COORDINATOR-COPILOT-001.8
+  - AC-COORDINATOR-COPILOT-001.9
   - AC-COORDINATOR-COPILOT-002.1
   - AC-COORDINATOR-COPILOT-002.2
   - AC-COORDINATOR-COPILOT-002.3
@@ -76,7 +78,7 @@ Deciding proposals is task 07. Backend only. On the critical path.
   re-read finds `conversation_task_id` NULL (a concurrent context change
   cleared it after the stale read in step 2) restarts from step 2 once with
   the fresh value; a second NULL on the retry's re-read returns 409 instead
-  of looping again.
+  of looping again (`AC-COORDINATOR-COPILOT-001.9`).
 - `TaskOriginCoordinator` (task 01's constant) refused at HTTP and MCP task
   create. The `coordinator-proposal:` external-id prefix refusal is task 07's.
 - `ListCoordinatorOriginTasks` in the task repository (SQLite and PostgreSQL)

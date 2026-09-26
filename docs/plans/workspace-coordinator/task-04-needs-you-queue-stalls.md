@@ -176,8 +176,16 @@ cd apps/backend && go test ./internal/coordinator/... ./internal/backendapp/...
 cd apps/web && pnpm test -- lib/coordinator/attention.test.ts
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/needs-you.spec.ts tests/coordinator/stall.spec.ts tests/coordinator/empty-states.spec.ts
+cd apps/web && pnpm e2e:run --project=auth tests/auth/coordinator-needs-you-reader.spec.ts
 cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-needs-you.spec.ts
 ```
+
+The `auth` project's `testMatch` requires an `auth/` path segment, so the
+reader case (`AC-COORDINATOR-NEEDS-YOU-002.8`: "a reader sees no decision
+actions") lives in its own `tests/auth/coordinator-needs-you-reader.spec.ts`:
+a `workspace.manage` fixture sees Approve, Edit and Reject on a proposal
+item, and a `workspace.read` fixture sees the same item's title, description,
+target and "Proposed by" line with no decision actions.
 
 The `mobile-chrome` project matches on the `mobile-*.spec.ts` filename prefix
 (`apps/web/e2e/playwright.config.ts`), not on project scope, so the 390px and
@@ -202,6 +210,12 @@ Go tests cover the stall upsert: a newer `last_event_at` replaces the row and
 publishes `coordinator.updated`; an equal one (redelivery) and an earlier one
 (out of order) change nothing and publish nothing, on SQLite and PostgreSQL
 (`AC-COORDINATOR-NEEDS-YOU-005.1`).
+
+Go tests cover startup pruning (`AC-COORDINATOR-NEEDS-YOU-005.3`): seeding a
+stall row detected 31 days ago, a row whose task is archived, a row whose task
+is deleted outright, and a row detected within the last 30 days for a live
+task, then running the startup pass asserts the first three rows are gone and
+the fourth survives unchanged, on SQLite and PostgreSQL.
 
 Go tests cover the `workspace.deleted` subscriber
 (`AC-COORDINATOR-COORDINATORS-006.1`): deleting a workspace with a coordinator
@@ -235,6 +249,7 @@ inference from other tests.
 - `apps/web/components/navigation/mobile-sidebar-layout-navigation.tsx`
 - `apps/web/src/locales/*/`
 - `apps/web/e2e/tests/coordinator/`, including `mobile-needs-you.spec.ts`
+- `apps/web/e2e/tests/auth/coordinator-needs-you-reader.spec.ts`
 - `apps/web/e2e/helpers/axe.ts`
 
 ## Dependencies
@@ -249,3 +264,5 @@ inference from other tests.
   waiting on the rendered card.
 - Workflow snapshots must be loaded for every workflow of the workspace, or
   counts undercount.
+- The reader case needs the `auth` project with `KANDEV_FEATURES_AUTH=true`;
+  without it the local user holds every scope and the test proves nothing.

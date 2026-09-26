@@ -121,6 +121,11 @@ Mockup:
   shall be reported per `AC-COORDINATOR-COORDINATORS-005.1`-`005.3` rather
   than the conversation continuing on the old, now-archived session. Sending
   a profile id back unchanged shall keep the conversation.
+- **AC-COORDINATOR-COORDINATORS-002.11:** When the chosen agent profile or
+  executor profile belongs to a different workspace than the coordinator's
+  own, the system shall refuse the create or edit with a 400 error naming the
+  field, the same as a profile that does not exist
+  (`AC-COORDINATOR-COORDINATORS-002.5`).
 
 ### REQ-COORDINATOR-COORDINATORS-003: Listing and permissions
 
@@ -208,6 +213,13 @@ Mockup:
   the conversation route shall return 409 until a manager saves an existing,
   non-passthrough profile. With a missing executor profile as well, both
   messages shall show as `AC-COORDINATOR-COORDINATORS-005.2` says.
+- **AC-COORDINATOR-COORDINATORS-005.4:** When a coordinator's agent profile or
+  executor profile belongs to a different workspace than the coordinator's own
+  (for example after the profile itself was moved between workspaces),
+  `profileStatus` shall report it `missing`, the same as an unreadable or
+  absent profile, and its settings page, copilot and conversation route shall
+  behave as `AC-COORDINATOR-COORDINATORS-005.1` or `005.2` says for a missing
+  profile.
 
 ### REQ-COORDINATOR-COORDINATORS-006: Workspace deletion
 

@@ -83,6 +83,12 @@ Mockup:
   started one; the open itself shall never start an agent.
 - **AC-COORDINATOR-COPILOT-001.8:** A conversation task shall not be removed by
   Quick Chat idle expiry, however long it stays idle.
+- **AC-COORDINATOR-COPILOT-001.9:** When an open loses the race described in
+  `AC-COORDINATOR-COPILOT-001.2` and finds no other task to converge on
+  because a context or profile change cleared the reference concurrently, the
+  open shall retry once from the start with the fresh value and complete
+  normally on that retry; a second such race on the retry shall return 409
+  instead of retrying again.
 
 ### REQ-COORDINATOR-COPILOT-002: Attended turns
 
