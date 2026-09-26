@@ -113,11 +113,11 @@ UI-03: Desktop Changes, saved layout = tree, first commit expanded.
 
 ```text
 COMMITS (6)                                  Push 6   PR
-v d8816fc fix: preserve browser...  +76 -44 [Open commit]
+v d8816fc fix: preserve browser...  +76 -44 [open icon]
     v src/
         browser.ts                 +60 -30
         browser.test.ts            +16 -14
-> fd00686 fix: preview feedback...  +84 -13 [Open commit]
+> fd00686 fix: preview feedback...  +84 -13 [open icon]
 ```
 
 With the flat preference, replace directory rows with full-path file rows.
@@ -134,7 +134,7 @@ v d8816fc fix: preserve...     [Open]
     src/
     browser.test.ts            +16 -14
     src/
-> fd00686 fix: feedback...     [Open]
+> fd00686 fix: feedback...     [open icon]
   +84 -13
 ```
 

@@ -244,13 +244,12 @@ function CommitOpenButton({
       aria-label={label}
       title={label}
       className={cn(
-        "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1 rounded px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground",
-        touchSized ? "min-h-11 min-w-11" : "min-h-7 min-w-7",
+        "inline-flex shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground",
+        touchSized ? "size-11" : "size-4",
       )}
       onClick={onOpen}
     >
       <IconExternalLink className="size-3.5" />
-      <span className="hidden text-[11px] sm:inline">{label}</span>
     </button>
   );
 }
@@ -276,7 +275,7 @@ function CommitRowToggle({
       aria-controls={inlineFilesId}
       className={cn(
         "flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left",
-        touchSized ? "min-h-11" : "min-h-7",
+        touchSized && "min-h-11",
       )}
       onClick={onToggle}
     >

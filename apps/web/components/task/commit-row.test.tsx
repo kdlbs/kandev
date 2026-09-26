@@ -9,12 +9,17 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const COMMIT_TOGGLE_TEST_ID = "commit-toggle";
+const REMOTE_OPEN_TEST_ID = "commit-open-remote1";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({
     isMobile: mocks.isMobile,
     isFinePointer: mocks.isFinePointer,
   }),
+}));
+
+vi.mock("@/hooks/use-copy-repository-path", () => ({
+  useCopyRepositoryPath: () => vi.fn(),
 }));
 
 vi.mock("@kandev/ui/context-menu", () => ({
@@ -131,7 +136,7 @@ describe("CommitRow", () => {
     const commit = remoteCommit();
     render(<CommitRow commit={commit} isLatest onOpenCommitDetail={onOpenCommitDetail} />);
 
-    fireEvent.click(screen.getByTestId("commit-open-remote1"));
+    fireEvent.click(screen.getByTestId(REMOTE_OPEN_TEST_ID));
     expect(onOpenCommitDetail).toHaveBeenCalledWith(commit.detailTarget);
   });
 
@@ -196,7 +201,7 @@ describe("CommitRow", () => {
       identity!.compareDocumentPosition(stats) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(toggle.className).toContain("min-h-11");
-    expect(screen.getByTestId("commit-open-mobile1").className).toContain("min-h-11");
+    expect(screen.getByTestId("commit-open-mobile1").className).toContain("size-11");
   });
 
   it("keeps commit controls at ordinary desktop size for a fine pointer", () => {
@@ -204,8 +209,10 @@ describe("CommitRow", () => {
     mocks.isFinePointer = true;
     render(<CommitRow commit={remoteCommit()} isLatest />);
 
-    expect(screen.getByTestId(COMMIT_TOGGLE_TEST_ID).className).toContain("min-h-7");
-    expect(screen.getByTestId("commit-open-remote1").className).toContain("min-h-7");
+    expect(screen.getByTestId(COMMIT_TOGGLE_TEST_ID).className).not.toContain("min-h-7");
+    expect(screen.getByTestId(REMOTE_OPEN_TEST_ID).className).toContain("size-4");
+    expect(screen.getByTestId(REMOTE_OPEN_TEST_ID).textContent).toBe("");
+    expect(screen.getByTestId(REMOTE_OPEN_TEST_ID).getAttribute("aria-label")).toBe("Open commit");
   });
 
   it("uses touch-sized commit controls for a coarse-pointer tablet", () => {
@@ -214,6 +221,6 @@ describe("CommitRow", () => {
     render(<CommitRow commit={remoteCommit()} isLatest />);
 
     expect(screen.getByTestId(COMMIT_TOGGLE_TEST_ID).className).toContain("min-h-11");
-    expect(screen.getByTestId("commit-open-remote1").className).toContain("min-h-11");
+    expect(screen.getByTestId(REMOTE_OPEN_TEST_ID).className).toContain("size-11");
   });
 });

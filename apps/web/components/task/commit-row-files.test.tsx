@@ -26,6 +26,10 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   }),
 }));
 
+vi.mock("@/hooks/use-copy-repository-path", () => ({
+  useCopyRepositoryPath: () => vi.fn(),
+}));
+
 vi.mock("@/components/diff", () => ({
   FileDiffViewer: () => <div data-testid="inline-diff" />,
 }));
@@ -65,13 +69,31 @@ describe("CommitRowFiles flat presentation", () => {
     const onOpenFile = vi.fn();
     render(<CommitRowFiles target={target} onOpenFile={onOpenFile} />);
 
-    expect(screen.getAllByTestId("commit-file-entry").map((node) => node.textContent)).toEqual([
-      "src/a.ts+1 / -2",
-      "src/b.ts+1 / -2",
+    const rows = [...document.querySelectorAll('[data-commit-file-entry="true"]')];
+    expect(rows.map((node) => node.getAttribute("data-file-path"))).toEqual([
+      "src/a.ts",
+      "src/b.ts",
     ]);
+    expect(rows[0].textContent).toContain("+1-2");
+    expect(screen.getByTestId("commit-file-src-a.ts").className).toContain("py-0.5");
     expect(screen.queryByTitle("Stage file")).toBeNull();
     fireEvent.click(screen.getByTestId("commit-file-src-a.ts"));
     expect(onOpenFile).toHaveBeenCalledWith("src/a.ts");
+  });
+
+  it("opens historical images in the commit diff without worktree actions", () => {
+    mocks.useCommitDetail.mockReturnValue({
+      files: { "assets/icon.png": file("assets/icon.png", { status: "added" }) },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const onOpenFile = vi.fn();
+    render(<CommitRowFiles target={target} onOpenFile={onOpenFile} />);
+
+    fireEvent.click(screen.getByTestId("commit-file-assets-icon.png"));
+    expect(onOpenFile).toHaveBeenCalledWith("assets/icon.png");
+    expect(screen.queryByTestId("file-row-hover-actions")).toBeNull();
   });
 });
 
@@ -118,9 +140,10 @@ describe("CommitRowFiles tree presentation", () => {
     render(<CommitRowFiles target={target} />);
 
     const directory = screen.getByTestId("commit-file-tree-dir-src");
-    expect(screen.getAllByTestId("commit-file-entry")).toHaveLength(2);
+    expect(directory.className).toContain("-mx-1");
+    expect(document.querySelectorAll('[data-commit-file-entry="true"]')).toHaveLength(2);
     fireEvent.click(directory);
-    expect(screen.queryAllByTestId("commit-file-entry")).toHaveLength(0);
+    expect(document.querySelectorAll('[data-commit-file-entry="true"]')).toHaveLength(0);
   });
 
   it("preserves tree file statistics and rename metadata from the original detail payload", () => {
@@ -151,7 +174,7 @@ describe("CommitRowFiles tree presentation", () => {
         .map((path) => {
           const button = screen.getByTestId(`commit-file-${path.replace(/[/\\]/g, "-")}`);
           return {
-            text: button.textContent,
+            stats: button.textContent?.match(/\+\d+-\d+/)?.[0],
             status: button.querySelector('[role="img"]')?.getAttribute("aria-label"),
           };
         });
@@ -166,9 +189,11 @@ describe("CommitRowFiles tree presentation", () => {
     expect(readPresentation()).toEqual(flatPresentation);
 
     const renamedButton = screen.getByTestId("commit-file-src-old-name.ts");
-    expect(renamedButton.textContent).toContain("+7 / -3");
+    expect(renamedButton.textContent).toContain("+7-3");
     expect(screen.getByRole("img", { name: "Moved from src/previous-name.ts" })).toBeTruthy();
-    expect(screen.getByTestId("commit-file-src-missing.ts").textContent).toContain("Unavailable");
+    expect(screen.getByTestId("commit-file-src-missing.ts").textContent).not.toContain(
+      "Unavailable",
+    );
   });
 });
 

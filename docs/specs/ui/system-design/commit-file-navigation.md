@@ -71,8 +71,8 @@ The same target/session identity resets this state. No threshold, auto-collapse 
 ## Inline commit files in Changes
 
 `components/task/commit-row.tsx` currently uses an interactive `li` to open details. Replace this with a list item containing sibling controls.
-The main button contains chevron, provenance, SHA, message, and stats. It controls the inline file region.
-A separate Open commit button uses the existing `onOpenCommitDetail` callback. Keep it visible without hover, including on phones.
+The main button contains provenance, SHA, message, and stats. It controls the inline file region.
+A separate icon-only Open commit button uses the existing `onOpenCommitDetail` callback and keeps that accessible name. Keep it visible without hover, including on phones. Its fine-pointer size stays within the original compact row height; phone and coarse-pointer controls use 44px targets.
 Keep existing local commit actions and their eligibility rules. Action click and keyboard events must not trigger expansion.
 Use semantic nested lists without nesting action buttons inside the main button.
 
@@ -85,8 +85,8 @@ Do not render diff engines in inline lists. Do not add a new endpoint or global 
 
 Use `userSettings.changesPanelLayout`, already consumed by `changes-panel-timeline.tsx`, for live flat/tree rendering.
 Reuse `buildChangesTree` and `useTree` hierarchy/sorting rules by extracting the pure builder from `changes-panel-tree.tsx` into `changes-file-tree-model.ts`.
-The existing `ChangesTree` includes stage/unstage/discard/edit actions; do not mount it with dummy handlers for historical files.
-The inline adapter renders only directory toggles and historical file navigation, path/status metadata, and supplied stats.
+The existing `ChangesTree` includes stage/unstage/discard/edit actions; do not mount that mutable tree for historical files.
+Render inline historical files through the shared `FileRow` read-only presentation and the shared `TreeDirRow` directory control so row density, icons, status/stat layout, and phone filename hierarchy track dirty/staged Changes files. The read-only branch hides worktree actions and routes every file type to the historical diff. The inline adapter retains source-aware data loading and layout selection.
 Changing layout preserves the loaded data and row expansion. Directory state is transient per mounted commit row.
 Reuse the same target/session identity rules as the commit panel and include full source/repository identity in row keys, not only SHA.
 

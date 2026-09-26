@@ -38,6 +38,9 @@ const splitPath = (path: string) => {
 export type FileRowProps = {
   file: ChangedFile;
   isPending: boolean;
+  /** Historical commit files share the Changes row anatomy without mutation controls. */
+  readOnly?: boolean;
+  testId?: string;
   isSelected?: boolean;
   /** True when this file's diff/editor tab is the currently active dockview panel. */
   isActive?: boolean;
@@ -68,7 +71,7 @@ export type FileRowContentProps = FileRowProps & {
 };
 
 export function FileRow(props: FileRowProps) {
-  const { file, isSelected, isActive, onSelect, onEditFile, onOpenDiff } = props;
+  const { file, isSelected, isActive, onSelect, onEditFile, onOpenDiff, readOnly } = props;
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   const copyRepositoryPath = useCopyRepositoryPath();
   const touchMode = isMobile || !isFinePointer;
@@ -76,6 +79,10 @@ export function FileRow(props: FileRowProps) {
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button === 2) return;
+    if (readOnly) {
+      onOpenDiff(file.path);
+      return;
+    }
     const consumed = onSelect?.(file.path, e);
     if (!consumed) {
       if (getFileCategory(file.path) === "image") {
@@ -96,8 +103,12 @@ export function FileRow(props: FileRowProps) {
 
   return (
     <li
-      data-testid={`file-row-${file.path.replace(/[/\\]/g, "-")}`}
+      data-testid={props.testId ?? `file-row-${file.path.replace(/[/\\]/g, "-")}`}
       data-changes-file={file.path}
+      data-commit-file-entry={readOnly ? "true" : undefined}
+      data-file-path={file.path}
+      aria-label={readOnly ? file.path : undefined}
+      title={readOnly ? file.path : undefined}
       data-selected={isSelected ? "true" : "false"}
       data-active={isActive ? "true" : "false"}
       className={cn(
@@ -130,6 +141,7 @@ function DesktopFileRowContent({
   folder,
   name,
   onCopyPath,
+  readOnly,
 }: FileRowContentProps) {
   const showFolder = !treeMode && folder;
   return (
@@ -138,7 +150,8 @@ function DesktopFileRowContent({
         className="flex items-center gap-2 min-w-0"
         style={indentPx ? { paddingLeft: indentPx } : undefined}
       >
-        {treeMode ? (
+        {readOnly && <FileIcon fileName={name} className="size-4 shrink-0" />}
+        {!readOnly && treeMode && (
           <TreeModeFileActionSlot
             name={name}
             isPending={isPending}
@@ -148,7 +161,8 @@ function DesktopFileRowContent({
             onStage={onStage}
             onUnstage={onUnstage}
           />
-        ) : (
+        )}
+        {!readOnly && !treeMode && (
           <StageButton
             isPending={isPending}
             staged={file.staged}
@@ -171,22 +185,29 @@ function DesktopFileRowContent({
         </button>
       </div>
       <div className="grid items-center shrink-0 [&>*]:col-start-1 [&>*]:row-start-1">
-        <FileRowStats file={file} />
-        <FileRowActions
-          path={file.path}
-          repo={file.repositoryName}
-          onCopyPath={onCopyPath}
-          onDiscard={onDiscard}
-          onEditFile={onEditFile}
-        />
+        <FileRowStats file={file} readOnly={readOnly} />
+        {!readOnly && (
+          <FileRowActions
+            path={file.path}
+            repo={file.repositoryName}
+            onCopyPath={onCopyPath}
+            onDiscard={onDiscard}
+            onEditFile={onEditFile}
+          />
+        )}
       </div>
     </>
   );
 }
 
-function FileRowStats({ file }: { file: ChangedFile }) {
+function FileRowStats({ file, readOnly }: { file: ChangedFile; readOnly?: boolean }) {
   return (
-    <div className="flex items-center gap-2 justify-end transition-opacity pointer-events-none group-hover:opacity-0 group-focus-within:opacity-0">
+    <div
+      className={cn(
+        "flex items-center gap-2 justify-end pointer-events-none",
+        !readOnly && "transition-opacity group-hover:opacity-0 group-focus-within:opacity-0",
+      )}
+    >
       <LineStat added={file.plus} removed={file.minus} />
       <FileStatusIcon status={file.status} oldPath={file.oldPath} />
     </div>

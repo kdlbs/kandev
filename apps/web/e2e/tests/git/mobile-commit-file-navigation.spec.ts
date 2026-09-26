@@ -80,13 +80,20 @@ test.describe("Mobile commit file navigation", () => {
     const toggle = row.getByTestId("commit-toggle");
     await expect(toggle).toHaveClass(/min-h-11/);
     await expectTouchControl(toggle);
-    await toggle.tap();
     const inlineFile = row.getByTestId(`commit-file-${filePath.replaceAll("/", "-")}`);
-    await expect(inlineFile).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect
+      .poll(
+        async () => {
+          if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.tap();
+          return inlineFile.isVisible();
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(true);
     await expect(inlineFile).toContainText("commit-file-navigation-with-a-long-name.ts");
-    await expect(inlineFile).toContainText("mobile/deeply/nested");
+    const directory = row.getByTestId("commit-file-tree-dir-mobile-deeply-nested");
+    await expect(directory).toBeVisible();
+    await expectTouchControl(directory);
     await expect(inlineFile).toHaveAttribute("aria-label", filePath);
     await expectTouchControl(inlineFile);
     await expectTouchControl(row.getByTestId(`commit-open-${sha.slice(0, 7)}`));

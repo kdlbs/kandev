@@ -230,23 +230,26 @@ export function RepoTreeGroup(props: RepoTreeGroupProps) {
   );
 }
 
-function TreeDirRow({
+export function TreeDirRow({
   row,
   baseIndentPx,
   onToggle,
+  testId,
 }: {
   row: VisibleRow<TreeNode>;
   baseIndentPx: number;
   onToggle: () => void;
+  testId?: string;
 }) {
   return (
     <li>
       <button
         type="button"
-        className="flex items-center w-full gap-1 px-1 py-0.5 -mx-1 rounded-md hover:bg-muted/60 cursor-pointer text-xs text-foreground/70"
+        className="flex items-center w-full gap-1 px-1 py-0.5 -mx-1 rounded-md hover:bg-muted/60 cursor-pointer text-xs text-foreground/70 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         style={{ paddingLeft: baseIndentPx + row.depth * 12 + 4 }}
         onClick={onToggle}
-        data-testid={`tree-dir-${row.path.replace(/[/\\]/g, "-")}`}
+        aria-expanded={row.isExpanded}
+        data-testid={testId ?? `tree-dir-${row.path.replace(/[/\\]/g, "-")}`}
       >
         {row.isExpanded ? (
           <IconChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />

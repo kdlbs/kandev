@@ -49,6 +49,7 @@ test.describe("Commit file navigation", () => {
     git.createFile("docs/navigation-two.md", "navigation two\n");
     git.stageAll();
     const sha = git.commit("Add commit navigation files");
+    git.createFile("src/navigation-one.ts", "export const one = 2;\n");
 
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
@@ -59,8 +60,12 @@ test.describe("Commit file navigation", () => {
     await expect(row).toBeVisible({ timeout: 15_000 });
     const toggle = row.getByTestId("commit-toggle");
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expectControlHeight(toggle, 28);
-    await expectControlHeight(row.getByTestId(`commit-open-${sha.slice(0, 7)}`), 28);
+    await expectControlHeight(toggle, 16);
+    const openCommit = row.getByTestId(`commit-open-${sha.slice(0, 7)}`);
+    await expectControlHeight(openCommit, 16);
+    await expect(openCommit).toHaveAccessibleName("Open commit");
+    await expect(openCommit).toHaveText("");
+    expect((await row.boundingBox())!.height).toBeLessThanOrEqual(26);
 
     await row.getByTestId(`commit-open-${sha.slice(0, 7)}`).click();
     const detail = testPage.getByTestId("commit-detail-content");
@@ -82,6 +87,16 @@ test.describe("Commit file navigation", () => {
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     const inlineFile = row.getByTestId("commit-file-src-navigation-one.ts");
     await expect(inlineFile).toBeVisible({ timeout: 15_000 });
+    const dirtyFile = testPage.getByTestId("file-row-src-navigation-one.ts");
+    await expect(dirtyFile).toBeVisible({ timeout: 15_000 });
+    const inlineFileBox = await inlineFile.boundingBox();
+    const dirtyFileBox = await dirtyFile.boundingBox();
+    expect(inlineFileBox?.height).toBe(dirtyFileBox?.height);
+    const inlineStatus = inlineFile.locator("[data-file-status]");
+    const dirtyStatus = dirtyFile.locator("[data-file-status]");
+    expect((await inlineStatus.boundingBox())?.width).toBe(
+      (await dirtyStatus.boundingBox())?.width,
+    );
     await inlineFile.click();
 
     const selectedHeader = detail.locator(

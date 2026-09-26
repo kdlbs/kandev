@@ -54,7 +54,7 @@ v d8816fc fix: preserve browser...  +76 -44 [Open commit]
     v src/
         browser.ts                 +60 -30
         browser.test.ts            +16 -14
-> fd00686 fix: preview feedback...  +84 -13 [Open commit]
+> fd00686 fix: preview feedback...  +84 -13 [open icon]
 ```
 
 UI-04: Phone Changes, flat preference.
@@ -168,3 +168,5 @@ Completed on 2026-09-17.
 Review remediation on 2026-09-17 preserves the original `FileInfo` in tree-mode rows, including nonzero, zero, missing, and renamed-file metadata. It also verifies filename-first mobile rows with complete accessible paths, separate Open actions, and 28px fine-pointer versus at least 44px phone/coarse-pointer controls. The final affected component suite passed 11 files and 85 tests; the final mobile E2E passed 1 test with long labels, inline historical-file activation, focus, touch hitboxes, and no document overflow.
 
 Merged-base PR fixup validation on 2026-09-26 passed 13 affected Vitest files (104 tests), 29 desktop commit/Changes E2E tests, and 10 mobile commit/Changes E2E tests. Typecheck, i18n checks, public-doc validation (62 tests, 47 pages), and specification validation (309 decisions, 1,185 specifications) also passed.
+
+UX refinement on 2026-09-26 restored the compact desktop commit-row height and made the visible Open commit action icon-only with its accessible name intact. Inline historical files now use the same read-only `FileRow` and `TreeDirRow` presentation as dirty/staged Changes, including phone hierarchy and touch targets. The affected component suite passed 4 files and 47 tests; the desktop and phone commit-navigation E2E specs passed, along with typecheck and specification validation.
