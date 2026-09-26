@@ -83,7 +83,7 @@ lib/api/domains/                    # API clients
 
 For rebasing or finishing PRs written against the old Next.js runtime, follow [`docs/nextjs-spa-migration.md`](../../docs/nextjs-spa-migration.md).
 
-**Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscription + store selection. WS client deduplicates subscriptions automatically.
+**Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscriptions and store selection; the WS client deduplicates subscriptions. The bounded `useSystemInfo` TanStack Query pilot owns only the About view's `/api/v1/system/info` snapshot and request state, scoped by canonical full API base URL, page boot ID, and auth identity. The boot payload remains unchanged; other System resources stay in Zustand, while process-generation/restart/update probes remain independent no-store reads. See the [ownership decision](../../docs/decisions/2026-09-26-system-info-query-cache-ownership.md) and [system design](../../docs/specs/platform/system-design/system-info-query-cache.md).
 
 ## WebSockets
 

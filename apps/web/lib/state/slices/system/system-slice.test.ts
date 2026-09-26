@@ -4,7 +4,6 @@ import { immer } from "zustand/middleware/immer";
 import { createSystemSlice, defaultSystemState } from "./system-slice";
 import type { SystemSlice } from "./types";
 import type {
-  SystemInfo,
   DiskUsageResponse,
   DatabaseStats,
   SnapshotInfo,
@@ -21,17 +20,6 @@ function makeStore() {
     immer((...a) => ({ ...(createSystemSlice as any)(...a) })),
   );
 }
-
-const INFO: SystemInfo = {
-  version: "1.2.3",
-  commit: "abc1234",
-  build_time: "2026-01-01T00:00:00Z",
-  go_version: "go1.24",
-  os: "darwin",
-  arch: "arm64",
-  boot_id: "boot-1",
-  started_at: "2026-01-01T00:00:00Z",
-};
 
 const DISK_USAGE: DiskUsageResponse = {
   data: {
@@ -170,18 +158,11 @@ describe("system slice", () => {
     const store = makeStore();
     const s = store.getState();
     expect(s.system).toEqual(defaultSystemState.system);
-    expect(s.system.info).toBeNull();
     expect(s.system.diskUsage).toBeNull();
     expect(s.system.database).toBeNull();
     expect(s.system.backups).toEqual({ items: [], loaded: false });
     expect(s.system.updates).toBeNull();
     expect(s.system.jobs).toEqual({});
-  });
-
-  it("setSystemInfo stores the payload", () => {
-    const store = makeStore();
-    store.getState().setSystemInfo(INFO);
-    expect(store.getState().system.info).toEqual(INFO);
   });
 
   it("setSystemDiskUsage replaces the cached response", () => {
