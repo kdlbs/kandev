@@ -302,10 +302,13 @@ test("launches from a real in-cluster service account", async ({ cluster }) => {
     const backendLogs = cluster.kubectl([
       "-n",
       cluster.controlNamespace,
-      "logs",
+      "exec",
       "pod/kandev-in-cluster",
       "-c",
       "backend",
+      "--",
+      "cat",
+      "/data/home/logs/backend-logs.log",
     ]);
     expect(backendLogs).toContain("using verified remote helper cache");
     expect(backendLogs).toContain(cluster.remoteHelperCachePath);

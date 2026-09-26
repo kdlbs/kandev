@@ -567,6 +567,7 @@ spec:
         - {name: HOME, value: /data}
         - {name: KANDEV_HOME_DIR, value: /data/home}
         - {name: KANDEV_BUNDLE_DIR, value: /opt/kandev/runtime}
+        - {name: PATH, value: "/opt/kandev/runtime/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
         - {name: KANDEV_SERVER_PORT, value: "8080"}
         - {name: KANDEV_SERVER_HOST, value: "0.0.0.0"}
         - {name: KANDEV_WEB_DIST_DIR, value: /opt/kandev/web}
