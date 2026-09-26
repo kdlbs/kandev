@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
@@ -110,6 +111,69 @@ func TestStartCoordinatorBackgroundPass_RunsHooksWithProvidedT0(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for background pass hook")
+	}
+}
+
+// TestRegisterCoordinatorRoutes_CapturesT0BeforeRoutesRegister verifies the
+// RV-001 invariant directly at its actual regression site: T0 must be
+// captured before coordinator.RegisterRoutes is called, not merely before
+// registerCoordinatorRoutes returns. It intercepts the real RegisterRoutes
+// call via the registerCoordinatorHTTPRoutes test seam to record when routes
+// actually register, and the background pass dispatch via the
+// runCoordinatorBackgroundPass test seam to capture the T0 value that was
+// computed, then asserts T0 is not after that registration time.
+//
+// Unlike TestStartCoordinatorBackgroundPass_RunsHooksWithProvidedT0 (which
+// only proves the extracted helper forwards whatever T0 it is given) and
+// TestRegisterCoordinatorRoutes_DisabledReturns404AndPreservesRows (which
+// never reaches the T0 line at all, because svc is nil), this test fails if
+// T0 capture is moved back to after the RegisterRoutes call: both seams fire
+// synchronously and in call order, so a regression makes registeredAt
+// strictly earlier than the captured T0.
+func TestRegisterCoordinatorRoutes_CapturesT0BeforeRoutesRegister(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tracker := newCoordinatorTestTracker(t)
+	pool := newCoordinatorTestPool(t)
+
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, true, newTestLogger())
+	if err != nil {
+		t.Fatalf("initCoordinatorWiring: %v", err)
+	}
+	if svc == nil {
+		t.Fatal("expected a non-nil service when features.coordinator is enabled")
+	}
+
+	originalRegister := registerCoordinatorHTTPRoutes
+	t.Cleanup(func() { registerCoordinatorHTTPRoutes = originalRegister })
+	var registeredAt time.Time
+	registerCoordinatorHTTPRoutes = func(router *gin.Engine, s *coordinator.Service, log *logger.Logger) {
+		registeredAt = time.Now().UTC()
+		originalRegister(router, s, log)
+	}
+
+	originalPass := runCoordinatorBackgroundPass
+	t.Cleanup(func() { runCoordinatorBackgroundPass = originalPass })
+	var gotT0 time.Time
+	runCoordinatorBackgroundPass = func(ctx context.Context, t0 time.Time, hooks []func(context.Context, time.Time)) {
+		gotT0 = t0
+		originalPass(ctx, t0, hooks)
+	}
+
+	registerCoordinatorRoutes(routeParams{
+		ctx:      context.Background(),
+		router:   gin.New(),
+		services: &Services{Coordinator: svc},
+		log:      newTestLogger(),
+	})
+
+	if registeredAt.IsZero() {
+		t.Fatal("expected registerCoordinatorHTTPRoutes spy to have run")
+	}
+	if gotT0.IsZero() {
+		t.Fatal("expected runCoordinatorBackgroundPass spy to have run")
+	}
+	if gotT0.After(registeredAt) {
+		t.Fatalf("T0 %v was captured after routes registered at %v; T0 must precede route registration", gotT0, registeredAt)
 	}
 }
 

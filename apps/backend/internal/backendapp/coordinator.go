@@ -42,6 +42,11 @@ func initCoordinatorWiring(
 	return coordinator.NewService(store, validator, taskSvc, log), nil
 }
 
+// registerCoordinatorHTTPRoutes is a test seam over coordinator.RegisterRoutes:
+// production always calls the real function; tests may override it to
+// observe its call time relative to when T0 was captured.
+var registerCoordinatorHTTPRoutes = coordinator.RegisterRoutes
+
 // registerCoordinatorRoutes registers the coordinator CRUD, proposals-read and
 // stalls-read HTTP routes, the coordinator.updated WS forwarder, and starts
 // the background startup pass. Callers must only invoke it when
@@ -58,7 +63,7 @@ func registerCoordinatorRoutes(p routeParams) {
 	}
 	t0 := time.Now().UTC()
 	svc := p.services.Coordinator
-	coordinator.RegisterRoutes(p.router, svc, p.log)
+	registerCoordinatorHTTPRoutes(p.router, svc, p.log)
 	if p.gateway != nil {
 		gateways.RegisterCoordinatorNotifications(p.ctx, p.eventBus, p.gateway.Hub, p.log)
 	}
@@ -67,8 +72,13 @@ func registerCoordinatorRoutes(p routeParams) {
 		registerCoordinatorSubscribers(p.router, p.eventBus, svc, p.log),
 		registerCoordinatorDecisions(p.router, p.eventBus, svc, p.log),
 	}
-	startCoordinatorBackgroundPass(p.ctx, t0, hooks)
+	runCoordinatorBackgroundPass(p.ctx, t0, hooks)
 }
+
+// runCoordinatorBackgroundPass is a test seam over startCoordinatorBackgroundPass:
+// production always calls it directly; tests may override it to observe the
+// T0 value it is given relative to when routes registered.
+var runCoordinatorBackgroundPass = startCoordinatorBackgroundPass
 
 // startCoordinatorBackgroundPass runs each later work package's named
 // registration hook with the given T0, in the fixed order the spec
