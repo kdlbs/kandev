@@ -70,9 +70,10 @@ func taskPRNeedsUnwatchedSync(tp *TaskPR, now time.Time) bool {
 // leaves the row for the next attempt, matching the surrounding
 // reconciliation paths — a dead repo must not fail the caller's sync.
 //
-// Only lifecycle and head-scoped workflow-attention fields are written (see
-// reconcileTaskPRLifecycle). Passive reads use the cheap PR query. An explicit
-// refresh may also collect fresh Actions evidence for a row nobody watches.
+// Lifecycle, conflict observation, and head-scoped workflow-attention fields
+// are written (see reconcileTaskPRLifecycle). Passive reads use the cheap PR
+// query. An explicit refresh may also collect fresh Actions evidence for a row
+// nobody watches.
 // Check and review aggregates deliberately stay untouched: they belong to the
 // active, watch-covered PR.
 //
@@ -176,6 +177,7 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 	pr := status.PR
 	isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt :=
 		resolveTaskPROutcomeFields(tp, status)
+	nextHasMergeConflicts := observedTaskPRMergeConflict(tp.HasMergeConflicts, pr, pr.MergeableState)
 	nextHeadSHA := tp.HeadSHA
 	if pr.HeadSHA != "" {
 		nextHeadSHA = pr.HeadSHA
@@ -189,7 +191,8 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 		!intPtrEqual(tp.ChangedFiles, changedFiles) ||
 		!stringPtrEqual(tp.MergedByLogin, mergedByLogin) ||
 		!stringPtrEqual(tp.ClosedByLogin, closedByLogin) ||
-		!timeEqual(tp.AutoMergeObservedAt, autoMergeObservedAt)
+		!timeEqual(tp.AutoMergeObservedAt, autoMergeObservedAt) ||
+		!boolPtrEqual(tp.HasMergeConflicts, nextHasMergeConflicts)
 	nextWorkflowAttention := resolveTaskPRWorkflowAttention(tp, status, nextHeadSHA)
 	changed = changed || !workflowAttentionSemanticEqual(tp.WorkflowAttention, nextWorkflowAttention)
 
@@ -202,6 +205,7 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 	tp.MergedByLogin = mergedByLogin
 	tp.ClosedByLogin = closedByLogin
 	tp.AutoMergeObservedAt = autoMergeObservedAt
+	tp.HasMergeConflicts = nextHasMergeConflicts
 	tp.WorkflowAttention = nextWorkflowAttention
 	tp.WorkflowAttentionJSON = marshalWorkflowAttention(nextWorkflowAttention)
 	now := s.now()

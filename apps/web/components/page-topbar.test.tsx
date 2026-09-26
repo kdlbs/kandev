@@ -2,6 +2,12 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PageTopbar, TOPBAR_HEIGHT_CLASSNAME, type ParentCrumb } from "./page-topbar";
 
+const isMacTauriWebview = vi.hoisted(() => vi.fn(() => false));
+vi.mock("@/lib/desktop/window-chrome", () => ({
+  isMacTauriWebview,
+  macTauriDragRegionProps: () => (isMacTauriWebview() ? { "data-tauri-drag-region": "deep" } : {}),
+}));
+
 vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
   AppStatusDrawerTrigger: () => null,
 }));
@@ -9,7 +15,10 @@ vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
 const PHONE_HOME = "topbar-phone-home";
 
 describe("PageTopbar home crumb", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    isMacTauriWebview.mockReturnValue(false);
+  });
 
   it("renders a phone-only home crumb by default", () => {
     render(<PageTopbar title="Hello E2E" />);
@@ -54,6 +63,15 @@ describe("PageTopbar home crumb", () => {
     for (const ghostHome of screen.getAllByTestId("topbar-ghost-home")) {
       expect(ghostHome.className).toContain("md:hidden");
     }
+  });
+
+  it("marks the header as a native drag region only for macOS Tauri", () => {
+    isMacTauriWebview.mockReturnValue(true);
+    render(<PageTopbar title="Settings" testId="native-titlebar" />);
+
+    expect(screen.getByTestId("native-titlebar").getAttribute("data-tauri-drag-region")).toBe(
+      "deep",
+    );
   });
 
   it("omits it when the page already shows a real back link", () => {

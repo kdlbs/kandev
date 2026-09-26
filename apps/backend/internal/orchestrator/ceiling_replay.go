@@ -655,6 +655,7 @@ func (s *Service) replayCeilingLaunchPromptEnsure(ctx context.Context, task *mod
 		promptAlreadyComposed:     boolField(payload, "prompt_already_composed"),
 		fallbackLaunchPrompt:      stringField(payload, "fallback_launch_prompt"),
 		fallbackRetryPrompt:       stringField(payload, "fallback_retry_prompt"),
+		promptReferenceContext:    stringField(payload, "prompt_reference_context"),
 	}
 	if binding, present, bindingErr := models.ReadCeilingWorkflowEntryBinding(payload); bindingErr == nil && present {
 		options.ceilingEntryBinding = &binding

@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { expectCancelToSettlePromptly } from "../../helpers/cancellation";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForActiveSessionCancellationPendingOrSettled } from "../../helpers/session-store";
 import { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
@@ -132,6 +133,7 @@ test.describe("mobile: cancelled turn completion", () => {
 
     expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(1);
     await tapCancelButton(session);
+    await waitForActiveSessionCancellationPendingOrSettled(testPage);
     await expectCancelToSettlePromptly(session);
     await expect
       .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id, {

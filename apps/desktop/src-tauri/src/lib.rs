@@ -1,4 +1,5 @@
 pub mod backend;
+pub mod downloads;
 pub mod external_links;
 pub mod folder_picker;
 pub mod native_notifications;

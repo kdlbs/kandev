@@ -200,6 +200,7 @@ func seam3PromptEnsurePayload(
 		"prompt_already_composed":     options.promptAlreadyComposed,
 		"fallback_launch_prompt":      options.fallbackLaunchPrompt,
 		"fallback_retry_prompt":       options.fallbackRetryPrompt,
+		"prompt_reference_context":    options.promptReferenceContext,
 	}
 	if options.ceilingEntryBinding != nil {
 		payload[models.CeilingLaunchEntryBindingKey] = ceilingEntryBindingValue(*options.ceilingEntryBinding)

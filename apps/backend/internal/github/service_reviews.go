@@ -340,8 +340,8 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 		}
 	}
 
-	// Enrich new PRs with full details (branch info) from the PR API,
-	// since the search API does not return head/base branch.
+	// Enrich new PRs with provider details because search results can omit
+	// branch information and head repository identity.
 	s.enrichPRDetails(ctx, resolved.Client, newPRs)
 
 	s.logger.Debug("review watch check complete",
@@ -476,30 +476,46 @@ func repoFilterToQualifier(repo RepoFilter) string {
 	return fmt.Sprintf("repo:%s/%s", repo.Owner, repo.Name)
 }
 
-// enrichPRDetails fetches full PR details for PRs missing branch info (from the search API).
+// enrichPRDetails fetches full PR details for search results missing branch
+// information or head repository identity.
 func (s *Service) enrichPRDetails(ctx context.Context, client Client, prs []*PR) {
 	for _, pr := range prs {
-		if pr.HeadBranch != "" && pr.BaseBranch != "" {
+		if pr.HeadBranch != "" && pr.BaseBranch != "" && pr.HeadRepoOwner != "" && pr.HeadRepoName != "" {
 			continue
 		}
-		s.logger.Debug("enriching PR with full details (missing branch info)",
+		s.logger.Debug("enriching PR with full details (missing required review metadata)",
 			zap.String("repo", pr.RepoOwner+"/"+pr.RepoName),
 			zap.Int("pr_number", pr.Number))
 
 		full, err := client.GetPR(ctx, pr.RepoOwner, pr.RepoName, pr.Number)
 		if err != nil {
-			s.logger.Warn("failed to fetch full PR details, branch info will be empty",
+			s.logger.Warn("failed to fetch full PR details, review metadata will remain incomplete",
 				zap.String("repo", pr.RepoOwner+"/"+pr.RepoName),
 				zap.Int("pr_number", pr.Number),
 				zap.Error(err))
 			continue
 		}
+		if full == nil {
+			continue
+		}
 		pr.HeadBranch = full.HeadBranch
 		pr.HeadSHA = full.HeadSHA
 		pr.BaseBranch = full.BaseBranch
+		pr.BaseSHA = full.BaseSHA
 		pr.Additions = full.Additions
 		pr.Deletions = full.Deletions
 		pr.Mergeable = full.Mergeable
+		pr.MergeableState = full.MergeableState
+		pr.HeadRepoID = full.HeadRepoID
+		pr.HeadRepoNodeID = full.HeadRepoNodeID
+		pr.HeadRepoOwner = full.HeadRepoOwner
+		pr.HeadRepoName = full.HeadRepoName
+		pr.HeadRepoCloneURL = full.HeadRepoCloneURL
+		pr.BaseRepoID = full.BaseRepoID
+		pr.BaseRepoOwner = full.BaseRepoOwner
+		pr.BaseRepoName = full.BaseRepoName
+		pr.BaseDefaultBranch = full.BaseDefaultBranch
+		pr.MaintainerCanModify = full.MaintainerCanModify
 	}
 }
 

@@ -1,24 +1,22 @@
 :root {
-  --startup-bg: #f5f7f6;
-  --startup-panel: #ffffff;
-  --startup-panel-border: #d8dfdc;
-  --startup-text: #18201f;
-  --startup-muted: #53625e;
-  --startup-shadow: rgba(24, 32, 31, 0.14);
-  --spinner-track: #d8dfdc;
-  --spinner-primary: #16875f;
-  --spinner-accent: #c48a2a;
-  --error-text: #9d241b;
-
+  --startup-bg: #fff;
+  --startup-dark-bg: #181818;
+  --startup-primary: oklch(0.51 0.23 277);
+  --startup-dark-primary: oklch(0.59 0.2 277);
+  --startup-panel: #fff;
+  --startup-border: #e5e5e5;
+  --startup-text: #181818;
+  --startup-muted: #666;
+  --startup-error: oklch(0.58 0.22 27);
   color: var(--startup-text);
-  background: var(--startup-bg);
   color-scheme: light dark;
+  background: var(--startup-bg);
   font-family:
-    Inter,
+    "Figtree",
+    "Geist",
     ui-sans-serif,
     system-ui,
     -apple-system,
-    BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
   font-synthesis: none;
@@ -29,16 +27,13 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --startup-bg: #0f1413;
-    --startup-panel: #151c1a;
-    --startup-panel-border: #27322e;
-    --startup-text: #edf5f2;
-    --startup-muted: #9ca8a4;
-    --startup-shadow: rgba(0, 0, 0, 0.36);
-    --spinner-track: #27322e;
-    --spinner-primary: #2aa876;
-    --spinner-accent: #d6a348;
-    --error-text: #ffb4ab;
+    --startup-bg: var(--startup-dark-bg);
+    --startup-primary: var(--startup-dark-primary);
+    --startup-panel: #1f1f1f;
+    --startup-border: #373737;
+    --startup-text: #d4d4d4;
+    --startup-muted: #a0a0a0;
+    --startup-error: oklch(0.704 0.191 22.216);
   }
 }
 
@@ -46,10 +41,14 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
+html,
 body {
   background: var(--startup-bg);
   margin: 0;
-  min-width: 320px;
   min-height: 100vh;
 }
 
@@ -57,90 +56,79 @@ body {
   align-items: center;
   background: var(--startup-bg);
   display: flex;
+  justify-content: center;
   min-height: 100vh;
+  overflow: auto;
   padding: 32px;
 }
 
 .startup-panel {
-  align-items: center;
-  display: flex;
-  justify-content: center;
-  margin: 0 auto;
-  min-height: 88px;
-  min-width: 88px;
+  margin: auto;
+  max-width: 760px;
+  width: 100%;
 }
 
-.status-spinner {
-  animation: startup-spin 960ms linear infinite;
-  background:
-    linear-gradient(var(--startup-bg), var(--startup-bg)) padding-box,
-    conic-gradient(
-        from 0deg,
-        var(--spinner-primary),
-        var(--spinner-accent),
-        var(--spinner-track),
-        var(--spinner-primary)
-      )
-      border-box;
-  border: 4px solid transparent;
-  border-radius: 999px;
-  height: 52px;
-  width: 52px;
+#loading-state {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  justify-content: center;
+  max-width: 640px;
+  min-height: 112px;
+  text-align: center;
+}
+
+.spinner-grid {
+  color: var(--startup-primary);
+  display: inline-grid;
+  flex: none;
+  gap: 0.15em;
+  grid-template-columns: repeat(3, 1fr);
+  height: 3em;
+  width: 3em;
+}
+
+.spinner-grid-cube {
+  animation: spinner-grid 1.3s ease-in-out infinite;
+  background: currentColor;
+  height: 100%;
+  width: 100%;
+}
+
+.spinner-grid-cube:nth-child(1),
+.spinner-grid-cube:nth-child(5),
+.spinner-grid-cube:nth-child(9) {
+  animation-delay: 0.2s;
+}
+
+.spinner-grid-cube:nth-child(2),
+.spinner-grid-cube:nth-child(6) {
+  animation-delay: 0.3s;
+}
+
+.spinner-grid-cube:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+.spinner-grid-cube:nth-child(4),
+.spinner-grid-cube:nth-child(8) {
+  animation-delay: 0.1s;
+}
+
+.spinner-grid-cube:nth-child(7) {
+  animation-delay: 0s;
 }
 
 .startup-copy {
-  border: 0;
-  clip: rect(0 0 0 0);
-  display: block;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  padding: 0;
-  position: absolute;
-  white-space: nowrap;
-  width: 1px;
-}
-
-.startup-shell.is-failed .startup-panel {
-  background: var(--startup-panel);
-  border: 1px solid var(--startup-panel-border);
-  border-radius: 8px;
-  box-shadow: 0 24px 70px var(--startup-shadow);
-  display: grid;
-  gap: 20px;
-  grid-template-columns: 56px minmax(0, 1fr);
-  max-width: 560px;
-  min-height: 168px;
-  padding: 28px;
-  width: min(100%, 560px);
-}
-
-.startup-shell.is-failed .status-spinner {
-  animation: none;
-  background:
-    linear-gradient(var(--startup-panel), var(--startup-panel)) padding-box,
-    conic-gradient(from 90deg, var(--error-text), var(--spinner-accent), var(--error-text))
-      border-box;
-  height: 44px;
-  width: 44px;
-}
-
-.startup-shell.is-failed .startup-copy {
-  clip: auto;
-  height: auto;
-  margin: 0;
   min-width: 0;
-  overflow: visible;
-  position: static;
-  white-space: normal;
-  width: auto;
+  width: 100%;
 }
 
 .eyebrow {
   color: var(--startup-muted);
   font-size: 0.78rem;
   font-weight: 700;
-  letter-spacing: 0;
   line-height: 1.4;
   margin: 0 0 6px;
   text-transform: uppercase;
@@ -154,41 +142,197 @@ h1 {
   overflow-wrap: anywhere;
 }
 
-#status-detail {
+h2 {
+  color: var(--startup-text);
+  font-size: 1.05rem;
+  line-height: 1.35;
+  margin: 0;
+}
+
+p {
   color: var(--startup-muted);
-  font-size: 0.96rem;
   line-height: 1.55;
   margin: 10px 0 0;
   overflow-wrap: anywhere;
 }
 
-.startup-shell.is-failed h1 {
-  color: var(--error-text);
+code,
+pre {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
-@keyframes startup-spin {
-  to {
-    transform: rotate(360deg);
+#temporary-home {
+  margin-top: 22px;
+}
+
+#temporary-home code {
+  display: block;
+  margin-top: 4px;
+}
+
+#temporary-cleanup {
+  font-size: 0.9rem;
+}
+
+.conflict-panel,
+.failure-panel {
+  background: var(--startup-panel);
+  border: 1px solid var(--startup-border);
+  border-radius: 12px;
+  box-shadow: 0 20px 64px rgb(0 0 0 / 12%);
+  padding: 32px;
+  text-align: left;
+}
+
+.conflict-header {
+  margin-bottom: 22px;
+}
+
+.conflict-rule {
+  color: var(--startup-text);
+  font-size: 1.12rem;
+  font-weight: 650;
+  margin-top: 0;
+}
+
+.conflict-paths,
+.technical-details dl {
+  display: grid;
+  gap: 12px;
+  margin: 20px 0 0;
+}
+
+.conflict-paths > div,
+.technical-details dl > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+dt {
+  color: var(--startup-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.technical-details {
+  border-top: 1px solid var(--startup-border);
+  margin-top: 18px;
+  padding-top: 14px;
+}
+
+.technical-details summary {
+  color: var(--startup-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.technical-details pre {
+  background: color-mix(in srgb, var(--startup-bg) 78%, var(--startup-panel));
+  border-radius: 6px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  margin: 12px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.temporary-instance-section {
+  border-top: 1px solid var(--startup-border);
+  margin-top: 24px;
+  padding-top: 22px;
+}
+
+.temporary-instance-section button {
+  background: var(--startup-primary);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  margin-top: 16px;
+  min-height: 44px;
+  padding: 9px 16px;
+}
+
+.temporary-instance-section button:hover {
+  filter: brightness(1.08);
+}
+
+.temporary-instance-section button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--startup-primary) 46%, transparent);
+  outline-offset: 2px;
+}
+
+.temporary-instance-section button:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+#temporary-action-feedback {
+  font-size: 0.9rem;
+  min-height: 1.4em;
+}
+
+.failure-panel h1 {
+  color: var(--startup-error);
+}
+
+.failure-panel pre {
+  color: var(--startup-muted);
+  font-size: 0.88rem;
+  margin: 12px 0 0;
+  max-height: 55vh;
+  overflow: auto;
+}
+
+#failure-home {
+  display: grid;
+  gap: 6px;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.startup-shell.is-failed .spinner-grid,
+.startup-shell.is-conflict .spinner-grid {
+  display: none;
+}
+
+@keyframes spinner-grid {
+  0%,
+  70%,
+  100% {
+    transform: scale3d(0.5, 0.5, 1);
+  }
+  35% {
+    transform: scale3d(0, 0, 1);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .status-spinner {
+  .spinner-grid-cube {
     animation: none;
   }
 }
 
 @media (max-width: 520px) {
   .startup-shell {
-    align-items: stretch;
     padding: 16px;
   }
 
-  .startup-shell.is-failed .startup-panel {
-    align-content: center;
-    grid-template-columns: 1fr;
-    justify-items: start;
-    min-height: 100%;
+  .conflict-panel,
+  .failure-panel {
     padding: 22px;
   }
 }

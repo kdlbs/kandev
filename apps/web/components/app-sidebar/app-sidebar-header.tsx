@@ -10,6 +10,7 @@ import { useOfficeModeState } from "@/hooks/use-in-office";
 import { cn } from "@/lib/utils";
 import { workspaceHomeHref } from "./app-sidebar-workspace-navigation";
 import { AppSidebarWorkspacePicker } from "./app-sidebar-workspace-picker";
+import { macTauriDragRegionProps } from "@/lib/desktop/window-chrome";
 
 type AppSidebarHeaderProps = {
   collapsed: boolean;
@@ -18,6 +19,15 @@ type AppSidebarHeaderProps = {
 };
 
 const COLLAPSE_BUTTON_CLASS = "h-7 w-7 shrink-0 cursor-pointer";
+
+function sidebarHeaderAttributes(collapsed: boolean) {
+  return {
+    "data-testid": "app-sidebar-header",
+    "data-window-controls-overlay-region": "sidebar",
+    "data-sidebar-header-collapsed": collapsed ? "true" : "false",
+    ...macTauriDragRegionProps(),
+  };
+}
 
 export function AppSidebarHeader({
   collapsed,
@@ -46,8 +56,7 @@ export function AppSidebarHeader({
     // the expanded header — a lone workspace glyph here read as noise.
     return (
       <div
-        data-testid="app-sidebar-header"
-        data-window-controls-overlay-region="sidebar"
+        {...sidebarHeaderAttributes(true)}
         className="flex flex-col items-center gap-1 px-1 py-1.5 border-b border-border shrink-0"
       >
         <Tooltip>
@@ -89,8 +98,7 @@ export function AppSidebarHeader({
   // brand carries weight/colour, the workspace stays muted and secondary.
   return (
     <div
-      data-testid="app-sidebar-header"
-      data-window-controls-overlay-region="sidebar"
+      {...sidebarHeaderAttributes(false)}
       className="flex items-center gap-1.5 h-10 px-3 shrink-0 border-b border-border"
     >
       <Link

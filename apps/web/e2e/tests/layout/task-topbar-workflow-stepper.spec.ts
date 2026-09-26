@@ -165,11 +165,25 @@ test.describe("Compact task topbar workflow stepper", () => {
     apiClient,
     seedData,
   }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Compact workflow movement",
+      "simple",
+    );
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    const sortedSteps = [...steps].sort((left, right) => left.position - right.position);
+    const currentStep = sortedSteps.find((step) => step.is_start_step) ?? sortedSteps[0];
+    if (!currentStep) throw new Error("compact workflow movement requires at least one step");
+
     const task = await apiClient.seedTask(seedData.workspaceId, COMPACT_TASK_TITLE, {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
+      workflow_id: workflow.id,
+      workflow_step_id: currentStep.id,
     });
-    const targetStep = adjacentStep(seedData.steps, seedData.startStepId);
+    // The worker can refresh a workflow while another test is completing its
+    // setup. Re-read the task's workflow after task creation so the disclosure
+    // uses the current step set instead of stale fixture data.
+    const { steps: currentSteps } = await apiClient.listWorkflowSteps(workflow.id);
+    const targetStep = adjacentStep(currentSteps, currentStep.id);
 
     await testPage.setViewportSize({ width: 900, height: 800 });
     await testPage.goto(`/t/${task.task_id}`);
@@ -196,7 +210,7 @@ test.describe("Compact task topbar workflow stepper", () => {
     await trigger.focus();
     await expect(disclosureSurface).toBeVisible();
     await expect(disclosure.locator('[data-testid^="workflow-step-disclosure-row-"]')).toHaveCount(
-      seedData.steps.length,
+      currentSteps.length,
     );
 
     const moveButton = testPage.getByTestId(`workflow-step-disclosure-move-${targetStep.id}`);
@@ -207,7 +221,7 @@ test.describe("Compact task topbar workflow stepper", () => {
     expect(moveButtonBox.height).toBeLessThan(40);
 
     let moveButtonFocused = false;
-    for (let tabCount = 0; tabCount < seedData.steps.length + 2; tabCount += 1) {
+    for (let tabCount = 0; tabCount < currentSteps.length + 2; tabCount += 1) {
       if (await moveButton.evaluate((element) => element === document.activeElement)) {
         moveButtonFocused = true;
         break;
