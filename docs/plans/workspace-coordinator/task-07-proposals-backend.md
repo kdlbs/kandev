@@ -40,8 +40,9 @@ system_design:
 Add the approve and reject route handlers (task 01 declared their types) with
 the claim, frozen spec, idempotent task creation, the reserved external-id
 prefix and recovery, and publish `coordinator.updated` on every decision.
-Needs only task 01's proposals table and store methods: tests insert pending
-proposals through the store. Runs in parallel with tasks 02, 03 and 04.
+Needs only task 01's proposals table and store methods (plus the one
+discovery method this work order adds): tests insert pending proposals
+through the store. Runs in parallel with tasks 02, 03 and 04.
 
 ## In scope
 
@@ -50,7 +51,11 @@ proposals through the store. Runs in parallel with tasks 02, 03 and 04.
   and empty-string rules of the proposals design's Edits table, re-validated
   including the step-eligibility check from task 01 (an auto-start step or a
   step that has become a feeder of an auto-start step since propose is
-  refused); a failed attempt's `final_spec_json` is the base of the next),
+  refused); a failed attempt's `final_spec_json` is the base of the next;
+  a `failed` row whose external id already holds a task completes with that
+  task without re-validation, or returns 409 when the body carries edits),
+  the pre-create eligibility check that runs immediately before every create
+  call (ineligible fails the row with no create),
   the create-outcome branches (`Created` then `SettleExternalID`,
   `FoundSettled`, `FoundUnsettled`, and any other settle error, which returns
   the error and leaves the row `approving` for the next recovery pass to
@@ -61,7 +66,24 @@ proposals through the store. Runs in parallel with tasks 02, 03 and 04.
 - Stale-claim recovery at startup and on approve only; a proposal list or get
   never writes. The startup recovery hooks into task 01's decisions
   registration function (its startup-pass hook slot), not into the shared
-  pass's call site.
+  pass's call site. As the proposals design's
+  [Recovery](../../specs/coordinator/system-design/proposals.md#recovery)
+  says, the startup pass uses `cutoff = T0`, not the two-minute rule. It
+  finds rows through a new store method, `ListApprovingClaimedBefore(ctx,
+  cutoff)` (`status='approving' AND claimed_at < cutoff`, ordered by
+  `claimed_at` then `id`, every workspace, no limit, no new index), and
+  handles them one at a time. A discovery error ends the pass; a row error
+  is logged and the pass moves on. A read error after a re-claim leaves the
+  row `approving` (500 for an approve request), never `failed`.
+- The step-graph loader in `internal/coordinator/step_graph.go` (the
+  proposals design's
+  [No agent starts](../../specs/coordinator/system-design/proposals.md#no-agent-starts)):
+  it reads a workflow's steps through the workflow service's
+  `ListStepsByWorkflow` and maps them to `[]StepNode` for task 01's
+  `EligibleStep`. Task 03 needs the same loader and runs in parallel: build
+  it at that path if it is absent when this work order branches; whichever
+  of tasks 03 and 07 merges second deletes its own copy and calls the one on
+  `main`.
 - The `coordinator-proposal:` external-id prefix refused in the task service:
   `CreateTask` without `AllowReservedExternalID`, and
   `ReleaseTaskExternalID`, at the HTTP and MCP task create entry points.
@@ -141,7 +163,32 @@ task, including when the target step's eligibility changed during the crash
 window (the stale re-claim's `GetTaskByExternalID` lookup finds the task the
 crashed attempt already created and completes with it instead of failing);
 crash after claim, before create, with eligibility now failing, fails the
-proposal without creating a task; two readers of a stale claim, one wins, keeping the first
+proposal without creating a task; a startup pass run less than two minutes
+after a claim whose `claimed_at` is before `T0` recovers it, and one whose
+claim is at or after `T0` is left alone; the startup pass handles several
+`approving` rows in `claimed_at` then `id` order and continues past a row
+whose re-claim or create errors; a lookup or step-graph read error after a
+re-claim leaves the row `approving` with the new token and returns 500 to an
+approve request; a read error before the claim returns 500 with the row
+unchanged and nothing published; a deleted workflow at stale re-claim with no
+task found fails the proposal; the step made ineligible between the claim
+and the create (after step 2 passed) fails the proposal with "the target
+step is no longer eligible" and makes no create call, and a step-graph read
+error at that check leaves the row `approving` and returns 500; a slow
+original claimer whose create commits after a stale re-claim failed the
+proposal on ineligibility logs at warn with the proposal and task ids,
+writes nothing, returns 200 with the `failed` row, and the task stays on its
+board; the same slow claimer finding the row `rejected` (a manager rejected
+the `failed` row first) logs at warn, writes nothing and returns 200 with the
+`rejected` row; a reject of such a `failed` row leaves the task on its board
+(task still present, same step, no agent); a later approve of such a
+`failed` row with no edits completes with that same task (`Found*`, no
+second task) even while the step is ineligible; a later approve of it with
+edits returns 409 with the row, validates nothing and writes nothing; a
+lookup error on a `failed` row returns 500 with the row unchanged;
+the loader maps `is_start_step`, `allow_manual_move`, an `on_enter`
+`auto_start_agent` action and `pull_from_step_id` to `StepNode`, and returns
+an empty graph for a workflow with no steps; two readers of a stale claim, one wins, keeping the first
 `final_spec_json` and `decided_by`; a stale original claimer's completion and
 failure updates match no row (claim token); edits sent against an `approving`
 row get 409; status is checked before edits (invalid edits against an
@@ -173,7 +220,8 @@ and its test, since task 07 does not depend on task 04.
 
 ## Likely files
 
-- `apps/backend/internal/coordinator/{approve,reject,recovery}.go` and tests
+- `apps/backend/internal/coordinator/{approve,reject,recovery,step_graph}.go` and tests
+- `apps/backend/internal/coordinator/store_proposals.go` (`ListApprovingClaimedBefore` only)
 - `apps/backend/internal/task/service/service_tasks.go`, `service_requests.go`, `external_id.go` (reserved prefix)
 - `apps/backend/internal/backendapp/coordinator.go` (decisions registration function only)
 
