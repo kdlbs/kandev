@@ -165,7 +165,7 @@ mockup's `mockup/e2e/tests/`, outside this repository; see the plan's [Mockup sc
 ```bash
 cd apps/web && pnpm test -- components/config-chat components/quick-chat components/task/chat/messages/user-message-body.test.tsx hooks/domains/session/use-session-resumption
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
-cd apps/web && pnpm e2e:run tests/config-chat
+cd apps/web && pnpm e2e:run tests/settings/config-chat-popover.spec.ts tests/settings/mobile-config-chat-popover.spec.ts tests/settings/mobile-configuration-chat.spec.ts
 ```
 
 ## Likely files
