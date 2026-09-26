@@ -5,7 +5,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"strconv"
@@ -50,7 +49,10 @@ func snapshotLinuxProc(
 				// contribute a candidate or an ancestry hop to this snapshot.
 				continue
 			}
-			return nil, fmt.Errorf("read /proc/%d/stat: %w", pid, statErr)
+			// Preserve the unknown ancestry hop so descendants fail their
+			// ownership check instead of treating this pid as a chain end.
+			procs = append(procs, hostProcess{PID: pid, PPID: orphanReapUnresolvedPPID})
+			continue
 		}
 		// A cwd read failure still leaves ancestry (ppid) usable for the
 		// ownership walk; leave Cwd empty so this pid never becomes a
