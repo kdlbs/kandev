@@ -475,8 +475,10 @@ describe("ChatInputToolbar responsive wrapper", () => {
       SUBMIT_MESSAGE_BUTTON_TEST_ID,
     ]) {
       const control = screen.getByTestId(testId);
-      expect(control.className).toContain("min-h-11");
-      expect(control.className).toContain("min-w-11");
+      const classes = control.className.split(/\s+/);
+      const hasSquareTarget = classes.includes("size-11");
+      const hasMinimumTarget = classes.includes("min-h-11") && classes.includes("min-w-11");
+      expect(hasSquareTarget || hasMinimumTarget).toBe(true);
     }
   });
 
@@ -491,9 +493,10 @@ describe("ChatInputToolbar responsive wrapper", () => {
       SUBMIT_MESSAGE_BUTTON_TEST_ID,
     ]) {
       const control = screen.getByTestId(testId);
-      expect(control.className).toContain("h-7");
-      expect(control.className).not.toContain("min-h-11");
-      expect(control.className).not.toContain("min-w-11");
+      const classes = control.className.split(/\s+/);
+      expect(classes.includes("size-7") || classes.includes("h-7")).toBe(true);
+      expect(classes).not.toContain("min-h-11");
+      expect(classes).not.toContain("min-w-11");
     }
   });
 

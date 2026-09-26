@@ -26,10 +26,16 @@ import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/wor
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { TaskTopBarActionsMenu } from "@/components/task/task-top-bar-actions-menu";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
+import { SurfaceAction } from "@/components/actions/surface-action";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
+import {
+  RemoteRepositoryProviderIcon,
+  useRemoteRepositoryProviderLabel,
+} from "@/components/task-create-dialog-remote-repo-provider-tabs";
 import { isDebugUI } from "@/lib/config";
 import { useTranslation } from "react-i18next";
 import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
+import type { TaskTopbarRepository } from "./task-page-content-helpers";
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -37,6 +43,7 @@ type TaskTopBarProps = {
   taskTitle?: string;
   /** `owner/repo` (or the repository name) of the task's primary repository. */
   repositoryLabel?: string | null;
+  topbarRepository?: TaskTopbarRepository | null;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   workflowSteps?: WorkflowStepperStep[];
@@ -66,6 +73,7 @@ const TaskTopBar = memo(function TaskTopBar({
   activeSessionId,
   taskTitle,
   repositoryLabel,
+  topbarRepository,
   showDebugOverlay,
   onToggleDebugOverlay,
   workflowSteps,
@@ -91,9 +99,23 @@ const TaskTopBar = memo(function TaskTopBar({
   // Projects only exist for office-owned tasks, so kanban-mode tasks render no
   // ancestry trail at all.
   const project = useOfficeProject(projectId);
+  const repositoryProviderLabel = useRemoteRepositoryProviderLabel(
+    topbarRepository?.provider ?? "",
+  );
   const showExecutorSettings =
     !isArchived && shouldShowExecutorEnvironmentControls(remoteExecutorType);
-  const parents = buildTaskCrumbs(project, repositoryLabel);
+  const repositoryAccessibleName = topbarRepository
+    ? t("task:remoteRepositoryIdentity", {
+        provider: repositoryProviderLabel,
+        repository: topbarRepository.fullName,
+      })
+    : undefined;
+  const parents = buildTaskCrumbs(
+    project,
+    repositoryLabel,
+    topbarRepository,
+    repositoryAccessibleName,
+  );
   return (
     <PageTopbar
       testId="task-topbar"
@@ -163,10 +185,26 @@ const TaskTopBar = memo(function TaskTopBar({
 function buildTaskCrumbs(
   project: { id: string; name: string } | null | undefined,
   repositoryLabel: string | null | undefined,
+  topbarRepository?: TaskTopbarRepository | null,
+  repositoryAccessibleName?: string,
 ): ParentCrumb[] | undefined {
   const crumbs: ParentCrumb[] = [];
   if (project) crumbs.push({ label: project.name, href: `/office/projects/${project.id}` });
-  if (repositoryLabel) crumbs.push({ label: repositoryLabel });
+  if (topbarRepository) {
+    crumbs.push({
+      label: topbarRepository.displayName,
+      externalUrl: topbarRepository.browserUrl ?? undefined,
+      ariaLabel: repositoryAccessibleName,
+      title: topbarRepository.fullName,
+      icon: (
+        <span data-testid="task-topbar-repository-provider-icon">
+          <RemoteRepositoryProviderIcon provider={topbarRepository.provider} />
+        </span>
+      ),
+    });
+  } else if (repositoryLabel) {
+    crumbs.push({ label: repositoryLabel });
+  }
   return crumbs.length > 0 ? crumbs : undefined;
 }
 
@@ -228,15 +266,13 @@ function DebugOverlayToggle({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 cursor-pointer px-2"
+        <SurfaceAction
+          surface="topbar"
+          presentation="desktop"
+          label={label}
+          icon={<IconBug className="h-4 w-4" />}
           onClick={onToggleDebugOverlay}
-          aria-label={label}
-        >
-          <IconBug className="h-4 w-4" />
-        </Button>
+        />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
@@ -411,7 +447,7 @@ function TopBarRight({
       {!isArchived && (
         <TopbarCluster
           label={t("task:pluginTopBarActions")}
-          className="[&_button]:h-7 [&_button]:text-xs"
+          className="[&_button:not([data-slot=surface-action])]:h-7 [&_button:not([data-slot=surface-action])]:text-xs"
         >
           <TaskTopBarPluginActions
             sessionId={activeSessionId ?? null}

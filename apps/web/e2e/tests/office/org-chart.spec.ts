@@ -23,7 +23,23 @@ test.describe("Org chart", () => {
     });
     const workerId = worker.id as string;
 
+    const agentsLoaded = waitForHttp(
+      testPage,
+      "GET",
+      new RegExp(`/api/v1/office/workspaces/${officeSeed.workspaceId}/agents$`),
+    );
     await testPage.goto("/office/workspace/org");
+    const agentsResponse = await agentsLoaded;
+    expect(agentsResponse.ok()).toBe(true);
+    const { agents } = (await agentsResponse.json()) as {
+      agents: Array<{ id: string; name: string }>;
+    };
+    expect(agents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: officeSeed.agentId, name: "CEO" }),
+        expect.objectContaining({ id: workerId, name: "Org Chart Reparent Target" }),
+      ]),
+    );
     await expect(officeTopbarTitle(testPage)).toHaveText(/Org/i, {
       timeout: 10_000,
     });

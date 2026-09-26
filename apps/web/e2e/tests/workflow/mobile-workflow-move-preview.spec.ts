@@ -56,7 +56,9 @@ test.describe("mobile: workflow move preview", () => {
       const isMovePreviewRequest = movePreviewRequestPredicate(task.id, targetStep.id);
       let requestCount = 0;
       const requestListener = (request: Request) => {
-        if (isMovePreviewRequest(request)) requestCount += 1;
+        if (isMovePreviewRequest(request)) {
+          requestCount += 1;
+        }
       };
       tabletTestPage.on("request", requestListener);
 

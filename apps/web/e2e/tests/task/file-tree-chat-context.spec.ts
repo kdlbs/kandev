@@ -1,9 +1,11 @@
+import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
+import { watchWs } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
@@ -20,10 +22,12 @@ async function setupDesktopContextTask(
     path.join(backend.tmpDir, "repos", "e2e-repo"),
     makeGitEnv(backend.tmpDir),
   );
+  git.exec("git checkout main");
   git.createFile(filePath, "# Context file\n");
   git.createFile(`${directoryPath}/nested.txt`, "directory content\n");
   git.stageAll();
   git.commit(`add chat context fixtures ${suffix}`);
+  git.exec("git push origin main");
 
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -36,10 +40,35 @@ async function setupDesktopContextTask(
       repository_ids: [seedData.repositoryId],
     },
   );
+  let workspacePath = "";
+  await expect
+    .poll(
+      async () => {
+        const environment = await apiClient.getTaskEnvironment(task.id);
+        workspacePath = environment?.workspace_path ?? environment?.repos?.[0]?.worktree_path ?? "";
+        return (
+          environment?.status === "ready" &&
+          workspacePath !== "" &&
+          fs.existsSync(path.join(workspacePath, filePath)) &&
+          fs.existsSync(path.join(workspacePath, directoryPath, "nested.txt"))
+        );
+      },
+      {
+        timeout: 60_000,
+        message: `Waiting for ${filePath} and ${directoryPath} in the task worktree`,
+      },
+    )
+    .toBe(true);
+
+  const gateway = watchWs(testPage);
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 45_000 });
+  const treeResponse = gateway.waitForResponse("workspace.tree.get");
+  await testPage.reload();
+  await session.waitForLoad();
+  await treeResponse;
   return { session, filePath, directoryPath };
 }
 

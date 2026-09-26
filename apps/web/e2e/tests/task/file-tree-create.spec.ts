@@ -3,12 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import {
-  GitHelper,
-  makeGitEnv,
-  openTaskSession,
-  createStandardProfile,
-} from "../../helpers/git-helper";
+import { SessionPage } from "../../pages/session-page";
+import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 
 // File creation lives in file-browser-toolbar.tsx ("New file" button) +
 // inline-file-input.tsx (InlineFileInput) + file-browser.tsx
@@ -66,7 +62,9 @@ async function setupTask(
       .toBe(true);
   }
 
-  const session = await openTaskSession(testPage, options.taskTitle);
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
   await session.clickTab("Files");
   return session;
 }

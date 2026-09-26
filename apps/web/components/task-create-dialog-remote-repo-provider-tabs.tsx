@@ -5,7 +5,7 @@ import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import type { RemoteRepositoryProvider } from "@/hooks/domains/integrations/use-remote-repositories";
-import { pluginRegistry } from "@/lib/plugins/registry";
+import { usePluginRegistry } from "@/lib/plugins/registry";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { cn } from "@/lib/utils";
 
@@ -16,20 +16,29 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 export function RemoteRepositoryProviderIcon({ provider }: { provider: RemoteRepositoryProvider }) {
+  const registry = usePluginRegistry();
   if (provider === "github") return <IconBrandGithub className="size-3.5 shrink-0" />;
   if (provider === "gitlab") return <IconBrandGitlab className="size-3.5 shrink-0" />;
   if (provider === "azure_devops") return <AzureDevOpsIcon className="size-3.5 shrink-0" />;
-  const registration = pluginRegistry.getRepositoryProvider(provider);
+  const registration = registry.getRepositoryProvider(provider);
   const Icon = registration ? resolvePluginIcon(registration.icon) : IconGitBranch;
   return <Icon className="size-3.5 shrink-0" />;
 }
 
-function providerLabel(provider: RemoteRepositoryProvider): string {
+export function remoteRepositoryProviderLabel(
+  provider: RemoteRepositoryProvider,
+  registeredLabel?: string,
+): string {
   return (
     PROVIDER_LABELS[provider] ??
-    pluginRegistry.getRepositoryProvider(provider)?.label ??
+    registeredLabel ??
     provider.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
   );
+}
+
+export function useRemoteRepositoryProviderLabel(provider: RemoteRepositoryProvider): string {
+  const registry = usePluginRegistry();
+  return remoteRepositoryProviderLabel(provider, registry.getRepositoryProvider(provider)?.label);
 }
 
 function ProviderTab({
@@ -39,7 +48,7 @@ function ProviderTab({
   provider: RemoteRepositoryProvider;
   compact: boolean;
 }) {
-  const label = providerLabel(provider);
+  const label = useRemoteRepositoryProviderLabel(provider);
   const trigger = (
     <TabsTrigger
       value={provider}

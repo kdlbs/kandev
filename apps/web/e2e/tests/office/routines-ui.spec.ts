@@ -104,7 +104,7 @@ test.describe("Routines UI", () => {
       .locator("..")
       .getByRole("combobox")
       .click();
-    await testPage.getByRole("option", { name: "CEO" }).click();
+    await testPage.getByRole("option", { name: "CEO", exact: true }).click();
     await testPage.getByRole("button", { name: "Next" }).click();
 
     await testPage.getByLabel("Task Title Template").fill("{{name}} wire check");
@@ -173,7 +173,7 @@ test.describe("Routines UI", () => {
     await expect(testPage.getByText(name)).toBeVisible({ timeout: 10_000 });
 
     await comboboxNear(testPage, "Assignee").click();
-    await testPage.getByRole("option", { name: "CEO" }).click();
+    await testPage.getByRole("option", { name: "CEO", exact: true }).click();
     await comboboxNear(testPage, "Concurrency policy").click();
     await testPage.getByRole("option", { name: "Always create" }).click();
     await comboboxNear(testPage, "Catch-up policy").click();
@@ -305,7 +305,7 @@ test.describe("Routines UI", () => {
       .locator("..")
       .getByRole("combobox")
       .click();
-    await testPage.getByRole("option", { name: "CEO" }).click();
+    await testPage.getByRole("option", { name: "CEO", exact: true }).click();
     await testPage.getByRole("button", { name: "Next" }).click();
     await testPage.getByRole("button", { name: "Next" }).click();
 

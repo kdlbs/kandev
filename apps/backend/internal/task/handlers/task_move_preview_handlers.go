@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/task/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
 
@@ -58,12 +59,24 @@ func (h *TaskHandlers) httpMoveTaskPreview(c *gin.Context) {
 		handleSelectedMoveError(c, h.logger, err)
 		return
 	}
+	var candidateOverrides *models.WorkflowAgentOverrides
+	if body.WorkflowChange != nil {
+		candidateOverrides, err = h.service.ValidateWorkflowChange(
+			c.Request.Context(), taskID, body.WorkflowID, body.WorkflowStepID, body.WorkflowChange,
+		)
+		if err != nil {
+			handleSelectedMoveError(c, h.logger, err)
+			return
+		}
+	}
 
 	preview, err := h.movePreviewer.PreviewWorkflowMove(c.Request.Context(), orchestrator.WorkflowMovePreviewRequest{
-		TaskID:         taskID,
-		WorkflowID:     body.WorkflowID,
-		WorkflowStepID: body.WorkflowStepID,
-		EntryOptions:   entryOptions,
+		TaskID:                     taskID,
+		WorkflowID:                 body.WorkflowID,
+		WorkflowStepID:             body.WorkflowStepID,
+		EntryOptions:               entryOptions,
+		WorkflowChange:             body.WorkflowChange,
+		CandidateWorkflowOverrides: candidateOverrides,
 	})
 	if err != nil {
 		handleSelectedMoveError(c, h.logger, err)

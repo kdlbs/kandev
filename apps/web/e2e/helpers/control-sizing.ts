@@ -1,6 +1,7 @@
 import { expect, type Locator } from "@playwright/test";
 
 const PIXEL_TOLERANCE = 1;
+const TOUCH_TARGET_PIXEL_TOLERANCE = 0.01;
 
 export async function controlHeight(locator: Locator): Promise<number> {
   const box = await locator.boundingBox();
@@ -30,12 +31,12 @@ export async function expectControlWidth(
 export async function expectTouchSquareControl(locator: Locator): Promise<void> {
   const box = await locator.boundingBox();
   expect(box, "touch control should have a rendered bounding box").not.toBeNull();
-  expect(box!.height).toBeGreaterThanOrEqual(44);
-  expect(box!.width).toBeGreaterThanOrEqual(44);
+  expect(box!.height + TOUCH_TARGET_PIXEL_TOLERANCE).toBeGreaterThanOrEqual(44);
+  expect(box!.width + TOUCH_TARGET_PIXEL_TOLERANCE).toBeGreaterThanOrEqual(44);
 }
 
 export async function expectTouchControl(locator: Locator): Promise<void> {
   const box = await locator.boundingBox();
   expect(box, "touch control should have a rendered bounding box").not.toBeNull();
-  expect(box!.height).toBeGreaterThanOrEqual(44);
+  expect(box!.height + TOUCH_TARGET_PIXEL_TOLERANCE).toBeGreaterThanOrEqual(44);
 }

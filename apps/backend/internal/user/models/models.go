@@ -157,6 +157,7 @@ type UserSettings struct {
 	SidebarTaskColors                 map[string]*string                `json:"sidebar_task_colors"`
 	TaskCreateLastUsed                TaskCreateLastUsed                `json:"task_create_last_used"`
 	JiraSavedViews                    json.RawMessage                   `json:"jira_saved_views"`
+	JiraDefaultViewID                 string                            `json:"jira_default_view_id"`
 	JiraTaskPresets                   json.RawMessage                   `json:"jira_task_presets"`
 	GitHubSavedPresets                json.RawMessage                   `json:"github_saved_presets"`
 	GitHubDefaultQueryPresets         json.RawMessage                   `json:"github_default_query_presets"`

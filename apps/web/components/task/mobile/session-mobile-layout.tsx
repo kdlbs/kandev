@@ -41,6 +41,7 @@ import { useTranslation } from "react-i18next";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import { LaunchQueueStatus } from "../launch-queue-status";
 import { WipQueueStatus } from "../wip-queue-status";
+import type { TaskTopbarRepository } from "../task-page-content-helpers";
 
 export { resolveMobilePluginPanel } from "./mobile-plugin-panel-lifecycle";
 
@@ -93,6 +94,7 @@ type SessionMobileLayoutProps = {
   taskTitle?: string;
   /** `owner/repo` (or the repository name) of the task's primary repository. */
   repositoryLabel?: string | null;
+  topbarRepository?: TaskTopbarRepository | null;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string | null;
   remoteExecutorName?: string | null;
@@ -417,6 +419,7 @@ type MobileTopBarStickyProps = {
   taskTitle?: string;
   /** `owner/repo` (or the repository name) of the task's primary repository. */
   repositoryLabel?: string | null;
+  topbarRepository?: TaskTopbarRepository | null;
   effectiveSessionId: string | null;
   baseBranch?: string;
   worktreeBranch?: string | null;
@@ -446,6 +449,7 @@ function MobileTopBarSticky(props: MobileTopBarStickyProps) {
         workspaceId={props.workspaceId}
         taskTitle={props.taskTitle}
         repositoryLabel={props.repositoryLabel}
+        topbarRepository={props.topbarRepository}
         sessionId={props.effectiveSessionId}
         baseBranch={props.baseBranch}
         worktreeBranch={props.worktreeBranch}

@@ -24,6 +24,7 @@ func CreateProfileRequestFromDTO(request dto.ProfileCreateRequest) CreateProfile
 		ProviderKind:           request.ProviderKind,
 		ProviderBaseURL:        request.ProviderBaseURL,
 		ProviderAPIKeySecretID: request.ProviderAPIKeySecretID,
+		CursorMCPAuthEnabled:   request.CursorMCPAuthEnabled,
 		Dynamic:                request.Dynamic,
 	}
 }
@@ -51,6 +52,7 @@ func UpdateProfileRequestFromDTO(request dto.ProfileUpdateRequest) UpdateProfile
 		ProviderKind:           request.ProviderKind,
 		ProviderBaseURL:        request.ProviderBaseURL,
 		ProviderAPIKeySecretID: request.ProviderAPIKeySecretID,
+		CursorMCPAuthEnabled:   request.CursorMCPAuthEnabled,
 		Dynamic:                request.Dynamic,
 		Force:                  request.Force,
 	}

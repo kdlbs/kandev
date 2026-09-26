@@ -26,17 +26,18 @@ func TestDuplicateAgentProfile_RoundTrip(t *testing.T) {
 	}
 
 	source := &models.AgentProfile{
-		AgentID:          agent.ID,
-		Name:             "Default",
-		AgentDisplayName: "Test Agent",
-		Model:            "model-1",
-		Mode:             "plan",
-		AutoApprove:      true,
-		CLIPassthrough:   true,
-		CLIFlags:         []models.CLIFlag{{Description: "Tools", Flag: "--allow-all-tools", Enabled: true}},
-		EnvVars:          []models.ProfileEnvVar{{Key: "FOO", Value: "bar"}},
-		CommandPrefix:    "greywall --",
-		UserModified:     true,
+		AgentID:              agent.ID,
+		Name:                 "Default",
+		AgentDisplayName:     "Test Agent",
+		Model:                "model-1",
+		Mode:                 "plan",
+		AutoApprove:          true,
+		CLIPassthrough:       true,
+		CLIFlags:             []models.CLIFlag{{Description: "Tools", Flag: "--allow-all-tools", Enabled: true}},
+		EnvVars:              []models.ProfileEnvVar{{Key: "FOO", Value: "bar"}},
+		CommandPrefix:        "greywall --",
+		CursorMCPAuthEnabled: false,
+		UserModified:         true,
 	}
 	if err := repo.CreateAgentProfile(ctx, source); err != nil {
 		t.Fatalf("create source: %v", err)
@@ -59,18 +60,19 @@ func TestDuplicateAgentProfile_RoundTrip(t *testing.T) {
 	}
 
 	clone := &models.AgentProfile{
-		AgentID:          source.AgentID,
-		Name:             "Default Copy",
-		AgentDisplayName: source.AgentDisplayName,
-		Model:            source.Model,
-		Mode:             source.Mode,
-		AutoApprove:      source.AutoApprove,
-		CLIPassthrough:   source.CLIPassthrough,
-		CLIFlags:         source.CLIFlags,
-		EnvVars:          source.EnvVars,
-		CommandPrefix:    source.CommandPrefix,
-		Enabled:          false,
-		UserModified:     true,
+		AgentID:              source.AgentID,
+		Name:                 "Default Copy",
+		AgentDisplayName:     source.AgentDisplayName,
+		Model:                source.Model,
+		Mode:                 source.Mode,
+		AutoApprove:          source.AutoApprove,
+		CLIPassthrough:       source.CLIPassthrough,
+		CLIFlags:             source.CLIFlags,
+		EnvVars:              source.EnvVars,
+		CommandPrefix:        source.CommandPrefix,
+		CursorMCPAuthEnabled: source.CursorMCPAuthEnabled,
+		Enabled:              false,
+		UserModified:         true,
 	}
 	copiedMcp := &models.AgentProfileMcpConfig{
 		Enabled: sourceMcp.Enabled,
@@ -97,6 +99,9 @@ func TestDuplicateAgentProfile_RoundTrip(t *testing.T) {
 	// disabled source produces a disabled copy in the same write.
 	if got.Enabled {
 		t.Error("duplicate enabled = true, want false (source disabled)")
+	}
+	if got.CursorMCPAuthEnabled {
+		t.Error("duplicate reset Cursor MCP auth preference; want explicit false")
 	}
 	if got.Name != "Default Copy" || got.Model != "model-1" || got.Mode != "plan" ||
 		!got.AutoApprove || !got.CLIPassthrough || got.CommandPrefix != "greywall --" ||
