@@ -1,13 +1,18 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ActiveSessionRecovery } from "@/lib/active-session-recovery";
 import type { RunError } from "@/app/office/tasks/[id]/types";
 import { WebSocketRequestError } from "@/lib/ws/client";
 import { RunErrorEntry } from "./run-error-entry";
 
+const FAILURE_STAMP = "ordinary-failure-stamp";
+const REMEDIATION_LINK_ID = "remediation-link";
 const RECOVERY_ERROR_ID = "run-error-recovery-error";
 const { requestMock, recoveryContext } = vi.hoisted(() => ({
   requestMock: vi.fn(),
-  recoveryContext: { value: null as { sessionId: string; model: null; pending: null } | null },
+  recoveryContext: {
+    value: null as { sessionId: string; model: ActiveSessionRecovery | null; pending: null } | null,
+  },
 }));
 const RUN_ERROR_RESUME_TEST_ID = "run-error-resume-button";
 
@@ -37,7 +42,7 @@ function runError(failureCode: string): RunError {
     rawPayload: "provider raw details",
     failedAt: "2026-08-20T10:00:00Z",
     failureCode,
-    errorStamp: "ordinary-failure-stamp",
+    errorStamp: FAILURE_STAMP,
     message: "provider failure",
     remediationUrl: "https://opencode.ai/workspace/demo_workspace/go",
   };
@@ -46,7 +51,7 @@ function runError(failureCode: string): RunError {
 it("keeps run remediation available when the composer has no recovery model", () => {
   recoveryContext.value = { sessionId: "session-1", model: null, pending: null };
   render(<RunErrorEntry taskId="task-1" error={runError("provider_auth_required")} />);
-  expect(screen.getByTestId("remediation-link")).toBeTruthy();
+  expect(screen.getByTestId(REMEDIATION_LINK_ID)).toBeTruthy();
   expect(screen.getByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeTruthy();
 });
 
@@ -86,7 +91,7 @@ describe("RunErrorEntry", () => {
       expect(
         screen.getByTestId("run-error-raw-payload").closest("details")?.hasAttribute("open"),
       ).toBe(false);
-      expect(screen.getByTestId("remediation-link")).toBeTruthy();
+      expect(screen.getByTestId(REMEDIATION_LINK_ID)).toBeTruthy();
       expect(screen.queryByTestId("task-launch-error-entry")).toBeNull();
     },
   );
@@ -207,4 +212,37 @@ it("labels a workspace restoration failure separately from a resume failure", as
   expect(screen.getByTestId(RECOVERY_ERROR_ID).querySelector("p")?.textContent).toBe(
     "Failed to restore workspace",
   );
+});
+
+it.each([
+  { name: "a historical row", isActive: false, errorStamp: FAILURE_STAMP },
+  { name: "a different failure", isActive: true, errorStamp: "another-stamp" },
+  { name: "an unstamped failure", isActive: true, errorStamp: undefined },
+])("preserves $name when another recovery card is present", ({ isActive, errorStamp }) => {
+  recoveryContext.value = {
+    sessionId: "session-1",
+    model: { sessionId: "session-1", stamp: FAILURE_STAMP, kind: "generic" },
+    pending: null,
+  };
+  render(
+    <RunErrorEntry
+      taskId="task-1"
+      error={{ ...runError("provider_auth_required"), isActive, errorStamp }}
+    />,
+  );
+  expect(screen.getByTestId("run-error-raw-payload").textContent).toBe("provider raw details");
+  expect(screen.getByTestId(REMEDIATION_LINK_ID)).toBeTruthy();
+  expect(Boolean(screen.queryByTestId(RUN_ERROR_RESUME_TEST_ID))).toBe(isActive);
+});
+
+it("compacts only the active failure owned by the composer card", () => {
+  recoveryContext.value = {
+    sessionId: "session-1",
+    model: { sessionId: "session-1", stamp: FAILURE_STAMP, kind: "generic" },
+    pending: null,
+  };
+  render(<RunErrorEntry taskId="task-1" error={runError("provider_auth_required")} />);
+  expect(screen.queryByTestId(REMEDIATION_LINK_ID)).toBeNull();
+  expect(screen.queryByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeNull();
+  expect(screen.getByText("provider raw details")).toBeTruthy();
 });

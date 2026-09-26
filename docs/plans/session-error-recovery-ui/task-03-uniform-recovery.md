@@ -371,3 +371,18 @@ CI on that head failed the Kubernetes recovery-after-backend-restart case
 (run 36236750854, job 108390907369): resume returned an error and the composer
 remained absent. Local reproduction and final-head CI/review remain pending;
 these local UI results do not waive that failed required check.
+
+### Match the active legacy run failure
+
+CodeRabbit thread 4111254939 found that a composer card for a newer failure could
+compact an unrelated retained run-error row. Compaction now requires an active
+row with a nonempty stamp matching the composer model. Historical, differently
+stamped and unstamped rows retain their category presentation and remediation.
+This enforces the existing matching-row requirement; no design change is needed.
+
+Three new cases failed before the correction; the matching-owner case confirms
+that duplicate controls stay suppressed. The run-entry and chat-entry suites
+passed all 31 tests, with zero-warning targeted lint and type checking. This
+predicate-only correction does not change layout or native mobile interactions;
+the preceding eight desktop/eight mobile cases remain applicable. Final-head CI
+and renewed review verification remain pending after delivery.

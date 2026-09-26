@@ -162,6 +162,10 @@ function LegacyRunErrorEntry({
   );
 }
 
+function composerOwnsRunError(error: RunError, stamp: string | undefined) {
+  return error.isActive !== false && Boolean(error.errorStamp) && error.errorStamp === stamp;
+}
+
 export function RunErrorEntry({
   taskId,
   workspaceId = "",
@@ -191,7 +195,7 @@ export function RunErrorEntry({
     errorStamp: error.errorStamp,
   });
 
-  if (composerOwner?.model)
+  if (composerOwnsRunError(error, composerOwner?.model?.stamp))
     return (
       <div className="min-w-0 py-3 text-xs text-muted-foreground">
         <p>{t("task:theAgentStoppedWithAnError")}</p>
