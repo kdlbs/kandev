@@ -2122,9 +2122,15 @@ type runsServiceEngineAdapter struct {
 	// officeSvc sources the actor and causation lineage for every
 	// request. The target task is req.TaskID; the source task is
 	// req.CausingTaskID when a queue_run action targets another task.
-	// The carrier is resolved from the source task, preferring the run
-	// currently claimed against that task by req.CausingAgentProfileID over
-	// the task's own already-resolved carrier — the same live-run preference
+	// When req.CausingStepTransitionID is set (a step-entry wake —
+	// DispatchStepEntry or the Office auto-start path), the carrier
+	// resolves from that task_step_transitions ledger row via
+	// TaskBoundaryCarrierForStepTransition instead, since a step-entry
+	// action has no claimed-run scope to key off
+	// (AC-OFFICE-RUN-CAUSATION-001.25). Otherwise the carrier is resolved
+	// from the source task, preferring the run currently claimed against
+	// that task by req.CausingAgentProfileID over the task's own
+	// already-resolved carrier — the same live-run preference
 	// office/service.TaskBoundaryCarrierMetadata applies for
 	// create_child_task, needed here so a chain of queue_run actions also
 	// advances the causation depth hop by hop. Nil only in tests that
@@ -2142,8 +2148,13 @@ func (a *runsServiceEngineAdapter) QueueRun(
 	if causingTaskID == "" {
 		causingTaskID = req.TaskID
 	}
+	causingStepTransitionID := strings.TrimSpace(req.CausingStepTransitionID)
 	if a.officeSvc != nil && causingTaskID != "" {
-		carrier = a.officeSvc.TaskBoundaryCarrierForRunQueue(ctx, causingTaskID, req.CausingAgentProfileID)
+		if causingStepTransitionID != "" {
+			carrier = a.officeSvc.TaskBoundaryCarrierForStepTransition(ctx, causingTaskID, causingStepTransitionID)
+		} else {
+			carrier = a.officeSvc.TaskBoundaryCarrierForRunQueue(ctx, causingTaskID, req.CausingAgentProfileID)
+		}
 	}
 	if carrier.ActorKind == "" {
 		carrier.ActorKind = officemodels.ActorKindSystem

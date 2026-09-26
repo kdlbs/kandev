@@ -601,6 +601,30 @@ func (r *Repository) GetClaimedRunByTaskAndAgent(
 	return &req, nil
 }
 
+// GetRunBySessionAt returns the run bound to sessionID whose claimed_at is
+// at or before at, most recently claimed first — this is how a step-entry
+// wake's causation carrier resolves the run that produced the ledger row's
+// recorded agent-actor attribution (AC-OFFICE-RUN-CAUSATION-001.25).
+// Deliberately not restricted to status = 'claimed', unlike
+// GetClaimedRunByTaskID/GetClaimedRunByTaskAndAgent: a step-entry dispatch
+// resolving asynchronously can run after the causing run has already
+// finished, and a finished run is still the correct parent.
+func (r *Repository) GetRunBySessionAt(ctx context.Context, sessionID string, at time.Time) (*models.Run, error) {
+	var req models.Run
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT * FROM runs
+		WHERE session_id = ?
+		  AND claimed_at IS NOT NULL
+		  AND claimed_at <= ?
+		ORDER BY claimed_at DESC
+		LIMIT 1
+	`), sessionID, at).StructScan(&req)
+	if err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
 // CheckIdempotencyKey returns true if the key already exists within the window.
 func (r *Repository) CheckIdempotencyKey(ctx context.Context, key string, windowHours int) (bool, error) {
 	return checkIdempotencyKey(ctx, r.ro, key, windowHours)

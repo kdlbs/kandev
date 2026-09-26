@@ -271,6 +271,12 @@ each call site:
 | Wake caused by a task | the actor on the task carrier | as carried |
 | Retry / recovery / re-dispatch | re-queues an existing row; actor unchanged | as persisted |
 | Workflow engine `queue_run` action, task carrier unresolved | none; a task with no carrier and no live claimed run is itself a root cause | `system` |
+| Step-entry wake (ledger `DispatchStepEntry` actions, Office `auto_start_agent`) | the `task_step_transitions` row for the entry: `agent` resolves the run bound to its `session_id` as the causing run; `human` is a human-rooted root; anything else falls back to the task carrier | `agent`, `user`, or as carried |
+
+The seventh row exists because step-entry wakes run after the transition commits and
+carry no live session in `MachineState`. The ledger row is the durable record of who
+caused the entry, so the wake reads it instead of a live claimed-run lookup keyed on
+an agent profile that the step-entry path never had (AC-OFFICE-RUN-CAUSATION-001.25).
 
 The sixth row is the workflow engine's `queue_run` bridge
 (`runsServiceEngineAdapter.QueueRun`, `internal/backendapp/main.go`): it always resolves

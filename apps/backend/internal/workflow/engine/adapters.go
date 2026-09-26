@@ -72,6 +72,14 @@ type QueueRunRequest struct {
 	// since more than one agent can hold a claimed run on the same task.
 	// Empty for triggers with no session (e.g. a routine or wakeup fire).
 	CausingAgentProfileID string
+	// CausingStepTransitionID is the task_step_transitions ledger row that
+	// produced this enqueue, set only for a step-entry wake (DispatchStepEntry).
+	// A step-entry action's MachineState carries no session, so
+	// CausingAgentProfileID is always empty on this path; the ledger id lets
+	// a carrier resolver read that row's own recorded actor and session
+	// instead (AC-OFFICE-RUN-CAUSATION-001.25). Empty for every other
+	// trigger.
+	CausingStepTransitionID string
 	// WaveKey and WaveString carry a completion-wave identity through from
 	// OnChildrenCompletedPayload (parent-wake-wave-identity). Empty for
 	// every trigger except on_children_completed.
@@ -316,7 +324,8 @@ type TaskCreator interface {
 // (markerEntryID == 0).
 type MarkerBearingStepEntryExecutor interface {
 	ExecuteMarkerBearingStepEntryAction(
-		ctx context.Context, taskID string, step StepSpec, action Action, position int, markerEntryID int64,
+		ctx context.Context, taskID string, step StepSpec, action Action, position int,
+		stepTransitionID string, markerEntryID int64,
 	) (abandon bool, err error)
 }
 
