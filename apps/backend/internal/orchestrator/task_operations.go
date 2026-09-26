@@ -22,6 +22,7 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentruntimekind "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/editors/capabilities"
 	"github.com/kandev/kandev/internal/events"
@@ -3613,9 +3614,20 @@ func (s *Service) sessionAlreadyPromptReady(ctx context.Context, sessionID strin
 	if _, active := s.resumeAttemptStore().current(sessionID); active {
 		return false
 	}
+	if s.executor != nil {
+		if existing, ok := s.executor.GetExecutionBySession(sessionID); ok && existing != nil {
+			if s.agentManager == nil {
+				return true
+			}
+			return s.agentManager.IsAgentReadyForPrompt(context.WithoutCancel(ctx), sessionID)
+		}
+	}
 	if s.agentManager == nil {
-		existing, ok := s.executor.GetExecutionBySession(sessionID)
-		return ok && existing != nil
+		return false
+	}
+	remoteStatus, err := s.agentManager.GetRemoteRuntimeStatusBySession(context.WithoutCancel(ctx), sessionID)
+	if err != nil || remoteStatus == nil || remoteStatus.RuntimeName != agentruntimekind.RuntimeCursorCloud {
+		return false
 	}
 	return s.agentManager.IsAgentReadyForPrompt(context.WithoutCancel(ctx), sessionID)
 }

@@ -281,8 +281,9 @@ type mockAgentManager struct {
 	// isAgentRunningFn, when non-nil, overrides isAgentRunning for
 	// IsAgentRunningForSession. Lets tests model state changes mid-sequence
 	// (e.g. stream disconnect between PromptAgent call and queue write).
-	isAgentRunningFn func(context.Context, string) bool
-	isAgentReadyFn   func(context.Context, string) bool
+	isAgentRunningFn    func(context.Context, string) bool
+	isAgentReadyFn      func(context.Context, string) bool
+	remoteRuntimeStatus *executor.RemoteRuntimeStatus
 	// rowLivenessFn, when non-nil, makes the mock satisfy the orchestrator's
 	// optional rowLivenessProber so reconciliation tests can drive runtime-aware
 	// liveness per row. Nil → the mock is not a prober and reconciliation treats
@@ -809,7 +810,7 @@ func (m *mockAgentManager) MarkPassthroughRunning(sessionID string) error {
 	return m.markPassthroughErr
 }
 func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(_ context.Context, _ string) (*executor.RemoteRuntimeStatus, error) {
-	return nil, nil
+	return m.remoteRuntimeStatus, nil
 }
 func (m *mockAgentManager) PollRemoteStatusForRecords(_ context.Context, _ []executor.RemoteStatusPollRequest) {
 }

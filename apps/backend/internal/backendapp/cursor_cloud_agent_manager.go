@@ -368,7 +368,14 @@ func (m *cursorCloudAgentManager) ProbeBackgroundWorkloads(ctx context.Context, 
 }
 
 func (m *cursorCloudAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
-	running, err := m.ProbeAgentRunningForSession(ctx, sessionID)
+	binding, err := m.repo.GetManagedAgentBindingBySession(ctx, sessionID)
+	if errors.Is(err, repository.ErrManagedAgentBindingNotFound) {
+		return m.lifecycleAdapter.IsAgentRunningForSession(ctx, sessionID)
+	}
+	if err != nil {
+		return true
+	}
+	running, err := m.managedAgentIsRunning(ctx, binding)
 	return err != nil || running
 }
 
@@ -380,6 +387,13 @@ func (m *cursorCloudAgentManager) ProbeAgentRunningForSession(ctx context.Contex
 	if err != nil {
 		return true, err
 	}
+	return m.managedAgentIsRunning(ctx, binding)
+}
+
+func (m *cursorCloudAgentManager) managedAgentIsRunning(
+	ctx context.Context,
+	binding *models.ManagedAgentBinding,
+) (bool, error) {
 	operation, err := m.repo.GetManagedAgentLatestOperation(ctx, binding.ID)
 	if err != nil {
 		return true, err

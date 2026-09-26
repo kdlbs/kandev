@@ -9,7 +9,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/agent/runtime"
-	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
@@ -57,7 +58,7 @@ func TestCursorCloudCompatibilityMethodMatrix(t *testing.T) {
 	if got, err := manager.ListPendingPermissionsBySessionID(ctx, sessionID); err != nil || len(got) != 0 {
 		t.Fatalf("pending permissions = %#v, %v; want empty typed result", got, err)
 	}
-	if got, err := manager.ProbeBackgroundWorkloads(ctx, sessionID); err != nil || got != client.ProbeResultUnknown {
+	if got, err := manager.ProbeBackgroundWorkloads(ctx, sessionID); err != nil || got != agentctlclient.ProbeResultUnknown {
 		t.Fatalf("background workload probe = %v, %v; want unknown", got, err)
 	}
 	if manager.IsPassthroughSession(ctx, sessionID) || len(manager.GetSessionAuthMethods(sessionID)) != 0 {
@@ -109,6 +110,27 @@ func TestCursorCloudCompatibilityMethodMatrix(t *testing.T) {
 	}
 	if err := manager.CleanupStaleExecutionBySessionID(ctx, sessionID); err != nil {
 		t.Fatalf("cloud stale cleanup: %v", err)
+	}
+}
+
+func TestCursorCloudLocalLivenessPreservesLegacyProbeErrorBehavior(t *testing.T) {
+	repo, _, _ := seedCursorCloudCompatibilityBinding(t)
+	lifecycleManager := lifecycle.NewManager(nil, nil, nil, nil, nil, nil,
+		lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	execution := &lifecycle.AgentExecution{
+		ID: "local-execution", SessionID: "local-session", Status: v1.AgentStatusReady,
+	}
+	execution.SetAgentCtlClientForTesting(agentctlclient.NewClient("127.0.0.1", 1, newTestLogger()))
+	if err := lifecycleManager.ExecutionStoreForTesting().Add(execution); err != nil {
+		t.Fatalf("seed local execution: %v", err)
+	}
+
+	manager := &cursorCloudAgentManager{
+		lifecycleAdapter: newLifecycleAdapter(lifecycleManager, nil, newTestLogger()),
+		repo:             repo,
+	}
+	if manager.IsAgentRunningForSession(context.Background(), "local-session") {
+		t.Fatal("local probe errors must preserve the lifecycle manager's not-running result")
 	}
 }
 
