@@ -16,6 +16,7 @@
   "enable": "啓用",
   "failedToAddSource": "新增來源失敗",
   "failedToDisable": "停用 {{name}} 失敗",
+  "remoteResourcesMayRemain": "停用此外掛程式後，遠端環境仍可能繼續執行。請重新啓用外掛程式，並在卸載前清理其任務環境。",
   "failedToEnable": "啓用 {{name}} 失敗",
   "failedToInstallPlugin": "安裝外掛程式失敗",
   "failedToLoadMarketplace": "載入市場失敗",

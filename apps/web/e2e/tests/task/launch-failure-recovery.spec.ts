@@ -256,7 +256,7 @@ test.describe("task launch failure recovery", () => {
       const card = testPage.getByTestId("task-launch-error-entry");
       await expect(card).toHaveCount(1);
       await expect(card).toContainText("The selected base branch is not available.");
-      await expect(card).not.toContainText("branch-that-no-longer-exists");
+      await expect(card.locator("pre")).toBeHidden();
       await expect(testPage.getByTestId("last-agent-error-notice")).toHaveCount(0);
       await expect(testPage.getByTestId("prepare-progress-panel")).toHaveCount(0);
       await expect(testPage.getByTestId("missing-branch-recovery")).toHaveCount(0);
@@ -413,6 +413,7 @@ test.describe("task launch failure recovery", () => {
     ).join("\n");
     await apiClient.seedTaskSession(task.id, {
       state: "WAITING_FOR_INPUT",
+      errorMessage: "The agent could not start.",
       sessionId: task.session_id,
       agentProfileId: seedData.agentProfileId,
       metadata: {
@@ -487,7 +488,7 @@ test.describe("task launch failure recovery", () => {
     const initialScroll = await readTranscriptScrollState(transcript);
     expect(initialScroll.scrollHeight).toBeGreaterThan(initialScroll.clientHeight);
     expect(initialScroll.scrollTop).toBeGreaterThan(0);
-    await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
+    await expect(session.activeChat().getByTestId("session-recovery-card")).toBeVisible();
 
     const details = failureRow.getByText("Technical details", { exact: true });
     await details.click();
@@ -496,8 +497,10 @@ test.describe("task launch failure recovery", () => {
     await expect(detailsPanel).toContainText(
       "agent_bootstrap; diagnostic_line=1; cause=permission_denied",
     );
-    await expect(failureRow.getByTestId("recovery-resume-button")).toBeVisible();
-    await expect(failureRow.getByTestId("recovery-fresh-button")).toBeVisible();
+    await expect(
+      testPage.getByTestId("session-recovery-card").getByTestId("recovery-resume-button"),
+    ).toBeVisible();
+    await expect(testPage.getByTestId("recovery-fresh-button")).toBeVisible();
     const expandedScroll = await readTranscriptScrollState(transcript);
     expect(expandedScroll.scrollOwnerCount).toBe(1);
     expect(expandedScroll.scrollHeight).toBeGreaterThan(expandedScroll.clientHeight);
@@ -509,6 +512,7 @@ test.describe("task launch failure recovery", () => {
 
     await apiClient.seedTaskSession(task.id, {
       state: "WAITING_FOR_INPUT",
+      errorMessage: "",
       sessionId: task.session_id,
       agentProfileId: seedData.agentProfileId,
       metadata: {
@@ -553,6 +557,7 @@ test.describe("task launch failure recovery", () => {
     const nextFailureCreatedAt = new Date(Date.now() + 4_000).toISOString();
     await apiClient.seedTaskSession(task.id, {
       state: "WAITING_FOR_INPUT",
+      errorMessage: "The agent could not start.",
       sessionId: task.session_id,
       agentProfileId: seedData.agentProfileId,
       metadata: {
@@ -595,7 +600,10 @@ test.describe("task launch failure recovery", () => {
     });
     await expect(failureRows).toHaveCount(2);
     const currentFailureRow = failureRows.last();
-    await expect(currentFailureRow.getByTestId("recovery-resume-button")).toBeVisible();
+    await expect(currentFailureRow.getByTestId("recovery-resume-button")).toHaveCount(0);
+    await expect(
+      testPage.getByTestId("session-recovery-card").getByTestId("recovery-resume-button"),
+    ).toBeVisible();
     await expect(failureRow.getByTestId("recovery-resume-button")).toHaveCount(0);
 
     await testPage.reload();
@@ -603,7 +611,10 @@ test.describe("task launch failure recovery", () => {
     const reloadedFailureRows = testPage.locator("[id^='msg-']").filter({ hasText: failureText });
     await expect(reloadedFailureRows).toHaveCount(2);
     await expect(reloadedFailureRows.first().getByTestId("recovery-resume-button")).toHaveCount(0);
-    await expect(reloadedFailureRows.last().getByTestId("recovery-resume-button")).toBeVisible();
+    await expect(reloadedFailureRows.last().getByTestId("recovery-resume-button")).toHaveCount(0);
+    await expect(
+      testPage.getByTestId("session-recovery-card").getByTestId("recovery-resume-button"),
+    ).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage, "bootstrap recovery presentation");
 
     await testPage.screenshot({

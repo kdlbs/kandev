@@ -1,6 +1,7 @@
 "use client";
 
 import type { Message, TaskSessionState } from "@/lib/types/http";
+import { useSessionComposerRecovery } from "./session-recovery-context";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { filterLaunchErrorMessages } from "./message-list-shared";
@@ -59,6 +60,7 @@ export function MessageListFooter({
   launchErrorStamp,
   launchErrorOccurredAt,
 }: MessageListFooterProps) {
+  const composerOwner = useSessionComposerRecovery(sessionId);
   const currentActionableFailure = findCurrentActionableFailure(messages, footerActionMessages);
   const recoveryOwnsFailure =
     !launchErrorOwned &&
@@ -73,14 +75,16 @@ export function MessageListFooter({
       );
   return (
     <>
-      {!recoveryOwnsFailure && !(launchErrorOwned && sessionState === "FAILED") && (
-        <AgentStatus
-          sessionState={sessionState}
-          sessionId={sessionId}
-          messages={messages}
-          isWorking={isWorking}
-        />
-      )}
+      {!composerOwner?.model &&
+        !recoveryOwnsFailure &&
+        !(launchErrorOwned && sessionState === "FAILED") && (
+          <AgentStatus
+            sessionState={sessionState}
+            sessionId={sessionId}
+            messages={messages}
+            isWorking={isWorking}
+          />
+        )}
       {visibleFooterActionMessages.map((message) => (
         <MessageRenderer key={message.id} comment={message} isTaskDescription={false} />
       ))}

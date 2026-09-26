@@ -11,6 +11,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   HEALTH_REQUESTED_TIMEOUT_MS,
   ROOT_REQUESTED_TIMEOUT_MS,
+  writeJsonAtomically,
   waitForFile,
 } from "./desktop-launch-smoke.mjs";
 
@@ -108,6 +109,38 @@ test("waitForFile calls tick on every poll and surfaces a tick failure immediate
       /boom/,
     );
     assert.ok(calls >= 2, `expected at least 2 tick() calls, got ${calls}`);
+  });
+});
+
+test("atomic JSON writes never expose a partial instance record", async () => {
+  await withTempDir(async (dir) => {
+    const target = join(dir, "instance.json");
+    await writeFile(target, JSON.stringify({ revision: 0, payload: "x".repeat(100_000) }));
+
+    let writing = true;
+    let parseErrors = 0;
+    const writer = (async () => {
+      for (let revision = 1; revision <= 300; revision += 1) {
+        await writeJsonAtomically(
+          target,
+          JSON.stringify({ revision, payload: "x".repeat(100_000) }),
+        );
+      }
+      writing = false;
+    })();
+    const readers = Array.from({ length: 4 }, async () => {
+      while (writing) {
+        try {
+          JSON.parse(await readFile(target, "utf8"));
+        } catch (error) {
+          if (error instanceof SyntaxError) parseErrors += 1;
+        }
+      }
+    });
+
+    await Promise.all([writer, ...readers]);
+    assert.equal(parseErrors, 0);
+    assert.equal(JSON.parse(await readFile(target, "utf8")).revision, 300);
   });
 });
 

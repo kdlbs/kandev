@@ -53,6 +53,9 @@ type Client struct {
 	// strand workflow step transitions on a closed client.
 	closed bool
 	mu     sync.RWMutex
+	// endpointTransport is present only for plugin-managed remote environments.
+	// It resolves a short-lived connection lease for every new request.
+	endpointTransport *endpointRoundTripper
 
 	// Shared write mutex for agent stream (used by StreamUpdates and sendStreamRequest)
 	streamWriteMu sync.Mutex
@@ -164,8 +167,12 @@ func (s *StatusResponse) IsAgentRunning() bool {
 
 // NewClient creates a new agentctl client
 func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) *Client {
+	return newClient(fmt.Sprintf("http://%s:%d", host, port), log, opts...)
+}
+
+func newClient(baseURL string, log *logger.Logger, opts ...ClientOption) *Client {
 	c := &Client{
-		baseURL: fmt.Sprintf("http://%s:%d", host, port),
+		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
@@ -195,6 +202,19 @@ func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) 
 		c.longRunningHTTPClient.Transport = &instanceIDTransport{instanceID: c.executionID, base: c.longRunningHTTPClient.Transport}
 	}
 	return c
+}
+
+// ProxyTransport returns the same authenticated upstream transport used by
+// agentctl HTTP requests. Gateway proxies use it so provider leases, host
+// authentication, and instance fencing are applied to HTTP and upgrades alike.
+func (c *Client) ProxyTransport() http.RoundTripper {
+	if c.endpointTransport != nil {
+		return c.endpointTransport
+	}
+	if c.httpClient.Transport != nil {
+		return c.httpClient.Transport
+	}
+	return http.DefaultTransport
 }
 
 // authTransport is an http.RoundTripper that injects an Authorization header.
@@ -805,6 +825,9 @@ func (c *Client) BaseURL() string {
 // AuthToken returns the Bearer token used for authenticating requests to agentctl.
 // Returns empty string if no token is configured.
 func (c *Client) AuthToken() string {
+	if c.endpointTransport != nil {
+		return c.endpointTransport.authTokenValue()
+	}
 	return c.authToken
 }
 

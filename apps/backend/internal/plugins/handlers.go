@@ -275,11 +275,15 @@ func (c *Controller) enable(ctx *gin.Context) {
 }
 
 func (c *Controller) disable(ctx *gin.Context) {
-	if err := c.svc.Disable(ctx.Param("id")); err != nil {
+	result, err := c.svc.DisableWithResult(ctx.Param("id"))
+	if err != nil {
 		c.writeLookupError(ctx, err)
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"disabled": true})
+	ctx.JSON(http.StatusOK, gin.H{
+		"disabled":                    result.Disabled,
+		"remote_resources_may_remain": result.RemoteResourcesMayRemain,
+	})
 }
 
 // --- Auto-update settings ---

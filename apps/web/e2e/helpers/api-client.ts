@@ -1213,6 +1213,7 @@ export class ApiClient {
       name: string;
       type: string;
       profiles?: Array<{ id: string; name: string }>;
+      provider?: { plugin_id?: string; key?: string };
     }>;
   }> {
     return this.request("GET", "/api/v1/executors");
@@ -2563,6 +2564,8 @@ export class ApiClient {
       turn_id?: string;
       raw_content?: string;
       metadata?: Record<string, unknown>;
+      created_at?: string;
+      updated_at?: string;
     }>;
   }> {
     // The production endpoint intentionally caps explicit pages at 100. E2E
@@ -2575,6 +2578,8 @@ export class ApiClient {
       type?: string;
       raw_content?: string;
       metadata?: Record<string, unknown>;
+      created_at?: string;
+      updated_at?: string;
     }> = [];
     let after = "";
     for (;;) {

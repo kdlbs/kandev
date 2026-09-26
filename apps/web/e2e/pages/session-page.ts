@@ -1380,7 +1380,11 @@ export class SessionPage {
     const xterm = this.activePanel("terminal-panel").locator(".xterm");
     await expect(xterm).toBeVisible();
     await xterm.click();
-    await this.page.keyboard.type(command);
+    // xterm forwards each key through a PTY. A zero-delay burst can overrun
+    // that bridge under hosted CI load, which drops characters before the
+    // shell has consumed them. A small delay keeps the command intact while
+    // remaining much faster than a fixed sleep.
+    await this.page.keyboard.type(command, { delay: 5 });
     await this.page.keyboard.press("Enter");
   }
 

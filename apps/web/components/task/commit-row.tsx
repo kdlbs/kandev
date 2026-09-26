@@ -16,7 +16,7 @@ import {
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import { timeAgo } from "@/lib/utils/time";
-import type { CommitDetailTarget } from "./changes-diff-target";
+import type { CommitDetailTarget } from "@/lib/state/diff-target-types";
 import { useTranslation } from "react-i18next";
 
 export type CommitPresentation = "current_pr" | "local_checkout";

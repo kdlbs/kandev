@@ -20,7 +20,7 @@ test.describe("Change workflow", () => {
       "External move target",
     );
     const analysis = await apiClient.createWorkflowStep(destination.id, "Analysis", 0);
-    await apiClient.createWorkflowStep(destination.id, "Implement", 1);
+    const implement = await apiClient.createWorkflowStep(destination.id, "Implement", 1);
     const task = await apiClient.createTask(seedData.workspaceId, "External workflow move task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
@@ -38,7 +38,27 @@ test.describe("Change workflow", () => {
       "aria-current",
       "step",
     );
-    await expect(stepper.getByTestId("workflow-step-Implement")).toBeVisible();
+    const fullImplementStep = stepper.getByTestId("workflow-step-Implement");
+    const compactStepper = stepper.getByTestId("workflow-stepper-minimal");
+    await expect
+      .poll(
+        async () => (await fullImplementStep.count()) > 0 || (await compactStepper.count()) > 0,
+        { timeout: 15_000, message: "the destination workflow stepper did not render" },
+      )
+      .toBe(true);
+    if (await fullImplementStep.count()) {
+      await expect(fullImplementStep).toBeVisible();
+    } else {
+      // The responsive top bar can collapse the stepper under shard viewport
+      // pressure. The same step list is then available from its disclosure.
+      await expect(compactStepper).toBeVisible();
+      await compactStepper.hover();
+      const disclosure = testPage.getByTestId("workflow-step-disclosure");
+      await expect(disclosure).toBeVisible();
+      await expect(
+        disclosure.getByTestId(`workflow-step-disclosure-row-${implement.id}`),
+      ).toBeVisible();
+    }
   });
 
   test("updates the open task stepper after changing workflow and preserves its context", async ({

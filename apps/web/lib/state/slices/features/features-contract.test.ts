@@ -32,6 +32,10 @@ describe("feature flag repository contract", () => {
     expect(defaultFeatureFlags.canvases).toBe(false);
   });
 
+  it("keeps remote executor plugins disabled by default", () => {
+    expect(defaultFeatureFlags.remoteExecutorPlugins).toBe(false);
+  });
+
   it("keeps frontend defaults equal to backend FeaturesConfig JSON keys", async () => {
     const backendConfig = await readFile(backendConfigPath, "utf8");
 

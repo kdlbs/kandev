@@ -40,7 +40,7 @@ import { Dialog } from "@kandev/ui/dialog";
 Go Boot Payload -> Hydrate Store -> Components Read Store -> Hooks Subscribe
 ```
 
-**Never fetch data directly in components.**
+**Never fetch data directly in components.** State in `lib/state/` is below UI/routes: components and routes may consume it, but state must not import `components/` or `app/`, including type-only, re-export, or dynamic imports. Put shared values in dependency-neutral modules.
 
 ### Browser capability boundaries
 
@@ -83,7 +83,7 @@ lib/api/domains/                    # API clients
 
 For rebasing or finishing PRs written against the old Next.js runtime, follow [`docs/nextjs-spa-migration.md`](../../docs/nextjs-spa-migration.md).
 
-**Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscription + store selection. WS client deduplicates subscriptions automatically.
+**Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscriptions and store selection; the WS client deduplicates subscriptions. The bounded `useSystemInfo` TanStack Query pilot owns only the About view's `/api/v1/system/info` snapshot and request state, scoped by canonical full API base URL, page boot ID, and auth identity. The boot payload remains unchanged; other System resources stay in Zustand, while process-generation/restart/update probes remain independent no-store reads. See the [ownership decision](../../docs/decisions/2026-09-26-system-info-query-cache-ownership.md) and [system design](../../docs/specs/platform/system-design/system-info-query-cache.md).
 
 ## WebSockets
 
@@ -137,13 +137,13 @@ surface.
   name the target only (for example, `Bitbucket Pull Request`) and preserve their
   registered provider icon.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
-- **Self-documenting settings:** give each setting a short, plain-language description of its effect. Use `SettingsInfo` for optional scope and implementation details: hover/focus on desktop, a drawer on touch devices. Keep active errors, permissions, managed values, and essential input constraints visible.
+- **Self-documenting settings:** describe each setting's effect, when it applies, and how to choose non-obvious options; keep exclusions, precedence, costs, destructive consequences, errors, permissions, managed values, and input constraints visible.
+  Use `SettingsInfo` for optional detail (desktop hover/focus, touch drawer); do not rely on external docs or implementation terms alone.
 - **Settings composition:** use `SettingsGroup` for bordered groups and `SettingsRow` for simple preferences; keep one domain owner/save contributor and attach discovery to actual controls. Keep sections expanded and use existing header tabs for larger pages. Preserve specialized editor/table/diagnostic/credential layouts.
-- **Settings save coordination:** settings surfaces with local unsaved state must register a
-  contributor with `useSettingsSaveContributor` (or use `SettingsPageTemplate`) so the shared
-  floating **Save changes** control, navigation guard, and discard flow own persistence. Do not add
-  page-local Save/Cancel controls. Contributor `save` callbacks must reject on failure so the
-  coordinator can report an error; `discard` must restore the contributor's authoritative baseline.
+- **Settings save coordination:** register drafts with `useSettingsSaveContributor` or
+  `SettingsPageTemplate`; they own shared save, navigation, and discard. Avoid page-local controls.
+  Reject failures and restore the authoritative baseline. For normalized or fallback saves, snapshot
+  the raw draft before awaiting; apply canonical values only if the draft still matches; test dirty clearing and preservation of in-flight edits.
 - **Settings tabs:** use `components/settings/settings-tabs.tsx` in `SettingsPageHeader`; preserve drafts with validated URL `tab` state, map discovery fragments to the owning tab, and use 44px controls on phones and coarse pointers.
 - **Dialog Enter-to-confirm:** the base `@kandev/ui` `DialogContent` / `AlertDialogContent`
   activate the dialog's semantic action on plain Enter (`packages/ui/src/lib/dialog-default-action.ts`),

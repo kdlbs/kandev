@@ -617,6 +617,8 @@ func (s *Service) startCreatedSessionWithComposedPrompt(
 }
 
 type startCreatedSessionOptions struct {
+	lifecycleLockHeld           bool
+	refuseIfAgentRunning        bool
 	initialCreatePrompt         bool
 	skipTaskDescriptionFallback bool
 	promptAlreadyComposed       bool
@@ -645,8 +647,10 @@ func (s *Service) startCreatedSession(
 	promptReferenceContext string,
 	options startCreatedSessionOptions,
 ) (*executor.TaskExecution, error) {
-	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
-	defer releaseLifecycleLock()
+	if !options.lifecycleLockHeld {
+		releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
+		defer releaseLifecycleLock()
+	}
 	if options.ceilingEntryBinding == nil {
 		options.ceilingEntryBinding = ceilingEntryBindingFromContext(ctx)
 	}
@@ -674,6 +678,9 @@ func (s *Service) startCreatedSession(
 	// When the user sends the first message to a prepared session, on_turn_start may fire
 	// and move the step, which sets the session to WAITING_FOR_INPUT before we get here.
 	if session.State != models.TaskSessionStateCreated && session.State != models.TaskSessionStateWaitingForInput {
+		if session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning {
+			return nil, executor.ErrExecutionAlreadyRunning
+		}
 		return nil, fmt.Errorf("session is not in CREATED or WAITING_FOR_INPUT state (current: %s)", session.State)
 	}
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, options.ceilingEntryBinding); err != nil {
@@ -936,13 +943,14 @@ func (s *Service) startCreatedSession(
 		}()
 	}
 	launchOptions := executor.LaunchOptions{
-		AgentProfileID: effectiveProfileID,
-		ExecutorID:     executorID,
-		Prompt:         effectivePrompt,
-		StartAgent:     true,
-		McpMode:        mcpMode,
-		Attachments:    attachments,
-		TurnID:         initialTurnID,
+		AgentProfileID:       effectiveProfileID,
+		ExecutorID:           executorID,
+		Prompt:               effectivePrompt,
+		StartAgent:           true,
+		RefuseIfAgentRunning: options.refuseIfAgentRunning,
+		McpMode:              mcpMode,
+		Attachments:          attachments,
+		TurnID:               initialTurnID,
 	}
 	if options.initialCreatePrompt && session.IsPassthrough {
 		launchOptions.OnExecutionAdmitted = func(executionID string) {
@@ -951,6 +959,12 @@ func (s *Service) startCreatedSession(
 	}
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
 	if err != nil {
+		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
+			if initialTurnCreated {
+				s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
+			}
+			return nil, err
+		}
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.
 		if initialTurnCreated {
@@ -1117,7 +1131,39 @@ func (s *Service) scheduleTaskForSession(ctx context.Context, taskID, sessionID 
 		}
 		return fmt.Errorf("session %s is %s; cannot schedule task", session.ID, session.State)
 	}
-	return s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling)
+	task, err := s.taskRepo.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if task.State == v1.TaskStateScheduling {
+		return nil
+	}
+	if task.State == v1.TaskStateInProgress {
+		return nil
+	}
+	switch task.State {
+	case "", v1.TaskStateTODO, v1.TaskStateCreated, v1.TaskStateReview:
+	default:
+		return fmt.Errorf("task %s is %s; cannot schedule session %s", taskID, task.State, sessionID)
+	}
+	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, taskID, v1.TaskStateScheduling, []v1.TaskState{task.State})
+	if err != nil || updated {
+		return err
+	}
+	task, err = s.taskRepo.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if task.State == v1.TaskStateScheduling || task.State == v1.TaskStateInProgress {
+		return nil
+	}
+	return fmt.Errorf("task %s is %s; cannot schedule session %s", taskID, task.State, sessionID)
 }
 
 func (s *Service) promoteSessionIfTaskHasNoPrimary(ctx context.Context, taskID string, session *models.TaskSession) {

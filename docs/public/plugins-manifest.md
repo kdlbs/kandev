@@ -211,6 +211,7 @@ for a complete authoring path.
 | `capabilities.agent_conversation`  | no                                   | bool                                  | Gates the optional `pluginsdk.AgentConversations(host)` manager. `Ensure` creates or repairs a hidden ephemeral task/session for one `(plugin, workspace, conversation key)`, `Dispatch` sends an idempotent prompt, and `Delete` removes the matching plugin-owned conversation. Calls without this capability return gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                   |
 | `capabilities.auth`                | no                                   | bool                                  | Lets the plugin log a visitor in against an external IdP (OIDC/SAML). Its webhook validates the token, then asserts the identity to Kandev via the `X-Kandev-Auth-Login` response header (`{provider, subject, email, display_name}`); Kandev mints the session and sets the cookie, so the plugin never sees the token. Requires authentication enabled; new users are provisioned as members, and Kandev never creates an admin nor auto-links to an existing admin account. **You MUST only assert an email the IdP verified as owned by the subject; a spoofed email claim is account takeover.** Highest-privilege capability; grant only to trusted plugins. See ADR 0050. |
 | `capabilities.user_state`          | no                                   | bool                                  | Gates `host.storage` (`get`/`set`/`delete`/`list`/`subscribe`), the authenticated per-user browser storage surface at `/api/plugins/{id}/user-state/...`. Unlike `capabilities.state` (the gRPC `Host.SetState` family, written by the plugin's own backend), this is reachable directly from the plugin's frontend bundle with no Go backend required; every read/write is scoped to the calling user. Calling the route without this capability returns `403`. See [Authoring a plugin](plugins-authoring.md) and the per-user-plugin-storage decision record.                                                                                                                 |
+| `capabilities.executor_provider`   | required with `executor_providers` | bool                                  | Enables the optional remote executor provider contract. Requires `runtime.type: binary` and at least one `executor_providers` declaration. Provider operations are available only when the administrator enables `features.remoteExecutorPlugins` and restarts Kandev.                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `webhooks[].key`                   | yes                                  | string                                | Must be unique within the manifest. Used in the relay path `POST /api/plugins/{id}/webhooks/{key}`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `webhooks[].description`           | no                                   | string                                | Free-form.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `webhooks[].method`                | no                                   | string                                | **Informational only**: kandev does not validate or enforce the inbound HTTP method against this value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -222,6 +223,15 @@ for a complete authoring path.
 | `actions[].access`                 | no                                   | `authenticated` \| `admin`            | Defaults to `authenticated`. `admin` is enforced before the action envelope is read and requires `min_kandev_version: "0.91.1"` or later so older hosts cannot silently treat it as authenticated.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `actions[].max_body_bytes`         | yes\*                                | int                                   | Maximum size of the decoded untrusted `body`, from 1 through 1,048,576 bytes. The whole HTTP envelope has a slightly larger hard cap.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `repository_providers`             | no                                   | string[]                              | Provider IDs this plugin owns while active. An active provider can register native repository discovery/URL inspection and may supply transient Git credentials. Native first-use task creation requires a workspace-scoped `repositories.inspect` action; Kandev invokes the active owner on the server and validates its descriptor before persistence. Plugin-originated task creation must use the authenticated plugin task-create path so the plugin reauthorizes the descriptor before Host Tasks.Create. Duplicate ownership is rejected.                                                                                                                                |
+| `executor_providers[]`             | no                                   | object[]                              | Declares a remote executor provider implemented by the complete optional Go SDK interface. Requires `capabilities.executor_provider: true` and `runtime.type: binary`. See "Remote executor providers" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `executor_providers[].key`         | yes\*                                | string                                | Unique lowercase provider key, matching `^[a-z][a-z0-9_-]{0,63}$`. Kandev forms the provider identity as `plugin:<plugin-id>:<key>`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `executor_providers[].display_name`| yes\*                                | string                                | Non-empty provider label, up to 100 characters.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `executor_providers[].description` | yes\*                                | string                                | Non-empty provider description, up to 1024 characters.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `executor_providers[].contract_version` | yes\*                           | int                                   | Must be a contract version supported by the host. The current host supports version `1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `executor_providers[].supported_state_versions` | yes\*                  | int[]                                 | One to sixteen unique positive state versions the plugin can read. The host uses these values when it checks whether an installed plugin can manage retained resources.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `executor_providers[].profile_schema` | yes\*                              | object                                | Scalar-only object schema for provider profile fields. It supports `string`, `boolean`, `number`, and `integer` fields. String fields can use `secret: true`; secret values are delivered to provider operations and must not be persisted in resource state.                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `executor_providers[].resource_state_schema` | yes\*                      | object                                | Scalar-only object schema for bounded, durable, non-secret provider state. Secret fields are not allowed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `executor_providers[].capabilities` | yes\*                               | object                                | Declares `terminal`, `files`, `git`, `embedded_editor`, `preview`, `reattach`, and `retention`. Retention is `unknown`, `ephemeral`, `bounded`, or `persistent`; `bounded` requires `maximum_lifetime_seconds`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `reference_sources[]`              | no                                   | object[]                              | Dynamic composer-reference source. Each entry declares `source`, `provider`, `kind`, `display_name`, and `kind_label`; `order` is optional. Candidate identity is not trusted: Kandev reauthorizes the canonical reference when it is submitted.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `auth_providers[]`                 | no                                   | object[]                              | Login buttons this plugin contributes to the pre-auth login screen (needs `capabilities.auth`). Each is `{ id, display_name, initiate }`, where `initiate` names one of the plugin's `webhooks[].key` values; the button navigates to that webhook, which 302-redirects to the IdP. Surfaced anonymously in the boot payload as `auth.ssoProviders`.                                                                                                                                                                                                                                                                                                                             |
 | `config_schema`                    | no                                   | object                                | JSON-Schema-like object driving the settings form at **Settings > Plugins > `<plugin>`** (`GET /api/plugins/{id}/config` and `PATCH /api/plugins/{id}`). See "Config schema validation and secret fields" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -318,6 +328,83 @@ binary`), so a legacy manifest can never actually be installed via `POST
 /api/plugins/install` or a filesystem sideload. The remote tier is
 effectively removed in practice, even though the manifest schema still
 recognizes its shape.
+
+## Remote executor providers
+
+A managed plugin declares each provider in `executor_providers`. Provider keys
+are unique within a plugin. The full provider identity is
+`plugin:<plugin-id>:<key>`. The host currently supports contract version `1`.
+The plugin must implement all seven provider RPCs; a partial implementation is
+not available for profile creation or task launch.
+
+```yaml
+runtime:
+  type: binary
+  executables:
+    linux-amd64: server/plugin-linux-amd64
+
+capabilities:
+  executor_provider: true
+
+executor_providers:
+  - key: remote-sandbox
+    display_name: Remote Sandbox
+    description: Remote Linux environments for isolated sessions.
+    contract_version: 1
+    supported_state_versions: [1]
+    profile_schema:
+      type: object
+      required: [region]
+      properties:
+        region:
+          type: string
+          title: Region
+        credential:
+          type: string
+          title: Provider credential
+          secret: true
+    resource_state_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        instance_id:
+          type: string
+    capabilities:
+      terminal: true
+      files: true
+      git: true
+      embedded_editor: true
+      preview: true
+      reattach: true
+      retention: bounded
+      maximum_lifetime_seconds: 28800
+```
+
+`profile_schema` accepts one to 64 scalar fields. The resource-state schema
+uses the same field types, cannot declare secrets, and must set
+`additionalProperties: false`. The host persists only fields declared by that
+schema, after validating required fields, scalar types, enum membership, and
+numeric bounds. Numeric bounds are allowed only on `number` and `integer`
+fields, must be finite numbers, and `minimum` cannot exceed `maximum`. Each
+schema is limited to 64 KiB. State versions must be unique positive integers.
+The manifest can declare at most 16 providers.
+
+In the provider profile editor, an empty optional non-secret field is submitted
+as an empty value so an existing value can be cleared. Secret fields use
+explicit keep, replace, and clear behavior.
+
+Provider capability declarations are upper bounds. Profile validation and
+environment provisioning can reduce the effective capabilities. `bounded`
+retention requires a maximum lifetime from 1 second through 365 days. Each
+bounded resource must also return a parseable absolute expiry no later than
+that maximum lifetime. For other retention values, omit
+`maximum_lifetime_seconds`. Unknown retention makes no promise about workspace
+survival.
+
+Install the plugin as usual, then enable `features.remoteExecutorPlugins` and
+restart Kandev to create or use provider profiles. Shipped profiles keep this
+feature disabled. See [Authoring a plugin](plugins-authoring.md#remote-executor-providers)
+for provider operations, callbacks, connection leases, and cleanup behavior.
 
 ## Host data API resource vocabulary
 

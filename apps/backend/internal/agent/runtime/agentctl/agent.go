@@ -388,9 +388,8 @@ type MCPHandler interface {
 // If mcpHandler is provided, MCP requests from agentctl will be dispatched to it and responses sent back.
 // If onDisconnect is provided, it is called when the WebSocket read goroutine exits (e.g., on error or close).
 func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error)) error {
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/agent/stream"
-
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, c.wsAuthHeaders())
+	const wsRoute = "/api/v1/agent/stream"
+	conn, _, err := c.dialWebSocket(ctx, wsRoute, c.wsAuthHeaders())
 	if err != nil {
 		return fmt.Errorf("failed to connect to updates stream: %w", err)
 	}
@@ -399,7 +398,7 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 	c.agentStreamConn = conn
 	c.mu.Unlock()
 
-	c.logger.Info("connected to updates stream", zap.String("url", wsURL))
+	c.logger.Info("connected to updates stream", zap.String("path", wsRoute))
 
 	// writeMessage uses the shared stream write mutex for thread-safe writes
 	writeMessage := func(data []byte) error {

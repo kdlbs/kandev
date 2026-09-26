@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
@@ -11,6 +11,18 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(__dirname, "..");
 const repoRoot = resolve(desktopRoot, "../..");
+
+let atomicWriteSequence = 0;
+
+export async function writeJsonAtomically(path, contents) {
+  const temporaryPath = `${path}.${process.pid}.${++atomicWriteSequence}.tmp`;
+  try {
+    await writeFile(temporaryPath, contents);
+    await rename(temporaryPath, path);
+  } finally {
+    await rm(temporaryPath, { force: true });
+  }
+}
 
 // The Rust side (apps/desktop/src-tauri/src/backend.rs) does a two-stage wait before it
 // navigates the webview: wait_for_backend polls GET /health every 250ms against a bounded
@@ -496,7 +508,7 @@ async function runFakeRuntime(stateDir, args) {
     rootRequested: false,
   };
   const saveRecord = () =>
-    writeFile(join(instanceDir, "instance.json"), JSON.stringify(record, null, 2));
+    writeJsonAtomically(join(instanceDir, "instance.json"), JSON.stringify(record, null, 2));
   await saveRecord();
   await writeFile(join(instanceDir, "launched"), JSON.stringify({ args, port }));
 

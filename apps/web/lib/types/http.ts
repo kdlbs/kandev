@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- HTTP DTO definitions intentionally co-locate protocol shapes. */
 
-import type { ExecutorType } from "./executor";
+import type { ExecutorProvider, ExecutorType } from "./executor";
 import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
 import type {
@@ -23,7 +23,7 @@ import type { AgentGoalReconciliation } from "@/lib/agent-goal";
 
 export type { TaskStatusSummary } from "./task-status-summary";
 
-export type { ExecutorType } from "./executor";
+export type { ExecutorProvider, ExecutorProviderCapabilities, ExecutorType } from "./executor";
 export type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 export type {
   SavedLayout,
@@ -906,6 +906,7 @@ export type Executor = {
   is_system: boolean;
   config?: Record<string, string>;
   profiles?: ExecutorProfile[];
+  provider?: ExecutorProvider;
   created_at: string;
   updated_at: string;
 };
@@ -924,6 +925,8 @@ export type ExecutorProfile = {
   name: string;
   mcp_policy?: string;
   config?: Record<string, string>;
+  secret_fields?: Record<string, boolean>;
+  provider?: ExecutorProvider;
   prepare_script: string;
   cleanup_script: string;
   env_vars?: ProfileEnvVar[];

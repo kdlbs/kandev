@@ -4,7 +4,7 @@ system: ui
 requirements:
   - REQ-UI-TRANSCRIPT-AUTO-SCROLL-001
 created: 2026-08-27
-updated: 2026-09-07
+updated: 2026-09-26
 owners:
   - kandev
 ---
@@ -160,6 +160,76 @@ Same-environment session switches return before arming this lifecycle.
 Maximize, un-maximize, preset, and custom-layout rebuilds retain the existing
 `pendingChatScrollTop` path and do not request session initialization.
 
+## Initial placement completion and explicit latest navigation
+
+The native coordinator owns initial placement for every session visit, including
+visits without a Dockview environment-switch token. History refresh readiness
+selects provisional versus final placement in both cases. A provisional write
+cannot consume final placement. A visit identity guards callbacks across session
+changes, hidden panels, and unmounts.
+
+Placement distinguishes a temporary blocker from a successful transfer of
+ownership. Explicit navigation, an unread target, and a valid same-transcript
+layout restore retain priority. A matching restore can complete initialization
+only through its actual application. An unrelated or stale restore cannot
+consume the incoming session's placement. The existing layout restore producer
+must identify its session and generation if those cannot otherwise be proven.
+A transient programmatic lock defers placement until release. User navigation
+cancels pending automatic placement instead of triggering a later bottom write.
+
+The coordinator observes blocker release explicitly. It does not depend on an
+unrelated message update. Provisional placement records success only after an
+actual write. Initial geometry must be visible and measurable. Older-history
+pagination remains blocked until placement completes or transfers to a valid
+owner, including ordinary visits without an environment-switch token.
+
+The existing bottom-follow lifecycle also handles content-size changes. A
+content ResizeObserver can wake the guarded controller when asynchronous rows
+change size. It preserves previously established bottom-follow intent, rather
+than interpreting content growth as user navigation. It stops automatic writes
+on reader interaction, disabled auto-scroll, explicit navigation, hidden panels,
+or session replacement. It disconnects on cleanup. Initial placement stays
+immediate. Normal append commits retain the write-only path and chat-motion
+contract. No unbounded frame retry loop is introduced.
+
+`MessageListHandle` exposes an explicit latest-position action. The native list
+implements it with the shared WebKit-safe bottom helper, cancels older motion
+and initial callbacks, and refreshes near-bottom state. It does not mutate the
+auto-scroll preference. Existing last-prompt and start navigation keep their
+meaning. The action targets the transcript end, including grouped assistant
+output, rather than looking up the last user-message identifier.
+
+The native transcript reports whether content remains below the viewport through
+`hasTranscriptProgressedPastView`. A shared localized Button appears above the
+composer, outside the scrolling content, only while that condition is true.
+It remains available when optional navigation controls are hidden. Desktop uses
+a compact 28px control. Phone and coarse-pointer layouts use at least 44px.
+The phone retains the full-height Chat surface, safe-area clearance, and one
+vertical scroll owner. Keyboard activation keeps focus on a stable transcript
+or composer target when the button disappears.
+
+## Live-turn follow intent
+
+The follow controller separates reader intent from current distance to the
+bottom. Sending from a bottom-following position preserves that intent across
+the optimistic prompt, composer resize, working-state changes, and content growth.
+A scroll event caused by application placement or browser layout does not by
+itself establish reader intent.
+
+Upward wheel, touch, keyboard, and scrollbar movement cancels follow intent.
+This input handling exists independently of the animation driver and OS motion
+preference. Small upward movements do not inherit the ordinary 100px proximity
+heuristic. A working-state transition cannot clear the reader's pause. Returning
+to the bottom or explicit latest navigation can clear it when auto-scroll is
+enabled. The saved preference and temporary reader pause remain separate state.
+
+Content-size and viewport-size correction use this same intent. The complete
+footer, including `AgentStatus`, belongs to the content boundary. A delayed
+running-status render must not remain clipped merely because message identity
+and `isWorking` did not change. Scheduled correction rechecks user intent and
+session identity before writing. Motion settings choose the movement style,
+not whether reader gestures are respected.
+
 ## Interaction boundaries
 
 The optimization does not replace geometry reads that answer a user-action
@@ -187,8 +257,7 @@ overflow anchoring.
 ## Responsive behavior
 
 Desktop and mobile use the same native transcript, store state, and bottom
-placement helper. The transcript remains the only vertical scroll owner. No
-control, copy, layout, or touch target changes.
+placement helper. The transcript remains the only vertical scroll owner. The explicit latest-message action uses the same scroll owner on both surfaces.
 
 The inactive persistent-portal state exists only in the desktop Dockview
 workbench. Mobile renders one selected `TaskChatPanel` and replaces its session
@@ -239,3 +308,11 @@ intersection. Message content and saved offsets are not logged.
 ## Related decisions
 
 - [Isolate Replaceable Session Stream Traffic](../../../decisions/2026-08-02-isolate-replaceable-session-stream-traffic.md)
+
+## Implementation plans
+
+- [Initial history placement and latest navigation](../../../plans/transcript-initial-history-placement/plan.md)
+- [Earlier task-switch continuity](../../../plans/transcript-task-switch-continuity/plan.md)
+
+The new package extends ordinary entry and completion handling. Earlier completed
+packages remain historical delivery records, not evidence for the new criteria.

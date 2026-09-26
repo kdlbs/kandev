@@ -101,11 +101,23 @@ func (m *Manager) Start(ctx context.Context) error {
 	// hypothetical re-Start) never leaks into this pass's outcome.
 	m.resetRetrackedSessions()
 
-	// Read the live standalone recovery-inventory records (startup step 3,
-	// AC-EXECUTORS-SURVIVAL-002.8) before recovery contacts any control
-	// server, and hand them to every runtime's RecoverInstances unchanged.
+	// Read every runtime-owned startup recovery record before contacting any
+	// endpoint. Remote plugin rows carry decrypted auth tokens only in memory.
 	startup.BeginStep(ctx, startup.StepSessionsRecovery)
 	records, listErr := m.ListLiveStandaloneExecutorsRunning(ctx)
+	pluginRecords, pluginListErr := m.ListLivePluginExecutorsRunning(ctx)
+	if listErr == nil && pluginListErr != nil {
+		listErr = pluginListErr
+	}
+	if listErr == nil {
+		for _, record := range pluginRecords {
+			if record == nil {
+				continue
+			}
+			record.TransientAuthToken = m.revealRuntimeSecret(ctx, record.Metadata, MetadataKeyAuthTokenSecret)
+		}
+		records = append(records, pluginRecords...)
+	}
 	recoveryOutcome := recoveryOutcomeSummary{candidateCountKnown: listErr == nil}
 	m.runRecoveryErr = listErr
 	if listErr != nil {
@@ -120,7 +132,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		// adopted server that cannot be enumerated: report no recovered
 		// instances, stop no instance, and leave every record to the existing
 		// stale-execution repair path.
-		m.logger.Error("skipping recovery: live standalone recovery-inventory records could not be read, so no live instance can be correlated to a session",
+		m.logger.Error("skipping recovery: live executor recovery inventory could not be read, so no runtime can be correlated to a session",
 			zap.Error(listErr))
 		records = nil
 		// The corpus is unknown, not zero: a failed read is not the same as

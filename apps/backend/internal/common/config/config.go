@@ -560,6 +560,11 @@ type FeaturesConfig struct {
 	// off in every shipped profile and requires a restart because its protocol
 	// adapter and profile catalogue are composed at startup.
 	CodexAppServer bool `mapstructure:"codex_app_server" json:"codexAppServer"`
+
+	// RemoteExecutorPlugins gates manifest-owned providers that allocate
+	// remote task environments. It remains off in every embedded profile
+	// until the complete lifecycle, recovery, and cleanup path is available.
+	RemoteExecutorPlugins bool `mapstructure:"remote_executor_plugins" json:"remoteExecutorPlugins"`
 }
 
 // LoggingConfig holds logging configuration.

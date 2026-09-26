@@ -253,6 +253,22 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.remoteExecutorPlugins",
+			EnvVar:          "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS",
+			Kind:            KindFeature,
+			Label:           "Remote executor plugins",
+			Description:     "Enables plugin-provided remote task execution environments.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "A provider plugin can allocate remote compute and receive scoped bootstrap data. Enable only while provider admission, authenticated transport, durable cleanup inventory, and recovery are available.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.RemoteExecutorPlugins },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.RemoteExecutorPlugins = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

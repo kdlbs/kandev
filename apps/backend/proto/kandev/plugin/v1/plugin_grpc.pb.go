@@ -19,16 +19,23 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Plugin_DeliverEvent_FullMethodName                = "/kandev.plugin.v1.Plugin/DeliverEvent"
-	Plugin_HandleWebhook_FullMethodName               = "/kandev.plugin.v1.Plugin/HandleWebhook"
-	Plugin_DescribeAutomationCondition_FullMethodName = "/kandev.plugin.v1.Plugin/DescribeAutomationCondition"
-	Plugin_VerifyAutomationWebhook_FullMethodName     = "/kandev.plugin.v1.Plugin/VerifyAutomationWebhook"
-	Plugin_HandleAction_FullMethodName                = "/kandev.plugin.v1.Plugin/HandleAction"
-	Plugin_SearchEntityReferences_FullMethodName      = "/kandev.plugin.v1.Plugin/SearchEntityReferences"
-	Plugin_AuthorizeEntityReference_FullMethodName    = "/kandev.plugin.v1.Plugin/AuthorizeEntityReference"
-	Plugin_ResolveGitCredential_FullMethodName        = "/kandev.plugin.v1.Plugin/ResolveGitCredential"
-	Plugin_GetGitCredentialBinding_FullMethodName     = "/kandev.plugin.v1.Plugin/GetGitCredentialBinding"
-	Plugin_InvokeAgentTool_FullMethodName             = "/kandev.plugin.v1.Plugin/InvokeAgentTool"
+	Plugin_DeliverEvent_FullMethodName                 = "/kandev.plugin.v1.Plugin/DeliverEvent"
+	Plugin_HandleWebhook_FullMethodName                = "/kandev.plugin.v1.Plugin/HandleWebhook"
+	Plugin_DescribeAutomationCondition_FullMethodName  = "/kandev.plugin.v1.Plugin/DescribeAutomationCondition"
+	Plugin_VerifyAutomationWebhook_FullMethodName      = "/kandev.plugin.v1.Plugin/VerifyAutomationWebhook"
+	Plugin_HandleAction_FullMethodName                 = "/kandev.plugin.v1.Plugin/HandleAction"
+	Plugin_SearchEntityReferences_FullMethodName       = "/kandev.plugin.v1.Plugin/SearchEntityReferences"
+	Plugin_AuthorizeEntityReference_FullMethodName     = "/kandev.plugin.v1.Plugin/AuthorizeEntityReference"
+	Plugin_ResolveGitCredential_FullMethodName         = "/kandev.plugin.v1.Plugin/ResolveGitCredential"
+	Plugin_GetGitCredentialBinding_FullMethodName      = "/kandev.plugin.v1.Plugin/GetGitCredentialBinding"
+	Plugin_InvokeAgentTool_FullMethodName              = "/kandev.plugin.v1.Plugin/InvokeAgentTool"
+	Plugin_ValidateExecutorProfile_FullMethodName      = "/kandev.plugin.v1.Plugin/ValidateExecutorProfile"
+	Plugin_ProvisionExecutorEnvironment_FullMethodName = "/kandev.plugin.v1.Plugin/ProvisionExecutorEnvironment"
+	Plugin_RecoverExecutorOperation_FullMethodName     = "/kandev.plugin.v1.Plugin/RecoverExecutorOperation"
+	Plugin_AttachExecutorEnvironment_FullMethodName    = "/kandev.plugin.v1.Plugin/AttachExecutorEnvironment"
+	Plugin_InspectExecutorEnvironment_FullMethodName   = "/kandev.plugin.v1.Plugin/InspectExecutorEnvironment"
+	Plugin_ResolveExecutorConnection_FullMethodName    = "/kandev.plugin.v1.Plugin/ResolveExecutorConnection"
+	Plugin_DestroyExecutorEnvironment_FullMethodName   = "/kandev.plugin.v1.Plugin/DestroyExecutorEnvironment"
 )
 
 // PluginClient is the client API for Plugin service.
@@ -59,6 +66,15 @@ type PluginClient interface {
 	// closed without resolving a secret merely to inspect its revision.
 	GetGitCredentialBinding(ctx context.Context, in *GitCredentialBindingRequest, opts ...grpc.CallOption) (*GitCredentialBindingResponse, error)
 	InvokeAgentTool(ctx context.Context, in *AgentToolRequest, opts ...grpc.CallOption) (*AgentToolResponse, error)
+	// Optional remote-executor provider extension. A provider must implement
+	// the complete lifecycle interface before any of these methods are served.
+	ValidateExecutorProfile(ctx context.Context, in *ValidateExecutorProfileRequest, opts ...grpc.CallOption) (*ValidateExecutorProfileResponse, error)
+	ProvisionExecutorEnvironment(ctx context.Context, in *ProvisionExecutorEnvironmentRequest, opts ...grpc.CallOption) (*ProvisionExecutorEnvironmentResponse, error)
+	RecoverExecutorOperation(ctx context.Context, in *RecoverExecutorOperationRequest, opts ...grpc.CallOption) (*RecoverExecutorOperationResponse, error)
+	AttachExecutorEnvironment(ctx context.Context, in *AttachExecutorEnvironmentRequest, opts ...grpc.CallOption) (*AttachExecutorEnvironmentResponse, error)
+	InspectExecutorEnvironment(ctx context.Context, in *InspectExecutorEnvironmentRequest, opts ...grpc.CallOption) (*InspectExecutorEnvironmentResponse, error)
+	ResolveExecutorConnection(ctx context.Context, in *ResolveExecutorConnectionRequest, opts ...grpc.CallOption) (*ResolveExecutorConnectionResponse, error)
+	DestroyExecutorEnvironment(ctx context.Context, in *DestroyExecutorEnvironmentRequest, opts ...grpc.CallOption) (*DestroyExecutorEnvironmentResponse, error)
 }
 
 type pluginClient struct {
@@ -169,6 +185,76 @@ func (c *pluginClient) InvokeAgentTool(ctx context.Context, in *AgentToolRequest
 	return out, nil
 }
 
+func (c *pluginClient) ValidateExecutorProfile(ctx context.Context, in *ValidateExecutorProfileRequest, opts ...grpc.CallOption) (*ValidateExecutorProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ValidateExecutorProfileResponse)
+	err := c.cc.Invoke(ctx, Plugin_ValidateExecutorProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) ProvisionExecutorEnvironment(ctx context.Context, in *ProvisionExecutorEnvironmentRequest, opts ...grpc.CallOption) (*ProvisionExecutorEnvironmentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProvisionExecutorEnvironmentResponse)
+	err := c.cc.Invoke(ctx, Plugin_ProvisionExecutorEnvironment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) RecoverExecutorOperation(ctx context.Context, in *RecoverExecutorOperationRequest, opts ...grpc.CallOption) (*RecoverExecutorOperationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RecoverExecutorOperationResponse)
+	err := c.cc.Invoke(ctx, Plugin_RecoverExecutorOperation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) AttachExecutorEnvironment(ctx context.Context, in *AttachExecutorEnvironmentRequest, opts ...grpc.CallOption) (*AttachExecutorEnvironmentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AttachExecutorEnvironmentResponse)
+	err := c.cc.Invoke(ctx, Plugin_AttachExecutorEnvironment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) InspectExecutorEnvironment(ctx context.Context, in *InspectExecutorEnvironmentRequest, opts ...grpc.CallOption) (*InspectExecutorEnvironmentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InspectExecutorEnvironmentResponse)
+	err := c.cc.Invoke(ctx, Plugin_InspectExecutorEnvironment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) ResolveExecutorConnection(ctx context.Context, in *ResolveExecutorConnectionRequest, opts ...grpc.CallOption) (*ResolveExecutorConnectionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveExecutorConnectionResponse)
+	err := c.cc.Invoke(ctx, Plugin_ResolveExecutorConnection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) DestroyExecutorEnvironment(ctx context.Context, in *DestroyExecutorEnvironmentRequest, opts ...grpc.CallOption) (*DestroyExecutorEnvironmentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DestroyExecutorEnvironmentResponse)
+	err := c.cc.Invoke(ctx, Plugin_DestroyExecutorEnvironment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PluginServer is the server API for Plugin service.
 // All implementations must embed UnimplementedPluginServer
 // for forward compatibility.
@@ -197,6 +283,15 @@ type PluginServer interface {
 	// closed without resolving a secret merely to inspect its revision.
 	GetGitCredentialBinding(context.Context, *GitCredentialBindingRequest) (*GitCredentialBindingResponse, error)
 	InvokeAgentTool(context.Context, *AgentToolRequest) (*AgentToolResponse, error)
+	// Optional remote-executor provider extension. A provider must implement
+	// the complete lifecycle interface before any of these methods are served.
+	ValidateExecutorProfile(context.Context, *ValidateExecutorProfileRequest) (*ValidateExecutorProfileResponse, error)
+	ProvisionExecutorEnvironment(context.Context, *ProvisionExecutorEnvironmentRequest) (*ProvisionExecutorEnvironmentResponse, error)
+	RecoverExecutorOperation(context.Context, *RecoverExecutorOperationRequest) (*RecoverExecutorOperationResponse, error)
+	AttachExecutorEnvironment(context.Context, *AttachExecutorEnvironmentRequest) (*AttachExecutorEnvironmentResponse, error)
+	InspectExecutorEnvironment(context.Context, *InspectExecutorEnvironmentRequest) (*InspectExecutorEnvironmentResponse, error)
+	ResolveExecutorConnection(context.Context, *ResolveExecutorConnectionRequest) (*ResolveExecutorConnectionResponse, error)
+	DestroyExecutorEnvironment(context.Context, *DestroyExecutorEnvironmentRequest) (*DestroyExecutorEnvironmentResponse, error)
 	mustEmbedUnimplementedPluginServer()
 }
 
@@ -236,6 +331,27 @@ func (UnimplementedPluginServer) GetGitCredentialBinding(context.Context, *GitCr
 }
 func (UnimplementedPluginServer) InvokeAgentTool(context.Context, *AgentToolRequest) (*AgentToolResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InvokeAgentTool not implemented")
+}
+func (UnimplementedPluginServer) ValidateExecutorProfile(context.Context, *ValidateExecutorProfileRequest) (*ValidateExecutorProfileResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateExecutorProfile not implemented")
+}
+func (UnimplementedPluginServer) ProvisionExecutorEnvironment(context.Context, *ProvisionExecutorEnvironmentRequest) (*ProvisionExecutorEnvironmentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ProvisionExecutorEnvironment not implemented")
+}
+func (UnimplementedPluginServer) RecoverExecutorOperation(context.Context, *RecoverExecutorOperationRequest) (*RecoverExecutorOperationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RecoverExecutorOperation not implemented")
+}
+func (UnimplementedPluginServer) AttachExecutorEnvironment(context.Context, *AttachExecutorEnvironmentRequest) (*AttachExecutorEnvironmentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AttachExecutorEnvironment not implemented")
+}
+func (UnimplementedPluginServer) InspectExecutorEnvironment(context.Context, *InspectExecutorEnvironmentRequest) (*InspectExecutorEnvironmentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InspectExecutorEnvironment not implemented")
+}
+func (UnimplementedPluginServer) ResolveExecutorConnection(context.Context, *ResolveExecutorConnectionRequest) (*ResolveExecutorConnectionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResolveExecutorConnection not implemented")
+}
+func (UnimplementedPluginServer) DestroyExecutorEnvironment(context.Context, *DestroyExecutorEnvironmentRequest) (*DestroyExecutorEnvironmentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DestroyExecutorEnvironment not implemented")
 }
 func (UnimplementedPluginServer) mustEmbedUnimplementedPluginServer() {}
 func (UnimplementedPluginServer) testEmbeddedByValue()                {}
@@ -438,6 +554,132 @@ func _Plugin_InvokeAgentTool_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Plugin_ValidateExecutorProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ValidateExecutorProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).ValidateExecutorProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_ValidateExecutorProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).ValidateExecutorProfile(ctx, req.(*ValidateExecutorProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_ProvisionExecutorEnvironment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProvisionExecutorEnvironmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).ProvisionExecutorEnvironment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_ProvisionExecutorEnvironment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).ProvisionExecutorEnvironment(ctx, req.(*ProvisionExecutorEnvironmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_RecoverExecutorOperation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecoverExecutorOperationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).RecoverExecutorOperation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_RecoverExecutorOperation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).RecoverExecutorOperation(ctx, req.(*RecoverExecutorOperationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_AttachExecutorEnvironment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AttachExecutorEnvironmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).AttachExecutorEnvironment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_AttachExecutorEnvironment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).AttachExecutorEnvironment(ctx, req.(*AttachExecutorEnvironmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_InspectExecutorEnvironment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InspectExecutorEnvironmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).InspectExecutorEnvironment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_InspectExecutorEnvironment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).InspectExecutorEnvironment(ctx, req.(*InspectExecutorEnvironmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_ResolveExecutorConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveExecutorConnectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).ResolveExecutorConnection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_ResolveExecutorConnection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).ResolveExecutorConnection(ctx, req.(*ResolveExecutorConnectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_DestroyExecutorEnvironment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DestroyExecutorEnvironmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).DestroyExecutorEnvironment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_DestroyExecutorEnvironment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).DestroyExecutorEnvironment(ctx, req.(*DestroyExecutorEnvironmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Plugin_ServiceDesc is the grpc.ServiceDesc for Plugin service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -485,6 +727,34 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "InvokeAgentTool",
 			Handler:    _Plugin_InvokeAgentTool_Handler,
 		},
+		{
+			MethodName: "ValidateExecutorProfile",
+			Handler:    _Plugin_ValidateExecutorProfile_Handler,
+		},
+		{
+			MethodName: "ProvisionExecutorEnvironment",
+			Handler:    _Plugin_ProvisionExecutorEnvironment_Handler,
+		},
+		{
+			MethodName: "RecoverExecutorOperation",
+			Handler:    _Plugin_RecoverExecutorOperation_Handler,
+		},
+		{
+			MethodName: "AttachExecutorEnvironment",
+			Handler:    _Plugin_AttachExecutorEnvironment_Handler,
+		},
+		{
+			MethodName: "InspectExecutorEnvironment",
+			Handler:    _Plugin_InspectExecutorEnvironment_Handler,
+		},
+		{
+			MethodName: "ResolveExecutorConnection",
+			Handler:    _Plugin_ResolveExecutorConnection_Handler,
+		},
+		{
+			MethodName: "DestroyExecutorEnvironment",
+			Handler:    _Plugin_DestroyExecutorEnvironment_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "kandev/plugin/v1/plugin.proto",
@@ -510,6 +780,9 @@ const (
 	Host_ListWorkflowTransitionGroups_FullMethodName  = "/kandev.plugin.v1.Host/ListWorkflowTransitionGroups"
 	Host_ListAgentProfiles_FullMethodName             = "/kandev.plugin.v1.Host/ListAgentProfiles"
 	Host_ListExecutorProfiles_FullMethodName          = "/kandev.plugin.v1.Host/ListExecutorProfiles"
+	Host_CheckpointExecutorResource_FullMethodName    = "/kandev.plugin.v1.Host/CheckpointExecutorResource"
+	Host_ReportExecutorProgress_FullMethodName        = "/kandev.plugin.v1.Host/ReportExecutorProgress"
+	Host_ReadExecutorRuntimeArtifact_FullMethodName   = "/kandev.plugin.v1.Host/ReadExecutorRuntimeArtifact"
 	Host_ListRepositories_FullMethodName              = "/kandev.plugin.v1.Host/ListRepositories"
 	Host_ListSessions_FullMethodName                  = "/kandev.plugin.v1.Host/ListSessions"
 	Host_ListSessionCodeStats_FullMethodName          = "/kandev.plugin.v1.Host/ListSessionCodeStats"
@@ -590,6 +863,10 @@ type HostClient interface {
 	ListWorkflowTransitionGroups(ctx context.Context, in *ListWorkflowTransitionGroupsRequest, opts ...grpc.CallOption) (*ListWorkflowTransitionGroupsResponse, error)
 	ListAgentProfiles(ctx context.Context, in *ListAgentProfilesRequest, opts ...grpc.CallOption) (*ListAgentProfilesResponse, error)
 	ListExecutorProfiles(ctx context.Context, in *ListExecutorProfilesRequest, opts ...grpc.CallOption) (*ListExecutorProfilesResponse, error)
+	// Operation-bound callbacks available only to executor-provider plugins.
+	CheckpointExecutorResource(ctx context.Context, in *CheckpointExecutorResourceRequest, opts ...grpc.CallOption) (*CheckpointExecutorResourceResponse, error)
+	ReportExecutorProgress(ctx context.Context, in *ReportExecutorProgressRequest, opts ...grpc.CallOption) (*ReportExecutorProgressResponse, error)
+	ReadExecutorRuntimeArtifact(ctx context.Context, in *ReadExecutorRuntimeArtifactRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ExecutorRuntimeArtifactChunk], error)
 	ListRepositories(ctx context.Context, in *ListRepositoriesRequest, opts ...grpc.CallOption) (*ListRepositoriesResponse, error)
 	// Sessions + code stats — capability api_read:sessions. Driven by a real
 	// plugin (kandev-plugin-agent-stats) that otherwise read task_sessions,
@@ -862,6 +1139,45 @@ func (c *hostClient) ListExecutorProfiles(ctx context.Context, in *ListExecutorP
 	return out, nil
 }
 
+func (c *hostClient) CheckpointExecutorResource(ctx context.Context, in *CheckpointExecutorResourceRequest, opts ...grpc.CallOption) (*CheckpointExecutorResourceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckpointExecutorResourceResponse)
+	err := c.cc.Invoke(ctx, Host_CheckpointExecutorResource_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ReportExecutorProgress(ctx context.Context, in *ReportExecutorProgressRequest, opts ...grpc.CallOption) (*ReportExecutorProgressResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportExecutorProgressResponse)
+	err := c.cc.Invoke(ctx, Host_ReportExecutorProgress_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ReadExecutorRuntimeArtifact(ctx context.Context, in *ReadExecutorRuntimeArtifactRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ExecutorRuntimeArtifactChunk], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Host_ServiceDesc.Streams[0], Host_ReadExecutorRuntimeArtifact_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ReadExecutorRuntimeArtifactRequest, ExecutorRuntimeArtifactChunk]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Host_ReadExecutorRuntimeArtifactClient = grpc.ServerStreamingClient[ExecutorRuntimeArtifactChunk]
+
 func (c *hostClient) ListRepositories(ctx context.Context, in *ListRepositoriesRequest, opts ...grpc.CallOption) (*ListRepositoriesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListRepositoriesResponse)
@@ -1120,6 +1436,10 @@ type HostServer interface {
 	ListWorkflowTransitionGroups(context.Context, *ListWorkflowTransitionGroupsRequest) (*ListWorkflowTransitionGroupsResponse, error)
 	ListAgentProfiles(context.Context, *ListAgentProfilesRequest) (*ListAgentProfilesResponse, error)
 	ListExecutorProfiles(context.Context, *ListExecutorProfilesRequest) (*ListExecutorProfilesResponse, error)
+	// Operation-bound callbacks available only to executor-provider plugins.
+	CheckpointExecutorResource(context.Context, *CheckpointExecutorResourceRequest) (*CheckpointExecutorResourceResponse, error)
+	ReportExecutorProgress(context.Context, *ReportExecutorProgressRequest) (*ReportExecutorProgressResponse, error)
+	ReadExecutorRuntimeArtifact(*ReadExecutorRuntimeArtifactRequest, grpc.ServerStreamingServer[ExecutorRuntimeArtifactChunk]) error
 	ListRepositories(context.Context, *ListRepositoriesRequest) (*ListRepositoriesResponse, error)
 	// Sessions + code stats — capability api_read:sessions. Driven by a real
 	// plugin (kandev-plugin-agent-stats) that otherwise read task_sessions,
@@ -1258,6 +1578,15 @@ func (UnimplementedHostServer) ListAgentProfiles(context.Context, *ListAgentProf
 }
 func (UnimplementedHostServer) ListExecutorProfiles(context.Context, *ListExecutorProfilesRequest) (*ListExecutorProfilesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListExecutorProfiles not implemented")
+}
+func (UnimplementedHostServer) CheckpointExecutorResource(context.Context, *CheckpointExecutorResourceRequest) (*CheckpointExecutorResourceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CheckpointExecutorResource not implemented")
+}
+func (UnimplementedHostServer) ReportExecutorProgress(context.Context, *ReportExecutorProgressRequest) (*ReportExecutorProgressResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReportExecutorProgress not implemented")
+}
+func (UnimplementedHostServer) ReadExecutorRuntimeArtifact(*ReadExecutorRuntimeArtifactRequest, grpc.ServerStreamingServer[ExecutorRuntimeArtifactChunk]) error {
+	return status.Errorf(codes.Unimplemented, "method ReadExecutorRuntimeArtifact not implemented")
 }
 func (UnimplementedHostServer) ListRepositories(context.Context, *ListRepositoriesRequest) (*ListRepositoriesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListRepositories not implemented")
@@ -1681,6 +2010,53 @@ func _Host_ListExecutorProfiles_Handler(srv interface{}, ctx context.Context, de
 	}
 	return interceptor(ctx, in, info, handler)
 }
+
+func _Host_CheckpointExecutorResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckpointExecutorResourceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).CheckpointExecutorResource(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_CheckpointExecutorResource_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).CheckpointExecutorResource(ctx, req.(*CheckpointExecutorResourceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ReportExecutorProgress_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportExecutorProgressRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ReportExecutorProgress(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ReportExecutorProgress_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ReportExecutorProgress(ctx, req.(*ReportExecutorProgressRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ReadExecutorRuntimeArtifact_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ReadExecutorRuntimeArtifactRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(HostServer).ReadExecutorRuntimeArtifact(m, &grpc.GenericServerStream[ReadExecutorRuntimeArtifactRequest, ExecutorRuntimeArtifactChunk]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Host_ReadExecutorRuntimeArtifactServer = grpc.ServerStreamingServer[ExecutorRuntimeArtifactChunk]
 
 func _Host_ListRepositories_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListRepositoriesRequest)
@@ -2126,6 +2502,14 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Host_ListExecutorProfiles_Handler,
 		},
 		{
+			MethodName: "CheckpointExecutorResource",
+			Handler:    _Host_CheckpointExecutorResource_Handler,
+		},
+		{
+			MethodName: "ReportExecutorProgress",
+			Handler:    _Host_ReportExecutorProgress_Handler,
+		},
+		{
 			MethodName: "ListRepositories",
 			Handler:    _Host_ListRepositories_Handler,
 		},
@@ -2206,6 +2590,12 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Host_CancelClarification_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "ReadExecutorRuntimeArtifact",
+			Handler:       _Host_ReadExecutorRuntimeArtifact_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "kandev/plugin/v1/plugin.proto",
 }

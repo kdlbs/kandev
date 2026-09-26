@@ -35,7 +35,7 @@ import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
-import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
+import type { CommitDetailTarget, OpenDiffOptions } from "@/lib/state/diff-target-types";
 import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { PluginTaskPanel } from "./plugin-task-panel";

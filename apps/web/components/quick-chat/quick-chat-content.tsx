@@ -88,13 +88,16 @@ export const QuickChatContent = memo(function QuickChatContent({
   });
 
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
-
+  const handleShortcutScopeMouseDown = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(event, shortcutScopeRef),
+    [],
+  );
   return (
     <div
       ref={shortcutScopeRef}
       data-testid="quick-chat-content"
       tabIndex={-1}
-      onMouseDown={(event) => routePanelMouseDown(event, shortcutScopeRef)}
+      onMouseDown={handleShortcutScopeMouseDown}
       onClick={(event) => routePanelClick(event, shortcutScopeRef)}
       className="flex flex-col flex-1 min-h-0 outline-none"
     >

@@ -39,6 +39,7 @@ type pluginHost struct {
 	pluginsdk.UnimplementedHostData
 
 	pluginID     string
+	service      *Service
 	capabilities manifest.Capabilities
 	// repositoryProviders is the manifest-declared set of provider IDs this
 	// plugin owns. Only these IDs may use the trusted remote-descriptor path
