@@ -69,6 +69,19 @@ func TestHTTPPreviewExactRetirementAuthorization(t *testing.T) {
 		require.NotContains(t, rec.Body.String(), `"receipts"`)
 	})
 
+	t.Run("foreign caller with equal task IDs is indistinguishable from missing task", func(t *testing.T) {
+		equalIDsBody := fmt.Sprintf(`{"replacement_task_id":"retirement-old","workspace_id":%q,"expected_old_generation":%q,"expected_replacement_generation":%q}`,
+			workspaceID, oldTask.UpdatedAt.UTC().Format(time.RFC3339Nano), oldTask.UpdatedAt.UTC().Format(time.RFC3339Nano))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/retirement-old/exact-retirement/preview", strings.NewReader(equalIDsBody))
+		req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "outsider", Role: authn.RoleMember}))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+		require.NotContains(t, rec.Body.String(), "private task")
+		require.NotContains(t, rec.Body.String(), `"receipts"`)
+	})
+
 	t.Run("task writer without admin role is denied", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/retirement-old/exact-retirement/preview", strings.NewReader(body))
 		req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "collaborator", Role: authn.RoleMember}))

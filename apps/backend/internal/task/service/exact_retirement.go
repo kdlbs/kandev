@@ -99,7 +99,7 @@ func (s *Service) authorizeExactRetirementPreview(ctx context.Context, oldTaskID
 // PreviewExactRetirement only reads authorized task rows. Evidence owners are
 // intentionally represented as UNKNOWN until their read-only adapters exist.
 func (s *Service) PreviewExactRetirement(ctx context.Context, request ExactRetirementPreviewRequest) (*ExactRetirementPreview, error) {
-	if request.OldTaskID == "" || request.ReplacementTaskID == "" || request.OldTaskID == request.ReplacementTaskID {
+	if request.OldTaskID == "" || request.ReplacementTaskID == "" {
 		return nil, ErrExactRetirementPairInvalid
 	}
 	oldTask, err := s.GetTask(ctx, request.OldTaskID)
@@ -112,6 +112,9 @@ func (s *Service) PreviewExactRetirement(ctx context.Context, request ExactRetir
 	}
 	if err := s.authorizeExactRetirementPreview(ctx, oldTask.ID, replacementTask.ID); err != nil {
 		return nil, err
+	}
+	if oldTask.ID == replacementTask.ID {
+		return nil, ErrExactRetirementPairInvalid
 	}
 	if request.WorkspaceID == "" || oldTask.WorkspaceID != request.WorkspaceID || replacementTask.WorkspaceID != request.WorkspaceID {
 		return nil, ErrExactRetirementWorkspaceInvalid

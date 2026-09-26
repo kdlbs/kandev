@@ -36,12 +36,13 @@ task delete/archive or broad worktree cleanup.
 
 ## Data and contracts
 
-The preview request carries exact old and replacement IDs, their expected
-generations, canonical workspace/repository/environment/worktree identities,
-and a platform-verifiable preservation receipt identifier. A predicate receipt
-contains status, reason code, resource ID, observed generation, and SHA-256
-evidence digest. Its payload is redacted: queue bodies, archive bytes,
-credentials, and provider tokens never appear.
+The W02 preview request carries exact old and replacement IDs, workspace ID,
+and their expected generations. Later commitment work adds canonical
+repository/environment/worktree identities and a platform-verifiable
+preservation receipt identifier. A predicate receipt contains status, reason
+code, resource ID, observed generation, and SHA-256 evidence digest. Its
+payload is redacted: queue bodies, archive bytes, credentials, and provider
+tokens never appear.
 
 `PASS` means the adapter proved the required condition. `BLOCKED` means it
 proved an unsafe condition. `UNKNOWN` means the adapter was unavailable,
