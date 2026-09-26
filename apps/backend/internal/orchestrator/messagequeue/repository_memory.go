@@ -2385,6 +2385,9 @@ func (r *memoryRepository) replaceSessionLocked(sessionID string, entries []Queu
 		return nil
 	}
 	clone := *pendingMove
+	if clone.ID == "" {
+		clone.ID = uuid.New().String()
+	}
 	r.pendingMoves[sessionID] = &clone
 	return nil
 }
@@ -2419,6 +2422,7 @@ func (r *memoryRepository) SetPendingMove(_ context.Context, sessionID string, m
 	}); err != nil {
 		return err
 	}
+	move.ID = uuid.New().String()
 	if move.QueuedAt.IsZero() {
 		move.QueuedAt = time.Now().UTC()
 	}
