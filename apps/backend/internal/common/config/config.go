@@ -543,6 +543,10 @@ type FeaturesConfig struct {
 	// can regress without notice.
 	ClaudeMidTurnSteering bool `mapstructure:"claude_mid_turn_steering" json:"claudeMidTurnSteering"`
 
+	// CoordinatorTaskAuthority gates operator-granted, task-scoped coordination
+	// authority. It is disabled in every profile until an operator explicitly
+	// enables the feature for a controlled installation.
+	CoordinatorTaskAuthority bool `mapstructure:"coordinator_task_authority" json:"coordinatorTaskAuthority"`
 	// NeedsYouInbox gates the Needs-you Inbox: a workspace-scoped sidebar
 	// destination, independent of Office, listing exactly the answerable
 	// clarification bundles for the active workspace. Off in prod until the

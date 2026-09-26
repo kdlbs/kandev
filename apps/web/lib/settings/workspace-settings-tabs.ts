@@ -7,6 +7,7 @@ import {
   IconKey,
   IconLayoutGrid,
   IconPlugConnected,
+  IconShieldCheck,
 } from "@tabler/icons-react";
 
 import { WORKSPACES_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/workspaces";
@@ -28,7 +29,8 @@ export type WorkspaceSettingsTab =
   | "canvases"
   | "integrations"
   | "automations"
-  | "secrets";
+  | "secrets"
+  | "coordinators";
 
 export function workspaceSettingsHref(workspaceId: string, tab: WorkspaceSettingsTab): string {
   const base = `${WORKSPACES_SETTINGS_HREF}/${encodeURIComponent(workspaceId)}`;
@@ -55,6 +57,7 @@ export const WORKSPACE_SETTINGS_TABS: ReadonlyArray<WorkspaceTabSpec> = [
   { tab: "integrations", labelKey: "common:integrations", icon: IconPlugConnected },
   { tab: "automations", labelKey: "common:automations", icon: IconBolt },
   { tab: "secrets", labelKey: "settings:secrets", icon: IconKey },
+  { tab: "coordinators", labelKey: "workspaces:coordinators", icon: IconShieldCheck },
 ];
 
 /**
@@ -64,10 +67,13 @@ export const WORKSPACE_SETTINGS_TABS: ReadonlyArray<WorkspaceTabSpec> = [
  */
 export function getWorkspaceSettingsTabs(
   canvasesEnabled: boolean,
+  coordinatorTaskAuthorityEnabled = false,
 ): ReadonlyArray<WorkspaceTabSpec> {
-  return canvasesEnabled
-    ? WORKSPACE_SETTINGS_TABS
-    : WORKSPACE_SETTINGS_TABS.filter(({ tab }) => tab !== "canvases");
+  return WORKSPACE_SETTINGS_TABS.filter(({ tab }) => {
+    if (tab === "canvases") return canvasesEnabled;
+    if (tab === "coordinators") return coordinatorTaskAuthorityEnabled;
+    return true;
+  });
 }
 
 /** The name and mark for a tab, for the surfaces that render one tab at a time. */

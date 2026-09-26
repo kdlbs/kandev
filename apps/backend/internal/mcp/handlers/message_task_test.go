@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -920,13 +921,14 @@ func TestHandleMessageTask_ParentToChildRunningSession_ExplicitQueued_DoesNotInt
 }
 
 // TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected pins
-// the authorization contract: delivery_mode="interrupt" is only ever
-// honored when the sender is the target's direct parent. A non-parent
-// (sibling/unrelated) sender explicitly requesting "interrupt" must get a
-// hard rejection — not a silent downgrade to "queued" — and the rejection
-// must have no side effect: nothing is queued, dispatched, or interrupted.
-// A silent downgrade would misreport what happened and hide caller misuse
-// instead of telling the caller its request was rejected.
+// the authorization contract: delivery_mode="interrupt" is honored for the
+// target's direct parent or a caller with active granted coordinator scope. A
+// non-parent (sibling/unrelated) sender without that scope explicitly
+// requesting "interrupt" must get a hard rejection — not a silent downgrade
+// to "queued" — and the rejection must have no side effect: nothing is
+// queued, dispatched, or interrupted. A silent downgrade would misreport what
+// happened and hide caller misuse instead of telling the caller its request
+// was rejected.
 func TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
@@ -941,6 +943,7 @@ func TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected(t *test
 	var errPayload ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(resp.Payload, &errPayload))
 	assert.Contains(t, errPayload.Message, "direct parent")
+	assert.Contains(t, errPayload.Message, "active granted coordinator scope")
 
 	// No side effect from the rejected request: the target's queue stays
 	// empty and neither the interrupt nor any other dispatch path ran.
@@ -949,6 +952,38 @@ func TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected(t *test
 	assert.Empty(t, orch.interruptCalls)
 	assert.Empty(t, orch.promptCalls)
 	assert.Empty(t, orch.startCreatedCalls)
+}
+
+func TestHandleMessageTask_CoordinatorGrantInterruptsAndResolvesAudit(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	now := time.Now().UTC()
+	principal := &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: sender.WorkspaceID, PluginInstallationID: coordinator.TaskPrincipalInstallationID, LogicalKey: coordinator.TaskPrincipalLogicalKey(sender.ID),
+		BackingTaskID: sender.ID, BackingSessionID: "sender-sess-1", CreatedAt: now,
+	}
+	require.NoError(t, repo.CreateWorkspaceAgentPrincipal(context.Background(), principal))
+	require.NoError(t, repo.CreateWorkspaceCoordinatorGrant(context.Background(), &models.WorkspaceCoordinatorGrant{
+		WorkspaceID: sender.WorkspaceID, CoordinatorTaskID: sender.ID, CreatedByUserID: "operator", CreatedAt: now,
+	}))
+	require.NoError(t, repo.CreateCoordinatorGrant(context.Background(), &models.CoordinatorGrant{
+		ID: "grant-1", PrincipalID: principal.ID, WorkspaceID: sender.WorkspaceID,
+		ScopeKind: coordinator.ScopeWorkspace, ScopeID: sender.WorkspaceID, Capabilities: "orchestrate", GrantedAt: now,
+	}))
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	h.SetCoordinatorAuthority(coordinator.New(repo, func() bool { return true }))
+
+	response, err := h.handleMessageTask(context.Background(), makeWSMessage(t, ws.ActionMCPMessageTask,
+		senderPayloadWithMode(target.ID, "stop now", sender.ID, "interrupt")))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	require.Len(t, orch.interruptCalls, 1)
+	require.Equal(t, sess.ID, orch.interruptCalls[0].sessionID)
+	events, err := repo.ListCoordinatorAuditEvents(context.Background(), sender.WorkspaceID, sender.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, "ok", events[0].Result)
+	require.Equal(t, principal.ID, events[0].PrincipalID)
 }
 
 // TestHandleMessageTask_InvalidDeliveryMode_Rejected pins plain input

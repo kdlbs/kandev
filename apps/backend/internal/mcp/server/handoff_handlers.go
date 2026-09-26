@@ -16,7 +16,7 @@ import (
 func (s *Server) registerRelatedTasksTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_related_tasks_kandev",
-			mcp.WithDescription(`List a task's parent, children, siblings, blockers, and blocked tasks. Entries include identity, state, and linked pull requests; Office entries also include document keys. Descriptions are omitted unless verbose=true. task_id defaults to the current task and may inspect another task in the same workspace.`),
+			mcp.WithDescription(`List a task's parent, children, siblings, blockers, and blocked tasks. Entries include identity, state, and linked pull requests; Office entries also include document keys. Descriptions are omitted unless verbose=true. task_id defaults to the current task and may inspect a related task or a target within an explicitly granted coordinator scope.`),
 			mcp.WithString("task_id", mcp.Description("Defaults to the current task.")),
 			mcp.WithBoolean("verbose", mcp.Description(
 				"Include each related task's full description. Defaults to false, which returns the compact projection.")),
@@ -36,7 +36,7 @@ func (s *Server) registerTaskDocumentTools() {
 			mcp.WithDescription(
 				`List documents for a task (key + title + author + size; no content).
 Allowed for the current task itself, the current task's ancestors/descendants in the same workspace,
-and siblings sharing a non-empty parent. Returns access_denied for unrelated tasks.`,
+and siblings sharing a non-empty parent. Explicit coordinator inspect authority also permits targets in its granted scope. Returns access_denied otherwise.`,
 			),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("Target task to list documents for.")),
 		),
@@ -46,7 +46,7 @@ and siblings sharing a non-empty parent. Returns access_denied for unrelated tas
 		mcp.NewTool("get_task_document_kandev",
 			mcp.WithDescription(
 				`Fetch a single task document (with content). Same access rules as list_task_documents_kandev:
-self, ancestors, descendants in the same workspace, or siblings with a shared non-empty parent.`,
+self, ancestors, descendants in the same workspace, siblings with a shared non-empty parent, or targets in an explicitly granted coordinator inspect scope.`,
 			),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("Target task that owns the document.")),
 			mcp.WithString("document_key", mcp.Required(), mcp.Description("Document key (e.g. 'spec', 'plan', 'notes').")),
@@ -80,8 +80,9 @@ func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("task_id is required (no current task context)"), nil
 		}
 		payload := map[string]string{
-			"task_id":        taskID,
-			"caller_task_id": s.taskID,
+			"task_id":           taskID,
+			"caller_task_id":    s.taskID,
+			"caller_session_id": s.sessionID,
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListRelatedTasks, payload, &result); err != nil {
@@ -128,8 +129,9 @@ func (s *Server) listTaskDocumentsHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
 		payload := map[string]string{
-			"task_id":        taskID,
-			"caller_task_id": s.taskID,
+			"task_id":           taskID,
+			"caller_task_id":    s.taskID,
+			"caller_session_id": s.sessionID,
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTaskDocuments, payload, &result); err != nil {
@@ -151,9 +153,10 @@ func (s *Server) getTaskDocumentHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("document_key is required"), nil
 		}
 		payload := map[string]string{
-			"task_id":        taskID,
-			"document_key":   key,
-			"caller_task_id": s.taskID,
+			"task_id":           taskID,
+			"document_key":      key,
+			"caller_task_id":    s.taskID,
+			"caller_session_id": s.sessionID,
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskDocument, payload, &result); err != nil {

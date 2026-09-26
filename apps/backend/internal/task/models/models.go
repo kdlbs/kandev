@@ -1961,6 +1961,18 @@ var AllTaskSessionStates = []TaskSessionState{
 	TaskSessionStateCancelled,
 }
 
+// IsTerminalTaskSessionState reports whether the session can no longer
+// dispatch: completed, failed, or cancelled. Every other state (including
+// IDLE, which keeps an office session resumable) may still dispatch, so
+// authorization bindings must treat those as live.
+func IsTerminalTaskSessionState(state TaskSessionState) bool {
+	switch state {
+	case TaskSessionStateCompleted, TaskSessionStateFailed, TaskSessionStateCancelled:
+		return true
+	}
+	return false
+}
+
 // SessionBranchInfo is a lightweight projection of a session with its worktree branch.
 // Used by the PR watch reconciler to find sessions that may need PR watches.
 type SessionBranchInfo struct {

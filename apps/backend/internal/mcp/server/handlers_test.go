@@ -846,6 +846,11 @@ func TestStopTask_ToolSchemaIsMinimalAndDescriptionIsAccurate(t *testing.T) {
 	require.True(t, ok, "stop schema must declare properties")
 	require.Len(t, properties, 1, "stop schema must not expose sender, session, reason, or force controls")
 	assert.Contains(t, properties, "task_id")
+	taskIDProperty, ok := properties["task_id"].(map[string]interface{})
+	require.True(t, ok, "stop task_id schema must describe the target scope")
+	taskIDDescription, ok := taskIDProperty["description"].(string)
+	require.True(t, ok, "stop task_id schema must have a description")
+	assert.Contains(t, taskIDDescription, "granted coordinator scope")
 	for _, forbidden := range []string{"sender_task_id", "sender_session_id", "session_id", "reason", "force"} {
 		assert.NotContains(t, properties, forbidden)
 	}
@@ -857,6 +862,7 @@ func TestStopTask_ToolSchemaIsMinimalAndDescriptionIsAccurate(t *testing.T) {
 	description := stopTool.Tool.Description
 	for _, phrase := range []string{
 		"direct child",
+		"explicitly granted coordinator authority",
 		"all live sessions",
 		"halt-only",
 		"does not send a prompt or start a replacement turn",
@@ -893,10 +899,10 @@ func TestStopTask_ForwardsTrustedSenderToBackend(t *testing.T) {
 	assert.Equal(t, "mcp.stop_task", backend.lastAction)
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
-	require.Len(t, payload, 2, "forwarder must build a fresh trusted payload")
+	require.Len(t, payload, 3, "forwarder must build a fresh trusted payload")
 	assert.Equal(t, "task-target", payload["task_id"])
 	assert.Equal(t, "task-current", payload["sender_task_id"])
-	assert.NotContains(t, payload, "sender_session_id")
+	assert.Equal(t, "test-session", payload["sender_session_id"])
 	assert.NotContains(t, payload, "session_id")
 	assert.NotContains(t, payload, "reason")
 	assert.NotContains(t, payload, "force")

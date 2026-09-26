@@ -100,6 +100,12 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Operator-granted task coordination. Off in every profile so grants never
+  # extend task authority unless an installation explicitly enables it.
+  KANDEV_FEATURES_COORDINATOR_TASK_AUTHORITY:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
   # Needs-you Inbox: a workspace-scoped sidebar destination listing exactly
   # the answerable clarification bundles for the active workspace. Off in
   # prod until the feature is user-ready; on in dev/e2e so contributors and

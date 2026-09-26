@@ -160,14 +160,14 @@ Choose the control by intent:
 | Intent                                                  | Operation                                                        | Result                                                                                                                                       |
 | ------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Send information that can wait                          | `message_task_kandev` with queued delivery or no `delivery_mode` | The current turn continues and the message waits FIFO.                                                                                       |
-| Stop the current approach and give replacement work now | `message_task_kandev` with `delivery_mode: "interrupt"`          | The direct parent requests immediate cancellation and redispatch. If that cannot proceed safely, the response reports the message as queued. |
-| Halt all current work with no replacement prompt        | `stop_task_kandev`                                               | The direct parent requests logical cancellation and graceful teardown without creating or dispatching a message.                             |
+| Stop the current approach and give replacement work now | `message_task_kandev` with `delivery_mode: "interrupt"`          | A direct parent or an explicitly granted coordinator requests immediate cancellation and redispatch. If that cannot proceed safely, the response reports the message as queued. |
+| Halt all current work with no replacement prompt        | `stop_task_kandev`                                               | A direct parent or an explicitly granted coordinator requests logical cancellation and graceful teardown without creating or dispatching a message.                             |
 
-Only a direct parent may interrupt its child. Halt-only stop is stricter: it accepts only a same-workspace direct child, while self, siblings, ancestors other than the parent, deeper descendants, unrelated tasks, and cross-workspace callers are rejected. Use interrupt for stop-and-steer work. Reserve stop for halt-only intent.
+An ordinary task may interrupt or stop only its same-workspace direct child. A task with an active, explicitly granted coordinator `orchestrate` capability may also target a task within its grant's scope. Self, siblings, ancestors other than the parent, deeper descendants, unrelated tasks outside that scope, and cross-workspace callers are rejected. Use interrupt for stop-and-steer work. Reserve stop for halt-only intent.
 
-### Stop a direct child's work
+### Stop task work
 
-`stop_task_kandev` accepts the full ID of one direct child and has no session-specific option. Kandev inspects that child's active-session candidates and requests a graceful stop for every execution still observed as live, including non-primary sibling sessions. It does not recurse into descendants.
+`stop_task_kandev` accepts the full ID of one authorized target and has no session-specific option. Kandev inspects that target's active-session candidates and requests a graceful stop for every execution still observed as live, including non-primary sibling sessions. It does not recurse into descendants.
 
 For each accepted execution, Kandev persists the session as `CANCELLED` before scheduling runtime teardown. A `status: "stopped"` response confirms that logical state and scheduled teardown; cleanup continues asynchronously and the process may not have exited yet. When no live execution is accepted, the call succeeds idempotently with `status: "not_running"` and changes no task or session state.
 
@@ -259,7 +259,7 @@ processes after attachment. Local Docker, SSH, and Sprites instead clone the new
 the current remote workspace and rescan it without changing the agent CWD or restarting the agent
 and workspace processes.
 
-Task agents can call `add_workspace_sources_kandev` with the same mixed batch; `task_id` defaults to the current task, and the operation remains idle-only. A direct parent in the same workspace can use it to recover an idle child that is missing a repository or SDK; siblings and other task relationships cannot target that child. Exact retries are safe no-ops. `add_branch_to_task_kandev` remains the current-task-only Worktree legacy one-repository/branch path and may run during an active turn: it creates a sibling worktree under the task directory, promotes the Files root to that parent, and rescans without restarting the agent, terminals, or workspace processes. Its `worktree_path` is the exact new location, `task_workspace_path` is the Files root, and `agent_cwd_changed` is always `false`; the agent's current directory stays unchanged.
+Task agents can call `add_workspace_sources_kandev` with the same mixed batch; `task_id` defaults to the current task, and the operation remains idle-only. A direct parent in the same workspace can use it to recover an idle child that is missing a repository or SDK. A task with an active, explicitly granted coordinator `orchestrate` capability can do the same for an idle task in its grant's scope. Other task relationships cannot target that task. Exact retries are safe no-ops. `add_branch_to_task_kandev` remains the current-task-only Worktree legacy one-repository/branch path and may run during an active turn: it creates a sibling worktree under the task directory, promotes the Files root to that parent, and rescans without restarting the agent, terminals, or workspace processes. Its `worktree_path` is the exact new location, `task_workspace_path` is the Files root, and `agent_cwd_changed` is always `false`; the agent's current directory stays unchanged.
 
 Use `update_repository_base_branch_kandev` with a task-repository ID to change the comparison base. The database update is authoritative. Resetting cached session bases, refreshing Changes, base commit, ahead/behind counts, and cumulative diff in a live tracker are best-effort side effects; a failure is logged without rolling back the new base, and the persisted value is rebuilt on the next session launch. The tool does not rewrite commits, switch the checkout, or change an existing pull request's target branch.
 
@@ -321,8 +321,8 @@ When Office is enabled, it prototypes **Blocked by** and **Blocking** properties
 - **Subtask creates but its agent or repositories fail to start:** the dialog does not enforce agent/executor compatibility. Confirm the agent is configured on that executor; multi-repository creation supports Worktree, Local Docker, SSH, and Sprites.
 - **Inherited subtask sees unexpected changes:** it intentionally shares the parent's materialized files and branch.
 - **Message remains queued:** the target is busy and only one queued message drains per turn. Check for `queue_full` before retrying.
-- **Interrupt is rejected:** only the target's direct parent may use interrupt delivery.
-- **Stop is rejected:** `stop_task_kandev` is task-mode only and accepts only a same-workspace direct child of the caller.
+- **Interrupt is rejected:** use interrupt only for a same-workspace direct child, unless the caller has an active coordinator `orchestrate` grant that includes the target.
+- **Stop is rejected:** `stop_task_kandev` is task-mode only and accepts a same-workspace direct child or a target within the caller's active coordinator `orchestrate` grant.
 - **Stop reports `stopped` but a process is still visible:** the response confirms logical cancellation and scheduled graceful teardown, not process exit.
 - **Agent cannot spawn on another task:** `spawn_session_kandev` is same-workspace only; create a task or use a normal targeted message instead.
 - **Parent does not advance after children finish:** the parent needs an active session in `CREATED`, `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT` in addition to terminal direct children.
@@ -332,3 +332,78 @@ When Office is enabled, it prototypes **Blocked by** and **Blocking** properties
 - **Changed base did not retarget the PR:** the base-update tool changes Kandev's comparison context, not Git history or provider PR metadata.
 
 Related: [Tasks and workflows](tasks-and-workflows.md), [Sessions and review](sessions-and-review.md), [Automation and MCP](automation-and-mcp.md), [Agents and profiles](agents-and-profiles.md), and [Executors](executors.md).
+
+## Coordinator task authority
+
+A **coordinator grant** is an explicit operator-level permission that lets one
+task (the _coordinator_) act on unrelated tasks within a workspace or
+workflow. This is how an orchestrator task monitors and redirects its board
+without being the direct parent of every task it manages.
+
+### Capabilities
+
+- **Inspect**: read documents, relations, and metadata on any task in scope.
+- **Orchestrate**: stop, interrupt (deliver urgent messages), and attach
+  workspace sources on any task in scope.
+- **Execution lease**: lets the Host, not the coordinator agent, perform one
+  short-lived, exact repository operation after it validates the grant,
+  workspace, task, branch, and expected commit.
+
+Coordinator authority is additive: a coordinator retains its existing
+parent/child capabilities and gains these on top.
+
+### What a grant does NOT enable
+
+- **Destructive operations**: `delete_task`, `archive_task`, credential
+  access, deletion, force-push, rebase, squash, amend, and other irreversible
+  actions remain outside coordinator authority.
+- **Cross-workspace authority**: a grant is strictly scoped to one workspace.
+- **Mutating the grant system**: no MCP or API tool can create, revoke, or
+  modify a coordinator grant.
+- **Credentials or arbitrary commands**: an execution lease is never exposed
+  to an agent as a token, shell command, filesystem path, or provider
+  credential. Force pushes, rebases, history rewrites, and cross-workspace
+  actions remain unavailable.
+
+### Creating and managing grants
+
+Grants are managed through **Settings → Workspace → Coordinators** in the web
+UI, or through the `/api/v1/workspaces/:id/coordinator-grants` API endpoint:
+
+- **Create**: specify the coordinator task UUID, the scope (`workspace` or
+  `workflow`), and the capability list.
+- **List**: view active and revoked grants per workspace or per task.
+- **Revoke**: soft-delete the grant. Revocation takes effect on the next
+  privileged call; no restart is needed.
+
+### Audit trail
+
+Every privileged action (stop, interrupt, attach workspace sources) that either
+succeeds via a grant or is denied while the actor holds an active grant in the
+workspace is recorded in the workspace's audit log. The log contains:
+
+- Actor task and session
+- Target task
+- Action and capability requested
+- Decision (`allowed` / `denied`)
+- Grant ID that was used
+- Result and detail (reason codes only, never task content)
+
+Denials for tasks that hold no grant are not audited, so audit volume stays
+proportional to coordinator activity.
+
+### Threat model
+
+A coordinator grant is as strong as operator access to the system. Any user who
+can reach the Settings → Coordinators page or the `/api/v1/coordinator-grants`
+API can grant coordinator authority. Enable per-user authentication on shared
+instances.
+
+### Recovery
+
+- **Revoke all grants** for a coordinator: the next privileged call falls back
+  to the default direct-parent rules.
+- **Disable the runtime flag** `features.coordinatorTaskAuthority`: the
+  grant checks stop running and legacy relation rules remain in force.
+- **Delete the grant row**: the audit trail is retained, but the grant no
+  longer exists.
