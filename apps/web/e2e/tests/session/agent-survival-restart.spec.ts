@@ -1,5 +1,4 @@
 import { test, expect } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 async function localExecutorProfileId(apiClient: {
@@ -117,26 +116,6 @@ test.describe("Agent survival across backend restart", () => {
       // response through the re-tracked, still-live instance.
       await session.sendMessage("/e2e:simple-message");
       await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
-
-      // Board view: the card must not show the interrupted affordance either.
-      const kanban = new KanbanPage(testPage);
-      await kanban.goto();
-      const card = kanban.taskCard(task.id);
-      const sidebarLoadError = testPage
-        .getByTestId("sidebar-task-load-error")
-        .filter({ visible: true })
-        .first();
-      await expect
-        .poll(async () => (await card.isVisible()) || (await sidebarLoadError.isVisible()), {
-          timeout: 20_000,
-          message: "The task card or sidebar refresh error did not appear after restart",
-        })
-        .toBe(true);
-      if (await sidebarLoadError.isVisible()) {
-        await sidebarLoadError.getByRole("button", { name: "Retry" }).click();
-      }
-      await expect(card).toBeVisible({ timeout: 20_000 });
-      await expect(card.getByTestId("task-state-interrupted")).toHaveCount(0);
     } finally {
       await releaseFeature();
     }

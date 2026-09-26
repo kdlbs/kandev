@@ -4,6 +4,7 @@ import {
   captureGatewayRequests,
   routeRecoveryFailureAndRetry,
   sessionLaunchRequests,
+  waitForTaskUnarchive,
 } from "../../helpers/archived-session-recovery";
 import { waitForArchiveCancelledSession, waitForSessionDone } from "../../helpers/session";
 import {
@@ -53,11 +54,9 @@ test.describe("archived session recovery", () => {
     expect(sessionLaunchRequests(requests, sessionId)).toHaveLength(0);
 
     requests.length = 0;
-    const unarchiveResponse = testPage.waitForResponse((response) =>
-      response.url().endsWith(`/api/v1/tasks/${fixture.task.id}/unarchive`),
-    );
+    const unarchiveSettled = waitForTaskUnarchive(testPage, fixture.task.id);
     await testPage.getByTestId("task-unarchive-button").click();
-    await unarchiveResponse;
+    await unarchiveSettled;
     await expect(testPage.getByTestId("task-unarchive-button")).toHaveCount(0);
     await expect
       .poll(
@@ -134,11 +133,9 @@ test.describe("archived session recovery", () => {
       expect(sessionLaunchRequests(requests, sessionId)).toHaveLength(0);
 
       requests.length = 0;
-      const unarchiveResponse = testPage.waitForResponse((response) =>
-        response.url().endsWith(`/api/v1/tasks/${fixture.task.id}/unarchive`),
-      );
+      const unarchiveSettled = waitForTaskUnarchive(testPage, fixture.task.id);
       await testPage.getByTestId("task-unarchive-button").click();
-      await unarchiveResponse;
+      await unarchiveSettled;
       await expect(testPage.getByTestId("task-unarchive-button")).toHaveCount(0);
       await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
       expect(
@@ -181,7 +178,9 @@ test.describe("archived session recovery", () => {
     await testPage.goto(`/t/${fixture.task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    const unarchiveSettled = waitForTaskUnarchive(testPage, fixture.task.id);
     await testPage.getByTestId("task-unarchive-button").click();
+    await unarchiveSettled;
     await expect(testPage.getByTestId("task-unarchive-button")).toHaveCount(0);
 
     const banner = testPage.getByTestId("session-recovery-error");
