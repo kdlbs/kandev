@@ -275,7 +275,7 @@ export function KanbanCardShell({
             <KanbanCardBody
               task={task}
               repositoryChips={repositoryChips ?? []}
-              enableTitleHover
+              enableTitleHover={!isMultiSelectMode}
               actions={
                 <KanbanCardActionSlot
                   isMultiSelectMode={isMultiSelectMode}

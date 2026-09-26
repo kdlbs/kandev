@@ -131,7 +131,8 @@ func (f fakeSourceProfileReader) GetAgent(_ context.Context, id string) (*settin
 }
 
 type capturingAgentCreator struct {
-	agent *models.AgentInstance
+	agent               *models.AgentInstance
+	backfilledWorkspace string
 }
 
 func TestResolveProviderIDRejectsUnsupportedAgentName(t *testing.T) {
@@ -148,6 +149,13 @@ func TestResolveProviderIDRejectsUnsupportedAgentName(t *testing.T) {
 func (c *capturingAgentCreator) CreateAgentInstance(_ context.Context, agent *models.AgentInstance) error {
 	c.agent = agent
 	return nil
+}
+
+func (c *capturingAgentCreator) BackfillDefaultSkillsForWorkspace(
+	_ context.Context,
+	workspaceID string,
+) {
+	c.backfilledWorkspace = workspaceID
 }
 
 // newTestOnboardingServiceWithRepo is like newTestOnboardingService but
@@ -322,6 +330,9 @@ func TestCreateOnboardingAgent_KeepsRuntimeConfigurationIndirect(t *testing.T) {
 	}
 	if capture.agent == nil {
 		t.Fatal("agent was not created")
+	}
+	if capture.backfilledWorkspace != "ws-1" {
+		t.Errorf("backfill workspace = %q, want ws-1", capture.backfilledWorkspace)
 	}
 	if capture.agent.AgentID != "provider-db-id" {
 		t.Errorf("legacy provider family = %q", capture.agent.AgentID)

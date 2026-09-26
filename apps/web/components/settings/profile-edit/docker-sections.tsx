@@ -17,6 +17,7 @@ import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
+import { buildRemoteDockerImage } from "@/lib/api/domains/remote-docker-api";
 import {
   buildDockerImage,
   listDockerContainers,
@@ -119,7 +120,13 @@ async function readDockerStream(
   return hasError;
 }
 
-function useBuildStream(onBuildSuccess?: (result: DockerBuildSuccess) => void) {
+// remoteExecutorId selects the daemon the build runs on. When set, the build
+// targets that executor's own daemon; the image only exists where it is built,
+// so a remote profile built on the install-wide daemon would never find it.
+function useBuildStream(
+  onBuildSuccess?: (result: DockerBuildSuccess) => void,
+  remoteExecutorId?: string,
+) {
   const { t } = useTranslation();
   const [buildStatus, setBuildStatus] = useState<BuildStatus>("idle");
   const [buildLog, setBuildLog] = useState("");
@@ -136,7 +143,9 @@ function useBuildStream(onBuildSuccess?: (result: DockerBuildSuccess) => void) {
       setBuildStatus("building");
       setBuildLog("");
       try {
-        const response = await buildDockerImage({ dockerfile, tag });
+        const response = remoteExecutorId
+          ? await buildRemoteDockerImage(remoteExecutorId, { dockerfile, tag })
+          : await buildDockerImage({ dockerfile, tag });
         if (!response.ok) {
           const text = await response.text();
           setBuildStatus("failed");
@@ -163,7 +172,7 @@ function useBuildStream(onBuildSuccess?: (result: DockerBuildSuccess) => void) {
         );
       }
     },
-    [appendLog, onBuildSuccess, t],
+    [appendLog, onBuildSuccess, remoteExecutorId, t],
   );
 
   return { buildStatus, buildLog, runBuild };
@@ -177,6 +186,9 @@ type DockerfileBuildCardProps = {
   baselineImageTag?: string;
   onImageTagChange: (v: string) => void;
   onBuildSuccess?: (result: DockerBuildSuccess) => void;
+  // Set for a remote Docker profile so the build runs on that executor's
+  // daemon rather than the install-wide one.
+  remoteExecutorId?: string;
 };
 
 /** Build trigger plus its status badge, or the admin-only explanation. */
@@ -219,9 +231,10 @@ export function DockerfileBuildCard({
   baselineImageTag,
   onImageTagChange,
   onBuildSuccess,
+  remoteExecutorId,
 }: DockerfileBuildCardProps) {
   const { t } = useTranslation();
-  const { buildStatus, buildLog, runBuild } = useBuildStream(onBuildSuccess);
+  const { buildStatus, buildLog, runBuild } = useBuildStream(onBuildSuccess, remoteExecutorId);
   const logRef = useRef<HTMLPreElement>(null);
   // Building an image is a host-level operation with no per-user resource, so
   // the backend gates POST /api/v1/docker/build on the admin role.

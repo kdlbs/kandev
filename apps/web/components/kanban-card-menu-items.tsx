@@ -11,21 +11,6 @@ import {
   IconUnlink,
 } from "@tabler/icons-react";
 import {
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-} from "@kandev/ui/context-menu";
-import {
-  DropdownMenuItem,
-  DropdownMenuPortal,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-} from "@kandev/ui/dropdown-menu";
-import {
   stepHasAutoStart,
   type TaskMoveStep,
   type TaskMoveWorkflow,
@@ -43,6 +28,11 @@ import { buildEditMenuEntry } from "./kanban-card-edit-submenu";
 import { buildPrimaryPluginEntries } from "./plugins/task-menu-actions";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { buildSingleTaskWorkflowEntry } from "./kanban-card-single-workflow-entry";
+export {
+  KanbanCardContextMenuItems,
+  KanbanCardDropdownMenuItems,
+} from "./kanban-card-menu-entry-renderers";
 export { useKanbanCardMoveTargets } from "@/hooks/use-kanban-card-move-targets";
 
 type ItemEntry = {
@@ -113,7 +103,7 @@ export type BuildKanbanCardMenuEntriesArgs = {
   currentStepId?: string | null;
   workflows: TaskMoveWorkflow[];
   stepsByWorkflowId: Record<string, TaskMoveStep[]>;
-  /** Disables only move and send-to-workflow entries while a row-local move runs. */
+  /** Disables only move and change-workflow entries while a row-local move runs. */
   moveDisabled?: boolean;
   disabled?: boolean;
   isDeleting?: boolean;
@@ -135,7 +125,9 @@ export type BuildKanbanCardMenuEntriesArgs = {
   onLinkSentryIssue?: () => void;
   pluginLinkActions?: KanbanPluginLinkAction[];
   onMoveToStep?: (stepId: string) => void;
+  onChangeWorkflow?: () => void;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
+  isBulkSelection?: boolean;
   /** Defaults to an empty-id context (no visible plugin actions match it in practice). */
   pluginMenuContext?: PluginTaskMenuContext;
   /**
@@ -372,10 +364,10 @@ function buildSendToWorkflowSubmenu({
   if (!onSendToWorkflow || !currentWorkflowId || targets.length === 0) return null;
   return {
     kind: "submenu",
-    key: "send-to-workflow",
-    testId: "task-context-send-to-workflow",
+    key: "change-workflow-selection",
+    testId: "task-context-change-workflow-selection",
     icon: <IconLogicBuffer className="mr-2 h-4 w-4" />,
-    label: t("kanban:sendToWorkflow"),
+    label: t("task:changeWorkflowForSelectedTasks"),
     disabled,
     className: "w-56",
     children: targets.map((workflow) =>
@@ -387,6 +379,72 @@ function buildSendToWorkflowSubmenu({
       }),
     ),
   };
+}
+
+function buildWorkflowMenuEntry({
+  currentWorkflowId,
+  workflows,
+  stepsByWorkflowId,
+  disabled,
+  onChangeWorkflow,
+  onSendToWorkflow,
+  isBulkSelection,
+}: Pick<
+  BuildKanbanCardMenuEntriesArgs,
+  | "currentWorkflowId"
+  | "workflows"
+  | "stepsByWorkflowId"
+  | "onChangeWorkflow"
+  | "onSendToWorkflow"
+  | "isBulkSelection"
+> & { disabled: boolean }): KanbanCardMenuEntry | null {
+  const visibleWorkflows = workflows.filter((workflow) => !workflow.hidden);
+  if (isBulkSelection) {
+    return buildSendToWorkflowSubmenu({
+      currentWorkflowId,
+      workflows: visibleWorkflows,
+      stepsByWorkflowId,
+      disabled,
+      onSendToWorkflow,
+    });
+  }
+  return buildSingleTaskWorkflowEntry({
+    currentWorkflowId,
+    hasOtherWorkflows: visibleWorkflows.some((workflow) => workflow.id !== currentWorkflowId),
+    disabled,
+    onChangeWorkflow,
+  });
+}
+
+function buildCurrentWorkflowMoveEntry(
+  currentSteps: TaskMoveStep[],
+  currentStepId: string | null | undefined,
+  disabled: boolean,
+  onMoveToStep: ((stepId: string) => void) | undefined,
+) {
+  return buildMoveToCurrentWorkflowSubmenu({
+    steps: currentSteps,
+    currentStepId,
+    disabled,
+    onMoveToStep,
+  });
+}
+
+// A flat Edit surface cannot reuse plugin entries that include the card-only Edit group.
+function resolveCardPluginEntries({
+  pluginEntries,
+  forceFlatEdit,
+  disabled,
+  onEdit,
+  pluginMenuContext,
+}: Pick<
+  BuildKanbanCardMenuEntriesArgs,
+  "pluginEntries" | "forceFlatEdit" | "onEdit" | "pluginMenuContext"
+> & {
+  disabled: boolean;
+}): CardPluginEntries {
+  if (pluginEntries && !forceFlatEdit) return pluginEntries;
+  return buildCardPluginEntries({ disabled, onEdit, forceFlatEdit, pluginMenuContext });
 }
 
 export function buildKanbanCardMenuEntries({
@@ -414,12 +472,13 @@ export function buildKanbanCardMenuEntries({
   onLinkSentryIssue,
   pluginLinkActions,
   onMoveToStep,
+  onChangeWorkflow,
   onSendToWorkflow,
+  isBulkSelection,
   pluginMenuContext,
   pluginEntries,
   forceFlatEdit,
 }: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
-  const visibleWorkflows = workflows.filter((workflow) => !workflow.hidden);
   const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
   const isProcessing = Boolean(disabled || isDeleting || isArchiving || isDetaching);
   const priorityEntry = buildPriorityMenuEntry({
@@ -428,30 +487,29 @@ export function buildKanbanCardMenuEntries({
     onSelectPriority,
   });
 
-  const moveToEntry = buildMoveToCurrentWorkflowSubmenu({
-    steps: currentSteps,
+  const moveToEntry = buildCurrentWorkflowMoveEntry(
+    currentSteps,
     currentStepId,
-    disabled: moveDisabled || isProcessing,
+    Boolean(moveDisabled || isProcessing),
     onMoveToStep,
-  });
-  const sendToEntry = buildSendToWorkflowSubmenu({
+  );
+  const sendToEntry = buildWorkflowMenuEntry({
     currentWorkflowId,
-    workflows: visibleWorkflows,
+    workflows,
     stepsByWorkflowId,
-    disabled: moveDisabled || isProcessing,
+    disabled: Boolean(moveDisabled || isProcessing),
+    onChangeWorkflow,
     onSendToWorkflow,
+    isBulkSelection,
   });
 
-  // `forceFlatEdit` outranks a prebuilt bundle: those surfaces must never show the submenu form.
-  const pluginContributions =
-    pluginEntries && !forceFlatEdit
-      ? pluginEntries
-      : buildCardPluginEntries({
-          disabled: isProcessing,
-          onEdit,
-          forceFlatEdit,
-          pluginMenuContext,
-        });
+  const pluginContributions = resolveCardPluginEntries({
+    pluginEntries,
+    forceFlatEdit,
+    disabled: isProcessing,
+    onEdit,
+    pluginMenuContext,
+  });
 
   const linkEntry = buildLinkSubmenu({
     disabled: isProcessing,
@@ -564,107 +622,4 @@ function buildDetachEntry({
     disabled: isProcessing,
     onSelect: onDetach,
   };
-}
-
-function ContextEntry({ entry }: { entry: KanbanCardMenuEntry }) {
-  if (entry.kind === "separator") return <ContextMenuSeparator />;
-  if (entry.kind === "submenu") {
-    return (
-      <ContextMenuSub>
-        <ContextMenuSubTrigger data-testid={entry.testId} disabled={entry.disabled}>
-          {entry.icon}
-          {entry.label}
-        </ContextMenuSubTrigger>
-        <ContextMenuSubContent className={entry.className}>
-          {entry.children.map((child) => (
-            <ContextEntry key={child.key} entry={child} />
-          ))}
-        </ContextMenuSubContent>
-      </ContextMenuSub>
-    );
-  }
-
-  return (
-    <ContextMenuItem
-      data-testid={entry.testId}
-      disabled={entry.disabled}
-      className={entry.destructive ? "text-destructive focus:text-destructive" : undefined}
-      // React events bubble through the React tree even from a portal — stop here so the card's onClick doesn't navigate.
-      onClick={(event) => event.stopPropagation()}
-      onSelect={() => {
-        if (!entry.disabled) entry.onSelect?.();
-      }}
-    >
-      {entry.icon}
-      {entry.leading}
-      {entry.label}
-      {entry.trailing}
-    </ContextMenuItem>
-  );
-}
-
-function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
-  if (entry.kind === "separator") return <DropdownMenuSeparator />;
-  if (entry.kind === "submenu") {
-    return (
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger
-          data-testid={entry.testId}
-          disabled={entry.disabled}
-          onClick={(event) => event.stopPropagation()}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          {entry.icon}
-          {entry.label}
-        </DropdownMenuSubTrigger>
-        <DropdownMenuPortal>
-          <DropdownMenuSubContent className={entry.className}>
-            {entry.children.map((child) => (
-              <DropdownEntry key={child.key} entry={child} />
-            ))}
-          </DropdownMenuSubContent>
-        </DropdownMenuPortal>
-      </DropdownMenuSub>
-    );
-  }
-
-  return (
-    <DropdownMenuItem
-      data-testid={entry.testId}
-      disabled={entry.disabled}
-      className={entry.destructive ? "text-destructive focus:text-destructive" : undefined}
-      // React events bubble through the React tree even from a portal - stop here so click/pointer don't reach the parent Card's onClick or dnd-kit listeners.
-      onClick={(event) => event.stopPropagation()}
-      onPointerDown={(event) => event.stopPropagation()}
-      onSelect={(event) => {
-        event.stopPropagation();
-        if (!entry.disabled) entry.onSelect?.();
-      }}
-    >
-      {entry.icon}
-      {entry.leading}
-      {entry.label}
-      {entry.trailing}
-    </DropdownMenuItem>
-  );
-}
-
-export function KanbanCardContextMenuItems({ entries }: { entries: KanbanCardMenuEntry[] }) {
-  return (
-    <>
-      {entries.map((entry) => (
-        <ContextEntry key={entry.key} entry={entry} />
-      ))}
-    </>
-  );
-}
-
-export function KanbanCardDropdownMenuItems({ entries }: { entries: KanbanCardMenuEntry[] }) {
-  return (
-    <>
-      {entries.map((entry) => (
-        <DropdownEntry key={entry.key} entry={entry} />
-      ))}
-    </>
-  );
 }

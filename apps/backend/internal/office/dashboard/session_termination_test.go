@@ -311,28 +311,18 @@ func TestAddTaskReviewer_ClaimKeepsSessionOfDisplacedRunner(t *testing.T) {
 	}
 }
 
-// TestSelfReviewSessionSurvivesRemoval_BothIdentityFlagStates is
-// AC-OFFICE-SESSION-TERM-003.5. The defect is reachable in the shipped
-// configuration (flag off), where a task with a runner routes every office run
-// through the runner's session, so the flag must not change the outcome.
-func TestSelfReviewSessionSurvivesRemoval_BothIdentityFlagStates(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		t.Run(map[bool]string{false: "identity_off", true: "identity_on"}[enabled], func(t *testing.T) {
-			deps := newTestDeps(t)
-			rt := &recordingTerminator{}
-			deps.svc.SetSessionTerminator(rt)
-			deps.svc.SetOfficeSessionIdentity(enabled)
+func TestSelfReviewSessionSurvivesRemoval(t *testing.T) {
+	deps := newTestDeps(t)
+	rt := &recordingTerminator{}
+	deps.svc.SetSessionTerminator(rt)
 
-			seedSelfReviewTask(t, deps, "task-flag", "agent-dual")
+	seedSelfReviewTask(t, deps, "task-self-review", "agent-dual")
 
-			if err := deps.svc.RemoveTaskReviewer(
-				context.Background(), "", "task-flag", "agent-dual"); err != nil {
-				t.Fatalf("remove reviewer: %v", err)
-			}
-			if len(rt.calls) != 0 {
-				t.Errorf("runner keeps its session regardless of the flag: got %d terminations",
-					len(rt.calls))
-			}
-		})
+	if err := deps.svc.RemoveTaskReviewer(
+		context.Background(), "", "task-self-review", "agent-dual"); err != nil {
+		t.Fatalf("remove reviewer: %v", err)
+	}
+	if len(rt.calls) != 0 {
+		t.Errorf("runner keeps its session: got %d terminations", len(rt.calls))
 	}
 }

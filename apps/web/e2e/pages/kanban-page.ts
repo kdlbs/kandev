@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { ChangeWorkflowPage } from "./change-workflow-page";
 
 export class KanbanPage {
   readonly board: Locator;
@@ -68,8 +69,12 @@ export class KanbanPage {
     return this.page.getByTestId("task-context-move-to");
   }
 
-  contextSendToWorkflow(): Locator {
-    return this.page.getByTestId("task-context-send-to-workflow");
+  contextChangeWorkflow(): Locator {
+    return this.page.getByTestId("task-context-change-workflow");
+  }
+
+  contextChangeWorkflowSelection(): Locator {
+    return this.page.getByTestId("task-context-change-workflow-selection");
   }
 
   contextWorkflow(workflowId: string): Locator {
@@ -138,21 +143,38 @@ export class KanbanPage {
   }
 
   async sendTaskToWorkflow(taskId: string, workflowId: string, stepId: string) {
-    await this.selectFromTaskContextMenu(taskId, () => this.selectWorkflowStep(workflowId, stepId));
+    await this.selectFromTaskContextMenu(taskId, async () => {
+      await expect(
+        this.contextChangeWorkflow().or(this.contextChangeWorkflowSelection()),
+      ).toBeVisible();
+      if (await this.contextChangeWorkflowSelection().isVisible()) {
+        await this.selectBulkWorkflowStep(workflowId, stepId);
+        return;
+      }
+      await this.selectChangeWorkflowForm(workflowId, stepId);
+    });
   }
 
   async sendTaskToWorkflowFromActions(taskId: string, workflowId: string, stepId: string) {
-    await this.selectFromTaskActionsMenu(taskId, () => this.selectWorkflowStep(workflowId, stepId));
+    await this.selectFromTaskActionsMenu(taskId, () =>
+      this.selectChangeWorkflowForm(workflowId, stepId),
+    );
   }
 
   async openSendToWorkflowTargets(workflowId: string) {
-    await this.openSubmenu(this.contextSendToWorkflow(), this.contextWorkflow(workflowId));
+    await this.openChangeWorkflowForm();
+    await this.changeWorkflowPage().chooseWorkflow(workflowId);
   }
 
   async openSendToWorkflowStep(workflowId: string, stepId: string) {
-    const workflow = this.contextWorkflow(workflowId);
-    await this.openSubmenu(this.contextSendToWorkflow(), workflow);
-    await this.openSubmenu(workflow, this.contextStep(stepId));
+    await this.openChangeWorkflowForm();
+    await this.changeWorkflowPage().chooseWorkflow(workflowId);
+    await this.changeWorkflowPage().chooseStep(stepId);
+  }
+
+  async openChangeWorkflowForm() {
+    await this.contextChangeWorkflow().click();
+    await expect(this.page.getByTestId("change-workflow-form")).toBeVisible();
   }
 
   private async selectFromTaskContextMenu(taskId: string, select: () => Promise<void>) {
@@ -178,12 +200,24 @@ export class KanbanPage {
     throw lastError;
   }
 
-  private async selectWorkflowStep(workflowId: string, stepId: string) {
+  private async selectChangeWorkflowForm(workflowId: string, stepId: string) {
+    await this.openChangeWorkflowForm();
+    const form = this.changeWorkflowPage();
+    await form.chooseWorkflow(workflowId);
+    await form.chooseStep(stepId);
+    await form.submit();
+  }
+
+  private async selectBulkWorkflowStep(workflowId: string, stepId: string) {
     const workflow = this.contextWorkflow(workflowId);
     const step = this.contextStep(stepId);
-    await this.openSubmenu(this.contextSendToWorkflow(), workflow);
+    await this.openSubmenu(this.contextChangeWorkflowSelection(), workflow);
     await this.openSubmenu(workflow, step);
     await this.selectMenuItem(step);
+  }
+
+  private changeWorkflowPage() {
+    return new ChangeWorkflowPage(this.page);
   }
 
   private async openSubmenu(trigger: Locator, child: Locator) {

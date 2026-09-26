@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"path"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/githubauth"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -59,4 +60,12 @@ func (r *KubernetesExecutor) prepareSharedKubernetesCredentials(ctx context.Cont
 	}
 	uploader := kubernetesPodFileUploader{streams: runtime.streams, pod: pod, container: container}
 	return r.materializeKubernetesCredentials(ctx, uploader, runtime, req, pod, container)
+}
+
+// normalizeKubernetesManagedGitEnvironment binds the helper to the executable
+// installed in the worker, never a path inherited from the backend host.
+func normalizeKubernetesManagedGitEnvironment(runtimeName agentruntime.Runtime, env map[string]string) {
+	if runtimeName == agentruntime.RuntimeKubernetes && hasManagedGitCredentialBrokerEnv(env) {
+		env[githubauth.CredentialHelperPathEnv] = kubernetesAgentctlPath
+	}
 }

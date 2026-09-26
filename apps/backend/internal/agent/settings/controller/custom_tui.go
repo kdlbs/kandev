@@ -133,6 +133,7 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 	if err := c.repo.CreateAgent(ctx, agent); err != nil {
 		// Rollback registry on DB failure
 		_ = c.agentRegistry.Unregister(slug)
+		c.InvalidateDiscoveryCache()
 		return nil, err
 	}
 
@@ -144,11 +145,12 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 		profileName = req.DisplayName
 	}
 	profile := &models.AgentProfile{
-		AgentID:          agent.ID,
-		Name:             profileName,
-		AgentDisplayName: req.DisplayName,
-		Model:            "passthrough",
-		CLIPassthrough:   true,
+		AgentID:              agent.ID,
+		Name:                 profileName,
+		AgentDisplayName:     req.DisplayName,
+		Model:                "passthrough",
+		CLIPassthrough:       true,
+		CursorMCPAuthEnabled: true,
 	}
 	if acp {
 		// The probe supplies a default when the operator named no model; it

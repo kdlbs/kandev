@@ -377,6 +377,7 @@ export type AgentProfilePayload = {
   dangerously_skip_permissions: boolean;
   allow_indexing: boolean;
   cli_passthrough?: boolean;
+  cursor_mcp_auth_enabled?: boolean;
   plan: string;
   created_at?: string;
   updated_at?: string;

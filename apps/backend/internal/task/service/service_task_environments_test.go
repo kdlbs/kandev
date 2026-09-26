@@ -69,8 +69,8 @@ type stubDestroyer struct {
 	pushErr                  error
 }
 
-func (s *stubDestroyer) DestroyContainer(_ context.Context, id string) error {
-	s.containerCalls = append(s.containerCalls, id)
+func (s *stubDestroyer) DestroyContainer(_ context.Context, env *models.TaskEnvironment) error {
+	s.containerCalls = append(s.containerCalls, env.ContainerID)
 	if s.cancelAfterContainer != nil {
 		s.cancelAfterContainer()
 	}
@@ -91,7 +91,7 @@ func (s *stubDestroyer) PushEnvironmentBranch(context.Context, *models.TaskEnvir
 	s.pushCalls++
 	return s.pushErr
 }
-func (s *stubDestroyer) GetContainerLiveStatus(context.Context, string) (*ContainerLiveStatus, error) {
+func (s *stubDestroyer) GetContainerLiveStatus(context.Context, *models.TaskEnvironment) (*ContainerLiveStatus, error) {
 	return nil, nil
 }
 

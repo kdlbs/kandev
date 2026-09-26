@@ -74,6 +74,40 @@ describe("toSheetItem repository projection", () => {
   });
 });
 
+describe("toSheetItem activity projection", () => {
+  it("preserves task activity and its task-local fallbacks on the phone row", () => {
+    const item = toSheetItem(
+      task({
+        updatedAt: "task-updated",
+        createdAt: "task-created",
+        statusSummary: {
+          revision: 3,
+          updated_at: "summary-refreshed",
+          last_activity_at: "task-activity",
+        },
+      }),
+      emptyCtx(),
+    );
+
+    expect(item.lastActivityAt).toBe("task-activity");
+    expect(item.updatedAt).toBe("summary-refreshed");
+    expect(item.createdAt).toBe("task-created");
+  });
+
+  it("falls back to the task update time instead of summary freshness", () => {
+    const item = toSheetItem(
+      task({
+        updatedAt: "task-updated",
+        createdAt: "task-created",
+        statusSummary: { revision: 3, updated_at: "summary-refreshed" },
+      }),
+      emptyCtx(),
+    );
+
+    expect(item.lastActivityAt).toBe("task-updated");
+  });
+});
+
 describe("toSheetItem remote executor projection", () => {
   it("carries the exact remote executor scope onto the mobile sheet row", () => {
     const item = toSheetItem(

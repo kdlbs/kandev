@@ -16,6 +16,7 @@ export type TaskManagementMenuProps = {
   disabled?: boolean;
   onPriority: (priority: TaskPriority) => void;
   onMove: (workflowId: string, stepId: string) => void;
+  onChangeWorkflow?: () => void;
   onArchive: () => void;
   onDelete: () => void;
   closeMenu: () => void;
@@ -30,6 +31,7 @@ export function TaskManagementMenu({
   disabled,
   onPriority,
   onMove,
+  onChangeWorkflow,
   onArchive,
   onDelete,
   closeMenu,
@@ -52,7 +54,7 @@ export function TaskManagementMenu({
         onMoveToStep={(stepId) => {
           if (task.workflowId) onMove(task.workflowId, stepId);
         }}
-        onSendToWorkflow={onMove}
+        onChangeWorkflow={onChangeWorkflow}
       />
       <TaskPluginLinkMenu
         task={task}

@@ -62,6 +62,7 @@ type UserSettingsDTO struct {
 	SidebarTaskColors                 map[string]*string                      `json:"sidebar_task_colors"`
 	TaskCreateLastUsed                models.TaskCreateLastUsed               `json:"task_create_last_used"`
 	JiraSavedViews                    json.RawMessage                         `json:"jira_saved_views,omitempty"`
+	JiraDefaultViewID                 string                                  `json:"jira_default_view_id"`
 	JiraTaskPresets                   json.RawMessage                         `json:"jira_task_presets,omitempty"`
 	GitHubSavedPresets                json.RawMessage                         `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets         json.RawMessage                         `json:"github_default_query_presets,omitempty"`
@@ -178,6 +179,7 @@ type UpdateUserSettingsRequest struct {
 	SidebarTaskColorPatch             *models.SidebarTaskColorPatch      `json:"sidebar_task_color_patch,omitempty"`
 	TaskCreateLastUsed                *models.TaskCreateLastUsed         `json:"task_create_last_used,omitempty"`
 	JiraSavedViews                    NullableRawMessage                 `json:"jira_saved_views,omitempty"`
+	JiraDefaultViewID                 *string                            `json:"jira_default_view_id,omitempty"`
 	JiraTaskPresets                   NullableRawMessage                 `json:"jira_task_presets,omitempty"`
 	GitHubSavedPresets                NullableRawMessage                 `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets         NullableRawMessage                 `json:"github_default_query_presets,omitempty"`
@@ -378,6 +380,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		SidebarTaskColors:                 models.CloneSidebarTaskColors(settings.SidebarTaskColors),
 		TaskCreateLastUsed:                settings.TaskCreateLastUsed,
 		JiraSavedViews:                    settings.JiraSavedViews,
+		JiraDefaultViewID:                 settings.JiraDefaultViewID,
 		JiraTaskPresets:                   settings.JiraTaskPresets,
 		GitHubSavedPresets:                settings.GitHubSavedPresets,
 		GitHubDefaultQueryPresets:         settings.GitHubDefaultQueryPresets,

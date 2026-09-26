@@ -91,6 +91,18 @@ func (s *Service) resolveWorkflowSessionTarget(
 	taskID string,
 	step *wfmodels.WorkflowStep,
 ) (workflowSessionTargetResolution, error) {
+	return s.resolveWorkflowSessionTargetWithTask(ctx, taskID, step, nil)
+}
+
+// resolveWorkflowSessionTargetWithTask resolves the recipient using a task
+// projection when a move is being validated against an uncommitted profile map.
+// Initial targets remain tied to the task's immutable initial-session record.
+func (s *Service) resolveWorkflowSessionTargetWithTask(
+	ctx context.Context,
+	taskID string,
+	step *wfmodels.WorkflowStep,
+	effectiveTask *models.Task,
+) (workflowSessionTargetResolution, error) {
 	if step == nil || step.SessionTarget == nil {
 		return workflowSessionTargetResolution{}, fmt.Errorf("workflow session target is required")
 	}
@@ -105,13 +117,14 @@ func (s *Service) resolveWorkflowSessionTarget(
 		return workflowSessionTargetResolution{session: session, profileID: profileID}, nil
 	}
 
-	return s.resolveSourceWorkflowSessionTarget(ctx, taskID, step)
+	return s.resolveSourceWorkflowSessionTargetWithTask(ctx, taskID, step, effectiveTask)
 }
 
-func (s *Service) resolveSourceWorkflowSessionTarget(
+func (s *Service) resolveSourceWorkflowSessionTargetWithTask(
 	ctx context.Context,
 	taskID string,
 	step *wfmodels.WorkflowStep,
+	effectiveTask *models.Task,
 ) (workflowSessionTargetResolution, error) {
 	sourceStep, err := s.loadWorkflowStepForLifecycle(ctx, step.SessionTarget.StepID, "session target source")
 	if err != nil {
@@ -120,11 +133,13 @@ func (s *Service) resolveSourceWorkflowSessionTarget(
 	if err := validateWorkflowSessionTargetSource(step, sourceStep); err != nil {
 		return workflowSessionTargetResolution{}, err
 	}
-	session, err := s.resolveBoundSourceWorkflowSession(ctx, taskID, step.WorkflowID, sourceStep)
+	profileID, err := s.resolveWorkflowSessionTargetProfile(ctx, taskID, effectiveTask, sourceStep)
 	if err != nil {
 		return workflowSessionTargetResolution{}, err
 	}
-	profileID, err := s.resolveStepAgentProfileForTaskID(ctx, taskID, sourceStep)
+	session, err := s.resolveBoundSourceWorkflowSessionWithProfile(
+		ctx, taskID, step.WorkflowID, sourceStep, profileID,
+	)
 	if err != nil {
 		return workflowSessionTargetResolution{}, err
 	}
@@ -147,21 +162,30 @@ func validateWorkflowSessionTargetSource(destination, source *wfmodels.WorkflowS
 	return nil
 }
 
-func (s *Service) resolveBoundSourceWorkflowSession(
+func (s *Service) resolveWorkflowSessionTargetProfile(
+	ctx context.Context,
+	taskID string,
+	effectiveTask *models.Task,
+	sourceStep *wfmodels.WorkflowStep,
+) (string, error) {
+	if effectiveTask != nil {
+		return s.resolveStepAgentProfileForTask(ctx, effectiveTask, sourceStep), nil
+	}
+	return s.resolveStepAgentProfileForTaskID(ctx, taskID, sourceStep)
+}
+
+func (s *Service) resolveBoundSourceWorkflowSessionWithProfile(
 	ctx context.Context,
 	taskID string,
 	workflowID string,
 	sourceStep *wfmodels.WorkflowStep,
+	effectiveProfileID string,
 ) (*models.TaskSession, error) {
 	store, ok := s.repo.(workflowSessionBindingStore)
 	if !ok {
 		return nil, nil
 	}
 	binding, err := store.GetWorkflowSessionBinding(ctx, taskID, workflowSessionBindingTargetKey(sourceStep.ID))
-	if err != nil {
-		return nil, err
-	}
-	effectiveProfileID, err := s.resolveStepAgentProfileForTaskID(ctx, taskID, sourceStep)
 	if err != nil {
 		return nil, err
 	}
@@ -174,6 +198,9 @@ func (s *Service) resolveBoundSourceWorkflowSession(
 		return nil, fmt.Errorf("load session target binding %q: %w", sourceStep.ID, err)
 	}
 	if session == nil || session.TaskID != taskID || session.AgentProfileID != effectiveProfileID {
+		return nil, nil
+	}
+	if isTerminalSessionState(session.State) {
 		return nil, nil
 	}
 	return session, nil

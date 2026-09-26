@@ -64,11 +64,13 @@ Stopping a session is not deletion. Resume needs the executor's session record. 
 When startup or resume fails:
 
 - Kandev adds one recovery entry to the selected session's chat.
-- The current unresolved failure shows recovery controls. Older entries keep their message and technical details without stale controls.
+- The current unresolved failure replaces the blocked message composer with one recovery card. Older entries keep their message and technical details without stale controls.
 - Repeated delivery of the same failure does not add another entry.
 - History loading and new messages keep the normal chat scroll behavior.
 
 **Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. The session entry remains visible until the session resumes successfully. Kandev uses stacked touch-sized actions on phones. A failure in another session remains in that session's history.
+
+The recovery card places the recommended action first and shows every available alternative as an individual button, including **Restore read-only workspace** and **Start fresh session** when eligible. Buttons wrap on desktop and stack at touch size on phones. Runtime installation failures offer **Retry**; provider quota failures show reset guidance, while Archive and Delete remain in the task menu. Restoring the workspace does not restart the agent. Expand **Technical details** for wrapped, bounded diagnostics; **Copy details** copies the same redacted text you see. When a workspace pane can identify the same failure and its visible recovery entry, **View recovery** opens Chat and focuses the recovery card. Independent workspace failures retain their own retry.
 
 Failures during task or workspace preparation appear as one task error strip below the task header and above the session and Plan tabs. The strip remains visible when you switch sessions or tabs and disappears only after task recovery succeeds. Select **Show details** to open the available guarded actions in a desktop dialog or phone drawer.
 
@@ -171,13 +173,14 @@ Select **Open task** in a tile when you need the complete task workbench. To lin
 To manage the task without leaving Threads, select **Task actions** (the three
 dots beside **Open task**). On desktop, you can also right-click the task
 header; conversation text and editors keep their normal context menus.
-The menu offers **Priority**, **Move to**, **Send to workflow**, supported
+The menu offers **Priority**, **Move to**, **Change workflow...**, supported
 **Link** choices, **Archive**, and **Delete**, according to availability.
 
-On a phone, the choices open in an inset bottom sheet. Choose a workflow and
-then a step in the same sheet; **Back** returns to the previous choices.
-Actions apply to the task whose menu you opened, even if its selected session
-changes. Canceling a confirmation leaves the task unchanged. See
+Choose **Change workflow...** to select a workflow and destination step, review
+the entry preview, and optionally map fixed workflow profiles for this task.
+On a phone, the form uses a full-height sheet with a scrollable body. Actions
+apply to the task whose menu you opened, even if its selected session changes.
+Canceling a form or confirmation leaves the task unchanged. See
 [archive and deletion behavior](tasks-and-workflows.md#archive-unarchive-and-delete)
 for confirmation preferences and cleanup consequences.
 

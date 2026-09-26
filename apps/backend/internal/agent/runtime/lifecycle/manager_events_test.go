@@ -154,9 +154,7 @@ func TestHandleAgentEvent_CompleteCarriesPromptTurnID(t *testing.T) {
 // (execution.officeProfileID()), not the concrete AgentProfileID the CLI
 // happens to run under. This is what lets office/service attribute a
 // session-bridged comment to the agent that actually ran the turn instead of
-// the task's assignee, without depending on task_sessions.agent_profile_id
-// (which only holds the acting agent when features.officeSessionIdentity is
-// on — off by default in every shipped profile).
+// the task's assignee, without depending on task_sessions.agent_profile_id.
 func TestHandleAgentEvent_CompleteCarriesActingAgentOfficeIdentity(t *testing.T) {
 	mgr, eventBus := createTestManagerWithTracking()
 	execution := createTestExecution("exec-office-identity", "task-1", "session-1")

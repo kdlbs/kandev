@@ -37,6 +37,7 @@ type PullRequestInput struct {
 	ReviewState           string
 	ChecksState           string
 	MergeableState        string
+	HasMergeConflicts     *bool
 	MergeQueueState       string
 	UnresolvedReviewCount int
 	PendingReviewCount    int

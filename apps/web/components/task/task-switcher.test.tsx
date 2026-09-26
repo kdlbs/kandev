@@ -455,7 +455,7 @@ describe("TaskSwitcher — archived rows action menu", () => {
     expect(screen.queryByText("Duplicate")).toBeNull();
     expect(screen.queryByText("Color")).toBeNull();
     expect(screen.queryByTestId("task-context-priority")).toBeNull();
-    expect(screen.queryByText("Send to workflow")).toBeNull();
+    expect(screen.queryByText("Change workflow...")).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
   });
 });

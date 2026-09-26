@@ -9,6 +9,7 @@ import {
   saveDraft,
   selectGeneratedText,
   startPreviewServer,
+  waitForScreenshotCaptureMode,
 } from "./preview-feedback-helpers";
 
 test.describe("Web preview feedback", () => {
@@ -64,18 +65,24 @@ test.describe("Web preview feedback", () => {
       await saveDraft(testPage, "Explain how this generated total was calculated");
 
       await chooseCapture(testPage, "Select screenshot region");
+      await waitForScreenshotCaptureMode(frame);
       await dragScreenshotRegion(testPage, frame.locator("#save"));
       const screenshotDraft = testPage.getByTestId("preview-feedback-draft");
-      await expect(screenshotDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
+      await expect(screenshotDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
+        timeout: 15_000,
+      });
       await expect(screenshotDraft).toContainText(/\d+ × \d+ · PNG/);
       await saveDraft(testPage, "Tighten the spacing in this region");
 
       const failedScreenshotComment = "Keep this screenshot comment after create fails";
       createFailure.failNextCreate();
       await chooseCapture(testPage, "Select screenshot region");
+      await waitForScreenshotCaptureMode(frame);
       await dragScreenshotRegion(testPage, frame.locator("#save"));
       const failedDraft = testPage.getByTestId("preview-feedback-draft");
-      await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
+      await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
+        timeout: 15_000,
+      });
       await failedDraft
         .getByRole("textbox", { name: "Comment on selection" })
         .fill(failedScreenshotComment);

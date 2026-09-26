@@ -2,7 +2,7 @@
 status: draft
 system: ui
 created: 2026-08-17
-updated: 2026-08-29
+updated: 2026-09-25
 owners:
   - kandev
 ---
@@ -11,6 +11,8 @@ owners:
 ## Overview
 
 Saved sidebar views can sort tasks by **Updated**. That value currently follows task-status summary freshness. Background pull-request updates can refresh many idle rows together, so this order does not answer which tasks a user or agent worked on most recently.
+
+A parent and its nested children appear as one sidebar tree. Last activity sorting must position that tree by its most recently active included member, so active child work does not remain buried under an idle parent's older timestamp.
 
 ## Requirements
 
@@ -28,6 +30,19 @@ Saved sidebar views can sort tasks by **Updated**. That value currently follows 
 - **AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.6:** The built-in view and new-view defaults do not change.
 - **AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.7:** When a view sorts by **Last activity**, each row displays that activity time. Other sort modes retain the existing row time behavior.
 - **AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.8:** **GIVEN** several idle tasks receive pull-request status refreshes, **WHEN** a view sorts by **Last activity**, **THEN** their order and displayed activity times do not change.
+
+### REQ-UI-SIDEBAR-LAST-ACTIVITY-SORT-002: Task tree activity order
+
+**Intent:** A parent task and its descendants move together when any included member becomes active.
+
+#### Acceptance criteria
+
+- **AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-002.1:** When a sidebar view sorts by **Last activity**, each task tree shall rank by the newest activity timestamp among its root and all included descendants. Descending order shall place the most recently active tree first; ascending order shall place the least recently active tree first.
+- **AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-002.2:** Activity of a nested descendant at any depth shall affect the placement of every included ancestor. Sibling child trees shall follow the same rule within their parent.
+- **AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-002.3:** A descendant excluded by the active filters shall not affect the visible tree's rank. A child whose parent is excluded shall rank as its own visible root.
+- **AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-002.4:** Equal tree activity timestamps shall retain input order. Collapsing or expanding a tree shall not change its rank.
+- **AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-002.5:** Each row shall continue to show that task's own activity time. Existing pinned-task precedence, manual subtask order, and other sort keys shall retain their behavior.
+- **AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-002.6:** Desktop and phone task sidebars shall show the same tree order for the same view and included tasks, without adding a new control or changing the saved-view format.
 
 ## Migrated source detail
 
@@ -182,7 +197,9 @@ vertical scroll body.
 - Sorting the Kanban board, Office task list, command panel, or quick-chat tabs.
 - Treating passive focus, provider polling, or raw stream chunks as activity.
 - Adding a general task activity feed or audit log.
+- Changing the activity timestamp published for an individual task or the meaning of the **Updated** sort.
 
 ## Implementation plan
 
 - [Sidebar Last Activity Sort](../../../plans/sidebar-last-activity-sort/plan.md)
+- [Sidebar task tree activity order](../../../plans/sidebar-task-tree-activity-sort/plan.md)

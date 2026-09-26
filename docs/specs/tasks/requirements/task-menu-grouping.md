@@ -27,12 +27,12 @@ This document extends [task actions menus](task-actions-menu.md) to cover orderi
   | Mark | Pin or Unpin, Color, Priority |
   | Edit | Edit, Rename, Duplicate |
   | Relationships | Create subtask, Nest under, Link, Detach from parent |
-  | Move | Move to, Send to workflow |
+  | Move | Move to, Change workflow... |
   | Plugins | Admitted primary plugin actions in registration order |
   | Remove | Archive, Delete |
 
-- **AC-TASKS-MENU-GROUPING-001.2:** Card context and three-dot menus shall use Priority, Edit, Link, Detach from parent, Move to, Send to workflow, primary plugins, Archive, Delete.
-  Group boundaries shall match the table. Preview and desktop detail menus shall inherit this order with their existing availability exceptions.
+- **AC-TASKS-MENU-GROUPING-001.2:** Card context and three-dot menus shall use Priority, Edit, Link, Detach from parent, Move to, Change workflow..., primary plugins, Archive, Delete.
+  Group boundaries shall match the table. Preview and desktop detail menus shall inherit this order with their existing availability exceptions. A single-task Change workflow... entry opens the shared form directly; multi-task selection retains its separate bulk workflow submenu.
 - **AC-TASKS-MENU-GROUPING-001.3:** Menus shall show one thin divider between nonempty groups, with no visible group headings.
   Menus shall show no leading, trailing, or consecutive dividers. Archive and Delete shall share a group.
 - **AC-TASKS-MENU-GROUPING-001.4:** Menus shall preserve existing labels, icons, eligibility, disabled states, callbacks, confirmations, selection semantics, and navigation outcomes.

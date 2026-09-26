@@ -50,6 +50,7 @@ function profileFormData(
     auto_approve: permissions.auto_approve,
     allow_indexing: permissions.allow_indexing,
     cli_passthrough: profile.cliPassthrough ?? false,
+    cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
     cli_flags: profile.cliFlags ?? [],
     command_prefix: profile.commandPrefix ?? "",
   };
@@ -186,6 +187,9 @@ export function ProfileCardItem({
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           agentName={draftAgent.name}
+          cursorMcpAuthSupported={
+            draftAgent.name === "cursor-acp" || draftAgent.tui_config?.mcp_strategy === "cursor"
+          }
           onRemove={() => onRemoveProfile(profile.id)}
           canRemove={draftAgent.profiles.length > 1}
           lockPassthrough={Boolean(draftAgent.tui_config)}
