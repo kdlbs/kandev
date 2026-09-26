@@ -174,6 +174,8 @@ type Service struct {
 	workspaceAuthorizer   func(context.Context, string) error
 	freshDefaultsMu       sync.Mutex
 	freshDefaultsDone     bool
+	ciRunClientResolver   func(context.Context, string, string, string) (ciRunActionsClient, error)
+	ciRunNow              func() time.Time
 
 	// cleanupFailureMu guards cleanupFailureCounts; the cleanup loop is the
 	// only writer but the global sweep + per-watch sweep can run concurrently
@@ -262,6 +264,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		passiveFallbackTargetCursors: make(map[string]int),
 		passiveWorkspaceRefreshAt:    make(map[string]time.Time),
 		appRegistrationRuntimes:      make(map[string]*githubAppRuntime),
+		ciRunNow:                     time.Now,
 		stopCtx:                      stopCtx,
 		stopCancel:                   stopCancel,
 		clock:                        time.Now,
