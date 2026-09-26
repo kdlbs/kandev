@@ -81,6 +81,7 @@ func failureKind(provider string, syncErr error) github.FailureKind {
 		return github.FailureTransient
 	}
 	if errors.Is(syncErr, github.ErrNoClient) ||
+		errors.Is(syncErr, errGitHubClientNotConfigured) ||
 		errors.Is(syncErr, github.ErrGitHubNotConfigured) ||
 		errors.Is(syncErr, github.ErrGitHubConnectionInvalid) {
 		return github.FailureInvalidCredentials

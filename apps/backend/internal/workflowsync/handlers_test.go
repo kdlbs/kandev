@@ -336,6 +336,27 @@ func TestHTTPHandlersSanitizeSuspensionReasons(t *testing.T) {
 	}
 }
 
+func TestHTTPForceSyncShowsActionableGitHubConnectionFailure(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	require.NoError(t, err)
+	svc := NewService(setupTestStore(t), nil, nil, &fakeApplier{}, log)
+	configureWorkspace(t, svc, victimWorkspace)
+	router := newTestRouter(t, svc)
+
+	syncResponse := doJSON(t, router, http.MethodPost, "/api/v1/workflow-sync/sync?workspace_id="+victimWorkspace, nil)
+	require.Equal(t, http.StatusOK, syncResponse.Code)
+	assert.Contains(t, syncResponse.Body.String(), githubConnectionFailureMessage)
+	configResponse := doJSON(t, router, http.MethodGet, "/api/v1/workflow-sync/config?workspace_id="+victimWorkspace, nil)
+	require.Equal(t, http.StatusOK, configResponse.Code)
+	var config Config
+	require.NoError(t, json.Unmarshal(configResponse.Body.Bytes(), &config))
+	assert.True(t, config.PollSuspended)
+	assert.Equal(t, string(github.FailureInvalidCredentials), config.LastErrorClass)
+	assert.Equal(t, githubConnectionFailureMessage, config.LastError)
+	assert.Equal(t, githubConnectionFailureMessage, config.PollSuspensionReason)
+	assert.Nil(t, config.NextRetryAt)
+}
+
 func TestHTTPForceSyncReturnsRateLimitDetailsWhenAdmissionWaitIsCanceled(t *testing.T) {
 	now := time.Date(2026, 8, 30, 11, 18, 0, 0, time.UTC)
 	retryAt := now.Add(2 * time.Minute)
