@@ -7,6 +7,9 @@ import type { SessionPrepareState } from "./types";
  */
 type RawPrepareStep = {
   name: string;
+  kind?: string;
+  remote_platform?: string;
+  failure_code?: string;
   command?: string;
   status: string;
   output?: string;
@@ -45,6 +48,9 @@ export function prepareResultToSessionState(
     status: pr.status ?? "completed",
     steps: (pr.steps ?? []).map((s) => ({
       name: s.name,
+      kind: s.kind,
+      remotePlatform: s.remote_platform,
+      failureCode: s.failure_code,
       command: s.command,
       status: s.status,
       output: s.output,

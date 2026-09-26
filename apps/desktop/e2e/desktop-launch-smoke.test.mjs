@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,13 +12,17 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   HEALTH_REQUESTED_TIMEOUT_MS,
   ROOT_REQUESTED_TIMEOUT_MS,
+  waitForHttp,
   waitForFile,
+  writeFakeRuntime,
+  writeReleaseShapedRuntime,
 } from "./desktop-launch-smoke.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(__dirname, "..");
 const repoRoot = resolve(desktopRoot, "../..");
 const backendRsPath = resolve(__dirname, "../src-tauri/src/backend.rs");
+const smokeScriptPath = resolve(__dirname, "desktop-launch-smoke.mjs");
 const mainRsPath = resolve(__dirname, "../src-tauri/src/main.rs");
 const shellRsPath = resolve(__dirname, "../src-tauri/src/shell.rs");
 const startupHtmlPath = resolve(__dirname, "../index.html");
@@ -128,6 +133,74 @@ test("waitForHttp backs off after an unsuccessful HTTP response", async () => {
   assert.deepEqual(pauses, [100]);
 });
 
+test("desktop smoke runtime uses standard resources without bundled remote helpers", async () => {
+  await withTempDir(async (dir) => {
+    const runtimeDir = resolve(dir, "runtime");
+    const stateDir = resolve(dir, "state");
+    await mkdir(resolve(runtimeDir, "bin"), { recursive: true });
+    await mkdir(stateDir, { recursive: true });
+    await writeFakeRuntime(runtimeDir, stateDir, "happy");
+
+    assert.deepEqual(
+      (await readdir(resolve(runtimeDir, "bin"))).sort(),
+      process.platform === "win32" ? ["agentctl.cmd", "kandev.cmd"] : ["agentctl", "kandev"],
+    );
+    const manifest = JSON.parse(await readFile(resolve(runtimeDir, "remote-helpers.json"), "utf8"));
+    assert.equal(manifest.variant, "standard");
+    assert.equal(manifest.schema_version, 1);
+  });
+});
+
+test("release-shaped Desktop runtime seeds a verified helper outside the standard bundle", async () => {
+  await withTempDir(async (dir) => {
+    const sourceBinDir = resolve(dir, "source-bin");
+    const runtimeDir = resolve(dir, "runtime");
+    const homeDir = resolve(dir, "home");
+    await mkdir(sourceBinDir, { recursive: true });
+    for (const name of [
+      "kandev",
+      "agentctl",
+      "agentctl-linux-amd64",
+      "agentctl-linux-arm64",
+      "agentctl-darwin-amd64",
+      "agentctl-darwin-arm64",
+    ]) {
+      const path = resolve(sourceBinDir, name);
+      await writeFile(path, `#!/bin/sh\n# ${name}\n`);
+      await chmod(path, 0o755);
+    }
+
+    const runtime = await writeReleaseShapedRuntime({
+      sourceBinDir,
+      runtimeDir,
+      homeDir,
+      version: "1.2.3",
+      commit: "a".repeat(40),
+    });
+
+    assert.deepEqual((await readdir(resolve(runtimeDir, "bin"))).sort(), ["agentctl", "kandev"]);
+    assert.equal(runtime.manifest.variant, "standard");
+    assert.equal(runtime.manifest.version, "1.2.3");
+    assert.equal(runtime.manifest.commit, "a".repeat(40));
+    const helper = runtime.manifest.helpers.find(({ platform }) => platform === "linux/amd64");
+    assert.ok(helper);
+    const cachedHelper = await readFile(runtime.cachePath);
+    assert.equal(createHash("sha256").update(cachedHelper).digest("hex"), helper.sha256);
+    assert.equal(cachedHelper.length, helper.size_bytes);
+    assert.ok((await stat(runtime.cachePath)).mode & 0o111);
+  });
+});
+
+test("release-shaped Desktop smoke runs the real launcher with a preseeded helper cache", async () => {
+  const source = await readFile(smokeScriptPath, "utf8");
+  assert.match(source, /spawn\(launcherBinary, \["--headless", "--port", String\(launcherPort\)\]/);
+  assert.match(source, /KANDEV_BUNDLE_DIR: runtimeDir/);
+  assert.match(source, /KANDEV_AGENTCTL_LINUX_AMD64_BINARY: ""/);
+  assert.match(source, /KANDEV_DESKTOP_RUNTIME_DIR: runtimeDir/);
+  assert.match(source, /TestAgentctlResolverPackagedDesktopBundleUsesPreseededCache/);
+  assert.match(source, /await runReleaseShapedSmoke\(appBinary\)/);
+});
+
 test("health-requested timeout stays above the Rust backend's own HEALTH_TIMEOUT", async () => {
   const source = await readFile(backendRsPath, "utf8");
   const match = source.match(/const HEALTH_TIMEOUT: Duration = Duration::from_secs\((\d+)\);/);
@@ -183,8 +256,15 @@ test("main window registers download handling before its configured WebView is c
   const mainWindow = JSON.parse(configSource).app.windows.find(({ label }) => label === "main");
 
   assert.ok(mainWindow, "the configured main window must exist");
-  assert.equal(mainWindow.create, false, "Tauri must leave creation to the configured callback builder");
-  assert.match(mainSource, /WebviewWindowBuilder::from_config[\s\S]*?\.on_download\([\s\S]*?\)\s*\.build\(\)/);
+  assert.equal(
+    mainWindow.create,
+    false,
+    "Tauri must leave creation to the configured callback builder",
+  );
+  assert.match(
+    mainSource,
+    /WebviewWindowBuilder::from_config[\s\S]*?\.on_download\([\s\S]*?\)\s*\.build\(\)/,
+  );
   assert.match(mainSource, /downloads::handle_download_event/);
 });
 
@@ -307,7 +387,7 @@ test(
 
     let browser;
     try {
-      await waitForHttp("http://127.0.0.1:4178", 15_000, () => {
+      await waitForPreviewHttp("http://127.0.0.1:4178", 15_000, () => {
         if (preview.exitCode !== null) throw new Error(serverOutput);
       });
       browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
@@ -338,12 +418,15 @@ test(
         ["zh-Hant", "zh-tw"],
       ]) {
         const localeContext = await browser.newContext();
-        await localeContext.addInitScript((languages) => {
-          Object.defineProperty(navigator, "languages", {
-            configurable: true,
-            value: languages,
-          });
-        }, [language]);
+        await localeContext.addInitScript(
+          (languages) => {
+            Object.defineProperty(navigator, "languages", {
+              configurable: true,
+              value: languages,
+            });
+          },
+          [language],
+        );
         const localePage = await localeContext.newPage();
         await localePage.goto("http://127.0.0.1:4178", { waitUntil: "networkidle" });
         assert.equal(await localePage.locator("html").getAttribute("lang"), expectedLocale);
@@ -374,7 +457,9 @@ test(
         () => typeof window.__KANDEV_DESKTOP_SET_STATUS === "function",
       );
       assert.equal(
-        await lightPage.locator("[data-startup-drag-region]").getAttribute("data-tauri-drag-region"),
+        await lightPage
+          .locator("[data-startup-drag-region]")
+          .getAttribute("data-tauri-drag-region"),
         "",
       );
 
@@ -488,7 +573,7 @@ test(
   },
 );
 
-async function waitForHttp(url, timeoutMs, tick, pause = delay) {
+async function waitForPreviewHttp(url, timeoutMs, tick, pause = delay) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     tick?.();

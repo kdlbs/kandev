@@ -107,4 +107,7 @@ func TestRunInstalledBuildVersion(t *testing.T) {
 	if got.Version != "1.2.3" {
 		t.Fatalf("managed startup version = %q, want 1.2.3", got.Version)
 	}
+	if got.BundleDir != bundle {
+		t.Fatalf("managed bundle dir = %q, want %q", got.BundleDir, bundle)
+	}
 }

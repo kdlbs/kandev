@@ -275,7 +275,7 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		return nil, err
 	}
 
-	agentctlBin, platform, err := r.prepareRemoteHost(baseCtx, client, req)
+	agentctlBin, platform, err := r.prepareRemoteHost(baseCtx, client, req, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -463,6 +463,7 @@ func (r *SSHExecutor) prepareRemoteHost(
 	ctx context.Context,
 	client *ssh.Client,
 	req *ExecutorCreateRequest,
+	helperContexts ...context.Context,
 ) (string, SSHRemotePlatform, error) {
 	info, err := detectRemoteInfo(ctx, client)
 	if err != nil {
@@ -475,7 +476,16 @@ func (r *SSHExecutor) prepareRemoteHost(
 	}
 	r.report(req.OnProgress, "Detecting remote OS", PrepareStepCompleted, info.UnameAll)
 
-	agentctlBin, err := ensureAgentctlOnHost(ctx, client, r.agentctlResolver, info.Platform, r.logger)
+	helperProgress := req.OnProgress
+	if helperProgress != nil {
+		callback := helperProgress
+		helperProgress = func(step PrepareStep, index, total int) { callback(step, index+1, total+1) }
+	}
+	helperCtx := ctx
+	if len(helperContexts) > 0 && helperContexts[0] != nil {
+		helperCtx = helperContexts[0]
+	}
+	agentctlBin, err := ensureAgentctlOnHostWithProgress(ctx, helperCtx, client, r.agentctlResolver, info.Platform, r.logger, helperProgress)
 	if err != nil {
 		r.report(req.OnProgress, "Uploading agent controller", PrepareStepFailed, err.Error())
 		return "", info.Platform, err

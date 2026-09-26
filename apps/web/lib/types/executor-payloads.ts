@@ -30,6 +30,9 @@ export type PrepareProgressPayload = {
   session_id: string;
   execution_id: string;
   step_name: string;
+  step_kind?: string;
+  remote_platform?: string;
+  failure_code?: string;
   step_command?: string;
   step_index: number;
   total_steps: number;
@@ -53,6 +56,9 @@ export type PrepareCompletedPayload = {
   workspace_path?: string;
   steps?: Array<{
     name: string;
+    kind?: string;
+    remote_platform?: string;
+    failure_code?: string;
     command?: string;
     status: string;
     output?: string;

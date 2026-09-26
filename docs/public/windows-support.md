@@ -14,12 +14,12 @@ Kandev has native Windows x64 desktop and npm/npx releases. WSL 2 remains useful
 3. Keep repositories, agents, Docker, and credentials in the same environment as Kandev.
 4. Use the troubleshooting section for path, shell, and browser differences.
 
-| Path | Best for | Main limitations |
-|---|---|---|
-| [Desktop app](desktop-app.md) | Normal interactive use, native menus/notifications/updates | Windows x64 and WebView2; no service/background mode |
-| [npm/npx CLI](cli.md) | Browser UI, terminal operation, headless use | Node.js with npm 7+ is needed for the package shim |
-| WSL 2 CLI | Linux-only agent tools and shell scripts | Browser launch and Windows/WSL path interop are dependency-bound |
-| Native source checkout | Contributors testing Windows-specific code | Manual toolchain and curated Windows test subset; not the simplest product install |
+| Path                          | Best for                                                   | Main limitations                                                                   |
+| ----------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| [Desktop app](desktop-app.md) | Normal interactive use, native menus/notifications/updates | Windows x64 and WebView2; no service/background mode                               |
+| [npm/npx CLI](cli.md)         | Browser UI, terminal operation, headless use               | Node.js with npm 7+ is needed for the package shim                                 |
+| WSL 2 CLI                     | Linux-only agent tools and shell scripts                   | Browser launch and Windows/WSL path interop are dependency-bound                   |
+| Native source checkout        | Contributors testing Windows-specific code                 | Manual toolchain and curated Windows test subset; not the simplest product install |
 
 ## Native desktop installation
 
@@ -184,7 +184,12 @@ When Docker Desktop WSL integration is enabled for the distribution, verify `doc
 
 ## Remote executor limitation
 
-The release bundle carries remote `agentctl` helpers for Linux `amd64`/`arm64` and macOS `amd64`/`arm64`. It does not carry a Windows remote helper. Consequently, a Windows desktop/CLI host can control supported Linux/macOS SSH targets, but a Windows machine is not a supported destination for the SSH executor. Remote Docker behavior depends on the target daemon and configured Linux container image; it does not add a Windows `agentctl` remote target.
+Stable standard Windows installs include the host binaries and a manifest. They download a verified
+Linux or macOS helper when a remote task needs one and no cached copy exists. Allow outbound HTTPS to
+`github.com` and `release-assets.githubusercontent.com`; GitHub redirects release-asset downloads to
+the second host. Windows has no remote helper, so it cannot be an SSH destination. Remote Docker
+still needs a reachable daemon and a compatible Linux image. For offline CLI use, download
+`kandev-windows-x64-full.zip`. Desktop has no full offline installer or updater.
 
 ## Services and background operation
 

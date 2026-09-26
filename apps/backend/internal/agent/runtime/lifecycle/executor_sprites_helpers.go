@@ -151,6 +151,7 @@ type spritesStepKey string
 
 const (
 	spriteStepCreateSprite       spritesStepKey = "create_sprite"
+	spriteStepResolveAgentctl    spritesStepKey = "resolve_agentctl"
 	spriteStepUploadAgentctl     spritesStepKey = "upload_agentctl"
 	spriteStepUploadCredentials  spritesStepKey = "upload_credentials"
 	spriteStepRunPrepareScript   spritesStepKey = "run_prepare_script"
@@ -178,6 +179,7 @@ func newSpritesProgressPlan(reconnect bool) *spritesProgressPlan {
 	}
 	return buildPlan([]spritesStepKey{
 		spriteStepCreateSprite,
+		spriteStepResolveAgentctl,
 		spriteStepUploadAgentctl,
 		spriteStepUploadCredentials,
 		spriteStepRunPrepareScript,

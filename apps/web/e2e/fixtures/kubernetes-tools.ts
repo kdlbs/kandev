@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { dwell } from "../helpers/causal-waits";
 import { waitForHealth } from "./backend";
+import { prepareCompactRuntimeFixture } from "./compact-runtime";
 import {
   assertRuntimeImageTagAvailable,
   FixtureResourceOwnership,
@@ -86,6 +87,7 @@ export type KubernetesCluster = {
   namespace: string;
   controlNamespace: string;
   image: string;
+  remoteHelperCachePath: string;
   kubectl: (args: string[], options?: KubectlOptions) => string;
   json: <T>(args: string[], options?: KubectlOptions) => T;
   podTemplate: (overrides?: PodTemplateOverrides) => string;
@@ -208,28 +210,34 @@ function requireBuildArtifacts(): void {
   }
 }
 
-function buildRuntimeImage(tag: string): void {
+function buildRuntimeImage(tag: string): string {
   requireBuildArtifacts();
   const context = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-kubernetes-e2e-image-"));
-  // The pinned CI runtime already contains the lifecycle tools used by the
-  // backend. Reusing it keeps compatibility jobs independent of live package
-  // mirror resolution on each hosted runner.
+  const runtime = prepareCompactRuntimeFixture({
+    bundleDir: path.join(context, "runtime"),
+    homeDir: path.join(context, "home"),
+    sourceBinDir: path.join(BACKEND_DIR, "bin"),
+  });
+  const helperCache = path.join(context, "helper-cache");
+  fs.cpSync(runtime.cacheRoot, helperCache, { recursive: true });
+  const podCachePath = path.posix.join(
+    "/data/home",
+    path.relative(path.join(context, "home"), runtime.cachePath).split(path.sep).join("/"),
+  );
   const dockerfile = `FROM ${KUBERNETES_E2E_BASE_IMAGE}
 COPY kandev /usr/local/bin/kandev
-COPY agentctl-linux-amd64 /usr/local/bin/agentctl-linux-amd64
+COPY runtime /opt/kandev/runtime
+COPY helper-cache /opt/kandev/helper-cache
 COPY mock-agent-linux-amd64 /usr/local/bin/mock-agent
 COPY web-dist /opt/kandev/web
-RUN chmod 0755 /usr/local/bin/kandev /usr/local/bin/agentctl-linux-amd64 /usr/local/bin/mock-agent \
- && ln -s /usr/local/bin/agentctl-linux-amd64 /usr/local/bin/agentctl
+RUN chmod 0755 /usr/local/bin/kandev /usr/local/bin/mock-agent /opt/kandev/runtime/bin/* \
+ && chmod -R 0755 /opt/kandev/helper-cache
 ENV PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV KANDEV_BUNDLE_DIR=/opt/kandev/runtime
 WORKDIR /workspace
 `;
   try {
     fs.copyFileSync(path.join(BACKEND_DIR, "bin/kandev"), path.join(context, "kandev"));
-    fs.copyFileSync(
-      path.join(BACKEND_DIR, "bin/agentctl-linux-amd64"),
-      path.join(context, "agentctl-linux-amd64"),
-    );
     fs.copyFileSync(
       path.join(BACKEND_DIR, "bin/mock-agent-linux-amd64"),
       path.join(context, "mock-agent-linux-amd64"),
@@ -240,6 +248,7 @@ WORKDIR /workspace
       timeout: 300_000,
       stdio: process.env.E2E_DEBUG ? ["pipe", "inherit", "inherit"] : ["pipe", "ignore", "inherit"],
     });
+    return podCachePath;
   } finally {
     fs.rmSync(context, { recursive: true, force: true });
   }
@@ -541,7 +550,10 @@ spec:
       imagePullPolicy: Never
       command: ["/bin/sh", "-c"]
       args:
-        - mkdir -p /data/home /data/worktrees /data/repos && exec /usr/local/bin/kandev __backend
+        - >-
+          mkdir -p /data/home /data/worktrees /data/repos /data/home/cache/remote-helpers &&
+          cp -a /opt/kandev/helper-cache/. /data/home/cache/remote-helpers/ &&
+          exec /usr/local/bin/kandev __backend
       ports:
         - name: http
           containerPort: 8080
@@ -554,6 +566,8 @@ spec:
       env:
         - {name: HOME, value: /data}
         - {name: KANDEV_HOME_DIR, value: /data/home}
+        - {name: KANDEV_BUNDLE_DIR, value: /opt/kandev/runtime}
+        - {name: PATH, value: "/opt/kandev/runtime/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
         - {name: KANDEV_SERVER_PORT, value: "8080"}
         - {name: KANDEV_SERVER_HOST, value: "0.0.0.0"}
         - {name: KANDEV_WEB_DIST_DIR, value: /opt/kandev/web}
@@ -563,9 +577,8 @@ spec:
         - {name: KANDEV_REPOCLONE_BASEPATH, value: /data/repos}
         - {name: KANDEV_E2E_MOCK, value: "true"}
         - {name: KANDEV_DOCKER_ENABLED, value: "false"}
-        - {name: KANDEV_AGENTCTL_LINUX_BINARY, value: /usr/local/bin/agentctl-linux-amd64}
         - {name: KANDEV_MOCK_AGENT_LINUX_BINARY, value: /usr/local/bin/mock-agent}
-        - {name: KANDEV_LOG_LEVEL, value: warn}
+        - {name: KANDEV_LOG_LEVEL, value: debug}
       volumeMounts:
         - {name: data, mountPath: /data}
   volumes:
@@ -713,6 +726,7 @@ export async function provisionKubernetesCluster(
   const restrictedKubeconfig = path.join(root, `${name}.restricted.kubeconfig`);
   const kindConfigPath = path.join(root, `${name}.kind.yaml`);
   const image = `kandev-kubernetes-e2e:${name}`;
+  let remoteHelperCachePath = "";
   const marker = ownershipMarkerPath();
   const ownership = new FixtureResourceOwnership();
   let inCluster: { context: InClusterBackend; proc: ChildProcess } | undefined;
@@ -760,7 +774,9 @@ export async function provisionKubernetesCluster(
       throw new Error(`refusing to reuse existing Kind cluster ${name}`);
     }
     assertRuntimeImageTagAvailable(image, dockerImageTagExists(image));
-    ownership.acquire("image", () => buildRuntimeImage(image));
+    ownership.acquire("image", () => {
+      remoteHelperCachePath = buildRuntimeImage(image);
+    });
     fs.writeFileSync(kindConfigPath, kindClusterConfig(), { mode: 0o600 });
     writeClusterOwnershipMarker(marker, name);
     ownership.acquire("cluster", () =>
@@ -915,6 +931,7 @@ export async function provisionKubernetesCluster(
     namespace: WORKLOAD_NAMESPACE,
     controlNamespace: CONTROL_NAMESPACE,
     image,
+    remoteHelperCachePath,
     kubectl,
     json,
     podTemplate: (overrides) => podTemplate(image, overrides),

@@ -49,6 +49,27 @@ func TestLaunch_ResumeWithoutPreparationPublishesNoPrepareEvents(t *testing.T) {
 	require.Empty(t, prepareCompletedPayloads(eventBus))
 }
 
+func TestPrepareProgressPublishesTypedRemoteHelperFields(t *testing.T) {
+	mgr, eventBus := newPrepareEventsTestManager(t, "profile-remote-helper-progress")
+	mgr.newProgressCallback("task-1", "session-1")(
+		PrepareStep{
+			Kind:           PrepareStepKindRemoteHelperDownload,
+			RemotePlatform: "linux/amd64",
+			FailureCode:    "timeout",
+			Status:         PrepareStepFailed,
+			Error:          "context deadline exceeded",
+		},
+		0,
+		1,
+	)
+
+	payloads := prepareProgressPayloads(eventBus)
+	require.Len(t, payloads, 1)
+	require.Equal(t, PrepareStepKindRemoteHelperDownload, payloads[0].StepKind)
+	require.Equal(t, "linux/amd64", payloads[0].RemotePlatform)
+	require.Equal(t, "timeout", payloads[0].FailureCode)
+}
+
 func newPrepareEventsTestManager(t *testing.T, profileID string) (*Manager, *MockEventBusWithTracking) {
 	t.Helper()
 	log := newTestLogger()

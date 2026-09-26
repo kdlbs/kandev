@@ -22,7 +22,7 @@ import (
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/mcp/toolschema"
 	"github.com/kandev/kandev/internal/mcp/tooltokens"
-	"github.com/kandev/kandev/internal/task/service"
+	taskcontract "github.com/kandev/kandev/internal/task/contract"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -1260,7 +1260,7 @@ func (s *Server) registerKanbanTools() {
 		mcp.NewTool("update_task_kandev",
 			mcp.WithDescription("Update an existing task."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
-			mcp.WithString("title", mcp.MaxLength(service.TaskTitleMaxLength), mcp.Description("New concise task title (maximum 60 characters)")),
+			mcp.WithString("title", mcp.MaxLength(taskcontract.TaskTitleMaxLength), mcp.Description("New concise task title (maximum 60 characters)")),
 			mcp.WithString("description", mcp.Description("New description")),
 			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
 			mcp.WithString("deferred_launch_prompt", mcp.Description("Replace the prompt a not-yet-started task will launch with. Only valid for a task created with blocked_by (+ start_agent), whose launch is still waiting on its dependencies — use it to refresh a brief that went stale while the chain ran. Rejected once the task has started; send new context with message_task_kandev instead. When this is rejected, no other field in the same call is applied.")),
@@ -1470,7 +1470,7 @@ func (s *Server) registerCreateTaskTool() {
 			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Auto-resolved if the workspace has only one workflow. Defaulted from parent for subtasks when workspace_id is also omitted; if supplied, it must belong to the effective workspace_id.")),
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted; for subtasks, pass only with an explicit workflow_id)")),
 			mcp.WithString("workspace_mode", mcp.Enum("inherit_parent", "new_workspace"), mcp.Description("Optional materialized-workspace mode. Omit for subtasks to inherit the parent's workspace/worktree. inherit_parent requires parent_id and reuses the parent's materialized workspace/worktree; new_workspace requests a separate workspace/worktree.")),
-			mcp.WithString("title", mcp.Required(), mcp.MaxLength(service.TaskTitleMaxLength), mcp.Description("A concise, few-word task title (maximum 60 characters).")),
+			mcp.WithString("title", mcp.Required(), mcp.MaxLength(taskcontract.TaskTitleMaxLength), mcp.Description("A concise, few-word task title (maximum 60 characters).")),
 			mcp.WithString("prompt", mcp.Description("The initial prompt for the task agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. For auto-started subtasks, provide a specific and detailed prompt; omitting it starts the task agent without task-specific context.")),
 			mcp.WithBoolean("autopilot", mcp.Description("Start this task in autopilot mode. Default: false. The value is fixed at creation and is not inherited by subtasks. The agent does not ask the user directly; it asks its direct parent only for critical decisions.")),
 			mcp.WithString("agent_profile_id", mcp.Description(agentProfileDesc)),
@@ -1923,13 +1923,13 @@ func (s *Server) registerPlanTools() {
 			// (compiled with additionalProperties:false) and would then
 			// reject an out-of-enum value itself, with a generic message
 			// that never names either accepted value - before
-			// service.ParsePlanWriteMode ever runs. The rejection must name both,
+			// taskcontract.ParsePlanWriteMode ever runs. The rejection must name both,
 			// so the two accepted
 			// values are documented in the description text (advisory to
 			// well-behaved clients) and enforced, with that exact message,
 			// by the handler instead.
 			mcp.WithString("mode",
-				mcp.DefaultString(string(service.PlanWriteModeReplace)),
+				mcp.DefaultString(string(taskcontract.PlanWriteModeReplace)),
 				mcp.Description(`"replace" (default) submits the whole document and overwrites the stored plan. "append" submits only a fragment, which the server appends after one blank line without you needing to read the plan first; append is not idempotent, so resubmitting the same call adds the fragment again. Any other value is rejected and leaves the stored plan unchanged.`),
 			),
 		),
@@ -1951,7 +1951,7 @@ func (s *Server) registerPlanTools() {
 			mcp.WithDescription("List bounded metadata for a task plan's revisions, newest first. Responses contain IDs, authors, timestamps, titles, and byte sizes, but no revision content. Use get_task_plan_revision_kandev for one exact snapshot before a deliberate restore."),
 			mcp.WithString("task_id", mcp.Description("The task ID whose plan history to list. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 			mcp.WithInteger("before_revision_number", mcp.Min(0), mcp.Description("Optional exclusive revision-number cursor from the previous response; zero starts at the newest revision.")),
-			mcp.WithInteger("limit", mcp.Min(1), mcp.Max(service.MaxPlanRevisionPageLimit), mcp.Description("Optional page size. Defaults to 20 and cannot exceed 100.")),
+			mcp.WithInteger("limit", mcp.Min(1), mcp.Max(taskcontract.MaxPlanRevisionPageLimit), mcp.Description("Optional page size. Defaults to 20 and cannot exceed 100.")),
 		),
 		s.wrapHandler("list_task_plan_revisions_kandev", s.listTaskPlanRevisionsHandler()),
 	)

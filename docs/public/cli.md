@@ -16,17 +16,17 @@ The packaged `kandev` executable is a single native Go binary with the compiled 
 
 ## Supported release targets
 
-| OS | Architectures | Install channels |
-|---|---|---|
-| macOS | Apple silicon (`arm64`), Intel (`x64`) | Homebrew, npm/npx |
-| Linux | `arm64`, `x64` | Homebrew, npm/npx |
-| Windows | `x64` | Scoop, npm/npx |
+| OS      | Architectures                          | Install channels  |
+| ------- | -------------------------------------- | ----------------- |
+| macOS   | Apple silicon (`arm64`), Intel (`x64`) | Homebrew, npm/npx |
+| Linux   | `arm64`, `x64`                         | Homebrew, npm/npx |
+| Windows | `x64`                                  | Scoop, npm/npx    |
 
 The `kandev` binary contains the backend and compiled web application. A
-release bundle also contains the host `agentctl` and Linux/macOS remote
-`agentctl` helpers for task environments. These helpers support agent
-execution in SSH and container environments. They do not serve the Kandev web
-application.
+Stable standard runtime contains the host `agentctl` and a manifest for Linux
+and macOS remote helpers. Kandev downloads a selected helper when a remote
+executor needs it and no verified copy is cached. Full Stable archives and npm
+Nightlies contain all remote helpers. These helpers do not serve the web app.
 
 The npm package is a small Node.js shim. It selects an exact, same-version
 native runtime package for `process.platform` and `process.arch`, then starts
@@ -94,6 +94,18 @@ tar -xzf kandev-linux-x64.tar.gz
 ```
 
 Verifying the checksum matters more here than with the package managers, which do that themselves.
+
+The default Stable archive is the standard runtime. It contains `kandev`, the host `agentctl`, and
+`remote-helpers.json`. A remote task can need an HTTPS download the first time it selects a platform.
+The download comes from that Stable release and Kandev checks its SHA-256 digest before use. Allow
+outbound HTTPS to `github.com` and `release-assets.githubusercontent.com`; GitHub redirects release
+asset downloads to the second host.
+
+For an offline CLI install, add `-full` before the archive extension, as in
+`kandev-linux-x64-full.tar.gz`. This archive also contains all four remote helpers. Windows users
+can use `kandev-windows-x64-full.zip`. Stable Desktop has no full offline installer or updater.
+Containers and npm Nightlies retain all helpers. See the [release size report](https://github.com/kdlbs/kandev/releases/latest/download/runtime-size-report.md)
+for the current archive and helper sizes.
 
 The archive extracts to a `kandev/` directory containing `bin/`, and the launcher finds the rest of
 the bundle relative to itself. The extracted directory can be moved anywhere; add `kandev/bin` to
@@ -177,14 +189,14 @@ kandev start [options]
 kandev service <action> [service options]
 ```
 
-| Option | Meaning |
-|---|---|
-| `--port <1-65535>` | Request an exact backend port. `--backend-port` is an alias; `--port=<port>` forms also work. |
-| `--headless`, `--no-browser` | Do not open a browser. |
-| `--verbose`, `-v` | Show backend info output. |
-| `--debug` | Record debug output in the backend file and enable diagnostic endpoints and ACP frame logs; stdout remains concise. See the security warning below. |
-| `--version`, `-V` | Print the native runtime version. |
-| `--help`, `-h`, `help` | Print help. |
+| Option                       | Meaning                                                                                                                                             |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--port <1-65535>`           | Request an exact backend port. `--backend-port` is an alias; `--port=<port>` forms also work.                                                       |
+| `--headless`, `--no-browser` | Do not open a browser.                                                                                                                              |
+| `--verbose`, `-v`            | Show backend info output.                                                                                                                           |
+| `--debug`                    | Record debug output in the backend file and enable diagnostic endpoints and ACP frame logs; stdout remains concise. See the security warning below. |
+| `--version`, `-V`            | Print the native runtime version.                                                                                                                   |
+| `--help`, `-h`, `help`       | Print help.                                                                                                                                         |
 
 These commands and options describe the installed native launcher. Unknown arguments fail with exit status 2. In particular, the npm and Homebrew release entrypoints currently invoke that native launcher, which does **not** support `dev`, `--dev`, `--runtime-version`, `--web-internal-port`, or the removed `--web-port` spelling. The source-checkout development launcher has a separate contract described below.
 
@@ -258,14 +270,14 @@ kandev maintenance database [--execute] [--compact]
     [--keep-plan-revisions <n>] [--candidate-limit <n>] [--home-dir <path>]
 ```
 
-| Option | Meaning |
-|---|---|
-| `--execute` | Perform retention deletes. Without it, the command is a read-only dry run (the default). |
-| `--compact` | After retention deletes commit, additionally stage a compacted copy and atomically replace the live database. Only takes effect together with `--execute`. |
-| `--keep-plan-revisions <n>` | Additionally protect the `n` most recent non-HEAD plan revisions per task (default `0`). |
-| `--candidate-limit <n>` | Cap how many rows are reported/deleted per retention category (default: unlimited). |
-| `--home-dir <path>` | Kandev home directory override (default: `$KANDEV_HOME_DIR` or `~/.kandev`). |
-| `--help`, `-h` | Print command help. |
+| Option                      | Meaning                                                                                                                                                    |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--execute`                 | Perform retention deletes. Without it, the command is a read-only dry run (the default).                                                                   |
+| `--compact`                 | After retention deletes commit, additionally stage a compacted copy and atomically replace the live database. Only takes effect together with `--execute`. |
+| `--keep-plan-revisions <n>` | Additionally protect the `n` most recent non-HEAD plan revisions per task (default `0`).                                                                   |
+| `--candidate-limit <n>`     | Cap how many rows are reported/deleted per retention category (default: unlimited).                                                                        |
+| `--home-dir <path>`         | Kandev home directory override (default: `$KANDEV_HOME_DIR` or `~/.kandev`).                                                                               |
+| `--help`, `-h`              | Print command help.                                                                                                                                        |
 
 **Dry run (default).** Without `--execute`, the command never acquires a
 lock, takes a backup, or changes anything; it is always safe to run
@@ -305,25 +317,25 @@ backend to loopback while diagnostics are enabled and treat the complete
 response as sensitive process data. The counters below never use task,
 workspace, repository, branch, session, or execution identifiers as labels.
 
-| Metric | Meaning |
-|---|---|
-| `github_pr_watch_active` | Canonical watches eligible for polling in the latest poll census. |
-| `github_pr_watch_searching` | Eligible watches still searching by branch. |
-| `github_pr_watch_duplicates` | Rows that violate the canonical searching or discovered identity in the latest census. Expected value: `0`. |
-| `github_pr_watch_orphans` | Watches whose task or task/repository relationship is missing. Expected value: `0`. |
-| `github_pr_watch_canonical_poll_requests_total` | Canonical watch targets submitted to GitHub polling, including targets combined into one batch request. |
-| `task_status_summary_cas_retries_total` | Projection compare-and-swap losses retried after reloading authoritative state. |
-| `task_status_summary_cas_exhaustions_total` | Projection updates that exhausted the bounded retry policy. Expected steady-state value: no increase. |
-| `task_status_summary_event_handler_failures_total` | Status-summary events that returned a handler error. |
-| `task_message_payload_hydrations_total` | Explicit payload hydration outcomes, labelled only by `outcome=success` or `outcome=error`. |
-| `task_message_payload_hydration_latency_ms` | Cumulative hydration counts in the bounded `10`, `50`, `250`, `1000`, and `+Inf` millisecond buckets, labelled by outcome. |
-| `task_message_content_bytes` | Logical bytes in message content from the latest database-stat read. |
-| `task_message_metadata_bytes` | Logical bytes in inline message metadata from the latest database-stat read. |
-| `task_message_payload_compressed_bytes` | Compressed external payload bytes from the latest database-stat read. |
-| `task_git_snapshot_bytes` | Logical Git snapshot file and metadata bytes from the latest database-stat read. |
-| `database_size_bytes` / `database_wal_size_bytes` | Database and SQLite WAL bytes from the latest database-stat read. PostgreSQL reports `0` for the SQLite-only WAL gauge. |
-| `message_queue_depth` | Current unreserved prompt queue depth. `-1` means the queue is unavailable or the bounded read failed. |
-| `agent_active_runtimes` | Agent executions currently owned by the lifecycle runtime. |
+| Metric                                             | Meaning                                                                                                                    |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `github_pr_watch_active`                           | Canonical watches eligible for polling in the latest poll census.                                                          |
+| `github_pr_watch_searching`                        | Eligible watches still searching by branch.                                                                                |
+| `github_pr_watch_duplicates`                       | Rows that violate the canonical searching or discovered identity in the latest census. Expected value: `0`.                |
+| `github_pr_watch_orphans`                          | Watches whose task or task/repository relationship is missing. Expected value: `0`.                                        |
+| `github_pr_watch_canonical_poll_requests_total`    | Canonical watch targets submitted to GitHub polling, including targets combined into one batch request.                    |
+| `task_status_summary_cas_retries_total`            | Projection compare-and-swap losses retried after reloading authoritative state.                                            |
+| `task_status_summary_cas_exhaustions_total`        | Projection updates that exhausted the bounded retry policy. Expected steady-state value: no increase.                      |
+| `task_status_summary_event_handler_failures_total` | Status-summary events that returned a handler error.                                                                       |
+| `task_message_payload_hydrations_total`            | Explicit payload hydration outcomes, labelled only by `outcome=success` or `outcome=error`.                                |
+| `task_message_payload_hydration_latency_ms`        | Cumulative hydration counts in the bounded `10`, `50`, `250`, `1000`, and `+Inf` millisecond buckets, labelled by outcome. |
+| `task_message_content_bytes`                       | Logical bytes in message content from the latest database-stat read.                                                       |
+| `task_message_metadata_bytes`                      | Logical bytes in inline message metadata from the latest database-stat read.                                               |
+| `task_message_payload_compressed_bytes`            | Compressed external payload bytes from the latest database-stat read.                                                      |
+| `task_git_snapshot_bytes`                          | Logical Git snapshot file and metadata bytes from the latest database-stat read.                                           |
+| `database_size_bytes` / `database_wal_size_bytes`  | Database and SQLite WAL bytes from the latest database-stat read. PostgreSQL reports `0` for the SQLite-only WAL gauge.    |
+| `message_queue_depth`                              | Current unreserved prompt queue depth. `-1` means the queue is unavailable or the bounded read failed.                     |
+| `agent_active_runtimes`                            | Agent executions currently owned by the lifecycle runtime.                                                                 |
 
 `GET /api/v1/system/database` refreshes the database and storage gauges and
 returns the same values as typed fields: `size_bytes`, `wal_size_bytes`,
@@ -336,10 +348,10 @@ capacity alerts.
 
 ## Ports and network exposure
 
-| Process | Preferred port | Automatic behavior |
-|---|---:|---|
-| Backend (UI, HTTP, WebSocket, MCP) | `38429` | If no port was requested and this port cannot bind on loopback, try up to 10 random ports in `10000`-`60000`. |
-| Core `agentctl` | `39429` | Uses the same automatic fallback strategy and never shares the backend port. |
+| Process                            | Preferred port | Automatic behavior                                                                                            |
+| ---------------------------------- | -------------: | ------------------------------------------------------------------------------------------------------------- |
+| Backend (UI, HTTP, WebSocket, MCP) |        `38429` | If no port was requested and this port cannot bind on loopback, try up to 10 random ports in `10000`-`60000`. |
+| Core `agentctl`                    |        `39429` | Uses the same automatic fallback strategy and never shares the backend port.                                  |
 
 There is no separate web-server port in an installed release: the backend serves embedded assets. For the `run`, `start`, and development launcher flows, if `--port`, `KANDEV_BACKEND_PORT`, or `KANDEV_PORT` specifies a port, the launcher checks it before declaring the backend ready, does not substitute another one, and fails startup if the configured listen address cannot bind it. `kandev service install --port` remains the separate installer behavior described above.
 
@@ -369,18 +381,18 @@ does not merge candidates, and an unreadable or invalid first file stops the
 launch. There is no public `--config` flag. Service launches use the same
 discovery and carry the selected file into the managed backend process.
 
-| Variable | Default | Behavior |
-|---|---|---|
-| `KANDEV_BACKEND_PORT` | unset | Backend port when `--port` is absent. |
-| `KANDEV_PORT` | unset | Compatibility backend-port alias. |
-| `KANDEV_HOME_DIR` | `~/.kandev` | Root for application data, tasks, repositories, logs, and launcher state. |
-| `KANDEV_DATABASE_PATH` | `<home>/data/kandev.db` | Advanced SQLite path override. System backups use the sibling `backups/` directory. See [Configuration](configuration.md). |
-| `KANDEV_LOG_LEVEL` | `warn` from the launcher | Explicit backend log level; overrides `--verbose` and `--debug` log-level selection. |
-| `KANDEV_HEALTH_TIMEOUT_MS` | `45000` | Positive integer startup-health timeout. Invalid or non-positive values fall back to 45 seconds. |
-| `KANDEV_NO_BROWSER` | unset | The exact value `1` suppresses browser opening. |
-| `KANDEV_BUNDLE_DIR` | selected by installer | Advanced packaging override. The npm shim and Homebrew wrapper set this; a bad path is a fatal runtime validation error. |
-| `KANDEV_VERSION` | unset | Optional installer-supplied display metadata (the Homebrew wrapper sets it). |
-| `KANDEV_SHUTDOWN_DEBUG` | unset | The exact value `1` prints launcher process IDs, commands, paths, signals, and graceful/forced shutdown decisions. Use temporarily for shutdown diagnosis. |
+| Variable                   | Default                  | Behavior                                                                                                                                                   |
+| -------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KANDEV_BACKEND_PORT`      | unset                    | Backend port when `--port` is absent.                                                                                                                      |
+| `KANDEV_PORT`              | unset                    | Compatibility backend-port alias.                                                                                                                          |
+| `KANDEV_HOME_DIR`          | `~/.kandev`              | Root for application data, tasks, repositories, logs, and launcher state.                                                                                  |
+| `KANDEV_DATABASE_PATH`     | `<home>/data/kandev.db`  | Advanced SQLite path override. System backups use the sibling `backups/` directory. See [Configuration](configuration.md).                                 |
+| `KANDEV_LOG_LEVEL`         | `warn` from the launcher | Explicit backend log level; overrides `--verbose` and `--debug` log-level selection.                                                                       |
+| `KANDEV_HEALTH_TIMEOUT_MS` | `45000`                  | Positive integer startup-health timeout. Invalid or non-positive values fall back to 45 seconds.                                                           |
+| `KANDEV_NO_BROWSER`        | unset                    | The exact value `1` suppresses browser opening.                                                                                                            |
+| `KANDEV_BUNDLE_DIR`        | selected by installer    | Advanced packaging override. The npm shim and Homebrew wrapper set this; a bad path is a fatal runtime validation error.                                   |
+| `KANDEV_VERSION`           | unset                    | Optional installer-supplied display metadata (the Homebrew wrapper sets it).                                                                               |
+| `KANDEV_SHUTDOWN_DEBUG`    | unset                    | The exact value `1` prints launcher process IDs, commands, paths, signals, and graceful/forced shutdown decisions. Use temporarily for shutdown diagnosis. |
 
 The launcher also sets the selected server and `agentctl` ports for the backend. Treat its supervisor socket and manifest under `<home>/supervisor/` as private implementation state, not a control API.
 
@@ -436,7 +448,10 @@ Remove `--omit=optional` from npm configuration for this install. On unsupported
 
 ### A required binary or remote helper is missing
 
-Reinstall or upgrade the whole package. Runtime validation intentionally fails when `kandev`, `agentctl`, or a required Linux/macOS remote helper is absent. Mixing archives or pruning package files produces this error.
+If `kandev` or the host `agentctl` is missing, reinstall the whole package. A Stable standard runtime
+does not contain remote helpers. If a remote task cannot get its selected helper, allow outbound
+HTTPS to `github.com` and `release-assets.githubusercontent.com`, then retry. For an offline CLI
+install, use a `-full` archive or an existing helper-path override. See [Executors](executors.md#stable-remote-helpers).
 
 ### The requested port is already in use
 
@@ -461,12 +476,12 @@ The launcher prints buffered backend output once when startup fails, followed by
 
 Use the failure class to choose the next action:
 
-| Failure class | Meaning and recovery |
-|---|---|
-| Early backend exit | The child stopped before readiness. Read the named backend log for the startup error. |
-| Unreachable backend | No target accepted a connection. Check the effective binds, firewall rules, and environment overrides. |
-| Unhealthy HTTP response | A target answered with a non-success status. Inspect that status and the backend log. |
-| Different process | A selected port answered without the launcher's token. Free the port or choose another backend port. |
+| Failure class           | Meaning and recovery                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ |
+| Early backend exit      | The child stopped before readiness. Read the named backend log for the startup error.                  |
+| Unreachable backend     | No target accepted a connection. Check the effective binds, firewall rules, and environment overrides. |
+| Unhealthy HTTP response | A target answered with a non-success status. Inspect that status and the backend log.                  |
+| Different process       | A selected port answered without the launcher's token. Free the port or choose another backend port.   |
 
 If the backend is still running when readiness expires, the summary says that the launcher stopped it after readiness failed. It does not describe that case as a backend crash. Common underlying causes include an invalid `config.yaml`, a database migration or permission error, an occupied explicit port, or a damaged runtime bundle.
 

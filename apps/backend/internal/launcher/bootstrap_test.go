@@ -48,6 +48,14 @@ func TestLauncherBootstrapUsesYAMLValues(t *testing.T) {
 	}
 }
 
+func TestBackendEnvIncludesValidatedBundleRoot(t *testing.T) {
+	t.Setenv("KANDEV_BUNDLE_DIR", "inherited-wrong-value")
+	got := backendEnvForConfig(portConfig{}, "", "", false, "health", []string{"KANDEV_BUNDLE_DIR=/opt/kandev"}, nil)
+	if value := processEnvValue(got, "KANDEV_BUNDLE_DIR"); value != "/opt/kandev" {
+		t.Fatalf("KANDEV_BUNDLE_DIR = %q, want /opt/kandev", value)
+	}
+}
+
 func TestLauncherBootstrapEnvironmentOverridesYAMLAndFlagsOverrideEnvironment(t *testing.T) {
 	clearLauncherConfigurationEnvironment(t)
 	dir := t.TempDir()

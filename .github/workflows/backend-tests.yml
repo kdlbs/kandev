@@ -92,6 +92,7 @@ jobs:
             apps/web/lib/settings-discovery/contract.generated.json
             apps/web/lib/settings-discovery/profile-contract.generated.json
             scripts/settings-contract-ci.test.mjs
+            scripts/check-agentctl-deps.sh
             # check-make-shells also lints the root Makefile's $(shell ...)
             # probes, so a change there has to be able to trip it.
             Makefile
@@ -185,6 +186,10 @@ jobs:
 
       - name: Build
         run: go build -v ./cmd/kandev
+
+      - name: Guard agentctl dependency graph
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/check-agentctl-deps.sh
 
       - name: Verify settings catalog contract
         working-directory: ${{ github.workspace }}

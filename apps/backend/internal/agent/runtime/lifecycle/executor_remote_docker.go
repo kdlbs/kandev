@@ -27,7 +27,8 @@ import (
 // all resolve on the remote host, and nothing on the backend's filesystem is
 // mounted into the container.
 type RemoteDockerExecutor struct {
-	logger *logger.Logger
+	logger           *logger.Logger
+	agentctlResolver *AgentctlResolver
 
 	// connect resolves a request to a live remote session. These operations
 	// are fields so the lifecycle can be tested without a daemon or an SSH
@@ -147,17 +148,30 @@ func (s *remoteDockerSession) takeWatchdog(expected *sshKeepaliveWatchdog) *sshK
 
 // NewRemoteDockerExecutor creates the remote Docker runtime. Connections are
 // established per launch, against the target named by the executor profile.
-func NewRemoteDockerExecutor(log *logger.Logger) *RemoteDockerExecutor {
+func NewRemoteDockerExecutor(log *logger.Logger, resolvers ...*AgentctlResolver) *RemoteDockerExecutor {
+	resolver := NewAgentctlResolver(log)
+	if len(resolvers) > 0 && resolvers[0] != nil {
+		resolver = resolvers[0]
+	}
 	r := &RemoteDockerExecutor{
-		logger:   log.WithFields(zap.String("runtime", "remote_docker")),
-		sessions: map[string]*remoteDockerSession{},
-		targets:  map[string]map[string]interface{}{},
+		logger:           log.WithFields(zap.String("runtime", "remote_docker")),
+		agentctlResolver: resolver,
+		sessions:         map[string]*remoteDockerSession{},
+		targets:          map[string]map[string]interface{}{},
 	}
 	r.connect = r.dialRemote
 	r.reconnect = r.reconnectToContainer
 	r.launch = r.launchFresh
 	r.watchTransport = r.startTransportWatchdog
 	return r
+}
+
+func (r *RemoteDockerExecutor) newRemoteContainerInputs(
+	client containerArchiveWriter,
+	platform SSHRemotePlatform,
+	commandBuilder *CommandBuilder,
+) *remoteContainerInputs {
+	return newRemoteContainerInputs(client, platform, commandBuilder, r.logger, r.agentctlResolver)
 }
 
 func (r *RemoteDockerExecutor) Name() executor.Name {
@@ -268,7 +282,7 @@ func (r *RemoteDockerExecutor) dialRemote(ctx context.Context, req *ExecutorCrea
 	mgr.containerHostFiles = newRemoteContainerHostFiles(info.Platform)
 	mgr.endpointResolver = session.endpoints
 
-	session.inputs = newRemoteContainerInputs(dockerClient, info.Platform, mgr.commandBuilder, r.logger)
+	session.inputs = r.newRemoteContainerInputs(dockerClient, info.Platform, mgr.commandBuilder)
 	session.inputs.resolveMockAgentBinary = mgr.resolveMockAgentBinary
 	mgr.seedCreatedContainer = session.inputs.DeliverLaunchInputs
 	session.containerMgr = mgr

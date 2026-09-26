@@ -63,6 +63,8 @@ const (
 	PrepareStepSkipped   PrepareStepStatus = "skipped"
 )
 
+const PrepareStepKindRemoteHelperDownload = "remote_helper_download"
+
 // RepoPrepareSpec describes one repository for multi-repo environment preparation.
 // Mirrors the per-repo prepare fields that EnvPrepareRequest historically
 // carried at the top level. When EnvPrepareRequest.Repositories is non-empty,
@@ -219,15 +221,18 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 
 // PrepareStep represents a single step in the preparation process.
 type PrepareStep struct {
-	Name          string            `json:"name"`
-	Command       string            `json:"command,omitempty"`
-	Status        PrepareStepStatus `json:"status"`
-	Output        string            `json:"output,omitempty"`
-	Error         string            `json:"error,omitempty"`
-	Warning       string            `json:"warning,omitempty"`
-	WarningDetail string            `json:"warning_detail,omitempty"`
-	StartedAt     *time.Time        `json:"started_at,omitempty"`
-	EndedAt       *time.Time        `json:"ended_at,omitempty"`
+	Name           string            `json:"name"`
+	Kind           string            `json:"kind,omitempty"`
+	RemotePlatform string            `json:"remote_platform,omitempty"`
+	FailureCode    string            `json:"failure_code,omitempty"`
+	Command        string            `json:"command,omitempty"`
+	Status         PrepareStepStatus `json:"status"`
+	Output         string            `json:"output,omitempty"`
+	Error          string            `json:"error,omitempty"`
+	Warning        string            `json:"warning,omitempty"`
+	WarningDetail  string            `json:"warning_detail,omitempty"`
+	StartedAt      *time.Time        `json:"started_at,omitempty"`
+	EndedAt        *time.Time        `json:"ended_at,omitempty"`
 }
 
 // RepoWorktreeResult is the per-repository outcome of environment preparation.
@@ -325,6 +330,15 @@ func SerializePrepareResult(result *EnvPrepareResult) map[string]interface{} {
 		entry := map[string]interface{}{
 			"name": step.Name, "status": string(step.Status),
 			"output": output, "command": step.Command,
+		}
+		if step.Kind != "" {
+			entry["kind"] = step.Kind
+		}
+		if step.RemotePlatform != "" {
+			entry["remote_platform"] = step.RemotePlatform
+		}
+		if step.FailureCode != "" {
+			entry["failure_code"] = step.FailureCode
 		}
 		if step.Error != "" {
 			entry["error"] = step.Error

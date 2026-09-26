@@ -26,32 +26,43 @@ flowchart TD
 
 ## Overview
 
-This package provides the `kandev` CLI launcher. The runtime bundle (Go backend, agentctl, and static Vite web assets) is **installed by the package manager** — there is no first-run download.
+This package provides the `kandev` CLI launcher. The runtime bundle (Go backend, agentctl, and static Vite web assets) is **installed by the package manager**. Stable standard installs download a verified remote helper on first use when its cache is empty.
 
 Three native bundle consumers share the same release artifacts:
 
 - **npm/npx**: `kandev@X.Y.Z` declares `optionalDependencies` for `@kdlbs/runtime-{platform}@X.Y.Z`. npm 7+ filters by `os`/`cpu` and installs only the matching one.
 - **Homebrew**: `kdlbs/homebrew-kandev` formula downloads the GitHub release tarball into the Cellar and installs `bin/kandev` as the public command.
-- **Scoop**: `kdlbs/scoop-kandev` manifest downloads the Windows x64 GitHub release tarball and exposes `bin\kandev.exe` as the public command.
+- **Scoop**: `kdlbs/scoop-kandev` manifest downloads the standard Windows x64 GitHub release archive and exposes `bin\kandev.exe` as the public command.
 
-All three consumers resolve to a native runtime bundle. Homebrew/Scoop/manual bundles contain the platform launcher and `bin/agentctl`; npm runtime packages also include the platform-matched binaries. The public command remains `kandev`; the hidden backend mode is `kandev __backend`.
+All three consumers resolve to a native runtime bundle. Stable Homebrew/Scoop/manual bundles contain the host launcher, `bin/agentctl`, and the helper manifest. The remote resolver downloads a selected helper when needed. Full CLI bundles contain all helper executables for offline use. The public command remains `kandev`; the hidden backend mode is `kandev __backend`.
 
 ## Artifact shapes
 
-The GitHub release bundle and the npm runtime package are **different shapes** because they serve different consumers:
+The Stable GitHub release bundle and Stable npm runtime package are **different shapes** because they serve different consumers. Nightly npm packages keep the full offline layout because they do not have a matching GitHub Release for helper downloads:
 
 ```
-# GitHub release bundle (used by Homebrew + Scoop + manual installs)
+# Stable standard GitHub release bundle
 kandev/
-└── bin/{kandev,agentctl,agentctl-linux-amd64,agentctl-darwin-arm64,agentctl-darwin-amd64}
+├── bin/{kandev,agentctl}
+└── remote-helpers.json
 
-# npm runtime package (@kdlbs/runtime-{platform})
+# Stable full CLI bundle
+kandev/
+└── bin/{kandev,agentctl,agentctl-linux-amd64,agentctl-linux-arm64,agentctl-darwin-amd64,agentctl-darwin-arm64}
+
+# Stable npm runtime package (@kdlbs/runtime-{platform})
 @kdlbs/runtime-{platform}/
-└── bin/{kandev,agentctl,agentctl-linux-amd64,agentctl-darwin-arm64,agentctl-darwin-amd64}
+├── bin/{kandev,agentctl}
+└── remote-helpers.json
+
+# Nightly npm runtime package (@kdlbs/runtime-{platform})
+@kdlbs/runtime-{platform}/
+└── bin/{kandev,agentctl,agentctl-linux-amd64,agentctl-linux-arm64,agentctl-darwin-amd64,agentctl-darwin-arm64}
 
 # Tauri desktop resource directory
 apps/desktop/src-tauri/resources/kandev/
-└── bin/{kandev[.exe],agentctl[.exe],agentctl-linux-amd64,agentctl-darwin-arm64,agentctl-darwin-amd64}
+├── bin/{kandev[.exe],agentctl[.exe]}
+└── remote-helpers.json
 ```
 
 For npm installs, the main `kandev` package provides only a tiny Node bin shim that execs `bin/kandev` from the platform runtime package.

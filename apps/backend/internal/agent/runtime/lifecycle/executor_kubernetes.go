@@ -94,9 +94,13 @@ func NewKubernetesExecutor(agentctlResolver *AgentctlResolver, log *logger.Logge
 		locks:             make(map[string]*kubernetesInstanceLock),
 	}
 	if agentctlResolver != nil {
-		runtime.resolveBinary = func(platform kubeexecutor.Platform) ([]byte, error) {
+		runtime.resolveBinary = func(ctx context.Context, req *ExecutorCreateRequest, platform kubeexecutor.Platform) ([]byte, error) {
 			arch := strings.TrimPrefix(string(platform), "linux/")
-			path, err := agentctlResolver.ResolveRemoteBinary(SSHRemotePlatform{GOOS: "linux", GOARCH: arch})
+			var onProgress PrepareProgressCallback
+			if req != nil {
+				onProgress = req.OnProgress
+			}
+			path, err := agentctlResolver.ResolveRemoteBinaryContext(ctx, SSHRemotePlatform{GOOS: "linux", GOARCH: arch}, onProgress)
 			if err != nil {
 				return nil, err
 			}
@@ -195,7 +199,7 @@ func (r *KubernetesExecutor) createFresh(
 		if stageErr != nil {
 			return stageErr
 		}
-		binary, stageErr = r.resolveBinary(profile.Platform)
+		binary, stageErr = r.resolveBinary(ctx, req, profile.Platform)
 		if stageErr != nil {
 			return fmt.Errorf("kubernetes lifecycle: resolve agentctl for %s: %w", profile.Platform, stageErr)
 		}

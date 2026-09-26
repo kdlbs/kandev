@@ -115,9 +115,16 @@ function StepWarning({ warning, warningDetail }: { warning: string; warningDetai
 }
 
 function StepMessages({ step }: { step: PrepareStepInfo }) {
+  const { t } = useTranslation();
+  const remoteHelperDownload = step.kind === "remote_helper_download";
   return (
     <>
       {step.warning && <StepWarning warning={step.warning} warningDetail={step.warningDetail} />}
+      {remoteHelperDownload && step.status === "failed" && (
+        <span className="text-muted-foreground mt-0.5 block text-xs">
+          {t("task:remoteHelperDownloadRecovery")}
+        </span>
+      )}
       {step.error && (
         <pre className="text-destructive mt-0.5 max-w-full whitespace-pre-wrap break-words text-xs">
           {step.error}
@@ -129,6 +136,7 @@ function StepMessages({ step }: { step: PrepareStepInfo }) {
 
 function StepRow({ step }: { step: PrepareStepInfo }) {
   const { t } = useTranslation();
+  const displayName = remoteHelperDownloadStepLabel(t, step);
   const inlineCommand = step.command && isInlineCommand(step.command) ? step.command : undefined;
   const blockCommand = step.command && !isInlineCommand(step.command) ? step.command : undefined;
   const hasExpandable = Boolean(step.output) || Boolean(blockCommand);
@@ -148,7 +156,7 @@ function StepRow({ step }: { step: PrepareStepInfo }) {
         <div className="flex-shrink-0">
           <StepIcon status={step.status} hasWarning={Boolean(step.warning)} />
         </div>
-        <span className={nameClass}>{step.name || t("task:preparingEllipsis")}</span>
+        <span className={nameClass}>{displayName || t("task:preparingEllipsis")}</span>
         {inlineCommand && (
           <code className="text-muted-foreground/50 min-w-0 break-all font-mono text-[10px]">
             {inlineCommand}
@@ -322,7 +330,20 @@ function hasStepDetails(step: PrepareStepInfo): boolean {
 
 function isVisibleStep(step: PrepareStepInfo): boolean {
   if (step.status === "skipped" && !hasStepDetails(step)) return false;
+  if (step.kind === "remote_helper_download") return true;
   return step.name.trim() !== "" || hasStepDetails(step);
+}
+
+function remoteHelperDownloadStepLabel(t: TFunction, step: PrepareStepInfo): string {
+  if (step.kind !== "remote_helper_download") return step.name;
+  const options = { platform: step.remotePlatform ?? "" };
+  if (step.status === "running") return t("task:remoteHelperDownloadRunning", options);
+  if (step.status === "completed") return t("task:remoteHelperDownloadCompleted", options);
+  if (step.status === "failed" && step.failureCode === "timeout") {
+    return t("task:remoteHelperDownloadTimedOut", options);
+  }
+  if (step.status === "failed") return t("task:remoteHelperDownloadFailed", options);
+  return t("task:preparingEllipsis");
 }
 
 type ScriptStatus = "starting" | "running" | "exited" | "failed";

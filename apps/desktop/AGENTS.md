@@ -19,11 +19,11 @@ Release builds prepare `src-tauri/resources/kandev/` with:
 ```text
 bin/kandev[.exe]
 bin/agentctl[.exe]
-bin/agentctl-linux-amd64
-bin/agentctl-linux-arm64
-bin/agentctl-darwin-arm64
-bin/agentctl-darwin-amd64
+remote-helpers.json (Stable standard resources)
 ```
+
+Legacy complete resources without `remote-helpers.json` still require all four
+cross-platform helper binaries under `bin/` during update/start validation.
 
 Use `scripts/release/prepare-desktop-runtime.sh` and `scripts/release/verify-desktop-runtime.sh`; do not commit runtime binaries. The tracked `.gitignore` files only keep the resource directory present for Tauri config validation.
 

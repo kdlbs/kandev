@@ -45,6 +45,12 @@ func provideLifecycleManager(
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 	secretStores := newLifecycleSecretStores(rawSecretStore)
+	agentctlResolver := lifecycle.NewAgentctlResolverWithOptions(log, lifecycle.AgentctlResolverOptions{
+		Version:   Version,
+		Commit:    Commit,
+		BundleDir: os.Getenv("KANDEV_BUNDLE_DIR"),
+		HomeDir:   cfg.ResolvedHomeDir(),
+	})
 
 	// Create runtime registry to manage multiple runtimes
 	executorRegistry := lifecycle.NewExecutorRegistry(log)
@@ -75,20 +81,24 @@ func provideLifecycleManager(
 		zap.String("host", cfg.Agent.StandaloneHost),
 		zap.Int("port", cfg.Agent.StandalonePort))
 
-	// Register Docker runtime if enabled (client is created lazily on first use)
+	// Keep cache cleanup on the shared resolver so SSH, Sprites, Kubernetes, and
+	// Desktop helper use can trigger it after a complete Docker mount inventory.
+	dockerExec := lifecycle.NewDockerExecutor(cfg.Docker, cfg.ResolvedHomeDir(), log, agentctlResolver)
+	agentctlResolver.SetCacheMountInventory(dockerExec.RemoteHelperCacheMounts)
+
+	// Register Docker runtime if enabled (client is created lazily on first use).
+	// The inventory callback remains available to non-Docker helper resolutions.
 	if cfg.Docker.Enabled {
-		dockerExec := lifecycle.NewDockerExecutor(cfg.Docker, cfg.ResolvedHomeDir(), log)
 		executorRegistry.Register(dockerExec)
 		log.Info("Docker runtime registered (lazy initialization)")
 	}
 
 	// Register Remote Docker runtime (always available, instances are created lazily per host)
-	remoteDockerExec := lifecycle.NewRemoteDockerExecutor(log)
+	remoteDockerExec := lifecycle.NewRemoteDockerExecutor(log, agentctlResolver)
 	executorRegistry.Register(remoteDockerExec)
 	log.Info("Remote Docker runtime registered")
 
 	// Register Sprites runtime (remote sandboxes via Sprites.dev)
-	agentctlResolver := lifecycle.NewAgentctlResolver(log)
 	spritesExec := lifecycle.NewSpritesExecutor(secretStores.credentials, agentRegistry, agentctlResolver, 8765, log)
 	executorRegistry.Register(spritesExec)
 	log.Info("Sprites runtime registered")

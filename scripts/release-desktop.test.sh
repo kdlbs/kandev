@@ -62,6 +62,24 @@ chmod_runtime() {
   done
 }
 
+write_standard_manifest() {
+  local dir="$1"
+  cat >"$dir/remote-helpers.json" <<'JSON'
+{
+  "schema_version": 1,
+  "version": "v1.2.3",
+  "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "variant": "standard",
+  "helpers": [
+    {"platform":"linux/amd64","asset":"agentctl-linux-amd64.gz","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":123},
+    {"platform":"linux/arm64","asset":"agentctl-linux-arm64.gz","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size_bytes":123},
+    {"platform":"darwin/amd64","asset":"agentctl-darwin-amd64.gz","sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","size_bytes":123},
+    {"platform":"darwin/arm64","asset":"agentctl-darwin-arm64.gz","sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","size_bytes":123}
+  ]
+}
+JSON
+}
+
 runtime_dir="$TMP_DIR/runtime"
 write_runtime "$runtime_dir"
 
@@ -75,6 +93,41 @@ chmod_runtime "$runtime_dir"
 "$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform macos-arm64 "$runtime_dir" >"$OUT_FILE"
 grep -q "verified for macos-arm64" "$OUT_FILE" || fail "verify-desktop-runtime did not include platform output"
 pass "verify-desktop-runtime accepts executable runtime"
+
+standard_runtime_dir="$TMP_DIR/standard-runtime"
+write_runtime "$standard_runtime_dir" without-helper
+chmod_runtime "$standard_runtime_dir"
+write_standard_manifest "$standard_runtime_dir"
+"$ROOT_DIR/scripts/release/verify-desktop-runtime.sh" --platform linux-x64 "$standard_runtime_dir" >"$OUT_FILE"
+grep -q "verified for linux-x64" "$OUT_FILE" || fail "verify-desktop-runtime did not accept standard manifest runtime"
+pass "verify-desktop-runtime accepts standard manifest runtime without helpers"
+
+standard_output_dir="$TMP_DIR/standard-output"
+"$ROOT_DIR/scripts/release/prepare-desktop-runtime.sh" \
+  --bundle-dir "$standard_runtime_dir" \
+  --platform linux-x64 \
+  --output-dir "$standard_output_dir" >"$OUT_FILE"
+cmp "$standard_runtime_dir/remote-helpers.json" "$standard_output_dir/remote-helpers.json" || fail "prepare-desktop-runtime did not copy the root manifest"
+for remote_helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+  if [ -e "$standard_output_dir/bin/$remote_helper" ]; then
+    fail "prepare-desktop-runtime copied unexpected helper $remote_helper into standard resources"
+  fi
+done
+pass "prepare-desktop-runtime copies standard manifest without helper executables"
+
+missing_manifest_dir="$TMP_DIR/missing-manifest-runtime"
+write_runtime "$missing_manifest_dir" without-helper
+chmod_runtime "$missing_manifest_dir"
+if "$ROOT_DIR/scripts/release/prepare-desktop-runtime.sh" \
+  --bundle-dir "$missing_manifest_dir" \
+  --output-dir "$TMP_DIR/missing-manifest-output" >"$OUT_FILE" 2>"$ERR_FILE"; then
+  fail "prepare-desktop-runtime should reject slim runtime without a manifest"
+fi
+if [ -e "$TMP_DIR/missing-manifest-output" ]; then
+  fail "prepare-desktop-runtime created output for an invalid slim runtime"
+fi
+grep -q "Missing agentctl linux/amd64 helper" "$ERR_FILE" || fail "missing manifest error did not explain that a complete legacy bundle or manifest is required"
+pass "prepare-desktop-runtime refuses to publish a slim runtime without its manifest"
 
 missing_helper_runtime_dir="$TMP_DIR/missing-helper-runtime"
 write_runtime "$missing_helper_runtime_dir" without-helper

@@ -900,19 +900,22 @@ func mergeRouteOverrideEnv(req *LaunchRequest) error {
 func (m *Manager) newProgressCallback(taskID, sessionID string) PrepareProgressCallback {
 	return func(step PrepareStep, stepIndex int, totalSteps int) {
 		m.eventPublisher.PublishPrepareProgress(sessionID, &PrepareProgressEventPayload{
-			TaskID:        taskID,
-			SessionID:     sessionID,
-			StepName:      step.Name,
-			StepCommand:   step.Command,
-			StepIndex:     stepIndex,
-			TotalSteps:    totalSteps,
-			Status:        string(step.Status),
-			Output:        step.Output,
-			Error:         step.Error,
-			Warning:       step.Warning,
-			WarningDetail: step.WarningDetail,
-			StartedAt:     step.StartedAt,
-			EndedAt:       step.EndedAt,
+			TaskID:         taskID,
+			SessionID:      sessionID,
+			StepName:       step.Name,
+			StepKind:       step.Kind,
+			RemotePlatform: step.RemotePlatform,
+			FailureCode:    step.FailureCode,
+			StepCommand:    step.Command,
+			StepIndex:      stepIndex,
+			TotalSteps:     totalSteps,
+			Status:         string(step.Status),
+			Output:         step.Output,
+			Error:          step.Error,
+			Warning:        step.Warning,
+			WarningDetail:  step.WarningDetail,
+			StartedAt:      step.StartedAt,
+			EndedAt:        step.EndedAt,
 		})
 	}
 }

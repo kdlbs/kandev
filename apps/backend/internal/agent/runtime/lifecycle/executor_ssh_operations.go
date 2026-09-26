@@ -86,9 +86,15 @@ func SSHRequireSupportedRemotePlatform(platform SSHRemotePlatform) error {
 // CreateInstance — but they still bubble up so the UI can surface "agentctl
 // not yet on remote" as a status row.
 func SSHCheckAgentctlCached(ctx context.Context, client *ssh.Client, resolver *AgentctlResolver, platform SSHRemotePlatform) (bool, error) {
-	localSha, _, _, err := localAgentctlSha256(resolver, platform)
+	localSha, hasExpectedDigest, err := resolver.expectedRemoteHelperSHA256(platform)
 	if err != nil {
 		return false, err
+	}
+	if !hasExpectedDigest {
+		localSha, _, _, err = localAgentctlSha256WithContext(ctx, resolver, platform, nil)
+		if err != nil {
+			return false, err
+		}
 	}
 	remoteShaFile, err := expandRemoteHome(ctx, client, sshRemoteAgentctlSha256)
 	if err != nil {
@@ -275,7 +281,11 @@ func expandRemoteHome(ctx context.Context, client *ssh.Client, path string) (str
 // localAgentctlSha256 returns the hex sha256 of the local agentctl binary
 // resolved via AgentctlResolver. Used to decide whether to re-upload.
 func localAgentctlSha256(resolver *AgentctlResolver, platform SSHRemotePlatform) (string, []byte, string, error) {
-	path, err := resolver.ResolveRemoteBinary(platform)
+	return localAgentctlSha256WithContext(context.Background(), resolver, platform, nil)
+}
+
+func localAgentctlSha256WithContext(ctx context.Context, resolver *AgentctlResolver, platform SSHRemotePlatform, onProgress PrepareProgressCallback) (string, []byte, string, error) {
+	path, err := resolver.ResolveRemoteBinaryContext(ctx, platform, onProgress)
 	if err != nil {
 		return "", nil, "", err
 	}
@@ -290,7 +300,11 @@ func localAgentctlSha256(resolver *AgentctlResolver, platform SSHRemotePlatform)
 // ensureAgentctlOnHost uploads the agentctl binary if the remote's cached sha256
 // differs from the local binary's sha256. Returns the absolute remote path.
 func ensureAgentctlOnHost(ctx context.Context, client *ssh.Client, resolver *AgentctlResolver, platform SSHRemotePlatform, log *logger.Logger) (string, error) {
-	localSha, localData, localPath, err := localAgentctlSha256(resolver, platform)
+	return ensureAgentctlOnHostWithProgress(ctx, ctx, client, resolver, platform, log, nil)
+}
+
+func ensureAgentctlOnHostWithProgress(ctx, helperCtx context.Context, client *ssh.Client, resolver *AgentctlResolver, platform SSHRemotePlatform, log *logger.Logger, onProgress PrepareProgressCallback) (string, error) {
+	localSha, localData, localPath, err := localAgentctlSha256WithContext(helperCtx, resolver, platform, onProgress)
 	if err != nil {
 		return "", err
 	}

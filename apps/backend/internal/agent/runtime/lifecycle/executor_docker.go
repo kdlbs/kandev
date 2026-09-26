@@ -74,9 +74,10 @@ func getMetadataStringMap(metadata map[string]interface{}, key string) map[strin
 // DockerExecutor implements Runtime for Docker-based agent execution.
 // The Docker client is created lazily on first use (not at startup).
 type DockerExecutor struct {
-	cfg           config.DockerConfig
-	kandevHomeDir string
-	logger        *logger.Logger
+	cfg              config.DockerConfig
+	kandevHomeDir    string
+	logger           *logger.Logger
+	agentctlResolver *AgentctlResolver
 
 	// newClientFunc creates the Docker client. Defaults to docker.NewClient.
 	// Override in tests to simulate failures.
@@ -112,13 +113,22 @@ type DockerExecutor struct {
 // when CreateInstance is called. kandevHomeDir is the resolved kandev root
 // directory used to host per-container agent session dirs (the replacement
 // for host home bind mounts that were leaking host state into containers).
-func NewDockerExecutor(cfg config.DockerConfig, kandevHomeDir string, log *logger.Logger) *DockerExecutor {
+
+func NewDockerExecutor(cfg config.DockerConfig, kandevHomeDir string, log *logger.Logger, resolvers ...*AgentctlResolver) *DockerExecutor {
+	var resolver *AgentctlResolver
+	if len(resolvers) > 0 {
+		resolver = resolvers[0]
+	}
+	if resolver == nil {
+		resolver = NewAgentctlResolver(log)
+	}
 	return &DockerExecutor{
-		cfg:             cfg,
-		kandevHomeDir:   kandevHomeDir,
-		logger:          log.WithFields(zap.String("runtime", "docker")),
-		newClientFunc:   docker.NewClient,
-		brokerPreflight: runBrokerReachabilityViaAgentctl,
+		cfg:              cfg,
+		kandevHomeDir:    kandevHomeDir,
+		logger:           log.WithFields(zap.String("runtime", "docker")),
+		agentctlResolver: resolver,
+		newClientFunc:    docker.NewClient,
+		brokerPreflight:  runBrokerReachabilityViaAgentctl,
 	}
 }
 
@@ -140,7 +150,7 @@ func (r *DockerExecutor) ensureClient() (*docker.Client, *ContainerManager, erro
 	cli.SetActivityCoordinator(r.activity)
 
 	r.docker = cli
-	r.containerMgr = NewContainerManager(cli, r.kandevHomeDir, r.logger)
+	r.containerMgr = NewContainerManager(cli, r.kandevHomeDir, r.logger, r.agentctlResolver)
 	r.initialized = true
 
 	return r.docker, r.containerMgr, nil
@@ -224,6 +234,27 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		zap.String("container_ip", containerIP))
 
 	return r.buildCreatedInstance(req, result, containerIP), nil
+}
+
+// RemoteHelperCacheMounts reports helper paths mounted by local Docker
+// containers so the shared cache retains helpers needed by reconnectable work.
+func (r *DockerExecutor) RemoteHelperCacheMounts(ctx context.Context) ([]string, error) {
+	_, manager, err := r.ensureClient()
+	if err != nil {
+		return nil, err
+	}
+	if manager == nil {
+		return nil, fmt.Errorf("docker container manager is unavailable")
+	}
+	containers, err := manager.ListManagedContainers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var mounts []string
+	for _, containerInfo := range containers {
+		mounts = append(mounts, containerInfo.Mounts...)
+	}
+	return mounts, nil
 }
 
 // reportCreateInstanceProgress wires the "Waiting for Docker container" step

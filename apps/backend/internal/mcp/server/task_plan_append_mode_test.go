@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kandev/kandev/internal/task/service"
+	taskcontract "github.com/kandev/kandev/internal/task/contract"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,7 +18,7 @@ import (
 // argument_validation.go) compiles every tool's schema with
 // additionalProperties:false and enforces a declared enum strictly, which
 // would reject an out-of-enum value itself - with a message naming neither
-// accepted value - before service.ParsePlanWriteMode ever ran. Declaring the
+// accepted value - before taskcontract.ParsePlanWriteMode ever ran. Declaring the
 // two values only in the description (advisory to well-behaved clients) is
 // what lets AC-TASKS-PLAN-APPEND-001.3's "name the two accepted values"
 // requirement actually reach the caller.
@@ -30,13 +30,13 @@ func TestUpdateTaskPlanKandev_ToolSchema_ModeHasDefaultAndDocumentsBothValues(t 
 	modeSchema, ok := props["mode"].(map[string]interface{})
 	require.True(t, ok, "update_task_plan_kandev schema must expose a 'mode' property")
 
-	assert.Equal(t, string(service.PlanWriteModeReplace), modeSchema["default"])
+	assert.Equal(t, string(taskcontract.PlanWriteModeReplace), modeSchema["default"])
 	assert.NotContains(t, modeSchema, "enum",
 		"an enforced schema enum would shadow ParsePlanWriteMode's own message; see comment above")
 
 	description, _ := modeSchema["description"].(string)
-	assert.Contains(t, description, string(service.PlanWriteModeReplace))
-	assert.Contains(t, description, string(service.PlanWriteModeAppend))
+	assert.Contains(t, description, string(taskcontract.PlanWriteModeReplace))
+	assert.Contains(t, description, string(taskcontract.PlanWriteModeAppend))
 }
 
 // TestUpdateTaskPlanKandev_ToolDescription_CoversAC006 pins

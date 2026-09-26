@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kandev/kandev/internal/task/service"
+	taskcontract "github.com/kandev/kandev/internal/task/contract"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
@@ -54,7 +54,7 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, props, "title")
 	titleProp, ok := props["title"].(map[string]interface{})
 	require.True(t, ok, "title should be an object")
-	assert.Equal(t, float64(service.TaskTitleMaxLength), titleProp["maxLength"])
+	assert.Equal(t, float64(taskcontract.TaskTitleMaxLength), titleProp["maxLength"])
 	titleDesc, ok := titleProp["description"].(string)
 	require.True(t, ok, "title should have a description")
 	assert.Contains(t, titleDesc, "concise")
@@ -177,7 +177,7 @@ func TestUpdateTask_ToolSchema_HasTitleMaxLength(t *testing.T) {
 	require.True(t, ok, "schema should have properties")
 	titleProp, ok := props["title"].(map[string]interface{})
 	require.True(t, ok, "title should be an object")
-	assert.Equal(t, float64(service.TaskTitleMaxLength), titleProp["maxLength"])
+	assert.Equal(t, float64(taskcontract.TaskTitleMaxLength), titleProp["maxLength"])
 }
 
 func TestCreateTask_PromptCanonical(t *testing.T) {

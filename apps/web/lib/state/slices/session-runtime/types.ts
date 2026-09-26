@@ -397,6 +397,9 @@ export type UserShellsState = {
 
 export type PrepareStepInfo = {
   name: string;
+  kind?: string;
+  remotePlatform?: string;
+  failureCode?: string;
   command?: string;
   status: string;
   output?: string;
