@@ -31,6 +31,11 @@ customer-facing API behavior and compatibility promises.
   unregistered annotations during rollout.
 - `scripts/lint-architecture.py` runs the modular rules. The pre-commit hook
   and CI architecture check use the same repository-owned entry point.
+- [Scanner tests](../../../../scripts/architecture_lint_tests/test_deprecation_ledger.py)
+  cover declaration scanning, identity, exclusions, registration, and baseline
+  behavior.
+- [Compatibility tests](../../../../scripts/architecture_lint_tests/test_compatibility.py)
+  preserve existing ledger metadata and date/SemVer removal-target semantics.
 
 ## Data and contracts
 
@@ -44,9 +49,10 @@ are diagnostic context, not identity.
 A declaration-level ledger locator supplies the repository-relative path,
 exact declaration identity, and canonical marker. Existing ledger validation
 continues to require a stable ID, owner, reason, introduction metadata,
-removal condition, and one date or SemVer target. A date target expires on its
-date; a SemVer target is a review checkpoint. Ordinary compatibility entries
-without `locator.declaration` keep their existing marker semantics.
+removal condition, and one date or SemVer target. A date target remains valid
+through its stated date and expires after that date; a SemVer target is a review
+checkpoint. Ordinary compatibility entries without `locator.declaration` keep
+their existing marker semantics.
 
 ## Control flow
 

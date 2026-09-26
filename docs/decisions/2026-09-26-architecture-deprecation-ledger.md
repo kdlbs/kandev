@@ -8,7 +8,7 @@
 
 The compatibility ledger records owners, reasons, introduction metadata, and removal conditions for intentional compatibility behavior. Explicit Go and TypeScript deprecation annotations can currently be added without an entry in that ledger. Existing compatibility annotations must remain usable while the repository adopts enforcement.
 
-This is an internal repository check and changes no product behavior. The internal tooling contract is recorded in the [architecture-lint requirement](../specs/architecture-lint/requirements/deprecation-ledger.md) and [system design](../specs/architecture-lint/system-design/deprecation-ledger.md); no product requirement applies.
+This is internal repository tooling. It adds a requirement to the architecture-lint system. It does not change product behavior or customer-facing compatibility promises. See the [requirement](../specs/architecture-lint/requirements/deprecation-ledger.md) and [system design](../specs/architecture-lint/system-design/deprecation-ledger.md).
 
 ## Decision
 

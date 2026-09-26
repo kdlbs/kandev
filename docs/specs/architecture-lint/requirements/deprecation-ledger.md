@@ -44,14 +44,18 @@ APIs.
   legacy-baseline finding, the linter shall require a valid compatibility entry
   for that path, declaration, and marker. A missing or stale declaration
   registration shall fail validation.
-- **AC-ARCHITECTURE-LINT-DEPRECATION-001.3:** When TypeScript functions or
-  methods have overloads, their normalized generic and parameter signatures
-  shall keep distinct declaration identities stable across source reordering
-  and formatting. An indistinguishable repeated annotation identity shall fail
-  as ambiguous.
+- **AC-ARCHITECTURE-LINT-DEPRECATION-001.3:** Member declaration identities
+  shall include their owning container. TypeScript function and method
+  identities shall include normalized generic and parameter signatures and
+  remain stable across source reordering and formatting. An indistinguishable
+  repeated annotation identity shall fail as ambiguous.
 - **AC-ARCHITECTURE-LINT-DEPRECATION-001.4:** When a deprecated declaration is
   removed, the linter shall reject its stale baseline finding or compatibility
   entry. After initial rollout, the rule baseline shall only shrink.
+- **AC-ARCHITECTURE-LINT-DEPRECATION-001.5:** Existing compatibility target
+  semantics shall remain unchanged. A date target remains valid through its
+  stated date and expires after that date. A SemVer target remains a review
+  checkpoint, not a calendar expiry.
 
 ## Out of scope
 

@@ -12,6 +12,7 @@ acceptance_criteria:
   - AC-ARCHITECTURE-LINT-DEPRECATION-001.2
   - AC-ARCHITECTURE-LINT-DEPRECATION-001.3
   - AC-ARCHITECTURE-LINT-DEPRECATION-001.4
+  - AC-ARCHITECTURE-LINT-DEPRECATION-001.5
 system_design:
   - ../../specs/architecture-lint/system-design/deprecation-ledger.md
 ---
@@ -26,9 +27,12 @@ New canonical production Go and TypeScript deprecation annotations require a mat
 
 - `AC-ARCHITECTURE-LINT-DEPRECATION-001.1`: The rule detects attached Go `Deprecated:` comments and TypeScript JSDoc `@deprecated` tags with exact path, declaration, and marker identities, while excluding generated/test/fixture/third-party sources, ordinary prose, and strings.
 - `AC-ARCHITECTURE-LINT-DEPRECATION-001.2`: A valid matching ledger registration passes; a missing, mismatched, or stale registration fails with deterministic actionable diagnostics.
-- `AC-ARCHITECTURE-LINT-DEPRECATION-001.3`: Tests prove overload identity stability under reordering and formatting and reject indistinguishable duplicate signatures.
+- `AC-ARCHITECTURE-LINT-DEPRECATION-001.3`: Tests prove member identities include their owners. They prove overload identities stay stable after formatting and reordering. They reject indistinguishable duplicates.
 - `AC-ARCHITECTURE-LINT-DEPRECATION-001.4`: Baseline bootstrap/shrink behavior remains exact, and removed declarations require baseline or ledger cleanup.
-- Tests cover grouped Go declarations, embedded fields, nested and decorated TypeScript declarations, non-identifier member keys, stale registrations after overload removal, and existing ledger date, version, staleness, and marker checks.
+- `AC-ARCHITECTURE-LINT-DEPRECATION-001.5`: Date targets remain valid through their stated date and expire after it; SemVer targets remain review checkpoints.
+- Tests cover same-named members in different containers, grouped Go declarations, and embedded fields.
+- Tests cover nested or decorated TypeScript declarations, non-identifier member keys, and stale entries after overload removal.
+- Compatibility tests cover current ledger date, version, staleness, and marker checks.
 - The initial baseline contains exactly the current unregistered production declarations on the refreshed main head.
 
 ## Scope and exclusions
@@ -39,7 +43,7 @@ Do not add compatibility-keyword discovery, a global deprecation ban, automatic 
 
 ## Requirements and system design
 
-The internal governance contract is [REQ-ARCHITECTURE-LINT-DEPRECATION-001](../../specs/architecture-lint/requirements/deprecation-ledger.md), with technical boundaries in the [system design](../../specs/architecture-lint/system-design/deprecation-ledger.md). The durable choice is recorded in [the architecture deprecation ledger decision](../../decisions/2026-09-26-architecture-deprecation-ledger.md). This is not a product requirement.
+The architecture-lint requirement defines this internal tooling contract. The system design describes its technical boundaries. The [ADR](../../decisions/2026-09-26-architecture-deprecation-ledger.md) records the durable decision. This change does not alter product behavior or customer-facing API contracts.
 
 ## Verification
 
@@ -67,3 +71,4 @@ Implemented and verified on refreshed main `c735b678863ba64e31bd78cd1a6e3c845be3
 - `python3 scripts/lint-spec-files.py --all` — passed after identity docs updates.
 - `python3 scripts/lint-harness-files.test.py` — passed, 19 tests; `make lint-harness` passed for all 199 harness files.
 - `git diff --check` — passed.
+- Coverage correction: code-only head `65f56956cb6b2f800485031caaec3fa8b30de097` failed `PR documentation coverage` (run `36259598400`). Its error was “Linked delivery package is incomplete.” The internal requirement/design pair then linked the rule to this work order. Trusted-base evaluation passed at exact head `a2cf91d63db6398a5f3eb9fa1730e1fbfed5a0d2` (run `36261418199`).
