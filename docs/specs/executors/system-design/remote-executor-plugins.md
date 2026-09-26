@@ -44,6 +44,9 @@ Each entry contains a local key, display name, description, localized message re
 contract version, supported state versions, profile schema, resource-state schema, and capabilities.
 The host derives the canonical identity `plugin:<plugin-id>:<key>`.
 The manifest validator bounds keys to 64 characters and schema documents to 64 KiB.
+Resource-state schemas are closed objects (`additionalProperties: false`). Before any callback or
+provider response can update inventory, the host validates required fields, declared scalar types,
+enums, numeric bounds, and the absence of undeclared or secret fields.
 Reject collisions, unsupported required contract versions, and declarations without the capability.
 
 Reuse the current managed binary and gRPC transport. Add optional SDK interfaces, as existing
@@ -82,7 +85,7 @@ They use typed envelopes, not generic browser actions.
 | Method | Inputs | Output and semantics |
 | --- | --- | --- |
 | `ValidateExecutorProfile` | Provider key, canonical config, profile-scoped secret values | Field errors and effective profile capabilities; no allocation |
-| `ProvisionExecutorEnvironment` | Operation identity, profile snapshot, bootstrap descriptor | Exact resource handle, bounded non-secret state, platform, retention and expiry |
+| `ProvisionExecutorEnvironment` | Operation identity, profile snapshot, bootstrap descriptor | Exact resource handle, schema-valid bounded non-secret state, platform, retention and expiry |
 | `RecoverExecutorOperation` | Original operation identity and profile snapshot | `found`, `absent`, or `unknown`; resolves lost provision responses |
 | `AttachExecutorEnvironment` | Recorded handle/state, session identity, expected runtime identity | Same environment descriptor; never provisions a replacement |
 | `InspectExecutorEnvironment` | Recorded handle/state | `running`, `suspended`, `terminated`, `absent`, or `unknown`, reason and expiry |
@@ -216,6 +219,10 @@ For `allocating`, call operation recovery. `found` checkpoints the exact handle;
 settlement; `unknown` retains the record and blocks replacement. After a canceled launch, even a late
 successful provision result enters cleanup rather than agent startup.
 
+For `cleanup_pending` without a resource handle, recover the original operation by its recorded ID.
+Destroy a recovered handle, settle `absent` only after provider confirmation, and retain `unknown` for
+retry. Never treat a missing handle or unimplemented lookup as proof that allocation did not occur.
+
 For `artifact_staging`, `bootstrapping`, and `provisioned`, attach only when the recorded resource and
 persisted transient agentctl authorization are available. If bootstrap did not persist authorization,
 run idempotent cleanup for the exact recorded resource. Mark confirmed absence; retain `cleanup_pending`
@@ -231,6 +238,7 @@ Backend shutdown closes local connections and stops plugin processes without des
 Archive, delete, reset, and failed-launch rollback use host-authorized resource destruction.
 Acquire the existing cleanup claim for environment owner and generation before external teardown.
 Late callbacks and stale claims cannot mutate inventory or destroy a successor resource.
+Task reset authorizes task-write scope before it looks up the environment or invokes provider cleanup.
 Reset cannot provision its replacement until prior destruction is confirmed.
 
 Confirmed compute absence preserves conversation resume information according to `RowMustBePreserved`.
@@ -267,8 +275,9 @@ Profile validation can narrow manifest support; instance inspection can narrow i
 The host also applies platform and policy constraints. Missing optional capabilities are false.
 Unknown retention remains unknown. Built-in capability decisions remain unchanged.
 
-Bounded instances must return an absolute provider-derived expiry. Reattachment cannot move that deadline
-unless the provider verifies an actual lifetime change. Show the exact timestamp in the user's locale.
+Bounded instances must return a parseable absolute provider-derived expiry no later than their declared
+maximum lifetime. Reattachment cannot move that deadline unless the provider verifies an actual lifetime
+change. Show the exact timestamp in the user's locale.
 At the deadline, bounded inspection determines whether the resource expired. An unavailable inspection
 shows deadline passed, state unknown. It does not trigger host deletion or a synthetic successful completion.
 Confirmed expiry goes through existing environment-loss and interrupted-session settlement, with reason
@@ -291,7 +300,7 @@ disclosure for status, and the mobile picker pattern for temporary profile selec
 The curated `mobile-menu-sheet.tsx` supplies fixed header and internal scroll geometry.
 Deep forms use a page because profile editing is sustained work, not a short temporary choice.
 The page or drawer has one vertical scroll owner; viewport-bound surfaces use `100dvh`.
-Touch targets are at least 44px; ordinary desktop controls remain 28px.
+Phone and coarse-pointer touch targets are at least 44px; fine-pointer desktop profile controls remain 28px.
 Share validation and mutations across presentations. Preserve focus return and desktop preferences.
 
 The [plan previews](../../../plans/remote-executor-plugins/plan.md#ascii-ui-preview) define UI-01 through UI-03.

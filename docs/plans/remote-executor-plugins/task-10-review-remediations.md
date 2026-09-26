@@ -1,6 +1,6 @@
 ---
 id: "10-review-remediations"
-title: "Close review findings for authentication, retention and recovery"
+title: "Close review findings for provider lifecycle and contract validation"
 status: done
 wave: 10
 depends_on:
@@ -11,24 +11,30 @@ depends_on:
 plan: "plan.md"
 requirements:
   - REQ-EXECUTORS-PLUGIN-001
-  - REQ-EXECUTORS-PLUGIN-003
   - REQ-EXECUTORS-PLUGIN-004
+  - REQ-EXECUTORS-PLUGIN-006
+  - REQ-EXECUTORS-PLUGIN-007
 acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-001.2
   - AC-EXECUTORS-PLUGIN-003.1
   - AC-EXECUTORS-PLUGIN-004.1
   - AC-EXECUTORS-PLUGIN-004.3
   - AC-EXECUTORS-PLUGIN-004.4
+  - AC-EXECUTORS-PLUGIN-004.2
+  - AC-EXECUTORS-PLUGIN-001.6
+  - AC-EXECUTORS-PLUGIN-001.7
+  - AC-EXECUTORS-PLUGIN-006.2
+  - AC-EXECUTORS-PLUGIN-007.6
 system_design:
   - ../../specs/executors/system-design/remote-executor-plugins.md
 ---
 
-# Task 10: Close review findings for authentication, retention and recovery
+# Task 10: Close review findings for provider lifecycle and contract validation
 
 ## Summary
 
-Fix five implementation review findings in the remote executor plugin lifecycle and preserve the original
-plugin provider architecture and durable ownership rules.
+Fix the five initial implementation findings and eight additional PR findings in the remote executor
+plugin lifecycle. Preserve the plugin provider architecture and durable ownership rules.
 
 ## Scope
 
@@ -42,6 +48,17 @@ plugin provider architecture and durable ownership rules.
 - Compare inventory checkpoints with the caller-observed envelope revision, enforce phase transitions,
   and merge only the plugin envelope into the latest metadata.
 - Preserve documented legacy `local_pc` routing while unknown executor types fail closed.
+- Recover cleanup-pending operations by their original operation ID when the resource handle is missing;
+  distinguish recovered resources, confirmed absence, and unknown outcomes.
+- Report `absent` for fixture operations that never allocated a resource.
+- Submit blank optional non-secret profile values so the UI can clear them.
+- Validate provider state against a required, closed schema, including scalar types, enums and numeric
+  bounds, before checkpoint or inventory persistence.
+- Require bounded resources to provide a parseable absolute expiry within the declared maximum lifetime.
+- Reject malformed numeric schema bounds and resource-state schemas that permit extra fields.
+- Keep fine-pointer desktop profile controls at 28px and measure touch/coarse-pointer controls at 44px or
+  larger.
+- Authorize task-write scope before task environment reset lookup or provider cleanup.
 
 ## Acceptance
 
@@ -53,6 +70,13 @@ plugin provider architecture and durable ownership rules.
 - Restart recovery covers `artifact_staging`, `bootstrapping`, `provisioned`, and `ready` before and after
   handshake-token persistence. Unconfirmed cleanup remains retryable.
 - A stale inspection checkpoint cannot overwrite cleanup's `absent` state or unrelated metadata.
+- Cleanup without a handle queries the original operation and only destroys a recovered exact resource;
+  `absent` settles inventory and `unknown` retains it.
+- Provider checkpoints reject undeclared, missing-required, invalid-type, enum-invalid, out-of-bound, or
+  secret resource-state fields. Bounded expiry must parse and fit the capability limit.
+- Task reset by a non-owner stops before environment lookup and provider cleanup.
+- Optional non-secret profile fields can be cleared; secret fields retain explicit clear semantics.
+- Desktop and phone rendered controls meet the 28px and 44px size contracts respectively.
 
 ## Verification
 
@@ -109,6 +133,39 @@ Validation passed:
 
 The lifecycle test previously asserted for an obsolete `***` sanitizer marker. Its expectation now matches
 the existing `[path-redacted]` contract; runtime behavior is unchanged.
+
+## Additional PR review remediation
+
+The follow-up review closed eight findings: missing-handle cleanup recovery, fixture absence reporting,
+optional profile-field clearing, provider state validation, bounded expiry validation, manifest bound
+validation, desktop/phone control sizing, and reset authorization ordering. Requirements, system design,
+the implementation plan, and public manifest/authoring references record these contracts.
+
+Post-fixup checks passed:
+
+- `make -C apps/backend build` passed for agentctl, kandev, and the runtime helper binaries.
+- `go test ./cmd/plugin-fixture ./internal/plugins/manifest ./internal/agent/runtime/lifecycle -run
+  'TestPluginExecutorFixtureReportsAbsentForUnknownOperation|TestPluginExecutorResetRecoversMissingCleanupHandle|TestPluginExecutorResourceStateMatchesProviderSchema|TestPluginExecutorBoundedResourceRequiresValidExpiry|TestPluginExecutorResourceExpiryRejectsInvalidAbsoluteDate|TestValidateExecutorProviderRejectsInvalidNumericBounds|TestValidateExecutorProviderRequiresClosedResourceStateSchema' -count=1`
+  passed. `go test ./internal/task/service -run
+  '^TestResetPluginExecutorEnvironmentRejectsForeignTaskBeforeProviderCleanup$' -count=1` also passed.
+- `pnpm exec vitest run components/settings/plugin-executor-profile.test.tsx lib/plugins/executor-profile-schema.test.ts`
+  passed (5 tests), including optional profile-field clearing. `pnpm run typecheck` passed.
+- `TMPDIR=/root/k.D6zpBC GOTMPDIR=/root/k.D6zpBC pnpm e2e:run --project mobile-chrome tests/settings/mobile-plugin-executor-profiles.spec.ts`
+  and `TMPDIR=/root/k.D6zpBC GOTMPDIR=/root/k.D6zpBC pnpm e2e:run tests/settings/plugin-executor-profiles.spec.ts`
+  each passed (1 test); phone controls meet the measured touch target and desktop controls meet the 28px contract.
+- Fresh managed-runner capture specs passed on `mobile-chrome` and `chromium`. The manifest contains the
+  two refreshed profile screenshots plus the two unchanged retention screenshots; every listed image
+  exists, uses fixture data, and was compressed with the supported pngquant fallback.
+- Commit hooks passed, including changed-package Go lint, web lint, i18n ratchet, documentation catalog,
+  architecture and specification checks. The current-base merge was validated with the same hooks.
+- Documentation checks passed after the final edits: catalog validation (312 decisions, 1189
+  specifications), all specification files linted, 36 spec-linter tests, 62 public-doc validation tests,
+  and all 47 public pages validated. `git diff HEAD --check` passed.
+
+A broad multi-package Go test invocation later exceeded its 600-second limit while running
+`internal/task/service` alongside another suite. It reported no failing assertion. The review-specific
+service regression passed in isolation, and the earlier full-suite and race results above remain recorded
+for the initial five findings.
 
 ## Dependencies
 

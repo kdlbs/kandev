@@ -119,12 +119,12 @@ Maximum lifetime: 8 hours.
 ```
 
 The phone page body scrolls; the Save region clears the safe area and keyboard.
-The desktop layout may group short fields; the phone form has one column.
+The desktop layout may group short fields and uses standard 28px profile controls; the phone form has one column and controls of at least 44px.
 The 8-hour value is fixture data, not a host constant. Save errors preserve edits.
 Provider absent: keep fields and selection visible, disable Save, and show a reason.
 Loading: show status without replacing saved values. No providers: link to plugin settings.
 Host strings use translations; provider strings use the plugin localization contract.
-Covers AC-EXECUTORS-PLUGIN-001.1 through 001.3 and 007.1 through 007.5.
+Covers AC-EXECUTORS-PLUGIN-001.1 through 001.3 and 001.7, plus AC-EXECUTORS-PLUGIN-007.1 through 007.6.
 
 ### UI-02: Executor selection
 
@@ -195,16 +195,17 @@ Use the exact commands and results in those packets to assess coverage.
 
 | Criteria | Required evidence | Work order |
 | --- | --- | --- |
-| 001.1-001.3 | TestPluginExecutorProfileSecrets, Catalog, AdmissionPaths, NoLocalFallback; profile E2E | 03, 07 |
+| 001.1-001.3, 001.7 | TestPluginExecutorProfileSecrets, Catalog, AdmissionPaths, NoLocalFallback; profile tests and E2E | 03, 07, 10 |
+| 001.6 | Provider state required/type/enum/bounds/closed-schema tests; manifest schema tests | 09, 10 |
 | 001.4-001.5 | TestPluginExecutorWireContract, OldPluginCompatibility, Admission, DisabledNoDispatch, FlagOffRetention | 01, 06, 09 |
 | 002.1 | TestPluginExecutorPartialLaunch, provider operation recovery, and retained cleanup inventory | 04, 05, 09 |
 | 002.2 | TestPluginExecutorAdmissionPaths; incompatible profile UI | 03, 07 |
 | 002.3-002.4 | TestPluginExecutorLaunch, BootstrapSecrets, and host agentctl/gateway transport coverage | 04, 02, 09 |
 | 003.1-003.4 | TestPluginExecutorTransportMatrix, LeaseRefresh, EndpointRejection, ProxyHTTPAndUpgrade, ProxyGeneration | 02 |
-| 004.1-004.5 | TestPluginExecutorRestartRecovery, UnknownOperation, StopMatrix, OwnershipFence; PostgreSQL CAS/claim tests | 04, 05 |
+| 004.1-004.5 | TestPluginExecutorRestartRecovery, UnknownOperation, StopMatrix, OwnershipFence, missing-handle cleanup and reset-scope tests; PostgreSQL CAS/claim tests | 04, 05, 10 |
 | 005.1-005.4 | TestPluginExecutorDisableRetention, UninstallRace, UpgradeCompatibility; lifecycle status E2E | 06, 08 |
-| 006.1-006.4 | TestPluginExecutorExpiry, UnknownRetention; desktop/mobile status E2E | 08 |
-| 007.1-007.5 | Profile component tests, status projection tests, desktop/mobile E2E and i18n gates | 07, 08 |
+| 006.1-006.4 | TestPluginExecutorExpiry, UnknownRetention, bounded expiry validation; desktop/mobile status E2E | 08, 10 |
+| 007.1-007.6 | Profile component tests, status projection tests, desktop/mobile E2E, measured control sizes, and i18n gates | 07, 08, 10 |
 | 001.2, 003.1, 004.1, 004.3-004.4 | Review regressions for bootstrap auth, retained secrets, exact reopen, partial bootstrap, and revision-fenced inventory | 10 |
 
 All short criterion numbers above use the prefix `AC-EXECUTORS-PLUGIN-`.
@@ -242,7 +243,7 @@ Inspect the rendered phone surface against the preview; record discrepancies or 
 - [x] [Task 07: Configure and select providers on desktop and phone](task-07-profile-ui.md)
 - [x] [Task 08: Expose retention, expiry and cleanup outcomes](task-08-retention-status.md)
 - [x] [Task 09: Prove packaged provider behavior and document the API](task-09-provider-conformance.md)
-- [x] [Task 10: Close review findings for authentication, retention and recovery](task-10-review-remediations.md)
+- [x] [Task 10: Close review findings for provider lifecycle and contract validation](task-10-review-remediations.md)
 
 ## Verification results
 
@@ -266,13 +267,15 @@ remote fixture. No AWS or production-provider validation was performed.
 Tasks 01 through 09 are done. Their recorded checks include successful PostgreSQL concurrency coverage
 for inventory and ownership fencing. Cloud-specific behavior remains unverified and is outside this plan.
 
-Task 10 closed five review findings. Bootstrap credentials now authenticate WebSocket clients; rotated
+Task 10 closed the five initial and eight follow-up PR findings. Bootstrap credentials now authenticate WebSocket clients; rotated
 profile credentials remain available to retained environments, and clear/delete is blocked while inventory
 references the profile. Normal stopped-session reopen attaches to its exact retained resource. Every
 durable partial-bootstrap phase has an explicit attach or cleanup outcome. Inventory checkpoints compare
 the caller-observed envelope revision, validate phase transitions, and merge only the plugin envelope.
-The targeted race tests, affected package suites, PostgreSQL checks, and backend build results are recorded
-in [Task 10](task-10-review-remediations.md).
+Cleanup recovers missing handles by the original operation ID, provider state and expiry are validated
+before persistence, task reset checks authorization first, and desktop/phone controls meet their size
+contracts. Exact post-fixup test, build, lint and CI results are recorded in
+[Task 10](task-10-review-remediations.md).
 
 ## Risks
 

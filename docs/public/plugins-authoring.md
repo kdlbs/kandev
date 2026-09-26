@@ -872,9 +872,13 @@ manifest that declares a provider without the complete interface is unavailable.
 
 Profile secrets arrive in the operation's transient `SecretValues` map. Keep
 them out of provider resource state, logs, command arguments, and returned URLs.
-Resource state is durable, bounded, schema-validated, and must contain only
-non-secret values. Use operation-bound Host callbacks to checkpoint resource
-state, report progress, and read the host's agentctl runtime artifact.
+Resource state is durable, bounded, and validated against a closed provider
+schema before it is stored. Include only declared fields with valid required
+values, scalar types, enum members, and numeric bounds. Do not return undeclared
+or secret fields. A bounded environment must report a parseable absolute expiry
+within its declared maximum lifetime. Use operation-bound Host callbacks to
+checkpoint resource state, report progress, and read the host's agentctl runtime
+artifact.
 
 Return short-lived HTTPS connection leases. Put credentials in HTTP or
 WebSocket headers, never in the URL. Remote environments must reach the

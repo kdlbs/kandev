@@ -365,6 +365,7 @@ executor_providers:
           secret: true
     resource_state_schema:
       type: object
+      additionalProperties: false
       properties:
         instance_id:
           type: string
@@ -380,15 +381,25 @@ executor_providers:
 ```
 
 `profile_schema` accepts one to 64 scalar fields. The resource-state schema
-uses the same field types and cannot declare secrets. Each schema is limited to
-64 KiB. State versions must be unique positive integers. The manifest can
-declare at most 16 providers.
+uses the same field types, cannot declare secrets, and must set
+`additionalProperties: false`. The host persists only fields declared by that
+schema, after validating required fields, scalar types, enum membership, and
+numeric bounds. Numeric bounds are allowed only on `number` and `integer`
+fields, must be finite numbers, and `minimum` cannot exceed `maximum`. Each
+schema is limited to 64 KiB. State versions must be unique positive integers.
+The manifest can declare at most 16 providers.
+
+In the provider profile editor, an empty optional non-secret field is submitted
+as an empty value so an existing value can be cleared. Secret fields use
+explicit keep, replace, and clear behavior.
 
 Provider capability declarations are upper bounds. Profile validation and
 environment provisioning can reduce the effective capabilities. `bounded`
-retention requires a maximum lifetime from 1 second through 365 days. For other
-retention values, omit `maximum_lifetime_seconds`. Unknown retention makes no
-promise about workspace survival.
+retention requires a maximum lifetime from 1 second through 365 days. Each
+bounded resource must also return a parseable absolute expiry no later than
+that maximum lifetime. For other retention values, omit
+`maximum_lifetime_seconds`. Unknown retention makes no promise about workspace
+survival.
 
 Install the plugin as usual, then enable `features.remoteExecutorPlugins` and
 restart Kandev to create or use provider profiles. Shipped profiles keep this

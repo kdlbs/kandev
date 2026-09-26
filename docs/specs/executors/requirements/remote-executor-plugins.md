@@ -39,6 +39,8 @@ It specifies core support and a test provider. It does not implement an AWS prov
 - **AC-EXECUTORS-PLUGIN-001.3:** Missing, disabled, incompatible, or unhealthy providers shall reject new launches without selecting another executor. Saved selections and profiles shall remain visible.
 - **AC-EXECUTORS-PLUGIN-001.4:** Conflicting provider identities and undeclared provider calls shall be rejected. Existing plugins and built-in executor profiles shall retain their behavior.
 - **AC-EXECUTORS-PLUGIN-001.5:** When the release toggle is disabled, provider registration, profile mutation, allocation, attachment, and provider RPC dispatch shall be unavailable. Existing inventory shall remain readable and intact.
+- **AC-EXECUTORS-PLUGIN-001.6:** Before provider state is persisted, the host shall validate it against the provider's closed resource-state schema, including required fields, declared scalar types, enums, and numeric bounds. Undeclared or secret fields shall be rejected.
+- **AC-EXECUTORS-PLUGIN-001.7:** Profile updates shall submit blank optional non-secret fields so users can clear their saved values. Secret fields shall retain the existing unchanged, replace, and explicit clear behavior.
 
 ### REQ-EXECUTORS-PLUGIN-002: Provisioning and ordinary session behavior
 
@@ -69,7 +71,7 @@ It specifies core support and a test provider. It does not implement an AWS prov
 #### Acceptance criteria
 
 - **AC-EXECUTORS-PLUGIN-004.1:** After restart, Kandev shall recover the exact recorded environment or report missing, expired, incompatible, or unavailable. It shall not substitute a fresh workspace for required reuse.
-- **AC-EXECUTORS-PLUGIN-004.2:** Ordinary agent Stop and backend shutdown shall preserve the environment. Archive, delete, reset, and failed-launch rollback shall use the existing authorized cleanup lifecycle.
+- **AC-EXECUTORS-PLUGIN-004.2:** Ordinary agent Stop and backend shutdown shall preserve the environment. Archive, delete, reset, and failed-launch rollback shall use the existing authorized cleanup lifecycle. Task reset shall authorize task-write scope before reading environment state or invoking provider cleanup.
 - **AC-EXECUTORS-PLUGIN-004.3:** Delayed status, checkpoint, or cleanup operations shall not alter a successor execution or a transferred environment. Unconfirmed cleanup shall preserve its retry information.
 - **AC-EXECUTORS-PLUGIN-004.4:** Recovery shall resolve interrupted allocation by its original operation identity, including interruption before a resource handle was returned. Unknown outcomes shall block replacement allocation.
 - **AC-EXECUTORS-PLUGIN-004.5:** Resumable conversation information shall remain intact after compute loss. Recovery shall make no new guarantee about remote transcript replay.
@@ -92,7 +94,7 @@ It specifies core support and a test provider. It does not implement an AWS prov
 #### Acceptance criteria
 
 - **AC-EXECUTORS-PLUGIN-006.1:** Profiles and sessions shall distinguish persistent, compute-bound, and unknown workspace retention. Omitted retention information shall mean unknown.
-- **AC-EXECUTORS-PLUGIN-006.2:** Bounded profiles shall disclose their maximum lifetime before selection. Active and idle sessions shall display their actual expiry time and workspace-loss consequence.
+- **AC-EXECUTORS-PLUGIN-006.2:** Bounded profiles shall disclose their maximum lifetime before selection. A bounded environment shall include a parseable absolute expiry no later than its declared maximum lifetime. Active and idle sessions shall display their actual expiry time and workspace-loss consequence.
 - **AC-EXECUTORS-PLUGIN-006.3:** Confirmed expiry shall show an explicit environment-expired outcome and disable resume into the lost workspace. A network error alone shall not establish expiry.
 - **AC-EXECUTORS-PLUGIN-006.4:** Reconnecting, stopping, or suspending shall not imply an extended lifetime. The host shall not automatically replace an expired environment or treat Git commits as durable remote backups.
 
@@ -107,6 +109,7 @@ It specifies core support and a test provider. It does not implement an AWS prov
 - **AC-EXECUTORS-PLUGIN-007.3:** Phone settings shall use a focused page; temporary selection and status inspection shall use touch-accessible surfaces. Actions shall not depend on hover.
 - **AC-EXECUTORS-PLUGIN-007.4:** New phone controls shall provide at least 44px touch targets, internal scrolling where needed, safe-area clearance, and no document horizontal overflow. Keyboard focus and dismissal shall remain usable.
 - **AC-EXECUTORS-PLUGIN-007.5:** Host-owned copy shall use supported locales. Provider labels shall use the plugin localization contract, with declared fallback text when a locale is unavailable.
+- **AC-EXECUTORS-PLUGIN-007.6:** Fine-pointer desktop profile controls shall retain the standard 28px control height. Phone and coarse-pointer controls shall meet the 44px touch-target minimum.
 
 ## Out of scope
 
