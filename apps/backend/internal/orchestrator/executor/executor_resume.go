@@ -1015,6 +1015,9 @@ func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]i
 // Branch replacement is intentionally opt-in; ordinary resume preserves the
 // original worktree branch and reports when it is unrecoverable.
 type ResumeOptions struct {
+	ExactProfile           bool
+	ExactProfileModel      string
+	ExactProfileRevision   int64
 	AllowBranchReplacement bool
 	// AllowCompletedSessionResume is granted only by an explicit user recovery
 	// or a pinned follow-up dispatch. It does not change the global terminal
@@ -1674,6 +1677,9 @@ func newResumeLaunchRequest(
 		IsPassthrough:          session.IsPassthrough,
 		TaskEnvironmentID:      session.TaskEnvironmentID,
 		AllowBranchReplacement: options.AllowBranchReplacement,
+		ExactProfile:           options.ExactProfile,
+		ExactProfileModel:      options.ExactProfileModel,
+		ExactProfileRevision:   options.ExactProfileRevision,
 	}
 
 	metadata := map[string]interface{}{}

@@ -489,7 +489,8 @@ const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
 	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id,
-	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out`
+	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out,
+	ts.exact_profile_generation, ts.exact_profile_revision`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -1090,12 +1091,13 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 			repository_id, base_branch, base_commit_sha, workspace_path,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
-			is_primary, review_status, is_passthrough, task_environment_id, name
+			is_primary, review_status, is_passthrough, task_environment_id, name,
+			exact_profile_generation, exact_profile_revision
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?
+			?, ?, ?
 		)
 	`), session.ID, session.TaskID, session.QueueIncarnationID, agentProfileID,
 		session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
@@ -1104,7 +1106,8 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
-		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
+		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name,
+		session.ExactProfileGeneration, session.ExactProfileRevision)
 
 	return err
 }
@@ -1350,6 +1353,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
 		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut,
+		&session.ExactProfileGeneration, &session.ExactProfileRevision,
 	)
 
 	if err == sql.ErrNoRows {
@@ -1856,7 +1860,8 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 			repository_id = ?, base_branch = ?, base_commit_sha = ?, workspace_path = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
-			is_primary = ?, review_status = ?, is_passthrough = ?, task_environment_id = ?
+			is_primary = ?, review_status = ?, is_passthrough = ?, task_environment_id = ?,
+			exact_profile_generation = ?, exact_profile_revision = ?
 		WHERE id = ?`
 	args := []interface{}{agentProfileID, session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
 		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
@@ -1865,6 +1870,7 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 		string(session.State), session.ErrorMessage, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID,
+		session.ExactProfileGeneration, session.ExactProfileRevision,
 		session.ID}
 	if expected != nil {
 		query += " AND state = ?"
@@ -3755,6 +3761,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
 		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut,
+		&session.ExactProfileGeneration, &session.ExactProfileRevision,
 	)
 	if err != nil {
 		return nil, err

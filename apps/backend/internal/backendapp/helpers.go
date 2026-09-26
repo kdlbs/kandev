@@ -2046,6 +2046,7 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
+	mcpHandlers.SetExactTaskProfileAssigner(p.orchestratorSvc)
 	if p.services.Automation != nil {
 		mcpHandlers.SetAutomationCreator(p.services.Automation.Service)
 	}

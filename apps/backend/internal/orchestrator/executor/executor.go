@@ -456,6 +456,9 @@ type RemoteStatusPollRequest struct {
 type AgentProfileInfo struct {
 	ProfileID                  string
 	ProfileName                string
+	WorkspaceID                string
+	Enabled                    bool
+	Revision                   time.Time
 	AgentID                    string
 	AgentName                  string
 	Model                      string
@@ -481,6 +484,11 @@ type LaunchAgentRequest struct {
 	WorkspaceID       string // Kandev workspace ID — used to build scratch dir for repo-less tasks
 	SessionID         string
 	TaskEnvironmentID string // Env owning this session (shared across sessions in the same task)
+	ExactProfile      bool
+	// ExactProfileModel and ExactProfileRevision are the immutable profile
+	// snapshot validated by the orchestrator for this launch.
+	ExactProfileModel    string
+	ExactProfileRevision int64
 	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
 	// task environment. It must never be inferred from a sibling execution ID.
 	WorkspaceReuseRequired bool
@@ -660,10 +668,14 @@ const McpModeAutomation = mcpmode.Automation
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
-	AgentProfileID       string
-	OfficeAgentProfileID string
-	ExecutorID           string
-	TurnID               string
+	AgentProfileID         string
+	ExactProfile           bool
+	ExactProfileGeneration int64
+	ExactProfileRevision   int64
+	ExactProfileModel      string
+	OfficeAgentProfileID   string
+	ExecutorID             string
+	TurnID                 string
 	// OnExecutionAdmitted runs after the launch path has identified and
 	// persisted the execution that will receive this turn, but before its
 	// process is started. Callers use this boundary to bind turn-scoped

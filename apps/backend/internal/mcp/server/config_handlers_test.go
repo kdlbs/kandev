@@ -172,6 +172,18 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 	assert.Equal(t, "mcp.delete_task", ws.ActionMCPDeleteTask)
 	assert.Equal(t, "mcp.archive_task", ws.ActionMCPArchiveTask)
 	assert.Equal(t, "mcp.update_task_state", ws.ActionMCPUpdateTaskState)
+	assert.Equal(t, "mcp.assign_exact_task_profile", ws.ActionMCPAssignExactTaskProfile)
+}
+
+func TestAssignExactTaskProfileToolIsConfigOnly(t *testing.T) {
+	backend := &testBackend{}
+	config := New(backend, "test-session", "", 10005, newTestLogger(t), "", false, ModeConfig)
+	external := New(backend, "test-session", "", 10005, newTestLogger(t), "", false, ModeExternal)
+	task := New(backend, "test-session", "", 10005, newTestLogger(t), "", false, ModeTask)
+
+	assert.Contains(t, config.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
+	assert.Contains(t, external.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
+	assert.NotContains(t, task.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
 }
 
 // --- Workflow handler tests ---

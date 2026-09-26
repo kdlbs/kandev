@@ -36,6 +36,8 @@ signals, and task-scoped scheduling contracts.
 
 ### Requirements
 
+- [Exact Profile Assignment at Launch](requirements/exact-profile-launch-assignment.md)
+
 - [Initial task brief](requirements/initial-task-brief.md)
 
 - [Bounded Session History Storage](requirements/bounded-session-history.md)
@@ -150,6 +152,8 @@ signals, and task-scoped scheduling contracts.
 - [Human Assignee and Actor Attribution](requirements/human-assignee.md)
 
 ### System design
+
+- [Exact Profile Assignment at Launch](system-design/exact-profile-launch-assignment.md)
 
 - [Bounded Session History Storage](system-design/bounded-session-history.md)
 - [Initial task brief](system-design/initial-task-brief.md)

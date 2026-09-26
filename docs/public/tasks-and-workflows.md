@@ -311,6 +311,8 @@ disclosure shows its actual model and session. Before a session exists, it
 shows the planned replacement model. A profile that becomes unavailable blocks
 creation until you choose another profile or reset the row.
 
+Configuration and External MCP clients can use `assign_exact_task_profile_kandev` to bind an existing task to one concrete enabled agent profile. Kandev stores the assignment with the current profile revision and applies it to later session starts, workflow-step auto-starts, and deferred moves for that task. If the profile is disabled, moved to another workspace, renamed, or changed before launch, Kandev fails the launch instead of falling back to a workflow or workspace default profile.
+
 ### Navigate long chat transcripts
 
 When your latest prompt has fully left the transcript viewport, **Scroll to
