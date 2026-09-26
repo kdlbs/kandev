@@ -12,25 +12,31 @@ test.describe("Office runtime memory", () => {
       reason: "heartbeat",
       sessionId: "runtime-memory-session",
     });
-    const { token } = await apiClient.mintRuntimeToken({
-      agentProfileId: officeSeed.agentId,
-      workspaceId: officeSeed.workspaceId,
-      runId: seededRun.run_id,
-      sessionId: "runtime-memory-session",
-      capabilities: JSON.stringify({ read_memory: true, write_memory: true }),
-    });
-    const memoryPath = `/workspaces/${officeSeed.workspaceId}/memory/agents/${officeSeed.agentId}/knowledge/runtime-note`;
+    try {
+      const { token } = await apiClient.mintRuntimeToken({
+        agentProfileId: officeSeed.agentId,
+        workspaceId: officeSeed.workspaceId,
+        runId: seededRun.run_id,
+        sessionId: "runtime-memory-session",
+        capabilities: JSON.stringify({ read_memory: true, write_memory: true }),
+      });
+      const memoryPath = `/workspaces/${officeSeed.workspaceId}/memory/agents/${officeSeed.agentId}/knowledge/runtime-note`;
 
-    const put = await apiClient.runtimePutMemory(token, memoryPath, "memory from runtime");
-    expect(put.status).toBe(200);
-    const get = await apiClient.runtimeGetMemory(token, memoryPath);
-    expect(get.status).toBe(200);
-    const body = (await get.json()) as { memory: { content: string } };
-    expect(body.memory.content).toBe("memory from runtime");
+      const put = await apiClient.runtimePutMemory(token, memoryPath, "memory from runtime");
+      expect(put.status).toBe(200);
+      const get = await apiClient.runtimeGetMemory(token, memoryPath);
+      expect(get.status).toBe(200);
+      const body = (await get.json()) as { memory: { content: string } };
+      expect(body.memory.content).toBe("memory from runtime");
 
-    await testPage.goto(`/office/agents/${officeSeed.agentId}/runs/${seededRun.run_id}`);
-    await expect(testPage.getByTestId("events-log")).toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByText("runtime.action")).toBeVisible();
-    await expect(testPage.getByText(/write_memory/)).toBeVisible();
+      await testPage.goto(`/office/agents/${officeSeed.agentId}/runs/${seededRun.run_id}`);
+      await expect(testPage.getByTestId("events-log")).toBeVisible({ timeout: 10_000 });
+      await expect(testPage.getByText("runtime.action")).toBeVisible();
+      await expect(testPage.getByText(/write_memory/)).toBeVisible();
+    } finally {
+      // A claimed synthetic run holds execution capacity in the worker-scoped
+      // backend until it reaches a terminal state.
+      await apiClient.updateRunStatus(seededRun.run_id, { status: "finished" });
+    }
   });
 });
