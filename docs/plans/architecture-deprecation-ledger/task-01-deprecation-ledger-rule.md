@@ -46,11 +46,11 @@ git diff --check
 
 ## Results
 
-Implemented and verified on refreshed main `c735b678863ba64e31bd78cd1a6e3c845be3b4e9`. Review regressions cover grouped and embedded Go declarations, nested and decorated TypeScript declarations, string/numeric/computed member keys, and local-variable exclusions.
+Implemented and verified on refreshed main `c735b678863ba64e31bd78cd1a6e3c845be3b4e9`. Review regressions cover grouped and embedded Go declarations, nested and decorated TypeScript declarations, string/numeric/computed member keys, local-variable exclusions, and apostrophes in JSX text.
 
 - The initial baseline contains exactly 15 unregistered declarations: 4 Go and 11 TypeScript.
 - The two existing compatibility-ledger entries are unchanged.
-- `python3 scripts/lint-architecture.test.py` — passed, 89 tests.
+- `python3 scripts/lint-architecture.test.py` — passed, 90 tests.
 - `make lint-architecture` — passed.
 - `python3 scripts/lint-architecture.py --all --baseline-base-ref origin/main --allow-missing-base-baseline` — passed.
 - `python3 scripts/list-docs.py validate` — passed; 310 decisions and 1185 specifications validated.

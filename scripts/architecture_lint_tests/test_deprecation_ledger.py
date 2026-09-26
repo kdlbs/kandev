@@ -433,6 +433,18 @@ class DeprecationLedgerTest(ArchitectureFixture):
             [(1, "function:Old", "@deprecated")],
         )
 
+    def test_tsx_apostrophe_in_jsx_text_does_not_hide_later_deprecations(self) -> None:
+        source = """\
+        export const RetryLabel = () => <p>Don't retry this request</p>;
+        /** @deprecated Use currentApi instead. */
+        export function oldApi(): void;
+        """
+
+        self.assertEqual(
+            find_declarations("apps/web/lib/retry-label.tsx", source),
+            [(2, "function:oldApi", "@deprecated")],
+        )
+
     def test_multiline_jsdoc_uses_tag_line_and_member_identity(self) -> None:
         source = """\
         export type Payload = {

@@ -134,6 +134,8 @@ def _mask_source(source: str) -> tuple[str, list[Comment]]:
                 elif source[index] == quote:
                     index += 1
                     break
+                elif source[index] == "\n" and quote != "`":
+                    break
                 else:
                     index += 1
             masked[start:index] = _blank(source[start:index])
