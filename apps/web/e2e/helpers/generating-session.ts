@@ -2,7 +2,7 @@ import { type Page } from "@playwright/test";
 import { expect } from "../fixtures/test-base";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
-import { waitForLatestSessionDone } from "./session";
+import { waitForSessionDone } from "./session";
 import {
   waitForActiveSessionForegroundActivity,
   waitForSessionAgentctlReady,
@@ -45,12 +45,12 @@ export async function seedRunningGeneratingSession(
     },
   );
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-  await waitForLatestSessionDone(
+  await waitForSessionDone(
     apiClient,
     task.id,
-    1,
+    task.session_id,
     "the initial task prompt should finish before seeding a generating turn",
-    60_000,
+    90_000,
   );
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);

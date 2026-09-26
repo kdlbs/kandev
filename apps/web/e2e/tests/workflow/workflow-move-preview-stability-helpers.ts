@@ -86,11 +86,27 @@ export async function applyHarmlessPreviewUpdate(
 
 export async function waitForPreviewTaskSessionsLoaded(page: Page, taskId: string): Promise<void> {
   await page.waitForFunction(
-    (currentTaskId) =>
-      (window as PreviewStoreWindow).__KANDEV_E2E_STORE__?.getState().taskSessionsByTask
-        .loadedByTaskId[currentTaskId] === true,
+    (currentTaskId) => {
+      const state = (window as PreviewStoreWindow).__KANDEV_E2E_STORE__?.getState();
+      if (!state || state.connection.status !== "connected") return false;
+      if (state.taskSessionsByTask.loadedByTaskId[currentTaskId] !== true) return false;
+
+      const task = state.kanban.tasks.find((candidate) => candidate.id === currentTaskId);
+      if (!task?.primarySessionId) return false;
+      const primarySession = (state.taskSessionsByTask.itemsByTaskId[currentTaskId] ?? []).find(
+        (session) => session.id === task.primarySessionId,
+      );
+      const settledStates = ["COMPLETED", "WAITING_FOR_INPUT"];
+      return (
+        primarySession?.state === task.primarySessionState &&
+        settledStates.includes(task.primarySessionState ?? "")
+      );
+    },
     taskId,
-    { timeout: 15_000, message: `Task sessions did not load for preview task ${taskId}` },
+    {
+      timeout: 15_000,
+      message: `Preview task and primary session did not settle for task ${taskId}`,
+    },
   );
 }
 
