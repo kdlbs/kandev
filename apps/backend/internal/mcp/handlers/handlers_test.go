@@ -113,8 +113,12 @@ func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo
 }
 
 func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository) {
+	return newTestTaskServiceWithWorkflowTasks(t, nil)
+}
+
+func newTestTaskServiceWithWorkflowTasks(t *testing.T, tasksFor func(*sqliterepo.Repository) repository.TaskRepository) (*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository) {
 	t.Helper()
-	svc, repo, workflowCtrl, workflowRepo, _ := newTestTaskServiceWithWorkflowDB(t)
+	svc, repo, workflowCtrl, workflowRepo, _, _ := newTestTaskServiceWithWorkflowDBAndEventBus(t, tasksFor)
 	return svc, repo, workflowCtrl, workflowRepo
 }
 
@@ -125,11 +129,14 @@ func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo
 func newTestTaskServiceWithWorkflowDB(t *testing.T) (
 	*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository, *sqlx.DB,
 ) {
-	svc, repo, workflowCtrl, workflowRepo, sqlxDB, _ := newTestTaskServiceWithWorkflowDBAndEventBus(t)
+	svc, repo, workflowCtrl, workflowRepo, sqlxDB, _ := newTestTaskServiceWithWorkflowDBAndEventBus(t, nil)
 	return svc, repo, workflowCtrl, workflowRepo, sqlxDB
 }
 
-func newTestTaskServiceWithWorkflowDBAndEventBus(t *testing.T) (
+func newTestTaskServiceWithWorkflowDBAndEventBus(
+	t *testing.T,
+	tasksOverrides ...func(*sqliterepo.Repository) repository.TaskRepository,
+) (
 	*service.Service,
 	*sqliterepo.Repository,
 	*workflowcontroller.Controller,
@@ -157,9 +164,13 @@ func newTestTaskServiceWithWorkflowDBAndEventBus(t *testing.T) (
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	eventBus := bus.NewMemoryEventBus(log)
 	t.Cleanup(func() { eventBus.Close() })
+	tasks := repository.TaskRepository(repo)
+	if len(tasksOverrides) > 0 && tasksOverrides[0] != nil {
+		tasks = tasksOverrides[0](repo)
+	}
 	svc := service.NewService(service.Repos{
 		Workspaces:       repo,
-		Tasks:            repo,
+		Tasks:            tasks,
 		TaskRepos:        repo,
 		WorkspaceFolders: repo,
 		Workflows:        repo,
@@ -175,6 +186,7 @@ func newTestTaskServiceWithWorkflowDBAndEventBus(t *testing.T) (
 	svc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })
+	svc.SetWorkflowStepGetter(workflowSvc)
 	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo, sqlxDB, eventBus
 }
 

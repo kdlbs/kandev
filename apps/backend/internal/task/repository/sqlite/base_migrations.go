@@ -77,8 +77,11 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
 //
-//nolint:cyclop,funlen,maintidx // Legacy flat list of ~60 independent idempotent migration steps predating startup-step instrumentation; splitting it is out of scope here.
+//nolint:cyclop,funlen,maintidx // Legacy flat list of independent idempotent migration steps.
 func (r *Repository) runMigrations(ctx context.Context) error {
+	if err := r.migrateCoordinatorGrantSchema(); err != nil {
+		return err
+	}
 	if err := r.migrateTaskPriorityToTextPostgres(); err != nil {
 		return err
 	}
@@ -926,6 +929,7 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 		`CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_workflow_step_id ON tasks(workflow_step_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_workspace_id_id ON tasks(workspace_id, id)`,
 	})
 }
 

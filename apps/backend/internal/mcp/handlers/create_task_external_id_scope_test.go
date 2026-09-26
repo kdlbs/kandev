@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/auth/authn"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
@@ -123,7 +124,7 @@ func TestHandleCreateTask_ExternalIDCrossWorkspaceDeniedByIdentityScope(t *testi
 	resolver := mcpscope.NewResolver(repo, identities, func() bool { return true }, testLogger(t))
 	scopedCtx, err := resolver.Scope(ctx, "task-a-stream")
 	require.NoError(t, err)
-	scopedCtx, err = resolver.ScopePrincipal(scopedCtx, "task-a-stream", "session-a-stream")
+	scopedCtx, err = resolver.ScopePrincipal(streams.WithMCPExecutionContext(scopedCtx, streams.MCPExecutionContext{ExecutionID: "execution-a-stream", TaskID: "task-a-stream", SessionID: "session-a-stream"}), "task-a-stream", "session-a-stream")
 	require.NoError(t, err)
 
 	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))

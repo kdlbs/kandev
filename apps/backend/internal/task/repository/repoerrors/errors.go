@@ -98,6 +98,11 @@ var ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
 // contract.
 var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")
 
+// ErrWorkflowStepChanged reports that a route's expected source step no
+// longer matches the task inside its write transaction. Callers use this
+// typed error to settle the route as a durable stale-source outcome.
+var ErrWorkflowStepChanged = errors.New("workflow step changed before route commit")
+
 // ErrWorkflowChangeConflict reports that an explicit change-workflow request
 // no longer matches the task source or task version it was opened against.
 var ErrWorkflowChangeConflict = errors.New("task changed since workflow change was opened")

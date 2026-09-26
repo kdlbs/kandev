@@ -26,6 +26,7 @@ import (
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	"github.com/kandev/kandev/internal/workflow/stepentry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -1071,6 +1072,37 @@ func (r *Repository) UpdateTaskIfWorkflowMatches(ctx context.Context, task *mode
 	return r.updateTaskCommit(ctx, task, expectedWorkflowID, true, false)
 }
 
+func (r *Repository) UpdateTaskIfWorkflowStepMatches(ctx context.Context, task *models.Task, expectedStepID, expectedWorkflowID string) error {
+	metadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		metadata = []byte("{}")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, stepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+	}
+	if expectedStepID != "" && stepID != expectedStepID {
+		return fmt.Errorf("%w: expected %q, task is now in %q", ErrWorkflowStepChanged, expectedStepID, stepID)
+	}
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, true, true, nil)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID, markerEntryID)
+	return nil
+}
+
 // UpdateTaskWithExplicitPosition performs the same write as UpdateTask
 // except it writes task.Position as given rather than preserving whatever
 // is currently persisted. It is the one path allowed to write a
@@ -1279,6 +1311,9 @@ func (r *Repository) updateTaskTx(
 		}
 		return "", 0, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
+	if err := r.settleTerminalPendingMovesTx(ctx, tx, task); err != nil {
+		return "", 0, err
+	}
 
 	transitionID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
 		taskID:             task.ID,
@@ -1316,6 +1351,28 @@ func (r *Repository) updateTaskTx(
 		return "", 0, err
 	}
 	return entryID, markerEntryID, nil
+}
+
+func (r *Repository) settleTerminalPendingMovesTx(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	if !models.IsTerminalTaskState(task.State) {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE workflow_route_operations
+		SET observed_step_id = ?, outcome = ?, updated_at = ?
+		WHERE task_id = ? AND outcome = ? AND id IN (
+			SELECT move_id FROM pending_moves WHERE task_id = ?
+		)
+	`), task.WorkflowStepID, string(routing.OutcomeStaleSource), task.UpdatedAt,
+		task.ID, string(routing.OutcomePending), task.ID)
+	if err != nil && !internaldb.IsMissingTableError(err) {
+		return fmt.Errorf("settle terminal route operations: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM pending_moves WHERE task_id = ?`), task.ID)
+	if err != nil && !internaldb.IsMissingTableError(err) {
+		return fmt.Errorf("settle terminal pending moves: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) readAndValidateTaskUpdateSourceInTx(
@@ -1409,6 +1466,10 @@ func (r *Repository) UpdateTaskWithWorkflowChangeAdmissionAndState(
 		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source,
 	)
 	return admitted, err
+}
+
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(ctx context.Context, task *models.Task, expectedStepID, targetStepID string, limit int, admittedState *v1.TaskState, queueExitPending bool, expectedWorkflowID string) (bool, bool, error) {
+	return r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, admittedState, queueExitPending, expectedStepID, expectedWorkflowID, nil, nil)
 }
 
 // UpdateTaskWithWorkflowStepAdmissionIfAtStep is the AC-46/48 compare-and-swap
@@ -1588,11 +1649,10 @@ func (r *Repository) deleteDeferredMoveGuardTx(
 // (workflow id, the deferred-moves metadata sub-map) are carried forward
 // from the caller's request; everything else comes from the fresh row.
 //
-// The unconditional (expectedStepID == "") callers — manual/bulk/feeder
-// moves — must NOT call this: their caller-built `task` already carries
-// this operation's own field changes (Position, move-lifecycle metadata,
-// …) that have no other source of truth, so rebasing from a fresh row would
-// drop them instead of protecting them.
+// Every workflow move, including a manual, bulk, or feeder move, uses this
+// path. The move-owned metadata is restored below after the rebase, including
+// deliberate key removal, so the write keeps its lifecycle contract without
+// copying unrelated stale fields from the caller snapshot.
 //
 // Returns applied=false, err=nil when the CAS precondition fails (the task
 // already left expectedStepID) — that is a lost race, not an error.
@@ -1604,6 +1664,7 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	now time.Time,
 ) (applied bool, err error) {
 	requestedWorkflowID := task.WorkflowID
+	requestedMoveMetadata := snapshotMoveMetadata(task.Metadata)
 	requestedAppliedMoves := map[string]interface{}{}
 	if appliedMoves, ok := task.Metadata[models.MetaKeyAppliedDeferredMoves].(map[string]interface{}); ok {
 		for moveID, value := range appliedMoves {
@@ -1636,6 +1697,7 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	if task.Metadata == nil {
 		task.Metadata = map[string]interface{}{}
 	}
+	restoreMoveMetadata(task.Metadata, requestedMoveMetadata)
 	if len(requestedAppliedMoves) > 0 {
 		currentAppliedMoves := map[string]interface{}{}
 		if existing, ok := task.Metadata[models.MetaKeyAppliedDeferredMoves].(map[string]interface{}); ok {
@@ -1650,6 +1712,45 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	}
 	task.UpdatedAt = now
 	return true, nil
+}
+
+// workflowMoveOwnedMetadataKeys are the metadata fields a workflow move
+// creates, updates, or removes as part of its state transition. A CAS rebase
+// carries exactly these fields forward from the caller's request; all other
+// metadata remains from the transaction's fresh row.
+var workflowMoveOwnedMetadataKeys = []string{
+	models.MetaKeyWorkflowMovePending,
+	models.MetaKeyQueuedMoveExitPending,
+	models.MetaKeyQueuedMoveExitCompleted,
+	models.MetaKeyQueuePromotionPending,
+	models.MetaKeyManualMoveLifecyclePending,
+	models.MetaKeyManualMoveLifecycleCompleted,
+	models.MetaKeyStepHandoffCarry,
+}
+
+type moveMetadataValue struct {
+	present bool
+	value   interface{}
+}
+
+func snapshotMoveMetadata(metadata map[string]interface{}) map[string]moveMetadataValue {
+	snapshot := make(map[string]moveMetadataValue, len(workflowMoveOwnedMetadataKeys))
+	for _, key := range workflowMoveOwnedMetadataKeys {
+		value, present := metadata[key]
+		snapshot[key] = moveMetadataValue{present: present, value: value}
+	}
+	return snapshot
+}
+
+func restoreMoveMetadata(metadata map[string]interface{}, snapshot map[string]moveMetadataValue) {
+	for _, key := range workflowMoveOwnedMetadataKeys {
+		value := snapshot[key]
+		if !value.present {
+			delete(metadata, key)
+			continue
+		}
+		metadata[key] = value.value
+	}
 }
 
 // Inner descriptor keys for the one-shot MetaKeyWorkflowMovePending marker.
