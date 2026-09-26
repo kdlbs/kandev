@@ -46,30 +46,36 @@ func initCoordinatorWiring(
 // stalls-read HTTP routes, the coordinator.updated WS forwarder, and starts
 // the background startup pass. Callers must only invoke it when
 // features.coordinator is enabled.
+//
+// T0 is recorded before the routes register, so that any task a request
+// creates after this point has created_at >= T0
+// (coordinators.md#flag-and-wiring): a later work package's conversation
+// cleanup pass treats only tasks with created_at < T0 as pre-restart
+// leftovers.
 func registerCoordinatorRoutes(p routeParams) {
 	if p.router == nil || p.services == nil || p.services.Coordinator == nil {
 		return
 	}
+	t0 := time.Now().UTC()
 	svc := p.services.Coordinator
 	coordinator.RegisterRoutes(p.router, svc, p.log)
 	if p.gateway != nil {
 		gateways.RegisterCoordinatorNotifications(p.ctx, p.eventBus, p.gateway.Hub, p.log)
 	}
-	startCoordinatorBackgroundPass(p.ctx, p.router, p.eventBus, svc, p.log)
+	hooks := []func(context.Context, time.Time){
+		registerCoordinatorConversation(p.router, p.eventBus, svc, p.log),
+		registerCoordinatorSubscribers(p.router, p.eventBus, svc, p.log),
+		registerCoordinatorDecisions(p.router, p.eventBus, svc, p.log),
+	}
+	startCoordinatorBackgroundPass(p.ctx, t0, hooks)
 }
 
-// startCoordinatorBackgroundPass records T0 and runs each later work
-// package's named registration hook, in the fixed order the spec describes
-// (Build decision 14): conversation (task 03), subscribers (task 04),
-// decisions (task 07). All three are no-ops in WP-1; later work orders fill
-// in their bodies without changing this call site or ordering.
-func startCoordinatorBackgroundPass(ctx context.Context, router *gin.Engine, eventBus bus.EventBus, svc *coordinator.Service, log *logger.Logger) {
-	t0 := time.Now().UTC()
-	hooks := []func(context.Context, time.Time){
-		registerCoordinatorConversation(router, eventBus, svc, log),
-		registerCoordinatorSubscribers(router, eventBus, svc, log),
-		registerCoordinatorDecisions(router, eventBus, svc, log),
-	}
+// startCoordinatorBackgroundPass runs each later work package's named
+// registration hook with the given T0, in the fixed order the spec
+// describes (Build decision 14): conversation (task 03), subscribers (task
+// 04), decisions (task 07). All three are no-ops in WP-1; later work orders
+// fill in their bodies without changing this call site or ordering.
+func startCoordinatorBackgroundPass(ctx context.Context, t0 time.Time, hooks []func(context.Context, time.Time)) {
 	go func() {
 		for _, hook := range hooks {
 			hook(ctx, t0)

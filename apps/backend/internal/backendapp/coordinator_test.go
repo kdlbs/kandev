@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -82,5 +83,28 @@ func TestInitCoordinatorWiring_StoreErrorPropagates(t *testing.T) {
 	}
 	if svc != nil {
 		t.Fatal("expected a nil service on store initialization failure")
+	}
+}
+
+// TestStartCoordinatorBackgroundPass_RunsHooksWithProvidedT0 verifies the
+// RV-001 fix: the background pass must not record T0 itself (that happens
+// before routes register, in registerCoordinatorRoutes); it must run each
+// hook with the exact T0 it was given.
+func TestStartCoordinatorBackgroundPass_RunsHooksWithProvidedT0(t *testing.T) {
+	fixedT0 := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	received := make(chan time.Time, 1)
+	hooks := []func(context.Context, time.Time){
+		func(_ context.Context, t0 time.Time) { received <- t0 },
+	}
+
+	startCoordinatorBackgroundPass(context.Background(), fixedT0, hooks)
+
+	select {
+	case got := <-received:
+		if !got.Equal(fixedT0) {
+			t.Fatalf("hook received t0 %v, want %v", got, fixedT0)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for background pass hook")
 	}
 }
