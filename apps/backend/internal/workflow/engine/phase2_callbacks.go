@@ -39,12 +39,11 @@ var ErrMalformedParticipantRole = errors.New("ensure_participant_seat: malformed
 var ErrParticipantSeatUnfillable = errors.New("ensure_participant_seat: role unfillable")
 
 // ErrCommentFanOutIncomplete is the sentinel QueueRunForEachParticipantCallback
-// wraps around every error it returns when the trigger is TriggerOnComment
-// (REQ-OFFICE-GATE-COMMENT-001, AC-OFFICE-GATE-COMMENT-001.13). Dashboard
-// dispatch uses errors.Is against this sentinel to distinguish a gate
-// comment fan-out failure — which must not fall back to the legacy assignee
-// wake — from every other comment-handler failure, which keeps that wake
-// (AC-OFFICE-GATE-COMMENT-001.14, .15).
+// wraps around every error it returns when the trigger is TriggerOnComment.
+// Dashboard dispatch uses errors.Is against this sentinel to distinguish a
+// gate comment fan-out failure — which must not fall back to the legacy
+// assignee wake — from every other comment-handler failure, which keeps
+// that wake.
 var ErrCommentFanOutIncomplete = errors.New("queue_run_for_each_participant: comment fan-out incomplete")
 
 // Target prefixes / sentinels recognised by QueueRunCallback.
@@ -551,11 +550,10 @@ func (c ClearDecisionsCallback) Execute(ctx context.Context, in ActionInput) (Ac
 // in the task's workflow-scoped participant slate matching the configured
 // role.
 //
-// Decisions and Logger are optional (AC-24 convention: nil-safe). Decisions
-// is consulted only when the action's SkipDecided is true; a nil store or a
-// read error fails open, waking every seat left after author exclusion
-// (REQ-OFFICE-GATE-COMMENT-001, AC-OFFICE-GATE-COMMENT-001.9), and a nil
-// Logger just skips the accompanying warning.
+// Decisions and Logger are both optional and nil-safe. Decisions is
+// consulted only when the action's SkipDecided is true; a nil store or a
+// read error fails open, waking every seat left after author exclusion, and
+// a nil Logger just skips the accompanying warning.
 type QueueRunForEachParticipantCallback struct {
 	Adapter      RunQueueAdapter
 	Participants ParticipantStore
@@ -564,9 +562,9 @@ type QueueRunForEachParticipantCallback struct {
 }
 
 // Execute satisfies ActionCallback. Under TriggerOnComment every returned
-// error wraps ErrCommentFanOutIncomplete (AC-OFFICE-GATE-COMMENT-001.13) so
-// the dashboard can tell a fan-out failure apart from every other
-// comment-handler failure without new dispatcher plumbing.
+// error wraps ErrCommentFanOutIncomplete so the dashboard can tell a
+// fan-out failure apart from every other comment-handler failure without
+// new dispatcher plumbing.
 func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in ActionInput) (ActionResult, error) {
 	cfg := in.Action.QueueRunForEachParticipant
 	var role string
@@ -647,10 +645,10 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 }
 
 // wrapCommentFanOut wraps a non-nil error with ErrCommentFanOutIncomplete
-// when the trigger is a comment (AC-OFFICE-GATE-COMMENT-001.13). The wrap
-// uses Go's multi-%w form so an inner error that already wraps
-// ErrActionNotYetWired keeps matching errors.Is for both sentinels. role is
-// quoted so a missing role (empty string) renders as `role ""`.
+// when the trigger is a comment. The wrap uses Go's multi-%w form so an
+// inner error that already wraps ErrActionNotYetWired keeps matching
+// errors.Is for both sentinels. role is quoted so a missing role (empty
+// string) renders as `role ""`.
 func (c QueueRunForEachParticipantCallback) wrapCommentFanOut(in ActionInput, taskID, role string, err error) error {
 	if err == nil || in.Trigger != TriggerOnComment {
 		return err
@@ -658,10 +656,10 @@ func (c QueueRunForEachParticipantCallback) wrapCommentFanOut(in ActionInput, ta
 	return fmt.Errorf("%w: task %s step %s role %q: %w", ErrCommentFanOutIncomplete, taskID, in.Step.ID, role, err)
 }
 
-// filterFanOutSeats applies the two REQ-OFFICE-GATE-COMMENT-001/002 filters
-// over the fan-out population, in order: author exclusion (unconditional,
-// comment triggers only), then the decided-seat filter (only when
-// cfg.SkipDecided is true). Both preserve the population's order.
+// filterFanOutSeats applies two filters over the fan-out population, in
+// order: author exclusion (unconditional, comment triggers only), then the
+// decided-seat filter (only when cfg.SkipDecided is true). Both preserve
+// the population's order.
 func (c QueueRunForEachParticipantCallback) filterFanOutSeats(
 	ctx context.Context, in ActionInput, taskID, role string, cfg *QueueRunForEachParticipantAction, seats []ParticipantInfo,
 ) []ParticipantInfo {
@@ -672,13 +670,12 @@ func (c QueueRunForEachParticipantCallback) filterFanOutSeats(
 	return c.excludeDecidedSeats(ctx, in, taskID, role, seats)
 }
 
-// excludeCommentAuthor drops the comment's own author from the population
-// (AC-OFFICE-GATE-COMMENT-002.1 to .5). It only excludes anyone when the
-// trigger payload is an OnCommentPayload carrying a non-empty AuthorID — a
-// human author's id never equals an agent profile id (AC-002.3), and a
-// missing author excludes nobody (AC-002.4). Any other trigger's payload
-// never matches commentPayload, so this never runs outside on_comment
-// (AC-002.5).
+// excludeCommentAuthor drops the comment's own author from the population.
+// It only excludes anyone when the trigger payload is an OnCommentPayload
+// carrying a non-empty AuthorID — a human author's id never equals an agent
+// profile id, and a missing author excludes nobody. Any other trigger's
+// payload never matches commentPayload, so this never runs outside
+// on_comment.
 func excludeCommentAuthor(in ActionInput, seats []ParticipantInfo) []ParticipantInfo {
 	comment, ok := commentPayload(in.Payload)
 	if !ok || comment.AuthorID == "" {
@@ -695,10 +692,9 @@ func excludeCommentAuthor(in ActionInput, seats []ParticipantInfo) []Participant
 }
 
 // excludeDecidedSeats drops every seat holding a non-superseded decision at
-// the step (AC-OFFICE-GATE-COMMENT-001.1, .2). A nil Decisions store or a
-// read error fails open — logging a warning and returning the population
-// unfiltered — because a wasted run is cheaper than a gate left parked
-// (AC-001.9).
+// the step. A nil Decisions store or a read error fails open — logging a
+// warning and returning the population unfiltered — because a wasted run is
+// cheaper than a gate left parked.
 func (c QueueRunForEachParticipantCallback) excludeDecidedSeats(
 	ctx context.Context, in ActionInput, taskID, role string, seats []ParticipantInfo,
 ) []ParticipantInfo {
@@ -729,8 +725,8 @@ func (c QueueRunForEachParticipantCallback) excludeDecidedSeats(
 	return out
 }
 
-// warnDecisionReadFailed emits AC-001.9's warning naming the task, step,
-// role and error. Nil-safe (AC-24 convention).
+// warnDecisionReadFailed logs a warning naming the task, step, role and
+// error. Nil-safe: a nil Logger skips emission.
 func (c QueueRunForEachParticipantCallback) warnDecisionReadFailed(taskID, stepID, role string, err error) {
 	if c.Logger == nil {
 		return

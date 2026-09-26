@@ -18,16 +18,15 @@ const maxOnCommentReconcileAttempts = 5
 
 // healBuiltinWorkflowStepOnCommentFanOut reconciles workflow_steps.events on
 // system-workflow rows whose steps were materialized before their embedded
-// template declared an on_comment queue_run_for_each_participant fan-out
-// (REQ-OFFICE-GATE-COMMENT-004). It is modelled on
-// healBuiltinWorkflowStepOnAgentError: for every embedded template, for every
-// step, for every on_comment queue_run_for_each_participant action that
-// step's template declares (one per role), it finds every system-owned
-// workflow_steps row materialized from that (template, step name) and
-// appends the action if and only if OnComment does not already carry a
-// queue_run_for_each_participant action for the same role — preserving every
-// other declared action and leaving user-created or user-customised
-// workflows (is_system = 0) alone.
+// template declared an on_comment queue_run_for_each_participant fan-out.
+// It is modelled on healBuiltinWorkflowStepOnAgentError: for every embedded
+// template, for every step, for every on_comment
+// queue_run_for_each_participant action that step's template declares (one
+// per role), it finds every system-owned workflow_steps row materialized
+// from that (template, step name) and appends the action if and only if
+// OnComment does not already carry a queue_run_for_each_participant action
+// for the same role — preserving every other declared action and leaving
+// user-created or user-customised workflows (is_system = 0) alone.
 func (r *Repository) healBuiltinWorkflowStepOnCommentFanOut() error {
 	templates, err := workflowcfg.LoadTemplates()
 	if err != nil {
