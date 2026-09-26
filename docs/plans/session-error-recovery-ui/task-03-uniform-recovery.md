@@ -386,3 +386,17 @@ passed all 31 tests, with zero-warning targeted lint and type checking. This
 predicate-only correction does not change layout or native mobile interactions;
 the preceding eight desktop/eight mobile cases remain applicable. Final-head CI
 and renewed review verification remain pending after delivery.
+
+### Component-size review cleanup
+
+Greptile's renewed review requested compliance with the component-size guidance.
+Bootstrap recovery now separates pure presentation-model construction from its
+rendered content and recovery controls. The legacy run presentation is a separate
+domain component. The affected component files are under 200 lines; actions,
+copy, markup and recovery semantics are unchanged. No requirement or system-design
+change is needed for this structural extraction.
+
+All seven focused recovery suites pass (97 tests). Typecheck, targeted ESLint,
+architecture, localization and specification checks pass. Prior Kubernetes CI evidence was superseded by a successful run of
+the same restart-recovery case with zero retries (run 36239673423, container
+shard 2, job 108403952098). Current-head CI and renewed reviews remain pending.

@@ -9,7 +9,7 @@ import {
   buildRecoveryCardModel,
   causeLabel,
   operationLabel,
-} from "./session-bootstrap-recovery-card";
+} from "./session-bootstrap-recovery-model";
 import { isSessionRecoveryBusy } from "@/lib/session-recovery-presentation";
 import { sessionRecoveryAction } from "./messages/action-message-recovery";
 
