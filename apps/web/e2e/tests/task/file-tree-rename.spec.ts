@@ -5,7 +5,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 
 // Inline rename lives in file-context-menu.tsx (useFileRename + TreeNodeName).
 // Entry points (today, in product code):
@@ -16,13 +16,15 @@ import { dwell } from "../../helpers/causal-waits";
 // We test the user-visible flow only (no direct DOM hacks), so the 400ms
 // blur gate is exercised implicitly.
 
-async function setupTask(
-  testPage: Page,
-  apiClient: ApiClient,
-  seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string },
-  profileName: string,
-  taskTitle: string,
-) {
+async function setupTask(args: {
+  testPage: Page;
+  apiClient: ApiClient;
+  seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string };
+  profileName: string;
+  taskTitle: string;
+  requiredPath: string;
+}) {
+  const { testPage, apiClient, seedData, profileName, taskTitle, requiredPath } = args;
   const profile = await createStandardProfile(apiClient, profileName);
   const task = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
     description: "/e2e:simple-message",
@@ -30,11 +32,33 @@ async function setupTask(
     workflow_step_id: seedData.startStepId,
     repository_ids: [seedData.repositoryId],
   });
-  // Use the task id returned by the API. Waiting for a title in the Kanban
-  // projection can race the first file-tree snapshot on a loaded worker.
+  let workspacePath = "";
+  await expect
+    .poll(
+      async () => {
+        const environment = await apiClient.getTaskEnvironment(task.id);
+        workspacePath = environment?.workspace_path ?? environment?.repos?.[0]?.worktree_path ?? "";
+        return (
+          environment?.status === "ready" &&
+          workspacePath !== "" &&
+          fs.existsSync(path.join(workspacePath, requiredPath))
+        );
+      },
+      {
+        timeout: 60_000,
+        message: `Waiting for ${requiredPath} in the ${taskTitle} worktree`,
+      },
+    )
+    .toBe(true);
+
+  const gateway = watchWs(testPage);
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
+  const treeResponse = gateway.waitForResponse("workspace.tree.get");
+  await testPage.reload();
+  await session.waitForLoad();
+  await treeResponse;
   await session.clickTab("Files");
   return session;
 }
@@ -61,11 +85,20 @@ test.describe("File tree inline rename", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.exec("git checkout main");
     git.createFile("rename-me.ts", "hello");
     git.stageAll();
     git.commit("seed rename file");
+    git.exec("git push origin main");
 
-    const session = await setupTask(testPage, apiClient, seedData, "ft-rename", "FT Rename Enter");
+    const session = await setupTask({
+      testPage,
+      apiClient,
+      seedData,
+      profileName: "ft-rename",
+      taskTitle: "FT Rename Enter",
+      requiredPath: "rename-me.ts",
+    });
 
     const node = await session.fileTree.waitForFileTreeNode("rename-me.ts");
 
@@ -95,17 +128,20 @@ test.describe("File tree inline rename", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.exec("git checkout main");
     git.createFile("keep-name.ts", "stay");
     git.stageAll();
     git.commit("seed keep file");
+    git.exec("git push origin main");
 
-    const session = await setupTask(
+    const session = await setupTask({
       testPage,
       apiClient,
       seedData,
-      "ft-rename-esc",
-      "FT Rename Escape",
-    );
+      profileName: "ft-rename-esc",
+      taskTitle: "FT Rename Escape",
+      requiredPath: "keep-name.ts",
+    });
 
     const node = await session.fileTree.waitForFileTreeNode("keep-name.ts");
 
@@ -129,18 +165,21 @@ test.describe("File tree inline rename", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.exec("git checkout main");
     git.createFile("blur-original.ts", "blur");
     git.createFile("other.ts", "other");
     git.stageAll();
     git.commit("seed blur file");
+    git.exec("git push origin main");
 
-    const session = await setupTask(
+    const session = await setupTask({
       testPage,
       apiClient,
       seedData,
-      "ft-rename-blur",
-      "FT Rename Blur",
-    );
+      profileName: "ft-rename-blur",
+      taskTitle: "FT Rename Blur",
+      requiredPath: "blur-original.ts",
+    });
 
     const node = await session.fileTree.waitForFileTreeNode("blur-original.ts");
 
@@ -172,17 +211,20 @@ test.describe("File tree inline rename", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.exec("git checkout main");
     git.createFile("noop.ts", "noop");
     git.stageAll();
     git.commit("seed noop");
+    git.exec("git push origin main");
 
-    const session = await setupTask(
+    const session = await setupTask({
       testPage,
       apiClient,
       seedData,
-      "ft-rename-noop",
-      "FT Rename NoOp",
-    );
+      profileName: "ft-rename-noop",
+      taskTitle: "FT Rename NoOp",
+      requiredPath: "noop.ts",
+    });
 
     const node = await session.fileTree.waitForFileTreeNode("noop.ts");
 

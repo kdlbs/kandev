@@ -60,7 +60,7 @@ export const test = base.extend<{ testPage: Page }, OfficeFixtures>({
   // but onboarding allocates its OWN workspace ID (officeSeed.workspaceId),
   // so per-test office task / session leftovers leak across tests unless we
   // reset the office workspace here as well.
-  testPage: async ({ testPage: basePage, apiClient, backend, officeSeed, seedData }, use) => {
+  testPage: async ({ testPage: basePage, backend, apiClient, officeSeed, seedData }, use) => {
     await runWithBackendRecovery(backend, async () => {
       if (officeSeed.workspaceId !== seedData.workspaceId) {
         await apiClient.e2eReset(officeSeed.workspaceId, [

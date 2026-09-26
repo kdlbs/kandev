@@ -3,12 +3,17 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
@@ -97,6 +102,9 @@ func TestBuildReviewTaskRequest_ForkPRRequiresManualStart(t *testing.T) {
 			evt.PR.HeadRepoOwner = tt.headOwner
 			evt.PR.HeadRepoName = tt.headRepo
 
+			if got := reviewPRHeadMatchesBase(evt.PR); got != tt.wantAutostart {
+				t.Errorf("reviewPRHeadMatchesBase() = %v, want %v", got, tt.wantAutostart)
+			}
 			req := buildReviewTaskRequest(evt, nil, "acme/widget")
 			if req.Metadata[taskmodels.MetaKeyAutoStartGuard] != true {
 				t.Fatalf("auto-start guard = %v, want true", req.Metadata[taskmodels.MetaKeyAutoStartGuard])
@@ -105,12 +113,158 @@ func TestBuildReviewTaskRequest_ForkPRRequiresManualStart(t *testing.T) {
 			if gotAutostart != tt.wantAutostart {
 				t.Errorf("automatic launch token present = %v, want %v", gotAutostart, tt.wantAutostart)
 			}
-			_, requiresManualStart := req.Metadata[taskmodels.MetaKeyForkPRRequiresManualStart]
-			if requiresManualStart != !tt.wantAutostart {
-				t.Errorf("manual-start marker present = %v, want %v", requiresManualStart, !tt.wantAutostart)
+			manualStartMarker, requiresManualStart := req.Metadata[taskmodels.MetaKeyForkPRRequiresManualStart]
+			if requiresManualStart != !tt.wantAutostart || (requiresManualStart && manualStartMarker != true) {
+				t.Errorf("manual-start marker = (%v, present=%v), want (true, present=%v)",
+					manualStartMarker, requiresManualStart, !tt.wantAutostart)
 			}
 		})
 	}
+}
+
+func TestReviewWatchSearchResultIdentityControlsAutoStart(t *testing.T) {
+	tests := []struct {
+		name          string
+		detailPR      *github.PR
+		detailErr     error
+		wantHeadOwner string
+		wantHeadRepo  string
+		wantAutostart bool
+	}{
+		{
+			name: "internal PR",
+			detailPR: &github.PR{
+				HeadRepoOwner: "acme",
+				HeadRepoName:  "widget",
+				BaseRepoOwner: "acme",
+				BaseRepoName:  "widget",
+			},
+			wantHeadOwner: "acme",
+			wantHeadRepo:  "widget",
+			wantAutostart: true,
+		},
+		{
+			name: "fork PR",
+			detailPR: &github.PR{
+				HeadRepoOwner: "contributor",
+				HeadRepoName:  "widget-fork",
+				BaseRepoOwner: "acme",
+				BaseRepoName:  "widget",
+			},
+			wantHeadOwner: "contributor",
+			wantHeadRepo:  "widget-fork",
+		},
+		{
+			name:      "missing identity after detail lookup failure",
+			detailErr: errors.New("GitHub detail lookup failed"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			emitted, prs := triggerReviewWatchForAutoStartTest(t, tt.detailPR, tt.detailErr)
+			if len(prs) != 1 || emitted == nil || emitted.PR == nil {
+				t.Fatalf("review watch result = (%d PRs, event=%v), want one PR event", len(prs), emitted != nil)
+			}
+			if emitted.PR != prs[0] {
+				t.Fatal("published event PR is not the PR returned by TriggerReviewWatch")
+			}
+
+			if emitted.PR.HeadRepoOwner != tt.wantHeadOwner || emitted.PR.HeadRepoName != tt.wantHeadRepo {
+				t.Errorf("emitted PR head identity = %s/%s, want %s/%s",
+					emitted.PR.HeadRepoOwner, emitted.PR.HeadRepoName, tt.wantHeadOwner, tt.wantHeadRepo)
+			}
+			if emitted.PR.RepoOwner != "acme" || emitted.PR.RepoName != "widget" {
+				t.Errorf("emitted PR target identity = %s/%s, want acme/widget", emitted.PR.RepoOwner, emitted.PR.RepoName)
+			}
+			if got := reviewPRHeadMatchesBase(emitted.PR); got != tt.wantAutostart {
+				t.Errorf("reviewPRHeadMatchesBase(emitted PR) = %v, want %v", got, tt.wantAutostart)
+			}
+			request := buildReviewTaskRequest(emitted, nil, "acme/widget")
+			autoStartClaim, hasAutoStartClaim := request.Metadata[taskmodels.MetaKeyAutoStartClaimed]
+			if hasAutoStartClaim != tt.wantAutostart || (hasAutoStartClaim && autoStartClaim != true) {
+				t.Errorf("auto_start_claimed = (%v, present=%v), want true present=%v",
+					autoStartClaim, hasAutoStartClaim, tt.wantAutostart)
+			}
+			manualMarker, hasManualMarker := request.Metadata[taskmodels.MetaKeyForkPRRequiresManualStart]
+			if hasManualMarker != !tt.wantAutostart || (hasManualMarker && manualMarker != true) {
+				t.Errorf("fork_pr_requires_manual_start = (%v, present=%v), want present=%v",
+					manualMarker, hasManualMarker, !tt.wantAutostart)
+			}
+		})
+	}
+}
+
+func triggerReviewWatchForAutoStartTest(
+	t *testing.T,
+	detailPR *github.PR,
+	detailErr error,
+) (*github.NewReviewPREvent, []*github.PR) {
+	t.Helper()
+	ctx := context.Background()
+	store := newReviewWatchGitHubStore(t)
+	mockClient := github.NewMockClient()
+	mockClient.SetReviewRequestedPRs([]*github.PR{{
+		Number: 42, Title: "Review this change", HTMLURL: "https://github.com/acme/widget/pull/42",
+		RepoOwner: "acme", RepoName: "widget", HeadBranch: "feature", BaseBranch: "main",
+	}})
+	mockClient.SetPRDetail("acme", "widget", 42, detailPR, detailErr)
+	if err := store.UpsertWorkspaceConnection(ctx, &github.WorkspaceConnection{
+		WorkspaceID: "ws1", Source: github.ConnectionSourcePAT, GitHubHost: "github.com", Login: "reviewer",
+		Status: github.ConnectionStatusActive,
+	}); err != nil {
+		t.Fatalf("create workspace connection: %v", err)
+	}
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	t.Cleanup(eventBus.Close)
+	var emitted *github.NewReviewPREvent
+	_, err := eventBus.Subscribe(events.GitHubNewReviewPR, func(_ context.Context, event *bus.Event) error {
+		payload, ok := event.Data.(*github.NewReviewPREvent)
+		if !ok {
+			return errors.New("event data is not a NewReviewPREvent")
+		}
+		emitted = payload
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe to review event: %v", err)
+	}
+	githubService := github.NewService(mockClient, github.AuthMethodPAT, nil, store, eventBus, testLogger())
+	t.Cleanup(githubService.Stop)
+	github.NewMockController(mockClient, store, eventBus, githubService, testLogger())
+	watch := &github.ReviewWatch{
+		ID: "watch-1", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "step1",
+		AgentProfileID: testAgentProfileID, Repos: []github.RepoFilter{{Owner: "acme", Name: "widget"}}, Enabled: true,
+	}
+	if err := store.CreateReviewWatch(ctx, watch); err != nil {
+		t.Fatalf("create review watch: %v", err)
+	}
+	prs, err := githubService.TriggerReviewWatch(ctx, watch)
+	if err != nil {
+		t.Fatalf("TriggerReviewWatch: %v", err)
+	}
+	return emitted, prs
+}
+
+func newReviewWatchGitHubStore(t *testing.T) *github.Store {
+	t.Helper()
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "review-watch.db"))
+	if err != nil {
+		t.Fatalf("open review watch database: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	if _, err := sqlxDB.Exec("CREATE TABLE workspaces (id TEXT PRIMARY KEY)"); err != nil {
+		t.Fatalf("create workspace schema: %v", err)
+	}
+	if _, err := sqlxDB.Exec("INSERT INTO workspaces (id) VALUES (?)", "ws1"); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	store, err := github.NewStore(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("create GitHub store: %v", err)
+	}
+	return store
 }
 
 // TestBuildIssueTaskTitle_TruncatesTitle mirrors the review-title regression for

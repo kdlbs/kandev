@@ -4,6 +4,7 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { watchWs } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 /**
@@ -58,11 +59,19 @@ async function seedSimpleTask(
       .toBe(true);
   }
 
+  const gateway = requiredPaths.length > 0 ? watchWs(testPage) : null;
   await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+
+  if (gateway) {
+    const treeResponse = gateway.waitForResponse("workspace.tree.get");
+    await testPage.reload();
+    await session.waitForLoad();
+    await treeResponse;
+  }
 
   return { session, sessionId: task.session_id ?? task.id };
 }
@@ -182,6 +191,7 @@ test.describe("Symlink file handling", () => {
           apiClient,
           seedData,
           "Symlink File Tree Test",
+          ["real-file.txt", "link-file.txt"],
         );
 
         await session.clickTab("Changes");

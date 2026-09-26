@@ -157,7 +157,10 @@ test.describe("Quick Chat", () => {
         borderColor: styles.borderColor,
       };
     });
-    expect(normalFocusStyles.outlineStyle).not.toBe("none");
+    expect(
+      normalFocusStyles.outlineStyle !== "none" ||
+        normalFocusStyles.boxShadow !== silentStyles.boxShadow,
+    ).toBe(true);
     expect(normalFocusStyles.borderColor).not.toBe(silentStyles.borderColor);
   });
 

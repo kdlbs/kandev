@@ -4,6 +4,7 @@
  * same workspace action with a touch-sized target.
  */
 import { expect, test } from "../../fixtures/test-base";
+import { expectTouchControl } from "../../helpers/control-sizing";
 import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
@@ -33,11 +34,8 @@ test.describe("Mobile plugin workspace actions", () => {
 
     const box = await slot.boundingBox();
     expect(box).not.toBeNull();
-    // CSS pixels can be returned as a value just below the integer edge by
-    // Chromium's fractional device scale. Round the measured geometry before
-    // checking the 44px touch-target contract.
-    expect(Math.round(box!.width)).toBeGreaterThanOrEqual(44);
-    expect(Math.round(box!.height)).toBeGreaterThanOrEqual(44);
+    expect(box!.width + 0.01).toBeGreaterThanOrEqual(44);
+    await expectTouchControl(slot);
 
     await slot.tap();
     await expect(slot).toHaveAttribute("data-clicked", "true");

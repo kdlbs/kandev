@@ -165,16 +165,25 @@ test.describe("Compact task topbar workflow stepper", () => {
     apiClient,
     seedData,
   }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Compact workflow movement",
+      "simple",
+    );
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    const sortedSteps = [...steps].sort((left, right) => left.position - right.position);
+    const currentStep = sortedSteps.find((step) => step.is_start_step) ?? sortedSteps[0];
+    if (!currentStep) throw new Error("compact workflow movement requires at least one step");
+
     const task = await apiClient.seedTask(seedData.workspaceId, COMPACT_TASK_TITLE, {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
+      workflow_id: workflow.id,
+      workflow_step_id: currentStep.id,
     });
-    // A worker can refresh the workflow while another test is completing its
-    // setup. Read the workflow after creating the task so the disclosure
-    // assertion follows the current backend step set instead of stale worker
-    // fixture data.
-    const { steps: currentSteps } = await apiClient.listWorkflowSteps(seedData.workflowId);
-    const targetStep = adjacentStep(currentSteps, seedData.startStepId);
+    // The worker can refresh a workflow while another test is completing its
+    // setup. Re-read the task's workflow after task creation so the disclosure
+    // uses the current step set instead of stale fixture data.
+    const { steps: currentSteps } = await apiClient.listWorkflowSteps(workflow.id);
+    const targetStep = adjacentStep(currentSteps, currentStep.id);
 
     await testPage.setViewportSize({ width: 900, height: 800 });
     await testPage.goto(`/t/${task.task_id}`);

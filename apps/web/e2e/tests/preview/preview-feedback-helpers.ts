@@ -113,9 +113,11 @@ export async function chooseCapture(page: Page, name: string): Promise<void> {
 export async function waitForScreenshotCaptureMode(frame: FrameLocator): Promise<void> {
   await expect
     .poll(
-      async () =>
-        frame.locator("html").evaluate((element) => (element as HTMLElement).style.cursor),
-      { timeout: 5_000, message: "preview iframe did not enter screenshot capture mode" },
+      () => frame.locator("html").evaluate((element) => (element as HTMLElement).style.cursor),
+      {
+        timeout: 5_000,
+        message: "The preview must enter screenshot-capture mode before the region drag starts",
+      },
     )
     .toBe("crosshair");
 }

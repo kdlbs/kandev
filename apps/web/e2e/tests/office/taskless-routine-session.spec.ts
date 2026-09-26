@@ -2,14 +2,9 @@ import { expect, test } from "../../fixtures/office-fixture";
 
 type RoutineRun = {
   id: string;
+  causation_id?: string;
   linked_task_id?: string;
   status: string;
-};
-
-type AgentRun = {
-  id: string;
-  reason: string;
-  context_snapshot?: string;
 };
 
 async function routineRuns(
@@ -79,14 +74,30 @@ test.describe("Office taskless routine sessions", () => {
     });
     const routineId = routine.id as string;
 
-    const existing = await officeApi.listRuns(officeSeed.workspaceId);
-    const seen = new Set(((existing.runs ?? []) as { id: string }[]).map((run) => run.id));
     const sessions: string[] = [];
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       await waitForAgentIdle(officeApi, officeSeed.agentId);
       const response = await officeApi.runRoutine(routineId);
-      expect(response.status).toBe(200);
+      if (response.status !== 200) {
+        throw new Error(
+          `manual routine fire returned ${response.status}: ${await response.text()}`,
+        );
+      }
+      const fired = (await response.json()) as { run: RoutineRun };
+      expect(fired.run.id).toBeTruthy();
+      const routineRunId = fired.run.id;
+      const expectedCausationId = fired.run.causation_id;
+      expect(expectedCausationId, "routine fire causation ID").toBeTruthy();
+      await expect
+        .poll(() => routineRuns(officeApi, routineId), { timeout: 20_000 })
+        .toHaveLength(attempt);
+      await expect
+        .poll(async () =>
+          (await routineRuns(officeApi, routineId)).some((run) => run.id === routineRunId),
+        )
+        .toBe(true);
       let runId = "";
+      let observedRuns: unknown[] = [];
       await expect
         .poll(() => routineRuns(officeApi, routineId), {
           timeout: 30_000,
@@ -98,16 +109,10 @@ test.describe("Office taskless routine sessions", () => {
         .poll(
           async () => {
             const result = await officeApi.listRuns(officeSeed.workspaceId);
-            const run = ((result.runs ?? []) as AgentRun[]).find((candidate) => {
-              if (seen.has(candidate.id) || !candidate.reason.startsWith("routine_")) {
-                return false;
-              }
-              try {
-                return JSON.parse(candidate.context_snapshot ?? "{}").routine_id === routineId;
-              } catch {
-                return false;
-              }
-            });
+            observedRuns = (result.runs ?? []) as unknown[];
+            const run = (observedRuns as { id: string; causation_id?: string }[]).find(
+              (candidate) => candidate.causation_id === expectedCausationId,
+            );
             runId = run?.id ?? "";
             return runId;
           },
@@ -117,14 +122,21 @@ test.describe("Office taskless routine sessions", () => {
             message: `Waiting for agent run ${attempt} to appear`,
           },
         )
-        .not.toBe("");
-      seen.add(runId);
+        .not.toBe("")
+        .catch((error) => {
+          throw new Error(
+            `No live office run found for causation ID ${expectedCausationId}: ${JSON.stringify(observedRuns)}`,
+            { cause: error },
+          );
+        });
       const detailPath = `/agents/${officeSeed.agentId}/runs/${runId}`;
       await expect
         .poll(
           async () => {
             const result = await officeApi.rawRequest("GET", detailPath);
-            expect(result.ok).toBe(true);
+            if (!result.ok) {
+              throw new Error(`run detail returned ${result.status}: ${await result.text()}`);
+            }
             const detail = await result.json();
             return detail.status;
           },

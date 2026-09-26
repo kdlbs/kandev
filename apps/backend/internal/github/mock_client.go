@@ -105,6 +105,17 @@ type repoFileEntry struct {
 	Content []byte
 }
 
+type mockPRDetailResult struct {
+	pr  *PR
+	err error
+}
+
+type mockReviewWatchResponses struct {
+	details          map[prKey]mockPRDetailResult
+	searchResults    []*PR
+	searchResultsSet bool
+}
+
 // MockClient implements Client with in-memory configurable data for E2E testing.
 // All data is protected by a sync.RWMutex for thread safety.
 type MockClient struct {
@@ -161,6 +172,7 @@ type MockClient struct {
 	// singleflight coalescing.
 	probeEntered chan string
 	probeRelease chan struct{}
+	reviewWatch  mockReviewWatchResponses
 }
 
 // mockGist captures a gist that was created via the mock client so tests
@@ -179,6 +191,7 @@ func NewMockClient() *MockClient {
 		user:              mockDefaultUser,
 		authenticated:     true,
 		prs:               make(map[prKey]*PR),
+		reviewWatch:       mockReviewWatchResponses{details: make(map[prKey]mockPRDetailResult)},
 		issues:            make(map[issueKey]*Issue),
 		prsByBranch:       make(map[branchKey]*PR),
 		repos:             make(map[string][]GitHubRepo),
@@ -218,7 +231,11 @@ func (m *MockClient) GetAuthenticatedUser(context.Context) (string, error) {
 func (m *MockClient) GetPR(_ context.Context, owner, repo string, number int) (*PR, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	pr, ok := m.prs[prKey{owner, repo, number}]
+	key := prKey{owner, repo, number}
+	if result, ok := m.reviewWatch.details[key]; ok {
+		return result.pr, result.err
+	}
+	pr, ok := m.prs[key]
 	if !ok {
 		return nil, fmt.Errorf("mock: PR %s/%s#%d not found", owner, repo, number)
 	}
@@ -306,6 +323,9 @@ func (m *MockClient) ListAuthoredPRs(_ context.Context, owner, repo string) ([]*
 func (m *MockClient) ListReviewRequestedPRs(context.Context, string, string, string) ([]*PR, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if m.reviewWatch.searchResultsSet {
+		return append([]*PR(nil), m.reviewWatch.searchResults...), nil
+	}
 	var result []*PR
 	for _, pr := range m.prs {
 		if len(pr.RequestedReviewers) > 0 {
@@ -949,6 +969,23 @@ func (m *MockClient) AddPR(pr *PR) {
 	}
 }
 
+// SetReviewRequestedPRs overrides search-shaped review-requested results.
+// Use SetPRDetail to provide the separate GetPR response for each result.
+func (m *MockClient) SetReviewRequestedPRs(prs []*PR) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reviewWatch.searchResultsSet = true
+	m.reviewWatch.searchResults = append([]*PR(nil), prs...)
+}
+
+// SetPRDetail overrides GetPR for one PR, allowing search and detail responses
+// to differ in tests that exercise provider enrichment.
+func (m *MockClient) SetPRDetail(owner, repo string, number int, pr *PR, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reviewWatch.details[prKey{owner, repo, number}] = mockPRDetailResult{pr: pr, err: err}
+}
+
 func (m *MockClient) ensurePRHeadSHA(owner, repo string, number int, fallback string) (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1185,6 +1222,7 @@ func (m *MockClient) Reset() {
 	m.authError = ""
 	m.reposUnavailable = false
 	m.prs = make(map[prKey]*PR)
+	m.reviewWatch = mockReviewWatchResponses{details: make(map[prKey]mockPRDetailResult)}
 	m.issues = make(map[issueKey]*Issue)
 	m.prsByBranch = make(map[branchKey]*PR)
 	m.orgs = nil

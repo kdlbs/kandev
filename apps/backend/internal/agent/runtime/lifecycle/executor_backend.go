@@ -203,6 +203,9 @@ const (
 	MetadataKeyGitUserEmail             = "git_user_email"
 	MetadataKeyImageTagOverride         = "image_tag_override"
 	MetadataKeyAllowUserNamespaces      = "allow_user_namespaces"
+	MetadataKeyDockerNetwork            = "docker_network"
+	MetadataKeyDockerNetworkGwPriority  = "docker_network_gw_priority"
+	MetadataKeyDockerAdditionalNetworks = "docker_additional_networks"
 	MetadataKeyContainerID              = "container_id"
 	MetadataKeySpriteName               = "sprite_name"
 	MetadataKeySpriteState              = "sprite_state"
@@ -393,6 +396,9 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyExecutorProfileID:        true,
 	MetadataKeyImageTagOverride:         true,
 	MetadataKeyAllowUserNamespaces:      true,
+	MetadataKeyDockerNetwork:            true,
+	MetadataKeyDockerNetworkGwPriority:  true,
+	MetadataKeyDockerAdditionalNetworks: true,
 	MetadataKeyContainerID:              true,
 	MetadataKeyWorktreeBranch:           true,
 	metadataCheckoutBranch:              true,

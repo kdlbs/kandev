@@ -117,8 +117,8 @@ workflows:
     // Dialog should close and toast should appear
     await expect(dialog).not.toBeVisible();
 
-    // The import handler refreshes the route after the response. Wait for that
-    // refresh instead of starting a competing navigation.
+    // The import refreshes the workflow list in place. Wait for its new name
+    // instead of starting a competing navigation while that refresh settles.
     const card = await page.findWorkflowCard("Pasted Workflow", { waitForName: true });
     await expect(card).toBeVisible();
     await expect(card.getByText("Open")).toBeVisible();
@@ -263,8 +263,7 @@ workflows:
       expect(implement?.agent_profile_id).toBe(replacement.id);
       expect(review?.session_target).toEqual({ kind: "step", step_id: implement?.id });
 
-      await page.goto(seedData.workspaceId);
-      const importedCard = await page.findWorkflowCard(workflowName);
+      const importedCard = await page.findWorkflowCard(workflowName, { waitForName: true });
       await expect(importedCard).toBeVisible();
     } finally {
       const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);

@@ -217,10 +217,9 @@ they are the ones that fail silently if written casually:
   implementation that wrongly suppresses both.
 
 The shipped-configuration reachability described in the requirement's overview
-also gives a direct regression test that needs no flag: with
-`features.officeSessionIdentity` off, an agent that is both runner and
-auto-cast reviewer holds the task's only session, and displacing it from the
-reviewer seat must leave that session live.
+also gives a direct regression test under ordinary startup, with no flag
+matrix: an agent that is both runner and auto-cast reviewer holds one session,
+and displacing it from the reviewer seat must leave that session live.
 
 ## Related decisions
 
