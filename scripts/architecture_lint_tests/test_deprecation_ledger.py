@@ -766,3 +766,202 @@ class DeprecationLedgerTest(ArchitectureFixture):
 
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("ambiguous repeated deprecation identity", result.stdout)
+
+    def test_go_multi_name_field_requires_registration_for_each_name(self) -> None:
+        path = "apps/backend/internal/example/api.go"
+        source = """\
+        package example
+        type T struct {
+          // Deprecated: use C.
+          A, B string
+        }
+        """
+        self.write(path, source)
+
+        declarations = [
+            finding.identity_dict()["declaration"] for finding in scan(path, source)
+        ]
+
+        self.assertEqual(declarations, ["field:T.A#1", "field:T.B#1"])
+
+        self.write_ledger(
+            [
+                {
+                    "id": "field-a",
+                    "locator": {
+                        "path": path,
+                        "declaration": "field:T.A#1",
+                        "marker": "Deprecated:",
+                    },
+                    "reason": "Existing callers still use field A.",
+                    "owner": "backend maintainers",
+                    "introduced_on": "2026-01-15",
+                    "removal_condition": "Callers use field C.",
+                    "target_removal_version": "2.0.0",
+                }
+            ]
+        )
+        self.track_all()
+
+        missing_b = self.run_cli("--all")
+
+        self.assertEqual(missing_b.returncode, 1, missing_b.stdout + missing_b.stderr)
+        self.assertIn("field:T.B#1", missing_b.stdout)
+        self.assertIn("unregistered", missing_b.stdout)
+
+        self.write(
+            path,
+            """\
+            package example
+            type T struct {
+              // Deprecated: use C.
+              B string
+            }
+            """,
+        )
+        self.track_all()
+
+        removed_a = self.run_cli("--all")
+
+        self.assertEqual(removed_a.returncode, 1, removed_a.stdout + removed_a.stderr)
+        self.assertIn("field-a: locator declaration does not match", removed_a.stdout)
+        self.assertIn("field:T.B#1", removed_a.stdout)
+        self.assertIn("unregistered", removed_a.stdout)
+
+    def test_regex_backticks_do_not_hide_typescript_deprecations(self) -> None:
+        cases = {
+            "apps/web/lib/regex.ts": (
+                """\
+                const message = `literal text
+                /** @deprecated template text is not a comment */
+                end`;
+                const ratio = calculate() / scale;
+                const matcher = /`/;
+                function hasMatch(input: string) {
+                  if (input) /`/.test(input);
+                  return /`/.test(input);
+                }
+                /** @deprecated Use newApi instead. */
+                export function oldApi(): void;
+                """,
+                10,
+            ),
+            "apps/web/lib/regex.tsx": (
+                """\
+                const label = () => <p>Don't parse this as a string</p>;
+                const message = `literal text
+                /** @deprecated template text is not a comment */
+                end`;
+                const ratio = calculate() / scale;
+                const matcher = /`/;
+                function hasMatch(input: string) {
+                  if (input) /`/.test(input);
+                  return /`/.test(input);
+                }
+                /** @deprecated Use newApi instead. */
+                export function oldApi(): void;
+                """,
+                11,
+            ),
+        }
+
+        for path, (source, marker_line) in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(
+                    find_declarations(path, source),
+                    [(marker_line, "function:oldApi[signature=( )]", "@deprecated")],
+                )
+
+    def test_nested_generic_closers_preserve_function_and_method_registrations(self) -> None:
+        path = "apps/web/lib/generic-api.ts"
+        compact = """\
+        /** @deprecated Use currentFunction instead. */
+        export function oldFunction<T extends A<B<C>>>(value: G<H<I>>): void;
+        export interface Service {
+          /** @deprecated Use currentMethod instead. */
+          oldMethod<T extends A<B<C>>>(value: G<H<I>>): void;
+        }
+        """
+        spaced = """\
+        /** @deprecated Use currentFunction instead. */
+        export function oldFunction<T extends A<B<C> > >(value : G<H<I> >) : void;
+        export interface Service {
+          /** @deprecated Use currentMethod instead. */
+          oldMethod<T extends A<B<C> > >(value : G<H<I> >) : void;
+        }
+        """
+
+        original_findings = scan(path, compact)
+        reformatted_findings = scan(path, spaced)
+        original_declarations = [
+            finding.identity_dict()["declaration"] for finding in original_findings
+        ]
+        reformatted_declarations = [
+            finding.identity_dict()["declaration"] for finding in reformatted_findings
+        ]
+
+        self.assertEqual(original_declarations, reformatted_declarations)
+
+        entries = []
+        for finding in original_findings:
+            declaration = finding.identity_dict()["declaration"]
+            entry_id = (
+                "old-function"
+                if declaration.startswith("function:oldFunction")
+                else "old-method"
+            )
+            entries.append(
+                {
+                    "id": entry_id,
+                    "locator": {
+                        "path": path,
+                        "declaration": declaration,
+                        "marker": "@deprecated",
+                    },
+                    "reason": "Existing callers still use this declaration.",
+                    "owner": "web maintainers",
+                    "introduced_on": "2026-01-15",
+                    "removal_condition": "All callers use the current declaration.",
+                    "target_removal_version": "2.0.0",
+                }
+            )
+        self.write(path, compact)
+        self.write_ledger(entries)
+        self.track_all()
+
+        self.write(path, spaced)
+        self.track_all()
+        reformatted_registration = self.run_cli("--all")
+
+        self.assertEqual(
+            reformatted_registration.returncode,
+            0,
+            reformatted_registration.stdout + reformatted_registration.stderr,
+        )
+
+        changed_signature = spaced.replace("A<B<C> > >", "A<B<D> > >")
+        self.write(path, changed_signature)
+        self.track_all()
+        stale_registration = self.run_cli("--all")
+
+        self.assertEqual(stale_registration.returncode, 1)
+        self.assertIn("old-function: locator declaration does not match", stale_registration.stdout)
+        self.assertIn("old-method: locator declaration does not match", stale_registration.stdout)
+
+    def test_generic_closer_normalization_preserves_shift_and_type_changes(self) -> None:
+        compact = """\
+        /** @deprecated Use currentApi instead. */
+        export function oldApi<T extends A<B<C>>>(value: number = input >>> 1): void {}
+        """
+        spaced_closers = compact.replace("A<B<C>>>", "A<B<C> > >")
+        changed_shift = spaced_closers.replace("input >>> 1", "input >> 1")
+        changed_type = spaced_closers.replace("A<B<C> > >", "A<B<D> > >")
+
+        compact_identity = scan("apps/web/lib/api.ts", compact)[0].identity_dict()["declaration"]
+        spaced_identity = scan("apps/web/lib/api.ts", spaced_closers)[0].identity_dict()["declaration"]
+        changed_shift_identity = scan("apps/web/lib/api.ts", changed_shift)[0].identity_dict()["declaration"]
+        changed_type_identity = scan("apps/web/lib/api.ts", changed_type)[0].identity_dict()["declaration"]
+
+        self.assertEqual(compact_identity, spaced_identity)
+        self.assertNotEqual(compact_identity, changed_shift_identity)
+        self.assertNotEqual(compact_identity, changed_type_identity)

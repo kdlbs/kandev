@@ -39,7 +39,7 @@ GO_SCOPE = re.compile(r"\btype\s+([A-Za-z_]\w*)\s*(?:\[[^\]\n]+\])?\s+(struct|in
 GO_TYPE_SPEC_SCOPE = re.compile(
     r"^\s*([A-Za-z_]\w*)\s*(?:\[[^\]\n]+\])?\s+(struct|interface)\s*\{"
 )
-GO_FIELD = re.compile(r"^\s*([A-Za-z_]\w*)\s+")
+GO_FIELD = re.compile(r"^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s+")
 GO_EMBEDDED_FIELD = re.compile(
     r"^\s*\*?(?:[A-Za-z_]\w*\s*\.\s*)?([A-Za-z_]\w*)"
     r"(?:\s*\[[^\]\n]+\])?(?:\s|$|`)"
@@ -70,6 +70,12 @@ TS_SIGNATURE_TOKEN = re.compile(
     r"(?P<space>\s+)|(?P<punct>.)",
     re.DOTALL,
 )
+TS_REGEX_PREFIX_KEYWORDS = frozenset(
+    "await case delete do else in instanceof of return throw typeof void yield".split()
+)
+TS_REGEX_PREFIX_TOKENS = frozenset("({[,;:=!?~+-*%&|^<>/")
+TS_REGEX_CONTROL_PARENS = frozenset({"catch", "for", "if", "switch", "while", "with"})
+TS_MULTICHAR_TOKENS = ("++", "--")
 
 
 @dataclass(frozen=True)
@@ -102,12 +108,40 @@ def _blank(value: str) -> str:
     return "".join("\n" if char == "\n" else " " for char in value)
 
 
-def _mask_source(source: str) -> tuple[str, list[Comment]]:
+def _typescript_regex_end(source: str, start: int) -> int | None:
+    index = start + 1
+    in_character_class = False
+    while index < len(source):
+        char = source[index]
+        if char in "\r\n":
+            return None
+        if char == "\\":
+            if index + 1 >= len(source) or source[index + 1] in "\r\n":
+                return None
+            index += 2
+            continue
+        if char == "[":
+            in_character_class = True
+        elif char == "]":
+            in_character_class = False
+        elif char == "/" and not in_character_class:
+            index += 1
+            while index < len(source) and source[index].isalpha() and source[index].isascii():
+                index += 1
+            return index
+        index += 1
+    return None
+
+
+def _mask_source(source: str, *, typescript: bool = False) -> tuple[str, list[Comment]]:
     """Hide literals and comments while retaining source offsets and lines."""
 
     masked = list(source)
     comments: list[Comment] = []
     index = 0
+    previous_token: str | None = None
+    regex_can_start = True
+    paren_contexts: list[str | None] = []
     while index < len(source):
         if source.startswith("//", index):
             end = source.find("\n", index + 2)
@@ -118,6 +152,23 @@ def _mask_source(source: str) -> tuple[str, list[Comment]]:
             )
             masked[index:end] = _blank(source[index:end])
             index = end
+        elif (
+            typescript
+            and source[index] == "/"
+            and regex_can_start
+            and not source.startswith("/*", index)
+            and not (index > 0 and source.startswith("</", index - 1))
+        ):
+            end = _typescript_regex_end(source, index)
+            if end is None:
+                previous_token = "/"
+                regex_can_start = True
+                index += 1
+            else:
+                masked[index:end] = _blank(source[index:end])
+                previous_token = "literal"
+                regex_can_start = False
+                index = end
         elif source.startswith("/*", index):
             close = source.find("*/", index + 2)
             end = len(source) if close < 0 else close + 2
@@ -148,6 +199,45 @@ def _mask_source(source: str) -> tuple[str, list[Comment]]:
                 else:
                     index += 1
             masked[start:index] = _blank(source[start:index])
+            if typescript:
+                previous_token = "literal"
+                regex_can_start = False
+        elif typescript and source[index].isspace():
+            index += 1
+        elif typescript and (source[index].isalpha() or source[index] in "_$"):
+            match = re.match(r"[A-Za-z_$][A-Za-z0-9_$]*", source[index:])
+            token = match.group() if match else source[index]
+            previous_token = token
+            regex_can_start = token in TS_REGEX_PREFIX_KEYWORDS
+            index += len(token)
+        elif typescript and source[index].isdigit():
+            while index < len(source) and (
+                source[index].isalnum() or source[index] in "_.$"
+            ):
+                index += 1
+            previous_token = "literal"
+            regex_can_start = False
+        elif typescript:
+            token = next(
+                (
+                    candidate
+                    for candidate in TS_MULTICHAR_TOKENS
+                    if source.startswith(candidate, index)
+                ),
+                source[index],
+            )
+            if token == "(":
+                paren_contexts.append(previous_token)
+                regex_can_start = True
+            elif token == ")":
+                context = paren_contexts.pop() if paren_contexts else None
+                regex_can_start = context in TS_REGEX_CONTROL_PARENS
+            elif token in {"++", "--", ")", "]", "}"}:
+                regex_can_start = False
+            else:
+                regex_can_start = token in TS_REGEX_PREFIX_TOKENS
+            previous_token = token
+            index += len(token)
         else:
             index += 1
     return "".join(masked), comments
@@ -261,7 +351,8 @@ def _go_declaration(
                 return [f"method:{scope_name}.{method.group(1)}"]
         field = GO_FIELD.match(code)
         if field:
-            return [f"field:{scope_name}.{field.group(1)}"]
+            names = re.findall(r"[A-Za-z_]\w*", field.group(1))
+            return [f"field:{scope_name}.{name}" for name in names]
         embedded = GO_EMBEDDED_FIELD.match(code)
         return [f"field:{scope_name}.{embedded.group(1)}"] if embedded else []
     if depth != 0:
@@ -449,8 +540,15 @@ def _typescript_call_signature(source: str, masked: str, start: int) -> str | No
     if close_paren is None:
         return None
 
-    tokens: list[str] = []
-    for match in TS_SIGNATURE_TOKEN.finditer(source[start : close_paren + 1]):
+    signature_source = source[start : close_paren + 1]
+    tokens = _typescript_signature_tokens(signature_source)
+    parameter_start = open_paren - start
+    return " ".join(_normalize_generic_closers(tokens, parameter_start))
+
+
+def _typescript_signature_tokens(source: str) -> list[tuple[int, str]]:
+    tokens: list[tuple[int, str]] = []
+    for match in TS_SIGNATURE_TOKEN.finditer(source):
         if match.lastgroup in {"comment", "space"}:
             continue
         token = match.group()
@@ -459,8 +557,88 @@ def _typescript_call_signature(source: str, masked: str, start: int) -> str | No
                 token = json.dumps(ast.literal_eval(token), ensure_ascii=False)
             except (SyntaxError, ValueError):
                 pass
-        tokens.append(token)
-    return " ".join(tokens)
+        tokens.append((match.start(), token))
+    return tokens
+
+
+def _normalize_generic_closers(
+    tokens: list[tuple[int, str]], parameter_start: int
+) -> list[str]:
+    normalized: list[str] = []
+    generic_depth = 0
+    parameter_depth = 0
+    brace_depth = 0
+    bracket_depth = 0
+    type_angle_depth = 0
+    in_parameter_type = False
+
+    for position, token in tokens:
+        if position < parameter_start:
+            if token == "<":
+                generic_depth += 1
+                normalized.append(token)
+            elif token == ">" and generic_depth:
+                generic_depth -= 1
+                normalized.append(token)
+            elif token in {">>", ">>>"} and generic_depth >= len(token):
+                normalized.extend(">" for _ in token)
+                generic_depth -= len(token)
+            else:
+                normalized.append(token)
+            continue
+
+        if token == "(":
+            parameter_depth += 1
+            normalized.append(token)
+            continue
+        if token == ")":
+            if parameter_depth == 1:
+                in_parameter_type = False
+                type_angle_depth = 0
+            parameter_depth = max(0, parameter_depth - 1)
+            normalized.append(token)
+            continue
+
+        at_parameter_boundary = (
+            parameter_depth == 1
+            and brace_depth == 0
+            and bracket_depth == 0
+            and type_angle_depth == 0
+        )
+        if at_parameter_boundary:
+            if token == ":":
+                in_parameter_type = True
+            elif token == ",":
+                in_parameter_type = False
+            elif token == "=":
+                in_parameter_type = False
+
+        if in_parameter_type and token == "<":
+            type_angle_depth += 1
+            normalized.append(token)
+        elif in_parameter_type and token == ">" and type_angle_depth:
+            type_angle_depth -= 1
+            normalized.append(token)
+        elif (
+            in_parameter_type
+            and token in {">>", ">>>"}
+            and type_angle_depth >= len(token)
+        ):
+            normalized.extend(">" for _ in token)
+            type_angle_depth -= len(token)
+        else:
+            normalized.append(token)
+
+        if token == "{":
+            brace_depth += 1
+        elif token == "}" and brace_depth:
+            brace_depth -= 1
+        elif token == "[":
+            bracket_depth += 1
+        elif token == "]" and bracket_depth:
+            bracket_depth -= 1
+
+    return normalized
 
 
 def _typescript_findings(
@@ -512,7 +690,7 @@ def find_declarations(path: str, source: str) -> list[tuple[int, str, str]]:
         return _go_findings(masked, comments, source)
     if is_generated_typescript(source):
         return []
-    masked, comments = _mask_source(source)
+    masked, comments = _mask_source(source, typescript=True)
     return _typescript_findings(masked, comments, source)
 
 

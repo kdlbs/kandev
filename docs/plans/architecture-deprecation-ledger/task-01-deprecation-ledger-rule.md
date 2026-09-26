@@ -60,15 +60,16 @@ git diff --check
 
 ## Results
 
-Implemented and verified on refreshed main `c735b678863ba64e31bd78cd1a6e3c845be3b4e9`. Review regressions cover grouped and embedded Go declarations, nested and decorated TypeScript declarations, string/numeric/computed member keys, local-variable exclusions, and apostrophes in JSX text. A follow-up identity regression also proves distinct TS overloads keep identities when reordered or reformatted, stale registrations fail when the referenced overload is removed, and indistinguishable repeated signatures are diagnosed.
+Implemented and verified on refreshed main `c735b678863ba64e31bd78cd1a6e3c845be3b4e9`. Review regressions cover grouped and embedded Go declarations, nested and decorated TypeScript declarations, string/numeric/computed member keys, local-variable exclusions, and apostrophes in JSX text. Identity regressions prove distinct TS overloads keep identities when reordered or reformatted, stale registrations fail when a referenced overload or Go field is removed, and indistinguishable repeated signatures are diagnosed. The final fixup separately covers multi-name Go field identities, regex backticks versus multiline templates in TS and TSX, and formatting-stable nested generic closers without conflating shift operators or real type changes.
 
 - The initial baseline contains exactly 15 unregistered declarations: 4 Go and 11 TypeScript.
 - The two existing compatibility-ledger entries are unchanged.
-- `python3 scripts/lint-architecture.test.py` — passed, 95 tests after identity hardening.
+- `python3 scripts/lint-architecture.test.py` — passed, 99 tests after the final scanner regressions.
 - `make lint-architecture` — passed after identity hardening.
 - `python3 scripts/lint-architecture.py --all --baseline-base-ref origin/main --allow-missing-base-baseline` — passed after identity hardening.
 - `python3 scripts/list-docs.py validate` — passed with the internal requirement/design pair; 310 decisions and 1188 specifications validated.
 - `python3 scripts/lint-spec-files.py --all` — passed after identity docs updates.
+- Cross-PR integration against #3974 head `8f786df7e966ad087e50adbb0b87a8d6c90a2921` — 31 Office aliases matched 31 declaration registrations; zero ledger diagnostics.
 - `python3 scripts/lint-harness-files.test.py` — passed, 19 tests; `make lint-harness` passed for all 199 harness files.
 - `git diff --check` — passed.
 - Coverage correction: code-only head `65f56956cb6b2f800485031caaec3fa8b30de097` failed `PR documentation coverage` (run `36259598400`). Its error was “Linked delivery package is incomplete.” The internal requirement/design pair then linked the rule to this work order. Trusted-base evaluation passed at exact head `a2cf91d63db6398a5f3eb9fa1730e1fbfed5a0d2` (run `36261418199`).

@@ -41,14 +41,15 @@ Run the architecture-lint suite and full lint, compare the initial baseline agai
 
 ## Results
 
-Completed on refreshed main `c735b678863ba64e31bd78cd1a6e3c845be3b4e9`. The exact initial baseline contains 15 unregistered declarations: 4 Go and 11 TypeScript. Review regressions expanded the scanner to grouped and embedded Go declarations, nested and decorated TypeScript declarations, canonical non-identifier member keys, and quote termination across JSX text.
+Completed on refreshed main `c735b678863ba64e31bd78cd1a6e3c845be3b4e9`. The exact initial baseline contains 15 unregistered declarations: 4 Go and 11 TypeScript. Review regressions expanded the scanner to grouped and embedded Go declarations, nested and decorated TypeScript declarations, canonical non-identifier member keys, and quote termination across JSX text. The final review fixup adds independent identities for every name in a multi-name Go field, recognizes regex literals containing backticks without ending real multiline templates, and normalizes nested generic closing tokens across formatting while retaining real shift-operator and signature changes.
 
-- `python3 scripts/lint-architecture.test.py` — passed, 95 tests after identity hardening.
+- `python3 scripts/lint-architecture.test.py` — passed, 99 tests after the final scanner regressions.
 - `make lint-architecture` — passed.
 - `python3 scripts/lint-architecture.py --all --baseline-base-ref origin/main --allow-missing-base-baseline` — passed; the new baseline bootstraps at 15 exact current findings.
 - `python3 scripts/list-docs.py validate` — passed with the internal requirement/design pair; 310 decisions and 1188 specifications validated.
 - `python3 scripts/list-docs.py decisions --format paths` — includes the new decision.
 - `python3 scripts/lint-spec-files.py --all` — passed.
+- Cross-PR integration against #3974 head `8f786df7e966ad087e50adbb0b87a8d6c90a2921` — 31 Office aliases matched 31 declaration registrations; zero ledger diagnostics.
 - `python3 scripts/lint-harness-files.test.py` — passed, 19 tests; `make lint-harness` passed for all 199 harness files.
 - `git diff --check` — passed.
 - Coverage correction: code-only head `65f56956cb6b2f800485031caaec3fa8b30de097` failed `PR documentation coverage` (run `36259598400`). Its error was “Linked delivery package is incomplete.” The later head `a2cf91d63db6398a5f3eb9fa1730e1fbfed5a0d2` passed after the requirement/design pair was added (run `36261418199`).
