@@ -33,6 +33,16 @@ test.describe("remote executor profiles", () => {
       await expect(editor.getByText("Credential is configured.", { exact: true })).toBeVisible();
       await expect(testPage.getByLabel("Credential")).toHaveValue("");
 
+      for (const control of [
+        testPage.getByLabel("Region"),
+        testPage.getByLabel("Image"),
+        testPage.getByTestId("executor-profile-secret-clear-credential"),
+      ]) {
+        const box = await control.boundingBox();
+        expect(box, "fine-pointer desktop profile controls must have geometry").not.toBeNull();
+        expect(box!.height).toBeCloseTo(28, 0);
+      }
+
       let publicProfile = await readFixtureProfile(apiClient, executor.id, profile.id);
       expect(JSON.stringify(publicProfile)).not.toContain(FIXTURE_PROFILE_SECRET);
       expect(publicProfile.secret_fields?.credential).toBe(true);

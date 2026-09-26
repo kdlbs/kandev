@@ -150,8 +150,8 @@ export function serializeExecutorProfileValues(
   const config: Record<string, string> = {};
   for (const field of fields) {
     const value = values[field.name] ?? "";
-    if (field.secret && clearedSecrets[field.name]) {
-      config[field.name] = "";
+    if (!field.secret || clearedSecrets[field.name]) {
+      config[field.name] = value;
     } else if (value !== "") {
       config[field.name] = value;
     }

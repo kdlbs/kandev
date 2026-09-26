@@ -77,6 +77,7 @@ executor_providers:
           description: A long optional label that verifies narrow form layouts.
     resource_state_schema:
       type: object
+      additionalProperties: false
       properties:
         instance_id:
           type: string

@@ -58,6 +58,7 @@ apps/backend/
 │   │   ├── models/       # Task, Session, Executor, Message models
 │   │   ├── repository/   # Database access (SQLite)
 │   │   └── service/      # Task business logic
+│   ├── runs/             # Generic backend-wide run scheduling and execution state
 │   ├── office/           # Autonomous agent management (agents, approvals, channels, config, configsync,
 │   │                     # costs, dashboard, infra, labels, onboarding, projects, repository, runtime,
 │   │                     # routines, routing, scheduler, service, shared, skills, workspaces)
@@ -88,11 +89,7 @@ apps/backend/
 │   ├── tools/            # Tool integrations
 │   ├── user/             # User management
 │   ├── utility/          # Shared utility functions
-│   ├── workflow/         # Workflow engine
-│   │   ├── engine/       # Typed state-machine engine
-│   │   ├── models/       # Workflow step, template, and history models
-│   │   ├── repository/   # Workflow persistence (SQLite)
-│   │   └── service/      # Workflow CRUD, step resolution, and sync apply
+│   ├── workflow/         # Workflow engine (engine, models, repository, service)
 │   ├── workflowsync/     # GitHub workflow sync (per-workspace repo config, poller, force sync)
 │   └── worktree/         # Git worktree management for workspace isolation
 ```
@@ -141,6 +138,8 @@ replace state verification, installation association, or HMAC verification.
 
 **Agent Runtime** (`internal/agent/runtime/`) is the single seam for launching, resuming, stopping, and observing agent executions. ADR 0004 introduced this in Phase 1 of task-model-unification. The public surface is `runtime.Runtime` (`runtime.go`); a thin facade (`facade.go`) delegates to a `Backend` (satisfied by `*lifecycle.Manager`). Run-owned executions use `runtime.LaunchSpec.Owner` (`kind=run`) with durable run-session identity; admission fails closed before allocation and lifecycle registration, and `runtime.Start` rolls back failed startup while task launches keep task/session checks.
 
+**Run scheduling ownership:** `internal/runs/` is generic; only `internal/backendapp/` constructs and owns the single `internal/runs/scheduler` and its lifecycle. Office adapters may depend on runs, but generic runs must not import `internal/office` or its subpackages.
+
 **Runtime environment invariant:** `Agent.Runtime().Env` applies to every ACP subprocess entry point. Route new overrides through host-utility probes and sessionless prompts into agentctl child processes before sanitization; cover probe DTO, prompt DTO, and child-process boundaries.
 
 **Convention:** only `internal/agent/runtime/` (and code that pre-dates Phase 1 migration) may import `runtime/lifecycle` or `runtime/agentctl` directly. New consumers — workflow engine actions, cron-driven trigger handlers, future task-tier callers — should depend on `runtime.Runtime` or narrow local interfaces for the lifecycle-owned capability they consume. Existing call sites are migrated through later phases of task-model-unification.
@@ -173,7 +172,7 @@ Standalone agentctl is launched in its own process group so terminal Ctrl+C is h
 - `sprites` - Sprites cloud environment
 - `ssh` - Remote SSH host
 - `k8s` - Namespaced Kubernetes Pod with optional PVC workspace
-- `remote_docker`, `remote_vps` - Planned
+- `remote_docker` - Container on a Docker daemon reached over SSH; `remote_vps` - Planned
 
 **Kubernetes lifecycle:** `task_environment_kubernetes` owns shared physical Pod/PVC inventory; `executors_running` records individual sessions and legacy session-owned pods. Persist the exact Pod/PVC names, UIDs, full `kandev.ai/*` identity, workload snapshot, and internal runtime-secret references before reporting a launch as durable. Session stop deletes only its agentctl instance, and backend shutdown preserves resources; task cleanup deletes the Pod and only a Kandev-created PVC after exact identity checks and confirmed absence. Reconnect uses the current executor connection config but the recorded workload/resource snapshot, and any ambiguity fails closed. Keep agentctl reachable only through a process-local loopback port-forward; never add a Service or place resolved credentials in a Pod spec.
 

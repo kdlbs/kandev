@@ -247,6 +247,7 @@ export {
   refreshRepositoryDiscoveryAction,
   listDesktopDiscoveryRootsAction,
   addDesktopDiscoveryRootAction,
+  confirmHomeDesktopDiscoveryAction,
   reconnectDesktopDiscoveryRootAction,
   removeDesktopDiscoveryRootAction,
 } from "./repository-discovery";

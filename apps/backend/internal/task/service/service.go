@@ -504,6 +504,7 @@ type Service struct {
 	logger                          *logger.Logger
 	discoveryConfig                 RepositoryDiscoveryConfig
 	discoveryCacheMu                sync.Mutex
+	discoveryRootMutationMu         sync.Mutex
 	discoveryCache                  map[string]discoveryCacheEntry
 	discoveryRootCache              map[string]discoveryRootCacheEntry
 	discoveryFlights                map[string]*discoveryFlight

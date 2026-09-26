@@ -42,7 +42,8 @@ describe("describeEnsureError", () => {
     const info = describeEnsureError(new Error("websocket disconnected"), "ws-1");
     expect(info?.isAgentProfileMissing).toBe(false);
     expect(info?.title).toBe("Couldn't start a session");
-    expect(info?.detail).toContain("websocket disconnected");
+    expect(info?.detail).not.toContain("websocket disconnected");
+    expect(info?.detail).toMatch(/backend rejected/i);
     expect(info?.action).toBeNull();
   });
 
@@ -126,10 +127,11 @@ describe("EnsureSessionErrorBanner", () => {
     fireEvent.click(screen.getByTestId("session-recovery-details-summary"));
 
     expect(details.open).toBe(true);
-    expect(screen.getByText("Resume attempt")).toBeTruthy();
-    expect(screen.getByText(RESUME_FAILURE_DETAIL)).toBeTruthy();
-    expect(screen.getByText("Workspace restore attempt")).toBeTruthy();
-    expect(screen.getByText(RESTORE_FAILURE_DETAIL)).toBeTruthy();
+    expect(details.textContent).toContain("Resume attempt");
+    expect(details.textContent).toContain(RESUME_FAILURE_DETAIL);
+    expect(details.textContent).toContain("Workspace restore attempt");
+    expect(details.textContent).toContain("restore failed: workspace ***");
+    expect(details.textContent).not.toContain("/tmp/task-123");
   });
 
   it("disables retry while automatic recovery is in flight", () => {
@@ -171,8 +173,8 @@ describe("EnsureSessionErrorBanner", () => {
     fireEvent.click(screen.getByTestId("session-recovery-details-summary"));
 
     expect(details.open).toBe(true);
-    expect(screen.getByText("Resume attempt")).toBeTruthy();
-    expect(screen.getByText(RESUME_FAILURE_DETAIL)).toBeTruthy();
+    expect(details.textContent).toContain("Resume attempt");
+    expect(details.textContent).toContain(RESUME_FAILURE_DETAIL);
   });
 
   it("renders status failures as compact retryable feedback with collapsed details", () => {

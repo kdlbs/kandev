@@ -53,9 +53,13 @@ describe("plugin executor profile", () => {
     const values = buildExecutorProfileValues(fields, { region: "eu-west-1" });
     expect(values.credential).toBe("");
     expect(validateExecutorProfileValues(fields, values, { credential: true })).toEqual({});
-    expect(serializeExecutorProfileValues(fields, values)).toEqual({ region: "eu-west-1" });
+    expect(serializeExecutorProfileValues(fields, values)).toEqual({
+      region: "eu-west-1",
+      workers: "",
+    });
     expect(serializeExecutorProfileValues(fields, { ...values, credential: "new-token" })).toEqual({
       region: "eu-west-1",
+      workers: "",
       credential: "new-token",
     });
   });

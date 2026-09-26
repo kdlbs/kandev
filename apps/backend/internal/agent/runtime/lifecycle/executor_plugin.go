@@ -474,18 +474,6 @@ func validatePluginExecutorResource(resource *pluginsdk.ExecutorResourceDescript
 	return nil
 }
 
-func validatePluginExecutorResourceForProvider(provider models.ExecutorProvider, resource *pluginsdk.ExecutorResourceDescriptor) error {
-	if err := validatePluginExecutorResource(resource); err != nil {
-		return err
-	}
-	for _, supported := range provider.SupportedStateVersions {
-		if supported > 0 && uint32(supported) == resource.GetStateVersion() {
-			return nil
-		}
-	}
-	return errors.New("provider resource state version is unsupported")
-}
-
 func intersectPluginExecutorCapabilities(base models.ExecutorProviderCapabilities, reported *pluginsdk.ExecutorProviderCapabilities, resourceRetention ...string) models.ExecutorProviderCapabilities {
 	retention := pluginExecutorEffectiveRetention(base.Retention, reported.GetRetention(), resourceRetention)
 	maximum := pluginExecutorEffectiveMaximumLifetime(base.MaximumLifetimeSecs, reported.GetMaximumLifetimeSeconds())

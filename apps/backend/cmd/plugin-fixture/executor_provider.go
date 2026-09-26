@@ -128,7 +128,7 @@ func (p *fixturePlugin) RecoverExecutorOperation(ctx context.Context, req *plugi
 	}
 	resource, found, err := p.fixtureResourceByOperation(req.GetContext())
 	if err != nil || !found {
-		return &pluginsdk.RecoverExecutorOperationResponse{Outcome: "not_found"}, err
+		return &pluginsdk.RecoverExecutorOperationResponse{Outcome: "absent"}, err
 	}
 	if _, err := p.ensureFixtureTransport(resource); err != nil {
 		return nil, err

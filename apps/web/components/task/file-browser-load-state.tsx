@@ -8,6 +8,7 @@ import { t } from "@/lib/i18n";
 
 type RenderSessionOrLoadStateInput = {
   isSessionFailed: boolean;
+  sessionId?: string;
   sessionError: string | null | undefined;
   loadState: string;
   isLoadingTree: boolean;
@@ -21,6 +22,7 @@ type RenderSessionOrLoadStateInput = {
 
 export function renderSessionOrLoadState({
   isSessionFailed,
+  sessionId,
   sessionError,
   loadState,
   isLoadingTree,
@@ -41,7 +43,7 @@ export function renderSessionOrLoadState({
     );
   }
   if (isSessionFailed) {
-    return <WorkspaceUnavailable error={sessionError} />;
+    return <WorkspaceUnavailable error={sessionError} failedSessionId={sessionId} />;
   }
   if ((loadState === "loading" || isLoadingTree) && !tree) {
     return <PanelLoadingState label={t("task:loadingFiles")} />;

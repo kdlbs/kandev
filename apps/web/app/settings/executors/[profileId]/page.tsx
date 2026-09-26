@@ -12,7 +12,6 @@ import {
   updateExecutorProfile,
   deleteExecutorProfile,
   removeDockerContainer,
-  fetchLocalGitIdentity,
   listScriptPlaceholders,
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
@@ -28,12 +27,9 @@ import {
   envVarsToRows,
 } from "@/components/settings/profile-edit/env-vars-card";
 import { ProfileScriptCards } from "@/components/settings/profile-edit/profile-script-cards";
+import { RemoteDockerConnectionSection } from "@/components/settings/remote-docker-connection-section";
 import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
 import { SSHTaskDirReclamationCard } from "@/components/settings/ssh-task-dir-reclamation-card";
-import {
-  type GitIdentityMode,
-  type GitIdentityState,
-} from "@/components/settings/profile-edit/remote-credentials-card";
 import { SpritesApiKeyCard } from "@/components/settings/profile-edit/sprites-api-key-card";
 import {
   DockerSections,
@@ -71,7 +67,9 @@ import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { buildSaveConfig } from "@/components/settings/profile-edit/serialize-executor-config";
 import { useUserNamespacesFormState } from "@/components/settings/profile-edit/use-user-namespaces-form-state";
+import { useDockerNetworksFormState } from "@/components/settings/profile-edit/use-docker-networks-form-state";
 import { useProfileRuntimeFormState } from "@/components/settings/profile-edit/use-profile-runtime-form-state";
+import { useGitIdentityState } from "@/components/settings/profile-edit/use-git-identity-state";
 import { KubernetesProfileSections } from "@/components/settings/kubernetes-profile-sections";
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
 import { KubernetesProfileClusterSection } from "@/components/settings/kubernetes-profile-cluster-section";
@@ -133,71 +131,6 @@ function useRemoteAuthState(profile: ExecutorProfile) {
     setConfigBundleIds,
     agentEnvVars,
     handleAgentEnvVarChange,
-    reset,
-  };
-}
-
-function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
-  const [localGitIdentity, setLocalGitIdentity] = useState<GitIdentityState>({
-    userName: "",
-    userEmail: "",
-    detected: false,
-  });
-  const [gitIdentityMode, setGitIdentityMode] = useState<GitIdentityMode>("override");
-  const [gitUserName, setGitUserName] = useState(profile.config?.git_user_name ?? "");
-  const [gitUserEmail, setGitUserEmail] = useState(profile.config?.git_user_email ?? "");
-  const [loaded, setLoaded] = useState(!isRemote);
-
-  useEffect(() => {
-    if (!isRemote) {
-      setLoaded(true);
-      return;
-    }
-    setLoaded(false);
-    fetchLocalGitIdentity()
-      .then((identity) => {
-        const local: GitIdentityState = {
-          userName: identity.user_name ?? "",
-          userEmail: identity.user_email ?? "",
-          detected: Boolean(identity.detected),
-        };
-        setLocalGitIdentity(local);
-
-        const hasStoredOverride = Boolean(
-          profile.config?.git_user_name?.trim() || profile.config?.git_user_email?.trim(),
-        );
-        if (hasStoredOverride) {
-          setGitIdentityMode("override");
-          return;
-        }
-        if (local.detected) {
-          setGitIdentityMode("local");
-          setGitUserName(local.userName);
-          setGitUserEmail(local.userEmail);
-          return;
-        }
-        setGitIdentityMode("override");
-      })
-      .catch(() => {})
-      .finally(() => setLoaded(true));
-  }, [isRemote, profile.config?.git_user_email, profile.config?.git_user_name]);
-
-  const reset = useCallback(() => {
-    const baseline = getGitIdentityBaseline(profile, localGitIdentity);
-    setGitIdentityMode(baseline.mode);
-    setGitUserName(baseline.userName);
-    setGitUserEmail(baseline.userEmail);
-  }, [localGitIdentity, profile]);
-
-  return {
-    localGitIdentity,
-    gitIdentityMode,
-    setGitIdentityMode,
-    gitUserName,
-    setGitUserName,
-    gitUserEmail,
-    setGitUserEmail,
-    loaded,
     reset,
   };
 }
@@ -300,6 +233,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
   const runtime = useProfileRuntimeFormState(executor, profile);
   const userNamespaces = useUserNamespacesFormState(profile.config);
+  const dockerNetworks = useDockerNetworksFormState(profile.config);
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar, resetEnvVars } = useEnvVarRows(
     profile.env_vars,
   );
@@ -337,7 +271,8 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     setSpritesSecretId(deriveSpritesSecretId(profile.env_vars));
     remoteAuth.reset();
     gitIdentity.reset();
-  }, [gitIdentity, profile, remoteAuth, resetEnvVars, runtime, userNamespaces]);
+    dockerNetworks.resetDockerNetworks();
+  }, [dockerNetworks, gitIdentity, profile, remoteAuth, resetEnvVars, runtime, userNamespaces]);
 
   return {
     ...runtime,
@@ -352,6 +287,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     allowUserNamespaces: userNamespaces.allowUserNamespaces,
     setAllowUserNamespaces: userNamespaces.setAllowUserNamespaces,
     resetUserNamespaces: userNamespaces.resetUserNamespaces,
+    ...dockerNetworks,
     isLocalDocker: executor.type === "local_docker",
     envVarRows,
     addEnvVar,
@@ -395,6 +331,7 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
   const canManageKubernetes = useKubernetesAdminAccess();
   return (
     <>
+      {executor.type === "remote_docker" && <RemoteDockerConnectionSection executor={executor} />}
       {executor.type === "ssh" && (
         <SSHAgentReadinessCard
           executorId={executor.id}
@@ -426,9 +363,11 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           onDockerfileChange={form.setDockerfile}
           imageTag={form.imageTag}
           onImageTagChange={form.setImageTag}
+          remoteExecutorId={executor.type === "remote_docker" ? executor.id : undefined}
           allowsUserNamespaces={form.isLocalDocker}
           allowUserNamespaces={form.allowUserNamespaces}
           onAllowUserNamespacesChange={form.setAllowUserNamespaces}
+          networks={form}
         />
       )}
       {form.isKubernetes && (

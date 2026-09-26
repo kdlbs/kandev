@@ -255,7 +255,7 @@ function TouchExecutorProfileSelector({
           aria-haspopup="dialog"
           disabled={disabled}
           data-testid="executor-profile-selector"
-          className={cn("h-11 min-h-11 w-full justify-between", triggerClassName)}
+          className={cn("h-11 min-h-12 w-full justify-between", triggerClassName)}
         >
           <span className="min-w-0 truncate text-left">
             {selected?.renderTriggerLabel?.() ??
@@ -275,7 +275,7 @@ function TouchExecutorProfileSelector({
               variant="ghost"
               size="icon"
               aria-label={t("common:close")}
-              className="absolute right-3 top-3 min-h-11 min-w-11"
+              className="absolute right-3 top-3 min-h-12 min-w-12"
             >
               <IconX className="h-4 w-4" />
             </Button>
@@ -285,7 +285,7 @@ function TouchExecutorProfileSelector({
           className="min-h-0 flex-1 border-t"
           data-testid="executor-profile-selector-dropdown"
         >
-          <CommandInput placeholder={t("task:searchProfiles")} className="h-11" />
+          <CommandInput placeholder={t("task:searchProfiles")} className="h-11 min-h-12" />
           <CommandList className="min-h-0 flex-1 overflow-y-auto" data-vaul-no-drag>
             <CommandEmpty>{t("task:noProfileFound")}</CommandEmpty>
             <CommandGroup>
@@ -892,6 +892,7 @@ function useCreationComposerPluginActions(args: {
         submittable: !args.disabled && args.description.trim().length > 0,
         composer,
       }}
+      actionSurface={{ surface: "composer", presentation: isMobile ? "mobile" : "desktop" }}
     />
   );
 }

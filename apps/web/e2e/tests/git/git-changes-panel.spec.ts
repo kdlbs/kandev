@@ -2973,12 +2973,16 @@ test.describe("Git Changes Panel", () => {
       author_login: "local-ahead-author",
     });
 
+    // Put the task worktree on the contribution branch before the first page
+    // load. The session Git snapshot is read during hydration, so changing the
+    // branch after navigation can leave the contribution policy on its
+    // temporary "provider unavailable" state until another status event.
+    git.exec(`git checkout -B ${providerBranch} ${localHead}`);
+    git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
-    git.exec(`git checkout -B ${providerBranch} ${localHead}`);
-    git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
     await session.clickTab("Changes");
     const changes = testPage.getByTestId("changes-panel");
     await expect(changes.getByTestId("commits-section")).toBeVisible({ timeout: 30_000 });
@@ -2990,7 +2994,9 @@ test.describe("Git Changes Panel", () => {
     await changes.getByRole("button", { name: "Review" }).click();
     const reviewDialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(reviewDialog).toBeVisible({ timeout: 15_000 });
-    await expect(reviewDialog.getByTestId("vcs-primary-push")).toBeVisible({ timeout: 15_000 });
+    // Provider commits load independently from the local Changes panel. Wait
+    // for the push control to become actionable before opening its menu.
+    await expect(reviewDialog.getByTestId("vcs-primary-push")).toBeEnabled({ timeout: 45_000 });
     await reviewDialog.getByRole("button", { name: "Open VCS options" }).click();
     const openMenu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
     const pushAction = openMenu

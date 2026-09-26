@@ -122,6 +122,21 @@ func TestPluginExecutorFixtureRecoversLostProvisionReplyWithoutAllocatingAgain(t
 	require.Equal(t, 1, restarted.executorAllocationCount())
 }
 
+func TestPluginExecutorFixtureReportsAbsentForUnknownOperation(t *testing.T) {
+	plugin := newFixturePluginAt(t.TempDir())
+	t.Cleanup(func() { require.NoError(t, plugin.Close()) })
+	ctx := &pluginsdk.ExecutorProviderRequestContext{
+		PluginId: "kandev-plugin-e2e", InstallationId: "installation-1", ProviderKey: executorProviderKey,
+		ContractVersion: 1, EnvironmentId: "environment-never-allocated", OperationId: "operation-never-allocated", InputDigest: "digest-1",
+	}
+
+	recovered, err := plugin.RecoverExecutorOperation(context.Background(), &pluginsdk.RecoverExecutorOperationRequest{
+		Context: ctx, Profile: &pluginsdk.ExecutorProfileSnapshot{ProfileId: "profile-1"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "absent", recovered.GetOutcome())
+}
+
 func TestPluginExecutorFixtureFailureBarriersAreRetryable(t *testing.T) {
 	plugin := newFixturePluginAt(t.TempDir())
 	t.Cleanup(func() { require.NoError(t, plugin.Close()) })

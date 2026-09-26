@@ -448,7 +448,7 @@ executor_providers:
     contract_version: 1
     supported_state_versions: [1, 2]
     profile_schema: {type: object, properties: {region: {type: string, enum: [eu-west-1, us-east-1]}}}
-    resource_state_schema: {type: object, properties: {` + resourceProperties + `}}
+    resource_state_schema: {type: object, additionalProperties: false, properties: {` + resourceProperties + `}}
     capabilities:
       files: true
       git: true

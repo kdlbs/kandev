@@ -4,8 +4,9 @@ import type { ListAvailableAgentsResponse } from "../../../lib/types/http";
 // The default mock-agent is discovered as already available (it has an
 // InstallScript, but the catalog filters on !available && install_script), so
 // the catalog would show its "everything installed" state with no install
-// cards. Intercept /api/v1/agents/available and return one unavailable agent
-// with an install script so an install card renders.
+// cards. Seed one unavailable agent with an install script after navigation.
+// Settings pages hydrate available agents in the server-rendered boot payload,
+// so a route-only mock can be skipped by the loaded-state guard.
 const AVAILABLE_AGENTS = {
   agents: [
     {
@@ -39,23 +40,58 @@ const AVAILABLE_AGENTS = {
   total: 1,
 } satisfies ListAvailableAgentsResponse;
 
+type E2EStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      availableAgents: {
+        items: ListAvailableAgentsResponse["agents"];
+        tools: ListAvailableAgentsResponse["tools"];
+        loading: boolean;
+        loaded: boolean;
+      };
+    };
+    setState: (state: {
+      availableAgents: {
+        items: ListAvailableAgentsResponse["agents"];
+        tools: ListAvailableAgentsResponse["tools"];
+        loading: boolean;
+        loaded: boolean;
+      };
+    }) => void;
+  };
+};
+
 test.describe("Agents browse page", () => {
   test("renders the heading and install cards statically, without a collapsible toggle", async ({
     testPage,
   }) => {
-    await testPage.route("**/api/v1/agents/available**", (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(AVAILABLE_AGENTS),
-      }),
-    );
-
     await testPage.goto("/settings/agents/browse");
 
     const heading = testPage.getByRole("heading", { name: "Browse available agents" });
     await expect(heading).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByTestId("install-card-codex")).toBeVisible();
+
+    // The SSR payload marks this resource as loaded before the client hook
+    // runs. Replace that hydrated snapshot directly so the assertion does not
+    // depend on whether a second fetch happens after the page mounts.
+    await testPage.evaluate((agents) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) throw new Error("E2E store bridge is unavailable");
+      // Use the test store's partial-state bridge instead of the production
+      // action. The action rejects snapshots older than the SSR timestamp,
+      // while this fixture intentionally owns the catalog contents.
+      const current = store.getState().availableAgents;
+      store.setState({
+        availableAgents: {
+          ...current,
+          items: agents,
+          tools: [],
+          loading: false,
+          loaded: true,
+        },
+      });
+    }, AVAILABLE_AGENTS.agents);
+
+    await expect(testPage.getByTestId("install-card-codex")).toBeVisible({ timeout: 15_000 });
 
     // PR #2544 wrapped the section in a collapsible whose heading row was a
     // toggle button. Reverted, the heading must be a plain heading: no button
@@ -68,7 +104,7 @@ test.describe("Agents browse page", () => {
     // A role-less clickable wrapper (e.g. <div onClick>) would not surface as
     // a button; clicking the heading must not hide the install cards.
     await heading.click();
-    await expect(testPage.getByTestId("install-card-codex")).toBeVisible();
+    await expect(testPage.getByTestId("install-card-codex")).toBeVisible({ timeout: 15_000 });
 
     // A separately-triggered collapsible (e.g. a toggle button elsewhere in
     // the content) would not be caught by the heading assertions. The page

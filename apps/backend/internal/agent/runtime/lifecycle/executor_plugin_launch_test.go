@@ -282,6 +282,14 @@ func testPluginExecutorLaunchProvider() models.ExecutorProvider {
 	return models.ExecutorProvider{
 		ExecutorID: "exec-plugin-1", Identity: "plugin:example:remote", PluginID: "example", InstallationID: "install-1",
 		Key: "remote", ContractVersion: 1, SupportedStateVersions: []int{1}, Available: true,
+		ResourceStateSchema: map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{
+				"resource":    map[string]any{"type": "string"},
+				"resource_id": map[string]any{"type": "string"},
+				"id":          map[string]any{"type": "string"},
+			},
+		},
 		Capabilities: models.ExecutorProviderCapabilities{Terminal: true, Files: true, Git: true, Reattach: true, Retention: "persistent"},
 	}
 }

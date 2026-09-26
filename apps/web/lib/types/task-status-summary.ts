@@ -70,6 +70,7 @@ export type TaskStatusSummary = {
     attention?: boolean;
     auto_fix_enabled?: boolean;
     auto_merge_enabled?: boolean;
+    has_merge_conflicts?: boolean;
     aggregate_state?: string;
     state?: string;
     number?: number;

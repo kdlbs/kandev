@@ -293,6 +293,7 @@ executor_providers:
         region: {type: string}
     resource_state_schema:
       type: object
+      additionalProperties: false
       properties:
         handle: {type: string}
     capabilities:

@@ -3,9 +3,16 @@ package manifest
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"unicode/utf8"
+)
+
+const (
+	executorSchemaTypeInteger = "integer"
+	executorSchemaTypeKeyword = "type"
+	executorSchemaTypeNumber  = "number"
 )
 
 const (
@@ -61,8 +68,8 @@ func (m *Manifest) validateExecutorProviders() []error {
 			errs = append(errs, fmt.Errorf("%s.contract_version %d is unsupported; host supports %d", prefix, provider.ContractVersion, CurrentExecutorProviderContractVersion))
 		}
 		errs = append(errs, validateStateVersions(prefix, provider.SupportedStateVersions)...)
-		errs = append(errs, validateExecutorSchema(prefix+".profile_schema", provider.ProfileSchema, true)...)
-		errs = append(errs, validateExecutorSchema(prefix+".resource_state_schema", provider.ResourceStateSchema, false)...)
+		errs = append(errs, validateExecutorSchema(prefix+".profile_schema", provider.ProfileSchema, true, false)...)
+		errs = append(errs, validateExecutorSchema(prefix+".resource_state_schema", provider.ResourceStateSchema, false, true)...)
 		errs = append(errs, validateExecutorProviderCapabilities(prefix, &provider.Capabilities)...)
 		errs = append(errs, validateLocalizedMessages(prefix, provider.LocalizedMessages)...)
 	}
@@ -128,7 +135,7 @@ func validateLocalizedMessages(prefix string, messages map[string]string) []erro
 
 // validateExecutorSchema accepts the scalar-only schema subset shared by the
 // provider form and its non-secret persisted resource state.
-func validateExecutorSchema(prefix string, schema map[string]any, allowSecrets bool) []error {
+func validateExecutorSchema(prefix string, schema map[string]any, allowSecrets, requireClosed bool) []error {
 	if len(schema) == 0 {
 		return []error{fmt.Errorf("%s is required", prefix)}
 	}
@@ -143,7 +150,7 @@ func validateExecutorSchema(prefix string, schema map[string]any, allowSecrets b
 	if !ok {
 		return []error{fmt.Errorf("%s must be an object schema", prefix)}
 	}
-	if err := validateExecutorSchemaRoot(prefix, root); err != nil {
+	if err := validateExecutorSchemaRoot(prefix, root, requireClosed); err != nil {
 		return []error{err}
 	}
 	properties, ok := stringMap(root["properties"])
@@ -159,17 +166,24 @@ func validateExecutorSchema(prefix string, schema map[string]any, allowSecrets b
 	return nil
 }
 
-func validateExecutorSchemaRoot(prefix string, root map[string]any) error {
+func validateExecutorSchemaRoot(prefix string, root map[string]any, requireClosed bool) error {
 	for key := range root {
-		if key != "type" && key != executorSchemaTitleKeyword && key != "description" && key != "properties" && key != "required" && key != "additionalProperties" {
+		if key != executorSchemaTypeKeyword && key != executorSchemaTitleKeyword && key != "description" && key != "properties" && key != "required" && key != "additionalProperties" {
 			return fmt.Errorf("%s contains unsupported schema keyword %q", prefix, key)
 		}
 	}
-	if root["type"] != "object" {
+	if root[executorSchemaTypeKeyword] != "object" {
 		return fmt.Errorf("%s.type must be object", prefix)
 	}
-	if additional, present := root["additionalProperties"]; present && additional != false {
+	additional, present := root["additionalProperties"]
+	if requireClosed && !present {
 		return fmt.Errorf("%s.additionalProperties must be false", prefix)
+	}
+	if present {
+		closed, ok := additional.(bool)
+		if !ok || closed {
+			return fmt.Errorf("%s.additionalProperties must be false", prefix)
+		}
 	}
 	return nil
 }
@@ -213,11 +227,11 @@ func validateExecutorSchemaRequired(prefix string, raw any, properties map[strin
 
 func validateExecutorSchemaProperty(prefix string, property map[string]any, allowSecrets bool) error {
 	for key := range property {
-		if key != "type" && key != executorSchemaTitleKeyword && key != "description" && key != "enum" && key != "secret" && key != "format" && key != "minimum" && key != "maximum" {
+		if key != executorSchemaTypeKeyword && key != executorSchemaTitleKeyword && key != "description" && key != "enum" && key != "secret" && key != "format" && key != "minimum" && key != "maximum" {
 			return fmt.Errorf("%s contains unsupported schema keyword %q", prefix, key)
 		}
 	}
-	typeName, err := executorSchemaPropertyType(prefix, property["type"])
+	typeName, err := executorSchemaPropertyType(prefix, property[executorSchemaTypeKeyword])
 	if err != nil {
 		return err
 	}
@@ -227,12 +241,57 @@ func validateExecutorSchemaProperty(prefix string, property map[string]any, allo
 	if err := validateExecutorSchemaEnum(prefix, property["enum"], typeName); err != nil {
 		return err
 	}
+	if err := validateExecutorSchemaNumericBounds(prefix, property, typeName); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateExecutorSchemaNumericBounds(prefix string, property map[string]any, typeName string) error {
+	minimumRaw, hasMinimum := property["minimum"]
+	maximumRaw, hasMaximum := property["maximum"]
+	if !hasMinimum && !hasMaximum {
+		return nil
+	}
+	if typeName != executorSchemaTypeNumber && typeName != executorSchemaTypeInteger {
+		return fmt.Errorf("%s numeric bounds require a number or integer field", prefix)
+	}
+	minimum, hasMinimum := schemaNumericValue(minimumRaw)
+	maximum, hasMaximum := schemaNumericValue(maximumRaw)
+	if _, present := property["minimum"]; present && !hasMinimum {
+		return fmt.Errorf("%s.minimum must be a finite number", prefix)
+	}
+	if _, present := property["maximum"]; present && !hasMaximum {
+		return fmt.Errorf("%s.maximum must be a finite number", prefix)
+	}
+	if hasMinimum && hasMaximum && minimum > maximum {
+		return fmt.Errorf("%s.minimum must not exceed maximum", prefix)
+	}
+	return nil
+}
+
+func schemaNumericValue(value any) (float64, bool) {
+	var number float64
+	switch typed := value.(type) {
+	case int:
+		number = float64(typed)
+	case int64:
+		number = float64(typed)
+	case uint64:
+		number = float64(typed)
+	case float64:
+		number = typed
+	case float32:
+		number = float64(typed)
+	default:
+		return 0, false
+	}
+	return number, !math.IsNaN(number) && !math.IsInf(number, 0)
 }
 
 func executorSchemaPropertyType(prefix string, raw any) (string, error) {
 	typeName, ok := raw.(string)
-	if !ok || (typeName != "string" && typeName != "boolean" && typeName != "number" && typeName != "integer") {
+	if !ok || (typeName != "string" && typeName != "boolean" && typeName != executorSchemaTypeNumber && typeName != executorSchemaTypeInteger) {
 		return "", fmt.Errorf("%s.type must be string, boolean, number, or integer", prefix)
 	}
 	return typeName, nil
@@ -330,14 +389,14 @@ func scalarMatchesType(value any, typeName string) bool {
 	case "boolean":
 		_, ok := value.(bool)
 		return ok
-	case "number":
+	case executorSchemaTypeNumber:
 		switch value.(type) {
 		case float64, int, int64, uint64:
 			return true
 		default:
 			return false
 		}
-	case "integer":
+	case executorSchemaTypeInteger:
 		switch value.(type) {
 		case int, int64, uint64:
 			return true

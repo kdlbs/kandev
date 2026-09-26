@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	"github.com/kandev/kandev/internal/worktree"
@@ -19,16 +20,19 @@ import (
 // Worktree destruction preserves the underlying branch — user data that hasn't been
 // pushed is never deleted by reset.
 type EnvironmentDestroyer interface {
-	DestroyContainer(ctx context.Context, containerID string) error
+	// DestroyContainer tears down the environment's container. It takes the
+	// environment, not a bare container ID: the ID alone does not say which
+	// daemon owns it, and a remote Docker container lives on another host.
+	DestroyContainer(ctx context.Context, env *models.TaskEnvironment) error
 	DestroySandbox(ctx context.Context, sandboxID, executionID string) error
 	DestroyWorktree(ctx context.Context, worktreeID string) error
 	// PushEnvironmentBranch best-effort pushes the current branch of the environment's
 	// workspace to its upstream. Returns an error if the push fails; callers can decide
 	// whether to abort the reset on failure.
 	PushEnvironmentBranch(ctx context.Context, env *models.TaskEnvironment) error
-	// GetContainerLiveStatus returns a real-time snapshot of a Docker container,
-	// or nil when the executor type doesn't have a container layer.
-	GetContainerLiveStatus(ctx context.Context, containerID string) (*ContainerLiveStatus, error)
+	// GetContainerLiveStatus returns a real-time snapshot of the environment's
+	// container, or nil when the executor type doesn't have a container layer.
+	GetContainerLiveStatus(ctx context.Context, env *models.TaskEnvironment) (*ContainerLiveStatus, error)
 }
 
 type pluginExecutorEnvironmentDestroyer interface {
@@ -123,7 +127,7 @@ func (s *Service) GetTaskEnvironmentLiveStatus(ctx context.Context, taskID strin
 	if env.ContainerID == "" || s.envDestroyer == nil {
 		return nil, nil
 	}
-	return s.envDestroyer.GetContainerLiveStatus(ctx, env.ContainerID)
+	return s.envDestroyer.GetContainerLiveStatus(ctx, env)
 }
 
 // GetPluginExecutorEnvironmentStatus returns a safe live status projection for
@@ -157,7 +161,7 @@ func (s *Service) GetSSHLiveStatus(ctx context.Context, taskID string) (*SSHLive
 	if err != nil || env == nil {
 		return nil, err
 	}
-	if env.ExecutorType != string(models.ExecutorTypeSSH) {
+	if !sshLiveStatusApplies(env.ExecutorType) {
 		return nil, nil
 	}
 	running, err := s.latestRunningForTask(ctx, taskID)
@@ -210,6 +214,20 @@ func (s *Service) latestRunningForTask(ctx context.Context, taskID string) (*mod
 
 // buildSSHLiveStatus projects the SSH metadata keys onto the live-status
 // shape. Pure function so the projection contract is unit-testable.
+// sshLiveStatusApplies reports whether an executor reaches its workspace over
+// SSH, and therefore records connection metadata worth surfacing. Remote
+// Docker qualifies: its daemon is reached over the same transport and its
+// instances carry the same metadata keys, and the environment popover needs
+// the host to describe how to reach the container at all.
+func sshLiveStatusApplies(executorType string) bool {
+	switch models.ExecutorType(executorType) {
+	case models.ExecutorTypeSSH, models.ExecutorTypeRemoteDocker:
+		return true
+	default:
+		return false
+	}
+}
+
 func buildSSHLiveStatus(md map[string]interface{}) *SSHLiveStatus {
 	status := &SSHLiveStatus{
 		Host:          mdString(md, "ssh_host"),
@@ -312,6 +330,9 @@ func (s *Service) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string)
 // If opts.PushBranch is set, the branch is pushed before teardown; a failed push
 // aborts the reset and leaves the environment intact so the user can investigate.
 func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts ResetOptions) error {
+	if err := s.AuthorizeTaskScope(ctx, taskID, authz.ScopeTaskWrite); err != nil {
+		return err
+	}
 	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("lookup environment: %w", err)
@@ -459,7 +480,7 @@ func (s *Service) teardownEnvironmentResourcesWithWorktrees(
 		if err := contextError(); err != nil {
 			return err
 		}
-		if err := s.envDestroyer.DestroyContainer(ctx, env.ContainerID); err != nil {
+		if err := s.envDestroyer.DestroyContainer(ctx, env); err != nil {
 			errs = append(errs, fmt.Errorf("destroy container %s: %w", env.ContainerID, err))
 		}
 	}

@@ -498,7 +498,10 @@ func (r *PluginRemoteExecutor) recoverPluginExecutorCleanupResource(
 	if inventory.Resource != nil {
 		return inventory.Resource, true, nil
 	}
-	if inventory.Phase != pluginExecutorPhaseAllocating {
+	switch inventory.Phase {
+	case pluginExecutorPhaseAllocating, pluginExecutorPhaseArtifactStaging, pluginExecutorPhaseBootstrapping,
+		pluginExecutorPhaseProvisioned, pluginExecutorPhaseReady, pluginExecutorPhaseCleanupPending:
+	default:
 		return nil, false, errors.New("plugin executor cleanup resource handle is missing")
 	}
 	operationContext := pluginExecutorRequestContextForRecord(record, inventory, *profile)

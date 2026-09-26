@@ -71,7 +71,7 @@ function FieldSecretStatus({
           type="button"
           variant="outline"
           disabled={disabled}
-          className="min-h-11 cursor-pointer"
+          className="cursor-pointer"
           onClick={() => onRestore?.(field.name)}
         >
           {t("executors:providerFieldKeep")}
@@ -125,7 +125,7 @@ function FieldChoiceControl({
     >
       <SelectTrigger
         id={id}
-        className="min-h-11 w-full max-w-md cursor-pointer"
+        className="w-full max-w-md cursor-pointer"
         aria-invalid={Boolean(error)}
       >
         <SelectValue placeholder={t("executors:providerFieldSelectPlaceholder")} />
@@ -185,7 +185,7 @@ function FieldInputControl({
         placeholder={placeholder}
         aria-invalid={Boolean(error)}
         aria-describedby={describedBy}
-        className="min-h-11 w-full max-w-md"
+        className="w-full max-w-md"
         onChange={(event) => onValueChange(field.name, event.target.value)}
       />
       {field.secret && configured && !cleared && (
@@ -193,7 +193,7 @@ function FieldInputControl({
           type="button"
           variant="outline"
           disabled={disabled}
-          className="min-h-11 cursor-pointer"
+          className="cursor-pointer"
           data-testid={`executor-profile-secret-clear-${field.name}`}
           onClick={() => onClearSecret?.(field.name)}
         >

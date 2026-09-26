@@ -12,6 +12,8 @@ export type RepositoryDiscoveryRootControlsProps = {
   isLoading: boolean;
   discoveryRoots: DesktopDiscoveryRoot[];
   homeConfirmationRequired: boolean;
+  isConfirmingHomeDiscovery?: boolean;
+  onConfirmHomeDiscovery: () => void;
   onChooseDiscoveryRoot: (path: string) => void;
   onRefreshDiscovery: () => void;
   onReconnectDiscoveryRoot: (oldPath: string, newPath: string) => void;
@@ -65,6 +67,8 @@ export function RepositoryDiscoveryRootControls({
   isLoading,
   discoveryRoots,
   homeConfirmationRequired,
+  isConfirmingHomeDiscovery = false,
+  onConfirmHomeDiscovery,
   onChooseDiscoveryRoot,
   onRefreshDiscovery,
   onReconnectDiscoveryRoot,
@@ -112,11 +116,20 @@ export function RepositoryDiscoveryRootControls({
         <div className="rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
           <p>{t("workspaces:homeDiscoveryConfirmationDescription")}</p>
           <div className="mt-2">
-            <FolderPicker
-              value=""
-              placeholder={t("workspaces:continueHomeDiscovery")}
-              onChange={onChooseDiscoveryRoot}
-            />
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isLoading || isConfirmingHomeDiscovery}
+              aria-busy={isConfirmingHomeDiscovery}
+              onClick={onConfirmHomeDiscovery}
+            >
+              {t("workspaces:continueHomeDiscovery")}
+            </Button>
+            {isConfirmingHomeDiscovery && (
+              <span className="sr-only" role="status">
+                {t("common:loading")}
+              </span>
+            )}
           </div>
         </div>
       )}
