@@ -32,7 +32,6 @@ async function setupTask(args: {
     workflow_step_id: seedData.startStepId,
     repository_ids: [seedData.repositoryId],
   });
-
   let workspacePath = "";
   await expect
     .poll(
@@ -101,8 +100,7 @@ test.describe("File tree inline rename", () => {
       requiredPath: "rename-me.ts",
     });
 
-    const node = session.fileTreeNode("rename-me.ts");
-    await expect(node).toBeVisible({ timeout: 15_000 });
+    const node = await session.fileTree.waitForFileTreeNode("rename-me.ts");
 
     const input = await startRenameViaContextMenu(testPage, node);
     // Select-all then type the new name (the hook also calls .select() but
@@ -113,7 +111,7 @@ test.describe("File tree inline rename", () => {
 
     // Old node disappears from the tree, new node appears.
     await expect(session.fileTreeNode("rename-me.ts")).toHaveCount(0, { timeout: 10_000 });
-    await expect(session.fileTreeNode("renamed.ts")).toBeVisible({ timeout: 10_000 });
+    await session.fileTree.waitForFileTreeNode("renamed.ts");
 
     // And the rename hit the file system.
     await expect
@@ -145,8 +143,7 @@ test.describe("File tree inline rename", () => {
       requiredPath: "keep-name.ts",
     });
 
-    const node = session.fileTreeNode("keep-name.ts");
-    await expect(node).toBeVisible({ timeout: 15_000 });
+    const node = await session.fileTree.waitForFileTreeNode("keep-name.ts");
 
     const input = await startRenameViaContextMenu(testPage, node);
     await input.press("ControlOrMeta+A");
@@ -154,7 +151,7 @@ test.describe("File tree inline rename", () => {
     await input.press("Escape");
 
     // No mutation - original node still present, no renamed node, disk unchanged.
-    await expect(session.fileTreeNode("keep-name.ts")).toBeVisible({ timeout: 5_000 });
+    await session.fileTree.waitForFileTreeNode("keep-name.ts");
     await expect(session.fileTreeNode("nope.ts")).toHaveCount(0);
     expect(fs.existsSync(path.join(repoDir, "keep-name.ts"))).toBe(true);
     expect(fs.existsSync(path.join(repoDir, "nope.ts"))).toBe(false);
@@ -184,8 +181,7 @@ test.describe("File tree inline rename", () => {
       requiredPath: "blur-original.ts",
     });
 
-    const node = session.fileTreeNode("blur-original.ts");
-    await expect(node).toBeVisible({ timeout: 15_000 });
+    const node = await session.fileTree.waitForFileTreeNode("blur-original.ts");
 
     const input = await startRenameViaContextMenu(testPage, node);
     await input.press("ControlOrMeta+A");
@@ -198,9 +194,9 @@ test.describe("File tree inline rename", () => {
     );
     // Click another file to blur the input. The other node also belongs to
     // the tree, so we don't lose tree-container focus state.
-    await session.fileTreeNode("other.ts").click();
+    await (await session.fileTree.waitForFileTreeNode("other.ts")).click();
 
-    await expect(session.fileTreeNode("blur-final.ts")).toBeVisible({ timeout: 10_000 });
+    await session.fileTree.waitForFileTreeNode("blur-final.ts");
     await expect(session.fileTreeNode("blur-original.ts")).toHaveCount(0);
     await expect
       .poll(() => fs.existsSync(path.join(repoDir, "blur-final.ts")), { timeout: 10_000 })
@@ -230,14 +226,13 @@ test.describe("File tree inline rename", () => {
       requiredPath: "noop.ts",
     });
 
-    const node = session.fileTreeNode("noop.ts");
-    await expect(node).toBeVisible({ timeout: 15_000 });
+    const node = await session.fileTree.waitForFileTreeNode("noop.ts");
 
     const input = await startRenameViaContextMenu(testPage, node);
     // Don't change anything, just press Enter.
     await input.press("Enter");
 
-    await expect(session.fileTreeNode("noop.ts")).toBeVisible({ timeout: 5_000 });
+    await session.fileTree.waitForFileTreeNode("noop.ts");
     expect(fs.existsSync(path.join(repoDir, "noop.ts"))).toBe(true);
   });
 });

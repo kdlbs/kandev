@@ -59,7 +59,16 @@ function multiPRAccessibleStatus(prs: TaskPR[], t: ReturnType<typeof useTranslat
 }
 
 function focusAfterCollapse(triggerRef?: TriggerRef) {
-  if (triggerRef) setTimeout(() => triggerRef.current?.focus(), 0);
+  if (!triggerRef) return;
+  let attempts = 0;
+  const restoreFocus = () => {
+    attempts += 1;
+    triggerRef.current?.focus({ preventScroll: true });
+    // A two-PR surface is replaced by a single-PR surface after the mutation.
+    // Retry across the replacement render so the surviving trigger owns focus.
+    if (attempts < 4) setTimeout(restoreFocus, 0);
+  };
+  setTimeout(restoreFocus, 0);
 }
 
 function PRMultiButtonContent({ prs, colorClassName }: { prs: TaskPR[]; colorClassName: string }) {

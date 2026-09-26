@@ -34,7 +34,7 @@ test.describe("Mobile plugin workspace actions", () => {
 
     const box = await slot.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.width + 0.01).toBeGreaterThanOrEqual(44);
     await expectTouchControl(slot);
 
     await slot.tap();

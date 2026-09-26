@@ -43,12 +43,9 @@ async function createTaskAndNavigate(
     )
     .toBe(true);
 
-  const kanban = new KanbanPage(testPage);
-  await kanban.goto();
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 10_000 });
-  await card.click();
-  await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+  // The task API is already authoritative here. Direct navigation avoids a
+  // race with the kanban snapshot refresh after the first agent session ends.
+  await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
