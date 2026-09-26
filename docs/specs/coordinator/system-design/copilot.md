@@ -99,8 +99,9 @@ see [Residual](#residual-external-surface).
 - Quick Chat idle expiry excludes origin `coordinator`:
   `ListExpiredQuickChatTasks` and the re-check in
   `DeleteExpiredQuickChatTask` (`internal/task/repository/sqlite/task.go`)
-  gain `AND t.origin <> 'coordinator'` beside the existing `automation_run`
-  exclusion, so a conversation idle for more than seven days is kept.
+  exclude origin `coordinator` beside their existing bound `automation_run`
+  exclusion (`COALESCE(t.origin, '') NOT IN (?, ?)`), so a conversation idle for
+  more than seven days is kept.
 
 ### Conversation lifecycle
 
@@ -262,8 +263,9 @@ the messages built from them.
 
 ## Permission policy
 
-- `WorkspaceInfo.McpMode` (`internal/orchestrator/executor/service_turns.go`)
-  carries the coordinator mode to every agentctl instance of the task, not
+- A new `McpMode` field on `lifecycle.WorkspaceInfo`
+  (`internal/agent/runtime/lifecycle/types.go`, built by the task service in
+  `internal/task/service/service_turns.go`) carries the coordinator mode to every agentctl instance of the task, not
   only its first launch: the prepare path (`IntentPrepare`/`NoAgentLaunch`,
   used by the conversation route's session-ensure) and the promotion path (a
   workspace-only execution later promoted to a full launch) both set it

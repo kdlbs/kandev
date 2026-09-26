@@ -109,8 +109,9 @@ Deciding proposals is task 07. Backend only. On the critical path.
   `coordinator_authorization.go`.
 - Fail-closed start checks, including the profile check at session start;
   exact-name auto-approval; `AutoApprovePermissionsOverride=false` on every
-  lifecycle path. `WorkspaceInfo.McpMode`
-  (`internal/orchestrator/executor/service_turns.go`) carries the coordinator
+  lifecycle path. A new `McpMode` field on `lifecycle.WorkspaceInfo`
+  (`internal/agent/runtime/lifecycle/types.go`, built in
+  `internal/task/service/service_turns.go`) carries the coordinator
   mode to every agentctl instance of the task, not only its first launch: the
   prepare path (`IntentPrepare`/`NoAgentLaunch`) and the promotion path (a
   workspace-only execution later promoted to a full launch) both set it
