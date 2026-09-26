@@ -940,6 +940,10 @@ func collapseOfficeSeatsPerTaskOverTemplate(rows []officeSeatRow) []officeSeatRo
 	return out
 }
 
+// pickOfficeSeatPerTaskOverTemplate returns the per-task row (taskID != "")
+// when one exists among rows — the caller (listWorkflowScopedSeats) appends
+// canonPerTask before template rows, so the first taskID != "" hit is always
+// a per-task seat. Falls back to the lowest id when only template rows are present.
 func pickOfficeSeatPerTaskOverTemplate(rows []officeSeatRow) officeSeatRow {
 	for _, row := range rows {
 		if row.taskID != "" {
