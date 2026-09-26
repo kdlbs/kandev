@@ -42,10 +42,10 @@ type completionIntentReconciliationStore interface {
 		ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time,
 		event *models.SessionControlEvent,
 	) (bool, error)
-	CompleteTurnAndTransitionCompletionIntentWithControlEvent(
-		ctx context.Context, turnID, intentID string, from, to models.CompletionIntentState,
+	CompleteTurnAndTransitionCompletionIntent(
+		ctx context.Context, turnID, intentID string, from models.CompletionIntentState,
 		settledAt time.Time, event *models.SessionControlEvent,
-	) (bool, error)
+	) (models.CompletionIntentState, bool, error)
 }
 
 type completionIntentReopenStore interface {
@@ -300,56 +300,43 @@ func (s *Service) reconcileCompletionIntentLocked(
 	if done, err := s.reconcileCompletionIntentWithExecutionCheck(ctx, store, intent, now, auditEvent); done {
 		return err
 	}
-	task, err := s.repo.GetTask(ctx, intent.TaskID)
-	if err != nil {
-		s.logger.Warn("failed to load completion intent task", zap.String("intent_id", intent.ID), zap.Error(err))
-		s.retryCompletionIntent(ctx, store, intent)
-		return fmt.Errorf("load completion intent task: %w", err)
-	}
-	moved := task == nil || task.WorkflowStepID != intent.WorkflowStepID
+	return s.settleClaimedCompletionIntent(ctx, store, intent, turn, now, auditEvent)
+}
+
+func (s *Service) settleClaimedCompletionIntent(
+	ctx context.Context, store completionIntentReconciliationStore, intent *models.CompletionIntent,
+	turn *models.Turn, now time.Time, auditEvent *models.SessionControlEvent,
+) error {
 	terminalState := models.CompletionIntentStateSettled
-	cause := "quiet_grace"
-	if moved {
-		terminalState = models.CompletionIntentStateSuperseded
-		cause = "task_moved"
-	}
-	auditSettled := false
-	if auditEvent != nil && turn != nil {
-		auditEvent.Result = string(terminalState)
-		settled, err := store.CompleteTurnAndTransitionCompletionIntentWithControlEvent(
-			ctx, intent.TurnID, intent.ID, models.CompletionIntentStateSettling, terminalState, now, auditEvent,
-		)
+	intentCommitted := false
+	if turn != nil {
+		state, settled, err := s.commitCapturedCompletionIntentTurn(ctx, store, intent, now, auditEvent)
 		if err != nil {
-			s.logger.Warn("failed to atomically settle completion intent turn", zap.String("intent_id", intent.ID), zap.Error(err))
-			s.retryCompletionIntent(ctx, store, intent)
-			return fmt.Errorf("atomically settle completion intent turn: %w", err)
+			return err
 		}
 		if !settled {
 			return nil
 		}
-		auditSettled = true
-		adminmetrics.RecordCompletionReconciled(string(terminalState), cause)
-		s.recordPendingCompletionIntentMetric(ctx, store)
-		// The transaction owns durable state. CompleteTurn publishes the normal
-		// turn-completed conversation event after that state is committed.
-		if err := s.turnService.CompleteTurn(ctx, intent.TurnID); err != nil {
-			s.logger.Warn("failed to publish settled completion intent turn", zap.String("intent_id", intent.ID), zap.Error(err))
-		}
-	} else if turn != nil {
-		if err := s.turnService.CompleteTurn(ctx, intent.TurnID); err != nil {
-			s.logger.Warn("failed to settle completion intent turn", zap.String("intent_id", intent.ID), zap.Error(err))
-			s.retryCompletionIntent(ctx, store, intent)
-			return fmt.Errorf("settle completion intent turn: %w", err)
-		}
-	}
-	if turn != nil {
+		terminalState = state
+		intentCommitted = true
 		s.activeTurns.CompareAndDelete(intent.SessionID, intent.TurnID)
+	}
+	if !intentCommitted {
+		task, err := s.repo.GetTask(ctx, intent.TaskID)
+		if err != nil {
+			s.logger.Warn("failed to load completion intent task", zap.String("intent_id", intent.ID), zap.Error(err))
+			s.retryCompletionIntent(ctx, store, intent)
+			return fmt.Errorf("load completion intent task: %w", err)
+		}
+		if task == nil || task.WorkflowStepID != intent.WorkflowStepID {
+			terminalState = models.CompletionIntentStateSuperseded
+		}
 	}
 	// A later workflow move must never replay this old completion, but it does
 	// not own the captured stale turn. Release that exact ownership first, then
 	// mark the old intent superseded without evaluating its source step.
-	if task == nil || task.WorkflowStepID != intent.WorkflowStepID {
-		return s.settleMovedCompletionIntent(ctx, store, intent, now, auditEvent, auditSettled)
+	if terminalState == models.CompletionIntentStateSuperseded {
+		return s.settleMovedCompletionIntent(ctx, store, intent, now, auditEvent, intentCommitted)
 	}
 	session, err := s.repo.GetTaskSession(ctx, intent.SessionID)
 	if err != nil {
@@ -361,11 +348,40 @@ func (s *Service) reconcileCompletionIntentLocked(
 	// provider-ready path does this implicitly; reconciliation has no later
 	// lifecycle callback to perform that release for us.
 	s.setSessionWaitingForInput(ctx, intent.TaskID, intent.SessionID, session)
-	s.processOnTurnCompleteViaEngine(ctx, intent.TaskID, session)
-	if auditSettled {
+	s.processOnTurnCompleteViaEngineForStep(ctx, intent.TaskID, session, intent.WorkflowStepID)
+	if intentCommitted {
 		return nil
 	}
 	return s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSettled, now, "quiet_grace", auditEvent)
+}
+
+func (s *Service) commitCapturedCompletionIntentTurn(
+	ctx context.Context, store completionIntentReconciliationStore, intent *models.CompletionIntent,
+	now time.Time, auditEvent *models.SessionControlEvent,
+) (models.CompletionIntentState, bool, error) {
+	state, settled, err := store.CompleteTurnAndTransitionCompletionIntent(
+		ctx, intent.TurnID, intent.ID, models.CompletionIntentStateSettling, now, auditEvent,
+	)
+	if err != nil {
+		s.logger.Warn("failed to atomically settle completion intent turn", zap.String("intent_id", intent.ID), zap.Error(err))
+		s.retryCompletionIntent(ctx, store, intent)
+		return "", false, fmt.Errorf("atomically settle completion intent turn: %w", err)
+	}
+	if !settled {
+		return "", false, nil
+	}
+	cause := "quiet_grace"
+	if state == models.CompletionIntentStateSuperseded {
+		cause = "task_moved"
+	}
+	adminmetrics.RecordCompletionReconciled(string(state), cause)
+	s.recordPendingCompletionIntentMetric(ctx, store)
+	// The transaction owns durable state. CompleteTurn publishes the normal
+	// turn-completed conversation event after that state is committed.
+	if err := s.turnService.CompleteTurn(ctx, intent.TurnID); err != nil {
+		s.logger.Warn("failed to publish settled completion intent turn", zap.String("intent_id", intent.ID), zap.Error(err))
+	}
+	return state, true, nil
 }
 
 func (s *Service) claimCompletionIntent(

@@ -100,3 +100,8 @@ manual-settlement atomicity gap: turn completion, terminal intent transition,
 and authorization audit now commit together. The focused failure-path tests and
 spec validation pass. Exact-head CI remains blocked by unavailable required-
 check policy and a GitHub code-search rate limit in PR documentation coverage.
+
+The later review remediation serializes the task-step decision with exact-turn
+settlement and guards post-commit workflow evaluation against a later move.
+Focused race-detector regressions for moves on both sides of the commit pass;
+the PostgreSQL behavior test is gated on a configured database in CI.

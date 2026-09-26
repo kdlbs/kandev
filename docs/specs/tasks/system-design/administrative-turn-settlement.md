@@ -70,10 +70,14 @@ Settlement takes the same in-flight cancellation guard as the ordinary stop
 path, evaluates the candidate under the guard, then delegates the terminal
 commit to `reconcileCompletionIntentLocked`. For an authorized manual
 settlement, one repository transaction completes the captured turn, transitions
-its completion intent, and inserts the audit event. A failed write leaves all
-three durable records unchanged. After commit, the normal turn-completed event
-is published and the reconciler releases session ownership and continues the
-current workflow. A post-commit readback that finds the intent not in a
+its completion intent, and inserts the audit event. The transaction reads the
+intent's captured step and locks the task row before choosing `settled` or
+`superseded`; a task move committed before that choice supersedes the old
+intent. A failed write leaves all three durable records unchanged. After
+commit, the normal turn-completed event is published and the reconciler
+releases session ownership. Workflow evaluation also checks the captured step
+before running, so a move immediately after commit cannot complete the
+destination step. A post-commit readback that finds the intent not in a
 terminal state refuses with `settlement_not_committed`.
 
 ## Supersession

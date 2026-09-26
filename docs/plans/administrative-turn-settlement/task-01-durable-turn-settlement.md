@@ -139,3 +139,13 @@ python3 scripts/lint-spec-files.py --all
 All four commands passed. PR CI was started for this commit; its final gate
 remains unresolved because required-check policy lookup failed and the PR
 documentation-coverage job hit GitHub code-search rate limits.
+
+The subsequent review fix moves the `settled`/`superseded` choice into the
+turn-settlement transaction, where the task step is read under the same
+serialization boundary. Workflow evaluation checks the captured step again
+after commit. Deterministic regressions move the task immediately before and
+after that commit; both preserve the destination step. The same transaction
+serves manual and periodic settlement. Local `go test -race` focused on stale
+settlement and completion-intent repository cases passed, as did spec
+validation. PostgreSQL concurrency coverage is environment-gated and awaits
+the configured CI database.

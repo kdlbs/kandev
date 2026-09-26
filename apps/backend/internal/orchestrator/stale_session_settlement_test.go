@@ -118,16 +118,15 @@ func (r *failingSettlementCommitRepository) TransitionCompletionIntentWithContro
 	return false, r.err
 }
 
-func (r *failingSettlementCommitRepository) CompleteTurnAndTransitionCompletionIntentWithControlEvent(
+func (r *failingSettlementCommitRepository) CompleteTurnAndTransitionCompletionIntent(
 	context.Context,
 	string,
 	string,
 	models.CompletionIntentState,
-	models.CompletionIntentState,
 	time.Time,
 	*models.SessionControlEvent,
-) (bool, error) {
-	return false, r.err
+) (models.CompletionIntentState, bool, error) {
+	return "", false, r.err
 }
 
 func TestSettleStaleSessionRefusesActiveAdministrativeOwnership(t *testing.T) {

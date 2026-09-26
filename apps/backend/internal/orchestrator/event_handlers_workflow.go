@@ -7436,11 +7436,27 @@ func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID str
 	return s.processOnTurnCompleteViaEngineWithCause(ctx, taskID, session, turnCompletionCauseAgentTurn)
 }
 
+func (s *Service) processOnTurnCompleteViaEngineForStep(
+	ctx context.Context, taskID string, session *models.TaskSession, expectedStepID string,
+) bool {
+	return s.processOnTurnCompleteViaEngineWithCauseAtStep(ctx, taskID, session, turnCompletionCauseAgentTurn, expectedStepID)
+}
+
 func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	ctx context.Context,
 	taskID string,
 	session *models.TaskSession,
 	cause turnCompletionCause,
+) bool {
+	return s.processOnTurnCompleteViaEngineWithCauseAtStep(ctx, taskID, session, cause, "")
+}
+
+func (s *Service) processOnTurnCompleteViaEngineWithCauseAtStep(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	cause turnCompletionCause,
+	expectedStepID string,
 ) bool {
 	if session == nil || models.IsCompletionFollowUpSession(session.Metadata) {
 		return false
@@ -7456,6 +7472,9 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	unlock, task, proceed := s.acquireTurnCompletionCriticalSection(ctx, taskID, session, task)
 	defer unlock()
 	if !proceed {
+		return false
+	}
+	if expectedStepID != "" && task.WorkflowStepID != expectedStepID {
 		return false
 	}
 

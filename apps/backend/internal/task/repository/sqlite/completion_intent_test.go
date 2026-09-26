@@ -423,8 +423,8 @@ func TestCompleteTurnAndTransitionCompletionIntentRollsBackTogetherOnAuditFailur
 		t.Fatalf("CreateSessionControlEvent seed: %v", err)
 	}
 
-	if _, err := repo.CompleteTurnAndTransitionCompletionIntentWithControlEvent(
-		ctx, "turn", intent.ID, models.CompletionIntentStateSettling, models.CompletionIntentStateSettled, now, event,
+	if _, _, err := repo.CompleteTurnAndTransitionCompletionIntent(
+		ctx, "turn", intent.ID, models.CompletionIntentStateSettling, now, event,
 	); err == nil {
 		t.Fatal("expected duplicate audit ID to fail the atomic settlement")
 	}
