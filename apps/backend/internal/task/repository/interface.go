@@ -517,6 +517,13 @@ type CompletionIntentRepository interface {
 		ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time,
 		event *models.SessionControlEvent,
 	) (bool, error)
+	// CompleteTurnAndTransitionCompletionIntentWithControlEvent commits the
+	// captured turn completion, terminal intent transition, and authorization
+	// audit event as one settlement operation.
+	CompleteTurnAndTransitionCompletionIntentWithControlEvent(
+		ctx context.Context, turnID, intentID string, from, to models.CompletionIntentState,
+		settledAt time.Time, event *models.SessionControlEvent,
+	) (bool, error)
 }
 
 // SessionControlEventRepository stores authorized stale-turn control attempts.

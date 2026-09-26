@@ -82,6 +82,13 @@ func TestSettleStaleSessionPropagatesSettlementCommitFailure(t *testing.T) {
 	if errors.Is(err, ErrStaleSessionNotStale) {
 		t.Fatalf("SettleStaleSession error = %v, must not report active_turn/not_stale after mutation", err)
 	}
+	turn, turnErr := repo.GetTurn(ctx, request.TargetTurnID)
+	if turnErr != nil {
+		t.Fatalf("GetTurn after failed settlement: %v", turnErr)
+	}
+	if turn.CompletedAt != nil {
+		t.Fatalf("turn completed_at = %v after failed settlement, want open turn", turn.CompletedAt)
+	}
 
 	var refusalCount int
 	if err := repo.DB().QueryRowContext(ctx, `
@@ -102,6 +109,18 @@ type failingSettlementCommitRepository struct {
 
 func (r *failingSettlementCommitRepository) TransitionCompletionIntentWithControlEvent(
 	context.Context,
+	string,
+	models.CompletionIntentState,
+	models.CompletionIntentState,
+	time.Time,
+	*models.SessionControlEvent,
+) (bool, error) {
+	return false, r.err
+}
+
+func (r *failingSettlementCommitRepository) CompleteTurnAndTransitionCompletionIntentWithControlEvent(
+	context.Context,
+	string,
 	string,
 	models.CompletionIntentState,
 	models.CompletionIntentState,

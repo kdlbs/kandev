@@ -42,6 +42,10 @@ type completionIntentReconciliationStore interface {
 		ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time,
 		event *models.SessionControlEvent,
 	) (bool, error)
+	CompleteTurnAndTransitionCompletionIntentWithControlEvent(
+		ctx context.Context, turnID, intentID string, from, to models.CompletionIntentState,
+		settledAt time.Time, event *models.SessionControlEvent,
+	) (bool, error)
 }
 
 type completionIntentReopenStore interface {
@@ -296,25 +300,56 @@ func (s *Service) reconcileCompletionIntentLocked(
 	if done, err := s.reconcileCompletionIntentWithExecutionCheck(ctx, store, intent, now, auditEvent); done {
 		return err
 	}
-	if turn != nil {
-		if err := s.turnService.CompleteTurn(ctx, intent.TurnID); err != nil {
-			s.logger.Warn("failed to settle completion intent turn", zap.String("intent_id", intent.ID), zap.Error(err))
-			s.retryCompletionIntent(ctx, store, intent)
-			return fmt.Errorf("settle completion intent turn: %w", err)
-		}
-		s.activeTurns.CompareAndDelete(intent.SessionID, intent.TurnID)
-	}
-	// A later workflow move must never replay this old completion, but it does
-	// not own the captured stale turn. Release that exact ownership first, then
-	// mark the old intent superseded without evaluating its source step.
 	task, err := s.repo.GetTask(ctx, intent.TaskID)
 	if err != nil {
 		s.logger.Warn("failed to load completion intent task", zap.String("intent_id", intent.ID), zap.Error(err))
 		s.retryCompletionIntent(ctx, store, intent)
 		return fmt.Errorf("load completion intent task: %w", err)
 	}
+	moved := task == nil || task.WorkflowStepID != intent.WorkflowStepID
+	terminalState := models.CompletionIntentStateSettled
+	cause := "quiet_grace"
+	if moved {
+		terminalState = models.CompletionIntentStateSuperseded
+		cause = "task_moved"
+	}
+	auditSettled := false
+	if auditEvent != nil && turn != nil {
+		auditEvent.Result = string(terminalState)
+		settled, err := store.CompleteTurnAndTransitionCompletionIntentWithControlEvent(
+			ctx, intent.TurnID, intent.ID, models.CompletionIntentStateSettling, terminalState, now, auditEvent,
+		)
+		if err != nil {
+			s.logger.Warn("failed to atomically settle completion intent turn", zap.String("intent_id", intent.ID), zap.Error(err))
+			s.retryCompletionIntent(ctx, store, intent)
+			return fmt.Errorf("atomically settle completion intent turn: %w", err)
+		}
+		if !settled {
+			return nil
+		}
+		auditSettled = true
+		adminmetrics.RecordCompletionReconciled(string(terminalState), cause)
+		s.recordPendingCompletionIntentMetric(ctx, store)
+		// The transaction owns durable state. CompleteTurn publishes the normal
+		// turn-completed conversation event after that state is committed.
+		if err := s.turnService.CompleteTurn(ctx, intent.TurnID); err != nil {
+			s.logger.Warn("failed to publish settled completion intent turn", zap.String("intent_id", intent.ID), zap.Error(err))
+		}
+	} else if turn != nil {
+		if err := s.turnService.CompleteTurn(ctx, intent.TurnID); err != nil {
+			s.logger.Warn("failed to settle completion intent turn", zap.String("intent_id", intent.ID), zap.Error(err))
+			s.retryCompletionIntent(ctx, store, intent)
+			return fmt.Errorf("settle completion intent turn: %w", err)
+		}
+	}
+	if turn != nil {
+		s.activeTurns.CompareAndDelete(intent.SessionID, intent.TurnID)
+	}
+	// A later workflow move must never replay this old completion, but it does
+	// not own the captured stale turn. Release that exact ownership first, then
+	// mark the old intent superseded without evaluating its source step.
 	if task == nil || task.WorkflowStepID != intent.WorkflowStepID {
-		return s.settleMovedCompletionIntent(ctx, store, intent, now, auditEvent)
+		return s.settleMovedCompletionIntent(ctx, store, intent, now, auditEvent, auditSettled)
 	}
 	session, err := s.repo.GetTaskSession(ctx, intent.SessionID)
 	if err != nil {
@@ -327,6 +362,9 @@ func (s *Service) reconcileCompletionIntentLocked(
 	// lifecycle callback to perform that release for us.
 	s.setSessionWaitingForInput(ctx, intent.TaskID, intent.SessionID, session)
 	s.processOnTurnCompleteViaEngine(ctx, intent.TaskID, session)
+	if auditSettled {
+		return nil
+	}
 	return s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSettled, now, "quiet_grace", auditEvent)
 }
 
@@ -489,6 +527,7 @@ func (s *Service) settleMovedCompletionIntent(
 	intent *models.CompletionIntent,
 	now time.Time,
 	auditEvent *models.SessionControlEvent,
+	auditSettled bool,
 ) error {
 	// The source turn is now terminal, so it must no longer leave the reused
 	// session coarse-RUNNING behind the newer task step. Do not run the old
@@ -509,6 +548,9 @@ func (s *Service) settleMovedCompletionIntent(
 	// would deadlock the moved-step recovery path, leaving the stale turn and
 	// destination handoff stranded forever.
 	s.drainQueuedMessageForPromptableSessionLocked(ctx, intent.SessionID)
+	if auditSettled {
+		return nil
+	}
 	return s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSuperseded, now, "task_moved", auditEvent)
 }
 

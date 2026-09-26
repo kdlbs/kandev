@@ -68,10 +68,13 @@ look like turn evidence.
 
 Settlement takes the same in-flight cancellation guard as the ordinary stop
 path, evaluates the candidate under the guard, then delegates the terminal
-commit to `reconcileCompletionIntentLocked`. The audit event is committed
-atomically with the intent transition: either both durable facts land or
-neither does. A post-commit readback that finds the intent not in a terminal
-state refuses with `settlement_not_committed`.
+commit to `reconcileCompletionIntentLocked`. For an authorized manual
+settlement, one repository transaction completes the captured turn, transitions
+its completion intent, and inserts the audit event. A failed write leaves all
+three durable records unchanged. After commit, the normal turn-completed event
+is published and the reconciler releases session ownership and continues the
+current workflow. A post-commit readback that finds the intent not in a
+terminal state refuses with `settlement_not_committed`.
 
 ## Supersession
 
@@ -95,10 +98,10 @@ stores the immutable write-once supervisor provenance.
 
 Refusals never mutate durable state and are auditable as `not_stale`
 denials; a retry after a completed settlement returns `already_settled`.
-A crash between reconciliation decisions cannot strand a settled turn
-without its audit because the transition and the audit are one transaction.
-Startup reconciliation uses the same durable predicate as the manual tool,
-so a duplicate attempt cannot close a successor or re-run a transition.
+A failure during manual settlement cannot leave only the turn, intent, or audit
+committed because their terminal writes share one transaction. Startup
+reconciliation uses the same durable predicate as the manual tool, so a
+duplicate attempt cannot close a successor or re-run a transition.
 
 ## Security
 

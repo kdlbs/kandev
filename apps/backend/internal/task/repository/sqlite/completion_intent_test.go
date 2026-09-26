@@ -399,6 +399,51 @@ func TestTransitionCompletionIntentWithControlEventRollsBackTogetherOnAuditFailu
 	}
 }
 
+func TestCompleteTurnAndTransitionCompletionIntentRollsBackTogetherOnAuditFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForSessionTests(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	seedCompletionIntentFixture(t, repo, "task", "session", "turn", "step")
+	intent := &models.CompletionIntent{
+		ID: "intent", TaskID: "task", SessionID: "session", TurnID: "turn", WorkflowStepID: "step",
+		State: models.CompletionIntentStatePending, RequestedAt: now, EligibleAt: now,
+	}
+	if _, _, err := repo.CreateOrGetCompletionIntent(ctx, intent); err != nil {
+		t.Fatalf("CreateOrGetCompletionIntent: %v", err)
+	}
+	if _, err := repo.ClaimCompletionIntentForSettlement(ctx, intent.ID, now, now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	event := &models.SessionControlEvent{
+		ID: "duplicate-event", ActorTaskID: "task", ActorSessionID: "session",
+		TargetTaskID: "task", TargetSessionID: "session", TargetTurnID: "turn",
+		AuthorityBasis: "same_task_peer", EvidenceCode: "eligible_completion_intent", Result: "settled",
+	}
+	if err := repo.CreateSessionControlEvent(ctx, event); err != nil {
+		t.Fatalf("CreateSessionControlEvent seed: %v", err)
+	}
+
+	if _, err := repo.CompleteTurnAndTransitionCompletionIntentWithControlEvent(
+		ctx, "turn", intent.ID, models.CompletionIntentStateSettling, models.CompletionIntentStateSettled, now, event,
+	); err == nil {
+		t.Fatal("expected duplicate audit ID to fail the atomic settlement")
+	}
+	turn, err := repo.GetTurn(ctx, "turn")
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if turn.CompletedAt != nil {
+		t.Fatalf("turn completed_at = %v, want open turn after rollback", turn.CompletedAt)
+	}
+	stored, err := repo.GetCompletionIntent(ctx, intent.ID)
+	if err != nil {
+		t.Fatalf("GetCompletionIntent: %v", err)
+	}
+	if stored.State != models.CompletionIntentStateSettling {
+		t.Fatalf("intent state = %q, want settling after rollback", stored.State)
+	}
+}
+
 // TestCompletionIntentReopenedRecordsTerminalTimestamp covers Reopened, a
 // terminal state (CanTransitionTo has no outgoing case for it) that must get
 // the same durable settled_at stamp as Settled/Superseded/Rejected so audit

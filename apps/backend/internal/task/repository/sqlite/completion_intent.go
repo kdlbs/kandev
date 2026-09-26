@@ -285,6 +285,84 @@ func (r *Repository) TransitionCompletionIntentWithControlEvent(
 	return true, nil
 }
 
+// CompleteTurnAndTransitionCompletionIntentWithControlEvent commits the
+// captured turn, its terminal completion intent, and the authorizing audit
+// event together. A failed intent or audit write must leave the turn open so
+// the exact settlement can be retried safely.
+func (r *Repository) CompleteTurnAndTransitionCompletionIntentWithControlEvent(
+	ctx context.Context, turnID, intentID string, from, to models.CompletionIntentState, settledAt time.Time,
+	event *models.SessionControlEvent,
+) (bool, error) {
+	if turnID == "" {
+		return false, fmt.Errorf("turn id is required for completion intent settlement")
+	}
+	if event != nil && event.TargetTurnID != turnID {
+		return false, fmt.Errorf("audit target turn %q does not match settled turn %q", event.TargetTurnID, turnID)
+	}
+	if !from.CanTransitionTo(to) {
+		return false, fmt.Errorf("illegal completion intent transition %q -> %q", from, to)
+	}
+	if err := validateSessionControlEvent(event); err != nil {
+		return false, err
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin atomic turn settlement: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	turnResult, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE task_session_turns
+		SET completed_at = COALESCE(completed_at, ?), updated_at = ?
+		WHERE id = ?
+	`), settledAt, settledAt, turnID)
+	if err != nil {
+		return false, fmt.Errorf("complete captured turn: %w", err)
+	}
+	turnRows, err := turnResult.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("inspect captured turn completion: %w", err)
+	}
+	if turnRows != 1 {
+		return false, fmt.Errorf("captured turn %q not found", turnID)
+	}
+
+	transitioned, err := r.transitionCompletionIntentForTurnTx(ctx, tx, intentID, turnID, from, to, settledAt)
+	if err != nil || !transitioned {
+		return false, err
+	}
+	if err := insertSessionControlEventTx(ctx, tx, r.db, event); err != nil {
+		return false, fmt.Errorf("record atomic turn settlement audit: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit atomic turn settlement: %w", err)
+	}
+	return true, nil
+}
+
+func (r *Repository) transitionCompletionIntentForTurnTx(
+	ctx context.Context, tx *sqlx.Tx, id, turnID string, from, to models.CompletionIntentState, settledAt time.Time,
+) (bool, error) {
+	var completedAt interface{}
+	if to == models.CompletionIntentStateSettled || to == models.CompletionIntentStateReopened ||
+		to == models.CompletionIntentStateSuperseded || to == models.CompletionIntentStateRejected {
+		completedAt = settledAt
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE session_completion_intents
+		SET state = ?, settled_at = COALESCE(?, settled_at)
+		WHERE id = ? AND turn_id = ? AND state = ?
+	`), to, completedAt, id, turnID, from)
+	if err != nil {
+		return false, fmt.Errorf("transition completion intent for captured turn: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("inspect completion intent transition for captured turn: %w", err)
+	}
+	return affected == 1, nil
+}
+
 func (r *Repository) transitionCompletionIntentTx(
 	ctx context.Context, tx *sqlx.Tx, id string, from, to models.CompletionIntentState, settledAt time.Time,
 ) (bool, error) {
