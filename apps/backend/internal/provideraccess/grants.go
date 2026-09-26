@@ -104,6 +104,16 @@ func NewStore(db *sqlx.DB) (*Store, error) {
    ON provider_access_grants(scope_key) WHERE revoked_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS provider_access_grants_workspace
    ON provider_access_grants(workspace_id, updated_at)`,
+		`CREATE TABLE IF NOT EXISTS provider_access_leases (
+   id TEXT PRIMARY KEY, grant_id TEXT NOT NULL, grant_generation BIGINT NOT NULL,
+   scope_key TEXT NOT NULL, managed_task_id TEXT NOT NULL, session_id TEXT NOT NULL,
+   target_digest TEXT NOT NULL, approval_revision BIGINT NOT NULL,
+   connection_generation TEXT NOT NULL, idempotency_hash TEXT NOT NULL,
+   expires_at BIGINT NOT NULL, revoked_at BIGINT, created_at BIGINT NOT NULL,
+   UNIQUE(grant_id, idempotency_hash),
+   FOREIGN KEY(grant_id) REFERENCES provider_access_grants(id))`,
+		`CREATE INDEX IF NOT EXISTS provider_access_leases_grant
+   ON provider_access_leases(grant_id, expires_at)`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
@@ -135,6 +145,10 @@ func (s *Store) ReplaceGrant(ctx context.Context, grant *Grant) error {
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE provider_access_grants
   SET revoked_at = ?, updated_at = ? WHERE scope_key = ? AND revoked_at IS NULL`), now.Unix(), now.Unix(), key); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE provider_access_leases SET revoked_at = ?
+  WHERE scope_key = ? AND revoked_at IS NULL`), now.Unix(), key); err != nil {
 		return err
 	}
 	if err := tx.GetContext(ctx, &grant.Generation, tx.Rebind(`SELECT COALESCE(MAX(generation), 0) + 1
@@ -218,7 +232,12 @@ func (s *Store) RevokeGrant(ctx context.Context, workspaceID, id string, at time
 	if workspaceID == "" || id == "" || at.IsZero() {
 		return errors.New("workspace, grant, and revocation time are required")
 	}
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(`UPDATE provider_access_grants
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE provider_access_grants
   SET revoked_at = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND revoked_at IS NULL`),
 		at.Unix(), at.Unix(), id, workspaceID)
 	if err != nil {
@@ -231,5 +250,9 @@ func (s *Store) RevokeGrant(ctx context.Context, workspaceID, id string, at time
 	if count != 1 {
 		return sql.ErrNoRows
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE provider_access_leases SET revoked_at = ?
+  WHERE grant_id = ? AND revoked_at IS NULL`), at.Unix(), id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
