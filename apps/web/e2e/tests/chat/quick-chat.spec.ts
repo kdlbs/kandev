@@ -447,6 +447,36 @@ test.describe("Quick Chat", () => {
     await testPage.keyboard.press("Escape");
     await expect(overlay).not.toBeVisible();
     await expect(dialog).toBeVisible();
+    await expect(editor).toBeFocused();
+
+    // Continue the draft with the keyboard only. No click should be needed
+    // after Escape dismisses history search.
+    await testPage.keyboard.type("continued draft");
+    await expect(editor).toHaveText("continued draft");
+  });
+
+  test("reverse-search Escape restores Quick Chat editor focus from elsewhere in the dialog", async ({
+    testPage,
+  }) => {
+    const dialog = await openQuickChatWithAgent(testPage);
+    const editor = dialog.locator(".tiptap.ProseMirror:visible").first();
+    await editor.click();
+    await testPage.keyboard.press("Control+r");
+
+    const overlay = dialog.getByTestId("history-search-overlay");
+    await expect(overlay).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByTestId("history-search-input")).toBeFocused();
+    const dialogContent = dialog.getByTestId("quick-chat-content");
+    await dialogContent.evaluate((element: HTMLElement) => element.focus());
+    await expect(dialogContent).toBeFocused();
+
+    await testPage.keyboard.press("Escape");
+
+    await expect(overlay).not.toBeVisible();
+    await expect(dialog).toBeVisible();
+    await expect(editor).toBeFocused();
+    await testPage.keyboard.type("fallback draft");
+    await expect(editor).toHaveText("fallback draft");
   });
 
   test("offers configuration chat in setup and hides it once one exists", async ({
