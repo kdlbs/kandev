@@ -54,6 +54,12 @@ describe("toActivePlugin", () => {
     ]);
   });
 
+  it("preserves manifest-owned repository providers for a runtime enable", () => {
+    const result = toActivePlugin(record({ repository_providers: ["bitbucket"] }));
+
+    expect(result?.repositoryProviderIds).toEqual(["bitbucket"]);
+  });
+
   it("omits styleUrls when the plugin declares no styles", () => {
     const result = toActivePlugin(record({ ui: { bundle: "/ui/bundle.js" } }));
     expect(result?.styleUrls).toBeUndefined();

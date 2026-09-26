@@ -82,6 +82,33 @@ describe("StateProvider task-create queued overlay", () => {
               branch: "main",
               agentProfileId: null,
               executorProfileId: null,
+              workflowIdsByWorkspace: {},
+            },
+          },
+        }}
+      >
+        <div>ready</div>
+      </StateProvider>,
+    );
+
+    expect(readQueuedTaskCreateLastUsedState()).toEqual({});
+  });
+
+  it("compares workflow history by content when clearing the queued overlay", () => {
+    syncTaskCreateLastUsed({ workspace_id: "workspace-1", workflow_id: "workflow-1" });
+
+    render(
+      <StateProvider
+        initialState={{
+          userSettings: {
+            ...defaultSettingsState.userSettings,
+            loaded: true,
+            taskCreateLastUsed: {
+              repositoryId: null,
+              branch: null,
+              agentProfileId: null,
+              executorProfileId: null,
+              workflowIdsByWorkspace: { "workspace-1": "workflow-1" },
             },
           },
         }}

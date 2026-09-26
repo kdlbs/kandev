@@ -11,10 +11,12 @@ import {
   type RunDetail,
 } from "@/lib/api/domains/office-extended-api";
 import { toRouteErrorState, type LoadState } from "@/lib/routing/client-route-helpers";
+import { useTranslation } from "react-i18next";
 
 const DASHBOARD_DAYS = 14;
 
 export function AgentDashboardRoute({ agentId }: { agentId: string }) {
+  const { t } = useTranslation();
   const [state, setState] = useState<LoadState<AgentSummaryResponse>>({ status: "loading" });
 
   useEffect(() => {
@@ -35,13 +37,14 @@ export function AgentDashboardRoute({ agentId }: { agentId: string }) {
   }, [agentId]);
 
   if (state.status !== "ready") {
-    return <AgentRoutePlaceholder state={state} label="agent dashboard" />;
+    return <AgentRoutePlaceholder state={state} label={t("common:agentDashboard")} />;
   }
 
   return <DashboardView agentId={agentId} initial={state.data} days={DASHBOARD_DAYS} />;
 }
 
 export function AgentRunsRoute({ agentId }: { agentId: string }) {
+  const { t } = useTranslation();
   const [state, setState] = useState<LoadState<AgentRunsListPage>>({ status: "loading" });
 
   useEffect(() => {
@@ -62,13 +65,14 @@ export function AgentRunsRoute({ agentId }: { agentId: string }) {
   }, [agentId]);
 
   if (state.status !== "ready") {
-    return <AgentRoutePlaceholder state={state} label="agent runs" />;
+    return <AgentRoutePlaceholder state={state} label={t("common:agentRuns")} />;
   }
 
   return <RunsListView agentId={agentId} initial={state.data} />;
 }
 
 export function AgentRunDetailRoute({ agentId, runId }: { agentId: string; runId: string }) {
+  const { t } = useTranslation();
   const [state, setState] = useState<LoadState<{ initial: RunDetail; recent: AgentRunsListPage }>>({
     status: "loading",
   });
@@ -99,7 +103,7 @@ export function AgentRunDetailRoute({ agentId, runId }: { agentId: string; runId
   }, [agentId, runId]);
 
   if (state.status !== "ready") {
-    return <AgentRoutePlaceholder state={state} label="agent run" />;
+    return <AgentRoutePlaceholder state={state} label={t("common:agentRun")} />;
   }
 
   return (
@@ -108,9 +112,12 @@ export function AgentRunDetailRoute({ agentId, runId }: { agentId: string; runId
 }
 
 function AgentRoutePlaceholder<T>({ state, label }: { state: LoadState<T>; label: string }) {
+  const { t } = useTranslation();
   if (state.status === "error") {
     return <div className="py-8 text-sm text-destructive">{state.message}</div>;
   }
 
-  return <div className="py-8 text-sm text-muted-foreground">Loading {label}...</div>;
+  return (
+    <div className="py-8 text-sm text-muted-foreground">{t("common:loadingLabel", { label })}</div>
+  );
 }

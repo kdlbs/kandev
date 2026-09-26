@@ -1,4 +1,5 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { t } from "@/lib/i18n";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -29,8 +30,8 @@ function deferred<T>() {
 
 describe("subscriptionActionLabel", () => {
   it("describes the next upstream notification action", () => {
-    expect(subscriptionActionLabel(false)).toBe("Subscribe to GitLab notifications");
-    expect(subscriptionActionLabel(true)).toBe("Unsubscribe from GitLab notifications");
+    expect(subscriptionActionLabel(false, t)).toBe("Subscribe to GitLab notifications");
+    expect(subscriptionActionLabel(true, t)).toBe("Unsubscribe from GitLab notifications");
   });
 
   it("ignores a delayed subscription read after the MR identity changes", async () => {

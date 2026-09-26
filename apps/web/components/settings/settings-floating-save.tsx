@@ -18,74 +18,152 @@ import { createPortal } from "react-dom";
 import { useConfigChatFloatingActionsHost } from "@/components/config-chat/config-chat-provider";
 import type { NavigationIntent } from "@/lib/routing/navigation-guard";
 import { cn } from "@/lib/utils";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 export type SettingsSaveStatus = "dirty" | "saving" | "saved" | "error";
+export type SettingsSaveErrorKind = "save" | "reset";
+export type SettingsSavePlacement = "content" | "viewport";
+
+function standalonePositioningClass(placement: SettingsSavePlacement): string {
+  if (placement === "content") {
+    return "absolute inset-x-0 bottom-[calc(5rem_+_env(safe-area-inset-bottom))] pl-[calc(1rem_+_env(safe-area-inset-left))] pr-[calc(1rem_+_env(safe-area-inset-right))] md:bottom-[calc(1.6875rem_+_env(safe-area-inset-bottom))]";
+  }
+  return "fixed inset-x-0 bottom-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))] pl-[calc(1rem_+_env(safe-area-inset-left))] pr-[calc(1rem_+_env(safe-area-inset-right))]";
+}
 
 type SettingsFloatingSaveProps = {
   status: SettingsSaveStatus;
+  placement?: SettingsSavePlacement;
+  canSave?: boolean;
+  errorKind?: SettingsSaveErrorKind | null;
   dirtyContributorIds?: string;
   invalidReason?: string;
   navigationIntent: NavigationIntent | null;
   isDiscarding: boolean;
   onSave: () => Promise<boolean>;
+  onReset: () => Promise<unknown> | void;
   onDiscardAndLeave: () => Promise<void> | void;
   onContinueEditing: () => void;
 };
 
+type SaveActionButtonsProps = {
+  isBusy: boolean;
+  isSaved: boolean;
+  isInvalid: boolean;
+  accessibleLabel: string;
+  labelKey: string;
+  status: SettingsSaveStatus;
+  primaryAction: () => Promise<unknown> | void;
+  onReset: () => Promise<unknown> | void;
+};
+
+function SaveActionButtons({
+  isBusy,
+  isSaved,
+  isInvalid,
+  accessibleLabel,
+  labelKey,
+  status,
+  primaryAction,
+  onReset,
+}: SaveActionButtonsProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex shrink-0 gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        className={settingsActionClassName("shrink-0 cursor-pointer px-3 text-sm")}
+        disabled={isBusy || isSaved}
+        onClick={() => void onReset()}
+      >
+        {t("settings:reset")}
+      </Button>
+      <Button
+        type="button"
+        className={settingsActionClassName(
+          "shrink-0 cursor-pointer bg-success px-3 text-sm text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35",
+        )}
+        disabled={isBusy || isSaved || isInvalid}
+        aria-label={accessibleLabel}
+        onClick={() => void primaryAction()}
+      >
+        <SaveButtonIcon status={status} />
+        {t(labelKey)}
+      </Button>
+    </div>
+  );
+}
+
 export function SettingsFloatingSave({
   status,
+  placement = "viewport",
+  canSave = true,
+  errorKind,
   dirtyContributorIds,
   invalidReason,
   navigationIntent,
   isDiscarding,
   onSave,
+  onReset,
   onDiscardAndLeave,
   onContinueEditing,
 }: SettingsFloatingSaveProps) {
   const { t } = useTranslation();
   const isSaving = status === "saving";
   const isSaved = status === "saved";
-  const isInvalid = Boolean(invalidReason);
+  const isInvalid = !canSave || Boolean(invalidReason);
   const isBusy = isSaving || isDiscarding;
-  const { label: labelKey, accessible: accessibleKey } = saveButtonKeys(status);
+  const { label: labelKey, accessible: accessibleKey } = saveButtonKeys(status, errorKind);
+  const errorMessage = errorMessageKeys(errorKind);
   const accessibleLabel = t(accessibleKey);
   const configChatFloatingActionsHost = useConfigChatFloatingActionsHost();
   const isHostedByConfigChat = configChatFloatingActionsHost !== null;
+  const positioningClass = standalonePositioningClass(placement);
+  const primaryAction = status === "error" && errorKind === "reset" ? onReset : onSave;
   const saveAction = (
     <div
       className={cn(
-        "pointer-events-none z-40 max-w-[calc(100vw_-_2rem_-_env(safe-area-inset-left)_-_env(safe-area-inset-right))]",
-        !isHostedByConfigChat &&
-          "fixed right-[calc(1rem_+_env(safe-area-inset-right))] bottom-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]",
+        "pointer-events-none z-40 flex w-full justify-center",
+        !isHostedByConfigChat && positioningClass,
       )}
       data-testid="settings-floating-save"
       data-dirty-contributors={dirtyContributorIds}
+      data-status={status}
     >
-      <div className="pointer-events-auto flex min-h-11 max-w-full flex-col items-stretch gap-2 rounded-md border bg-background p-2 shadow-lg sm:flex-row sm:items-center">
-        {status === "error" && (
-          <span className="flex items-center gap-1 text-xs text-destructive" role="status">
-            <Trans i18nKey="settings:couldnTSave">
-              <IconAlertCircle className="size-4" />
-              {t("settings:couldnTSave2")}
-            </Trans>
-          </span>
-        )}
-        {invalidReason && (
-          <span className="max-w-64 text-xs text-destructive" role="status">
-            {invalidReason}
-          </span>
-        )}
-        <Button
-          type="button"
-          size="lg"
-          className="min-h-12 cursor-pointer bg-success text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35"
-          disabled={isBusy || isSaved || isInvalid}
-          aria-label={accessibleLabel}
-          onClick={() => void onSave()}
-        >
-          <SaveButtonIcon status={status} />
-          {t(labelKey)}
-        </Button>
+      <div
+        className="pointer-events-auto flex w-fit max-w-full items-center gap-1 rounded-lg border border-border/80 bg-card/95 px-1 shadow-md backdrop-blur-sm md:py-1"
+        data-testid="settings-floating-save-surface"
+      >
+        <div className="min-w-0 max-w-52 flex-1 space-y-0.5 px-1">
+          {status === "error" ? (
+            <span className="flex items-center gap-1 text-xs text-destructive" role="status">
+              <Trans i18nKey={errorMessage.labelKey}>
+                <IconAlertCircle className="size-4" />
+                {t(errorMessage.fallbackKey)}
+              </Trans>
+            </span>
+          ) : (
+            <span className="text-sm font-medium text-foreground">
+              {isSaved ? t("settings:saved") : t("common:unsavedChanges")}
+            </span>
+          )}
+          {invalidReason && (
+            <span className="block max-w-64 text-xs text-destructive" role="status">
+              {invalidReason}
+            </span>
+          )}
+        </div>
+        <SaveActionButtons
+          isBusy={isBusy}
+          isSaved={isSaved}
+          isInvalid={isInvalid}
+          accessibleLabel={accessibleLabel}
+          labelKey={labelKey}
+          status={status}
+          primaryAction={primaryAction}
+          onReset={onReset}
+        />
       </div>
     </div>
   );
@@ -187,11 +265,27 @@ function SaveButtonIcon({ status }: { status: SettingsSaveStatus }) {
  * the accessible name while saving ("Saving…" vs "Saving changes"), so the two
  * are separate keys rather than one string compared against itself.
  */
-function saveButtonKeys(status: SettingsSaveStatus): { label: string; accessible: string } {
+function saveButtonKeys(
+  status: SettingsSaveStatus,
+  errorKind?: SettingsSaveErrorKind | null,
+): { label: string; accessible: string } {
   if (status === "saving") {
     return { label: "settings:saving", accessible: "settings:savingChanges" };
   }
   if (status === "saved") return { label: "settings:saved", accessible: "settings:saved" };
+  if (status === "error" && errorKind === "reset") {
+    return { label: "settings:retryReset", accessible: "settings:retryReset" };
+  }
   if (status === "error") return { label: "settings:retrySave", accessible: "settings:retrySave" };
   return { label: "settings:saveChanges", accessible: "settings:saveChanges" };
+}
+
+function errorMessageKeys(errorKind: SettingsSaveErrorKind | null | undefined): {
+  labelKey: string;
+  fallbackKey: string;
+} {
+  if (errorKind === "reset") {
+    return { labelKey: "settings:couldnTReset", fallbackKey: "settings:couldnTReset2" };
+  }
+  return { labelKey: "settings:couldnTSave", fallbackKey: "settings:couldnTSave2" };
 }

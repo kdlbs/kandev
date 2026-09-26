@@ -10,6 +10,7 @@ import { DEFAULT_DIFF_WORD_WRAP } from "./diff-defaults";
 import { useDiffOptions } from "./use-diff-options";
 import { useDiffViewerState } from "./use-diff-viewer-state";
 import { UnanchoredFindingsBanner } from "./unanchored-findings-banner";
+import { useTranslation } from "react-i18next";
 
 export type RevertBlockInfo = {
   /** 1-based line number in the new file where additions start */
@@ -132,9 +133,10 @@ function arePropsEqual(prevProps: DiffViewerProps, nextProps: DiffViewerProps): 
 }
 
 function NoDiffPlaceholder({ className }: { className?: string }) {
+  const { t } = useTranslation();
   return (
     <div className={cn("rounded-md bg-muted/20 p-4 text-muted-foreground text-xs", className)}>
-      No diff available
+      {t("diff:noDiffAvailable")}
     </div>
   );
 }

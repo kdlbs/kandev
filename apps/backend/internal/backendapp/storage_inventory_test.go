@@ -71,15 +71,15 @@ func TestWorkspaceInventoryOnlyProtectsActiveTaskWorktrees(t *testing.T) {
 		{taskID: "archived", path: "/tasks/archived_def/repo"},
 		{taskID: "deleted", path: "/tasks/deleted_ghi/repo"},
 	} {
-		sessionID := "session-" + item.taskID
 		if _, err := database.Exec(
-			"INSERT INTO task_sessions (id, task_id) VALUES (?, ?)", sessionID, item.taskID,
+			"INSERT INTO task_environments (id, task_id, status) VALUES (?, ?, 'ready')",
+			"env-"+item.taskID, item.taskID,
 		); err != nil {
-			t.Fatalf("insert task session for %q: %v", item.taskID, err)
+			t.Fatalf("insert task environment for %q: %v", item.taskID, err)
 		}
 		if _, err := database.Exec(
-			"INSERT INTO task_session_worktrees (id, session_id, status, worktree_path) VALUES (?, ?, 'active', ?)",
-			"worktree-"+item.taskID, sessionID, item.path,
+			"INSERT INTO task_environment_repos (id, task_environment_id, status, worktree_path) VALUES (?, ?, 'active', ?)",
+			"worktree-"+item.taskID, "env-"+item.taskID, item.path,
 		); err != nil {
 			t.Fatalf("insert task worktree for %q: %v", item.taskID, err)
 		}
@@ -93,6 +93,48 @@ func TestWorkspaceInventoryOnlyProtectsActiveTaskWorktrees(t *testing.T) {
 	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("active worktree paths = %#v, want %#v", paths, want)
 	}
+}
+
+func TestWorkspaceInventoryLoadsTaskEligibilityStates(t *testing.T) {
+	t.Run("active and archived tasks", func(t *testing.T) {
+		database := newContainerInventoryDatabase(t)
+		insertContainerInventoryTask(t, database, "active", v1.TaskStateInProgress, false)
+		insertContainerInventoryTask(t, database, "archived", v1.TaskStateCompleted, true)
+
+		states, err := (&storageInventory{reader: database}).taskWorkspaceStates(context.Background())
+		if err != nil {
+			t.Fatalf("taskWorkspaceStates: %v", err)
+		}
+		known, archived := taskEligibilitySets(states)
+		if !reflect.DeepEqual(known, map[string]struct{}{"active": {}, "archived": {}}) {
+			t.Fatalf("known task IDs = %#v", known)
+		}
+		if !reflect.DeepEqual(archived, map[string]struct{}{"archived": {}}) {
+			t.Fatalf("archived task IDs = %#v", archived)
+		}
+	})
+
+	t.Run("empty database", func(t *testing.T) {
+		database := newContainerInventoryDatabase(t)
+		states, err := (&storageInventory{reader: database}).taskWorkspaceStates(context.Background())
+		if err != nil {
+			t.Fatalf("taskWorkspaceStates: %v", err)
+		}
+		known, archived := taskEligibilitySets(states)
+		if len(states) != 0 || len(known) != 0 || len(archived) != 0 {
+			t.Fatalf("empty task eligibility = states %#v known %#v archived %#v", states, known, archived)
+		}
+	})
+
+	t.Run("query error", func(t *testing.T) {
+		database := newContainerInventoryDatabase(t)
+		if err := database.Close(); err != nil {
+			t.Fatalf("close inventory database: %v", err)
+		}
+		if _, err := (&storageInventory{reader: database}).taskWorkspaceStates(context.Background()); err == nil {
+			t.Fatal("taskWorkspaceStates error = nil, want closed-database error")
+		}
+	})
 }
 
 func TestContainerInventoryRemovability(t *testing.T) {
@@ -231,9 +273,9 @@ func newContainerInventoryDatabase(t *testing.T) *sqlx.DB {
 			state TEXT NOT NULL DEFAULT 'CREATED',
 			task_environment_id TEXT NOT NULL DEFAULT ''
 		);
-		CREATE TABLE task_session_worktrees (
+		CREATE TABLE task_environment_repos (
 			id TEXT PRIMARY KEY,
-			session_id TEXT NOT NULL,
+			task_environment_id TEXT NOT NULL,
 			status TEXT NOT NULL,
 			worktree_path TEXT NOT NULL DEFAULT '',
 			deleted_at TIMESTAMP

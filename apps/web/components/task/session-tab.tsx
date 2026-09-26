@@ -7,15 +7,14 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { IconStar } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
 import { ContextMenu, ContextMenuTrigger } from "@kandev/ui/context-menu";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useToast } from "@/components/toast-provider";
-import { renameSession } from "@/lib/api/domains/session-api";
+import { useAppStore } from "@/components/state-provider";
 import {
   useSessionActions,
   isSessionDeletable as isDeletable,
@@ -33,6 +32,9 @@ import { isSessionActive } from "./session-sort";
 import { resolveSessionTabTitle } from "./session-tab-title";
 import { TabRenameInput } from "./tab-rename-input";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
+import { SessionTabCloseAction } from "./session-tab-close-action";
+import { useSessionTabDelete } from "./use-session-tab-delete";
+import { MAX_SESSION_NAME_LENGTH, useSessionRenameCommitter } from "./use-session-rename";
 
 function useSessionTabState(sessionId: string | undefined) {
   const isPrimary = useAppStore((state) => {
@@ -125,46 +127,6 @@ function useSessionTabState(sessionId: string | undefined) {
   };
 }
 
-/** Mirrors the backend's maxSessionNameLength so the optimistic store update
- * matches what the rename broadcast will echo back. */
-const MAX_SESSION_NAME_LENGTH = 120;
-
-/** Commit a session tab rename: persist via WS and optimistically update the store. */
-function useSessionRenameCommitter(
-  sessionId: string | undefined,
-  taskId: string | null,
-  currentName: string | null,
-  onDone: () => void,
-) {
-  const appStoreApi = useAppStoreApi();
-  const { toast } = useToast();
-  return useCallback(
-    async (next: string) => {
-      onDone();
-      if (!sessionId || !taskId) return;
-      const normalized = next.trim().slice(0, MAX_SESSION_NAME_LENGTH);
-      if ((currentName ?? "") === normalized) return;
-      try {
-        await renameSession(sessionId, normalized);
-        const existing = appStoreApi.getState().taskSessions.items[sessionId];
-        if (existing) {
-          appStoreApi
-            .getState()
-            .upsertTaskSessionFromEvent(taskId, { ...existing, name: normalized });
-        }
-      } catch (error) {
-        console.error("rename session:", error);
-        toast({
-          title: "Rename failed",
-          description: error instanceof Error ? error.message : "Unknown error",
-          variant: "error",
-        });
-      }
-    },
-    [sessionId, taskId, currentName, appStoreApi, onDone, toast],
-  );
-}
-
 function useSessionTabActions(
   sessionId: string | undefined,
   taskId: string | null,
@@ -237,6 +199,7 @@ function SessionTabTriggerContent({
   sessionState,
   isActive,
   showDeleteOnClose,
+  isDeleting,
   onCloseTab,
 }: {
   props: IDockviewPanelHeaderProps;
@@ -248,20 +211,11 @@ function SessionTabTriggerContent({
   sessionState: TaskSessionState | null;
   isActive: boolean;
   showDeleteOnClose: boolean;
+  isDeleting: boolean;
   onCloseTab: () => void;
 }) {
-  const tabContentRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!showDeleteOnClose || !sessionId) return;
-    const closeAction = tabContentRef.current?.querySelector(".dv-default-tab-action");
-    if (!closeAction) return;
-    closeAction.setAttribute("data-testid", `session-tab-close-${sessionId}`);
-    return () => closeAction.removeAttribute("data-testid");
-  }, [showDeleteOnClose, sessionId, isActive]); // isActive: re-run when tab activates so Dockview renders .dv-default-tab-action
-
   return (
-    <div ref={tabContentRef} className="flex items-center">
+    <div className="flex items-center">
       {isPrimary && showMultiSessionBadges && (
         <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0 ml-2" />
       )}
@@ -282,11 +236,10 @@ function SessionTabTriggerContent({
             className={`ml-1.5 shrink-0${isActive ? "" : " opacity-50"}`}
           />
         ))}
-      <DockviewDefaultTab
-        {...props}
-        hideClose={!showDeleteOnClose}
-        closeActionOverride={showDeleteOnClose ? onCloseTab : undefined}
-      />
+      <DockviewDefaultTab {...props} hideClose />
+      {showDeleteOnClose && (
+        <SessionTabCloseAction sessionId={sessionId} isDeleting={isDeleting} onClose={onCloseTab} />
+      )}
     </div>
   );
 }
@@ -321,6 +274,22 @@ function useSessionTabDialogState(sessionId: string | undefined) {
   };
 }
 
+function useSessionMenuDelete(openMenuDelete: () => void) {
+  const menuDeleteAnchorRef = useRef<HTMLElement>(null);
+  const menuDeleteFocusBoundaryRef = useRef<HTMLElement>(null);
+  const handleMenuDelete = useCallback(
+    (event: Event) => {
+      const anchor = event.currentTarget;
+      if (!(anchor instanceof HTMLElement)) return;
+      menuDeleteAnchorRef.current = anchor;
+      menuDeleteFocusBoundaryRef.current = anchor.closest('[data-slot="context-menu-content"]');
+      openMenuDelete();
+    },
+    [openMenuDelete],
+  );
+  return { menuDeleteAnchorRef, menuDeleteFocusBoundaryRef, handleMenuDelete };
+}
+
 /** Tab body: inline rename input while renaming, normal trigger content otherwise. */
 function SessionTabBody({
   props,
@@ -345,6 +314,7 @@ function SessionTabBody({
   sessionState: TaskSessionState | null;
   isActive: boolean;
   showDeleteOnClose: boolean;
+  isDeleting: boolean;
   onCloseTab: () => void;
 }) {
   if (isRenaming) {
@@ -372,6 +342,55 @@ function useSessionTabTitleSync(api: IDockviewPanelHeaderProps["api"], tabTitle:
     const disposable = api.onDidTitleChange(syncTitle);
     return () => disposable.dispose();
   }, [tabTitle, api]);
+}
+
+type SessionTabDialogHostProps = {
+  dialogs: ReturnType<typeof useSessionTabDialogState>;
+  deleteState: ReturnType<typeof useSessionTabDelete>;
+  menuDeleteAnchorRef: RefObject<HTMLElement | null>;
+  menuDeleteFocusBoundaryRef: RefObject<HTMLElement | null>;
+  isPrimary: boolean;
+  sessionCount: number;
+  targetName: string | null;
+  taskId: string | null;
+  sessionId: string | undefined;
+  groupId: string | undefined;
+};
+
+function SessionTabDialogHost({
+  dialogs,
+  deleteState,
+  menuDeleteAnchorRef,
+  menuDeleteFocusBoundaryRef,
+  isPrimary,
+  sessionCount,
+  targetName,
+  taskId,
+  sessionId,
+  groupId,
+}: SessionTabDialogHostProps) {
+  return (
+    <SessionTabDialogs
+      confirmDelete={dialogs.confirmDelete && deleteState.deleteOrigin === "tab"}
+      menuDeleteOpen={dialogs.confirmDelete && deleteState.deleteOrigin === "menu"}
+      menuDeleteAnchorRef={menuDeleteAnchorRef}
+      menuDeleteFocusBoundaryRef={menuDeleteFocusBoundaryRef}
+      setConfirmDelete={deleteState.handleDeleteDialogOpenChange}
+      isPrimary={isPrimary}
+      sessionCount={sessionCount}
+      onConfirmDelete={deleteState.handleConfirmDelete}
+      targetName={targetName}
+      taskId={taskId}
+      sessionId={sessionId}
+      shareOpen={dialogs.shareOpen}
+      setShareOpen={dialogs.setShareOpen}
+      handoffOpen={dialogs.handoffOpen}
+      setHandoffOpen={dialogs.setHandoffOpen}
+      handoffPreset={dialogs.handoffPreset}
+      setHandoffPreset={dialogs.setHandoffPreset}
+      groupId={groupId}
+    />
+  );
 }
 
 /**
@@ -407,10 +426,10 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   // Multi-session tab close means delete, not hide-only. Running/starting sessions are
   // not deletable, so we omit the X rather than reviving hide-only close behavior.
   const showDeleteOnClose = showMultiSessionBadges && !!sessionState && isDeletable(sessionState);
-  const { setConfirmDelete, setIsRenaming, setShareOpen } = dialogs;
-  const handleCloseTab = useCallback(() => {
-    setConfirmDelete(true);
-  }, [setConfirmDelete]);
+  const deleteState = useSessionTabDelete(dialogs.setConfirmDelete, actions.handleDelete);
+  const { handleCloseTab, handleMenuDelete: openMenuDelete, isDeletingFromTab } = deleteState;
+  const { menuDeleteAnchorRef, menuDeleteFocusBoundaryRef, handleMenuDelete } =
+    useSessionMenuDelete(openMenuDelete);
   const { handlePointerDownCapture, handleKeyDownCapture } = useSessionTabUserActivationIntent(
     sessionId,
     activeSessionId,
@@ -433,7 +452,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
             renameInitial={sessionName || tabTitle || ""}
             renameSeqBadge={showMultiSessionBadges ? sessionNumber : null}
             onCommitRename={handleCommitRename}
-            onCancelRename={() => setIsRenaming(false)}
+            onCancelRename={() => dialogs.setIsRenaming(false)}
             sessionId={sessionId}
             isPrimary={isPrimary}
             showMultiSessionBadges={showMultiSessionBadges}
@@ -442,6 +461,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
             sessionState={sessionState}
             isActive={isActive}
             showDeleteOnClose={showDeleteOnClose}
+            isDeleting={isDeletingFromTab}
             onCloseTab={handleCloseTab}
           />
         </ContextMenuTrigger>
@@ -452,26 +472,22 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           taskId={taskId}
           sessionId={sessionId}
           actions={actions}
-          onDelete={() => setConfirmDelete(true)}
-          onShare={() => setShareOpen(true)}
+          onDelete={handleMenuDelete}
+          onShare={() => dialogs.setShareOpen(true)}
           onHandoffProfile={dialogs.handleHandoffProfile}
-          onStartRename={() => setIsRenaming(true)}
+          onStartRename={() => dialogs.setIsRenaming(true)}
         />
       </ContextMenu>
-      <SessionTabDialogs
-        confirmDelete={dialogs.confirmDelete}
-        setConfirmDelete={setConfirmDelete}
+      <SessionTabDialogHost
+        dialogs={dialogs}
+        deleteState={deleteState}
+        menuDeleteAnchorRef={menuDeleteAnchorRef}
+        menuDeleteFocusBoundaryRef={menuDeleteFocusBoundaryRef}
         isPrimary={isPrimary}
         sessionCount={sessionCount}
-        onConfirmDelete={actions.handleDelete}
+        targetName={tabTitle}
         taskId={taskId}
         sessionId={sessionId}
-        shareOpen={dialogs.shareOpen}
-        setShareOpen={setShareOpen}
-        handoffOpen={dialogs.handoffOpen}
-        setHandoffOpen={dialogs.setHandoffOpen}
-        handoffPreset={dialogs.handoffPreset}
-        setHandoffPreset={dialogs.setHandoffPreset}
         groupId={api.group?.id}
       />
     </>

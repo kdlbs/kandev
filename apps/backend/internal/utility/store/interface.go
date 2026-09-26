@@ -14,6 +14,9 @@ type Repository interface {
 	GetAgentByName(ctx context.Context, name string) (*models.UtilityAgent, error)
 	CreateAgent(ctx context.Context, agent *models.UtilityAgent) error
 	UpdateAgent(ctx context.Context, agent *models.UtilityAgent) error
+	// NormalizeEmptyBuiltinBinding changes an empty, unconfigured built-in to
+	// inherit only while the row still has that exact stale binding.
+	NormalizeEmptyBuiltinBinding(ctx context.Context, id string) (bool, error)
 	DeleteAgent(ctx context.Context, id string) error
 
 	// Calls (history)

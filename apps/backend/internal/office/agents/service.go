@@ -39,9 +39,12 @@ var (
 	ErrAgentNameRequired     = errors.New("agent name is required")
 	ErrAgentRoleInvalid      = errors.New("invalid agent role")
 	ErrAgentCEOAlreadyExists = errors.New("workspace already has a CEO agent")
+	ErrAgentCEOReportsTo     = errors.New("CEO agent must be the workspace root")
 	ErrAgentReportsToInvalid = errors.New("reports_to agent does not exist in this workspace")
 	ErrAgentReportsToSelf    = errors.New("agent cannot report to itself")
+	ErrAgentReportsToCycle   = errors.New("agent reporting structure cannot contain a cycle")
 	ErrAgentStatusTransition = errors.New("invalid status transition")
+	ErrAgentStatusStale      = errors.New("agent status changed before recovery")
 )
 
 // GovernanceSettingsReader reads workspace governance settings.
@@ -81,7 +84,7 @@ var validRoles = map[models.AgentRole]bool{
 
 // allowedTransitions defines which status transitions are valid.
 var allowedTransitions = map[models.AgentStatus][]models.AgentStatus{
-	models.AgentStatusIdle:            {models.AgentStatusWorking, models.AgentStatusPaused, models.AgentStatusStopped, models.AgentStatusPendingApproval},
+	models.AgentStatusIdle:            {models.AgentStatusPaused, models.AgentStatusStopped, models.AgentStatusPendingApproval},
 	models.AgentStatusWorking:         {models.AgentStatusIdle, models.AgentStatusPaused, models.AgentStatusStopped},
 	models.AgentStatusPaused:          {models.AgentStatusIdle, models.AgentStatusStopped},
 	models.AgentStatusStopped:         {models.AgentStatusIdle},
@@ -236,6 +239,20 @@ func (s *AgentService) GetAgentFromConfig(ctx context.Context, idOrName string) 
 		return nil, fmt.Errorf("agent not found: %s", idOrName)
 	}
 	return agent, nil
+}
+
+// getAgentFromConfigInWorkspace resolves an ID or name without crossing a
+// workspace boundary. IDs are globally unique, while names are workspace-scoped.
+func (s *AgentService) getAgentFromConfigInWorkspace(
+	ctx context.Context, idOrName, workspaceID string,
+) (*models.AgentInstance, error) {
+	if agent, err := s.repo.GetAgentInstance(ctx, idOrName); err == nil {
+		if agent.WorkspaceID != workspaceID {
+			return nil, ErrAgentReportsToInvalid
+		}
+		return agent, nil
+	}
+	return s.repo.GetAgentInstanceByName(ctx, workspaceID, idOrName)
 }
 
 // ListAgentsFromConfig returns all agent instances for a workspace.
@@ -643,6 +660,63 @@ func (s *AgentService) UpdateAgentStatus(
 	return agent, nil
 }
 
+// UpdateAgentStatusIfCurrent performs the guarded recovery transition used by
+// the operator recovery control. It accepts a request rendered from either
+// recoverable status, but only applies it while the server still has a
+// recoverable status. A live working agent is never changed by a stale browser
+// request, and repeated recovery requests converge on idle.
+func (s *AgentService) UpdateAgentStatusIfCurrent(
+	ctx context.Context,
+	id string,
+	expectedStatus models.AgentStatus,
+	newStatus models.AgentStatus,
+	pauseReason string,
+) (*models.AgentInstance, error) {
+	if expectedStatus != models.AgentStatusPaused && expectedStatus != models.AgentStatusStopped {
+		return nil, fmt.Errorf("%w: expected status %q is not recoverable", ErrAgentStatusStale, expectedStatus)
+	}
+	if newStatus != models.AgentStatusIdle {
+		return nil, fmt.Errorf("%w: guarded recovery target must be idle", ErrAgentStatusTransition)
+	}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		agent, err := s.GetAgentFromConfig(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if agent.Status == newStatus {
+			return agent, nil
+		}
+		if agent.Status != models.AgentStatusPaused && agent.Status != models.AgentStatusStopped {
+			return nil, fmt.Errorf("%w: current status %q is not recoverable", ErrAgentStatusStale, agent.Status)
+		}
+		if err := validateStatusTransition(agent.Status, newStatus); err != nil {
+			return nil, err
+		}
+
+		changed, dbErr := s.repo.UpdateAgentStatusFieldsIfCurrent(
+			ctx, agent.ID, string(agent.Status), string(newStatus), pauseReason,
+		)
+		if dbErr != nil {
+			return nil, fmt.Errorf("persist agent status: %w", dbErr)
+		}
+		if changed {
+			agent.Status = newStatus
+			agent.PauseReason = pauseReason
+			return agent, nil
+		}
+	}
+
+	current, err := s.GetAgentFromConfig(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if current.Status == newStatus {
+		return current, nil
+	}
+	return nil, fmt.Errorf("%w: current status %q is not recoverable", ErrAgentStatusStale, current.Status)
+}
+
 // DeleteAgentInstance deletes an agent instance from the DB and cascades
 // termination of every office task session belonging to that agent. The
 // cascade runs after the DB row is gone so a concurrent EnsureSessionForAgent
@@ -756,6 +830,9 @@ func (s *AgentService) validateAgentCreate(ctx context.Context, agent *models.Ag
 		return ErrAgentRoleInvalid
 	}
 	if agent.Role == models.AgentRoleCEO {
+		if agent.ReportsTo != "" {
+			return ErrAgentCEOReportsTo
+		}
 		if s.countAgentsByRoleInWorkspace(ctx, models.AgentRoleCEO, agent.WorkspaceID, "") > 0 {
 			return ErrAgentCEOAlreadyExists
 		}
@@ -764,7 +841,7 @@ func (s *AgentService) validateAgentCreate(ctx context.Context, agent *models.Ag
 		return err
 	}
 	if agent.ReportsTo != "" {
-		return s.validateReportsTo(ctx, agent.ReportsTo, "")
+		return s.validateReportsTo(ctx, agent)
 	}
 	return nil
 }
@@ -778,12 +855,15 @@ func (s *AgentService) validateAgentUpdate(ctx context.Context, agent *models.Ag
 		return ErrAgentRoleInvalid
 	}
 	if agent.Role == models.AgentRoleCEO {
+		if agent.ReportsTo != "" {
+			return ErrAgentCEOReportsTo
+		}
 		if s.countAgentsByRoleInWorkspace(ctx, models.AgentRoleCEO, agent.WorkspaceID, agent.ID) > 0 {
 			return ErrAgentCEOAlreadyExists
 		}
 	}
 	if agent.ReportsTo != "" {
-		return s.validateReportsTo(ctx, agent.ReportsTo, agent.ID)
+		return s.validateReportsTo(ctx, agent)
 	}
 	return nil
 }
@@ -812,14 +892,62 @@ func (s *AgentService) validateAgentNameUnique(ctx context.Context, name, worksp
 	return nil
 }
 
-// validateReportsTo ensures the target agent exists.
-func (s *AgentService) validateReportsTo(ctx context.Context, reportsTo, selfID string) error {
-	if selfID != "" && reportsTo == selfID {
-		return ErrAgentReportsToSelf
-	}
-	_, err := s.GetAgentFromConfig(ctx, reportsTo)
+// validateReportsTo ensures the target agent exists in the same workspace and
+// that changing the edge does not create a cycle in the reporting tree. On
+// success it normalizes agent.ReportsTo to the target's ID, so a caller that
+// names its manager rather than IDing it persists the canonical ID like every
+// other reference — not the raw name, which would otherwise mismatch a
+// same-named agent in another workspace on the next read.
+func (s *AgentService) validateReportsTo(ctx context.Context, agent *models.AgentInstance) error {
+	selfID := agent.ID
+	target, err := s.getAgentFromConfigInWorkspace(ctx, agent.ReportsTo, agent.WorkspaceID)
 	if err != nil {
 		return ErrAgentReportsToInvalid
+	}
+	if selfID != "" && target.ID == selfID {
+		return ErrAgentReportsToSelf
+	}
+	agent.ReportsTo = target.ID
+	if selfID == "" {
+		return nil
+	}
+
+	agents, err := s.ListAgentsFromConfig(ctx, agent.WorkspaceID)
+	if err != nil {
+		return ErrAgentReportsToInvalid
+	}
+	parentByID := make(map[string]string, len(agents))
+	idByReference := make(map[string]string, len(agents)*2)
+	for _, a := range agents {
+		parentByID[a.ID] = a.ReportsTo
+		idByReference[a.ID] = a.ID
+		if a.Name != "" {
+			idByReference[a.Name] = a.ID
+		}
+	}
+	// Validate the proposed edge, not the stale value currently stored for the
+	// agent being updated.
+	parentByID[selfID] = target.ID
+
+	currentID := target.ID
+	visited := make(map[string]struct{}, len(agents))
+	for currentID != "" {
+		if currentID == selfID {
+			return ErrAgentReportsToCycle
+		}
+		if _, seen := visited[currentID]; seen {
+			return ErrAgentReportsToCycle
+		}
+		visited[currentID] = struct{}{}
+		parentReference := parentByID[currentID]
+		if parentReference == "" {
+			return nil
+		}
+		nextID, ok := idByReference[parentReference]
+		if !ok {
+			return nil
+		}
+		currentID = nextID
 	}
 	return nil
 }

@@ -1,4 +1,11 @@
-import { createRef, type ReactNode, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  createRef,
+  type ComponentProps,
+  type ReactNode,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+} from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,12 +21,31 @@ const USER_EDIT = "User edit";
 const PROMPT_RESULT_RECOVERY_TEST_ID = "prompt-result-recovery";
 const ENHANCE_PROMPT_BUTTON_TEST_ID = "enhance-prompt-button";
 
+type EscapeEvent = { preventDefault: () => void };
+
+type CloseAutoFocusEvent = { preventDefault: () => void };
+
 let allowProgrammaticSet = true;
 let mockFs: DialogFormState;
+let dialogEscapeHandler: ((event: EscapeEvent) => void) | undefined;
+let autoFocusNewTasks = true;
+let dialogCloseAutoFocusHandler: ((event: CloseAutoFocusEvent) => void) | undefined;
 
 vi.mock("@kandev/ui/dialog", () => ({
   Dialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  DialogContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DialogContent: ({
+    children,
+    onEscapeKeyDown,
+    onCloseAutoFocus,
+  }: {
+    children: ReactNode;
+    onEscapeKeyDown?: (event: EscapeEvent) => void;
+    onCloseAutoFocus?: (event: CloseAutoFocusEvent) => void;
+  }) => {
+    dialogEscapeHandler = onEscapeKeyDown;
+    dialogCloseAutoFocusHandler = onCloseAutoFocus;
+    return <div>{children}</div>;
+  },
   DialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DialogFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
@@ -64,6 +90,7 @@ vi.mock("@/hooks/use-keyboard-shortcut", () => ({
 }));
 
 vi.mock("@/components/task-create-dialog-footer", () => ({
+  isNativeSubmitDisabled: () => false,
   TaskCreateDialogFooter: () => null,
 }));
 
@@ -83,7 +110,12 @@ vi.mock("@/components/task-create-dialog-repo-chips", () => ({
   RepoChipsRow: () => null,
 }));
 
+vi.mock("./task-edit-dialog-dependencies", () => ({
+  TaskEditDialogDependencies: () => null,
+}));
+
 vi.mock("@/hooks/use-task-create-dialog-popover-container", () => ({
+  useTaskCreateDialogPopoverContainer: () => null,
   TaskCreateDialogPopoverContainerProvider: ({ children }: { children: ReactNode }) => (
     <>{children}</>
   ),
@@ -94,8 +126,24 @@ vi.mock("@/components/task-create-dialog-handlers", () => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: { userSettings: { taskCreateLastUsed: null } }) => unknown) =>
-    selector({ userSettings: { taskCreateLastUsed: null } }),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useAppStore: (selector: (state: any) => unknown) =>
+    selector({
+      userSettings: { taskCreateLastUsed: null, autoFocusNewTasks },
+      repositorySets: {
+        itemsByWorkspaceId: {},
+        loadingByWorkspaceId: {},
+        loadedByWorkspaceId: {},
+        revisionByWorkspaceId: {},
+      },
+      setRepositorySets: () => undefined,
+      setRepositorySetsLoading: () => undefined,
+    }),
+  useAppStoreApi: () => ({
+    getState: () => ({
+      repositoryBranchPolicies: { revisionByRepositoryId: {} },
+    }),
+  }),
 }));
 
 vi.mock("@/components/task-create-dialog-submit", () => ({
@@ -230,18 +278,28 @@ vi.mock("@/components/task-create-dialog-state", () => ({
 
 function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
   return {
+    blockedBy: [],
+    setBlockedBy: () => undefined,
     taskName: "Task title",
+    autopilot: false,
+    setAutopilot: () => undefined,
+    priority: "medium",
+    setPriority: () => undefined,
     setTaskName: () => undefined,
     hasTitle: true,
     setHasTitle: () => undefined,
     hasDescription: true,
     setHasDescription: setHasDescriptionMock,
+    hasPendingAttachmentUploads: false,
+    setHasPendingAttachmentUploads: () => undefined,
     draftDescription: initialDescription,
     openCycle: 0,
     currentDefaults: { name: "Task title", description: initialDescription },
     descriptionInputRef: createRef<TaskFormInputsHandle>(),
     repositories: [],
+    repositoriesDirty: false,
     setRepositories: () => undefined,
+    setRepositoriesDirty: () => undefined,
     addRepository: () => undefined,
     removeRepository: () => undefined,
     updateRepository: () => undefined,
@@ -251,6 +309,8 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     setExecutorId: () => undefined,
     executorProfileId: "executor-profile-1",
     setExecutorProfileId: () => undefined,
+    setExecutorProfileIdFromSeed: () => undefined,
+    seededExecutorProfileId: null,
     discoveredRepositories: [],
     setDiscoveredRepositories: () => undefined,
     discoverReposLoading: false,
@@ -259,6 +319,8 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     setDiscoverReposLoaded: () => undefined,
     selectedWorkflowId: null,
     setSelectedWorkflowId: () => undefined,
+    workflowAgentOverrides: {},
+    setWorkflowAgentOverrides: () => undefined,
     fetchedSteps: null,
     setFetchedSteps: () => undefined,
     isCreatingSession: false,
@@ -282,6 +344,7 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     prInfoByUrl: {
       info: () => undefined,
       loading: () => false,
+      settled: () => true,
       error: () => undefined,
       ensure: () => undefined,
       clear: () => undefined,
@@ -299,20 +362,27 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     setCurrentLocalBranchLoading: () => undefined,
     noRepository: false,
     setNoRepository: () => undefined,
+    preferLocalExecutor: false,
+    setPreferLocalExecutor: () => undefined,
     workspacePath: "",
     setWorkspacePath: () => undefined,
   };
 }
 
-function renderDialog() {
+function renderDialog(
+  mode: "create" | "edit" | "session" = "create",
+  extraProps: Partial<ComponentProps<typeof TaskCreateDialog>> = {},
+) {
   return render(
     <TaskCreateDialog
       open
+      mode={mode}
       onOpenChange={() => undefined}
       workspaceId="workspace-1"
       workflowId={null}
       defaultStepId={null}
       steps={[]}
+      {...extraProps}
     />,
   );
 }
@@ -326,7 +396,73 @@ beforeEach(() => {
   enhancePromptMock.mockReset();
   toastMock.mockReset();
   setHasDescriptionMock.mockReset();
+  dialogEscapeHandler = undefined;
+  dialogCloseAutoFocusHandler = undefined;
+  autoFocusNewTasks = true;
   mockFs = buildMockFs();
+});
+
+describe("TaskCreateDialog focus return (AC-TASKS-TASK-ACTIONS-MENU-001.12)", () => {
+  it("returns focus to the given focusReturnRef target on close, overriding Radix's default", () => {
+    const target = document.createElement("button");
+    document.body.appendChild(target);
+    target.focus = vi.fn();
+    const focusReturnRef = { current: target };
+
+    renderDialog("edit", { focusReturnRef });
+    expect(dialogCloseAutoFocusHandler).toBeTypeOf("function");
+
+    const event = { preventDefault: vi.fn() };
+    dialogCloseAutoFocusHandler?.(event);
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(target.focus).toHaveBeenCalled();
+
+    document.body.removeChild(target);
+  });
+
+  it("leaves Radix's default close-focus behavior alone when the target has left the document", () => {
+    const target = document.createElement("button");
+    target.focus = vi.fn();
+    const focusReturnRef = { current: target };
+
+    renderDialog("edit", { focusReturnRef });
+    const event = { preventDefault: vi.fn() };
+    dialogCloseAutoFocusHandler?.(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(target.focus).not.toHaveBeenCalled();
+  });
+
+  it("leaves Radix's default close-focus behavior alone when no focusReturnRef is given", () => {
+    renderDialog("edit");
+    const event = { preventDefault: vi.fn() };
+    dialogCloseAutoFocusHandler?.(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+});
+
+describe("TaskCreateDialog Escape dismissal", () => {
+  it("prevents Escape from dismissing create mode", () => {
+    renderDialog();
+    const event = { preventDefault: vi.fn() };
+
+    expect(dialogEscapeHandler).toBeTypeOf("function");
+    dialogEscapeHandler?.(event);
+
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it.each(["edit", "session"] as const)("keeps Escape dismissal available in %s mode", (mode) => {
+    renderDialog(mode);
+    const event = { preventDefault: vi.fn() };
+
+    expect(dialogEscapeHandler).toBeTypeOf("function");
+    dialogEscapeHandler?.(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
 });
 
 describe("TaskCreateDialog prompt enhancement", () => {
@@ -421,4 +557,21 @@ describe("TaskCreateDialog prompt enhancement", () => {
     expect(setHasDescriptionMock).not.toHaveBeenCalled();
     expect(screen.getByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeTruthy();
   });
+});
+
+it("returns to the opening control after background task creation", () => {
+  autoFocusNewTasks = false;
+  const target = document.createElement("button");
+  document.body.appendChild(target);
+  try {
+    target.focus();
+    renderDialog();
+    target.blur();
+    const event = { preventDefault: vi.fn() };
+    dialogCloseAutoFocusHandler?.(event);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(document.activeElement).toBe(target);
+  } finally {
+    target.remove();
+  }
 });

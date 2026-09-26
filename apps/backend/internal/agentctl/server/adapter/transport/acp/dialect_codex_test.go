@@ -1,6 +1,48 @@
 package acp
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/coder/acp-go-sdk"
+)
+
+// TestCodexDialect_MarksTypedUsageEstimated is a regression test for the
+// codex-acp usage undercount: codex-acp 1.4.0 hardcodes the prompt
+// response's typed usage to the LAST model request of the turn
+// (buildPromptUsage reads sessionState.lastTokenUsage, never
+// totalTokenUsage), not a per-turn total. A 22-request Tetris-build turn
+// stored only request #22's counts (410 output tokens instead of 8813,
+// confirmed against the codex rollout log's total_token_usage). Before this
+// fix the codex dialect had no normalizePromptUsage hook, so this typed
+// frame passed through unmarked (Estimated stayed false) and was recorded
+// as an authoritative per-turn measurement.
+func TestCodexDialect_MarksTypedUsageEstimated(t *testing.T) {
+	response := &acp.PromptResponse{
+		Usage: &acp.Usage{
+			InputTokens:  37616,
+			OutputTokens: 410,
+			TotalTokens:  38026,
+		},
+	}
+	dialect := newCodexACPDialect()
+	usage := dialect.promptUsage(extractUsage(response), response.Meta)
+	if usage == nil {
+		t.Fatal("expected non-nil usage")
+	}
+	if !usage.Estimated {
+		t.Fatal("codex-acp typed usage is per-request, not per-turn; Estimated should be true")
+	}
+	if usage.InputTokens != 37616 || usage.OutputTokens != 410 {
+		t.Fatalf("token counts should pass through unchanged: got %+v", usage)
+	}
+}
+
+func TestCodexDialect_LeavesNilUsageAlone(t *testing.T) {
+	dialect := newCodexACPDialect()
+	if usage := dialect.promptUsage(nil, nil); usage != nil {
+		t.Fatalf("expected nil usage to stay nil, got %#v", usage)
+	}
+}
 
 func TestParseCodexSubagentFrameCollaboration(t *testing.T) {
 	meta := codexCollaborationMeta(codexCollaborationSpawnAgent, []any{"thread-child"})

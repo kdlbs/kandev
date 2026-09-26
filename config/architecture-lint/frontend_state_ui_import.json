@@ -3,6 +3,14 @@
   "rule": "ARCH-FRONTEND-STATE-UI-IMPORT",
   "entries": [
     {
+      "import": "@/components/task/changes-diff-target",
+      "path": "apps/web/lib/state/dockview-panel-actions.ts"
+    },
+    {
+      "import": "@/components/task/changes-diff-target",
+      "path": "apps/web/lib/state/dockview-store.ts"
+    },
+    {
       "import": "@/components/app-sidebar/app-sidebar-constants",
       "path": "apps/web/lib/state/slices/ui/app-sidebar-actions.ts"
     },

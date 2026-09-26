@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { updateReviewFindingStatus } from "@/lib/api/domains/review-api";
@@ -16,6 +17,7 @@ import type { ReviewFindingStatus, TaskReviewFinding } from "@/lib/types/review"
 export function useFindingActions(taskId: string | null | undefined) {
   const storeApi = useAppStoreApi();
   const { toast } = useToast();
+  const { t } = useTranslation("review");
 
   const setStatus = useCallback(
     async (finding: TaskReviewFinding, status: ReviewFindingStatus) => {
@@ -28,13 +30,13 @@ export function useFindingActions(taskId: string | null | undefined) {
       } catch (error) {
         storeApi.getState().updateReviewFinding(taskId, previous);
         toast({
-          title: "Could not update finding",
-          description: error instanceof Error ? error.message : "An error occurred",
+          title: t("review:couldNotUpdateFinding"),
+          description: error instanceof Error ? error.message : t("common:anErrorOccurred"),
           variant: "error",
         });
       }
     },
-    [taskId, storeApi, toast],
+    [taskId, storeApi, t, toast],
   );
 
   return {

@@ -49,6 +49,16 @@ type serviceInstallMetadata struct {
 	InstalledAt     string `json:"installed_at"`
 }
 
+type managedUserServiceProblem uint8
+
+const (
+	managedUserServiceSupported managedUserServiceProblem = iota
+	managedUserServiceNotRunning
+	managedUserServiceUnmanaged
+	managedUserServiceWrongMode
+	managedUserServiceUnsupportedManager
+)
+
 func (s *Service) detectInstallState() (InstallStateResponse, *serviceInstallMetadata) {
 	if s.getenv(envRunningAsService) != "true" {
 		return InstallStateResponse{}, nil
@@ -141,22 +151,65 @@ func (s *Service) metadataMatchesService(state InstallStateResponse, metadata *s
 }
 
 func (s InstallStateResponse) applySupport() (bool, string) {
-	if !s.RunningAsService {
-		return false, "Kandev is not running as a managed service."
-	}
-	if !s.ManagedService {
-		return false, "Kandev service metadata is missing or invalid."
-	}
-	if s.Mode != installModeUser {
-		return false, "Self-update is only available for user services."
-	}
-	if s.Manager != serviceManagerSystemd && s.Manager != serviceManagerLaunchd {
-		return false, "This service manager does not support UI self-update."
+	if problem := s.managedUserServiceProblem(); problem != managedUserServiceSupported {
+		return false, problem.reason(false)
 	}
 	if s.Kind != installKindHomebrew && s.Kind != installKindNPM && s.Kind != installKindNPX {
 		return false, "This installation method does not support UI self-update."
 	}
 	return true, ""
+}
+
+func (s InstallStateResponse) nightlySupport() (bool, string) {
+	if problem := s.managedUserServiceProblem(); problem != managedUserServiceSupported {
+		return false, problem.reason(true)
+	}
+	if s.Kind != installKindNPM && s.Kind != installKindNPX {
+		return false, "Nightly updates are only available for npm or npx installations."
+	}
+	return true, ""
+}
+
+func (s InstallStateResponse) managedUserServiceProblem() managedUserServiceProblem {
+	if !s.RunningAsService {
+		return managedUserServiceNotRunning
+	}
+	if !s.ManagedService {
+		return managedUserServiceUnmanaged
+	}
+	if s.Mode != installModeUser {
+		return managedUserServiceWrongMode
+	}
+	if s.Manager != serviceManagerSystemd && s.Manager != serviceManagerLaunchd {
+		return managedUserServiceUnsupportedManager
+	}
+	return managedUserServiceSupported
+}
+
+func (p managedUserServiceProblem) reason(nightly bool) string {
+	if nightly {
+		switch p {
+		case managedUserServiceNotRunning:
+			return "Nightly updates require a Kandev-managed npm or npx user service."
+		case managedUserServiceUnmanaged:
+			return "Nightly updates require valid Kandev service metadata."
+		case managedUserServiceWrongMode:
+			return "Nightly updates are only available for user services."
+		case managedUserServiceUnsupportedManager:
+			return "This service manager does not support nightly updates."
+		}
+	}
+	switch p {
+	case managedUserServiceNotRunning:
+		return "Kandev is not running as a managed service."
+	case managedUserServiceUnmanaged:
+		return "Kandev service metadata is missing or invalid."
+	case managedUserServiceWrongMode:
+		return "Self-update is only available for user services."
+	case managedUserServiceUnsupportedManager:
+		return "This service manager does not support UI self-update."
+	}
+	return ""
 }
 
 func manualCommands(install InstallStateResponse, latest string) []string {

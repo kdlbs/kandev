@@ -9,6 +9,7 @@ import {
   fetchSessionDataForTask,
   type FetchedSessionData,
 } from "@/lib/ssr/session-page-state";
+import { useTranslation } from "react-i18next";
 
 type TaskDetailRouteProps = {
   taskId: string;
@@ -49,6 +50,7 @@ export function TaskDetailRoute({
   mode,
   initialData,
 }: TaskDetailRouteProps) {
+  const { t } = useTranslation();
   const [routeState, setRouteState] = useState<TaskDetailRouteState>(() =>
     initialRouteState(initialData, taskId),
   );
@@ -82,7 +84,7 @@ export function TaskDetailRoute({
     return (
       <div className="flex h-full min-h-0 w-full items-center justify-center bg-background">
         <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-          Loading task…
+          {t("common:loadingTask")}
         </p>
       </div>
     );

@@ -67,10 +67,11 @@ func TestUpdateRepositoryBaseBranch_ResetsSessionBases(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Sessions",
 		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/x"}},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestUpdateRepositoryBaseBranch_PersistsAndPushes(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
@@ -126,6 +127,7 @@ func TestUpdateRepositoryBaseBranch_PersistsAndPushes(t *testing.T) {
 			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/a"},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -179,10 +181,9 @@ func TestUpdateRepositoryBaseBranch_PersistsAndPushes(t *testing.T) {
 	}
 }
 
-// TestUpdateRepositoryBaseBranch_NoChangeSkipsWork is a sanity check: when
-// the new value equals the stored value, the service short-circuits before
-// the DB write so callers don't trigger spurious task.updated events or
-// agentctl refreshes.
+// TestUpdateRepositoryBaseBranch_NoChangeSkipsWork ensures selecting the
+// already displayed branch records the user's choice without triggering
+// spurious task.updated events or agentctl refreshes.
 func TestUpdateRepositoryBaseBranch_NoChangeSkipsWork(t *testing.T) {
 	svc, bus, repo := createTestService(t)
 	ctx := context.Background()
@@ -194,7 +195,7 @@ func TestUpdateRepositoryBaseBranch_NoChangeSkipsWork(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
@@ -203,6 +204,7 @@ func TestUpdateRepositoryBaseBranch_NoChangeSkipsWork(t *testing.T) {
 			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/a"},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -217,11 +219,70 @@ func TestUpdateRepositoryBaseBranch_NoChangeSkipsWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateRepositoryBaseBranch: %v", err)
 	}
+	updated, err := repo.GetTaskRepository(ctx, rows[0].ID)
+	if err != nil {
+		t.Fatalf("GetTaskRepository: %v", err)
+	}
+	if !models.HasManualBaseBranchOverride(updated.Metadata) {
+		t.Fatal("same-branch manual selection did not persist its override marker")
+	}
 	if eventBusHasType(bus, events.TaskUpdated) {
 		t.Error("identical update should not emit task.updated")
 	}
 	if len(pusher.snapshot()) != 0 {
 		t.Error("identical update should not invoke pusher")
+	}
+}
+
+func TestUpdateRepositoryBaseBranch_SameBranchClearsComparisonTarget(t *testing.T) {
+	svc, bus, repo := createTestService(t)
+	ctx := context.Background()
+	setBranchUpdateWorkflowStep(svc)
+	pusher := &fakeBaseBranchPusher{}
+	svc.SetAgentBaseBranchPusher(pusher)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Clear target",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/a"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	rows, err := repo.ListTaskRepositories(ctx, taskResult.Task.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ListTaskRepositories: %v, rows=%d", err, len(rows))
+	}
+	target := models.ComparisonTarget{
+		Version: models.ComparisonTargetVersion, Provider: models.ComparisonTargetProviderGitHub,
+		Kind: models.ComparisonTargetKindPullRequest, Number: 42, HeadBranch: "feature/a", TargetBranch: "main",
+		HeadRepository:   models.ComparisonTargetRepository{Host: "github.com", Path: "contributor/frontend", RemoteURL: "https://github.com/contributor/frontend.git"},
+		TargetRepository: models.ComparisonTargetRepository{Host: "github.com", Path: "upstream/frontend", RemoteURL: "https://github.com/upstream/frontend.git"},
+	}
+	if _, changed, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, rows[0].ID, &target, nil, false); err != nil || !changed {
+		t.Fatalf("seed comparison target: changed=%v err=%v", changed, err)
+	}
+	bus.ClearEvents()
+
+	updated, err := svc.UpdateRepositoryBaseBranch(ctx, UpdateRepositoryBaseBranchRequest{
+		TaskID: taskResult.Task.ID, TaskRepositoryID: rows[0].ID, BaseBranch: "main",
+	})
+	if err != nil {
+		t.Fatalf("UpdateRepositoryBaseBranch: %v", err)
+	}
+	if updated.BaseBranch != "main" {
+		t.Fatalf("BaseBranch = %q, want main", updated.BaseBranch)
+	}
+	if _, ok, err := models.LoadComparisonTarget(updated.Metadata); err != nil || ok {
+		t.Fatalf("comparison target remains: present=%v err=%v", ok, err)
+	}
+	if !eventBusHasType(bus, events.TaskUpdated) {
+		t.Fatal("same-branch target removal should publish task.updated")
+	}
+	if len(pusher.snapshot()) != 1 {
+		t.Fatalf("same-branch target removal should push live base map once, got %d", len(pusher.snapshot()))
 	}
 }
 
@@ -242,10 +303,11 @@ func TestUpdateRepositoryBaseBranch_RejectsUnsafeRefs(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, _ := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, _ := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "T",
 		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-1", BaseBranch: "main"}},
 	})
+	task := taskResult.Task
 	rows, _ := repo.ListTaskRepositories(ctx, task.ID)
 
 	for _, bad := range []string{"-upload-pack=evil", "main;rm -rf", "branch with space", "/leading-slash"} {
@@ -273,7 +335,7 @@ func TestUpdateRepositoryBaseBranch_NotFound(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, _ := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, _ := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
@@ -282,6 +344,7 @@ func TestUpdateRepositoryBaseBranch_NotFound(t *testing.T) {
 			{RepositoryID: "repo-1", BaseBranch: "main"},
 		},
 	})
+	task := taskResult.Task
 	rows, _ := repo.ListTaskRepositories(ctx, task.ID)
 
 	t.Run("unknown row id", func(t *testing.T) {
@@ -305,4 +368,193 @@ func TestUpdateRepositoryBaseBranch_NotFound(t *testing.T) {
 			t.Errorf("got %v, want ErrTaskRepositoryNotFound", err)
 		}
 	})
+}
+
+// Regression: collectTaskBaseBranches skipped any task_repositories row whose
+// Repository could not be resolved. For a multi-repo task that yields a
+// non-empty but INCOMPLETE map — and since agentctl's SetBaseBranches replaces
+// the stored map wholesale, pushing it silently drops the base branch of every
+// repository that was skipped. The len>0 guard does not catch this, because the
+// map is not empty; it is just missing entries. A partial hydration must be
+// treated as a failure, not pushed.
+func TestUpdateRepositoryBaseBranch_PartialHydrationIsNotPushed(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setBranchUpdateWorkflowStep(svc)
+	pusher := &fakeBaseBranchPusher{}
+	svc.SetAgentBaseBranchPusher(pusher)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-2", WorkspaceID: "ws-1", Name: "backend", DefaultBranch: "main"})
+
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "Multi repo",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/a"},
+			{RepositoryID: "repo-2", BaseBranch: "main", CheckoutBranch: "feature/b"},
+		},
+	})
+	task := taskResult.Task
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	rows, err := repo.ListTaskRepositories(ctx, task.ID)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("ListTaskRepositories: %v, rows=%d", err, len(rows))
+	}
+
+	// Delete one repository so its task_repositories row can no longer resolve
+	// a Name — the shape a failed GetRepository produces.
+	if err := repo.DeleteRepository(ctx, "repo-2"); err != nil {
+		t.Fatalf("DeleteRepository: %v", err)
+	}
+
+	var target string
+	for _, r := range rows {
+		if r.RepositoryID == "repo-1" {
+			target = r.ID
+		}
+	}
+
+	if _, err := svc.UpdateRepositoryBaseBranch(ctx, UpdateRepositoryBaseBranchRequest{
+		TaskID:           task.ID,
+		TaskRepositoryID: target,
+		BaseBranch:       "staging",
+	}); err != nil {
+		t.Fatalf("UpdateRepositoryBaseBranch: %v", err)
+	}
+
+	// The push must be skipped entirely. Pushing {frontend: staging} alone
+	// would replace the map and wipe backend's recorded base branch.
+	if calls := pusher.snapshot(); len(calls) != 0 {
+		t.Fatalf("expected no push for an incomplete hydration, got %d calls: %+v", len(calls), calls)
+	}
+}
+
+// Regression: collectTaskBaseBranches keyed the map by the bare Repository.Name.
+// A task may attach the same repository on several branches, and those siblings
+// live in `{RepoName}-{BranchSlug}` worktree directories — which is the name
+// their WorkspaceTracker reports. Keying by name alone collapsed every sibling
+// onto one entry, so the non-flat trackers found no key and fell back to
+// origin/main. Worse, because SetBaseBranches *replaces* the stored map, this
+// push overwrote the correctly-keyed map the launch path had already seeded.
+//
+// The keys must match lifecycle.baseBranchMetadataKey: the lowest-positioned
+// branch of a repeated repository keeps the flat legacy path, the rest are
+// suffixed with their branch-identity path slug.
+func TestUpdateRepositoryBaseBranch_MultiBranchKeysPerWorktree(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setBranchUpdateWorkflowStep(svc)
+	pusher := &fakeBaseBranchPusher{}
+	svc.SetAgentBaseBranchPusher(pusher)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
+
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "Same repo, two branches",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/a"},
+			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/b"},
+		},
+	})
+	task := taskResult.Task
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	rows, err := repo.ListTaskRepositories(ctx, task.ID)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("ListTaskRepositories: %v, rows=%d", err, len(rows))
+	}
+	var sibling string
+	for _, r := range rows {
+		if r.CheckoutBranch == "feature/b" {
+			sibling = r.ID
+		}
+	}
+	if sibling == "" {
+		t.Fatal("no task_repositories row for feature/b")
+	}
+
+	if _, err := svc.UpdateRepositoryBaseBranch(ctx, UpdateRepositoryBaseBranchRequest{
+		TaskID:           task.ID,
+		TaskRepositoryID: sibling,
+		BaseBranch:       "staging",
+	}); err != nil {
+		t.Fatalf("UpdateRepositoryBaseBranch: %v", err)
+	}
+
+	calls := pusher.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 pusher call, got %d", len(calls))
+	}
+	got := calls[0].branches
+
+	// feature/a is position 0, so it keeps the flat directory.
+	if got["frontend"] != "main" {
+		t.Errorf("branches[frontend] = %q, want main (flat sibling keeps its base)", got["frontend"])
+	}
+	// feature/b is the suffixed sibling and is the row we just updated.
+	if got["frontend-feature-b"] != "staging" {
+		t.Errorf("branches[frontend-feature-b] = %q, want staging", got["frontend-feature-b"])
+	}
+	// Multi-row tasks must not publish the empty-key fallback: lookupBaseBranch
+	// falls back to it for any unmatched tracker, which would hand one sibling's
+	// base branch to the other.
+	if _, ok := got[""]; ok {
+		t.Errorf("branches[\"\"] present for a multi-row task: %+v", got)
+	}
+}
+
+// The map keys are read by WorkspaceTracker, whose repositoryName is the
+// worktree *directory* basename — a sanitised repo name, not the raw
+// Repository.Name. A name with characters the directory sanitiser rewrites
+// (e.g. a space) produced a key no tracker could ever match.
+func TestCollectTaskBaseBranches_SanitizesRepositoryName(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setBranchUpdateWorkflowStep(svc)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "my repo", DefaultBranch: "main"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-2", WorkspaceID: "ws-1", Name: "backend", DefaultBranch: "main"})
+
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Unsanitised name",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/a"},
+			{RepositoryID: "repo-2", BaseBranch: "develop", CheckoutBranch: "feature/b"},
+		},
+	})
+	task := taskResult.Task
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	branches, err := svc.collectTaskBaseBranches(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("collectTaskBaseBranches: %v", err)
+	}
+	if branches["my-repo"] != "main" {
+		t.Errorf("branches[my-repo] = %q, want main; got map %+v", branches["my-repo"], branches)
+	}
+	if _, ok := branches["my repo"]; ok {
+		t.Errorf("raw repository name leaked as a key: %+v", branches)
+	}
+	if branches["backend"] != "develop" {
+		t.Errorf("branches[backend] = %q, want develop", branches["backend"])
+	}
 }

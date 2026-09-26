@@ -1,31 +1,16 @@
 "use client";
 
-import {
-  Children,
-  memo,
-  useState,
-  useCallback,
-  useMemo,
-  type ComponentPropsWithoutRef,
-  type ReactNode,
-} from "react";
-import type { Components } from "react-markdown";
-import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
+import { memo, useState, useCallback, useMemo } from "react";
+import { IconWand, IconMessageDots, IconFile, IconFolder } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
+import { TASK_DESCRIPTION_SYNTHETIC_ID } from "@/hooks/initial-prompt-preview";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
 import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
 import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
-import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
-import { useAppStore } from "@/components/state-provider";
-import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
-import { PromptPreview } from "@/components/task/chat/context-items/prompt-preview";
-import {
-  buildPromptMentionNames,
-  splitPreparedPromptMentionSegments,
-} from "@/lib/prompts/prompt-mention-segments";
 import {
   WorkflowStepMessageBadge,
   workflowMessageInfoFromMetadata,
@@ -33,9 +18,14 @@ import {
   type WorkflowStepMessageInfo,
 } from "./workflow-step-message-badge";
 import { AgentMessageContent } from "./agent-message-content";
-import { buildEntityReferenceMarkdownComponents } from "./entity-reference-chip";
+import {
+  usePromptMentionMarkdownComponents,
+  usePromptMentionNames,
+} from "./prompt-mention-components";
 import { entityReferencesFromMetadata } from "@/lib/entity-references/message-references";
-import type { EntityReference } from "@/lib/types/entity-reference";
+import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
+import { formatBytes } from "@/lib/utils/format-bytes";
+import { renderUserMessageBody } from "./user-message-body";
 
 type ChatMessageProps = {
   comment: Message;
@@ -91,53 +81,6 @@ function renderContentWithFileRefs(content: string): React.ReactNode[] {
   return parts.length > 0 ? parts : [content];
 }
 
-// ── Markdown component overrides imported from shared/markdown-components ─────
-
-type UserMessageBodyOptions = {
-  hasContent: boolean;
-  showRaw: boolean;
-  hasAttachments: boolean;
-  content: string;
-  rawContent?: string;
-  promptMentionComponents?: Components;
-  taskId: string;
-  worktreePath?: string;
-  onOpenFile?: (path: string) => void;
-};
-
-function renderUserMessageBody({
-  hasContent,
-  showRaw,
-  hasAttachments,
-  content,
-  rawContent,
-  promptMentionComponents,
-  taskId,
-  worktreePath,
-  onOpenFile,
-}: UserMessageBodyOptions): React.ReactNode {
-  if (hasContent && showRaw) {
-    return <pre className="whitespace-pre-wrap font-mono text-xs">{rawContent || content}</pre>;
-  }
-  if (hasContent) {
-    return (
-      <div className="markdown-body markdown-body-user max-w-none">
-        <MemoizedMarkdown
-          content={content}
-          taskId={taskId}
-          components={promptMentionComponents}
-          worktreePath={worktreePath}
-          onOpenFile={onOpenFile}
-        />
-      </div>
-    );
-  }
-  if (!hasAttachments) {
-    return <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">(empty)</p>;
-  }
-  return null;
-}
-
 // ── User message sub-component ──────────────────────────────────────
 
 type UserMessageProps = {
@@ -151,173 +94,16 @@ type UserMessageProps = {
 };
 
 type UserMessageMetadata = WorkflowMessageMetadata & {
-  attachments?: Array<{ type: string; data: string; mime_type: string; name?: string }>;
+  attachments?: UserMessageAttachment[];
   plan_mode?: boolean;
   has_review_comments?: boolean;
   has_hidden_prompts?: boolean;
-  context_files?: Array<{ path: string; name: string }>;
+  context_files?: Array<{ path: string; name: string; is_directory?: boolean }>;
   sender_task_id?: string;
   sender_task_title?: string;
   sender_session_id?: string;
   sender_session_name?: string;
 };
-
-type PromptMentionMarkdownTag =
-  | "p"
-  | "li"
-  | "h1"
-  | "h2"
-  | "h3"
-  | "h4"
-  | "h5"
-  | "h6"
-  | "blockquote"
-  | "td"
-  | "th";
-
-type MarkdownChildrenProps<T extends PromptMentionMarkdownTag> = ComponentPropsWithoutRef<T> & {
-  children?: ReactNode;
-  node?: unknown;
-};
-
-function usePromptMentionNames() {
-  const prompts = useAppStore((state) => state.prompts.items);
-  return useMemo(() => prompts.map((prompt) => prompt.name), [prompts]);
-}
-
-function usePromptMentionMarkdownComponents(
-  promptNames: string[],
-  entityReferences: readonly EntityReference[],
-): Components | undefined {
-  return useMemo(() => {
-    const mentionNames = buildPromptMentionNames(promptNames);
-    const baseComponents = buildEntityReferenceMarkdownComponents(entityReferences);
-    if (mentionNames.length === 0) {
-      return entityReferences.length === 0 ? undefined : baseComponents;
-    }
-    const renderChildren = (children: ReactNode, keyPrefix: string) =>
-      renderChildrenWithPromptMentions(children, mentionNames, keyPrefix);
-    return {
-      ...baseComponents,
-      p: ({ children, node, ...props }: MarkdownChildrenProps<"p">) => {
-        void node;
-        return <p {...props}>{renderChildren(children, "p")}</p>;
-      },
-      li: ({ children, node, ...props }: MarkdownChildrenProps<"li">) => {
-        void node;
-        return <li {...props}>{renderChildren(children, "li")}</li>;
-      },
-      h1: ({ children, node, ...props }: MarkdownChildrenProps<"h1">) => {
-        void node;
-        return <h1 {...props}>{renderChildren(children, "h1")}</h1>;
-      },
-      h2: ({ children, node, ...props }: MarkdownChildrenProps<"h2">) => {
-        void node;
-        return <h2 {...props}>{renderChildren(children, "h2")}</h2>;
-      },
-      h3: ({ children, node, ...props }: MarkdownChildrenProps<"h3">) => {
-        void node;
-        return <h3 {...props}>{renderChildren(children, "h3")}</h3>;
-      },
-      h4: ({ children, node, ...props }: MarkdownChildrenProps<"h4">) => {
-        void node;
-        return <h4 {...props}>{renderChildren(children, "h4")}</h4>;
-      },
-      h5: ({ children, node, ...props }: MarkdownChildrenProps<"h5">) => {
-        void node;
-        return <h5 {...props}>{renderChildren(children, "h5")}</h5>;
-      },
-      h6: ({ children, node, ...props }: MarkdownChildrenProps<"h6">) => {
-        void node;
-        return <h6 {...props}>{renderChildren(children, "h6")}</h6>;
-      },
-      blockquote: ({ children, node, ...props }: MarkdownChildrenProps<"blockquote">) => {
-        void node;
-        return <blockquote {...props}>{renderChildren(children, "blockquote")}</blockquote>;
-      },
-      td: ({ children, node, ...props }: MarkdownChildrenProps<"td">) => {
-        void node;
-        return <td {...props}>{renderChildren(children, "td")}</td>;
-      },
-      th: ({ children, node, ...props }: MarkdownChildrenProps<"th">) => {
-        void node;
-        return <th {...props}>{renderChildren(children, "th")}</th>;
-      },
-    };
-  }, [promptNames, entityReferences]);
-}
-
-function renderChildrenWithPromptMentions(
-  children: ReactNode,
-  promptNames: string[],
-  keyPrefix: string,
-) {
-  return Children.toArray(children).flatMap((child, index) => {
-    if (typeof child !== "string") return child;
-    return renderTextWithPromptMentions(child, promptNames, `${keyPrefix}-${index}`);
-  });
-}
-
-function renderTextWithPromptMentions(text: string, promptNames: string[], keyPrefix: string) {
-  return splitPreparedPromptMentionSegments(text, promptNames).map((segment, index) => {
-    if (segment.kind === "text") return segment.value;
-    return (
-      <PromptMentionChip
-        key={`${keyPrefix}-prompt-${index}`}
-        name={segment.name}
-        value={segment.value}
-      />
-    );
-  });
-}
-
-const PROMPT_MENTION_CHIP_CLASS =
-  "inline rounded-md border border-emerald-300/35 bg-emerald-400/20 px-1.5 py-0.5 font-mono text-[0.88em] font-semibold text-emerald-950 box-decoration-clone break-all dark:text-emerald-100";
-
-/**
- * Renders a saved-prompt @mention as a chip. When the referenced prompt is
- * loaded in the store, hovering the chip reveals its contents so the reader
- * doesn't need to switch to the raw message view.
- */
-function PromptMentionChip({ name, value }: { name: string; value: string }) {
-  const content = useAppStore(
-    useCallback(
-      (state) => state.prompts.items.find((prompt) => prompt.name === name)?.content ?? null,
-      [name],
-    ),
-  );
-
-  if (!content) {
-    return (
-      <span
-        data-testid="custom-prompt-mention"
-        data-prompt-name={name}
-        title={`Custom prompt: ${name}`}
-        className={PROMPT_MENTION_CHIP_CLASS}
-      >
-        {value}
-      </span>
-    );
-  }
-
-  return (
-    <HoverCard openDelay={300} closeDelay={0}>
-      <HoverCardTrigger asChild>
-        <span
-          data-testid="custom-prompt-mention"
-          data-prompt-name={name}
-          tabIndex={0}
-          className={cn(PROMPT_MENTION_CHIP_CLASS, "cursor-default")}
-        >
-          {value}
-        </span>
-      </HoverCardTrigger>
-      <HoverCardContent side="top" align="start" className="w-80 max-h-80 overflow-y-auto">
-        <PromptPreview content={content} />
-      </HoverCardContent>
-    </HoverCard>
-  );
-}
 
 function parseUserMessageMetadata(comment: Message) {
   const metadata = comment.metadata as UserMessageMetadata | undefined;
@@ -361,10 +147,11 @@ function UserContextBadges({
 }: {
   hasPlanMode: boolean;
   hasReviewComments: boolean;
-  contextFiles: Array<{ path: string; name: string }>;
+  contextFiles: Array<{ path: string; name: string; is_directory?: boolean }>;
   senderTask: SenderTaskInfo | null;
   workflowMessage: WorkflowStepMessageInfo | null;
 }) {
+  const { t } = useTranslation();
   if (
     !hasPlanMode &&
     !hasReviewComments &&
@@ -379,27 +166,41 @@ function UserContextBadges({
       {senderTask && <SenderTaskBadge sender={senderTask} />}
       {hasPlanMode && (
         <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/20 px-2 py-0.5 text-[10px] text-slate-400">
-          <IconWand size={10} /> Plan mode
+          <IconWand size={10} /> {t("task:planMode")}
         </span>
       )}
       {hasReviewComments && (
         <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/20 px-2 py-0.5 text-[10px] text-blue-400">
-          <IconMessageDots size={10} /> Review comments
+          <IconMessageDots size={10} /> {t("task:reviewComments")}
         </span>
       )}
       {contextFiles.map((f) => (
         <span
           key={f.path}
+          data-testid="message-context-file"
+          data-path={f.path}
           className="inline-flex items-center gap-1 rounded-full bg-muted/50 px-2 py-0.5 text-[10px] text-muted-foreground"
         >
-          <IconFile size={10} /> {f.name}
+          {f.is_directory ? (
+            <IconFolder data-testid="message-context-directory-icon" size={10} />
+          ) : (
+            <IconFile data-testid="message-context-file-icon" size={10} />
+          )}{" "}
+          {f.name}
         </span>
       ))}
     </div>
   );
 }
 
-type UserMessageAttachment = { type: string; data: string; mime_type: string; name?: string };
+type UserMessageAttachment = {
+  type: string;
+  data?: string;
+  attachment_id?: string;
+  mime_type: string;
+  name?: string;
+  size_bytes?: number;
+};
 
 /** Renders image previews and file chips attached to a user message. */
 function UserMessageAttachments({
@@ -411,16 +212,37 @@ function UserMessageAttachments({
   fileAttachments: UserMessageAttachment[];
   hasContent: boolean;
 }) {
+  const { t } = useTranslation("chat");
+  const sourceFor = (attachment: UserMessageAttachment) => {
+    if (attachment.attachment_id) {
+      return attachmentContentUrl(attachment.attachment_id);
+    }
+    if (attachment.data) {
+      return `data:${attachment.mime_type};base64,${attachment.data}`;
+    }
+    return null;
+  };
   return (
     <div className={cn("flex flex-wrap gap-2", hasContent && "mb-2")}>
-      {imageAttachments.map((att, index) => (
-        <ImagePreviewDialog
-          key={index}
-          src={`data:${att.mime_type};base64,${att.data}`}
-          alt={`Attachment ${index + 1}`}
-          thumbnailClassName="max-h-48 max-w-full rounded-lg object-contain transition-opacity hover:opacity-90"
-        />
-      ))}
+      {imageAttachments.map((att, index) => {
+        const src = sourceFor(att);
+        if (!src) {
+          return (
+            <span key={`image-${index}`} className="inline-flex items-center gap-1.5 text-xs">
+              <IconFile size={12} />
+              {att.name || t("chat:attachmentFallbackName")}
+            </span>
+          );
+        }
+        return (
+          <ImagePreviewDialog
+            key={index}
+            src={src}
+            alt={t("chat:attachmentMessageAlt", { index: index + 1 })}
+            thumbnailClassName="max-h-48 max-w-full rounded-lg object-contain transition-opacity hover:opacity-90"
+          />
+        );
+      })}
       {fileAttachments.map((att, index) => (
         <span
           key={`file-${index}`}
@@ -428,7 +250,10 @@ function UserMessageAttachments({
           className="inline-flex self-start items-center gap-1.5 rounded-full bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground"
         >
           <IconFile size={12} />
-          {att.name || "Attachment"}
+          <span>{att.name || t("chat:attachmentFallbackName")}</span>
+          {typeof att.size_bytes === "number" && (
+            <span className="text-[10px]">({formatBytes(att.size_bytes)})</span>
+          )}
         </span>
       ))}
     </div>
@@ -511,7 +336,9 @@ function UserMessageContent({
           isRawView={showRaw}
           onToggleRaw={onToggleRaw}
           isFavorite={isFavorite}
-          onToggleFavorite={toggleFavorite}
+          onToggleFavorite={
+            comment.id === TASK_DESCRIPTION_SYNTHETIC_ID ? undefined : toggleFavorite
+          }
           onNavigatePrev={() => {
             if (userNavigation.previousId && onScrollToMessage)
               onScrollToMessage(userNavigation.previousId);
@@ -541,6 +368,7 @@ export const ChatMessage = memo(function ChatMessage({
   onScrollToMessage,
   isTurnActive = false,
 }: ChatMessageProps) {
+  const { t } = useTranslation();
   const [showRaw, setShowRaw] = useState(false);
   const toggleRaw = useCallback(() => setShowRaw((v) => !v), []);
 
@@ -552,13 +380,13 @@ export const ChatMessage = memo(function ChatMessage({
           <p className="text-[11px] uppercase tracking-wide opacity-70">
             {comment.requests_input ? (
               <span className="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-300">
-                Needs input
+                {t("task:needsInput")}
               </span>
             ) : null}
           </p>
         </div>
         <p className="whitespace-pre-wrap">
-          {comment.content ? renderContentWithFileRefs(comment.content) : "(empty)"}
+          {comment.content ? renderContentWithFileRefs(comment.content) : t("task:empty")}
         </p>
       </div>
     );

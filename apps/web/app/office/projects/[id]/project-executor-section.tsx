@@ -10,34 +10,36 @@ import { toast } from "@/lib/toast/sonner";
 import { updateProject } from "@/lib/api/domains/office-api";
 import { useAppStore } from "@/components/state-provider";
 import type { Project } from "@/lib/state/slices/office/types";
+import { useTranslation } from "react-i18next";
 
 type ProjectExecutorSectionProps = {
   project: Project;
 };
 
 function ExecutorTypeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1">
-      <Label className="text-xs">Type</Label>
+      <Label className="text-xs">{t("office:type")}</Label>
       <Select value={value || "inherit"} onValueChange={(v) => onChange(v === "inherit" ? "" : v)}>
         <SelectTrigger className="cursor-pointer">
-          <SelectValue placeholder="Inherit from workspace" />
+          <SelectValue placeholder={t("office:inheritFromWorkspace")} />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="inherit" className="cursor-pointer">
-            Inherit from workspace
+            {t("office:inheritFromWorkspace")}
           </SelectItem>
           <SelectItem value="local_pc" className="cursor-pointer">
-            Local (standalone)
+            {t("office:localStandalone")}
           </SelectItem>
           <SelectItem value="local_docker" className="cursor-pointer">
-            Local Docker
+            {t("office:localDocker")}
           </SelectItem>
           <SelectItem value="sprites" className="cursor-pointer">
-            Sprites (remote sandbox)
+            {t("office:spritesRemoteSandbox")}
           </SelectItem>
           <SelectItem value="remote_docker" className="cursor-pointer">
-            Remote Docker
+            {t("office:remoteDocker")}
           </SelectItem>
         </SelectContent>
       </Select>
@@ -60,19 +62,20 @@ function ContainerFields({
   onMemoryChange: (v: string) => void;
   onCpuChange: (v: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <div className="space-y-1">
-        <Label className="text-xs">Docker Image</Label>
+        <Label className="text-xs">{t("office:dockerImage")}</Label>
         <Input
-          placeholder="e.g. node:20-slim"
+          placeholder={t("office:dockerImageExample")}
           value={image}
           onChange={(e) => onImageChange(e.target.value)}
         />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
-          <Label className="text-xs">Memory (MB)</Label>
+          <Label className="text-xs">{t("office:memoryMb")}</Label>
           <Input
             type="number"
             placeholder="4096"
@@ -81,7 +84,7 @@ function ContainerFields({
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">CPU Cores</Label>
+          <Label className="text-xs">{t("office:cpuCores")}</Label>
           <Input
             type="number"
             placeholder="2"
@@ -94,7 +97,27 @@ function ContainerFields({
   );
 }
 
+function buildConfig(input: {
+  executorType: string;
+  image: string;
+  memoryMb: string;
+  cpuCores: string;
+  isContainer: boolean;
+}): Record<string, unknown> {
+  const config: Record<string, unknown> = {};
+  if (input.executorType) config.type = input.executorType;
+  if (input.image) config.image = input.image;
+  if (input.isContainer && (input.memoryMb || input.cpuCores)) {
+    const limits: Record<string, number> = {};
+    if (input.memoryMb) limits.memory_mb = parseInt(input.memoryMb, 10);
+    if (input.cpuCores) limits.cpu_cores = parseInt(input.cpuCores, 10);
+    config.resource_limits = limits;
+  }
+  return config;
+}
+
 export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps) {
+  const { t } = useTranslation();
   const updateProjectStore = useAppStore((s) => s.updateProject);
   const config = project.executorConfig ?? {};
 
@@ -114,33 +137,36 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      const newConfig: Record<string, unknown> = {};
-      if (executorType) newConfig.type = executorType;
-      if (image) newConfig.image = image;
-      if (isContainer && (memoryMb || cpuCores)) {
-        const limits: Record<string, number> = {};
-        if (memoryMb) limits.memory_mb = parseInt(memoryMb, 10);
-        if (cpuCores) limits.cpu_cores = parseInt(cpuCores, 10);
-        newConfig.resource_limits = limits;
-      }
+      const newConfig = buildConfig({ executorType, image, memoryMb, cpuCores, isContainer });
       await updateProject(project.id, { executorConfig: newConfig });
-      updateProjectStore(project.id, { executorConfig: newConfig });
+      updateProjectStore(project.workspaceId, project.id, { executorConfig: newConfig });
       setDirty(false);
-      toast.success("Executor configuration saved");
+      toast.success(t("office:executorConfigurationSaved"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save executor configuration");
+      toast.error(
+        err instanceof Error ? err.message : t("office:failedToSaveExecutorConfiguration"),
+      );
     } finally {
       setSaving(false);
     }
-  }, [executorType, image, memoryMb, cpuCores, isContainer, project.id, updateProjectStore]);
+  }, [
+    executorType,
+    image,
+    memoryMb,
+    cpuCores,
+    isContainer,
+    project.id,
+    updateProjectStore,
+    project.workspaceId,
+  ]);
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold">Executor Configuration</h2>
+          <h2 className="text-sm font-semibold">{t("office:executorConfiguration")}</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            How agent sessions run for this project.
+            {t("office:howAgentSessionsRunForThis")}
           </p>
         </div>
         {dirty && (
@@ -152,7 +178,7 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
             className="cursor-pointer"
           >
             <IconDeviceFloppy className="h-3.5 w-3.5 mr-1" />
-            Save
+            {t("common:save")}
           </Button>
         )}
       </div>

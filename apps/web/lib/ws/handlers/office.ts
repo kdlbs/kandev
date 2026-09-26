@@ -1,6 +1,13 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
+import type {
+  OfficeTask,
+  OfficeTaskStatus,
+  ProviderHealth,
+  RouteAttempt,
+} from "@/lib/state/slices/office/types";
+import { isFieldGuarded } from "@/lib/state/office-task-content-sync";
 
 /**
  * Registers WS handlers for office domain events.
@@ -27,17 +34,11 @@ export function registerOfficeHandlers(store: StoreApi<AppState>): WsHandlers {
     return !wsId || wsId === activeId;
   };
 
+  // Delegates to the store's own patchTaskInStore action rather than
+  // writing office.tasks.items directly, so a raw wire status (e.g.
+  // "SCHEDULING") gets the same normalization as API-sourced task loads.
   const updateTaskStatus = (taskId: string, fields: Record<string, unknown>) => {
-    store.setState((state) => ({
-      ...state,
-      office: {
-        ...state.office,
-        tasks: {
-          ...state.office.tasks,
-          items: state.office.tasks.items.map((i) => (i.id === taskId ? { ...i, ...fields } : i)),
-        },
-      },
-    }));
+    store.getState().patchTaskInStore(taskId, fields as Partial<OfficeTask>);
   };
 
   return {
@@ -61,11 +62,24 @@ function buildTaskHandlers(
       if (!isCurrentWorkspace(p)) return;
       const taskId = (p.task_id ?? p.id) as string | undefined;
       if (!taskId) return;
-      updateTaskStatus(taskId, normalizeIssueFields(p));
+      updateTaskStatus(taskId, stripGuardedContentFields(taskId, normalizeIssueFields(p)));
       // Per-task channel — the detail page subscribes to refresh the
       // server-authoritative task DTO after a property mutation.
       triggerRefetch(`task:${taskId}`);
       triggerRefetch("dashboard");
+      // Cost-by-project breakdown groups by the task's live project_id
+      // (see costs.go), so reassigning a task's project changes an
+      // already-computed breakdown without a dedicated cost event. Gate on
+      // `fields` (only DashboardService.UpdateTaskProjectID sends it) so the
+      // generic kanban task.updated forward — which carries no `fields` —
+      // doesn't refetch costs on every unrelated task touch.
+      const fields = p.fields as string[] | undefined;
+      if (Array.isArray(fields) && fields.includes("project_id")) {
+        triggerRefetch("costs");
+        triggerRefetch("tasks");
+        triggerRefetch("inbox");
+        triggerRefetch("activity");
+      }
     },
 
     "office.task.created": (message) => {
@@ -79,12 +93,20 @@ function buildTaskHandlers(
       if (!isCurrentWorkspace(p)) return;
       const taskId = (p.task_id ?? p.id) as string | undefined;
       const newStatus = p.new_status as string | undefined;
-      if (!taskId || !newStatus) {
+      if (!taskId) {
         triggerRefetch("tasks");
         triggerRefetch("dashboard");
         return;
       }
-      updateTaskStatus(taskId, { status: newStatus as OfficeTaskStatus });
+      // The task service publishes task.moved without new_status. Keep the
+      // direct patch when a producer provides one, but always refresh the
+      // detail and activity projections for a known task.
+      if (newStatus) {
+        updateTaskStatus(taskId, { status: newStatus as OfficeTaskStatus });
+      } else {
+        triggerRefetch("tasks");
+      }
+      triggerRefetch(`task:${taskId}`);
       triggerRefetch("dashboard");
       triggerRefetch("activity");
     },
@@ -99,6 +121,7 @@ function buildTaskHandlers(
         return;
       }
       updateTaskStatus(taskId, { status: newStatus as OfficeTaskStatus });
+      triggerRefetch(`task:${taskId}`);
       triggerRefetch("dashboard");
     },
 
@@ -134,11 +157,20 @@ function buildAgentHandlers(
   triggerRefetch: (type: string) => void,
   isCurrentWorkspace: WorkspaceCheck,
 ): WsHandlers {
+  // Which workspace's agent list this event mutates. `isCurrentWorkspace` has
+  // already passed, so a payload carrying no `workspace_id` (legacy events) is
+  // by definition about the active one.
+  const targetWorkspaceId = (payload: Record<string, unknown>): string | null =>
+    (payload.workspace_id as string | undefined) ?? store.getState().workspaces.activeId;
+
   return {
     "office.agent.completed": (message) => {
       if (!isCurrentWorkspace(message.payload)) return;
       const agentId = message.payload.agent_profile_id as string | undefined;
-      if (agentId) store.getState().updateOfficeAgentProfile(agentId, { status: "idle" });
+      const workspaceId = targetWorkspaceId(message.payload);
+      if (agentId && workspaceId) {
+        store.getState().updateOfficeAgentProfile(workspaceId, agentId, { status: "idle" });
+      }
       triggerRefetch("dashboard");
       triggerRefetch("agents");
       triggerRefetch("activity");
@@ -147,7 +179,10 @@ function buildAgentHandlers(
     "office.agent.failed": (message) => {
       if (!isCurrentWorkspace(message.payload)) return;
       const agentId = message.payload.agent_profile_id as string | undefined;
-      if (agentId) store.getState().updateOfficeAgentProfile(agentId, { status: "idle" });
+      const workspaceId = targetWorkspaceId(message.payload);
+      if (agentId && workspaceId) {
+        store.getState().updateOfficeAgentProfile(workspaceId, agentId, { status: "idle" });
+      }
       triggerRefetch("dashboard");
       triggerRefetch("agents");
     },
@@ -197,6 +232,10 @@ function buildMiscHandlers(
       if (!isCurrentWorkspace(message.payload)) return;
       triggerRefetch("runs");
       triggerRefetch("agents");
+      // A failed run can add (or, for a repeat taskless failure, auto-
+      // dismiss) an inbox row — refresh the inbox so that appears live
+      // instead of waiting for an unrelated event or a manual reload.
+      if (message.payload.status === "failed") triggerRefetch("inbox");
       // The run lifecycle just advanced (claimed → finished/failed/
       // cancelled) — refresh the chat for the affected task so the
       // badge transitions to its new state (or hides on finished).
@@ -244,8 +283,8 @@ function buildRoutingHandlers(
   };
 }
 
-type ProviderHealthPayload = import("@/lib/state/slices/office/types").ProviderHealth;
-type RouteAttemptPayload = import("@/lib/state/slices/office/types").RouteAttempt;
+type ProviderHealthPayload = ProviderHealth;
+type RouteAttemptPayload = RouteAttempt;
 
 function extractProviderHealth(p: Record<string, unknown>): ProviderHealthPayload | null {
   if (typeof p.provider_id !== "string" || typeof p.scope !== "string") return null;
@@ -269,13 +308,27 @@ function normalizeIssueFields(p: Record<string, unknown>): Record<string, unknow
   const out: Record<string, unknown> = {};
   if (p.title != null) out.title = p.title;
   if (p.description != null) out.description = p.description;
+  if (p.state != null) out.status = p.state;
   if (p.status != null) out.status = p.status;
   if (p.new_status != null) out.status = p.new_status;
   if (p.priority != null) out.priority = p.priority;
+  if (p.project_id != null) out.projectId = p.project_id;
   if (p.updated_at != null) out.updatedAt = p.updated_at;
   if (p.assignee_agent_profile_id != null) out.assigneeAgentProfileId = p.assignee_agent_profile_id;
   return out;
 }
 
-// Re-import the type for the status field cast
-type OfficeTaskStatus = import("@/lib/state/slices/office/types").OfficeTaskStatus;
+/**
+ * AC-61: a guarded field (open editor or unresolved write) must not be
+ * overwritten by this unguarded WS fast path, even though this handler is
+ * shared with surfaces (list/board cards) where no editor is ever open.
+ */
+function stripGuardedContentFields(
+  taskId: string,
+  fields: Record<string, unknown>,
+): Record<string, unknown> {
+  const out = { ...fields };
+  if (isFieldGuarded(taskId, "title")) delete out.title;
+  if (isFieldGuarded(taskId, "description")) delete out.description;
+  return out;
+}

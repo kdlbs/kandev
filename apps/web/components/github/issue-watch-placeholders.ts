@@ -56,6 +56,7 @@ export function issueWatchPlaceholders(t: TFunction): ScriptPlaceholder[] {
  * Seeded into the prompt field, then persisted and sent to the agent verbatim.
  * Deliberately NOT translated — see `DEFAULT_REVIEW_WATCH_PROMPT`.
  */
+// i18n-exempt: default watch prompt, persisted and sent verbatim to the agent.
 export const DEFAULT_ISSUE_WATCH_PROMPT = `You have been assigned a GitHub issue to work on.
 
 **Issue:** {{issue.link}}

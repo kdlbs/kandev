@@ -11,6 +11,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/persistence"
+	"github.com/kandev/kandev/internal/system/maintenance"
 )
 
 // resetConfirmToken is the literal value the client must POST as
@@ -26,13 +29,14 @@ var ErrResetNotConfirmed = errors.New("factory reset requires confirm=\"RESET\""
 // caller must pass confirm == "RESET" — anything else returns
 // ErrResetNotConfirmed without starting a job. On success the job ID is
 // returned immediately; the heavy work runs asynchronously via the jobs
-// tracker.
+// tracker. Accepted jobs outlive the caller context.
 //
 // The job:
 //  1. Calls s.OrchestratorShutdown (if set) to stop running executions.
-//  2. Snapshots the live DB to <dataDir>/backups/kandev-pre-reset-<unix>.db.
-//  3. Drops every user table from the SQLite schema (kandev_meta is kept).
-//  4. os.RemoveAll on worktrees/repos/sessions/tasks/quick-chat subdirs.
+//  2. Calls s.DatabaseQuiesce (if set) to stop database-backed workers.
+//  3. Snapshots the live DB to the sibling backups directory.
+//  4. Drops every user table from the SQLite schema (kandev_meta is kept).
+//  5. os.RemoveAll on worktrees/repos/sessions/tasks/quick-chat subdirs.
 //
 // On success the result map exposes {"snapshot_path", "tables_dropped",
 // "restart_required": true}. The frontend dialog uses restart_required to
@@ -41,23 +45,53 @@ func (s *Service) FactoryReset(ctx context.Context, confirm string) (string, err
 	if confirm != resetConfirmToken {
 		return "", ErrResetNotConfirmed
 	}
-	return s.jobs.Start(ctx, "factory-reset", func(jobCtx context.Context) (map[string]interface{}, error) {
+	return s.jobs.Start(context.WithoutCancel(ctx), "factory-reset", func(jobCtx context.Context) (map[string]interface{}, error) {
 		return s.runFactoryReset(jobCtx)
 	}), nil
 }
 
-func (s *Service) runFactoryReset(_ context.Context) (map[string]interface{}, error) {
+func (s *Service) runFactoryReset(ctx context.Context) (map[string]interface{}, error) {
+	release, err := maintenance.ForPool(s.pool).Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := s.requireSQLiteMaintenance("factory reset"); err != nil {
 		return nil, err
+	}
+	if s.PersistenceUnavailable != nil {
+		s.PersistenceUnavailable()
 	}
 
 	if s.OrchestratorShutdown != nil {
 		s.OrchestratorShutdown()
 	}
+	if s.DatabaseQuiesce != nil {
+		if err := s.DatabaseQuiesce(); err != nil {
+			return nil, fmt.Errorf("quiesce database workers: %w", err)
+		}
+	}
 
-	snapshotPath, err := s.createPreResetSnapshot()
+	snapshotPath, err := s.createPreResetSnapshot(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("pre-reset snapshot: %w", err)
+	}
+
+	// Delete the delivery-ledger and run-outcome activation keys BEFORE
+	// dropping any user table (docs/specs/task-delivery-ledger/spec.md,
+	// "Reset parity"). kandev_meta itself survives the drop loop below, so
+	// a stale activation key left behind would point at a boot instant
+	// before data that no longer exists — a post-reset task with no
+	// ledger row would then read as "observed as nothing" rather than
+	// "not observed". Ordering matters because the drop loop is not
+	// transactional: if key deletion fails, the reset fails here and no
+	// table is dropped, which is the fail-safe order — the alternative
+	// (drop first, delete keys second) can leave a present key pointing
+	// at data a later step just removed.
+	if err := persistence.DeleteKeys(s.pool.Writer(),
+		"telemetry.delivery_ledger.activated_at", "telemetry.run_outcome.activated_at",
+	); err != nil {
+		return nil, fmt.Errorf("delete activation keys: %w", err)
 	}
 
 	dropped, err := dropUserTables(s.pool.Writer())
@@ -82,17 +116,17 @@ func (s *Service) runFactoryReset(_ context.Context) (map[string]interface{}, er
 // createPreResetSnapshot performs VACUUM INTO into a stable, time-stamped
 // path inside the backups directory. The "kandev-" prefix is kept so the
 // existing backup retention regex continues to match the file.
-func (s *Service) createPreResetSnapshot() (string, error) {
+func (s *Service) createPreResetSnapshot(ctx context.Context) (string, error) {
 	if s.pool == nil {
 		return "", fmt.Errorf("no database pool")
 	}
-	backupDir := filepath.Join(s.dataDir, "backups")
+	backupDir := s.backupsDir()
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir backups: %w", err)
 	}
 	name := fmt.Sprintf("kandev-pre-reset-%s.db", strconv.FormatInt(time.Now().UTC().Unix(), 10))
 	path := filepath.Join(backupDir, name)
-	if _, err := s.pool.Writer().Exec(`VACUUM INTO ?`, path); err != nil {
+	if _, err := persistence.SnapshotSQLiteContext(ctx, s.pool.Writer(), path); err != nil {
 		return "", fmt.Errorf("vacuum into %s: %w", path, err)
 	}
 	if s.log != nil {

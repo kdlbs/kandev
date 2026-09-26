@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { cn } from "@kandev/ui/lib/utils";
 import type { InstructionFile } from "./agent-instructions-tab";
+import { useTranslation } from "react-i18next";
 
 type InstructionFileListProps = {
   files: InstructionFile[];
@@ -26,6 +27,7 @@ export function InstructionFileList({
   onSelect,
   onAdd,
 }: InstructionFileListProps) {
+  const { t } = useTranslation();
   const [showInput, setShowInput] = useState(false);
   const [newFilename, setNewFilename] = useState("");
 
@@ -43,7 +45,7 @@ export function InstructionFileList({
     <div className="w-[250px] shrink-0 border border-border rounded-lg">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Files
+          {t("common:files")}
         </span>
         <Button
           variant="ghost"
@@ -72,7 +74,7 @@ export function InstructionFileList({
       <div className="py-1">
         {files.length === 0 && (
           <p className="px-3 py-4 text-xs text-muted-foreground text-center">
-            No instruction files yet.
+            {t("office:noInstructionFilesYet")}
           </p>
         )}
         {files.map((f) => (

@@ -1,6 +1,14 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { SessionPage } from "../../pages/session-page";
+import { waitForHttp } from "../../helpers/causal-waits";
+import { switchToTerminalPanel, waitForShellReady } from "../terminal/mobile-terminal-helpers";
+import {
+  cleanupPRLinkForkLaunchFixture,
+  createPRLinkForkLaunchFixture,
+  expectForkPRLaunchState,
+} from "./pr-link-fork-launch-helpers";
 
 function expectedRemoteTitle(title: string): string {
   const characters = Array.from(title);
@@ -94,6 +102,80 @@ test.describe("Create task Remote repo picker on mobile", () => {
     await expect(testPage.getByTestId("remote-branch-chip-trigger")).toContainText("main");
     await expect.poll(() => branchRequests).toBe(1);
     await expectNoDocumentHorizontalOverflow(testPage);
+  });
+
+  test("starts a target-attached fork PR from its URL", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    const fixture = await createPRLinkForkLaunchFixture(
+      apiClient,
+      seedData.workspaceId,
+      backend.tmpDir,
+    );
+    let taskId: string | undefined;
+
+    try {
+      const { executors } = await apiClient.listExecutors();
+      const worktreeExec = executors.find((executor) => executor.type === "worktree");
+      if (!worktreeExec?.profiles?.[0]) {
+        test.skip(true, "No worktree executor profile available");
+        return;
+      }
+
+      const taskTitle = `Phone fork PR ${fixture.repositoryName}`;
+      const mobile = new MobileKanbanPage(testPage);
+      await mobile.goto();
+      await mobile.mobileFab.tap();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await testPage.getByTestId("source-mode-remote").tap();
+      await testPage.getByTestId("remote-repo-chip-trigger").first().tap();
+      const urlInput = testPage.getByTestId("remote-repo-input");
+      await expect(urlInput).toBeVisible();
+      await urlInput.fill(fixture.prURL);
+      await urlInput.press("Enter");
+      await expect(testPage.getByTestId("remote-branch-chip-trigger").first()).toContainText(
+        fixture.headBranch,
+      );
+      await testPage.getByTestId("task-title-input").fill(taskTitle);
+      await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
+
+      const startButton = testPage.getByTestId("submit-start-agent");
+      await expect(startButton).toBeEnabled();
+      await testPage.getByTestId("executor-profile-selector").tap();
+      await testPage.getByRole("option", { name: /Worktree/i }).tap();
+      const createdTaskResponse = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
+      await startButton.tap();
+      const response = await createdTaskResponse;
+      const responseBody = await response.text();
+      expect(response.status(), responseBody).toBe(200);
+      const created = JSON.parse(responseBody) as { id: string };
+      taskId = created.id;
+      const requestBody = response.request().postDataJSON() as {
+        repositories?: Array<Record<string, unknown>>;
+      };
+      expect(requestBody.repositories?.[0]).not.toHaveProperty("remote_contribution");
+      expect(requestBody.repositories?.[0]).not.toHaveProperty("comparison_target");
+
+      await expect(dialog).not.toBeVisible();
+      await expect(mobile.taskCard(taskId)).toBeVisible({ timeout: 15_000 });
+      await mobile.taskCard(taskId).tap();
+      await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}$`));
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible();
+      await expect(session.idleInput()).toBeVisible();
+
+      await switchToTerminalPanel(testPage);
+      await waitForShellReady(testPage);
+      await expectForkPRLaunchState(testPage, session, apiClient, fixture, taskId);
+    } finally {
+      await cleanupPRLinkForkLaunchFixture(apiClient, fixture, taskId);
+    }
   });
 
   test("keeps a failed URL row touch-usable and retries its branch resolution", async ({
@@ -306,5 +388,52 @@ test.describe("Create task Remote repo picker on mobile", () => {
     await expect(testPage.getByTestId("remote-repo-chip-trigger").nth(1)).toContainText(
       "mock-user/duplicate",
     );
+  });
+
+  test("keeps an unconfigured provider out of the touch picker", async ({
+    apiClient,
+    seedData,
+    testPage,
+    prCapture,
+  }) => {
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+    await apiClient.mockGitHubAddRepos("mock-user", [
+      {
+        full_name: "mock-user/phone-alpha",
+        owner: "mock-user",
+        name: "phone-alpha",
+        private: false,
+      },
+    ]);
+    let gitLabProjectRequests = 0;
+    await testPage.route("**/api/v1/gitlab/projects?*", async (route) => {
+      gitLabProjectRequests += 1;
+      await route.continue();
+    });
+
+    await openRemotePicker(testPage);
+
+    await expect(
+      testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/phone-alpha" }),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("remote-repo-provider-tabs")).toHaveCount(0);
+    await expect(testPage.getByText(/Could not load repositories/i)).toHaveCount(0);
+    await expect(testPage.getByTestId("remote-repo-input")).toBeVisible();
+    expect(gitLabProjectRequests).toBe(0);
+    await prCapture.screenshot("remote-repository-picker-mobile", {
+      caption: "Mobile remote picker with an unconfigured provider hidden",
+    });
+
+    await testPage
+      .getByTestId("remote-repo-option")
+      .filter({ hasText: "mock-user/phone-alpha" })
+      .tap();
+    await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
+      "mock-user/phone-alpha",
+    );
+    await expectNoDocumentHorizontalOverflow(testPage);
   });
 });

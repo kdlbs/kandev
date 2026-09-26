@@ -108,15 +108,28 @@ export class PrAssetCapture {
   private recordingInterval: ReturnType<typeof setInterval> | null = null;
   private recordingFrameCount = 0;
 
-  constructor(page: Page, testFile: string, opts?: { outputDir?: string }) {
+  constructor(page: Page, testFile: string, opts?: { outputDir?: string; captureKey?: string }) {
     this.page = page;
     this.enabled = !!process.env.CAPTURE_PR_ASSETS;
     this.outputDir = opts?.outputDir ?? DEFAULT_OUTPUT_DIR;
-    this.testSlug = getTestSlug(testFile);
+    const fileSlug = getTestSlug(testFile);
+    const captureKey = sanitizeName(opts?.captureKey ?? "");
+    this.testSlug = captureKey ? `${fileSlug}-${captureKey}` : fileSlug;
 
     if (this.enabled) {
       ensureDir(this.outputDir);
     }
+  }
+
+  /**
+   * Whether captures are actually being written (`CAPTURE_PR_ASSETS`).
+   *
+   * Every capture method is a no-op otherwise, so a spec that does extra work
+   * *for* a capture -- settling the UI, hiding transient chrome -- should skip
+   * that work in ordinary runs rather than pay for it on every shard.
+   */
+  get capturing(): boolean {
+    return this.enabled;
   }
 
   /**

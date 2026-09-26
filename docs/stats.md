@@ -17,9 +17,9 @@ Frontend                        Backend                         Database
          ├─ Overview cards        └─ httpGetStats()              ├─ tasks
          ├─ Heatmap                   ├─ GetGlobalStats()        ├─ task_sessions
          ├─ Completed chart           ├─ GetTaskStats()          ├─ task_session_turns
-         ├─ Agent usage               ├─ GetDailyActivity()      ├─ task_session_messages
+         ├─ Model usage               ├─ GetDailyActivity()      ├─ task_session_messages
          ├─ Repo stats               ├─ GetCompletedTaskActivity()├─ task_session_commits
-         └─ Workload                  ├─ GetAgentUsage()         ├─ task_repositories
+         └─ Workload                  ├─ GetModelUsage()         ├─ task_repositories
                                       ├─ GetRepositoryStats()    ├─ repositories
                                       └─ GetGitStats()           └─ workflow_steps
 ```
@@ -67,7 +67,7 @@ The handler at `apps/backend/internal/analytics/handlers/stats_handlers.go` call
 | Duration | `SUM((julianday(completed_at) - julianday(started_at)) * 86400000)` on turns |
 | Tool calls | Messages with `type LIKE 'tool_%'` |
 | User messages | Messages with `author_type = 'user'` |
-| Agent name/model | `json_extract()` from `agent_profile_snapshot` on sessions |
+| Model | `json_extract()` of `model` (then `model_name`, `llm`) from `agent_profile_snapshot` on sessions. Usage is grouped by this value rather than by agent profile: a profile gets renamed and repointed at other models, so its sessions carry several snapshots and no single one describes the group. |
 | Git stats | Aggregated from `task_session_commits` (only in-session commits) |
 
 ### Time ranges

@@ -1,5 +1,6 @@
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import type { UISlice } from "./types";
+import { t } from "@/lib/i18n";
 
 type ImmerSet = (recipe: (draft: UISlice) => void, shouldReplace?: false | undefined) => void;
 
@@ -45,7 +46,8 @@ function syncSidebarTaskPrefs(prefs: UISlice["sidebarTaskPrefs"], set: ImmerSet)
           });
         })
         .catch((err) => {
-          const message = err instanceof Error ? err.message : "Failed to sync sidebar task prefs";
+          const message =
+            err instanceof Error ? err.message : t("sidebar:failedToSyncSidebarTaskPrefs");
           set((draft) => {
             if (syncVersion !== sidebarTaskPrefsSyncVersion) return;
             draft.sidebarTaskPrefs.syncError = message;

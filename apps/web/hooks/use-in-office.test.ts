@@ -2,58 +2,87 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 
 let officeEnabled = false;
-let pathname = "/";
+let scope = { mode: "unknown" as "office" | "kanban" | "unknown" };
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: () => officeEnabled,
 }));
-vi.mock("@/lib/routing/client-router", () => ({
-  usePathname: () => pathname,
+vi.mock("@/components/workspace-scope-provider", () => ({
+  useWorkspaceScope: () => scope,
 }));
 
-import { useInOffice } from "./use-in-office";
+import { useInOffice, useOfficeModeState } from "./use-in-office";
 
-function run(): boolean {
+function mode(): string {
+  return renderHook(() => useOfficeModeState()).result.current;
+}
+
+function inOffice(): boolean {
   return renderHook(() => useInOffice()).result.current;
 }
+
+describe("useOfficeModeState", () => {
+  afterEach(() => {
+    officeEnabled = false;
+    scope = { mode: "unknown" };
+  });
+
+  it("follows the workspace, not the route", () => {
+    // The whole point of the change: mode is a property of the selected
+    // workspace, so no pathname is consulted here at all.
+    officeEnabled = true;
+    scope = { mode: "office" };
+    expect(mode()).toBe("office");
+
+    scope = { mode: "kanban" };
+    expect(mode()).toBe("kanban");
+  });
+
+  it("reports unknown until the workspace list has hydrated", () => {
+    // Distinct from "kanban": callers painting mode-specific chrome hold on
+    // this rather than rendering one mode and swapping to the other.
+    officeEnabled = true;
+    scope = { mode: "unknown" };
+    expect(mode()).toBe("unknown");
+  });
+
+  it("degrades an office workspace to kanban when the feature is disabled", () => {
+    // Such a build registers no /api/v1/office/* routes, so Office chrome would
+    // link to surfaces that cannot load.
+    officeEnabled = false;
+    scope = { mode: "office" };
+    expect(mode()).toBe("kanban");
+  });
+
+  it("still reports unknown when the feature is disabled and nothing has resolved", () => {
+    officeEnabled = false;
+    scope = { mode: "unknown" };
+    expect(mode()).toBe("unknown");
+  });
+});
 
 describe("useInOffice", () => {
   afterEach(() => {
     officeEnabled = false;
-    pathname = "/";
+    scope = { mode: "unknown" };
   });
 
-  it("is false in the regular workspace even when the office feature is enabled", () => {
+  it("is true only for a resolved office workspace", () => {
     officeEnabled = true;
-    pathname = "/";
-    expect(run()).toBe(false);
+    scope = { mode: "office" };
+    expect(inOffice()).toBe(true);
   });
 
-  it("is false on a task route (/t/...) with office enabled", () => {
+  it("is false for kanban, for unknown, and for a disabled feature", () => {
     officeEnabled = true;
-    pathname = "/t/abc123";
-    expect(run()).toBe(false);
-  });
+    scope = { mode: "kanban" };
+    expect(inOffice()).toBe(false);
 
-  it("is true on the office dashboard and office sub-routes", () => {
-    officeEnabled = true;
-    pathname = "/office";
-    expect(run()).toBe(true);
-    pathname = "/office/projects/p1";
-    expect(run()).toBe(true);
-    pathname = "/office/agents";
-    expect(run()).toBe(true);
-  });
+    scope = { mode: "unknown" };
+    expect(inOffice()).toBe(false);
 
-  it("is false on /office routes when the office feature is disabled", () => {
     officeEnabled = false;
-    pathname = "/office";
-    expect(run()).toBe(false);
-  });
-
-  it("does not match a route that merely starts with the word office", () => {
-    officeEnabled = true;
-    pathname = "/officers"; // not an /office route
-    expect(run()).toBe(false);
+    scope = { mode: "office" };
+    expect(inOffice()).toBe(false);
   });
 });

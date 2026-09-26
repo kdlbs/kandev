@@ -16,6 +16,16 @@ func enableClaudeBackgroundPromptHandoffForTest(t *testing.T, svc *Service) {
 	svc.config.ClaudeBackgroundPromptHandoff = true
 }
 
+// advertisePromptQueueingForTest records the negotiated prompt-queueing
+// advertisement for sessionID. This is what grants handoff eligibility now that
+// the gate is the agent's advertisement rather than its persisted name — see
+// ADR 0049's rejection of a central agent-name whitelist. A session with no
+// recorded advertisement is ineligible, which is also the post-restart state.
+func advertisePromptQueueingForTest(t *testing.T, svc *Service, sessionID string) {
+	t.Helper()
+	svc.recordSessionPromptQueueing(sessionID, true)
+}
+
 func setSessionAgentNameForTest(
 	t *testing.T,
 	svc *Service,
@@ -87,6 +97,7 @@ func TestCheckSessionPromptable_ClaudeExperimentAcceptsBackgroundIdle(t *testing
 	const sessionID = "session-claude-experiment"
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
 	setSessionAgentNameForTest(t, svc, sessionID, "claude-acp")
+	advertisePromptQueueingForTest(t, svc, sessionID)
 
 	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
 	svc.markForegroundIdle(sessionID)
@@ -786,5 +797,75 @@ func TestForegroundBusySignal_UpdateDoesNotReYieldAfterForeground(t *testing.T) 
 	bgUpdate()
 	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); !errors.Is(err, ErrAgentPromptInProgress) {
 		t.Fatalf("a later background progress update must not re-open the gate after foreground resumed, got: %v", err)
+	}
+}
+
+// TestClaudeHandoffGateIsNegotiatedNotNamed pins ADR 0049's rejected
+// alternative: a session whose persisted agent_name still says "claude-acp" is
+// ineligible unless the connected agent actually advertised prompt queueing.
+// This is the version-accuracy case — a bridge too old to advertise must not be
+// trusted on identity alone.
+func TestClaudeHandoffGateIsNegotiatedNotNamed(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	enableClaudeBackgroundPromptHandoffForTest(t, svc)
+
+	const taskID = "task-negotiated"
+	const sessionID = "session-negotiated"
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	setSessionAgentNameForTest(t, svc, sessionID, "claude-acp")
+
+	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
+	svc.markForegroundIdle(sessionID)
+
+	// Name matches, advertisement absent: fail closed.
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+		t.Fatalf("claude-named session without the advertisement = %q, want generating", got)
+	}
+	if err := svc.checkSessionPromptable(
+		taskID,
+		sessionID,
+		models.TaskSessionStateRunning,
+	); !errors.Is(err, ErrAgentPromptInProgress) {
+		t.Fatalf("claude-named session without the advertisement must stay gated, got: %v", err)
+	}
+
+	// Same session, now advertising: eligible.
+	advertisePromptQueueingForTest(t, svc, sessionID)
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("advertised session activity = %q, want background", got)
+	}
+	if err := svc.checkSessionPromptable(
+		taskID,
+		sessionID,
+		models.TaskSessionStateRunning,
+	); err != nil {
+		t.Fatalf("advertised background-idle session rejected: %v", err)
+	}
+}
+
+// TestAgentCapabilitiesEventRecordsPromptQueueing proves the advertisement
+// reaches the orchestrator over the existing agent_capabilities stream event
+// rather than needing a new channel.
+func TestAgentCapabilitiesEventRecordsPromptQueueing(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	const sessionID = "session-caps"
+	if svc.sessionAdvertisesPromptQueueing(sessionID) {
+		t.Fatal("session advertised prompt queueing before any capabilities frame")
+	}
+
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task-caps",
+		SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:                   "agent_capabilities",
+			SupportsPromptQueueing: true,
+		},
+	})
+
+	if !svc.sessionAdvertisesPromptQueueing(sessionID) {
+		t.Fatal("agent_capabilities event did not record the prompt-queueing advertisement")
 	}
 }

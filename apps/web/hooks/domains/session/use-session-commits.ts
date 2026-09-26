@@ -89,10 +89,11 @@ export function useSessionCommits(sessionId: string | null) {
       const version = ++requestVersionRef.current;
       setSessionCommitsLoading(sessionId, true);
       try {
-        const response = await client.request<{ commits?: SessionCommit[]; ready?: boolean }>(
-          "session.git.commits",
-          { session_id: sessionId },
-        );
+        const response = await client.request<{
+          commits?: SessionCommit[];
+          ready?: boolean;
+          reason?: string;
+        }>("session.git.commits", { session_id: sessionId });
 
         // Drop stale callbacks: another fetch (e.g. a later trigger bump)
         // already started, so this response is for an older state and must
@@ -109,7 +110,13 @@ export function useSessionCommits(sessionId: string | null) {
         // Schedule a retry so we eventually pick up the real list. Preserve
         // `opts` across retries so a trigger-bump fetch that gets ready:false
         // still applies its authoritative empty response when it succeeds.
+        //
+        // reason:"session_terminal" is permanent (cancelled/completed/failed):
+        // never retry and keep any previously loaded snapshot.
         if (response?.ready === false) {
+          if (response.reason === "session_terminal") {
+            return;
+          }
           retryTimerRef.current = setTimeout(() => {
             retryTimerRef.current = null;
             fetchCommits(opts);

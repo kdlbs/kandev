@@ -16,6 +16,7 @@ the GitHub Actions workflow only invokes those repository-owned entry points.
 | `ARCH-RUN-SCHEDULER-OWNER` | Only the backend composition root under `apps/backend/internal/backendapp/` may import `internal/runs/scheduler`. | Construct the one backend-wide scheduler in `internal/backendapp`; other packages consume runs services or interfaces. |
 | `ARCH-RUNS-OFFICE-IMPORT` | Production Go under `internal/runs/` must not add imports of `internal/office` or its subpackages. | Office adapters may depend on generic runs; generic runs must not depend on Office implementations. |
 | `ARCH-FRONTEND-STATE-UI-IMPORT` | Production files under `apps/web/lib/state/` must not import `apps/web/components/` or `apps/web/app/`. | Components and routes consume state; state remains below UI/app layers and shared values belong in dependency-neutral modules. |
+| `ARCH-INBOX-HISTORY-ISOLATION` | A closed set of backend pending-action sinks must not reference the Inbox History read's exported entry points, and the Inbox History read/render modules must not reference the Needs-you sidebar-badge state or subscribe to an event stream. | Keep the additive History read (AC-UI-INBOX-HISTORY-001.5/.17/.22) out of the operational pending-action path in both directions. |
 
 Each rule owns its exact grandfathered finding set under `config/architecture-lint/`. A current
 finding absent from that rule's baseline fails. When cleanup removes a finding, the now-stale entry

@@ -18,10 +18,24 @@ repos:
         language: system
         pass_filenames: true
 
+      - id: docs-catalog
+        name: Documentation catalog validation
+        entry: python3 scripts/list-docs.py validate
+        language: system
+        files: ^docs/(decisions|specs)/.*\.md$|^scripts/(list-docs|spec_metadata|lint-spec-files)\.py$|^scripts/(list-docs|lint-spec-files)\.test\.py$
+        pass_filenames: false
+
       - id: architecture-lint
         name: Architecture lint and compatibility expiry
         entry: python3 scripts/lint-architecture.py --all
         language: system
+        pass_filenames: false
+
+      - id: specification-lint
+        name: Specification structure and size lint
+        entry: python3 scripts/lint-spec-files.py --all
+        language: system
+        files: ^docs/specs/.*|^scripts/lint-spec-files\.py$|^scripts/lint-spec-files\.test\.py$
         pass_filenames: false
 
   # Backend (Go) hooks
@@ -35,11 +49,12 @@ repos:
         pass_filenames: true
 
       - id: go-lint
-        name: Go lint (PR changed code)
-        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; base=$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse HEAD); cd apps/backend && golangci-lint run ./... --new-from-rev="$base" --timeout=5m'
+        name: Go lint (changed packages)
+        entry: bash scripts/lint-go-changed
         language: system
         files: ^apps/backend/.*\.go$
-        pass_filenames: false
+        pass_filenames: true
+        require_serial: true
 
   # Web app (TypeScript/React) hooks
   - repo: local
@@ -68,3 +83,26 @@ repos:
         language: system
         files: ^apps/web/(components|app|hooks|lib|src)/.*\.tsx?$|^apps/web/eslint\.i18n\.options\.mjs$
         pass_filenames: false
+
+      # New E2E waits must name their cause, or name a category and a reason via
+      # dwell()/injectLatency(). Raw page.waitForTimeout() and hand-rolled
+      # promise sleeps are the suite's most reliable source of flake. Same
+      # judge-the-change contract as the i18n hook above: added files whole,
+      # modified files only on touched lines, so the ~126 sleeps that predate it
+      # never block an unrelated commit.
+      - id: e2e-sleep-ratchet
+        name: E2E sleep guard (new code only)
+        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; cd apps/web && node scripts/check-new-e2e-sleeps.mjs'
+        language: system
+        files: ^apps/web/e2e/.*\.tsx?$|^apps/web/eslint-rules/no-unsanctioned-sleep\.mjs$
+        pass_filenames: false
+
+  # Public copy hooks
+  - repo: local
+    hooks:
+      - id: public-copy-em-dash
+        name: Public copy em-dash guard
+        entry: node apps/web/scripts/check-no-em-dash-ui.mjs
+        language: system
+        pass_filenames: false
+        always_run: true

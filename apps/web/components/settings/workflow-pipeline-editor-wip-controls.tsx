@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type { WorkflowStep } from "@/lib/types/http";
 import { HelpTip } from "./workflow-pipeline-editor-helpers";
 import { isWorkflowStepValueDirty } from "./workflow-dirty-state";
+import { settingsControlClassName } from "./settings-control";
 
 type StepWipControlsProps = {
   step: WorkflowStep;
@@ -33,6 +34,13 @@ export function StepWipControls({
   const otherSteps = steps.filter((s) => s.id !== step.id);
   const pullFromValue = step.pull_from_step_id || "none";
   const pullFromSelectID = `${step.id}-pull-from-step`;
+  const pullFromGuidance = step.pull_from_step_id
+    ? t("workflows:pullFromGuidanceWithFeeder", {
+        feeder:
+          otherSteps.find((candidate) => candidate.id === step.pull_from_step_id)?.name ??
+          t("workflows:noFeederStep"),
+      })
+    : t("workflows:pullFromGuidanceWithoutFeeder");
 
   return (
     <div className="grid grid-cols-1 gap-3 pt-3 sm:grid-cols-2 xl:grid-cols-[180px_minmax(220px,320px)]">
@@ -55,7 +63,7 @@ export function StepWipControls({
             onUpdate({ wip_limit: parseWipLimit(e.target.value) });
           }}
           disabled={readOnly}
-          className="h-8"
+          className={settingsControlClassName()}
           data-settings-dirty={isWorkflowStepValueDirty(
             step,
             savedStep,
@@ -68,7 +76,15 @@ export function StepWipControls({
           <Label htmlFor={pullFromSelectID} className="text-xs font-medium">
             {t("workflows:pullFrom")}
           </Label>
-          <HelpTip text={t("workflows:pullFromHelp")} />
+          <HelpTip
+            testId={`${step.id}-pull-from-guidance-help`}
+            text={
+              <div className="space-y-2">
+                <p>{pullFromGuidance}</p>
+                <p>{t("workflows:wipLimitsNote")}</p>
+              </div>
+            }
+          />
         </div>
         <Select
           value={pullFromValue}
@@ -80,7 +96,7 @@ export function StepWipControls({
         >
           <SelectTrigger
             id={pullFromSelectID}
-            className="h-8"
+            className={settingsControlClassName()}
             data-testid={`${step.id}-pull-from-step-select`}
             data-settings-dirty={isWorkflowStepValueDirty(
               step,
@@ -102,7 +118,6 @@ export function StepWipControls({
           </SelectContent>
         </Select>
       </div>
-      <p className="text-xs text-muted-foreground sm:col-span-2">{t("workflows:wipLimitsNote")}</p>
     </div>
   );
 }

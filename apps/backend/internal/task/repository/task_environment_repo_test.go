@@ -3,14 +3,15 @@ package repository
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/sqlite"
-	"github.com/kandev/kandev/internal/worktree"
 )
 
 // Phase 0 tests for the multi-repo TaskEnvironment / TaskEnvironmentRepo schema.
@@ -67,14 +68,19 @@ func TestTaskEnvironmentRepo_CRUD(t *testing.T) {
 
 	newTaskWithRepo(t, repo, "task-env-2")
 	env := newEnv(t, repo, "task-env-2", "env-2")
+	compactedAt := time.Now().UTC().Truncate(time.Second)
 
 	er := &models.TaskEnvironmentRepo{
-		TaskEnvironmentID: env.ID,
-		RepositoryID:      "repo-frontend",
-		WorktreeID:        "wt-1",
-		WorktreePath:      "/tmp/tasks/x/frontend",
-		WorktreeBranch:    "feature/x",
-		Position:          0,
+		TaskEnvironmentID:         env.ID,
+		RepositoryID:              "repo-frontend",
+		WorktreeID:                "wt-1",
+		WorktreePath:              "/tmp/tasks/x/frontend",
+		WorktreeBranch:            "feature/x",
+		WorktreeBranchOwner:       "kandev",
+		WorktreeIntegrationRef:    "main",
+		WorktreeRecoveryHeadSHA:   strings.Repeat("a", 40),
+		WorktreeBranchCompactedAt: &compactedAt,
+		Position:                  0,
 	}
 	if err := repo.CreateTaskEnvironmentRepo(ctx, er); err != nil {
 		t.Fatalf("create env repo: %v", err)
@@ -87,17 +93,22 @@ func TestTaskEnvironmentRepo_CRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(list) != 1 || list[0].RepositoryID != "repo-frontend" {
+	if len(list) != 1 || list[0].RepositoryID != "repo-frontend" ||
+		list[0].WorktreeBranchOwner != "kandev" || list[0].WorktreeIntegrationRef != "main" ||
+		list[0].WorktreeRecoveryHeadSHA != strings.Repeat("a", 40) ||
+		list[0].WorktreeBranchCompactedAt == nil ||
+		!list[0].WorktreeBranchCompactedAt.Equal(compactedAt) {
 		t.Fatalf("unexpected list: %+v", list)
 	}
 
 	er.WorktreeBranch = "feature/x-renamed"
+	er.WorktreeIntegrationRef = "develop"
 	er.ErrorMessage = "fetch failed"
 	if err := repo.UpdateTaskEnvironmentRepo(ctx, er); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	list, _ = repo.ListTaskEnvironmentRepos(ctx, env.ID)
-	if list[0].WorktreeBranch != "feature/x-renamed" || list[0].ErrorMessage != "fetch failed" {
+	if list[0].WorktreeBranch != "feature/x-renamed" || list[0].WorktreeIntegrationRef != "develop" || list[0].ErrorMessage != "fetch failed" {
 		t.Errorf("update did not persist: %+v", list[0])
 	}
 
@@ -202,88 +213,34 @@ func TestTaskEnvironmentRepo_CascadeDeleteOnEnvDelete(t *testing.T) {
 	}
 }
 
-func TestTaskEnvironmentRepo_BackfillFromLegacyEnv(t *testing.T) {
-	// Backfill is run by initSchema. Simulate a "legacy" environment by inserting
-	// directly into task_environments with repository_id set, then re-opening the
-	// repository so initSchema re-runs the backfill on the existing data.
+func TestTaskEnvironmentRepo_LegacyFlatColumnsAreGone(t *testing.T) {
+	// The flat task_environments worktree columns were removed by the
+	// one-time cutover; only the versioned migration knows the legacy shape.
+	// The migration-path coverage lives in the sqlite package's
+	// TestCutover_NormalizesLegacyFlatEnvironment.
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "backfill.db")
+	dbPath := filepath.Join(tmpDir, "final.db")
 
 	dbConn, err := db.OpenSQLite(dbPath)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, err := sqlite.NewWithDB(sqlxDB, sqlxDB, nil)
-	if err != nil {
+	if _, err := sqlite.NewWithDB(sqlxDB, sqlxDB, nil); err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
-	if _, err := worktree.NewSQLiteStore(sqlxDB, sqlxDB); err != nil {
-		t.Fatalf("worktree store: %v", err)
-	}
+	t.Cleanup(func() { _ = sqlxDB.Close() })
 
-	ctx := context.Background()
-	newTaskWithRepo(t, repo, "task-env-6")
-
-	// Insert a legacy-shaped env (no per-repo row exists).
-	if _, err := sqlxDB.Exec(`
+	_, err = sqlxDB.Exec(`
 		INSERT INTO task_environments (
-			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
-			control_port, status,
-			worktree_id, worktree_path, worktree_branch, workspace_path,
-			container_id, sandbox_id, task_dir_name,
+			id, task_id, repository_id, executor_type, worktree_id,
+			worktree_path, worktree_branch, workspace_path,
 			created_at, updated_at
-		) VALUES ('legacy-env', 'task-env-6', 'repo-legacy', 'local_pc', '', '',
-			0, 'ready',
+		) VALUES ('legacy-env', 'task-env-6', 'repo-legacy', 'local_pc',
 			'wt-legacy', '/wt/legacy', 'main', '',
-			'', '', '',
 			datetime('now'), datetime('now'))
-	`); err != nil {
-		t.Fatalf("insert legacy env: %v", err)
-	}
-
-	// Verify no per-repo row yet.
-	list, err := repo.ListTaskEnvironmentRepos(ctx, "legacy-env")
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(list) != 0 {
-		t.Fatalf("expected 0 per-repo rows pre-backfill, got %d", len(list))
-	}
-
-	// Re-open the repository to retrigger initSchema → backfill.
-	if err := repo.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	dbConn2, err := db.OpenSQLite(dbPath)
-	if err != nil {
-		t.Fatalf("reopen db: %v", err)
-	}
-	sqlxDB2 := sqlx.NewDb(dbConn2, "sqlite3")
-	repo2, err := sqlite.NewWithDB(sqlxDB2, sqlxDB2, nil)
-	if err != nil {
-		t.Fatalf("reopen repo: %v", err)
-	}
-	defer func() {
-		_ = repo2.Close()
-		_ = sqlxDB2.Close()
-	}()
-
-	list, err = repo2.ListTaskEnvironmentRepos(ctx, "legacy-env")
-	if err != nil {
-		t.Fatalf("list after reopen: %v", err)
-	}
-	if len(list) != 1 {
-		t.Fatalf("expected 1 backfilled row, got %d", len(list))
-	}
-	got := list[0]
-	if got.RepositoryID != "repo-legacy" || got.WorktreeID != "wt-legacy" || got.WorktreeBranch != "main" {
-		t.Errorf("backfilled row mismatch: %+v", got)
-	}
-
-	// Idempotency: a second backfill must not duplicate rows.
-	list, _ = repo2.ListTaskEnvironmentRepos(ctx, "legacy-env")
-	if len(list) != 1 {
-		t.Errorf("expected backfill to be idempotent, got %d rows", len(list))
+	`)
+	if err == nil {
+		t.Fatal("expected legacy flat columns to be absent from the final schema")
 	}
 }

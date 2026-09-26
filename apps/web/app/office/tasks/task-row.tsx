@@ -3,12 +3,14 @@
 import { useRouter } from "@/lib/routing/client-router";
 import { IconChevronRight, IconLoader2 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { formatRelativeTime } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import { selectLiveSessionForTask } from "@/lib/state/slices/session/selectors";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { StatusIcon } from "./status-icon";
 import { ExecutionIndicator } from "../components/execution-indicator";
+import { useTranslation } from "react-i18next";
 
 type TaskRowProps = {
   task: OfficeTask;
@@ -27,6 +29,7 @@ export function TaskRow({
   onToggleExpand,
   agentName,
 }: TaskRowProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   // Show an animated yellow spinner instead of the static status icon
   // while any session for this task is RUNNING. Drives the "this task
@@ -55,7 +58,7 @@ export function TaskRow({
         <button
           onClick={handleToggle}
           className="shrink-0 cursor-pointer p-0 border-0 bg-transparent"
-          aria-label={expanded ? "Collapse" : "Expand"}
+          aria-label={expanded ? t("office:collapse") : t("office:expand")}
         >
           <IconChevronRight
             className={cn(
@@ -68,10 +71,12 @@ export function TaskRow({
         <span className="w-3.5 shrink-0" />
       )}
       {isRunning ? (
-        <IconLoader2
-          className="h-4 w-4 shrink-0 animate-spin text-yellow-500"
+        <CompositorSpin
+          className="h-4 w-4 shrink-0 text-yellow-500"
           data-testid="task-row-running-spinner"
-        />
+        >
+          <IconLoader2 className="size-full" />
+        </CompositorSpin>
       ) : (
         <StatusIcon status={task.status} className="h-4 w-4 shrink-0" />
       )}
@@ -79,7 +84,7 @@ export function TaskRow({
       <span className="flex-1 truncate">{task.title}</span>
       {task.isSystem && (
         <span className="shrink-0 inline-flex items-center rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          System
+          {t("common:system")}
         </span>
       )}
       {Array.isArray(task.labels) && task.labels.length > 0 && (
@@ -99,7 +104,7 @@ export function TaskRow({
           })}
         </span>
       )}
-      <ExecutionIndicator status={task.status} />
+      <ExecutionIndicator status={task.rawStatus ?? task.status} />
       {agentName && (
         <span className="text-xs text-muted-foreground shrink-0 truncate max-w-[100px]">
           {agentName}

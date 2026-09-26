@@ -126,6 +126,7 @@ func writeBundleEntities(w *configloader.FileWriter, bundle *ConfigBundle) error
 	for _, a := range bundle.Agents {
 		agent := &models.AgentInstance{
 			Name: a.Name, Role: models.AgentRole(a.Role), Icon: a.Icon,
+			ReportsTo:          a.ReportsTo,
 			BudgetMonthlyCents: a.BudgetMonthlyCents, MaxConcurrentSessions: a.MaxConcurrentSessions,
 			DesiredSkills: a.DesiredSkills, ExecutorPreference: a.ExecutorPreference,
 		}

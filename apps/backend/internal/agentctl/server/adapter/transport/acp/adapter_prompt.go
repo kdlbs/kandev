@@ -2,16 +2,22 @@ package acp
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
+
+const maxNativeAttachmentBytes int64 = 8 << 20
 
 // Prompt sends a prompt to the agent.
 // If pending context is set (from SetPendingContext), it will be prepended to the message.
@@ -24,7 +30,36 @@ func (a *Adapter) Prompt(
 	promptGeneration uint64,
 ) error {
 	// A user prompt always targets the current session, so it is not pinned.
-	return a.sendPrompt(ctx, message, attachments, "", promptGeneration)
+	return a.sendPrompt(ctx, message, attachments, "", promptGeneration, false)
+}
+
+// SupportsSteering reports whether this adapter can deliver a prompt into a turn
+// that is still generating. It is the same negotiated advertisement that gates
+// prompt handoff — the agent must accept a concurrent session/prompt.
+func (a *Adapter) SupportsSteering() bool {
+	return a.supportsPromptHandoff()
+}
+
+// PromptSteer delivers a prompt without waiting for the in-flight turn to end.
+//
+// It differs from Prompt in exactly one way: instead of blocking on the prompt
+// gate until the current turn releases it (or a provider foreground-idle event
+// attests a handoff), the operator's send is itself the handoff trigger. The
+// predecessor's `session/prompt` stays open and the token transfers to this
+// call, so two prompts briefly overlap on one ACP session with one logical
+// owner — the arrangement ADR 0049 already built for the foreground-idle case.
+//
+// Delivery is opportunistic. Whether the agent folds this prompt into the
+// running turn or runs it as the next turn is the agent's decision and is not
+// advertised over the protocol, so both outcomes must be correct. See
+// docs/specs/platform/requirements/mid-turn-steering.md.
+func (a *Adapter) PromptSteer(
+	ctx context.Context,
+	message string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+) error {
+	return a.sendPrompt(ctx, message, attachments, "", promptGeneration, true)
 }
 
 // sendPrompt serializes session/prompt calls through promptGate and sends one
@@ -41,6 +76,7 @@ func (a *Adapter) sendPrompt(
 	attachments []v1.MessageAttachment,
 	expectSession string,
 	promptGeneration uint64,
+	steer bool,
 ) error {
 	humanPrompt := expectSession == ""
 	promptCtx, turn := newPromptTurnState(
@@ -48,6 +84,20 @@ func (a *Adapter) sendPrompt(
 		promptGeneration,
 		humanPrompt && a.supportsPromptHandoff() && promptGeneration != 0,
 	)
+	// A steer initiates the handoff itself rather than waiting for a provider
+	// foreground-idle event. Best-effort by design: if there is no handoff-eligible
+	// turn in flight (idle session, or a synthetic wakeup holding the gate), this
+	// is a no-op and the call falls through to ordinary gate acquisition, which is
+	// exactly the specified behavior for those cases.
+	//
+	// Guarded on a live context: beginSteerHandoff protects the predecessor's
+	// background work and closes its handoff channel, which only pays off once a
+	// successor actually acquires the gate. If ctx is already cancelled the
+	// acquisition below will fail immediately, so triggering the handoff first
+	// would strand that protection with no successor to clear it.
+	if steer && humanPrompt && promptGeneration != 0 && a.supportsPromptHandoff() && ctx.Err() == nil {
+		a.beginSteerHandoff()
+	}
 	if err := a.acquirePromptTurn(ctx, turn, humanPrompt); err != nil {
 		return err
 	}
@@ -162,6 +212,11 @@ func (a *Adapter) sendPrompt(
 		return nil
 	}
 	if err != nil {
+		// The SDK guarantees that notifications received before this prompt RPC
+		// settles reached enqueueACPUpdate, but our worker processes them
+		// asynchronously. Drain it before returning the error so a diagnostic
+		// agent_message_chunk cannot be overtaken by the terminal failure event.
+		a.syncNotifQueue()
 		return normalizePromptErrorAfterCancel(traceCtx, err)
 	}
 
@@ -190,28 +245,72 @@ func (a *Adapter) sendPrompt(
 	// state when the parent prompt completes naturally.
 	a.sweepMonitorsOnPromptEnd(sessionID)
 
+	// Drop any Cursor `cursor/task` metadata for this session that never matched
+	// a subagent tool_call this turn.
+	a.sweepCursorTaskMetaOnPromptEnd(sessionID)
+
+	if cursorRetriable, occurredAt := turn.cursorRetriableFailureAt(); cursorRetriable {
+		const safeMessage = cursorRetriableStreamResetMessage
+		if occurredAt.IsZero() {
+			occurredAt = time.Now().UTC()
+		}
+		a.logger.Info("cursor prompt ended with retriable stream-reset evidence",
+			zap.String("session_id", sessionID),
+			zap.Uint64("prompt_generation", promptGeneration))
+		a.cancelAsyncTurnComplete(sessionID)
+		a.sendUpdate(AgentEvent{
+			Type:             streams.EventTypeError,
+			SessionID:        sessionID,
+			PromptGeneration: promptGeneration,
+			Error:            safeMessage,
+			ProviderError: &streams.ProviderError{
+				Source:     streams.ProviderErrorSourceCursorACP,
+				ProviderID: acpcompat.CursorAgentID,
+				Message:    safeMessage,
+				OccurredAt: occurredAt,
+			},
+		})
+		return nil
+	}
+
+	if a.agentID == codexAgentID && turn.codexCapacityFailure() {
+		const safeMessage = codexModelCapacityErrorMessage
+		a.logger.Info("codex prompt ended with model-capacity evidence",
+			zap.String("session_id", sessionID),
+			zap.Uint64("prompt_generation", promptGeneration))
+		a.cancelAsyncTurnComplete(sessionID)
+		a.sendUpdate(AgentEvent{
+			Type:             streams.EventTypeError,
+			SessionID:        sessionID,
+			PromptGeneration: promptGeneration,
+			Error:            safeMessage,
+			ProviderError: &streams.ProviderError{
+				Source:     streams.ProviderErrorSourceCodexACP,
+				ProviderID: codexAgentID,
+				Message:    safeMessage,
+				OccurredAt: time.Now().UTC(),
+			},
+		})
+		return nil
+	}
+
 	// Emit complete event via the stream, including the StopReason from the agent.
-	// This normalizes ACP behavior to match other adapters (stream-json, amp, copilot, opencode).
 	a.logger.Debug("emitting complete event after prompt",
 		zap.String("session_id", sessionID),
 		zap.String("stop_reason", stopReason))
 	a.cancelAsyncTurnComplete(sessionID)
 	usage := a.dialect.promptUsage(extractUsage(&resp), resp.Meta)
-	// codex-acp emits no per-turn usage frame, only cumulative context
-	// occupancy. Fall back to nonnegative occupancy growth so the office cost
-	// subscriber sees an approximate input count. It has no input/output split,
-	// so Estimated remains true. usage_update cost is cumulative session cost;
-	// consumeUsageDelta converts it to the current turn's nonnegative delta.
-	delta, costSubcents := a.consumeUsageDelta(sessionID)
+	// Typed per-turn usage frames aren't universal — an adapter with no
+	// result.usage and no recognized _meta shape leaves usage nil here.
+	// usageBySession tracks cumulative context-window occupancy
+	// (usage_update frames) as a fallback signal for that case; see
+	// fallbackUsageForNilTypedUsage's doc comment. usage_update cost is
+	// cumulative session cost; consumeUsageDelta converts it to the
+	// current turn's nonnegative delta.
+	delta, costSubcents, costPresent := a.consumeUsageDeltaWithPresence(sessionID)
 	if usage == nil {
-		if delta > 0 || costSubcents > 0 {
-			usage = &streams.PromptUsage{
-				InputTokens:                  delta,
-				Estimated:                    true,
-				ProviderReportedCostSubcents: costSubcents,
-			}
-		}
-	} else if costSubcents > 0 {
+		usage = fallbackUsageForNilTypedUsage(delta, costSubcents, costPresent)
+	} else if costPresent {
 		// claude-acp: usage_update.cost.amount carries authoritative cumulative
 		// USD cost — attach the derived turn delta so Layer A wins
 		// downstream and the office cost subscriber stores the row
@@ -219,6 +318,7 @@ func (a *Adapter) sendPrompt(
 		// model id is a logical alias (sonnet / haiku) that won't match
 		// any pricing entry, so this is the only accurate cost path.
 		usage.ProviderReportedCostSubcents = costSubcents
+		usage.ProviderReportedCostPresent = true
 	}
 	a.sendUpdate(AgentEvent{
 		Type:             streams.EventTypeComplete,
@@ -231,8 +331,38 @@ func (a *Adapter) sendPrompt(
 	return nil
 }
 
+// fallbackUsageForNilTypedUsage synthesizes a usage frame from
+// context-window-occupancy growth for an adapter that reported no typed
+// per-turn usage at all (extractUsage found nothing recognizable). It
+// fires on nonnegative context growth or a provider-reported cost sample —
+// whichever is present — matching the pre-existing contract other callers
+// (e.g. the steering handoff path, which reports usage via cumulative
+// context growth alone with no cost) already depend on. It only ever
+// carries InputTokens: this adapter shape has no way to observe output
+// tokens, so OutputTokens is left at its zero value and Estimated=true is
+// the signal downstream must use to treat the whole row, including that
+// zero, as approximate rather than measured (see streams.PromptUsage's
+// doc comment).
+func fallbackUsageForNilTypedUsage(delta, costSubcents int64, costPresent bool) *streams.PromptUsage {
+	if delta <= 0 && !costPresent {
+		return nil
+	}
+	return &streams.PromptUsage{
+		InputTokens:                  delta,
+		Estimated:                    true,
+		ProviderReportedCostSubcents: costSubcents,
+		ProviderReportedCostPresent:  costPresent,
+	}
+}
+
+// supportsPromptHandoff reports whether this adapter's connected agent may have
+// its in-flight prompt handed off to a human successor. Gated on the negotiated
+// prompt-queueing advertisement rather than the agent's id, per ADR 0049's
+// rejection of a central agent-name whitelist.
 func (a *Adapter) supportsPromptHandoff() bool {
-	return a.agentID == claudeAgentID || a.agentID == mockAgentID
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.promptQueueing
 }
 
 func normalizePromptErrorAfterCancel(promptCtx context.Context, err error) error {
@@ -260,6 +390,19 @@ func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.Mess
 			contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved, true)))
 			continue
 		}
+		if att.AttachmentID != "" && att.Data == "" && (att.Type == contentTypeImage || att.Type == contentTypeAudio) {
+			data, saved, ok := a.loadMaterializedAttachmentData(att)
+			switch {
+			case ok:
+				att.Data = data
+			case len(saved) > 0:
+				contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved, false)))
+				continue
+			default:
+				a.logger.Warn("failed to load materialized prompt attachment",
+					zap.String("attachment_id", att.AttachmentID), zap.String("name", att.Name))
+			}
+		}
 
 		switch att.Type {
 		case contentTypeImage:
@@ -284,6 +427,25 @@ func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.Mess
 	}
 
 	return contentBlocks
+}
+
+func (a *Adapter) loadMaterializedAttachmentData(att v1.MessageAttachment) (string, []shared.SavedAttachment, bool) {
+	if a.attachMgr == nil {
+		return "", nil, false
+	}
+	saved, err := a.attachMgr.SaveAttachments([]v1.MessageAttachment{att})
+	if err != nil || len(saved) == 0 {
+		return "", nil, false
+	}
+	info, err := os.Stat(saved[0].AbsPath)
+	if err != nil || info.Size() > maxNativeAttachmentBytes {
+		return "", saved, false
+	}
+	data, err := os.ReadFile(saved[0].AbsPath)
+	if err != nil {
+		return "", saved, false
+	}
+	return base64.StdEncoding.EncodeToString(data), saved, true
 }
 
 func buildAttachmentFallbackBlock(att v1.MessageAttachment) acp.ContentBlock {
@@ -343,7 +505,9 @@ func (a *Adapter) fireWakeup(sessionID, prompt string) {
 		defer cancel()
 		// Pin to the scheduled session: if the active session changed while this
 		// wakeup waited on the prompt gate, sendPrompt drops it.
-		if err := a.sendPrompt(ctx, prompt, nil, sessionID, 0); err != nil {
+		// Never a steer: a synthetic wakeup must stay serialized behind the owning
+		// prompt and must not consume a handoff meant for a human successor.
+		if err := a.sendPrompt(ctx, prompt, nil, sessionID, 0, false); err != nil {
 			a.logger.Error("synthetic wakeup prompt failed",
 				zap.String("session_id", sessionID),
 				zap.Error(err))
@@ -426,7 +590,7 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 	}
 
 	turn := a.signalPromptTurnAbort()
-	if err := waitForPromptRPCAfterCancel(turn); err != nil {
+	if err := a.waitForPromptRPCAfterCancel(turn); err != nil {
 		span.RecordError(err)
 		a.logger.Warn("session/cancel sent but in-flight prompt did not end",
 			zap.String("session_id", sessionID),

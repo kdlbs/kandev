@@ -54,3 +54,10 @@ func TestACPNotifQueueCapacity(t *testing.T) {
 		}
 	})
 }
+
+func TestACPNotifQueueCapacityUsesExplicitStartupValue(t *testing.T) {
+	t.Setenv("KANDEV_ACP_NOTIF_QUEUE", "1024")
+	if got := acpNotifQueueCapacity(4096); got != 4096 {
+		t.Fatalf("explicit queue capacity = %d, want 4096", got)
+	}
+}

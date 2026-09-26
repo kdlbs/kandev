@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/clarification"
@@ -20,11 +22,201 @@ import (
 	githubsvc "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/worktree/copyfiles"
 	"github.com/kandev/kandev/pkg/api/v1"
 )
+
+// canvasAgentCtlClient is the small agentctl surface shared by canvas
+// authoring and browser-initiated canvas editing. The concrete runtime client
+// stays behind this adapter so higher-level services do not couple to the
+// lifecycle or agentctl implementation packages.
+type canvasAgentCtlClient interface {
+	CreateFile(context.Context, string, string) (*streams.FileCreateResponse, error)
+	ApplyFileDiff(context.Context, string, string, string, string, *string) (*streams.FileUpdateResponse, error)
+	DeleteFile(context.Context, string, string) (*streams.FileDeleteResponse, error)
+	RenameFile(context.Context, string, string, string) (*streams.FileRenameResponse, error)
+	StreamCanvasSource(context.Context, string) (io.ReadCloser, error)
+	CopyFiles(context.Context, string, []copyfiles.Entry) (canvasCopyFilesResult, error)
+}
+
+type canvasCopyFilesResult struct {
+	Warnings []string
+	Present  bool
+}
+
+type canvasEditAgentCtl interface {
+	CopyFiles(context.Context, string, []copyfiles.Entry) (canvasCopyFilesResult, error)
+}
+
+type canvasAgentExecution struct {
+	TaskID    string
+	SessionID string
+	client    canvasAgentCtlClient
+}
+
+func (e *canvasAgentExecution) GetAgentCtlClient() canvasAgentCtlClient {
+	if e == nil {
+		return nil
+	}
+	return e.client
+}
+
+type canvasExecutionResolver interface {
+	ResolveCanvasExecution(string) (*canvasAgentExecution, error)
+}
+
+type canvasEditExecutionResolver interface {
+	ResolveAgentCtl(string) (canvasEditAgentCtl, error)
+}
+
+// lifecycleCanvasExecutionResolver is the approved low-level adapter from
+// the lifecycle manager to the canvas services. Keep direct runtime imports
+// here, at the boundary, instead of spreading them through feature code.
+type lifecycleCanvasExecutionResolver struct {
+	manager *lifecycle.Manager
+}
+
+func (r lifecycleCanvasExecutionResolver) ResolveCanvasExecution(executionID string) (*canvasAgentExecution, error) {
+	if r.manager == nil || executionID == "" {
+		return nil, errors.New("agent execution is unavailable")
+	}
+	execution, ok := r.manager.GetExecution(executionID)
+	if !ok || execution == nil {
+		return nil, errors.New("agent execution is unavailable")
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	if client == nil {
+		release()
+		return nil, errors.New("agent execution is unavailable")
+	}
+	release()
+	return &canvasAgentExecution{
+		TaskID: execution.TaskID, SessionID: execution.SessionID,
+		client: canvasAgentCtlAdapter{acquire: execution.AcquireAgentCtlClient},
+	}, nil
+}
+
+func (r lifecycleCanvasExecutionResolver) ResolveAgentCtl(executionID string) (canvasEditAgentCtl, error) {
+	execution, err := r.ResolveCanvasExecution(executionID)
+	if err != nil {
+		return nil, err
+	}
+	return execution.GetAgentCtlClient(), nil
+}
+
+type canvasAgentCtlAdapter struct {
+	client  *client.Client
+	acquire func() (*client.Client, func())
+}
+
+func (a canvasAgentCtlAdapter) acquireClient() (*client.Client, func(), error) {
+	if a.acquire != nil {
+		client, release := a.acquire()
+		if client == nil {
+			release()
+			return nil, func() {}, errors.New("agentctl client is unavailable")
+		}
+		return client, release, nil
+	}
+	if a.client == nil {
+		return nil, func() {}, errors.New("agentctl client is unavailable")
+	}
+	return a.client, func() {}, nil
+}
+
+func (a canvasAgentCtlAdapter) CreateFile(ctx context.Context, path, repo string) (*streams.FileCreateResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.CreateFile(ctx, path, repo)
+}
+
+func (a canvasAgentCtlAdapter) ApplyFileDiff(ctx context.Context, path, diff, originalHash, repo string, desiredContent *string) (*streams.FileUpdateResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.ApplyFileDiff(ctx, path, diff, originalHash, repo, desiredContent)
+}
+
+func (a canvasAgentCtlAdapter) DeleteFile(ctx context.Context, path, repo string) (*streams.FileDeleteResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.DeleteFile(ctx, path, repo)
+}
+
+func (a canvasAgentCtlAdapter) RenameFile(ctx context.Context, oldPath, newPath, repo string) (*streams.FileRenameResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.RenameFile(ctx, oldPath, newPath, repo)
+}
+
+func (a canvasAgentCtlAdapter) StreamCanvasSource(ctx context.Context, root string) (io.ReadCloser, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	stream, err := client.StreamCanvasSource(ctx, root)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	if stream == nil {
+		release()
+		return nil, errors.New("agentctl returned an empty source stream")
+	}
+	return &canvasSourceReadCloser{ReadCloser: stream, release: release}, nil
+}
+
+func (a canvasAgentCtlAdapter) CopyFiles(ctx context.Context, repo string, entries []copyfiles.Entry) (canvasCopyFilesResult, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return canvasCopyFilesResult{}, err
+	}
+	defer release()
+	response, err := client.CopyFiles(ctx, repo, entries)
+	if response == nil {
+		return canvasCopyFilesResult{}, err
+	}
+	return canvasCopyFilesResult{Warnings: append([]string(nil), response.Warnings...), Present: true}, err
+}
+
+type canvasSourceReadCloser struct {
+	io.ReadCloser
+	release func()
+	once    sync.Once
+}
+
+func (r *canvasSourceReadCloser) releaseClient() {
+	r.once.Do(r.release)
+}
+
+func (r *canvasSourceReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if err != nil {
+		r.releaseClient()
+	}
+	return n, err
+}
+
+func (r *canvasSourceReadCloser) Close() error {
+	err := r.ReadCloser.Close()
+	r.releaseClient()
+	return err
+}
 
 // taskGetterRepo is the minimal interface needed by the scheduler adapter.
 type taskGetterRepo interface {
@@ -95,8 +287,31 @@ type lifecycleAdapter struct {
 	logger   *logger.Logger
 }
 
+// orchestrator.Service.currentACPSessionID selects the generation-safety seam
+// for resetAgentContext by asserting the agent manager to this unexported
+// interface; that assertion fails silently at runtime if this method is
+// missing or its signature drifts, leaving storeResumeToken's stale-event
+// guard and the reset-failure reconcile permanently inert against a defunct
+// or dead-wrong ACP session id. Pin the exact shape here so drift is a build
+// error, not a silently-dead production guard.
+//
+// OwnsPromptActivity and GetPromptActivityForSession are pinned for the same
+// reason: the stuck-signal watchdog (internal/orchestrator/stuck_signal_watchdog.go)
+// and handleAgentStalled (internal/orchestrator/event_handlers_stall.go) both
+// select their activity guards by asserting the agent manager to narrow
+// unexported interfaces shaped like these two methods. Before this pin
+// existed, lifecycleAdapter forwarded neither method, so both assertions
+// failed silently in production: the watchdog's inactivity gate never
+// engaged (WO-38 review), and handleAgentStalled's ActivityEpoch check
+// always bailed out whenever a payload carried a nonzero epoch.
 var _ interface {
 	OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error)
+	GetACPSessionIDForSession(sessionID string) (string, bool)
+	OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
+	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
+	CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error
+	PreparePassthroughRunning(sessionID string) (func(), error)
 } = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
@@ -110,6 +325,23 @@ func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *lo
 
 // LaunchAgent creates a new agentctl instance for a task.
 // Agent subprocess is NOT started - call StartAgentProcess() explicitly.
+// wrapSessionRecoveryGuardError translates the raw lifecycle recovery-guard
+// sentinels into an orchestrator.SessionRecoveryGuardError so callers outside
+// internal/agent/runtime/ can distinguish a retryable in-progress recovery
+// from a non-retryable unstoppable-agent condition without importing
+// lifecycle directly. Errors that are not guard-related pass through
+// unchanged.
+func wrapSessionRecoveryGuardError(err error, sessionID string) error {
+	switch {
+	case errors.Is(err, lifecycle.ErrSessionRecoveryGuarded):
+		return &orchestrator.SessionRecoveryGuardError{Cause: err, SessionID: sessionID, Retryable: true}
+	case errors.Is(err, lifecycle.ErrSessionUnstoppableAgent):
+		return &orchestrator.SessionRecoveryGuardError{Cause: err, SessionID: sessionID, Retryable: false}
+	default:
+		return err
+	}
+}
+
 func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	// WorkspacePath wins when set (repo-less task with picked folder); otherwise
 	// fall back to RepositoryURL (legacy: this carries a local filesystem path
@@ -123,143 +355,219 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	if officeProfileID == "" {
 		officeProfileID = req.AgentProfileID
 	}
-	launchReq := &lifecycle.LaunchRequest{
-		TaskID:              req.TaskID,
-		WorkspaceID:         req.WorkspaceID,
-		SessionID:           req.SessionID,
-		TaskEnvironmentID:   req.TaskEnvironmentID,
-		TaskTitle:           req.TaskTitle,
-		AgentProfileID:      officeProfileID,
-		ExecutionProfileID:  req.AgentProfileID,
-		StartAgent:          req.StartAgent,
-		WorkspacePath:       workspacePath,
-		TaskDescription:     req.TaskDescription,
-		Attachments:         convertToLifecycleAttachments(req.Attachments),
-		Env:                 req.Env,
-		ACPSessionID:        req.ACPSessionID,
-		Metadata:            req.Metadata,
-		ModelOverride:       req.ModelOverride,
-		ExecutorType:        req.ExecutorType,
-		ExecutorConfig:      req.ExecutorConfig,
-		PreviousExecutionID: req.PreviousExecutionID,
-		McpMode:             req.McpMode,
-		IsEphemeral:         req.IsEphemeral,
-		IsPassthrough:       req.IsPassthrough,
-		SetupScript:         req.SetupScript,
-		CopyFiles:           req.CopyFiles,
-		// Worktree configuration for concurrent agent execution
-		UseWorktree:            req.UseWorktree,
-		WorktreeID:             req.WorktreeID,
-		RepositoryID:           req.RepositoryID,
-		RepositoryPath:         req.RepositoryPath,
-		BaseBranch:             req.BaseBranch,
-		DefaultBranch:          req.DefaultBranch,
-		CheckoutBranch:         req.CheckoutBranch,
-		PRNumber:               req.PRNumber,
-		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
-		WorktreeBranchTicket:   req.WorktreeBranchTicket,
-		PullBeforeWorktree:     req.PullBeforeWorktree,
-		// Task directory mode
-		TaskDirName:        req.TaskDirName,
-		RepoName:           req.RepoName,
-		BranchSlug:         req.BranchSlug,
-		BranchIdentitySlug: req.BranchIdentitySlug,
-	}
-	for _, f := range req.WorkspaceFolders {
-		launchReq.WorkspaceFolders = append(launchReq.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
-	}
-
-	if req.RouteOverride != nil {
-		launchReq.RouteOverride = &lifecycle.RouteOverride{
-			ExecutionProfileID: req.RouteOverride.ExecutionProfileID,
-			ProviderID:         req.RouteOverride.ProviderID,
-			Model:              req.RouteOverride.Model,
-			Tier:               req.RouteOverride.Tier,
-			Mode:               req.RouteOverride.Mode,
-			Flags:              req.RouteOverride.Flags,
-			Env:                req.RouteOverride.Env,
-		}
-	}
-
-	// Multi-repo: forward the explicit repo list when the orchestrator built one.
-	if len(req.Repositories) > 0 {
-		specs := make([]lifecycle.RepoLaunchSpec, 0, len(req.Repositories))
-		for _, r := range req.Repositories {
-			specs = append(specs, lifecycle.RepoLaunchSpec{
-				RepositoryID:           r.RepositoryID,
-				RepositoryPath:         r.RepositoryPath,
-				RepositoryURL:          r.RepositoryURL,
-				RepoName:               r.RepoName,
-				BaseBranch:             r.BaseBranch,
-				DefaultBranch:          r.DefaultBranch,
-				CheckoutBranch:         r.CheckoutBranch,
-				PRNumber:               r.PRNumber,
-				WorktreeID:             r.WorktreeID,
-				WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
-				WorktreeBranchTemplate: r.WorktreeBranchTemplate,
-				WorktreeBranchTicket:   r.WorktreeBranchTicket,
-				PullBeforeWorktree:     r.PullBeforeWorktree,
-				RepoSetupScript:        r.RepoSetupScript,
-				RepoCleanupScript:      r.RepoCleanupScript,
-				CopyFiles:              r.CopyFiles,
-				BranchSlug:             r.BranchSlug,
-				BranchIdentitySlug:     r.BranchIdentitySlug,
-			})
-		}
-		launchReq.Repositories = specs
-	}
+	launchReq := buildLifecycleLaunchRequest(req, workspacePath, officeProfileID)
 
 	// Create the agentctl execution (does NOT start agent process)
 	execution, err := a.mgr.Launch(ctx, launchReq)
 	if err != nil {
-		return nil, err
+		return nil, wrapSessionRecoveryGuardError(err, req.SessionID)
 	}
 
 	// Extract worktree info from metadata if available
+	metadata := execution.MetadataSnapshot()
 	var worktreeID, worktreePath, worktreeBranch string
-	if execution.Metadata != nil {
-		if id, ok := execution.Metadata["worktree_id"].(string); ok {
+	var worktreeBranchOwner, worktreeIntegrationRef string
+	if metadata != nil {
+		if id, ok := metadata["worktree_id"].(string); ok {
 			worktreeID = id
 		}
-		if path, ok := execution.Metadata["worktree_path"].(string); ok {
+		if path, ok := metadata["worktree_path"].(string); ok {
 			worktreePath = path
 		}
-		if branch, ok := execution.Metadata["worktree_branch"].(string); ok {
+		if branch, ok := metadata["worktree_branch"].(string); ok {
 			worktreeBranch = branch
 		}
+	}
+	if execution.PrepareResult != nil {
+		worktreeBranchOwner = execution.PrepareResult.WorktreeBranchOwner
+		worktreeIntegrationRef = execution.PrepareResult.WorktreeIntegrationRef
 	}
 
 	// Surface per-repo worktree results from the prepare step so the orchestrator
 	// can persist N TaskEnvironmentRepo / TaskSessionWorktree rows when multi-repo.
 	var worktrees []executor.RepoWorktreeResult
+	var requestedBaseBranch, baseBranch, baseBranchFallbackWarning string
+	if execution.PrepareResult != nil {
+		requestedBaseBranch = execution.PrepareResult.RequestedBaseBranch
+		baseBranch = execution.PrepareResult.BaseBranch
+		baseBranchFallbackWarning = execution.PrepareResult.BaseBranchFallbackWarning
+	}
 	if execution.PrepareResult != nil && len(execution.PrepareResult.Worktrees) > 0 {
 		worktrees = make([]executor.RepoWorktreeResult, 0, len(execution.PrepareResult.Worktrees))
 		for _, w := range execution.PrepareResult.Worktrees {
 			worktrees = append(worktrees, executor.RepoWorktreeResult{
-				RepositoryID:   w.RepositoryID,
-				BranchSlug:     w.BranchSlug,
-				WorktreeID:     w.WorktreeID,
-				WorktreeBranch: w.WorktreeBranch,
-				WorktreePath:   w.WorktreePath,
-				MainRepoGitDir: w.MainRepoGitDir,
-				ErrorMessage:   w.ErrorMessage,
+				TaskRepositoryID:          w.TaskRepositoryID,
+				RepositoryID:              w.RepositoryID,
+				BranchSlug:                w.BranchSlug,
+				WorktreeID:                w.WorktreeID,
+				WorktreeBranch:            w.WorktreeBranch,
+				WorktreeBranchOwner:       w.WorktreeBranchOwner,
+				WorktreeIntegrationRef:    w.WorktreeIntegrationRef,
+				WorktreePath:              w.WorktreePath,
+				MainRepoGitDir:            w.MainRepoGitDir,
+				RequestedBaseBranch:       w.RequestedBaseBranch,
+				BaseBranch:                w.BaseBranch,
+				BaseBranchFallbackWarning: w.BaseBranchFallbackWarning,
+				ErrorMessage:              w.ErrorMessage,
 			})
 		}
 	}
 
 	return &executor.LaunchAgentResponse{
-		AgentExecutionID: execution.ID,
-		ContainerID:      execution.ContainerID,
-		Status:           execution.Status,
-		WorktreeID:       worktreeID,
-		WorktreePath:     worktreePath,
-		WorktreeBranch:   worktreeBranch,
-		WorkspacePath:    execution.WorkspacePath,
-		Metadata:         execution.Metadata,
-		PrepareResult:    execution.PrepareResult,
-		Worktrees:        worktrees,
+		AgentExecutionID:          execution.ID,
+		ContainerID:               execution.ContainerID,
+		Status:                    execution.Status,
+		WorktreeID:                worktreeID,
+		WorktreePath:              worktreePath,
+		WorktreeBranch:            worktreeBranch,
+		WorktreeBranchOwner:       worktreeBranchOwner,
+		WorktreeIntegrationRef:    worktreeIntegrationRef,
+		RequestedBaseBranch:       requestedBaseBranch,
+		BaseBranch:                baseBranch,
+		BaseBranchFallbackWarning: baseBranchFallbackWarning,
+		WorkspacePath:             execution.WorkspacePath,
+		Metadata:                  metadata,
+		PrepareResult:             execution.PrepareResult,
+		Worktrees:                 worktrees,
 	}, nil
+}
+
+func buildLifecycleLaunchRequest(
+	req *executor.LaunchAgentRequest, workspacePath, officeProfileID string,
+) *lifecycle.LaunchRequest {
+	launchReq := &lifecycle.LaunchRequest{
+		TaskID:                        req.TaskID,
+		WorkspaceID:                   req.WorkspaceID,
+		SessionID:                     req.SessionID,
+		TaskEnvironmentID:             req.TaskEnvironmentID,
+		WorkspaceReuseRequired:        req.WorkspaceReuseRequired,
+		AllowBranchReplacement:        req.AllowBranchReplacement,
+		TaskTitle:                     req.TaskTitle,
+		AgentProfileID:                officeProfileID,
+		ExecutionProfileID:            req.AgentProfileID,
+		StartAgent:                    req.StartAgent,
+		TurnID:                        req.TurnID,
+		WorkspacePath:                 workspacePath,
+		TaskDescription:               req.TaskDescription,
+		Attachments:                   convertToLifecycleAttachments(req.Attachments),
+		Env:                           req.Env,
+		AdditionalSkillSlugs:          append([]string(nil), req.AdditionalSkillSlugs...),
+		ApprovedSecretEnvKeys:         append([]string(nil), req.ApprovedSecretEnvKeys...),
+		EnvironmentDefinitions:        append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...),
+		EnvironmentResolutionRequired: req.EnvironmentResolutionRequired,
+		ACPSessionID:                  req.ACPSessionID,
+		Metadata:                      req.Metadata,
+		ModelOverride:                 req.ModelOverride,
+		ExecutorType:                  req.ExecutorType,
+		ExecutorConfig:                req.ExecutorConfig,
+		PreviousExecutionID:           req.PreviousExecutionID,
+		McpMode:                       req.McpMode,
+		McpProviders:                  req.McpProviders,
+		McpProfile:                    req.McpProfile,
+		IsEphemeral:                   req.IsEphemeral,
+		IsPassthrough:                 req.IsPassthrough,
+		SetupScript:                   req.SetupScript,
+		CopyFiles:                     req.CopyFiles,
+		UseWorktree:                   req.UseWorktree,
+		WorktreeID:                    req.WorktreeID,
+		RepositoryID:                  req.RepositoryID,
+		TaskRepositoryID:              req.TaskRepositoryID,
+		RepositoryPath:                req.RepositoryPath,
+		BaseBranch:                    req.BaseBranch,
+		IntegrationRef:                req.IntegrationRef,
+		DefaultBranch:                 req.DefaultBranch,
+		CheckoutBranch:                req.CheckoutBranch,
+		PRNumber:                      req.PRNumber,
+		RemoteContribution:            req.RemoteContribution,
+		CheckoutOptions:               req.CheckoutOptions,
+		ContributionDestination:       req.ContributionDestination,
+		ComparisonTarget:              req.ComparisonTarget,
+		QualifiedPRBase:               req.QualifiedPRBase,
+		WorktreeBranchPrefix:          req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate:        req.WorktreeBranchTemplate,
+		WorktreeBranchTicket:          req.WorktreeBranchTicket,
+		PullBeforeWorktree:            req.PullBeforeWorktree,
+		RemoteSyncHandled:             req.RemoteSyncHandled,
+		RefreshRepository:             req.RefreshRepository,
+		RefreshRepositoryWithState:    req.RefreshRepositoryWithState,
+		RemoteRefState:                req.RemoteRefState,
+		TaskDirName:                   req.TaskDirName,
+		RepoName:                      req.RepoName,
+		BranchSlug:                    req.BranchSlug,
+		BranchIdentitySlug:            req.BranchIdentitySlug,
+	}
+	launchReq.WorkspaceFolders = lifecycleWorkspaceFolders(req.WorkspaceFolders)
+	launchReq.RouteOverride = lifecycleRouteOverride(req.RouteOverride)
+	launchReq.Repositories = lifecycleRepoLaunchSpecs(req.Repositories)
+	return launchReq
+}
+
+func lifecycleWorkspaceFolders(folders []executor.WorkspaceFolderSpec) []lifecycle.WorkspaceFolderSpec {
+	if len(folders) == 0 {
+		return nil
+	}
+	result := make([]lifecycle.WorkspaceFolderSpec, 0, len(folders))
+	for _, f := range folders {
+		result = append(result, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
+	}
+	return result
+}
+
+func lifecycleRouteOverride(override *executor.RouteOverride) *lifecycle.RouteOverride {
+	if override == nil {
+		return nil
+	}
+	return &lifecycle.RouteOverride{
+		ExecutionProfileID: override.ExecutionProfileID,
+		ProviderID:         override.ProviderID,
+		Model:              override.Model,
+		Tier:               override.Tier,
+		Mode:               override.Mode,
+		Flags:              override.Flags,
+		Env:                override.Env,
+	}
+}
+
+func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchSpec {
+	if len(repos) == 0 {
+		return nil
+	}
+	specs := make([]lifecycle.RepoLaunchSpec, 0, len(repos))
+	for _, r := range repos {
+		specs = append(specs, lifecycle.RepoLaunchSpec{
+			TaskRepositoryID:           r.TaskRepositoryID,
+			RepositoryID:               r.RepositoryID,
+			RepositoryPath:             r.RepositoryPath,
+			RepositoryURL:              r.RepositoryURL,
+			RepoName:                   r.RepoName,
+			BaseBranch:                 r.BaseBranch,
+			IntegrationRef:             r.IntegrationRef,
+			DefaultBranch:              r.DefaultBranch,
+			CheckoutBranch:             r.CheckoutBranch,
+			PRNumber:                   r.PRNumber,
+			RemoteContribution:         r.RemoteContribution,
+			CheckoutOptions:            r.CheckoutOptions,
+			ContributionDestination:    r.ContributionDestination,
+			ComparisonTarget:           r.ComparisonTarget,
+			QualifiedPRBase:            r.QualifiedPRBase,
+			WorktreeID:                 r.WorktreeID,
+			AllowBranchReplacement:     r.AllowBranchReplacement,
+			WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
+			WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
+			WorktreeBranchTicket:       r.WorktreeBranchTicket,
+			PullBeforeWorktree:         r.PullBeforeWorktree,
+			RemoteSyncHandled:          r.RemoteSyncHandled,
+			RefreshRepository:          r.RefreshRepository,
+			RefreshRepositoryWithState: r.RefreshRepositoryWithState,
+			RemoteRefState:             r.RemoteRefState,
+			RepoSetupScript:            r.RepoSetupScript,
+			RepoCleanupScript:          r.RepoCleanupScript,
+			CopyFiles:                  r.CopyFiles,
+			BranchSlug:                 r.BranchSlug,
+			BranchIdentitySlug:         r.BranchIdentitySlug,
+		})
+	}
+	return specs
 }
 
 // convertToLifecycleAttachments converts v1.MessageAttachment to lifecycle.MessageAttachment.
@@ -270,10 +578,12 @@ func convertToLifecycleAttachments(attachments []v1.MessageAttachment) []lifecyc
 	result := make([]lifecycle.MessageAttachment, len(attachments))
 	for i, att := range attachments {
 		result[i] = lifecycle.MessageAttachment{
+			AttachmentID: att.AttachmentID,
 			Type:         att.Type,
 			Data:         att.Data,
 			MimeType:     att.MimeType,
 			Name:         att.Name,
+			SizeBytes:    att.SizeBytes,
 			DeliveryMode: att.DeliveryMode,
 		}
 	}
@@ -283,6 +593,10 @@ func convertToLifecycleAttachments(attachments []v1.MessageAttachment) []lifecyc
 // SetExecutionDescription updates the task description in an existing execution's metadata.
 func (a *lifecycleAdapter) SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error {
 	return a.mgr.SetExecutionDescription(ctx, agentExecutionID, description)
+}
+
+func (a *lifecycleAdapter) SetPromptTurnID(ctx context.Context, agentExecutionID, turnID string) error {
+	return a.mgr.SetPromptTurnID(ctx, agentExecutionID, turnID)
 }
 
 // RequiresCloneURL implements executor.ExecutorTypeCapabilities by delegating to
@@ -300,6 +614,12 @@ func (a *lifecycleAdapter) ShouldApplyPreferredShell(executorType string) bool {
 // SetExecutionEnv updates per-run env vars in an existing execution.
 func (a *lifecycleAdapter) SetExecutionEnv(ctx context.Context, agentExecutionID string, env map[string]string) error {
 	return a.mgr.SetExecutionEnv(ctx, agentExecutionID, env)
+}
+
+// ExecutorProfileEnvForSession resolves the current executor profile
+// environment for a prepared workspace before its agent process starts.
+func (a *lifecycleAdapter) ExecutorProfileEnvForSession(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error) {
+	return a.mgr.ExecutorProfileEnvForSession(ctx, sessionID, taskEnvironmentID)
 }
 
 // SetMcpMode changes the MCP tool mode on an existing execution's agentctl instance.
@@ -345,13 +665,29 @@ func normalizeRuntimeStopError(err error) error {
 }
 
 // RowLiveness classifies the liveness of the OS process backing an
-// executors_running row using the runtime-aware host-local probe. It is the
-// orchestrator's window into the platform-split liveness check (kept in the
-// lifecycle package) used by startup reconciliation
-// (#1597 runtime-aware liveness). A local check never runs against a
+// executors_running row. It is the orchestrator's window into the
+// platform-split liveness check (kept in the lifecycle package) used outside
+// a reconciliation pass — e.g. the single-session idle reclaim path — and
+// always takes its own fresh adopted-server enumeration for a standalone row
+// rather than reusing one a pass cached (see RowLivenessScoped for the
+// pass-scoped sibling). A local/enumeration check never runs against a
 // remote/SSH row — such rows return Unknown.
 func (a *lifecycleAdapter) RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness {
-	return lifecycle.RowProcessLiveness(row)
+	return a.mgr.RowLiveness(row)
+}
+
+// NewStandaloneLivenessScope takes one adopted-server enumeration for reuse
+// across every row of a single reconciliation pass (design 02 "Persistence":
+// "It has two kinds of caller, and only one of them is a pass"). Satisfies
+// the orchestrator's optional standaloneLivenessScoper capability.
+func (a *lifecycleAdapter) NewStandaloneLivenessScope(ctx context.Context) interface{} {
+	return a.mgr.NewStandaloneLivenessScope(ctx)
+}
+
+// RowLivenessScoped classifies row's liveness reusing scope (from
+// NewStandaloneLivenessScope) instead of taking a fresh enumeration.
+func (a *lifecycleAdapter) RowLivenessScoped(row *models.ExecutorRunning, scope interface{}) models.ProcessLiveness {
+	return a.mgr.RowLivenessScoped(row, scope)
 }
 
 // GetAgentStatus returns the status of an agent execution
@@ -403,6 +739,30 @@ func (a *lifecycleAdapter) OwnsPromptGeneration(sessionID, executionID string, g
 	return a.mgr.OwnsPromptGeneration(sessionID, executionID, generation)
 }
 
+func (a *lifecycleAdapter) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
+	return a.mgr.GetPromptGenerationForSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool {
+	return a.mgr.OwnsPromptActivity(sessionID, executionID, generation, activityEpoch)
+}
+
+func (a *lifecycleAdapter) GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error) {
+	return a.mgr.GetPromptActivityForSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error {
+	return a.mgr.CancelAgentForPrompt(ctx, sessionID, executionID, generation, activityEpoch)
+}
+
+// GetACPSessionIDForSession forwards to the lifecycle manager so
+// orchestrator.Service.currentACPSessionID observes the live execution's
+// actual ACP session identity in production, not just in tests against
+// mockAgentManager (see the compile-time assertion above this type).
+func (a *lifecycleAdapter) GetACPSessionIDForSession(sessionID string) (string, bool) {
+	return a.mgr.GetACPSessionIDForSession(sessionID)
+}
+
 func (a *lifecycleAdapter) GetSessionAuthMethods(sessionID string) []streams.AuthMethodInfo {
 	return a.mgr.GetSessionAuthMethods(sessionID)
 }
@@ -422,6 +782,32 @@ func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID stri
 
 func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
 	result, err := a.mgr.PromptAgentWithDispatchCallback(ctx, agentInstanceID, prompt, attachments, dispatchOnly, onDispatched)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{
+		StopReason:   result.StopReason,
+		AgentMessage: result.AgentMessage,
+	}, nil
+}
+
+// Compile-time guard for the steer capability. The executor selects the steer
+// path by asserting the agent manager to its unexported
+// steerAgentWithDispatchCallback interface (internal/orchestrator/executor); that
+// assertion fails silently at runtime if this method's signature drifts,
+// disabling every production steer. Pin the exact shape here so drift is a build
+// error, not a runtime regression.
+var _ interface {
+	SteerAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*executor.PromptResult, error)
+} = (*lifecycleAdapter)(nil)
+
+// SteerAgentWithDispatchCallback forwards a mid-turn steer to the lifecycle
+// manager. Without it the executor's steer path type-assertion fails and every
+// eligible steer returns ErrPromptDispatchCallbackUnsupported, so the production
+// agent-manager client must satisfy the steerAgentWithDispatchCallback capability
+// exactly as it does the ordinary dispatch-callback prompt.
+func (a *lifecycleAdapter) SteerAgentWithDispatchCallback(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
+	result, err := a.mgr.SteerAgentWithDispatchCallback(ctx, agentInstanceID, prompt, attachments, dispatchOnly, onDispatched)
 	if err != nil {
 		return nil, err
 	}
@@ -469,10 +855,34 @@ func (a *lifecycleAdapter) RespondToPermissionBySessionID(ctx context.Context, s
 	return a.mgr.RespondToPermissionBySessionID(sessionID, pendingID, optionID, cancelled)
 }
 
+func (a *lifecycleAdapter) ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error) {
+	return a.mgr.ListPendingPermissionsBySessionID(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	return a.mgr.ResolvePermissionBySessionID(ctx, sessionID, requestID, pendingID, optionID)
+}
+
+func (a *lifecycleAdapter) CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	return a.mgr.CancelPermissionBySessionID(ctx, sessionID, requestID, pendingID)
+}
+
+// ProbeBackgroundWorkloads samples a session's agent process for
+// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+func (a *lifecycleAdapter) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	return a.mgr.ProbeBackgroundWorkloadsBySessionID(ctx, sessionID)
+}
+
 // IsAgentRunningForSession checks if an agent is actually running for a session
 // This probes the actual agent (Docker container or standalone process)
 func (a *lifecycleAdapter) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	return a.mgr.IsAgentRunningForSession(ctx, sessionID)
+}
+
+// ProbeAgentRunningForSession preserves probe errors so orchestrator cleanup
+// can distinguish an unavailable status check from a confirmed dead agent.
+func (a *lifecycleAdapter) ProbeAgentRunningForSession(ctx context.Context, sessionID string) (bool, error) {
+	return a.mgr.ProbeAgentRunningForSession(ctx, sessionID)
 }
 
 // IsAgentReadyForPrompt checks if the session can accept a prompt immediately.
@@ -482,6 +892,10 @@ func (a *lifecycleAdapter) IsAgentReadyForPrompt(ctx context.Context, sessionID 
 
 func (a *lifecycleAdapter) RecoverAgentPromptStream(ctx context.Context, sessionID string) error {
 	return a.mgr.RecoverAgentPromptStream(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) BindResumeAttempt(ctx context.Context, sessionID, attemptID string) error {
+	return a.mgr.BindResumeAttempt(ctx, sessionID, attemptID)
 }
 
 // IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
@@ -502,10 +916,15 @@ func (a *lifecycleAdapter) MarkPassthroughRunning(sessionID string) error {
 	return a.mgr.MarkPassthroughRunning(sessionID)
 }
 
+func (a *lifecycleAdapter) PreparePassthroughRunning(sessionID string) (func(), error) {
+	return a.mgr.PreparePassthroughRunning(sessionID)
+}
+
 func (a *lifecycleAdapter) PollRemoteStatusForRecords(ctx context.Context, records []executor.RemoteStatusPollRequest) {
 	lcRecords := make([]lifecycle.RemoteStatusPollRecord, len(records))
 	for i, r := range records {
 		lcRecords[i] = lifecycle.RemoteStatusPollRecord{
+			TaskID:           r.TaskID,
 			SessionID:        r.SessionID,
 			Runtime:          r.Runtime,
 			AgentExecutionID: r.AgentExecutionID,
@@ -520,6 +939,16 @@ func (a *lifecycleAdapter) CleanupStaleExecutionBySessionID(ctx context.Context,
 	return a.mgr.CleanupStaleExecutionBySessionID(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) CleanupStaleExecutionBySessionIDIfCurrent(
+	ctx context.Context,
+	sessionID, expectedExecutionID string,
+	expectedUpdatedAt time.Time,
+) error {
+	return a.mgr.CleanupStaleExecutionBySessionIDIfCurrent(
+		ctx, sessionID, expectedExecutionID, expectedUpdatedAt,
+	)
+}
+
 func (a *lifecycleAdapter) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
 	_, err := a.mgr.EnsureWorkspaceExecutionForSession(ctx, taskID, sessionID)
 	return err
@@ -527,6 +956,31 @@ func (a *lifecycleAdapter) EnsureWorkspaceExecutionForSession(ctx context.Contex
 
 func (a *lifecycleAdapter) GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error) {
 	return a.mgr.GetExecutionIDForSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference {
+	return a.mgr.ListExecutionsForTask(taskID)
+}
+
+// LiveSessionIDsForTask satisfies taskservice.SessionExecutionRegistry: the
+// session IDs under taskID that currently have a live in-memory execution
+// registered by the agent runtime. The session reconciliation sweep uses the
+// snapshot to tell an active session whose backing actor is alive from one
+// whose actor is gone. Pinned here so a signature drift is a build error.
+var _ taskservice.SessionExecutionRegistry = (*lifecycleAdapter)(nil)
+
+func (a *lifecycleAdapter) LiveSessionIDsForTask(taskID string) []string {
+	references := a.mgr.ListExecutionsForTask(taskID)
+	sessionIDs := make([]string, 0, len(references))
+	for _, reference := range references {
+		// ListExecutionsForTask includes workspace-only infrastructure created
+		// by file/shell access. Only an execution with an agent command (or a
+		// live passthrough process) owns the agent session lifecycle.
+		if reference.SessionID != "" && a.mgr.HasLiveAgentExecution(reference.SessionID) {
+			sessionIDs = append(sessionIDs, reference.SessionID)
+		}
+	}
+	return sessionIDs
 }
 
 func (a *lifecycleAdapter) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
@@ -557,12 +1011,24 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		AgentName:                  info.AgentName,
 		Model:                      info.Model,
 		Mode:                       info.Mode,
+		FallbackModel:              info.FallbackModel,
+		AutoFallback:               info.AutoFallback,
+		RequireExactModel:          info.RequireExactModel,
 		ConfigOptions:              info.ConfigOptions,
 		AutoApprove:                info.AutoApprove,
 		DangerouslySkipPermissions: info.DangerouslySkipPermissions,
 		CLIPassthrough:             info.CLIPassthrough,
+		EnvVars:                    append([]models.ProfileEnvVar(nil), info.EnvVars...),
 		SupportsMCP:                info.SupportsMCP,
 	}, nil
+}
+
+// HasLiveExecution reports whether the session still has an agent execution
+// owned by the runtime. It backs the task service's orphan-session
+// reconciliation sweep; workspace-only infrastructure is not a live agent,
+// and this lookup must never lazily create an execution.
+func (a *lifecycleAdapter) HasLiveExecution(sessionID string) bool {
+	return a.mgr.HasLiveAgentExecution(sessionID)
 }
 
 // GetGitLog retrieves the git log for a session from baseCommit to HEAD.
@@ -572,7 +1038,8 @@ func (a *lifecycleAdapter) GetGitLog(ctx context.Context, sessionID, baseCommit 
 	if !ok {
 		return nil, nil // No execution, not an error
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -585,7 +1052,8 @@ func (a *lifecycleAdapter) GetCumulativeDiff(ctx context.Context, sessionID, bas
 	if !ok {
 		return nil, nil // No execution, not an error
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -601,7 +1069,8 @@ func (a *lifecycleAdapter) GetGitStatus(ctx context.Context, sessionID string) (
 	if !ok {
 		return nil, nil // No execution, not an error
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -614,7 +1083,8 @@ func (a *lifecycleAdapter) GetGitStatusFresh(ctx context.Context, sessionID stri
 	if !ok {
 		return nil, nil
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -632,6 +1102,8 @@ type orchestratorWrapper struct {
 	svc *orchestrator.Service
 }
 
+var _ taskhandlers.AtomicQueuedPromptCoordinator = (*orchestratorWrapper)(nil)
+
 // PromptTask forwards directly to the orchestrator service.
 // Attachments (images) are passed through to the agent.
 func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error) {
@@ -644,10 +1116,86 @@ func (w *orchestratorWrapper) ResumeTaskSession(ctx context.Context, taskID, tas
 	return err
 }
 
+// HasActiveSessionRecoveryForFailure forwards the correlated prompt-error
+// ownership seam. Historical session errors never suppress a new failure.
+func (w *orchestratorWrapper) HasActiveSessionRecoveryForFailure(ctx context.Context, taskID, taskSessionID string, failure error) bool {
+	return w.svc.HasActiveSessionRecoveryForFailure(ctx, taskID, taskSessionID, failure)
+}
+
+// ResumeTaskSessionAndPrompt keeps the recovery attempt alive through prompt
+// provider acceptance for the handler's internal retry.
+func (w *orchestratorWrapper) ResumeTaskSessionAndPrompt(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.ResumeTaskSessionAndPrompt(ctx, taskID, taskSessionID, prompt, model, planMode, attachments)
+}
+
 // StartCreatedSession forwards to the orchestrator service, discarding the TaskExecution result.
 func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) error {
 	_, err := w.svc.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references)
 	return err
+}
+
+// PrepareDirectPrompt forwards the backend-owned direct-message preparation
+// seam used by the WebSocket message handler.
+func (w *orchestratorWrapper) PrepareDirectPrompt(ctx context.Context, prompt string, isPassthrough bool) (string, string) {
+	return w.svc.PrepareDirectPrompt(ctx, prompt, isPassthrough)
+}
+
+// StartCreatedSessionWithPromptContext forwards direct-message startup while
+// preserving the trusted saved-prompt context through the second canonicalizer.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContext(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContext(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		promptReferencesPrepared,
+	)
+}
+
+// StartCreatedSessionWithPromptContextAndCanvasGuidance forwards direct
+// startup together with the server-resolved capability projection used when
+// the message was persisted.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuidance(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	canvasGuidanceResolved, includeCanvasGuidance bool,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidance(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		promptReferencesPrepared, canvasGuidanceResolved, includeCanvasGuidance,
+	)
+}
+
+// StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt
+// forwards a first direct prompt whose task brief was admitted and persisted
+// before launch.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	canvasGuidanceResolved, includeCanvasGuidance bool,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		promptReferencesPrepared, canvasGuidanceResolved, includeCanvasGuidance,
+	)
 }
 
 type githubTaskIssueStoreAdapter struct {
@@ -682,6 +1230,43 @@ func (a githubTaskIssueStoreAdapter) UpdateTaskMetadata(ctx context.Context, tas
 	return task, nil
 }
 
+func (a githubTaskIssueStoreAdapter) UpdateTaskRepositoryBaseBranch(
+	ctx context.Context, taskID, repositoryID, headBranch, baseBranch string,
+) error {
+	taskRepos, err := a.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	taskRepo, err := selectTaskRepositoryForPR(taskRepos, repositoryID, headBranch)
+	if err != nil {
+		return err
+	}
+	_, err = a.svc.UpdateRepositoryBaseBranchFromSystem(ctx, taskservice.UpdateRepositoryBaseBranchRequest{
+		TaskID: taskID, TaskRepositoryID: taskRepo.ID, BaseBranch: baseBranch,
+	})
+	return err
+}
+
+func selectTaskRepositoryForPR(
+	taskRepos []*models.TaskRepository, repositoryID, headBranch string,
+) (*models.TaskRepository, error) {
+	matches := make([]*models.TaskRepository, 0, 1)
+	for _, taskRepo := range taskRepos {
+		if taskRepo != nil && taskRepo.RepositoryID == repositoryID {
+			matches = append(matches, taskRepo)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	for _, taskRepo := range matches {
+		if taskRepo.CheckoutBranch == headBranch {
+			return taskRepo, nil
+		}
+	}
+	return nil, fmt.Errorf("task repository for repository %q and branch %q not found", repositoryID, headBranch)
+}
+
 func wrapGitHubTaskIssueStoreError(err error) error {
 	if errors.Is(err, taskrepo.ErrTaskNotFound) {
 		return fmt.Errorf("%w: %w", githubsvc.ErrTaskNotFound, err)
@@ -690,8 +1275,21 @@ func wrapGitHubTaskIssueStoreError(err error) error {
 }
 
 // ProcessOnTurnStart forwards to the orchestrator service.
-func (w *orchestratorWrapper) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error {
+func (w *orchestratorWrapper) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error) {
 	return w.svc.ProcessOnTurnStart(ctx, taskID, sessionID)
+}
+
+// QueueUserPrompt forwards a prompt that must wait for workflow admission.
+func (w *orchestratorWrapper) QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error {
+	return w.svc.QueueUserPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
+}
+
+func (w *orchestratorWrapper) MaxQueuedPromptsPerSession() int {
+	return w.svc.MaxQueuedPromptsPerSession()
+}
+
+func (w *orchestratorWrapper) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string) {
+	w.svc.NotifyQueuedUserPrompt(ctx, taskID, sessionID)
 }
 
 // StepRequiresCompletionSignal forwards to the orchestrator service.
@@ -699,9 +1297,37 @@ func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, 
 	return w.svc.StepRequiresCompletionSignal(ctx, taskID)
 }
 
+// TaskSessionCanvasGuidanceEnabled forwards the resolved capability used when
+// the message handler persists a first-turn prompt.
+func (w *orchestratorWrapper) TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error) {
+	return w.svc.TaskSessionCanvasGuidanceEnabled(ctx, taskID, sessionID)
+}
+
 // ForegroundActivity forwards to the orchestrator service (ADR-0049).
 func (w *orchestratorWrapper) ForegroundActivity(sessionID string) v1.ForegroundActivity {
 	return w.svc.ForegroundActivity(sessionID)
+}
+
+func (w *orchestratorWrapper) SteerEligible(sessionID string, state models.TaskSessionState) bool {
+	return w.svc.SteerEligible(sessionID, state)
+}
+
+func (w *orchestratorWrapper) SteerTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.SteerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments)
+}
+
+func (w *orchestratorWrapper) SteerRecordedMessage(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.SteerRecordedMessage(ctx, taskID, sessionID, prompt, model, planMode, attachments)
+}
+
+// subagentContextAdapter adapts the task service to the
+// orchestrator.SubagentContextRecorder interface.
+type subagentContextAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a *subagentContextAdapter) RecordSubagentContext(ctx context.Context, req taskservice.RecordSubagentContextRequest) {
+	a.svc.RecordSubagentContext(ctx, req)
 }
 
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface
@@ -782,6 +1408,22 @@ func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, c
 	return err
 }
 
+func (a *messageCreatorAdapter) CreateUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, turnID string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "user",
+		Metadata:      metadata,
+	})
+	return err
+}
+
 // CreateToolCallMessage creates a message for a tool call
 func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error {
 	metadata := map[string]interface{}{
@@ -822,6 +1464,15 @@ func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskI
 	return a.svc.UpdateToolCallMessageWithCreate(ctx, agentSessionID, toolCallID, parentToolCallID, status, result, title, normalized, taskID, turnID, msgType)
 }
 
+func (a *messageCreatorAdapter) UpsertAgentPlanMessage(
+	ctx context.Context,
+	taskID, sourceToolCallID, agentSessionID, content, turnID string,
+) error {
+	return a.svc.UpsertAgentPlanMessage(
+		ctx, taskID, sourceToolCallID, agentSessionID, content, turnID,
+	)
+}
+
 // CreateSessionMessage creates a message for non-chat session updates (status/progress/error/etc).
 func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
@@ -837,9 +1488,31 @@ func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID
 	return err
 }
 
+// CreateSessionMessageIdempotent persists a lifecycle/status message with a
+// deterministic ID so a replayed failure event cannot add another transcript
+// entry for the same failure stamp.
+func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, messageType, turnID string,
+	metadata map[string]interface{}, requestsInput bool,
+) error {
+	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+		RequestsInput: requestsInput,
+	})
+	return err
+}
+
 // CreatePermissionRequestMessage creates a message for a permission request
-func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
 	metadata := map[string]interface{}{
+		"request_id":     requestID,
 		"pending_id":     pendingID,
 		"tool_call_id":   toolCallID,
 		"options":        options,
@@ -863,8 +1536,20 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 }
 
 // UpdatePermissionMessage updates a permission message's status
-func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
-	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
+func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error {
+	return a.svc.UpdatePermissionMessage(ctx, taskID, sessionID, requestID, pendingID, status)
+}
+
+func (a *messageCreatorAdapter) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	return a.svc.ClaimPermissionResolution(ctx, request)
+}
+
+func (a *messageCreatorAdapter) FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	return a.svc.FinalizePermissionResolution(ctx, request)
+}
+
+func (a *messageCreatorAdapter) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
+	return a.svc.GetPermissionResolutionAudit(ctx, taskID, sessionID, requestID, pendingID)
 }
 
 // CreateClarificationRequestMessages emits one chat message per question in a
@@ -943,10 +1628,61 @@ func (a *messageCreatorAdapter) rollbackPartialBundle(ctx context.Context, ids [
 	}
 }
 
-// UpdateClarificationMessage updates a clarification message's status and answer
-// for a specific (pending_id, question_id) pair within the session.
+// UpdateClarificationMessage updates a clarification message's status and
+// answer.
+//
+// A nil answer must be forwarded as an untyped nil, not as a nil
+// *clarification.Answer boxed into the service method's interface{}
+// parameter (COR-001): a typed nil pointer boxed into an interface produces
+// a non-nil interface value, so the service's own `answer != nil` check
+// would fire and write a literal "response": null into every rejected or
+// cancelled clarification message's metadata.
 func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *clarification.Answer) error {
+	if answer == nil {
+		return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, nil)
+	}
 	return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, answer)
+}
+
+func (a *messageCreatorAdapter) CompleteActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+) ([]*models.Message, bool, error) {
+	return a.svc.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
+}
+
+func (a *messageCreatorAdapter) FinalizeClarificationResponseDelivery(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
+) ([]*models.Message, bool, error) {
+	return a.svc.FinalizeClarificationResponseDelivery(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
+}
+
+func (a *messageCreatorAdapter) RestoreActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
+) ([]*models.Message, bool, error) {
+	return a.svc.RestoreActiveClarificationBundle(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
+}
+
+func (a *messageCreatorAdapter) PublishClarificationBundleUpdates(
+	ctx context.Context,
+	messages []*models.Message,
+) error {
+	return a.svc.PublishClarificationBundleUpdates(ctx, messages)
 }
 
 // CreateAgentMessageStreaming creates a new agent message with a pre-generated ID.

@@ -3,6 +3,7 @@
 import { mergeAttributes, Node } from "@tiptap/core";
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from "@tiptap/react";
 import { IconHash } from "@tabler/icons-react";
+import { t } from "@/lib/i18n";
 
 export const EntityReferenceNode = Node.create({
   name: "entityReference",
@@ -54,7 +55,7 @@ function EntityReferenceChipView({ node }: ReactNodeViewProps) {
     kind?: string | null;
     id?: string | null;
   };
-  const label = key || title || id || "Reference";
+  const label = key || title || id || t("common:reference");
   const source = [provider, kind].filter(Boolean).join(" ");
   const description = source ? `${source}: ${title || label}` : title || label;
   return (

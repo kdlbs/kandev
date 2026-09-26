@@ -46,6 +46,9 @@ function makeUpdates(updateAvailable: boolean): UpdatesResponse {
     latest_url: "",
     latest_checked_at: "2026-05-18T00:00:00Z",
     update_available: updateAvailable,
+    channel: "stable",
+    channel_editable: true,
+    channel_unsupported_reason: "",
   };
 }
 

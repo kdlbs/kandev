@@ -95,4 +95,99 @@ test.describe("Archive task redirect", () => {
     // Should redirect to the home page
     await expect(testPage).not.toHaveURL(/\/t\//, { timeout: 15_000 });
   });
+
+  test("skips cascaded descendants when choosing the archive destination", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const parentTitle = "Cascade archive parent";
+    const childTitle = "Cascade archive recent child";
+    const secondChildTitle = "Cascade archive second child";
+    const unrelatedTitle = "Cascade archive unrelated task";
+    const createOptions = {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    };
+    const parent = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      parentTitle,
+      seedData.agentProfileId,
+      { ...createOptions, description: 'e2e:message("cascade parent response")' },
+    );
+    const child = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      childTitle,
+      seedData.agentProfileId,
+      {
+        ...createOptions,
+        parent_id: parent.id,
+        description: 'e2e:message("cascade child response")',
+      },
+    );
+    const secondChild = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      secondChildTitle,
+      seedData.agentProfileId,
+      {
+        ...createOptions,
+        parent_id: parent.id,
+        description: 'e2e:message("cascade second child response")',
+      },
+    );
+    const unrelated = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      unrelatedTitle,
+      seedData.agentProfileId,
+      { ...createOptions, description: 'e2e:message("cascade unrelated response")' },
+    );
+    for (const task of [parent, child, secondChild, unrelated]) {
+      if (!task.session_id) throw new Error(`missing session for ${task.title}`);
+    }
+
+    // Visit the child before the parent. Once the parent is removed, the old
+    // recent-task order therefore tries the child first.
+    await testPage.goto(`/t/${child.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.chat.getByText("cascade child response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+    await testPage.goto(`/t/${parent.id}`);
+    await session.waitForLoad();
+    await expect(session.chat.getByText("cascade parent response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.taskInSidebar(parentTitle)).toBeVisible({ timeout: 15_000 });
+    await expect(session.taskInSidebar(childTitle)).toBeVisible({ timeout: 15_000 });
+    await expect(session.taskInSidebar(secondChildTitle)).toBeVisible({ timeout: 15_000 });
+    await expect(session.taskInSidebar(unrelatedTitle)).toBeVisible({ timeout: 15_000 });
+
+    const documentRequests: string[] = [];
+    testPage.on("request", (request) => {
+      if (
+        request.isNavigationRequest() &&
+        request.frame() === testPage.mainFrame() &&
+        request.resourceType() === "document"
+      ) {
+        documentRequests.push(request.url());
+      }
+    });
+    const documentRequestsBeforeArchive = documentRequests.length;
+
+    await session.archiveTaskInSidebar(parentTitle, { cascade: true });
+
+    await expect(testPage).toHaveURL(new RegExp(`/t/${unrelated.id}$`), { timeout: 20_000 });
+    await expect(session.chat.getByText("cascade unrelated response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.activeSidebarTaskItem(unrelatedTitle)).toBeVisible({ timeout: 15_000 });
+    await expect(session.sidebarTaskItem(parentTitle)).toHaveCount(0, { timeout: 15_000 });
+    await expect(session.sidebarTaskItem(childTitle)).toHaveCount(0, { timeout: 15_000 });
+    await expect(session.sidebarTaskItem(secondChildTitle)).toHaveCount(0, { timeout: 15_000 });
+    expect(documentRequests).toHaveLength(documentRequestsBeforeArchive);
+  });
 });

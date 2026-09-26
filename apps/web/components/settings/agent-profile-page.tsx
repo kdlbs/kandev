@@ -1,14 +1,17 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { useParams } from "@/lib/routing/client-router";
-import { IconTrash } from "@tabler/icons-react";
+import { IconCopy, IconTrash } from "@tabler/icons-react";
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Separator } from "@kandev/ui/separator";
+import { Switch } from "@kandev/ui/switch";
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
@@ -16,8 +19,9 @@ import { ProfileFormFields, type ProfileFormData } from "@/components/settings/p
 import { profilePermissionValues } from "@/lib/agent-permissions";
 import { toAgentProfilePatch } from "@/app/settings/agents/[agentId]/agent-save-helpers";
 import {
-  AgentProfileDeleteConfirmDialog,
+  AgentProfileDeleteConfirmation,
   AgentProfileDeleteConflictDialog,
+  AgentProfileDisableConflictDialog,
   type AgentProfileDeleteConflict,
 } from "@/components/settings/agent-profile-delete-dialog";
 import {
@@ -31,7 +35,15 @@ import {
   useProfileSave,
   useSyncAgentsToStore,
 } from "@/components/settings/agent-profile-page-state";
+import {
+  profileSaveInvalidReason,
+  useProfileDuplicateAction,
+} from "@/components/settings/agent-profile-duplicate-action";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
+import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
+import { ProviderSection } from "@/components/settings/profile-edit/provider-section";
+import { settingsActionClassName } from "@/components/settings/settings-control";
+import { providerConfigInvalidReasonKey } from "@/lib/settings/provider-config-validation";
 
 export {
   ProfileEnvVarsEditor,
@@ -46,12 +58,19 @@ import type {
   PermissionSetting,
   PassthroughConfig,
 } from "@/lib/types/http";
+import type { SecretListItem } from "@/lib/types/http-secrets";
+import type { UtilityAgentReference } from "@/lib/types/agent-profile-errors";
 import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
 import { CommandPreviewCard } from "@/app/settings/agents/[agentId]/profiles/[profileId]/command-preview-card";
 import type { AgentProfileMcpConfig } from "@/lib/types/http";
 import { useAgentProfileSettings } from "@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings";
+import { agentProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
+import { DynamicAgentProfileEditor } from "@/components/settings/dynamic-agent-profile-editor";
+import { isHandledApiError } from "@/lib/api/client";
 
 type ProfileEditorProps = {
   agent: Agent;
@@ -62,22 +81,53 @@ type ProfileEditorProps = {
   initialMcpConfig?: AgentProfileMcpConfig | null;
 };
 
+function toProfileFormData(
+  profile: AgentProfile,
+  permissionSettings: Record<string, PermissionSetting>,
+): ProfileFormData {
+  const permissionValues = profilePermissionValues(profile, permissionSettings);
+  return {
+    name: profile.name,
+    model: profile.model,
+    fallback_model: profile.fallbackModel ?? "",
+    auto_fallback: profile.autoFallback ?? false,
+    require_exact_model: profile.requireExactModel ?? false,
+    mode: profile.mode ?? "",
+    config_options: profile.configOptions ?? {},
+    auto_approve: permissionValues.auto_approve,
+    allow_indexing: permissionValues.allow_indexing,
+    cli_passthrough: profile.cliPassthrough,
+    cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
+    cli_flags: profile.cliFlags ?? [],
+    command_prefix: profile.commandPrefix ?? "",
+    provider_kind: profile.providerKind ?? "",
+  };
+}
+
 type ProfileEditorHeaderProps = {
   agentName: string;
   agentDisplayName: string;
   savedProfileName: string;
+  enabled: boolean;
+  onEnabledChange: (enabled: boolean) => void;
+  onDuplicate: () => void;
+  duplicating: boolean;
 };
 
 function ProfileEditorHeader({
   agentName,
   agentDisplayName,
   savedProfileName,
+  enabled,
+  onEnabledChange,
+  onDuplicate,
+  duplicating,
 }: ProfileEditorHeaderProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-start justify-between">
-      <div>
-        <h2 className="text-2xl font-bold flex items-center gap-2">
+    <div className="flex flex-col items-stretch justify-between gap-4 md:flex-row md:items-start">
+      <div className="min-w-0">
+        <h2 className="text-2xl font-bold flex min-w-0 items-center gap-2 wrap-break-word">
           <AgentLogo agentName={agentName} size={28} className="shrink-0" />
           {agentDisplayName} • {savedProfileName}
         </h2>
@@ -85,31 +135,106 @@ function ProfileEditorHeader({
           {t("agents:agentProfileSettings", { name: agentDisplayName })}
         </p>
       </div>
+      <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center md:gap-3 md:shrink-0">
+        <Button
+          variant="outline"
+          onClick={onDuplicate}
+          data-testid="duplicate-profile-header"
+          className={settingsActionClassName("w-full md:w-auto")}
+          disabled={duplicating}
+          aria-busy={duplicating}
+          title={t("agents:duplicateProfileNamed", { name: savedProfileName })}
+        >
+          <IconCopy className="h-4 w-4 mr-2" />
+          {t("agents:duplicate")}
+        </Button>
+        <div className="flex items-center gap-1 text-left sm:text-right">
+          <p className="text-sm font-medium">{t("agents:enabled")}</p>
+          <ProfileEnabledHelp />
+        </div>
+        <Switch
+          checked={enabled}
+          onCheckedChange={onEnabledChange}
+          data-testid="profile-enabled-toggle"
+          aria-label={enabled ? t("agents:disableProfile") : t("agents:enableProfile")}
+        />
+      </div>
     </div>
   );
 }
 
 type DeleteProfileCardProps = {
+  profile: AgentProfile;
   onDelete: () => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void | Promise<void>;
 };
 
-function DeleteProfileCard({ onDelete }: DeleteProfileCardProps) {
+function DeleteProfileCard({
+  profile,
+  onDelete,
+  open,
+  onOpenChange,
+  onConfirm,
+}: DeleteProfileCardProps) {
   const { t } = useTranslation();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  useConfirmationBoundary(open, profile.id, onOpenChange);
+  const deleteAnchorRef = useRef<HTMLButtonElement>(null);
+  const closeDeleteConfirmation = () => {
+    onOpenChange(false);
+    queueMicrotask(() => deleteAnchorRef.current?.focus());
+  };
   return (
     <Card className="border-destructive">
       <CardHeader>
         <CardTitle className="text-destructive">{t("agents:deleteProfile")}</CardTitle>
       </CardHeader>
-      <CardContent className="flex items-center justify-between">
-        <div>
+      <CardContent className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
           <p className="text-sm font-medium">{t("agents:removeThisProfile")}</p>
           <p className="text-xs text-muted-foreground">{t("agents:actionCannotBeUndone")}</p>
         </div>
-        <Button variant="destructive" onClick={onDelete}>
-          <IconTrash className="h-4 w-4 mr-2" />
-          {t("agents:delete")}
-        </Button>
+        {!open || isFinePointer || isMobile ? (
+          <Button
+            ref={deleteAnchorRef}
+            variant="destructive"
+            className="cursor-pointer"
+            onClick={onDelete}
+            data-testid="profile-delete-trigger"
+          >
+            <IconTrash className="h-4 w-4 mr-2" />
+            {t("agents:delete")}
+          </Button>
+        ) : null}
+        {!isMobile && !isFinePointer && open ? (
+          <div className="basis-full min-w-0">
+            <AgentProfileDeleteConfirmation
+              profileId={profile.id}
+              profileName={profile.name}
+              open={open}
+              isFinePointer={false}
+              anchorRef={deleteAnchorRef}
+              onOpenChange={onOpenChange}
+              onCancel={closeDeleteConfirmation}
+              onConfirm={onConfirm}
+            />
+          </div>
+        ) : null}
       </CardContent>
+      {isMobile || isFinePointer ? (
+        <AgentProfileDeleteConfirmation
+          profileId={profile.id}
+          profileName={profile.name}
+          open={open}
+          isFinePointer
+          anchorRef={deleteAnchorRef}
+          onOpenChange={onOpenChange}
+          onCancel={closeDeleteConfirmation}
+          onConfirm={onConfirm}
+        />
+      ) : null}
     </Card>
   );
 }
@@ -123,6 +248,7 @@ type ProfileSettingsCardProps = {
   modelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
+  onModelConfigResolutionPendingChange: (pending: boolean) => void;
 };
 
 function ProfileSettingsCard({
@@ -134,16 +260,18 @@ function ProfileSettingsCard({
   modelConfig,
   permissionSettings,
   passthroughConfig,
+  onModelConfigResolutionPendingChange,
 }: ProfileSettingsCardProps) {
   const { t } = useTranslation();
   const handleFormChange = (patch: Partial<ProfileFormData>) => {
     onDraftChange(toAgentProfilePatch(patch));
   };
-  const permissionValues = profilePermissionValues(draft, permissionSettings);
-  const savedPermissionValues = profilePermissionValues(savedProfile, permissionSettings);
 
   return (
-    <SettingsCard isDirty={isDirty}>
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "profile-settings")}
+    >
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <span>{t("agents:profileSettings")}</span>
@@ -152,33 +280,17 @@ function ProfileSettingsCard({
       </CardHeader>
       <CardContent className="space-y-4">
         <ProfileFormFields
-          profile={{
-            name: draft.name,
-            model: draft.model,
-            mode: draft.mode ?? "",
-            config_options: draft.configOptions ?? {},
-            auto_approve: permissionValues.auto_approve,
-            allow_indexing: permissionValues.allow_indexing,
-            cli_passthrough: draft.cliPassthrough,
-            cli_flags: draft.cliFlags ?? [],
-            command_prefix: draft.commandPrefix ?? "",
-          }}
-          baselineProfile={{
-            name: savedProfile.name,
-            model: savedProfile.model,
-            mode: savedProfile.mode ?? "",
-            config_options: savedProfile.configOptions ?? {},
-            auto_approve: savedPermissionValues.auto_approve,
-            allow_indexing: savedPermissionValues.allow_indexing,
-            cli_passthrough: savedProfile.cliPassthrough,
-            cli_flags: savedProfile.cliFlags ?? [],
-            command_prefix: savedProfile.commandPrefix ?? "",
-          }}
+          profile={toProfileFormData(draft, permissionSettings)}
+          baselineProfile={toProfileFormData(savedProfile, permissionSettings)}
           onChange={handleFormChange}
           modelConfig={modelConfig}
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           agentName={agent.name}
+          cursorMcpAuthSupported={
+            agent.name === "cursor-acp" || agent.tui_config?.mcp_strategy === "cursor"
+          }
+          onModelConfigResolutionPendingChange={onModelConfigResolutionPendingChange}
           lockPassthrough={Boolean(agent.tui_config)}
           hideCustomCLIFlags
         />
@@ -188,32 +300,18 @@ function ProfileSettingsCard({
 }
 
 type ProfileDeleteDialogsProps = {
-  showDeleteConfirm: boolean;
-  setShowDeleteConfirm: (open: boolean) => void;
-  handleDeleteProfile: () => void;
   conflict: AgentProfileDeleteConflict | null;
   setConflict: (c: AgentProfileDeleteConflict | null) => void;
   handleForceDelete: () => void;
 };
 
 function ProfileDeleteDialogs({
-  showDeleteConfirm,
-  setShowDeleteConfirm,
-  handleDeleteProfile,
   conflict,
   setConflict,
   handleForceDelete,
 }: ProfileDeleteDialogsProps) {
   return (
     <>
-      <AgentProfileDeleteConfirmDialog
-        open={showDeleteConfirm}
-        onOpenChange={(open) => {
-          if (!open) setShowDeleteConfirm(false);
-        }}
-        onConfirm={handleDeleteProfile}
-      />
-
       <AgentProfileDeleteConflictDialog
         conflict={conflict}
         onOpenChange={(open) => {
@@ -234,9 +332,10 @@ type ProfileEditorBodyProps = {
   modelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
   initialMcpConfig?: AgentProfileMcpConfig | null;
   onToastError: (error: unknown) => void;
+  onModelConfigResolutionPendingChange: (pending: boolean) => void;
 };
 
 function ProfileEditorBody({
@@ -251,6 +350,7 @@ function ProfileEditorBody({
   secrets,
   initialMcpConfig,
   onToastError,
+  onModelConfigResolutionPendingChange,
 }: ProfileEditorBodyProps) {
   return (
     <>
@@ -263,6 +363,7 @@ function ProfileEditorBody({
         modelConfig={modelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
+        onModelConfigResolutionPendingChange={onModelConfigResolutionPendingChange}
       />
 
       <CustomCLIFlagsCard
@@ -270,12 +371,21 @@ function ProfileEditorBody({
         baselineFlags={savedProfile.cliFlags ?? []}
         onChange={(next) => updateDraft({ cliFlags: next })}
         permissionSettings={permissionSettings}
+        discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "cli-flags")}
+      />
+
+      <ProviderSection
+        draft={draft}
+        savedProfile={savedProfile}
+        secrets={secrets}
+        onChange={updateDraft}
       />
 
       <ProfileEnvVarsSection
         envVars={draft.envVars}
         baselineEnvVars={savedProfile.envVars}
         onChange={updateDraft}
+        discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "environment-variables")}
       />
 
       <CommandPreviewCard
@@ -287,6 +397,7 @@ function ProfileEditorBody({
         commandPrefix={draft.commandPrefix}
         envVars={draft.envVars}
         secrets={secrets}
+        discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "command-preview")}
       />
 
       <ProfileMcpConfigCard
@@ -301,6 +412,7 @@ function ProfileEditorBody({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function
 function ProfileEditor({
   agent,
   profile,
@@ -311,11 +423,22 @@ function ProfileEditor({
 }: ProfileEditorProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const [modelConfigResolutionPending, setModelConfigResolutionPending] = useState(false);
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const syncAgentsToStore = useSyncAgentsToStore();
   const { items: secrets } = useSecrets();
-  const { draft, setDraft, savedProfile, setSavedProfile, setSaveStatus, isDirty } =
-    useProfileEditorState(profile, permissionSettings);
+  const {
+    draft,
+    setDraft,
+    savedProfile,
+    setSaveStatus,
+    isDirty,
+    hasExternalConflict,
+    markProfileSubmitted,
+    acceptProfileSaveResponse,
+    discardProfileDraft,
+  } = useProfileEditorState(profile, permissionSettings);
+  const [utilityConflict, setUtilityConflict] = useState<UtilityAgentReference[]>([]);
   const updateDraft = useCallback(
     (patch: Partial<AgentProfile>) => {
       setDraft((current) => {
@@ -333,38 +456,75 @@ function ProfileEditor({
   const handleSave = useProfileSave({
     agent,
     draft,
-    setSavedProfile,
-    setDraft,
+    savedProfile,
     setSaveStatus,
+    markProfileSubmitted,
+    acceptProfileSaveResponse,
     settingsAgents,
     syncAgentsToStore,
     toast,
+    onUtilityConflict: setUtilityConflict,
+  });
+  const providerInvalidKey = providerConfigInvalidReasonKey({
+    providerKind: draft.providerKind,
+    providerBaseUrl: draft.providerBaseUrl,
+    providerApiKeySecretId: draft.providerApiKeySecretId,
+    model: draft.model,
+    cliPassthrough: draft.cliPassthrough,
   });
   useSettingsSaveContributor({
     id: `agent-profile:${draft.id}`,
     revision: JSON.stringify(draft),
     isDirty,
-    canSave: Boolean(draft.name.trim()),
-    invalidReason: draft.name.trim() ? undefined : t("agents:profileNameRequired"),
-    save: handleSave,
-    discard: () => setDraft(savedProfile),
+    canSave:
+      Boolean(draft.name.trim()) &&
+      !modelConfigResolutionPending &&
+      !hasExternalConflict &&
+      !providerInvalidKey,
+    invalidReason: hasExternalConflict
+      ? t("agents:profileExternalChangeInvalidReason")
+      : (profileSaveInvalidReason(draft.name, modelConfigResolutionPending, t) ??
+        (providerInvalidKey ? t(providerInvalidKey) : undefined)),
+    save: () => handleSave(),
+    discard: discardProfileDraft,
   });
-  const {
-    requestDelete,
-    showDeleteConfirm,
-    setShowDeleteConfirm,
-    handleDeleteProfile,
-    conflict,
-    setConflict,
-    handleForceDelete,
-  } = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
+  const deleteState = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
+
+  const { handleDuplicate: handleDuplicateProfile, duplicating } = useProfileDuplicateAction({
+    agent,
+    draft,
+    modelConfigResolutionPending,
+    translate: t,
+  });
 
   return (
     <div className="space-y-8">
+      {hasExternalConflict ? (
+        <Alert variant="destructive" data-testid="profile-external-change-alert">
+          <IconAlertTriangle className="h-4 w-4" />
+          <AlertTitle>{t("agents:profileExternalChangeTitle")}</AlertTitle>
+          <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>{t("agents:profileExternalChangeDescription")}</span>
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 shrink-0"
+              onClick={discardProfileDraft}
+              data-testid="profile-external-change-discard"
+            >
+              {t("agents:profileExternalChangeDiscard")}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <ProfileEditorHeader
         agentName={agent.name}
         agentDisplayName={profile.agentDisplayName ?? ""}
         savedProfileName={savedProfile.name}
+        enabled={draft.enabled ?? true}
+        onEnabledChange={(next) => updateDraft({ enabled: next })}
+        onDuplicate={() => void handleDuplicateProfile()}
+        duplicating={duplicating}
       />
 
       <Separator />
@@ -380,24 +540,38 @@ function ProfileEditor({
         passthroughConfig={passthroughConfig}
         secrets={secrets}
         initialMcpConfig={initialMcpConfig}
-        onToastError={(error) =>
+        onToastError={(error) => {
+          if (isHandledApiError(error)) return;
           toast({
             title: t("agents:failedToSaveMcpConfig"),
             description: errorMessage(error),
             variant: "error",
-          })
-        }
+          });
+        }}
+        onModelConfigResolutionPendingChange={setModelConfigResolutionPending}
       />
 
-      <DeleteProfileCard onDelete={requestDelete} />
+      <DeleteProfileCard
+        profile={savedProfile}
+        onDelete={deleteState.requestDelete}
+        open={deleteState.showDeleteConfirm}
+        onOpenChange={deleteState.setShowDeleteConfirm}
+        onConfirm={deleteState.handleDeleteProfile}
+      />
+
+      <AgentProfileDisableConflictDialog
+        agents={utilityConflict}
+        onCancel={() => setUtilityConflict([])}
+        onConfirm={async () => {
+          setUtilityConflict([]);
+          await handleSave(true);
+        }}
+      />
 
       <ProfileDeleteDialogs
-        showDeleteConfirm={showDeleteConfirm}
-        setShowDeleteConfirm={setShowDeleteConfirm}
-        handleDeleteProfile={handleDeleteProfile}
-        conflict={conflict}
-        setConflict={setConflict}
-        handleForceDelete={handleForceDelete}
+        conflict={deleteState.conflict}
+        setConflict={deleteState.setConflict}
+        handleForceDelete={deleteState.handleForceDelete}
       />
     </div>
   );
@@ -428,6 +602,10 @@ export function AgentProfilePage({ initialMcpConfig }: AgentProfilePageClientPro
         </CardContent>
       </Card>
     );
+  }
+
+  if (profile.kind === "dynamic" || agent.name === "dynamic") {
+    return <DynamicAgentProfileEditor agent={agent} profile={profile} />;
   }
 
   return (

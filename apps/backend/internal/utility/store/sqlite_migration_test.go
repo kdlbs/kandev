@@ -117,3 +117,42 @@ func TestSeedBuiltinAgents_UsesClaudeACP(t *testing.T) {
 		t.Fatalf("expected at least one built-in row, found 0")
 	}
 }
+
+func TestNormalizeEmptyBuiltinBindingUsesStalePredicate(t *testing.T) {
+	sqlxDB := openTestDB(t)
+	repo, err := newSQLiteRepositoryWithDB(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("schema init: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := sqlxDB.Exec(`INSERT OR REPLACE INTO utility_agents
+		(id, name, description, prompt, agent_id, model, agent_profile_id, profile_binding_state, builtin, enabled, created_at, updated_at)
+		VALUES (?, ?, '', '', 'claude-acp', '', '', 'unconfigured', 1, 0, ?, ?)`,
+		"stale", "stale", now, now); err != nil {
+		t.Fatalf("seed stale builtin: %v", err)
+	}
+
+	changed, err := repo.NormalizeEmptyBuiltinBinding(context.Background(), "stale")
+	if err != nil || !changed {
+		t.Fatalf("NormalizeEmptyBuiltinBinding() = (%v, %v), want (true, nil)", changed, err)
+	}
+
+	if _, err := sqlxDB.Exec(`UPDATE utility_agents
+		SET agent_profile_id = 'profile-1', profile_binding_state = 'explicit'
+		WHERE id = ?`, "stale"); err != nil {
+		t.Fatalf("simulate concurrent repair: %v", err)
+	}
+	changed, err = repo.NormalizeEmptyBuiltinBinding(context.Background(), "stale")
+	if err != nil || changed {
+		t.Fatalf("NormalizeEmptyBuiltinBinding() after repair = (%v, %v), want (false, nil)", changed, err)
+	}
+
+	var profileID, bindingState string
+	if err := sqlxDB.QueryRowx(`SELECT agent_profile_id, profile_binding_state FROM utility_agents WHERE id = ?`, "stale").Scan(&profileID, &bindingState); err != nil {
+		t.Fatalf("read repaired builtin: %v", err)
+	}
+	if profileID != "profile-1" || bindingState != "explicit" {
+		t.Fatalf("concurrent repair was overwritten: profile=%q state=%q", profileID, bindingState)
+	}
+}

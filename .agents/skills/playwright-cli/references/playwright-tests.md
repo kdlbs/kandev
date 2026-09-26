@@ -1,10 +1,10 @@
 # Running Playwright Tests
 
-To run Playwright tests, use the `npx playwright test` command, or a package manager script. To avoid opening the interactive html report, use `PLAYWRIGHT_HTML_OPEN=never` environment variable.
+For Kandev E2E tests, use the guarded `e2e:raw` or `e2e:run` package script. These runners keep Playwright at one worker and reject unsafe overrides. To avoid opening the interactive HTML report, use `PLAYWRIGHT_HTML_OPEN=never`.
 
 ```bash
 # Run all tests
-PLAYWRIGHT_HTML_OPEN=never npx playwright test
+cd apps/web && PLAYWRIGHT_HTML_OPEN=never pnpm e2e:raw
 
 # Run all tests through a custom npm script
 PLAYWRIGHT_HTML_OPEN=never npm run special-test-command
@@ -20,7 +20,7 @@ Once instructions containing a session name are printed, use `playwright-cli` to
 
 ```bash
 # Run the test
-PLAYWRIGHT_HTML_OPEN=never npx playwright test --debug=cli
+cd apps/web && PLAYWRIGHT_HTML_OPEN=never pnpm e2e:raw -- --debug=cli
 # ...
 # ... debugging instructions for "tw-abcdef" session ...
 # ...

@@ -7,10 +7,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useSentryAvailable } from "@/hooks/domains/sentry/use-sentry-availability";
 import { useAppStore } from "@/components/state-provider";
 import { SentryIssueDialog } from "./sentry-issue-dialog";
+import { useTranslation } from "react-i18next";
 
 // SentryIssueButton opens the browse/search dialog. It renders nothing when
 // the Sentry integration is not available (toggle off or unauthenticated).
 export function SentryIssueButton() {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const available = useSentryAvailable(workspaceId);
   const [open, setOpen] = useState(false);
@@ -31,7 +33,7 @@ export function SentryIssueButton() {
             <span className="text-xs font-medium">Sentry</span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Browse Sentry issues</TooltipContent>
+        <TooltipContent>{t("sentry:browseSentryIssues")}</TooltipContent>
       </Tooltip>
       <SentryIssueDialog open={open} onOpenChange={setOpen} workspaceId={workspaceId ?? ""} />
     </>

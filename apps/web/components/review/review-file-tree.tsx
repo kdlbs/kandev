@@ -1,11 +1,12 @@
 "use client";
 
-import { memo, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import {
   IconChevronDown,
   IconChevronRight,
   IconMessage,
   IconAlertTriangle,
+  IconGitBranch,
   IconSearch,
   IconX,
 } from "@tabler/icons-react";
@@ -14,6 +15,7 @@ import { cn } from "@kandev/ui/lib/utils";
 import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import { FileIcon } from "@/components/ui/file-icon";
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
+import { useTranslation } from "react-i18next";
 import type { ReviewFile, FileTreeNode } from "./types";
 import { buildFileTree, reviewFileKey } from "./types";
 
@@ -35,6 +37,19 @@ const REVIEW_GET_PATH = (n: FileTreeNode) => n.path;
 const REVIEW_GET_CHILDREN = (n: FileTreeNode) => n.children;
 const REVIEW_IS_DIR = (n: FileTreeNode) => Boolean(n.isDir);
 
+function collectDirPaths(nodes: FileTreeNode[]): string[] {
+  const paths: string[] = [];
+  const walk = (list: FileTreeNode[]) => {
+    for (const node of list) {
+      if (!node.isDir) continue;
+      paths.push(node.path);
+      if (node.children) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return paths;
+}
+
 export const ReviewFileTree = memo(function ReviewFileTree({
   files,
   reviewedFiles,
@@ -49,13 +64,28 @@ export const ReviewFileTree = memo(function ReviewFileTree({
   const inputRef = useRef<HTMLInputElement>(null);
   const tree = useMemo(() => buildFileTree(files), [files]);
 
-  const { visibleRows, toggle } = useTree<FileTreeNode>({
+  const { visibleRows, toggle, setExpanded } = useTree<FileTreeNode>({
     nodes: tree,
     getPath: REVIEW_GET_PATH,
     getChildren: REVIEW_GET_CHILDREN,
     isDir: REVIEW_IS_DIR,
     defaultExpanded: "all",
   });
+
+  // Auto-expand directories that arrive with a later review-source update.
+  // Existing directories keep the reviewer's explicit collapsed state.
+  const seenDirPathsRef = useRef<Set<string>>(new Set(collectDirPaths(tree)));
+  useEffect(() => {
+    const current = collectDirPaths(tree);
+    const newDirs = current.filter((path) => !seenDirPathsRef.current.has(path));
+    if (newDirs.length === 0) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const path of newDirs) next.add(path);
+      return next;
+    });
+    for (const path of newDirs) seenDirPathsRef.current.add(path);
+  }, [tree, setExpanded]);
 
   return (
     <div className="flex flex-col h-full text-sm">
@@ -86,6 +116,7 @@ interface ReviewFilterInputProps {
 }
 
 function ReviewFilterInput({ ref, value, onChange }: ReviewFilterInputProps) {
+  const { t } = useTranslation();
   return (
     <div className="px-2 py-2 shrink-0">
       <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted/50 border border-border/50 focus-within:border-border focus-within:bg-muted/80 transition-colors">
@@ -94,7 +125,7 @@ function ReviewFilterInput({ ref, value, onChange }: ReviewFilterInputProps) {
           ref={ref}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="Filter changed files"
+          placeholder={t("review:filterChangedFiles")}
           className="flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground outline-none min-w-0"
         />
         {value && (
@@ -130,15 +161,25 @@ function ReviewTreeRow(props: ReviewTreeRowProps) {
 }
 
 function ReviewDirRow({ row, onToggleDir }: ReviewTreeRowProps) {
+  const { t } = useTranslation();
   const isRepoRoot = Boolean(row.node.isRepoRoot);
-  const fileCount = isRepoRoot ? countLeafFiles(row.node) : 0;
+  const isSubmodule = Boolean(row.node.isSubmodule);
+  const isScopeBoundary = isRepoRoot || isSubmodule;
+  const fileCount = isScopeBoundary ? countLeafFiles(row.node) : 0;
+  const scopeLabel = row.node.repositoryName ?? row.node.name;
+  let testId = "dir-node";
+  if (isRepoRoot) testId = "repo-root-node";
+  if (isSubmodule) testId = "submodule-node";
   return (
-    <div data-testid={isRepoRoot ? "repo-root-node" : "dir-node"}>
+    <div data-testid={testId} data-repository-name={row.node.repositoryName}>
       <button
         type="button"
+        aria-label={
+          isSubmodule ? t("common:reviewSubmoduleBoundary", { scope: scopeLabel }) : undefined
+        }
         className={cn(
           "flex items-center w-full gap-1 px-2 py-1 hover:bg-muted/50 transition-colors cursor-pointer",
-          isRepoRoot && "border-t border-border/40 first:border-t-0 mt-1 first:mt-0",
+          isScopeBoundary && "border-t border-border/40 first:border-t-0 mt-1 first:mt-0",
         )}
         style={{ paddingLeft: `${row.depth * 12 + 8}px` }}
         onClick={onToggleDir}
@@ -148,10 +189,13 @@ function ReviewDirRow({ row, onToggleDir }: ReviewTreeRowProps) {
         ) : (
           <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
+        {isSubmodule && (
+          <IconGitBranch aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-primary" />
+        )}
         <span
           className={cn(
             "text-[13px] truncate",
-            isRepoRoot ? "font-medium text-foreground" : "text-muted-foreground",
+            isScopeBoundary ? "font-medium text-foreground" : "text-muted-foreground",
           )}
         >
           {row.node.name}

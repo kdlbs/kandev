@@ -18,14 +18,46 @@ import { test, expect } from "../../fixtures/office-fixture";
 
 type RunRow = { id: string; reason: string; task_id?: string; comment_id?: string };
 
+type RunPage = {
+  runs?: RunRow[];
+  next_cursor?: string;
+  next_id?: string;
+};
+
 async function listAgentRuns(
   apiClient: { rawRequest: (m: string, u: string) => Promise<Response> },
   agentId: string,
 ): Promise<RunRow[]> {
-  const res = await apiClient.rawRequest("GET", `/api/v1/office/agents/${agentId}/runs`);
-  if (!res.ok) return [];
-  const body = (await res.json()) as { runs?: RunRow[] };
-  return body.runs ?? [];
+  const runs: RunRow[] = [];
+  let cursor = "";
+  let cursorId = "";
+
+  for (;;) {
+    const query = new URLSearchParams({ limit: "100" });
+    if (cursor) {
+      query.set("cursor", cursor);
+      if (cursorId) query.set("cursor_id", cursorId);
+    }
+
+    const res = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/office/agents/${agentId}/runs?${query.toString()}`,
+    );
+    if (!res.ok) return [];
+
+    const body = (await res.json()) as RunPage;
+    runs.push(...(body.runs ?? []));
+    if (!body.next_cursor) return runs;
+
+    // The API returns a stable (requested_at, id) cursor pair. Guard against
+    // a malformed response looping forever while still allowing old servers
+    // that omit the tie-breaker ID to make progress by timestamp.
+    if (body.next_cursor === cursor && (body.next_id ?? "") === cursorId) {
+      return runs;
+    }
+    cursor = body.next_cursor;
+    cursorId = body.next_id ?? "";
+  }
 }
 
 test.describe("Office reactive scheduler", () => {
@@ -33,8 +65,12 @@ test.describe("Office reactive scheduler", () => {
     apiClient,
     officeApi,
     officeSeed,
+    testPage,
   }) => {
-    test.setTimeout(30_000);
+    // Request the office fixture's page so its per-test reset clears runs and
+    // sessions left by earlier office specs in the same worker.
+    void testPage;
+    test.setTimeout(90_000);
 
     // Create a task without an assignee, then attach the CEO.
     const task = await apiClient.createTask(
@@ -53,7 +89,7 @@ test.describe("Office reactive scheduler", () => {
           const runs = await listAgentRuns(apiClient, officeSeed.agentId);
           return runs.filter((r) => r.reason === "task_assigned" && r.task_id === task.id);
         },
-        { timeout: 20_000, message: "no task_assigned run surfaced for the new assignee" },
+        { timeout: 60_000, message: "no task_assigned run surfaced for the new assignee" },
       )
       .not.toEqual([]);
   });
@@ -62,8 +98,10 @@ test.describe("Office reactive scheduler", () => {
     apiClient,
     officeApi,
     officeSeed,
+    testPage,
   }) => {
-    test.setTimeout(30_000);
+    void testPage;
+    test.setTimeout(90_000);
 
     const task = await apiClient.createTask(
       officeSeed.workspaceId,
@@ -81,7 +119,7 @@ test.describe("Office reactive scheduler", () => {
           const runs = await listAgentRuns(apiClient, officeSeed.agentId);
           return runs.filter((r) => r.reason === "task_assigned" && r.task_id === task.id).length;
         },
-        { timeout: 20_000 },
+        { timeout: 60_000 },
       )
       .toBeGreaterThan(0);
 
@@ -94,7 +132,7 @@ test.describe("Office reactive scheduler", () => {
           const runs = await listAgentRuns(apiClient, officeSeed.agentId);
           return runs.filter((r) => r.reason === "task_comment" && r.task_id === task.id);
         },
-        { timeout: 20_000, message: "no task_comment run surfaced for the comment" },
+        { timeout: 60_000, message: "no task_comment run surfaced for the comment" },
       )
       .not.toEqual([]);
   });

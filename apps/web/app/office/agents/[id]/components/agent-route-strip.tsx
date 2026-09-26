@@ -7,10 +7,13 @@ import { useAppStore } from "@/components/state-provider";
 import { useAgentRoute } from "@/hooks/domains/office/use-agent-route";
 import { useWorkspaceRouting } from "@/hooks/domains/office/use-workspace-routing";
 import { providerLabel } from "../../../workspace/routing/components/provider-order-editor";
+import { TIER_SOURCE_LABEL_KEYS } from "../../../lib/label-keys";
+import { useTranslation } from "react-i18next";
 
-const CONFIGURED_TOOLTIP = "Primary route from workspace + agent overrides.";
-const CURRENT_TOOLTIP =
-  "Reflects the next-launch choice. In-flight session details are on each run.";
+// Catalog keys, not copy — module scope freezes a `t()` at the boot locale.
+// The record keys are wire values and stay untranslated.
+const CONFIGURED_TOOLTIP = "office:configuredRouteTooltip";
+const CURRENT_TOOLTIP = "office:currentRouteTooltip";
 
 type Props = { agentId: string };
 
@@ -48,19 +51,20 @@ export function AgentRouteStrip({ agentId }: Props) {
 const LABEL_CLASS = "text-muted-foreground uppercase tracking-wide";
 
 function ConfiguredRow({ preview }: { preview: AgentRoutePreview }) {
+  const { t } = useTranslation();
   const primaryProvider = preview.primary_provider_id ?? "";
   const primaryModel = preview.primary_model ?? "";
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className={`${LABEL_CLASS} cursor-help`}>Configured</span>
+          <span className={`${LABEL_CLASS} cursor-help`}>{t("office:configured")}</span>
         </TooltipTrigger>
-        <TooltipContent>{CONFIGURED_TOOLTIP}</TooltipContent>
+        <TooltipContent>{t(CONFIGURED_TOOLTIP)}</TooltipContent>
       </Tooltip>
       <span className="font-mono">
         {primaryProvider === "" ? (
-          <span className="italic">none</span>
+          <span className="italic">{t("office:noneLower")}</span>
         ) : (
           <>
             {providerLabel(primaryProvider)}/{primaryModel || "?"}
@@ -73,9 +77,12 @@ function ConfiguredRow({ preview }: { preview: AgentRoutePreview }) {
           </span>
         ))}
       </span>
-      <Badge variant="secondary" className="capitalize ml-auto">
-        {preview.effective_tier}
-      </Badge>
+      <div className="flex items-center gap-1.5 ml-auto">
+        <Badge variant="secondary" className="capitalize">
+          {preview.effective_tier}
+        </Badge>
+        <span className={LABEL_CLASS}>{t(TIER_SOURCE_LABEL_KEYS[preview.tier_source])}</span>
+      </div>
     </div>
   );
 }
@@ -89,13 +96,14 @@ function CurrentRow({
   model: string;
   failureCode?: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className={`${LABEL_CLASS} cursor-help`}>Current</span>
+          <span className={`${LABEL_CLASS} cursor-help`}>{t("office:current")}</span>
         </TooltipTrigger>
-        <TooltipContent>{CURRENT_TOOLTIP}</TooltipContent>
+        <TooltipContent>{t(CURRENT_TOOLTIP)}</TooltipContent>
       </Tooltip>
       <span className="font-mono">
         {providerLabel(provider)}/{model || "?"}

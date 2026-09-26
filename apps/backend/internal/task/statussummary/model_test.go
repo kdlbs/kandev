@@ -2,9 +2,12 @@ package statussummary
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestTaskStatusSummarySemanticEqualityIgnoresTransportMetadata(t *testing.T) {
@@ -29,6 +32,34 @@ func TestTaskStatusSummarySemanticEqualityIgnoresTransportMetadata(t *testing.T)
 	}
 }
 
+func TestTaskStatusSummaryLastActivityIsSemanticAndBackwardCompatible(t *testing.T) {
+	activity := time.Date(2026, time.August, 17, 12, 0, 0, 0, time.UTC)
+	first := TaskStatusSummary{LastActivityAt: &activity}
+	second := first
+	if first.SemanticEqual(second) == false {
+		t.Fatal("equal last activity timestamps should compare equal")
+	}
+	later := activity.Add(time.Minute)
+	second.LastActivityAt = &later
+	if first.SemanticEqual(second) {
+		t.Fatal("different last activity timestamps must not compare equal")
+	}
+	payload, err := first.SemanticJSON()
+	if err != nil {
+		t.Fatalf("last activity semantic JSON: %v", err)
+	}
+	if !strings.Contains(string(payload), `"last_activity_at"`) {
+		t.Fatalf("last activity missing from semantic JSON: %s", payload)
+	}
+	var decoded TaskStatusSummary
+	if err := json.Unmarshal([]byte(`{"revision": 4, "updated_at": "2026-08-17T10:00:00Z"}`), &decoded); err != nil {
+		t.Fatalf("decode legacy summary: %v", err)
+	}
+	if decoded.LastActivityAt != nil {
+		t.Fatalf("legacy summary activity = %v, want nil", decoded.LastActivityAt)
+	}
+}
+
 func TestTaskStatusSummarySemanticJSONIsBoundedAndOmitsTransportMetadata(t *testing.T) {
 	summary := TaskStatusSummary{
 		Revision:  4,
@@ -37,6 +68,11 @@ func TestTaskStatusSummarySemanticJSONIsBoundedAndOmitsTransportMetadata(t *test
 			SessionID: "session-1",
 			Stamp:     "error-1",
 			Preview:   "safe preview",
+		},
+		TaskError: &ActiveErrorSummary{
+			Scope:   models.ErrorScopeTask,
+			Stamp:   "task-error-1",
+			Preview: "safe task preview",
 		},
 		Git: &GitSummary{ChangedFiles: 2, Additions: 3},
 	}
@@ -53,6 +89,251 @@ func TestTaskStatusSummarySemanticJSONIsBoundedAndOmitsTransportMetadata(t *test
 	}
 	if !summary.SemanticEqual(decoded) {
 		t.Fatalf("semantic round trip changed value: %#v", decoded)
+	}
+	if decoded.TaskError == nil || decoded.TaskError.Scope != models.ErrorScopeTask {
+		t.Fatalf("task error missing from semantic payload: %#v", decoded.TaskError)
+	}
+}
+
+func TestTaskStatusSummaryQueuedPromptCountRoundTripsThroughSemanticJSON(t *testing.T) {
+	summary := TaskStatusSummary{QueuedPromptCount: 4}
+	payload, err := summary.SemanticJSON()
+	if err != nil {
+		t.Fatalf("semantic JSON: %v", err)
+	}
+	var decoded TaskStatusSummary
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("decode semantic JSON: %v", err)
+	}
+	if decoded.QueuedPromptCount != 4 {
+		t.Fatalf("queued prompt count after round trip = %d, want 4", decoded.QueuedPromptCount)
+	}
+	if !summary.SemanticEqual(decoded) {
+		t.Fatalf("semantic round trip changed value: %#v", decoded)
+	}
+}
+
+func TestTaskStatusSummaryQueuedPromptCountValidateRejectsNegative(t *testing.T) {
+	if err := (TaskStatusSummary{QueuedPromptCount: -1}).Validate(); err == nil {
+		t.Fatal("negative queued prompt count should be rejected")
+	}
+	if err := (TaskStatusSummary{QueuedPromptCount: 0}).Validate(); err != nil {
+		t.Fatalf("zero queued prompt count rejected: %v", err)
+	}
+}
+
+func TestTaskStatusSummaryQueuedPromptCountAffectsSemanticEquality(t *testing.T) {
+	base := TaskStatusSummary{}
+	if base.SemanticEqual(TaskStatusSummary{QueuedPromptCount: 2}) {
+		t.Fatal("different queued prompt counts must not compare equal")
+	}
+}
+
+func TestTaskStatusSummaryLaunchQueueRoundTripsAndIsSemantic(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	summary := TaskStatusSummary{
+		LaunchQueue: &LaunchQueueSummary{
+			SessionID:      "session-luna",
+			AgentProfileID: "profile-luna",
+			WorkflowStepID: "step-implement",
+			QueuedAt:       queuedAt,
+			Reason:         LaunchQueueReasonSessionCapacity,
+			Retrying:       true,
+			Capacity: &LaunchQueueCapacity{
+				InUse:      5,
+				Limit:      5,
+				ObservedAt: queuedAt,
+			},
+		},
+	}
+	payload, err := summary.SemanticJSON()
+	if err != nil {
+		t.Fatalf("semantic JSON: %v", err)
+	}
+	var decoded TaskStatusSummary
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("decode semantic JSON: %v", err)
+	}
+	if !summary.SemanticEqual(decoded) {
+		t.Fatalf("launch queue changed after semantic round trip: %#v", decoded.LaunchQueue)
+	}
+
+	changed := summary
+	changed.LaunchQueue = &LaunchQueueSummary{SessionID: "session-other", QueuedAt: queuedAt, Reason: LaunchQueueReasonSessionCapacity}
+	if summary.SemanticEqual(changed) {
+		t.Fatal("launch queue destination must affect semantic equality")
+	}
+}
+
+func TestTaskStatusSummaryLaunchQueueValidationRejectsUnknownOrUnboundedValues(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	valid := TaskStatusSummary{LaunchQueue: &LaunchQueueSummary{
+		SessionID: "session-luna", QueuedAt: queuedAt, Reason: LaunchQueueReasonSessionCapacity,
+		Capacity: &LaunchQueueCapacity{InUse: 1, Limit: 2, ObservedAt: queuedAt},
+	}}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid launch queue rejected: %v", err)
+	}
+	unknownReason := valid
+	unknownReason.LaunchQueue = &LaunchQueueSummary{SessionID: "session-luna", QueuedAt: queuedAt, Reason: "invented"}
+	if err := unknownReason.Validate(); err == nil {
+		t.Fatal("unknown launch queue reason accepted")
+	}
+	invalidCapacity := valid
+	invalidCapacity.LaunchQueue = &LaunchQueueSummary{
+		SessionID: "session-luna", QueuedAt: queuedAt, Reason: LaunchQueueReasonSessionCapacity,
+		Capacity: &LaunchQueueCapacity{InUse: -1, Limit: 2, ObservedAt: queuedAt},
+	}
+	if err := invalidCapacity.Validate(); err == nil {
+		t.Fatal("capacity over limit accepted")
+	}
+}
+
+func TestLaunchQueueSummaryFromTaskUsesDurableCeilingDeferral(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	task := &models.Task{Metadata: map[string]interface{}{models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			"session_id":       "session-luna",
+			"agent_profile_id": "profile-luna",
+			"workflow_step_id": "step-implement",
+		},
+		ReasonCode:      "ceiling",
+		QueuedAt:        queuedAt,
+		Population:      5,
+		PopulationKnown: true,
+		Ceiling:         5,
+	})}}
+	got := LaunchQueueSummaryFromTask(task)
+	if got == nil || got.SessionID != "session-luna" || got.AgentProfileID != "profile-luna" ||
+		got.WorkflowStepID != "step-implement" || !got.QueuedAt.Equal(queuedAt) ||
+		got.Reason != LaunchQueueReasonSessionCapacity || !got.Retrying {
+		t.Fatalf("launch queue = %+v", got)
+	}
+	if got.Capacity == nil || got.Capacity.InUse != 5 || got.Capacity.Limit != 5 {
+		t.Fatalf("launch queue capacity = %+v", got.Capacity)
+	}
+}
+
+func TestLaunchQueueSummaryFromTaskAllowsDirectProfileWorkflowBindingWithoutRoute(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	task := &models.Task{
+		WorkflowID:     "workflow-1",
+		WorkflowStepID: "step-implement",
+		Metadata: map[string]interface{}{models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+			Kind: models.CeilingLaunchStartCreated,
+			Payload: map[string]interface{}{
+				"agent_profile_id": "profile-luna",
+				models.CeilingLaunchEntryBindingKey: map[string]interface{}{
+					"workflow_id":            "workflow-1",
+					"destination_step_id":    "step-implement",
+					"route_operation_id":     "direct-route",
+					"entry_identity":         "entry:00000000000000000007",
+					"destination_session_id": "session-luna",
+				},
+			},
+			Origin:     "automatic",
+			ReasonCode: "ceiling",
+			QueuedAt:   queuedAt,
+			Population: 1,
+			Ceiling:    1,
+		})},
+	}
+
+	got := LaunchQueueSummaryFromTask(task)
+	if got == nil || got.SessionID != "session-luna" ||
+		got.AgentProfileID != "profile-luna" || got.WorkflowStepID != "step-implement" ||
+		got.Reason != LaunchQueueReasonSessionCapacity || !got.Retrying {
+		t.Fatalf("direct-profile launch queue = %+v, want a retryable capacity entry", got)
+	}
+}
+
+func TestLaunchQueueSummaryFromTaskWithCapacityUsesLatestObservation(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	task := &models.Task{Metadata: map[string]interface{}{models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			"session_id":       "session-luna",
+			"agent_profile_id": "profile-luna",
+		},
+		QueuedAt:        queuedAt,
+		Population:      5,
+		PopulationKnown: true,
+		Ceiling:         5,
+	})}}
+	observedAt := queuedAt.Add(30 * time.Second)
+	got := LaunchQueueSummaryFromTaskWithCapacity(task, &LaunchQueueCapacityObservation{
+		InUse: 3, Limit: 5, ObservedAt: observedAt, Known: true,
+	})
+	if got == nil || got.Capacity == nil {
+		t.Fatalf("launch queue capacity = %+v, want latest observation", got)
+	}
+	if got.Capacity.InUse != 3 || got.Capacity.Limit != 5 || !got.Capacity.ObservedAt.Equal(observedAt) {
+		t.Fatalf("launch queue capacity = %+v, want 3/5 at %v", got.Capacity, observedAt)
+	}
+	if !got.QueuedAt.Equal(queuedAt) {
+		t.Fatalf("queue time changed with capacity observation: %v", got.QueuedAt)
+	}
+
+	unknown := LaunchQueueSummaryFromTaskWithCapacity(task, &LaunchQueueCapacityObservation{
+		Limit: 5, ObservedAt: observedAt,
+	})
+	if unknown == nil || unknown.Capacity != nil {
+		t.Fatalf("unknown capacity = %+v, want nil while retaining queue", unknown)
+	}
+}
+
+func TestLaunchQueueSummaryFromTaskResolvesSeamOneDestinationFromRoute(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	task := &models.Task{
+		WorkflowID:     "workflow-1",
+		WorkflowStepID: "step-implement",
+		Metadata: map[string]interface{}{
+			models.MetaKeyWorkflowSessionRoute: models.WorkflowSessionRoute{
+				OperationID:       "route-1",
+				DestinationStepID: "step-implement",
+				EntryIdentity:     "entry:1",
+				TargetKind:        "new_session",
+				DestinationID:     "session-luna",
+				Phase:             "committed",
+			},
+			models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+				Kind: models.CeilingLaunchStart,
+				Payload: map[string]interface{}{
+					"workflow_step_id": "step-implement",
+				},
+				Origin: "automatic", ReasonCode: "session_capacity", QueuedAt: queuedAt,
+			}),
+		},
+	}
+	got := LaunchQueueSummaryFromTask(task)
+	if got == nil || got.SessionID != "session-luna" {
+		t.Fatalf("seam-one launch queue = %+v, want route destination session-luna", got)
+	}
+}
+
+func TestLaunchQueueSummaryFromTaskMarksInvalidWorkflowOwnership(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	task := &models.Task{Metadata: map[string]interface{}{
+		models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+			Kind: models.CeilingLaunchStartCreated,
+			Payload: map[string]interface{}{
+				"session_id":       "session-luna",
+				"workflow_step_id": "step-implement",
+				models.CeilingLaunchEntryBindingKey: map[string]interface{}{
+					"workflow_id":            "workflow-1",
+					"destination_step_id":    "step-implement",
+					"route_operation_id":     "route-old",
+					"entry_identity":         "entry:old",
+					"destination_session_id": "session-luna",
+				},
+			},
+			Origin: "automatic", ReasonCode: "session_capacity", QueuedAt: queuedAt,
+		}),
+	}}
+	got := LaunchQueueSummaryFromTask(task)
+	if got == nil || got.Reason != LaunchQueueReasonOwnershipUnavailable || got.Retrying {
+		t.Fatalf("invalid workflow queue = %+v, want ownership_unavailable without retry", got)
 	}
 }
 
@@ -71,5 +352,121 @@ func TestTaskStatusSummaryValidateBoundsErrorPreview(t *testing.T) {
 	invalidUTF8 := TaskStatusSummary{ActiveError: &ActiveErrorSummary{Preview: string([]byte{0xff})}}
 	if err := invalidUTF8.Validate(); err == nil {
 		t.Fatal("invalid UTF-8 preview should be rejected")
+	}
+}
+
+func TestTaskStatusSummaryProjectsTaskOwnedErrorFields(t *testing.T) {
+	now := time.Date(2026, 8, 19, 20, 0, 0, 0, time.UTC)
+	got := BuildFromAuthoritative(RebuildInput{
+		TaskError: &ActiveErrorSummary{
+			TaskRepositoryID: "task-repository-1",
+			Stamp:            "task-error-1",
+			OccurredAt:       now,
+			Preview:          "The linked pull request is already closed or merged.",
+			Category:         "pr_already_closed",
+			RecoveryActions: []string{
+				"mark_review_done", "unknown", "mark_review_done", "retry_default",
+			},
+		},
+		Sessions: []RebuildSession{{
+			ID: "older-session",
+			ActiveError: &ActiveErrorSummary{
+				SessionID:  "older-session",
+				Stamp:      "session-error-1",
+				OccurredAt: now.Add(-time.Minute),
+				Preview:    "older",
+			},
+		}},
+		Now: now,
+	})
+
+	if got.ActiveError == nil {
+		t.Fatal("active error is nil")
+	}
+	if got.ActiveError.SessionID != "" || got.ActiveError.TaskRepositoryID != "task-repository-1" {
+		t.Fatalf("active error identity = %+v", got.ActiveError)
+	}
+	if got.ActiveError.Category != "pr_already_closed" {
+		t.Fatalf("active error category = %q", got.ActiveError.Category)
+	}
+	if got.TaskError == nil || got.TaskError.Scope != models.ErrorScopeTask {
+		t.Fatalf("task error = %+v, want independent task projection", got.TaskError)
+	}
+	wantActions := []string{"mark_review_done"}
+	if !reflect.DeepEqual(got.ActiveError.RecoveryActions, wantActions) {
+		t.Fatalf("active error actions = %#v, want %#v", got.ActiveError.RecoveryActions, wantActions)
+	}
+}
+
+func TestTaskStatusSummaryProjectsBootstrapCorrelationAndCauses(t *testing.T) {
+	now := time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC)
+	got := BuildFromAuthoritative(RebuildInput{
+		Sessions: []RebuildSession{{
+			ID: "session-1",
+			ActiveError: &ActiveErrorSummary{
+				SessionID:   "session-1",
+				ExecutionID: "execution-1",
+				AttemptID:   "attempt-1",
+				Phase:       models.LaunchErrorPhaseBootstrap,
+				Stamp:       "stamp-1",
+				OccurredAt:  now,
+				Preview:     "The agent could not start.",
+				Category:    models.LaunchErrorCategoryGenericLaunchFailure,
+				Causes: []models.AgentErrorCause{{
+					Operation: models.AgentErrorCauseOperationResume,
+					Code:      models.AgentErrorCauseCodePermissionDenied,
+					Detail:    "Contribution access was denied.",
+				}},
+			},
+		}},
+		Now: now,
+	})
+
+	if got.ActiveError == nil {
+		t.Fatal("active error is nil")
+	}
+	if got.ActiveError.Phase != models.LaunchErrorPhaseBootstrap ||
+		got.ActiveError.ExecutionID != "execution-1" || got.ActiveError.AttemptID != "attempt-1" {
+		t.Fatalf("bootstrap correlation = %+v", got.ActiveError)
+	}
+	if !reflect.DeepEqual(got.ActiveError.Causes, []models.AgentErrorCause{{
+		Operation: models.AgentErrorCauseOperationResume,
+		Code:      models.AgentErrorCauseCodePermissionDenied,
+		Detail:    "Contribution access was denied.",
+	}}) {
+		t.Fatalf("bootstrap causes = %#v", got.ActiveError.Causes)
+	}
+}
+
+func TestTaskStatusSummaryValidatesActiveErrorCategoryAndTaskRepositoryBounds(t *testing.T) {
+	tooLargeCategory := TaskStatusSummary{ActiveError: &ActiveErrorSummary{
+		Category: strings.Repeat("x", 65),
+	}}
+	if err := tooLargeCategory.Validate(); err == nil {
+		t.Fatal("oversized active error category should be rejected")
+	}
+	tooLargeRepository := TaskStatusSummary{ActiveError: &ActiveErrorSummary{
+		TaskRepositoryID: strings.Repeat("x", 257),
+	}}
+	if err := tooLargeRepository.Validate(); err == nil {
+		t.Fatal("oversized task repository identity should be rejected")
+	}
+}
+
+func TestBuildFromAuthoritativeUsesStableStampAsErrorTieBreaker(t *testing.T) {
+	now := time.Date(2026, 8, 19, 20, 0, 0, 0, time.UTC)
+	got := BuildFromAuthoritative(RebuildInput{
+		Sessions: []RebuildSession{
+			{ID: "session-a", ActiveError: &ActiveErrorSummary{
+				SessionID: "session-a", Stamp: "stamp-a", OccurredAt: now, Preview: "a",
+			}},
+			{ID: "session-b", ActiveError: &ActiveErrorSummary{
+				SessionID: "session-b", Stamp: "stamp-b", OccurredAt: now, Preview: "b",
+			}},
+		},
+		Now: now,
+	})
+	if got.ActiveError == nil || got.ActiveError.Stamp != "stamp-b" {
+		t.Fatalf("active error = %+v, want the stable-stamp winner", got.ActiveError)
 	}
 }

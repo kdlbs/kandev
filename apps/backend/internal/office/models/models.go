@@ -95,9 +95,48 @@ type Skill struct {
 type RunSkillSnapshot struct {
 	RunID            string `json:"run_id" db:"run_id"`
 	SkillID          string `json:"skill_id" db:"skill_id"`
+	DisplayName      string `json:"display_name" db:"display_name"`
+	Slug             string `json:"slug" db:"slug"`
+	LabelSource      string `json:"label_source" db:"label_source"`
 	Version          string `json:"version" db:"version"`
 	ContentHash      string `json:"content_hash" db:"content_hash"`
 	MaterializedPath string `json:"materialized_path" db:"materialized_path"`
+}
+
+// RunSessionState is the durable lifecycle state of an Office execution that
+// is owned by a run rather than by a task session.
+type RunSessionState string
+
+const (
+	RunSessionStatePreparing   RunSessionState = "preparing"
+	RunSessionStateRunning     RunSessionState = "running"
+	RunSessionStateFinished    RunSessionState = "finished"
+	RunSessionStateFailed      RunSessionState = "failed"
+	RunSessionStateCancelled   RunSessionState = "cancelled"
+	RunSessionStateInterrupted RunSessionState = "interrupted"
+)
+
+// RunSession records one immutable attempt to execute an Office run. A retry
+// receives a new ID and attempt number, so delayed predecessor events cannot
+// be accepted as updates to the successor.
+type RunSession struct {
+	ID                 string          `json:"id" db:"id"`
+	WorkspaceID        string          `json:"workspace_id" db:"workspace_id"`
+	AgentProfileID     string          `json:"agent_profile_id" db:"agent_profile_id"`
+	RunID              string          `json:"run_id" db:"run_id"`
+	Attempt            int             `json:"attempt" db:"attempt"`
+	State              RunSessionState `json:"state" db:"state"`
+	ExecutionID        string          `json:"execution_id" db:"execution_id"`
+	ExecutionProfileID string          `json:"execution_profile_id" db:"execution_profile_id"`
+	Adapter            string          `json:"adapter" db:"adapter"`
+	Model              string          `json:"model" db:"model"`
+	ACPSessionID       string          `json:"acp_session_id" db:"acp_session_id"`
+	CreatedAt          time.Time       `json:"created_at" db:"created_at"`
+	StartedAt          *time.Time      `json:"started_at,omitempty" db:"started_at"`
+	FinishedAt         *time.Time      `json:"finished_at,omitempty" db:"finished_at"`
+	CancelRequestedAt  *time.Time      `json:"cancel_requested_at,omitempty" db:"cancel_requested_at"`
+	ErrorMessage       string          `json:"error_message,omitempty" db:"error_message"`
+	Version            int64           `json:"version" db:"version"`
 }
 
 // ProjectStatus represents the status of a project.
@@ -286,28 +325,79 @@ var ValidProjectStatuses = map[ProjectStatus]bool{
 	ProjectStatusArchived:  true,
 }
 
+// CostContractVersion is the in-band activation point for the cache-split /
+// cost-provenance / turn-attribution columns (docs/specs/office/requirements/costs.md).
+// The Rill cost extract has no schema versioning of its own, so a row
+// written under a prior contract is distinguished by comparing
+// cost_contract_version, not by a date an analyst has to be told out of
+// band. Both production writers (the prompt-usage subscriber's buildCostEvent
+// and the manual-entry RecordCostEvent) use this value. The test harness uses
+// it too. Thus, the writers cannot disagree about which contract applies to a
+// row. Bump only if the contract's meaning changes again.
+//
+// v1 → v2: on the CostSourceUnpriced path, v1 forced Estimated=true
+// regardless of the caller's own Estimated flag, conflating "we could not
+// resolve a price" with "the token counts themselves were synthesised" —
+// two different signals this same contract introduced CostSource
+// specifically to keep separate. v2 preserves the caller's Estimated value
+// verbatim on every path; cost_source=unpriced alone now carries the
+// pricing-failure signal.
+//
+// v2 → v3: v2 wrote TokensOut = OutputTokens unconditionally, so a
+// synthesised-usage turn (Estimated=true) with no observed output token
+// count stored a plain 0 — indistinguishable from a genuine zero-output
+// turn, and a row with real dollars attached to it. v3 makes TokensOut
+// nullable and uses the normalized output-token presence signal to leave it
+// NULL when no output count was observed, so "never measured" is
+// unrepresentable as a number.
+const CostContractVersion int64 = 3
+
 // CostEvent represents a cost tracking event.
 //
 // CostSubcents is stored as hundredths of a cent (int64) to keep token-rate
 // math integer-only. UI divides by 10000 when rendering dollars. Estimated
-// is true when token counts were synthesised by the adapter (e.g.
-// cumulative-delta inference for codex-acp) rather than reported directly
-// by the agent; the row still counts toward budget totals at face value.
+// is true when token counts are not authoritative for a complete turn, such
+// as adapter synthesis or a provider frame that covers only part of a turn;
+// the row still counts toward budget totals at face value.
+//
+// TokensCachedRead / TokensCachedWrite / TokensOut / TurnID / UsageEventID /
+// CostSource / the Rate*PerMillion columns / PricingCatalogVersion /
+// CostContractVersion are all nullable (pointer fields): NULL means "not
+// recorded" — a legacy row written before the column existed, or (for the
+// cache split specifically) an adapter that did not report cache data.
+// TokensOut is NULL specifically when no output count was observed: a 0
+// would assert a measurement that was never taken, and a downstream
+// per-output-token measure must see "unknown" rather than a fake zero-output
+// turn. The JSON cost-list representation includes this field as null so API
+// consumers can make the same distinction. NULL is never backfilled to 0;
+// TokensCachedIn keeps its original read+write sum semantics on every row so
+// existing consumers of that column are unaffected. See docs/specs/office/requirements/costs.md.
 type CostEvent struct {
-	ID             string    `json:"id" db:"id"`
-	SessionID      string    `json:"session_id" db:"session_id"`
-	TaskID         string    `json:"task_id" db:"task_id"`
-	AgentProfileID string    `json:"agent_profile_id" db:"agent_profile_id"`
-	ProjectID      string    `json:"project_id" db:"project_id"`
-	Model          string    `json:"model" db:"model"`
-	Provider       string    `json:"provider" db:"provider"`
-	TokensIn       int64     `json:"tokens_in" db:"tokens_in"`
-	TokensCachedIn int64     `json:"tokens_cached_in" db:"tokens_cached_in"`
-	TokensOut      int64     `json:"tokens_out" db:"tokens_out"`
-	CostSubcents   int64     `json:"cost_subcents" db:"cost_subcents"`
-	Estimated      bool      `json:"estimated" db:"estimated"`
-	OccurredAt     time.Time `json:"occurred_at" db:"occurred_at"`
-	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+	ID                        string      `json:"id" db:"id"`
+	SessionID                 string      `json:"session_id" db:"session_id"`
+	TaskID                    string      `json:"task_id" db:"task_id"`
+	AgentProfileID            string      `json:"agent_profile_id" db:"agent_profile_id"`
+	ProjectID                 string      `json:"project_id" db:"project_id"`
+	Model                     string      `json:"model" db:"model"`
+	Provider                  string      `json:"provider" db:"provider"`
+	TokensIn                  int64       `json:"tokens_in" db:"tokens_in"`
+	TokensCachedIn            int64       `json:"tokens_cached_in" db:"tokens_cached_in"`
+	TokensCachedRead          *int64      `json:"tokens_cached_read,omitempty" db:"tokens_cached_read"`
+	TokensCachedWrite         *int64      `json:"tokens_cached_write,omitempty" db:"tokens_cached_write"`
+	TokensOut                 *int64      `json:"tokens_out" db:"tokens_out"`
+	CostSubcents              int64       `json:"cost_subcents" db:"cost_subcents"`
+	Estimated                 bool        `json:"estimated" db:"estimated"`
+	TurnID                    *string     `json:"turn_id,omitempty" db:"turn_id"`
+	UsageEventID              *string     `json:"usage_event_id,omitempty" db:"usage_event_id"`
+	CostSource                *CostSource `json:"cost_source,omitempty" db:"cost_source"`
+	RateInputPerMillion       *int64      `json:"rate_input_per_million,omitempty" db:"rate_input_per_million"`
+	RateCachedReadPerMillion  *int64      `json:"rate_cached_read_per_million,omitempty" db:"rate_cached_read_per_million"`
+	RateCachedWritePerMillion *int64      `json:"rate_cached_write_per_million,omitempty" db:"rate_cached_write_per_million"`
+	RateOutputPerMillion      *int64      `json:"rate_output_per_million,omitempty" db:"rate_output_per_million"`
+	PricingCatalogVersion     *string     `json:"pricing_catalog_version,omitempty" db:"pricing_catalog_version"`
+	CostContractVersion       *int64      `json:"cost_contract_version,omitempty" db:"cost_contract_version"`
+	OccurredAt                time.Time   `json:"occurred_at" db:"occurred_at"`
+	CreatedAt                 time.Time   `json:"created_at" db:"created_at"`
 }
 
 // BudgetPolicy represents a budget limit policy. LimitSubcents is
@@ -324,6 +414,25 @@ type BudgetPolicy struct {
 	ActionOnExceed    BudgetActionOnExceed `json:"action_on_exceed" db:"action_on_exceed"`
 	CreatedAt         time.Time            `json:"created_at" db:"created_at"`
 	UpdatedAt         time.Time            `json:"updated_at" db:"updated_at"`
+	// Revision identifies which immutable set of the fields above a budget
+	// claim was evaluated against (REQ-OFFICE-COSTS-003). Server-assigned:
+	// starts at 1 and increases by exactly 1 on each successful update.
+	Revision int64 `json:"revision" db:"revision"`
+}
+
+// SpendWindow reports one scope's priced spend and degradation state for a
+// single [start, before) window, in one query round-trip. Shared between
+// internal/office/repository/sqlite (the query implementations) and
+// internal/office/costs (the Repository interface and EvaluatePreLaunch),
+// so neither package needs to import the other's package for this one
+// return type. AC-OFFICE-BUDGET-002.10/.15, REQ-OFFICE-BUDGET-004.
+type SpendWindow struct {
+	// PricedSubcents excludes any event whose cost_source is 'unpriced'
+	// (AC-OFFICE-BUDGET-004.1); a NULL cost_source is treated as priced.
+	PricedSubcents int64
+	// Degraded is true when the window contains at least one unpriced
+	// event, determined from cost_source, never from estimated.
+	Degraded bool
 }
 
 // Run represents a run queue entry.
@@ -359,10 +468,36 @@ type Run struct {
 	// SummaryInjected is the continuation-summary content prepended
 	// to the prompt at dispatch time, snapshot for inspection. Empty
 	// when no summary was injected (today: every run, until PR 2).
-	SummaryInjected string     `json:"summary_injected,omitempty" db:"summary_injected"`
-	RequestedAt     time.Time  `json:"requested_at" db:"requested_at"`
-	ClaimedAt       *time.Time `json:"claimed_at" db:"claimed_at"`
-	FinishedAt      *time.Time `json:"finished_at" db:"finished_at"`
+	SummaryInjected string `json:"summary_injected,omitempty" db:"summary_injected"`
+	// ContinuationScope is the continuation-summary scope key
+	// (ContinuationScopeForRun's output) computed once at run creation
+	// and persisted here so every later reader/writer of this run's
+	// continuation summary uses the same value. Computing this at
+	// creation time — before any wakeup can coalesce into this row —
+	// closes a race where a routine wakeup patches context_snapshot
+	// after claim but a re-derivation against the freshly re-fetched
+	// row would disagree with the derivation the claiming scheduler is
+	// still holding in memory.
+	ContinuationScope string `json:"continuation_scope,omitempty" db:"continuation_scope"`
+	// WakeWaveKey and WakeWaveString are the completion-wave identity
+	// (parent-wake-wave-identity): both set together, only for
+	// task_children_completed runs, from one derivation per queued run.
+	// WakeWaveKey is the digest idx_run_wake_wave indexes; WakeWaveString
+	// is the plain string the backstop's candidate query compares. Empty
+	// for every other run reason and for every pre-upgrade row.
+	WakeWaveKey    string     `json:"wake_wave_key,omitempty" db:"wake_wave_key"`
+	WakeWaveString string     `json:"wake_wave_string,omitempty" db:"wake_wave_string"`
+	RequestedAt    time.Time  `json:"requested_at" db:"requested_at"`
+	ClaimedAt      *time.Time `json:"claimed_at" db:"claimed_at"`
+	FinishedAt     *time.Time `json:"finished_at" db:"finished_at"`
+
+	// Outcome records why a finished run ended (docs/specs/
+	// task-delivery-ledger/spec.md, "Office run outcome"): one of eight
+	// values on the finished path, NULL on failed and on every
+	// pre-activation row. Pointer-typed so StructScan reads the NULL
+	// every pre-activation row carries, same idiom as the provider-
+	// routing columns below.
+	Outcome *string `json:"outcome,omitempty" db:"outcome"`
 
 	// Provider-routing columns (office-provider-routing spec). All
 	// optional and ignored when workspace routing is disabled. The TEXT
@@ -376,6 +511,22 @@ type Run struct {
 	// RequestedTier is the tier the resolver consumed (override > workspace
 	// default) when the run was first dispatched.
 	RequestedTier *string `json:"requested_tier,omitempty" db:"requested_tier"`
+	// Causation chain identity (REQ-OFFICE-RUN-CAUSATION-001).
+	// ChainCausationID is the root run's own ID; empty means the legacy
+	// pre-capability marker, read by AC-OFFICE-RUN-CAUSATION-001.6 as a
+	// root at depth 0. Distinct from CausationID below
+	// (REQ-OFFICE-LOOP-LIVENESS-002), an unrelated wakeup-request
+	// correlation that reached for the same name independently.
+	ChainCausationID string        `json:"chain_causation_id" db:"chain_causation_id"`
+	ParentRunID      string        `json:"parent_run_id" db:"parent_run_id"`
+	CausationDepth   int           `json:"causation_depth" db:"causation_depth"`
+	PriorityClass    PriorityClass `json:"priority_class" db:"priority_class"`
+	HumanRooted      bool          `json:"human_rooted" db:"human_rooted"`
+	RoutineID        string        `json:"routine_id" db:"routine_id"`
+	ActorKind        ActorKind     `json:"actor_kind" db:"actor_kind"`
+	ActorID          string        `json:"actor_id" db:"actor_id"`
+	WorkspaceID      string        `json:"workspace_id" db:"workspace_id"`
+
 	// ResolvedExecutionProfileID/ProviderID/Model identify the candidate
 	// that actually launched; empty until a launch succeeds. Provider and
 	// model are audit snapshots derived from the concrete profile.
@@ -401,6 +552,13 @@ type Run struct {
 	// EarliestRetryAt is the earliest moment a parked run should be re-
 	// resolved. Set only when at least one degraded route is auto-retryable.
 	EarliestRetryAt *time.Time `json:"earliest_retry_at,omitempty" db:"earliest_retry_at"`
+
+	// CausationID is copied from the agent_wakeup_requests row that
+	// created this run (REQ-OFFICE-LOOP-LIVENESS-002). "" means
+	// uncorrelated — either a legacy pre-migration row or a run created
+	// off a wake that never carried an id. Never a join/group-by key
+	// without excluding "" first.
+	CausationID string `json:"causation_id,omitempty" db:"causation_id"`
 }
 
 // RouteAttempt records one provider attempt inside a Run. Each fallback
@@ -408,22 +566,28 @@ type Run struct {
 // Persisted by the routing scheduler dispatcher in
 // internal/office/scheduler/dispatch_routing.go.
 type RouteAttempt struct {
-	RunID              string              `json:"run_id" db:"run_id"`
-	Seq                int                 `json:"seq" db:"seq"`
-	ExecutionProfileID string              `json:"execution_profile_id" db:"execution_profile_id"`
-	ProviderID         string              `json:"provider_id" db:"provider_id"`
-	Model              string              `json:"model" db:"model"`
-	Tier               string              `json:"tier" db:"tier"`
-	Outcome            RouteAttemptOutcome `json:"outcome" db:"outcome"`
-	ErrorCode          string              `json:"error_code,omitempty" db:"error_code"`
-	ErrorConfidence    ErrorConfidence     `json:"error_confidence,omitempty" db:"error_confidence"`
-	AdapterPhase       AdapterPhase        `json:"adapter_phase,omitempty" db:"adapter_phase"`
-	ClassifierRule     string              `json:"classifier_rule,omitempty" db:"classifier_rule"`
-	ExitCode           *int                `json:"exit_code,omitempty" db:"exit_code"`
-	RawExcerpt         string              `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
-	ResetHint          *time.Time          `json:"reset_hint,omitempty" db:"reset_hint"`
-	StartedAt          time.Time           `json:"started_at" db:"started_at"`
-	FinishedAt         *time.Time          `json:"finished_at,omitempty" db:"finished_at"`
+	RunID              string `json:"run_id" db:"run_id"`
+	Seq                int    `json:"seq" db:"seq"`
+	ExecutionProfileID string `json:"execution_profile_id" db:"execution_profile_id"`
+	ProviderID         string `json:"provider_id" db:"provider_id"`
+	Model              string `json:"model" db:"model"`
+	Tier               string `json:"tier" db:"tier"`
+	// TierSource names the precedence level that supplied Tier: one of
+	// "wake_reason", "override", "role", "workspace". Empty means "not
+	// recorded" — either a pre-migration row (Tier non-empty) or an
+	// attempt that never resolved a tier (both empty, e.g. a
+	// max-attempts-exceeded row) — never interpreted as "workspace".
+	TierSource      string              `json:"tier_source,omitempty" db:"tier_source"`
+	Outcome         RouteAttemptOutcome `json:"outcome" db:"outcome"`
+	ErrorCode       string              `json:"error_code,omitempty" db:"error_code"`
+	ErrorConfidence ErrorConfidence     `json:"error_confidence,omitempty" db:"error_confidence"`
+	AdapterPhase    AdapterPhase        `json:"adapter_phase,omitempty" db:"adapter_phase"`
+	ClassifierRule  string              `json:"classifier_rule,omitempty" db:"classifier_rule"`
+	ExitCode        *int                `json:"exit_code,omitempty" db:"exit_code"`
+	RawExcerpt      string              `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
+	ResetHint       *time.Time          `json:"reset_hint,omitempty" db:"reset_hint"`
+	StartedAt       time.Time           `json:"started_at" db:"started_at"`
+	FinishedAt      *time.Time          `json:"finished_at,omitempty" db:"finished_at"`
 }
 
 // ProviderHealth records the health state of one (workspace, provider,
@@ -495,19 +659,42 @@ type RoutineTrigger struct {
 }
 
 // RoutineRun represents a single run of a routine.
+//
+// CatchUpMissedTicks/CatchUpFirstMissedAt/CatchUpTruncated are the gap
+// summary measured for the claim that created this run — written once
+// at creation and never modified afterward (AC-OFFICE-ROUTINE-CATCHUP-002.10).
+// CatchUpMissedTicks is nil when no gap summary was recorded; per
+// AC-002.3, absence is never represented as a stored zero, so a nil
+// check (not a zero check) is the presence test.
 type RoutineRun struct {
-	ID                  string           `json:"id" db:"id"`
-	RoutineID           string           `json:"routine_id" db:"routine_id"`
-	TriggerID           string           `json:"trigger_id" db:"trigger_id"`
-	Source              string           `json:"source" db:"source"`
-	Status              RoutineRunStatus `json:"status" db:"status"`
-	TriggerPayload      string           `json:"trigger_payload" db:"trigger_payload"`
-	LinkedTaskID        string           `json:"linked_task_id" db:"linked_task_id"`
-	CoalescedIntoRunID  string           `json:"coalesced_into_run_id" db:"coalesced_into_run_id"`
-	DispatchFingerprint string           `json:"dispatch_fingerprint" db:"dispatch_fingerprint"`
-	StartedAt           *time.Time       `json:"started_at" db:"started_at"`
-	CompletedAt         *time.Time       `json:"completed_at" db:"completed_at"`
-	CreatedAt           time.Time        `json:"created_at" db:"created_at"`
+	ID                   string           `json:"id" db:"id"`
+	RoutineID            string           `json:"routine_id" db:"routine_id"`
+	TriggerID            string           `json:"trigger_id" db:"trigger_id"`
+	Source               string           `json:"source" db:"source"`
+	Status               RoutineRunStatus `json:"status" db:"status"`
+	TriggerPayload       string           `json:"trigger_payload" db:"trigger_payload"`
+	LinkedTaskID         string           `json:"linked_task_id" db:"linked_task_id"`
+	CoalescedIntoRunID   string           `json:"coalesced_into_run_id" db:"coalesced_into_run_id"`
+	DispatchFingerprint  string           `json:"dispatch_fingerprint" db:"dispatch_fingerprint"`
+	CatchUpMissedTicks   *int             `json:"catch_up_missed_ticks,omitempty" db:"catch_up_missed_ticks"`
+	CatchUpFirstMissedAt *time.Time       `json:"catch_up_first_missed_at,omitempty" db:"catch_up_first_missed_at"`
+	CatchUpTruncated     bool             `json:"catch_up_truncated" db:"catch_up_truncated"`
+	StartedAt            *time.Time       `json:"started_at" db:"started_at"`
+	CompletedAt          *time.Time       `json:"completed_at" db:"completed_at"`
+	CreatedAt            time.Time        `json:"created_at" db:"created_at"`
+	// SkipReason carries exactly one value today, "workspace_paused",
+	// distinguishing a workspace-pause skip from every other skip cause
+	// (e.g. skip_if_active concurrency). Empty for a run not skipped by a
+	// pause.
+	SkipReason string `json:"skip_reason" db:"skip_reason"`
+	// PauseID names the office_workspace_pauses row that blocked this
+	// fire. Empty when SkipReason is empty.
+	PauseID string `json:"pause_id" db:"pause_id"`
+	// CausationID is minted once per fire in dispatchRoutineRun
+	// (REQ-OFFICE-LOOP-LIVENESS-002) — the origin id every wakeup
+	// request and run this fire produces carries forward. "" only for
+	// rows written before this feature.
+	CausationID string `json:"causation_id,omitempty" db:"causation_id"`
 }
 
 // ApprovalType constants for approval request types.
@@ -536,14 +723,17 @@ type Approval struct {
 
 // ActivityEntry represents an entry in the activity log.
 type ActivityEntry struct {
-	ID          string             `json:"id" db:"id"`
-	WorkspaceID string             `json:"workspace_id" db:"workspace_id"`
-	ActorType   ActivityActorType  `json:"actor_type" db:"actor_type"`
-	ActorID     string             `json:"actor_id" db:"actor_id"`
-	Action      ActivityAction     `json:"action" db:"action"`
-	TargetType  ActivityTargetType `json:"target_type" db:"target_type"`
-	TargetID    string             `json:"target_id" db:"target_id"`
-	Details     string             `json:"details" db:"details"`
+	ID               string             `json:"id" db:"id"`
+	WorkspaceID      string             `json:"workspace_id" db:"workspace_id"`
+	ActorType        ActivityActorType  `json:"actor_type" db:"actor_type"`
+	ActorID          string             `json:"actor_id" db:"actor_id"`
+	Action           ActivityAction     `json:"action" db:"action"`
+	TargetType       ActivityTargetType `json:"target_type" db:"target_type"`
+	TargetID         string             `json:"target_id" db:"target_id"`
+	ActorName        string             `json:"actor_name,omitempty" db:"-"`
+	TargetName       string             `json:"target_name,omitempty" db:"-"`
+	TargetIdentifier string             `json:"target_identifier,omitempty" db:"-"`
+	Details          string             `json:"details" db:"details"`
 	// RunID + SessionID let the run detail page join activity rows
 	// back to the originating run for the "Tasks Touched" surface.
 	// Empty string for activity not produced under a run (manual
@@ -600,6 +790,11 @@ const (
 const (
 	DecisionApproved         = "approved"
 	DecisionChangesRequested = "changes_requested"
+	// DecisionRejected is the agent-path verdict literal
+	// (engine.DecisionRejected) for the same semantic as
+	// DecisionChangesRequested — the quorum engine already treats them as
+	// synonyms (isRejectionVerdict in internal/workflow/engine/quorum.go).
+	DecisionRejected = "rejected"
 
 	DeciderTypeUser  = "user"
 	DeciderTypeAgent = "agent"

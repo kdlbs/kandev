@@ -21,7 +21,6 @@ var (
 	ErrDocumentNotFound     = errors.New("document not found")
 	ErrDocumentKeyRequired  = errors.New("document key is required")
 	ErrDocumentTaskRequired = errors.New("task_id is required")
-	ErrAttachmentTooLarge   = errors.New("attachment exceeds maximum size")
 	ErrInvalidPathComponent = errors.New("invalid path component")
 )
 

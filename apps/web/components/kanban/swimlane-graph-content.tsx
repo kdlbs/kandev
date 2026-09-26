@@ -25,6 +25,9 @@ import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
+import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-message";
 
 export type SwimlaneGraphContentProps = {
   workflowId: string;
@@ -77,16 +80,16 @@ function DraggableTaskChip({
   const pendingInput = useTaskPendingInput(task.primarySessionId, {
     taskId: task.id,
     taskPendingAction: task.taskPendingAction,
+    statusSummary: task.statusSummary,
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
-  const statusIcon = getTaskStateIcon(
-    task.state,
-    "h-3 w-3",
-    pendingInput.clarification,
-    task.foregroundActivity,
-    pendingInput.permission,
-  );
+  const statusIcon = getTaskStateIcon(task.state, "h-3 w-3", {
+    hasPendingClarification: pendingInput.clarification,
+    foregroundActivity: task.foregroundActivity,
+    hasPendingPermission: pendingInput.permission,
+    interrupted: task.interrupted,
+  });
 
   return (
     <button
@@ -115,16 +118,16 @@ function TaskChipPreview({ task }: { task: Task }) {
   const pendingInput = useTaskPendingInput(task.primarySessionId, {
     taskId: task.id,
     taskPendingAction: task.taskPendingAction,
+    statusSummary: task.statusSummary,
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
-  const statusIcon = getTaskStateIcon(
-    task.state,
-    "h-3 w-3",
-    pendingInput.clarification,
-    task.foregroundActivity,
-    pendingInput.permission,
-  );
+  const statusIcon = getTaskStateIcon(task.state, "h-3 w-3", {
+    hasPendingClarification: pendingInput.clarification,
+    foregroundActivity: task.foregroundActivity,
+    hasPendingPermission: pendingInput.permission,
+    interrupted: task.interrupted,
+  });
   return (
     <div
       className={cn(
@@ -147,7 +150,15 @@ type SwimlaneGraphDndOptions = {
   onMoveError?: (error: MoveTaskError) => void;
 };
 
-async function moveTaskAcrossSwimlaneSteps({
+/**
+ * Optimistically moves a task, rolling the snapshot back and reporting a message
+ * when the backend refuses.
+ *
+ * Exported for tests: the localized fallback on the non-`Error` branch is the
+ * kind of copy no rendering test reaches, since it is handed to `onMoveError`
+ * rather than to the DOM.
+ */
+export async function moveTaskAcrossSwimlaneSteps({
   task,
   taskId,
   targetColumnId,
@@ -200,7 +211,7 @@ async function moveTaskAcrossSwimlaneSteps({
         .getState()
         .setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
     }
-    const message = error instanceof Error ? error.message : "Failed to move task";
+    const message = getTaskMoveErrorMessage(error, t("task:taskMoveErrorGeneric"), t);
     onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
   }
 }
@@ -295,6 +306,7 @@ export function SwimlaneGraphContent({
   onPreviewTask,
   onMoveError,
 }: SwimlaneGraphContentProps) {
+  const { t } = useTranslation();
   const {
     sensors,
     clampVertical,
@@ -309,7 +321,7 @@ export function SwimlaneGraphContent({
   if (tasks.length === 0) {
     return (
       <div className="px-3 pb-3">
-        <div className="text-xs text-muted-foreground text-center py-4">No tasks</div>
+        <div className="text-xs text-muted-foreground text-center py-4">{t("kanban:noTasks")}</div>
       </div>
     );
   }

@@ -4,6 +4,8 @@ import type { DockviewApi } from "dockview-react";
 vi.mock("@/lib/local-storage", () => ({
   setEnvLayout: vi.fn(),
   getEnvLayout: vi.fn(() => null),
+  getEnvLayoutProfile: vi.fn(() => null),
+  setEnvLayoutProfile: vi.fn(),
   getEnvMaximizeState: vi.fn(() => null),
   setEnvMaximizeState: vi.fn(),
   removeEnvMaximizeState: vi.fn(),
@@ -79,7 +81,12 @@ vi.mock("./layout-manager", async (importOriginal) => {
 
 import { removeEnvMaximizeState, setEnvLayout } from "@/lib/local-storage";
 import { persistEnvLayoutNow, useDockviewStore } from "./dockview-store";
-import { applyLayout, defaultLayout, fromDockviewApi } from "./layout-manager";
+import {
+  applyLayout,
+  fromDockviewApi,
+  getPresetLayout,
+  resolveNamedIntent,
+} from "./layout-manager";
 
 function makeApi(snapshot: object = { columns: [] }): DockviewApi {
   return {
@@ -171,12 +178,17 @@ describe("persistEnvLayoutNow", () => {
 // previously held isRestoringLayout=true for the whole rAF and never wrote.
 function resetStoreForIntegration() {
   vi.clearAllMocks();
+  vi.mocked(fromDockviewApi).mockReset().mockReturnValue({ columns: [] });
   useDockviewStore.setState({
     api: null,
     currentLayoutEnvId: null,
     preMaximizeLayout: null,
     maximizedGroupId: null,
     isRestoringLayout: false,
+    pinnedWidths: new Map(),
+    userDefaultLayout: null,
+    userDefaultLayoutProfile: { kind: "built-in", id: "default" },
+    defaultPreset: "default",
   });
 }
 
@@ -313,6 +325,37 @@ describe("applyBuiltInPreset — persistence at call site", () => {
 describe("resetLayout — effective default persistence", () => {
   beforeEach(resetStoreForIntegration);
 
+  // @covers AC-UI-TASK-LAYOUT-PROFILES-001.9 AC-UI-TASK-LAYOUT-PROFILES-001.10
+  it("uses scaled proportions from the effective custom default", () => {
+    const api = makeStoreApi();
+    const userDefaultLayout = {
+      columns: [
+        {
+          id: "center",
+          width: 700,
+          groups: [{ panels: [{ id: "chat", component: "chat", title: "Agent" }] }],
+        },
+        {
+          id: "right",
+          pinned: true,
+          width: 300,
+          groups: [{ panels: [{ id: "files", component: "files", title: "Files" }] }],
+        },
+      ],
+    };
+    useDockviewStore.setState({
+      api,
+      currentLayoutEnvId: "env-reset",
+      userDefaultLayout,
+    });
+
+    useDockviewStore.getState().resetLayout();
+
+    const appliedWidths = vi.mocked(applyLayout).mock.calls.at(-1)?.[2];
+    expect(appliedWidths).toEqual(new Map([["right", 240]]));
+    expect(useDockviewStore.getState().pinnedWidths).toBe(appliedWidths);
+  });
+
   it("applies the current user default and persists it for the active environment", async () => {
     const api = makeStoreApi();
     const userDefaultLayout = {
@@ -357,92 +400,66 @@ describe("resetLayout — effective default persistence", () => {
   });
 });
 
-describe("toggleRightPanels — center fallback", () => {
+describe("buildDefaultLayout — effective default widths", () => {
   beforeEach(resetStoreForIntegration);
 
-  it("keeps a center fallback PR Details tab when hiding right panels", async () => {
+  it("uses scaled proportions when building a custom default without an intent", () => {
     const api = makeStoreApi();
-    vi.mocked(fromDockviewApi).mockReturnValue({
-      columns: [
-        {
-          id: "center",
-          groups: [
-            {
-              id: "group-center",
-              panels: [
-                { id: "chat", component: "chat", title: "Agent" },
-                { id: "pr-detail", component: "pr-detail", title: "PR Details" },
-              ],
-            },
-          ],
-        },
-        {
-          id: "right",
-          pinned: true,
-          groups: [
-            {
-              id: "group-right-top",
-              panels: [{ id: "files", component: "files", title: "Files" }],
-            },
-          ],
-        },
-      ],
+    useDockviewStore.setState({
+      api,
+      userDefaultLayout: {
+        columns: [
+          { id: "center", width: 700, groups: [] },
+          { id: "right", pinned: true, width: 300, groups: [] },
+        ],
+      },
     });
-    useDockviewStore.setState({ api, rightPanelsVisible: true, defaultPreset: "default" });
 
-    useDockviewStore.getState().toggleRightPanels();
+    useDockviewStore.getState().buildDefaultLayout(api);
 
-    const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
-    expect(appliedState?.columns.map((column) => column.id)).toEqual(["center"]);
-    expect(appliedState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toEqual([
-      "chat",
-      "pr-detail",
-    ]);
-    await flushRaf();
+    expect(applyLayout).toHaveBeenLastCalledWith(
+      api,
+      expect.anything(),
+      new Map([["right", 240]]),
+      800,
+      600,
+    );
+    expect(useDockviewStore.getState().pinnedWidths).toEqual(new Map([["right", 240]]));
   });
 
-  it("keeps a center fallback PR Details tab when showing right panels", async () => {
+  it("keeps named preset widths responsive", () => {
     const api = makeStoreApi();
-    vi.mocked(fromDockviewApi).mockReturnValue({
+    const planLayout = {
       columns: [
         {
           id: "center",
-          groups: [
-            {
-              id: "group-center",
-              panels: [
-                { id: "chat", component: "chat", title: "Agent" },
-                { id: "pr-detail", component: "pr-detail", title: "PR Details" },
-              ],
-            },
-          ],
+          width: 600,
+          groups: [{ panels: [{ id: "chat", component: "chat", title: "Agent" }] }],
         },
-      ],
-    });
-    vi.mocked(defaultLayout).mockReturnValue({
-      columns: [
         {
           id: "right",
           pinned: true,
-          groups: [
-            {
-              id: "group-right-top",
-              panels: [{ id: "files", component: "files", title: "Files" }],
-            },
-          ],
+          width: 200,
+          groups: [{ panels: [{ id: "plan", component: "plan", title: "Plan" }] }],
         },
       ],
+    };
+    vi.mocked(resolveNamedIntent).mockReturnValue({ preset: "plan" });
+    vi.mocked(getPresetLayout).mockReturnValue(planLayout);
+    useDockviewStore.setState({
+      api,
+      userDefaultLayout: {
+        columns: [
+          { id: "center", width: 700, groups: [] },
+          { id: "right", pinned: true, width: 300, groups: [] },
+        ],
+      },
     });
-    useDockviewStore.setState({ api, rightPanelsVisible: false, defaultPreset: "default" });
 
-    useDockviewStore.getState().toggleRightPanels();
+    useDockviewStore.getState().buildDefaultLayout(api, "plan");
 
-    const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
-    expect(appliedState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toEqual([
-      "chat",
-      "pr-detail",
-    ]);
-    await flushRaf();
+    expect(applyLayout).toHaveBeenLastCalledWith(api, planLayout, new Map(), 800, 600);
+    expect(useDockviewStore.getState().pinnedWidths).toEqual(new Map());
   });
 });
 

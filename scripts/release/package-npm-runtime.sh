@@ -13,55 +13,29 @@
 #   release-assets-dir Directory containing kandev-*.tar.gz files
 #   output-dir         Directory where per-platform npm packages are written
 #
-# Output (one directory per platform ready for npm publish):
-#   <output-dir>/@kdlbs/runtime-linux-x64/
-#   <output-dir>/@kdlbs/runtime-linux-arm64/
-#   <output-dir>/@kdlbs/runtime-darwin-x64/
-#   <output-dir>/@kdlbs/runtime-darwin-arm64/
-#   <output-dir>/@kdlbs/runtime-win32-x64/
+# Output: one scoped directory per package in npm-packages.sh.
 set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/release/npm-packages.sh
+source "$ROOT_DIR/scripts/release/npm-packages.sh"
 
 VERSION="${1:?Usage: $0 <version> <release-assets-dir> <output-dir>}"
 ASSETS_DIR="${2:?Usage: $0 <version> <release-assets-dir> <output-dir>}"
 OUT_DIR="${3:?Usage: $0 <version> <release-assets-dir> <output-dir>}"
 
-# Maps platform dir name → npm package name + npm os/cpu fields
-declare -A PLATFORM_TO_PACKAGE=(
-  ["linux-x64"]="@kdlbs/runtime-linux-x64"
-  ["linux-arm64"]="@kdlbs/runtime-linux-arm64"
-  ["macos-x64"]="@kdlbs/runtime-darwin-x64"
-  ["macos-arm64"]="@kdlbs/runtime-darwin-arm64"
-  ["windows-x64"]="@kdlbs/runtime-win32-x64"
-)
-
-declare -A PLATFORM_TO_OS=(
-  ["linux-x64"]='["linux"]'
-  ["linux-arm64"]='["linux"]'
-  ["macos-x64"]='["darwin"]'
-  ["macos-arm64"]='["darwin"]'
-  ["windows-x64"]='["win32"]'
-)
-
-declare -A PLATFORM_TO_CPU=(
-  ["linux-x64"]='["x64"]'
-  ["linux-arm64"]='["arm64"]'
-  ["macos-x64"]='["x64"]'
-  ["macos-arm64"]='["arm64"]'
-  ["windows-x64"]='["x64"]'
-)
-
 echo "Packaging npm runtime packages for version $VERSION..."
 echo "  assets dir: $ASSETS_DIR"
 echo "  output dir: $OUT_DIR"
 
-for platform in linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64; do
+for platform in "${RUNTIME_PLATFORMS[@]}"; do
   archive="$ASSETS_DIR/kandev-${platform}.tar.gz"
   if [[ ! -f "$archive" ]]; then
     echo "Error: missing archive $archive" >&2
     exit 1
   fi
 
-  package_name="${PLATFORM_TO_PACKAGE[$platform]}"
+  package_name="${RUNTIME_PACKAGE_BY_PLATFORM[$platform]}"
   # @kdlbs/runtime-linux-x64 → scope=@kdlbs, name=runtime-linux-x64
   scope_dir="${package_name%%/*}"    # @kdlbs
   pkg_dir="${package_name##*/}"      # runtime-linux-x64
@@ -85,8 +59,17 @@ for platform in linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64; do
   cp -R "$bundle_root/bin" "$pkg_out/bin"
   rm -rf "$local_tmp"
 
-  os_field="${PLATFORM_TO_OS[$platform]}"
-  cpu_field="${PLATFORM_TO_CPU[$platform]}"
+  case "$platform" in
+    linux-*) os_field='["linux"]' ;;
+    macos-*) os_field='["darwin"]' ;;
+    windows-*) os_field='["win32"]' ;;
+    *) echo "Error: unsupported runtime platform $platform" >&2; exit 1 ;;
+  esac
+  case "$platform" in
+    *-x64) cpu_field='["x64"]' ;;
+    *-arm64) cpu_field='["arm64"]' ;;
+    *) echo "Error: unsupported runtime architecture $platform" >&2; exit 1 ;;
+  esac
 
   # Note: `repository` is required when publishing with `npm publish --provenance`.
   # npm's sigstore attestation embeds repo info from the OIDC token and refuses

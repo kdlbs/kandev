@@ -7,6 +7,8 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useDraggablePopover, usePopoverDismiss } from "@/components/task/use-draggable-popover";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type EditorCommentPopoverProps = {
   selectedText: string;
@@ -37,6 +39,7 @@ function PopoverBody({
   handleSubmitAndRun?: () => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
+  const { t } = useTranslation();
   const previewText =
     selectedText.length > 100 ? selectedText.slice(0, 100).trim() + "…" : selectedText;
   const isDisabled = !comment.trim();
@@ -67,12 +70,13 @@ function PopoverBody({
         value={comment}
         onChange={(e) => setComment(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Add your comment or instruction..."
+        placeholder={t("task:addYourCommentOrInstruction")}
         className="min-h-[72px] resize-none text-sm border-border/50 focus:border-primary/50"
       />
       <div className="mt-3 flex items-center justify-between">
         <span className="text-xs text-muted-foreground/70">
-          {modKey}+Enter to add{handleSubmitAndRun ? `, ${modKey}+Shift+Enter to run` : ""}
+          {t("task:modKeyEnterToAdd", { modKey })}
+          {handleSubmitAndRun ? t("task:shiftEnterToRun2", { modKey }) : ""}
         </span>
         <TooltipProvider delayDuration={400}>
           <div className="inline-flex">
@@ -86,11 +90,11 @@ function PopoverBody({
                   className={`gap-1.5 cursor-pointer ${handleSubmitAndRun ? "rounded-r-none border-r-0" : ""}`}
                 >
                   <IconPlus className="h-3.5 w-3.5" />
-                  Add
+                  {t("task:add")}
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                <p>Save comment for review ({modKey}+Enter)</p>
+                <p>{t("task:saveCommentForReviewShortcut", { modKey })}</p>
               </TooltipContent>
             </Tooltip>
             {handleSubmitAndRun && (
@@ -103,11 +107,11 @@ function PopoverBody({
                     className="gap-1.5 rounded-l-none cursor-pointer"
                   >
                     <IconPlayerPlay className="h-3.5 w-3.5" />
-                    Run
+                    {t("task:run")}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  <p>Save and send to agent ({modKey}+Shift+Enter)</p>
+                  <p>{t("task:saveAndSendToAgentShortcut", { modKey })}</p>
                 </TooltipContent>
               </Tooltip>
             )}
@@ -148,8 +152,8 @@ export function EditorCommentPopover({
 
   const lineRangeText =
     lineRange.start === lineRange.end
-      ? `Line ${lineRange.start}`
-      : `Lines ${lineRange.start}-${lineRange.end}`;
+      ? t("task:lineNumber", { line: lineRange.start })
+      : t("task:lineRange", { start: lineRange.start, end: lineRange.end });
 
   return (
     <div

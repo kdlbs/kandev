@@ -5,17 +5,23 @@ import { Button } from "@kandev/ui/button";
 import { IconAlertCircle, IconX } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import type { Message, TaskSessionState } from "@/lib/types/http";
-import type { RenderItem } from "@/hooks/use-processed-messages";
+import { TASK_DESCRIPTION_SYNTHETIC_ID, type RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
 import { PrepareProgress } from "@/components/session/prepare-progress";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { dismissLastAgentError } from "@/lib/api/domains/session-api";
+import { RemediationLink } from "@/components/task/remediation-link";
 import {
   type LastAgentError,
   lastAgentErrorStamp,
   readLastAgentError,
 } from "@/lib/session-last-agent-error";
+import { isLaunchErrorSurfaceMessage } from "./types";
+import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import type { MessageHistoryStatus } from "@/hooks/domains/session/use-message-fetch-state";
+import { SessionHistoryFeedback } from "./session-entry-feedback";
 
 export type MessageListProps = {
   items: RenderItem[];
@@ -27,10 +33,15 @@ export type MessageListProps = {
   taskId?: string;
   sessionId: string | null;
   messagesLoading: boolean;
+  /** Latest-session history is still reconciling while cached rows remain visible. */
+  historyRefreshPending?: boolean;
+  historyStatus?: MessageHistoryStatus;
+  historyError?: unknown;
+  onRetryHistory?: () => void;
   isWorking: boolean;
   sessionState?: TaskSessionState;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   /** Render item key (see getItemKey) the unread "New" divider should
    *  appear immediately before; null/undefined renders no divider. */
   dividerBeforeItemKey?: string | null;
@@ -58,15 +69,30 @@ export type MessageListProps = {
    * to the top of the transcript (e.g. the unread "New" divider) reserve
    * room for the overlay instead of being covered by it. */
   anchoredBarHeight?: number;
+  /** Whether the host panel is actually visible. Persistent Dockview panels
+   * remain mounted while inactive and use this transition to recover missed
+   * oldest-page sentinel observations. */
+  isVisible?: boolean;
+  /** The task-owned launch card renders the matching failure. */
+  launchErrorOwned?: boolean;
+  /** Stamp used to distinguish a matching last-agent-error notice. */
+  launchErrorStamp?: string;
+  /** Timestamp used to identify unstamped synthetic rows from the active failure. */
+  launchErrorOccurredAt?: string;
 };
 
-/** Imperative handle exposed by `MessageList` and both rendering strategies,
- * letting the chat panel scroll to an arbitrary message (e.g. the last
+/** Imperative handle exposed by `MessageList`, letting the chat panel scroll
+ * to an arbitrary message (e.g. the last
  * prompt) from outside the list — from the composer's scroll-up button. */
 export type MessageListHandle = {
-  scrollToMessage: (messageId: string, options?: { align?: "start" | "center" }) => void;
+  scrollToMessage: (
+    messageId: string,
+    options?: { align?: "start" | "center"; behavior?: "smooth" | "auto" },
+  ) => boolean;
 };
 
+/** Render key for a transcript item: `item.id` for turn-group, prepare-
+ * progress, and agent-error-notice items; the message id for message rows. */
 export function getItemKey(item: RenderItem): string {
   if (
     item.type === "turn_group" ||
@@ -77,6 +103,88 @@ export function getItemKey(item: RenderItem): string {
   return item.message.id;
 }
 
+const LAUNCH_ERROR_STAMP_KEYS = ["launch_error_stamp", "error_stamp"] as const;
+
+function launchErrorSurfaceStamp(message: Message): string | undefined {
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  for (const key of LAUNCH_ERROR_STAMP_KEYS) {
+    const value = metadata?.[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+function launchErrorSurfaceMessageIds(
+  messages: Message[],
+  launchErrorStamp?: string,
+  launchErrorOccurredAt?: string,
+): Set<string> {
+  const launchMessages = messages.filter(isLaunchErrorSurfaceMessage);
+  if (launchMessages.length === 0) return new Set();
+
+  const unstampedMessages = launchMessages.filter(
+    (message) => launchErrorSurfaceStamp(message) === undefined,
+  );
+  const hiddenIds = new Set<string>();
+  if (launchErrorStamp) {
+    const stampedMatches = launchMessages.filter(
+      (message) => launchErrorSurfaceStamp(message) === launchErrorStamp,
+    );
+    stampedMatches.forEach((message) => hiddenIds.add(message.id));
+  }
+
+  const occurredAt = launchErrorOccurredAt ? Date.parse(launchErrorOccurredAt) : Number.NaN;
+  if (!Number.isNaN(occurredAt)) {
+    unstampedMessages.forEach((message) => {
+      const createdAt = Date.parse(message.created_at);
+      if (!Number.isNaN(createdAt) && createdAt >= occurredAt) hiddenIds.add(message.id);
+    });
+  }
+
+  if (hiddenIds.size > 0 || launchErrorStamp || launchErrorOccurredAt) return hiddenIds;
+
+  // Older synthetic rows do not carry the launch stamp. Keep historical rows
+  // intact and hide only the most recent row when no identity is available.
+  const fallbackMessage = launchMessages[launchMessages.length - 1];
+  return fallbackMessage ? new Set([fallbackMessage.id]) : new Set();
+}
+
+/** Remove the launch-only transcript decorations once the task card owns them. */
+export function filterLaunchErrorMessages(
+  messages: Message[],
+  launchErrorOwned: boolean,
+  launchErrorStamp?: string,
+  launchErrorOccurredAt?: string,
+): Message[] {
+  if (!launchErrorOwned) return messages;
+  const hiddenIds = launchErrorSurfaceMessageIds(messages, launchErrorStamp, launchErrorOccurredAt);
+  return messages.filter((message) => !hiddenIds.has(message.id));
+}
+
+/** Remove synthetic launch rows while preserving ordinary transcript activity. */
+export function filterLaunchErrorItems(
+  items: RenderItem[],
+  launchErrorOwned: boolean,
+  launchErrorStamp?: string,
+  launchErrorOccurredAt?: string,
+): RenderItem[] {
+  if (!launchErrorOwned) return items;
+  const hiddenMessageIds = launchErrorSurfaceMessageIds(
+    items.flatMap((item) => (item.type === "message" ? [item.message] : [])),
+    launchErrorStamp,
+    launchErrorOccurredAt,
+  );
+  return items.filter((item) => {
+    if (item.type === "prepare_progress") return false;
+    if (item.type === "agent_error_notice") {
+      return !launchErrorStamp || lastAgentErrorStamp(item.error) !== launchErrorStamp;
+    }
+    return item.type !== "message" || !hiddenMessageIds.has(item.message.id);
+  });
+}
+
+/** The active turn id, but only while the agent is working — turns no longer
+ * in progress aren't treated as active. */
 export function getEffectiveActiveTurnId(
   activeTurnId: string | null,
   isWorking: boolean,
@@ -85,9 +193,13 @@ export function getEffectiveActiveTurnId(
 }
 
 /** Index of the most recent user-authored message, or -1 when there is none. */
+function isStoredUserMessage(message: Message): boolean {
+  return message.author_type === "user" && message.id !== TASK_DESCRIPTION_SYNTHETIC_ID;
+}
+
 function findLastUserMessageIndex(messages: Message[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].author_type === "user") return i;
+    if (isStoredUserMessage(messages[i])) return i;
   }
   return -1;
 }
@@ -103,24 +215,8 @@ export function getLastUserMessageId(messages: Message[]): string | null {
  * the task description). Used to power the transcript's scroll-to-start
  * affordance. */
 export function getFirstUserMessageId(messages: Message[]): string | null {
-  const first = messages.find((message) => message.author_type === "user");
+  const first = messages.find(isStoredUserMessage);
   return first ? first.id : null;
-}
-
-export type TranscriptNavigationTarget = "last_prompt" | "start";
-
-/**
- * Whether resolving a transcript-navigation target needs another older page.
- * The latest prompt may sit before a long agent response; the true start can
- * only be known after the pagination cursor is exhausted.
- */
-export function shouldLoadMoreForTranscriptTarget(
-  target: TranscriptNavigationTarget,
-  messages: Message[],
-  hasMore: boolean,
-): boolean {
-  if (!hasMore) return false;
-  return target === "start" || getLastUserMessageId(messages) === null;
 }
 
 /**
@@ -148,6 +244,9 @@ export function shouldAutoScrollToBottom(params: {
  * fractional layout boundaries while scrolling settles. */
 export type LastPromptEdge = "above" | "below" | "visible";
 
+/** Classifies the last prompt's position relative to the transcript viewport:
+ * fully `"above"` it (scrolled past), fully `"below"` it (not yet reached),
+ * or `"visible"` — with a two-pixel tolerance against flicker. */
 export function resolveLastPromptEdge(container: HTMLElement, target: HTMLElement): LastPromptEdge {
   const containerRect = container.getBoundingClientRect();
   const targetRect = target.getBoundingClientRect();
@@ -191,8 +290,7 @@ export function isElementFullyVisible(container: HTMLElement, target: HTMLElemen
  * last-prompt bar's pinned overlay, so a scroll-into-view target (namely
  * the unread "New" divider) lands below it instead of underneath it.
  * Clamps an unmeasured/negative height to zero and rounds to whole pixels
- * — callers feed this straight into a CSS `scroll-margin-top` or a
- * Virtuoso `scrollToIndex` offset. */
+ * — callers feed this straight into a CSS `scroll-margin-top`. */
 export function anchoredBarScrollOffsetPx(anchoredBarHeight: number | undefined): number {
   return Math.max(0, Math.round(anchoredBarHeight ?? 0));
 }
@@ -212,6 +310,7 @@ export function getStreamingAgentMessageId(messages: Message[]): string | null {
   return null;
 }
 
+/** Id of the final turn-group item in the list, or null when there is none. */
 export function getLastTurnGroupId(items: RenderItem[]) {
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
@@ -220,6 +319,9 @@ export function getLastTurnGroupId(items: RenderItem[]) {
   return null;
 }
 
+/** Derives the transcript's loading presentation: whether this is the initial
+ * load and whether the loading spinner should show (suppressed for CREATED
+ * sessions, which are prepare-only, and while the agent is working). */
 export function getConversationLoadingState(params: {
   messagesLoading: boolean;
   messagesCount: number;
@@ -282,6 +384,9 @@ export function canReassertDividerScroll(params: {
 // after the agent resumes — so the user can read the full error message at
 // their own pace. The sidebar icon, by contrast, also auto-hides once the
 // agent posts a new message (see agentErrorMessageForTask).
+/** Banner showing the session's last agent error, with a dismiss button that
+ * persists until the user explicitly dismisses it. Renders nothing when
+ * there's no error or it was already dismissed. */
 export function LastAgentErrorNotice({
   sessionId,
   error,
@@ -289,6 +394,7 @@ export function LastAgentErrorNotice({
   sessionId: string | null;
   error: LastAgentError | null;
 }) {
+  const { t } = useTranslation();
   const stamp = error ? lastAgentErrorStamp(error) : "";
   const dismissedStamp = useAppStore((state) =>
     sessionId ? state.dismissedAgentErrors[sessionId] : undefined,
@@ -324,15 +430,28 @@ export function LastAgentErrorNotice({
       <div className="flex items-start gap-2 px-3 py-2">
         <IconAlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium">Previous agent error</div>
+          <div className="text-xs font-medium">{t("task:previousAgentError")}</div>
           <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-destructive/85">
             {error.message}
           </pre>
+          {error.details && (
+            <details className="mt-2 min-w-0 text-[11px]" data-testid="last-agent-error-details">
+              <summary className="cursor-pointer font-medium">{t("task:technicalDetails")}</summary>
+              <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed text-destructive/85">
+                {error.details}
+              </pre>
+            </details>
+          )}
+          {error.remediationUrl && (
+            <div className="mt-1">
+              <RemediationLink url={error.remediationUrl} className="text-destructive/85" />
+            </div>
+          )}
         </div>
         <button
           type="button"
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-destructive/10 cursor-pointer"
-          aria-label="Hide previous agent error"
+          className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded hover:bg-destructive/10 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+          aria-label={t("task:hidePreviousAgentError")}
           onClick={dismiss}
         >
           <IconX className="h-3.5 w-3.5" aria-hidden="true" />
@@ -348,21 +467,47 @@ export function LastAgentErrorNotice({
  * (see hooks/use-processed-messages.ts's findUnreadDividerItemId).
  */
 export function UnreadDivider() {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="unread-divider"
       role="separator"
-      aria-label="New messages"
+      aria-label={t("task:newMessages")}
       className="relative my-3 flex items-center"
     >
       <div className="h-px flex-1 bg-destructive" />
       <span className="ml-2 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-destructive">
-        New
+        {t("task:new")}
       </span>
     </div>
   );
 }
 
+function SessionHistoryStatus({
+  sessionId,
+  sessionState,
+  historyStatus,
+  historyError,
+  onRetryHistory,
+}: {
+  sessionId: string | null;
+  sessionState?: TaskSessionState;
+  historyStatus: MessageHistoryStatus;
+  historyError: unknown;
+  onRetryHistory?: () => void;
+}) {
+  if (!sessionId || sessionState === "CREATED" || historyStatus === "ready" || !onRetryHistory) {
+    return null;
+  }
+  return (
+    <SessionHistoryFeedback status={historyStatus} error={historyError} onRetry={onRetryHistory} />
+  );
+}
+
+/** Transcript status footer: the loading-older indicator, an explicit
+ * load-older button, the conversation loading spinner, and the empty-state
+ * message when there are no messages. */
+// eslint-disable-next-line complexity -- transcript status owns independent loading, pagination, and recovery states.
 export function MessageListStatus({
   isLoadingMore,
   hasMore,
@@ -371,6 +516,12 @@ export function MessageListStatus({
   isInitialLoading,
   messagesCount,
   onLoadMore,
+  showRecovery = false,
+  sessionId = null,
+  sessionState,
+  historyStatus = "ready",
+  historyError = null,
+  onRetryHistory,
 }: {
   isLoadingMore: boolean;
   hasMore: boolean;
@@ -384,42 +535,61 @@ export function MessageListStatus({
    * fails to re-arm (e.g. pinned at the very top with the sentinel always in view).
    */
   onLoadMore?: () => void;
+  /** Shows the explicit control only after a recoverable pagination failure. */
+  showRecovery?: boolean;
+  sessionId?: string | null;
+  sessionState?: TaskSessionState;
+  historyStatus?: MessageHistoryStatus;
+  historyError?: unknown;
+  onRetryHistory?: () => void;
 }) {
+  const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   return (
     <>
       {isLoadingMore && hasMore && (
         <div className="text-center text-xs text-muted-foreground py-2">
-          Loading older messages...
+          {t("task:loadingOlderMessages")}
         </div>
       )}
-      {hasMore && !isLoadingMore && onLoadMore && (
+      {hasMore && !isLoadingMore && showRecovery && onLoadMore && (
         <div className="flex justify-center py-2">
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="cursor-pointer text-xs text-muted-foreground"
+            className={`cursor-pointer text-xs text-muted-foreground ${isFinePointer ? "" : "min-h-11"}`}
             data-testid="load-older-messages"
             onClick={onLoadMore}
           >
-            Load older messages
+            {t("task:loadOlderMessages")}
           </Button>
         </div>
       )}
-      {showLoadingState && (
+      <SessionHistoryStatus
+        sessionId={sessionId}
+        sessionState={sessionState}
+        historyStatus={historyStatus}
+        historyError={historyError}
+        onRetryHistory={onRetryHistory}
+      />
+      {showLoadingState && historyStatus === "ready" && (
         <div
           className="flex items-center justify-center py-8 text-muted-foreground"
           data-testid="conversation-loading-state"
         >
           <GridSpinner className="text-primary mr-2" />
-          <span>Loading conversation...</span>
+          <span>{t("task:loadingConversation")}</span>
         </div>
       )}
-      {!messagesLoading && !isInitialLoading && messagesCount === 0 && (
-        <div className="flex items-center justify-center py-8 text-muted-foreground">
-          <span>No messages yet. Start the conversation!</span>
-        </div>
-      )}
+      {!messagesLoading &&
+        !isInitialLoading &&
+        messagesCount === 0 &&
+        historyStatus === "ready" && (
+          <div className="flex items-center justify-center py-8 text-muted-foreground">
+            <span>{t("task:noMessagesYetStartTheConversation")}</span>
+          </div>
+        )}
     </>
   );
 }
@@ -443,7 +613,7 @@ export const MessageItem = memo(function MessageItem({
   childrenByParentToolCallId: Map<string, Message[]>;
   taskId?: string;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   isLastGroup: boolean;
   activeTurnId?: string | null;
   streamingMessageId?: string | null;

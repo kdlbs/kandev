@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-review-blocker-remediation"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 04: PR Review Fixup

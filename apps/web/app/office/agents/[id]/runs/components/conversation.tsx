@@ -1,6 +1,7 @@
 "use client";
 
 import { AdvancedChatPanel } from "../../../../tasks/[id]/advanced-panels/chat-panel";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   taskId: string;
@@ -16,13 +17,14 @@ type Props = {
  * via the task page).
  */
 export function RunConversation({ taskId, sessionId }: Props) {
+  const { t } = useTranslation();
   if (!taskId || !sessionId) {
     return (
       <div
         className="rounded-lg border border-border p-4 text-xs text-muted-foreground"
         data-testid="run-conversation-empty"
       >
-        No conversation linked to this run.
+        {t("office:noConversationLinkedToThisRun")}
       </div>
     );
   }

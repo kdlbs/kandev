@@ -17,9 +17,10 @@ test.describe("Workflow import/export", () => {
     // Textarea should contain valid YAML with the workflow
     const textarea = dialog.locator("textarea");
     const yamlContent = await textarea.inputValue();
-    expect(yamlContent).toContain("version: 1");
+    expect(yamlContent).toContain("version: 2");
     expect(yamlContent).toContain("type: kandev_workflow");
     expect(yamlContent).toContain("E2E Workflow");
+    expect(yamlContent).toContain("complete_task_on_enter: false");
 
     // Copy button should work
     await dialog.getByRole("button", { name: "Copy" }).click();
@@ -109,9 +110,9 @@ workflows:
     // Dialog should close and toast should appear
     await expect(dialog).not.toBeVisible();
 
-    // Reload to see the imported workflow
-    await page.goto(seedData.workspaceId);
-    const card = await page.findWorkflowCard("Pasted Workflow");
+    // The import refreshes the workflow list in place. Wait for its new name
+    // instead of starting a competing navigation while that refresh settles.
+    const card = await page.findWorkflowCard("Pasted Workflow", { waitForName: true });
     await expect(card).toBeVisible();
     await expect(card.getByText("Open")).toBeVisible();
     await expect(card.getByText("Closed")).toBeVisible();
@@ -141,6 +142,127 @@ workflows:
 
     // Should show a toast mentioning "Skipped" since the workflow already exists
     await expect(testPage.getByText("Skipped", { exact: false })).toBeVisible({ timeout: 5000 });
+  });
+
+  test("import resolves a missing step profile and preserves a later session target", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const replacement = await apiClient.getAgentProfile(seedData.agentProfileId);
+    const workflowName = `Profile import ${Date.now()}`;
+    const yamlContent = `version: 2
+type: kandev_workflow
+workflows:
+  - name: ${workflowName}
+    steps:
+      - name: Start
+        position: 0
+        color: bg-neutral-400
+        events: {}
+        is_start_step: true
+        show_in_command_panel: true
+        allow_manual_move: true
+        complete_task_on_enter: false
+        auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false
+      - name: Implement
+        position: 1
+        color: bg-blue-500
+        events: {}
+        is_start_step: false
+        show_in_command_panel: true
+        allow_manual_move: true
+        agent_profile:
+          agent_name: Missing import agent
+          model: missing-import-model
+          mode: missing-import-mode
+        complete_task_on_enter: false
+        auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false
+      - name: Review
+        position: 2
+        color: bg-yellow-500
+        events: {}
+        is_start_step: false
+        show_in_command_panel: true
+        allow_manual_move: true
+        session_target:
+          kind: step
+          step_position: 1
+        complete_task_on_enter: false
+        auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false`;
+
+    try {
+      const page = new WorkflowSettingsPage(testPage);
+      await page.goto(seedData.workspaceId);
+      await testPage.getByRole("button", { name: "Import", exact: true }).click();
+      const dialog = testPage.getByRole("dialog");
+      const inputGeometry = await dialog.evaluate((surface) => {
+        const upload = surface.querySelector('input[type="file"]')!;
+        return {
+          width: surface.getBoundingClientRect().width,
+          fileButtonHeight: parseFloat(getComputedStyle(upload, "::file-selector-button").height),
+        };
+      });
+      expect(inputGeometry.width).toBeGreaterThanOrEqual(720);
+      expect(inputGeometry.fileButtonHeight).toBeCloseTo(28, 0);
+      await dialog.locator("textarea").fill(yamlContent);
+      await dialog.getByRole("button", { name: "Import", exact: true }).click();
+
+      const selection = testPage.getByTestId("workflow-import-profile-selection");
+      await expect(selection).toBeVisible();
+      await expect(selection.getByText("Implement", { exact: true })).toBeVisible();
+      await expect(testPage.getByPlaceholder("Search profiles")).not.toBeVisible();
+
+      await selection.getByTestId("workflow-import-profile-select-0:1").click();
+      await testPage.getByTestId(`workflow-import-profile-option-${replacement.id}`).click();
+      const selectedTrigger = selection.getByTestId("workflow-import-profile-select-0:1");
+      await expect(selectedTrigger).toContainText(replacement.name);
+      const geometry = await selectedTrigger.evaluate((button) => {
+        const label = button.querySelector("span");
+        const bounds = button.getBoundingClientRect();
+        const text = label?.getBoundingClientRect();
+        return {
+          height: bounds.height,
+          top: bounds.top,
+          bottom: bounds.bottom,
+          textTop: text?.top ?? 0,
+          textBottom: text?.bottom ?? 0,
+        };
+      });
+      expect(geometry.height).toBeCloseTo(28, 0);
+      expect(geometry.textTop).toBeGreaterThanOrEqual(geometry.top);
+      expect(geometry.textBottom).toBeLessThanOrEqual(geometry.bottom);
+      await selection.getByTestId("workflow-import-profile-submit").click();
+      await expect(selection).not.toBeVisible();
+
+      let importedId: string | undefined;
+      await expect
+        .poll(
+          async () => {
+            const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
+            importedId = workflows.find((workflow) => workflow.name === workflowName)?.id;
+            return importedId;
+          },
+          { timeout: 10_000 },
+        )
+        .toBeDefined();
+
+      const { steps } = await apiClient.listWorkflowSteps(importedId!);
+      const implement = steps.find((step) => step.name === "Implement");
+      const review = steps.find((step) => step.name === "Review");
+      expect(implement?.agent_profile_id).toBe(replacement.id);
+      expect(review?.session_target).toEqual({ kind: "step", step_id: implement?.id });
+
+      const importedCard = await page.findWorkflowCard(workflowName, { waitForName: true });
+      await expect(importedCard).toBeVisible();
+    } finally {
+      const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
+      const imported = workflows.find((workflow) => workflow.name === workflowName);
+      if (imported) await apiClient.deleteWorkflow(imported.id).catch(() => {});
+    }
   });
 
   test("round-trip: export workflow, delete, re-import preserves structure", async ({

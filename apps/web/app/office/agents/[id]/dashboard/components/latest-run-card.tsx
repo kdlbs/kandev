@@ -5,6 +5,7 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { cn } from "@/lib/utils";
 import type { AgentLatestRun } from "@/lib/api/domains/office-extended-api";
 import { formatShortDate } from "./format-date";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   run: AgentLatestRun | null;
@@ -37,19 +38,20 @@ function statusBadgeClass(status: string): string {
  * so a generic transformer is enough.
  */
 function formatReason(reason: string): string {
-  if (!reason) return "—";
+  if (!reason) return "-";
   const text = reason.replaceAll("_", " ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 export function LatestRunCard({ run, agentId }: Props) {
+  const { t } = useTranslation();
   if (!run) {
     return (
       <Card data-testid="latest-run-card">
         <CardContent className="py-4">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-medium">Latest run</span>
-            <span className="text-xs text-muted-foreground">No runs yet</span>
+            <span className="text-sm font-medium">{t("office:latestRun")}</span>
+            <span className="text-xs text-muted-foreground">{t("office:noRunsYetShort")}</span>
           </div>
         </CardContent>
       </Card>
@@ -69,7 +71,7 @@ export function LatestRunCard({ run, agentId }: Props) {
       >
         <CardContent className="py-3 space-y-1.5">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">Latest run</span>
+            <span className="text-sm font-medium">{t("office:latestRun")}</span>
             <Badge
               variant="outline"
               className={cn("text-[11px] py-0", statusBadgeClass(run.status))}

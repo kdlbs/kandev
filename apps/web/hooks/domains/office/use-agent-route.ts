@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getAgentRoute, updateAgentRouting } from "@/lib/api/domains/office-extended-api";
 import type { AgentRouteData, AgentRoutingOverrides } from "@/lib/state/slices/office/types";
+import { t } from "@/lib/i18n";
 
 export type UseAgentRouteResult = {
   data: AgentRouteData | undefined;
@@ -27,7 +28,7 @@ export function useAgentRoute(agentId: string | null): UseAgentRouteResult {
       const res = await getAgentRoute(agentId);
       setAgentRouting(agentId, res);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load agent route");
+      setError(e instanceof Error ? e.message : t("office:failedToLoadAgentRoute"));
     } finally {
       setIsLoading(false);
     }

@@ -1,6 +1,10 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/backendapp"
@@ -33,6 +37,28 @@ func TestDispatchesHiddenBackendMode(t *testing.T) {
 	}
 	if launcherCalled {
 		t.Fatal("launcher runner was called for hidden backend mode")
+	}
+}
+
+func TestDispatchWritesBackendPIDFile(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "backend.pid")
+	t.Setenv(backendPIDFileEnv, pidFile)
+
+	code := dispatch([]string{"__backend"}, buildInfo{}, func([]string, backendapp.BuildInfo) int {
+		return 7
+	}, func([]string, launcher.BuildInfo) int {
+		t.Fatal("launcher runner called for backend mode")
+		return 0
+	})
+	if code != 7 {
+		t.Fatalf("exit code = %d, want 7", code)
+	}
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("read backend pid file: %v", err)
+	}
+	if got, want := strings.TrimSpace(string(raw)), strconv.Itoa(os.Getpid()); got != want {
+		t.Fatalf("backend pid = %q, want %q", got, want)
 	}
 }
 

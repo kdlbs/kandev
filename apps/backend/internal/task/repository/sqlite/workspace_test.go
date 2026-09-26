@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -41,6 +43,32 @@ func TestDeleteWorkspaceCascadeWithNameDeletesWorkspaceChildren(t *testing.T) {
 		t.Fatalf("workspace workflows should be deleted, got %d", len(workflows))
 	}
 	assertNoWorkspaceCascadeDependents(t, repo)
+}
+
+func TestDeleteWorkspaceCascadeWithSecretCleanupRollsBackOnCleanupFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	seedWorkspaceCascadeRows(t, repo, "ws-delete")
+
+	_, _, err := repo.DeleteWorkspaceCascadeWithSecretCleanup(ctx, "ws-delete", func(context.Context, *sqlx.Tx) error {
+		return errors.New("injected secret cleanup failure")
+	})
+	if err == nil {
+		t.Fatal("delete succeeded, want cleanup failure")
+	}
+	if _, err := repo.GetWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("workspace was deleted after cleanup failure: %v", err)
+	}
+	if _, err := repo.GetTask(ctx, "task-delete"); err != nil {
+		t.Fatalf("workspace task was deleted after cleanup failure: %v", err)
+	}
+	workflows, err := repo.ListWorkflows(ctx, "ws-delete", true)
+	if err != nil {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	if len(workflows) != 1 {
+		t.Fatalf("workflows after cleanup failure = %#v, want one", workflows)
+	}
 }
 
 func TestDeleteWorkspaceCascadeDeletesWorkspaceChildren(t *testing.T) {
@@ -224,11 +252,8 @@ func seedWorkspaceCascadeRows(t *testing.T, repo *Repository, workspaceID string
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID:            "env-delete",
 		TaskID:        "task-delete",
-		RepositoryID:  "repo-delete",
 		ExecutorType:  string(models.ExecutorTypeWorktree),
 		Status:        models.TaskEnvironmentStatusReady,
-		WorktreeID:    "wt-delete",
-		WorktreePath:  "/tmp/wt-delete",
 		WorkspacePath: "/tmp/wt-delete",
 		Repos: []*models.TaskEnvironmentRepo{{
 			ID:             "env-repo-delete",
@@ -249,16 +274,6 @@ func seedWorkspaceCascadeRows(t *testing.T, repo *Repository, workspaceID string
 	}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID:             "session-wt-delete",
-		SessionID:      "session-delete",
-		WorktreeID:     "wt-delete",
-		RepositoryID:   "repo-delete",
-		WorktreePath:   "/tmp/wt-delete",
-		WorktreeBranch: "branch-delete",
-	}); err != nil {
-		t.Fatalf("CreateTaskSessionWorktree: %v", err)
-	}
 	if err := repo.CreateTurn(ctx, &models.Turn{
 		ID:            "turn-delete",
 		TaskSessionID: "session-delete",
@@ -275,6 +290,15 @@ func seedWorkspaceCascadeRows(t *testing.T, repo *Repository, workspaceID string
 		Content:       "hello",
 	}); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
+	}
+	turnDeleteID := "turn-delete"
+	if err := repo.UpsertSubagentContext(ctx, &models.SubagentContext{
+		TaskSessionID: "session-delete",
+		TaskID:        "task-delete",
+		TurnID:        &turnDeleteID,
+		ToolCallID:    "tc-delete",
+	}); err != nil {
+		t.Fatalf("UpsertSubagentContext: %v", err)
 	}
 	if err := repo.CreateTaskPlan(ctx, &models.TaskPlan{
 		ID:        "plan-delete",
@@ -306,9 +330,9 @@ func assertNoWorkspaceCascadeDependents(t *testing.T, repo *Repository) {
 		"task_sessions",
 		"task_environments",
 		"task_environment_repos",
-		"task_session_worktrees",
 		"task_session_turns",
 		"task_session_messages",
+		"task_session_subagents",
 		"task_plans",
 		"task_plan_revisions",
 	} {

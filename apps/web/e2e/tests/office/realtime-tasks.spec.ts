@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Real-time issue updates", () => {
   test("new task created while on tasks page is visible after reload", async ({
@@ -8,7 +9,7 @@ test.describe("Real-time issue updates", () => {
   }) => {
     // Navigate to tasks list
     await testPage.goto("/office/tasks");
-    await expect(testPage.getByRole("heading", { name: /Tasks/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Tasks/i, {
       timeout: 10_000,
     });
 

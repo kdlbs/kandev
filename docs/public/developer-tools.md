@@ -13,6 +13,17 @@ Kandev includes short-lived chat, reusable AI helpers, dictation, file and edito
 2. Use a task session for work that needs files, review, or workflow state.
 3. Add utility agents, editors, language servers, or terminals only when their host boundary is acceptable.
 
+## Configure Apprise notifications
+
+To detect Apprise after you install it, open **Settings > Preferences > Notifications** and select
+**Rescan Apprise** under **External Providers**. Kandev checks for the `apprise` executable in the
+environment of the running Kandev backend. When it is found, **Add Apprise Provider** becomes
+available. Rescanning does not save notification drafts or send a notification.
+
+If Kandev does not detect Apprise, check the `PATH` used by the backend process. If you install
+Apprise in a directory already in that `PATH`, rescan. If you install it elsewhere or change `PATH`
+after Kandev starts, restart Kandev so the running backend receives the new environment, then rescan.
+
 ## Quick Chat
 
 Quick Chat is an agent conversation outside the board. Use it for repository orientation, experiments, and disposable questions that do not need workflow state, review gates, dependencies, or a delivery record.
@@ -33,6 +44,12 @@ Use `@` for files, saved prompts, and the current plan. New task lookup is under
 
 Select **Quick Chat** beside **New Task** in the expanded sidebar, or select its standalone row in the collapsed sidebar.
 
+On a phone, open the hamburger app menu from a listing, task workbench, or
+shared page, then select **Quick Chat** or **Quick terminal**. The menu closes before the tool
+opens. The topbar menu button shows Quick Chat activity: a blue dot while a chat
+is running and a green dot when a reply is ready to read. Terminal tabs do not
+contribute to this activity indicator.
+
 ### Start a chat
 
 1. Turn on **Configuration chat** when the conversation should inspect or change Kandev configuration. This option is hidden when the workspace already has a configuration conversation.
@@ -47,9 +64,29 @@ Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordin
 
 Your chats and their names are shared by every browser and device signed in to the same Kandev instance. Starting, renaming, or closing a chat on one device updates the others, and a device that was offline catches up when it reconnects.
 
+When **Settings > Preferences > Task Behavior > Tasks > Agent-generated task titles** is enabled, an ordinary
+Quick Chat starts with its normal provisional label and its owner agent can replace that label with a
+short title based on your first request. Structured and CLI-passthrough chats receive the title
+instruction through their existing first-turn path. The new title appears on every connected device
+and survives reload. Configuration Chat and Quick Terminal are excluded. If you disable the setting,
+or rename the chat first, the provisional or user-selected title remains authoritative.
+
 Closing a real chat tab permanently deletes its conversation, hidden backing task data, and associated worktree. There is no undo. Kandev also deletes abandoned chats after seven days; cleanup runs when the backend starts and then once per day. Only chats whose session is `RUNNING` or `IDLE` are protected from age-based cleanup. Old `CREATED`, `STARTING`, or `WAITING_FOR_INPUT` chats can expire, so do not use Quick Chat for durable work.
 
 If **Start chat** is disabled, select a profile and finish every repository/branch row. If a repository is missing, confirm that it belongs to the current workspace and refresh the repository configuration. Use a normal task when the result must remain visible on a board or become a reviewed PR.
+
+### Agent continuation goals
+
+Some ACP agents keep an explicit goal after a reply. When the selected task or Quick Chat session
+reports an active goal, Kandev shows a **Goal Active** chip above the composer. Select the chip, or
+focus it with the keyboard, to read the goal and its status. The details explain that the agent may
+continue automatically between replies. They do not provide a wakeup time or change the agent's
+goal.
+
+The chip remains visible while the provider reports the goal as active, including while the session
+is idle. Completion, clearing, pausing, blocking, or a usage limit removes it. On a phone, select
+the chip to open the details in a drawer. The drawer keeps long goal text inside its own scroll
+area.
 
 <details>
 <summary>Utility agents and configuration chat</summary>
@@ -68,11 +105,11 @@ The built-in actions are:
 - `enhance-prompt`
 - `summarize-session`
 
-Set a global **Default utility agent model** by choosing an inference-capable agent and one of its models. Each built-in action can inherit that pair or override it, and its prompt template is editable. Kandev probes the agent for its live model list; refresh or retry when model discovery fails.
+Set a global **Default utility agent profile** by choosing an enabled, global, ACP inference profile. Each built-in action can inherit that profile or select another profile, and its prompt template is editable. The profile owns the agent, model, mode, launch flags, environment, and permission policy.
 
-You can also create a custom utility. Name, prompt, agent, and model are required; description is optional. Prompt fields offer autocomplete for supported `{{...}}` template variables. A per-action override must specify a usable agent/model pair; otherwise resolution falls back to the global pair. Buttons that depend on a utility are disabled or return an error when no valid model is available.
+You can also create a custom utility. Name, prompt, and profile are required; description is optional. Prompt fields offer autocomplete for supported `{{...}}` template variables. A stale, disabled, deleted, workspace-scoped, passthrough-only, or unconfigured profile fails closed. Repair the binding in Settings before running the utility again.
 
-Utility calls run as ephemeral processes on the Kandev backend host. Kandev records the resolved prompt, response, selected model, token counts when provided, duration, status, and error. The prompt can include repository, diff, task, or conversation context, so its content goes to the selected model provider. Apply the same credential, retention, and data-classification rules as a normal agent session.
+Utility calls run as ephemeral processes on the Kandev backend host. Kandev resolves one profile snapshot at call start, records its profile ID with the call, and applies its permissions without asking for interactive approval. If the profile does not auto-approve a permission request, the call is rejected promptly. Profile edits affect the next call; an in-flight call keeps its snapshot.
 
 ### Configuration Chat
 
@@ -80,7 +117,7 @@ The same settings page configures the **Configuration Chat Agent** for each work
 
 Open Configuration Chat from the floating chat button on Settings pages, turn on **Configuration chat** while creating a Quick Chat, or run **Configuration Chat** from the `Cmd/Ctrl+K` command menu. A workspace currently has one configuration conversation. The Settings panel shows that conversation without tabs; **Open in Quick Chat** moves the same setup or session into the larger tabbed dialog without copying it.
 
-Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
+Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can list and read saved prompts by exact name. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
 
 Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. Configuration tasks are excluded from the seven-day Quick Chat sweeper and remain available until explicitly deleted or their workspace is deleted.
 
@@ -93,12 +130,35 @@ Closing the floating Settings panel preserves the conversation. To delete it, op
 
 Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content.
 
+Shared prompt reads and reference use are available to org members. Creating,
+editing, or deleting prompts requires `org.config.manage` permission.
+
 Type `@` in the task chat composer and select a prompt. The visible message keeps the `@name`; Kandev expands the prompt content into hidden system context for the agent. References are recognized only at the start of the text or after whitespace and must match the stored name. Prompt content can reference other saved prompts. Expansion stops at a depth of eight, skips cycles, and includes each prompt only once.
 
-The same `@name` reference works in a workflow step's Prompt field and in a GitHub Review Watch's prompt; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
+In the new task form, the same completion inserts an editable `@name` chip.
+Select the chip to preview the saved prompt, or use its remove action to delete
+that occurrence. Task creation submits the visible alias text, so later prompt
+updates apply when the task launches. Unknown names and aliases in code spans or
+link destinations remain ordinary text.
+
+Kandev always seeds an editable built-in prompt named `create-canvas`. When
+canvases are enabled, the workspace canvas setup form references it as
+`@create-canvas`, so the task description stays short while the agent receives
+the canvas authoring workflow at launch. Editing the prompt changes later
+canvas tasks; a user prompt with the same name keeps its own content.
+
+Initial task and Quick Chat launches also expand known references when no workflow step is configured. The stored message and the prompt sent to the agent keep the same saved-prompt context.
+
+Workflow-step launches, profile switches, context resets, and replacement
+launches keep one matching saved-prompt expansion in the stored message and
+agent prompt. A queued workflow prompt resolves references when it drains, and
+its recovery launch uses that same definition.
+
+The Settings prompt editor also offers the same `@name` completion when you edit a saved prompt, a workflow prompt, a workflow step, an automation instruction, a quick action, or a provider watch. The prompt being edited is excluded from its own completion list, so selecting a reference cannot create a direct self-reference by accident. The same `@name` reference works in a workflow step's Prompt field and in a GitHub Review Watch's prompt; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 
 Kandev seeds these built-ins:
 
+- `create-canvas`
 - `code-review`
 - `open-pr`
 - `merge-base`
@@ -107,49 +167,59 @@ Kandev seeds these built-ins:
 
 Built-ins are marked in the UI but remain editable. Editing `ci-auto-fix` or `changes-walkthrough` changes the corresponding PR repair or walkthrough action. Seed insertion does not overwrite edits. If you delete a built-in, it stays absent for the current backend run and is seeded again on the next service start. There is no reset-to-default button.
 
+Kandev upgrades exact, untouched legacy revisions of the built-in `ci-auto-fix` prompt when the backend starts. It preserves edited and unrecognized prompt content. Kandev also adds the PR auto-fix outcome instructions outside the saved prompt, so editing the prompt cannot remove the required outcome report.
+
 A saved prompt is an instruction, not an authorization or policy boundary. Executor permissions, human gates, tests, and provider protections still control what can happen.
 
 </details>
+
+Utility-agent prompt templates use a separate template engine. Type `{{` to select the utility variables shown by the editor, but do not use `@name` saved-prompt references there. Utility calls are sessionless and do not resolve saved prompts at runtime. Put reusable nested instructions in a saved prompt used by a task, workflow, automation, or integration prompt instead.
 
 ## Voice Mode
 
 <details>
 <summary>Voice details</summary>
 
-Open **Settings > Voice Mode** (`/settings/voice-mode`). Voice Mode inserts a transcript at the cursor in the active chat composer.
+Voice Mode is no longer built into Kandev. It ships as the
+[Voice Mode plugin](https://github.com/kdlbs/kandev-plugin-voice), installed like any other plugin
+from **Settings > Plugins**. Nothing in a Kandev install downloads a speech model, records audio, or
+holds a transcription key until you install it.
 
-Defaults are:
+Once installed, a microphone button appears beside the existing controls in task chat, Quick Chat,
+task creation and new-session creation, on desktop and on a phone. Dictating inserts the transcript
+at your cursor; Kandev's own composer still owns the draft and the send.
 
-| Setting           | Default                   |
-| ----------------- | ------------------------- |
-| Enabled           | On                        |
-| Engine            | Automatic                 |
-| Language          | Auto-detect               |
-| Activation        | Click to toggle           |
-| Auto-send         | Off                       |
-| Whisper Web model | Base, approximately 75 MB |
-| Shortcut          | `Cmd/Ctrl+Shift+M`        |
+The plugin offers three engines, chosen per user under **Settings > Plugins > Voice Mode**:
 
-The shortcut is also configurable under **Settings > General > Keyboard Shortcuts**. Hold-to-talk applies on a fine-pointer device. On touch/coarse-pointer devices, Kandev uses toggle behavior while preserving the stored preference. With auto-send enabled, a successful transcript is sent as soon as it is inserted.
+| Engine                   | Where recognition happens              | Requirements and data flow                                                                                                                      |
+| ------------------------ | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Browser speech**       | The browser's own recognizer           | No audio reaches your Kandev server. Chromium only, and the browser vendor's own handling applies.                                              |
+| **In-browser Whisper**   | On the device                          | Downloads and caches an ONNX model from Hugging Face (about 40 MB, 75 MB or 240 MB), then runs locally in a worker. No audio leaves the device. |
+| **Server transcription** | Your Kandev server, relaying to OpenAI | Requires an operator to save an OpenAI key in the plugin's settings. The key stays on the server; the request requires a signed-in Kandev user. |
 
-### Choose an engine
+`Automatic` picks the first engine the browser can run, in that order. Engine choice is capability
+selection, not runtime failover: once recognition starts, an error does not retry through the next
+engine.
 
-| Engine             | Where recognition happens       | Requirements and data flow                                                                                                                                                                       |
-| ------------------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Automatic**      | First available engine          | Selects the first currently available capability in this order: Web Speech, Whisper Web, then Whisper Server. A pinned engine that is unavailable is resolved through the same capability order. |
-| **Web Speech**     | Browser-provided implementation | No audio is sent to the Kandev backend. Browser/vendor behavior and privacy policy still apply, and some implementations require a network service.                                              |
-| **Whisper Web**    | In the browser                  | Downloads and caches an ONNX model from Hugging Face, then runs local inference in a worker. Tiny is about 40 MB, Base about 75 MB, and Small about 240 MB.                                      |
-| **Whisper Server** | Kandev backend and OpenAI       | The browser uploads audio to Kandev; Kandev sends it to OpenAI's `whisper-1` transcription API. Configure `KANDEV_VOICE_OPENAI_API_KEY` on the backend.                                          |
+Microphone capture requires browser permission and normally HTTPS or localhost. If recording fails,
+check site permission, input device, secure context, model download and cache, and network access.
+Switching task or session cancels an in-flight recording and discards its transcript.
 
-Whisper Server accepts at most 10 MiB per request and has a 60-second backend timeout. It returns an unavailable error when the key is not configured, a payload-too-large error above the limit, and an upstream error when transcription fails. Automatic selection can choose this unconfigured server when both browser capabilities are unavailable.
-
-Engine choice is capability selection, not runtime failover. Once recognition or transcription starts, an error does not retry the request through the next engine. The backend `/api/v1/transcribe` route has no Kandev authentication and spends the configured OpenAI key; protect the whole backend origin and do not publish that endpoint directly.
-
-Microphone capture requires browser permission and normally HTTPS or localhost. Whisper Web also needs `getUserMedia`, `MediaRecorder`, workers, enough browser storage, and a first-use network download. The UI mentions common Chrome, Edge, and Safari versions, but Kandev does not enforce a browser/version allow-list; runtime availability is determined from the required APIs. If recording fails, check site permission, input device, secure context, model download/cache, browser support, and network access. The composer must remain enabled; switching tasks or disabling the input cancels recording.
+Kandev no longer reads `KANDEV_VOICE_OPENAI_API_KEY` and no longer serves `/api/v1/transcribe`. An
+operator upgrading from an older release re-enters the key in the plugin's settings, and each user
+re-picks their engine and language: preferences are not carried over.
 
 </details>
 
 ## Files and editor integrations
+
+To open a task folder in your file manager, open the **Open in editor** dropdown in the task toolbar and select **Open folder**. On a phone, use **Files → Workspace actions → Open workspace folder**. For tasks with several worktrees, choose the repository and branch to open.
+
+This opens Finder on macOS, the default file manager on Linux, or Explorer on Windows on the machine running Kandev. A browser connected to a remote Kandev instance does not open that folder on your own device. The host needs a desktop session and an available file manager.
+
+The folder action is disabled when the host folder-opening command is unavailable
+(`open` on macOS, `xdg-open` on Linux, or `explorer` on Windows), or while its
+availability is unknown. The repository picker is also unavailable in that case.
 
 > **Security:** Embedded VS Code runs code-server with `--auth none` inside the task environment. Use it only with a trusted executor and network boundary.
 
@@ -160,13 +230,33 @@ For an idle, non-archived repository-backed task, **Files → Workspace actions 
 
 The task **Files** panel browses, searches, opens, and edits task-worktree files. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
 
-Open the context menu on any file or folder in the Files tree — right-click on desktop, long-press on touch — for **Open in \<editor\>**, which launches your default editor at that path instead of at the worktree root. When more than one editor is configured, **Open in other editor** lists the rest. When the tree is rooted above the worktrees — a multi-worktree task, or any task that has had sources attached — Kandev resolves the clicked path back to its own worktree, so no picker is needed. The action is hidden for entries that belong to no worktree, such as an attached plain folder, because the editor launch is resolved against a worktree. It is also hidden while several files are selected, because it applies to a single path.
+### Preview an HTML file
 
-**VS Code (Embedded)** runs code-server inside the active task environment and displays it in a workbench panel. Opening it starts code-server independently of the agent process. It launches with `--auth none` and binds `0.0.0.0` on a random port inside that runtime; network/firewall isolation is therefore important, especially for Local and SSH environments. If the binary is absent, agentctl attempts to download it into `~/.kandev/tools/code-server`; first use needs a supported execution platform and access to the [code-server release](https://github.com/coder/code-server/releases/tag/v4.130.0). Native Windows Local and Worktree sessions do not support this integration. Linux-backed Local Docker, Sprites, and supported SSH sessions can offer it even when the Kandev app runs on Windows. The task-detail topbar follows the active session's executor capability, never the visitor's browser platform; other configured editors remain available. Use the panel error and task-environment logs when installation, startup, or proxying fails.
+Open an `.html` or `.htm` file in **Files**, then select **Preview HTML**. Kandev publishes the current editor buffer to an ephemeral static server, so the preview includes unsaved changes while the source file stays dirty and unchanged on disk. On desktop, the preview replaces the editor body. On mobile, it replaces the source in the focused full-height viewer. Select **Show code** to return to the same source buffer. Select **Refresh HTML preview** to publish the latest buffer again, or use the Browser button to open the published page in a separate **Browser** panel.
+
+The preview uses the native browser engine. HTML, CSS, JavaScript, inline event handlers, browser APIs, forms, popups, and normal browser navigation behave as they do in a regular page. A visible warning identifies the preview as trusted workspace code. Preview only HTML you trust because this feature does not claim to isolate hostile content from the browser or task environment.
+
+Relative and root-relative URLs resolve from the selected task repository or workspace root. Static files use their normal browser content types, and the current entry document is held in memory. The static server does not persist the overlay, run a build, provide HMR, or proxy an application backend. It bounds one entry document to 5 MiB and keeps at most 32 recently published overlays per agentctl instance.
+
+Closing the preview, file tab, focused viewer, or optional Browser panel removes that view but does not stop the shared static server. One bounded server is reused for the agentctl session and stops when that task runtime is torn down. If the page needs a build pipeline, HMR, backend routes, or project services, start a development server and open it in the **Browser** panel instead. If the task session stops, publish the file again or select **Retry** after the session becomes available. Preview URLs and in-editor preview state are not restored as durable file state.
+
+### Comment on a rendered preview
+
+Select **Annotate** in a Browser panel or rendered HTML-file preview. Choose **Select text**, **Select element**, or **Select screenshot region**, make the selection in the page, enter a comment, and select **Save feedback**. Element mode outlines and labels the candidate under the pointer, keyboard focus, or active touch before selection. Text feedback keeps the exact selected text together with its containing element, DOM range endpoints, rendered rectangles, scroll position, viewport size, and device pixel ratio. This position data lets the agent identify text that JavaScript generated or that the live page no longer contains.
+
+Screenshot mode rasterizes the selected part of the rendered document and shows the PNG before saving. A screenshot is limited to 16 megapixels and 10 MiB, and one pending collection can contain up to 10 screenshots. Browser rendering features that cannot be read or reproduced by the rasterizer, including some canvas, video, font, and cross-origin resources, can look different or cause capture to fail. A failed capture or upload keeps a retryable draft; discarding it removes its staged image.
+
+Saved feedback belongs to the task. It remains pending while you navigate between routes, close or reopen previews, switch task sessions, reload the browser, or restart Kandev. The active task composer shows the shared pending count. Review, edit, or delete items from **Annotate**. None of the captured content reaches an agent until you use the ordinary chat **Send** action.
+
+Send addresses the selected task session. An idle session receives the feedback directly; a busy session receives the same text, element metadata, and PNG attachments through its durable queue. Kandev removes only the exact saved versions accepted with that message. A validation, capacity, attachment, or version conflict leaves the feedback and composer draft available for correction and retry. The preview server and navigated page state remain ephemeral even though the saved feedback is durable.
+
+Open the context menu on any file or folder in the Files tree: right-click on desktop or long-press on touch to see **Open in \<editor\>**, which launches your default editor at that path instead of at the worktree root. When more than one editor is configured, **Open in other editor** lists the rest. When the tree is rooted above the worktrees (a multi-worktree task or any task that has had sources attached), Kandev resolves the clicked path back to its own worktree, so no picker is needed. The action is hidden for entries that belong to no worktree, such as an attached plain folder, because the editor launch is resolved against a worktree. It is also hidden while several files are selected, because it applies to a single path.
+
+**VS Code (Embedded)** runs code-server inside the active task environment and displays it in a workbench panel. Opening it starts code-server independently of the agent process. It launches with `--auth none` and binds `0.0.0.0` on a random port inside that runtime; network/firewall isolation is therefore important, especially for Local, Kubernetes, and SSH environments. If the binary is absent, agentctl attempts to download it into `~/.kandev/tools/code-server`; first use needs a supported execution platform and access to the [code-server release](https://github.com/coder/code-server/releases/tag/v4.130.0). Native Windows Local and Worktree sessions do not support this integration. Linux-backed Local Docker, Kubernetes, Sprites, and supported SSH sessions can offer it even when the Kandev app runs on Windows. The task-detail topbar follows the active session's executor capability, never the visitor's browser platform; other configured editors remain available. Use the panel error and task-environment logs when installation, startup, or proxying fails.
 
 Use the workbench top bar's split-editor action to open the selected session worktree in the default editor. Its menu lets you choose another configured editor. A file's **Open with** menu can also open a specific editor, copy the path, or ask the operating system to show the folder.
 
-Open **Settings > General > Editors** (`/settings/general/editors`) to set a default and configure integrations. Kandev discovers these built-in desktop editors when installed:
+Open **Settings > Preferences > Terminal & Editors** (`/settings/preferences/terminal-editors`) to set a default and configure integrations. Kandev discovers these built-in desktop editors when installed:
 
 - Visual Studio Code
 - Zed
@@ -186,24 +276,44 @@ Desktop editor discovery and custom commands run on the Kandev backend host. The
 
 ## Language servers
 
-Language-server settings are part of **Settings > General > Editors**. Kandev currently registers servers for:
+![Settings > Preferences > Terminal & Editors showing language-server cards, auto-start controls, status location, and server configuration.](../screenshots/settings-terminal-editors.png)
+
+Language-server settings are part of **Settings > Preferences > Terminal & Editors**. Kandev currently registers servers for:
 
 - TypeScript and JavaScript;
 - Go;
 - Rust;
-- Python.
+- Python;
+- Kotlin through the official `kotlin-lsp`. Kotlin support is experimental because the upstream server is still alpha.
 
-Auto-start and auto-install are off for every language by default. Enable only the languages used by the workspace, then save settings. A file toolbar can start or stop a server manually; browser-local storage remembers manual enablement for that session and language. Kandev disconnects an unused server connection after two minutes.
+Auto-start and auto-install are off for every language by default. Enable only the languages used by the workspace, then save settings. Each language card keeps its installation command, prerequisites, and managed destination visible next to the auto-install setting, including for touch and keyboard users. Open the language-server control to inspect its status and use the explicit **Start**, **Stop**, or **Retry** action. Browser-local storage remembers manual enablement for that session and language. If you stop an auto-started server, it stays off for that session and language in the current browser tab, even if a matching editor reopens, until you explicitly start it again or reload the page. Kandev disconnects an unused server connection after two minutes.
 
-Server lookup checks installed executables and `<KANDEV_HOME_DIR>/lsp-servers` (by default `~/.kandev/lsp-servers`). Auto-install uses different toolchains:
+**Status location** defaults to the active file's editor toolbar. On a fine-pointer desktop with **Show status bar** enabled under **Settings > Preferences > Appearance > Status Bar**, you can instead place it in that bar; the item follows the active supported file and is absent on unsupported files and non-file panels. Turning the status surface off moves the item back to the editor toolbar without overwriting its saved location. A touch-oriented tablet also keeps the saved preference but uses the 44 px editor-toolbar control and bottom drawer. The phone file viewer has no LSP control.
+
+Language servers run beside the project on the **task host**, with the task workspace as their working directory. V1 supports Local PC and Local Docker tasks. Kubernetes, SSH, Sprites, and remote-Docker tasks show an unsupported-executor state instead of starting a server; an LSP request alone does not launch or resume those task resources. The desktop Monaco editor wires diagnostics plus completion, hover, definition, references, signature help, and semantic tokens when the server advertises them. TypeScript/JavaScript built-ins remain available to other sessions and models, and for features the active external server does not advertise or Kandev does not replace. After a file is successfully saved, Kandev sends its latest content change before notifying an active server that requested save synchronization; a failed save sends no save notification. The mobile file viewer does not start language servers in the background.
+
+Only enable Kotlin language support for repositories you trust. Kotlin project import can evaluate Gradle or Maven build configuration on the task host; use a disposable Local Docker executor when the repository or its build files are untrusted.
+
+Server lookup checks the task host's `PATH` and its `~/.kandev/lsp-servers` directory. The managed cache resolves `~` from the same task `HOME` used to execute installer commands, including executor-provided environment overrides. Auto-install uses different toolchains:
 
 - TypeScript/JavaScript and Python install npm packages into Kandev's language-server storage;
-- Go runs `go install ...@latest` and therefore needs a working Go toolchain;
-- Rust downloads a release for supported macOS or Linux, x86-64 or ARM64 hosts. Windows is not registered for automatic Rust installation.
+- Go runs `go install ...@latest` and therefore needs a working Go toolchain. Result discovery follows `GOBIN`, `GOPATH`, and the task user's default Go workspace, including `%USERPROFILE%\go\bin` on Windows;
+- Rust downloads a release for supported macOS or Linux, x86-64 or ARM64 task hosts. The Editors checkbox is a global preference; agentctl applies it only when the active task host supports the installer. A Windows Local PC task therefore needs a manual installation, while a Linux Local Docker task can auto-install Rust even when Kandev itself runs on Windows. If the selected task host has no supported installer, its status directs you to install the server manually even before you enable auto-install;
+- Kotlin is manual-only. Follow the [official Kotlin LSP installation guide](https://kotlinlang.org/docs/kotlin-lsp.html), then verify `command -v kotlin-lsp` and `kotlin-lsp --version` in the task environment.
 
-The default Go server configuration enables semantic tokens. A custom language-server configuration must be a JSON object; Kandev sends it through the language-server workspace configuration request. Installing a language server does not install project dependencies or make an unsupported language available. If startup fails, check the backend log/status, executable `PATH`, supported host platform, toolchain/network access, project dependencies, and that the file belongs to the active task worktree.
+For a Local PC task, start Kandev from an environment whose `PATH` includes the server executable. For a Local Docker task, the host installation is not visible: add the executable and its runtime requirements to the executor image or prepare script, then recreate the task container. A Kotlin server in a Local Docker task must therefore be resolvable by `command -v kotlin-lsp` inside that container. If a managed installation fails, the language-server status preserves the detailed installer output after the connection closes.
 
-Language-server subprocesses run on the Kandev backend host with the task workspace path as their working directory; they are not launched inside a Docker container, SSH host, or Sprites sandbox. Remote-only paths, binaries, and project dependencies are therefore normally unavailable to this LSP path even when the agent itself can use them.
+The default Go server configuration enables semantic tokens. A custom language-server configuration must be a JSON object; Kandev returns it through the language-server workspace configuration request and notifies an already-running server immediately after a saved change. Installing a language server does not install project dependencies or make an unsupported language available. If the task host cannot launch a discovered executable, the editor shows a localized start-failure status while the detailed execution error remains in backend logs. Check the backend log/status, executable `PATH`, supported host platform, toolchain/network access, project dependencies, and that the file belongs to the active task worktree.
+
+The status surface separates process startup, the LSP `initialize` request, and server-reported background project analysis. **Server process started** means the executable is running but has not yet answered `initialize`; definitions and references across files remain unavailable during that stage. After one minute, Kandev calls out the long wait without stopping the server. For Kotlin, a Gradle project import is one possible cause, especially in a large or multi-module codebase. **Stop** remains available throughout.
+
+Kandev does not impose an automatic initialization timeout or invent a percentage or ETA. Some valid project imports take several minutes, and LSP has no universal indexing-progress contract. When a server reports standard work-done progress, Kandev shows its title, message, percentage, and concurrent work-item count when available. Those values describe only the work item the server reported; its completion does not guarantee that every cross-file definition or reference is ready. If cross-file navigation is still incomplete, leave the server running while its project model warms up, or stop it explicitly if the wait is unexpected.
+
+Task-owned browser continuity is on by default in shipped profiles. The restart-required `features.lspBrowserContinuity` runtime flag remains as an operator kill switch; an explicit false override restores browser-owned cleanup. With continuity enabled, each browser window owns an independent lease for the task-host language-server process. Closing a browser window or losing its network connection detaches the window while the lease continues to drain server messages. Reopening the task can reattach to that lease without a second `initialize`; duplicated tabs and other windows receive independent leases. Current diagnostics are cleared on detach and restored only after the editor resends its open files.
+
+**Stop** releases that window's lease, and closing the last editor releases it after two minutes. Closing the browser retains a detached lease for up to one hour; reopening it resets that deadline, and an attached editor has no expiry deadline. Expiry releases the language server and lets normal task-host cleanup resume. Archiving or deleting the task starts background runtime cleanup that releases its leases. Stopping the task runtime or Kandev also releases its leases. Kandev allows eight active or detached leases by default; operators can change that startup limit with `KANDEV_LSP_MAX_CONNECTIONS`. If the limit is reached, a new request is rejected while every lease is attached. When a detached lease is available, Kandev evicts the one detached longest. After expiry, eviction, or a backend restart, the next eligible connection starts a fresh server and project analysis must run again. With continuity disabled by the kill switch, closing the browser connection reaps its process as before. If the toolbar says the server is unavailable, distinguish a missing task-host binary from an unsupported executor or the active-lease limit before retrying.
+
+During a temporary browser-to-backend transport failure, the status changes to **Reconnecting** while Kandev attempts to reattach; browser closes `1005` and `1006`, backend restart close `1001`, and backend transport close `4009` do not prove that the language server exited. A confirmed server process exit uses `4006` and shows the server-exited state with **Retry**. Close `4010` means the task runtime stopped, so Kandev ends that lease without reconnecting it.
 
 ## Integrated terminal
 
@@ -218,7 +328,9 @@ On desktop, select **+ > Terminals > New Terminal**. Parked terminal sessions ca
 
 Do not confuse a user terminal with a CLI-passthrough agent tab: both use PTYs, but only the agent tab is the agent's native interface. `Cmd/Ctrl+J` toggles the bottom terminal area.
 
-Open **Settings > General > Terminal** (`/settings/general/terminal`) to configure:
+![Settings > Preferences > Terminal & Editors showing shell, terminal font, font size, and link settings.](../screenshots/settings-terminal.png)
+
+Open **Settings > Preferences > Terminal & Editors** (`/settings/preferences/terminal-editors`) to configure:
 
 - preferred shell, which defaults to the system shell; the built-in choices are zsh, bash, and sh on macOS/Linux, and PowerShell (`pwsh`), Windows PowerShell, and cmd on Windows, plus a custom executable;
 - terminal font, with a default Menlo/Monaco-style stack;

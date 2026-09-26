@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/system/logbundle"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
@@ -22,17 +23,82 @@ import (
 // returns the value of the corresponding field; if the err counterpart is
 // non-nil, the value is ignored and the error is returned instead.
 type fakeGitHubInfo struct {
-	login         string
-	loginErr      error
-	hasWrite      bool
-	hasWriteErr   error
-	hasFork       bool
-	hasForkErr    error
-	calledHasFork bool
+	login             string
+	loginErr          error
+	providerRepoID    string
+	providerRepoIDErr error
+	hasWrite          bool
+	hasWriteErr       error
+	hasFork           bool
+	hasForkErr        error
+	calledHasFork     bool
+}
+
+type fakeManagedGitHub struct {
+	policy    github.TaskGitCredentialPolicy
+	policyErr error
+	result    github.ContributionForkResolution
+	resultErr error
+	probed    bool
+}
+
+func (f *fakeManagedGitHub) DescribeTaskGitCredentialPolicy(context.Context, string) (github.TaskGitCredentialPolicy, error) {
+	return f.policy, f.policyErr
+}
+
+func (f *fakeManagedGitHub) ProbeContributionForkCapabilityForWorkspace(context.Context, string, string, string) (github.ContributionForkResolution, error) {
+	f.probed = true
+	return f.result, f.resultErr
+}
+
+func TestResolveGitHubAccessForWorkspaceUsesManagedForkCapability(t *testing.T) {
+	managed := &fakeManagedGitHub{
+		policy: github.TaskGitCredentialPolicy{Mode: github.TaskGitCredentialsModeManaged},
+		result: github.ContributionForkResolution{
+			Status: github.ContributionForkStatusCreatable, ActorLogin: "automation",
+			Repository: &github.GitHubRepository{ID: 100},
+		},
+	}
+	handler := newTestHandler(&fakeGitHubInfo{login: "ambient", hasWrite: true})
+	handler.SetManagedGitHubForkProber(managed)
+
+	access := handler.resolveGitHubAccessForWorkspace(context.Background(), "workspace-1")
+	if access.forkStatus != ForkStatusCreatable || access.login != "automation" || access.providerRepoID != "100" || !managed.probed {
+		t.Fatalf("managed access = %+v, probed=%v", access, managed.probed)
+	}
+}
+
+func TestResolveGitHubAccessForWorkspaceBlocksManagedErrorsWithoutAmbientFallback(t *testing.T) {
+	managed := &fakeManagedGitHub{
+		policy:    github.TaskGitCredentialPolicy{Mode: github.TaskGitCredentialsModeManaged},
+		resultErr: github.ErrContributionForkAppUnsupported,
+	}
+	handler := newTestHandler(&fakeGitHubInfo{login: "ambient", hasWrite: true})
+	handler.SetManagedGitHubForkProber(managed)
+
+	access := handler.resolveGitHubAccessForWorkspace(context.Background(), "workspace-1")
+	if access.forkStatus != ForkStatusBlockedManaged || access.login != "" || access.hasWrite {
+		t.Fatalf("managed error access = %+v", access)
+	}
+}
+
+func TestResolveGitHubAccessFallsBackToCanonicalProviderID(t *testing.T) {
+	handler := newTestHandler(&fakeGitHubInfo{
+		login: "alice", providerRepoID: "100", hasWrite: true,
+	})
+
+	access := handler.resolveGitHubAccess(context.Background())
+	if access.providerRepoID != "100" {
+		t.Fatalf("providerRepoID = %q, want 100", access.providerRepoID)
+	}
 }
 
 func (f *fakeGitHubInfo) GetAuthenticatedLogin(_ context.Context) (string, error) {
 	return f.login, f.loginErr
+}
+
+func (f *fakeGitHubInfo) GetRepositoryID(_ context.Context, _, _ string) (string, error) {
+	return f.providerRepoID, f.providerRepoIDErr
 }
 
 func (f *fakeGitHubInfo) HasRepoWriteAccess(_ context.Context, _, _ string) (bool, error) {
@@ -46,20 +112,6 @@ func (f *fakeGitHubInfo) UserHasFork(_ context.Context, _, _ string) (bool, erro
 
 func newTestHandler(gh GitHubInfo) *Handler {
 	return &Handler{gh: gh, log: logger.Default()}
-}
-
-func TestCanonicalWorkspaceID(t *testing.T) {
-	const canonical = "123e4567-e89b-12d3-a456-426614174000"
-	got, err := canonicalWorkspaceID("123E4567-E89B-12D3-A456-426614174000")
-	if err != nil {
-		t.Fatalf("canonicalWorkspaceID() error = %v", err)
-	}
-	if got != canonical {
-		t.Fatalf("canonicalWorkspaceID() = %q, want %q", got, canonical)
-	}
-	if _, err := canonicalWorkspaceID("../workspace"); err == nil {
-		t.Fatal("canonicalWorkspaceID() expected invalid UUID error")
-	}
 }
 
 type fakeDiagnosticBundles struct {
@@ -141,8 +193,8 @@ func TestResolveGitHubAccess_ForkAlreadyExists(t *testing.T) {
 	if access.forkStatus != ForkStatusReady {
 		t.Errorf("fork status = %q, want %q", access.forkStatus, ForkStatusReady)
 	}
-	if access.forkMessage != "" {
-		t.Errorf("ready status must not include a fork_message even for EMU-shaped logins: %q", access.forkMessage)
+	if access.forkReasonCode != "" {
+		t.Errorf("ready status must not include a fork reason even for EMU-shaped logins: %q", access.forkReasonCode)
 	}
 }
 
@@ -152,8 +204,8 @@ func TestResolveGitHubAccess_BlockedEMU(t *testing.T) {
 	if access.forkStatus != ForkStatusBlockedEMU {
 		t.Errorf("fork status = %q, want %q", access.forkStatus, ForkStatusBlockedEMU)
 	}
-	if access.forkMessage == "" {
-		t.Errorf("blocked_emu must include a fork_message for the dialog")
+	if access.forkReasonCode == "" {
+		t.Errorf("blocked_emu must include a fork reason code for the dialog")
 	}
 }
 
@@ -174,8 +226,8 @@ func TestResolveGitHubAccess_UnknownOnForkLookupError(t *testing.T) {
 	if access.forkStatus != ForkStatusUnknown {
 		t.Errorf("fork status = %q, want %q", access.forkStatus, ForkStatusUnknown)
 	}
-	if access.forkMessage != "" {
-		t.Errorf("fork lookup failures must not produce an EMU message even for underscore logins")
+	if access.forkReasonCode != "" {
+		t.Errorf("fork lookup failures must not produce an EMU reason even for underscore logins")
 	}
 }
 
@@ -185,8 +237,8 @@ func TestResolveGitHubAccess_NoForkNotEMU(t *testing.T) {
 	if access.forkStatus != ForkStatusUnknown {
 		t.Errorf("fork status = %q, want %q", access.forkStatus, ForkStatusUnknown)
 	}
-	if access.forkMessage != "" {
-		t.Errorf("non-EMU users should not get a fork_message")
+	if access.forkReasonCode != "" {
+		t.Errorf("non-EMU users should not get a fork reason code")
 	}
 }
 

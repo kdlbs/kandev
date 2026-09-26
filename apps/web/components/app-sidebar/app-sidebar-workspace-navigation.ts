@@ -1,91 +1,53 @@
-import { linkToTaskOverview } from "@/lib/links";
+import {
+  ACTIVE_WORKSPACE_COOKIE,
+  LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE,
+  scopedCookieName,
+} from "@/lib/routing/route-bootstrap";
+import { isOfficeWorkspace, type ModeWorkspace } from "@/lib/state/slices/workspace/selectors";
 
-export type SidebarWorkspace = {
-  id: string;
-  office_workflow_id?: string | null;
-};
+export { workspaceHomeHref } from "@/lib/navigation/workspace-home";
 
-export const LAST_KANBAN_WORKSPACE_KEY = "kandev.lastKanbanWorkspaceId";
-export const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
-export const OFFICE_ACTIVE_WORKSPACE_COOKIE = "office-active-workspace";
 const ACTIVE_WORKSPACE_COOKIE_MAX_AGE = 31536000;
 
-export function isOfficeWorkspace(workspace: SidebarWorkspace | undefined): boolean {
-  return Boolean(workspace?.office_workflow_id);
+/**
+ * Records a workspace as the active one — one write per workspace change.
+ * Callers must not write these cookies themselves: split writes are how the
+ * active-workspace record and the legacy office cookie drift out of step.
+ */
+export function rememberWorkspaceSelection(workspace: ModeWorkspace | undefined): void {
+  if (!workspace) return;
+  rememberWorkspaceSelectionById(workspace.id, isOfficeWorkspace(workspace) ? "office" : "kanban");
 }
 
-export function workspaceHomeHref(workspace: SidebarWorkspace | undefined): string {
-  if (!workspace) return linkToTaskOverview();
-  if (!isOfficeWorkspace(workspace)) return linkToTaskOverview({ workspaceId: workspace.id });
-  return `/office?workspaceId=${workspace.id}`;
-}
-
-export function rememberLastKanbanWorkspace(workspace: SidebarWorkspace | undefined): void {
-  if (!workspace || isOfficeWorkspace(workspace) || typeof window === "undefined") return;
-  window.localStorage.setItem(LAST_KANBAN_WORKSPACE_KEY, workspace.id);
-  writeWorkspaceCookie(ACTIVE_WORKSPACE_COOKIE, workspace.id);
-}
-
-export function rememberLastOfficeWorkspace(workspace: SidebarWorkspace | undefined): void {
-  if (!workspace || !isOfficeWorkspace(workspace) || typeof document === "undefined") return;
-  writeWorkspaceCookie(ACTIVE_WORKSPACE_COOKIE, workspace.id);
-  writeWorkspaceCookie(OFFICE_ACTIVE_WORKSPACE_COOKIE, workspace.id);
-}
-
-export function resolveLastKanbanWorkspace(
-  workspaces: SidebarWorkspace[],
-): SidebarWorkspace | null {
-  const kanbanWorkspaces = workspaces.filter((workspace) => !isOfficeWorkspace(workspace));
-  if (kanbanWorkspaces.length === 0) return null;
-
-  const activeCookieId =
-    typeof document === "undefined" ? null : readCookieValue(ACTIVE_WORKSPACE_COOKIE);
-  const activeCookieWorkspace = kanbanWorkspaces.find(
-    (workspace) => workspace.id === activeCookieId,
-  );
-  if (activeCookieWorkspace) return activeCookieWorkspace;
-
-  if (typeof window !== "undefined") {
-    const storedId = window.localStorage.getItem(LAST_KANBAN_WORKSPACE_KEY);
-    const stored = kanbanWorkspaces.find((workspace) => workspace.id === storedId);
-    if (stored) return stored;
+/**
+ * The same write for a caller that knows the kind but does not hold a workspace
+ * record — the setup wizard, whose create response returns an id and nothing
+ * else. Passing a fabricated record with an invented `office_workflow_id` would
+ * be a lie the type system happily accepts.
+ */
+export function rememberWorkspaceSelectionById(id: string, kind: "office" | "kanban"): void {
+  if (!id || typeof document === "undefined") return;
+  writeWorkspaceCookie(ACTIVE_WORKSPACE_COOKIE, id);
+  // The office boot path (`src/office-routes.tsx`) reads the office-family
+  // cookie (scoped name first, legacy unprefixed name as read-only fallback)
+  // to pick an office workspace when the unified one names a kanban board, so
+  // it is kept in step here. Only the port-scoped names are ever written.
+  if (kind === "office") {
+    writeWorkspaceCookie(LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE, id);
   }
-
-  return kanbanWorkspaces[0] ?? null;
 }
 
-export function resolveLastOfficeWorkspace(
-  workspaces: SidebarWorkspace[],
-): SidebarWorkspace | null {
-  const officeWorkspaces = workspaces.filter(isOfficeWorkspace);
-  if (officeWorkspaces.length === 0) return null;
-
-  const activeCookieId =
-    typeof document === "undefined" ? null : readCookieValue(ACTIVE_WORKSPACE_COOKIE);
-  const activeCookieWorkspace = officeWorkspaces.find(
-    (workspace) => workspace.id === activeCookieId,
-  );
-  if (activeCookieWorkspace) return activeCookieWorkspace;
-
-  const officeCookieId =
-    typeof document === "undefined" ? null : readCookieValue(OFFICE_ACTIVE_WORKSPACE_COOKIE);
-  const officeCookieWorkspace = officeWorkspaces.find(
-    (workspace) => workspace.id === officeCookieId,
-  );
-  return officeCookieWorkspace ?? officeWorkspaces[0] ?? null;
-}
-
+/**
+ * Writes one workspace-selection cookie under its port-scoped name (API-origin
+ * port; the plain name on a no-port instance). The legacy unprefixed name is
+ * deliberately left untouched: on a host serving a default-port instance it is
+ * that instance's LIVE selection cookie, and for upgraded ported instances it
+ * is the validated migration fallback until each writes its own scoped value.
+ * Scrubbing it from one instance would change the other instances' next boot
+ * (see docs/specs/auth/requirements/fix-multi-instance-cookie-isolation.md: the upgraded
+ * instance does not proactively delete the legacy cookie).
+ */
 function writeWorkspaceCookie(name: string, value: string): void {
   if (typeof document === "undefined") return;
-  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${ACTIVE_WORKSPACE_COOKIE_MAX_AGE}; samesite=strict`;
-}
-
-function readCookieValue(name: string): string | null {
-  const prefix = `${encodeURIComponent(name)}=`;
-  const match = document.cookie
-    .split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(prefix));
-  if (!match) return null;
-  return decodeURIComponent(match.slice(prefix.length));
+  document.cookie = `${scopedCookieName(name)}=${encodeURIComponent(value)}; path=/; max-age=${ACTIVE_WORKSPACE_COOKIE_MAX_AGE}; samesite=strict`;
 }

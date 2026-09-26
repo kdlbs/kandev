@@ -18,6 +18,7 @@
 
 import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export type StackedBarSegment = {
   /** Sub-bucket key, e.g. "succeeded" / "failed". */
@@ -120,6 +121,7 @@ export function StackedBars({
  * truncated to integer pixels for crisp rendering.
  */
 function Bar({ row, heightPx, max }: { row: StackedBarRow; heightPx: number; max: number }) {
+  const { t } = useTranslation();
   const total = row.segments.reduce((sum, seg) => sum + seg.value, 0);
   return (
     <div
@@ -127,7 +129,7 @@ function Bar({ row, heightPx, max }: { row: StackedBarRow; heightPx: number; max
       data-testid="stacked-bar"
       data-bar-id={row.id}
       data-bar-total={total}
-      title={`${row.label}: ${total}`}
+      title={t("office:barTotal", { label: row.label, total })}
     >
       {row.segments.map((seg) => {
         const px = max > 0 ? Math.floor((seg.value / max) * heightPx) : 0;

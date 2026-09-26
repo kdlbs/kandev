@@ -147,7 +147,7 @@ test.describe("integration provider authentication errors", () => {
     await surface.getByRole("button", { name: "Save changes" }).click();
 
     await expect(testPage).toHaveURL(
-      new RegExp(`/settings/workspace/${seedData.workspaceId}/integrations/github$`),
+      new RegExp(`/settings/workspaces/${seedData.workspaceId}/integrations/github$`),
     );
     await expect(testPage.getByText("GitHub token is invalid", { exact: true })).toBeVisible();
     await expect(token).toHaveValue("ghp_invalid");

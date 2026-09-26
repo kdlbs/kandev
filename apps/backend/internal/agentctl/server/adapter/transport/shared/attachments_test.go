@@ -2,6 +2,7 @@ package shared
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,6 +67,16 @@ func TestSaveAttachments_MissingWorkDir(t *testing.T) {
 	_, err := mgr.SaveAttachments([]v1.MessageAttachment{{Type: "image", Data: "abc"}})
 	if err == nil {
 		t.Fatal("expected error when workDir is empty")
+	}
+}
+
+func TestSaveAttachments_RejectsPathTraversalSession(t *testing.T) {
+	mgr := NewAttachmentManager(t.TempDir(), testLogger())
+	mgr.SetSessionID("../escape")
+
+	_, err := mgr.SaveAttachments([]v1.MessageAttachment{{Type: "resource", Data: "", MimeType: "text/plain", Name: "note.txt"}})
+	if err == nil {
+		t.Fatal("expected unsafe session id to be rejected")
 	}
 }
 
@@ -144,6 +155,50 @@ func TestSaveAttachments_ResourceAttachment(t *testing.T) {
 	}
 	if string(data) != string(content) {
 		t.Errorf("file content = %q, want %q", string(data), string(content))
+	}
+}
+
+func TestSaveAttachments_ReusesMaterializedDescriptor(t *testing.T) {
+	workDir := t.TempDir()
+	dir := filepath.Join(workDir, ".kandev", "attachments", "sess-materialized")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("already streamed by backend")
+	path := filepath.Join(dir, "bundle.zip")
+	if err := os.WriteFile(path, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := NewAttachmentManager(workDir, testLogger())
+	mgr.SetSessionID("sess-materialized")
+	saved, err := mgr.SaveAttachments([]v1.MessageAttachment{
+		{AttachmentID: "attachment-1", Type: "resource", MimeType: "application/zip", Name: "bundle.zip"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) != 1 || saved[0].AbsPath != path {
+		t.Fatalf("saved = %+v, want materialized path %q", saved, path)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("materialized file changed: %q", got)
+	}
+}
+
+func TestSaveAttachments_ReturnsTypedErrorForMissingMaterializedDescriptor(t *testing.T) {
+	mgr := NewAttachmentManager(t.TempDir(), testLogger())
+	mgr.SetSessionID("sess-missing")
+
+	_, err := mgr.SaveAttachments([]v1.MessageAttachment{{
+		AttachmentID: "missing", Type: "resource", MimeType: "text/plain", Name: "missing.txt",
+	}})
+	if !errors.Is(err, ErrMaterializedAttachmentMissing) {
+		t.Fatalf("error = %v, want ErrMaterializedAttachmentMissing", err)
 	}
 }
 

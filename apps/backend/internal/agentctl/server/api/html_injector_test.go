@@ -40,15 +40,88 @@ func TestInjectInspectorScript_UpperCaseBodyTag(t *testing.T) {
 	}
 }
 
-func TestInspectorScript_UsesPreviewRouteForAnnotationPagePath(t *testing.T) {
-	if !strings.Contains(inspectorScript, "function currentPagePath()") {
-		t.Fatal("inspector should derive annotation routes through currentPagePath")
+func TestInspectorScript_CapturesVersionedTextEvidence(t *testing.T) {
+	wants := []string{
+		"var PROTOCOL_VERSION = 2;",
+		"function captureTextSelection()",
+		"selection.getRangeAt(0)",
+		"function captureTextEndpoint(",
+		"node_path:",
+		"range.getClientRects()",
+		"containing_element:",
+		"send('capture-completed'",
 	}
-	if !strings.Contains(inspectorScript, "window.__kandevProxyPrefix") {
-		t.Fatal("inspector should read the proxy prefix exposed by the runtime shim")
+	for _, want := range wants {
+		if !strings.Contains(inspectorScript, want) {
+			t.Errorf("inspector should include %q", want)
+		}
 	}
-	if !strings.Contains(inspectorScript, "pagePath: currentPagePath()") {
-		t.Fatal("annotations should store the app route, not location.pathname directly")
+}
+
+func TestInspectorScript_HintsElementCandidateBeforeCapture(t *testing.T) {
+	wants := []string{
+		"function showCandidate(",
+		"candidateLabel.textContent",
+		"send('candidate-changed'",
+		"document.addEventListener('focusin'",
+		"document.addEventListener('touchstart'",
+		"case 'element':",
+	}
+	for _, want := range wants {
+		if !strings.Contains(inspectorScript, want) {
+			t.Errorf("inspector should include %q", want)
+		}
+	}
+}
+
+func TestInspectorScript_TracksRoutesAndProjectsMarkers(t *testing.T) {
+	wants := []string{
+		"function currentPageRoute()",
+		"window.__kandevProxyPrefix",
+		"history.pushState",
+		"window.addEventListener('popstate'",
+		"case 'project-markers':",
+		"function renderMarkers()",
+		"send('route-changed'",
+	}
+	for _, want := range wants {
+		if !strings.Contains(inspectorScript, want) {
+			t.Errorf("inspector should include %q", want)
+		}
+	}
+}
+
+func TestInspectorScript_SanitizesRoutesAndCompletesTouchKeyboardCaptures(t *testing.T) {
+	wants := []string{
+		"function sanitizedSearch()",
+		"location.search",
+		"document.addEventListener('touchend', onTextTouchEnd, true)",
+		"event.key === 'Enter'",
+		"event.key === ' '",
+		"querySelectorAll(selector).length === 1",
+		"hideCandidate();",
+	}
+	for _, want := range wants {
+		if !strings.Contains(inspectorScript, want) {
+			t.Errorf("inspector should include %q", want)
+		}
+	}
+}
+
+func TestInspectorScript_OwnsDragGesturesOnlyInScreenshotMode(t *testing.T) {
+	wants := []string{
+		"function onScreenshotPointerDown(",
+		"function onScreenshotPointerMove(",
+		"function onScreenshotPointerUp(",
+		"if (mode !== 'screenshot') return;",
+		"send('screenshot-region-selected'",
+		"document.addEventListener('pointerdown'",
+		"document.removeEventListener('pointerdown'",
+	}
+	for _, want := range wants {
+		if !strings.Contains(inspectorScript, want) {
+			t.Errorf("inspector should include %q", want)
+		}
 	}
 }
 

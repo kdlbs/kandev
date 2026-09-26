@@ -3,12 +3,15 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { KanbanColumn, WorkflowStep } from "../kanban-column";
-import { Task } from "../kanban-card";
-import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import { Task, type KanbanPresentation } from "../kanban-card";
+import { pickKanbanColumnComparator } from "@/lib/kanban/task-order";
+import { useAppStore } from "@/components/state-provider";
 import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
+import type { KeyboardReorderDraft } from "./virtualized-column-task-list";
 
 type SwipeableColumnsProps = {
   steps: WorkflowStep[];
+  presentation: KanbanPresentation;
   // Real workflow steps only (excludes the "Needs Reassignment" sentinel) —
   // passed to KanbanColumn purely for move-menu targets.
   moveTargetSteps: WorkflowStep[];
@@ -29,6 +32,9 @@ type SwipeableColumnsProps = {
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   externalLinkAvailability: KanbanExternalLinkAvailability;
+  activeTaskId?: string | null;
+  keyboardDraft?: KeyboardReorderDraft | null;
+  onCardKeyDown?: (event: React.KeyboardEvent, task: Task) => void;
 };
 
 /** Two-way sync between Embla's carousel position and the external activeIndex. */
@@ -69,6 +75,7 @@ function useEmblaIndexSync(
 
 export function SwipeableColumns({
   steps,
+  presentation,
   moveTargetSteps,
   tasks,
   activeIndex,
@@ -87,6 +94,9 @@ export function SwipeableColumns({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
+  activeTaskId,
+  keyboardDraft,
+  onCardKeyDown,
 }: SwipeableColumnsProps) {
   // Stable options to avoid Embla reinitializing on every activeIndex change
   const [initialIndex] = useState(activeIndex);
@@ -101,29 +111,33 @@ export function SwipeableColumns({
   );
   const [emblaRef, emblaApi] = useEmblaCarousel(options);
 
+  const kanbanSort = useAppStore((state) => state.userSettings.kanbanSort);
+  const comparator = pickKanbanColumnComparator(kanbanSort);
+
   const getTasksForStep = useCallback(
     (stepId: string) => {
       return tasks
         .filter((task) => task.workflowStepId === stepId)
-        .map((task) => ({ ...task, position: task.position ?? 0 }))
-        .sort(compareTasksByCreatedDesc);
+        .map((task) => (task.position == null ? { ...task, position: 0 } : task))
+        .sort(comparator);
     },
-    [tasks],
+    [tasks, comparator],
   );
 
   useEmblaIndexSync(emblaApi, activeIndex, onIndexChange);
 
   return (
     <div className="flex-1 min-h-0 overflow-hidden" ref={emblaRef}>
-      <div className="flex h-full touch-pan-y">
+      <div className="flex h-full min-h-0 touch-pan-y">
         {steps.map((step) => (
           <div
             key={step.id}
-            className="flex-shrink-0 w-full h-full min-w-0 px-4 py-2 flex flex-col"
+            className="flex h-full min-h-0 w-full min-w-0 flex-shrink-0 flex-col px-4 py-2"
           >
             <KanbanColumn
               step={step}
               tasks={getTasksForStep(step.id)}
+              presentation={presentation}
               onPreviewTask={onPreviewTask}
               onOpenTask={onOpenTask}
               onEditTask={onEditTask}
@@ -139,6 +153,9 @@ export function SwipeableColumns({
               onSelectRange={onSelectRange}
               isMultiSelectMode={isMultiSelectMode}
               externalLinkAvailability={externalLinkAvailability}
+              activeTaskId={activeTaskId}
+              keyboardDraft={keyboardDraft}
+              onCardKeyDown={onCardKeyDown}
               hideHeader
             />
           </div>

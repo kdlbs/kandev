@@ -137,6 +137,7 @@ func newScopeFixtureWith(t *testing.T, authEnabled bool, identities stubIdentity
 	dispatcher := ws.NewDispatcher()
 	dispatcher.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
 	dispatcher.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
+	dispatcher.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 
 	resolver := mcpscope.NewResolver(repo, identities, func() bool { return authEnabled }, testLogger(t))
 	return &scopeFixture{
@@ -211,6 +212,32 @@ func TestInSessionMCPConversationAllowsOwnTask(t *testing.T) {
 	var payload map[string]interface{}
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
 	assert.Equal(t, f.userA.sessionID, payload["session_id"])
+	assert.Equal(t, float64(1), payload["total"])
+}
+
+// TestInSessionMCPListSessionsDeniesForeignTask covers session discovery: the
+// session IDs it returns are the keys to another user's conversations and
+// message delivery, so it must be scoped like the reads it feeds.
+func TestInSessionMCPListSessionsDeniesForeignTask(t *testing.T) {
+	f := newScopeFixture(t, true)
+
+	resp := f.dispatchAs(t, f.userA.taskID, ws.ActionMCPListTaskSessions, map[string]interface{}{
+		"task_id": f.userB.taskID,
+	})
+
+	assert.Equal(t, ws.MessageTypeError, resp.Type, "user A's agent must not enumerate user B's sessions")
+}
+
+func TestInSessionMCPListSessionsAllowsOwnTask(t *testing.T) {
+	f := newScopeFixture(t, true)
+
+	resp := f.dispatchAs(t, f.userA.taskID, ws.ActionMCPListTaskSessions, map[string]interface{}{
+		"task_id": f.userA.taskID,
+	})
+
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
 	assert.Equal(t, float64(1), payload["total"])
 }
 

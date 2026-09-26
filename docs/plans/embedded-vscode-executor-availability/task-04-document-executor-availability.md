@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-add-session-capability", "02-wire-editor-availability"]
 plan: "plan.md"
-spec: "../../specs/ui/embedded-vscode-executor-availability.md"
+spec: "../../specs/ui/requirements/embedded-vscode-executor-availability.md"
 ---
 
 # Task 04: Document Executor-Specific Availability
@@ -39,7 +39,7 @@ rg -n "Embedded VS Code|code-server|backend host is Windows|backend runs on Wind
 - `docs/public/developer-tools.md`
 - `docs/public/feature-status.md`
 - `docs/public/executors.md`
-- `docs/specs/ui/embedded-vscode-executor-availability.md`
+- `docs/specs/ui/requirements/embedded-vscode-executor-availability.md`
 - `docs/specs/INDEX.md`
 - `docs/plans/embedded-vscode-executor-availability/plan.md`
 - `docs/plans/embedded-vscode-executor-availability/task-*.md`

@@ -1,5 +1,7 @@
 "use client";
 
+import { TaskFolderPicker } from "./task-folder-picker";
+
 import React, {
   useEffect,
   useMemo,
@@ -11,95 +13,33 @@ import React, {
 } from "react";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import type { FileTreeNode, OpenFileTab } from "@/lib/types/backend";
-import { useSession } from "@/hooks/domains/session/use-session";
-import { useRepository } from "@/hooks/domains/workspace/use-repository";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useAppStore } from "@/components/state-provider";
-import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useToast } from "@/components/toast-provider";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useMultiSelect } from "@/hooks/use-multi-select";
-import { FileBrowserSearchHeader } from "./file-browser-search-header";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { isEditableKeydownTarget } from "@/lib/keyboard/utils";
+import { useContextFilesStore } from "@/lib/state/context-files-store";
+import { FileBrowserHeader } from "./file-browser-header";
 import {
   insertNodeInTree,
   removeNodeFromTree,
-  FileBrowserToolbar,
-  FileBrowserContentArea,
+  shouldShowFileTreeTouchActions,
 } from "./file-browser-parts";
+import { FileBrowserContentArea } from "./file-browser-content-area";
 import {
-  useFileBrowserSearch,
   useFileBrowserTree,
   useScrollPersistence,
+  loadNodeChildren,
   toggleFolderExpand,
   fetchAndOpenFile,
 } from "./file-browser-hooks";
-import { getFileBrowserSessionWorkspacePath, resolveFileBrowserPaths } from "./file-browser-path";
+import { useFileBrowserData } from "./file-browser-data";
+import { useFileUploadEntryPoints } from "./use-file-upload-entry-points";
+import { FileUploadStatusList } from "./file-upload-status-list";
 import { FileTreeEditorProvider } from "./file-tree-editor-menu";
-import { getVisiblePaths, moveNodesInTree, computeMoveTargets } from "./file-tree-utils";
-
-type FileBrowserHeaderProps = {
-  treeLoaded: boolean;
-  search: ReturnType<typeof useFileBrowserSearch>;
-  displayPath: string;
-  fullPath: string;
-  copied: boolean;
-  expandedPathsSize: number;
-  onCopyPath: (value: string) => void | Promise<void>;
-  onStartCreate?: () => void;
-  onOpenFolder: () => void;
-  onCollapseAll: () => void;
-  showCreateButton: boolean;
-  onAddSources?: (opener: HTMLButtonElement) => void;
-  addSourcesButtonRef?: Ref<HTMLButtonElement>;
-  addSourcesDisabledReason?: string;
-};
-
-function FileBrowserHeader({
-  treeLoaded,
-  search,
-  displayPath,
-  fullPath,
-  copied,
-  expandedPathsSize,
-  onCopyPath,
-  onStartCreate,
-  onOpenFolder,
-  onCollapseAll,
-  showCreateButton,
-  onAddSources,
-  addSourcesButtonRef,
-  addSourcesDisabledReason,
-}: FileBrowserHeaderProps) {
-  if (!treeLoaded) return null;
-  if (search.isSearchActive) {
-    return (
-      <FileBrowserSearchHeader
-        isSearching={search.isSearching}
-        localSearchQuery={search.localSearchQuery}
-        searchInputRef={search.searchInputRef}
-        onSearchChange={search.handleSearchChange}
-        onCloseSearch={search.handleCloseSearch}
-      />
-    );
-  }
-  return (
-    <FileBrowserToolbar
-      displayPath={displayPath}
-      fullPath={fullPath}
-      copied={copied}
-      expandedPathsSize={expandedPathsSize}
-      onCopyPath={onCopyPath}
-      onStartCreate={onStartCreate}
-      onOpenFolder={onOpenFolder}
-      onStartSearch={() => search.setIsSearchActive(true)}
-      onCollapseAll={onCollapseAll}
-      showCreateButton={showCreateButton}
-      onAddSources={onAddSources}
-      addSourcesButtonRef={addSourcesButtonRef}
-      addSourcesDisabledReason={addSourcesDisabledReason}
-    />
-  );
-}
+import { computeMoveTargets, getVisiblePaths, moveNodesInTree } from "./file-tree-utils";
+import { useFileTreeReveal } from "./file-tree-reveal";
 
 type FileBrowserProps = {
   sessionId: string;
@@ -109,6 +49,7 @@ type FileBrowserProps = {
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
   activeFilePath?: string | null;
   onAddSources?: (opener: HTMLButtonElement) => void;
   addSourcesButtonRef?: Ref<HTMLButtonElement>;
@@ -122,9 +63,15 @@ function useFileBrowserHandlers(
   treeState: ReturnType<typeof useFileBrowserTree>,
 ) {
   const { toast } = useToast();
+  const { t } = useTranslation("chat");
+  const addContextFile = useContextFilesStore((state) => state.addFile);
   const [creatingInPath, setCreatingInPath] = useState<string | null>(null);
   const [activeFolderPath, setActiveFolderPath] = useState<string>("");
   const openFileAbortRef = useRef<AbortController | null>(null);
+  const treeStateRef = useRef(treeState);
+  treeStateRef.current = treeState;
+
+  const { expandedPaths, setExpandedPaths, setTree } = treeState;
 
   useLayoutEffect(
     () => () => {
@@ -135,32 +82,38 @@ function useFileBrowserHandlers(
   );
 
   const handleStartCreate = useCallback(() => {
-    if (activeFolderPath && !treeState.expandedPaths.has(activeFolderPath)) {
-      treeState.setExpandedPaths((prev) => new Set(prev).add(activeFolderPath));
+    if (activeFolderPath && !expandedPaths.has(activeFolderPath)) {
+      setExpandedPaths((prev) => new Set(prev).add(activeFolderPath));
     }
     setCreatingInPath(activeFolderPath);
-  }, [activeFolderPath, treeState]);
+  }, [activeFolderPath, expandedPaths, setExpandedPaths]);
 
   const handleCreateFileSubmit = useCallback(
     (parentPath: string, name: string) => {
       setCreatingInPath(null);
       const newPath = parentPath ? `${parentPath}/${name}` : name;
       const newNode: FileTreeNode = { name, path: newPath, is_dir: false, size: 0 };
-      treeState.setTree((prev) => (prev ? insertNodeInTree(prev, parentPath, newNode) : prev));
+      setTree((prev) => (prev ? insertNodeInTree(prev, parentPath, newNode) : prev));
       onCreateFile?.(newPath)
         .then((ok) => {
-          if (!ok) treeState.setTree((prev) => (prev ? removeNodeFromTree(prev, newPath) : prev));
+          if (!ok) setTree((prev) => (prev ? removeNodeFromTree(prev, newPath) : prev));
         })
         .catch(() => {
-          treeState.setTree((prev) => (prev ? removeNodeFromTree(prev, newPath) : prev));
+          setTree((prev) => (prev ? removeNodeFromTree(prev, newPath) : prev));
         });
     },
-    [onCreateFile, treeState],
+    [onCreateFile, setTree],
   );
 
   const toggleExpand = useCallback(
-    (node: FileTreeNode) => toggleFolderExpand({ node, sessionId, treeState, setActiveFolderPath }),
-    [treeState, sessionId],
+    (node: FileTreeNode) =>
+      toggleFolderExpand({
+        node,
+        sessionId,
+        treeState: treeStateRef.current,
+        setActiveFolderPath,
+      }),
+    [sessionId],
   );
 
   const openFileByPath = useCallback(
@@ -179,6 +132,20 @@ function useFileBrowserHandlers(
     [sessionId, onOpenFile, toast],
   );
   const handleCancelCreate = useCallback(() => setCreatingInPath(null), []);
+  const handleAddToChatContext = useCallback(
+    (node: FileTreeNode) => {
+      addContextFile(sessionId, {
+        path: node.path,
+        name: node.name,
+        isDirectory: node.is_dir,
+      });
+      toast({
+        description: t("chat:addedToChatContext", { name: node.name }),
+        variant: "success",
+      });
+    },
+    [addContextFile, sessionId, t, toast],
+  );
 
   return {
     creatingInPath,
@@ -188,6 +155,7 @@ function useFileBrowserHandlers(
     toggleExpand,
     openFileByPath,
     handleCancelCreate,
+    handleAddToChatContext,
   };
 }
 
@@ -203,7 +171,11 @@ type MoveFilesParams = {
   onRenameFile: (oldPath: string, newPath: string) => Promise<boolean>;
 };
 
-function executeMoveFiles(params: MoveFilesParams, toast: ReturnType<typeof useToast>["toast"]) {
+function executeMoveFiles(
+  params: MoveFilesParams,
+  toast: ReturnType<typeof useToast>["toast"],
+  t: TFunction,
+) {
   const { sources, targetPath, treeState, setSelectedPaths, onRenameFile } = params;
   const snapshot = treeState.tree;
 
@@ -219,8 +191,8 @@ function executeMoveFiles(params: MoveFilesParams, toast: ReturnType<typeof useT
       if (results.some((ok) => !ok)) {
         treeState.setTree(snapshot);
         toast({
-          title: "Move failed",
-          description: "Some files could not be moved",
+          title: t("task:moveFailed"),
+          description: t("task:moveFailedFiles"),
           variant: "error",
         });
       }
@@ -228,8 +200,8 @@ function executeMoveFiles(params: MoveFilesParams, toast: ReturnType<typeof useT
     .catch(() => {
       treeState.setTree(snapshot);
       toast({
-        title: "Move failed",
-        description: "An error occurred while moving files",
+        title: t("task:moveFailed"),
+        description: t("task:moveFailedUnexpected"),
         variant: "error",
       });
     });
@@ -241,10 +213,13 @@ function useDragAndDrop(
   setSelectedPaths: (paths: Set<string>) => void,
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>,
 ) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [isDragging, setIsDragging] = useState(false);
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   const dragPathsRef = useRef<string[]>([]);
+  const treeStateRef = useRef(treeState);
+  treeStateRef.current = treeState;
 
   const handleDragStart = useCallback(
     (path: string, e: React.DragEvent) => {
@@ -304,9 +279,19 @@ function useDragAndDrop(
       if (!onRenameFile) return;
       const sources = dragPathsRef.current;
       if (sources.length === 0 || isDropInvalid(sources, targetPath)) return;
-      executeMoveFiles({ sources, targetPath, treeState, setSelectedPaths, onRenameFile }, toast);
+      executeMoveFiles(
+        {
+          sources,
+          targetPath,
+          treeState: treeStateRef.current,
+          setSelectedPaths,
+          onRenameFile,
+        },
+        toast,
+        t,
+      );
     },
-    [onRenameFile, treeState, setSelectedPaths, toast],
+    [onRenameFile, setSelectedPaths, t, toast],
   );
 
   return {
@@ -320,28 +305,8 @@ function useDragAndDrop(
   };
 }
 
-function useAutoExpandAncestors(
-  activeFilePath: string | null | undefined,
-  setExpandedPaths: React.Dispatch<React.SetStateAction<Set<string>>>,
-) {
-  useEffect(() => {
-    if (!activeFilePath) return;
-    const parts = activeFilePath.split("/");
-    if (parts.length <= 1) return;
-    const ancestors: string[] = [];
-    for (let i = 1; i < parts.length; i++) {
-      ancestors.push(parts.slice(0, i).join("/"));
-    }
-    setExpandedPaths((prev) => {
-      if (ancestors.every((p) => prev.has(p))) return prev;
-      const next = new Set(prev);
-      for (const p of ancestors) next.add(p);
-      return next;
-    });
-  }, [activeFilePath, setExpandedPaths]);
-}
-
 function useSelectionInteractions(
+  sessionId: string,
   treeState: ReturnType<typeof useFileBrowserTree>,
   containerRef: React.RefObject<HTMLDivElement | null>,
   activeFilePath: string | null | undefined,
@@ -360,7 +325,21 @@ function useSelectionInteractions(
   );
 
   useKeyboardShortcuts(containerRef, multiSelect.clearSelection, multiSelect.selectAll);
-  useAutoExpandAncestors(activeFilePath, treeState.setExpandedPaths);
+  const treeStateRef = useRef(treeState);
+  treeStateRef.current = treeState;
+  const loadChildren = useCallback(
+    (node: FileTreeNode, shouldApply?: () => boolean) =>
+      loadNodeChildren(node, sessionId, treeStateRef.current, { force: true, shouldApply }),
+    [sessionId],
+  );
+  useFileTreeReveal({
+    activeFilePath,
+    sessionId,
+    tree: treeState.tree,
+    setExpandedPaths: treeState.setExpandedPaths,
+    isLoading: treeState.isLoading,
+    loadChildren,
+  });
 
   const handleClickOutside = useCallback(
     (e: React.MouseEvent) => {
@@ -376,7 +355,7 @@ function useSelectionInteractions(
         return;
       multiSelect.clearSelection();
     },
-    [multiSelect],
+    [multiSelect.selectedPaths, multiSelect.clearSelection],
   );
 
   return { multiSelect, dnd, handleClickOutside };
@@ -395,7 +374,7 @@ function useKeyboardShortcuts(
         return;
       if (e.key === "Escape") {
         clearSelection();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === "a") {
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "a" && !isEditableKeydownTarget(e)) {
         e.preventDefault();
         selectAll();
       }
@@ -405,71 +384,7 @@ function useKeyboardShortcuts(
   }, [containerRef, clearSelection, selectAll]);
 }
 
-export function getFileBrowserResetKey({
-  sessionId,
-  environmentId,
-  worktreeCount,
-  workspaceFilesRefresh,
-}: {
-  sessionId: string;
-  environmentId?: string | null;
-  worktreeCount: number;
-  workspaceFilesRefresh: number;
-}) {
-  return `${environmentId ?? sessionId}:${worktreeCount}:${workspaceFilesRefresh}`;
-}
-
-function useFileBrowserResetKey(sessionId: string, environmentId?: string | null) {
-  // Worktree count participates in the tree's reset key so an add_branch_to_task
-  // call that materializes a sibling worktree forces a fresh tree load.
-  const worktreeCount = useAppStore(
-    (state) => state.sessionWorktreesBySessionId.itemsBySessionId[sessionId]?.length ?? 0,
-  );
-  const workspaceFilesRefresh = useAppStore(
-    (state) => state.workspaceFilesRefresh.bySessionId[sessionId] ?? 0,
-  );
-  return getFileBrowserResetKey({
-    sessionId,
-    environmentId,
-    worktreeCount,
-    workspaceFilesRefresh,
-  });
-}
-
-function useFileBrowserData(sessionId: string, environmentId: string | null | undefined) {
-  const { session, isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
-  const repository = useRepository(session?.repository_id ?? null);
-  const gitStatus = useSessionGitStatus(sessionId);
-  const { open: openFolder } = useOpenSessionFolder(sessionId);
-  const { copied, copy: copyPath } = useCopyToClipboard(1000);
-  const search = useFileBrowserSearch(sessionId);
-  const resetKey = useFileBrowserResetKey(sessionId, environmentId);
-  const treeState = useFileBrowserTree(sessionId, resetKey);
-  const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
-  const fileStatuses = useMemo(
-    () =>
-      new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
-    [gitStatus?.files],
-  );
-  const paths = resolveFileBrowserPaths({
-    sessionWorktreePath: getFileBrowserSessionWorkspacePath(session),
-    repositoryLocalPath: repository?.local_path,
-    treePath: treeState.tree?.path,
-    treeLoaded: isTreeLoaded,
-  });
-  return {
-    isSessionFailed,
-    sessionError,
-    openFolder,
-    copied,
-    copyPath,
-    search,
-    treeState,
-    isTreeLoaded,
-    fileStatuses,
-    ...paths,
-  };
-}
+export { getFileBrowserResetKey } from "./file-browser-data";
 
 function useFileBrowserViewModel({
   sessionId,
@@ -491,6 +406,7 @@ function useFileBrowserViewModel({
   useScrollPersistence(sessionId, data.isTreeLoaded, scrollAreaRef, data.treeState.tree);
   const handlers = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, data.treeState);
   const selection = useSelectionInteractions(
+    sessionId,
     data.treeState,
     containerRef,
     activeFilePath,
@@ -506,19 +422,36 @@ function FileBrowserTreeContent({
   multiSelect,
   dnd,
   activeFilePath,
+  workspaceBlocked,
   onDeleteFile,
   onRenameFile,
   onDownloadFile,
+  onUploadFilesHere,
+  showTouchActions,
 }: Omit<FileBrowserProps, "sessionId" | "environmentId" | "onOpenFile" | "onCreateFile"> & {
   scrollAreaRef: React.RefObject<HTMLDivElement | null>;
   data: ReturnType<typeof useFileBrowserData>;
   handlers: ReturnType<typeof useFileBrowserHandlers>;
   multiSelect: ReturnType<typeof useSelectionInteractions>["multiSelect"];
   dnd: ReturnType<typeof useSelectionInteractions>["dnd"];
+  workspaceBlocked: boolean;
+  showTouchActions: boolean;
 }) {
-  const { search, isSessionFailed, sessionError, treeState, fileStatuses } = data;
+  const { search, isSessionFailed, sessionError, treeState, fileStatuses, workspaceRestoration } =
+    data;
+  const scrollViewportRef = useRef<HTMLDivElement>(null);
   return (
-    <ScrollArea className="flex-1" ref={scrollAreaRef}>
+    <ScrollArea
+      className="flex-1 min-h-0 min-w-0"
+      ref={scrollAreaRef}
+      viewportProps={{
+        ref: scrollViewportRef,
+        "data-testid": "file-tree-scroll",
+        // Keep the file-tree content constrained to the viewport so row labels
+        // can shrink and apply their own truncation rules.
+        className: "[&>div]:!block [&>div]:!min-w-0 [&>div]:!w-full",
+      }}
+    >
       <FileBrowserContentArea
         isSearchActive={search.isSearchActive}
         searchResults={search.searchResults}
@@ -531,27 +464,34 @@ function FileBrowserTreeContent({
         creatingInPath={handlers.creatingInPath}
         fileStatuses={fileStatuses}
         visibleRows={treeState.visibleRows}
+        scrollViewportRef={scrollViewportRef}
         activeFolderPath={handlers.activeFolderPath}
         activeFilePath={activeFilePath}
         visibleLoadingPaths={treeState.visibleLoadingPaths}
         onOpenFile={handlers.openFileByPath}
         onToggleExpand={handlers.toggleExpand}
-        onDeleteFile={onDeleteFile}
-        onRenameFile={onRenameFile}
+        onDeleteFile={workspaceBlocked ? undefined : onDeleteFile}
+        onRenameFile={workspaceBlocked ? undefined : onRenameFile}
         onDownloadFile={onDownloadFile}
-        onCreateFileSubmit={handlers.handleCreateFileSubmit}
+        onUploadFilesHere={workspaceBlocked ? undefined : onUploadFilesHere}
+        onAddToChatContext={handlers.handleAddToChatContext}
+        showTouchActions={showTouchActions}
+        onCreateFileSubmit={workspaceBlocked ? () => undefined : handlers.handleCreateFileSubmit}
         onCancelCreate={handlers.handleCancelCreate}
         onRetry={() => void treeState.loadTree({ resetRetry: true })}
+        workspaceRestoration={workspaceRestoration.attempt}
+        onRestoreWorkspace={() => void workspaceRestoration.restore()}
+        restoreWorkspaceDisabled={workspaceRestoration.status === "pending"}
         setTree={treeState.setTree}
         isSelectedFn={multiSelect.isSelected}
         onSelect={multiSelect.handleClick}
         isDragging={dnd.isDragging}
         dragOverPath={dnd.dragOverPath}
-        onDragStart={dnd.handleDragStart}
-        onDragEnd={dnd.handleDragEnd}
-        onDragOver={dnd.handleDragOver}
-        onDragLeave={dnd.handleDragLeave}
-        onDrop={dnd.handleDrop}
+        onDragStart={workspaceBlocked ? undefined : dnd.handleDragStart}
+        onDragEnd={workspaceBlocked ? undefined : dnd.handleDragEnd}
+        onDragOver={workspaceBlocked ? undefined : dnd.handleDragOver}
+        onDragLeave={workspaceBlocked ? undefined : dnd.handleDragLeave}
+        onDrop={workspaceBlocked ? undefined : dnd.handleDrop}
         selectedCount={multiSelect.selectedPaths.size}
         selectedPaths={multiSelect.selectedPaths}
       />
@@ -572,6 +512,9 @@ export function FileBrowser({
   addSourcesButtonRef,
   addSourcesDisabledReason,
 }: FileBrowserProps) {
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const { t } = useTranslation();
+  const showTouchActions = shouldShowFileTreeTouchActions(isMobile, isFinePointer);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { data, handlers, multiSelect, dnd, handleClickOutside } = useFileBrowserViewModel({
@@ -584,7 +527,15 @@ export function FileBrowser({
     scrollAreaRef,
     containerRef,
   });
-  const { openFolder, copied, copyPath, search, treeState, fullPath, displayPath } = data;
+  const { folderAction, copied, copyPath, search, treeState, fullPath, displayPath } = data;
+  const workspaceBlocked =
+    data.workspaceRestoration.status !== null && data.workspaceRestoration.status !== "ready";
+  const { openPicker, uploads, elements } = useFileUploadEntryPoints(sessionId);
+  const handleToolbarUpload = useCallback(
+    (mode: "files" | "folder") => openPicker(mode, handlers.activeFolderPath ?? ""),
+    [openPicker, handlers.activeFolderPath],
+  );
+  const handleUploadHere = useCallback((path: string) => openPicker("files", path), [openPicker]);
   return (
     <FileTreeEditorProvider sessionId={sessionId} treeRootName={treeState.tree?.name}>
       <div
@@ -601,25 +552,38 @@ export function FileBrowser({
           copied={copied}
           expandedPathsSize={treeState.expandedPaths.size}
           onCopyPath={copyPath}
-          onStartCreate={onCreateFile ? handlers.handleStartCreate : undefined}
-          onOpenFolder={openFolder}
+          onStartCreate={!workspaceBlocked && onCreateFile ? handlers.handleStartCreate : undefined}
+          onOpenFolder={folderAction.open}
+          isOpeningFolder={folderAction.isLoading}
+          isFolderDisabled={folderAction.disabled}
           onCollapseAll={treeState.collapseAll}
-          showCreateButton={Boolean(onCreateFile)}
-          onAddSources={onAddSources}
+          showCreateButton={!workspaceBlocked && Boolean(onCreateFile)}
+          onUploadFiles={!workspaceBlocked && sessionId ? handleToolbarUpload : undefined}
+          onAddSources={workspaceBlocked ? undefined : onAddSources}
           addSourcesButtonRef={addSourcesButtonRef}
           addSourcesDisabledReason={addSourcesDisabledReason}
         />
         <FileBrowserTreeContent
+          key={`${sessionId}:${environmentId ?? ""}`}
           scrollAreaRef={scrollAreaRef}
           data={data}
           handlers={handlers}
           multiSelect={multiSelect}
           dnd={dnd}
           activeFilePath={activeFilePath}
+          workspaceBlocked={workspaceBlocked}
           onDeleteFile={onDeleteFile}
           onRenameFile={onRenameFile}
           onDownloadFile={onDownloadFile}
+          onUploadFilesHere={sessionId ? handleUploadHere : undefined}
+          showTouchActions={showTouchActions}
         />
+        <span role="status" className="sr-only">
+          {folderAction.isLoading ? t("editors:openingFolder") : ""}
+        </span>
+        <TaskFolderPicker action={folderAction} />
+        <FileUploadStatusList uploads={uploads} />
+        {elements}
       </div>
     </FileTreeEditorProvider>
   );

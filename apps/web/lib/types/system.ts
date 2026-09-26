@@ -1,6 +1,6 @@
 // System pages — frontend types mirroring the
 // `apps/backend/internal/system/` HTTP surface (see
-// docs/specs/system-page/spec.md "Backend surface").
+// docs/specs/system-page/requirements/system-page.md "Backend surface").
 
 export interface SystemInfo {
   version: string;
@@ -36,6 +36,7 @@ export interface DiskUsageResponse {
 export interface DatabaseStats {
   driver: string;
   path: string;
+  backup_directory: string;
   size_bytes: number;
   wal_size_bytes: number;
   schema_version: string;
@@ -47,7 +48,6 @@ export type SnapshotKind = "auto" | "manual";
 
 export interface SnapshotInfo {
   name: string;
-  path: string;
   size_bytes: number;
   /** ISO timestamp. */
   mtime: string;
@@ -122,11 +122,16 @@ export interface UpdatesResponse {
   /** ISO timestamp. */
   latest_checked_at: string;
   update_available: boolean;
+  channel: UpdatesChannel;
+  channel_editable: boolean;
+  channel_unsupported_reason: string;
   install?: InstallState;
   apply_supported?: boolean;
   apply_unsupported_reason?: string;
   manual_commands?: string[];
 }
+
+export type UpdatesChannel = "stable" | "nightly";
 
 export interface InstallState {
   running_as_service: boolean;
@@ -181,6 +186,71 @@ export interface SystemMetricsSettingsResponse {
   settings: SystemMetricsGlobalSettings;
 }
 
+export interface MessageQueueSettingsValue {
+  max_per_session: number;
+  merge_enabled: boolean;
+  auto_merge_enabled: boolean;
+}
+
+/** Partial PATCH payload: omitted fields are left unchanged server-side. */
+export type MessageQueueSettingsPatch = Partial<MessageQueueSettingsValue>;
+
+export type MessageQueueSettingsSource = "default" | "setting" | "configuration" | "environment";
+
+export interface MessageQueueEffectiveSettings extends MessageQueueSettingsValue {
+  source: MessageQueueSettingsSource;
+  locked: boolean;
+}
+
+export interface MessageQueueSettingsResponse {
+  settings: MessageQueueSettingsValue;
+  effective: MessageQueueEffectiveSettings;
+}
+
+export interface SessionCapacitySettingsValue {
+  enabled: boolean;
+  max_sessions: number;
+}
+
+/** Partial PATCH payload: omitted fields are left unchanged server-side. */
+export type SessionCapacitySettingsPatch = Partial<SessionCapacitySettingsValue>;
+
+export type SessionCapacitySettingsSource = "default" | "setting" | "environment";
+
+export interface SessionCapacityEffectiveSettings {
+  enabled: boolean;
+  max_sessions: number;
+  source: SessionCapacitySettingsSource;
+  locked: boolean;
+}
+
+export interface SessionCapacitySettingsResponse {
+  settings: SessionCapacitySettingsValue;
+  effective: SessionCapacityEffectiveSettings;
+}
+
+export type SleepInhibitionPlatform = "darwin" | "windows" | "linux" | "other";
+export type SleepInhibitionIssue =
+  | "unsupported_platform"
+  | "system_service_unavailable"
+  | "request_failed";
+
+export interface SleepInhibitionSettings {
+  enabled: boolean;
+}
+
+export interface SleepInhibitionStatus {
+  platform: SleepInhibitionPlatform;
+  supported: boolean;
+  active: boolean;
+  issue?: SleepInhibitionIssue;
+}
+
+export interface SleepInhibitionResponse {
+  settings: SleepInhibitionSettings;
+  status: SleepInhibitionStatus;
+}
+
 export interface SystemMetricSample {
   id: SystemMetricId | string;
   label: string;
@@ -214,6 +284,10 @@ export interface StorageResourceSettings {
   enabled: boolean;
 }
 
+export interface StorageWorkspaceSettings extends StorageResourceSettings {
+  dependency_cleanup_enabled: boolean;
+}
+
 export interface StorageGoCacheSettings {
   enabled: boolean;
   max_bytes: number;
@@ -235,8 +309,9 @@ export interface StorageMaintenanceSettings {
   idle_for_minutes: number;
   orphan_grace_hours: number;
   quarantine_retention_hours: number;
-  workspaces: StorageResourceSettings;
+  workspaces: StorageWorkspaceSettings;
   kandev_containers: StorageResourceSettings;
+  temporary_artifacts?: StorageResourceSettings;
   go_cache: StorageGoCacheSettings;
   docker: StorageDockerSettings;
 }
@@ -244,6 +319,7 @@ export interface StorageMaintenanceSettings {
 export interface StorageCapabilities {
   managed_go_cache_path: string;
   go_cache_adoption_available: boolean;
+  temporary_artifacts_available: boolean;
   docker_available: boolean;
   docker_host: string;
   host_global_docker_cleanup_allowed: boolean;
@@ -293,11 +369,119 @@ export type StorageQuarantineSummary =
       size_bytes?: never;
     };
 
+export interface StorageTemporaryArtifactsSummary {
+  available?: boolean;
+  total_count?: number;
+  total_bytes?: number;
+  active_count?: number;
+  active_bytes?: number;
+  protected_count?: number;
+  protected_bytes?: number;
+  stale_count?: number;
+  stale_bytes?: number;
+  skipped_count?: number;
+  warnings?: string[];
+  warning?: string;
+}
+
+export type StorageTemporaryRootStatus = "measured" | "partial" | "unavailable" | "not_applicable";
+
+export interface StorageTemporaryRootMeasurement {
+  requested_path: string;
+  path: string;
+  aliases?: string[];
+  status: StorageTemporaryRootStatus;
+  size_bytes?: number;
+  skipped_count?: number;
+  reason?: string;
+  warnings?: string[];
+}
+
+export interface StorageSystemTemporarySummary {
+  status: StorageTemporaryRootStatus;
+  roots: StorageTemporaryRootMeasurement[];
+  size_bytes?: number;
+  included_in_total: false;
+  reason?: string;
+  warnings?: string[];
+}
+
+export type StorageFootprintMeasurementStatus = "measured" | "unavailable" | "not_applicable";
+
+export type StorageFootprintMeasurement =
+  | {
+      status: "measured";
+      size_bytes?: number;
+      counted_size_bytes?: number;
+      path?: string;
+      included_in_total: boolean;
+      reason?: string;
+      warning?: string;
+    }
+  | {
+      status: "unavailable" | "not_applicable";
+      path?: string;
+      included_in_total: false;
+      reason?: string;
+      warning?: string;
+    };
+
 export interface StorageSummary {
   workspaces: StorageWorkspaceSummary;
   go_cache: StorageGoCacheSummary;
   quarantine: StorageQuarantineSummary;
+  temporary_artifacts: StorageTemporaryArtifactsSummary;
+  system_temporary?: StorageSystemTemporarySummary;
   docker: StorageDockerSummary;
+  database?: StorageFootprintMeasurement;
+  database_backups?: StorageFootprintMeasurement;
+}
+
+export type StorageSummaryPartial = {
+  workspaces?: StorageWorkspaceSummary | null;
+  go_cache?: StorageGoCacheSummary | null;
+  quarantine?: StorageQuarantineSummary | null;
+  temporary_artifacts?: StorageTemporaryArtifactsSummary | null;
+  system_temporary?: StorageSystemTemporarySummary | null;
+  docker?: StorageDockerSummary | null;
+  database?: StorageFootprintMeasurement | null;
+  database_backups?: StorageFootprintMeasurement | null;
+};
+
+export type StorageAnalysisStateName = "scanning" | "ready" | "failed";
+export type StorageSourceStateName = "pending" | "scanning" | "ready" | "failed";
+
+export interface StorageSourceProgress {
+  state: StorageSourceStateName;
+  completed_items: number;
+  total_items?: number;
+  bytes_scanned: number;
+  error?: string;
+}
+
+export interface StorageAnalysisProgress {
+  completed_sources: number;
+  total_sources: number;
+  sources: Record<string, StorageSourceProgress>;
+}
+
+export interface StorageAnalysisState {
+  generation: number;
+  state: StorageAnalysisStateName;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_ms: number | null;
+  cache_ttl_seconds: number;
+  refresh_due_at: string | null;
+  stale: boolean;
+  error: string | null;
+  progress: StorageAnalysisProgress;
+  partial_summary: StorageSummaryPartial | null;
+}
+
+export interface StorageAnalysisUpdatedPayload {
+  generation: number;
+  state: StorageAnalysisStateName;
 }
 
 export type StorageRunState =
@@ -332,7 +516,7 @@ export interface StorageMaintenanceRun {
 
 export interface StorageQuarantineEntry {
   id: string;
-  resource_type: "task_workspace" | "go_cache";
+  resource_type: "task_workspace" | "go_cache" | "temporary_artifact";
   task_id?: string;
   workspace_id?: string;
   original_path: string;
@@ -369,9 +553,20 @@ export interface StorageQuarantinePurgeResult {
 export interface StorageOverviewResponse {
   settings: StorageMaintenanceSettings;
   capabilities: StorageCapabilities;
-  summary: StorageSummary;
-  analyzed_at: string;
+  summary: StorageSummary | null;
+  analyzed_at: string | null;
+  analysis: StorageAnalysisState;
   last_run: StorageMaintenanceRun | null;
+}
+
+export interface StorageDiskCapacityResponse {
+  path: string;
+  total_bytes: number;
+  used_bytes: number;
+  available_bytes: number;
+  used_percent: number;
+  available: boolean;
+  warning?: string;
 }
 
 export interface StoragePolicyResponse {
@@ -385,6 +580,78 @@ export interface StorageSettingsResponse {
 
 export interface StorageAdoptionResponse extends StorageSettingsResponse {
   capabilities: StorageCapabilities;
+}
+
+// --- Office run history retention ---------------------------------------
+
+export interface RetentionTableSettings {
+  window_days: number;
+  floor_per_owner: number;
+  warn_rows: number;
+}
+
+export interface RetentionRunEventsSettings {
+  warn_rows: number;
+}
+
+export interface RetentionSettings {
+  enabled: boolean;
+  sweep_interval_hours: number;
+  batch_limit: number;
+  routine_runs: RetentionTableSettings;
+  runs: RetentionTableSettings;
+  run_events: RetentionRunEventsSettings;
+}
+
+export interface RetentionTableSweepResult {
+  deleted: number;
+  backlog: boolean;
+  error: string;
+}
+
+export interface RetentionSweptTableResult extends RetentionTableSweepResult {
+  previewed: boolean;
+  would_delete: number;
+}
+
+export interface RetentionLastSweep {
+  started_at: string;
+  finished_at: string;
+  office_routine_runs: RetentionSweptTableResult;
+  runs: RetentionSweptTableResult;
+  run_events: RetentionTableSweepResult;
+  route_attempts: RetentionTableSweepResult;
+  run_skills: RetentionTableSweepResult;
+}
+
+export type RetentionCensusState = "not_computed" | "fresh" | "stale";
+
+export interface RetentionUnknownStatusCount {
+  status: string;
+  count: number;
+}
+
+export interface RetentionTableCensus {
+  state: RetentionCensusState;
+  retained_count: number;
+  as_of: string;
+  unknown_statuses?: RetentionUnknownStatusCount[];
+  top_routine_id?: string;
+  top_routine_share?: number;
+}
+
+export interface RetentionRetainedCounts {
+  office_routine_runs: RetentionTableCensus;
+  runs: RetentionTableCensus;
+  run_events: RetentionTableCensus;
+}
+
+export interface RetentionStatus {
+  settings: RetentionSettings;
+  last_sweep: RetentionLastSweep | null;
+  skip_count: number;
+  last_skip_at?: string;
+  retained_counts: RetentionRetainedCounts;
 }
 
 export interface RestartCapability {

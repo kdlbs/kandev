@@ -1,4 +1,5 @@
 import type { AddPanelOptions, DockviewApi } from "dockview-react";
+import { t } from "@/lib/i18n";
 
 type StaleSessionPanel = {
   id: string;
@@ -20,7 +21,7 @@ export function ensureSessionPanel(
     id: `session:${sessionId}`,
     component: "chat",
     tabComponent: "sessionTab",
-    title: "Agent",
+    title: t("common:agent"),
     params: { sessionId },
     position,
     inactive,

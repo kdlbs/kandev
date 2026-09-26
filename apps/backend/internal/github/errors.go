@@ -2,7 +2,10 @@ package github
 
 import (
 	"errors"
+	"net/http"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/authcircuit"
 )
 
 // ErrInvalidPRURL signals that a caller-supplied PR URL could not be parsed.
@@ -17,6 +20,11 @@ var ErrInvalidIssueReference = errors.New("invalid GitHub issue reference")
 // ErrIssueRepositoryMismatch signals that the issue belongs to a repository
 // that is not attached to the target task.
 var ErrIssueRepositoryMismatch = errors.New("GitHub issue repository is not attached to task")
+
+// ErrTaskPRRepositoryMismatch signals that a PR association used a
+// task_repositories row ID instead of the canonical repositories.ID attached
+// to the task.
+var ErrTaskPRRepositoryMismatch = errors.New("GitHub PR repository is not attached to task")
 
 // ErrTaskNotFound is the sentinel that cleanup paths check to distinguish
 // "the task is already gone — fine, mop up the dedup row" from a real
@@ -50,6 +58,11 @@ var ErrInvalidToken = errors.New("invalid token")
 // caller needs to differentiate a "stop retrying" failure from a
 // transient upstream blip.
 var ErrRepoNotResolvable = errors.New("github: repository not resolvable")
+
+// ErrTaskPRNotLinked is returned by UpdateTaskCIOptions when the patch names
+// a repository_id/pr_number that is not currently linked to the task. HTTP
+// callers translate this into a 400 rather than a generic 500.
+var ErrTaskPRNotLinked = errors.New("PR is not linked to this task")
 
 // errStoreUnavailable is returned from service methods when no Store is
 // wired (Provide can return a Service with store == nil when the SQLite
@@ -106,4 +119,55 @@ func isRepoNotResolvableErr(err error) bool {
 		}
 	}
 	return false
+}
+
+// classifyPollErr maps a background PR-watch poll failure to an
+// authcircuit.FailureClass, for Poller's per-workspace in-memory circuit
+// (see poller_circuit.go). This is deliberately a coarser, workspace-level
+// signal than the existing repoErrorCache (which negative-caches a single
+// repo for 10 minutes): an auth failure means every watch in the workspace
+// is broken, not just one repo, so it uses the longer permanent-backoff
+// schedule and only resets on a credential change
+// (Service.WorkspaceConnectionFingerprint), while a repo-not-resolvable
+// signal is treated as a configuration problem here too — both caches agree
+// "stop retrying this" and neither depends on the other.
+func classifyPollErr(err error) authcircuit.FailureClass {
+	if err == nil {
+		return authcircuit.FailureClassNone
+	}
+	if errors.Is(err, ErrGitHubConnectionInvalid) || errors.Is(err, ErrGitHubNotConfigured) {
+		return authcircuit.FailureClassAuth
+	}
+	if isRepoNotResolvableErr(err) {
+		return authcircuit.FailureClassConfig
+	}
+	var apiErr *GitHubAPIError
+	if errors.As(err, &apiErr) {
+		if isGitHubRateLimitAPIError(apiErr) {
+			return authcircuit.FailureClassTransient
+		}
+		switch apiErr.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return authcircuit.FailureClassAuth
+		case http.StatusNotFound, http.StatusUnprocessableEntity, http.StatusBadRequest:
+			return authcircuit.FailureClassConfig
+		default:
+			return authcircuit.FailureClassTransient
+		}
+	}
+	return authcircuit.FailureClassTransient
+}
+
+func isGitHubRateLimitAPIError(err *GitHubAPIError) bool {
+	if err == nil {
+		return false
+	}
+	if err.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	if err.StatusCode != http.StatusForbidden {
+		return false
+	}
+	body := strings.ToLower(err.Body)
+	return strings.Contains(body, "rate limit") || strings.Contains(body, "abuse detection")
 }

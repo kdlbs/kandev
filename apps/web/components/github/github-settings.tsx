@@ -4,10 +4,10 @@ import { useState, useCallback } from "react";
 import { IconBrandGithub, IconPlus, IconTrashX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
-import { Separator } from "@kandev/ui/separator";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { GitHubEnabledControl } from "@/components/github/github-enabled-control";
 import { GitHubAutomationSettings, GitHubPersonalSettings } from "./github-status";
 import { GitHubCallbackNotice } from "./github-callback-notice";
 import { ReviewWatchTable } from "./review-watch-table";
@@ -26,6 +26,7 @@ import { ResetWatchDialog, useWatchResetController } from "@/components/watches/
 import { cleanupMergedReviewTasks, cleanupClosedIssueTasks } from "@/lib/api/domains/github-api";
 import type { ReviewWatch, IssueWatch } from "@/lib/types/github";
 import { useTranslation } from "react-i18next";
+import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 // CleanupNowButton runs a manual global sweep over the dedup tables. Useful
 // for users who upgraded with a pile of legacy merged-PR / closed-issue
@@ -241,29 +242,30 @@ function useIssueWatchActions(workspaceId?: string | null) {
   };
 }
 
+/** Top-of-page GitHub settings: title + enable toggle, callback notice, and workspace credentials. */
 export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   return (
     <>
-      <div>
-        <h2
-          className="text-2xl font-bold flex items-center gap-2"
-          data-testid="github-integration-heading"
-        >
-          <IconBrandGithub className="h-6 w-6" />
-          {t("github:githubIntegration")}
-        </h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          {t("github:chooseTheAutomationAndPersonalIdentities")}
-        </p>
-      </div>
-      <Separator />
-      <GitHubCallbackNotice workspaceId={workspaceId} />
       <SettingsSection
-        title={t("github:workspaceGithubAccess")}
-        description={t("github:credentialUsedForRepositorySyncWatches")}
+        discoveryTargetId={INTEGRATION_SETTINGS_TARGETS.github}
+        icon={<IconBrandGithub className="h-5 w-5" />}
+        title={t("github:githubIntegration")}
+        titleTestId="github-integration-heading"
+        description={t("github:chooseTheAutomationAndPersonalIdentities")}
+        action={<GitHubEnabledControl workspaceId={workspaceId} />}
       >
-        <GitHubAutomationSettings workspaceId={workspaceId} />
+        <GitHubCallbackNotice workspaceId={workspaceId} />
+        <SettingsSection
+          title={t("github:workspaceGithubAccess")}
+          description={t("github:credentialUsedForRepositorySyncWatches")}
+        >
+          <Card data-testid="github-workspace-access-card">
+            <CardContent className="pt-0">
+              <GitHubAutomationSettings workspaceId={workspaceId} />
+            </CardContent>
+          </Card>
+        </SettingsSection>
       </SettingsSection>
       <div className="pr-16 sm:pr-0">
         <GitHubPersonalSettings workspaceId={workspaceId} />
@@ -296,6 +298,7 @@ type GitHubIntegrationPageProps = {
   workspaceId?: string;
 };
 
+/** GitHub's own settings page: resolves the active workspace, then renders its connection, review/issue watch, repo-scope, and automation sections. */
 export function GitHubIntegrationPage({ workspaceId }: GitHubIntegrationPageProps = {}) {
   return (
     <TooltipProvider>
@@ -394,6 +397,9 @@ function ReviewWatchSection({ workspaceId }: { workspaceId: string }) {
         }}
         onUpdate={async (id, req) => {
           const watch = watches.find((item) => item.id === id);
+          // Unreachable-invariant guard: the dialog only ever calls onUpdate for
+          // a row it was opened from. A developer diagnostic, not user copy.
+          // eslint-disable-next-line i18next/no-literal-string -- invariant message
           if (!watch) throw new Error("review watch not found");
           await update(id, watch.workspace_id, req);
           toast({ description: t("github:reviewWatchUpdated"), variant: "success" });
@@ -497,6 +503,8 @@ function IssueWatchSection({ workspaceId }: { workspaceId: string }) {
         }}
         onUpdate={async (id, req) => {
           const watch = issueActions.watches.find((item) => item.id === id);
+          // Unreachable-invariant guard, as above. Developer diagnostic.
+          // eslint-disable-next-line i18next/no-literal-string -- invariant message
           if (!watch) throw new Error("issue watch not found");
           await issueActions.update(id, watch.workspace_id, req);
           toast({ description: t("github:issueWatchUpdated"), variant: "success" });

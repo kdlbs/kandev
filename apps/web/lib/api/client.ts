@@ -1,7 +1,9 @@
 import { getBackendConfig } from "@/lib/config";
+import { signalBackendReloadRequired } from "@/lib/platform/backend-reload-coordinator";
 import { readInterimSettingsInterlockToken } from "@/src/boot-payload";
 
 const interimSettingsInterlockHeader = "X-Kandev-Interim-Settings-Interlock";
+export const INTERIM_SETTINGS_INTERLOCK_ERROR_CODE = "interim_settings_interlock_required";
 
 export type ApiRequestOptions = {
   baseUrl?: string;
@@ -17,12 +19,21 @@ export type ApiRequestOptions = {
 export class ApiError extends Error {
   readonly status: number;
   readonly body: unknown;
+  readonly errorCode?: string;
   readonly retryAfterSeconds?: number;
+  handled = false;
   constructor(message: string, status: number, body: unknown, retryAfterSeconds?: number) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.body = body;
+    this.errorCode =
+      body &&
+      typeof body === "object" &&
+      "error_code" in body &&
+      typeof (body as { error_code?: unknown }).error_code === "string"
+        ? (body as { error_code: string }).error_code
+        : undefined;
     this.retryAfterSeconds = retryAfterSeconds;
   }
 }
@@ -62,12 +73,21 @@ async function throwFromResponse(response: Response): Promise<never> {
     if (typeof errVal === "string") message = errVal;
   }
   const retryAfter = Number(response.headers.get("Retry-After"));
-  throw new ApiError(
+  const error = new ApiError(
     message,
     response.status,
     body,
     Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
   );
+  if (error.errorCode === INTERIM_SETTINGS_INTERLOCK_ERROR_CODE) {
+    signalBackendReloadRequired("settings_interlock_rejected");
+    error.handled = true;
+  }
+  throw error;
+}
+
+export function isHandledApiError(error: unknown): error is ApiError & { handled: true } {
+  return error instanceof ApiError && error.handled;
 }
 
 export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOptions): Promise<T> {
@@ -87,14 +107,47 @@ export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOption
   if (response.status === 204) return undefined as T;
   const text = await response.text();
   if (!text) return undefined as T;
-  return JSON.parse(text) as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError(
+      `Request failed: ${response.status} ${response.statusText}`,
+      response.status,
+      null,
+    );
+  }
+}
+
+/**
+ * Fetches a binary response body (e.g. a zip download) as a Blob. Unlike
+ * fetchJson, no Content-Type is forced on the request and the body is never
+ * parsed as JSON — the caller consumes raw bytes. Non-2xx responses reject
+ * with the same ApiError classification fetchJson uses, so callers get one
+ * error shape to handle regardless of which fetch helper they used.
+ */
+export async function fetchBlob(pathOrUrl: string, options?: ApiRequestOptions): Promise<Blob> {
+  const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
+  const url = resolveUrl(pathOrUrl, baseUrl);
+  const response = await fetch(url, {
+    ...options?.init,
+    cache: options?.cache,
+    credentials: "include",
+    headers: requestHeaders(options?.init?.headers),
+  });
+  if (!response.ok) {
+    if (response.status === 401 && isKandevAuthChallenge(response)) onUnauthorized?.();
+    await throwFromResponse(response);
+  }
+  return response.blob();
 }
 
 // buildRequestHeaders assembles the JSON content-type header plus the
 // interim-settings interlock token on mutating requests.
 function buildRequestHeaders(options?: ApiRequestOptions): Headers {
   const headers = requestHeaders(options?.init?.headers);
-  headers.set("Content-Type", "application/json");
+  const body = options?.init?.body;
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
+  if (!isFormData) headers.set("Content-Type", "application/json");
   if (isMutation(options?.init?.method)) {
     const token = readInterimSettingsInterlockToken();
     if (token) headers.set(interimSettingsInterlockHeader, token);

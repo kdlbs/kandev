@@ -12,7 +12,7 @@ function task(overrides: Partial<Task>): Task {
     title: "Child task",
     description: "",
     state: "TODO",
-    priority: 0,
+    priority: "medium",
     created_at: "2026-07-25T00:00:00Z",
     updated_at: "2026-07-25T00:00:00Z",
     ...overrides,

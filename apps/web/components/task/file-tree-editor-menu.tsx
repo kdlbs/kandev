@@ -19,6 +19,7 @@ import {
   resolveTaskTopbarEditorId,
 } from "@/components/task/editors-menu-availability";
 import { resolveFileTreeEditorTarget, type FileTreeEditorTarget } from "./file-tree-editor-target";
+import { useTranslation } from "react-i18next";
 
 export type FileTreeEditorActions = {
   editors: EditorOption[];
@@ -109,6 +110,7 @@ export function FileTreeEditorProvider({
  * remaining editors when more than one is available.
  */
 export function OpenInEditorMenuItems({ node }: { node: FileTreeNode }) {
+  const { t } = useTranslation();
   const actions = useFileTreeEditorActions();
   if (!actions) return null;
   const { editors, defaultEditorId, openInEditor } = actions;
@@ -123,12 +125,12 @@ export function OpenInEditorMenuItems({ node }: { node: FileTreeNode }) {
         onSelect={() => openInEditor(node, primary.id)}
       >
         <IconCode className="h-3.5 w-3.5" />
-        Open in {primary.name}
+        {t("task:openInEditorNamed", { name: primary.name })}
       </ContextMenuItem>
       {others.length > 0 && (
         <ContextMenuSub>
           <ContextMenuSubTrigger data-testid="file-tree-open-in-other-editor">
-            Open in other editor
+            {t("task:openInOtherEditor")}
           </ContextMenuSubTrigger>
           <ContextMenuSubContent>
             {others.map((editor) => (

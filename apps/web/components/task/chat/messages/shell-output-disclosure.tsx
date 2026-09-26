@@ -4,11 +4,14 @@ import { useState } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
+import { isToolPayloadRemovedError } from "@/lib/utils/tool-payload-retention";
 import { useShellCommandOutput } from "@/hooks/domains/session/use-shell-command-output";
 import type { ShellCommandOutput, ShellCommandOutputSnapshot } from "@/lib/api/domains/session-api";
 import { cn } from "@/lib/utils";
 import { isTerminalToolCallStatus, normalizeToolCallStatus } from "@/lib/utils/tool-call-status";
 import type { ShellExecOutputSummary } from "../types";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type ShellOutputDisclosureProps = {
   sessionId: string;
@@ -19,9 +22,9 @@ type ShellOutputDisclosureProps = {
 
 function formatOutputSize(summary: ShellExecOutputSummary | undefined) {
   const bytes = (summary?.stdout_bytes ?? 0) + (summary?.stderr_bytes ?? 0);
-  if (bytes === 0) return "Output";
-  if (bytes < 1024) return `Output · ${bytes} B`;
-  return `Output · ${(bytes / 1024).toFixed(bytes < 10_240 ? 1 : 0)} KB`;
+  if (bytes === 0) return t("task:output");
+  if (bytes < 1024) return `${t("task:output")} · ${bytes} B`;
+  return `${t("task:output")} · ${(bytes / 1024).toFixed(bytes < 10_240 ? 1 : 0)} KB`;
 }
 
 function OutputTranscript({ output }: { output: ShellCommandOutput }) {
@@ -43,6 +46,7 @@ function OutputTranscript({ output }: { output: ShellCommandOutput }) {
 }
 
 function ResultDetails({ snapshot }: { snapshot: ShellCommandOutputSnapshot }) {
+  const { t } = useTranslation();
   const { output, status } = snapshot;
   const normalizedStatus = normalizeToolCallStatus(status);
   if (!isTerminalToolCallStatus(status) && !output.truncated) return null;
@@ -55,14 +59,23 @@ function ResultDetails({ snapshot }: { snapshot: ShellCommandOutputSnapshot }) {
 
   return (
     <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border/40 pt-2 text-xs text-muted-foreground">
-      {output.truncated && <span>Output truncated</span>}
+      {output.truncated && <span>{t("task:outputTruncated")}</span>}
       {isTerminalToolCallStatus(status) && (
         <span className={cn("font-mono", exitClass)}>
-          {knownExit ? `Exit code ${output.exit_code}` : "Exit code unavailable"}
+          {knownExit
+            ? t("task:exitCodeShell", { exitCode: output.exit_code })
+            : t("task:exitCodeUnavailable")}
         </span>
       )}
     </div>
   );
+}
+
+function emptyOutputLabel(snapshotStatus?: string, messageStatus?: string) {
+  return normalizeToolCallStatus(snapshotStatus) === "running" &&
+    !isTerminalToolCallStatus(messageStatus)
+    ? t("task:noCommandOutputYet")
+    : t("task:noCommandOutput");
 }
 
 function DisclosureContent({
@@ -78,23 +91,23 @@ function DisclosureContent({
   retry: () => void;
   messageStatus?: string;
 }) {
+  const { t } = useTranslation();
+  if (isToolPayloadRemovedError(error)) {
+    return <p className="text-xs text-muted-foreground">{t("task:toolPayloadRemoved")}</p>;
+  }
   const hasTranscript = Boolean(snapshot?.output.stdout || snapshot?.output.stderr);
-  const emptyLabel =
-    normalizeToolCallStatus(snapshot?.status) === "running" &&
-    !isTerminalToolCallStatus(messageStatus)
-      ? "No command output yet."
-      : "No command output.";
+  const emptyLabel = emptyOutputLabel(snapshot?.status, messageStatus);
 
   return (
     <div className="min-w-0 space-y-2 border-l-2 border-border/30 pl-3 pt-1">
       {isLoading && !snapshot && (
-        <p className="text-xs text-muted-foreground">Loading command output...</p>
+        <p className="text-xs text-muted-foreground">{t("task:loadingCommandOutput")}</p>
       )}
       {error && (
         <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-destructive">
-          <span>Command output unavailable.</span>
+          <span>{t("task:commandOutputUnavailable")}</span>
           <Button variant="ghost" size="xs" className="cursor-pointer" onClick={retry}>
-            Retry
+            {t("task:retry")}
           </Button>
         </div>
       )}
@@ -113,6 +126,7 @@ export function ShellOutputDisclosure({
   messageStatus,
   summary,
 }: ShellOutputDisclosureProps) {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const output = useShellCommandOutput({ sessionId, messageId, isOpen, messageStatus });
   const label = formatOutputSize(summary);
@@ -124,12 +138,12 @@ export function ShellOutputDisclosure({
           variant="ghost"
           size="sm"
           className="-ml-2 h-7 max-w-full cursor-pointer gap-1 px-2 text-muted-foreground"
-          aria-label={`${isOpen ? "Hide" : "Show"} command output`}
+          aria-label={isOpen ? t("task:hideCommandOutput") : t("task:showCommandOutput")}
         >
           {isOpen ? <IconChevronDown aria-hidden /> : <IconChevronRight aria-hidden />}
           <span className="truncate">{label}</span>
           {summary?.truncated && (
-            <span className="text-amber-600 dark:text-amber-400">truncated</span>
+            <span className="text-amber-600 dark:text-amber-400">{t("task:truncated")}</span>
           )}
         </Button>
       </CollapsibleTrigger>

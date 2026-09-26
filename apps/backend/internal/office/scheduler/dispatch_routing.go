@@ -14,7 +14,22 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	sqliterepo "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
+	"github.com/kandev/kandev/internal/office/service"
 )
+
+// TaskStarterWithSession optionally returns the id of the agent session
+// a routed launch created, mirroring service.TaskStarterWithSession for
+// the legacy launch path (AC-OFFICE-LOOP-LIVENESS-002.7). A starter that
+// does not implement this falls back to StartTaskWithRoute, and the
+// run's session id stays empty.
+type TaskStarterWithSession interface {
+	StartTaskWithRouteReturningSession(
+		ctx context.Context,
+		taskID, agentProfileID string,
+		launch LaunchContext,
+		route RouteOverride,
+	) (sessionID string, err error)
+}
 
 // RouteAttemptOutcomeLaunched is the in-flight outcome string the
 // dispatcher writes when an attempt is appended. It is overwritten with
@@ -27,6 +42,7 @@ const (
 	RouteAttemptOutcomeSkippedUserAction     = "skipped_user_action"
 	RouteAttemptOutcomeSkippedMissingMapping = "skipped_missing_mapping"
 	RouteAttemptOutcomeMaxAttempts           = "skipped_max_attempts"
+	RouteAttemptOutcomeDeferredCapacity      = "deferred_capacity"
 )
 
 // MaxAttemptsPerRun caps the number of route_attempt rows a single run
@@ -55,11 +71,14 @@ func (ss *SchedulerService) DispatchWithRouting(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance,
 	launch LaunchContext,
 ) (bool, bool, error) {
-	if ss.resolver == nil || ss.taskStarter == nil {
+	if ss.resolver == nil || (ss.taskStarter == nil && ss.runSessionLauncher == nil) {
 		return false, false, nil
 	}
 	if agent == nil || run == nil {
 		return false, false, fmt.Errorf("dispatch: nil run or agent")
+	}
+	if extractRunTaskID(run.Payload) != "" && ss.taskStarter == nil {
+		return false, false, nil
 	}
 	prior, err := ss.repo.ListRouteAttempts(ctx, run.ID)
 	if err != nil {
@@ -81,6 +100,10 @@ func (ss *SchedulerService) DispatchWithRouting(
 		return false, false, fmt.Errorf("dispatch: resolve: %w", err)
 	}
 	if !res.Enabled && len(res.Candidates) == 0 {
+		if res.BlockReason.Status == routing.StatusWaitingForCapacity {
+			_, _, perr := ss.parkRunBlocked(ctx, run, agent.WorkspaceID, res)
+			return false, true, perr
+		}
 		return false, false, nil
 	}
 	if err := ss.persistRoutingDecision(ctx, run, res); err != nil {
@@ -198,6 +221,7 @@ func (ss *SchedulerService) parkRunBlocked(
 			Seq:        seq,
 			ProviderID: string(sk.ProviderID),
 			Tier:       string(res.RequestedTier),
+			TierSource: res.TierSource,
 			Outcome:    skipOutcome(sk.Reason),
 			ErrorCode:  sk.ErrorCode,
 			RawExcerpt: sk.RawExcerpt,
@@ -241,18 +265,20 @@ func (ss *SchedulerService) tryCandidates(
 	agent *models.AgentInstance, res *routing.Resolution,
 	launch LaunchContext, prior []models.RouteAttempt,
 ) (bool, *routing.BlockReason, error) {
-	taskID := extractRunTaskID(run.Payload)
 	var prev *routing.Candidate
 	for i := range res.Candidates {
 		candidate := res.Candidates[i]
 		candidateLaunch := continuationLaunchContext(
 			launch, prior, run.RouteCycleBaselineSeq, candidate,
 		)
-		seq, err := ss.recordAttemptStart(ctx, run, candidate, res.RequestedTier)
+		seq, err := ss.recordAttemptStart(ctx, run, candidate, res.RequestedTier, res.TierSource)
 		if err != nil {
 			return false, nil, err
 		}
-		launchErr := ss.launchCandidate(ctx, taskID, agent.ID, candidate, candidateLaunch)
+		sessionID, launchErr := ss.launchCandidate(ctx, run, agent, candidate, candidateLaunch)
+		if errors.Is(launchErr, service.ErrLaunchDeferredByCapacity) {
+			return ss.handleLaunchDeferred(ctx, run, agent.WorkspaceID, seq)
+		}
 		if launchErr == nil {
 			if prev != nil {
 				// We walked past at least one prior candidate — that's
@@ -265,7 +291,7 @@ func (ss *SchedulerService) tryCandidates(
 			}
 			ss.recordRouteAttempt(agent.WorkspaceID,
 				string(candidate.ProviderID), metricOutcomeSuccess, "")
-			return ss.handleLaunchSuccess(ctx, run, agent, candidate)
+			return ss.handleLaunchSuccess(ctx, run, agent, candidate, sessionID)
 		}
 		// Emit the failure-side route_attempt before classifying. The
 		// outcome label is refined by handleLaunchFailure.
@@ -276,6 +302,18 @@ func (ss *SchedulerService) tryCandidates(
 		}
 		ss.recordRouteAttempt(agent.WorkspaceID,
 			string(candidate.ProviderID), outcome, string(classified.Code))
+		if officeShortRetryAllowed(classified) {
+			retryCount, countErr := ss.shortRouteRetryCount(ctx, run, candidate)
+			if countErr != nil {
+				return false, nil, countErr
+			}
+			if retryCount < officeShortRetryMaxAttempts {
+				if applyErr := ss.applyShortRouteRetry(ctx, run, agent, candidate, classified, retryCount+1); applyErr != nil {
+					return false, nil, applyErr
+				}
+				return false, nil, nil
+			}
+		}
 		fatal, err := ss.handleLaunchFailure(ctx, run, agent, candidate, seq, launchErr)
 		if err != nil {
 			return false, nil, err
@@ -336,10 +374,14 @@ func latestFailedExecutionProfile(
 }
 
 // recordAttemptStart increments the attempt sequence and appends the
-// in-flight attempt row with outcome=launched.
+// in-flight attempt row with outcome=launched. tierSource is the
+// resolution's precedence level (routing.Resolution.TierSource) —
+// threaded in from the caller, which has the *routing.Resolution in
+// scope, rather than re-derived here (AC-20d names effectiveTier as
+// the sole producer).
 func (ss *SchedulerService) recordAttemptStart(
 	ctx context.Context, run *models.Run,
-	candidate routing.Candidate, tier routing.Tier,
+	candidate routing.Candidate, tier routing.Tier, tierSource string,
 ) (int, error) {
 	seq, err := ss.repo.IncrementRouteAttemptSeq(ctx, run.ID)
 	if err != nil {
@@ -353,6 +395,7 @@ func (ss *SchedulerService) recordAttemptStart(
 		ProviderID:         string(candidate.ProviderID),
 		Model:              candidate.Model,
 		Tier:               string(tier),
+		TierSource:         tierSource,
 		Outcome:            RouteAttemptOutcomeLaunched,
 		StartedAt:          time.Now().UTC(),
 	}
@@ -378,22 +421,40 @@ func (ss *SchedulerService) recordAttemptStart(
 // everything except provider/model selection. Without this, the routed
 // path would fall back to task.Description and lose role framing.
 func (ss *SchedulerService) launchCandidate(
-	ctx context.Context, taskID, agentID string,
+	ctx context.Context, run *models.Run, agent *models.AgentInstance,
 	candidate routing.Candidate, launch LaunchContext,
-) error {
+) (string, error) {
+	taskID := extractRunTaskID(run.Payload)
+	agentID := agent.ID
 	if taskID == "" {
-		return fmt.Errorf("dispatch: empty task id in run payload")
+		if ss.runSessionLauncher == nil {
+			return "", fmt.Errorf("dispatch: taskless run-session launcher is not configured")
+		}
+		route := &RouteOverride{
+			ExecutionProfileID: candidate.ExecutionProfileID,
+			ProviderID:         string(candidate.ProviderID),
+			Model:              candidate.Model,
+			Tier:               string(candidate.Tier),
+			Mode:               candidate.Mode,
+			Flags:              candidate.Flags,
+			Env:                candidate.Env,
+		}
+		result, err := ss.runSessionLauncher.StartRunSession(ctx, run, agent, launch, route)
+		if err != nil {
+			return "", err
+		}
+		return result.SessionID, nil
 	}
 	if _, ok := routingerr.InjectedCode(string(candidate.ProviderID)); ok {
 		// Synthesize a launch failure via Classify so injection is
 		// honoured for deterministic E2E specs. Classify short-circuits
 		// to the injected code at the head of its decision chain.
-		return routingerr.Classify(routingerr.Input{
+		return "", routingerr.Classify(routingerr.Input{
 			Phase:      routingerr.PhaseProcessStart,
 			ProviderID: string(candidate.ProviderID),
 		})
 	}
-	return ss.taskStarter.StartTaskWithRoute(ctx, taskID, agentID, launch, RouteOverride{
+	route := RouteOverride{
 		ExecutionProfileID: candidate.ExecutionProfileID,
 		ProviderID:         string(candidate.ProviderID),
 		Model:              candidate.Model,
@@ -401,22 +462,113 @@ func (ss *SchedulerService) launchCandidate(
 		Mode:               candidate.Mode,
 		Flags:              candidate.Flags,
 		Env:                candidate.Env,
-	})
+	}
+	if starter, ok := ss.taskStarter.(TaskStarterWithSession); ok {
+		return starter.StartTaskWithRouteReturningSession(ctx, taskID, agentID, launch, route)
+	}
+	return "", ss.taskStarter.StartTaskWithRoute(ctx, taskID, agentID, launch, route)
 }
 
-// handleLaunchSuccess records the resolved provider/model on the run
-// row and flips every health scope this candidate touched back to
-// healthy. Returns (launched=true, nil, nil) on success.
+// handleLaunchSuccess persists the launched session id, counts the
+// launch, records the resolved provider/model on the run row, and
+// flips every health scope this candidate touched back to healthy.
+// Always returns (launched=true, nil, nil): by the time this is called
+// launchCandidate has already started a real agent session, so nothing
+// downstream may report the launch as failed or leave it uncounted
+// (AC-002.7, AC-003.9). The session id and the launch counter are
+// persisted first and unconditionally — they are the correlation this
+// capability exists to preserve — before the best-effort
+// resolved-route snapshot, whose own failure (Review round 3, R3-2)
+// must not undo them or cause a caller to retry-launch an agent that
+// is already running.
 func (ss *SchedulerService) handleLaunchSuccess(
 	ctx context.Context, run *models.Run,
-	agent *models.AgentInstance, candidate routing.Candidate,
+	agent *models.AgentInstance, candidate routing.Candidate, sessionID string,
 ) (bool, *routing.BlockReason, error) {
+	service.IncLoopLaunch(agent.WorkspaceID)
+	ss.persistLaunchedSession(ctx, run.ID, agent.WorkspaceID, sessionID)
 	if err := ss.repo.SetRunResolvedRoute(ctx,
 		run.ID, candidate.ExecutionProfileID, string(candidate.ProviderID), candidate.Model); err != nil {
-		return false, nil, err
+		ss.logger.Warn("persist resolved route failed",
+			zap.String("run_id", run.ID), zap.String("provider_id", string(candidate.ProviderID)), zap.Error(err))
 	}
 	ss.markHealthScopes(ctx, agent.WorkspaceID, candidate)
 	return true, nil, nil
+}
+
+// handleLaunchDeferred is tryCandidates' disposition when the task starter
+// reports ErrLaunchDeferredByCapacity: the orchestrator's own session
+// ceiling already persisted a replay record for this exact launch and owns
+// retrying it, so this attempt must not be counted as launched (no session
+// was created) and this run must not be retried by the scheduler's own
+// routing/park wake-up loop — a second automatic attempt here would race
+// the ceiling's own replay into a double launch. Parking under
+// blocked_provider_action_required (the same status parkRunMaxAttempts
+// uses) keeps LiftParkedRuns from ever picking the run back up on its own.
+// There is no reconciliation path back from the orchestrator's ceiling
+// state today (REQ-OFFICE-LAUNCH-SAFETY-003/REQ-OFFICE-BACKPRESSURE-003
+// require a durable operator-visible record here, not a lift mechanism),
+// so the run stays parked until an operator finds it and clears the
+// routing block by hand.
+func (ss *SchedulerService) handleLaunchDeferred(
+	ctx context.Context, run *models.Run, workspaceID string, seq int,
+) (bool, *routing.BlockReason, error) {
+	now := time.Now().UTC()
+	attempt := models.RouteAttempt{
+		RunID:      run.ID,
+		Seq:        seq,
+		Outcome:    RouteAttemptOutcomeDeferredCapacity,
+		FinishedAt: &now,
+	}
+	if err := ss.repo.UpdateRouteAttemptOutcome(ctx, &attempt); err != nil {
+		return false, nil, err
+	}
+	ss.svc.AppendRunEvent(ctx, run.ID, "adapter.invoke", "info", map[string]interface{}{
+		"phase":  "deferred",
+		"reason": "session_ceiling",
+	})
+	hydrated := ss.hydrateAttempt(ctx, run.ID, seq, attempt)
+	ss.publishRouteAttemptAppended(ctx, run.ID, hydrated)
+	if err := ss.repo.ParkRunForProviderCapacity(ctx,
+		run.ID, routing.StatusBlockedActionRequired, time.Time{}); err != nil {
+		return false, nil, err
+	}
+	ss.logger.Info("run parked: launch deferred by session ceiling",
+		zap.String("run_id", run.ID))
+	ss.recordRouteParked(workspaceID, run.ID, routing.StatusBlockedActionRequired)
+	return false, &routing.BlockReason{Status: routing.StatusBlockedActionRequired}, nil
+}
+
+// persistLaunchedSession stores the session id a successful launch
+// produced (AC-OFFICE-LOOP-LIVENESS-002.7). An empty id is counted as a
+// without-session launch (AC-002.8) rather than attempted as a write.
+// A write failure does not fail the launch — the agent is already
+// running — and is counted separately from the without-session case
+// (AC-002.11) so the two causes of an identical "processed, no
+// session" row stay distinguishable in the counters. A non-empty id
+// whose write affects zero rows (e.g. the run row vanished between
+// claim and this write) is the same AC-002.11 case as a hard write
+// error — a real session id that failed to persist — not the AC-002.8
+// case, so it counts under the same persist-failed counter.
+func (ss *SchedulerService) persistLaunchedSession(
+	ctx context.Context, runID, workspaceID, sessionID string,
+) {
+	if sessionID == "" {
+		service.IncLoopLaunchWithoutSession(workspaceID)
+		return
+	}
+	wrote, err := ss.repo.SetRunSessionID(ctx, runID, sessionID)
+	if err != nil {
+		ss.logger.Warn("persist launched session id failed",
+			zap.String("run_id", runID), zap.String("session_id", sessionID), zap.Error(err))
+		service.IncLoopSessionPersistFailed(workspaceID)
+		return
+	}
+	if !wrote {
+		ss.logger.Warn("persist launched session id matched no row",
+			zap.String("run_id", runID), zap.String("session_id", sessionID))
+		service.IncLoopSessionPersistFailed(workspaceID)
+	}
 }
 
 // markHealthScopes marks the provider, tier, and model scopes healthy

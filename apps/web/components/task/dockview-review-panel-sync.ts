@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import type { AddPanelOptions, DockviewApi } from "dockview-react";
 import { prTaskKey } from "@/components/github/pr-utils";
 import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
@@ -10,6 +10,7 @@ import { t } from "@/lib/i18n";
 import { markPRPanelOffered, wasPRPanelOffered } from "@/lib/local-storage";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import type { ReviewItemSummary } from "@/lib/plugins/types";
 import {
   CENTER_GROUP,
   isCenterCandidateGroupId,
@@ -17,35 +18,141 @@ import {
 } from "@/lib/state/layout-manager";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
+import { useNormalizedTaskReviews } from "./review-panel-provider";
 
 export type CanonicalReviewParams = {
+  providerId: string | undefined;
   provider: "github" | "gitlab" | undefined;
+  reviewKey: string | undefined;
+  connectionScope: string | undefined;
+  repositoryId: string | undefined;
+  changeRequestNumber: string | number | undefined;
   prKey: string | undefined;
   mrKey: string | undefined;
 };
 
-export function resolveCanonicalReviewParams(
+export type CanonicalReviewPanelState = {
+  kind: "multiple" | "github" | "gitlab" | "registered" | "empty";
+  params: CanonicalReviewParams;
+  title: string;
+};
+
+export function resolveCanonicalReviewPanelState(
   prs: TaskPR[] | undefined,
   mrs: TaskMR[] | undefined,
-): CanonicalReviewParams {
+  registeredReviews: readonly ReviewItemSummary[] = [],
+): CanonicalReviewPanelState {
+  const linkedProviderIds = new Set<string>();
+  if (prs?.length) linkedProviderIds.add("github");
+  if (mrs?.length) linkedProviderIds.add("gitlab");
+  registeredReviews.forEach((review) => linkedProviderIds.add(review.providerId));
+  if (linkedProviderIds.size > 1) {
+    return {
+      kind: "multiple",
+      params: {
+        providerId: undefined,
+        provider: undefined,
+        reviewKey: undefined,
+        connectionScope: undefined,
+        repositoryId: undefined,
+        changeRequestNumber: undefined,
+        prKey: undefined,
+        mrKey: undefined,
+      },
+      title: t("integrations:reviews", { summary: "" }),
+    };
+  }
+
   const pr = getPrimaryTaskPR(prs);
-  if (pr) return { provider: "github", prKey: prTaskKey(pr), mrKey: undefined };
+  if (pr) {
+    const key = prTaskKey(pr);
+    return {
+      kind: "github",
+      params: {
+        providerId: "github",
+        provider: "github",
+        reviewKey: key,
+        connectionScope: reviewConnectionScope(pr.pr_url, "github"),
+        repositoryId: pr.repository_id || `${pr.owner}/${pr.repo}`,
+        changeRequestNumber: pr.pr_number,
+        prKey: key,
+        mrKey: undefined,
+      },
+      title: t("task:pullRequest2"),
+    };
+  }
 
   const mr = mrs?.[0];
-  if (mr) return { provider: "gitlab", prKey: undefined, mrKey: mrTaskKey(mr) };
+  if (mr) {
+    const key = mrTaskKey(mr);
+    return {
+      kind: "gitlab",
+      params: {
+        providerId: "gitlab",
+        provider: "gitlab",
+        reviewKey: key,
+        connectionScope: mr.host || reviewConnectionScope(mr.mr_url, "gitlab"),
+        repositoryId: mr.repository_id || mr.project_path,
+        changeRequestNumber: mr.mr_iid,
+        prKey: undefined,
+        mrKey: key,
+      },
+      title: t("task:mergeRequestLabel"),
+    };
+  }
 
-  return { provider: undefined, prKey: undefined, mrKey: undefined };
+  const registered = registeredReviews.find(
+    (review) => review.providerId !== "github" && review.providerId !== "gitlab",
+  );
+  if (registered) {
+    return {
+      kind: "registered",
+      params: {
+        providerId: registered.providerId,
+        provider: undefined,
+        reviewKey: registered.reviewKey,
+        connectionScope: registered.connectionScope,
+        repositoryId: registered.repositoryId,
+        changeRequestNumber: registered.changeRequestNumber,
+        prKey: undefined,
+        mrKey: undefined,
+      },
+      title: registered.title,
+    };
+  }
+
+  return {
+    kind: "empty",
+    params: {
+      providerId: undefined,
+      provider: undefined,
+      reviewKey: undefined,
+      connectionScope: undefined,
+      repositoryId: undefined,
+      changeRequestNumber: undefined,
+      prKey: undefined,
+      mrKey: undefined,
+    },
+    title: t("common:prDetails"),
+  };
 }
+
+const CANONICAL_REVIEW_PARAM_KEYS = [
+  "providerId",
+  "provider",
+  "reviewKey",
+  "connectionScope",
+  "repositoryId",
+  "changeRequestNumber",
+  "prKey",
+  "mrKey",
+] as const satisfies readonly (keyof CanonicalReviewParams)[];
 
 function hasSameReviewParams(
   current: Record<string, unknown> | undefined,
   next: CanonicalReviewParams,
 ): boolean {
-  return (
-    current?.provider === next.provider &&
-    current?.prKey === next.prKey &&
-    current?.mrKey === next.mrKey
-  );
+  return CANONICAL_REVIEW_PARAM_KEYS.every((key) => current?.[key] === next[key]);
 }
 
 export type ConditionalReviewPanelAction = "add" | "remove" | "sync" | "none";
@@ -122,7 +229,7 @@ function resolveReviewPanelTargetPosition(
 
 function addConditionalReviewPanel(
   api: DockviewApi,
-  next: CanonicalReviewParams,
+  next: CanonicalReviewPanelState,
   options: ConditionalReviewPanelOptions,
 ): void {
   focusOrAddPanel(
@@ -130,9 +237,9 @@ function addConditionalReviewPanel(
     {
       id: "pr-detail",
       component: "pr-detail",
-      title: t("common:prDetails"),
+      title: next.title || t("common:prDetails"),
       position: resolveReviewPanelTargetPosition(api, options),
-      params: next,
+      params: next.params,
     },
     true,
   );
@@ -141,22 +248,29 @@ function addConditionalReviewPanel(
 
 function syncExistingReviewPanel(
   panel: NonNullable<ReturnType<DockviewApi["getPanel"]>>,
-  next: CanonicalReviewParams,
+  next: CanonicalReviewPanelState,
   options: ConditionalReviewPanelOptions,
 ): boolean {
-  if (next.provider) markPRPanelOffered(options.sessionId);
-  if (hasSameReviewParams(panel.params, next)) return false;
-  panel.api.updateParameters(next);
+  if (hasCanonicalReview(next)) markPRPanelOffered(options.sessionId);
+  const paramsChanged = !hasSameReviewParams(panel.params, next.params);
+  const titleChanged = panel.api.title !== next.title;
+  if (!paramsChanged && !titleChanged) return false;
+  if (paramsChanged) panel.api.updateParameters(next.params);
+  if (titleChanged) panel.api.setTitle(next.title);
   return true;
+}
+
+function hasCanonicalReview(next: CanonicalReviewPanelState): boolean {
+  return next.kind !== "empty";
 }
 
 function resolveReviewPanelAction(
   panel: ReturnType<DockviewApi["getPanel"]>,
-  next: CanonicalReviewParams,
+  next: CanonicalReviewPanelState,
   options: ConditionalReviewPanelOptions,
 ): ConditionalReviewPanelAction {
   return resolveConditionalReviewPanelAction({
-    hasReview: !!next.provider,
+    hasReview: hasCanonicalReview(next),
     panelExists: !!panel,
     reviewsLoaded: options.reviewsLoaded,
     isRestoringLayout: options.isRestoringLayout,
@@ -174,7 +288,7 @@ function resolveReviewPanelAction(
  */
 export function syncCanonicalReviewPanel(
   api: DockviewApi,
-  next: CanonicalReviewParams,
+  next: CanonicalReviewPanelState,
   options: ConditionalReviewPanelOptions,
 ): boolean {
   const panel = api.getPanel("pr-detail");
@@ -193,8 +307,22 @@ export function syncCanonicalReviewPanel(
   return action === "sync" && panel ? syncExistingReviewPanel(panel, next, options) : false;
 }
 
-function reviewIdentity(params: CanonicalReviewParams): string {
-  return `${params.provider ?? "none"}:${params.prKey ?? ""}:${params.mrKey ?? ""}`;
+function reviewIdentity(state: CanonicalReviewPanelState): string {
+  return [
+    state.kind,
+    state.params.providerId ?? "none",
+    state.params.connectionScope ?? "",
+    state.params.repositoryId ?? "",
+    String(state.params.changeRequestNumber ?? ""),
+  ].join(":");
+}
+
+function reviewConnectionScope(url: string, fallback: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return fallback;
+  }
 }
 
 /** Keep an existing canonical PR Details panel in sync with the active task. */
@@ -204,6 +332,12 @@ export function useSyncReviewPanel() {
   const { loaded: githubReviewsLoaded } = useTaskPR(taskId);
   const sessionId = useAppStore((state) => state.tasks.activeSessionId);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const reviews = useNormalizedTaskReviews(taskId);
+  const registeredReviews = useMemo(
+    () =>
+      reviews.filter((review) => review.providerId !== "github" && review.providerId !== "gitlab"),
+    [reviews],
+  );
   const gitlabReviewsLoaded = useAppStore((state) =>
     workspaceId ? Object.hasOwn(state.taskMRs.byWorkspaceId, workspaceId) : false,
   );
@@ -211,9 +345,10 @@ export function useSyncReviewPanel() {
   const identity = useAppStore((state) => {
     if (!taskId || !workspaceId) return "none";
     return reviewIdentity(
-      resolveCanonicalReviewParams(
+      resolveCanonicalReviewPanelState(
         state.taskPRs.byTaskId[taskId],
         state.taskMRs.byWorkspaceId[workspaceId]?.[taskId],
+        registeredReviews,
       ),
     );
   });
@@ -242,9 +377,10 @@ export function useSyncReviewPanel() {
         const dockview = useDockviewStore.getState();
         syncCanonicalReviewPanel(
           api,
-          resolveCanonicalReviewParams(
+          resolveCanonicalReviewPanelState(
             live.taskPRs.byTaskId[taskId],
             live.taskMRs.byWorkspaceId[workspaceId]?.[taskId],
+            registeredReviews,
           ),
           {
             sessionId,
@@ -271,6 +407,7 @@ export function useSyncReviewPanel() {
     isMaximized,
     isRestoringLayout,
     reviewsLoaded,
+    registeredReviews,
     sessionId,
     taskId,
     userDefaultLayout,

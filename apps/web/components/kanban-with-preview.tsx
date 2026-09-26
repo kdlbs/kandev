@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable max-lines -- board preview owns the responsive board and desktop preview surface. */
+
 import {
   useCallback,
   useEffect,
@@ -22,10 +24,16 @@ import type { KanbanState } from "@/lib/state/slices";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
 import { linkToTask } from "@/lib/links";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { taskRemovalCoversTask } from "@/lib/state/task-removal";
+import {
+  usePreviewWorkflowStepMove,
+  type PreviewStepMove,
+} from "@/hooks/domains/kanban/use-preview-workflow-step-move";
 import {
   useEnsureTaskSession,
   type UseEnsureTaskSessionResult,
 } from "@/hooks/domains/session/use-ensure-task-session";
+import { useTranslation } from "react-i18next";
 
 type KanbanWithPreviewProps = {
   initialTaskId?: string;
@@ -86,17 +94,44 @@ function useUrlSync(selectedTaskId: string | null, selectedTaskSessionId: string
   }, [selectedTaskId, selectedTaskSessionId]);
 }
 
-function useEscapeKey(isOpen: boolean, close: () => void) {
+// The step disclosure closes itself on Escape via its own document-level
+// Radix handling; without this guard the preview's window-level listener
+// would also fire on the same keypress and close the whole panel instead of
+// leaving the first Escape to the disclosure alone.
+function useEscapeKey(isOpen: boolean, close: () => void, isDisclosureOpen: () => boolean) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
+      // `e.defaultPrevented` is the authoritative signal that an open actions
+      // menu already consumed this exact keypress (its `onEscapeKeyDown`
+      // calls `preventDefault()` during document-capture, which always runs
+      // before this window-bubble listener sees the same event). Do not gate
+      // on menu-open state read at listener-fire time instead: Radix's
+      // Escape handling can synchronously re-render and re-attach this very
+      // listener mid-dispatch, so that state can already read "closed" for
+      // the SAME keypress that closed it (AC-TASKS-TASK-ACTIONS-MENU-001.11).
+      if (e.key === "Escape" && isOpen && !isDisclosureOpen() && !e.defaultPrevented) {
         close();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, close]);
+  }, [isOpen, close, isDisclosureOpen]);
+}
+
+/** Mirrors the previewed task id into the store so kanban cards can highlight
+ * the currently-previewed card without prop-drilling through swimlanes. */
+function useMirrorPreviewedTaskId(
+  isOpen: boolean,
+  selectedTaskId: string | null | undefined,
+  setKanbanPreviewedTaskId: (taskId: string | null) => void,
+) {
+  useEffect(() => {
+    setKanbanPreviewedTaskId(isOpen ? (selectedTaskId ?? null) : null);
+  }, [isOpen, selectedTaskId, setKanbanPreviewedTaskId]);
+  useEffect(() => {
+    return () => setKanbanPreviewedTaskId(null);
+  }, [setKanbanPreviewedTaskId]);
 }
 
 function useResizeHandler(
@@ -167,15 +202,37 @@ function useSelectedTask(
       kanbanTasks.find((t: KanbanState["tasks"][number]) => t.id === selectedTaskId) ??
       findTaskInSnapshots(selectedTaskId, snapshots);
     if (!task) return null;
+    // Boot-hydrated snapshot tasks (backend `mapKanbanTaskState` entries) do
+    // not carry workflowId, and useAllWorkflowSnapshots keeps those snapshots
+    // as already-loaded instead of normalizing them. Derive the workflow id
+    // from the snapshot key so the prevent-auto-start gate resolves the
+    // task's OWN workflow steps — otherwise a non-active-workflow task would
+    // be checked against the active workflow's steps and could auto-start a
+    // terminal-step task despite the preference.
+    let workflowId = task.workflowId;
+    if (!workflowId) {
+      for (const [snapshotWorkflowId, snapshot] of Object.entries(snapshots)) {
+        if (snapshot.tasks.some((t) => t.id === selectedTaskId)) {
+          workflowId = snapshotWorkflowId;
+          break;
+        }
+      }
+    }
     return {
       id: task.id,
       title: task.title,
       workflowStepId: task.workflowStepId,
+      workflowId,
       state: task.state,
+      isArchived: task.isArchived,
       description: task.description,
       position: task.position,
       repositoryId: task.repositoryId,
+      repositories: task.repositories,
       primarySessionId: task.primarySessionId,
+      parentTaskId: task.parentTaskId,
+      primaryExecutorType: task.primaryExecutorType,
+      workspaceMode: task.workspaceMode,
     };
   }, [selectedTaskId, kanbanTasks, snapshots]);
 }
@@ -223,23 +280,142 @@ function useCloseMissingSelectedTask(params: {
   ]);
 }
 
+function usePreviewRemovalState(
+  selectedTaskId: string | null | undefined,
+  isOpen: boolean,
+): { previewIsOpen: boolean; previewTaskId: string | null | undefined } {
+  const isRemovingSelectedTask = useAppStore((state) =>
+    selectedTaskId ? taskRemovalCoversTask(state.taskRemoval, selectedTaskId) : false,
+  );
+  const previewIsOpen = isOpen && !isRemovingSelectedTask;
+  const previewTaskId = isRemovingSelectedTask ? null : selectedTaskId;
+
+  return { previewIsOpen, previewTaskId };
+}
+
+function usePreviewTaskToggle(
+  previewIsOpen: boolean,
+  previewTaskId: string | null | undefined,
+  open: (taskId: string) => void,
+  close: () => void,
+): (task: Task) => void {
+  return useCallback(
+    (task: Task) => {
+      if (previewIsOpen && previewTaskId === task.id) close();
+      else open(task.id);
+    },
+    [previewIsOpen, previewTaskId, open, close],
+  );
+}
+
 function useSyncSelectedTaskActivity(params: {
   isOpen: boolean;
   selectedTaskId: string | null | undefined;
   activeSessionId: string | null;
   setActiveSession: (taskId: string, sessionId: string) => void;
+  setActiveSessionAuto: (taskId: string, sessionId: string) => void;
+  workflowFocusRequestActive: boolean;
   setActiveTask: (taskId: string) => void;
 }) {
-  const { isOpen, selectedTaskId, activeSessionId, setActiveSession, setActiveTask } = params;
+  const {
+    isOpen,
+    selectedTaskId,
+    activeSessionId,
+    setActiveSession,
+    setActiveSessionAuto,
+    workflowFocusRequestActive,
+    setActiveTask,
+  } = params;
 
   useEffect(() => {
     if (!isOpen || !selectedTaskId) return;
     if (activeSessionId) {
-      setActiveSession(selectedTaskId, activeSessionId);
+      if (workflowFocusRequestActive) {
+        setActiveSessionAuto(selectedTaskId, activeSessionId);
+      } else {
+        setActiveSession(selectedTaskId, activeSessionId);
+      }
     } else {
       setActiveTask(selectedTaskId);
     }
-  }, [activeSessionId, isOpen, selectedTaskId, setActiveSession, setActiveTask]);
+  }, [
+    activeSessionId,
+    isOpen,
+    selectedTaskId,
+    setActiveSession,
+    setActiveSessionAuto,
+    workflowFocusRequestActive,
+    setActiveTask,
+  ]);
+}
+
+function usePreviewSessionFocus({
+  previewIsOpen,
+  previewTaskId,
+  selectedTask,
+  selectedTaskSessionId,
+  userSelectedSessionId,
+  setUserSelectedSessionId,
+}: {
+  previewIsOpen: boolean;
+  previewTaskId: string | null | undefined;
+  selectedTask: Task | null;
+  selectedTaskSessionId: string | null;
+  userSelectedSessionId: string | null;
+  setUserSelectedSessionId: (sessionId: string | null) => void;
+}) {
+  const setActiveTask = useAppStore((state) => state.setActiveTask);
+  const setActiveSession = useAppStore((state) => state.setActiveSession);
+  const setActiveSessionAuto = useAppStore((state) => state.setActiveSessionAuto);
+  const workflowFocusRequest = useAppStore((state) => state.workflowSessionFocus.request);
+  const acknowledgeWorkflowSessionFocus = useAppStore(
+    (state) => state.acknowledgeWorkflowSessionFocus,
+  );
+  let activeSessionId: string | null = null;
+  if (previewTaskId) {
+    if (workflowFocusRequest?.taskId === previewTaskId) {
+      activeSessionId = workflowFocusRequest.sessionId;
+    } else {
+      activeSessionId =
+        userSelectedSessionId ?? selectedTask?.primarySessionId ?? selectedTaskSessionId;
+    }
+  }
+
+  const handleSessionChange = useCallback(
+    (sessionId: string | null) => {
+      setUserSelectedSessionId(sessionId);
+      if (previewTaskId && sessionId) setActiveSession(previewTaskId, sessionId);
+    },
+    [previewTaskId, setActiveSession, setUserSelectedSessionId],
+  );
+
+  useEffect(() => {
+    if (!previewIsOpen || !previewTaskId || workflowFocusRequest?.taskId !== previewTaskId) {
+      return;
+    }
+    setUserSelectedSessionId(null);
+    setActiveSessionAuto(previewTaskId, workflowFocusRequest.sessionId);
+    acknowledgeWorkflowSessionFocus(workflowFocusRequest.requestId);
+  }, [
+    acknowledgeWorkflowSessionFocus,
+    previewIsOpen,
+    previewTaskId,
+    setActiveSessionAuto,
+    setUserSelectedSessionId,
+    workflowFocusRequest,
+  ]);
+
+  useSyncSelectedTaskActivity({
+    isOpen: previewIsOpen,
+    selectedTaskId: previewTaskId,
+    activeSessionId,
+    setActiveSession,
+    setActiveSessionAuto,
+    workflowFocusRequestActive: workflowFocusRequest?.taskId === previewTaskId,
+    setActiveTask,
+  });
+
+  return { activeSessionId, handleSessionChange };
 }
 
 export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWithPreviewProps) {
@@ -251,8 +427,6 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
   const kanbanIsLoading = useAppStore((state) => state.kanban.isLoading ?? false);
   const kanbanMultiSnapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const setActiveTask = useAppStore((state) => state.setActiveTask);
-  const setActiveSession = useAppStore((state) => state.setActiveSession);
   const setKanbanPreviewedTaskId = useAppStore((state) => state.setKanbanPreviewedTaskId);
   const hasLoadedTaskSources = hasLoadedKanbanTaskSources({
     activeWorkflowId: kanbanWorkflowId,
@@ -267,18 +441,13 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
       },
     });
 
-  // Mirror the previewed task id into the store so kanban cards can highlight
-  // the currently-previewed card without prop-drilling through swimlanes.
-  useEffect(() => {
-    setKanbanPreviewedTaskId(isOpen ? (selectedTaskId ?? null) : null);
-  }, [isOpen, selectedTaskId, setKanbanPreviewedTaskId]);
-  useEffect(() => {
-    return () => setKanbanPreviewedTaskId(null);
-  }, [setKanbanPreviewedTaskId]);
+  const { previewIsOpen, previewTaskId } = usePreviewRemovalState(selectedTaskId, isOpen);
+
+  useMirrorPreviewedTaskId(previewIsOpen, previewTaskId, setKanbanPreviewedTaskId);
 
   // Use custom hooks for layout and session management
-  const { containerRef, shouldFloat, kanbanWidth } = useKanbanLayout(isOpen, previewWidthPx);
-  const { sessionId: selectedTaskSessionId } = useTaskSession(selectedTaskId ?? null);
+  const { containerRef, shouldFloat, kanbanWidth } = useKanbanLayout(previewIsOpen, previewWidthPx);
+  const { sessionId: selectedTaskSessionId } = useTaskSession(previewTaskId ?? null);
 
   // User-selected tab overrides the default primary session pick.
   // Reset when the selected task changes.
@@ -287,10 +456,17 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
     initialSessionId ?? null,
   );
 
-  // Track resize state
   const isResizingRef = useRef(false);
 
+  // Gates the preview's own Escape-to-close so a first Escape only closes an
+  // open actions menu (AC-TASKS-TASK-ACTIONS-MENU-001.11): this reads the
+  // pre-keypress state, since the window `keydown` listener below runs after
+  // Radix's own Escape handling has requested the menu close for this same
+  // keypress but before that state update has re-rendered.
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+
   const selectedTask = useSelectedTask(selectedTaskId, kanbanTasks, kanbanMultiSnapshots);
+  const previewStepMove = usePreviewWorkflowStepMove(selectedTaskId, selectedTask);
 
   useCloseMissingSelectedTask({
     isOpen,
@@ -308,7 +484,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   // also used by launch flows that intentionally create a specific session
   // after the page is open.
   const ensureSession = useEnsureTaskSession(selectedTask, {
-    enabled: isOpen && selectedTaskId !== initialTaskId,
+    enabled: previewIsOpen && previewTaskId !== initialTaskId,
   });
 
   const handleNavigateToTask = useCallback(
@@ -318,32 +494,20 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
     [router],
   );
 
-  const activeSessionId = selectedTaskId
-    ? (userSelectedSessionId ?? selectedTask?.primarySessionId ?? selectedTaskSessionId)
-    : null;
-
-  useSyncSelectedTaskActivity({
-    isOpen,
-    selectedTaskId,
-    activeSessionId,
-    setActiveSession,
-    setActiveTask,
+  const { activeSessionId, handleSessionChange } = usePreviewSessionFocus({
+    previewIsOpen,
+    previewTaskId,
+    selectedTask,
+    selectedTaskSessionId,
+    userSelectedSessionId,
+    setUserSelectedSessionId,
   });
 
-  useUrlSync(selectedTaskId ?? null, activeSessionId ?? null);
+  useUrlSync(previewTaskId ?? null, previewIsOpen ? (activeSessionId ?? null) : null);
 
-  const handlePreviewTaskWithData = useCallback(
-    (task: Task) => {
-      if (isOpen && selectedTaskId === task.id) {
-        close();
-      } else {
-        open(task.id);
-      }
-    },
-    [isOpen, selectedTaskId, open, close],
-  );
+  const handlePreviewTaskWithData = usePreviewTaskToggle(previewIsOpen, previewTaskId, open, close);
 
-  useEscapeKey(isOpen, close);
+  useEscapeKey(previewIsOpen && !actionsMenuOpen, close, previewStepMove.isDisclosureOpen);
 
   const handleResizeMouseDown = useResizeHandler(isResizingRef, previewWidthPx, updatePreviewWidth);
 
@@ -362,15 +526,17 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
       shouldFloat={shouldFloat}
       kanbanWidth={kanbanWidth}
       previewWidthPx={previewWidthPx}
-      isOpen={isOpen}
-      selectedTask={selectedTask}
-      activeSessionId={activeSessionId}
+      isOpen={previewIsOpen}
+      selectedTask={previewIsOpen ? selectedTask : null}
+      activeSessionId={previewIsOpen ? activeSessionId : null}
       ensureSession={ensureSession}
+      stepMove={previewStepMove}
       onPreviewTask={handlePreviewTaskWithData}
       onNavigateToTask={handleNavigateToTask}
       onClose={close}
-      onSessionChange={setUserSelectedSessionId}
+      onSessionChange={handleSessionChange}
       onResizeMouseDown={handleResizeMouseDown}
+      onActionsMenuOpenChange={setActionsMenuOpen}
     />
   );
 }
@@ -406,28 +572,50 @@ function ResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => v
 type PreviewLayoutProps = {
   kanbanWidth: number;
   previewWidthPx: number;
+  isOpen: boolean;
   selectedTask: Task | null;
   activeSessionId: string | null;
   ensureSession: UseEnsureTaskSessionResult;
+  stepMove: PreviewStepMove;
   onPreviewTask: (task: Task) => void;
   onNavigateToTask: (task: Task) => void;
   onClose: () => void;
   onSessionChange: (sessionId: string | null) => void;
   onResizeMouseDown: (e: React.MouseEvent) => void;
+  onActionsMenuOpenChange: (open: boolean) => void;
 };
+
+function previewPanelStepProps(stepMove: PreviewStepMove) {
+  return {
+    workflowSteps: stepMove.workflowSteps,
+    currentStepId: stepMove.currentStepId,
+    taskWorkflowId: stepMove.taskWorkflowId,
+    isArchived: stepMove.isArchived,
+    movingToStepId: stepMove.movingToStepId,
+    progressByStepId: stepMove.progressByStepId,
+    agentLabelsByProfileId: stepMove.agentLabelsByProfileId,
+    onMoveStep: stepMove.handleMove,
+    onDisclosureOpenChange: stepMove.handleDisclosureOpenChange,
+    moveError: stepMove.moveError,
+  };
+}
 
 function FloatingPreviewLayout({
   kanbanWidth,
   previewWidthPx,
+  isOpen,
   selectedTask,
   activeSessionId,
   ensureSession,
+  stepMove,
   onPreviewTask,
   onNavigateToTask,
   onClose,
   onSessionChange,
   onResizeMouseDown,
+  onActionsMenuOpenChange,
 }: PreviewLayoutProps) {
+  const { t } = useTranslation();
   return (
     <>
       <div className="flex-1 overflow-hidden" style={{ width: `${kanbanWidth}px` }}>
@@ -437,30 +625,36 @@ function FloatingPreviewLayout({
           onBeforeEdit={onClose}
         />
       </div>
-      <div
-        className="fixed inset-0 bg-black/30 z-30"
-        onClick={onClose}
-        aria-label="Close preview"
-      />
-      <div
-        className="fixed top-0 right-0 bottom-[var(--app-status-bar-height)] z-40 flex bg-background shadow-2xl"
-        style={{
-          width: `${previewWidthPx}px`,
-          maxWidth: `${PREVIEW_PANEL.MAX_WIDTH_VW}vw`,
-        }}
-      >
-        <ResizeHandle onMouseDown={onResizeMouseDown} />
-        <div className="flex-1 min-w-0 overflow-hidden">
-          <TaskPreviewPanel
-            task={selectedTask}
-            sessionId={activeSessionId}
-            ensureSession={ensureSession}
-            onClose={onClose}
-            onMaximize={(task) => onNavigateToTask(task)}
-            onSessionChange={onSessionChange}
+      {isOpen && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/30 z-30"
+            onClick={onClose}
+            aria-label={t("kanban:closePreview")}
           />
-        </div>
-      </div>
+          <div
+            className="fixed top-0 right-0 bottom-[var(--app-status-bar-height)] z-40 flex bg-background shadow-2xl"
+            style={{
+              width: `${previewWidthPx}px`,
+              maxWidth: `${PREVIEW_PANEL.MAX_WIDTH_VW}vw`,
+            }}
+          >
+            <ResizeHandle onMouseDown={onResizeMouseDown} />
+            <div className="flex-1 min-w-0 overflow-hidden">
+              <TaskPreviewPanel
+                task={selectedTask}
+                sessionId={activeSessionId}
+                ensureSession={ensureSession}
+                onClose={onClose}
+                onMaximize={(task) => onNavigateToTask(task)}
+                onSessionChange={onSessionChange}
+                {...previewPanelStepProps(stepMove)}
+                onActionsMenuOpenChange={onActionsMenuOpenChange}
+              />
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -472,12 +666,14 @@ function InlinePreviewLayout({
   selectedTask,
   activeSessionId,
   ensureSession,
+  stepMove,
   onPreviewTask,
   onNavigateToTask,
   onClose,
   onSessionChange,
   onResizeMouseDown,
-}: PreviewLayoutProps & { isOpen: boolean }) {
+  onActionsMenuOpenChange,
+}: PreviewLayoutProps) {
   return (
     <div className="flex-1 flex overflow-hidden">
       <div className="overflow-hidden" style={{ width: `${kanbanWidth}px` }}>
@@ -501,6 +697,8 @@ function InlinePreviewLayout({
               onClose={onClose}
               onMaximize={(task) => onNavigateToTask(task)}
               onSessionChange={onSessionChange}
+              {...previewPanelStepProps(stepMove)}
+              onActionsMenuOpenChange={onActionsMenuOpenChange}
             />
           </div>
         </div>

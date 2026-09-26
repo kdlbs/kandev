@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -15,10 +16,15 @@ import (
 // prepared for a running remote workspace. It deliberately carries only a
 // credential-free locator; executor launch environments provide Git auth.
 type WorkspaceRepositoryMaterialization struct {
-	RepositoryURL  string
-	Destination    string
-	BaseBranch     string
-	CheckoutBranch string
+	CheckoutOptions         *models.RepositoryCheckoutOptions
+	RepositoryURL           string
+	Destination             string
+	BaseBranch              string
+	CheckoutBranch          string
+	PRNumber                int
+	QualifiedPRBase         *models.PRBase
+	RemoteContribution      *models.RemoteContribution
+	ContributionDestination *models.ContributionDestination
 }
 
 const workspaceMaterializationRollbackTimeout = 10 * time.Second
@@ -47,7 +53,13 @@ func remoteWorkspaceProjectionFromLaunch(req *LaunchRequest) ([]WorkspaceReposit
 		if name == "" || branchSlug == "" {
 			return nil, fmt.Errorf("remote repository %q has unsafe runtime name", spec.RepoName)
 		}
-		projection = append(projection, WorkspaceRepositoryMaterialization{RepositoryURL: spec.RepositoryURL, Destination: name + "-" + branchSlug, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch})
+		projection = append(projection, WorkspaceRepositoryMaterialization{
+			RepositoryURL: spec.RepositoryURL, Destination: name + "-" + branchSlug,
+			BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch,
+			PRNumber: spec.PRNumber, QualifiedPRBase: spec.QualifiedPRBase,
+			RemoteContribution: spec.RemoteContribution, CheckoutOptions: spec.CheckoutOptions,
+			ContributionDestination: spec.ContributionDestination,
+		})
 	}
 	return projection, nil
 }
@@ -68,6 +80,7 @@ func (m *Manager) MaterializeRepositoriesForEnvironment(ctx context.Context, tas
 		return nil, err
 	}
 	clients := distinctWorkspaceRepositoryClients(executions)
+	defer releaseWorkspaceRepositoryClients(clients)
 	if len(clients) == 0 {
 		return nil, fmt.Errorf("workspace execution has no agentctl client")
 	}
@@ -109,6 +122,7 @@ func materializeWorkspaceRepositories(ctx context.Context, client workspaceRepos
 type workspaceRepositoryExecution struct {
 	sessionID   string
 	client      workspaceRepositoryClient
+	release     func()
 	sourceRoots []string
 }
 
@@ -118,7 +132,12 @@ func (m *Manager) liveWorkspaceExecutionsForEnvironment(ctx context.Context, tas
 	}
 	executions := make([]*AgentExecution, 0)
 	for _, execution := range m.executionStore.List() {
-		if execution != nil && execution.TaskEnvironmentID == taskEnvironmentID && execution.GetAgentCtlClient() != nil {
+		if execution == nil || execution.TaskEnvironmentID != taskEnvironmentID {
+			continue
+		}
+		client, releaseClient := execution.AcquireAgentCtlClient()
+		releaseClient()
+		if client != nil {
 			executions = append(executions, execution)
 		}
 	}
@@ -127,7 +146,12 @@ func (m *Manager) liveWorkspaceExecutionsForEnvironment(ctx context.Context, tas
 		if err != nil {
 			return nil, fmt.Errorf("ensure workspace execution: %w", err)
 		}
-		if execution == nil || execution.GetAgentCtlClient() == nil {
+		if execution == nil {
+			return nil, fmt.Errorf("workspace execution has no agentctl client")
+		}
+		client, releaseClient := execution.AcquireAgentCtlClient()
+		releaseClient()
+		if client == nil {
 			return nil, fmt.Errorf("workspace execution has no agentctl client")
 		}
 		executions = append(executions, execution)
@@ -140,21 +164,31 @@ func distinctWorkspaceRepositoryClients(executions []*AgentExecution) []workspac
 	clients := make([]workspaceRepositoryExecution, 0, len(executions))
 	seen := make(map[*agentctl.Client]struct{}, len(executions))
 	for _, execution := range executions {
-		client := execution.GetAgentCtlClient()
+		client, releaseClient := execution.AcquireAgentCtlClient()
 		if client == nil {
 			continue
 		}
 		if _, exists := seen[client]; exists {
+			releaseClient()
 			continue
 		}
 		seen[client] = struct{}{}
 		clients = append(clients, workspaceRepositoryExecution{
 			sessionID:   execution.SessionID,
 			client:      client,
+			release:     releaseClient,
 			sourceRoots: append([]string(nil), execution.WorkspaceSourceRoots...),
 		})
 	}
 	return clients
+}
+
+func releaseWorkspaceRepositoryClients(executions []workspaceRepositoryExecution) {
+	for _, execution := range executions {
+		if execution.release != nil {
+			execution.release()
+		}
+	}
 }
 
 func workspaceRepositorySessionIDs(executions []*AgentExecution) []string {
@@ -179,10 +213,15 @@ func materializeWorkspaceRepositoriesWithoutRescan(ctx context.Context, client w
 	created := make([]WorkspaceRepositoryMaterialization, 0, len(repositories))
 	for _, repository := range repositories {
 		response, err := client.MaterializeRepository(ctx, agentctl.MaterializeRepositoryRequest{
-			RepositoryURL:  repository.RepositoryURL,
-			Destination:    repository.Destination,
-			BaseBranch:     repository.BaseBranch,
-			CheckoutBranch: repository.CheckoutBranch,
+			RepositoryURL:           repository.RepositoryURL,
+			Destination:             repository.Destination,
+			BaseBranch:              repository.BaseBranch,
+			CheckoutBranch:          repository.CheckoutBranch,
+			PRNumber:                repository.PRNumber,
+			QualifiedPRBase:         repository.QualifiedPRBase,
+			RemoteContribution:      repository.RemoteContribution,
+			CheckoutOptions:         repository.CheckoutOptions,
+			ContributionDestination: repository.ContributionDestination,
 		})
 		if err != nil {
 			rollbackErr := rollbackMaterializedWorkspaceRepositories(ctx, client, created)

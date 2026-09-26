@@ -29,6 +29,27 @@ func (f *fakeSessionChecker) GetActiveTaskInfoByAgentProfile(context.Context, st
 	return f.activeTasks, nil
 }
 
+// fakeAutomationDependencyChecker returns a canned list of enabled automations
+// bound to the profile.
+type fakeAutomationDependencyChecker struct {
+	refs         []AutomationReference
+	err          error
+	disableCalls int
+}
+
+func (f *fakeAutomationDependencyChecker) ListEnabledAutomationsByAgentProfile(
+	context.Context, string,
+) ([]AutomationReference, error) {
+	return f.refs, f.err
+}
+
+func (f *fakeAutomationDependencyChecker) DisableAutomationsByAgentProfile(
+	context.Context, string,
+) ([]AutomationReference, error) {
+	f.disableCalls++
+	return f.refs, nil
+}
+
 // fakeWatcherDependencyChecker returns a canned list of referencing
 // watchers and records disable invocations so tests can assert on the
 // force-delete eager-disable contract.
@@ -90,6 +111,84 @@ func TestDeleteProfile_BlocksOnReferencingWatchers(t *testing.T) {
 	}
 	if detail.Watchers[0].Kind != "linear" || detail.Watchers[1].Kind != "github_issue" {
 		t.Errorf("unexpected watcher refs: %+v", detail.Watchers)
+	}
+}
+
+// An enabled automation never appears in the active-session list — nothing is
+// running — but its next firing would launch against a profile that is gone,
+// and a schedule fails quietly, hours later, with nobody watching.
+func TestDeleteProfile_BlocksOnEnabledAutomations(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{id: "test-agent", name: "test-agent", enabled: true}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	st.profiles[agent.ID] = []*models.AgentProfile{{ID: "prof-1", AgentID: agent.ID, Name: "Kilo Profile"}}
+	ctrl.repo = st
+	ctrl.sessionChecker = &fakeSessionChecker{}
+	ctrl.automationDeps = &fakeAutomationDependencyChecker{refs: []AutomationReference{
+		{ID: "auto-1", Name: "Nightly dependency sweep", WorkspaceID: "ws-1"},
+	}}
+
+	_, err := ctrl.DeleteProfile(context.Background(), "prof-1", false)
+
+	var detail *ErrProfileInUseDetail
+	if !errors.As(err, &detail) {
+		t.Fatalf("expected ErrProfileInUseDetail, got %v", err)
+	}
+	if len(detail.Automations) != 1 || detail.Automations[0].Name != "Nightly dependency sweep" {
+		t.Fatalf("expected the automation to be named, got %+v", detail.Automations)
+	}
+}
+
+// The confirmation exists so the user can proceed knowingly; force is how they
+// say so.
+func TestDeleteProfile_ForceBypassesAutomationCheck(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{id: "test-agent", name: "test-agent", enabled: true}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	st.profiles[agent.ID] = []*models.AgentProfile{{ID: "prof-1", AgentID: agent.ID, Name: "Kilo Profile"}}
+	ctrl.repo = st
+	ctrl.sessionChecker = &fakeSessionChecker{}
+	automationDeps := &fakeAutomationDependencyChecker{refs: []AutomationReference{
+		{ID: "auto-1", Name: "Nightly dependency sweep", WorkspaceID: "ws-1"},
+	}}
+	ctrl.automationDeps = automationDeps
+
+	if _, err := ctrl.DeleteProfile(context.Background(), "prof-1", true); err != nil {
+		t.Fatalf("force delete should proceed past the automation check, got %v", err)
+	}
+	// Proceeding is not the whole contract: an automation left enabled would
+	// keep firing on its schedule into a profile that no longer exists.
+	if automationDeps.disableCalls != 1 {
+		t.Fatalf("force delete must disable the orphaned automations, got %d call(s)",
+			automationDeps.disableCalls)
+	}
+}
+
+// Fails closed. A watcher this lookup misses is disabled anyway by the force
+// pass; an automation is not, so silently treating "lookup failed" as "no
+// automations" would orphan exactly the references this check exists to catch.
+func TestDeleteProfile_AutomationLookupFailureBlocks(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{id: "test-agent", name: "test-agent", enabled: true}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	st.profiles[agent.ID] = []*models.AgentProfile{{ID: "prof-1", AgentID: agent.ID, Name: "Kilo Profile"}}
+	ctrl.repo = st
+	ctrl.sessionChecker = &fakeSessionChecker{}
+	ctrl.automationDeps = &fakeAutomationDependencyChecker{err: errors.New("store down")}
+
+	_, err := ctrl.DeleteProfile(context.Background(), "prof-1", false)
+	if err == nil {
+		t.Fatal("a failed automation lookup must refuse the deletion, not wave it through")
+	}
+	var detail *ErrProfileInUseDetail
+	if errors.As(err, &detail) {
+		t.Fatalf("a lookup failure is an error, not an in-use conflict: %v", err)
 	}
 }
 

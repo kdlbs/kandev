@@ -2,17 +2,8 @@
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Input } from "@kandev/ui/input";
-import { IconDownload, IconPencil, IconTrash } from "@tabler/icons-react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
+import { IconMessageDots } from "@tabler/icons-react";
+import { AlertDialog } from "@kandev/ui/alert-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -22,21 +13,29 @@ import {
 } from "@kandev/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
+import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useTranslation } from "react-i18next";
 import type { FileTreeNode } from "@/lib/types/backend";
+import { FileContextMenuItems } from "./file-context-menu-items";
 import type { FileInfo } from "@/lib/state/store";
-import {
-  removeNodeFromTree,
-  renameNodeInTree,
-  treeContainsPath,
-  countFilesInTree,
-} from "./file-tree-utils";
+import { removeNodeFromTree, renameNodeInTree, treeContainsPath } from "./file-tree-utils";
+import { createFileDeleteAction, type FileDeleteAction } from "./file-delete-action";
 import {
   OpenInEditorMenuItems,
   canOpenNodeInEditor,
   useFileTreeEditorActions,
 } from "./file-tree-editor-menu";
+import { DeleteConfirmDialog } from "./file-delete-confirmation";
 
 type GitFileStatus = FileInfo["status"] | undefined;
+
+const FileDeleteActionContext = React.createContext<FileDeleteAction | null>(null);
+
+export function useFileDeleteAction() {
+  return React.useContext(FileDeleteActionContext);
+}
 
 function deleteNodeOptimistically(
   tree: FileTreeNode | null,
@@ -53,99 +52,306 @@ function deleteNodeOptimistically(
     .catch(() => setTree(snapshot));
 }
 
-function DeleteConfirmDialog({
-  isBulk,
-  selectedCount,
+function removeSuccessfullyDeletedPaths(
+  snapshot: FileTreeNode | null,
+  paths: string[],
+  results: PromiseSettledResult<boolean>[],
+) {
+  let nextTree = snapshot;
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled" && result.value && nextTree) {
+      nextTree = removeNodeFromTree(nextTree, paths[index]);
+    }
+  });
+  return nextTree;
+}
+
+function ChatContextMenuItem({
   node,
-  fileCount,
-  onConfirm,
+  onAddToChatContext,
 }: {
-  isBulk: boolean;
-  selectedCount: number;
   node: FileTreeNode;
-  fileCount: number;
-  onConfirm: () => void;
+  onAddToChatContext: (node: FileTreeNode) => void;
 }) {
-  const title = isBulk ? `Delete ${selectedCount} items?` : "Delete folder?";
+  const { t } = useTranslation("chat");
   return (
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>{title}</AlertDialogTitle>
-        <AlertDialogDescription>
-          {isBulk ? (
-            `This will permanently delete ${selectedCount} selected items. This action cannot be undone.`
-          ) : (
-            <>
-              This will permanently delete <span className="font-semibold">{node.name}</span>
-              {fileCount > 0 && (
-                <>
-                  {" "}
-                  and <span className="font-semibold">{fileCount}</span>{" "}
-                  {fileCount === 1 ? "file" : "files"} inside it
-                </>
-              )}
-              . This action cannot be undone.
-            </>
-          )}
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-        <AlertDialogAction onClick={onConfirm} variant="destructive" className="cursor-pointer">
-          Delete
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
+    <ContextMenuItem
+      data-testid="file-context-add-to-chat"
+      className="cursor-pointer"
+      onSelect={() => onAddToChatContext(node)}
+    >
+      <IconMessageDots className="h-3.5 w-3.5" />
+      {t("chat:addToChatContext")}
+    </ContextMenuItem>
   );
 }
 
-type FileContextMenuItemsProps = {
+function attachAnchorRef(
+  children: React.ReactNode,
+  anchorRef: React.RefObject<HTMLElement | null>,
+): React.ReactNode {
+  if (!React.isValidElement(children)) {
+    return <span ref={anchorRef}>{children}</span>;
+  }
+  return React.cloneElement(children as React.ReactElement<{ ref?: React.Ref<HTMLElement> }>, {
+    ref: anchorRef,
+  });
+}
+
+function useFileContextMenuDelete({
+  tree,
+  treeRef,
+  setTree,
+  node,
+  isBulk,
+  onDeleteFile,
+  selectedPaths,
+}: {
+  tree: FileTreeNode | null;
+  treeRef?: React.RefObject<FileTreeNode | null>;
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   node: FileTreeNode;
   isBulk: boolean;
-  selectedCount: number;
+  onDeleteFile?: (path: string) => Promise<boolean>;
+  selectedPaths?: Set<string>;
+}) {
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const fallbackTreeRef = useRef<FileTreeNode | null>(tree);
+  fallbackTreeRef.current = tree;
+  const currentTreeRef = treeRef ?? fallbackTreeRef;
+
+  const handleConfirmDelete = useCallback(() => {
+    setDeleteConfirmationOpen(false);
+    if (!onDeleteFile) return;
+    if (isBulk && selectedPaths) {
+      const snapshot = currentTreeRef.current;
+      const paths = [...selectedPaths];
+      setTree((prev) => {
+        let nextTree = prev;
+        for (const path of paths) {
+          nextTree = nextTree ? removeNodeFromTree(nextTree, path) : nextTree;
+        }
+        return nextTree;
+      });
+      Promise.allSettled(paths.map((path) => onDeleteFile(path))).then((results) => {
+        setTree(removeSuccessfullyDeletedPaths(snapshot, paths, results));
+      });
+      return;
+    }
+    deleteNodeOptimistically(currentTreeRef.current, setTree, node.path, onDeleteFile);
+  }, [setTree, node.path, onDeleteFile, isBulk, selectedPaths, currentTreeRef]);
+
+  const handleDelete = useCallback(() => {
+    if (!onDeleteFile) return;
+    setDeleteConfirmationOpen(true);
+  }, [onDeleteFile]);
+
+  return {
+    deleteConfirmationOpen,
+    setDeleteConfirmationOpen,
+    handleConfirmDelete,
+    handleDelete,
+  };
+}
+
+function useFileMenuDeleteHandler({
+  handleDelete,
+  isBulk,
+  isFinePointer,
+  contextMenuRef,
+}: {
+  handleDelete: () => void;
+  isBulk: boolean;
+  isFinePointer: boolean;
+  contextMenuRef: React.RefObject<HTMLElement | null>;
+}) {
+  return useCallback(
+    (event: Event) => {
+      const item = event.currentTarget;
+      contextMenuRef.current =
+        item instanceof HTMLElement
+          ? (item.closest('[data-slot="context-menu-content"]') as HTMLElement | null)
+          : null;
+      if (isBulk || !isFinePointer) {
+        handleDelete();
+      } else {
+        // Let the 100 ms context-menu exit animation finish before anchoring the popover.
+        setTimeout(handleDelete, 150);
+      }
+    },
+    [handleDelete, isBulk, isFinePointer, contextMenuRef],
+  );
+}
+
+type FileContextMenuSurfaceProps = {
+  children: React.ReactNode;
+  node: FileTreeNode;
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
   onStartRename: () => void;
-  onDelete: () => void;
+  onAddToChatContext?: (node: FileTreeNode) => void;
+  selectedCount: number;
+  isBulk: boolean;
+  isFinePointer: boolean;
+  showOpenInEditor: boolean;
+  hasFileActions: boolean;
+  showAddToChatContext: boolean;
+  deleteConfirmationOpen: boolean;
+  setDeleteConfirmationOpen: (open: boolean) => void;
+  anchorRef: React.RefObject<HTMLElement | null>;
+  focusBoundaryRef: React.RefObject<HTMLElement | null>;
+  deleteAction: FileDeleteAction | null;
+  onConfirmDelete: () => void;
+  onDelete: (event: Event) => void;
 };
 
-function FileContextMenuItems({
+function FileContextMenuSurface({
+  children,
   node,
-  isBulk,
-  selectedCount,
   onDeleteFile,
   onRenameFile,
   onDownloadFile,
+  onUploadFilesHere,
   onStartRename,
+  onAddToChatContext,
+  selectedCount,
+  isBulk,
+  isFinePointer,
+  showOpenInEditor,
+  hasFileActions,
+  showAddToChatContext,
+  deleteConfirmationOpen,
+  setDeleteConfirmationOpen,
+  anchorRef,
+  focusBoundaryRef,
+  deleteAction,
+  onConfirmDelete,
   onDelete,
-}: FileContextMenuItemsProps) {
-  const deleteLabel = isBulk ? `Delete ${selectedCount} items` : "Delete";
-  const showRename = !!onRenameFile && !isBulk;
-  const download = !node.is_dir && !isBulk ? onDownloadFile : undefined;
+}: FileContextMenuSurfaceProps) {
+  const { isMobile } = useResponsiveBreakpoint();
+  const renamePendingRef = useRef(false);
+  const deletePendingRef = useRef(false);
+  const touchTriggerRef = useRef<HTMLButtonElement>(null);
+
+  const handleStartRename = useCallback(() => {
+    renamePendingRef.current = true;
+  }, []);
+
+  const handleCloseAutoFocus = useCallback(
+    (event: Event) => {
+      if (deletePendingRef.current) {
+        event.preventDefault();
+        deletePendingRef.current = false;
+        setDeleteConfirmationOpen(true);
+        return;
+      }
+      if (!renamePendingRef.current) return;
+      event.preventDefault();
+      renamePendingRef.current = false;
+      onStartRename();
+    },
+    [onStartRename, setDeleteConfirmationOpen],
+  );
+
   return (
-    <>
-      {onDeleteFile && (
-        <ContextMenuItem variant="destructive" onSelect={onDelete}>
-          <IconTrash className="h-3.5 w-3.5" />
-          {deleteLabel}
-        </ContextMenuItem>
+    <FileDeleteActionContext.Provider
+      value={deleteAction ? { ...deleteAction, triggerRef: touchTriggerRef } : null}
+    >
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+        <ContextMenuContent onCloseAutoFocus={handleCloseAutoFocus}>
+          {showOpenInEditor && <OpenInEditorMenuItems node={node} />}
+          {showOpenInEditor && (hasFileActions || showAddToChatContext) && <ContextMenuSeparator />}
+          {showAddToChatContext && onAddToChatContext && (
+            <ChatContextMenuItem node={node} onAddToChatContext={onAddToChatContext} />
+          )}
+          {showAddToChatContext && hasFileActions && <ContextMenuSeparator />}
+          <FileContextMenuItems
+            node={node}
+            isBulk={isBulk}
+            selectedCount={selectedCount}
+            onDeleteFile={onDeleteFile}
+            onRenameFile={onRenameFile}
+            onDownloadFile={onDownloadFile}
+            onUploadFilesHere={onUploadFilesHere}
+            onStartRename={handleStartRename}
+            onDelete={(event) => {
+              if (isMobile && !isBulk) deletePendingRef.current = true;
+              else onDelete(event);
+            }}
+          />
+        </ContextMenuContent>
+      </ContextMenu>
+      {isBulk && (
+        <AlertDialog open={deleteConfirmationOpen} onOpenChange={setDeleteConfirmationOpen}>
+          <DeleteConfirmDialog selectedCount={selectedCount} onConfirm={onConfirmDelete} />
+        </AlertDialog>
       )}
-      {showRename && onDeleteFile && <ContextMenuSeparator />}
-      {showRename && (
-        <ContextMenuItem onSelect={onStartRename}>
-          <IconPencil className="h-3.5 w-3.5" />
-          Rename
-        </ContextMenuItem>
+      {!isBulk && deleteAction && (
+        <FileDeleteConfirmation
+          action={deleteAction}
+          open={deleteConfirmationOpen}
+          path={node.path}
+          isFinePointer={isFinePointer}
+          anchorRef={anchorRef}
+          focusBoundaryRef={focusBoundaryRef}
+          focusReturnRef={touchTriggerRef.current ? touchTriggerRef : anchorRef}
+          onOpenChange={setDeleteConfirmationOpen}
+          onConfirm={onConfirmDelete}
+        />
       )}
-      {download && (showRename || onDeleteFile) && <ContextMenuSeparator />}
-      {download && (
-        <ContextMenuItem onSelect={() => void download(node.path)}>
-          <IconDownload className="h-3.5 w-3.5" />
-          Download
-        </ContextMenuItem>
-      )}
-    </>
+    </FileDeleteActionContext.Provider>
+  );
+}
+
+function FileDeleteConfirmation({
+  action,
+  path,
+  isFinePointer,
+  anchorRef,
+  focusReturnRef,
+  focusBoundaryRef,
+  ...props
+}: {
+  action: FileDeleteAction;
+  path: string;
+  isFinePointer: boolean;
+  anchorRef: React.RefObject<HTMLElement | null>;
+  focusReturnRef: React.RefObject<HTMLElement | null>;
+  focusBoundaryRef: React.RefObject<HTMLElement | null>;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  const actions = {
+    ...props,
+    title: action.title,
+    description: action.description,
+    cancelLabel: action.cancelLabel,
+    confirmLabel: action.label,
+    confirmAriaLabel: action.title,
+    confirmTestId: "file-delete-confirm",
+  };
+  return (
+    <MobileActionConfirmation
+      {...actions}
+      targetKey={path}
+      subject={path.includes("/") ? path : undefined}
+      focusReturnRef={focusReturnRef}
+      fallback={
+        isFinePointer ? (
+          <ActionConfirmPopover
+            {...actions}
+            anchorRef={anchorRef}
+            focusBoundaryRef={focusBoundaryRef}
+            testId="file-delete-confirm-popover"
+            onCancel={() => props.onOpenChange(false)}
+          />
+        ) : null
+      }
+    />
   );
 }
 
@@ -154,98 +360,101 @@ export function FileContextMenu({
   children,
   node,
   tree,
+  treeRef,
   setTree,
   onDeleteFile,
   onRenameFile,
   onDownloadFile,
+  onUploadFilesHere,
   onStartRename,
+  onAddToChatContext,
   selectedCount = 0,
   selectedPaths,
+  anchorRef: providedAnchorRef,
 }: {
   children: React.ReactNode;
   node: FileTreeNode;
   tree: FileTreeNode | null;
+  treeRef?: React.RefObject<FileTreeNode | null>;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
   onStartRename: () => void;
+  onAddToChatContext?: (node: FileTreeNode) => void;
   selectedCount?: number;
   selectedPaths?: Set<string>;
+  anchorRef?: React.RefObject<HTMLElement | null>;
 }) {
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const editorActions = useFileTreeEditorActions();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const { t } = useTranslation();
   const isBulk = selectedCount > 1;
-  const needsConfirmation = node.is_dir || isBulk;
   // A bulk selection would make a single-node "Open in <editor>" ambiguous.
   const showOpenInEditor = !isBulk && canOpenNodeInEditor(editorActions, node);
-  const hasFileActions = !!onDeleteFile || !!onRenameFile || !!onDownloadFile;
+  const hasFileActions =
+    !!onDeleteFile || !!onRenameFile || !!onDownloadFile || !!onUploadFilesHere;
+  const showAddToChatContext = !isBulk && !!onAddToChatContext;
+  const fallbackAnchorRef = useRef<HTMLElement>(null);
+  const anchorRef = providedAnchorRef ?? fallbackAnchorRef;
+  const contextMenuRef = useRef<HTMLElement>(null);
+  const { deleteConfirmationOpen, setDeleteConfirmationOpen, handleConfirmDelete, handleDelete } =
+    useFileContextMenuDelete({
+      tree,
+      treeRef,
+      setTree,
+      node,
+      isBulk,
+      onDeleteFile,
+      selectedPaths,
+    });
+  const handleMenuDelete = useFileMenuDeleteHandler({
+    handleDelete,
+    isBulk,
+    isFinePointer,
+    contextMenuRef,
+  });
 
-  const handleConfirmDelete = useCallback(() => {
-    setDeleteDialogOpen(false);
-    if (!onDeleteFile) return;
-    if (isBulk && selectedPaths) {
-      // Remove all nodes optimistically, then call APIs.
-      // Rollback entire tree only if any individual delete fails.
-      const snapshot = tree;
-      const paths = [...selectedPaths];
-      setTree((prev) => {
-        let t = prev;
-        for (const p of paths) t = t ? removeNodeFromTree(t, p) : t;
-        return t;
-      });
-      Promise.all(paths.map((p) => onDeleteFile(p)))
-        .then((results) => {
-          if (results.some((ok) => !ok)) setTree(snapshot);
-        })
-        .catch(() => setTree(snapshot));
-    } else {
-      deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);
-    }
-  }, [tree, setTree, node.path, onDeleteFile, isBulk, selectedPaths]);
+  const deleteAction = createFileDeleteAction({
+    node,
+    onDeleteFile,
+    selectedCount,
+    isBulk,
+    deleteConfirmationOpen,
+    t,
+    handleDelete,
+    setDeleteConfirmationOpen,
+    handleConfirmDelete,
+  });
 
-  const handleDelete = useCallback(() => {
-    if (!onDeleteFile) return;
-    if (needsConfirmation) {
-      setDeleteDialogOpen(true);
-    } else {
-      deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);
-    }
-  }, [tree, setTree, node.path, onDeleteFile, needsConfirmation]);
-
-  if (!hasFileActions && !showOpenInEditor) return <>{children}</>;
+  if (!hasFileActions && !showOpenInEditor && !showAddToChatContext) return <>{children}</>;
 
   return (
-    <>
-      <ContextMenu>
-        <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-        <ContextMenuContent>
-          {showOpenInEditor && <OpenInEditorMenuItems node={node} />}
-          {showOpenInEditor && hasFileActions && <ContextMenuSeparator />}
-          <FileContextMenuItems
-            node={node}
-            isBulk={isBulk}
-            selectedCount={selectedCount}
-            onDeleteFile={onDeleteFile}
-            onRenameFile={onRenameFile}
-            onDownloadFile={onDownloadFile}
-            onStartRename={onStartRename}
-            onDelete={handleDelete}
-          />
-        </ContextMenuContent>
-      </ContextMenu>
-      {needsConfirmation && (
-        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-          <DeleteConfirmDialog
-            isBulk={isBulk}
-            selectedCount={selectedCount}
-            node={node}
-            fileCount={countFilesInTree(node)}
-            onConfirm={handleConfirmDelete}
-          />
-        </AlertDialog>
-      )}
-    </>
+    <FileContextMenuSurface
+      node={node}
+      onDeleteFile={onDeleteFile}
+      onRenameFile={onRenameFile}
+      onDownloadFile={onDownloadFile}
+      onUploadFilesHere={onUploadFilesHere}
+      onStartRename={onStartRename}
+      onAddToChatContext={onAddToChatContext}
+      selectedCount={selectedCount}
+      isBulk={isBulk}
+      isFinePointer={isFinePointer}
+      showOpenInEditor={showOpenInEditor}
+      hasFileActions={hasFileActions}
+      showAddToChatContext={showAddToChatContext}
+      deleteConfirmationOpen={deleteConfirmationOpen}
+      setDeleteConfirmationOpen={setDeleteConfirmationOpen}
+      anchorRef={anchorRef}
+      focusBoundaryRef={contextMenuRef}
+      deleteAction={deleteAction}
+      onConfirmDelete={handleConfirmDelete}
+      onDelete={handleMenuDelete}
+    >
+      {providedAnchorRef ? children : attachAnchorRef(children, anchorRef)}
+    </FileContextMenuSurface>
   );
 }
 
@@ -255,10 +464,15 @@ export function useFileRename(
   tree: FileTreeNode | null,
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>,
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>,
+  treeRef?: React.RefObject<FileTreeNode | null>,
 ) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(node.name);
+  const fallbackTreeRef = useRef<FileTreeNode | null>(tree);
+  fallbackTreeRef.current = tree;
+  const currentTreeRef = treeRef ?? fallbackTreeRef;
 
   const handleStartRename = useCallback(() => {
     setRenameValue(node.name);
@@ -278,8 +492,8 @@ export function useFileRename(
     }
     if (newName.includes("/") || newName.includes("\\")) {
       toast({
-        title: "Invalid name",
-        description: "File names cannot contain path separators",
+        title: t("task:invalidName"),
+        description: t("task:fileNamesCannotContainPathSeparators"),
         variant: "error",
       });
       handleCancelRename();
@@ -289,12 +503,13 @@ export function useFileRename(
       ? node.path.substring(0, node.path.lastIndexOf("/"))
       : "";
     const newPath = parentPath ? `${parentPath}/${newName}` : newName;
-    const snapshot = tree;
+    const currentTree = currentTreeRef.current;
+    const snapshot = currentTree;
     setIsRenaming(false);
-    if (tree && treeContainsPath(tree, newPath)) {
+    if (currentTree && treeContainsPath(currentTree, newPath)) {
       toast({
-        title: "Failed to rename item",
-        description: `Target already exists: ${newPath}`,
+        title: t("task:failedToRenameItem"),
+        description: t("task:targetAlreadyExists", { newPath }),
         variant: "error",
       });
       handleCancelRename();
@@ -308,7 +523,16 @@ export function useFileRename(
       .catch(() => {
         setTree(snapshot);
       });
-  }, [renameValue, node.name, node.path, onRenameFile, tree, setTree, handleCancelRename, toast]);
+  }, [
+    renameValue,
+    node.name,
+    node.path,
+    onRenameFile,
+    setTree,
+    handleCancelRename,
+    toast,
+    currentTreeRef,
+  ]);
 
   const handleRenameKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -350,15 +574,12 @@ export function TreeNodeName({
   useEffect(() => {
     if (rename.isRenaming) {
       blurEnabledRef.current = false;
-      const focusTimer = setTimeout(() => {
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      }, 150);
+      inputRef.current?.focus();
+      inputRef.current?.select();
       const blurTimer = setTimeout(() => {
         blurEnabledRef.current = true;
       }, 400);
       return () => {
-        clearTimeout(focusTimer);
         clearTimeout(blurTimer);
       };
     }
@@ -374,6 +595,7 @@ export function TreeNodeName({
     return (
       <Input
         ref={inputRef}
+        controlSize="none"
         value={rename.renameValue}
         onChange={(e) => rename.setRenameValue(e.target.value)}
         onKeyDown={rename.handleRenameKeyDown}
@@ -386,7 +608,7 @@ export function TreeNodeName({
   return (
     <span
       className={cn(
-        "flex-1 truncate group-hover:text-foreground",
+        "min-w-0 flex-1 truncate group-hover:text-foreground",
         isActive ? "text-foreground" : "text-muted-foreground",
         node.is_dir ? "font-medium" : getGitStatusTextClass(gitStatus),
       )}

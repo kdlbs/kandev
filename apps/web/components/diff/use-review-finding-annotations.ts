@@ -5,10 +5,14 @@ import { resolveFindingAnchor } from "@/lib/review/findings";
 import { hashDiff } from "@/components/review/types";
 import type { TaskReviewFinding } from "@/lib/types/review";
 import type { AnnotationMetadata } from "./use-diff-annotation-renderer";
+import { useTranslation } from "react-i18next";
 
-/** Message shown on a finding whose line moved but whose anchor text survived. */
-const RELOCATED_REASON =
-  "The diff changed after this review; the finding was re-anchored to the code it describes.";
+/**
+ * Key for the message shown on a finding whose line moved but whose anchor text
+ * survived. Stored as a key, not resolved copy: a module-level `t()` would
+ * freeze at the boot locale.
+ */
+const RELOCATED_REASON_KEY = "diff:theDiffChangedAfterThisReviewRelocated";
 
 export type ReviewFindingAnnotationsResult = {
   /** Findings that could be anchored to a current line in this file. */
@@ -36,6 +40,7 @@ export function useReviewFindingAnnotations(opts: {
   diff?: string;
 }): ReviewFindingAnnotationsResult {
   const { filePath, repo, diff } = opts;
+  const { t } = useTranslation();
   // The diff reaching the viewer is already normalized (see normalizeDiffContent
   // in components/review/types.ts), so hashing it here yields the same value the
   // backend stamped on the finding and the same one computeReviewSets uses for
@@ -69,10 +74,10 @@ export function useReviewFindingAnnotations(opts: {
         metadata: {
           type: "review-finding" as const,
           finding,
-          findingStaleReason: anchor.relocated ? RELOCATED_REASON : undefined,
+          findingStaleReason: anchor.relocated ? t(RELOCATED_REASON_KEY) : undefined,
         },
       });
     }
     return { annotations, unanchored };
-  }, [findings, filePath, repo, diff, diffHash]);
+  }, [findings, filePath, repo, diff, diffHash, t]);
 }

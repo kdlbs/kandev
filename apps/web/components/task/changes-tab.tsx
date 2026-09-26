@@ -14,6 +14,7 @@ import { useSessionChangesCount } from "@/hooks/domains/session/use-session-chan
 import { cn } from "@kandev/ui/lib/utils";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { autoActivateChangesPanel } from "./changes-panel-focus";
+import { useTranslation } from "react-i18next";
 
 /**
  * Custom tab component for the Changes panel.
@@ -21,6 +22,7 @@ import { autoActivateChangesPanel } from "./changes-panel-focus";
  * and a badge showing unseen change count.
  */
 export function ChangesTab(props: IDockviewPanelHeaderProps) {
+  const { t } = useTranslation();
   const { api, containerApi } = props;
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
 
@@ -128,7 +130,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem className="cursor-pointer" onSelect={handleCloseOthers}>
-          Close Others
+          {t("task:closeOthers")}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

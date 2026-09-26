@@ -1,0 +1,375 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { KanbanDisplayDropdown } from "./kanban-display-dropdown";
+import { TASK_PRIORITY_TOKENS } from "@/lib/tasks/task-priority";
+
+const { useKanbanDisplaySettingsMock } = vi.hoisted(() => ({
+  useKanbanDisplaySettingsMock: vi.fn(),
+}));
+
+vi.mock("@/hooks/use-kanban-display-settings", () => ({
+  useKanbanDisplaySettings: useKanbanDisplaySettingsMock,
+}));
+
+function defaultMockSettings() {
+  return {
+    workflows: [],
+    activeWorkflowId: null,
+    repositories: [],
+    repositoriesLoading: false,
+    allRepositoriesSelected: true,
+    selectedRepositoryId: null,
+    enablePreviewOnClick: false,
+    tasksListShowDetails: false,
+    eligibleWorkflows: [],
+    snapshots: {},
+    hiddenWorkflowStepIds: {},
+    boardSort: "created_desc" as "created_desc" | "priority_desc",
+    priorityFilterTokens: [] as string[],
+    onWorkflowChange: vi.fn(),
+    onRepositoryChange: vi.fn(),
+    onTogglePreviewOnClick: vi.fn(),
+    onToggleTasksListShowDetails: vi.fn(),
+    onToggleStepVisibility: vi.fn(),
+    onBoardSortChange: vi.fn(),
+    onPriorityFilterChange: vi.fn(),
+  };
+}
+
+beforeEach(() => {
+  useKanbanDisplaySettingsMock.mockReturnValue(defaultMockSettings());
+});
+
+afterEach(cleanup);
+
+const TAGS_PLUGIN_ID = "kandev-plugin-tags";
+const TAGS_FILTER_ID = "tags";
+const TAGS_FILTER_KEY = `${TAGS_PLUGIN_ID}:${TAGS_FILTER_ID}`;
+const TAGS_FILTER_TEST_ID = `display-plugin-filter-${TAGS_FILTER_KEY}`;
+const PRIORITY_PLUGIN_ID = "kandev-plugin-priority";
+const PRIORITY_FILTER_KEY = `${PRIORITY_PLUGIN_ID}:${TAGS_FILTER_ID}`;
+const DISPLAY_SETTINGS_PREFIX = "display-settings-";
+const DISPLAY_WORKFLOW_FILTER_TEST_ID = "display-workflow-filter";
+const DISPLAY_REPOSITORY_FILTER_TEST_ID = "display-repository-filter";
+const DISPLAY_BOARD_SORT_TEST_ID = "display-board-sort";
+const ARIA_EXPANDED_ATTRIBUTE = "aria-expanded";
+const DATA_STATE_ATTRIBUTE = "data-state";
+
+const TAGS_FILTER = {
+  pluginId: TAGS_PLUGIN_ID,
+  id: TAGS_FILTER_ID,
+  label: "Tags",
+  getOptions: () => [
+    { value: "bug", label: "Bug" },
+    { value: "feature", label: "Feature" },
+  ],
+  matches: () => true,
+};
+
+function openDropdown() {
+  const trigger = screen.getByTestId("display-button");
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+  fireEvent.pointerUp(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+  fireEvent.click(trigger);
+}
+
+function expandGroup(group: "filters" | "sort" | "preview" | "list-rows") {
+  fireEvent.click(screen.getByTestId(`${DISPLAY_SETTINGS_PREFIX}${group}-toggle`));
+}
+
+function groupToggle(group: "filters" | "sort" | "preview" | "list-rows") {
+  return screen.getByTestId(`${DISPLAY_SETTINGS_PREFIX}${group}-toggle`);
+}
+
+describe("KanbanDisplayDropdown — grouped display settings", () => {
+  it("starts collapsed, expands groups independently, and resets expansion on close", () => {
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
+    openDropdown();
+
+    for (const group of ["filters", "sort", "preview"] as const) {
+      expect(groupToggle(group).getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe("false");
+    }
+    expect(screen.queryByTestId(DISPLAY_WORKFLOW_FILTER_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(DISPLAY_BOARD_SORT_TEST_ID)).toBeNull();
+
+    expandGroup("filters");
+    expect(groupToggle("filters").getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe("true");
+    expect(screen.getByTestId(DISPLAY_WORKFLOW_FILTER_TEST_ID)).not.toBeNull();
+    expect(groupToggle("sort").getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe("false");
+
+    expandGroup("sort");
+    expect(screen.getByTestId(DISPLAY_BOARD_SORT_TEST_ID)).not.toBeNull();
+    expect(groupToggle("filters").getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe("true");
+
+    const trigger = screen.getByTestId("display-button");
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+    fireEvent.pointerUp(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+    fireEvent.click(trigger);
+    expect(screen.queryByTestId(`${DISPLAY_SETTINGS_PREFIX}filters-toggle`)).toBeNull();
+    openDropdown();
+    expect(groupToggle("filters").getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe("false");
+  });
+
+  it("summarizes the current filters, sort, and preview settings", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      workflows: [{ id: "wf-a", name: "Workflow A" }],
+      activeWorkflowId: "wf-a",
+      repositories: [{ id: "repo-a", name: "Repository A" }],
+      allRepositoriesSelected: false,
+      selectedRepositoryId: "repo-a",
+      enablePreviewOnClick: true,
+      boardSort: "priority_desc",
+      priorityFilterTokens: ["critical"],
+    });
+    render(
+      <KanbanDisplayDropdown
+        currentPage="kanban"
+        pluginFilters={[TAGS_FILTER]}
+        pluginFilterSelections={{ [TAGS_FILTER_KEY]: ["bug"] }}
+      />,
+    );
+    openDropdown();
+
+    expect(screen.getByTestId("display-settings-filters").textContent).toContain(
+      "Workflow A, Repository A, Critical, Tags: 1 selected",
+    );
+    expect(screen.getByTestId("display-settings-sort").textContent).toContain("Priority");
+    expect(screen.getByTestId("display-settings-preview").textContent).toContain("On");
+  });
+
+  it("does not call preference handlers when groups are toggled", () => {
+    const settings = defaultMockSettings();
+    useKanbanDisplaySettingsMock.mockReturnValue(settings);
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
+    openDropdown();
+
+    expandGroup("filters");
+    expandGroup("sort");
+    expandGroup("preview");
+
+    expect(settings.onWorkflowChange).not.toHaveBeenCalled();
+    expect(settings.onRepositoryChange).not.toHaveBeenCalled();
+    expect(settings.onBoardSortChange).not.toHaveBeenCalled();
+    expect(settings.onPriorityFilterChange).not.toHaveBeenCalled();
+    expect(settings.onTogglePreviewOnClick).not.toHaveBeenCalled();
+  });
+
+  it("keeps page-specific controls inside the filters and list groups", () => {
+    render(<KanbanDisplayDropdown currentPage="tasks" />);
+    openDropdown();
+
+    expect(groupToggle("filters").getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe("false");
+    expect(groupToggle("list-rows").getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe("false");
+    expect(screen.queryByTestId(`${DISPLAY_SETTINGS_PREFIX}sort-toggle`)).toBeNull();
+    expect(screen.queryByTestId("display-settings-preview-toggle")).not.toBeNull();
+
+    expandGroup("filters");
+    expect(screen.getByTestId(DISPLAY_WORKFLOW_FILTER_TEST_ID)).not.toBeNull();
+    expect(screen.getByTestId(DISPLAY_REPOSITORY_FILTER_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId("display-priority-filter-option-critical")).toBeNull();
+
+    expandGroup("list-rows");
+    expect(screen.getByText("Show task details")).not.toBeNull();
+  });
+});
+
+describe("KanbanDisplayDropdown — plugin task filters", () => {
+  it("renders no plugin filter section when none are registered", () => {
+    render(<KanbanDisplayDropdown pluginFilters={[]} />);
+    openDropdown();
+
+    expect(screen.queryByTestId(/display-plugin-filter-/)).toBeNull();
+  });
+
+  it("renders a filter section with its options and current selection", () => {
+    render(
+      <KanbanDisplayDropdown
+        pluginFilters={[TAGS_FILTER]}
+        pluginFilterSelections={{ [TAGS_FILTER_KEY]: ["bug"] }}
+      />,
+    );
+    openDropdown();
+    expandGroup("filters");
+
+    expect(screen.getByTestId(TAGS_FILTER_TEST_ID)).not.toBeNull();
+    expect(screen.getByText("Tags")).not.toBeNull();
+    expect(
+      screen.getByTestId(`${TAGS_FILTER_TEST_ID}-option-bug`).getAttribute(DATA_STATE_ATTRIBUTE),
+    ).toBe("checked");
+    expect(
+      screen
+        .getByTestId(`${TAGS_FILTER_TEST_ID}-option-feature`)
+        .getAttribute(DATA_STATE_ATTRIBUTE),
+    ).toBe("unchecked");
+  });
+
+  it("invokes onPluginFilterChange with the updated selection when toggling an option", () => {
+    const onPluginFilterChange = vi.fn();
+    render(
+      <KanbanDisplayDropdown
+        pluginFilters={[TAGS_FILTER]}
+        pluginFilterSelections={{}}
+        onPluginFilterChange={onPluginFilterChange}
+      />,
+    );
+    openDropdown();
+    expandGroup("filters");
+
+    fireEvent.click(screen.getByTestId(`${TAGS_FILTER_TEST_ID}-option-bug`));
+
+    expect(onPluginFilterChange).toHaveBeenCalledWith(TAGS_FILTER_KEY, ["bug"]);
+  });
+});
+
+describe("KanbanDisplayDropdown — plugin task filter identities", () => {
+  it("keeps same-id filters from different plugins independent", () => {
+    const onPluginFilterChange = vi.fn();
+    const firstFilterKey = TAGS_FILTER_KEY;
+    const secondFilterKey = PRIORITY_FILTER_KEY;
+    const secondFilter = {
+      pluginId: PRIORITY_PLUGIN_ID,
+      id: TAGS_FILTER_ID,
+      label: "Priority",
+      getOptions: () => [{ value: "high", label: "High" }],
+      matches: () => true,
+    };
+
+    render(
+      <KanbanDisplayDropdown
+        pluginFilters={[TAGS_FILTER, secondFilter]}
+        pluginFilterSelections={{ [firstFilterKey]: ["bug"] }}
+        onPluginFilterChange={onPluginFilterChange}
+      />,
+    );
+    openDropdown();
+    expandGroup("filters");
+
+    expect(
+      screen
+        .getByTestId(`display-plugin-filter-${firstFilterKey}-option-bug`)
+        .getAttribute(DATA_STATE_ATTRIBUTE),
+    ).toBe("checked");
+    expect(
+      screen
+        .getByTestId(`display-plugin-filter-${secondFilterKey}-option-high`)
+        .getAttribute(DATA_STATE_ATTRIBUTE),
+    ).toBe("unchecked");
+
+    fireEvent.click(screen.getByTestId(`display-plugin-filter-${secondFilterKey}-option-high`));
+
+    expect(onPluginFilterChange).toHaveBeenCalledWith(secondFilterKey, ["high"]);
+  });
+
+  it("memoizes options while a filter registration remains stable", () => {
+    const getOptions = vi.fn(() => [{ value: "bug", label: "Bug" }]);
+    const filter = {
+      pluginId: TAGS_PLUGIN_ID,
+      id: TAGS_FILTER_ID,
+      label: TAGS_FILTER.label,
+      getOptions,
+      matches: () => true,
+    };
+    const props = { pluginFilters: [filter] };
+    const { rerender } = render(<KanbanDisplayDropdown {...props} />);
+    openDropdown();
+    expandGroup("filters");
+
+    expect(getOptions).toHaveBeenCalledTimes(1);
+
+    rerender(<KanbanDisplayDropdown {...props} />);
+
+    expect(getOptions).toHaveBeenCalledTimes(1);
+  });
+});
+describe("KanbanDisplayDropdown — no Steps section (relocated to the lane)", () => {
+  it("renders no Steps section, group, or step control on the kanban page", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue(defaultMockSettings());
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
+    openDropdown();
+
+    // Column visibility moved to the swimlane header's ColumnsMenu; the
+    // dropdown keeps only Workflow, Repository, plugin filters and Preview.
+    expect(screen.queryByText("kanban:steps")).toBeNull();
+    expect(screen.queryByTestId(/steps-filter-/)).toBeNull();
+    expect(screen.queryByTestId(/columns-menu/)).toBeNull();
+  });
+
+  it("renders no step control even when workflows have snapshots with steps", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      eligibleWorkflows: [{ id: "wf-a", name: "Workflow A" }],
+      snapshots: { "wf-a": { steps: [{ id: "step-1", title: "Step 1", position: 0 }] } },
+      hiddenWorkflowStepIds: { "wf-a": ["step-1"] },
+    });
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
+    openDropdown();
+
+    expect(screen.queryByTestId("steps-filter-step-step-1")).toBeNull();
+    expect(screen.queryByTestId("columns-menu-step-step-1")).toBeNull();
+  });
+});
+
+describe("KanbanDisplayDropdown — board sort and priority filter", () => {
+  it("renders the board sort and priority filter sections on the kanban page", () => {
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
+    openDropdown();
+    expandGroup("filters");
+    expandGroup("sort");
+
+    expect(screen.getByTestId(DISPLAY_BOARD_SORT_TEST_ID)).not.toBeNull();
+    TASK_PRIORITY_TOKENS.forEach((token) => {
+      expect(screen.getByTestId(`display-priority-filter-option-${token}`)).not.toBeNull();
+    });
+  });
+
+  it("names the board sort select by what it selects, not its current value", () => {
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
+    openDropdown();
+    expandGroup("sort");
+
+    expect(screen.getByRole("combobox", { name: "Board sort" })).not.toBeNull();
+  });
+
+  it("omits the board sort and priority filter sections on the tasks list page", () => {
+    render(<KanbanDisplayDropdown currentPage="tasks" />);
+    openDropdown();
+
+    expect(screen.queryByTestId(DISPLAY_BOARD_SORT_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(/display-priority-filter-option-/)).toBeNull();
+  });
+
+  it("reflects the current priority filter selection", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      priorityFilterTokens: ["critical"],
+    });
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
+    openDropdown();
+    expandGroup("filters");
+
+    expect(
+      screen
+        .getByTestId("display-priority-filter-option-critical")
+        .getAttribute(DATA_STATE_ATTRIBUTE),
+    ).toBe("checked");
+    expect(
+      screen.getByTestId("display-priority-filter-option-high").getAttribute(DATA_STATE_ATTRIBUTE),
+    ).toBe("unchecked");
+  });
+
+  it("invokes onPriorityFilterChange when toggling a priority option", () => {
+    const onPriorityFilterChange = vi.fn();
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      onPriorityFilterChange,
+    });
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
+    openDropdown();
+    expandGroup("filters");
+
+    fireEvent.click(screen.getByTestId("display-priority-filter-option-high"));
+
+    expect(onPriorityFilterChange).toHaveBeenCalledWith("high");
+  });
+});

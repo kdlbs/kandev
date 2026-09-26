@@ -1,53 +1,147 @@
 name: Frontend Tests
 
+# No trigger-level `paths:` filter, deliberately. A workflow skipped by one
+# reports no conclusion at all, and a required check that never reports leaves
+# a pull request unable to enter a merge queue and a merge group unable to
+# leave it. `merge_group` cannot carry a `paths:` filter in the first place.
+# The filter lives in the `changes` job below instead, and `frontend-gate`
+# reports the single conclusion the queue waits on. See docs/ci-merge-queue.md.
 on:
   push:
     branches: [main]
-    paths:
-      - "apps/cli/**"
-      - "apps/package.json"
-      - "apps/prettier.config.mjs"
-      - "apps/.prettierignore"
-      - "apps/web/**"
-      - "apps/packages/**"
-      - "apps/pnpm-lock.yaml"
-      - "apps/backend/go.mod"
-      - "apps/backend/go.sum"
-      - ".github/workflows/frontend-tests.yml"
-      - "!**/*.md"
-      - "!**/*.mdx"
-      - "!**/*.markdown"
   pull_request:
     branches: [main]
-    paths:
-      - "apps/cli/**"
-      - "apps/package.json"
-      - "apps/prettier.config.mjs"
-      - "apps/.prettierignore"
-      - "apps/web/**"
-      - "apps/packages/**"
-      - "apps/pnpm-lock.yaml"
-      - "apps/backend/go.mod"
-      - "apps/backend/go.sum"
-      - ".github/workflows/frontend-tests.yml"
-      - "!**/*.md"
-      - "!**/*.mdx"
-      - "!**/*.markdown"
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a merge-queue run. Its ref is unique per queue entry, so a
+  # cancellation here could only come from a mis-keyed group, and the queue
+  # would read the cancelled check as a failure and eject the pull request.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
-# Least-privilege: the `frontend` job only reads source and runs tests.
+# Least-privilege: the frontend jobs only read source and run verification.
 # `packages: read` lets the container job pull the kandev-ci image from GHCR.
 permissions:
   contents: read
   packages: read
 
+env:
+  # Container jobs may override HOME. Keep Corepack pointed at the pnpm cache
+  # prepared in the CI image.
+  COREPACK_HOME: /root/.cache/node/corepack
+
 jobs:
+  runner_plan:
+    name: Plan external runner allocation
+    runs-on: ubuntu-latest
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Plan runner allocation
+        id: plan
+        uses: ./.github/actions/plan-external-runners
+        with:
+          workflow: frontend
+          run-id: ${{ github.run_id }}
+          families: >-
+            [
+              {"name":"changes","tier":"light"},
+              {"name":"frontend","tier":"standard"},
+              {"name":"frontend_gate","tier":"light"}
+            ]
+          burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
+          percent: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
+          light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
+          standard-label: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
+
+  # The former trigger-level `paths:` list, applied one level down so a skip
+  # still produces a conclusion. `.github/scripts/changed-paths.py` implements
+  # the same last-match-wins semantics GitHub applies to `paths:`.
+  changes:
+    name: Detect relevant changes
+    needs: runner_plan
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).changes_runner }}
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.detect.outputs.run }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # The base commit has to be present locally for the diff below. Every
+          # other job in this workflow already pays for a full clone.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect relevant changes
+        id: detect
+        env:
+          PATTERNS: |
+            apps/cli/**
+            apps/package.json
+            apps/prettier.config.mjs
+            apps/.prettierignore
+            apps/web/**
+            scripts/settings-contract-ci.test.mjs
+            apps/packages/**
+            apps/pnpm-lock.yaml
+            apps/backend/go.mod
+            apps/backend/go.sum
+            .github/workflows/frontend-tests.yml
+            .github/scripts/changed-paths.py
+            !**/*.md
+            !**/*.mdx
+            !**/*.markdown
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          case "${EVENT_NAME}" in
+            # The checkout is the merge ref, whose first parent is the base
+            # branch tip. Diffing against that tip directly collapses to a
+            # two-dot diff over everything main landed since the PR opened, so
+            # take the fork point -- the same correction the steps below make.
+            pull_request) BASE="$(git merge-base HEAD "origin/${BASE_REF}")" ;;
+            # The queue branch is cut from this commit, so it is a true ancestor.
+            merge_group) BASE="${MERGE_GROUP_BASE_SHA}" ;;
+            push) BASE="${PUSH_BEFORE}" ;;
+            *) BASE="" ;;
+          esac
+
+          # Fail open. A first push to a branch, a force push, or an unknown
+          # event leaves no usable base, and running the suite needlessly is
+          # cheaper than merging something no job ever looked at.
+          if [[ -z "${BASE}" || "${BASE}" == "0000000000000000000000000000000000000000" ]] \
+             || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "No usable base commit for '${EVENT_NAME}'; running everything."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # `-z`, not plain --name-only: git quotes non-ASCII paths under its
+          # default core.quotePath, and a quoted path matches no pattern, so a
+          # change to one would skip every job and still report success.
+          git diff --name-only -z "${BASE}" HEAD \
+            | python3 .github/scripts/changed-paths.py
+
   frontend:
     name: Run Frontend Lint, Tests, and Build
-    runs-on: ubuntu-latest
+    needs: [changes, runner_plan]
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_runner }}
     # Pre-baked image bundles Node 24, pnpm 9.15.9, Go, and go-licenses —
     # see .github/docker/ci-base/Dockerfile.
     container: ghcr.io/kdlbs/kandev-ci:build-latest
@@ -63,21 +157,42 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Mark workspace safe for git
         shell: bash
         working-directory: ${{ github.workspace }}
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: |
+          set -euo pipefail
+          STORE_PATH="$(pnpm store path --silent)"
+          PNPM_VERSION="$(pnpm --version)"
+          if [[ "${STORE_PATH}" != /* ]]; then
+            echo "pnpm returned a non-absolute store path: ${STORE_PATH}" >&2
+            exit 1
+          fi
+          mkdir -p "${STORE_PATH}"
+          printf 'path=%s\n' "${STORE_PATH}" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "${PNPM_VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Cache pnpm store
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
         with:
-          path: ~/.local/share/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm-store.outputs.version }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm-store.outputs.version }}-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Verify settings catalog contract
+        working-directory: ${{ github.workspace }}
+        run: node --test scripts/settings-contract-ci.test.mjs
 
       - name: Regenerate OSS licenses manifest
         run: pnpm --filter @kandev/web licenses:gen
@@ -101,6 +216,11 @@ jobs:
 
       - name: Check formatting
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
 
@@ -112,10 +232,16 @@ jobs:
           # extra files are already formatted), but it is the same trap the i18n
           # ratchet below hit for real, so do not copy the old idiom. The fork
           # point is what "changed in this PR" actually means.
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BASE_SHA="$(git merge-base HEAD "origin/${{ github.base_ref }}")"
+          #
+          # `merge_group` has no PR context at all. Its own base_sha is the
+          # commit the queue branch was cut from, which is already the fork
+          # point, so no correction is needed there.
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            BASE_SHA="$(git merge-base HEAD "origin/${BASE_REF}")"
+          elif [[ "${EVENT_NAME}" == "merge_group" ]]; then
+            BASE_SHA="${MERGE_GROUP_BASE_SHA}"
           else
-            BASE_SHA="${{ github.event.before }}"
+            BASE_SHA="${PUSH_BEFORE}"
           fi
 
           if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
@@ -154,12 +280,22 @@ jobs:
       - name: Run lint
         run: pnpm --filter @kandev/web lint
 
+      # `build` below is Vite, which strips types with esbuild and never checks
+      # them, so nothing in this job used to fail on a type error. Runs before
+      # the tests to fail fast on the cheaper check.
+      - name: Run typecheck
+        run: pnpm --filter @kandev/web typecheck
+
+      - name: Verify standalone plugin SDK contract
+        run: pnpm --filter @kandev/plugin-sdk test && pnpm --filter @kandev/plugin-sdk typecheck
+
       # Unlike the eslint literal-string guard (scoped to already-migrated paths
-      # via i18nGuardFiles), these four checks scan components/app/hooks/lib
+      # via i18nGuardFiles), these five checks scan components/app/hooks/lib
       # repo-wide. Each one pins a class of i18n bug that fails silently at
       # runtime: a key with no catalog entry, <Trans> tag markup rendered
-      # verbatim, an English plural ending passed as a value, and t() at module
-      # scope frozen at the boot locale. See docs/i18n.md.
+      # verbatim, an English plural ending passed as a value, t() at module
+      # scope frozen at the boot locale, and em dashes in public copy. See
+      # docs/i18n.md.
       - name: Run i18n checks
         run: pnpm --filter @kandev/web i18n:check
 
@@ -173,6 +309,10 @@ jobs:
         shell: bash
         # The job defaults to `apps`; these scripts live one level deeper.
         working-directory: apps/web
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
 
@@ -184,14 +324,23 @@ jobs:
           # (#2160). The scripts' own default, `merge-base HEAD origin/main`,
           # resolves to the merge ref's base-side parent and is correct here;
           # origin/main is present because the checkout is fetch-depth: 0.
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             node scripts/run-i18n-ratchet.mjs
             exit 0
           fi
 
-          # push: HEAD *is* the new base branch tip, so there is no fork point to
-          # find and the previous tip is the only meaningful base.
-          BASE_SHA="${{ github.event.before }}"
+          # merge_group: the queue branch is cut from base_sha and carries only
+          # the queued pull requests on top, so that IS the fork point. The
+          # scripts' `origin/main` default is wrong here — main may already have
+          # moved past what this merge group was built on.
+          if [[ "${EVENT_NAME}" == "merge_group" ]]; then
+            BASE_SHA="${MERGE_GROUP_BASE_SHA}"
+          else
+            # push: HEAD *is* the new base branch tip, so there is no fork point to
+            # find and the previous tip is the only meaningful base.
+            BASE_SHA="${PUSH_BEFORE}"
+          fi
+
           if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
             echo "No usable base SHA; skipping the new-code ratchet."
             exit 0
@@ -199,8 +348,89 @@ jobs:
 
           node scripts/run-i18n-ratchet.mjs --base "${BASE_SHA}"
 
+      # New-code ratchet for E2E waits. `page.waitForTimeout(500)` and
+      # hand-rolled promise sleeps are the suite's most reliable source of flake:
+      # a hand-picked number that was long enough on the machine it was written
+      # on. The sanctioned forms (`dwell`, `injectLatency` in
+      # e2e/helpers/causal-waits.ts) take a category and a reason.
+      #
+      # The eslint rule is an error only on directories already converted to
+      # zero, so this judges the CHANGE instead of the FILE for everywhere else —
+      # added files whole, modified files only on touched lines. Same base
+      # handling as the i18n step above, and the same reason for it: DO NOT pass
+      # --base on pull_request.
+      - name: Run E2E sleep ratchet
+        shell: bash
+        working-directory: apps/web
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            node scripts/check-new-e2e-sleeps.mjs
+            exit 0
+          fi
+
+          if [[ "${EVENT_NAME}" == "merge_group" ]]; then
+            BASE_SHA="${MERGE_GROUP_BASE_SHA}"
+          else
+            BASE_SHA="${PUSH_BEFORE}"
+          fi
+
+          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+            echo "No usable base SHA; skipping the E2E sleep ratchet."
+            exit 0
+          fi
+
+          node scripts/check-new-e2e-sleeps.mjs --base "${BASE_SHA}"
+
+      # Keep the production environment guard in the unsharded job. The image
+      # sets no NODE_ENV, so this reproduces the runtime value that exposed a
+      # deleted NODE_ENV=test pin in vitest.config.ts.
       - name: Run tests
+        env:
+          NODE_ENV: production
         run: pnpm --filter @kandev/web test
 
       - name: Build
         run: pnpm --filter @kandev/web build
+
+  # The required check. Runs on every event, including the ones where the
+  # frontend verification jobs above are correctly skipped, so the merge queue
+  # always has a conclusion to read instead of a check that stays pending.
+  frontend-gate:
+    name: Frontend Tests Passed
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_gate_runner }}
+    needs: [changes, frontend, runner_plan]
+    if: always()
+
+    steps:
+      - name: Require the frontend job to have passed or been skipped
+        env:
+          RUNNER_PLAN_RESULT: ${{ needs.runner_plan.result }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+        run: |
+          set -euo pipefail
+
+          echo "Runner plan: ${RUNNER_PLAN_RESULT}"
+          # `skipped` is a pass: the change-detection job decided nothing this
+          # workflow covers was touched. `cancelled` is not — a cancelled job
+          # never reached a verdict, and treating that as a pass would let an
+          # untested merge group through.
+          if [[ "${RUNNER_PLAN_RESULT}" != "success" ]]; then
+            echo "Runner planning finished with result: ${RUNNER_PLAN_RESULT}" >&2
+            exit 1
+          fi
+          if [[ "${CHANGES_RESULT}" != "success" ]]; then
+            echo "Change detection finished with result: ${CHANGES_RESULT}" >&2
+            exit 1
+          fi
+          if [[ "${FRONTEND_RESULT}" != "success" && "${FRONTEND_RESULT}" != "skipped" ]]; then
+            echo "Frontend job finished with result: ${FRONTEND_RESULT}" >&2
+            exit 1
+          fi
+          echo "Change detection: ${CHANGES_RESULT}; frontend: ${FRONTEND_RESULT}"

@@ -13,6 +13,57 @@ async function expectInsideViewport(
 }
 
 test.describe("mobile: shell command output", () => {
+  test("does not show an output disclosure for a command with no output", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Mobile Empty Command Output", {
+      description: "seeded mobile shell command without output",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+      state: "IDLE",
+      agentProfileId: seedData.agentProfileId,
+    });
+    const command = "true";
+    await apiClient.seedSessionMessage(sessionId, {
+      type: "tool_execute",
+      content: command,
+      metadata: {
+        status: "complete",
+        tool_call_id: "tool-mobile-empty-output",
+        normalized: {
+          shell_exec: {
+            command,
+            work_dir: "/workspace",
+            output: { exit_code: 0 },
+          },
+        },
+      },
+    });
+    const shellOutputRequests: string[] = [];
+    testPage.on("request", (request) => {
+      if (request.url().endsWith("/shell-output")) shellOutputRequests.push(request.url());
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const chat = session.activeChat();
+
+    await expect(chat.getByTestId("tool-execute-command").filter({ hasText: command })).toBeVisible(
+      { timeout: 15_000 },
+    );
+    await expect(chat.getByLabel("Command succeeded")).toBeVisible();
+    await expect(chat.getByRole("button", { name: "Show command output" })).toHaveCount(0);
+    await expect(chat.getByTestId("tool-execute-output")).toHaveCount(0);
+    expect(shellOutputRequests).toHaveLength(0);
+  });
+
   test("keeps a long command and lazy output inside the viewport", async ({
     testPage,
     apiClient,

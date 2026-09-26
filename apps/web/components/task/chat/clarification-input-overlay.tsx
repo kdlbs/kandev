@@ -1,31 +1,65 @@
 "use client";
 
+/* eslint-disable max-lines -- the overlay keeps active and late-answer lifecycle states together. */
+
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { IconX, IconMessageQuestion, IconInfoCircle, IconCheck } from "@tabler/icons-react";
-import { cn } from "@/lib/utils";
-import ReactMarkdown from "react-markdown";
-import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
+import { IconInfoCircle } from "@tabler/icons-react";
 import type {
   Message,
   ClarificationRequestMetadata,
   ClarificationAnswer,
   ClarificationQuestion,
 } from "@/lib/types/http";
-import { useClarificationGroup } from "@/hooks/domains/session/use-clarification-group";
-import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
 import {
+  useClarificationGroup,
+  type ClarificationOutcome,
+} from "@/hooks/domains/session/use-clarification-group";
+import type {
+  LateClarificationSnapshot,
+  LateClarificationState,
+} from "@/hooks/use-late-clarification-message";
+import type { MessageAdmissionOutcome } from "@/hooks/use-message-handler";
+import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
+import {
+  CLARIFICATION_CUSTOM_TEXT_MAX_RUNES,
   ClarificationCarouselNav,
   ClarificationCustomInput,
   ClarificationOptions,
-  ClarificationStepper,
+  countRunes,
 } from "./clarification-overlay-parts";
+import { ClarificationOverlayTopBar } from "./clarification-overlay-header";
+import { ClarificationStatusBanner } from "./clarification-status-banner";
+import { ClarificationMarkdown } from "./clarification-markdown";
+import { useTranslation } from "react-i18next";
 
 type ClarificationInputOverlayProps = {
   messages: readonly Message[] | null | undefined;
   onResolved: () => void;
   shortcutScopeRef: RefObject<HTMLElement | null>;
   keyboardShortcutsEnabled?: boolean;
+  /** True when the session no longer has a live clarification waiter. */
+  agentDisconnected?: boolean;
+  // Called when the user presses Escape. Unlike Skip, this must not answer or
+  // reject the bundle — it only dismisses the UI (e.g. collapses the panel).
+  // The question stays pending and the agent stays blocked.
+  onDismiss: () => void;
+  // Called by the expanded header's collapse control.
+  onCollapse?: () => void;
+  collapseContentId?: string;
+  // Additive: reports every settled submission outcome, distinct from
+  // onResolved's narrower "this caller's own answer landed" signal. The
+  // task session and Quick Chat hosts leave this unset and keep their
+  // existing behavior identical; the Needs-you Inbox is the first host that
+  // needs to tell "this caller won" apart from "another caller won" /
+  // "no longer active" / "submission failed" to decide whether to remove its
+  // row (design-02#Failure-and-recovery).
+  onOutcome?: (outcome: ClarificationOutcome) => void;
+  mode?: "active" | "late";
+  onLateAnswer?: (snapshot: LateClarificationSnapshot) => Promise<MessageAdmissionOutcome>;
+  /** Restores a late-message draft after its inline form was removed. */
+  initialAnswers?: readonly ClarificationAnswer[];
+  /** Shares late-message admission state across transcript and active hosts. */
+  lateAnswerState?: LateClarificationState;
 };
 
 type SingleQuestionMeta = {
@@ -49,12 +83,32 @@ function resolveQuestionMessages(messages: readonly Message[] | null | undefined
   return [];
 }
 
+function useResetOverlayStateOnBundleChange(
+  pendingId: string | null,
+  setCustomDrafts: (drafts: Record<string, string>) => void,
+  setActiveIndex: (index: number) => void,
+) {
+  useEffect(() => {
+    // The hook resets its answer and retry state when a new pending bundle
+    // replaces the current one. Drafts and carousel navigation are overlay-
+    // local state, so they need the same lifecycle fence as well. Question IDs
+    // can repeat across bundles, which makes an ID-only draft key unsafe.
+    setCustomDrafts({});
+    setActiveIndex(0);
+  }, [pendingId, setCustomDrafts, setActiveIndex]);
+}
+
 function sortMessagesByQuestionIndex(messages: Message[]): Message[] {
   return messages.slice().sort((a, b) => {
     const ai = (a.metadata as ClarificationRequestMetadata | undefined)?.question_index ?? 0;
     const bi = (b.metadata as ClarificationRequestMetadata | undefined)?.question_index ?? 0;
     return ai - bi;
   });
+}
+
+function readSharedContext(message: Message | undefined): string | null {
+  const context = (message?.metadata as ClarificationRequestMetadata | undefined)?.context;
+  return context?.trim() ? context : null;
 }
 
 function isQuestionAnsweredAt(
@@ -66,6 +120,19 @@ function isQuestionAnsweredAt(
   if (!message) return false;
   const questionId = readSingleQuestionMeta(message)?.questionId;
   return questionId ? Boolean(answers[questionId]) : false;
+}
+
+function computeAllAnswered(
+  sortedMessages: Message[],
+  answers: Record<string, ClarificationAnswer>,
+): boolean {
+  return (
+    sortedMessages.length > 0 &&
+    sortedMessages.every((m) => {
+      const id = readSingleQuestionMeta(m)?.questionId;
+      return id ? Boolean(answers[id]) : false;
+    })
+  );
 }
 
 type CardProps = {
@@ -85,6 +152,7 @@ type CardProps = {
 };
 
 function ClarificationCard(props: CardProps) {
+  const { t } = useTranslation();
   const {
     meta,
     index,
@@ -112,22 +180,25 @@ function ClarificationCard(props: CardProps) {
         <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
           {total > 1 && (
             <span data-testid="clarification-progress-chip">
-              Question {index + 1} of {total}
+              {t("task:questionOfTotal", { index: index + 1, total })}
             </span>
           )}
           {metadata.question.title && (
-            <span className="text-muted-foreground/70">
+            <span data-testid="clarification-question-title" className="text-muted-foreground/70">
               {total > 1 ? "· " : ""}
-              {metadata.question.title}
+              <ClarificationMarkdown variant="inline">
+                {metadata.question.title}
+              </ClarificationMarkdown>
             </span>
           )}
         </div>
       )}
-      <div className="markdown-body max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 mb-3">
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-          {question.prompt}
-        </ReactMarkdown>
-      </div>
+      <ClarificationMarkdown
+        variant="block"
+        className="mb-3 max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+      >
+        {question.prompt}
+      </ClarificationMarkdown>
       <ClarificationOptions
         options={question.options}
         selectedOption={selectedOption}
@@ -141,7 +212,7 @@ function ClarificationCard(props: CardProps) {
           className="mt-2 flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400"
         >
           <IconInfoCircle className="h-3.5 w-3.5 flex-shrink-0" />
-          The agent has moved on. Your response will be sent as a new message.
+          {t("task:theAgentHasMovedOn")}
         </div>
       )}
       <ClarificationCustomInput
@@ -170,9 +241,49 @@ function useResolveCallback(
   }, [submitState, onResolved]);
 }
 
+// Tells an ancestor dialog (Quick Chat) whether this widget will actually act
+// on a given Escape keydown, so the dialog never swallows an Escape that
+// nothing here is going to handle. Mirrors CarouselKeyboardShortcuts's own
+// gate exactly (enabled, in-scope target, no modifier, not already claimed)
+// instead of a separately-derived approximation that could drift out of sync
+// with it.
+//
+// Also records which exact event object this predicate armed. Radix's
+// DismissableLayer intercepts Escape on `document` in the capture phase --
+// before CarouselKeyboardShortcuts's own bubble-phase `window` listener runs
+// -- and the dialog calls event.preventDefault() itself right after this
+// predicate returns true. By the time the window listener sees the event,
+// e.defaultPrevented is therefore already true for every Escape this
+// predicate armed, indistinguishable by flag alone from an unrelated in-scope
+// consumer (cancelling a queued-message edit, closing an @-mention popup)
+// having already claimed it first. The recorded event reference lets the
+// window listener tell those two cases apart: the same object means it was
+// this predicate's own doing.
+function useEscapeGuardRegistration(
+  handledHere: boolean,
+  shortcutScopeRef: RefObject<HTMLElement | null>,
+) {
+  const armedEventRef = useRef<KeyboardEvent | null>(null);
+  const testEscapeGuard = useCallback(
+    (event: KeyboardEvent) => {
+      const armed =
+        handledHere &&
+        isWithinScope(event.target, shortcutScopeRef) &&
+        !shouldIgnoreEscape(event) &&
+        !event.defaultPrevented;
+      if (armed) armedEventRef.current = event;
+      return armed;
+    },
+    [handledHere, shortcutScopeRef],
+  );
+  useClarificationEscapeGuard(testEscapeGuard);
+  return armedEventRef;
+}
+
 type CarouselShortcutArgs = {
   enabled: boolean;
   scopeRef: RefObject<HTMLElement | null>;
+  armedEventRef: RefObject<KeyboardEvent | null>;
   meta: SingleQuestionMeta;
   activeIndex: number;
   total: number;
@@ -180,7 +291,7 @@ type CarouselShortcutArgs = {
   onPick: (index: number) => void;
   onPrev: () => void;
   onNext: () => void;
-  onSkip: () => void;
+  onDismiss: () => void;
   onSubmit: () => void;
 };
 
@@ -200,6 +311,21 @@ function shouldIgnoreShortcut(e: KeyboardEvent): boolean {
   return e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
 }
 
+// Escape does not insert a character, so unlike the other shortcuts it must
+// still collapse the panel while focus is in the composer or another
+// editable control -- the ordinary state right after sending the message
+// that triggered the clarification. Only an actual modifier combo blocks it.
+function shouldIgnoreEscape(e: KeyboardEvent): boolean {
+  return e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
+}
+
+function isWithinScope(
+  target: EventTarget | null,
+  scopeRef: RefObject<HTMLElement | null>,
+): boolean {
+  return target instanceof Node && Boolean(scopeRef.current?.contains(target));
+}
+
 // tryHandleMetaEnter returns true when the event was Cmd/Ctrl+Enter, so the
 // caller can short-circuit. When focus is inside the custom-text input it
 // returns true *without* invoking onSubmit — the input's own keydown handler
@@ -214,21 +340,29 @@ function tryHandleMetaEnter(e: KeyboardEvent, canSubmit: boolean, onSubmit: () =
 }
 
 function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
-  const { enabled, scopeRef } = args;
+  const { enabled, scopeRef, armedEventRef } = args;
   const optionsCount = args.meta.question.options.length;
   const isLast = args.activeIndex === args.total - 1;
-  const { canSubmit, onPick, onPrev, onNext, onSkip, onSubmit } = args;
+  const { canSubmit, onPick, onPrev, onNext, onDismiss, onSubmit } = args;
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.target instanceof Node) || !scopeRef.current?.contains(e.target)) return;
+      if (!isWithinScope(e.target, scopeRef)) return;
       if (tryHandleMetaEnter(e, canSubmit, onSubmit)) return;
-      if (shouldIgnoreShortcut(e)) return;
       if (e.key === "Escape") {
+        if (shouldIgnoreEscape(e)) return;
+        // Bail if some other in-scope consumer (cancelling a queued-message
+        // edit, closing an @-mention/slash-command popup) already claimed
+        // this Escape -- but not if the only thing that claimed it was our
+        // own paired guard predicate (see useEscapeGuardRegistration), which
+        // always runs first and always sets e.defaultPrevented for events it
+        // arms.
+        if (e.defaultPrevented && armedEventRef.current !== e) return;
         e.preventDefault();
-        onSkip();
+        onDismiss();
         return;
       }
+      if (shouldIgnoreShortcut(e)) return;
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         onPrev();
@@ -251,13 +385,14 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
   }, [
     enabled,
     scopeRef,
+    armedEventRef,
     optionsCount,
     isLast,
     canSubmit,
     onPick,
     onPrev,
     onNext,
-    onSkip,
+    onDismiss,
     onSubmit,
   ]);
   return null;
@@ -265,6 +400,7 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
 
 type CarouselBodyProps = {
   sortedMessages: Message[];
+  meta: SingleQuestionMeta | null;
   group: ReturnType<typeof useClarificationGroup>;
   activeIndex: number;
   setActiveIndex: (idx: number) => void;
@@ -272,9 +408,14 @@ type CarouselBodyProps = {
   setCustomDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   allAnswered: boolean;
   isSubmitting: boolean;
+  agentDisconnected: boolean;
   shortcutScopeRef: RefObject<HTMLElement | null>;
+  armedEventRef: RefObject<KeyboardEvent | null>;
   keyboardShortcutsEnabled: boolean;
   onSubmit: () => void;
+  submitAnswers: (override?: Record<string, ClarificationAnswer>) => void | Promise<void>;
+  autoSubmitSingleQuestion: boolean;
+  onDismiss: () => void;
 };
 
 type QuestionHandlerCtx = {
@@ -285,7 +426,23 @@ type QuestionHandlerCtx = {
   total: number;
   setActiveIndex: (idx: number) => void;
   setCustomDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  submitAnswers: (override?: Record<string, ClarificationAnswer>) => void | Promise<void>;
+  autoSubmitSingleQuestion: boolean;
 };
+
+type AnswerSubmitter = (override?: Record<string, ClarificationAnswer>) => void | Promise<void>;
+
+function chooseSubmitter(
+  lateMode: boolean,
+  lateInteraction: boolean,
+  lateSubmitter: AnswerSubmitter,
+  lateRetry: AnswerSubmitter,
+  activeSubmitter: AnswerSubmitter,
+): AnswerSubmitter {
+  if (lateMode) return lateSubmitter;
+  if (lateInteraction) return lateRetry;
+  return activeSubmitter;
+}
 
 type QuestionHandlers = {
   onSelectOption: (optionId: string) => void;
@@ -316,15 +473,24 @@ function deriveSelectionState(
 }
 
 function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
-  const { meta, group, isSingleQuestion, activeIndex, total, setActiveIndex, setCustomDrafts } =
-    ctx;
+  const {
+    meta,
+    group,
+    isSingleQuestion,
+    activeIndex,
+    total,
+    setActiveIndex,
+    setCustomDrafts,
+    submitAnswers,
+    autoSubmitSingleQuestion,
+  } = ctx;
 
   // Records the answer, then auto-submits (single-question — uses the override
   // path because setState is async) or auto-advances to the next step.
   const commitAnswer = (answer: ClarificationAnswer) => {
     group.recordAnswer(meta.questionId, answer);
-    if (isSingleQuestion) {
-      void group.submitCollected({ [meta.questionId]: answer });
+    if (isSingleQuestion && autoSubmitSingleQuestion) {
+      void submitAnswers({ [meta.questionId]: answer });
       return;
     }
     if (activeIndex < total - 1) setActiveIndex(activeIndex + 1);
@@ -344,10 +510,14 @@ function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
     // Live-record the draft so the stepper updates and the custom input lights
     // up the moment the user types. Emptying the draft clears the answer so
     // allAnswered reverts to false. Enter/Cmd+Enter still drives advance/submit.
+    // An over-limit draft is also treated as unanswered (W4): otherwise it
+    // could sit recorded from live-typing and reach the header Submit button,
+    // which has no per-question rune check of its own, and fail the request
+    // with an opaque 400 the user never saw coming from this input.
     onCustomDraftChange(value) {
       setCustomDrafts((prev) => ({ ...prev, [meta.questionId]: value }));
       const trimmed = value.trim();
-      if (trimmed.length === 0) {
+      if (trimmed.length === 0 || countRunes(trimmed) > CLARIFICATION_CUSTOM_TEXT_MAX_RUNES) {
         group.clearAnswer(meta.questionId);
         return;
       }
@@ -368,9 +538,9 @@ function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
     },
   };
 }
-
 function ClarificationCarouselBody({
   sortedMessages,
+  meta,
   group,
   activeIndex,
   setActiveIndex,
@@ -378,16 +548,21 @@ function ClarificationCarouselBody({
   setCustomDrafts,
   allAnswered,
   isSubmitting,
+  agentDisconnected,
   shortcutScopeRef,
+  armedEventRef,
   keyboardShortcutsEnabled,
   onSubmit,
+  submitAnswers,
+  autoSubmitSingleQuestion,
+  onDismiss,
 }: CarouselBodyProps) {
   const total = sortedMessages.length;
-  const activeMessage = sortedMessages[Math.min(activeIndex, total - 1)] ?? null;
-  const meta = activeMessage ? readSingleQuestionMeta(activeMessage) : null;
-  const showAgentDisconnectedAtTop = sortedMessages.some(
-    (m) => (m.metadata as ClarificationRequestMetadata | undefined)?.agent_disconnected === true,
-  );
+  const showAgentDisconnectedAtTop =
+    agentDisconnected ||
+    sortedMessages.some(
+      (m) => (m.metadata as ClarificationRequestMetadata | undefined)?.agent_disconnected === true,
+    );
   const isSingleQuestion = total === 1;
 
   if (!meta) return null;
@@ -406,6 +581,8 @@ function ClarificationCarouselBody({
     total,
     setActiveIndex,
     setCustomDrafts,
+    submitAnswers,
+    autoSubmitSingleQuestion,
   });
 
   return (
@@ -437,6 +614,7 @@ function ClarificationCarouselBody({
       <CarouselKeyboardShortcuts
         enabled={keyboardShortcutsEnabled && !isSubmitting}
         scopeRef={shortcutScopeRef}
+        armedEventRef={armedEventRef}
         meta={meta}
         activeIndex={activeIndex}
         total={total}
@@ -444,149 +622,209 @@ function ClarificationCarouselBody({
         onPick={(idx) => onSelectOption(meta.question.options[idx].option_id)}
         onPrev={() => setActiveIndex(Math.max(0, activeIndex - 1))}
         onNext={() => setActiveIndex(Math.min(total - 1, activeIndex + 1))}
-        onSkip={() => void group.skipAll("User skipped")}
+        onDismiss={onDismiss}
         onSubmit={onSubmit}
       />
     </>
   );
 }
 
-function ClarificationHeaderActions({
-  total,
-  allAnswered,
-  isSubmitting,
-  onSubmit,
-  onSkip,
-}: {
-  total: number;
-  allAnswered: boolean;
-  isSubmitting: boolean;
-  onSubmit: () => void;
-  onSkip: () => void;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      {total > 1 && (
-        <KeyboardShortcutTooltip
-          shortcut={SHORTCUTS.SUBMIT}
-          description="Submit answers"
-          enabled={!isSubmitting}
-        >
-          <span
-            className="inline-flex"
-            data-testid="clarification-submit-shortcut"
-            tabIndex={!allAnswered && !isSubmitting ? 0 : undefined}
-          >
-            <button
-              type="button"
-              onClick={onSubmit}
-              disabled={!allAnswered || isSubmitting}
-              data-testid="clarification-submit"
-              className={cn(
-                "inline-flex items-center gap-1 text-xs px-3 py-1 rounded font-medium transition-colors",
-                allAnswered && !isSubmitting
-                  ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
-                  : "bg-muted text-muted-foreground cursor-not-allowed",
-              )}
-            >
-              {isSubmitting ? "Submitting…" : "Submit"}
-              <IconCheck className="h-3 w-3" />
-            </button>
-          </span>
-        </KeyboardShortcutTooltip>
-      )}
-      <KeyboardShortcutTooltip
-        shortcut={SHORTCUTS.CANCEL}
-        description="Skip all questions"
-        enabled={!isSubmitting}
-      >
-        <span className="inline-flex" data-testid="clarification-skip-shortcut">
-          <button
-            type="button"
-            onClick={onSkip}
-            disabled={isSubmitting}
-            className="text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-50"
-            data-testid="clarification-skip"
-            aria-label="Skip all questions"
-          >
-            <IconX className="h-4 w-4" />
-          </button>
-        </span>
-      </KeyboardShortcutTooltip>
-    </div>
-  );
-}
-
+// eslint-disable-next-line max-lines-per-function, complexity, sonarjs/cognitive-complexity -- coordinates the complete clarification overlay lifecycle.
 export function ClarificationInputOverlay({
   messages,
   onResolved,
+  onOutcome,
+  mode = "active",
+  onLateAnswer,
+  initialAnswers,
   shortcutScopeRef,
   keyboardShortcutsEnabled = true,
+  agentDisconnected = false,
+  onDismiss,
+  onCollapse,
+  collapseContentId,
+  lateAnswerState,
 }: ClarificationInputOverlayProps) {
+  const { t } = useTranslation();
+  const lateMode = mode === "late";
   const sortedMessages = useMemo(
     () => sortMessagesByQuestionIndex(resolveQuestionMessages(messages)),
     [messages],
   );
-  const group = useClarificationGroup(sortedMessages);
+  const group = useClarificationGroup(sortedMessages, onOutcome, onLateAnswer);
+  const [lateStatus, setLateStatus] = useState<"idle" | "sending" | "sent" | "queued" | "error">(
+    "idle",
+  );
+  const [lateSnapshot, setLateSnapshot] = useState<LateClarificationSnapshot | null>(null);
+  const sharedLateStatus = lateMode ? (lateAnswerState?.status ?? "idle") : "idle";
+  const effectiveLateStatus = sharedLateStatus === "idle" ? lateStatus : sharedLateStatus;
+  const effectiveLateSnapshot = lateMode
+    ? (lateAnswerState?.snapshot ?? lateSnapshot)
+    : lateSnapshot;
+  const isSubmitting =
+    group.submitState === "submitting" ||
+    group.lateAnswerState === "sending" ||
+    effectiveLateStatus === "sending";
+  const lateInteraction = lateMode || group.lateAnswerState !== "idle";
   const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
   const [rawActiveIndex, setActiveIndex] = useState(0);
+  useResetOverlayStateOnBundleChange(group.pendingId, setCustomDrafts, setActiveIndex);
+  const restoredAnswers = lateMode
+    ? (lateAnswerState?.snapshot?.answers ?? initialAnswers)
+    : initialAnswers;
+  const initialAnswersKey = JSON.stringify(restoredAnswers ?? []);
+  useEffect(() => {
+    if (!restoredAnswers || restoredAnswers.length === 0) return;
+    for (const answer of restoredAnswers) {
+      group.recordAnswer(answer.question_id, answer);
+    }
+    setCustomDrafts((current) => {
+      const next = { ...current };
+      for (const answer of restoredAnswers) {
+        if (answer.custom_text !== undefined) next[answer.question_id] = answer.custom_text;
+      }
+      return next;
+    });
+  }, [group.recordAnswer, initialAnswersKey, restoredAnswers]);
   // Clamp the active index to the current bundle size so late-arriving
   // messages or shrunk bundles never put us out of range.
   const total = sortedMessages.length;
   const activeIndex = total === 0 ? 0 : Math.min(rawActiveIndex, total - 1);
+  const activeMessage = sortedMessages[activeIndex] ?? null;
+  const meta = activeMessage ? readSingleQuestionMeta(activeMessage) : null;
+  const sharedContext = readSharedContext(sortedMessages[0]);
 
-  useResolveCallback(group.submitState, onResolved);
+  useResolveCallback(lateMode ? "idle" : group.submitState, onResolved);
 
   // group is a fresh object every render, but its submitCollected callback is
   // memoised by the hook — depend on the function only so this useCallback
   // doesn't churn on every keystroke (via the live-record path).
-  const submitCollected = group.submitCollected;
-  const allAnswered =
-    sortedMessages.length > 0 &&
-    sortedMessages.every((m) => {
-      const id = readSingleQuestionMeta(m)?.questionId;
-      return id ? Boolean(group.answers[id]) : false;
-    });
+  const allAnswered = computeAllAnswered(sortedMessages, group.answers);
+  const submitLateAnswer = useCallback(
+    async (override?: Record<string, ClarificationAnswer>) => {
+      const answers = { ...group.answers, ...(override ?? {}) };
+      if (!computeAllAnswered(sortedMessages, answers) || !onLateAnswer) return;
+      const snapshot: LateClarificationSnapshot = {
+        messages: sortedMessages.slice(),
+        answers: Object.values(answers),
+      };
+      setLateSnapshot(snapshot);
+      setLateStatus("sending");
+      try {
+        const outcome = await onLateAnswer(snapshot);
+        setLateStatus(outcome);
+      } catch {
+        setLateStatus("error");
+      }
+    },
+    [group.answers, onLateAnswer, sortedMessages],
+  );
+  const submitAnswers = chooseSubmitter(
+    lateMode,
+    lateInteraction,
+    submitLateAnswer,
+    group.retryLateAnswer,
+    group.submitCollected,
+  );
   const handleSubmit = useCallback(() => {
-    if (allAnswered) void submitCollected();
-  }, [allAnswered, submitCollected]);
+    if (allAnswered) void submitAnswers();
+  }, [allAnswered, submitAnswers]);
+  const retryLateAnswerForm = useCallback(() => {
+    if (effectiveLateSnapshot) void submitLateAnswer();
+  }, [effectiveLateSnapshot, submitLateAnswer]);
+  const retryLateAnswer = lateMode ? retryLateAnswerForm : group.retryLateAnswer;
+
+  // Gated on the same resolved `meta` that decides whether
+  // ClarificationCarouselBody (and CarouselKeyboardShortcuts within it) mount
+  // at all, not a looser proxy like sortedMessages.length > 0 -- otherwise the
+  // guard could tell the dialog "handledHere" for a state where the widget
+  // that would actually handle Escape never mounted in the first place.
+  const armedEventRef = useEscapeGuardRegistration(
+    keyboardShortcutsEnabled &&
+      !isSubmitting &&
+      group.submitState !== "expired" &&
+      group.lateAnswerState !== "sent" &&
+      group.lateAnswerState !== "queued" &&
+      (!lateInteraction || (effectiveLateStatus !== "sent" && effectiveLateStatus !== "queued")) &&
+      meta !== null,
+    shortcutScopeRef,
+  );
 
   if (sortedMessages.length === 0) return null;
-  const isSubmitting = group.submitState === "submitting";
+
+  if (!lateMode && group.submitState === "expired") {
+    return (
+      <div className="relative" data-testid="clarification-overlay">
+        <ClarificationStatusBanner state="expired" onRetry={() => void group.retry()} />
+      </div>
+    );
+  }
+
+  if (
+    (lateMode && (effectiveLateStatus === "sent" || effectiveLateStatus === "queued")) ||
+    (!lateMode && (group.lateAnswerState === "sent" || group.lateAnswerState === "queued"))
+  ) {
+    return (
+      <div className="relative" data-testid="clarification-overlay">
+        <div
+          data-testid="clarification-late-success"
+          className="flex min-h-11 items-center justify-between gap-3 px-4 py-2 text-sm text-muted-foreground"
+        >
+          <span>
+            {(lateMode ? effectiveLateStatus : group.lateAnswerState) === "sent"
+              ? t("task:lateAnswerSent")
+              : t("task:lateAnswerQueued")}
+          </span>
+          <button
+            type="button"
+            className="min-h-11 cursor-pointer underline underline-offset-2 md:min-h-0"
+            onClick={onDismiss}
+            data-testid="clarification-late-success-close"
+          >
+            {t("task:close")}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative" data-testid="clarification-overlay">
-      <div className="flex items-center justify-between gap-3 px-4 pt-2 pb-1">
-        <div className="flex items-center gap-3 min-w-0">
-          <IconMessageQuestion className="h-4 w-4 text-blue-500 flex-shrink-0" />
-          {total > 1 && (
-            <ClarificationStepper
-              total={total}
-              activeIndex={activeIndex}
-              isAnswered={(index) => isQuestionAnsweredAt(sortedMessages, group.answers, index)}
-              onJump={setActiveIndex}
-              isSubmitting={isSubmitting}
-            />
-          )}
-          {total > 1 && (
-            <span
-              data-testid="clarification-group-progress"
-              className="text-xs text-muted-foreground"
-            >
-              {group.answeredCount} of {group.total} answered
-            </span>
-          )}
+      <ClarificationOverlayTopBar
+        total={total}
+        activeIndex={activeIndex}
+        isAnswered={(index) => isQuestionAnsweredAt(sortedMessages, group.answers, index)}
+        onJump={setActiveIndex}
+        isSubmitting={isSubmitting}
+        answeredCount={group.answeredCount}
+        answerableTotal={group.total}
+        allAnswered={allAnswered}
+        onSubmit={handleSubmit}
+        onSkip={() => void group.skipAll("User skipped")}
+        lateMode={lateInteraction}
+        onLateClose={onDismiss}
+        onCollapse={onCollapse}
+        collapseContentId={collapseContentId}
+      />
+      {group.submitState === "error" && (
+        <ClarificationStatusBanner state={group.submitState} onRetry={() => void group.retry()} />
+      )}
+      {lateInteraction &&
+        ((lateMode && effectiveLateStatus === "error") ||
+          (!lateMode && group.lateAnswerState === "error")) && (
+          <ClarificationStatusBanner state="error" onRetry={retryLateAnswer} />
+        )}
+      {sharedContext && (
+        <div
+          data-testid="clarification-context"
+          className="mx-4 mt-3 mb-2 break-words whitespace-pre-wrap text-[13px]"
+        >
+          {sharedContext}
         </div>
-        <ClarificationHeaderActions
-          total={total}
-          allAnswered={allAnswered}
-          isSubmitting={isSubmitting}
-          onSubmit={handleSubmit}
-          onSkip={() => void group.skipAll("User skipped")}
-        />
-      </div>
+      )}
       <ClarificationCarouselBody
         sortedMessages={sortedMessages}
+        meta={meta}
         group={group}
         activeIndex={activeIndex}
         setActiveIndex={setActiveIndex}
@@ -594,9 +832,14 @@ export function ClarificationInputOverlay({
         setCustomDrafts={setCustomDrafts}
         allAnswered={allAnswered}
         isSubmitting={isSubmitting}
+        agentDisconnected={agentDisconnected}
         shortcutScopeRef={shortcutScopeRef}
+        armedEventRef={armedEventRef}
         keyboardShortcutsEnabled={keyboardShortcutsEnabled}
         onSubmit={handleSubmit}
+        submitAnswers={submitAnswers}
+        autoSubmitSingleQuestion={!lateInteraction}
+        onDismiss={onDismiss}
       />
     </div>
   );

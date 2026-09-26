@@ -1,14 +1,25 @@
+/** The repository host workflow sync fetches definitions from. */
+export type WorkflowSyncProvider = "github" | "gitlab";
+
 /**
- * Per-workspace workflow sync configuration: a GitHub repo + branch +
- * directory containing workflow export files (`.yml`/`.yaml`/`.json` in the
+ * Per-workspace workflow sync configuration: a repo + branch + directory
+ * containing workflow export files (`.yml`/`.yaml`/`.json` in the
  * `kandev_workflow` format). The backend polls the directory on
  * `interval_seconds` cadence and syncs workflows; `last_*` fields report the
  * outcome of the most recent sync attempt (poller or forced).
+ *
+ * `provider` selects the source: `"github"` uses `repo_owner` + `repo_name`;
+ * `"gitlab"` uses `project_path` (a namespace path, e.g. "group/project" or
+ * "group/subgroup/project") and leaves `repo_owner`/`repo_name` empty. GitLab
+ * sync always uses the workspace's own configured GitLab connection — there
+ * is no host field here.
  */
 export interface WorkflowSyncConfig {
   workspace_id: string;
+  provider: WorkflowSyncProvider;
   repo_owner: string;
   repo_name: string;
+  project_path: string;
   branch: string;
   path: string;
   interval_seconds: number;
@@ -26,11 +37,15 @@ export interface WorkflowSyncConfig {
 /**
  * Payload for creating or updating a workspace's workflow sync config.
  * `branch`, `path`, and `interval_seconds` fall back to server-side defaults
- * (`main`, `.kandev/workflows`, 300s / min 60s) when omitted.
+ * (`main`, `.kandev/workflows`, 300s / min 60s) when omitted. `provider`
+ * omitted means `"github"`, matching pre-GitLab clients. GitHub requires
+ * `repo_owner`/`repo_name`; GitLab requires `project_path` instead.
  */
 export interface WorkflowSyncSetConfigRequest {
-  repo_owner: string;
-  repo_name: string;
+  provider?: WorkflowSyncProvider;
+  repo_owner?: string;
+  repo_name?: string;
+  project_path?: string;
   branch?: string;
   path?: string;
   interval_seconds?: number;

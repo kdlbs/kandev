@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
@@ -10,18 +11,21 @@ import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { ModelCombobox } from "@/components/settings/model-combobox";
 import { ModeCombobox } from "@/components/settings/mode-combobox";
+import { ModelFallbackFields } from "@/components/agent/cli-profile-fallback-fields";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
 import {
   createAgentAction,
   createAgentProfileAction,
   updateAgentProfileAction,
 } from "@/app/actions/agents";
+import { isHandledApiError } from "@/lib/api/client";
 import type { Agent, AgentProfile, AvailableAgent, CLIFlag } from "@/lib/types/http";
 import { seedDefaultCLIFlags } from "@/lib/cli-flags";
 import {
   buildDefaultPermissions,
   PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
 } from "@/lib/agent-permissions";
+import { t } from "@/lib/i18n";
 
 export type CliProfileEditorMode = "create" | "edit";
 
@@ -50,6 +54,9 @@ type FormState = {
   agentName: string;
   profileName: string;
   model: string;
+  fallbackModel: string;
+  autoFallback: boolean;
+  requireExactModel: boolean;
   mode: string;
   cliFlags: CLIFlag[];
   cliPassthrough: boolean;
@@ -66,6 +73,9 @@ function fromExistingProfile(profile: AgentProfile): FormState {
     agentName: profile.agentId ?? "",
     profileName: profile.name,
     model: profile.model ?? "",
+    fallbackModel: profile.fallbackModel ?? "",
+    autoFallback: profile.autoFallback ?? false,
+    requireExactModel: profile.requireExactModel ?? false,
     mode: profile.mode ?? "",
     cliFlags: profile.cliFlags ?? [],
     cliPassthrough: profile.cliPassthrough ?? false,
@@ -85,6 +95,9 @@ function fromDefaultAgent(
     agentName: defaultAgent?.name ?? "",
     profileName: defaultName,
     model: cfg?.default_model ?? "",
+    fallbackModel: "",
+    autoFallback: false,
+    requireExactModel: false,
     mode: cfg?.current_mode_id ?? "",
     cliFlags: seedDefaultCLIFlags(permissionSettings),
     cliPassthrough: false,
@@ -100,6 +113,28 @@ function initialState(
 ): FormState {
   if (mode === "edit" && profile) return fromExistingProfile(profile);
   return fromDefaultAgent(defaultName, defaultAgent);
+}
+
+function ProfileNameField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <Label htmlFor="cli-profile-name">{t("common:profileName")}</Label>
+      <Input
+        id="cli-profile-name"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={t("common:default")}
+        className="mt-1"
+      />
+    </div>
+  );
 }
 
 export function CliProfileEditor({
@@ -140,6 +175,9 @@ export function CliProfileEditor({
           ? await saveExistingProfile(profile.id, form)
           : await saveNewProfile(form, settingsAgents);
       onSaved(saved);
+    } catch (error) {
+      if (isHandledApiError(error)) return;
+      throw error;
     } finally {
       setSaving(false);
     }
@@ -157,6 +195,10 @@ export function CliProfileEditor({
             patch({
               agentName: name,
               model: installed.find((a) => a.name === name)?.model_config.default_model ?? "",
+              // A fallback model belongs to the previous client's model
+              // vocabulary; carrying it over would save a false gone-model
+              // configuration for the new client.
+              fallbackModel: "",
               mode: installed.find((a) => a.name === name)?.model_config.current_mode_id ?? "",
               cliFlags: seedDefaultCLIFlags(
                 installed.find((a) => a.name === name)?.permission_settings ?? {},
@@ -166,24 +208,12 @@ export function CliProfileEditor({
         />
       )}
 
-      <div>
-        <Label htmlFor="cli-profile-name">Profile name</Label>
-        <Input
-          id="cli-profile-name"
-          value={form.profileName}
-          onChange={(e) => patch({ profileName: e.target.value })}
-          placeholder="default"
-          className="mt-1"
-        />
-      </div>
-
-      <ModelModeFields
-        modelConfig={modelConfig ?? null}
-        model={form.model}
-        mode={form.mode}
-        onModelChange={(v) => patch({ model: v })}
-        onModeChange={(v) => patch({ mode: v })}
+      <ProfileNameField
+        value={form.profileName}
+        onChange={(profileName) => patch({ profileName })}
       />
+
+      <ModelModeFieldsBinding form={form} patch={patch} modelConfig={modelConfig ?? null} />
 
       <AdvancedToggles
         open={advancedOpen}
@@ -213,8 +243,8 @@ export function CliProfileEditor({
 }
 
 function buttonLabel(mode: CliProfileEditorMode, saving: boolean): string {
-  if (saving) return mode === "edit" ? "Saving..." : "Creating...";
-  return mode === "edit" ? "Save profile" : "Create profile";
+  if (saving) return mode === "edit" ? t("agents:savingProfile") : t("agents:creatingProfile");
+  return mode === "edit" ? t("agents:saveProfile") : t("agents:createProfile");
 }
 
 function EditorFooter({
@@ -230,6 +260,7 @@ function EditorFooter({
   onSave: () => void;
   onCancel?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-end gap-2 pt-2">
       {onCancel && (
@@ -240,7 +271,7 @@ function EditorFooter({
           disabled={saving}
           className="cursor-pointer"
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
       )}
       <Button
@@ -264,12 +295,13 @@ function CliClientPicker({
   value: string;
   onChange: (name: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div>
-      <Label>CLI client</Label>
+      <Label>{t("common:cliClient")}</Label>
       <Select value={value} onValueChange={onChange} disabled={installed.length === 0}>
         <SelectTrigger className="mt-1 cursor-pointer">
-          <SelectValue placeholder="Pick a CLI client" />
+          <SelectValue placeholder={t("common:pickACliClient")} />
         </SelectTrigger>
         <SelectContent>
           {installed.map((agent) => (
@@ -281,58 +313,123 @@ function CliClientPicker({
       </Select>
       {installed.length === 0 && (
         <p className="text-xs text-muted-foreground mt-1">
-          No CLI clients installed yet. Install Claude / Codex / OpenCode / Amp to enable this
-          picker.
+          {t("common:noCliClientsInstalledYetInstall")}
         </p>
       )}
     </div>
   );
 }
 
+// ModelModeFieldsBinding forwards the editor's form state to ModelModeFields.
+// Extracted so CliProfileEditor stays under the linter's line budget.
+function ModelModeFieldsBinding({
+  form,
+  patch,
+  modelConfig,
+}: {
+  form: FormState;
+  patch: (p: Partial<FormState>) => void;
+  modelConfig: NonNullable<AvailableAgent["model_config"]> | null;
+}) {
+  return (
+    <ModelModeFields
+      modelConfig={modelConfig}
+      model={form.model}
+      fallbackModel={form.fallbackModel}
+      autoFallback={form.autoFallback}
+      requireExactModel={form.requireExactModel}
+      mode={form.mode}
+      onModelChange={(v) => patch({ model: v })}
+      onFallbackModelChange={(v) => patch({ fallbackModel: v })}
+      onAutoFallbackChange={(v) => patch({ autoFallback: v })}
+      onRequireExactModelChange={(v) => patch({ requireExactModel: v })}
+      onModeChange={(v) => patch({ mode: v })}
+    />
+  );
+}
+
 type ModelModeFieldsProps = {
   modelConfig: NonNullable<AvailableAgent["model_config"]> | null;
   model: string;
+  fallbackModel: string;
+  autoFallback: boolean;
+  requireExactModel: boolean;
   mode: string;
   onModelChange: (v: string) => void;
+  onFallbackModelChange: (v: string) => void;
+  onAutoFallbackChange: (v: boolean) => void;
+  onRequireExactModelChange: (v: boolean) => void;
   onModeChange: (v: string) => void;
 };
 
 function ModelModeFields({
   modelConfig,
   model,
+  fallbackModel,
+  autoFallback,
+  requireExactModel,
   mode,
   onModelChange,
+  onFallbackModelChange,
+  onAutoFallbackChange,
+  onRequireExactModelChange,
   onModeChange,
 }: ModelModeFieldsProps) {
+  const { t } = useTranslation();
   if (!modelConfig) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Pick a CLI client to load its available models and modes.
-      </p>
-    );
+    return <p className="text-xs text-muted-foreground">{t("common:pickACliClientToLoad")}</p>;
   }
+  const availableModels = modelConfig.available_models ?? [];
+  const startModelGone = Boolean(model && !availableModels.some((m) => m.id === model));
+  const fallbackModelGone = Boolean(
+    fallbackModel && !availableModels.some((m) => m.id === fallbackModel),
+  );
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <div>
-        <Label>Model</Label>
-        <ModelCombobox
-          value={model}
-          onChange={onModelChange}
-          models={modelConfig.available_models ?? []}
-          currentModelId={modelConfig.current_model_id}
-        />
-      </div>
-      {(modelConfig.available_modes ?? []).length > 0 && (
+    <div className="grid grid-cols-1 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <Label>Mode</Label>
-          <ModeCombobox
-            value={mode}
-            onChange={onModeChange}
-            modes={modelConfig.available_modes ?? []}
-            currentModeId={modelConfig.current_mode_id}
+          <Label>{t("common:model")}</Label>
+          <ModelCombobox
+            value={model}
+            onChange={onModelChange}
+            models={
+              startModelGone
+                ? [
+                    ...availableModels,
+                    {
+                      id: model,
+                      name: `${model} (${t("settings:startModelUnavailable")})`,
+                      disabled: true,
+                    },
+                  ]
+                : availableModels
+            }
+            currentModelId={modelConfig.current_model_id}
           />
         </div>
-      )}
+        {(modelConfig.available_modes ?? []).length > 0 && (
+          <div>
+            <Label>{t("common:mode")}</Label>
+            <ModeCombobox
+              value={mode}
+              onChange={onModeChange}
+              modes={modelConfig.available_modes ?? []}
+              currentModeId={modelConfig.current_mode_id}
+            />
+          </div>
+        )}
+      </div>
+      <ModelFallbackFields
+        availableModels={availableModels}
+        fallbackModel={fallbackModel}
+        fallbackModelGone={fallbackModelGone}
+        autoFallback={autoFallback}
+        requireExactModel={requireExactModel}
+        currentModelId={modelConfig.current_model_id}
+        onFallbackModelChange={onFallbackModelChange}
+        onAutoFallbackChange={onAutoFallbackChange}
+        onRequireExactModelChange={onRequireExactModelChange}
+      />
     </div>
   );
 }
@@ -368,6 +465,7 @@ function AdvancedToggles({
   onAutoApproveChange,
   onCliFlagsChange,
 }: AdvancedTogglesProps) {
+  const { t } = useTranslation();
   const autoSetting = permissionSettings?.auto_approve;
   const showAgentctlAutoApprove = Boolean(
     autoSetting?.supported && autoSetting.apply_method === PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
@@ -380,15 +478,15 @@ function AdvancedToggles({
         onClick={onToggle}
         className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
       >
-        {open ? "Hide" : "Show"} advanced options
+        {open ? t("common:hideAdvancedOptions") : t("common:showAdvancedOptions")}
       </button>
       {open && (
         <div className="mt-3 space-y-3">
           {allowCliPassthrough && (
             <ToggleRow
               id="cli-passthrough"
-              label="CLI passthrough"
-              description="Forward stdin/stdout straight to the CLI subprocess. Disables ACP."
+              label={t("common:cliPassthrough")}
+              description={t("common:forwardStdinStdoutStraightToThe")}
               checked={cliPassthrough}
               onChange={onCliPassthroughChange}
             />
@@ -404,8 +502,8 @@ function AdvancedToggles({
           {showAllowIndexing && (
             <ToggleRow
               id="allow-indexing"
-              label="Allow indexing"
-              description="Permit the CLI to upload code for cloud indexing (auggie / similar)."
+              label={t("common:allowIndexing")}
+              description={t("common:permitTheCliToUploadCode")}
               checked={allowIndexing}
               onChange={onAllowIndexingChange}
             />
@@ -459,15 +557,15 @@ function AgentctlAutoApproveRow({
   checked: boolean;
   onChange: (v: boolean) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
       <div className="space-y-0.5">
         <Label htmlFor={id} className="text-sm text-destructive">
-          {setting?.label ?? "Auto-approve all permissions"}
+          {setting?.label ?? t("common:autoApproveAllPermissions")}
         </Label>
         <p className="text-xs text-muted-foreground">
-          {setting?.description ??
-            "Kandev allows every agent permission request without prompting you."}
+          {setting?.description ?? t("common:kandevAllowsEveryAgentPermissionRequest")}
         </p>
       </div>
       <Switch
@@ -484,6 +582,9 @@ async function saveExistingProfile(id: string, form: FormState): Promise<AgentPr
   return updateAgentProfileAction(id, {
     name: form.profileName.trim(),
     model: form.model,
+    fallback_model: form.fallbackModel ?? "",
+    auto_fallback: form.autoFallback,
+    require_exact_model: form.requireExactModel,
     mode: form.mode || undefined,
     allow_indexing: form.allowIndexing,
     auto_approve: form.autoApprove,
@@ -497,6 +598,9 @@ async function saveNewProfile(form: FormState, settingsAgents: Agent[]): Promise
   const profilePayload = {
     name: form.profileName.trim(),
     model: form.model,
+    fallback_model: form.fallbackModel ?? "",
+    auto_fallback: form.autoFallback,
+    require_exact_model: form.requireExactModel,
     mode: form.mode || undefined,
     allow_indexing: form.allowIndexing,
     auto_approve: form.autoApprove,

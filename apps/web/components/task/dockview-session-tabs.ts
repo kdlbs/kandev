@@ -20,6 +20,7 @@ import {
   shouldPreserveActivePanel,
 } from "./dockview-session-tab-activation";
 import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-session-handoff";
+import { t } from "@/lib/i18n";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -128,7 +129,7 @@ export function setupChatPanelSafetyNet(
           id: `session:${activeSessionId}`,
           component: "chat",
           tabComponent: "sessionTab",
-          title: "Agent",
+          title: t("common:agent"),
           params: { sessionId: activeSessionId },
           position,
         });
@@ -296,16 +297,26 @@ type AutoSessionTabRefs = {
  * Activate the newly-ensured session panel and update the center-group store
  * entry. Returns the resolved active panel for sibling anchoring.
  */
-function activateSessionPanel(
-  api: DockviewApi,
-  effectiveSessionId: string,
+function activateSessionPanel({
+  api,
+  effectiveSessionId,
+  activation,
+  refs,
+  tid,
+  appStore,
+  workflowFocusRequestId,
+}: {
+  api: DockviewApi;
+  effectiveSessionId: string;
   activation: {
     sessionPanelExistedBefore: boolean;
     activePanelIdBeforeEnsure: string | null;
-  },
-  refs: AutoSessionTabRefs,
-  tid: string | null,
-): ReturnType<DockviewApi["getPanel"]> {
+  };
+  refs: AutoSessionTabRefs;
+  tid: string | null;
+  appStore: ReturnType<typeof useAppStoreApi>;
+  workflowFocusRequestId: number | null;
+}): ReturnType<DockviewApi["getPanel"]> {
   const activePanel = api.getPanel(`session:${effectiveSessionId}`);
   if (!activePanel) return activePanel;
 
@@ -317,6 +328,7 @@ function activateSessionPanel(
     currentTaskId: tid,
     currentSessionId: effectiveSessionId,
     currentActivePanelId: activation.activePanelIdBeforeEnsure,
+    workflowFocusRequested: workflowFocusRequestId !== null,
   });
   if (isDebug()) {
     debug("useAutoSessionTab: activation decision", {
@@ -331,7 +343,12 @@ function activateSessionPanel(
       activeGroupId: activePanel.group.id,
     });
   }
-  if (shouldActivate) activePanel.api.setActive();
+  if (shouldActivate) {
+    activePanel.api.setActive();
+    if (workflowFocusRequestId !== null) {
+      appStore.getState().acknowledgeWorkflowSessionFocus(workflowFocusRequestId);
+    }
+  }
   useDockviewStore.setState({
     centerGroupId: isCenterCandidateGroupId(activePanel.group.id)
       ? activePanel.group.id
@@ -483,6 +500,15 @@ function updateAutoSessionTabRefs(
   refs.prevSessionIdRef.current = effectiveSessionId;
 }
 
+function workflowFocusRequestIdForSession(
+  appStore: ReturnType<typeof useAppStoreApi>,
+  taskId: string | null,
+  sessionId: string,
+): number | null {
+  const request = appStore.getState().workflowSessionFocus?.request;
+  return request?.taskId === taskId && request.sessionId === sessionId ? request.requestId : null;
+}
+
 /**
  * Core effect body for useAutoSessionTab — extracted to reduce complexity of
  * the hook itself.
@@ -532,16 +558,20 @@ export function runAutoSessionTabEffect(
   }
 
   const chatWasSelected = isChatPlaceholderSelected(api);
+  const workflowFocusRequestId = workflowFocusRequestIdForSession(
+    appStore,
+    tid,
+    effectiveSessionId,
+  );
   const initialPosition = resolveInitialPosition(api, chatWasSelected);
   const sessionPanelExistedBefore = !!api.getPanel(`session:${effectiveSessionId}`);
   // Preserve the restored/user-selected panel before adding and reordering the
   // session tab. Dockview's same-group move briefly activates a sibling even
   // with skipSetActive, so reading api.activePanel afterward loses this intent.
   const activePanelIdBeforeEnsure = api.activePanel?.id ?? null;
-  const preserveActivePanel = shouldPreserveActivePanel(
-    sessionPanelExistedBefore,
-    activePanelIdBeforeEnsure,
-  );
+  const preserveActivePanel =
+    workflowFocusRequestId === null &&
+    shouldPreserveActivePanel(sessionPanelExistedBefore, activePanelIdBeforeEnsure);
 
   logSessionPanelEnsure(effectiveSessionId, sessionPanelExistedBefore, initialPosition);
 
@@ -566,13 +596,15 @@ export function runAutoSessionTabEffect(
   removeChatPlaceholder(api);
   ensureSessionTabPrecedesNonSessionTabs(api, effectiveSessionId);
 
-  const activePanel = activateSessionPanel(
+  const activePanel = activateSessionPanel({
     api,
     effectiveSessionId,
-    { sessionPanelExistedBefore, activePanelIdBeforeEnsure },
+    activation: { sessionPanelExistedBefore, activePanelIdBeforeEnsure },
     refs,
     tid,
-  );
+    appStore,
+    workflowFocusRequestId,
+  });
 
   restorePreservedActivePanel(api, activePanelIdBeforeEnsure, preserveActivePanel);
 
@@ -610,6 +642,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   const prevTaskIdRef = useRef<string | null>(null);
   const prevSessionIdRef = useRef<string | null>(null);
   const appStore = useAppStoreApi();
+  const dockviewApi = useDockviewStore((state) => state.api);
 
   // Key-based dependency so the effect re-runs when the task's session list
   // changes (add/remove). Inside the effect we re-read the real array from
@@ -621,6 +654,12 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     if (!list || list.length === 0) return EMPTY_SESSION_IDS_KEY;
     return list.map((ss) => ss.id).join(",");
   });
+  const workflowFocusRequestId = useAppStore((s) => {
+    const request = s.workflowSessionFocus.request;
+    return request?.taskId === s.tasks.activeTaskId && request.sessionId === effectiveSessionId
+      ? request.requestId
+      : null;
+  });
 
   useEffect(() => {
     runAutoSessionTabEffect(effectiveSessionId, appStore, {
@@ -628,5 +667,5 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
       prevTaskIdRef,
       prevSessionIdRef,
     });
-  }, [effectiveSessionId, sessionIdsKey, appStore]);
+  }, [appStore, dockviewApi, effectiveSessionId, sessionIdsKey, workflowFocusRequestId]);
 }

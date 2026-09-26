@@ -8,10 +8,18 @@ import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
 import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { WorkflowTemplate } from "@/lib/types/http";
+import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
+import type {
+  WorkflowImportPreview,
+  WorkflowImportProfileConflict,
+  WorkflowImportProfileStep,
+  WorkflowTemplate,
+} from "@/lib/types/http";
+import { WorkflowImportProfileSelection } from "./workflow-import-profile-selection";
+import type { WorkflowImportPhase, WorkflowImportSelections } from "./use-workflow-import";
 
 const YAML_PLACEHOLDER =
-  "version: 1\ntype: kandev_workflow\nworkflows:\n  - name: My Workflow\n    steps: [...]";
+  "version: 2\ntype: kandev_workflow\nworkflows:\n  - name: My Workflow\n    steps: [...]";
 
 type ImportWorkflowsDialogProps = {
   open: boolean;
@@ -20,8 +28,17 @@ type ImportWorkflowsDialogProps = {
   onImportYamlChange: (value: string) => void;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
-  onImport: () => void;
+  onImport: () => void | Promise<void>;
   importLoading: boolean;
+  importPhase: WorkflowImportPhase;
+  preview: WorkflowImportPreview | null;
+  selections: WorkflowImportSelections;
+  missingSteps: WorkflowImportProfileStep[];
+  profileConflicts: WorkflowImportProfileConflict[];
+  activeStepKey: string | null;
+  setActiveStepKey: (key: string | null) => void;
+  selectProfile: (stepKey: string, profileId: string) => void;
+  retryPreview: () => void | Promise<void>;
 };
 
 export function ImportWorkflowsDialog({
@@ -33,38 +50,74 @@ export function ImportWorkflowsDialog({
   fileInputRef,
   onImport,
   importLoading,
+  importPhase,
+  preview,
+  selections,
+  missingSteps,
+  profileConflicts,
+  activeStepKey,
+  setActiveStepKey,
+  selectProfile,
+  retryPreview,
 }: ImportWorkflowsDialogProps) {
   const { t } = useTranslation();
+  if (preview && importPhase !== "editing") {
+    return (
+      <WorkflowImportProfileSelection
+        open={open}
+        onOpenChange={onOpenChange}
+        preview={preview}
+        selections={selections}
+        missingSteps={missingSteps}
+        profileConflicts={profileConflicts}
+        activeStepKey={activeStepKey}
+        onActiveStepKeyChange={setActiveStepKey}
+        onSelectProfile={selectProfile}
+        onImport={onImport}
+        onRetryPreview={retryPreview}
+        importLoading={importLoading}
+      />
+    );
+  }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="flex max-h-[90dvh] flex-col overflow-hidden sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{t("workflows:importWorkflowsTitle")}</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="min-h-0 space-y-5 overflow-y-auto">
           <div className="space-y-2">
-            <Label>{t("workflows:uploadYamlFile")}</Label>
+            <Label htmlFor="workflow-import-file">{t("workflows:uploadYamlFile")}</Label>
             <input
+              id="workflow-import-file"
               ref={fileInputRef}
               type="file"
               accept=".yml,.yaml"
               onChange={onFileUpload}
-              className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground file:cursor-pointer cursor-pointer"
+              disabled={importLoading}
+              className="block w-full min-w-0 cursor-pointer text-sm text-muted-foreground file:mr-3 file:h-7 file:cursor-pointer file:rounded-md file:border file:border-input file:bg-muted file:px-3 file:py-0 file:text-xs file:font-medium file:text-foreground max-md:file:h-11 [@media(pointer:coarse)]:file:h-11"
             />
           </div>
           <div className="space-y-2">
-            <Label>{t("workflows:orPasteYaml")}</Label>
+            <Label htmlFor="workflow-import-yaml">{t("workflows:orPasteYaml")}</Label>
             <Textarea
+              id="workflow-import-yaml"
               // The placeholder is a sample of the kandev_workflow export
               // payload — a wire format, so its keys stay untranslated.
               placeholder={YAML_PLACEHOLDER}
               value={importYaml}
               onChange={(e) => onImportYamlChange(e.target.value)}
-              className="font-mono text-xs max-h-96 overflow-y-auto"
+              disabled={importLoading}
+              className="min-h-56 max-h-[50dvh] resize-y overflow-auto font-mono text-xs leading-relaxed"
             />
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
+          {importLoading && (
+            <span className="sr-only" role="status" aria-live="polite">
+              {t("workflows:importing")}
+            </span>
+          )}
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
             {t("common:cancel")}
           </Button>
@@ -227,5 +280,83 @@ export function CreateWorkflowDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+export function WorkflowDialogs({
+  page,
+}: {
+  page: {
+    isExportDialogOpen: boolean;
+    setIsExportDialogOpen: (open: boolean) => void;
+    exportYaml: string;
+    isImportDialogOpen: boolean;
+    setIsImportDialogOpen: (open: boolean) => void;
+    importYaml: string;
+    setImportYaml: (value: string) => void;
+    handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    fileInputRef: React.RefObject<HTMLInputElement | null>;
+    handleImport: () => Promise<void>;
+    importLoading: boolean;
+    importPhase: WorkflowImportPhase;
+    preview: WorkflowImportPreview | null;
+    selections: WorkflowImportSelections;
+    missingSteps: WorkflowImportProfileStep[];
+    profileConflicts: WorkflowImportProfileConflict[];
+    activeStepKey: string | null;
+    setActiveStepKey: (key: string | null) => void;
+    selectProfile: (stepKey: string, profileId: string) => void;
+    retryPreview: () => void | Promise<void>;
+    isAddWorkflowDialogOpen: boolean;
+    setIsAddWorkflowDialogOpen: (open: boolean) => void;
+    newWorkflowName: string;
+    setNewWorkflowName: (name: string) => void;
+    selectedTemplateId: string | null;
+    setSelectedTemplateId: (id: string | null) => void;
+    workflowTemplates: WorkflowTemplate[];
+    handleCreateWorkflow: () => Promise<void> | void;
+    createWorkflowLoading: boolean;
+  };
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <WorkflowExportDialog
+        open={page.isExportDialogOpen}
+        onOpenChange={page.setIsExportDialogOpen}
+        title={t("workflows:exportWorkflowsTitle")}
+        content={page.exportYaml}
+      />
+      <ImportWorkflowsDialog
+        open={page.isImportDialogOpen}
+        onOpenChange={page.setIsImportDialogOpen}
+        importYaml={page.importYaml}
+        onImportYamlChange={page.setImportYaml}
+        onFileUpload={page.handleFileUpload}
+        fileInputRef={page.fileInputRef}
+        onImport={page.handleImport}
+        importLoading={page.importLoading}
+        importPhase={page.importPhase}
+        preview={page.preview}
+        selections={page.selections}
+        missingSteps={page.missingSteps}
+        profileConflicts={page.profileConflicts}
+        activeStepKey={page.activeStepKey}
+        setActiveStepKey={page.setActiveStepKey}
+        selectProfile={page.selectProfile}
+        retryPreview={page.retryPreview}
+      />
+      <CreateWorkflowDialog
+        open={page.isAddWorkflowDialogOpen}
+        onOpenChange={page.setIsAddWorkflowDialogOpen}
+        workflowName={page.newWorkflowName}
+        onWorkflowNameChange={page.setNewWorkflowName}
+        selectedTemplateId={page.selectedTemplateId}
+        onSelectedTemplateChange={page.setSelectedTemplateId}
+        workflowTemplates={page.workflowTemplates}
+        onCreate={page.handleCreateWorkflow}
+        createLoading={page.createWorkflowLoading}
+      />
+    </>
   );
 }

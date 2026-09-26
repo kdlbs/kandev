@@ -20,6 +20,39 @@ import Link from "@/components/routing/app-link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { Routine, AgentProfile, RoutineTrigger } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
+import { CONCURRENCY_POLICY_LABEL_KEYS } from "../lib/label-keys";
+import { isRoutineFiring } from "../lib/routine-status";
+import { ScheduleStateBadge, UnarmedScheduleHint } from "./schedule-state-badge";
+
+/**
+ * A routine's concurrency policy is a wire value; only its label is copy.
+ * `?? policy` keeps an unknown value visible rather than blank.
+ */
+function concurrencyLabel(t: TFunction, policy: string): string {
+  const key = CONCURRENCY_POLICY_LABEL_KEYS[policy];
+  return key ? t(key) : policy;
+}
+
+/** A declared variable's wire value is `{ default: string }`; a bare string passes through unchanged. */
+export function formatVariableValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && "default" in value) {
+    const declaredDefault = (value as { default?: unknown }).default;
+    if (typeof declaredDefault === "string") return declaredDefault;
+  }
+  return "";
+}
+
+/**
+ * `task_template` is an unvalidated wire string decoded to `Record<string, unknown>`
+ * (`parseOptionalJSONObject`); a non-string `title`/`description` must not reach a JSX
+ * text node, so this coerces anything else to "" instead of casting.
+ */
+export function templateText(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
 
 type RoutineRowProps = {
   routine: Routine;
@@ -36,7 +69,7 @@ type RoutineRowProps = {
 // closest cron trigger, or "" when no cron trigger has a known next
 // fire (manual routines, disabled triggers, fresh-create with no
 // next_run_at yet). Empty string lets the caller skip rendering.
-function nextFireText(triggers: RoutineTrigger[]): string {
+function nextFireText(t: TFunction, triggers: RoutineTrigger[]): string {
   const cron = triggers
     .filter((t) => t.kind === "cron" && t.enabled && t.nextRunAt)
     .map((t) => new Date(t.nextRunAt as string).getTime())
@@ -44,7 +77,7 @@ function nextFireText(triggers: RoutineTrigger[]): string {
     .sort((a, b) => a - b);
   if (cron.length === 0) return "";
   const ms = cron[0] - Date.now();
-  if (ms <= 0) return "fires now";
+  if (ms <= 0) return t("office:firesNow");
   if (ms < 60_000) return "<1m";
   if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
   if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h`;
@@ -61,75 +94,82 @@ export function RoutineRow({
   onDelete,
   onClick,
 }: RoutineRowProps) {
-  // The API may return snake_case fields (assignee_agent_profile_id, concurrency_policy)
-  // before any mapping layer converts them. Use both camelCase and snake_case lookups.
-  const routineRaw = routine as unknown as Record<string, unknown>;
-  const assigneeId =
-    routine.assigneeAgentProfileId ?? (routineRaw.assignee_agent_profile_id as string | undefined);
-  const concurrencyPolicy =
-    routine.concurrencyPolicy ?? (routineRaw.concurrency_policy as string | undefined) ?? "";
-  const assignee = agents.find((a) => a.id === assigneeId);
-  const isActive = routine.status === "active";
-  const template = routine.taskTemplate as { title?: string; description?: string } | undefined;
+  const { t } = useTranslation();
+  const assignee = agents.find((a) => a.id === routine.assigneeAgentProfileId);
+  const isActive = isRoutineFiring(routine.status);
+  const rawTemplate = routine.taskTemplate as Record<string, unknown> | undefined;
+  const template = {
+    title: templateText(rawTemplate?.title),
+    description: templateText(rawTemplate?.description),
+  };
   const cronTrigger = triggers.find((t) => t.kind === "cron");
-  const nextFire = nextFireText(triggers);
+  const nextFire = isActive ? nextFireText(t, triggers) : "";
 
   return (
     <div>
       <div
-        className="flex items-center gap-3 px-4 py-2.5 hover:bg-accent/50 transition-colors cursor-pointer"
+        data-testid={`routine-row-${routine.id}`}
+        className="flex items-start gap-3 px-4 py-2.5 hover:bg-accent/50 transition-colors cursor-pointer"
         onClick={() => onClick(routine.id)}
       >
         <IconChevronDown
           className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`}
         />
-        <div className="flex-1 min-w-0">
+        <div className="flex min-w-0 flex-1 flex-col">
           <Link
             href={`/office/routines/${routine.id}`}
-            className="text-sm font-medium truncate cursor-pointer hover:underline"
+            className="block truncate text-sm font-medium cursor-pointer hover:underline"
             onClick={(e) => e.stopPropagation()}
           >
             {routine.name}
           </Link>
-          <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 text-xs text-muted-foreground">
             {assignee && <span>{assignee.name}</span>}
             {cronTrigger?.cronExpression && (
               <span className="font-mono">{cronTrigger.cronExpression}</span>
             )}
-            {nextFire && <span>next in {nextFire}</span>}
-            <span>{routine.lastRunAt ? timeAgo(routine.lastRunAt) : "Never run"}</span>
-            <span className="capitalize">{concurrencyPolicy.replace(/_/g, " ")}</span>
+            {nextFire && <span>{t("office:nextIn", { when: nextFire })}</span>}
+            <span>{routine.lastRunAt ? timeAgo(routine.lastRunAt) : t("office:neverRun")}</span>
+            <span>{concurrencyLabel(t, routine.concurrencyPolicy)}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 mt-1">
+            <Badge variant={isActive ? "default" : "secondary"}>
+              {isActive ? t("office:on") : t("office:off")}
+            </Badge>
+            <ScheduleStateBadge routine={routine} />
+            <UnarmedScheduleHint routine={routine} />
           </div>
         </div>
-        <Badge variant={isActive ? "default" : "secondary"}>{isActive ? "On" : "Off"}</Badge>
-        <Switch
-          checked={isActive}
-          onCheckedChange={(checked) => {
-            onToggle(routine.id, checked);
-          }}
-          onClick={(e) => e.stopPropagation()}
-          className="cursor-pointer"
-        />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              asChild
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 cursor-pointer"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Link href={`/office/routines/${routine.id}`}>
-                <IconPencil className="h-4 w-4" />
-              </Link>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Edit routine</TooltipContent>
-        </Tooltip>
-        <RoutineActions
-          onRunNow={() => onRunNow(routine.id)}
-          onDelete={() => onDelete(routine.id)}
-        />
+        <div className="flex shrink-0 items-center gap-3 pt-0.5">
+          <Switch
+            checked={isActive}
+            onCheckedChange={(checked) => {
+              onToggle(routine.id, checked);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="cursor-pointer"
+          />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                asChild
+                variant="ghost"
+                size="icon"
+                className="cursor-pointer"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Link href={`/office/routines/${routine.id}`}>
+                  <IconPencil className="h-4 w-4" />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("office:editRoutine")}</TooltipContent>
+          </Tooltip>
+          <RoutineActions
+            onRunNow={() => onRunNow(routine.id)}
+            onDelete={() => onDelete(routine.id)}
+          />
+        </div>
       </div>
       {expanded && (
         <RoutineExpandedDetail routine={routine} assignee={assignee} template={template} />
@@ -139,6 +179,7 @@ export function RoutineRow({
 }
 
 function RoutineActions({ onRunNow, onDelete }: { onRunNow: () => void; onDelete: () => void }) {
+  const { t } = useTranslation();
   return (
     <DropdownMenu>
       <Tooltip>
@@ -147,24 +188,25 @@ function RoutineActions({ onRunNow, onDelete }: { onRunNow: () => void; onDelete
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 cursor-pointer"
+              className="cursor-pointer"
               onClick={(e) => e.stopPropagation()}
             >
               <IconDots className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Actions</TooltipContent>
+        <TooltipContent>{t("office:actions")}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end">
         <DropdownMenuItem
+          data-testid="routine-run-now"
           className="cursor-pointer"
           onClick={(e) => {
             e.stopPropagation();
             onRunNow();
           }}
         >
-          <IconPlayerPlay className="h-4 w-4 mr-2" /> Run Now
+          <IconPlayerPlay className="h-4 w-4 mr-2" /> {t("office:runNowTitleCase")}
         </DropdownMenuItem>
         <DropdownMenuItem
           className="text-red-600 cursor-pointer"
@@ -173,7 +215,7 @@ function RoutineActions({ onRunNow, onDelete }: { onRunNow: () => void; onDelete
             onDelete();
           }}
         >
-          <IconTrash className="h-4 w-4 mr-2" /> Delete
+          <IconTrash className="h-4 w-4 mr-2" /> {t("office:delete")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -187,31 +229,34 @@ function RoutineExpandedDetail({
 }: {
   routine: Routine;
   assignee: AgentProfile | undefined;
-  template: { title?: string; description?: string } | undefined;
+  template: { title: string; description: string };
 }) {
-  const routineRaw = routine as unknown as Record<string, unknown>;
-  const concurrencyPolicy =
-    routine.concurrencyPolicy ?? (routineRaw.concurrency_policy as string | undefined) ?? "";
+  const { t } = useTranslation();
   return (
     <div className="px-4 pb-3 pt-1 ml-7 border-t border-border/50 space-y-2 text-sm">
-      {routine.description && <DetailField label="Description" value={routine.description} />}
-      {template?.title && <DetailField label="Task title" value={template.title} />}
-      {template?.description && (
-        <DetailField label="Task description" value={template.description} />
+      {routine.description && (
+        <DetailField label={t("office:description")} value={routine.description} />
       )}
-      <DetailField label="Assignee" value={assignee?.name ?? "Unassigned"} />
+      {template.title && <DetailField label={t("office:taskTitle")} value={template.title} />}
+      {template.description && (
+        <DetailField label={t("office:taskDescription")} value={template.description} />
+      )}
+      <DetailField label={t("office:assignee")} value={assignee?.name ?? t("office:unassigned")} />
       <DetailField
-        label="Last run"
-        value={routine.lastRunAt ? timeAgo(routine.lastRunAt) : "Never"}
+        label={t("office:lastRun")}
+        value={routine.lastRunAt ? timeAgo(routine.lastRunAt) : t("office:lastRunNever")}
       />
-      <DetailField label="Concurrency" value={concurrencyPolicy.replace(/_/g, " ")} />
+      <DetailField
+        label={t("office:concurrency")}
+        value={concurrencyLabel(t, routine.concurrencyPolicy)}
+      />
       {routine.variables && Object.keys(routine.variables).length > 0 && (
         <div>
-          <span className="text-xs font-medium text-muted-foreground">Variables</span>
+          <span className="text-xs font-medium text-muted-foreground">{t("office:variables")}</span>
           <div className="mt-1 space-y-0.5">
             {Object.entries(routine.variables).map(([key, val]) => (
               <div key={key} className="text-xs font-mono text-muted-foreground">
-                {key}: {String(val)}
+                {key}: {formatVariableValue(val)}
               </div>
             ))}
           </div>

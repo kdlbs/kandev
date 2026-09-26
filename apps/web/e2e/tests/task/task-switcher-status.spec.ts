@@ -78,6 +78,12 @@ test.describe("Task switcher sidebar status", () => {
     });
 
     // --- Complete Alpha first, then navigate to its session ---
+    // Prepare the session while Alpha is still in Inbox. Moving a task into an
+    // auto-start step can otherwise race session creation with the first
+    // kanban navigation under CI load, leaving the task in Working without an
+    // agent turn to complete it.
+    const preparedAlpha = await apiClient.ensureTaskSession(taskAlpha.id);
+    expect(preparedAlpha.session_id).toBeTruthy();
     await apiClient.moveTask(taskAlpha.id, workflow.id, workingStep.id);
 
     const kanban = new KanbanPage(testPage);

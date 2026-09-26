@@ -187,9 +187,9 @@ describe("TurnGroupMessage collapsed label", () => {
   }
 
   it("pluralizes with the count it displays", () => {
-    expect(renderLabel(2)).toContain("tool calls");
+    expect(renderLabel(2)).toContain("2 tool calls");
     const single = renderLabel(1);
-    expect(single).toContain("tool call");
+    expect(single).toContain("1 tool call");
     expect(single).not.toContain("tool calls");
   });
 

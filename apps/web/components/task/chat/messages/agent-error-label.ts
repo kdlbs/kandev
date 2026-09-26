@@ -9,15 +9,19 @@
  * failure when the message matches a known setup signature; everything else
  * keeps the accurate generic FAILED label and surfaces the raw message in the
  * expandable details.
+ *
+ * Labels travel as catalog keys, not resolved copy: this module is imported at
+ * module scope, so a `t()` here would freeze at the boot locale.
  */
 
-export const ENVIRONMENT_SETUP_FAILED_LABEL = "Environment setup failed";
+export const ENVIRONMENT_SETUP_FAILED_KEY = "task:environmentSetupFailed";
 
 // Signatures emitted while preparing the workspace / launching the executor,
 // before the agent process is meaningfully running. Sourced from the Go
 // backend: `environment preparation failed:` (manager_launch.go), the launch
 // race ("already has an agent running" / "race resolved during register"),
 // container launch failures, and branch/fresh-branch prep errors.
+// i18n-exempt: substrings matched against backend error text, not copy.
 const SETUP_FAILURE_SIGNATURES = [
   "environment preparation failed",
   "failed to launch container",
@@ -33,13 +37,14 @@ export function isEnvironmentSetupError(message: string | undefined | null): boo
 }
 
 /**
- * Resolves the label shown in the FAILED status banner. Returns the
- * "Environment setup failed" label only for genuine setup failures; otherwise
- * the caller's fallback (the generic "Agent has encountered an error").
+ * Resolves the catalog key for the label shown in the FAILED status banner.
+ * Returns the "Environment setup failed" key only for genuine setup failures;
+ * otherwise the caller's fallback key (the generic "Agent has encountered an
+ * error").
  */
-export function resolveAgentErrorLabel(
+export function resolveAgentErrorLabelKey(
   errorMessage: string | undefined | null,
-  fallbackLabel: string,
+  fallbackKey: string,
 ): string {
-  return isEnvironmentSetupError(errorMessage) ? ENVIRONMENT_SETUP_FAILED_LABEL : fallbackLabel;
+  return isEnvironmentSetupError(errorMessage) ? ENVIRONMENT_SETUP_FAILED_KEY : fallbackKey;
 }

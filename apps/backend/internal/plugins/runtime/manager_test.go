@@ -62,6 +62,9 @@ func (fakeHostTaskReader) Get(context.Context, string) (*pluginsdk.Task, error) 
 func (fakeHostTaskReader) Update(context.Context, pluginsdk.UpdateTaskInput) (*pluginsdk.Task, error) {
 	return nil, nil
 }
+func (fakeHostTaskReader) Move(context.Context, pluginsdk.MoveTaskInput) (*pluginsdk.MoveTaskOutcome, error) {
+	return nil, nil
+}
 
 func (r fakeHostTaskReader) Create(_ context.Context, in pluginsdk.CreateTaskInput) (*pluginsdk.Task, error) {
 	r.h.mu.Lock()
@@ -199,6 +202,20 @@ func TestManager_StartDeliverEventWebhookStop(t *testing.T) {
 		}
 		if string(resp.Body) != "hi" {
 			t.Fatalf("HandleWebhook().Body = %q, want echoed body", resp.Body)
+		}
+	})
+
+	t.Run("HandleAction echoes the verified action payload over the real subprocess", func(t *testing.T) {
+		resp, err := remote.HandleAction(ctx, &pluginsdk.PluginActionRequest{
+			ActionKey: "connection.get",
+			Context:   pluginsdk.VerifiedActionContext{ActorID: "user-1", WorkspaceID: "ws-1"},
+			Body:      []byte(`{"request":"action"}`),
+		})
+		if err != nil {
+			t.Fatalf("HandleAction() unexpected error: %v", err)
+		}
+		if string(resp.Body) != `{"request":"action"}` {
+			t.Fatalf("HandleAction().Body = %q, want echoed action body", resp.Body)
 		}
 	})
 

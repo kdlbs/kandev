@@ -4,13 +4,18 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/agentruntime"
+	kandevdb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
 )
 
 // Executor operations
@@ -89,7 +94,13 @@ func (r *Repository) UpdateExecutor(ctx context.Context, executor *models.Execut
 
 func (r *Repository) DeleteExecutor(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin executor delete: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE executors SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
 	`), now, now, id)
 	if err != nil {
@@ -99,7 +110,40 @@ func (r *Repository) DeleteExecutor(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("executor not found: %s", id)
 	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		DELETE FROM executor_reachability WHERE executor_id = ?
+	`), id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit executor delete: %w", err)
+	}
 	return nil
+}
+
+// scanExecutorRow scans one row of the standard executors column list
+// (id, name, type, status, is_system, resumable, config, created_at,
+// updated_at, deleted_at) into a models.Executor. Shared by every query that
+// selects that exact column set.
+func scanExecutorRow(scanner interface{ Scan(...any) error }) (*models.Executor, error) {
+	executor := &models.Executor{}
+	var configJSON string
+	var isSystem int
+	var resumable int
+	if err := scanner.Scan(
+		&executor.ID, &executor.Name, &executor.Type, &executor.Status,
+		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
+	); err != nil {
+		return nil, err
+	}
+	executor.IsSystem = isSystem == 1
+	executor.Resumable = resumable == 1
+	if configJSON != "" && configJSON != "{}" {
+		if err := json.Unmarshal([]byte(configJSON), &executor.Config); err != nil {
+			return nil, fmt.Errorf("failed to deserialize executor config: %w", err)
+		}
+	}
+	return executor, nil
 }
 
 func (r *Repository) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
@@ -114,28 +158,24 @@ func (r *Repository) ListExecutors(ctx context.Context) ([]*models.Executor, err
 
 	var result []*models.Executor
 	for rows.Next() {
-		executor := &models.Executor{}
-		var configJSON string
-		var isSystem int
-		var resumable int
-		if err := rows.Scan(
-			&executor.ID, &executor.Name, &executor.Type, &executor.Status,
-			&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
-		); err != nil {
+		executor, err := scanExecutorRow(rows)
+		if err != nil {
 			return nil, err
-		}
-		executor.IsSystem = isSystem == 1
-		executor.Resumable = resumable == 1
-		if configJSON != "" && configJSON != "{}" {
-			if err := json.Unmarshal([]byte(configJSON), &executor.Config); err != nil {
-				return nil, fmt.Errorf("failed to deserialize executor config: %w", err)
-			}
 		}
 		result = append(result, executor)
 	}
 	return result, rows.Err()
 }
 
+// UpsertExecutorRunning takes the shared task-row lock (kandevdb.LockTaskRowInTx)
+// before writing so a concurrent runner switch cannot land between this
+// write's mutability read and its own re-check — the two either fully
+// precede or fully follow each other. A row with no
+// TaskID (defensive only; every production caller populates it from the
+// owning execution) skips the lock, matching guardWorkspaceSourceParentTx's
+// no-parent case. It also locks the session row and, when the session names
+// a task environment, rejects the write via recoveryclaim.EnsureAvailableTx
+// while that environment is under an active recovery claim.
 func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
 	if running == nil {
 		return fmt.Errorf("executor running is nil")
@@ -161,7 +201,31 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		metadataJSON = string(b)
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if running.TaskID != "" {
+		if lockErr := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), running.TaskID); lockErr != nil &&
+			!errors.Is(lockErr, kandevdb.ErrTaskRowNotFound) {
+			return lockErr
+		}
+	}
+	if _, err := lockTaskSessionRow(ctx, tx, running.SessionID); err != nil {
+		return err
+	}
+	var environmentID sql.NullString
+	if queryErr := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COALESCE(task_environment_id, '') FROM task_sessions WHERE id = ?`), running.SessionID).Scan(&environmentID); queryErr != nil && queryErr != sql.ErrNoRows {
+		return queryErr
+	}
+	if environmentID.Valid {
+		if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID.String); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors_running (
 			id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
 			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
@@ -217,7 +281,10 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		running.CreatedAt,
 		running.UpdatedAt,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
@@ -229,6 +296,50 @@ func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.Execut
 		FROM executors_running
 		ORDER BY updated_at DESC
 	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanExecutorRunningRows(rows)
+}
+
+// ListExecutorsRunningIdle returns rows that can be candidates for periodic
+// stale-runtime recovery. Filtering in SQL avoids rescanning preserved stopped
+// rows and recent executions on every reaper tick.
+func (r *Repository) ListExecutorsRunningIdle(ctx context.Context, cutoff time.Time) ([]*models.ExecutorRunning, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
+			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
+			created_at, updated_at
+		FROM executors_running
+		WHERE status <> ? AND updated_at <= ?
+		ORDER BY updated_at DESC
+	`), models.ExecutorRunningStatusStopped, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanExecutorRunningRows(rows)
+}
+
+// ListExecutorsRunningLiveStandalone returns every non-terminal executors_running
+// row whose runtime is the standalone control server (worktree/local executors).
+// Used by startup recovery to build the guard/correlation inventory at step 3,
+// before any control-server contact (discovery H).
+func (r *Repository) ListExecutorsRunningLiveStandalone(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
+			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
+			created_at, updated_at
+		FROM executors_running
+		WHERE runtime = ? AND status NOT IN (?, ?, ?)
+		ORDER BY updated_at DESC
+	`), agentruntime.RuntimeStandalone,
+		models.ExecutorRunningStatusStopped, models.ExecutorRunningStatusComplete, models.ExecutorRunningStatusFailed)
 	if err != nil {
 		return nil, err
 	}
@@ -256,6 +367,14 @@ func (r *Repository) ListExecutorsRunningByTaskID(ctx context.Context, taskID st
 	defer func() { _ = rows.Close() }()
 
 	return scanExecutorRunningRows(rows)
+}
+
+// GetExecutorRunningExistenceByTaskIDs reports, for each of taskIDs, whether
+// any executors_running row exists — the same unconditional presence check
+// runnerHasExecutorRunning makes for one task, batched behind a single
+// IN-clause query for a projection covering many.
+func (r *Repository) GetExecutorRunningExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	return r.batchedTaskIDExistence(ctx, "executors_running", taskIDs)
 }
 
 func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {
@@ -376,7 +495,15 @@ func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessi
 	if sessionID == "" {
 		return fmt.Errorf("session_id is required")
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM executors_running WHERE session_id = ?`), sessionID)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM executors_running WHERE session_id = ?`), sessionID)
 	if err != nil {
 		return err
 	}
@@ -384,7 +511,39 @@ func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessi
 	if rows == 0 {
 		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
 	}
-	return nil
+	return tx.Commit()
+}
+
+// ensureExecutorRunningAvailableTx applies the environment recovery claim to
+// every mutation of an executors_running row. A session without an environment
+// is still allowed because initial materialization creates the environment
+// before it can be used for recovery.
+func (r *Repository) ensureExecutorRunningAvailableTx(ctx context.Context, tx *sqlx.Tx, sessionID string) error {
+	var environmentID sql.NullString
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COALESCE(task_environment_id, '') FROM task_sessions WHERE id = ?
+	`), sessionID).Scan(&environmentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !environmentID.Valid || environmentID.String == "" {
+		return nil
+	}
+	return recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID.String)
+}
+
+func (r *Repository) executorRunningRowExistsTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (bool, error) {
+	var exists int
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT 1 FROM executors_running WHERE session_id = ? LIMIT 1
+	`), sessionID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return exists == 1, err
 }
 
 // HasExecutorRunningRow returns true if an executors_running row exists for sessionID.
@@ -420,18 +579,25 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 		return fmt.Errorf("session_id is required")
 	}
 	now := time.Now().UTC()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
 	var (
 		result sql.Result
-		err    error
 	)
 	if expectedExecID == "" {
-		result, err = r.db.ExecContext(ctx, r.db.Rebind(`
+		result, err = tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE executors_running
 			   SET resume_token = ?, last_message_uuid = ?, updated_at = ?
-			 WHERE session_id = ?
+			WHERE session_id = ?
 		`), resumeToken, lastMessageUUID, now, sessionID)
 	} else {
-		result, err = r.db.ExecContext(ctx, r.db.Rebind(`
+		result, err = tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE executors_running
 			   SET resume_token = ?, last_message_uuid = ?, updated_at = ?
 			 WHERE session_id = ?
@@ -444,7 +610,7 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		// Distinguish "no row at all" from "row exists but rotated".
-		exists, hasErr := r.HasExecutorRunningRow(ctx, sessionID)
+		exists, hasErr := r.executorRunningRowExistsTx(ctx, tx, sessionID)
 		if hasErr != nil {
 			return hasErr
 		}
@@ -453,7 +619,7 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 		}
 		return models.ErrExecutionRotated
 	}
-	return nil
+	return tx.Commit()
 }
 
 // RepairExecutorRunningDead repairs a row in place to reflect that its backing
@@ -471,7 +637,15 @@ func (r *Repository) RepairExecutorRunningDead(ctx context.Context, sessionID st
 		return fmt.Errorf("session_id is required")
 	}
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE executors_running
 		   SET status = ?, local_pid = 0, last_seen_at = ?, updated_at = ?
 		 WHERE session_id = ?
@@ -483,7 +657,100 @@ func (r *Repository) RepairExecutorRunningDead(ctx context.Context, sessionID st
 	if rows == 0 {
 		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
 	}
-	return nil
+	return tx.Commit()
+}
+
+// RepairExecutorRunningDeadIfCurrent is the compare-and-set variant used by
+// concurrent cleanup. The row must still belong to expectedExecID and, when
+// supplied, must have the same UpdatedAt value observed by the caller.
+func (r *Repository) RepairExecutorRunningDeadIfCurrent(
+	ctx context.Context,
+	sessionID, expectedExecID string,
+	expectedUpdatedAt time.Time,
+) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	now := time.Now().UTC()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	query := `
+		UPDATE executors_running
+		   SET status = ?, local_pid = 0, last_seen_at = ?, updated_at = ?
+		 WHERE session_id = ? AND agent_execution_id = ?
+	`
+	args := []interface{}{
+		models.ExecutorRunningStatusStopped, now, now, sessionID, expectedExecID,
+	}
+	if !expectedUpdatedAt.IsZero() {
+		query += " AND updated_at = ?\n"
+		args = append(args, expectedUpdatedAt)
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		return tx.Commit()
+	}
+	exists, err := r.executorRunningRowExistsTx(ctx, tx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
+	}
+	return models.ErrExecutionRotated
+}
+
+// DeleteExecutorRunningIfCurrent deletes a row only when its execution
+// identity and observed timestamp still match. It prevents cleanup of a row
+// that a successor launch has already replaced.
+func (r *Repository) DeleteExecutorRunningIfCurrent(
+	ctx context.Context,
+	sessionID, expectedExecID string,
+	expectedUpdatedAt time.Time,
+) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	query := `DELETE FROM executors_running WHERE session_id = ? AND agent_execution_id = ?`
+	args := []interface{}{sessionID, expectedExecID}
+	if !expectedUpdatedAt.IsZero() {
+		query += " AND updated_at = ?\n"
+		args = append(args, expectedUpdatedAt)
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		return tx.Commit()
+	}
+	exists, err := r.executorRunningRowExistsTx(ctx, tx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
+	}
+	return models.ErrExecutionRotated
 }
 
 // UpdateExecutorRunningStatus narrowly updates the status column.
@@ -493,7 +760,15 @@ func (r *Repository) UpdateExecutorRunningStatus(ctx context.Context, sessionID,
 		return fmt.Errorf("session_id is required")
 	}
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE executors_running
 		   SET status = ?, updated_at = ?
 		 WHERE session_id = ?
@@ -505,7 +780,49 @@ func (r *Repository) UpdateExecutorRunningStatus(ctx context.Context, sessionID,
 	if rows == 0 {
 		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
 	}
-	return nil
+	return tx.Commit()
+}
+
+// UpdateExecutorRunningWorktreeBranch narrowly updates the branch snapshot for
+// a live execution. The execution ID is part of the CAS so a rotated execution
+// cannot overwrite the successor's branch snapshot.
+func (r *Repository) UpdateExecutorRunningWorktreeBranch(ctx context.Context, sessionID, expectedExecID, branch string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	if expectedExecID == "" {
+		return fmt.Errorf("expected execution_id is required")
+	}
+	now := time.Now().UTC()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE executors_running
+		   SET worktree_branch = ?, updated_at = ?
+		 WHERE session_id = ?
+		   AND agent_execution_id = ?
+	`), branch, now, sessionID, expectedExecID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		exists, hasErr := r.executorRunningRowExistsTx(ctx, tx, sessionID)
+		if hasErr != nil {
+			return hasErr
+		}
+		if !exists {
+			return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
+		}
+		return models.ErrExecutionRotated
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {

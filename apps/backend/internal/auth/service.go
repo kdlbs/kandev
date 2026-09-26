@@ -11,6 +11,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/httpcookie"
 	"github.com/kandev/kandev/internal/common/logger"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	userstore "github.com/kandev/kandev/internal/user/store"
@@ -47,6 +49,13 @@ const (
 	sessionTouchInterval = time.Minute
 
 	maxUserAgentLen = 256
+
+	// baseSessionCookieName is the session cookie base name. The effective
+	// name is request-host derived (see CookieNameForRequest): port-scoped on
+	// a ported host so multiple instances on one host keep isolated sessions,
+	// plain on a default-port host. An explicit auth.cookieName config value
+	// replaces the base name entirely (verbatim, never suffixed).
+	baseSessionCookieName = "kandev_session"
 )
 
 // Sentinel errors surfaced to HTTP handlers.
@@ -97,6 +106,19 @@ type Service struct {
 
 	// dummyHash equalizes login timing for unknown emails.
 	dummyHash string
+
+	// orgStatus fails sessions and tokens closed for a suspended
+	// organization. Nil when organizations are off.
+	orgStatus OrgStatusChecker
+
+	// adminCreated places the first admin and grants the operator tier before
+	// setup creates the identity that switches authentication into enabled mode.
+	adminCreated func(ctx context.Context, userID string) error
+}
+
+// SetAdminCreatedHook installs the pre-commit setup callback.
+func (s *Service) SetAdminCreatedHook(hook func(ctx context.Context, userID string) error) {
+	s.adminCreated = hook
 }
 
 // NewService constructs the service and computes the initial mode.
@@ -128,12 +150,29 @@ func (s *Service) Mode() Mode {
 	return ModeDisabled
 }
 
-// CookieName returns the configured session cookie name.
+// CookieName returns the configured session cookie name (request-less form).
+// An explicitly configured auth.cookieName is returned verbatim; the empty
+// default resolves to the base name. Contexts without a request (tests) must
+// pass this form or use CookieNameForRequest with a request.
 func (s *Service) CookieName() string {
 	if name := strings.TrimSpace(s.cfg.Auth.CookieName); name != "" {
 		return name
 	}
-	return "kandev_session"
+	return baseSessionCookieName
+}
+
+// CookieNameForRequest returns the session cookie name for a specific
+// request. A non-empty configured auth.cookieName is returned verbatim —
+// custom names disable automatic port isolation and must be unique per
+// cookie host. The empty default is port-scoped from the request host
+// (kandev_session_<port> on a ported host, plain kandev_session otherwise)
+// so two instances on one host (same IP, different ports) keep isolated
+// sessions instead of overwriting each other's token.
+func (s *Service) CookieNameForRequest(r *http.Request) string {
+	if name := strings.TrimSpace(s.cfg.Auth.CookieName); name != "" {
+		return name
+	}
+	return httpcookie.ScopedName(r, baseSessionCookieName)
 }
 
 // SessionTTL returns the sliding session lifetime.
@@ -182,11 +221,60 @@ func validateEmailPassword(email, password string) error {
 	return nil
 }
 
-func roleOf(user *usermodels.User) authn.Role {
-	if user.Role == usermodels.RoleAdmin {
-		return authn.RoleAdmin
+// identityOf builds the request identity from the account record. The org and
+// the operator tier come from the stored user and from nowhere else, so no
+// caller-supplied value can influence which tenant a request belongs to.
+// ErrOrgUnavailable reports a correct credential whose organization is
+// suspended. It is deliberately distinct from ErrInvalidCredentials: the
+// password was right, and saying otherwise would send the user to reset it.
+var ErrOrgUnavailable = errors.New("your organization is currently unavailable")
+
+// OrgStatusChecker reports whether an organization may serve requests. Wired
+// from backendapp; nil on instances without organizations.
+type OrgStatusChecker func(ctx context.Context, orgID string) bool
+
+// SetOrgStatusChecker installs the suspended-organization gate.
+func (s *Service) SetOrgStatusChecker(check OrgStatusChecker) { s.orgStatus = check }
+
+// orgUsable reports whether the identity's organization may serve requests.
+// A suspended org fails every session and token closed, which is what makes
+// suspension a real lever rather than a label.
+func (s *Service) orgUsable(ctx context.Context, orgID string) bool {
+	if s.orgStatus == nil || orgID == "" {
+		return true
 	}
-	return authn.RoleMember
+	return s.orgStatus(ctx, orgID)
+}
+
+// callerOrgID returns the requesting user's organization, or "" when
+// organizations are off. Accounts and invites created by an admin inherit it,
+// which is why neither path takes an org parameter.
+func callerOrgID(ctx context.Context) string {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic {
+		return ""
+	}
+	return identity.OrgID
+}
+
+func identityOf(user *usermodels.User, sessionID, tokenID string) authn.Identity {
+	return authn.Identity{
+		UserID:    user.ID,
+		Role:      roleOf(user),
+		OrgID:     user.OrgID,
+		Instance:  user.IsOperator,
+		SessionID: sessionID,
+		TokenID:   tokenID,
+	}
+}
+
+// roleOf carries the STORED role through unchanged. It deliberately does not
+// normalize: authz.NormalizeOrgRole maps an unrecognized role to guest, the
+// least privileged one, whereas usermodels.NormalizeRole defaults to member
+// for write paths. Normalizing here would turn an unknown stored value into a
+// collaborator on every org-visible workspace.
+func roleOf(user *usermodels.User) authn.Role {
+	return authn.Role(user.Role)
 }
 
 func truncateUserAgent(ua string) string {

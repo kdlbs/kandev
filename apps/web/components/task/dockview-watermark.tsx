@@ -15,6 +15,8 @@ import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { AddPanelMenuItems } from "./dockview-add-panel-items";
 import { NewSessionDialog } from "./new-session-dialog";
 import { useActiveSessionDevScript } from "./repository-scripts-menu";
+import { useTranslation } from "react-i18next";
+import { useOptionalPortForwardingVisibility } from "./port-forwarding-visibility-provider";
 
 /**
  * Watermark rendered by Dockview when a group becomes empty (e.g. after
@@ -28,6 +30,7 @@ import { useActiveSessionDevScript } from "./repository-scripts-menu";
  * never appeared in the user-shell list at all.
  */
 export function DockviewWatermark({ containerApi, group }: IWatermarkPanelProps) {
+  const { t } = useTranslation();
   const groupId = group?.id;
   const environmentId = useEnvironmentId();
   const taskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
@@ -47,7 +50,7 @@ export function DockviewWatermark({ containerApi, group }: IWatermarkPanelProps)
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
       <IconLayoutSidebarRightCollapse className="h-5 w-5 opacity-50" />
-      <p className="text-xs">Empty group</p>
+      <p className="text-xs">{t("task:emptyGroup")}</p>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -57,7 +60,7 @@ export function DockviewWatermark({ containerApi, group }: IWatermarkPanelProps)
             data-testid="watermark-add-panel-btn"
           >
             <IconPlus className="h-3.5 w-3.5" />
-            Add panel
+            {t("task:addPanel")}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="center" className="w-44">
@@ -94,6 +97,7 @@ function useWatermarkMenuState(
   });
   const { prs } = useTaskPR(taskID);
   const mrs = useTaskMRs(taskID);
+  const portForwarding = useOptionalPortForwardingVisibility();
   return useMemo(
     () => ({
       taskId: taskID,
@@ -102,8 +106,9 @@ function useWatermarkMenuState(
       hasFiles: Boolean(containerApi.getPanel("files") ?? containerApi.getPanel("all-files")),
       prs,
       mrs,
+      portForwarding,
     }),
-    [taskID, isPassthrough, containerApi, prs, mrs],
+    [taskID, isPassthrough, containerApi, prs, mrs, portForwarding],
   );
 }
 
@@ -112,6 +117,7 @@ function useWatermarkHandlers(
   environmentId: string | null,
   taskID: string | null,
 ) {
+  const { t } = useTranslation();
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
   const addUserShell = useAppStore((s) => s.addUserShell);
   const devScript = useActiveSessionDevScript();
@@ -149,7 +155,7 @@ function useWatermarkHandlers(
           groupId,
           environmentId,
           undefined,
-          result.label ?? "Script",
+          result.label ?? t("common:script"),
         );
       } catch (error) {
         console.error("Failed to run script:", error);
@@ -163,9 +169,9 @@ function useWatermarkHandlers(
     try {
       const result = await createUserShell(environmentId, {
         command: devScript,
-        label: "Dev Server",
+        label: t("task:devServer"),
       });
-      addTerminalPanel(result.terminalId, groupId, environmentId, undefined, "Dev Server");
+      addTerminalPanel(result.terminalId, groupId, environmentId, undefined, t("task:devServer"));
     } catch (error) {
       console.error("Failed to start dev script:", error);
     }

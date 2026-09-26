@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -14,7 +15,25 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 )
 
-func TestServiceInitializeLocalRepositoryCreatesCommitlessMainRepository(t *testing.T) {
+func TestServiceInitializeLocalRepositoryCreatesMainRepository(t *testing.T) {
+	for key, value := range map[string]string{
+		"GIT_AUTHOR_NAME":     "Host Author",
+		"GIT_AUTHOR_EMAIL":    "host-author@example.com",
+		"GIT_COMMITTER_NAME":  "Host Committer",
+		"GIT_COMMITTER_EMAIL": "host-committer@example.com",
+	} {
+		t.Setenv(key, value)
+	}
+	if runtime.GOOS != "windows" {
+		hooksPath := t.TempDir()
+		hook := filepath.Join(hooksPath, "prepare-commit-msg")
+		if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 42\n"), 0o755); err != nil {
+			t.Fatalf("WriteFile prepare-commit-msg: %v", err)
+		}
+		t.Setenv("GIT_CONFIG_COUNT", "1")
+		t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+		t.Setenv("GIT_CONFIG_VALUE_0", hooksPath)
+	}
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
@@ -49,10 +68,20 @@ func TestServiceInitializeLocalRepositoryCreatesCommitlessMainRepository(t *test
 		t.Fatalf("target entries = %+v, want only .git directory", entries)
 	}
 	if branch := runGitOutput(t, wantPath, "symbolic-ref", "--short", "HEAD"); branch != "main" {
-		t.Fatalf("unborn branch = %q, want main", branch)
+		t.Fatalf("current branch = %q, want main", branch)
 	}
-	if command := exec.Command("git", "-C", wantPath, "rev-parse", "--verify", "HEAD"); command.Run() == nil {
-		t.Fatal("rev-parse HEAD succeeded, want repository with no commits")
+	command := exec.Command("git", "-C", wantPath, "show-ref", "--verify", "--quiet", "refs/heads/main")
+	if err := command.Run(); err != nil {
+		t.Fatalf("show-ref refs/heads/main: %v", err)
+	}
+	if commitCount := runGitOutput(t, wantPath, "rev-list", "--count", "HEAD"); commitCount != "1" {
+		t.Fatalf("commit count = %q, want one empty initial commit", commitCount)
+	}
+	if tree := runGitOutput(t, wantPath, "ls-tree", "-r", "--name-only", "HEAD"); tree != "" {
+		t.Fatalf("initial commit tree = %q, want empty tree", tree)
+	}
+	if commit := runGitOutput(t, wantPath, "show", "-s", "--format=%an <%ae>%n%s", "HEAD"); commit != "Kandev Quick Chat <quickchat@kandev.local>\nInitial commit" {
+		t.Fatalf("initial commit = %q, want fixed Kandev identity and message", commit)
 	}
 	stored, err := repo.GetRepository(ctx, created.ID)
 	if err != nil {
@@ -203,7 +232,13 @@ func TestInitializeGitRepositoryInitializesTheOpenDirectory(t *testing.T) {
 		t.Fatalf("staging entries = %+v, want only a .git directory", entries)
 	}
 	if branch := runGitOutput(t, staging, "symbolic-ref", "--short", "HEAD"); branch != "main" {
-		t.Fatalf("unborn branch = %q, want main", branch)
+		t.Fatalf("current branch = %q, want main", branch)
+	}
+	if commitCount := runGitOutput(t, staging, "rev-list", "--count", "HEAD"); commitCount != "1" {
+		t.Fatalf("commit count = %q, want one empty initial commit", commitCount)
+	}
+	if tree := runGitOutput(t, staging, "ls-tree", "-r", "--name-only", "HEAD"); tree != "" {
+		t.Fatalf("initial commit tree = %q, want empty tree", tree)
 	}
 }
 
@@ -219,7 +254,7 @@ func TestServiceInitializeLocalRepositoryRejectsExistingTargetWithoutMutation(t 
 			if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
 				t.Fatalf("CreateWorkspace: %v", err)
 			}
-			parent := t.TempDir()
+			parent := trustedTempDir(t)
 			target := filepath.Join(parent, "existing")
 			if err := os.Mkdir(target, 0o755); err != nil {
 				t.Fatalf("Mkdir target: %v", err)
@@ -249,7 +284,7 @@ func TestServiceInitializeLocalRepositoryRejectsExistingTargetWithoutMutation(t 
 
 func TestServiceInitializeLocalRepositoryValidatesWorkspaceBeforeMutation(t *testing.T) {
 	svc, _, repo := createTestService(t)
-	parent := t.TempDir()
+	parent := trustedTempDir(t)
 	target := filepath.Join(parent, "new-project")
 
 	_, err := svc.InitializeLocalRepository(context.Background(), &InitializeLocalRepositoryRequest{
@@ -270,7 +305,7 @@ func TestServiceInitializeLocalRepositoryCleansUpGitFailure(t *testing.T) {
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
-	parent := t.TempDir()
+	parent := trustedTempDir(t)
 	t.Setenv("PATH", t.TempDir())
 
 	_, err := svc.InitializeLocalRepository(ctx, &InitializeLocalRepositoryRequest{
@@ -291,7 +326,7 @@ func TestServiceInitializeLocalRepositoryDoesNotRemoveReplacedTarget(t *testing.
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
-	parent := t.TempDir()
+	parent := trustedTempDir(t)
 	target := filepath.Join(parent, "new-project")
 	movedTarget := filepath.Join(parent, "request-owned")
 	replacementPath := ""
@@ -333,7 +368,7 @@ func TestServiceInitializeLocalRepositoryDoesNotPublishOverRacingTarget(t *testi
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
-	parent := t.TempDir()
+	parent := trustedTempDir(t)
 	target := filepath.Join(parent, "new-project")
 	marker := filepath.Join(target, "keep")
 
@@ -374,7 +409,7 @@ func TestServiceInitializeLocalRepositoryCleansUpPersistenceFailure(t *testing.T
 	}
 	wantErr := errors.New("database unavailable")
 	svc.repoEntities = failingCreateRepository{RepositoryEntityRepository: repo, err: wantErr}
-	parent := t.TempDir()
+	parent := trustedTempDir(t)
 
 	_, err := svc.InitializeLocalRepository(ctx, &InitializeLocalRepositoryRequest{
 		WorkspaceID: "ws-1", Name: "new-project", ParentPath: parent,

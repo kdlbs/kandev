@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -23,6 +24,11 @@ type UpdateAgentProfileMcpConfigRequest struct {
 	Meta    map[string]any
 }
 
+type UpdateAgentProfileMcpConfigPatchRequest struct {
+	Enabled *bool
+	Servers *map[string]mcpconfig.ServerDef
+}
+
 func (c *Controller) GetAgentProfileMcpConfig(ctx context.Context, profileID string) (*dto.AgentProfileMcpConfigDTO, error) {
 	config, err := c.mcpService.GetConfigByProfileID(ctx, profileID)
 	if err != nil {
@@ -35,10 +41,11 @@ func (c *Controller) GetAgentProfileMcpConfig(ctx context.Context, profileID str
 		return nil, err
 	}
 	return &dto.AgentProfileMcpConfigDTO{
-		ProfileID: config.ProfileID,
-		Enabled:   config.Enabled,
-		Servers:   config.Servers,
-		Meta:      config.Meta,
+		ProfileID:   config.ProfileID,
+		WorkspaceID: config.WorkspaceID,
+		Enabled:     config.Enabled,
+		Servers:     config.Servers,
+		Meta:        config.Meta,
 	}, nil
 }
 
@@ -58,10 +65,34 @@ func (c *Controller) UpdateAgentProfileMcpConfig(ctx context.Context, profileID 
 		return nil, err
 	}
 	return &dto.AgentProfileMcpConfigDTO{
-		ProfileID: config.ProfileID,
-		Enabled:   config.Enabled,
-		Servers:   config.Servers,
-		Meta:      config.Meta,
+		ProfileID:   config.ProfileID,
+		WorkspaceID: config.WorkspaceID,
+		Enabled:     config.Enabled,
+		Servers:     config.Servers,
+		Meta:        config.Meta,
+	}, nil
+}
+
+func (c *Controller) UpdateAgentProfileMcpConfigPatch(ctx context.Context, profileID string, req UpdateAgentProfileMcpConfigPatchRequest) (*dto.AgentProfileMcpConfigDTO, error) {
+	config, err := c.mcpService.PatchConfigByProfileID(ctx, profileID, mcpconfig.ConfigPatch{
+		Enabled: req.Enabled,
+		Servers: req.Servers,
+	})
+	if err != nil {
+		if errors.Is(err, mcpconfig.ErrAgentProfileNotFound) {
+			return nil, ErrAgentProfileNotFound
+		}
+		if errors.Is(err, mcpconfig.ErrAgentMcpUnsupported) {
+			return nil, ErrAgentMcpUnsupported
+		}
+		return nil, err
+	}
+	return &dto.AgentProfileMcpConfigDTO{
+		ProfileID:   config.ProfileID,
+		WorkspaceID: config.WorkspaceID,
+		Enabled:     config.Enabled,
+		Servers:     config.Servers,
+		Meta:        config.Meta,
 	}, nil
 }
 
@@ -188,11 +219,8 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 	// Tolerate malformed entries silently — the preview is informational.
 	cliFlagTokens, _ := cliflags.Resolve(cliFlagsFromDTO(req.CLIFlags))
 
-	// Passthrough: BuildPassthroughCommand emits permission flags via Settings();
-	// the launch path (manager_passthrough.go) does not append CLIFlagTokens for
-	// passthrough, so the preview must match — otherwise permission flags that
-	// the legacy allow_indexing backfill also pushes into CLIFlags get rendered
-	// twice (e.g. Auggie's --allow-indexing).
+	// Passthrough: BuildPassthroughCommand emits permission flags via Settings()
+	// and appends resolved profile CLI flags, matching manager_passthrough.go.
 	// ACP: mirror lifecycle.CommandBuilder.BuildCommand by appending CLIFlagTokens
 	// after the agent's BuildCommand.
 	var cmd agents.Command
@@ -200,13 +228,27 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 		cmd = ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 			Model:            req.Model,
 			PermissionValues: req.PermissionSettings,
+			CLIFlagTokens:    cliFlagTokens,
 		})
 	} else {
+		managedRuntimeVersion := ""
+		var err error
+		if managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent); ok {
+			managedRuntimeVersion, err = c.activeRuntimeVersion(
+				ctx,
+				agentName,
+				managed.ManagedNPMRuntime().Package,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("resolve active managed runtime version: %w", err)
+			}
+		}
 		cmd = agentConfig.BuildCommand(agents.CommandOptions{
-			Model:              req.Model,
-			PermissionValues:   req.PermissionSettings,
-			CLIFlagTokens:      cliFlagTokens,
-			PreferNativeBinary: previewPrefersNativeBinary(agentConfig),
+			Model:                 req.Model,
+			PermissionValues:      req.PermissionSettings,
+			CLIFlagTokens:         cliFlagTokens,
+			PreferNativeBinary:    previewPrefersNativeBinary(agentConfig),
+			ManagedRuntimeVersion: managedRuntimeVersion,
 		})
 		if len(cliFlagTokens) > 0 {
 			cmd = cmd.With().Flag(cliFlagTokens...).Build()
@@ -252,7 +294,7 @@ func previewPrefersNativeBinary(agentConfig agents.Agent) bool {
 // flag triggers a live Refresh() call against the warm host instance.
 func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, refresh bool) (*dto.DynamicModelsResponse, error) {
 	if _, ok := c.agentRegistry.Get(agentName); !ok {
-		return nil, fmt.Errorf("agent %q not found", agentName)
+		return nil, ErrAgentNotFound
 	}
 	if c.hostUtility == nil {
 		return &dto.DynamicModelsResponse{
@@ -318,6 +360,50 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 			Name:        c.Name,
 			Description: c.Description,
 		})
+	}
+	return resp, nil
+}
+
+// ResolveAgentModelConfig returns the complete provider configuration-option
+// snapshot after applying a selected model in a sessionless ACP probe.
+func (c *Controller) ResolveAgentModelConfig(
+	ctx context.Context,
+	agentName string,
+	req dto.ResolveAgentModelConfigRequest,
+) (*dto.AgentModelConfigResponse, error) {
+	if _, ok := c.agentRegistry.Get(agentName); !ok {
+		return nil, fmt.Errorf("%w: %s", ErrAgentNotFound, agentName)
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		return nil, ErrModelRequired
+	}
+	resp := &dto.AgentModelConfigResponse{
+		AgentName:     agentName,
+		Model:         req.Model,
+		Status:        string(hostutility.StatusNotConfigured),
+		ConfigOptions: []dto.ConfigOptionDTO{},
+	}
+	if c.hostUtility == nil {
+		return resp, nil
+	}
+
+	resolution, err := c.hostUtility.ResolveModelConfig(ctx, agentName, hostutility.ModelConfigResolutionRequest{
+		Model:         req.Model,
+		Mode:          req.Mode,
+		ConfigOptions: req.ConfigOptions,
+		Refresh:       req.Refresh,
+	})
+	if err != nil {
+		return nil, err
+	}
+	resp.Status = string(resolution.Status)
+	resp.ConfigOptions = configOptionDTOs(resolution.ConfigOptions)
+	if resolution.Error != "" {
+		message := "model option resolution failed"
+		if resolution.Status == hostutility.StatusAuthRequired {
+			message = "agent authentication is required"
+		}
+		resp.Error = &message
 	}
 	return resp, nil
 }

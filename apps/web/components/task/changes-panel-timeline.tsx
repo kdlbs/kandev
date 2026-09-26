@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { useMultiSelect } from "@/hooks/use-multi-select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -20,7 +20,8 @@ import {
   RepoGroupItem,
 } from "./changes-panel-repo-groups";
 import { PRFilesGroupedList } from "./changes-panel-pr-files";
-import type { OpenDiffOptions } from "./changes-diff-target";
+import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
+import { useTranslation } from "react-i18next";
 
 // --- Timeline visual components ---
 
@@ -46,6 +47,8 @@ function TimelineSection({
   children,
   collapsible = true,
   defaultCollapsed = false,
+  expandOnRequestToken,
+  focusOnExpand,
   "data-testid": testId,
 }: {
   dotColor: string;
@@ -55,7 +58,9 @@ function TimelineSection({
   children?: React.ReactNode;
   collapsible?: boolean;
   defaultCollapsed?: boolean;
-  "data-testid"?: string;
+  expandOnRequestToken?: number;
+  focusOnExpand?: boolean;
+  "data-testid": string;
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   // Git data arrives in separate async store updates, so `defaultCollapsed`
@@ -67,10 +72,25 @@ function TimelineSection({
   // rules.
   const [userToggled, setUserToggled] = useState(false);
   const [prevDefaultCollapsed, setPrevDefaultCollapsed] = useState(defaultCollapsed);
+  const [lastExpandOnRequestToken, setLastExpandOnRequestToken] = useState<number | undefined>();
+  const headingRef = useRef<HTMLButtonElement>(null);
   if (prevDefaultCollapsed !== defaultCollapsed) {
     setPrevDefaultCollapsed(defaultCollapsed);
     if (!userToggled) setCollapsed(defaultCollapsed);
   }
+  if (expandOnRequestToken !== undefined && expandOnRequestToken !== lastExpandOnRequestToken) {
+    setLastExpandOnRequestToken(expandOnRequestToken);
+    setCollapsed(false);
+    setUserToggled(false);
+  }
+  useEffect(() => {
+    if (!focusOnExpand || expandOnRequestToken === undefined) return;
+    // The request closes a Radix menu/drawer before this section expands. Defer
+    // one frame so the disclosure remains the final focus target after the
+    // primitive's close and focus-management callbacks have run.
+    const frame = requestAnimationFrame(() => headingRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [expandOnRequestToken, focusOnExpand]);
   const canCollapse = collapsible && !!label;
 
   return (
@@ -94,7 +114,8 @@ function TimelineSection({
                   setCollapsed((c) => !c);
                 }}
                 aria-expanded={!collapsed}
-                data-testid={`${testId ?? label.toLowerCase()}-collapse-toggle`}
+                data-testid={`${testId}-collapse-toggle`}
+                ref={headingRef}
               >
                 {label}
                 {typeof count === "number" && (
@@ -129,7 +150,7 @@ function TimelineSection({
 
 type CommitsSectionProps = {
   commits: CommitItem[];
-  onOpenCommitDetail?: (sha: string, repo?: string) => void;
+  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
   // Handlers receive the commit's repository_name so amend/revert/reset land
   // in the right git repo. The empty string routes to the workspace root for
   // single-repo workspaces.
@@ -144,12 +165,20 @@ type CommitsSectionProps = {
   repoDisplayName?: (repositoryName: string) => string | undefined;
   /** The session's base branch — passed through to the per-repo PR dialog. */
   repoBaseBranch?: string;
-  /** Per-repo branch / ahead / behind summary; used for the "ahead" indicator. */
-  perRepoStatus?: Array<{ repository_name: string; ahead: number }>;
+  /** Per-repo branch / upstream summary; used for the Push indicator. */
+  perRepoStatus?: Array<{ repository_name: string; pushAhead?: number; ahead?: number }>;
   /** Existing PR URL keyed by repository_name; "" key for single-repo. */
   prByRepo?: Record<string, string | undefined>;
   /** Initial collapse state. Defaults to collapsed; the panel expands it when it is the first visible section. */
   defaultCollapsed?: boolean;
+  /** Expands this section when a comparison request targets the Changes panel. */
+  expandOnRequestToken?: number;
+  /** Moves focus to this section heading after a comparison request. */
+  focusOnExpand?: boolean;
+  label?: string;
+  testId?: string;
+  pushDisabled?: boolean;
+  showActions?: boolean;
 };
 
 // Commits grouping shares the helper above with files — see @/lib/group-by-repo.
@@ -167,9 +196,18 @@ export function CommitsSection({
   perRepoStatus,
   prByRepo,
   defaultCollapsed = true,
+  expandOnRequestToken,
+  focusOnExpand,
+  label,
+  testId = "commits-section",
+  pushDisabled = false,
+  showActions = true,
 }: CommitsSectionProps) {
+  const { t } = useTranslation();
   const groups = groupByRepositoryName(commits, (c) => c.repository_name);
-  const aheadByRepo = new Map((perRepoStatus ?? []).map((s) => [s.repository_name, s.ahead]));
+  const aheadByRepo = new Map(
+    (perRepoStatus ?? []).map((s) => [s.repository_name, s.pushAhead ?? s.ahead ?? 0]),
+  );
   // Single-repo: drop the per-repo sub-header (CommitsRepoGroup with
   // showHeader=false renders flat) and lift the Push / PR buttons into the
   // section header.
@@ -180,8 +218,8 @@ export function CommitsSection({
       aheadCount={aheadByRepo.get("") ?? 0}
       prExists={!!prByRepo?.[""]}
       canCreatePR={!!onRepoCreatePR && !prByRepo?.[""]}
-      onRepoPush={onRepoPush}
-      onRepoCreatePR={onRepoCreatePR}
+      onRepoPush={showActions && !pushDisabled ? onRepoPush : undefined}
+      onRepoCreatePR={showActions ? onRepoCreatePR : undefined}
       stop={(e) => e.stopPropagation()}
     />
   ) : undefined;
@@ -189,10 +227,12 @@ export function CommitsSection({
   return (
     <TimelineSection
       dotColor={DOT_COLORS.commits}
-      label="Commits"
+      label={label ?? t("task:commits")}
       count={commits.length}
       defaultCollapsed={defaultCollapsed}
-      data-testid="commits-section"
+      expandOnRequestToken={expandOnRequestToken}
+      focusOnExpand={focusOnExpand}
+      data-testid={testId}
       action={sectionAction}
     >
       <ul data-testid="commits-list" className="space-y-0.5">
@@ -210,8 +250,8 @@ export function CommitsSection({
             onAmendCommit={onAmendCommit}
             onRevertCommit={onRevertCommit}
             onResetToCommit={onResetToCommit}
-            onRepoPush={onRepoPush}
-            onRepoCreatePR={onRepoCreatePR}
+            onRepoPush={showActions && !pushDisabled ? onRepoPush : undefined}
+            onRepoCreatePR={showActions ? onRepoCreatePR : undefined}
           />
         ))}
       </ul>
@@ -237,10 +277,10 @@ type FileListSectionProps = {
   // hits the right git repo. Same-named files across repos collide by path.
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
-  onDiscard: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   onBulkStage?: (paths: string[]) => void;
   onBulkUnstage?: (paths: string[]) => void;
-  onBulkDiscard?: (paths: string[]) => void;
+  onBulkDiscard?: (paths: string[], anchor?: HTMLElement) => void;
   // Per-repo action handlers shown inline with each repo group header. Always
   // rendered, including single-repo (with one entry pre-selected) — the empty
   // `repo` argument routes ops to the workspace root in that case.
@@ -248,6 +288,8 @@ type FileListSectionProps = {
   onRepoSecondaryAction?: (repo: string) => void;
   /** Maps a repository_name to its display label; called per group header. */
   repoDisplayName?: (repositoryName: string) => string | undefined;
+  /** Disable section and per-repository actions while another git operation runs. */
+  disabled?: boolean;
 };
 
 /**
@@ -266,7 +308,7 @@ type FileListBodyProps = {
   onEditFile: (path: string, repo?: string) => void;
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
-  onDiscard: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   /** Per-repo group header actions; primary = Stage all (unstaged) / Commit (staged). */
   onRepoAction?: (repo: string) => void;
   onRepoSecondaryAction?: (repo: string) => void;
@@ -274,6 +316,7 @@ type FileListBodyProps = {
   secondaryLabel?: string;
   /** Maps a repository_name to its display label (e.g. "" → workspace primary repo name). */
   repoDisplayName?: (repositoryName: string) => string | undefined;
+  disabled?: boolean;
 };
 
 function FileListBody(props: FileListBodyProps) {
@@ -391,6 +434,7 @@ function TreeFileListBody(props: FileListBranchProps) {
             secondaryLabel={props.secondaryLabel}
             onRepoAction={props.onRepoAction}
             onRepoSecondaryAction={props.onRepoSecondaryAction}
+            disabled={props.disabled}
             multiSelect={multiSelect}
           />
         ))
@@ -425,6 +469,7 @@ function FlatFileListBody(
                 onRepoAction={props.onRepoAction}
                 onRepoSecondaryAction={props.onRepoSecondaryAction}
                 displayName={props.repoDisplayName?.(group.repositoryName)}
+                disabled={props.disabled}
               />
             ))}
       </ul>
@@ -476,6 +521,7 @@ export function FileListSection(props: FileListSectionProps) {
             secondaryLabel={props.secondaryActionLabel}
             onAction={props.onRepoAction}
             onSecondaryAction={props.onRepoSecondaryAction}
+            disabled={props.isActionLoading || props.isSecondaryActionLoading}
           />
         ) : undefined
       }
@@ -497,6 +543,7 @@ export function FileListSection(props: FileListSectionProps) {
           onRepoAction={props.onRepoAction}
           onRepoSecondaryAction={props.onRepoSecondaryAction}
           repoDisplayName={props.repoDisplayName}
+          disabled={props.isActionLoading || props.isSecondaryActionLoading}
         />
       )}
       {files.length > 0 && hasSelection && (
@@ -549,10 +596,11 @@ export function PRFilesSection({
   repoDisplayName,
   defaultCollapsed = true,
 }: PRFilesSectionProps) {
+  const { t } = useTranslation();
   return (
     <TimelineSection
       dotColor={DOT_COLORS.pr}
-      label="PR Changes"
+      label={t("task:prChanges")}
       count={files.length}
       defaultCollapsed={defaultCollapsed}
       data-testid="pr-changes-section"
@@ -581,6 +629,7 @@ export function ReviewProgressBar({
   totalFileCount,
   onOpenReview,
 }: ReviewProgressBarProps) {
+  const { t } = useTranslation();
   const progressPercent = totalFileCount > 0 ? (reviewedCount / totalFileCount) * 100 : 0;
 
   if (totalFileCount <= 0) return null;
@@ -604,7 +653,7 @@ export function ReviewProgressBar({
         </div>
       </TooltipTrigger>
       <TooltipContent>
-        {reviewedCount} of {totalFileCount} files reviewed
+        {t("task:filesReviewedCount", { reviewedCount, totalFileCount })}
       </TooltipContent>
     </Tooltip>
   );

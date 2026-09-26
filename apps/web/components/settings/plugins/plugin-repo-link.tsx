@@ -1,4 +1,5 @@
 import { IconExternalLink } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,6 +21,7 @@ export function isHttpUrl(url: string | undefined | null): boolean {
  * link markup live in one place.
  */
 export function PluginRepoLink({ url, className }: { url?: string | null; className?: string }) {
+  const { t } = useTranslation();
   if (!isHttpUrl(url)) return null;
   return (
     <a
@@ -33,7 +35,7 @@ export function PluginRepoLink({ url, className }: { url?: string | null; classN
       )}
     >
       <IconExternalLink className="h-3.5 w-3.5" />
-      Repo
+      {t("plugins:repo")}
     </a>
   );
 }

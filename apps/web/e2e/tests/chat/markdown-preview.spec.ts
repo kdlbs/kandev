@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { watchWs } from "../../helpers/causal-waits";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import {
@@ -198,6 +199,80 @@ test.describe("Markdown preview", () => {
     expect(await testPage.evaluate(() => "markdownXss" in window)).toBe(false);
   });
 
+  test("resizes adjacent columns in a rendered Markdown file preview", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    // Covers AC-UI-RESIZABLE-MARKDOWN-TABLES-001.1, .3, and .9.
+    const fileName = "resizable-table.md";
+    const marker = "Preview table resize marker";
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    fs.writeFileSync(
+      path.join(repoDir, fileName),
+      [
+        "| Setting | Effect | Notes |",
+        "| --- | --- | --- |",
+        `| strictDepBuilds | Blocks unapproved scripts | ${marker} |`,
+        "| allowBuilds | Allows approved scripts | Ephemeral width |",
+      ].join("\n"),
+    );
+
+    const { session } = await seedTaskWithSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Markdown Preview Table Resize Test",
+    );
+    await openFileInPreview(testPage, session, fileName);
+
+    const preview = testPage.getByTestId("markdown-preview");
+    const table = preview.locator("table", { hasText: marker });
+    const wrapper = table.locator("xpath=..");
+    const cells = table.locator("tbody tr").first().locator("td");
+    const separator = preview.getByTestId("markdown-table-resizer-0");
+    await expect(table).toBeVisible();
+    await expect(separator).toBeVisible();
+    await expect(separator).toHaveAccessibleName("Resize table columns 1 and 2");
+    await expect(wrapper).toHaveAttribute("data-md-source-start", "1");
+    await expect(wrapper).toHaveClass(/markdown-table-scroll/);
+
+    const initialWidths = await cells.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().width),
+    );
+    const initialTableWidth = await table.evaluate(
+      (element) => element.getBoundingClientRect().width,
+    );
+    const [separatorBox, cellBox] = await Promise.all([
+      separator.boundingBox(),
+      cells.first().boundingBox(),
+    ]);
+    expect(separatorBox).not.toBeNull();
+    expect(cellBox).not.toBeNull();
+
+    const boundaryX = separatorBox!.x + separatorBox!.width / 2;
+    const rowY = cellBox!.y + cellBox!.height / 2;
+    await testPage.mouse.move(boundaryX, rowY);
+    await testPage.mouse.down();
+    await testPage.mouse.move(boundaryX + 40, rowY);
+    await testPage.mouse.up();
+
+    const resizedWidths = await cells.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().width),
+    );
+    expect(resizedWidths[0] - initialWidths[0]).toBeCloseTo(40, 0);
+    expect(initialWidths[1] - resizedWidths[1]).toBeCloseTo(40, 0);
+    expect(resizedWidths[2]).toBeCloseTo(initialWidths[2], 0);
+    expect(await table.evaluate((element) => element.getBoundingClientRect().width)).toBeCloseTo(
+      initialTableWidth,
+      0,
+    );
+    expect(
+      await preview.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true);
+  });
+
   test("markdown preview persists across page refresh", async ({
     testPage,
     apiClient,
@@ -222,7 +297,7 @@ test.describe("Markdown preview", () => {
       "Persist Test",
     );
 
-    // Verify the markdownPreview flag is in sessionStorage
+    // Verify the renderedPreview flag is in sessionStorage
     const storedTabs = await testPage.evaluate((sid) => {
       const raw = window.sessionStorage.getItem(`kandev.openFiles.${sid}`);
       return raw ? JSON.parse(raw) : null;
@@ -230,10 +305,11 @@ test.describe("Markdown preview", () => {
     expect(storedTabs).not.toBeNull();
     const mdTab = storedTabs.find((t: { path: string }) => t.path.endsWith("persist-test.md"));
     expect(mdTab).toBeTruthy();
-    expect(mdTab.markdownPreview).toBe(true);
+    expect(mdTab.renderedPreview).toBe(true);
 
-    // Brief pause to let the sessionStorage write settle before reload
-    await testPage.waitForTimeout(500);
+    // No settle needed before the reload: the assertions above already read
+    // the flag back out of sessionStorage, so the write has demonstrably
+    // landed by the time we get here.
 
     // Reload the page — sessionStorage survives same-URL reload.
     // After reload, the restored file tab becomes active (not the chat),
@@ -413,12 +489,15 @@ test.describe("Markdown preview", () => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     fs.writeFileSync(path.join(repoDir, fileName), `${wrappedLine}\n`);
 
+    const gateway = watchWs(testPage);
+    const treeResponse = gateway.waitForResponse("workspace.tree.get");
     const { session, sessionId } = await seedTaskWithSession(
       testPage,
       apiClient,
       seedData,
       "Markdown Code Wrapped Comment Test",
     );
+    await treeResponse;
     await testPage.evaluate(
       ({ sid, pathName, codeContent }) => {
         window.sessionStorage.setItem(

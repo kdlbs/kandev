@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -63,9 +64,53 @@ func seedTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessi
 		State:     sessionState,
 		StartedAt: now,
 		UpdatedAt: now,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyMCPAttachmentState: streams.MCPAttachmentHistory{
+				Version: streams.MCPAttachmentSchemaVersion,
+				Current: streams.MCPAttachmentAttempt{
+					AttemptID: "test-attachment-" + sessionID,
+					Servers: []streams.MCPServerAttachment{{
+						Name:   "kandev",
+						Source: streams.MCPServerSourceKandev,
+						Tools: []streams.MCPToolSummary{{
+							Name: "report_change_request_auto_fix_outcome_kandev",
+						}},
+					}},
+				},
+			},
+		},
 	}
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to create session: %v", err)
+	}
+}
+
+func TestStartSessionForWorkflowStepRejectsProfileMismatchBeforePrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-a"
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID:             "step2",
+		WorkflowID:     "wf1",
+		AgentProfileID: "profile-b",
+	}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+	err = svc.StartSessionForWorkflowStep(ctx, "t1", "s1", "step2")
+	if err == nil || !strings.Contains(err.Error(), "profile mismatch") {
+		t.Fatalf("StartSessionForWorkflowStep error = %v, want profile mismatch", err)
 	}
 }
 
@@ -143,7 +188,7 @@ func TestCreateStartSession_KanbanRunnerCreatesDistinctSession(t *testing.T) {
 	if isOffice {
 		t.Fatal("kanban task with a runner was classified as office-owned")
 	}
-	sessionID, _, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
+	sessionID, _, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "copilot-runner", "", "", "")
 	if err != nil {
 		t.Fatalf("create start session: %v", err)
 	}
@@ -196,7 +241,7 @@ func TestCreateStartSession_OfficeRunnerReusesPersistentSession(t *testing.T) {
 	if !isOffice {
 		t.Fatal("office-owned assigned task was not classified as office")
 	}
-	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
+	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "copilot-runner", "", "", "")
 	if err != nil {
 		t.Fatalf("create start session: %v", err)
 	}
@@ -205,6 +250,167 @@ func TestCreateStartSession_OfficeRunnerReusesPersistentSession(t *testing.T) {
 	}
 	if sessionID != "existing-office-session" {
 		t.Fatalf("office launch session = %q, want existing-office-session", sessionID)
+	}
+}
+
+func TestCreateStartSession_OfficeUnassignedReusesResolvedProfileSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-office-unassigned", Name: "Office", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-office-unassigned", WorkspaceID: "ws-office-unassigned", Name: "Office", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := seedWorkflowStep(t, repo, "step-office-unassigned"); err != nil {
+		t.Fatalf("create workflow step: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-office-unassigned", WorkspaceID: "ws-office-unassigned", WorkflowID: "wf-office-unassigned", WorkflowStepID: "step-office-unassigned",
+		Title: "Office task", State: v1.TaskStateInProgress, ProjectID: "office-project",
+		Metadata:  map[string]interface{}{models.MetaKeyAgentProfileID: "ceo-reviewer"},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-office-unassigned")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if !task.IsFromOffice {
+		t.Fatal("office task was not projected as office-owned")
+	}
+	if task.AssigneeAgentProfileID != "" {
+		t.Fatalf("task unexpectedly has an assignee: %q", task.AssigneeAgentProfileID)
+	}
+
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	firstID, firstCreated, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "", "", "", "")
+	if err != nil {
+		t.Fatalf("first create start session: %v", err)
+	}
+	if !firstCreated {
+		t.Fatal("first office launch should create a session")
+	}
+
+	secondID, secondCreated, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "", "", "", "")
+	if err != nil {
+		t.Fatalf("second create start session: %v", err)
+	}
+	if secondCreated {
+		t.Fatal("second office launch should reuse the profile session")
+	}
+	if secondID != firstID {
+		t.Fatalf("reused session = %q, want first session %q", secondID, firstID)
+	}
+}
+
+// TestCreateStartSession_ReviewerRunUsesParticipantSession verifies that an
+// Office review run uses the reviewer's session even when no feature override
+// is configured.
+func TestCreateStartSession_ReviewerRunUsesParticipantSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-review", Name: "Review", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-review", WorkspaceID: "ws-review", Name: "Review", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := seedWorkflowStep(t, repo, "step-review-start"); err != nil {
+		t.Fatalf("create workflow step: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-review", WorkspaceID: "ws-review", WorkflowID: "wf-review", WorkflowStepID: "step-review-start",
+		Title: "Review task", State: v1.TaskStateInProgress, ProjectID: "office-project", AssigneeAgentProfileID: "pm-runner",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "runner-session", TaskID: "task-review", AgentProfileID: "pm-runner",
+		State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create runner session: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-review")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+
+	// A reviewer run: the run's own agent (ceo-reviewer) differs from the
+	// task's runner seat (pm-runner).
+	sessionID, _, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "ceo-reviewer", "", "", "")
+	if err != nil {
+		t.Fatalf("create start session: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.AgentProfileID != "ceo-reviewer" {
+		t.Fatalf("session owner = %q, want ceo-reviewer", session.AgentProfileID)
+	}
+}
+
+func TestCreateStartSession_ReviewerRunCreatesOwnSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-review2", Name: "Review2", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-review2", WorkspaceID: "ws-review2", Name: "Review2", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := seedWorkflowStep(t, repo, "step-review2-start"); err != nil {
+		t.Fatalf("create workflow step: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-review2", WorkspaceID: "ws-review2", WorkflowID: "wf-review2", WorkflowStepID: "step-review2-start",
+		Title: "Review task", State: v1.TaskStateInProgress, ProjectID: "office-project", AssigneeAgentProfileID: "pm-runner",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "runner-session2", TaskID: "task-review2", AgentProfileID: "pm-runner",
+		State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create runner session: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-review2")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "ceo-reviewer", "", "", "")
+	if err != nil {
+		t.Fatalf("create start session: %v", err)
+	}
+	if !created {
+		t.Fatal("reviewer run should create its own session, not reuse the runner's")
+	}
+	if sessionID == "runner-session2" {
+		t.Fatal("reviewer run landed in the runner's session instead of its own")
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.AgentProfileID != "ceo-reviewer" {
+		t.Fatalf("session owner = %q, want ceo-reviewer", session.AgentProfileID)
 	}
 }
 
@@ -656,6 +862,91 @@ func TestPromptTask_ExecutionNotFoundRevertsStateAndBroadcasts(t *testing.T) {
 	}
 }
 
+func TestAcceptedReservedPromptFailureDoesNotStartFreshExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile1"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	var launchCalls atomic.Int32
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalls.Add(1)
+			return nil, errors.New("unexpected fresh launch")
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Task", State: v1.TaskStateInProgress}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	_, err = svc.finishPromptDispatchFailure(
+		ctx,
+		"task1",
+		"session1",
+		"answer",
+		false,
+		true,
+		nil,
+		promptClaimRollback{
+			previousSessionState: models.TaskSessionStateWaitingForInput,
+			turnID:               "turn-reserved",
+			createdTurn:          true,
+			reservedTurn: &models.Turn{
+				ID: "turn-reserved", TaskID: "task1", TaskSessionID: "session1",
+			},
+		},
+		promptTaskOptions{},
+		fmt.Errorf("accepted transport failure: %w", executor.ErrExecutionNotFound),
+		nil,
+		true,
+		nil,
+	)
+	require.ErrorIs(t, err, executor.ErrExecutionNotFound)
+	require.Zero(t, launchCalls.Load(), "accepted prompt must not start duplicate execution")
+}
+
+func TestAcceptedOrdinaryPromptFailureDoesNotStartFreshExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile1"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	var launchCalls atomic.Int32
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalls.Add(1)
+			return nil, errors.New("unexpected fresh launch")
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Task", State: v1.TaskStateInProgress}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	_, err = svc.finishPromptDispatchFailure(
+		ctx,
+		"task1",
+		"session1",
+		"answer",
+		false,
+		true,
+		nil,
+		promptClaimRollback{previousSessionState: models.TaskSessionStateWaitingForInput},
+		promptTaskOptions{},
+		fmt.Errorf("accepted transport failure: %w", executor.ErrExecutionNotFound),
+		nil,
+		true,
+		nil,
+	)
+	require.ErrorIs(t, err, executor.ErrExecutionNotFound)
+	require.Zero(t, launchCalls.Load(), "accepted ordinary prompt must not start duplicate execution")
+}
+
 func TestPromptTask_PlanModeInjectsPrefix(t *testing.T) {
 	repo := setupTestRepo(t)
 	taskRepo := newMockTaskRepo()
@@ -764,10 +1055,11 @@ func cancelCompletionStepGetter(enabled, signalRequired bool) *mockStepGetter {
 		}}},
 	}
 	getter.steps["step3"] = &wfmodels.WorkflowStep{
-		ID:         "step3",
-		WorkflowID: "wf1",
-		Name:       "Done",
-		Position:   2,
+		ID:                  "step3",
+		WorkflowID:          "wf1",
+		Name:                "Done",
+		Position:            2,
+		CompleteTaskOnEnter: true,
 	}
 	return getter
 }
@@ -1003,7 +1295,9 @@ func TestCancelAgent_SurvivesCallerCancellationDuringWaitingRetry(t *testing.T) 
 		cancel:           cancel,
 	}
 
-	require.NoError(t, svc.CancelAgent(ctx, sessionID))
+	err := svc.CancelAgent(ctx, sessionID)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, svc.waitForCancelInFlight(context.Background(), sessionID))
 	task, err := repo.GetTask(context.Background(), taskID)
 	require.NoError(t, err)
 	assert.Equal(t, "step2", task.WorkflowStepID)
@@ -1068,27 +1362,23 @@ func TestReconcileCancelledTurn_DoesNotCloseTurnWhenSessionStateWriteFails(t *te
 	assert.NotNil(t, activeTurn, "a failed session-state write must not close the active turn")
 }
 
-func TestCancelAgent_SurvivesCallerCancellationAfterAdmission(t *testing.T) {
+func TestCancelAgent_DoesNotTransitionWhenLifecycleCancelFails(t *testing.T) {
 	repo := setupTestRepo(t)
 	taskID := "task-cancel-session-write"
 	sessionID := "session-cancel-session-write"
 	seedSession(t, repo, taskID, sessionID, "step1")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	manager := &cancelContextAgentManager{
-		mockAgentManager: &mockAgentManager{},
-		cancel:           cancel,
-	}
+	ctx := context.Background()
+	manager := &mockAgentManager{cancelAgentErr: errors.New("cancel failed")}
 	svc := createTestServiceWithAgent(repo, cancelCompletionStepGetter(true, false), newMockTaskRepo(), manager)
 
 	err := svc.CancelAgent(ctx, sessionID)
-	require.NoError(t, err)
+	require.Error(t, err)
 	task, err := repo.GetTask(context.Background(), taskID)
 	require.NoError(t, err)
-	assert.Equal(t, "step2", task.WorkflowStepID)
+	assert.Equal(t, "step1", task.WorkflowStepID)
 	session, err := repo.GetTaskSession(context.Background(), sessionID)
 	require.NoError(t, err)
-	assert.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+	assert.Equal(t, models.TaskSessionStateRunning, session.State)
 }
 
 func TestCancelAgent_TerminalTransitionSkipsIntermediateReview(t *testing.T) {
@@ -1099,6 +1389,7 @@ func TestCancelAgent_TerminalTransitionSkipsIntermediateReview(t *testing.T) {
 	seedSession(t, repo, taskID, sessionID, "step1")
 	steps := cancelCompletionStepGetter(true, false)
 	steps.steps["step2"].Name = "Done"
+	steps.steps["step2"].CompleteTaskOnEnter = true
 	delete(steps.steps, "step3")
 
 	taskRepo := newMockTaskRepo()
@@ -1138,11 +1429,175 @@ func TestUserCancelCompletion_SilentCancelDoesNotTrigger(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-silent-cancel", "session-silent-cancel", "step1")
 	svc := createEngineService(t, repo, cancelCompletionStepGetter(true, false), &mockAgentManager{})
+	_, err := svc.messageQueue.QueueMessage(ctx, "session-silent-cancel", "task-silent-cancel", "stay armed", "", messagequeue.QueuedByUser, false, nil)
+	require.NoError(t, err)
 
 	require.NoError(t, svc.cancelAgentSilent(ctx, "task-silent-cancel", "session-silent-cancel"))
 	task, err := repo.GetTask(ctx, "task-silent-cancel")
 	require.NoError(t, err)
 	assert.Equal(t, "step1", task.WorkflowStepID)
+	assert.True(t, svc.messageQueue.GetStatus(ctx, "session-silent-cancel").AutoRun)
+}
+
+func TestCancelAgent_AllowsAcknowledgementStreamToDrain(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-cancel-stream-drain", "session-cancel-stream-drain", models.TaskSessionStateRunning)
+
+	streamDone := make(chan struct{})
+	var svc *Service
+	agentMgr := &mockAgentManager{}
+	agentMgr.cancelAgentFunc = func(ctx context.Context, sessionID string) error {
+		go func() {
+			svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+				TaskID:    "task-cancel-stream-drain",
+				SessionID: sessionID,
+				Data: &lifecycle.AgentStreamEventData{
+					Type: agentEventComplete,
+				},
+			})
+			close(streamDone)
+		}()
+
+		select {
+		case <-streamDone:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	err := svc.CancelAgent(ctx, "session-cancel-stream-drain")
+	require.NoError(t, err)
+	select {
+	case <-streamDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the acknowledgement stream callback")
+	}
+}
+
+func TestCancelAgentSilent_AllowsAcknowledgementStreamToDrain(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-silent-stream-drain", "session-silent-stream-drain", models.TaskSessionStateRunning)
+
+	streamDone := make(chan struct{})
+	var svc *Service
+	agentMgr := &mockAgentManager{}
+	agentMgr.cancelAgentFunc = func(ctx context.Context, sessionID string) error {
+		go func() {
+			svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+				TaskID:    "task-silent-stream-drain",
+				SessionID: sessionID,
+				Data: &lifecycle.AgentStreamEventData{
+					Type: agentEventComplete,
+				},
+			})
+			close(streamDone)
+		}()
+
+		select {
+		case <-streamDone:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	lock, release := svc.acquireCancelInFlightGuard("session-silent-stream-drain")
+	lock.Lock()
+	guardLocked := true
+	unlockGuard := func() {
+		if guardLocked {
+			lock.Unlock()
+			guardLocked = false
+		}
+	}
+	relockGuard := func() {
+		if !guardLocked {
+			lock.Lock()
+			guardLocked = true
+		}
+	}
+	defer func() {
+		unlockGuard()
+		release()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	err := svc.cancelAgentSilentWithGuard(
+		ctx,
+		"task-silent-stream-drain",
+		"session-silent-stream-drain",
+		unlockGuard,
+		relockGuard,
+	)
+	require.NoError(t, err)
+	select {
+	case <-streamDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the acknowledgement stream callback")
+	}
+}
+
+func TestCancelAgent_DoesNotReconcileSuccessorTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-cancel-successor", "session-cancel-successor", models.TaskSessionStateRunning)
+
+	var svc *Service
+	var successor *models.Turn
+	agentMgr := &mockAgentManager{}
+	agentMgr.cancelAgentFunc = func(ctx context.Context, sessionID string) error {
+		var err error
+		successor, err = svc.turnService.StartTurn(ctx, sessionID)
+		return err
+	}
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	captured, err := svc.turnService.StartTurn(ctx, "session-cancel-successor")
+	require.NoError(t, err)
+
+	err = svc.CancelAgent(ctx, "session-cancel-successor")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "superseded")
+	require.NotNil(t, successor)
+
+	active, err := svc.turnService.GetActiveTurn(ctx, "session-cancel-successor")
+	require.NoError(t, err)
+	require.NotNil(t, active)
+	assert.Equal(t, successor.ID, active.ID)
+	assert.NotEqual(t, captured.ID, active.ID)
+	session, err := repo.GetTaskSession(ctx, "session-cancel-successor")
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateRunning, session.State)
+}
+
+func TestCancelAgent_SurvivesCallerCancellationAfterAdmission(t *testing.T) {
+	repo := setupTestRepo(t)
+	taskID := "task-cancel-caller-disconnect"
+	sessionID := "session-cancel-caller-disconnect"
+	seedSession(t, repo, taskID, sessionID, "step1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager := &cancelContextAgentManager{
+		mockAgentManager: &mockAgentManager{},
+		cancel:           cancel,
+	}
+	svc := createTestServiceWithAgent(repo, cancelCompletionStepGetter(true, false), newMockTaskRepo(), manager)
+
+	err := svc.CancelAgent(ctx, sessionID)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, svc.waitForCancelInFlight(context.Background(), sessionID))
+	task, err := repo.GetTask(context.Background(), taskID)
+	require.NoError(t, err)
+	assert.Equal(t, "step2", task.WorkflowStepID)
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
 }
 
 // TestCancelAgent_DeduplicatesConcurrentCalls covers the impatient-user case:
@@ -1151,7 +1606,8 @@ func TestUserCancelCompletion_SilentCancelDoesNotTrigger(t *testing.T) {
 // Monitor tool). Without dedupe each click reaches the lifecycle layer and
 // emits its own "Turn cancelled by user" message; phantom turns are also
 // lazily started to host those messages. We assert that only one cancel makes
-// it through to agentManager.CancelAgent while one is already in flight.
+// it through to agentManager.CancelAgent while the other callers join its
+// result.
 func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	repo := setupTestRepo(t)
 	agentMgr := &mockAgentManager{
@@ -1175,23 +1631,29 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	// don't depend on real subprocess timing.
 	<-agentMgr.cancelAgentEntered
 
-	// Fire several duplicates while the first is still parked. Each must be
-	// short-circuited by the dedupe guard and return immediately.
+	// Fire several duplicates while the first is still parked. Each joins the
+	// owner operation and waits for its result rather than invoking the manager.
 	const duplicates = 5
+	duplicateDone := make(chan error, duplicates)
 	for i := 0; i < duplicates; i++ {
-		if err := svc.CancelAgent(context.Background(), "session1"); err != nil {
-			t.Fatalf("duplicate cancel %d returned error: %v", i, err)
-		}
+		go func() {
+			duplicateDone <- svc.CancelAgent(context.Background(), "session1")
+		}()
 	}
 	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 agentManager.CancelAgent call while first is in flight, got %d", got)
 	}
 
-	// Release the first call. After it returns, the guard clears and a fresh
-	// cancel is allowed through.
+	// Release the first call. The owner and all joiners observe the same result;
+	// after the operation clears, a fresh cancel is allowed through.
 	close(agentMgr.cancelAgentBlock)
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first CancelAgent returned error: %v", err)
+	}
+	for i := 0; i < duplicates; i++ {
+		if err := <-duplicateDone; err != nil {
+			t.Fatalf("duplicate cancel %d returned error: %v", i, err)
+		}
 	}
 
 	agentMgr.cancelAgentBlock = nil // unblock subsequent calls
@@ -1306,7 +1768,8 @@ func TestCancelAgent_SurvivesCallerCancellation(t *testing.T) {
 	cancel()
 	close(agentMgr.cancelAgentBlock)
 
-	require.NoError(t, <-done)
+	require.ErrorIs(t, <-done, context.Canceled)
+	require.NoError(t, svc.waitForCancelInFlight(context.Background(), "session1"))
 }
 
 func cancellationPendingEvents(recorded *recordingEventBus) []recordedEvent {
@@ -1318,6 +1781,262 @@ func cancellationPendingEvents(recorded *recordingEventBus) []recordedEvent {
 		}
 	}
 	return filtered
+}
+
+func TestCancellationSourcesShareLifecycleOwnership(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		start func(*Service, chan error)
+	}{
+		{
+			name: "explicit and silent",
+			start: func(svc *Service, done chan error) {
+				go func() { done <- svc.CancelAgent(context.Background(), "session1") }()
+				go func() { done <- svc.cancelAgentSilent(context.Background(), "task1", "session1") }()
+			},
+		},
+		{
+			name: "silent and silent",
+			start: func(svc *Service, done chan error) {
+				go func() { done <- svc.cancelAgentSilent(context.Background(), "task1", "session1") }()
+				go func() { done <- svc.cancelAgentSilent(context.Background(), "task1", "session1") }()
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+			agentMgr := &mockAgentManager{
+				cancelAgentBlock:   make(chan struct{}),
+				cancelAgentEntered: make(chan struct{}, 2),
+			}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+			done := make(chan error, 2)
+			tc.start(svc, done)
+			select {
+			case <-agentMgr.cancelAgentEntered:
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for the cancellation owner")
+			}
+			select {
+			case <-agentMgr.cancelAgentEntered:
+				t.Fatal("a second cancellation source invoked the lifecycle manager")
+			case <-time.After(100 * time.Millisecond):
+			}
+
+			close(agentMgr.cancelAgentBlock)
+			for i := 0; i < 2; i++ {
+				select {
+				case <-done:
+				case <-time.After(time.Second):
+					t.Fatal("timed out waiting for cancellation source")
+				}
+			}
+			assert.Equal(t, int32(1), agentMgr.cancelAgentCalls.Load())
+		})
+	}
+}
+
+func TestCancelAgent_JoinedSilentCancellationRunsExplicitReconciliation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	agentMgr := &mockAgentManager{
+		cancelAgentBlock:   make(chan struct{}),
+		cancelAgentEntered: make(chan struct{}, 1),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	_, err := svc.turnService.StartTurn(ctx, "session1")
+	require.NoError(t, err)
+
+	silentDone := make(chan error, 1)
+	go func() {
+		silentDone <- svc.cancelAgentSilent(ctx, "task1", "session1")
+	}()
+	select {
+	case <-agentMgr.cancelAgentEntered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for silent cancellation owner")
+	}
+
+	// The explicit user request joins the silent owner. It must not call the
+	// lifecycle manager again, but it still owns its visible cancel message and
+	// other explicit reconciliation once the shared operation settles.
+	explicitDone := make(chan error, 1)
+	go func() {
+		explicitDone <- svc.CancelAgent(ctx, "session1")
+	}()
+	waitForCancellationJoin(t, svc, "session1")
+	close(agentMgr.cancelAgentBlock)
+
+	select {
+	case err := <-silentDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("silent cancellation did not finish")
+	}
+	select {
+	case err := <-explicitDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("joined explicit cancellation did not finish")
+	}
+	assert.Equal(t, int32(1), agentMgr.cancelAgentCalls.Load())
+
+	messages.mu.Lock()
+	defer messages.mu.Unlock()
+	if len(messages.sessionMessages) != 1 || messages.sessionMessages[0].content != "Turn cancelled by user" {
+		t.Fatalf("expected one explicit cancellation message after joining silent owner, got %+v", messages.sessionMessages)
+	}
+}
+
+func TestCancellationStreamAdmissionRejectsStaleIdentity(t *testing.T) {
+	svc := &Service{logger: testLogger()}
+	operation, owner := svc.claimCancellation("session1", cancellationKindExplicit)
+	require.True(t, owner)
+	svc.setCancellationIdentity("session1", operation, cancellationIdentity{
+		executionID:      "execution-a",
+		promptGeneration: 7,
+		turnID:           "turn-a",
+	})
+
+	assert.False(t, svc.cancellationOwnsStreamEvent("session1", "execution-b", 7))
+	assert.False(t, svc.cancellationOwnsStreamEvent("session1", "execution-a", 8))
+	assert.True(t, svc.cancellationOwnsStreamEvent("session1", "execution-a", 7))
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:      "task1",
+		SessionID:   "session1",
+		ExecutionID: "execution-b",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:             "message_streaming",
+			PromptGeneration: 7,
+		},
+	})
+
+	svc.finishCancellation("session1", operation, nil)
+	assert.True(t, svc.cancellationOwnsStreamEvent("session1", "execution-b", 8))
+}
+
+func TestCancelAgent_OwnerDisconnectDoesNotAbortJoinedOperation(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-owner-disconnect", "session-owner-disconnect", models.TaskSessionStateRunning)
+	agentMgr := &mockAgentManager{
+		cancelAgentBlock:   make(chan struct{}),
+		cancelAgentEntered: make(chan struct{}, 1),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	ownerCtx, ownerCancel := context.WithCancel(context.Background())
+	ownerDone := make(chan error, 1)
+	go func() { ownerDone <- svc.CancelAgent(ownerCtx, "session-owner-disconnect") }()
+	select {
+	case <-agentMgr.cancelAgentEntered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for owner cancellation")
+	}
+	ownerCancel()
+	select {
+	case err := <-ownerDone:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("owner continued waiting on a disconnected request")
+	}
+
+	joinedDone := make(chan error, 1)
+	go func() { joinedDone <- svc.CancelAgent(context.Background(), "session-owner-disconnect") }()
+	waitForCancellationJoin(t, svc, "session-owner-disconnect")
+	close(agentMgr.cancelAgentBlock)
+	select {
+	case err := <-joinedDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("joined cancellation did not receive the service-owned result")
+	}
+	assert.Equal(t, int32(1), agentMgr.cancelAgentCalls.Load())
+}
+
+func TestCancelAgent_DefersLifecycleCompletionDuringCancellation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskID, sessionID := "task-cancel-completed-event", "session-cancel-completed-event"
+	seedSession(t, repo, taskID, sessionID, "step1")
+	steps := cancelCompletionStepGetter(true, false)
+	steps.steps["step2"].Events.OnTurnComplete = []wfmodels.OnTurnCompleteAction{{Type: wfmodels.OnTurnCompleteMoveToNext}}
+
+	var svc *Service
+	completedDone := make(chan struct{})
+	agentMgr := &mockAgentManager{}
+	agentMgr.cancelAgentFunc = func(eventCtx context.Context, _ string) error {
+		go func() {
+			svc.handleAgentCompleted(eventCtx, watcher.AgentEventData{
+				TaskID:           taskID,
+				SessionID:        sessionID,
+				AgentExecutionID: "execution-cancelled",
+			})
+			close(completedDone)
+		}()
+		select {
+		case <-completedDone:
+		case <-eventCtx.Done():
+			return eventCtx.Err()
+		}
+		return nil
+	}
+	svc = createEngineService(t, repo, steps, agentMgr)
+	svc.scheduler = scheduler.NewScheduler(
+		queue.NewTaskQueue(10),
+		svc.executor,
+		svc.taskRepo,
+		testLogger(),
+		scheduler.SchedulerConfig{},
+	)
+
+	require.NoError(t, svc.CancelAgent(ctx, sessionID))
+	select {
+	case <-completedDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the terminal lifecycle event")
+	}
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	assert.Equal(t, "step2", task.WorkflowStepID, "cancelled lifecycle completion must not advance workflow before cancellation reconciliation")
+}
+
+func TestCancelAgentSilent_DoesNotCloseSuccessorTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskID, sessionID := "task-silent-successor", "session-silent-successor"
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+
+	var svc *Service
+	var successor *models.Turn
+	agentMgr := &mockAgentManager{}
+	agentMgr.cancelAgentFunc = func(cancelCtx context.Context, _ string) error {
+		var err error
+		successor, err = svc.turnService.StartTurn(cancelCtx, sessionID)
+		return err
+	}
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	original, err := svc.turnService.StartTurn(ctx, sessionID)
+	require.NoError(t, err)
+
+	err = svc.cancelAgentSilent(ctx, taskID, sessionID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "superseded")
+	require.NotNil(t, successor)
+	active, err := svc.turnService.GetActiveTurn(ctx, sessionID)
+	require.NoError(t, err)
+	require.NotNil(t, active)
+	assert.Equal(t, successor.ID, active.ID)
+	assert.NotEqual(t, original.ID, active.ID)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateRunning, session.State)
 }
 
 // TestCancelAgent_TaskStateReconcile ensures cancel lands actively-working
@@ -1416,6 +2135,7 @@ func TestCancelAgent_LeavesQueuedMessageParked(t *testing.T) {
 
 			status := svc.messageQueue.GetStatus(ctx, "session1")
 			require.Equal(t, 1, status.Count)
+			require.False(t, status.AutoRun, "explicit cancel with a backlog must pause Auto-run")
 			require.Len(t, status.Entries, 1)
 			require.Equal(t, queued.ID, status.Entries[0].ID, "cancel must leave the same queued entry parked")
 		})
@@ -1469,6 +2189,41 @@ func TestCancelAgent_QueuedMessageRunsAfterExplicitDrain(t *testing.T) {
 	if status.Count != 0 {
 		t.Fatalf("expected explicit drain to remove the queued prompt, count=%d entries=%+v", status.Count, status.Entries)
 	}
+	if !status.AutoRun {
+		t.Fatal("expected explicit drain to resume Auto-run")
+	}
+}
+
+func TestDrainQueuedMessageIfAutoRunDoesNotResumePausedQueue(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	_, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "paused queued message", "", messagequeue.QueuedByUser, false, nil,
+	)
+	require.NoError(t, err)
+	require.NoError(t, svc.messageQueue.SetAutoRun(ctx, "session1", false))
+
+	drained, err := svc.DrainQueuedMessageIfAutoRun(ctx, "session1")
+	require.NoError(t, err)
+	require.False(t, drained)
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	require.False(t, status.AutoRun)
+	require.Len(t, status.Entries, 1)
+}
+
+func queueAndInterruptForPeerMessage(
+	svc *Service,
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	metadata map[string]interface{},
+) (*messagequeue.QueuedMessage, bool, error) {
+	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	return svc.QueueAndInterruptForPeerMessage(ctx, identity, prompt, metadata)
 }
 
 // --- QueueAndInterruptForPeerMessage ---
@@ -1492,7 +2247,7 @@ func TestQueueAndInterruptForPeerMessage_DeliversQueuedMessageWithoutUserCancelS
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
 
-	queued, dispatched, err := svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "parent steer message", nil)
+	queued, dispatched, err := queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "parent steer message", nil)
 	if err != nil {
 		t.Fatalf("queue and interrupt for peer message: %v", err)
 	}
@@ -1548,6 +2303,67 @@ func TestQueueAndInterruptForPeerMessage_DeliversQueuedMessageWithoutUserCancelS
 	}
 }
 
+// TestQueueAndInterruptForPeerMessage_LeavesMessageQueuedDuringUserCancel
+// covers the cross-source ownership boundary: a peer steering request that
+// arrives after the user cancel has claimed the session must not join the
+// explicit operation and dispatch its message after cancellation settles.
+// The message remains queued for a later, explicit drain.
+func TestQueueAndInterruptForPeerMessage_LeavesMessageQueuedDuringUserCancel(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+
+	agentMgr := &mockAgentManager{
+		cancelAgentBlock:   make(chan struct{}),
+		cancelAgentEntered: make(chan struct{}, 1),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	cancelDone := make(chan error, 1)
+	go func() { cancelDone <- svc.CancelAgent(ctx, "session1") }()
+	select {
+	case <-agentMgr.cancelAgentEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for explicit cancellation to enter lifecycle manager")
+	}
+
+	interruptDone := make(chan struct{})
+	var queued *messagequeue.QueuedMessage
+	var dispatched bool
+	var interruptErr error
+	go func() {
+		queued, dispatched, interruptErr = queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "peer message during cancel", nil)
+		close(interruptDone)
+	}()
+
+	select {
+	case <-interruptDone:
+		t.Fatal("peer queue operation returned before the user cancellation settled")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(agentMgr.cancelAgentBlock)
+	select {
+	case err := <-cancelDone:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for explicit cancellation")
+	}
+	select {
+	case <-interruptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for peer queue operation")
+	}
+
+	require.NoError(t, interruptErr)
+	require.NotNil(t, queued)
+	assert.False(t, dispatched)
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	require.Equal(t, 1, status.Count)
+	assert.Equal(t, queued.ID, status.Entries[0].ID)
+	assert.Equal(t, int32(1), agentMgr.cancelAgentCalls.Load())
+}
+
 // TestQueueAndInterruptForPeerMessage_CancelFailurePropagatesAndKeepsMessageQueued
 // pins the failure contract: a genuine cancel error (not the tolerated
 // ErrNoExecutionForSession / ErrCancelEscalated sentinels cancelAgentSilent
@@ -1570,7 +2386,7 @@ func TestQueueAndInterruptForPeerMessage_CancelFailurePropagatesAndKeepsMessageQ
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
 
-	queued, dispatched, err := svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "parent steer message", nil)
+	queued, dispatched, err := queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "parent steer message", nil)
 	if err == nil {
 		t.Fatal("expected QueueAndInterruptForPeerMessage to propagate the cancel failure")
 	}
@@ -1613,7 +2429,7 @@ func TestQueueAndInterruptForPeerMessage_DeliversTargetedEntryAheadOfOlderQueued
 		t.Fatalf("queue older message: %v", err)
 	}
 
-	queued, dispatched, err := svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "parent steer message", nil)
+	queued, dispatched, err := queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "parent steer message", nil)
 	if err != nil {
 		t.Fatalf("queue and interrupt for peer message: %v", err)
 	}
@@ -1644,14 +2460,12 @@ func TestQueueAndInterruptForPeerMessage_DeliversTargetedEntryAheadOfOlderQueued
 }
 
 // TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers
-// pins the mutual-exclusion contract: when another caller already holds the
-// session's cancelInFlight lock (mid-cancel, via a real concurrent
+// pins the shared-ownership contract: when another caller already owns the
+// session's cancellation (mid-cancel, via a real concurrent
 // QueueAndInterruptForPeerMessage call staged with the mock's
-// cancelAgentBlock/cancelAgentEntered hooks — no sleeps), a second call must
-// block on that same lock and wait for it to free up rather than falling
-// back to an unguarded "insert and hope" — see QueueAndInterruptForPeerMessage's
-// doc comment for why a busy-skip fallback would risk orphaning the second
-// call's message with no guaranteed future drain trigger.
+// cancelAgentBlock/cancelAgentEntered hooks), a second call must join that
+// cancellation and register its own targeted dispatch. The owner invokes the
+// lifecycle manager exactly once; both source-specific actions run after it.
 func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -1669,11 +2483,11 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
 
-	// First call: acquires the lock, queues its message, and blocks inside
-	// CancelAgent (holding the lock the whole time).
+	// First call queues its message, claims cancellation ownership, releases
+	// the guard around the lifecycle call, and blocks inside CancelAgent.
 	firstDone := make(chan struct{})
 	go func() {
-		_, _, _ = svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "first parent message", nil)
+		_, _, _ = queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "first parent message", nil)
 		close(firstDone)
 	}()
 
@@ -1683,27 +2497,30 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 		t.Fatal("timed out waiting for the first call to enter CancelAgent")
 	}
 
-	// Second call starts while the first still holds the lock mid-cancel.
+	// Second call starts while the first owns the cancellation mid-lifecycle.
 	secondDone := make(chan struct{})
 	var queued *messagequeue.QueuedMessage
 	var dispatched bool
 	var secondErr error
 	go func() {
-		queued, dispatched, secondErr = svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "second parent message", nil)
+		queued, dispatched, secondErr = queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "second parent message", nil)
 		close(secondDone)
 	}()
 
-	// The second call must not have completed yet — it has to be blocked
-	// on the lock, not working around it with an unguarded insert.
+	// Wait until the second call has joined the first operation before that
+	// operation is released.
+	waitForCancellationJoin(t, svc, "session1")
+
+	// A joined caller must still wait for the owner to settle cancellation and
+	// run its registered action.
 	select {
 	case <-secondDone:
-		t.Fatal("second QueueAndInterruptForPeerMessage returned before the first call released the lock")
+		t.Fatal("second QueueAndInterruptForPeerMessage returned before the shared cancellation settled")
 	default:
 	}
 
-	// Release the first call's cancel; it finishes and releases the lock,
-	// letting the second call proceed (its own CancelAgent no longer
-	// blocks either, since cancelAgentBlock is now closed).
+	// Release the shared lifecycle call. The coordinator then runs both
+	// targeted dispatch actions under the per-session guard.
 	close(agentMgr.cancelAgentBlock)
 
 	select {
@@ -1726,8 +2543,8 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 		t.Fatal("expected the second call to deliver its own message once the lock became available")
 	}
 
-	if got := agentMgr.cancelAgentCalls.Load(); got != 2 {
-		t.Fatalf("expected exactly 2 agent cancel calls (one per message), got %d", got)
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 lifecycle cancel call for both peer messages, got %d", got)
 	}
 
 	// Join whatever executeQueuedMessage did for the second message before
@@ -1751,6 +2568,19 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 	}, 2*time.Second, 10*time.Millisecond, "expected the second message to either be dispatched or settle back into the queue via requeueMessage")
 }
 
+func waitForCancellationJoin(t *testing.T, svc *Service, sessionID string) {
+	t.Helper()
+	svc.cancellationOperationsMu.Lock()
+	operation := svc.cancellationOperations[sessionID]
+	svc.cancellationOperationsMu.Unlock()
+	require.NotNil(t, operation, "expected an in-flight cancellation for %s", sessionID)
+	select {
+	case <-operation.joined:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for a cancellation join on %s", sessionID)
+	}
+}
+
 // erroringTakeByIDRepository wraps a messagequeue.Repository and returns a
 // configured error from TakeByID, letting orchestrator-level tests exercise
 // QueueAndInterruptForPeerMessage's error-propagation path without needing a
@@ -1763,6 +2593,14 @@ type erroringTakeByIDRepository struct {
 
 // TakeByID always returns the configured error, ignoring its arguments.
 func (r *erroringTakeByIDRepository) TakeByID(context.Context, string, string) (*messagequeue.QueuedMessage, error) {
+	return nil, r.takeByIDErr
+}
+
+func (r *erroringTakeByIDRepository) TakeByIDForSession(
+	context.Context,
+	messagequeue.QueueSessionIdentity,
+	string,
+) (*messagequeue.QueuedMessage, error) {
 	return nil, r.takeByIDErr
 }
 
@@ -1799,7 +2637,7 @@ func TestQueueAndInterruptForPeerMessage_TargetedTakeErrorPropagatesWithoutFIFOF
 		t.Fatalf("queue older message: %v", err)
 	}
 
-	queued, dispatched, err := svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "parent steer message", nil)
+	queued, dispatched, err := queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "parent steer message", nil)
 	if err == nil {
 		t.Fatal("expected QueueAndInterruptForPeerMessage to propagate the targeted-take error")
 	}
@@ -1826,6 +2664,58 @@ func TestQueueAndInterruptForPeerMessage_TargetedTakeErrorPropagatesWithoutFIFOF
 	if status.Count != 2 {
 		t.Fatalf("expected both entries to remain queued, count=%d entries=%+v", status.Count, status.Entries)
 	}
+}
+
+func TestQueueAndInterruptForPeerMessageRejectsReplacementIncarnationWhileWaiting(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{isAgentRunning: false, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	original, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	originalIdentity := messagequeue.QueueSessionIdentity{
+		TaskID: original.TaskID, SessionID: original.ID, SessionIncarnationID: original.QueueIncarnationID,
+	}
+
+	guard, releaseGuard := svc.acquireCancelInFlightGuard(original.ID)
+	guard.Lock()
+	result := make(chan struct {
+		queued     *messagequeue.QueuedMessage
+		dispatched bool
+		err        error
+	}, 1)
+	go func() {
+		queued, dispatched, callErr := svc.QueueAndInterruptForPeerMessage(
+			ctx, originalIdentity, "stale parent message", nil,
+		)
+		result <- struct {
+			queued     *messagequeue.QueuedMessage
+			dispatched bool
+			err        error
+		}{queued: queued, dispatched: dispatched, err: callErr}
+	}()
+	coordinatorStopWaitForGuardRefs(t, svc, original.ID, 2)
+
+	require.NoError(t, repo.DeleteTaskSession(ctx, original))
+	replacement := &models.TaskSession{
+		ID: original.ID, TaskID: original.TaskID, State: models.TaskSessionStateRunning,
+		StartedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+	replacementIdentity, err := svc.messageQueue.ResolveSessionIdentity(ctx, replacement.TaskID, replacement.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, originalIdentity.SessionIncarnationID, replacementIdentity.SessionIncarnationID)
+	guard.Unlock()
+	releaseGuard()
+
+	outcome := <-result
+	require.ErrorIs(t, outcome.err, messagequeue.ErrSessionIdentityMismatch)
+	require.Nil(t, outcome.queued)
+	require.False(t, outcome.dispatched)
+	status, err := svc.messageQueue.Snapshot(ctx, replacementIdentity)
+	require.NoError(t, err)
+	require.Empty(t, status.Entries)
 }
 
 // blockingGetTaskSessionRepo wraps a sessionExecutorStore and blocks the
@@ -1935,7 +2825,7 @@ func TestQueueAndInterruptForPeerMessage_ClosesStaleEarlyCheckRace(t *testing.T)
 	var dispatched bool
 	var interruptErr error
 	go func() {
-		queued, dispatched, interruptErr = svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "parent steer message", nil)
+		queued, dispatched, interruptErr = queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "parent steer message", nil)
 		close(interruptDone)
 	}()
 
@@ -2101,7 +2991,7 @@ func TestQueueAndInterruptForPeerMessage_CancelFailureDoesNotStrandMessageWhenRe
 	var dispatched bool
 	var interruptErr error
 	go func() {
-		queued, dispatched, interruptErr = svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "parent steer message", nil)
+		queued, dispatched, interruptErr = queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "parent steer message", nil)
 		close(interruptDone)
 	}()
 
@@ -2205,7 +3095,7 @@ func TestQueueAndInterruptForPeerMessage_CancelFailureLeavesMessageQueuedWhenSti
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
 
-	queued, dispatched, err := svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "parent steer message", nil)
+	queued, dispatched, err := queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "parent steer message", nil)
 	if err == nil {
 		t.Fatal("expected the genuine cancel failure to propagate while the session is still RUNNING")
 	}
@@ -2268,7 +3158,7 @@ func TestQueueAndInterruptForPeerMessage_DoesNotCancelUnrelatedSuccessorTurn(t *
 	var dispatched bool
 	var interruptErr error
 	go func() {
-		queued, dispatched, interruptErr = svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "parent steer message", nil)
+		queued, dispatched, interruptErr = queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "parent steer message", nil)
 		close(interruptDone)
 	}()
 
@@ -2347,7 +3237,7 @@ func TestQueueAndInterruptForPeerMessage_RacesManualDrainForSameSession(t *testi
 	var dispatched bool
 	var interruptErr error
 	go func() {
-		queued, dispatched, interruptErr = svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "parent steer message", nil)
+		queued, dispatched, interruptErr = queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "parent steer message", nil)
 		close(interruptDone)
 	}()
 	select {
@@ -2439,7 +3329,7 @@ func TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery(t *te
 		snapshotTaken:   make(chan struct{}),
 	}
 	svc.turnService = turnSync
-	_, err := turnSync.StartTurn(ctx, "session1")
+	clarificationTurn, err := turnSync.StartTurn(ctx, "session1")
 	require.NoError(t, err)
 
 	// Clarification-timeout recovery claims the guard first and blocks
@@ -2448,7 +3338,7 @@ func TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery(t *te
 	var recovered bool
 	go func() {
 		recovered = svc.retryClarificationAfterCancel(ctx, clarificationAnsweredData{
-			TaskID: "task1", SessionID: "session1",
+			TaskID: "task1", SessionID: "session1", ClarificationTurnID: clarificationTurn.ID,
 		}, "the clarification answer", fmt.Errorf("wrap: %w", ErrAgentPromptInProgress))
 		close(recoveryDone)
 	}()
@@ -2465,7 +3355,7 @@ func TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery(t *te
 	var dispatched bool
 	var interruptErr error
 	go func() {
-		queued, dispatched, interruptErr = svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "parent steer message", nil)
+		queued, dispatched, interruptErr = queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "parent steer message", nil)
 		close(interruptDone)
 	}()
 	select {
@@ -2534,7 +3424,7 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 	promptAccepted := make(chan promptCall, 2)
 	turnComplete := make(chan struct{})
 	var retryAcceptedOnce sync.Once
-	agentMgr := &mockAgentManager{
+	baseAgentMgr := &mockAgentManager{
 		isAgentRunning:         true,
 		repoForExecutionLookup: repo,
 		promptAgentFunc: func(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool) (*executor.PromptResult, error) {
@@ -2548,6 +3438,15 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 			return &executor.PromptResult{}, nil
 		},
 	}
+	// Keep the provider call blocked after it has entered the turn, but fire
+	// the dispatch callback at that acceptance boundary. The base mock invokes
+	// its callback only after promptAgentFunc returns, which would hold the
+	// admission guard until turnComplete and make this test exercise the mock's
+	// ordering rather than the provider contract.
+	agentMgr := &callbackAfterPromptEntryAgentManager{
+		mockAgentManager: baseAgentMgr,
+		promptEntries:    []<-chan struct{}{retryAccepted},
+	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -2559,13 +3458,13 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 		snapshotTaken:   make(chan struct{}),
 	}
 	svc.turnService = turnSync
-	_, err := turnSync.StartTurn(ctx, "session1")
+	clarificationTurn, err := turnSync.StartTurn(ctx, "session1")
 	require.NoError(t, err)
 
 	recoveryDone := make(chan bool, 1)
 	go func() {
 		recoveryDone <- svc.retryClarificationAfterCancel(ctx, clarificationAnsweredData{
-			TaskID: "task1", SessionID: "session1",
+			TaskID: "task1", SessionID: "session1", ClarificationTurnID: clarificationTurn.ID,
 		}, "clarification answer", fmt.Errorf("wrap: %w", ErrAgentPromptInProgress))
 	}()
 	<-retryAccepted
@@ -2575,9 +3474,7 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 	var dispatched bool
 	var interruptErr error
 	go func() {
-		queued, dispatched, interruptErr = svc.QueueAndInterruptForPeerMessage(
-			ctx, "task1", "session1", "parent steer", nil,
-		)
+		queued, dispatched, interruptErr = queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "parent steer", nil)
 		close(interruptDone)
 	}()
 	<-turnSync.snapshotTaken
@@ -2702,7 +3599,7 @@ func TestCancelAgent_RacesHandleAgentReady_QueuedMessageStaysParked(t *testing.T
 	}
 	select {
 	case <-readyDone:
-		t.Fatal("handleAgentReady returned before CancelAgent released the guard — it must block, not work around it")
+		t.Fatal("handleAgentReady returned before CancelAgent released the cancellation marker")
 	case <-time.After(100 * time.Millisecond):
 	}
 
@@ -2714,11 +3611,10 @@ func TestCancelAgent_RacesHandleAgentReady_QueuedMessageStaysParked(t *testing.T
 		t.Fatal("timed out waiting for CancelAgent to finish")
 	}
 	require.NoError(t, cancelErr)
-
 	select {
 	case <-readyDone:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for handleAgentReady to finish once the guard was released")
+		t.Fatal("timed out waiting for handleAgentReady after CancelAgent finished")
 	}
 
 	status := svc.messageQueue.GetStatus(ctx, "session1")
@@ -2802,6 +3698,30 @@ func TestCancelIntentDoesNotFollowSharedGuard(t *testing.T) {
 
 // --- StartCreatedSession ---
 
+func requirePersistedSessionLaunchError(t *testing.T, repo *sqliterepo.Repository, sessionID string) models.LastAgentError {
+	t.Helper()
+	var lastError models.LastAgentError
+	require.Eventually(t, func() bool {
+		session, err := repo.GetTaskSession(context.Background(), sessionID)
+		if err != nil {
+			return false
+		}
+		var ok bool
+		lastError, ok = models.LoadLastAgentError(session.Metadata)
+		return ok
+	}, time.Second, 10*time.Millisecond, "session %q has no typed launch error", sessionID)
+	if lastError.Code == "" || lastError.Stamp() == "" {
+		t.Fatalf("session %q has incomplete typed launch error: %#v", sessionID, lastError)
+	}
+	return lastError
+}
+
+func sessionMessageCount(messages *mockMessageCreator) int {
+	messages.mu.Lock()
+	defer messages.mu.Unlock()
+	return len(messages.sessionMessages)
+}
+
 func TestStartCreatedSession_WrongTask(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -2827,7 +3747,7 @@ func TestStartCreatedSession_NotInCreatedState(t *testing.T) {
 	}
 }
 
-func TestStartCreatedSession_MissingRemoteRefCreatesNeutralRecoveryMessage(t *testing.T) {
+func TestStartCreatedSession_MissingRemoteRefPersistsTypedRecoveryError(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
@@ -2848,7 +3768,6 @@ func TestStartCreatedSession_MissingRemoteRefCreatesNeutralRecoveryMessage(t *te
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
-	svc.executor.SetOnLaunchFailed(svc.handleSessionLaunchFailed)
 	svc.executor.SetOnSessionStateChange(func(callbackCtx context.Context, callbackTaskID, callbackSessionID string, state models.TaskSessionState, errorMessage string) error {
 		svc.updateTaskSessionState(callbackCtx, callbackTaskID, callbackSessionID, state, errorMessage, true)
 		return nil
@@ -2859,19 +3778,16 @@ func TestStartCreatedSession_MissingRemoteRefCreatesNeutralRecoveryMessage(t *te
 		t.Fatalf("StartCreatedSession error = %v, want %v", err, launchErr)
 	}
 
-	if len(messages.sessionMessages) != 1 {
-		t.Fatalf("expected one recovery message, got %d", len(messages.sessionMessages))
+	if got := sessionMessageCount(messages); got != 0 {
+		t.Fatalf("typed launch failure created legacy guidance messages: %d", got)
 	}
-	message := messages.sessionMessages[0]
-	if message.metadata["failure_kind"] != "branch_fetch_failed" {
-		t.Fatalf("failure_kind = %#v, want branch_fetch_failed", message.metadata["failure_kind"])
+	if _, suppressed := svc.suppressToast.Load("session1"); suppressed {
+		t.Fatal("typed launch failure must not suppress the pointer toast")
 	}
-	if _, ok := message.metadata["actions"]; ok {
-		t.Fatalf("expected neutral guidance without archive/delete actions, got %#v", message.metadata["actions"])
-	}
+	requirePersistedSessionLaunchError(t, repo, "session1")
 }
 
-func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateExecutorRecoveryMessage(t *testing.T) {
+func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateTypedRecoveryError(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
@@ -2893,21 +3809,19 @@ func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateExecutorRecoveryMes
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 	svc.eventBus = bus.NewMemoryEventBus(testLogger())
-	svc.executor.SetOnLaunchFailed(svc.handleSessionLaunchFailed)
-	// Production routes terminal failures through the strict transition callback
-	// so recovery guidance can set suppressToast before state_changed publishes it.
 	svc.executor.SetOnSessionStateTransition(svc.transitionTaskSessionState)
 
 	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "start the task", true, false, true, nil, nil)
 	if !errors.Is(err, launchErr) {
 		t.Fatalf("StartCreatedSession error = %v, want %v", err, launchErr)
 	}
-	if len(messages.sessionMessages) != 1 {
-		t.Fatalf("expected exactly one recovery message, got %d", len(messages.sessionMessages))
+	if got := sessionMessageCount(messages); got != 0 {
+		t.Fatalf("typed launch failure created legacy guidance messages: %d", got)
 	}
 	if _, suppressed := svc.suppressToast.Load("session1"); suppressed {
-		t.Fatal("state-change publishing did not consume the toast-suppression marker")
+		t.Fatal("typed launch failure must not suppress the pointer toast")
 	}
+	requirePersistedSessionLaunchError(t, repo, "session1")
 }
 
 func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
@@ -2926,7 +3840,7 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 		}
 	}
 
-	t.Run("early missing remote ref creates one neutral recovery message", func(t *testing.T) {
+	t.Run("early missing remote ref stays neutral before executor classification", func(t *testing.T) {
 		baseRepo := setupTestRepo(t)
 		seedTaskAndSession(t, baseRepo, taskID, "existing-session", models.TaskSessionStateCreated)
 		failureRepo := &taskEnvironmentFailureRepo{
@@ -2957,24 +3871,6 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 			t.Fatalf("PrepareTaskSession: %v", err)
 		}
 
-		select {
-		case <-messages.sessionMessageDone:
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for missing-branch recovery message")
-		}
-		if len(messages.sessionMessages) != 1 {
-			t.Fatalf("expected exactly one recovery message, got %d", len(messages.sessionMessages))
-		}
-		message := messages.sessionMessages[0]
-		if message.sessionID != sessionID {
-			t.Fatalf("recovery message session = %q, want %q", message.sessionID, sessionID)
-		}
-		if message.metadata["failure_kind"] != "branch_fetch_failed" {
-			t.Fatalf("failure_kind = %#v, want branch_fetch_failed", message.metadata["failure_kind"])
-		}
-		if _, ok := message.metadata["actions"]; ok {
-			t.Fatalf("expected neutral guidance without archive/delete actions, got %#v", message.metadata["actions"])
-		}
 		require.Eventually(t, func() bool {
 			failedSession, getErr := baseRepo.GetTaskSession(context.Background(), sessionID)
 			return getErr == nil && failedSession.State == models.TaskSessionStateFailed
@@ -2985,7 +3881,10 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 			return taskRepo.updatedStates[taskID] == v1.TaskStateFailed
 		}, time.Second, 10*time.Millisecond, "expected early launch failure to mark the task FAILED")
 		if _, suppressed := svc.suppressToast.Load(sessionID); suppressed {
-			t.Fatal("missing-branch recovery left a stale toast-suppression marker")
+			t.Fatal("typed launch failure must not suppress the pointer toast")
+		}
+		if got := sessionMessageCount(messages); got != 0 {
+			t.Fatalf("typed launch failure created legacy guidance messages: %d", got)
 		}
 	})
 
@@ -3053,32 +3952,85 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 			},
 		}
 		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
-		svc.executor.SetOnLaunchFailed(svc.handleSessionLaunchFailed)
 		svc.eventBus = bus.NewMemoryEventBus(testLogger())
 		svc.executor.SetOnSessionStateChange(func(callbackCtx context.Context, callbackTaskID, callbackSessionID string, state models.TaskSessionState, errorMessage string) error {
 			svc.updateTaskSessionState(callbackCtx, callbackTaskID, callbackSessionID, state, errorMessage, true)
 			return nil
 		})
-		messages := &mockMessageCreator{sessionMessageDone: make(chan struct{})}
+		messages := &mockMessageCreator{}
 		svc.messageCreator = messages
 
 		sessionID, err := svc.PrepareTaskSession(context.Background(), taskID, "profile1", "", "", "", true)
 		if err != nil {
 			t.Fatalf("PrepareTaskSession: %v", err)
 		}
-		select {
-		case <-messages.sessionMessageDone:
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for executor recovery message")
-		}
 		require.Eventually(t, func() bool {
 			session, getErr := repo.GetTaskSession(context.Background(), sessionID)
 			return getErr == nil && session.State == models.TaskSessionStateFailed
 		}, time.Second, 10*time.Millisecond, "expected failed state after workspace launch error")
-		if len(messages.sessionMessages) != 1 {
-			t.Fatalf("expected exactly one recovery message, got %d", len(messages.sessionMessages))
+		requirePersistedSessionLaunchError(t, repo, sessionID)
+		if got := sessionMessageCount(messages); got != 0 {
+			t.Fatalf("typed launch failure created legacy guidance messages: %d", got)
 		}
 	})
+}
+
+// TestPrepareTaskSession_MarksRouteActionRequiredWhenWorkspaceLaunchFails is
+// the regression test for review finding F2: PrepareTaskSession's own
+// background workspace launch resolves and claims a dynamic route ahead of
+// the actual agent start (see resolveExecutionForLaunchSession), but this
+// launch never starts the agent — it only reaches "active" later, via
+// StartCreatedSession. If it fails here, nothing else revisits the claim, so
+// it must not stay "starting" forever.
+func TestPrepareTaskSession_MarksRouteActionRequiredWhenWorkspaceLaunchFails(t *testing.T) {
+	const taskID = "task-dynamic-prepare-launch-fail"
+	const dynamicProfileID = "profile-dynamic"
+	const concreteProfileID = "profile-concrete"
+
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: taskID, WorkflowID: "wf1", Title: "Test Task", State: v1.TaskStateInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, WorkspaceID: "ws1", Title: "Test Task", State: v1.TaskStateInProgress}
+	launchErr := errors.New("workspace launch failed")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+	svc.SetProfileExecutionResolver(newWorkflowDynamicProfileResolver(t, dynamicProfileID, concreteProfileID))
+
+	sessionID, err := svc.PrepareTaskSession(context.Background(), taskID, dynamicProfileID, "", "", "", true)
+	if err != nil {
+		t.Fatalf("PrepareTaskSession: %v", err)
+	}
+
+	require.Eventually(t, func() bool {
+		session, getErr := repo.GetTaskSession(context.Background(), sessionID)
+		return getErr == nil && session.RouteState == "action_required"
+	}, time.Second, 10*time.Millisecond, "expected the claimed dynamic route to reach action_required after the workspace launch failed")
+
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.RouteGeneration == 0 {
+		t.Fatal("expected the session to have claimed a route generation before the launch failed")
+	}
 }
 
 func TestHandleSessionLaunchFailure_SkipsTaskFailureWhenSessionTransitionLoses(t *testing.T) {
@@ -3353,8 +4305,8 @@ func TestHandleSessionLaunchFailure_ConcurrentLaunchesCreateOneMessage(t *testin
 	messages.mu.Lock()
 	messageCount := len(messages.sessionMessages)
 	messages.mu.Unlock()
-	if messageCount != 1 {
-		t.Fatalf("recovery message count = %d, want 1", messageCount)
+	if messageCount != 0 {
+		t.Fatalf("legacy recovery message count = %d, want 0", messageCount)
 	}
 	taskRepo.mu.Lock()
 	defer taskRepo.mu.Unlock()
@@ -3385,7 +4337,6 @@ func TestPrepareAndStartCreatedSession_MissingRemoteRefClaimsRecoveryOnce(t *tes
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.eventBus = bus.NewMemoryEventBus(testLogger())
 	svc.executor.SetOnSessionStateTransition(svc.transitionTaskSessionState)
-	svc.executor.SetOnLaunchFailed(svc.handleSessionLaunchFailed)
 	messages := &mockMessageCreator{sessionMessageDone: make(chan struct{})}
 	svc.messageCreator = messages
 
@@ -3410,12 +4361,6 @@ func TestPrepareAndStartCreatedSession_MissingRemoteRefClaimsRecoveryOnce(t *tes
 	case <-time.After(time.Second):
 		t.Fatal("StartCreatedSession did not settle after prepared launch failed")
 	}
-	select {
-	case <-messages.sessionMessageDone:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for missing-branch recovery message")
-	}
-
 	failed, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("GetTaskSession: %v", err)
@@ -3425,8 +4370,8 @@ func TestPrepareAndStartCreatedSession_MissingRemoteRefClaimsRecoveryOnce(t *tes
 	}
 	messages.mu.Lock()
 	defer messages.mu.Unlock()
-	if len(messages.sessionMessages) != 1 {
-		t.Fatalf("recovery message count = %d, want 1", len(messages.sessionMessages))
+	if len(messages.sessionMessages) != 0 {
+		t.Fatalf("legacy recovery message count = %d, want 0", len(messages.sessionMessages))
 	}
 }
 
@@ -3651,6 +4596,7 @@ func TestStartCreatedSession_ConfigModeOmitsCoordinatorTaskControls(t *testing.T
 	}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.SetCanvasesEnabled(true)
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 
@@ -3658,6 +4604,8 @@ func TestStartCreatedSession_ConfigModeOmitsCoordinatorTaskControls(t *testing.T
 	require.NoError(t, err)
 	require.Len(t, messages.userMessages, 1)
 	assert.Contains(t, messages.userMessages[0].content, "KANDEV CONFIG MCP TOOLS")
+	assert.NotContains(t, messages.userMessages[0].content, "create_canvas_kandev",
+		"config-mode first-turn context must not advertise canvas authoring")
 	assert.NotContains(t, messages.userMessages[0].content, "stop_task_kandev",
 		"Config first-turn context must not advertise a task-mode-only tool")
 	assert.NotContains(t, messages.userMessages[0].content, "set_task_title_kandev",
@@ -3780,19 +4728,33 @@ func TestIssue1884_StepProfileSignalGateStaysInTaskMode(t *testing.T) {
 // mockMessageCreator implements MessageCreator for testing.
 // Only CreateUserMessage is tracked; all other methods are no-op stubs.
 type mockMessageCreator struct {
-	mu                 sync.Mutex
-	userMessages       []mockUserMessage
-	sessionMessages    []mockSessionMessage
-	sessionMessageDone chan struct{}
-	sessionMessageOnce sync.Once
-	sessionMessageErr  error
-	agentMessages      []mockAgentMessage
-	agentMessageWrites int
-	agentStreamWrites  int
-	thinkingWrites     int
-	toolCallWrites     int
-	toolUpdateWrites   int
-	userMessageErr     error
+	mu                        sync.Mutex
+	userMessages              []mockUserMessage
+	sessionMessages           []mockSessionMessage
+	sessionMessageAttempts    int
+	sessionMessageDone        chan struct{}
+	sessionMessageOnce        sync.Once
+	sessionMessageErr         error
+	idempotentSessionMessages map[string]struct{}
+	agentMessages             []mockAgentMessage
+	agentMessageWrites        int
+	agentStreamWrites         int
+	agentStreamTexts          []string
+	thinkingWrites            int
+	toolCallWrites            int
+	toolUpdateWrites          int
+	lastToolUpdateID          string
+	lastToolUpdateTitle       string
+	lastToolUpdateType        string
+	agentPlanUpserts          int
+	lastAgentPlanToolCallID   string
+	lastAgentPlanContent      string
+	userMessageErr            error
+	idempotentUserMessages    map[string]struct{}
+	permissionClaimFn         func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
+	permissionFinishFn        func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
+	permissionAuditFn         func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
+	permissionUpdateFn        func(context.Context, string, string, string, string, models.PermissionStatus) error
 }
 
 type mockUserMessage struct {
@@ -3818,6 +4780,27 @@ func (m *mockMessageCreator) CreateUserMessage(_ context.Context, taskID, conten
 	return nil
 }
 
+func (m *mockMessageCreator) CreateUserMessageIdempotent(
+	_ context.Context,
+	messageID, taskID, content, sessionID, turnID string,
+	metadata map[string]interface{},
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.userMessageErr != nil {
+		return m.userMessageErr
+	}
+	if m.idempotentUserMessages == nil {
+		m.idempotentUserMessages = make(map[string]struct{})
+	}
+	if _, exists := m.idempotentUserMessages[messageID]; exists {
+		return nil
+	}
+	m.idempotentUserMessages[messageID] = struct{}{}
+	m.userMessages = append(m.userMessages, mockUserMessage{taskID, content, sessionID, turnID, metadata})
+	return nil
+}
+
 func (m *mockMessageCreator) CreateAgentMessage(_ context.Context, taskID, content, sessionID, turnID string) error {
 	m.agentMessages = append(m.agentMessages, mockAgentMessage{taskID, content, sessionID, turnID})
 	m.agentMessageWrites++
@@ -3829,14 +4812,32 @@ func (m *mockMessageCreator) CreateToolCallMessage(context.Context, string, stri
 	return nil
 }
 
-func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, string, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+func (m *mockMessageCreator) UpdateToolCallMessage(
+	_ context.Context,
+	_, toolCallID, _, _, _, _, title, _, msgType string,
+	_ *streams.NormalizedPayload,
+) error {
 	m.toolUpdateWrites++
+	m.lastToolUpdateID = toolCallID
+	m.lastToolUpdateTitle = title
+	m.lastToolUpdateType = msgType
+	return nil
+}
+
+func (m *mockMessageCreator) UpsertAgentPlanMessage(
+	_ context.Context,
+	_, sourceToolCallID, _, content, _ string,
+) error {
+	m.agentPlanUpserts++
+	m.lastAgentPlanToolCallID = sourceToolCallID
+	m.lastAgentPlanContent = content
 	return nil
 }
 
 func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, content, sessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.sessionMessageAttempts++
 	if m.sessionMessageErr != nil {
 		return m.sessionMessageErr
 	}
@@ -3855,21 +4856,76 @@ func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, con
 	return nil
 }
 
-func (m *mockMessageCreator) CreatePermissionRequestMessage(context.Context, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}) (string, error) {
+func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, messageID, taskID, content, sessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sessionMessageAttempts++
+	if m.sessionMessageErr != nil {
+		return m.sessionMessageErr
+	}
+	if m.idempotentSessionMessages == nil {
+		m.idempotentSessionMessages = make(map[string]struct{})
+	}
+	if _, exists := m.idempotentSessionMessages[messageID]; exists {
+		return nil
+	}
+	m.idempotentSessionMessages[messageID] = struct{}{}
+	m.sessionMessages = append(m.sessionMessages, mockSessionMessage{
+		taskID:        taskID,
+		content:       content,
+		sessionID:     sessionID,
+		messageType:   messageType,
+		turnID:        turnID,
+		metadata:      metadata,
+		requestsInput: requestsInput,
+	})
+	if m.sessionMessageDone != nil {
+		m.sessionMessageOnce.Do(func() { close(m.sessionMessageDone) })
+	}
+	return nil
+}
+
+func (m *mockMessageCreator) CreatePermissionRequestMessage(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}) (string, error) {
 	return "", nil
 }
 
-func (m *mockMessageCreator) UpdatePermissionMessage(context.Context, string, string, models.PermissionStatus) error {
+func (m *mockMessageCreator) UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error {
+	if m.permissionUpdateFn != nil {
+		return m.permissionUpdateFn(ctx, taskID, sessionID, requestID, pendingID, status)
+	}
 	return nil
 }
 
-func (m *mockMessageCreator) CreateAgentMessageStreaming(context.Context, string, string, string, string, string) error {
+func (m *mockMessageCreator) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	if m.permissionClaimFn != nil {
+		return m.permissionClaimFn(ctx, request)
+	}
+	return &models.PermissionResolutionClaimResult{Outcome: models.PermissionClaimed}, nil
+}
+
+func (m *mockMessageCreator) FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	if m.permissionFinishFn != nil {
+		return m.permissionFinishFn(ctx, request)
+	}
+	return &models.PermissionResolutionFinalizeResult{Outcome: models.PermissionFinalized}, nil
+}
+
+func (m *mockMessageCreator) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
+	if m.permissionAuditFn != nil {
+		return m.permissionAuditFn(ctx, taskID, sessionID, requestID, pendingID)
+	}
+	return nil, nil
+}
+
+func (m *mockMessageCreator) CreateAgentMessageStreaming(_ context.Context, _, _, content, _, _ string) error {
 	m.agentStreamWrites++
+	m.agentStreamTexts = append(m.agentStreamTexts, content)
 	return nil
 }
 
-func (m *mockMessageCreator) AppendAgentMessage(context.Context, string, string) error {
+func (m *mockMessageCreator) AppendAgentMessage(_ context.Context, _, content string) error {
 	m.agentStreamWrites++
+	m.agentStreamTexts = append(m.agentStreamTexts, content)
 	return nil
 }
 
@@ -4436,6 +5492,117 @@ func TestStartTaskPublishesCreatedSessionBeforeLaunch(t *testing.T) {
 	assert.True(t, publishedBeforeLaunch, "created session event must arrive before the runtime starts")
 }
 
+func TestStartTaskRecordsDirectWorkflowSourceBindingBeforeLaunch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-source-start", "existing-session", models.TaskSessionStateCompleted)
+	dbTask, err := repo.GetTask(ctx, "task-source-start")
+	require.NoError(t, err)
+	dbTask.WorkflowStepID = "step-implement"
+	require.NoError(t, repo.UpdateTask(ctx, dbTask))
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-implement"] = &wfmodels.WorkflowStep{
+		ID: "step-implement", WorkflowID: "wf1", AgentProfileID: "profile-implement",
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task-source-start"] = &v1.Task{
+		ID: "task-source-start", Title: "Source start", Description: "Start here", State: v1.TaskStateInProgress,
+	}
+	bindingPresentBeforeLaunch := false
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			binding, bindingErr := repo.GetWorkflowSessionBinding(ctx, "task-source-start", workflowSessionBindingTargetKey("step-implement"))
+			bindingPresentBeforeLaunch = bindingErr == nil && binding != nil && binding.SessionID == req.SessionID
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-" + req.SessionID}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+	execution, err := svc.StartTask(ctx, "task-source-start", "profile-implement", "", "", "", "Start", "step-implement", false, false, nil)
+	require.NoError(t, err)
+	require.NotNil(t, execution)
+	require.True(t, bindingPresentBeforeLaunch)
+
+	binding, err := repo.GetWorkflowSessionBinding(ctx, "task-source-start", workflowSessionBindingTargetKey("step-implement"))
+	require.NoError(t, err)
+	require.NotNil(t, binding)
+	require.Equal(t, execution.SessionID, binding.SessionID)
+}
+
+// TestStartTaskWithEnv_OfficeCreateThenReusePublishesOneCreatedEvent drives
+// two sequential office wakeups for the same (task, agent) pair through the
+// full StartTaskWithEnv path — not just the repository call-count proxy used
+// by office_session_race_guard_test.go's convergence tests — and asserts on
+// the actual event bus. The first wakeup has no live session and must create
+// one, publishing exactly one TaskSessionStateChanged/CREATED event for it.
+// The second wakeup reuses that same live session (EnsureSessionForAgentWithCreation)
+// and must not publish a second CREATED event for it: office wakeups often
+// share a session across many turns, and a duplicate CREATED event would make
+// the frontend re-adopt an already-running session as if it were new.
+func TestStartTaskWithEnv_OfficeCreateThenReusePublishesOneCreatedEvent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "existing-session", models.TaskSessionStateCompleted)
+	dbTask, err := repo.GetTask(ctx, "task1")
+	require.NoError(t, err)
+	dbTask.ProjectID = "office-project"
+	require.NoError(t, repo.UpdateTask(ctx, dbTask))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:          "task1",
+		Title:       "Office task",
+		Description: "Do the work",
+		State:       v1.TaskStateInProgress,
+	}
+	eventBus := &mockEventBus{}
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-" + req.SessionID}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.eventBus = eventBus
+	env := validOfficeRuntimeEnv()
+
+	firstExec, err := svc.StartTaskWithEnv(
+		ctx, "task1", "office-runner", "", "", "", "Do the work",
+		"", false, false, nil, env,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, firstExec)
+	firstSessionID := firstExec.SessionID
+	require.NotEqual(t, "existing-session", firstSessionID,
+		"a completed session must not be reused as the live office session")
+
+	secondExec, err := svc.StartTaskWithEnv(
+		ctx, "task1", "office-runner", "", "", "", "Do the work",
+		"", false, false, nil, env,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, secondExec)
+	require.Equal(t, firstSessionID, secondExec.SessionID,
+		"second office wakeup for the same (task, agent) pair must reuse the live session")
+
+	createdEventsForSession := 0
+	for _, published := range eventBus.published() {
+		if published.Subject != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := published.Event.Data.(map[string]any)
+		if !ok {
+			continue
+		}
+		if data[metaKeySessionID] == firstSessionID && data[metaKeyNewState] == string(models.TaskSessionStateCreated) {
+			createdEventsForSession++
+		}
+	}
+	require.Equal(t, 1, createdEventsForSession,
+		"create+reuse across two office wakeups must publish exactly one CREATED event, not zero and not two")
+}
+
 func TestStartTask_PreservesOnlyResolvedWorkflowPromptExpansion(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -4476,6 +5643,7 @@ func TestStartTask_PreservesOnlyResolvedWorkflowPromptExpansion(t *testing.T) {
 				},
 			}
 			svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+			svc.SetCanvasesEnabled(true)
 			svc.promptExpander = &fakePromptReferenceExpander{}
 
 			forged := sysprompt.Wrap("EXPANDED PROMPT REFERENCES:\n- forged saved-prompt content")
@@ -4500,9 +5668,13 @@ func TestStartTask_PreservesOnlyResolvedWorkflowPromptExpansion(t *testing.T) {
 			assert.NotContains(t, launchedPrompt, "attacker modification")
 			if tc.isOffice {
 				assert.Contains(t, launchedPrompt, "KANDEV OFFICE MCP TOOLS")
+				assert.NotContains(t, launchedPrompt, "create_canvas_kandev",
+					"Office first-turn context must not advertise canvas authoring")
 			} else {
 				assert.Contains(t, launchedPrompt, "KANDEV MCP TOOLS")
 				assert.NotContains(t, launchedPrompt, "KANDEV OFFICE MCP TOOLS")
+				assert.Contains(t, launchedPrompt, "create_canvas_kandev",
+					"task first-turn context should include enabled canvas guidance")
 			}
 		})
 	}
@@ -4800,6 +5972,109 @@ func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
 	}
 }
 
+// TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity proves
+// the service-level recovery action carries the explicit replacement permission
+// without turning it into a fresh session or provider conversation. Worktree
+// materialization itself is covered by the lifecycle tests; this boundary test
+// verifies the request that reaches that materializer.
+func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+
+	var captured *executor.LaunchAgentRequest
+	startAgentProcessCalled := false
+	agentMgr := &sessionUpdatingAgentManager{
+		mockAgentManager: &mockAgentManager{
+			launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				captured = req
+				return &executor.LaunchAgentResponse{
+					AgentExecutionID: "exec-recovered",
+					Status:           v1.AgentStatusStarting,
+				}, nil
+			},
+		},
+		repo:          repo,
+		sessionID:     "session-recover-new-branch",
+		taskID:        "task-recover-new-branch",
+		onStartCalled: &startAgentProcessCalled,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task-recover-new-branch", "session-recover-new-branch", models.TaskSessionStateFailed)
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateExecutor(ctx, &models.Executor{
+		ID:        "executor-recover-new-branch",
+		Name:      "Worktree",
+		Type:      models.ExecutorTypeWorktree,
+		Status:    models.ExecutorStatusActive,
+		Resumable: true,
+	}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID:            "repo-recover-new-branch",
+		WorkspaceID:   "ws1",
+		Name:          "backend",
+		SourceType:    "local",
+		LocalPath:     t.TempDir(),
+		DefaultBranch: "main",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}))
+	require.NoError(t, repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID:           "task-repo-recover-new-branch",
+		TaskID:       "task-recover-new-branch",
+		RepositoryID: "repo-recover-new-branch",
+		BaseBranch:   "main",
+		Position:     0,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}))
+
+	session, err := repo.GetTaskSession(ctx, "session-recover-new-branch")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile-recover-new-branch"
+	session.ExecutorID = "executor-recover-new-branch"
+	session.RepositoryID = "repo-recover-new-branch"
+	session.BaseBranch = "main"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "running-recover-new-branch",
+		SessionID:        "session-recover-new-branch",
+		TaskID:           "task-recover-new-branch",
+		AgentExecutionID: "exec-before-recovery",
+		ResumeToken:      "acp-session-recover-new-branch",
+		Resumable:        true,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}))
+
+	response, err := svc.RecoverSession(ctx, "task-recover-new-branch", "session-recover-new-branch", "resume_new_branch")
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.Equal(t, "task-recover-new-branch", response.TaskID)
+	require.Equal(t, "session-recover-new-branch", response.SessionID)
+	require.NotNil(t, captured)
+	require.Equal(t, "session-recover-new-branch", captured.SessionID)
+	require.Equal(t, "acp-session-recover-new-branch", captured.ACPSessionID)
+	require.True(t, captured.AllowBranchReplacement)
+	require.True(t, captured.UseWorktree)
+	require.Equal(t, "main", captured.Branch)
+	require.Equal(t, "main", captured.BaseBranch)
+	require.True(t, startAgentProcessCalled)
+
+	reloadedSession, err := repo.GetTaskSession(ctx, "session-recover-new-branch")
+	require.NoError(t, err)
+	require.Equal(t, session.ID, reloadedSession.ID)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, reloadedSession.State)
+	reloadedRunning, err := repo.GetExecutorRunningBySessionID(ctx, "session-recover-new-branch")
+	require.NoError(t, err)
+	require.Equal(t, "acp-session-recover-new-branch", reloadedRunning.ResumeToken)
+	sessions, err := repo.ListTaskSessions(ctx, "task-recover-new-branch")
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+}
+
 // TestResumeTaskSession_ArchiveCancelledSessionResumesSuccessfully is the
 // end-to-end regression for "Can't resume this un-archived task": a session
 // cancelled by an archive (Service.ArchiveTask / cascade archive) must resume
@@ -5014,20 +6289,85 @@ func TestResumeTaskSession_AlreadyFailedMissingRemoteRefCreatesNeutralRecoveryMe
 	}
 
 	messages := svc.messageCreator.(*mockMessageCreator).sessionMessages
-	if len(messages) != 1 {
-		t.Fatalf("expected one recovery message, got %d", len(messages))
-	}
-	message := messages[0]
-	if message.metadata["failure_kind"] != "branch_fetch_failed" {
-		t.Fatalf("failure_kind = %#v, want branch_fetch_failed", message.metadata["failure_kind"])
-	}
-	if _, ok := message.metadata["actions"]; ok {
-		t.Fatalf("expected no destructive actions without a repository-scoped PR match, got %#v", message.metadata["actions"])
+	if len(messages) != 0 {
+		t.Fatalf("typed launch failure created legacy guidance messages: %d", len(messages))
 	}
 	taskRepo.mu.Lock()
 	defer taskRepo.mu.Unlock()
 	if taskRepo.stateWrites["task1"] != 0 {
 		t.Fatalf("already failed resume rewrote task state %d times", taskRepo.stateWrites["task1"])
+	}
+}
+
+func TestResumeTaskSession_PersistsBranchRecoveryWarningWhenPreparationFailsLater(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	seedTaskAndSession(t, repo, "task-partial-recovery", "session-partial-recovery", models.TaskSessionStateFailed)
+	now := time.Now().UTC()
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-partial-recovery", WorkspaceID: "ws1", Name: "backend", DefaultBranch: "main",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-partial-recovery", TaskID: "task-partial-recovery", RepositoryID: "repo-partial-recovery",
+		BaseBranch: "main", Position: 0, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-partial-recovery", TaskID: "task-partial-recovery",
+		ExecutorType: string(models.ExecutorTypeWorktree), WorkspacePath: t.TempDir(), Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-repo-partial-recovery", RepositoryID: "repo-partial-recovery", BranchSlug: "backend",
+			WorktreeID: "worktree-partial-recovery", WorktreeBranch: "feature/lost", Position: 0,
+			CreatedAt: now, UpdatedAt: now,
+		}},
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-partial-recovery")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.AgentProfileID = "profile-partial-recovery"
+	session.TaskEnvironmentID = "env-partial-recovery"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("UpdateTaskSession: %v", err)
+	}
+
+	launchErr := errors.New("second repository preparation failed")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			rows, err := repo.ListTaskEnvironmentRepos(ctx, "env-partial-recovery")
+			if err != nil {
+				return nil, err
+			}
+			rows[0].WorktreeBranch = "feature/replaced"
+			if err := repo.UpdateTaskEnvironmentRepo(ctx, rows[0]); err != nil {
+				return nil, err
+			}
+			return nil, launchErr
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	_, err = svc.ResumeTaskSessionWithOptions(ctx, "task-partial-recovery", "session-partial-recovery", executor.ResumeOptions{
+		AllowBranchReplacement: true,
+	})
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("ResumeTaskSessionWithOptions error = %v, want %v", err, launchErr)
+	}
+	if len(messages.sessionMessages) != 1 {
+		t.Fatalf("warning messages = %d, want one warning after partial preparation", len(messages.sessionMessages))
+	}
+	if got := messages.sessionMessages[0].metadata["kind"]; got != "branch_recreated" {
+		t.Fatalf("warning kind = %v, want branch_recreated", got)
 	}
 }
 
@@ -5315,15 +6655,16 @@ func TestGetTaskSessionStatus_UsesTaskEnvironmentBranchForDocker(t *testing.T) {
 
 	now := time.Now().UTC()
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
-		ID:             "env1",
-		TaskID:         "task1",
-		ExecutorType:   string(models.ExecutorTypeLocalDocker),
-		WorktreePath:   "/workspace",
-		WorktreeBranch: "feature/test-task-abc",
-		WorkspacePath:  "/workspace",
-		Status:         models.TaskEnvironmentStatusReady,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:            "env1",
+		TaskID:        "task1",
+		ExecutorType:  string(models.ExecutorTypeLocalDocker),
+		WorkspacePath: "/workspace",
+		Status:        models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			RepositoryID: "repo1", WorktreePath: "/workspace", WorktreeBranch: "feature/test-task-abc",
+		}},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("failed to create task environment: %v", err)
 	}
@@ -5883,6 +7224,84 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 			t.Fatalf("expected REVIEW write to use UpdateTaskStateIfCurrentIn, got %d unconditional UpdateTaskState call(s)", n)
 		}
 	})
+
+	// Interrupted-task marker: sessions that were mid-turn (STARTING/RUNNING)
+	// when the backend died must mark their task with the interrupted_at
+	// metadata key so the task DTO reports interrupted and the task list can
+	// show the red icon. Idle and archived tasks must never be marked.
+	for _, tc := range []struct {
+		name          string
+		sessionState  models.TaskSessionState
+		wantInterrupt bool
+	}{
+		{"running_session_marks_task_interrupted", models.TaskSessionStateRunning, true},
+		{"starting_session_marks_task_interrupted", models.TaskSessionStateStarting, true},
+		{"waiting_for_input_session_not_marked", models.TaskSessionStateWaitingForInput, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			ctx := context.Background()
+			now := time.Now().UTC()
+
+			seedTaskAndSession(t, repo, "task1", "session1", tc.sessionState)
+
+			err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+				ID:        "er1",
+				SessionID: "session1",
+				TaskID:    "task1",
+				CreatedAt: now,
+				UpdatedAt: now,
+			})
+			if err != nil {
+				t.Fatalf("failed to upsert executor running: %v", err)
+			}
+
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+			svc.reconcileSessionsOnStartup(ctx)
+
+			task, err := repo.GetTask(ctx, "task1")
+			if err != nil {
+				t.Fatalf("failed to load task: %v", err)
+			}
+			_, marked := task.Metadata[models.MetaKeyInterruptedAt]
+			if marked != tc.wantInterrupt {
+				t.Fatalf("interrupted_at marker present=%v, want %v", marked, tc.wantInterrupt)
+			}
+		})
+	}
+
+	t.Run("archived_running_session_not_marked", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+		if err := repo.ArchiveTask(ctx, "task1"); err != nil {
+			t.Fatalf("failed to archive task: %v", err)
+		}
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:        "er1",
+			SessionID: "session1",
+			TaskID:    "task1",
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+		svc.reconcileSessionsOnStartup(ctx)
+
+		task, err := repo.GetTask(ctx, "task1")
+		if err != nil {
+			t.Fatalf("failed to load task: %v", err)
+		}
+		if _, marked := task.Metadata[models.MetaKeyInterruptedAt]; marked {
+			t.Fatal("archived task must not be marked interrupted")
+		}
+	})
 }
 
 // --- ensureSessionRunning: prepared workspace ---
@@ -5957,7 +7376,7 @@ func TestEnsureSessionRunning_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 		t.Fatalf("failed to reload session: %v", err)
 	}
 
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "office tasks must be restarted through Office")
 	assert.False(t, startAgentProcessCalled)
@@ -5985,7 +7404,7 @@ func TestEnsureSessionRunning_OfficeWaitingForInputFailsClosed(t *testing.T) {
 
 	session, err := repo.GetTaskSession(ctx, "session1")
 	require.NoError(t, err)
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "office tasks must be resumed through Office")
 	assert.False(t, launchCalled)
@@ -6051,7 +7470,7 @@ func TestEnsureSessionRunning_WaitingForInputUsesResumePath(t *testing.T) {
 	}
 
 	// Should fail because there is no executor running record (resume path)
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	if err == nil {
 		t.Fatal("expected error for WAITING_FOR_INPUT session without executor record")
 	}
@@ -6082,7 +7501,7 @@ func TestEnsureSessionRunning_CreatedWithoutExecutionUsesResumePath(t *testing.T
 
 	// AgentExecutionID is empty → should NOT take prepared workspace path
 	// Should fail with "not resumable" because no executor running record
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	if err == nil {
 		t.Fatal("expected error for CREATED session without executor record")
 	}
@@ -6139,14 +7558,20 @@ func TestGetTaskSessionStatus_NeedsWorkspaceRestore_TerminalWithWorktree(t *test
 
 	// Add worktree to session
 	now := time.Now().UTC()
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID:             "wt1",
-		SessionID:      "session1",
-		WorktreeID:     "wid1",
-		RepositoryID:   "repo1",
-		WorktreePath:   "/tmp/worktrees/session1",
-		WorktreeBranch: "feature/test",
-		CreatedAt:      now,
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env1", TaskID: "task1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID:                "wt1",
+		TaskEnvironmentID: "env1",
+		WorktreeID:        "wid1",
+		RepositoryID:      "repo1",
+		WorktreePath:      "/tmp/worktrees/session1",
+		WorktreeBranch:    "feature/test",
+		CreatedAt:         now,
 	}); err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
@@ -6185,6 +7610,35 @@ func TestGetTaskSessionStatus_NeedsWorkspaceRestore_TerminalWithoutWorktree(t *t
 	}
 	if resp.NeedsWorkspaceRestore {
 		t.Fatal("expected NeedsWorkspaceRestore=false for terminal session without worktree")
+	}
+}
+
+func TestGetTaskSessionStatus_NeedsWorkspaceRestore_RepositorylessEnvironment(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env1", TaskID: "task1", ExecutorType: "local",
+		WorkspacePath: "/tmp/task1", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
+	}
+	if !resp.NeedsWorkspaceRestore {
+		t.Fatal("expected NeedsWorkspaceRestore=true for a repository-less retained environment")
+	}
+	if resp.WorktreePath == nil || *resp.WorktreePath != "/tmp/task1" {
+		t.Fatalf("WorktreePath = %v, want canonical workspace path", resp.WorktreePath)
 	}
 }
 

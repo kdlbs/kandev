@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,9 +12,12 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/gitref"
+	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -61,16 +65,28 @@ func isTerminalSessionState(state models.TaskSessionState) bool {
 
 // repoInfo holds resolved repository details for agent launch.
 type repoInfo struct {
-	RepositoryID           string
-	RepositoryPath         string
-	BaseBranch             string
-	CheckoutBranch         string
-	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
-	Position               int
-	WorktreeBranchPrefix   string
-	WorktreeBranchTemplate string
-	PullBeforeWorktree     bool
-	Repository             *models.Repository
+	TaskRepositoryID           string
+	RepositoryID               string
+	RepositoryPath             string
+	BaseBranch                 string
+	IntegrationRef             string
+	CheckoutBranch             string
+	PRNumber                   int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
+	RemoteContribution         *models.RemoteContribution
+	CheckoutOptions            *models.RepositoryCheckoutOptions
+	ContributionDestination    *models.ContributionDestination
+	ComparisonTarget           *models.ComparisonTarget
+	PRBase                     *models.PRBase
+	QualifiedPRBase            *models.PRBase
+	Position                   int
+	WorktreeBranchPrefix       string
+	WorktreeBranchTemplate     string
+	PullBeforeWorktree         bool
+	RemoteSyncHandled          bool
+	RefreshRepository          func(context.Context) error
+	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
+	RemoteRefState             repoclone.RemoteRefState
+	Repository                 *models.Repository
 }
 
 // resumeCredentialSnapshotBackup holds the non-secret routing metadata that
@@ -119,6 +135,12 @@ func resumeCredentialSnapshotBackupIfPersisted(
 // single-repo tasks and an empty slice for repo-less tasks (e.g. quick chat).
 // Each entry has LocalPath populated, cloning provider-backed repos on demand.
 func (e *Executor) resolveAllRepoInfo(ctx context.Context, taskID string) ([]*repoInfo, error) {
+	return e.resolveAllRepoInfoForSession(ctx, taskID, "")
+}
+
+func (e *Executor) resolveAllRepoInfoForSession(
+	ctx context.Context, taskID, sessionID string,
+) ([]*repoInfo, error) {
 	taskRepos, err := e.repo.ListTaskRepositories(ctx, taskID)
 	if err != nil {
 		e.logger.Error("failed to list task repositories",
@@ -131,7 +153,7 @@ func (e *Executor) resolveAllRepoInfo(ctx context.Context, taskID string) ([]*re
 	}
 	out := make([]*repoInfo, 0, len(taskRepos))
 	for _, tr := range taskRepos {
-		info, resolveErr := e.resolveTaskRepoInfo(ctx, tr)
+		info, resolveErr := e.resolveTaskRepoInfoForSession(ctx, sessionID, tr)
 		if resolveErr != nil {
 			return nil, resolveErr
 		}
@@ -143,12 +165,52 @@ func (e *Executor) resolveAllRepoInfo(ctx context.Context, taskID string) ([]*re
 // resolveTaskRepoInfo turns a TaskRepository row into a fully-resolved repoInfo
 // (loads the Repository entity, clones if necessary, fills defaults).
 func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepository) (*repoInfo, error) {
+	return e.resolveTaskRepoInfoForSession(ctx, "", tr)
+}
+
+func (e *Executor) resolveTaskRepoInfoForSession(
+	ctx context.Context, sessionID string, tr *models.TaskRepository,
+) (*repoInfo, error) {
+	options, err := models.GetRepositoryCheckoutOptions(tr.Metadata)
+	if err != nil {
+		return nil, err
+	}
 	info := &repoInfo{
-		RepositoryID:   tr.RepositoryID,
-		BaseBranch:     tr.BaseBranch,
-		CheckoutBranch: tr.CheckoutBranch,
-		PRNumber:       prNumberFromMetadata(tr.Metadata),
-		Position:       tr.Position,
+		CheckoutOptions:  options,
+		TaskRepositoryID: tr.ID,
+		RepositoryID:     tr.RepositoryID,
+		BaseBranch:       tr.BaseBranch,
+		IntegrationRef:   tr.BranchPolicyPullRequestTarget,
+		CheckoutBranch:   tr.CheckoutBranch,
+		PRNumber:         prNumberFromMetadata(tr.Metadata),
+		Position:         tr.Position,
+	}
+	if binding, found, err := models.LoadRemoteContribution(tr.Metadata); err != nil {
+		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
+	} else if found {
+		if tr.BaseBranch != "" && tr.BaseBranch != binding.BaseBranch {
+			e.logger.Debug("reconciling remote contribution base branch with task repository",
+				zap.String("task_repository_id", tr.ID),
+				zap.String("old_base_branch", binding.BaseBranch),
+				zap.String("new_base_branch", tr.BaseBranch))
+			binding.BaseBranch = tr.BaseBranch
+		}
+		if tr.CheckoutBranch != "" && tr.CheckoutBranch != binding.HeadBranch {
+			return nil, fmt.Errorf("task repository %q checkout branch does not match remote contribution", tr.ID)
+		}
+		info.RemoteContribution = &binding
+		info.BaseBranch = binding.BaseBranch
+		info.CheckoutBranch = binding.HeadBranch
+	}
+	if destination, found, err := models.LoadContributionDestination(tr.Metadata); err != nil {
+		return nil, fmt.Errorf("load contribution destination for task repository %q: %w", tr.ID, err)
+	} else if found {
+		info.ContributionDestination = &destination
+	}
+	if target, found, err := models.LoadComparisonTarget(tr.Metadata); err != nil {
+		return nil, fmt.Errorf("load comparison target for task repository %q: %w", tr.ID, err)
+	} else if found {
+		info.ComparisonTarget = &target
 	}
 	if info.RepositoryID == "" {
 		return info, nil
@@ -160,10 +222,18 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 			zap.Error(err))
 		return nil, err
 	}
-
-	if err := e.ensureRepoLocalPath(ctx, repo); err != nil {
+	if err := e.resolvePRBaseForLaunch(ctx, tr, repo, info); err != nil {
 		return nil, err
 	}
+
+	// Task checkout modes select a separate cache without rewriting the repository record.
+	repoCopy := *repo
+	repo = &repoCopy
+	remoteRefState, err := e.ensureTaskCheckoutPath(ctx, tr.TaskID, sessionID, repo, options)
+	if err != nil {
+		return nil, err
+	}
+	info.RemoteRefState = remoteRefState
 
 	// Backfill default_branch from the local clone when missing. This fires for
 	// two cases: (1) a freshly cloned provider-backed repo whose row was created
@@ -178,11 +248,454 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 	info.RepositoryPath = repo.LocalPath
 	info.WorktreeBranchPrefix = repo.WorktreeBranchPrefix
 	info.WorktreeBranchTemplate = repo.WorktreeBranchTemplate
+	if tr.BranchPolicyBranchTemplate != "" {
+		info.WorktreeBranchTemplate = tr.BranchPolicyBranchTemplate
+	}
 	info.PullBeforeWorktree = repo.PullBeforeWorktree
 	if info.BaseBranch == "" && repo.DefaultBranch != "" {
 		info.BaseBranch = repo.DefaultBranch
 	}
+	if info.IntegrationRef == "" {
+		info.IntegrationRef = info.BaseBranch
+	}
+	if info.PullBeforeWorktree {
+		refreshRequired, refreshErr := e.shouldRefreshRepositoryForSession(ctx, repo)
+		if refreshErr != nil {
+			return nil, refreshErr
+		}
+		if !refreshRequired {
+			return info, nil
+		}
+		prNumber, checkoutBranch := info.PRNumber, info.CheckoutBranch
+		info.RefreshRepository = func(refreshCtx context.Context) error {
+			return e.refreshManagedRepositoryForSession(
+				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch, options,
+			)
+		}
+		info.RefreshRepositoryWithState = func(refreshCtx context.Context) (repoclone.RemoteRefState, error) {
+			return e.refreshManagedRepositoryForSessionWithState(
+				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch, options,
+			)
+		}
+	}
 	return info, nil
+}
+
+func (e *Executor) resolvePRBaseForLaunch(
+	ctx context.Context, tr *models.TaskRepository, repo *models.Repository, info *repoInfo,
+) error {
+	if models.HasManualBaseBranchOverride(tr.Metadata) {
+		return nil
+	}
+	expected, err := applyExpectedPRComparisonTarget(tr.ID, info)
+	if err != nil {
+		return err
+	}
+	if e.prBaseResolver == nil || info.PRNumber <= 0 || !isGitHubRepository(repo) {
+		return nil
+	}
+	lookup := PRBaseLookup{
+		TaskID: tr.TaskID, TaskRepositoryID: tr.ID, RepositoryID: tr.RepositoryID,
+		Number: info.PRNumber, CheckoutBranch: info.CheckoutBranch,
+		AttachedOwner: repo.ProviderOwner, AttachedRepository: repo.ProviderName,
+		Target: expected,
+	}
+	resolved, err := e.prBaseResolver.ResolvePRBase(ctx, repo.WorkspaceID, lookup)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		if expected == nil && isUnusablePRBaseAssociation(err) {
+			return fmt.Errorf("resolve PR base for task repository %q: %w", tr.ID, err)
+		}
+		e.logger.Debug("could not resolve live pull request base branch",
+			zap.String("task_id", tr.TaskID),
+			zap.Int("pr_number", info.PRNumber),
+			zap.Error(err))
+		return nil
+	}
+	if err := resolved.Validate(); err != nil {
+		e.logger.Warn("live pull request base identity mismatch",
+			zap.String("task_repository_id", tr.ID),
+			zap.Int("pr_number", info.PRNumber),
+			zap.String("mismatch_reason", string(prBaseMismatchInvalidResolvedBase)))
+		if expected == nil {
+			return NewPRBaseResolutionError(err, false, true)
+		}
+		return nil
+	}
+	attachedRepository, hasAttachedRepository := githubComparisonRepositoryFromRepository(repo)
+	headRepository := attachedRepository
+	hasHeadRepository := hasAttachedRepository
+	if info.RemoteContribution != nil {
+		headRepository, hasHeadRepository = normalizeGitHubComparisonRepository(info.RemoteContribution.SourceRepository)
+	}
+	validIdentity, mismatchReason := validPRBaseIdentity(resolved, info.PRNumber, info.CheckoutBranch, expected,
+		attachedRepository, hasAttachedRepository, headRepository, hasHeadRepository, info.RemoteContribution != nil)
+	if !validIdentity {
+		e.logger.Warn("live pull request base identity mismatch",
+			zap.String("task_repository_id", tr.ID),
+			zap.Int("pr_number", info.PRNumber),
+			zap.String("mismatch_reason", string(mismatchReason)))
+		if expected == nil {
+			return NewPRBaseResolutionError(errors.New("pull request identity did not match the task repository binding"), false, true)
+		}
+		return nil
+	}
+	if resolved.Target.TargetBranch != tr.BaseBranch {
+		e.logger.Info("pull request base branch changed since task creation",
+			zap.String("task_id", tr.TaskID),
+			zap.Int("pr_number", info.PRNumber),
+			zap.String("old_base_branch", tr.BaseBranch),
+			zap.String("new_base_branch", resolved.Target.TargetBranch))
+	}
+	info.PRBase = &resolved
+	info.BaseBranch = resolved.Target.TargetBranch
+	if expected != nil || !models.ComparisonTargetRepositoriesEqual(attachedRepository, resolved.Target.TargetRepository) {
+		info.QualifiedPRBase = &resolved
+		info.ComparisonTarget = &resolved.Target
+	}
+	if info.RemoteContribution != nil {
+		info.RemoteContribution.BaseBranch = resolved.Target.TargetBranch
+	}
+	return nil
+}
+
+func applyExpectedPRComparisonTarget(
+	taskRepositoryID string, info *repoInfo,
+) (*models.ComparisonTarget, error) {
+	if info.ComparisonTarget == nil {
+		return nil, nil
+	}
+	target := *info.ComparisonTarget
+	if err := target.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid PR comparison target for task repository %q: %w", taskRepositoryID, err)
+	}
+	if info.PRNumber > 0 && target.Number != info.PRNumber {
+		return nil, fmt.Errorf("PR comparison target number does not match task repository %q", taskRepositoryID)
+	}
+	if info.CheckoutBranch != "" && target.HeadBranch != info.CheckoutBranch {
+		return nil, fmt.Errorf("PR comparison target head branch does not match task repository %q", taskRepositoryID)
+	}
+	if target.Provider != models.ComparisonTargetProviderGitHub || target.Kind != models.ComparisonTargetKindPullRequest {
+		return nil, nil
+	}
+	if info.PRNumber == 0 {
+		info.PRNumber = target.Number
+	}
+	base := models.PRBase{Target: target}
+	info.PRBase = &base
+	info.QualifiedPRBase = &base
+	info.BaseBranch = target.TargetBranch
+	if info.RemoteContribution != nil {
+		info.RemoteContribution.BaseBranch = target.TargetBranch
+	}
+	return &target, nil
+}
+
+func isUnusablePRBaseAssociation(err error) bool {
+	var knownCrossRepository interface{ KnownCrossRepository() bool }
+	if errors.As(err, &knownCrossRepository) && knownCrossRepository.KnownCrossRepository() {
+		return true
+	}
+	var invalidAssociation interface{ InvalidAssociation() bool }
+	return errors.As(err, &invalidAssociation) && invalidAssociation.InvalidAssociation()
+}
+
+type prBaseIdentityMismatchReason string
+
+const (
+	prBaseMismatchPRNumber            prBaseIdentityMismatchReason = "pr_number_mismatch"
+	prBaseMismatchProvider            prBaseIdentityMismatchReason = "provider_mismatch"
+	prBaseMismatchKind                prBaseIdentityMismatchReason = "kind_mismatch"
+	prBaseMismatchHeadBranch          prBaseIdentityMismatchReason = "head_branch_mismatch"
+	prBaseMismatchRepositoryIdentity  prBaseIdentityMismatchReason = "repository_identity_missing"
+	prBaseMismatchHeadRepository      prBaseIdentityMismatchReason = "head_repository_mismatch"
+	prBaseMismatchTargetRepository    prBaseIdentityMismatchReason = "target_repository_mismatch"
+	prBaseMismatchCheckoutBranch      prBaseIdentityMismatchReason = "checkout_branch_required"
+	prBaseMismatchComparisonTarget    prBaseIdentityMismatchReason = "comparison_target_mismatch"
+	prBaseMismatchInvalidResolvedBase prBaseIdentityMismatchReason = "invalid_resolved_pr_base"
+)
+
+func validPRBaseIdentity(
+	base models.PRBase, number int, checkoutBranch string,
+	expected *models.ComparisonTarget,
+	attachedRepository models.ComparisonTargetRepository, hasAttachedRepository bool,
+	headRepository models.ComparisonTargetRepository, hasHeadRepository bool,
+	contribution bool,
+) (bool, prBaseIdentityMismatchReason) {
+	target := base.Target
+	if target.Number != number {
+		return false, prBaseMismatchPRNumber
+	}
+	if target.Provider != models.ComparisonTargetProviderGitHub {
+		return false, prBaseMismatchProvider
+	}
+	if target.Kind != models.ComparisonTargetKindPullRequest {
+		return false, prBaseMismatchKind
+	}
+	if checkoutBranch != "" && target.HeadBranch != checkoutBranch {
+		return false, prBaseMismatchHeadBranch
+	}
+	if expected != nil || contribution {
+		return validBoundPRBaseIdentity(target, expected, attachedRepository, hasAttachedRepository,
+			headRepository, hasHeadRepository, contribution)
+	}
+	return validUnboundPRBaseIdentity(target, checkoutBranch, attachedRepository, hasAttachedRepository,
+		headRepository, hasHeadRepository)
+}
+
+func validBoundPRBaseIdentity(
+	target models.ComparisonTarget, expected *models.ComparisonTarget,
+	attachedRepository models.ComparisonTargetRepository, hasAttachedRepository bool,
+	headRepository models.ComparisonTargetRepository, hasHeadRepository, contribution bool,
+) (bool, prBaseIdentityMismatchReason) {
+	if !hasAttachedRepository || !hasHeadRepository ||
+		!models.ComparisonTargetRepositoriesEqual(target.HeadRepository, headRepository) {
+		if !hasAttachedRepository || !hasHeadRepository {
+			return false, prBaseMismatchRepositoryIdentity
+		}
+		return false, prBaseMismatchHeadRepository
+	}
+	if contribution && !models.ComparisonTargetRepositoriesEqual(target.TargetRepository, attachedRepository) {
+		return false, prBaseMismatchTargetRepository
+	}
+	if expected == nil {
+		return true, ""
+	}
+	if !expected.ChangeIdentityEqual(target) || expected.HeadBranch != target.HeadBranch ||
+		!models.ComparisonTargetRepositoriesEqual(expected.HeadRepository, target.HeadRepository) {
+		return false, prBaseMismatchComparisonTarget
+	}
+	return true, ""
+}
+
+func validUnboundPRBaseIdentity(
+	target models.ComparisonTarget, checkoutBranch string,
+	attachedRepository models.ComparisonTargetRepository, hasAttachedRepository bool,
+	headRepository models.ComparisonTargetRepository, hasHeadRepository bool,
+) (bool, prBaseIdentityMismatchReason) {
+	if !hasAttachedRepository || !hasHeadRepository {
+		return false, prBaseMismatchRepositoryIdentity
+	}
+	if models.ComparisonTargetRepositoriesEqual(target.TargetRepository, attachedRepository) {
+		if models.ComparisonTargetRepositoriesEqual(target.HeadRepository, attachedRepository) {
+			return true, ""
+		}
+		if checkoutBranch != "" {
+			return true, ""
+		}
+		return false, prBaseMismatchCheckoutBranch
+	}
+	// Fork-attached legacy tasks bind the attached repository to the PR head.
+	if models.ComparisonTargetRepositoriesEqual(target.HeadRepository, headRepository) {
+		return true, ""
+	}
+	return false, prBaseMismatchHeadRepository
+}
+
+func githubComparisonRepositoryFromRepository(repo *models.Repository) (models.ComparisonTargetRepository, bool) {
+	if repo == nil {
+		return models.ComparisonTargetRepository{}, false
+	}
+	owner := strings.TrimSpace(repo.ProviderOwner)
+	if owner == "" {
+		owner = strings.TrimSpace(repo.ProviderScope)
+	}
+	name := strings.TrimSpace(repo.ProviderName)
+	if name == "" {
+		name = strings.TrimSpace(repo.Name)
+	}
+	host := strings.TrimSpace(repo.ProviderHost)
+	if host == "" {
+		host = defaultGitHubHost
+	}
+	return normalizeGitHubComparisonRepository(models.ComparisonTargetRepository{
+		Host: host, Path: owner + "/" + name, ProviderID: strings.TrimSpace(repo.ProviderRepoID),
+	})
+}
+
+func normalizeGitHubComparisonRepository(repository models.ComparisonTargetRepository) (models.ComparisonTargetRepository, bool) {
+	if !isGitHubComparisonHost(repository.Host) {
+		return models.ComparisonTargetRepository{}, false
+	}
+	parts := strings.Split(strings.Trim(strings.TrimSpace(repository.Path), "/"), "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return models.ComparisonTargetRepository{}, false
+	}
+	owner, name := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	repository.Host = defaultGitHubHost
+	repository.Path = owner + "/" + name
+	repository.RemoteURL = fmt.Sprintf("https://%s/%s/%s.git", defaultGitHubHost, owner, name)
+	return repository, true
+}
+
+func isGitHubComparisonHost(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.User != nil || parsed.Port() != "" ||
+		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	return (strings.EqualFold(parsed.Scheme, "https") || strings.EqualFold(parsed.Scheme, "http")) &&
+		strings.EqualFold(parsed.Hostname(), defaultGitHubHost)
+}
+
+func hasProviderRepositoryIdentity(repo *models.Repository) bool {
+	if repo == nil {
+		return false
+	}
+	return (strings.TrimSpace(repo.ProviderOwner) != "" && strings.TrimSpace(repo.ProviderName) != "") ||
+		(strings.TrimSpace(repo.ProviderScope) != "" && strings.TrimSpace(repo.ProviderRepoID) != "")
+}
+
+func (e *Executor) shouldRefreshRepositoryForSession(
+	ctx context.Context, repo *models.Repository,
+) (bool, error) {
+	if repo == nil || repo.SourceType == sourceTypeLocal {
+		return false, nil
+	}
+	provider := strings.ToLower(strings.TrimSpace(repo.Provider))
+	if provider == gitLabProviderID {
+		return hasProviderRepositoryIdentity(repo), nil
+	}
+	if provider == providerAzureDevOps {
+		return strings.TrimSpace(repo.ProviderOwner) != "" && strings.TrimSpace(repo.ProviderName) != "", nil
+	}
+	if !isGitHubRepository(repo) {
+		return isPluginManagedRepository(repo), nil
+	}
+	policy := TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged}
+	if e.githubCredentialPolicyResolver != nil {
+		resolved, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, repo.WorkspaceID)
+		if err != nil {
+			return false, fmt.Errorf("resolve task Git credential policy: %w", err)
+		}
+		policy = resolved
+	}
+	return policy.Mode != taskGitCredentialsModeExecutor, nil
+}
+
+func isPluginManagedRepository(repo *models.Repository) bool {
+	if repo == nil || repo.SourceType == sourceTypeLocal || !hasProviderRepositoryIdentity(repo) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(repo.Provider)) {
+	case "", gitHubProviderID, gitLabProviderID, providerAzureDevOps:
+		return false
+	default:
+		return true
+	}
+}
+
+func (e *Executor) refreshManagedRepositoryForSession(
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string, options ...*models.RepositoryCheckoutOptions,
+) error {
+	_, err := e.refreshManagedRepositoryForSessionWithState(
+		ctx, taskID, sessionID, repo, prNumber, checkoutBranch, options...,
+	)
+	return err
+}
+
+func (e *Executor) refreshManagedRepositoryForSessionWithState(
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string, options ...*models.RepositoryCheckoutOptions,
+) (repoclone.RemoteRefState, error) {
+	if e.repoCloner == nil || repo.LocalPath == "" {
+		return repoclone.RemoteRefStateUnknown, errors.New("managed repository refresh is unavailable")
+	}
+	cloneURL := repositoryCloneURL(repo)
+	if cloneURL == "" {
+		var err error
+		cloneURL, err = e.repoCloner.BuildCloneURLWithHost(
+			ctx, repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+		)
+		if err != nil || cloneURL == "" {
+			return repoclone.RemoteRefStateUnknown, ErrNoCloneURL
+		}
+	}
+	credentialOrigin, token := "", ""
+	provider := strings.ToLower(strings.TrimSpace(repo.Provider))
+	if provider == gitLabProviderID && e.gitlabCredentials != nil {
+		var err error
+		credentialOrigin, token, err = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
+		if err != nil {
+			return repoclone.RemoteRefStateUnknown, fmt.Errorf("resolve GitLab refresh credentials: %w", err)
+		}
+	}
+	if provider == providerAzureDevOps && strings.HasPrefix(strings.ToLower(cloneURL), "https://") {
+		return e.refreshAzureDevOpsRepositoryForSessionWithState(
+			ctx, repo, cloneURL,
+		)
+	}
+	request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
+	if len(options) > 0 {
+		request.CheckoutOptions = options[0]
+	}
+	if isGitHubRepository(repo) {
+		request.PRNumber = prNumber
+		request.CheckoutBranch = checkoutBranch
+	}
+	if stateCloner, ok := e.repoCloner.(remoteStateRepoCloner); ok {
+		state, err := stateCloner.RefreshWorkspaceRepositoryWithCredentialRequestAndState(
+			ctx, request, repo.LocalPath, credentialOrigin, token,
+		)
+		if err != nil {
+			return repoclone.RemoteRefStateUnknown, fmt.Errorf("refresh repository before worktree: %w", err)
+		}
+		return state, nil
+	}
+	if err := e.repoCloner.RefreshWorkspaceRepositoryWithCredentialRequest(
+		ctx, request, repo.LocalPath, credentialOrigin, token,
+	); err != nil {
+		return repoclone.RemoteRefStateUnknown, fmt.Errorf("refresh repository before worktree: %w", err)
+	}
+	return repoclone.RemoteRefStateHasRefs, nil
+}
+
+func (e *Executor) refreshAzureDevOpsRepositoryForSession(
+	ctx context.Context, repo *models.Repository, cloneURL string,
+) error {
+	_, err := e.refreshAzureDevOpsRepositoryForSessionWithState(ctx, repo, cloneURL)
+	return err
+}
+
+func (e *Executor) refreshAzureDevOpsRepositoryForSessionWithState(
+	ctx context.Context, repo *models.Repository, cloneURL string,
+) (repoclone.RemoteRefState, error) {
+	authCloner, ok := e.repoCloner.(strictAuthenticatedRepoCloner)
+	if !ok || e.secretStore == nil {
+		return repoclone.RemoteRefStateUnknown, errors.New("azure DevOps repository refresh authentication is unavailable")
+	}
+	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
+	if err != nil {
+		return repoclone.RemoteRefStateUnknown, fmt.Errorf("read Azure DevOps refresh credential: %w", err)
+	}
+	if stateCloner, ok := e.repoCloner.(remoteStateAuthenticatedRepoCloner); ok {
+		state, err := stateCloner.RefreshWorkspaceRepositoryWithBasicAuthAndState(
+			ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost, cloneURL,
+			repo.ProviderOwner, repo.ProviderName, repo.LocalPath, "kandev", pat,
+		)
+		if err != nil {
+			return repoclone.RemoteRefStateUnknown, fmt.Errorf("refresh Azure DevOps repository before worktree: %w", err)
+		}
+		return state, nil
+	}
+	if err := authCloner.RefreshWorkspaceRepositoryWithBasicAuth(
+		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost, cloneURL,
+		repo.ProviderOwner, repo.ProviderName, repo.LocalPath, "kandev", pat,
+	); err != nil {
+		return repoclone.RemoteRefStateUnknown, fmt.Errorf("refresh Azure DevOps repository before worktree: %w", err)
+	}
+	return repoclone.RemoteRefStateHasRefs, nil
 }
 
 // ensureRepoLocalPath re-clones a repo's local checkout in place when it's
@@ -196,43 +709,93 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 // repo.LocalPath only when the clone actually returns a path — never blanks
 // an already-set one.
 func (e *Executor) ensureRepoLocalPath(ctx context.Context, repo *models.Repository) error {
-	if repo.SourceType == sourceTypeLocal || repo.ProviderOwner == "" || repo.ProviderName == "" {
-		return nil
+	return e.ensureRepoLocalPathForSession(ctx, "", "", repo)
+}
+
+func (e *Executor) ensureRepoLocalPathForSession(
+	ctx context.Context, taskID, sessionID string, repo *models.Repository,
+) error {
+	_, err := e.ensureRepoLocalPathForSessionAndState(ctx, taskID, sessionID, repo)
+	return err
+}
+
+func (e *Executor) ensureRepoLocalPathForSessionAndState(
+	ctx context.Context, taskID, sessionID string, repo *models.Repository,
+) (repoclone.RemoteRefState, error) {
+	if repo.SourceType == sourceTypeLocal {
+		if repo.LocalPath == "" || e.repoCloner == nil {
+			return repoclone.RemoteRefStateUnknown, nil
+		}
+		stateCloner, ok := e.repoCloner.(localRemoteStateRepoCloner)
+		if !ok {
+			return repoclone.RemoteRefStateUnknown, nil
+		}
+		state, err := stateCloner.InspectLocalRepositoryRemoteRefState(ctx, repo.LocalPath)
+		if err != nil {
+			// Local repositories historically support offline launch. Preserve
+			// that behavior when an origin is missing or temporarily
+			// unreachable; unknown state never authorizes empty-remote bootstrap.
+			e.logger.Debug("could not inspect local repository remote refs",
+				zap.String("repository_id", repo.ID),
+				zap.String("local_path", repo.LocalPath),
+				zap.Error(err))
+			return repoclone.RemoteRefStateUnknown, nil
+		}
+		return state, nil
+	}
+	if !hasProviderRepositoryIdentity(repo) {
+		return repoclone.RemoteRefStateUnknown, nil
 	}
 	if repo.LocalPath != "" && isLocalGitRepo(repo.LocalPath) &&
 		(e.repoCloner == nil || !e.repoCloner.ShouldRecloneForWorkspace(repo.WorkspaceID, repo.LocalPath)) {
-		return e.reconcileGitHubCheckoutOrigin(ctx, repo, repo.LocalPath)
+		return repoclone.RemoteRefStateUnknown, e.reconcileGitHubCheckoutOrigin(ctx, repo, repo.LocalPath)
 	}
-	localPath, cloneErr := e.ensureRepoCloned(ctx, repo)
+	localPath, state, cloneErr := e.ensureRepoClonedForSessionAndState(ctx, taskID, sessionID, repo)
 	if cloneErr != nil {
-		return cloneErr
+		return state, cloneErr
 	}
 	if localPath != "" {
 		repo.LocalPath = localPath
 	}
-	return nil
+	return state, nil
 }
 
 // ensureRepoCloned clones a provider-backed repository to local disk and updates its local path in the database.
 // Returns the local path on success, or empty string if no cloner is configured.
 func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository) (string, error) {
+	return e.ensureRepoClonedForSession(ctx, "", "", repo)
+}
+
+func (e *Executor) ensureRepoClonedForSession(
+	ctx context.Context, taskID, sessionID string, repo *models.Repository,
+) (string, error) {
+	path, _, err := e.ensureRepoClonedForSessionAndState(ctx, taskID, sessionID, repo)
+	return path, err
+}
+
+func (e *Executor) ensureRepoClonedForSessionAndState(
+	ctx context.Context, taskID, sessionID string, repo *models.Repository,
+) (string, repoclone.RemoteRefState, error) {
 	if e.repoCloner == nil {
 		e.logger.Warn("repository has no local path and no cloner configured",
 			zap.String("repository_id", repo.ID),
 			zap.String("provider", repo.Provider),
 			zap.String("owner", repo.ProviderOwner),
 			zap.String("name", repo.ProviderName))
-		return "", nil
+		return "", repoclone.RemoteRefStateUnknown, nil
 	}
 
-	cloneURL, urlErr := e.repoCloner.BuildCloneURLWithHost(
-		repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
-	)
-	if urlErr != nil || cloneURL == "" {
-		// Fall back to HTTPS URL if BuildCloneURL fails
-		cloneURL = repositoryCloneURL(repo)
-		if cloneURL == "" {
-			return "", ErrNoCloneURL
+	// RemoteURL is the canonical provider-declared transport. In particular,
+	// plugin providers may use a path shape that cannot be reconstructed from
+	// owner/name. Only derive a URL for legacy rows that do not have one.
+	cloneURL := strings.TrimSpace(repo.RemoteURL)
+	if cloneURL == "" {
+		var urlErr error
+		cloneURL, urlErr = e.repoCloner.BuildCloneURLWithHost(
+			ctx, repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+		)
+		if urlErr != nil || cloneURL == "" {
+			return "", repoclone.RemoteRefStateUnknown, ErrNoCloneURL
 		}
 	}
 
@@ -240,13 +803,13 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 		zap.String("repository_id", repo.ID),
 		zap.String("repo", repo.ProviderOwner+"/"+repo.ProviderName))
 
-	localPath, err := e.ensureClonedWithWorkspaceAuth(ctx, repo, cloneURL)
+	localPath, state, err := e.ensureClonedWithWorkspaceAuthForSessionAndState(ctx, taskID, sessionID, repo, cloneURL)
 	if err != nil {
 		e.logger.Error("failed to clone repository",
 			zap.String("repository_id", repo.ID),
 			zap.String("repo", repo.ProviderOwner+"/"+repo.ProviderName),
 			zap.Error(err))
-		return "", err
+		return "", state, err
 	}
 
 	// Persist the local path before reconciliation so a remote-update failure
@@ -261,7 +824,7 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 		}
 	}
 	if err := e.reconcileGitHubCheckoutOrigin(ctx, repo, localPath); err != nil {
-		return "", err
+		return "", state, err
 	}
 
 	// Note: default_branch backfill is intentionally driven from
@@ -270,7 +833,7 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 	// default_branch was never persisted (e.g. rows created before the
 	// backfill existed).
 
-	return localPath, nil
+	return localPath, state, nil
 }
 
 func (e *Executor) reconcileGitHubCheckoutOrigin(
@@ -287,7 +850,7 @@ func (e *Executor) reconcileGitHubCheckoutOrigin(
 		}
 		policy = resolved
 	}
-	originURL, err := gitHubCheckoutOriginURL(repo, policy, e.repoCloner)
+	originURL, err := gitHubCheckoutOriginURL(ctx, repo, policy, e.repoCloner)
 	if err != nil {
 		return err
 	}
@@ -307,11 +870,11 @@ func isGitHubRepository(repo *models.Repository) bool {
 }
 
 func gitHubCheckoutOriginURL(
-	repo *models.Repository, policy TaskGitCredentialPolicy, cloner RepoCloner,
+	ctx context.Context, repo *models.Repository, policy TaskGitCredentialPolicy, cloner RepoCloner,
 ) (string, error) {
 	if policy.Mode == taskGitCredentialsModeExecutor {
 		originURL, err := cloner.BuildCloneURLWithHost(
-			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+			ctx, repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
 		)
 		if err != nil {
 			return "", fmt.Errorf("build executor GitHub checkout origin: %w", err)
@@ -334,13 +897,21 @@ func gitHubCheckoutOriginURL(
 // repositories. Authentication and clone-url construction deliberately remain
 // inside Executor so callers never receive credentials or construct git calls.
 func (e *Executor) EnsureRepositoryCloned(ctx context.Context, repo *models.Repository) (string, error) {
+	return e.EnsureRepositoryClonedForSession(ctx, "", "", repo)
+}
+
+// EnsureRepositoryClonedForSession materializes a provider repository with
+// exact task/session scope for plugin credential resolution.
+func (e *Executor) EnsureRepositoryClonedForSession(
+	ctx context.Context, taskID, sessionID string, repo *models.Repository,
+) (string, error) {
 	if repo == nil {
 		return "", errors.New("repository is required")
 	}
 	if repo.LocalPath != "" {
 		return repo.LocalPath, nil
 	}
-	path, err := e.ensureRepoCloned(ctx, repo)
+	path, err := e.ensureRepoClonedForSession(ctx, taskID, sessionID, repo)
 	if err != nil {
 		return "", err
 	}
@@ -414,6 +985,17 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 		updateErr = e.persistSessionFullRowIfCurrentState(ctx, session, expectedState)
 	}
 	if updateErr != nil {
+		if startAgent && errors.Is(updateErr, errSessionAdvancedToRunning) {
+			if resp.PrepareResult == nil || !resp.PrepareResult.Success {
+				return nil
+			}
+			return e.repo.SetSessionMetadataKey(
+				ctx,
+				sessionID,
+				"prepare_result",
+				buildPrepareResultMetadata(resp.PrepareResult),
+			)
+		}
 		e.logger.Error("failed to update agent session after launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -429,82 +1011,114 @@ func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]i
 	return lifecycle.SerializePrepareResult(result)
 }
 
-func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID string, session *models.TaskSession, repositoryID string, resp *LaunchAgentResponse) {
-	// Multi-repo path: persist one TaskSessionWorktree row per per-repo worktree
-	// returned by the preparer. Each row carries its own RepositoryID so
-	// downstream lookups can scope by repo.
-	if len(resp.Worktrees) > 0 {
-		existingIDs := make(map[string]bool, len(session.Worktrees))
-		for _, wt := range session.Worktrees {
-			existingIDs[wt.WorktreeID] = true
-		}
-		for i, w := range resp.Worktrees {
-			if w.WorktreeID == "" || existingIDs[w.WorktreeID] {
-				continue
-			}
-			row := &models.TaskSessionWorktree{
-				SessionID:      session.ID,
-				WorktreeID:     w.WorktreeID,
-				RepositoryID:   w.RepositoryID,
-				BranchSlug:     w.BranchSlug,
-				Position:       i,
-				WorktreePath:   w.WorktreePath,
-				WorktreeBranch: w.WorktreeBranch,
-			}
-			if err := e.repo.CreateTaskSessionWorktree(ctx, row); err != nil {
-				e.logger.Error("failed to persist session worktree association",
-					zap.String("task_id", taskID),
-					zap.String("session_id", session.ID),
-					zap.String("worktree_id", w.WorktreeID),
-					zap.String("repository_id", w.RepositoryID),
-					zap.Error(err))
-			}
-		}
-		return
-	}
+// ResumeOptions controls explicit recovery behavior for a session resume.
+// Branch replacement is intentionally opt-in; ordinary resume preserves the
+// original worktree branch and reports when it is unrecoverable.
+type ResumeOptions struct {
+	AllowBranchReplacement bool
+	// AllowCompletedSessionResume is granted only by an explicit user recovery
+	// or a pinned follow-up dispatch. It does not change the global terminal
+	// session predicate or permit implicit resume paths.
+	AllowCompletedSessionResume bool
+	// Origin carries the session ceiling's explicit automatic/manual launch
+	// classification ("automatic" or "manual") from the caller into
+	// ResumeTaskSessionWithOptions's admission gate. A plain string rather
+	// than the orchestrator package's own type, since this package must not
+	// import orchestrator. Left empty, the gate classifies the resume as
+	// automatic and logs the omission — it is never silently treated as a
+	// manual override.
+	Origin string
+}
 
-	if resp.WorktreeID == "" {
-		return
+type cancellableResumeContextKey struct{}
+
+// WithCancellableResumeContext marks a resume whose startup context is owned
+// by the orchestrator's process-local recovery attempt. Ordinary executor
+// callers retain the historical detached startup behavior.
+func WithCancellableResumeContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	for _, wt := range session.Worktrees {
-		if wt.WorktreeID == resp.WorktreeID {
-			return
-		}
+	return context.WithValue(ctx, cancellableResumeContextKey{}, true)
+}
+
+// WithResumeAttemptID carries the immutable orchestrator recovery identity
+// through executor and lifecycle callbacks.
+func WithResumeAttemptID(ctx context.Context, attemptID string) context.Context {
+	return lifecycle.WithResumeAttemptID(ctx, attemptID)
+}
+
+// ResumeAttemptIDFromContext returns the recovery identity carried by ctx.
+func ResumeAttemptIDFromContext(ctx context.Context) string {
+	return lifecycle.ResumeAttemptIDFromContext(ctx)
+}
+
+// IsCancellableResumeContext reports whether startup cancellation belongs to a
+// process-local orchestrator resume attempt.
+func IsCancellableResumeContext(ctx context.Context) bool {
+	return isCancellableResumeContext(ctx)
+}
+
+func isCancellableResumeContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
 	}
-	sessionWorktree := &models.TaskSessionWorktree{
-		SessionID:      session.ID,
-		WorktreeID:     resp.WorktreeID,
-		RepositoryID:   repositoryID,
-		Position:       0,
-		WorktreePath:   resp.WorktreePath,
-		WorktreeBranch: resp.WorktreeBranch,
+	marked, _ := ctx.Value(cancellableResumeContextKey{}).(bool)
+	return marked
+}
+
+func resumeOwnedCleanupContext(ctx context.Context) context.Context {
+	if isCancellableResumeContext(ctx) {
+		return context.WithoutCancel(ctx)
 	}
-	if err := e.repo.CreateTaskSessionWorktree(ctx, sessionWorktree); err != nil {
-		e.logger.Error("failed to persist session worktree association",
-			zap.String("task_id", taskID),
-			zap.String("session_id", session.ID),
-			zap.String("worktree_id", resp.WorktreeID),
-			zap.Error(err))
-	}
+	return ctx
 }
 
 // ResumeSession restarts an existing task session using its stored worktree.
 // When startAgent is false, only the executor runtime is started (agent process is not launched).
 func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSession, startAgent bool) (*TaskExecution, error) {
+	return e.resumeSession(ctx, session, startAgent, ResumeOptions{})
+}
+
+// ResumeSessionWithOptions restarts an existing task session with an explicit
+// recovery permission. It keeps the same session and provider resume identity.
+func (e *Executor) ResumeSessionWithOptions(
+	ctx context.Context,
+	session *models.TaskSession,
+	startAgent bool,
+	options ResumeOptions,
+) (*TaskExecution, error) {
+	if session != nil {
+		e.auditCeilingBypass(ctx, "ResumeSessionWithOptions", session.ID, false)
+	}
+	return e.resumeSession(ctx, session, startAgent, options)
+}
+
+//nolint:cyclop,gocognit,funlen // Resume coordinates the established launch, rollback, and stale-execution recovery sequence.
+func (e *Executor) resumeSession(
+	ctx context.Context,
+	session *models.TaskSession,
+	startAgent bool,
+	options ResumeOptions,
+) (*TaskExecution, error) {
 	if session != nil {
 		resumeSnapshot := *session
 		resumeSnapshot.Metadata = cloneMetadata(session.Metadata)
 		session = &resumeSnapshot
 	}
-	task, unlock, err := e.validateAndLockResume(ctx, session)
+	task, unlock, err := e.validateAndLockResume(ctx, session, options)
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
-
+	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
+		return nil, err
+	}
 	resumeInitialState := session.State
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
-	wasTerminalResume := isTerminalSessionState(resumeInitialState)
+	completedResume := options.AllowCompletedSessionResume &&
+		resumeInitialState == models.TaskSessionStateCompleted
+	wasTerminalResume := isTerminalSessionState(resumeInitialState) || completedResume
 	// Force-cleanup any stale in-memory execution / agentctl state for terminal-state
 	// sessions. Their agent process is dead by definition, so "already running" signals
 	// from the execution store or agentctl's "starting" status are stale and would
@@ -521,15 +1135,17 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	var beforeCredentialLease func() error
 	if startAgent {
 		beforeCredentialLease = func() error {
-			if persistErr := e.persistResumeState(ctx, task.ID, session, true); persistErr != nil {
+			// The rollback path must remain armed if persistence fails after the
+			// session has entered STARTING.
+			resumeStatePersisted = true
+			if persistErr := e.persistResumeStateWithOptions(ctx, task.ID, session, true, options); persistErr != nil {
 				return persistErr
 			}
-			resumeStatePersisted = true
 			return nil
 		}
 	}
-	req, repositoryID, execCfg, existingEnv, _, err := e.buildResumeRequestAtCredentialBoundary(
-		ctx, task, session, startAgent, beforeCredentialLease,
+	req, _, execCfg, existingEnv, _, err := e.buildResumeRequestAtCredentialBoundaryWithOptions(
+		ctx, task, session, startAgent, beforeCredentialLease, options,
 	)
 	if err != nil {
 		if resumeStatePersisted {
@@ -552,6 +1168,21 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		credentialSnapshotPersisted = resumeCredentialSnapshotChanged(session, previousCredentialSnapshot)
 	}
 
+	var recoveryAdmission *worktree.RecoveryAdmission
+	recoveryAdmission, err = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, existingEnv, req.ExecutorType)
+	if err != nil {
+		if resumeStatePersisted {
+			e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err, nil)
+		}
+		return nil, err
+	}
+	launchCtx := ctx
+	if recoveryAdmission != nil {
+		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+	}
+	cleanupCtx := resumeOwnedCleanupContext(launchCtx)
+	defer func() { _ = releaseSelectedWorktreeRecovery(cleanupCtx, &recoveryAdmission) }()
+
 	e.logger.Debug("resuming agent session",
 		zap.String("task_id", session.TaskID),
 		zap.String("session_id", session.ID),
@@ -560,9 +1191,9 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		zap.String("resume_token", req.ACPSessionID),
 		zap.Bool("use_worktree", req.UseWorktree))
 
-	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
+	req.Env = e.applyPreferredShellEnv(launchCtx, req.ExecutorType, req.Env)
 
-	resp, err := e.agentManager.LaunchAgent(ctx, req)
+	resp, err := e.agentManager.LaunchAgent(launchCtx, req)
 	if err != nil && isAgentAlreadyRunningError(err) {
 		// "already has an agent running" fires both for live executions (a concurrent
 		// resume raced us) and stale ones (agent never started or exited without
@@ -576,8 +1207,12 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
 			if startAgent {
-				e.rollbackResumeStateAfterFailure(
-					ctx, task.ID, session.ID, resumeInitialState, err,
+				// The live process owns this session's active lifecycle. Keep the
+				// STARTING projection for that process to reconcile instead of
+				// marking it FAILED as if this duplicate launch had failed.
+				e.restoreResumeCredentialSnapshotIfStarting(
+					ctx,
+					session.ID,
 					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
 				)
 			}
@@ -586,17 +1221,28 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		e.logger.Info("cleaning up stale execution and retrying launch",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID))
-		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(ctx, session.ID); cleanupErr != nil {
+		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(launchCtx, session.ID); cleanupErr != nil {
 			e.logger.Warn("failed to clean up stale execution",
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))
 		}
-		resp, err = e.agentManager.LaunchAgent(ctx, req)
+		resp, err = e.agentManager.LaunchAgent(launchCtx, req)
+	}
+	if err != nil && isCancellableResumeContext(launchCtx) && launchCtx.Err() != nil {
+		// The cancellation owner reconciles the session state. Do not run the
+		// normal resume rollback, which could win a STARTING -> prior-state CAS
+		// before that owner finishes its cancellation projection.
+		if resp != nil && resp.AgentExecutionID != "" {
+			e.cleanupUnstartedExecutionAfterPersistError(
+				cleanupCtx, session.ID, resp.AgentExecutionID, launchCtx.Err(),
+			)
+		}
+		return nil, launchCtx.Err()
 	}
 	if err != nil {
 		if startAgent {
 			e.rollbackResumeStateAfterFailure(
-				ctx, task.ID, session.ID, resumeInitialState, err,
+				launchCtx, task.ID, session.ID, resumeInitialState, err,
 				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
 			)
 		}
@@ -608,22 +1254,22 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	}
 
 	if !startAgent {
-		if err := e.persistResumeState(ctx, task.ID, session, false); err != nil {
-			e.cleanupUnstartedExecutionAfterPersistError(ctx, session.ID, resp.AgentExecutionID, err)
+		if err := e.persistResumeState(launchCtx, task.ID, session, false); err != nil {
+			e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
 			return nil, err
 		}
 	}
-	e.persistWorktreeAssociation(ctx, task.ID, session, repositoryID, resp)
-	// Refresh task_environments after a successful resume so the row reflects
-	// the new worktree, container, and ready status. Without this, sessions
-	// that failed on initial launch (empty task_dir_name / worktree_path,
-	// status=stopped) stay stuck on those stale values even though the resume
-	// just prepared a fresh worktree — the frontend keeps showing
-	// "Executor environment is unavailable (stopped)" and disables chat input.
-	// existingEnv is captured from buildResumeRequest above (resolveResumeTaskEnvironment
-	// already aborts on real DB errors); when nil, persistTaskEnvironment will
-	// re-fetch under the per-task lock and create a fresh row if needed.
-	e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg)
+	if err := e.persistTaskEnvironment(launchCtx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
+		e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
+		if !isCancellableResumeContext(launchCtx) || launchCtx.Err() == nil {
+			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
+		}
+		if startAgent && (!isCancellableResumeContext(launchCtx) || launchCtx.Err() == nil) {
+			e.rollbackResumeStateAfterFailure(launchCtx, task.ID, session.ID, resumeInitialState, err,
+				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot))
+		}
+		return nil, err
+	}
 
 	worktreePath := resp.WorktreePath
 	worktreeBranch := resp.WorktreeBranch
@@ -646,9 +1292,17 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	}
 
 	if startAgent {
-		e.startAgentProcessOnResume(ctx, task.ID, session, resp.AgentExecutionID)
+		e.startAgentProcessOnResumeWithTaskPromotion(
+			worktree.WithoutRecoveryClaim(launchCtx),
+			task.ID,
+			session,
+			resp.AgentExecutionID,
+			!completedResume,
+		)
 	}
-
+	if releaseErr := releaseSelectedWorktreeRecovery(cleanupCtx, &recoveryAdmission); releaseErr != nil {
+		return execution, fmt.Errorf("release worktree recovery admission: %w", releaseErr)
+	}
 	return execution, nil
 }
 
@@ -695,9 +1349,21 @@ func (e *Executor) restoreResumeCredentialSnapshotIfStarting(
 	}
 }
 
+// terminalRollbackState prevents a failed relaunch from restoring an active
+// state when no agent process was recovered.
+func terminalRollbackState(priorState models.TaskSessionState) models.TaskSessionState {
+	switch priorState {
+	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+		return models.TaskSessionStateFailed
+	default:
+		return priorState
+	}
+}
+
 // rollbackResumeStateAfterFailure restores the state observed before a resume
 // attempt only while the session is still STARTING. A concurrent terminal
-// transition wins and is left untouched by transitionSessionState.
+// transition wins and is left untouched by transitionSessionState. Active
+// prior states become FAILED because the relaunch did not restore liveness.
 func (e *Executor) rollbackResumeStateAfterFailure(
 	ctx context.Context,
 	taskID, sessionID string,
@@ -705,13 +1371,29 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 	resumeErr error,
 	credentialSnapshot *resumeCredentialSnapshotBackup,
 ) {
+	// This rollback always leaves STARTING (successfully, or a no-op if the
+	// session had already left it), so the ceiling reservation is released
+	// unconditionally (AC-51a). Safe even when onSessionStateTransition
+	// already routes the write through the orchestrator's own funnel, since
+	// releasing a session that holds no reservation is a defined no-op.
+	if e.onCeilingReservationRelease != nil {
+		defer e.onCeilingReservationRelease(sessionID)
+	}
 	e.restoreResumeCredentialSnapshotIfStarting(ctx, sessionID, credentialSnapshot)
+	targetState := terminalRollbackState(priorState)
 	if e.onSessionStateTransition != nil {
 		current, err := e.repo.GetTaskSession(ctx, sessionID)
 		if err != nil || current == nil || current.State != models.TaskSessionStateStarting {
 			return
 		}
-		_, _, rollbackErr := e.transitionSessionState(ctx, taskID, sessionID, priorState, resumeErr.Error())
+		_, _, rollbackErr := e.transitionSessionStateFrom(
+			ctx,
+			taskID,
+			sessionID,
+			models.TaskSessionStateStarting,
+			targetState,
+			resumeErr.Error(),
+		)
 		if rollbackErr != nil {
 			e.logger.Warn("failed to roll back session state after resume failure",
 				zap.String("task_id", taskID),
@@ -727,7 +1409,7 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 			ctx,
 			sessionID,
 			models.TaskSessionStateStarting,
-			priorState,
+			targetState,
 			resumeErr.Error(),
 		); err != nil {
 			e.logger.Warn("failed to roll back session state after resume failure",
@@ -741,7 +1423,7 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 	if err != nil || current == nil || current.State != models.TaskSessionStateStarting {
 		return
 	}
-	_, _, rollbackErr := e.transitionSessionState(ctx, taskID, sessionID, priorState, resumeErr.Error())
+	_, _, rollbackErr := e.transitionSessionState(ctx, taskID, sessionID, targetState, resumeErr.Error())
 	if rollbackErr != nil {
 		e.logger.Warn("failed to roll back session state after resume failure",
 			zap.String("task_id", taskID),
@@ -753,9 +1435,13 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 // validateAndLockResume validates the session is resumable, acquires the per-session lock,
 // and loads the associated task. Returns the task, an unlock function, and any error.
 // The caller must call unlock() when the critical section is complete.
-func (e *Executor) validateAndLockResume(ctx context.Context, session *models.TaskSession) (*v1.Task, func(), error) {
-	if session == nil {
-		return nil, func() {}, ErrExecutionNotFound
+func (e *Executor) validateAndLockResume(
+	ctx context.Context,
+	session *models.TaskSession,
+	options ResumeOptions,
+) (*v1.Task, func(), error) {
+	if err := validateResumeSession(session, options); err != nil {
+		return nil, func() {}, err
 	}
 	requestedState := session.State
 
@@ -766,31 +1452,10 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 	sessionLock.Lock()
 	unlock := func() { sessionLock.Unlock() }
 
-	taskModel, err := e.repo.GetTask(ctx, session.TaskID)
+	task, err := e.loadResumeTask(ctx, session)
 	if err != nil {
 		unlock()
-		e.logger.Error("failed to load task for session resume",
-			zap.String("task_id", session.TaskID),
-			zap.String("session_id", session.ID),
-			zap.Error(err))
 		return nil, func() {}, err
-	}
-	if taskModel.ArchivedAt != nil {
-		unlock()
-		return nil, func() {}, ErrTaskArchived
-	}
-	task := taskModel.ToAPI()
-	if task == nil {
-		unlock()
-		return nil, func() {}, ErrExecutionNotFound
-	}
-
-	if session.AgentProfileID == "" {
-		unlock()
-		e.logger.Error("task session has no agent_profile_id configured",
-			zap.String("task_id", session.TaskID),
-			zap.String("session_id", session.ID))
-		return nil, func() {}, ErrNoAgentProfileID
 	}
 
 	// Re-read session state after acquiring the lock. The caller fetched the
@@ -801,43 +1466,102 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 	// registered, launching a duplicate. If the re-read fails, abort rather than
 	// proceeding with uncertain state — silently falling back to the stale state
 	// would reintroduce the exact race this re-read prevents.
-	fresh, fetchErr := e.repo.GetTaskSession(ctx, session.ID)
-	if fetchErr != nil {
+	if err := e.refreshResumeSessionState(ctx, session, requestedState); err != nil {
 		unlock()
-		e.logger.Warn("failed to re-read session state inside lock; aborting resume to avoid duplicate agent",
-			zap.String("session_id", session.ID),
-			zap.Error(fetchErr))
-		return nil, func() {}, fetchErr
-	}
-	if fresh != nil {
-		if isTerminalSessionState(fresh.State) && fresh.State != requestedState {
-			unlock()
-			return nil, func() {}, &SessionStateSupersededError{
-				SessionID: session.ID,
-				State:     fresh.State,
-			}
-		}
-		session.State = fresh.State
+		return nil, func() {}, err
 	}
 
 	// Skip the "already running" rejection for terminal-state sessions — the agent
 	// process is dead by definition, and ResumeSession will force-cleanup stale
 	// state before the relaunch.
-	if !isTerminalSessionState(session.State) {
-		if existing, ok := e.GetExecutionBySession(session.ID); ok && existing != nil {
-			unlock()
-			return nil, func() {}, ErrExecutionAlreadyRunning
-		}
+	if err := e.rejectRunningResume(session, options); err != nil {
+		unlock()
+		return nil, func() {}, err
 	}
 
 	return task, unlock, nil
+}
+
+func validateResumeSession(session *models.TaskSession, options ResumeOptions) error {
+	if session == nil {
+		return ErrExecutionNotFound
+	}
+	if session.State == models.TaskSessionStateCompleted && !options.AllowCompletedSessionResume {
+		return &SessionStateSupersededError{
+			SessionID: session.ID,
+			State:     session.State,
+		}
+	}
+	return nil
+}
+
+func (e *Executor) loadResumeTask(ctx context.Context, session *models.TaskSession) (*v1.Task, error) {
+	taskModel, err := e.repo.GetTask(ctx, session.TaskID)
+	if err != nil {
+		e.logger.Error("failed to load task for session resume",
+			zap.String("task_id", session.TaskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return nil, err
+	}
+	if taskModel.ArchivedAt != nil {
+		return nil, ErrTaskArchived
+	}
+	task := taskModel.ToAPI()
+	if task == nil {
+		return nil, ErrExecutionNotFound
+	}
+	if session.AgentProfileID == "" {
+		e.logger.Error("task session has no agent_profile_id configured",
+			zap.String("task_id", session.TaskID),
+			zap.String("session_id", session.ID))
+		return nil, ErrNoAgentProfileID
+	}
+	return task, nil
+}
+
+func (e *Executor) refreshResumeSessionState(
+	ctx context.Context,
+	session *models.TaskSession,
+	requestedState models.TaskSessionState,
+) error {
+	fresh, err := e.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		e.logger.Warn("failed to re-read session state inside lock; aborting resume to avoid duplicate agent",
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return err
+	}
+	if fresh == nil {
+		return nil
+	}
+	if isTerminalSessionState(fresh.State) && fresh.State != requestedState {
+		return &SessionStateSupersededError{
+			SessionID: session.ID,
+			State:     fresh.State,
+		}
+	}
+	session.State = fresh.State
+	return nil
+}
+
+func (e *Executor) rejectRunningResume(session *models.TaskSession, options ResumeOptions) error {
+	completedResume := options.AllowCompletedSessionResume &&
+		session.State == models.TaskSessionStateCompleted
+	if isTerminalSessionState(session.State) || completedResume {
+		return nil
+	}
+	if existing, ok := e.GetExecutionBySession(session.ID); ok && existing != nil {
+		return ErrExecutionAlreadyRunning
+	}
+	return nil
 }
 
 // buildResumeRequest constructs the LaunchAgentRequest for a session resume, resolving executor config,
 // repository details, worktree settings, and ACP resume token.
 // Returns the request, repository ID, executor config, existing ExecutorRunning record (may be nil), and error.
 func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, startAgent bool) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
-	return e.buildResumeRequestAtCredentialBoundary(ctx, task, session, startAgent, nil)
+	return e.buildResumeRequestAtCredentialBoundaryWithOptions(ctx, task, session, startAgent, nil, ResumeOptions{})
 }
 
 // buildResumeRequestAtCredentialBoundary prepares a resume request and invokes
@@ -851,23 +1575,101 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	startAgent bool,
 	beforeCredentialLease func() error,
 ) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
+	return e.buildResumeRequestAtCredentialBoundaryWithOptions(
+		ctx, task, session, startAgent, beforeCredentialLease, ResumeOptions{},
+	)
+}
+
+func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	startAgent bool,
+	beforeCredentialLease func() error,
+	options ResumeOptions,
+) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
+	req, metadata := newResumeLaunchRequest(task, session, startAgent, options)
+	existingRunning, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
+		return nil, "", executorConfig{}, nil, nil,
+			fmt.Errorf("load runtime inventory for session %q: %w", session.ID, runningErr)
+	}
+	recordedKubernetes := existingRunning != nil && existingRunning.Runtime == agentruntime.RuntimeKubernetes
+	if recordedKubernetes {
+		applyAuthoritativeKubernetesRunningMetadata(metadata, existingRunning.Metadata)
+	}
+	var execConfig executorConfig
+	if recordedKubernetes {
+		var configErr error
+		execConfig, configErr = e.applyRecordedKubernetesExecutorConfigToResumeRequest(
+			ctx, req, session, metadata, existingRunning,
+		)
+		if configErr != nil {
+			return nil, "", executorConfig{}, nil, existingRunning, configErr
+		}
+		if err := lifecycle.ValidateKubernetesResumeMetadata(
+			metadata, task.ID, session.ID, execConfig.ExecutorCfg,
+		); err != nil {
+			return nil, "", executorConfig{}, nil, existingRunning,
+				fmt.Errorf("validate recorded Kubernetes runtime for resume: %w", err)
+		}
+	} else {
+		execConfig = e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+	}
+	repositoryID, existingEnv, allRepos, err := e.prepareResumeRepositorySettings(
+		ctx, task, session, req,
+	)
+	if err != nil {
+		return nil, "", execConfig, existingEnv, nil, err
+	}
+	if err := e.applyResumeMCPSettings(ctx, task.ID, session, req); err != nil {
+		return nil, "", execConfig, existingEnv, nil, err
+	}
+
+	existingRunning = e.applyRunningRecordToResumeRequest(req, task, session, startAgent, existingRunning)
+	if err := e.applyResumeWorkspaceFolders(ctx, task.ID, req); err != nil {
+		return nil, "", execConfig, existingEnv, existingRunning, err
+	}
+	profileEnvVars, profileResolved := e.resolveHostGitHubBridgeProfileEnv(
+		ctx, req.AgentProfileID, execConfig.ProfileEnvVars,
+	)
+	if err := e.configureResumeGitHubCredentialsWithProfileEnvAndBridge(
+		ctx, req, session, allRepos, beforeCredentialLease, profileEnvVars, profileResolved,
+	); err != nil {
+		return nil, "", execConfig, existingEnv, existingRunning, err
+	}
+	e.injectGitLabWorkspaceCredentials(ctx, req)
+	if err := e.resolveLaunchEnvironment(ctx, req, execConfig.ProfileEnvVars, allRepos); err != nil {
+		return nil, "", execConfig, existingEnv, existingRunning, err
+	}
+
+	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
+}
+
+func newResumeLaunchRequest(
+	task *v1.Task,
+	session *models.TaskSession,
+	startAgent bool,
+	options ResumeOptions,
+) (*LaunchAgentRequest, map[string]interface{}) {
 	executionProfileID := session.ExecutionProfileID
 	if executionProfileID == "" {
 		executionProfileID = session.AgentProfileID
 	}
 	req := &LaunchAgentRequest{
-		TaskID:               task.ID,
-		WorkspaceID:          task.WorkspaceID,
-		SessionID:            session.ID,
-		TaskTitle:            task.Title,
-		AgentProfileID:       executionProfileID,
-		OfficeAgentProfileID: session.AgentProfileID,
-		StartAgent:           startAgent,
-		TaskDescription:      task.Description,
-		Priority:             task.Priority,
-		IsEphemeral:          task.IsEphemeral,
-		IsPassthrough:        session.IsPassthrough,
-		TaskEnvironmentID:    session.TaskEnvironmentID,
+		TaskID:                 task.ID,
+		WorkspaceID:            task.WorkspaceID,
+		SessionID:              session.ID,
+		TaskTitle:              task.Title,
+		AgentProfileID:         executionProfileID,
+		OfficeAgentProfileID:   session.AgentProfileID,
+		StartAgent:             startAgent,
+		TaskDescription:        task.Description,
+		Priority:               task.Priority,
+		IsEphemeral:            task.IsEphemeral,
+		IsPassthrough:          session.IsPassthrough,
+		TaskEnvironmentID:      session.TaskEnvironmentID,
+		AllowBranchReplacement: options.AllowBranchReplacement,
 	}
 
 	metadata := map[string]interface{}{}
@@ -883,45 +1685,138 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 		metadata["worktree_id"] = session.Worktrees[0].WorktreeID
 	}
 	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
+	return req, metadata
+}
 
-	execConfig := e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
-
-	existingEnv, err := e.resolveResumeTaskEnvironment(ctx, task.ID, session)
+func (e *Executor) prepareResumeRepositorySettings(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+) (string, *models.TaskEnvironment, []*repoInfo, error) {
+	existingEnv, err := e.resolveResumeTaskEnvironmentForTask(ctx, task, session)
 	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+		return "", nil, nil, err
+	}
+	if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType); err != nil {
+		return "", existingEnv, nil, err
 	}
 	if session.TaskEnvironmentID != "" {
 		req.TaskEnvironmentID = session.TaskEnvironmentID
 	}
+	req.WorkspaceReuseRequired = workspaceReuseAllowed(
+		existingEnv,
+		req.ExecutorType,
+		existingEnv != nil && existingEnv.MaterializationSessionID != session.ID,
+		e.taskIsRepoBacked(ctx, task.ID),
+	)
 
-	allRepos, err := e.resolveAllRepoInfo(ctx, task.ID)
+	allRepos, err := e.resolveAllRepoInfoForSession(ctx, task.ID, session.ID)
 	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+		return "", nil, nil, err
 	}
+	req.McpProviders = deriveMCPProviders(allRepos)
 	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req, existingEnv, allRepos)
 	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+		return "", nil, nil, err
+	}
+	applyResumeRepositoryFlags(req, allRepos)
+	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
+		return "", existingEnv, nil, err
 	}
 
 	e.reuseExistingEnvironment(ctx, req, existingEnv)
+	return repositoryID, existingEnv, allRepos, nil
+}
 
-	req.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, true)
+func applyResumeRepositoryFlags(req *LaunchAgentRequest, repositories []*repoInfo) {
+	if len(repositories) == 0 {
+		return
+	}
+	first := repositories[0]
+	req.PullBeforeWorktree = first.PullBeforeWorktree
+	req.RemoteSyncHandled = first.RemoteSyncHandled
+	req.RefreshRepository = first.RefreshRepository
+	req.RefreshRepositoryWithState = first.RefreshRepositoryWithState
+	req.RemoteRefState = first.RemoteRefState
+}
+
+func (e *Executor) applyResumeMCPSettings(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+) error {
+	mode, err := e.resolveTaskSessionMCPMode(ctx, taskID, session, true)
 	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+		return err
 	}
+	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, taskID, session, true)
+	if err != nil {
+		return err
+	}
+	req.McpMode = mode
+	profileContext.Providers = req.McpProviders
+	req.McpProfile = &profileContext
+	return nil
+}
 
-	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)
-	if err := e.applyResumeWorkspaceFolders(ctx, task.ID, req); err != nil {
-		return nil, "", execConfig, existingEnv, nil, err
+func applyAuthoritativeKubernetesRunningMetadata(
+	metadata map[string]interface{},
+	recorded map[string]interface{},
+) {
+	for key := range metadata {
+		if isKubernetesRecordedMetadataKey(key) {
+			delete(metadata, key)
+		}
 	}
-	if err := e.configureResumeGitHubCredentials(
-		ctx, req, session, allRepos, beforeCredentialLease,
-	); err != nil {
-		return nil, "", execConfig, existingEnv, existingRunning, err
+	for key, value := range recorded {
+		if isKubernetesRecordedMetadataKey(key) && lifecycle.ShouldPersistMetadataKey(key) {
+			metadata[key] = value
+		}
 	}
-	e.injectGitLabWorkspaceCredentials(ctx, req)
+}
 
-	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
+func isKubernetesRecordedMetadataKey(key string) bool {
+	return strings.HasPrefix(key, "kubernetes_") ||
+		key == lifecycle.MetadataKeyIsRemote ||
+		key == lifecycle.MetadataKeyExecutorProfileID ||
+		key == lifecycle.MetadataKeyAuthTokenSecret ||
+		key == lifecycle.MetadataKeyBootstrapNonceSecret
+}
+
+func (e *Executor) applyRecordedKubernetesExecutorConfigToResumeRequest(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	session *models.TaskSession,
+	metadata map[string]interface{},
+	running *models.ExecutorRunning,
+) (executorConfig, error) {
+	executorID := strings.TrimSpace(running.ExecutorID)
+	if executorID == "" {
+		return executorConfig{}, errors.New("resume Kubernetes executor: recorded executor ID is missing")
+	}
+	current, err := e.repo.GetExecutor(ctx, executorID)
+	if err != nil {
+		return executorConfig{}, fmt.Errorf("resume Kubernetes executor %q: %w", executorID, err)
+	}
+	if current == nil || current.Type != models.ExecutorTypeKubernetes {
+		return executorConfig{}, fmt.Errorf("resume Kubernetes executor %q: current Kubernetes executor is unavailable", executorID)
+	}
+	metadata["executor_id"] = executorID
+	config := executorConfig{
+		ExecutorID: executorID, ExecutorType: string(current.Type), ExecutorCfg: current.Config,
+		Metadata: metadata, Resumable: current.Resumable, RuntimeName: string(current.Type),
+	}
+	if err := e.restoreKubernetesProfileEnvironment(ctx, &config, running.Metadata); err != nil {
+		return executorConfig{}, err
+	}
+	session.ExecutorID = executorID
+	session.ExecutorProfileID, _ = running.Metadata[lifecycle.MetadataKeyExecutorProfileID].(string)
+	req.ExecutorType = config.ExecutorType
+	req.ExecutorConfig = config.ExecutorCfg
+	req.Metadata = metadata
+	return config, nil
 }
 
 func (e *Executor) applyResumeWorkspaceFolders(
@@ -950,23 +1845,85 @@ func (e *Executor) configureResumeGitHubCredentials(
 	repositories []*repoInfo,
 	beforeCredentialLease func() error,
 ) error {
+	return e.configureResumeGitHubCredentialsWithProfileEnvAndBridge(
+		ctx, req, session, repositories, beforeCredentialLease, nil, true,
+	)
+}
+
+func (e *Executor) configureResumeGitHubCredentialsWithProfileEnvAndBridge(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	session *models.TaskSession,
+	repositories []*repoInfo,
+	beforeCredentialLease func() error,
+	profileEnvVars []models.ProfileEnvVar,
+	hostBridgeProfileResolved bool,
+) error {
 	if beforeCredentialLease != nil {
 		if err := beforeCredentialLease(); err != nil {
 			return err
 		}
 	}
-	if err := e.configureGitHubCredentialBrokerForRepositories(ctx, req, repositories); err != nil {
+	if err := e.configureGitCredentialBrokerForRepositoriesWithProfileEnvAndBridge(
+		ctx, req, repositories, profileEnvVars, hostBridgeProfileResolved,
+	); err != nil {
 		return err
 	}
 	return e.applyGitCredentialSnapshot(ctx, req, session)
 }
 
 func (e *Executor) resolveResumeTaskEnvironment(ctx context.Context, taskID string, session *models.TaskSession) (*models.TaskEnvironment, error) {
+	taskModel, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup task for environment resume: %w", err)
+	}
+	task := &v1.Task{ID: taskID}
+	if taskModel != nil {
+		task = taskModel.ToAPI()
+	}
+	return e.resolveResumeTaskEnvironmentForTask(ctx, task, session)
+}
+
+func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task *v1.Task, session *models.TaskSession) (*models.TaskEnvironment, error) {
+	if task == nil || session == nil {
+		return nil, nil
+	}
+	taskID := task.ID
 	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("lookup existing task environment: %w", err)
 	}
 	if env == nil {
+		// Inherited-environment fallback: a child task created by an office
+		// task-handoff may have had session.TaskEnvironmentID rewritten to point
+		// at the parent's / shared group's env row, which is owned by a
+		// *different* task. GetTaskEnvironmentByTaskID misses that row because it
+		// indexes by the child task id, so without this lookup the resume path
+		// treats the env as absent and persistTaskEnvironment tries to CREATE a
+		// new row using the inherited ID — which already exists, producing
+		// "UNIQUE constraint failed: task_environments.id".
+		//
+		// Unlike the launch path (executor_execute.go), which hard-errors with
+		// ErrWorkspaceReuseUnsafe when the referenced row is absent, resume
+		// falls through to (nil, nil): the ID is then free, so the create path
+		// produces a valid fresh environment rather than a failing resume. A
+		// missing row surfaces as ErrTaskEnvironmentNotFound, which is a miss,
+		// not a fatal error; any other lookup error still propagates.
+		if session.TaskEnvironmentID != "" {
+			inherited, inhErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+			if inhErr != nil && !errors.Is(inhErr, repoerrors.ErrTaskEnvironmentNotFound) {
+				return nil, fmt.Errorf("lookup inherited task environment: %w", inhErr)
+			}
+			if inherited != nil {
+				if err := e.validateInheritedEnvironmentOwner(ctx, task, inherited); err != nil {
+					return nil, err
+				}
+				return inherited, nil
+			}
+			if taskUsesInheritedWorkspace(task) {
+				return nil, fmt.Errorf("%w: inherited task environment %s no longer exists", models.ErrWorkspaceReuseUnsafe, session.TaskEnvironmentID)
+			}
+		}
 		return nil, nil
 	}
 	if session.TaskEnvironmentID != env.ID {
@@ -984,15 +1941,6 @@ func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *
 	req.ExecutorType = execConfig.ExecutorType
 	req.ExecutorConfig = execConfig.ExecutorCfg
 	req.SetupScript = execConfig.SetupScript
-	if len(execConfig.ProfileEnv) > 0 {
-		if req.Env == nil {
-			req.Env = make(map[string]string)
-		}
-		for k, v := range execConfig.ProfileEnv {
-			req.Env[k] = v
-		}
-	}
-
 	if executorWasEmpty && session.ExecutorID != "" {
 		session.UpdatedAt = time.Now().UTC()
 		if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
@@ -1009,32 +1957,48 @@ func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *
 	return execConfig
 }
 
-// isArchiveCancelledResumeSession reports whether session was cancelled by an
-// archive (Service.ArchiveTask's single-task path or HandoffService's cascade
-// archive) rather than an explicit user/coordinator stop. Mirrors
-// orchestrator.isArchiveCancelledSession — kept local to this package since
-// the two live on opposite sides of the executor/orchestrator boundary and
-// the check is two lines over already-exported models helpers.
-func isArchiveCancelledResumeSession(session *models.TaskSession) bool {
+// isRecoverableCancelledResumeSession reports whether session was cancelled by
+// a system reconciliation path rather than an explicit user/coordinator stop.
+// Mirrors the orchestrator's eligibility checks while keeping the executor's
+// prompt-free launch behavior aligned for legacy archive and orphan rows.
+func isRecoverableCancelledResumeSession(session *models.TaskSession) bool {
 	return session != nil &&
 		session.State == models.TaskSessionStateCancelled &&
-		models.IsArchiveCancelReason(session.ErrorMessage)
+		(models.IsArchiveCancelReason(session.ErrorMessage) ||
+			models.IsOrphanCancelReason(session.ErrorMessage))
 }
 
 // applyRunningRecordToResumeRequest loads the ExecutorRunning record and applies
 // resume-related fields (remote reconnect, resume token) to the request.
-func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, startAgent bool) *models.ExecutorRunning {
-	running, runErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
-	if runErr != nil || running == nil {
+func (e *Executor) applyRunningRecordToResumeRequest(
+	req *LaunchAgentRequest,
+	task *v1.Task,
+	session *models.TaskSession,
+	startAgent bool,
+	running *models.ExecutorRunning,
+) *models.ExecutorRunning {
+	if running == nil {
 		// Archive cleanup tears down the executors_running row entirely, so an
-		// archive-cancelled session reaches this point with running == nil —
-		// exactly the shape GetTaskSessionStatus's resumeReasonArchiveCancelledResumable
-		// auto-resumes once the task is unarchived. There is no resume token or
-		// running record to fall back on here, but the launch still must not
-		// replay task.Description as a fresh prompt — see the else-if branch
-		// below for the same guard on the running-record path.
-		if startAgent && isArchiveCancelledResumeSession(session) {
-			req.TaskDescription = ""
+		// system-cancelled session reaches this point with running == nil. The
+		// session metadata mirrors the provider conversation identity so an
+		// explicit completed follow-up can still restore the same conversation
+		// after runtime cleanup removed the operational row.
+		noAutoPromptState := session.State == models.TaskSessionStateWaitingForInput ||
+			isRecoverableCancelledResumeSession(session) ||
+			session.State == models.TaskSessionStateCompleted
+		if startAgent && noAutoPromptState {
+			if token := persistedSessionResumeToken(session); token != "" {
+				req.ACPSessionID = token
+				req.TaskDescription = ""
+				e.logger.Info("found persisted session resume token after runtime cleanup",
+					zap.String("task_id", task.ID),
+					zap.String("session_id", session.ID),
+					zap.Bool("has_resume_token", true))
+			} else {
+				// A missing token must still never turn recovery into an automatic
+				// task-description prompt.
+				req.TaskDescription = ""
+			}
 		}
 		return nil
 	}
@@ -1067,11 +2031,12 @@ func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *L
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
 			zap.Bool("has_resume_token", running.ResumeToken != ""))
-	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput || isArchiveCancelledResumeSession(session)) {
+	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput ||
+		isRecoverableCancelledResumeSession(session) || session.State == models.TaskSessionStateCompleted) {
 		// Fresh-start resume (no resume token): don't auto-prompt with the task
-		// description. Also covers an archive-cancelled session whose running
-		// record survived cleanup but carries no token — same auto-resume shape
-		// as the running==nil branch above.
+		// description. Also covers completed and system-cancelled sessions whose
+		// running record survived cleanup but carries no token — the same
+		// auto-resume shape as the running==nil branch above.
 		req.TaskDescription = ""
 		e.logger.Info("fresh-start resume, clearing task description to avoid auto-prompt",
 			zap.String("task_id", task.ID),
@@ -1079,6 +2044,34 @@ func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *L
 	}
 
 	return running
+}
+
+// persistedSessionResumeToken returns the provider conversation identity that
+// survives executors_running cleanup. The dynamic route projection is checked
+// first; the generic ACP metadata mirror is the fallback for ordinary sessions.
+func persistedSessionResumeToken(session *models.TaskSession) string {
+	if session == nil {
+		return ""
+	}
+	if session.DownstreamACPSessionID != "" {
+		return session.DownstreamACPSessionID
+	}
+	if session.Metadata == nil {
+		return ""
+	}
+	acp, ok := session.Metadata["acp"]
+	if !ok {
+		return ""
+	}
+	switch value := acp.(type) {
+	case map[string]interface{}:
+		token, _ := value["session_id"].(string)
+		return token
+	case map[string]string:
+		return value["session_id"]
+	default:
+		return ""
+	}
 }
 
 // applyResumeRepoConfig resolves repository details and applies them to req.
@@ -1102,12 +2095,33 @@ func (e *Executor) applyResumeRepoConfig(
 	if err != nil {
 		return "", err
 	}
-	repositoryID, baseBranch := resolveResumeRepoIDAndBranch(task, session)
+	repositoryID, baseBranch := resolveResumeRepoIDAndBranch(session, allRepos)
+	baseBranch = resolveResumeBaseBranch(repositoryID, baseBranch, allRepos)
 	if baseBranch != "" {
 		req.Branch = baseBranch
 	}
 	if repositoryID == "" {
 		return "", nil
+	}
+	if session.RepositoryID == "" {
+		e.logger.Info("resolved resume repository from task attachment set",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID),
+			zap.String("repository_id", repositoryID))
+	}
+	// Stamp the resolved primary's identity on every executor type, whether or
+	// not it has a local clone: environmentReposForLaunch's single-repository
+	// fallback projects an inventory row from req.RepositoryID alone, and a
+	// task with exactly one attachment on a non-worktree executor reaches it
+	// with nothing else populated.
+	req.RepositoryID = repositoryID
+	// Clone-URL executors need BaseBranch for validateReuseEnvironmentInventory's
+	// branch identity slug even when workspace reuse is required: applyResumeCloneURL
+	// is the only other writer of req.BaseBranch outside the worktree path, and it
+	// skips clone-URL setup entirely once reuse is required. Local executors are
+	// excluded so LocalPreparer keeps using the current on-disk branch.
+	if baseBranch != "" && e.capabilities != nil && e.capabilities.RequiresCloneURL(req.ExecutorType) {
+		req.BaseBranch = baseBranch
 	}
 
 	var repository *models.Repository
@@ -1126,17 +2140,22 @@ func (e *Executor) applyResumeRepoConfig(
 				zap.Error(err))
 			return "", err
 		}
-
 		// A persisted session repository may legitimately be absent from the
 		// current task attachment set. Resolve that one exceptional repository,
 		// but never re-resolve the complete task set.
-		if err := e.ensureRepoLocalPath(ctx, repository); err != nil {
+		if err := e.ensureRepoLocalPathForSession(ctx, task.ID, session.ID, repository); err != nil {
 			return "", err
 		}
 	}
 
 	repositoryPath := repository.LocalPath
-	applyResumeRepoBasics(req, repository, repositoryPath)
+	applyResumeRepoBasics(req, repository, repositoryPath, shouldUseWorktree(req.ExecutorType))
+	for _, info := range allRepos {
+		if info != nil && info.RepositoryID == repositoryID {
+			req.ContributionDestination = info.ContributionDestination
+			break
+		}
+	}
 
 	if err := e.applyResumeCloneURL(req, repository, baseBranch); err != nil {
 		return "", err
@@ -1161,27 +2180,62 @@ func (e *Executor) resumeRepoSet(ctx context.Context, taskID string, resolved ..
 }
 
 // resolveResumeRepoIDAndBranch picks the primary repositoryID and baseBranch
-// for a resume, preferring the session's persisted values and falling back to
-// the task's primary repository when the session row was created before those
-// fields existed.
-func resolveResumeRepoIDAndBranch(task *v1.Task, session *models.TaskSession) (string, string) {
+// for a resume: the session's persisted preference when it is set, otherwise
+// the primary of the resolved task attachment set — its first entry, the same
+// definition GetPrimaryTaskRepository uses. A preference naming a repository
+// absent from the attachment set is used unchanged; resolution of that
+// repository is left to the caller's GetRepository fallback.
+func resolveResumeRepoIDAndBranch(session *models.TaskSession, allRepos []*repoInfo) (string, string) {
 	repositoryID := session.RepositoryID
-	if repositoryID == "" && len(task.Repositories) > 0 {
-		repositoryID = task.Repositories[0].RepositoryID
+	if repositoryID == "" && len(allRepos) > 0 && allRepos[0] != nil {
+		repositoryID = allRepos[0].RepositoryID
 	}
-	baseBranch := session.BaseBranch
-	if baseBranch == "" && len(task.Repositories) > 0 && task.Repositories[0].BaseBranch != "" {
-		baseBranch = task.Repositories[0].BaseBranch
-	}
-	return repositoryID, baseBranch
+	return repositoryID, session.BaseBranch
 }
 
-// applyResumeRepoBasics copies the repository's local path and setup script
-// onto the request. Pulled out of applyResumeRepoConfig so the parent's
-// cyclomatic complexity stays inside the lint budget.
-func applyResumeRepoBasics(req *LaunchAgentRequest, repository *models.Repository, repositoryPath string) {
+// resolveResumeBaseBranch prefers the current task-repository row when a
+// recovery action changed it after the session was created. A session keeps a
+// legacy primary base snapshot, but that snapshot must not overwrite an exact
+// task-repository recovery choice on the next launch. If the task has multiple
+// rows for the same repository, the legacy session value remains the only
+// unambiguous choice because TaskSession predates exact row identity.
+func resolveResumeBaseBranch(repositoryID, sessionBaseBranch string, repos []*repoInfo) string {
+	var match *repoInfo
+	for _, info := range repos {
+		if info == nil || info.RepositoryID != repositoryID {
+			continue
+		}
+		if match != nil {
+			return sessionBaseBranch
+		}
+		match = info
+	}
+	if match != nil && strings.TrimSpace(match.BaseBranch) != "" {
+		return match.BaseBranch
+	}
+	return sessionBaseBranch
+}
+
+// applyResumeRepoBasics copies the repository's local path, name, and setup
+// script onto the request. RepositoryPath/RepoName are stamped unconditionally
+// on every executor type, mirroring the initial-launch path
+// (applyRepositoryConfig): reconcileWorkspaceRepositories rejects a synthesized
+// spec whose RepositoryPath or RepoName is empty, and RepoSpecs() now
+// synthesizes a spec for any executor once req.RepositoryID is set. Pulled out
+// of applyResumeRepoConfig so the parent's cyclomatic complexity stays inside
+// the lint budget.
+func applyResumeRepoBasics(req *LaunchAgentRequest, repository *models.Repository, repositoryPath string, useWorktree bool) {
 	if repositoryPath != "" {
 		req.RepositoryURL = repositoryPath
+		req.RepositoryPath = repositoryPath
+	}
+	if useWorktree {
+		req.RepoName = repository.Name
+	} else {
+		req.RepoName = worktree.SanitizeRepoDirName(repository.Name)
+		if req.RepoName == "" {
+			req.RepoName = worktree.SanitizeRepoDirName(req.RepositoryID)
+		}
 	}
 	if repository.SetupScript != "" {
 		if req.Metadata == nil {
@@ -1196,10 +2250,19 @@ func applyResumeRepoBasics(req *LaunchAgentRequest, repository *models.Repositor
 // the prepare script's `git clone --branch <X>` resolves. Local executors skip
 // this path so LocalPreparer doesn't clobber the "use current state" UX.
 func (e *Executor) applyResumeCloneURL(req *LaunchAgentRequest, repository *models.Repository, baseBranch string) error {
-	if e.capabilities == nil || !e.capabilities.RequiresCloneURL(req.ExecutorType) {
+	if req.WorkspaceReuseRequired || e.capabilities == nil || !e.capabilities.RequiresCloneURL(req.ExecutorType) {
 		return nil
 	}
 	cloneURL := repositoryCloneURL(repository)
+	// Local Docker can bind-mount a task's checked-out source directory and
+	// clone it there, mirroring the initial-launch path (applyRepositoryConfig):
+	// RepositoryPath is authoritative for this launch even when the persisted
+	// generic repository has no provider identity or origin URL (as in
+	// workspace-source and E2E fixtures). Without this fallback, a repository
+	// attached with only a local path can launch initially but never resume.
+	if cloneURL == "" && req.ExecutorType == string(models.ExecutorTypeLocalDocker) {
+		cloneURL = dockerLocalCloneSource(req.RepositoryPath)
+	}
 	if cloneURL == "" {
 		return ErrNoCloneURL
 	}
@@ -1256,12 +2319,23 @@ func (e *Executor) applyResumeWorktreeConfig(
 	}
 	// Carry forward CheckoutBranch from task repository (e.g. PR head branch)
 	primaryTaskRepo, _ := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
+	if primaryTaskRepo != nil && primaryTaskRepo.RepositoryID == repositoryID {
+		req.TaskRepositoryID = primaryTaskRepo.ID
+	}
 	if primaryTaskRepo != nil && primaryTaskRepo.CheckoutBranch != "" {
 		req.CheckoutBranch = primaryTaskRepo.CheckoutBranch
 		req.PRNumber = prNumberFromMetadata(primaryTaskRepo.Metadata)
 	}
+	if primaryTaskRepo != nil && primaryTaskRepo.RepositoryID == repositoryID && req.ContributionDestination == nil {
+		if destination, found, err := models.LoadContributionDestination(primaryTaskRepo.Metadata); err == nil && found {
+			req.ContributionDestination = &destination
+		}
+	}
 	req.WorktreeBranchPrefix = repository.WorktreeBranchPrefix
 	req.WorktreeBranchTemplate = repository.WorktreeBranchTemplate
+	if primaryTaskRepo != nil && primaryTaskRepo.RepositoryID == repositoryID && primaryTaskRepo.BranchPolicyBranchTemplate != "" {
+		req.WorktreeBranchTemplate = primaryTaskRepo.BranchPolicyBranchTemplate
+	}
 	req.PullBeforeWorktree = repository.PullBeforeWorktree
 	// Worktree manager requires TaskDirName and RepoName. Mirror the
 	// initial-launch path (applyRepositoryConfig) so resumes of single-repo
@@ -1285,7 +2359,7 @@ func resolveResumeTaskDirName(existingEnv *models.TaskEnvironment, task *v1.Task
 	if existingEnv != nil && existingEnv.TaskDirName != "" {
 		return existingEnv.TaskDirName
 	}
-	return worktree.SemanticWorktreeName(task.Title, worktree.SmallSuffix(3))
+	return worktree.SemanticWorktreeName(task.Title, worktree.TaskDirSuffix(task.ID))
 }
 
 // persistResumeState updates the session row for a resume launch. For an agent
@@ -1295,16 +2369,41 @@ func resolveResumeTaskDirName(existingEnv *models.TaskEnvironment, task *v1.Task
 // lifecycle.persistExecutorRunning. The orchestrator's remaining
 // responsibility is the session-row state machine (STARTING / CompletedAt-clear).
 func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, startAgent bool) error {
+	return e.persistResumeStateWithOptions(ctx, taskID, session, startAgent, ResumeOptions{})
+}
+
+func (e *Executor) persistResumeStateWithOptions(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	startAgent bool,
+	options ResumeOptions,
+) error {
 	expectedState := session.State
+	completedResume := startAgent && options.AllowCompletedSessionResume &&
+		expectedState == models.TaskSessionStateCompleted
 	session.ErrorMessage = ""
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
 		session.CompletedAt = nil
+		if completedResume {
+			if session.Metadata == nil {
+				session.Metadata = make(map[string]interface{})
+			}
+			session.Metadata[models.SessionMetaKeyCompletionFollowUp] = true
+		}
 	}
 
 	var updateErr error
 	if startAgent {
-		updateErr = e.updateSessionStarting(ctx, taskID, session, expectedState, false)
+		updateErr = e.updateSessionStartingWithOptions(
+			ctx,
+			taskID,
+			session,
+			expectedState,
+			false,
+			completedResume,
+		)
 	} else {
 		updateErr = e.persistSessionFullRowIfCurrentState(ctx, session, expectedState)
 	}
@@ -1315,7 +2414,39 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 			zap.Error(updateErr))
 		return updateErr
 	}
+	if completedResume {
+		return e.persistCompletionFollowUpMarker(ctx, session.ID)
+	}
 	return nil
+}
+
+func (e *Executor) persistCompletionFollowUpMarker(ctx context.Context, sessionID string) error {
+	setter, ok := e.repo.(sessionMetadataKeyStateSetter)
+	if !ok {
+		return e.repo.SetSessionMetadataKey(
+			ctx,
+			sessionID,
+			models.SessionMetaKeyCompletionFollowUp,
+			true,
+		)
+	}
+	changed, err := setter.SetSessionMetadataKeyIfState(
+		ctx,
+		sessionID,
+		models.SessionMetaKeyCompletionFollowUp,
+		true,
+		models.TaskSessionStateStarting,
+	)
+	if err != nil {
+		return err
+	}
+	if changed {
+		return nil
+	}
+	return &SessionStateSupersededError{
+		SessionID: sessionID,
+		State:     models.TaskSessionStateStarting,
+	}
 }
 
 // prNumberFromMetadata extracts a GitHub PR number from a task_repository's
@@ -1351,12 +2482,24 @@ func prNumberFromMetadata(metadata map[string]interface{}) int {
 // Task state is managed by workflow triggers and stream handlers elsewhere; this callback
 // just logs successful process start.
 func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string, session *models.TaskSession, agentExecutionID string) {
-	e.runAgentProcessAsync(ctx, taskID, session.ID, agentExecutionID, func(updCtx context.Context) {
-		if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, session.ID); updateErr != nil {
-			e.logger.Warn("failed to update task state to IN_PROGRESS after resume start",
-				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID),
-				zap.Error(updateErr))
+	e.startAgentProcessOnResumeWithTaskPromotion(ctx, taskID, session, agentExecutionID, true)
+}
+
+func (e *Executor) startAgentProcessOnResumeWithTaskPromotion(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	agentExecutionID string,
+	promoteTask bool,
+) {
+	e.runAgentProcessAsyncWithObservation(ctx, taskID, session.ID, agentExecutionID, sessionCoresidencySiteResume, func(updCtx context.Context) {
+		if promoteTask {
+			if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, session.ID); updateErr != nil {
+				e.logger.Warn("failed to update task state to IN_PROGRESS after resume start",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID),
+					zap.Error(updateErr))
+			}
 		}
 		e.logger.Debug("agent resumed successfully",
 			zap.String("task_id", taskID),

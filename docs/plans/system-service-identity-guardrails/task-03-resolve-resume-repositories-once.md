@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-harden-origin-reconciliation"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 03: Resolve Resume Repositories Once

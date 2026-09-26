@@ -13,7 +13,7 @@ const preparation: PrepareGitHubAppImportResponse = {
   install_callback_url: "https://kandev.example/install/callback",
   personal_callback_url: "https://kandev.example/personal/callback",
   webhook_url: "https://kandev.example/webhook",
-  setup_url: "https://kandev.example/install/callback",
+  setup_url: "",
   permissions: { contents: "write" },
   events: ["installation"],
   expires_at: "2026-07-22T00:00:00Z",

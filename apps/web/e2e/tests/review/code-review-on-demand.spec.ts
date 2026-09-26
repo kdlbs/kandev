@@ -7,29 +7,19 @@ const REVIEWED_FILE = "review-target.ts";
 const SECOND_FILE = "review-second.ts";
 
 /**
- * Points the review runner at the mock agent.
+ * Points the review runner at the seeded agent profile.
  *
  * The built-in `code-review` utility agent seeds disabled, which makes the
- * resolver fall through to the user's default agent/model pair — so setting that
- * pair is all the on-demand path needs. It also keeps the spec honest about the
- * documented precedence rather than force-enabling a builtin behind the scenes.
+ * resolver fall through to the user's default profile. It also keeps the spec
+ * honest about the documented precedence rather than force-enabling a builtin.
  */
-async function configureReviewer(apiClient: {
-  listInferenceAgents: () => Promise<{
-    agents: Array<{ id: string; models: Array<{ id: string }> }>;
-  }>;
-  saveUserSettings: (settings: Record<string, unknown>) => Promise<void>;
-}) {
-  // The inference-agents endpoint is the right source: its `id` is the
-  // registered agent-type id the review runner resolves against. An agent row
-  // UUID from /api/v1/agents is rejected as "not inference-capable".
-  const { agents } = await apiClient.listInferenceAgents();
-  const agent = agents.find((candidate) => candidate.models.length > 0) ?? agents[0];
-  if (!agent) throw new Error("code review e2e: no inference-capable agent was discovered");
-  await apiClient.saveUserSettings({
-    default_utility_agent_id: agent.id,
-    default_utility_model: agent.models[0]?.id ?? "",
-  });
+async function configureReviewer(
+  apiClient: {
+    saveUserSettings: (settings: Record<string, unknown>) => Promise<void>;
+  },
+  profileId: string,
+) {
+  await apiClient.saveUserSettings({ default_utility_agent_profile_id: profileId });
 }
 
 test.describe("Native code review — on demand", () => {
@@ -41,7 +31,7 @@ test.describe("Native code review — on demand", () => {
     seedData,
     backend,
   }) => {
-    await configureReviewer(apiClient);
+    await configureReviewer(apiClient, seedData.agentProfileId);
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -77,14 +67,13 @@ test.describe("Native code review — on demand", () => {
     const changesTab = testPage.getByTestId("dockview-tab-changes");
     await expect(changesTab).toBeVisible();
     await changesTab.click();
-    await expect(testPage.getByTestId(`file-row-${REVIEWED_FILE}`)).toBeVisible({
+    await expect(
+      testPage.getByTestId("unstaged-file-tree").getByTestId(`file-row-${REVIEWED_FILE}`),
+    ).toBeVisible({
       timeout: 30_000,
     });
 
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible();
@@ -100,12 +89,14 @@ test.describe("Native code review — on demand", () => {
     await runButton.click();
 
     // Findings land as inline annotations in the diff.
-    const findingCard = dialog.getByTestId("review-finding-card").first();
+    const findingCard = dialog
+      .getByTestId("review-finding-card")
+      .filter({ hasText: "Unchecked value can be nil" });
     await expect(findingCard).toBeVisible({ timeout: 90_000 });
-    await expect(dialog.getByTestId("review-finding-title").first()).toContainText(
+    await expect(findingCard.getByTestId("review-finding-title")).toContainText(
       "Unchecked value can be nil",
     );
-    await expect(dialog.getByTestId("review-finding-severity-blocker").first()).toBeVisible();
+    await expect(findingCard.getByTestId("review-finding-severity-blocker")).toBeVisible();
     await expect(dialog.getByTestId("review-open-count")).toContainText("finding");
 
     await testPage.screenshot({
@@ -135,11 +126,9 @@ test.describe("Native code review — on demand", () => {
 
     // A finding is advisory: resolving it is the human's call and it persists.
     await findingCard.getByTestId("review-finding-resolve").click();
-    await expect(dialog.getByTestId("review-finding-card").first()).toHaveAttribute(
-      "data-finding-status",
-      "resolved",
-      { timeout: 15_000 },
-    );
+    await expect(findingCard).toHaveAttribute("data-finding-status", "resolved", {
+      timeout: 15_000,
+    });
 
     await testPage.screenshot({
       path: "e2e-artifacts/review-03-resolved.png",
@@ -153,18 +142,21 @@ test.describe("Native code review — on demand", () => {
     const changesTabAfterReload = testPage.getByTestId("dockview-tab-changes");
     await expect(changesTabAfterReload).toBeVisible({ timeout: 30_000 });
     await changesTabAfterReload.click();
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const reopened = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(reopened).toBeVisible();
-    await expect(reopened.getByTestId("review-finding-card").first()).toHaveAttribute(
-      "data-finding-status",
-      "resolved",
-      { timeout: 30_000 },
+    // The dialog renders only findings that can be anchored to the refreshed
+    // diff. Verify the persisted disposition through the same task-review
+    // snapshot used by the page backfill so an anchor refresh cannot hide a
+    // valid status transition from this regression check.
+    const reviewAfterReload = await apiClient.wsRequest<{
+      findings: Array<{ title: string; status: string }>;
+    }>("task.review.get", { task_id: task.id });
+    const resolvedFinding = reviewAfterReload.findings.find(
+      (finding) => finding.title === "Unchecked value can be nil",
     );
+    expect(resolvedFinding?.status).toBe("resolved");
   });
 
   test("explains how to configure a reviewer when none is available", async ({
@@ -178,6 +170,7 @@ test.describe("Native code review — on demand", () => {
     await apiClient.saveUserSettings({
       default_utility_agent_id: "",
       default_utility_model: "",
+      default_utility_agent_profile_id: "",
     });
 
     const task = await apiClient.createTaskWithAgent(
@@ -204,13 +197,12 @@ test.describe("Native code review — on demand", () => {
     git.createFile(REVIEWED_FILE, "export const unreviewable = 1;\n");
 
     await testPage.getByTestId("dockview-tab-changes").click();
-    await expect(testPage.getByTestId(`file-row-${REVIEWED_FILE}`)).toBeVisible({
+    await expect(
+      testPage.getByTestId("unstaged-file-tree").getByTestId(`file-row-${REVIEWED_FILE}`),
+    ).toBeVisible({
       timeout: 30_000,
     });
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible();

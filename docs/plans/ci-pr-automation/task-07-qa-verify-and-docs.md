@@ -6,7 +6,7 @@ wave: 9
 depends_on:
   - "17-final-lifecycle-transition-coverage"
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 07: QA Verify and Docs

@@ -1,8 +1,13 @@
 # 0011: Transient provider errors (529 Overloaded) auto-retry with visible backoff
 
-**Status:** accepted
+**Status:** superseded by ADR-2026-08-08-provider-neutral-agent-error-recovery
 **Date:** 2026-05-30
 **Area:** backend, frontend
+
+Superseded by
+[ADR-2026-08-08-provider-neutral-agent-error-recovery](2026-08-08-provider-neutral-agent-error-recovery.md),
+which retains visible transient retry while generalizing classification and
+recovery policy across agent and provider types.
 
 ## Context
 

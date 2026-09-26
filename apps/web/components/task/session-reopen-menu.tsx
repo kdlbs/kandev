@@ -17,6 +17,8 @@ import { markSessionTabUserActivationIntent } from "@/components/task/session-ta
 import { useSessionPendingInput } from "@/hooks/use-task-pending-input";
 import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type AgentInfo = { label: string; agentName: string };
 
@@ -34,13 +36,20 @@ export function shouldShowReopenStateIcon(
   foregroundActivity?: ForegroundActivity | null,
   hasPendingClarification = false,
   hasPendingPermission = false,
+  parkedOnBackgroundWork = false,
 ): boolean {
   if (state === "STARTING") return false;
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
   if (canRequestInput && (hasPendingClarification || hasPendingPermission)) return true;
   if (canRequestInput && foregroundActivity === "background") return true;
+  if (canRequestInput && parkedOnBackgroundWork) return true;
   if (canRequestInput) return false;
   return true;
+}
+
+/** Dockview panel id for a session tab — a protocol identifier, not copy. */
+function sessionPanelId(id: string): string {
+  return `session:${id}`;
 }
 
 function resolveAgentInfo(
@@ -52,7 +61,7 @@ function resolveAgentInfo(
   // A user-supplied session name wins over the derived profile label,
   // matching the session tab title precedence (resolveSessionTabTitle).
   if (session.name) return { label: session.name, agentName };
-  if (!profile) return { label: "Unknown agent", agentName: "" };
+  if (!profile) return { label: t("task:unknownAgent"), agentName: "" };
   const parts = profile.label.split(" \u2022 ");
   return { label: parts[1] || parts[0] || profile.label, agentName };
 }
@@ -75,6 +84,7 @@ export function SessionReopenMenuItems({
    */
   onNewSession?: () => void;
 }) {
+  const { t } = useTranslation();
   const { sessions } = useTaskSessions(taskId);
   const api = useDockviewStore((s) => s.api);
   const centerGroupId = useDockviewStore((s) => s.centerGroupId);
@@ -116,7 +126,9 @@ export function SessionReopenMenuItems({
 
   return (
     <>
-      <DropdownMenuLabel className="text-xs text-muted-foreground">Agents</DropdownMenuLabel>
+      <DropdownMenuLabel className="text-xs text-muted-foreground">
+        {t("common:agents")}
+      </DropdownMenuLabel>
       {onNewSession && (
         <DropdownMenuItem
           onClick={onNewSession}
@@ -124,21 +136,24 @@ export function SessionReopenMenuItems({
           data-testid="new-session-button"
         >
           <IconMessagePlus className="h-3.5 w-3.5 shrink-0" />
-          <span className="flex-1 truncate">New Agent</span>
+          <span className="flex-1 truncate">{t("task:newAgent")}</span>
         </DropdownMenuItem>
       )}
-      {sortedSessions.map((session, index) => (
-        <SessionReopenMenuItem
-          key={session.id}
-          session={session}
-          info={resolveAgentInfo(session, profilesById)}
-          index={index}
-          isPrimary={session.id === primarySessionId}
-          isOpen={Boolean(api?.getPanel(`session:${session.id}`))}
-          onClick={handleClick}
-          groupId={groupId}
-        />
-      ))}
+      {sortedSessions.map((session, index) => {
+        const panelId = sessionPanelId(session.id);
+        return (
+          <SessionReopenMenuItem
+            key={session.id}
+            session={session}
+            info={resolveAgentInfo(session, profilesById)}
+            index={index}
+            isPrimary={session.id === primarySessionId}
+            isOpen={Boolean(api?.getPanel(panelId))}
+            onClick={handleClick}
+            groupId={groupId}
+          />
+        );
+      })}
       <DropdownMenuSeparator />
     </>
   );
@@ -186,15 +201,15 @@ function SessionReopenMenuItem({
         session.foreground_activity,
         pending.clarification,
         pending.permission,
+        session.parked_on_background_work,
       ) && (
         <span className="shrink-0">
-          {getSessionStateIcon(
-            session.state,
-            "h-3 w-3",
-            session.foreground_activity,
-            pending.clarification,
-            pending.permission,
-          )}
+          {getSessionStateIcon(session.state, "h-3 w-3", {
+            foregroundActivity: session.foreground_activity,
+            hasPendingClarification: pending.clarification,
+            hasPendingPermission: pending.permission,
+            parkedOnBackgroundWork: session.parked_on_background_work,
+          })}
         </span>
       )}
     </DropdownMenuItem>

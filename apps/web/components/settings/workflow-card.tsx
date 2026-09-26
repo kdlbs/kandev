@@ -12,11 +12,14 @@ import type { WorkflowReplayCycleDiagnostic } from "@/lib/workflows/replay-cycle
 import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
-import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
 import { WorkflowPipelineEditor } from "@/components/settings/workflow-pipeline-editor";
 import { listWorkflowStepsAction } from "@/app/actions/workspaces";
 import { HelpTip } from "./workflow-pipeline-editor-helpers";
-import { WorkflowDeleteDialog, StepDeleteDialog } from "./workflow-card-dialogs";
+import {
+  WorkflowCardDialogs,
+  type StepDeleteState,
+  type WorkflowDeleteState,
+} from "./workflow-card-dialogs-content";
 import {
   useWorkflowStepActions,
   useWorkflowDeleteHandlers,
@@ -27,8 +30,10 @@ import { SettingsCard } from "./settings-card";
 import { isWorkflowFieldDirty } from "./workflow-dirty-state";
 import { WorkflowSyncedBadge } from "./workflow-synced-badge";
 import { useWorkflowMutationGuard } from "./workflow-mutation-guard";
-import { WorkflowCycleGuardDialog } from "./workflow-cycle-diagnostic";
 import { useWorkflowDraftContributor } from "./use-workflow-draft-contributor";
+import { WorkflowPromptSection } from "./workflow-prompt-section";
+import { WorkflowDescriptionField } from "./workflow-description-field";
+import { useWorkflowDuplication } from "@/app/settings/workspace/use-workflow-duplication";
 
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
 
@@ -39,12 +44,16 @@ type WorkflowCardProps = {
   isOrderDirty?: boolean;
   initialWorkflowSteps?: WorkflowStep[];
   otherWorkflows?: Workflow[];
+  /** Workflows in the dedicated Improve Kandev workspace are read-only. */
+  isImproveWorkspace?: boolean;
   onUpdateWorkflow: (updates: {
     name?: string;
     description?: string;
+    prompt?: string;
     agent_profile_id?: string;
   }) => void;
   onDeleteWorkflow: () => Promise<unknown>;
+  onDuplicateWorkflow: (steps: WorkflowStep[]) => void;
   onWorkflowSaved: (params: {
     clientWorkflow: Workflow;
     submittedWorkflow: Workflow;
@@ -109,23 +118,6 @@ function useWorkflowSteps(
   };
 }
 
-type WorkflowDeleteState = {
-  deleteOpen: boolean;
-  setDeleteOpen: (v: boolean) => void;
-  workflowTaskCount: number | null;
-  setWorkflowTaskCount: (v: number | null) => void;
-  workflowDeleteLoading: boolean;
-  setWorkflowDeleteLoading: (v: boolean) => void;
-  targetWorkflowId: string;
-  setTargetWorkflowId: (v: string) => void;
-  targetWorkflowSteps: WorkflowStep[];
-  setTargetWorkflowSteps: (v: WorkflowStep[]) => void;
-  targetStepId: string;
-  setTargetStepId: (v: string) => void;
-  migrateLoading: boolean;
-  setMigrateLoading: (v: boolean) => void;
-};
-
 function useWorkflowDeleteState(): WorkflowDeleteState {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [workflowTaskCount, setWorkflowTaskCount] = useState<number | null>(null);
@@ -152,21 +144,6 @@ function useWorkflowDeleteState(): WorkflowDeleteState {
   };
 }
 
-type StepDeleteState = {
-  stepDeleteOpen: boolean;
-  setStepDeleteOpen: (v: boolean) => void;
-  stepToDelete: string | null;
-  setStepToDelete: (v: string | null) => void;
-  stepTaskCount: number | null;
-  setStepTaskCount: (v: number | null) => void;
-  targetStepForMigration: string;
-  setTargetStepForMigration: (v: string) => void;
-  stepMigrateLoading: boolean;
-  setStepMigrateLoading: (v: boolean) => void;
-  stepDeletePending: boolean;
-  setStepDeletePending: (v: boolean) => void;
-};
-
 function useStepDeleteState(): StepDeleteState {
   const [stepDeleteOpen, setStepDeleteOpen] = useState(false);
   const [stepToDelete, setStepToDelete] = useState<string | null>(null);
@@ -190,34 +167,13 @@ function useStepDeleteState(): StepDeleteState {
   };
 }
 
-type WorkflowCardDialogsProps = {
-  wfDel: WorkflowDeleteState;
-  otherWorkflows: Workflow[];
-  deleteWorkflowLoading: boolean;
-  wfDeleteHandlers: {
-    handleDeleteWorkflow: () => Promise<void>;
-    handleMigrateAndDeleteWorkflow: () => Promise<void>;
-  };
-  exportOpen: boolean;
-  setExportOpen: (open: boolean) => void;
-  exportYaml: string;
-  stepDel: StepDeleteState;
-  stepToDeleteName: string;
-  stepsForStepMigration: WorkflowStep[];
-  stepDeleteHandlers: {
-    handleMigrateAndDeleteStep: () => Promise<void>;
-    handleDeleteStepAndTasks: () => Promise<void>;
-  };
-  hasUnsavedChanges: boolean;
-  mutationGuard: ReturnType<typeof useWorkflowMutationGuard>;
-};
-
 type WorkflowCardBodyProps = {
   workflow: Workflow;
   savedWorkflow?: Workflow;
   onUpdateWorkflow: (updates: {
     name?: string;
     description?: string;
+    prompt?: string;
     agent_profile_id?: string;
   }) => void;
   workflowLoading: boolean;
@@ -225,6 +181,8 @@ type WorkflowCardBodyProps = {
   savedWorkflowSteps: WorkflowStep[];
   diagnostics: WorkflowReplayCycleDiagnostic[];
   mutationPending: boolean;
+  /** Read-only reason label: Improve Kandev workspace vs GitHub sync. */
+  isImproveWorkspace?: boolean;
   stepActions: {
     handleUpdateWorkflowStep: (id: string, updates: Partial<WorkflowStep>) => Promise<void>;
     handleAddWorkflowStep: () => Promise<void>;
@@ -232,7 +190,88 @@ type WorkflowCardBodyProps = {
     handleReorderWorkflowSteps: (steps: WorkflowStep[]) => Promise<void>;
   };
   readOnly: boolean;
+  onSessionConfigResolutionPendingChange: (pending: boolean) => void;
 };
+
+function WorkflowNameField({
+  workflow,
+  savedWorkflow,
+  onUpdateWorkflow,
+  readOnly,
+  isImproveWorkspace,
+}: Pick<
+  WorkflowCardBodyProps,
+  "workflow" | "savedWorkflow" | "onUpdateWorkflow" | "readOnly" | "isImproveWorkspace"
+>) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex-1 space-y-1.5">
+      <Label className="flex items-center gap-2">
+        <span>{t("workflows:workflowName")}</span>
+        {readOnly && workflow.source === "github" && (
+          <WorkflowSyncedBadge sourcePath={workflow.source_path} />
+        )}
+        {readOnly && (
+          <span className="text-xs text-muted-foreground">
+            {isImproveWorkspace
+              ? t("workflows:readOnlyManagedByImproveKandev")
+              : t("workflows:readOnlyManagedBySync")}
+          </span>
+        )}
+      </Label>
+      <Input
+        value={workflow.name}
+        onChange={(e) => onUpdateWorkflow({ name: e.target.value })}
+        disabled={readOnly}
+        data-settings-dirty={isWorkflowFieldDirty(workflow, savedWorkflow, "name")}
+      />
+    </div>
+  );
+}
+
+function WorkflowAgentProfileField({
+  workflow,
+  savedWorkflow,
+  onUpdateWorkflow,
+  readOnly,
+}: Pick<WorkflowCardBodyProps, "workflow" | "savedWorkflow" | "onUpdateWorkflow" | "readOnly">) {
+  const { t } = useTranslation();
+  const healthyProfiles = useHealthyAgentProfiles(workflow.agent_profile_id);
+
+  return (
+    <div className="w-full space-y-1.5 md:w-[240px] md:shrink-0">
+      <Label className="flex items-center gap-1">
+        <span>{t("workflows:agentProfile")}</span>
+        <HelpTip text={t("workflows:agentProfileHelp")} />
+      </Label>
+      <Select
+        value={workflow.agent_profile_id || "none"}
+        onValueChange={(value) =>
+          onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
+        }
+        disabled={readOnly}
+      >
+        <SelectTrigger
+          className="w-full cursor-pointer"
+          data-testid="workflow-agent-profile-select"
+          data-settings-dirty={isWorkflowFieldDirty(workflow, savedWorkflow, "agent_profile_id")}
+        >
+          <SelectValue placeholder={t("workflows:noneUseTaskDefault")} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none" className="cursor-pointer">
+            {t("workflows:noneUseTaskDefault")}
+          </SelectItem>
+          {healthyProfiles.map((p) => (
+            <SelectItem key={p.id} value={p.id} className="cursor-pointer">
+              {p.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
 
 function WorkflowCardBody({
   workflow,
@@ -243,69 +282,43 @@ function WorkflowCardBody({
   savedWorkflowSteps,
   diagnostics,
   mutationPending,
+  isImproveWorkspace,
   stepActions,
   readOnly,
+  onSessionConfigResolutionPendingChange,
 }: WorkflowCardBodyProps) {
   const { t } = useTranslation();
-  const healthyProfiles = useHealthyAgentProfiles(workflow.agent_profile_id);
 
   return (
     <>
       <Label>{t("workflows:workflowDetails")}</Label>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-2">
-        <div className="flex-1 space-y-1.5">
-          <Label className="flex items-center gap-2">
-            <span>{t("workflows:workflowName")}</span>
-            {readOnly && <WorkflowSyncedBadge sourcePath={workflow.source_path} />}
-            {readOnly && (
-              <span className="text-xs text-muted-foreground">
-                {t("workflows:readOnlyManagedBySync")}
-              </span>
-            )}
-          </Label>
-          <Input
-            value={workflow.name}
-            onChange={(e) => onUpdateWorkflow({ name: e.target.value })}
-            disabled={readOnly}
-            data-settings-dirty={isWorkflowFieldDirty(workflow, savedWorkflow, "name")}
-          />
-        </div>
-        <div className="w-full space-y-1.5 sm:w-[240px] sm:shrink-0">
-          <Label className="flex items-center gap-1">
-            <span>{t("workflows:agentProfile")}</span>
-            <HelpTip text={t("workflows:agentProfileHelp")} />
-          </Label>
-          <Select
-            value={workflow.agent_profile_id || "none"}
-            onValueChange={(value) =>
-              onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
-            }
-            disabled={readOnly}
-          >
-            <SelectTrigger
-              className="w-full cursor-pointer"
-              data-testid="workflow-agent-profile-select"
-              data-settings-dirty={isWorkflowFieldDirty(
-                workflow,
-                savedWorkflow,
-                "agent_profile_id",
-              )}
-            >
-              <SelectValue placeholder={t("workflows:noneUseTaskDefault")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none" className="cursor-pointer">
-                {t("workflows:noneUseTaskDefault")}
-              </SelectItem>
-              {healthyProfiles.map((p) => (
-                <SelectItem key={p.id} value={p.id} className="cursor-pointer">
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:gap-2">
+        <WorkflowNameField
+          workflow={workflow}
+          savedWorkflow={savedWorkflow}
+          onUpdateWorkflow={onUpdateWorkflow}
+          readOnly={readOnly}
+          isImproveWorkspace={isImproveWorkspace}
+        />
+        <WorkflowAgentProfileField
+          workflow={workflow}
+          savedWorkflow={savedWorkflow}
+          onUpdateWorkflow={onUpdateWorkflow}
+          readOnly={readOnly}
+        />
       </div>
+      <WorkflowDescriptionField
+        workflow={workflow}
+        savedWorkflow={savedWorkflow}
+        readOnly={readOnly}
+        onUpdate={(description) => onUpdateWorkflow({ description })}
+      />
+      <WorkflowPromptSection
+        workflow={workflow}
+        savedWorkflow={savedWorkflow}
+        readOnly={readOnly}
+        onUpdate={(prompt) => onUpdateWorkflow({ prompt })}
+      />
       <div className="space-y-2">
         <Label>{t("workflows:workflowSteps")}</Label>
         {workflowLoading ? (
@@ -320,72 +333,10 @@ function WorkflowCardBody({
             onRemoveStep={stepActions.handleRemoveWorkflowStep}
             onReorderSteps={stepActions.handleReorderWorkflowSteps}
             readOnly={mutationPending || readOnly}
+            onSessionConfigResolutionPendingChange={onSessionConfigResolutionPendingChange}
           />
         )}
       </div>
-    </>
-  );
-}
-
-function WorkflowCardDialogs({
-  wfDel,
-  otherWorkflows,
-  deleteWorkflowLoading,
-  wfDeleteHandlers,
-  exportOpen,
-  setExportOpen,
-  exportYaml,
-  stepDel,
-  stepToDeleteName,
-  stepsForStepMigration,
-  stepDeleteHandlers,
-  hasUnsavedChanges,
-  mutationGuard,
-}: WorkflowCardDialogsProps) {
-  const { t } = useTranslation();
-  return (
-    <>
-      <WorkflowDeleteDialog
-        open={wfDel.deleteOpen}
-        onOpenChange={wfDel.setDeleteOpen}
-        workflowTaskCount={wfDel.workflowTaskCount}
-        otherWorkflows={otherWorkflows}
-        targetWorkflowId={wfDel.targetWorkflowId}
-        setTargetWorkflowId={wfDel.setTargetWorkflowId}
-        targetWorkflowSteps={wfDel.targetWorkflowSteps}
-        targetStepId={wfDel.targetStepId}
-        setTargetStepId={wfDel.setTargetStepId}
-        migrateLoading={wfDel.migrateLoading}
-        deleteLoading={deleteWorkflowLoading}
-        onDelete={wfDeleteHandlers.handleDeleteWorkflow}
-        onMigrateAndDelete={wfDeleteHandlers.handleMigrateAndDeleteWorkflow}
-        hasUnsavedChanges={hasUnsavedChanges}
-      />
-      <WorkflowExportDialog
-        open={exportOpen}
-        onOpenChange={setExportOpen}
-        title={t("workflows:exportWorkflowTitle")}
-        content={exportYaml}
-      />
-      <StepDeleteDialog
-        open={stepDel.stepDeleteOpen}
-        onOpenChange={stepDel.setStepDeleteOpen}
-        stepName={stepToDeleteName}
-        stepTaskCount={stepDel.stepTaskCount}
-        stepsForMigration={stepsForStepMigration}
-        targetStep={stepDel.targetStepForMigration}
-        setTargetStep={stepDel.setTargetStepForMigration}
-        loading={stepDel.stepMigrateLoading}
-        pending={stepDel.stepDeletePending}
-        onMigrateAndDelete={stepDeleteHandlers.handleMigrateAndDeleteStep}
-        onDeleteAndTasks={stepDeleteHandlers.handleDeleteStepAndTasks}
-        hasUnsavedChanges={hasUnsavedChanges}
-      />
-      <WorkflowCycleGuardDialog
-        proposal={mutationGuard.proposal}
-        onCancel={mutationGuard.cancelProposal}
-        onConfirm={mutationGuard.confirmProposal}
-      />
     </>
   );
 }
@@ -401,7 +352,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
   // Workflows synced from a configured GitHub repo are read-only: the
   // backend rejects definition mutations with a 409, so the UI disables the
   // matching affordances (name/agent-profile/steps/delete) up front.
-  const readOnly = workflow.source === "github";
+  const readOnly = workflow.source === "github" || props.isImproveWorkspace === true;
   const deleteWorkflowRequest = useRequest(onDeleteWorkflow);
   const {
     workflowSteps,
@@ -413,6 +364,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
   } = useWorkflowSteps(workflow.id, initialWorkflowSteps, toast);
   const isNewWorkflow = workflow.id.startsWith(TEMP_WORKFLOW_PREFIX);
   const mutationGuard = useWorkflowMutationGuard(workflowSteps);
+  const [sessionConfigResolutionPending, setSessionConfigResolutionPending] = useState(false);
   const stepActions = useWorkflowStepActions({
     workflow,
     isNewWorkflow,
@@ -439,6 +391,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
     onWorkflowSaved: props.onWorkflowSaved,
     onDiscardWorkflow: props.onDiscardWorkflow,
     onDeleteWorkflow: props.onDeleteWorkflow,
+    isSessionConfigResolutionPending: sessionConfigResolutionPending,
   });
   const wfDeleteHandlers = useWorkflowDeleteHandlers({
     workflow,
@@ -476,6 +429,8 @@ function useWorkflowCardState(props: WorkflowCardProps) {
     stepDeleteHandlers,
     stepsForStepMigration,
     ...workflowDraft,
+    sessionConfigResolutionPending,
+    setSessionConfigResolutionPending,
   };
 }
 
@@ -484,10 +439,19 @@ export function WorkflowCard(props: WorkflowCardProps) {
   const { workflow, savedWorkflow, otherWorkflows = [], onUpdateWorkflow } = props;
   const s = useWorkflowCardState(props);
   const visibleSavedSteps = savedWorkflow ? s.savedWorkflowSteps : [];
+  const duplicate = useWorkflowDuplication({
+    workflow,
+    hasUnsavedChanges: s.hasUnsavedChanges,
+    mutationPending: s.mutationGuard.isMutationPending,
+    isImproveWorkspace: props.isImproveWorkspace,
+    onDuplicateWorkflow: props.onDuplicateWorkflow,
+    toast: s.toast,
+  });
 
   return (
     <SettingsCard
       isDirty={s.hasUnsavedChanges || props.isOrderDirty}
+      discoveryTargetId={`workflow-card-${workflow.id}`}
       data-testid={`workflow-card-${workflow.id}`}
     >
       <CardContent className="pt-6">
@@ -501,8 +465,10 @@ export function WorkflowCard(props: WorkflowCardProps) {
             savedWorkflowSteps={visibleSavedSteps}
             diagnostics={s.mutationGuard.diagnostics}
             mutationPending={s.mutationGuard.isMutationPending}
+            isImproveWorkspace={props.isImproveWorkspace}
             stepActions={s.stepActions}
             readOnly={s.readOnly}
+            onSessionConfigResolutionPendingChange={s.setSessionConfigResolutionPending}
           />
           <WorkflowCardHeaderActions
             workflowId={workflow.id}
@@ -513,6 +479,7 @@ export function WorkflowCard(props: WorkflowCardProps) {
               if (workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)) await s.removeDraftWorkflow();
               else await s.wfDeleteHandlers.handleDeleteWorkflowClick();
             }}
+            onDuplicateClick={duplicate.handleDuplicateWorkflow}
             deleteDisabled={
               s.mutationGuard.isMutationPending ||
               s.deleteWorkflowRequest.isLoading ||
@@ -522,6 +489,9 @@ export function WorkflowCard(props: WorkflowCardProps) {
             }
             readOnly={s.readOnly}
             exportDisabled={workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)}
+            duplicateDisabled={duplicate.duplicateDisabled}
+            duplicateDisabledReason={duplicate.duplicateDisabledReason}
+            duplicateLoading={duplicate.duplicateLoading}
           />
         </div>
       </CardContent>

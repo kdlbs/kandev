@@ -51,6 +51,9 @@ func RegisterSessionStreamNotifications(ctx context.Context, eventBus bus.EventB
 	b.subscribe(eventBus, events.BuildSessionModeWildcardSubject(), ws.ActionSessionModeChanged)
 	b.subscribe(eventBus, events.BuildAgentCapabilitiesWildcardSubject(), ws.ActionSessionAgentCapabilities)
 	b.subscribe(eventBus, events.BuildSessionModelsWildcardSubject(), ws.ActionSessionModelsUpdated)
+	b.subscribe(eventBus, events.BuildSessionModelFallbackWildcardSubject(), ws.ActionSessionModelFallback)
+	b.subscribe(eventBus, events.BuildSessionModelSelectionWarningWildcardSubject(), ws.ActionSessionModelSelectionWarning)
+	b.subscribe(eventBus, events.BuildSessionLaunchWarningWildcardSubject(), ws.ActionSessionLaunchWarning)
 	b.subscribe(eventBus, events.BuildSessionMCPStatusWildcardSubject(), ws.ActionSessionMCPStatusUpdated)
 	b.subscribe(eventBus, events.BuildSessionInfoWildcardSubject(), ws.ActionSessionInfoUpdated)
 	b.subscribe(eventBus, events.BuildSessionTodosWildcardSubject(), ws.ActionSessionTodosUpdated)
@@ -91,6 +94,10 @@ func (b *SessionStreamBroadcaster) subscribe(eventBus bus.EventBus, subject, act
 		msg, err := ws.NewNotification(action, event.Data)
 		if err != nil {
 			b.logger.Error("failed to build websocket notification", zap.String("action", action), zap.Error(err))
+			return nil
+		}
+		if action == ws.ActionSessionLaunchWarning {
+			b.hub.rememberAndBroadcastSessionLaunchWarning(sessionID, msg)
 			return nil
 		}
 		b.hub.BroadcastToSession(sessionID, msg)

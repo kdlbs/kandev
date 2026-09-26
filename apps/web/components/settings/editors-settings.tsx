@@ -1,23 +1,17 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import {
-  IconEdit,
-  IconTrash,
-  IconChevronDown,
-  IconExternalLink,
-  IconInfoCircle,
-} from "@tabler/icons-react";
+import { IconEdit, IconTrash, IconChevronDown, IconExternalLink } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Checkbox } from "@kandev/ui/checkbox";
 import { Separator } from "@kandev/ui/separator";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { Switch } from "@kandev/ui/switch";
 import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
+import { SettingsGroup } from "@/components/settings/settings-group";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { EditableCard } from "@/components/settings/editable-card";
+import { LspStatusLocationSetting } from "@/components/settings/lsp-status-location-setting";
 import {
   EditorForm,
   type EditorFormState,
@@ -25,7 +19,7 @@ import {
   formStateFromEditor,
   getCustomEditorSummary,
 } from "@/components/settings/editor-form";
-import { LSP_DEFAULT_CONFIGS } from "@/lib/lsp/lsp-client-manager";
+import { LSP_DEFAULT_CONFIGS } from "@/lib/lsp/lsp-client-config";
 import type { EditorOption } from "@/lib/types/http";
 import type { RequestStatus } from "@/lib/http/use-request";
 import {
@@ -42,8 +36,11 @@ import {
   type EditorsSettingsState,
 } from "@/components/settings/editors-settings-state";
 import { isDraftEntryDirty, isEditorsSettingsDirty } from "./settings-dirty";
+import { LspLanguageCards } from "./lsp-language-cards";
 import { LSP_LANGUAGE_OPTIONS } from "./lsp-language-options";
 import { Trans, useTranslation } from "react-i18next";
+import { settingsActionClassName } from "@/components/settings/settings-control";
+import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 
 /**
  * Code identifiers rendered inside `<Trans>` copy. They are passed as
@@ -51,98 +48,8 @@ import { Trans, useTranslation } from "react-i18next";
  * is part of the message a translator edits, and translating a command name or
  * an LSP method breaks the thing it names.
  */
-const NPM_INSTALL_COMMAND = "npm install";
 const LSP_CONFIG_METHOD = "workspace/configuration";
-
-type LspLanguageCardsProps = {
-  lspAutoStartLanguages: string[];
-  lspAutoInstallLanguages: string[];
-  baselineLspAutoStart: string[];
-  baselineLspAutoInstall: string[];
-  toggleAutoStart: (langId: string, checked: boolean) => void;
-  toggleAutoInstall: (langId: string, checked: boolean) => void;
-};
-
-function LspLanguageCards({
-  lspAutoStartLanguages,
-  lspAutoInstallLanguages,
-  baselineLspAutoStart,
-  baselineLspAutoInstall,
-  toggleAutoStart,
-  toggleAutoInstall,
-}: LspLanguageCardsProps) {
-  const { t } = useTranslation();
-  return (
-    <div className="space-y-3">
-      <div>
-        <div className="text-sm font-medium text-foreground">{t("settings:languageServers")}</div>
-        <div className="text-xs text-muted-foreground">
-          {t("settings:autoStartLanguageServersWhenOpening")}
-          <br />
-          <Trans
-            i18nKey="settings:whenEnabledInstallYourProjectS"
-            values={{ command: NPM_INSTALL_COMMAND }}
-          >
-            When enabled, install your project&apos;s dependencies (e.g.{" "}
-            <code className="text-[11px] bg-muted px-1 rounded">{NPM_INSTALL_COMMAND}</code> via
-            repository setup scripts) to avoid missing type errors.
-          </Trans>
-        </div>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {LSP_LANGUAGE_OPTIONS.map((lang) => {
-          const autoStartDirty =
-            lspAutoStartLanguages.includes(lang.id) !== baselineLspAutoStart.includes(lang.id);
-          const autoInstallDirty =
-            lspAutoInstallLanguages.includes(lang.id) !== baselineLspAutoInstall.includes(lang.id);
-          return (
-            <div
-              key={lang.id}
-              className="rounded-lg border border-border/60 bg-background px-4 py-3 space-y-2.5"
-              data-settings-dirty={autoStartDirty || autoInstallDirty}
-            >
-              <div>
-                <div className="text-sm font-medium text-foreground">{lang.label}</div>
-                <div className="text-xs text-muted-foreground">{lang.binary}</div>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">{t("settings:autoStart")}</span>
-                <Switch
-                  checked={lspAutoStartLanguages.includes(lang.id)}
-                  onCheckedChange={(checked) => toggleAutoStart(lang.id, checked === true)}
-                  data-settings-dirty={autoStartDirty}
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id={`lsp-install-${lang.id}`}
-                  checked={lspAutoInstallLanguages.includes(lang.id)}
-                  onCheckedChange={(checked) => toggleAutoInstall(lang.id, checked === true)}
-                  className="h-3.5 w-3.5"
-                  data-settings-dirty={autoInstallDirty}
-                />
-                <label
-                  htmlFor={`lsp-install-${lang.id}`}
-                  className="text-xs text-muted-foreground cursor-pointer"
-                >
-                  {t("settings:autoInstallIfNotFound")}
-                </label>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-[260px] text-xs">
-                    {t(lang.installHintKey, lang.installHintValues)}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+const EDITORS_TITLE_KEY = "settings:editors";
 
 type LspServerConfigSectionProps = {
   lspConfigStrings: Record<string, string>;
@@ -299,21 +206,21 @@ function CustomEditorRow({
       )}
       renderPreview={({ open }) => (
         <div
-          className="rounded-lg border border-border/70 bg-background p-4 flex items-center justify-between gap-3 cursor-pointer"
+          className="rounded-lg border border-border/70 bg-background p-4 flex flex-col gap-3 cursor-pointer md:flex-row md:items-center md:justify-between"
           onClick={open}
         >
           <div className="min-w-0">
-            <div className="font-medium text-sm text-foreground truncate">{editor.name}</div>
+            <div className="break-words font-medium text-sm text-foreground">{editor.name}</div>
             <div className="text-xs text-muted-foreground truncate">
               {getCustomEditorSummary(t, editor)}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="cursor-pointer"
+              className={settingsActionClassName("cursor-pointer")}
               onClick={(event) => {
                 event.stopPropagation();
                 open();
@@ -326,7 +233,7 @@ function CustomEditorRow({
               type="button"
               variant="outline"
               size="sm"
-              className="cursor-pointer"
+              className={settingsActionClassName("cursor-pointer")}
               onClick={(event) => {
                 event.stopPropagation();
                 void deleteRequest.run(editor.id);
@@ -355,9 +262,14 @@ function CustomEditorsList({
   const { t } = useTranslation();
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div className="text-sm font-medium text-foreground">{t("settings:customEditors")}</div>
-        <Button type="button" variant="outline" onClick={() => setIsAdding(true)}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setIsAdding(true)}
+          className={settingsActionClassName()}
+        >
           {t("settings:addCustomEditor")}
         </Button>
       </div>
@@ -396,6 +308,8 @@ function CustomEditorsList({
 }
 
 type EditorsSectionProps = {
+  embedded: boolean;
+  showHeading?: boolean;
   defaultOptions: ComboboxOption[];
   defaultEditorId: string;
   baselineDefaultId: string;
@@ -413,6 +327,8 @@ type EditorsSectionProps = {
 };
 
 function EditorsSection({
+  embedded,
+  showHeading = true,
   defaultOptions,
   defaultEditorId,
   baselineDefaultId,
@@ -431,9 +347,14 @@ function EditorsSection({
   const { t } = useTranslation();
   return (
     <div className="space-y-6">
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {t("settings:editors")}
-      </div>
+      {showHeading &&
+        (embedded ? (
+          <h3 className={SETTINGS_TYPOGRAPHY.sectionTitle}>{t(EDITORS_TITLE_KEY)}</h3>
+        ) : (
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t(EDITORS_TITLE_KEY)}
+          </div>
+        ))}
       <div className="space-y-2">
         <div className="text-sm font-medium text-foreground">{t("settings:default")}</div>
         <div
@@ -493,6 +414,7 @@ function getEditorsSaveRevision(state: EditorsSettingsState): string {
     defaultEditorId: state.defaultEditorId,
     lspAutoStartLanguages: state.lspAutoStartLanguages,
     lspAutoInstallLanguages: state.lspAutoInstallLanguages,
+    lspStatusLocation: state.lspStatusLocation,
     lspConfigStrings: state.lspConfigStrings,
   });
 }
@@ -501,7 +423,7 @@ function useSyncEditors(editors: EditorOption[], setEditors: (editors: EditorOpt
   useEffect(() => setEditors(editors), [editors, setEditors]);
 }
 
-export function EditorsSettings() {
+export function EditorsSettings({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation();
   const state = useEditorsSettingsState();
   const { setLspConfigStrings, setLspConfigErrors, setEditors, editors } = state;
@@ -529,7 +451,7 @@ export function EditorsSettings() {
 
   return (
     <SettingsPageTemplate
-      title={t("settings:editors")}
+      title={t(EDITORS_TITLE_KEY)}
       description={t("settings:configureTheIncludedCodeEditorAnd")}
       // Explicit, because the template otherwise derives the save-contributor id
       // from `title` — which is now translated, and an identity must not be.
@@ -542,12 +464,15 @@ export function EditorsSettings() {
         hasInvalidConfig ? t("settings:fixInvalidLspServerConfigurationBefore") : undefined
       }
       onSave={() => saveDefaultRequest.run()}
+      showPageChrome={!embedded}
+      contentFrame="none"
     >
       <div className="space-y-6">
-        <div className="space-y-4">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {t("settings:fileEditor")}
-          </div>
+        <SettingsGroup
+          title={t("settings:fileEditor")}
+          discoveryTargetId={GENERAL_SETTINGS_TARGETS.fileEditor}
+          contentClassName="space-y-4 divide-y-0"
+        >
           <LspLanguageCards
             lspAutoStartLanguages={state.lspAutoStartLanguages}
             lspAutoInstallLanguages={state.lspAutoInstallLanguages}
@@ -555,6 +480,11 @@ export function EditorsSettings() {
             baselineLspAutoInstall={state.baselineLspAutoInstall}
             toggleAutoStart={toggleAutoStart}
             toggleAutoInstall={toggleAutoInstall}
+          />
+          <LspStatusLocationSetting
+            value={state.lspStatusLocation}
+            baseline={state.baselineLspStatusLocation}
+            onChange={state.setLspStatusLocation}
           />
           <LspServerConfigSection
             lspConfigStrings={state.lspConfigStrings}
@@ -564,24 +494,28 @@ export function EditorsSettings() {
             setExpandedConfigLang={state.setExpandedConfigLang}
             updateLspConfigString={updateLspConfigString}
           />
-        </div>
+        </SettingsGroup>
         <Separator />
-        <EditorsSection
-          defaultOptions={defaultOptions}
-          defaultEditorId={state.defaultEditorId}
-          baselineDefaultId={state.baselineDefaultId}
-          availableEditors={availableEditors}
-          builtInEditors={builtInEditors}
-          onDefaultEditorChange={state.setDefaultEditorId}
-          customEditors={customEditors}
-          editingId={state.editingId}
-          setEditingId={state.setEditingId}
-          isAdding={state.isAdding}
-          setIsAdding={state.setIsAdding}
-          createRequest={createRequest}
-          updateRequest={updateRequest}
-          deleteRequest={deleteRequest}
-        />
+        <SettingsGroup title={t(EDITORS_TITLE_KEY)} contentClassName="space-y-4 divide-y-0">
+          <EditorsSection
+            embedded={embedded}
+            showHeading={false}
+            defaultOptions={defaultOptions}
+            defaultEditorId={state.defaultEditorId}
+            baselineDefaultId={state.baselineDefaultId}
+            availableEditors={availableEditors}
+            builtInEditors={builtInEditors}
+            onDefaultEditorChange={state.setDefaultEditorId}
+            customEditors={customEditors}
+            editingId={state.editingId}
+            setEditingId={state.setEditingId}
+            isAdding={state.isAdding}
+            setIsAdding={state.setIsAdding}
+            createRequest={createRequest}
+            updateRequest={updateRequest}
+            deleteRequest={deleteRequest}
+          />
+        </SettingsGroup>
       </div>
     </SettingsPageTemplate>
   );

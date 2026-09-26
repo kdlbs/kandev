@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { dwell } from "../../helpers/causal-waits";
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
 useRegularMode();
@@ -177,6 +178,9 @@ test.describe("Workflow start step placement", () => {
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: workflow.id,
+      task_create_last_used: {
+        workflow_ids_by_workspace: { [seedData.workspaceId]: workflow.id },
+      },
       enable_preview_on_click: false,
     });
 
@@ -213,8 +217,12 @@ test.describe("Workflow start step placement", () => {
     });
 
     // --- Toggle off plan mode ---
-    // Wait for the editor to be fully interactive before sending the shortcut
-    await testPage.waitForTimeout(1_000);
+    await dwell(
+      testPage,
+      1_000,
+      "unverified",
+      "pre-existing spacing before the plan-mode shortcut; the editor's readiness was not tied to an identified timer or event, so this is labelled as debt rather than given a cause it does not have",
+    );
     await session.togglePlanMode();
     await expect(session.planPanel).not.toBeVisible({ timeout: 15_000 });
 
@@ -230,9 +238,11 @@ test.describe("Workflow start step placement", () => {
     });
 
     // Agent responds after the delay
-    await expect(session.chat.getByText("delayed mock response", { exact: false })).toBeVisible({
-      timeout: 30_000,
-    });
+    const delayedResponse = session.chat
+      .getByTestId("agent-message-highlight")
+      .filter({ hasText: "delayed mock response" });
+    await expect(delayedResponse).toHaveCount(1, { timeout: 30_000 });
+    await expect(delayedResponse).toBeVisible();
 
     // on_turn_complete fires on In Progress → task moves to Done
     await expect(session.stepperStep("Done")).toHaveAttribute("aria-current", "step", {
@@ -267,6 +277,9 @@ test.describe("Workflow start step placement", () => {
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: workflow.id,
+      task_create_last_used: {
+        workflow_ids_by_workspace: { [seedData.workspaceId]: workflow.id },
+      },
       enable_preview_on_click: false,
     });
 

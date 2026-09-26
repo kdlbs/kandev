@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 
 	"go.uber.org/zap"
@@ -36,6 +37,10 @@ type Repository interface {
 	// used by onboarding to write explicit routing.inherit markers on
 	// the freshly created CEO agent.
 	UpdateAgentSettings(ctx context.Context, agentID, settings string) error
+	// GetTaskWorkflowStepID resolves the workflow step currently bound to
+	// a task, used to gate the onboarding task's initial wake to steps
+	// that auto-start an agent.
+	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
 }
 
 // WorkspaceCreator creates a DB workspace row for kanban compatibility.
@@ -52,10 +57,12 @@ type WorkspaceCreator interface {
 // CreateOfficeTask routes the task through the workspace's office workflow
 // (workspaces.office_workflow_id). CreateOfficeTaskInWorkflow targets a
 // specific workflow id explicitly — used by the routines dispatcher to
-// pin tasks to the dedicated routine workflow.
+// pin tasks to the dedicated routine workflow; onboarding never calls it,
+// but must still declare the same signature as routines.RoutineTaskCreator
+// because both interfaces are satisfied by the same concrete adapter.
 type TaskCreator interface {
 	CreateOfficeTask(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (taskID string, err error)
-	CreateOfficeTaskInWorkflow(ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description string) (taskID string, err error)
+	CreateOfficeTaskInWorkflow(ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description, routineID string) (taskID string, err error)
 }
 
 // AgentCreator creates a new agent instance with validation.
@@ -102,6 +109,7 @@ type ConfigSyncer interface {
 type ApplyResult struct {
 	CreatedCount int
 	UpdatedCount int
+	Warnings     []string
 }
 
 // RunReason for a newly assigned task.
@@ -122,6 +130,17 @@ type OnboardingService struct {
 	runQueuer        shared.RunQueuer
 	configSyncer     ConfigSyncer
 	routineInstaller CoordinatorRoutineInstaller
+
+	// workflowStepGetter resolves a task's current workflow step so the
+	// onboarding task's initial wake can be gated to steps that auto-start
+	// an agent. Optional — nil fails open (see shared.IsAssignmentWakeEligible).
+	workflowStepGetter shared.AssignmentStepGetter
+}
+
+// SetWorkflowStepGetter wires the workflow step lookup used to gate the
+// onboarding task's initial wake. Left nil, the gate fails open.
+func (s *OnboardingService) SetWorkflowStepGetter(g shared.AssignmentStepGetter) {
+	s.workflowStepGetter = g
 }
 
 // SetCoordinatorRoutineInstaller wires the routines-service hook used
@@ -211,6 +230,7 @@ type CompleteResult struct {
 type ImportFromFSResult struct {
 	WorkspaceIDs  []string
 	ImportedCount int
+	Warnings      []string
 }
 
 // GetOnboardingState checks whether onboarding has been completed.
@@ -346,8 +366,17 @@ func (s *OnboardingService) maybeCreateOnboardingTask(
 		s.logger.Warn("create onboarding task failed", zap.Error(err))
 		return ""
 	}
-	if s.runQueuer != nil {
-		if wakeErr := s.runQueuer.QueueRun(ctx, agentID, runReasonTaskAssigned,
+	// The landing step must accept an auto-started run before this wake is
+	// queued — onboarding never sets StartAgent/PlanMode, so a custom
+	// workflow's start step and auto-start step can genuinely differ. See
+	// shared.IsAssignmentWakeEligible for the fail-open rationale.
+	if s.runQueuer != nil &&
+		shared.IsAssignmentWakeEligible(ctx, s.logger, s.repo, s.workflowStepGetter, taskID, "onboarding.maybe_create_onboarding_task") {
+		// A third task_assigned producer alongside queueTaskAssignedRun; it is
+		// never handed the assigning transaction's generation, so it enqueues
+		// keyless rather than deriving a divergent key.
+		runsservice.ReportKeylessEnqueue(runReasonTaskAssigned, runsservice.KeylessCauseUnresolved, "onboarding_no_generation")
+		if _, wakeErr := s.runQueuer.QueueRun(ctx, agentID, runReasonTaskAssigned,
 			fmt.Sprintf(`{"task_id":%q}`, taskID), ""); wakeErr != nil {
 			s.logger.Warn("enqueue onboarding run failed", zap.Error(wakeErr))
 		}
@@ -440,6 +469,7 @@ func (s *OnboardingService) importSingleWorkspace(
 			return "", false
 		}
 		result.ImportedCount += importResult.CreatedCount + importResult.UpdatedCount
+		result.Warnings = append(result.Warnings, importResult.Warnings...)
 	}
 	return wsID, true
 }

@@ -9,10 +9,40 @@ agentctl exposes these route groups (see `server/api/`):
 - `/instances/*` - Multi-instance management
 - `/processes/*` - Agent subprocess management (start/stop)
 - `/agent/configure`, `/agent/stream` - Agent configuration and event streaming
+- `/lsp/stream` - Task-host language-server stdio/WebSocket bridge
 - `/git/*` - Git operations (status, commit, push, pull, rebase, stage, create PR, etc.)
 - `/shell/*` - Shell session management
 - `/workspace/*` - File operations, search, tree
 - `/vscode/*` - VS Code integration proxy
+
+The **control server** (`server/api/control_server.go`) is a separate router from
+the per-instance ones above, and it owns the agent-survival surface:
+- `/identity` - opaque per-launch server identity, advertised capability set,
+  and this server's own resolved unowned period. Unauthenticated, because it is
+  what decides whether to authenticate. It therefore carries no filesystem path.
+- `/ownership/prove` - challenge/response proving this process holds the
+  credential the caller's record names. Also unauthenticated, for the same
+  reason, and safe because a proof is a keyed digest over a caller-chosen
+  challenge and cannot be inverted to the credential. Derivation is shared with
+  the backend through `internal/common/ownershipproof`.
+- `/api/v1/ownership/claim`, `/rotate`, `/confirm`, `/shutdown`, `/details` -
+  the authenticated ownership operations (`claim` is the renewal an owning
+  backend repeats on a cadence derived from the unowned period), plus the
+  filesystem paths kept off `/identity`.
+
+Auth on that router is `controlCredentialAuth`, which has three tiers rather
+than on/off. `/health`, `/auth/handshake`, `/identity`, and `/ownership/prove`
+are exempt entirely. The paths in `adoptionOnlyPaths` (`rotate`, `shutdown`)
+additionally accept the **superseded** credential until the rotation that
+replaced it is confirmed, so a backend that crashed mid-rotation can still
+adopt. Every other authenticated route accepts only the current credential.
+
+## Multi-repository Git and review payloads
+
+Preserve the repository-scoped fields `repository_name`, `base_ref`, and
+`is_submodule` in aggregate results; nested submodule comparisons stay anchored
+to the parent gitlink. The focused contract tests are in
+`server/api/git_multi_repo_review_test.go`.
 
 ## Pull request creation (`server/process/git_pr_providers.go`)
 
@@ -30,13 +60,14 @@ GitHub PR and GitLab MR URLs trigger backend association callbacks. Azure PR URL
 ## Adapter Model
 
 Protocol adapters in `server/adapter/transport/` normalize different agent CLIs:
-- `AgentAdapter` interface defines `Start()`, `Stop()`, `Prompt()`, `Cancel()`
-- Transports: `acp` (Claude Code), `codex` (OpenAI Codex), `opencode`, `shared`, `streamjson`
-- Top-level adapters: `CopilotAdapter` (GitHub Copilot SDK), `AmpAdapter` (Sourcegraph Amp)
+- `AgentAdapter` interface defines `Connect()`, `Initialize()`, `NewSession()`, `LoadSession()`, `Prompt()`, `Cancel()`, `Updates()`, `Close()`, among others
+- Transports: `acp` (all supported agent CLIs speak ACP), `shared` (cross-transport helpers). Only the ACP protocol is supported; non-ACP variants were removed in the ACP-first migration
 - `process.Manager` owns subprocess, wires stdio to adapter
-- Factory pattern in `server/adapter/factory.go` selects adapter by agent type
+- `NewAdapter` in `server/adapter/factory.go` selects the adapter by protocol (`agent.Protocol`), not by agent type; agent identity and CLI-specific config come from Go constructors in `internal/agent/agents/`, registered by `internal/agent/registry.Registry.LoadDefaults()`
 
-The `acp` transport is split by concern across `adapter_*.go` files: `adapter.go` (core/lifecycle), `adapter_session.go` (initialize/new/load/resume), `adapter_prompt.go` (prompt/cancel), `adapter_updates.go` (`session/update` notification fan-out), `adapter_tools.go` (`convertToolCallUpdate` / `convertToolCallResultUpdate` -> normalized payloads), `adapter_permissions.go`, and `adapter_helpers.go`. Agent-specific ACP extensions use the package-private `acpDialect` function table in `dialect.go`; keep observed wire translation in `dialect_<agent>.go`. Dialect hooks return normalized data or request descriptions and never receive `*Adapter` or execute RPCs. Shared capability normalization used by both live sessions and utility probes belongs in `internal/agentctl/acpcompat/`. Tool-call conversion lives in `adapter_tools.go`, not `adapter.go`. See ADR-0043.
+The `acp` transport is split by concern across `adapter_*.go` files: `adapter.go` (core/lifecycle), `adapter_session.go` (initialize/new/load/resume/close), `adapter_prompt.go` (prompt/cancel), `adapter_updates.go` (`session/update` notification fan-out), `adapter_tools.go` (`convertToolCallUpdate` / `convertToolCallResultUpdate` -> normalized payloads), `adapter_permissions.go`, and `adapter_helpers.go`. Agent-specific ACP extensions use the package-private `acpDialect` function table in `dialect.go`; keep observed wire translation in `dialect_<agent>.go`. Dialect hooks return normalized data or request descriptions and never receive `*Adapter` or execute RPCs. Shared capability normalization used by both live sessions and utility probes belongs in `internal/agentctl/acpcompat/`. Tool-call conversion lives in `adapter_tools.go`, not `adapter.go`. See ADR-0043. Session lifecycle transitions are serialized: `NewSession`, `LoadSession`, and `ResetSession` (`session/new` plus the `closeSupersededSessionLocked` cleanup) each run under `Adapter.sessionTransitionMu`, because agentctl dispatches WS requests to the adapter without serialization; any new path that writes `a.sessionID` must hold that mutex for the whole transition, not just the write.
+
+**Prompt handoff and steering are negotiated, not named.** Both the foreground-idle handoff (ADR-0049) and mid-turn steering (ADR-2026-08-04) gate on the agent's `initialize` advertisement `agentCapabilities._meta.claudeCode.promptQueueing`, read once in `prompt_queueing.go` and cached on the adapter — never on `agentID`. A steer transfers the existing prompt-gate token to a human successor while the predecessor `session/prompt` is still open (`adapter_prompt_cancel.go: handOffTurnLocked`), reusing the generation-keyed completion attribution and background-work protection built for handoff. Steering is exposed via the optional `adapter.SteerablePrompter` interface (`PromptSteer` / `SupportsSteering`), so non-steering transports need no change. Delivery is opportunistic: the advertisement asserts the agent accepts a concurrent prompt, not that it folds it — both outcomes must be correct.
 
 ### Grok ACP dialect (`dialect_grok.go`)
 
@@ -55,7 +86,34 @@ Grok ACP currently exposes neither per-turn cost nor subscription quota/reset va
 
 ## ACP Protocol
 
-JSON-RPC 2.0 over stdin/stdout between agentctl and agent process. Requests: `initialize`, `session/new`, `session/load`, `session/prompt`, `session/cancel`. Notifications: `session/update` with types `message_chunk`, `tool_call`, `tool_update`, `complete`, `error`, `permission_request`, `context_window`.
+JSON-RPC 2.0 over stdin/stdout between agentctl and agent process. Requests: `initialize`, `session/new`, `session/load`, `session/resume`, `session/prompt`, `session/cancel`, `session/close`. Notifications: `session/update` with types `message_chunk`, `tool_call`, `tool_update`, `complete`, `error`, `permission_request`, `context_window`.
+
+The adapter prefers advertised `session/resume` for any agent to restore the saved conversation without replaying its history. Both resume and load responses preserve typed configuration and legacy model state. If an agent advertises resume but returns method-not-found, the adapter uses `session/load` only when advertised and the context is still active. Other errors preserve the saved identity. Restore traces contain separate `session.resume` and `session.load` spans for the actual requests.
+
+### ACP permission identity and injected MCP approval
+
+The ACP client preserves `ToolCall.Name` and `ToolCall.Meta` on the internal
+permission request. The Claude dialect reads `_meta.claudeCode.toolName` only
+for Claude frames and uses an exact qualified title fallback only when both
+identity fields are absent and the ACP kind is `other`. Malformed or
+conflicting identity data stays in the normal permission path. Other provider
+dialects must not inherit this title fallback without a tested wire contract.
+
+The process manager may automatically select an offered allow-once, then
+allow-always option for any qualified tool on the host-injected Kandev MCP
+server when blanket approval is off. It requires the internal construction
+provenance marker and the exact current-port HTTP or SSE server entry. This
+server-wide provider-layer rule includes destructive Kandev tools; MCP
+authentication, task/session authorization, questions, and workflow gates stay
+separate. Shell, file, third-party, ambiguous, malformed, and unqualified
+requests keep the pending permission flow. Internal identity fields are not
+part of permission snapshots or stream events.
+
+The flattened `mcp__server__tool` parser accepts only one unambiguous `__`
+separator. It rejects delimiter collisions, adjacent underscores at the
+boundary, and additional `__` sequences in the tool suffix. This prevents a
+server such as `kandev__external` from being read as the reserved `kandev`
+server. Tool names with these ambiguous forms keep the pending flow.
 
 ### ACP frame debug logging (`adapter/transport/shared/acplog.go`)
 
@@ -113,6 +171,28 @@ wait). After the command leader exits, `waitForProcessExit` still checks the
 agent process group and sends SIGTERM/SIGKILL if descendants remain. If `Stop(ctx)`
 times out, it also re-runs the pgid SIGKILL fallback.
 
+Non-agent protocol subprocesses must use the same ownership path. LSP servers
+start through `process.Manager.StartPipedProcess`, which exposes stdin/stdout to
+the bridge while registering the command with `ProcessRunner`; instance teardown
+then closes admission and reaps the full process tree on Unix and Windows.
+LSP auto-install work holds `Manager.BeginOwnedOperation`; npm and Go installer
+commands run through `Manager.CombinedOutput`, so teardown cancels downloads,
+drains cache mutations, and reaps installer descendants before resources are
+released.
+
+When consuming `exec.Cmd.StdoutPipe` or `StderrPipe`, start the command before
+reading and finish every reader before calling `cmd.Wait`; `Wait` closes the
+pipes after the command exits. Prefer `CombinedOutput` when separate streaming
+is not required, and test cancellation with output large enough to exercise
+pipe backpressure so a reader/Wait ordering mistake cannot deadlock teardown.
+When wait and draining must proceed concurrently, use an explicitly owned
+`os.Pipe` assigned to `cmd.Stderr`, close the parent writer after `Start`, join
+the reader with `Wait`, and bound or close the reader on timeout so stderr is
+not lost or left blocking teardown.
+Lifecycle callbacks that publish process state must complete before releasing
+readiness waiters for that same process boundary; test callback-before-waiter
+ordering.
+
 To add another agent that needs immediate kill instead of graceful stdin close:
 set `RequiresProcessKill: true` in its `Runtime()` config.
 
@@ -130,6 +210,18 @@ The strip list flows agent → instance config → process manager via a single 
 For the one-shot probe/inference path, the strip list is derived from `Runtime().StripEnv` via the shared `agents.StripEnvFor` helper — it is not an independent field on `InferenceConfig`. The derived value is propagated through `InferenceConfigDTO.StripEnv` and applied by `utility.sanitizeEnvForAgent` before spawning the ephemeral subprocess.
 
 To add another agent that needs env vars stripped: set `StripEnv: []string{"VAR_NAME"}` in its `Runtime()` — that's all.
+
+**Agent environment snapshot:** `process.Manager` snapshots `cfg.AgentEnv` at
+construction. Tracker Git must not re-read ambient `os.Environ()` at execution
+time. Install command gates/shims and `KANDEV_TEST_*` variables before manager
+construction, or pass an explicit copied `AgentEnv` snapshot; helpers that create
+managers should accept that snapshot so fixtures cannot become stale.
+
+**SSH command shapes:** SSH option rewriting may preserve only direct OpenSSH
+commands, including quoted executable paths. Do not insert options after the
+first shell word for env/assignment/exec prefixes or custom/plink wrappers;
+unsupported shapes must use a documented safe default or fail closed. Cover
+direct, quoted, prefixed, and custom forms with focused tests.
 
 ## Idle-instance reaper (`KANDEV_ACP_IDLE_TIMEOUT`)
 

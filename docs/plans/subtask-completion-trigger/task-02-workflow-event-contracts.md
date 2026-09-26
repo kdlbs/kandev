@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/subtask-completion-trigger.md"
+spec: "../../specs/tasks/requirements/subtask-completion-trigger.md"
 ---
 
 # Task 02: Workflow event contracts
@@ -39,7 +39,7 @@ None.
 
 ## Inputs
 
-- Spec: `docs/specs/tasks/subtask-completion-trigger.md`, section
+- Spec: `docs/specs/tasks/requirements/subtask-completion-trigger.md`, section
   `API surface`.
 - Existing backend model: `apps/backend/internal/workflow/models/models.go`.
 - Existing frontend type file: `apps/web/lib/types/workflow-actions.ts`.

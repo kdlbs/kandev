@@ -9,6 +9,7 @@ import {
   toTaskPreset,
 } from "./action-presets";
 import { IconEye, IconSparkles } from "@tabler/icons-react";
+import { iconForIntegrationPreset } from "@/components/integrations/integration-preset-icons";
 
 describe("interpolatePromptTemplate", () => {
   it("replaces {{url}} and {{title}} placeholders", () => {
@@ -45,6 +46,10 @@ describe("interpolatePromptTemplate", () => {
 describe("iconForPresetKey", () => {
   it("returns the mapped Tabler icon for a known key", () => {
     expect(iconForPresetKey("eye")).toBe(IconEye);
+  });
+
+  it.each(["eye", "message", "tool"])("shares the host semantic %s glyph", (key) => {
+    expect(iconForPresetKey(key)).toBe(iconForIntegrationPreset(key));
   });
 
   it("falls back to sparkle for unknown or missing keys", () => {

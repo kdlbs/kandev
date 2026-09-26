@@ -47,25 +47,28 @@ export function useGitHubStatus(requestedWorkspaceId?: string | null) {
   const resetGitHubStatus = useAppStore((state) => state.resetGitHubStatus);
   const invalidateSystemHealth = useAppStore((state) => state.invalidateSystemHealth);
 
-  const doFetch = useCallback(() => {
-    if (!workspaceId) return;
-    const version = nextRequestVersion(workspaceId);
-    setGitHubStatusLoading(workspaceId, true);
-    fetchGitHubStatus(workspaceId, { cache: "no-store" })
-      .then((response) => {
-        if (isCurrentRequest(workspaceId, version)) {
-          setGitHubStatus(workspaceId, normalizeGitHubStatus(response));
-        }
-      })
-      .catch(() => {
-        if (isCurrentRequest(workspaceId, version)) setGitHubStatus(workspaceId, null);
-      })
-      .finally(() => {
-        if (isCurrentRequest(workspaceId, version)) {
-          setGitHubStatusLoading(workspaceId, false);
-        }
-      });
-  }, [setGitHubStatus, setGitHubStatusLoading, workspaceId]);
+  const doFetch = useCallback(
+    (refreshRateLimit = false) => {
+      if (!workspaceId) return;
+      const version = nextRequestVersion(workspaceId);
+      setGitHubStatusLoading(workspaceId, true);
+      fetchGitHubStatus(workspaceId, { cache: "no-store" }, refreshRateLimit)
+        .then((response) => {
+          if (isCurrentRequest(workspaceId, version)) {
+            setGitHubStatus(workspaceId, normalizeGitHubStatus(response));
+          }
+        })
+        .catch(() => {
+          if (isCurrentRequest(workspaceId, version)) setGitHubStatus(workspaceId, null);
+        })
+        .finally(() => {
+          if (isCurrentRequest(workspaceId, version)) {
+            setGitHubStatusLoading(workspaceId, false);
+          }
+        });
+    },
+    [setGitHubStatus, setGitHubStatusLoading, workspaceId],
+  );
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -82,7 +85,7 @@ export function useGitHubStatus(requestedWorkspaceId?: string | null) {
   const refresh = useCallback(() => {
     invalidateSystemHealth();
     if (!workspaceId) return;
-    doFetch();
+    doFetch(true);
   }, [doFetch, invalidateSystemHealth, workspaceId]);
 
   return {

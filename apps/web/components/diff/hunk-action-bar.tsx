@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { IconArrowBackUp, IconLoader2 } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 
 interface HunkActionBarProps {
   changeBlockId: string;
@@ -17,6 +18,7 @@ export function HunkActionBar({
   onMouseEnter,
   onMouseLeave,
 }: HunkActionBarProps) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(true);
 
@@ -69,7 +71,7 @@ export function HunkActionBar({
           ) : (
             <IconArrowBackUp className="h-3.5 w-3.5" />
           )}
-          Undo
+          {t("diff:undo")}
         </Button>
       </div>
     </div>

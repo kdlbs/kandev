@@ -5,10 +5,14 @@ import {
   IconCloudOff,
   IconFolder,
   IconFolders,
+  IconPackage,
+  IconPackageOff,
   IconServer,
   IconServerOff,
   IconTerminal2,
 } from "@tabler/icons-react";
+
+import { t } from "@/lib/i18n";
 
 export const EXECUTOR_ICON_MAP: Record<string, typeof IconFolder> = {
   local: IconFolder,
@@ -17,23 +21,40 @@ export const EXECUTOR_ICON_MAP: Record<string, typeof IconFolder> = {
   remote_docker: IconBox,
   sprites: IconCloud,
   ssh: IconTerminal2,
+  k8s: IconPackage,
 };
 
 export function getExecutorIcon(type: string): typeof IconFolder {
   return EXECUTOR_ICON_MAP[type] ?? IconFolder;
 }
 
-const EXECUTOR_LABEL_MAP: Record<string, string> = {
-  local: "Local",
-  worktree: "Worktree",
-  local_docker: "Local Docker",
-  remote_docker: "Remote Docker",
+// Brand and protocol names read the same in every locale, so they are values
+// rather than copy — the guard's `words.exclude` lists both. Keeping them out
+// of the catalog also keeps the pseudo-locale from transliterating them into
+// something the user cannot match against their own SSH config or Sprites
+// dashboard.
+const EXECUTOR_BRAND_LABEL_MAP: Record<string, string> = {
   sprites: "Sprites.dev",
   ssh: "SSH",
 };
 
+// Keys, not messages: `t` resolves inside getExecutorLabel at call time, so
+// the label follows a locale switch. Assigning t() here would freeze it at the
+// boot locale.
+const EXECUTOR_LABEL_KEY_MAP: Record<string, string> = {
+  local: "executors:typeLocal",
+  worktree: "executors:typeWorktree",
+  local_docker: "executors:localDocker",
+  remote_docker: "executors:remoteDocker",
+  k8s: "executors:typeKubernetes",
+};
+
 export function getExecutorLabel(type: string): string {
-  return EXECUTOR_LABEL_MAP[type] ?? type;
+  const brand = EXECUTOR_BRAND_LABEL_MAP[type];
+  if (brand) return brand;
+  const key = EXECUTOR_LABEL_KEY_MAP[type];
+  // An unmapped type echoes the raw wire value, which is an identifier.
+  return key ? t(key) : type;
 }
 
 /**
@@ -62,6 +83,12 @@ export function getExecutorStatusIcon(
     return {
       Icon: hasError ? IconServerOff : IconTerminal2,
       testId: "executor-status-ssh-icon",
+    };
+  }
+  if (executorType === "k8s") {
+    return {
+      Icon: hasError ? IconPackageOff : IconPackage,
+      testId: "executor-status-kubernetes-icon",
     };
   }
   return {

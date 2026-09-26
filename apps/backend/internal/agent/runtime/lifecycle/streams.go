@@ -15,26 +15,34 @@ import (
 type StreamCallbacks struct {
 	OnAgentEvent       func(execution *AgentExecution, event agentctl.AgentEvent)
 	OnStreamDisconnect func(execution *AgentExecution, err error, promptGeneration uint64)
-	OnGitStatus        func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
-	OnGitCommit        func(execution *AgentExecution, commit *agentctl.GitCommitNotification)
-	OnGitReset         func(execution *AgentExecution, reset *agentctl.GitResetNotification)
-	OnBranchSwitch     func(execution *AgentExecution, branchSwitch *agentctl.GitBranchSwitchNotification)
-	OnFileChange       func(execution *AgentExecution, notification *agentctl.FileChangeNotification)
-	OnShellOutput      func(execution *AgentExecution, data string)
-	OnShellExit        func(execution *AgentExecution, code int)
-	OnProcessOutput    func(execution *AgentExecution, output *agentctl.ProcessOutput)
-	OnProcessStatus    func(execution *AgentExecution, status *agentctl.ProcessStatusUpdate)
+	// Generation-aware callbacks are used for startup replacement streams. The
+	// lifecycle manager owns the completion signal and callback lease for this
+	// path; the legacy callbacks remain available to isolated callers and tests.
+	OnAgentEventWithGeneration       func(execution *AgentExecution, event agentctl.AgentEvent, startupGeneration uint64)
+	OnStreamDisconnectWithGeneration func(execution *AgentExecution, err error, promptGeneration, startupGeneration uint64)
+	OnGitStatus                      func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
+	OnGitCommit                      func(execution *AgentExecution, commit *agentctl.GitCommitNotification)
+	OnGitReset                       func(execution *AgentExecution, reset *agentctl.GitResetNotification)
+	OnBranchSwitch                   func(execution *AgentExecution, branchSwitch *agentctl.GitBranchSwitchNotification)
+	OnFileChange                     func(execution *AgentExecution, notification *agentctl.FileChangeNotification)
+	OnShellOutput                    func(execution *AgentExecution, data string)
+	OnShellExit                      func(execution *AgentExecution, code int)
+	OnProcessOutput                  func(execution *AgentExecution, output *agentctl.ProcessOutput)
+	OnProcessStatus                  func(execution *AgentExecution, status *agentctl.ProcessStatusUpdate)
 }
 
 // StreamManager manages WebSocket streams to agent executions
 type StreamManager struct {
 	logger     *logger.Logger
 	callbacks  StreamCallbacks
+	mcpMu      sync.RWMutex
 	mcpHandler agentctl.MCPHandler
 	// mcpIdentityScoper scopes in-session MCP dispatches to the owner of the
 	// stream's task. Nil leaves dispatch unscoped (single-user instances and
 	// isolated tests); set via Manager.SetMCPIdentityScoper.
 	mcpIdentityScoper MCPIdentityScoper
+	// mcpPrincipalScoper attaches the trusted task/session/surface principal.
+	mcpPrincipalScoper MCPPrincipalScoper
 	// stopCh is the Manager-owned shutdown signal. The retry/backoff and
 	// connected `<-ws.Done() / <-stop>` select read from it so they drain on
 	// Manager.Stop. May be nil when isolated tests don't care about external
@@ -227,7 +235,14 @@ func (sm *StreamManager) ReconnectAll(execution *AgentExecution) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := execution.agentctl.WaitForReady(ctx, 10*time.Second); err != nil {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		sm.logger.Warn("agentctl unavailable for stream reconnection", zap.String("instance_id", execution.ID))
+		return
+	}
+	err := client.WaitForReady(ctx, 10*time.Second)
+	releaseClient()
+	if err != nil {
 		sm.logger.Warn("agentctl not ready for stream reconnection",
 			zap.String("instance_id", execution.ID),
 			zap.Error(err))
@@ -281,16 +296,27 @@ func (sm *StreamManager) streamContext(execution *AgentExecution) context.Contex
 // connectUpdatesStream handles the updates WebSocket stream with ready signaling
 func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready chan<- struct{}) {
 	ctx := sm.streamContext(execution)
+	startupGeneration := execution.startupAttemptSnapshot()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		if ready != nil {
+			close(ready)
+		}
+		return
+	}
 
-	err := execution.agentctl.StreamUpdates(ctx, func(event agentctl.AgentEvent) {
-		if sm.callbacks.OnAgentEvent != nil {
+	err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {
+		if sm.callbacks.OnAgentEventWithGeneration != nil {
+			sm.callbacks.OnAgentEventWithGeneration(execution, event, startupGeneration)
+		} else if sm.callbacks.OnAgentEvent != nil {
 			sm.callbacks.OnAgentEvent(execution, event)
 		}
 	}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
 		if disconnectErr != nil {
-			sm.handleUpdatesDisconnect(execution, disconnectErr)
+			sm.handleUpdatesDisconnectWithGeneration(execution, disconnectErr, startupGeneration)
 		}
 	})
+	releaseClient()
 
 	// Signal that the stream connection attempt is complete (success or failure)
 	// StreamUpdates returns immediately after establishing the WebSocket connection
@@ -307,16 +333,36 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 }
 
 func (sm *StreamManager) handleUpdatesDisconnect(execution *AgentExecution, disconnectErr error) {
-	// Capture prompt ownership before signaling the waiter. A replacement may
-	// advance the generation before the lifecycle callback runs.
+	sm.handleUpdatesDisconnectWithGeneration(execution, disconnectErr, execution.startupAttemptSnapshot())
+}
+
+func (sm *StreamManager) handleUpdatesDisconnectWithGeneration(
+	execution *AgentExecution,
+	disconnectErr error,
+	startupGeneration uint64,
+) {
 	promptGeneration := execution.promptGenerationSnapshot()
-	select {
-	case execution.promptDoneCh <- PromptCompletionSignal{
-		IsError:          true,
-		Error:            "agent stream disconnected: " + disconnectErr.Error(),
-		PromptGeneration: promptGeneration,
-	}:
-	default:
+	if sm.callbacks.OnStreamDisconnectWithGeneration != nil {
+		// The lifecycle callback holds the startup lease across both the signal
+		// and disconnect mutation. Signalling here first would leave a window in
+		// which replacement startup could advance the generation before the old
+		// callback reached its validation guard.
+		sm.callbacks.OnStreamDisconnectWithGeneration(execution, disconnectErr, promptGeneration, startupGeneration)
+		return
+	}
+	if !execution.signalPromptCompletionForStartupGeneration(
+		startupGeneration,
+		PromptCompletionSignal{
+			IsError:          true,
+			Error:            "agent stream disconnected: " + disconnectErr.Error(),
+			PromptGeneration: promptGeneration,
+		},
+	) {
+		sm.logger.Debug("ignoring stale updates stream disconnect",
+			zap.String("execution_id", execution.ID),
+			zap.Uint64("stream_startup_generation", startupGeneration),
+			zap.Uint64("current_startup_generation", execution.startupAttemptSnapshot()))
+		return
 	}
 	if sm.callbacks.OnStreamDisconnect != nil {
 		sm.callbacks.OnStreamDisconnect(execution, disconnectErr, promptGeneration)
@@ -333,13 +379,18 @@ func (sm *StreamManager) handleUpdatesDisconnect(execution *AgentExecution, disc
 // closing this stream is expected, not an error.
 func (sm *StreamManager) connectMCPStream(execution *AgentExecution) {
 	ctx := sm.streamContext(execution)
-	err := execution.agentctl.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		return
+	}
+	err := client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
 		if disconnectErr != nil {
 			sm.logger.Debug("passthrough MCP stream disconnected",
 				zap.String("execution_id", execution.ID),
 				zap.Error(disconnectErr))
 		}
 	})
+	releaseClient()
 	if err != nil {
 		sm.logger.Error("failed to connect passthrough MCP stream",
 			zap.String("execution_id", execution.ID),
@@ -447,8 +498,12 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 		}
 
 		callbacks := sm.buildWorkspaceCallbacks(execution)
-
-		ws, err := execution.agentctl.StreamWorkspace(ctx, callbacks)
+		client, releaseClient := execution.AcquireAgentCtlClient()
+		if client == nil {
+			return
+		}
+		ws, err := client.StreamWorkspace(ctx, callbacks)
+		releaseClient()
 		if err != nil {
 			sm.logger.Debug("workspace stream connection failed, retrying",
 				zap.String("instance_id", execution.ID),

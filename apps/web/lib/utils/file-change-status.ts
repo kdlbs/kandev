@@ -1,3 +1,5 @@
+import { t } from "@/lib/i18n";
+
 export type FileChangeStatus = "modified" | "added" | "deleted" | "untracked" | "renamed";
 
 export function normalizeFileChangeStatus(status?: string): FileChangeStatus {
@@ -15,18 +17,24 @@ export function normalizeFileChangeStatus(status?: string): FileChangeStatus {
   }
 }
 
+/**
+ * Accessible name and tooltip for a changed file's status marker.
+ *
+ * Resolves at call time (`FileStatusIcon` calls it from its render body), so a
+ * locale switch re-labels the markers.
+ */
 export function fileChangeStatusLabel(status: FileChangeStatus, oldPath?: string): string {
   switch (status) {
     case "added":
-      return "Added";
+      return t("diff:fileStatusAdded");
     case "untracked":
-      return "Untracked";
+      return t("diff:fileStatusUntracked");
     case "modified":
-      return "Modified";
+      return t("diff:fileStatusModified");
     case "deleted":
-      return "Deleted";
+      return t("diff:fileStatusDeleted");
     case "renamed":
-      return oldPath ? `Moved from ${oldPath}` : "Moved";
+      return oldPath ? t("diff:fileStatusMovedFrom", { oldPath }) : t("diff:fileStatusMoved");
     default: {
       const exhaustiveStatus: never = status;
       return exhaustiveStatus;

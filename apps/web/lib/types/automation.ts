@@ -1,6 +1,13 @@
 // Automation types matching backend models in internal/automation/models.go
 
-export type TriggerType = "scheduled" | "github_pr" | "github_push" | "github_ci" | "webhook";
+export type TriggerType =
+  | "scheduled"
+  | "github_pr"
+  | "github_pr_merged"
+  | "github_push"
+  | "github_ci"
+  | "webhook"
+  | "plugin_event";
 
 export type RunStatus =
   | "triggered"
@@ -11,10 +18,14 @@ export type RunStatus =
   | "archived"
   | "cancelled";
 
-// ExecutionMode controls whether an automation firing creates a visible
-// kanban task ("task", the default) or an ephemeral run hidden from the
-// kanban whose output is surfaced via the automation's run history ("run").
-export type ExecutionMode = "task" | "run";
+export type ContinuationPolicy = "new_task" | "reuse_thread";
+export type TaskMode = "automation_run" | "normal_task";
+export type RepositoryMode = "workspace_default" | "selected" | "none";
+
+export type AutomationRepository = {
+  repository_id: string;
+  base_branch: string;
+};
 
 export type Automation = {
   id: string;
@@ -25,16 +36,32 @@ export type Automation = {
   workflow_step_id: string;
   agent_profile_id: string;
   executor_profile_id: string;
+  task_mode?: TaskMode;
+  repository_mode?: RepositoryMode;
   repository_ids: string[];
+  repositories?: AutomationRepository[];
   prompt: string;
   task_title_template: string;
-  execution_mode: ExecutionMode;
   enabled: boolean;
   max_concurrent_runs: number;
+  /** How later firings get their task and conversation context. */
+  continuation_policy?: ContinuationPolicy;
   last_triggered_at: string | null;
   created_at: string;
   updated_at: string;
   triggers: AutomationTrigger[];
+  /**
+   * This automation predates the withdrawal of execution modes and was stored
+   * in the `task` mode — the default — so its firings used to put a card on
+   * the kanban and no longer do. The server derives it from a column nothing
+   * else reads; it exists to explain the change once, not to describe how the
+   * automation runs now, which is the same for every automation.
+   *
+   * Optional because a backend older than the migration doesn't send it, and
+   * because it stops being interesting the moment the notice is dismissed —
+   * absent means "nothing changed for this automation".
+   */
+  legacy_board_card?: boolean;
 };
 
 export type AutomationTrigger = {
@@ -59,6 +86,50 @@ export type AutomationRun = {
   trigger_data: Record<string, unknown>;
   error_message: string;
   created_at: string;
+  /** Tail of the agent's last message on the generated task, truncated server-side. */
+  summary?: string;
+  /**
+   * The run's conversation. Absent when the run never produced a task or the
+   * task is gone — the detail view mounts its transcript from this, so a run
+   * without one is reported rather than offered as something to open.
+   */
+  session_id?: string;
+  /** Exact provider turn represented by this run when a session is shared. */
+  turn_id?: string;
+  thread_action?: "created" | "resumed" | "replaced";
+  thread_reason?: string;
+  /** Snapshot of the rendered task title at admission time. */
+  display_title?: string;
+  /** Why the webhook dedup key ended up empty (unresolved/not configured). Empty when a key was resolved. */
+  dedup_reason?: string;
+  /** Why the webhook repository selector produced no binding. Empty when a repository was bound. */
+  repository_reason?: string;
+};
+
+/**
+ * A run as it appears in the workspace-wide feed. A per-automation run log can
+ * take the automation for granted; a mixed feed cannot, so the server
+ * denormalises the name and execution mode onto every row rather than making
+ * the client join against the automation list.
+ */
+export type WorkspaceAutomationRun = AutomationRun & {
+  automation_name: string;
+};
+
+/**
+ * One automation's health, answered per automation.
+ *
+ * The runs list used to derive this from the workspace feed, which is capped —
+ * past the cap a quiet automation's last run falls out of the window and its
+ * row claims it has never run. The server answers per automation instead, so a
+ * row's two claims do not depend on how noisy its neighbours are.
+ */
+export type AutomationSummary = {
+  automation_id: string;
+  /** Open under the same definition the concurrency cap uses. */
+  open_runs: number;
+  /** Absent when the automation has never run, or its runs were all deleted. */
+  last_run?: AutomationRun;
 };
 
 // --- Trigger config types ---
@@ -88,8 +159,27 @@ export type GitHubCITriggerConfig = {
   check_names?: string[];
 };
 
+export type WebhookFilterOp = "eq" | "ne" | "in" | "not_in" | "exists" | "not_exists" | "contains";
+
+export type WebhookFilter = {
+  path: string;
+  op: WebhookFilterOp;
+  values?: string[];
+};
+
+export type WebhookRepositorySelector = {
+  selector_path: string;
+};
+
 export type WebhookTriggerConfig = {
+  /** Inert on the backend; kept only for wire compatibility with older clients. */
   filter_expression?: string;
+  /** Dot path into the payload whose resolved, trimmed, non-empty value dedups firings. */
+  dedup_key?: string;
+  /** Predicates evaluated in order before dedup; every one must pass to fire. */
+  filters?: WebhookFilter[];
+  /** Selects which already-configured repository a firing binds to. */
+  repository?: WebhookRepositorySelector;
 };
 
 // --- Trigger type metadata (from backend registry) ---
@@ -100,7 +190,25 @@ export type PlaceholderInfo = {
   example: string;
 };
 
+export type PluginConditionInfo = {
+  config_options?: Record<string, string[]>;
+  plugin_id: string;
+  provider_label: string;
+  available: boolean;
+  reason?: string;
+  condition: {
+    key: string;
+    label: string;
+    label_key?: string;
+    description: string;
+    description_key?: string;
+    config_version: number;
+    config_schema: Record<string, unknown>;
+  };
+};
+
 export type TriggerTypeInfo = {
+  plugin?: PluginConditionInfo;
   type: TriggerType;
   label: string;
   description: string;
@@ -123,10 +231,13 @@ export type CreateAutomationRequest = {
   agent_profile_id: string;
   executor_profile_id: string;
   repository_ids?: string[];
+  repositories?: AutomationRepository[];
   prompt?: string;
   task_title_template?: string;
-  execution_mode?: ExecutionMode;
   max_concurrent_runs?: number;
+  continuation_policy?: ContinuationPolicy;
+  task_mode?: TaskMode;
+  repository_mode?: RepositoryMode;
   triggers?: Array<{
     type: TriggerType;
     config: Record<string, unknown>;
@@ -142,11 +253,14 @@ export type UpdateAutomationRequest = {
   agent_profile_id?: string;
   executor_profile_id?: string;
   repository_ids?: string[];
+  repositories?: AutomationRepository[];
   prompt?: string;
   task_title_template?: string;
-  execution_mode?: ExecutionMode;
   enabled?: boolean;
   max_concurrent_runs?: number;
+  continuation_policy?: ContinuationPolicy;
+  task_mode?: TaskMode;
+  repository_mode?: RepositoryMode;
 };
 
 // CreateAutomationResponse mirrors the backend's one-time webhook secret

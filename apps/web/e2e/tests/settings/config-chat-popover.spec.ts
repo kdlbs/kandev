@@ -2,12 +2,7 @@ import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { expectElementsNotToIntersect } from "../../helpers/layout-assertions";
 
-async function openConfigChatFromSettings(page: Page): Promise<Locator> {
-  const pageErrors: string[] = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
-  await page.goto("/settings/agents");
-  await page.waitForLoadState("networkidle");
-  expect(pageErrors, "settings page should render without client errors").toEqual([]);
+async function openConfigChatPopover(page: Page): Promise<Locator> {
   const fab = page.getByRole("button", { name: "Configuration Chat" });
   await expect(fab).toBeVisible({ timeout: 10_000 });
   await fab.click();
@@ -15,6 +10,15 @@ async function openConfigChatFromSettings(page: Page): Promise<Locator> {
   await expect(popover).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("dialog", { name: "Quick Chat" })).not.toBeVisible();
   return popover;
+}
+
+async function openConfigChatFromSettings(page: Page): Promise<Locator> {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.goto("/settings/agents");
+  await page.waitForLoadState("networkidle");
+  expect(pageErrors, "settings page should render without client errors").toEqual([]);
+  return openConfigChatPopover(page);
 }
 
 async function startConfigChat(dialog: Locator, prompt: string) {
@@ -50,9 +54,18 @@ test.describe("Configuration Chat", () => {
     const initial = await apiClient.getUserSettings();
     const initialLayout = initial.settings.changes_panel_layout === "tree" ? "tree" : "flat";
     const nextLayout = initialLayout === "tree" ? "flat" : "tree";
+    expect(initial.settings.app_status_bar_enabled).toBe(false);
 
     try {
-      await testPage.goto("/settings/general/appearance");
+      await testPage.goto("/settings/preferences/appearance");
+      await expect(testPage.getByTestId("app-status-bar")).toHaveCount(0);
+      await expect
+        .poll(() =>
+          testPage.evaluate(() =>
+            getComputedStyle(document.documentElement).getPropertyValue("--app-status-bar-height"),
+          ),
+        )
+        .toBe("0px");
       const layout = testPage.getByTestId("changes-panel-layout-select");
       await layout.click();
       await testPage
@@ -61,14 +74,65 @@ test.describe("Configuration Chat", () => {
 
       const floatingSave = testPage.getByTestId("settings-floating-save");
       const saveButton = floatingSave.getByRole("button", { name: "Save changes" });
+      const resetButton = floatingSave.getByRole("button", { name: "Reset" });
+      const surface = floatingSave.getByTestId("settings-floating-save-surface");
+      const contentArea = testPage.getByTestId("settings-scroll-container");
       const configChatButton = testPage.getByRole("button", { name: "Configuration Chat" });
+      const [closedSurfaceBox, contentBox, configChatBox, resetBox, saveBox] = await Promise.all([
+        surface.boundingBox(),
+        contentArea.boundingBox(),
+        configChatButton.boundingBox(),
+        resetButton.boundingBox(),
+        saveButton.boundingBox(),
+      ]);
+      expect(closedSurfaceBox).not.toBeNull();
+      expect(contentBox).not.toBeNull();
+      expect(configChatBox).not.toBeNull();
+      expect(resetBox).not.toBeNull();
+      expect(saveBox).not.toBeNull();
+      expect(closedSurfaceBox!.height).toBeLessThanOrEqual(40);
+      expect(resetBox!.height).toBeLessThanOrEqual(32);
+      expect(saveBox!.height).toBeLessThanOrEqual(32);
+      expect(
+        Math.abs(
+          closedSurfaceBox!.x +
+            closedSurfaceBox!.width / 2 -
+            (contentBox!.x + contentBox!.width / 2),
+        ),
+      ).toBeLessThanOrEqual(2);
+      expect(closedSurfaceBox!.height - saveBox!.height).toBeGreaterThanOrEqual(6);
+      expect(
+        Math.abs(
+          closedSurfaceBox!.y +
+            closedSurfaceBox!.height / 2 -
+            (configChatBox!.y + configChatBox!.height / 2),
+        ),
+      ).toBeLessThanOrEqual(2);
       await expect(saveButton).toHaveClass(/bg-success/);
+      await expect(floatingSave).not.toHaveClass(/bg-success/);
       await expectElementsNotToIntersect(saveButton, configChatButton);
 
       await configChatButton.click();
       const configChatPopover = testPage.getByTestId("config-chat-popover");
       await expect(configChatPopover).toBeVisible();
       await expectElementAbove(saveButton, configChatPopover);
+      await expectElementAbove(surface, configChatPopover);
+      const [surfaceBox, popoverBox] = await Promise.all([
+        surface.boundingBox(),
+        configChatPopover.boundingBox(),
+      ]);
+      expect(surfaceBox).not.toBeNull();
+      expect(popoverBox).not.toBeNull();
+      expect(surfaceBox!.height).toBeLessThanOrEqual(48);
+      expect(
+        Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (popoverBox!.x + popoverBox!.width / 2)),
+      ).toBeLessThanOrEqual(2);
+      const leftParentGap = surfaceBox!.x - popoverBox!.x;
+      const rightParentGap =
+        popoverBox!.x + popoverBox!.width - (surfaceBox!.x + surfaceBox!.width);
+      expect(leftParentGap).toBeGreaterThanOrEqual(8);
+      expect(rightParentGap).toBeGreaterThanOrEqual(8);
+      expect(Math.abs(leftParentGap - rightParentGap)).toBeLessThanOrEqual(2);
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         changes_panel_layout: initialLayout,
@@ -76,7 +140,20 @@ test.describe("Configuration Chat", () => {
     }
   });
 
-  test("starts floating, expands the same session, restores, continues, and deletes", async ({
+  test("keeps the floating launcher visible and operable while open", async ({ testPage }) => {
+    const popover = await openConfigChatFromSettings(testPage);
+    const launcher = testPage.getByRole("button", { name: "Configuration Chat", exact: true });
+
+    await expect(launcher).toBeVisible();
+    await expect(launcher).toBeEnabled();
+    await expect(launcher).not.toHaveAttribute("aria-hidden", "true");
+    await expect(launcher).not.toHaveAttribute("tabindex", "-1");
+
+    await launcher.click();
+    await expect(popover).not.toBeVisible();
+  });
+
+  test("starts floating, expands the same session, restores, and continues", async ({
     testPage,
   }) => {
     await testPage.setViewportSize({ width: 900, height: 520 });
@@ -116,9 +193,7 @@ test.describe("Configuration Chat", () => {
 
     await testPage.reload();
     await testPage.waitForLoadState("networkidle");
-    await expect(testPage.getByRole("dialog", { name: "Quick Chat" })).not.toBeVisible();
-    await testPage.getByRole("button", { name: "Configuration Chat" }).click();
-    const restored = testPage.getByTestId("config-chat-popover");
+    const restored = await openConfigChatPopover(testPage);
     await expect(restored.getByTestId("chat-input-editor")).toBeVisible({ timeout: 10_000 });
     await expect(
       restored.getByText("simple mock response for e2e testing", { exact: false }),
@@ -128,9 +203,18 @@ test.describe("Configuration Chat", () => {
     await expect(restored.getByText("continued config response", { exact: true })).toBeVisible({
       timeout: 30_000,
     });
+  });
 
-    await restored.getByRole("button", { name: "Open in Quick Chat" }).click();
+  test("deletes an expanded configuration chat and returns to setup", async ({ testPage }) => {
+    const popover = await openConfigChatFromSettings(testPage);
+    await startConfigChat(popover, "/e2e:simple-message");
+    await expect(
+      popover.getByText("simple mock response for e2e testing", { exact: false }),
+    ).toBeVisible({ timeout: 30_000 });
+
+    await popover.getByRole("button", { name: "Open in Quick Chat" }).click();
     const restoredDialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await expect(restoredDialog).toBeVisible({ timeout: 10_000 });
     await restoredDialog
       .getByTestId("quick-chat-tab")
       .getByRole("button", { name: /^Close / })
@@ -146,10 +230,8 @@ test.describe("Configuration Chat", () => {
 
     await testPage.reload();
     await testPage.waitForLoadState("networkidle");
-    await testPage.getByRole("button", { name: "Configuration Chat" }).click();
-    await expect(
-      testPage.getByTestId("config-chat-popover").getByTestId("config-chat-setup"),
-    ).toBeVisible({ timeout: 10_000 });
+    const freshPopover = await openConfigChatPopover(testPage);
+    await expect(freshPopover.getByTestId("config-chat-setup")).toBeVisible({ timeout: 10_000 });
   });
 
   test("opens the same typed setup from the command palette", async ({ testPage }) => {

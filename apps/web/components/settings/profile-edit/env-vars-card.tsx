@@ -3,13 +3,19 @@
 import { useCallback, useId, useState } from "react";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { ProfileEnvVar } from "@/lib/types/http";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { SettingsFieldLabel } from "@/components/settings/settings-typography";
+import {
+  settingsActionClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
 import { useTranslation } from "react-i18next";
+import type { SecretListItem } from "@/lib/types/http-secrets";
 
 export type EnvVarRow = {
   key: string;
@@ -48,11 +54,13 @@ function ValueOrSecretInput({
 }: {
   row: EnvVarRow;
   index: number;
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   baselineRow?: EnvVarRow;
 }) {
   const { t } = useTranslation();
+  const hasMissingSecret =
+    Boolean(row.secretId) && !secrets.some((secret) => secret.id === row.secretId);
   if (row.mode === "value") {
     return (
       <Input
@@ -67,12 +75,15 @@ function ValueOrSecretInput({
   return (
     <Select value={row.secretId} onValueChange={(v) => onUpdate(index, "secretId", v)}>
       <SelectTrigger
-        className="flex-[3] text-xs"
+        className={settingsControlClassName("flex-[3]")}
         data-settings-dirty={!baselineRow || row.secretId !== baselineRow.secretId}
       >
         <SelectValue placeholder={t("executors:selectSecret")} />
       </SelectTrigger>
       <SelectContent>
+        {hasMissingSecret && (
+          <SelectItem value={row.secretId}>{t("executors:missingSecretReference")}</SelectItem>
+        )}
         {secrets.map((s) => (
           <SelectItem key={s.id} value={s.id}>
             {s.name}
@@ -93,7 +104,7 @@ function EnvVarRowComponent({
 }: {
   row: EnvVarRow;
   index: number;
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   onRemove: (index: number) => void;
   baselineRow?: EnvVarRow;
@@ -115,7 +126,7 @@ function EnvVarRowComponent({
       />
       <Select value={row.mode} onValueChange={(v) => onUpdate(index, "mode", v)}>
         <SelectTrigger
-          className="w-[100px] text-xs"
+          className={settingsControlClassName("w-[100px]")}
           data-settings-dirty={!baselineRow || row.mode !== baselineRow.mode}
         >
           <SelectValue />
@@ -137,7 +148,7 @@ function EnvVarRowComponent({
         variant="ghost"
         size="icon"
         onClick={() => onRemove(index)}
-        className="h-8 w-8 shrink-0 cursor-pointer"
+        className="shrink-0 cursor-pointer"
         data-testid={`env-var-remove-${index}`}
         aria-label={
           row.key ? t("executors:removeEnvVarNamed", { key: row.key }) : t("executors:removeEnvVar")
@@ -158,7 +169,7 @@ function DraftValueInput({
 }: {
   draft: EnvVarRow;
   valueId: string;
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
   onEnter: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   setDraft: React.Dispatch<React.SetStateAction<EnvVarRow>>;
 }) {
@@ -178,10 +189,17 @@ function DraftValueInput({
   }
   return (
     <Select value={draft.secretId} onValueChange={(v) => setDraft((d) => ({ ...d, secretId: v }))}>
-      <SelectTrigger id={valueId} className="text-xs" data-testid="env-var-new-secret-select">
+      <SelectTrigger
+        id={valueId}
+        className={settingsControlClassName()}
+        data-testid="env-var-new-secret-select"
+      >
         <SelectValue placeholder={t("executors:selectSecret")} />
       </SelectTrigger>
       <SelectContent>
+        {draft.secretId && !secrets.some((secret) => secret.id === draft.secretId) && (
+          <SelectItem value={draft.secretId}>{t("executors:missingSecretReference")}</SelectItem>
+        )}
         {secrets.map((s) => (
           <SelectItem key={s.id} value={s.id}>
             {s.name}
@@ -197,7 +215,7 @@ function EnvVarAddForm({
   secrets,
 }: {
   onAdd: (row: EnvVarRow) => void;
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
 }) {
   const { t } = useTranslation();
   const uid = useId();
@@ -228,11 +246,9 @@ function EnvVarAddForm({
   };
 
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+    <div className="flex flex-col gap-2 md:flex-row md:items-end">
       <div className="flex-[2] space-y-1">
-        <Label className="text-xs" htmlFor={keyId}>
-          {t("executors:key")}
-        </Label>
+        <SettingsFieldLabel htmlFor={keyId}>{t("executors:key")}</SettingsFieldLabel>
         <Input
           id={keyId}
           value={draft.key}
@@ -244,16 +260,14 @@ function EnvVarAddForm({
         />
       </div>
       <div className="space-y-1">
-        <Label className="text-xs" htmlFor={modeId}>
-          {t("executors:mode")}
-        </Label>
+        <SettingsFieldLabel htmlFor={modeId}>{t("executors:mode")}</SettingsFieldLabel>
         <Select
           value={draft.mode}
           onValueChange={(v) =>
             setDraft((d) => ({ ...d, mode: v as "value" | "secret", value: "", secretId: "" }))
           }
         >
-          <SelectTrigger id={modeId} className="w-[100px] text-xs">
+          <SelectTrigger id={modeId} className={settingsControlClassName("w-[100px]")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -263,9 +277,9 @@ function EnvVarAddForm({
         </Select>
       </div>
       <div className="flex-[3] space-y-1">
-        <Label className="text-xs" htmlFor={valueId}>
+        <SettingsFieldLabel htmlFor={valueId}>
           {draft.mode === "value" ? t("executors:value") : t("executors:secret")}
-        </Label>
+        </SettingsFieldLabel>
         <DraftValueInput
           draft={draft}
           valueId={valueId}
@@ -280,7 +294,7 @@ function EnvVarAddForm({
         size="sm"
         onClick={commit}
         disabled={isAddDisabled}
-        className="cursor-pointer"
+        className={settingsActionClassName("cursor-pointer")}
         data-testid="env-var-add-button"
       >
         <IconPlus className="h-3.5 w-3.5 mr-1" />
@@ -293,10 +307,11 @@ function EnvVarAddForm({
 type EnvVarsFieldProps = {
   rows: EnvVarRow[];
   baselineRows?: EnvVarRow[];
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
   onAdd: (row: EnvVarRow) => void;
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   onRemove: (index: number) => void;
+  discoveryTargetId?: string;
 };
 
 function EnvVarsFieldBody({
@@ -337,6 +352,10 @@ function EnvVarsFieldBody({
 export function useEnvVarRows(initialEnvVars?: ProfileEnvVar[]) {
   const [envVarRows, setEnvVarRows] = useState<EnvVarRow[]>(() => envVarsToRows(initialEnvVars));
 
+  const resetEnvVars = useCallback((envVars?: ProfileEnvVar[]) => {
+    setEnvVarRows(envVarsToRows(envVars));
+  }, []);
+
   const addEnvVar = useCallback((row: EnvVarRow) => {
     setEnvVarRows((prev) => [...prev, row]);
   }, []);
@@ -349,7 +368,7 @@ export function useEnvVarRows(initialEnvVars?: ProfileEnvVar[]) {
     setEnvVarRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: val } : row)));
   }, []);
 
-  return { envVarRows, addEnvVar, removeEnvVar, updateEnvVar };
+  return { envVarRows, addEnvVar, removeEnvVar, updateEnvVar, resetEnvVars };
 }
 
 export function EnvVarsCard(props: EnvVarsFieldProps) {
@@ -358,22 +377,22 @@ export function EnvVarsCard(props: EnvVarsFieldProps) {
     props.baselineRows !== undefined &&
     JSON.stringify(rowsToEnvVars(props.rows)) !== JSON.stringify(rowsToEnvVars(props.baselineRows));
   return (
-    <SettingsCard isDirty={isDirty} data-testid="env-vars-card">
-      <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <CardTitle>{t("executors:environmentVariables")}</CardTitle>
-            <CardDescription>
-              {t("executors:injectedIntoTheExecutionEnvironmentUse")}
-            </CardDescription>
-          </div>
-          {props.rows.length > 0 && (
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={props.discoveryTargetId}
+      data-testid="env-vars-card"
+    >
+      <SettingsCardHeader
+        title={t("executors:environmentVariables")}
+        description={t("executors:injectedIntoTheExecutionEnvironmentUse")}
+        actions={
+          props.rows.length > 0 ? (
             <span className="text-[10px] text-muted-foreground" data-testid="env-vars-count">
               {t("executors:envVarsConfiguredCount", { count: props.rows.length })}
             </span>
-          )}
-        </div>
-      </CardHeader>
+          ) : undefined
+        }
+      />
       <CardContent>
         <EnvVarsFieldBody {...props} />
       </CardContent>

@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ func memSQLiteDB(t *testing.T) *sqlx.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
@@ -167,6 +169,134 @@ func TestReadLatestVersion_PartialPersistedState(t *testing.T) {
 	}
 	if !when.IsZero() {
 		t.Errorf("checkedAt should be zero, got %v", when)
+	}
+}
+
+func TestWriteLatestNightlyVersionRollsBackPartialTuple(t *testing.T) {
+	db := memSQLiteDB(t)
+	if err := ensureMetaTable(db); err != nil {
+		t.Fatalf("ensureMetaTable: %v", err)
+	}
+	if _, err := db.Exec(fmt.Sprintf(`
+		CREATE TRIGGER fail_nightly_url
+		BEFORE INSERT ON kandev_meta
+		WHEN NEW.key = '%s'
+		BEGIN
+			SELECT RAISE(ABORT, 'forced nightly URL failure');
+		END`, metaKeyLatestNightlyVersionURL)); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	err := WriteLatestNightlyVersion(
+		db,
+		"1.2.4-nightly.shaabc123def456",
+		"https://example/nightly",
+		time.Unix(1_700_000_000, 0).UTC(),
+	)
+	if err == nil {
+		t.Fatal("WriteLatestNightlyVersion error = nil, want forced failure")
+	}
+	version, readErr := readKey(db, metaKeyLatestNightlyVersion)
+	if readErr != nil {
+		t.Fatalf("read nightly version: %v", readErr)
+	}
+	if version != "" {
+		t.Fatalf("partial nightly version persisted: %q", version)
+	}
+}
+
+func TestStableAndNightlyLatestVersionsAreIsolated(t *testing.T) {
+	db := memSQLiteDB(t)
+	if err := ensureMetaTable(db); err != nil {
+		t.Fatalf("ensureMetaTable: %v", err)
+	}
+	stableAt := time.Unix(1_700_000_000, 0).UTC()
+	nightlyAt := stableAt.Add(time.Hour)
+	if err := WriteLatestVersion(db, "v1.2.3", "https://example/stable", stableAt); err != nil {
+		t.Fatalf("WriteLatestVersion: %v", err)
+	}
+	if err := WriteLatestNightlyVersion(
+		db,
+		"1.2.4-nightly.shaabc123def456",
+		"https://example/nightly",
+		nightlyAt,
+	); err != nil {
+		t.Fatalf("WriteLatestNightlyVersion: %v", err)
+	}
+
+	stable, stableURL, stableChecked, err := ReadLatestVersion(db)
+	if err != nil {
+		t.Fatalf("ReadLatestVersion: %v", err)
+	}
+	nightly, nightlyURL, nightlyChecked, err := ReadLatestNightlyVersion(db)
+	if err != nil {
+		t.Fatalf("ReadLatestNightlyVersion: %v", err)
+	}
+	if stable != "v1.2.3" || stableURL != "https://example/stable" || !stableChecked.Equal(stableAt) {
+		t.Fatalf("stable cache changed: version=%q url=%q checked=%v", stable, stableURL, stableChecked)
+	}
+	if nightly != "1.2.4-nightly.shaabc123def456" || nightlyURL != "https://example/nightly" || !nightlyChecked.Equal(nightlyAt) {
+		t.Fatalf("nightly cache mismatch: version=%q url=%q checked=%v", nightly, nightlyURL, nightlyChecked)
+	}
+}
+
+// TestReadMetaKey_EmptyOnAbsentKey verifies the exported reader returns ""
+// and no error for a key that was never written.
+func TestReadMetaKey_EmptyOnAbsentKey(t *testing.T) {
+	db := memSQLiteDB(t)
+	if err := ensureMetaTable(db); err != nil {
+		t.Fatalf("ensureMetaTable: %v", err)
+	}
+
+	val, err := ReadMetaKey(db, "github_task_pr_outcome_activated_at")
+	if err != nil {
+		t.Fatalf("ReadMetaKey: %v", err)
+	}
+	if val != "" {
+		t.Errorf("expected empty value for absent key, got %q", val)
+	}
+}
+
+// TestWriteMetaKeyIfAbsent_WriteOnceSemantics verifies that the first call
+// inserts and reports true, and a second call with a different value leaves
+// the original value in place and reports false. This is the race-free
+// write-once primitive the outcome-attribution activation instant depends on.
+func TestWriteMetaKeyIfAbsent_WriteOnceSemantics(t *testing.T) {
+	db := memSQLiteDB(t)
+	if err := ensureMetaTable(db); err != nil {
+		t.Fatalf("ensureMetaTable: %v", err)
+	}
+
+	inserted, err := WriteMetaKeyIfAbsent(db, "github_task_pr_outcome_activated_at", "2026-08-13T00:00:00Z")
+	if err != nil {
+		t.Fatalf("WriteMetaKeyIfAbsent first call: %v", err)
+	}
+	if !inserted {
+		t.Fatal("expected first WriteMetaKeyIfAbsent call to report inserted=true")
+	}
+
+	val, err := ReadMetaKey(db, "github_task_pr_outcome_activated_at")
+	if err != nil {
+		t.Fatalf("ReadMetaKey: %v", err)
+	}
+	if val != "2026-08-13T00:00:00Z" {
+		t.Fatalf("got %q, want the first-written value", val)
+	}
+
+	inserted2, err := WriteMetaKeyIfAbsent(db, "github_task_pr_outcome_activated_at", "2027-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("WriteMetaKeyIfAbsent second call: %v", err)
+	}
+	if inserted2 {
+		t.Fatal("expected second WriteMetaKeyIfAbsent call to report inserted=false")
+	}
+
+	val2, err := ReadMetaKey(db, "github_task_pr_outcome_activated_at")
+	if err != nil {
+		t.Fatalf("ReadMetaKey after second call: %v", err)
+	}
+	if val2 != "2026-08-13T00:00:00Z" {
+		t.Fatalf("value changed on second call: got %q, want the first-written value unchanged", val2)
 	}
 }
 

@@ -1,37 +1,33 @@
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useMemo, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import {
-  queueMessage,
   clearQueue,
-  drainQueuedMessage,
-  getQueueStatus,
   updateQueuedMessage,
   removeQueuedEntry,
   mergeQueuedEntry,
+  reorderQueuedEntries,
   QueueEntryNotFoundError,
+  QueueEditConflictError,
+  sendQueuedNow,
+  setQueueAutoRun,
+  type QueueEditLease,
+  setQueueAutoMerge,
 } from "@/lib/api/domains/queue-api";
-import type { QueuedMessage } from "@/lib/state/slices/session/types";
+import type { QueueSessionIdentity } from "@/lib/api/domains/queue-api";
+import type {
+  QueueMeta,
+  QueueOperationToken,
+  QueuedMessage,
+} from "@/lib/state/slices/session/types";
+import type { MessageAttachment } from "./use-queue-types";
+export type { MessageAttachment, QueueMessageInput } from "./use-queue-types";
+import { useQueueAdmissionAction } from "./use-queue-admission";
+import { useQueueRefetch, type QueueRefetch } from "./use-queue-refetch";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
+import { generateUUID } from "@/lib/utils";
 const EMPTY_ENTRIES: QueuedMessage[] = [];
-
-export type MessageAttachment = {
-  type: string;
-  data: string;
-  mime_type: string;
-  name?: string;
-  delivery_mode?: "prompt" | "path";
-};
-
-export type QueueMessageInput = {
-  taskId: string;
-  content: string;
-  model?: string;
-  planMode?: boolean;
-  attachments?: MessageAttachment[];
-  entityReferences?: EntityReference[];
-};
 
 /** Selectors over the queue slice for one session. */
 function useQueueState(sessionId: string | null) {
@@ -41,199 +37,538 @@ function useQueueState(sessionId: string | null) {
   const meta = useAppStore((state) =>
     sessionId ? state.queue.metaBySessionId[sessionId] : undefined,
   );
-  const isLoading = useAppStore((state) =>
-    sessionId ? (state.queue.isLoading[sessionId] ?? false) : false,
-  );
   const setQueueEntries = useAppStore((state) => state.setQueueEntries);
   const removeQueueEntry = useAppStore((state) => state.removeQueueEntry);
-  const setQueueLoading = useAppStore((state) => state.setQueueLoading);
-  return { entries, meta, isLoading, setQueueEntries, removeQueueEntry, setQueueLoading };
+  const activeOperation = useAppStore((state) =>
+    sessionId ? state.queue.activeOperationBySessionId[sessionId] : undefined,
+  );
+  const beginQueueOperation = useAppStore((state) => state.beginQueueOperation);
+  const finishQueueOperation = useAppStore((state) => state.finishQueueOperation);
+  const cancellationPending = useAppStore(
+    (state) =>
+      (sessionId ? state.taskSessions.items[sessionId]?.cancellation_pending : false) === true,
+  );
+  const taskSession = useAppStore((state) =>
+    sessionId ? state.taskSessions.items[sessionId] : undefined,
+  );
+  return {
+    entries,
+    meta,
+    isLoading: activeOperation !== undefined,
+    cancellationPending,
+    taskSession,
+    setQueueEntries,
+    removeQueueEntry,
+    beginQueueOperation,
+    finishQueueOperation,
+  };
 }
 
 type QueueActionsArgs = {
-  sessionId: string | null;
+  identity: QueueSessionIdentity | null;
+  entries: QueuedMessage[];
   setQueueEntries: ReturnType<typeof useQueueState>["setQueueEntries"];
   removeQueueEntry: ReturnType<typeof useQueueState>["removeQueueEntry"];
-  setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"];
+  beginQueueOperation: ReturnType<typeof useQueueState>["beginQueueOperation"];
+  finishQueueOperation: ReturnType<typeof useQueueState>["finishQueueOperation"];
   metaMax: number | undefined;
+  metaMergeEnabled: boolean | undefined;
+  metaAutoRun: boolean | undefined;
 };
 
-function useDrainNextAction(
-  sessionId: string | null,
-  setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"],
-  refetch: (sid: string) => Promise<void>,
-) {
-  return useCallback(async () => {
-    if (!sessionId) return;
-    setQueueLoading(sessionId, true);
+type BeginQueueOperation = ReturnType<typeof useQueueState>["beginQueueOperation"];
+type FinishQueueOperation = ReturnType<typeof useQueueState>["finishQueueOperation"];
+
+async function runQueueMutation(
+  identity: QueueSessionIdentity | null,
+  beginQueueOperation: BeginQueueOperation,
+  finishQueueOperation: FinishQueueOperation,
+  refetch: QueueRefetch,
+  mutate: (identity: QueueSessionIdentity) => Promise<unknown>,
+): Promise<void> {
+  if (!identity) return;
+  const { session_id: sessionId, session_incarnation_id: incarnationId } = identity;
+  const token = beginQueueOperation(sessionId, incarnationId);
+  if (!token) return;
+  let mutationError: unknown;
+  try {
     try {
-      await drainQueuedMessage(sessionId);
-      await refetch(sessionId);
-    } finally {
-      setQueueLoading(sessionId, false);
+      await mutate(identity);
+    } catch (error) {
+      mutationError = error;
     }
-  }, [sessionId, refetch, setQueueLoading]);
+    try {
+      await refetch(sessionId, token);
+    } catch (reconcileError) {
+      if (mutationError) throw mutationError;
+      throw reconcileError;
+    }
+    if (mutationError) throw mutationError;
+  } finally {
+    finishQueueOperation(sessionId, token);
+  }
+}
+
+function useSendNowAction(
+  identity: QueueSessionIdentity | null,
+  beginQueueOperation: BeginQueueOperation,
+  finishQueueOperation: FinishQueueOperation,
+  refetch: QueueRefetch,
+) {
+  return useCallback(
+    (entryId: string) =>
+      runQueueMutation(identity, beginQueueOperation, finishQueueOperation, refetch, (current) =>
+        sendQueuedNow({ ...current, scope: "entry", entry_id: entryId }),
+      ),
+    [beginQueueOperation, finishQueueOperation, identity, refetch],
+  );
+}
+
+type BooleanQueueMutation = (identity: QueueSessionIdentity, enabled: boolean) => Promise<unknown>;
+
+function useBooleanQueueAction(
+  identity: QueueSessionIdentity | null,
+  beginQueueOperation: BeginQueueOperation,
+  finishQueueOperation: FinishQueueOperation,
+  refetch: QueueRefetch,
+  mutate: BooleanQueueMutation,
+) {
+  return useCallback(
+    (enabled: boolean) =>
+      runQueueMutation(identity, beginQueueOperation, finishQueueOperation, refetch, (current) =>
+        mutate(current, enabled),
+      ),
+    [beginQueueOperation, finishQueueOperation, identity, mutate, refetch],
+  );
 }
 
 /** Build an action set bound to the supplied session + slice setters. */
 function useQueueActions({
-  sessionId,
+  identity,
+  entries,
   setQueueEntries,
   removeQueueEntry,
-  setQueueLoading,
+  beginQueueOperation,
+  finishQueueOperation,
   metaMax,
+  metaMergeEnabled,
+  metaAutoRun,
 }: QueueActionsArgs) {
-  // Monotonic per-session refetch version. Concurrent mutations (merge, edit,
-  // remove, drain) all refetch; without a guard an older in-flight
-  // getQueueStatus response can land after a newer one and restore a stale
-  // snapshot (e.g. the pre-merge row). Discard any response that is no longer
-  // the latest issued for its session.
-  const refetchVersion = useRef<Record<string, number>>({});
-  const refetch = useCallback(
-    async (sid: string) => {
-      const version = (refetchVersion.current[sid] ?? 0) + 1;
-      refetchVersion.current[sid] = version;
-      try {
-        setQueueLoading(sid, true);
-        const status = await getQueueStatus(sid);
-        if (refetchVersion.current[sid] !== version) return;
-        setQueueEntries(sid, status.entries ?? [], { count: status.count, max: status.max });
-      } finally {
-        if (refetchVersion.current[sid] === version) {
-          setQueueLoading(sid, false);
-        }
-      }
-    },
-    [setQueueEntries, setQueueLoading],
+  const { refetch, invalidate: invalidateRefetch } = useQueueRefetch(
+    identity,
+    setQueueEntries,
+    beginQueueOperation,
+    finishQueueOperation,
   );
 
-  const queue = useCallback(
-    async ({
-      taskId,
-      content,
-      model,
-      planMode,
-      attachments,
-      entityReferences,
-    }: QueueMessageInput) => {
-      if (!sessionId) return;
-      setQueueLoading(sessionId, true);
-      try {
-        await queueMessage({
-          session_id: sessionId,
-          task_id: taskId,
-          content,
-          model,
-          plan_mode: planMode,
-          attachments,
-          entity_references: entityReferences,
-        });
-        await refetch(sessionId);
-      } finally {
-        setQueueLoading(sessionId, false);
-      }
-    },
-    [sessionId, refetch, setQueueLoading],
+  const queue = useQueueAdmissionAction(
+    identity,
+    beginQueueOperation,
+    finishQueueOperation,
+    refetch,
   );
 
-  const clearAll = useCallback(async () => {
-    if (!sessionId) return;
-    setQueueLoading(sessionId, true);
-    try {
-      await clearQueue(sessionId);
-      // Invalidate any in-flight refetch so a pre-clear getQueueStatus
-      // response cannot land after the empty snapshot and restore the
-      // entries that were just drained.
-      refetchVersion.current[sessionId] = (refetchVersion.current[sessionId] ?? 0) + 1;
-      // Reset to a neutral capacity snapshot; the next status_changed event
-      // will replace it with the authoritative server value. Using the
-      // pre-clear entry count as a fallback for `max` was wrong (it would
-      // pretend the cap equals "however many were queued").
-      setQueueEntries(sessionId, [], { count: 0, max: metaMax ?? 0 });
-    } finally {
-      setQueueLoading(sessionId, false);
-    }
-  }, [sessionId, setQueueEntries, setQueueLoading, metaMax]);
+  const clearAll = useClearAllAction({
+    identity,
+    setQueueEntries,
+    beginQueueOperation,
+    finishQueueOperation,
+    metaMax,
+    metaMergeEnabled,
+    metaAutoRun,
+    refetch,
+    invalidateRefetch,
+  });
 
-  const drainNext = useDrainNextAction(sessionId, setQueueLoading, refetch);
+  const sendEntryNow = useSendNowAction(
+    identity,
+    beginQueueOperation,
+    finishQueueOperation,
+    refetch,
+  );
+  const setAutoRun = useBooleanQueueAction(
+    identity,
+    beginQueueOperation,
+    finishQueueOperation,
+    refetch,
+    setQueueAutoRun,
+  );
+  const setAutoMerge = useBooleanQueueAction(
+    identity,
+    beginQueueOperation,
+    finishQueueOperation,
+    refetch,
+    setQueueAutoMerge,
+  );
 
   const { editEntry, removeEntry, mergeEntry } = useEntryMutations({
-    sessionId,
+    identity,
     removeQueueEntry,
+    refetch,
+    beginQueueOperation,
+    finishQueueOperation,
+  });
+
+  const reorderEntries = useReorderEntriesAction({
+    identity,
+    entries,
+    setQueueEntries,
+    beginQueueOperation,
+    finishQueueOperation,
+    metaMax,
+    metaMergeEnabled,
+    metaAutoRun,
     refetch,
   });
 
-  return { refetch, queue, clearAll, drainNext, editEntry, removeEntry, mergeEntry };
+  return {
+    refetch,
+    queue,
+    clearAll,
+    sendEntryNow,
+    setAutoRun,
+    setAutoMerge,
+    editEntry,
+    removeEntry,
+    mergeEntry,
+    reorderEntries,
+  };
+}
+
+type ReorderEntriesArgs = {
+  identity: QueueSessionIdentity | null;
+  entries: QueuedMessage[];
+  setQueueEntries: ReturnType<typeof useQueueState>["setQueueEntries"];
+  beginQueueOperation: BeginQueueOperation;
+  finishQueueOperation: FinishQueueOperation;
+  metaMax: number | undefined;
+  metaMergeEnabled: boolean | undefined;
+  metaAutoRun: boolean | undefined;
+  refetch: QueueRefetch;
+};
+
+type ClearAllArgs = {
+  identity: QueueSessionIdentity | null;
+  setQueueEntries: ReturnType<typeof useQueueState>["setQueueEntries"];
+  beginQueueOperation: BeginQueueOperation;
+  finishQueueOperation: FinishQueueOperation;
+  metaMax: number | undefined;
+  metaMergeEnabled: boolean | undefined;
+  metaAutoRun: boolean | undefined;
+  refetch: QueueRefetch;
+  invalidateRefetch: (sid: string) => void;
+};
+
+/** Clears every pending entry: optimistic empty state, then the backend's
+ * authoritative result. Reconcile errors preserve the mutation error. */
+function useClearAllAction({
+  identity,
+  setQueueEntries,
+  beginQueueOperation,
+  finishQueueOperation,
+  metaMax,
+  metaMergeEnabled,
+  metaAutoRun,
+  refetch,
+  invalidateRefetch,
+}: ClearAllArgs) {
+  return useCallback(async () => {
+    if (!identity) return;
+    const { session_id: sessionId, session_incarnation_id: incarnationId } = identity;
+    const token = beginQueueOperation(sessionId, incarnationId);
+    if (!token) return;
+    let mutationFailed = false;
+    let mutationError: unknown;
+    try {
+      // Close the panel as soon as the user commits the action. Invalidate
+      // older refetches first so a response that was already in flight cannot
+      // restore the pre-clear list while the mutation is pending. The
+      // authoritative refetch below restores the list if the request fails.
+      invalidateRefetch(sessionId);
+      setQueueEntries(sessionId, [], {
+        count: 0,
+        max: metaMax ?? 0,
+        mergeEnabled: metaMergeEnabled ?? true,
+        autoRun: metaAutoRun ?? true,
+        taskId: identity.task_id,
+        sessionIncarnationId: incarnationId,
+      });
+      try {
+        await clearQueue(identity);
+      } catch (err) {
+        mutationFailed = true;
+        mutationError = err;
+      }
+      try {
+        await refetch(sessionId, token);
+      } catch (reconcileError) {
+        if (mutationFailed) throw mutationError;
+        throw reconcileError;
+      }
+      if (mutationFailed) throw mutationError;
+    } finally {
+      finishQueueOperation(sessionId, token);
+    }
+  }, [
+    beginQueueOperation,
+    finishQueueOperation,
+    identity,
+    setQueueEntries,
+    metaMax,
+    metaMergeEnabled,
+    metaAutoRun,
+    refetch,
+    invalidateRefetch,
+  ]);
+}
+
+/** Rewrites the visible pending order, optimistically at first, then
+ * reconciles to the backend's authoritative order. A queue_changed drift
+ * (drain/remove/merge raced the drag) is refetched and rethrown as
+ * QueueReorderError so the panel can swallow it without a toast. */
+function useReorderEntriesAction({
+  identity,
+  entries,
+  setQueueEntries,
+  beginQueueOperation,
+  finishQueueOperation,
+  metaMax,
+  metaMergeEnabled,
+  metaAutoRun,
+  refetch,
+}: ReorderEntriesArgs) {
+  return useCallback(
+    async (orderedIds: string[]) => {
+      if (!identity) return;
+      const { session_id: sessionId, session_incarnation_id: incarnationId } = identity;
+      const token = beginQueueOperation(sessionId, incarnationId);
+      if (!token) return;
+      const byId = new Map(entries.map((entry) => [entry.id, entry]));
+      const reordered = orderedIds
+        .map((id) => byId.get(id))
+        .filter((entry): entry is QueuedMessage => entry !== undefined);
+      if (reordered.length === entries.length) {
+        setQueueEntries(sessionId, reordered, {
+          count: reordered.length,
+          max: metaMax ?? 0,
+          mergeEnabled: metaMergeEnabled ?? true,
+          autoRun: metaAutoRun ?? true,
+        });
+      }
+      let mutationFailed = false;
+      let mutationError: unknown;
+      try {
+        try {
+          await reorderQueuedEntries({ ...identity, ordered_ids: orderedIds });
+        } catch (err) {
+          mutationFailed = true;
+          mutationError = err;
+        }
+        try {
+          await refetch(sessionId, token);
+        } catch (reconcileError) {
+          if (mutationFailed) throw mutationError;
+          throw reconcileError;
+        }
+        if (mutationFailed) throw mutationError;
+      } finally {
+        finishQueueOperation(sessionId, token);
+      }
+    },
+    [
+      beginQueueOperation,
+      entries,
+      finishQueueOperation,
+      identity,
+      metaAutoRun,
+      metaMax,
+      metaMergeEnabled,
+      refetch,
+      setQueueEntries,
+    ],
+  );
 }
 
 type EntryMutationsArgs = {
-  sessionId: string | null;
+  identity: QueueSessionIdentity | null;
   removeQueueEntry: ReturnType<typeof useQueueState>["removeQueueEntry"];
-  refetch: (sid: string) => Promise<void>;
+  beginQueueOperation: BeginQueueOperation;
+  finishQueueOperation: FinishQueueOperation;
+  refetch: QueueRefetch;
 };
 
 /** Entry-level mutations (edit / remove / merge) that refetch on success and
  * resync on a drain race (QueueEntryNotFoundError). */
-function useEntryMutations({ sessionId, removeQueueEntry, refetch }: EntryMutationsArgs) {
+// eslint-disable-next-line max-lines-per-function -- entry mutations share one queue-operation lifecycle.
+function useEntryMutations({
+  identity,
+  removeQueueEntry,
+  beginQueueOperation,
+  finishQueueOperation,
+  refetch,
+}: EntryMutationsArgs) {
+  const run = useCallback(
+    async (operation: (token: QueueOperationToken) => Promise<void>) => {
+      if (!identity) return;
+      const token = beginQueueOperation(identity.session_id, identity.session_incarnation_id);
+      if (!token) return;
+      try {
+        await operation(token);
+      } finally {
+        finishQueueOperation(identity.session_id, token);
+      }
+    },
+    [beginQueueOperation, finishQueueOperation, identity],
+  );
+  const editOperation = useRef<{ key: string; id: string } | null>(null);
   const editEntry = useCallback(
     async (
       entryId: string,
       content: string,
       attachments?: MessageAttachment[],
       entityReferences: EntityReference[] = [],
-    ) => {
-      if (!sessionId) return;
-      try {
-        await updateQueuedMessage({
-          session_id: sessionId,
-          entry_id: entryId,
-          content,
-          attachments,
-          entity_references: entityReferences,
-        });
-        await refetch(sessionId);
-      } catch (err) {
-        if (err instanceof QueueEntryNotFoundError) {
-          await refetch(sessionId);
+      lease?: QueueEditLease | null,
+    ) =>
+      run(async (token) => {
+        if (!identity) return;
+        try {
+          const request = {
+            ...identity,
+            entry_id: entryId,
+            ...(lease
+              ? {
+                  lease_id: lease.lease_id,
+                  operation_id: "",
+                  expected_target_revision: lease.target_revision,
+                }
+              : {}),
+            content,
+            attachments,
+            entity_references: entityReferences,
+          };
+          if (lease) {
+            const key = JSON.stringify([
+              identity.session_id,
+              entryId,
+              lease.lease_id,
+              lease.target_revision,
+              content,
+              attachments,
+              entityReferences,
+            ]);
+            const operationId =
+              editOperation.current?.key === key ? editOperation.current.id : generateUUID();
+            editOperation.current = { key, id: operationId };
+            request.operation_id = operationId;
+          }
+          await updateQueuedMessage(request);
+          await refetch(identity.session_id, token);
+        } catch (err) {
+          if (err instanceof QueueEntryNotFoundError || err instanceof QueueEditConflictError) {
+            await refetch(identity.session_id, token);
+          }
+          throw err;
         }
-        throw err;
-      }
-    },
-    [sessionId, refetch],
+      }),
+    [identity, refetch, run],
   );
-
   const removeEntry = useCallback(
-    async (entryId: string) => {
-      if (!sessionId) return;
-      removeQueueEntry(sessionId, entryId);
-      try {
-        await removeQueuedEntry({ session_id: sessionId, entry_id: entryId });
-      } catch (err) {
-        if (err instanceof QueueEntryNotFoundError) return;
-        await refetch(sessionId);
-        throw err;
-      }
-    },
-    [sessionId, refetch, removeQueueEntry],
-  );
-
-  const mergeEntry = useCallback(
-    async (entryId: string, userId?: string) => {
-      if (!sessionId) return;
-      try {
-        await mergeQueuedEntry({ session_id: sessionId, entry_id: entryId, user_id: userId });
-        await refetch(sessionId);
-      } catch (err) {
-        if (err instanceof QueueEntryNotFoundError) {
-          await refetch(sessionId);
+    async (entryId: string) =>
+      run(async (token) => {
+        if (!identity) return;
+        removeQueueEntry(identity.session_id, entryId);
+        let mutationFailed = false;
+        let mutationError: unknown;
+        try {
+          await removeQueuedEntry({ ...identity, entry_id: entryId });
+        } catch (err) {
+          mutationFailed = true;
+          mutationError = err;
         }
-        throw err;
-      }
+        try {
+          await refetch(identity.session_id, token);
+        } catch (reconcileError) {
+          if (mutationFailed && !(mutationError instanceof QueueEntryNotFoundError)) {
+            throw mutationError;
+          }
+          throw reconcileError;
+        }
+        if (mutationFailed && !(mutationError instanceof QueueEntryNotFoundError)) {
+          throw mutationError;
+        }
+      }),
+    [identity, refetch, removeQueueEntry, run],
+  );
+  const mergeEntry = useCallback(
+    async (entryId: string, userId?: string) =>
+      run(async (token) => {
+        if (!identity) return;
+        try {
+          await mergeQueuedEntry({ ...identity, entry_id: entryId, user_id: userId });
+          await refetch(identity.session_id, token);
+        } catch (err) {
+          if (err instanceof QueueEntryNotFoundError) {
+            await refetch(identity.session_id, token);
+          }
+          throw err;
+        }
+      }),
+    [identity, refetch, run],
+  );
+  return { editEntry, removeEntry, mergeEntry };
+}
+
+function useCurrentQueueIdentity(
+  sessionId: string | null,
+  taskSession: ReturnType<typeof useQueueState>["taskSession"],
+) {
+  return useMemo<QueueSessionIdentity | null>(() => {
+    if (!sessionId || !taskSession?.task_id || !taskSession.queue_incarnation_id) return null;
+    return {
+      task_id: taskSession.task_id,
+      session_id: sessionId,
+      session_incarnation_id: taskSession.queue_incarnation_id,
+    };
+  }, [sessionId, taskSession?.task_id, taskSession?.queue_incarnation_id]);
+}
+
+function useQueueRefresh(
+  sessionId: string | null,
+  connectionStatus: string,
+  refetch: QueueRefetch,
+) {
+  useEffect(() => {
+    if (!sessionId || connectionStatus !== "connected") return;
+    void refetch(sessionId).catch((error) => {
+      console.error("Failed to fetch queue status:", error);
+    });
+  }, [sessionId, connectionStatus, refetch]);
+  useForegroundRefresh(
+    () => {
+      if (!sessionId || connectionStatus !== "connected") return;
+      return refetch(sessionId).catch((error) => {
+        console.error("Failed to fetch queue status after foreground refresh:", error);
+      });
     },
+    Boolean(sessionId),
+    sessionId,
+  );
+  return useCallback(
+    () => (sessionId ? refetch(sessionId) : Promise.resolve()),
     [sessionId, refetch],
   );
+}
 
-  return { editEntry, removeEntry, mergeEntry };
+function queueSummary(meta: QueueMeta | undefined, entries: QueuedMessage[]) {
+  return {
+    count: meta?.count ?? entries.length,
+    max: meta?.max ?? 0,
+    isFull: meta ? meta.count >= meta.max && meta.max > 0 : false,
+    mergeEnabled: meta?.mergeEnabled ?? true,
+    autoRun: meta?.autoRun ?? true,
+    autoMerge: meta?.autoMergeEnabled ?? false,
+    autoMergeAvailable: meta?.autoMergeAvailable ?? false,
+  };
 }
 
 /**
@@ -246,54 +581,48 @@ function useEntryMutations({ sessionId, removeQueueEntry, refetch }: EntryMutati
  */
 export function useQueue(sessionId: string | null) {
   const state = useQueueState(sessionId);
-  const { entries, meta, isLoading } = state;
+  const { entries, meta, isLoading, cancellationPending, taskSession } = state;
+  const identity = useCurrentQueueIdentity(sessionId, taskSession);
   const connectionStatus = useAppStore((appState) => appState.connection.status);
-  const { refetch, queue, clearAll, drainNext, editEntry, removeEntry, mergeEntry } =
-    useQueueActions({
-      sessionId,
-      setQueueEntries: state.setQueueEntries,
-      removeQueueEntry: state.removeQueueEntry,
-      setQueueLoading: state.setQueueLoading,
-      metaMax: meta?.max,
-    });
-
-  useEffect(() => {
-    if (!sessionId) return;
-    if (connectionStatus !== "connected") return;
-    void refetch(sessionId).catch((err) => {
-      console.error("Failed to fetch queue status:", err);
-    });
-  }, [sessionId, connectionStatus, refetch]);
-
-  useForegroundRefresh(
-    () => {
-      if (!sessionId) return;
-      if (connectionStatus !== "connected") return;
-      return refetch(sessionId).catch((err) => {
-        console.error("Failed to fetch queue status after foreground refresh:", err);
-      });
-    },
-    Boolean(sessionId),
-    sessionId,
-  );
-
-  const refetchBound = useCallback(
-    () => (sessionId ? refetch(sessionId) : Promise.resolve()),
-    [sessionId, refetch],
-  );
-
-  return {
-    entries,
-    count: meta?.count ?? entries.length,
-    max: meta?.max ?? 0,
-    isFull: meta ? meta.count >= meta.max && meta.max > 0 : false,
-    isLoading,
+  const {
+    refetch,
     queue,
     clearAll,
-    drainNext,
+    sendEntryNow,
+    setAutoMerge,
+    setAutoRun,
     editEntry,
     removeEntry,
     mergeEntry,
+    reorderEntries,
+  } = useQueueActions({
+    identity,
+    entries,
+    setQueueEntries: state.setQueueEntries,
+    removeQueueEntry: state.removeQueueEntry,
+    beginQueueOperation: state.beginQueueOperation,
+    finishQueueOperation: state.finishQueueOperation,
+    metaMax: meta?.max,
+    metaMergeEnabled: meta?.mergeEnabled,
+    metaAutoRun: meta?.autoRun,
+  });
+  const refetchBound = useQueueRefresh(sessionId, connectionStatus, refetch);
+
+  return {
+    entries,
+    ...queueSummary(meta, entries),
+    isQueueReady: identity !== null,
+    isLoading,
+    cancellationPending,
+    queue,
+    clearAll,
+    sendEntryNow,
+    setAutoRun,
+    setAutoMerge,
+    editEntry,
+    removeEntry,
+    mergeEntry,
+    reorderEntries,
     refetch: refetchBound,
   };
 }

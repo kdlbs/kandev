@@ -19,6 +19,7 @@ import {
   integrationLabel,
   type IntegrationSlug,
 } from "./integration-copy-config";
+import { Trans, useTranslation } from "react-i18next";
 
 type Workspace = { id: string; name: string };
 
@@ -53,21 +54,33 @@ function CopyConfigDialogBody({
   onCopy: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <DialogContent className="sm:max-w-md">
       <DialogHeader>
-        <DialogTitle>Copy {label} configuration</DialogTitle>
+        <DialogTitle>{t("integrations:copyConfiguration", { label })}</DialogTitle>
         <DialogDescription>
-          Copy the {label} settings
-          {slug === "github" ? "" : " and credentials"} from{" "}
-          <span className="font-medium text-foreground">{sourceName}</span> into another workspace.
-          This overwrites the target workspace&apos;s current {label} configuration. Watchers and
-          automations are not copied.
+          {/* One message per variant rather than a stem plus an optional " and
+              credentials" clause: where the credentials belong in the sentence
+              is the translator's call, and GitHub copies settings only. */}
+          <Trans
+            i18nKey={
+              slug === "github"
+                ? "integrations:copyConfigSettingsOnly"
+                : "integrations:copyConfigWithCredentials"
+            }
+            values={{ label, sourceName }}
+          >
+            Copy the {{ label }} settings and credentials from{" "}
+            <span className="font-medium text-foreground">{sourceName}</span> into another
+            workspace. This overwrites the target workspace&apos;s current {{ label }}{" "}
+            configuration. Watchers and automations are not copied.
+          </Trans>
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-2">
         <label htmlFor="copy-config-target" className="text-xs font-medium text-muted-foreground">
-          Target workspace
+          {t("integrations:targetWorkspace")}
         </label>
         <Select value={targetId ?? undefined} onValueChange={setTargetId}>
           <SelectTrigger
@@ -75,7 +88,7 @@ function CopyConfigDialogBody({
             className="w-full"
             data-testid="integration-copy-config-target"
           >
-            <SelectValue placeholder="Select a workspace…" />
+            <SelectValue placeholder={t("integrations:selectAWorkspace")} />
           </SelectTrigger>
           <SelectContent>
             {targets.map((workspace) => (
@@ -88,7 +101,7 @@ function CopyConfigDialogBody({
       </div>
       <DialogFooter>
         <Button type="button" variant="outline" className="cursor-pointer" onClick={onCancel}>
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button
           type="button"
@@ -99,7 +112,7 @@ function CopyConfigDialogBody({
           data-testid="integration-copy-config-confirm"
         >
           <IconCopy className="h-4 w-4" />
-          Copy config
+          {t("integrations:copyConfig")}
         </Button>
       </DialogFooter>
     </DialogContent>
@@ -115,6 +128,7 @@ export function IntegrationCopyConfigMenu({
   sourceWorkspaceId,
   workspaces,
 }: IntegrationCopyConfigMenuProps) {
+  const { t } = useTranslation();
   const { toast, updateToast } = useToast();
   const [open, setOpen] = useState(false);
   const [copying, setCopying] = useState(false);
@@ -149,20 +163,20 @@ export function IntegrationCopyConfigMenu({
     setCopying(true);
     const pendingId = toast({
       variant: "loading",
-      description: `Copying ${label} config to ${targetName}…`,
+      description: t("integrations:copyingConfigTo", { label, targetName }),
     });
     try {
       await copyIntegrationConfig(slug, sourceWorkspaceId, targetId);
       updateToast(pendingId, {
         variant: "success",
-        description: `Copied ${label} config to ${targetName}.`,
+        description: t("integrations:copiedConfigTo", { label, targetName }),
       });
       setOpen(false);
       setTargetId(null);
     } catch (err) {
       updateToast(pendingId, {
         variant: "error",
-        description: `Failed to copy config: ${String(err)}`,
+        description: t("integrations:failedToCopyConfig", { err: String(err) }),
       });
     } finally {
       setCopying(false);
@@ -180,14 +194,14 @@ export function IntegrationCopyConfigMenu({
             variant="outline"
             size="icon-lg"
             className="cursor-pointer"
-            aria-label="Copy config to another workspace"
+            aria-label={t("integrations:copyConfigToAnotherWorkspace")}
             data-testid="integration-copy-config-trigger"
             onClick={() => setOpen(true)}
           >
             <IconCopy className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Copy config to another workspace</TooltipContent>
+        <TooltipContent>{t("integrations:copyConfigToAnotherWorkspace")}</TooltipContent>
       </Tooltip>
       <CopyConfigDialogBody
         label={label}

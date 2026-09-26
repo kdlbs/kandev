@@ -10,13 +10,13 @@ import { Trans, useTranslation } from "react-i18next";
 import { formatDateTime } from "@/lib/i18n/formats";
 
 // These are the verbatim field names on GitHub's own "Register a new GitHub App"
-// form, which is English-only. The guide tells the user which field to paste each
-// value into, so translating them would break that mapping — they are references
-// to another product's UI, not our copy.
+// form, which is English-only. The numeric suffixes preserve the order GitHub
+// uses for OAuth during installation; they are references to another product's
+// UI, not our copy.
 const urlLabels: [keyof PrepareGitHubAppImportResponse, string][] = [
   ["public_base_url", "Homepage URL"],
-  ["personal_callback_url", "User authorization callback URL"],
-  ["setup_url", "Setup URL"],
+  ["install_callback_url", "User authorization callback URL 1"],
+  ["personal_callback_url", "User authorization callback URL 2"],
   ["webhook_url", "Webhook URL"],
 ];
 
@@ -67,7 +67,7 @@ export function GitHubAppImportGuide({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-11 w-11 shrink-0 cursor-pointer"
+                  className="shrink-0 cursor-pointer"
                   aria-label={t("github:copy", { label })}
                   onClick={() => void copyValue(value)}
                 >
@@ -84,14 +84,14 @@ export function GitHubAppImportGuide({
       </div>
       <div className="flex flex-col gap-2 sm:flex-row">
         {settingsUrl ? (
-          <Button asChild variant="outline" className="h-11 cursor-pointer">
+          <Button asChild variant="outline" className="cursor-pointer">
             <a href={settingsUrl} target="_blank" rel="noreferrer">
               {t("github:openGithubAppSettings")}
               <IconExternalLink className="ml-2 h-4 w-4" />
             </a>
           </Button>
         ) : (
-          <Button type="button" variant="outline" className="h-11" disabled>
+          <Button type="button" variant="outline" disabled>
             {t("github:openGithubAppSettings")}
             <IconExternalLink className="ml-2 h-4 w-4" />
           </Button>

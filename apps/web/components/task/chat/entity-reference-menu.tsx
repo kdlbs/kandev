@@ -12,6 +12,8 @@ import {
   visibleEntityReferenceGroups,
 } from "./entity-reference-groups";
 import { PopupMenu, PopupMenuItem, useMenuItemRefs } from "./popup-menu";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 export {
   selectableEntityReferences,
@@ -32,13 +34,23 @@ type EntityReferenceMenuProps = {
   setSelectedIndex: (index: number) => void;
 };
 
-const GROUP_STATUS_LABELS: Partial<Record<EntityReferenceGroupStatus, string>> = {
-  unauthorized: "Sign-in required",
-  rate_limited: "Temporarily rate limited",
-  timeout: "Search timed out",
-  upstream_error: "Provider unavailable",
-  unsupported_scope: "Unavailable for this workspace",
+// Catalog keys, not copy: this table is built at module load, so a `t()` here
+// would freeze at the boot locale. Keys resolve at render.
+const GROUP_STATUS_LABEL_KEYS: Partial<Record<EntityReferenceGroupStatus, string>> = {
+  unauthorized: "task:groupStatusUnauthorized",
+  rate_limited: "task:groupStatusRateLimited",
+  timeout: "task:groupStatusTimeout",
+  upstream_error: "task:groupStatusUpstreamError",
+  unsupported_scope: "task:groupStatusUnsupportedScope",
 };
+
+function groupStatusLabel(
+  translate: (key: string) => string,
+  status: EntityReferenceGroupStatus,
+): string {
+  const key = GROUP_STATUS_LABEL_KEYS[status];
+  return key ? translate(key) : translate("task:providerUnavailable");
+}
 
 function entityReferenceIcon(kind: string) {
   if (kind === "task") return <IconClipboardList className="h-4 w-4" />;
@@ -55,8 +67,8 @@ function entityReferenceEmptyState(
   error: EntityReferenceSearchError | null,
   onRetry: () => void,
 ) {
-  if (!query.trim()) return "Type to search work items";
-  if (isSearching) return "Searching work items…";
+  if (!query.trim()) return t("task:typeToSearchWorkItems");
+  if (isSearching) return t("task:searchingWorkItems");
   if (error) {
     return (
       <div className="flex min-h-11 items-center justify-between gap-3 px-3 text-xs">
@@ -66,12 +78,12 @@ function entityReferenceEmptyState(
           className="min-h-11 shrink-0 cursor-pointer px-2 font-medium text-primary"
           onClick={onRetry}
         >
-          Retry
+          {t("task:retry")}
         </button>
       </div>
     );
   }
-  return "No work items found";
+  return t("task:noWorkItemsFound");
 }
 
 export function EntityReferenceMenu({
@@ -87,6 +99,7 @@ export function EntityReferenceMenu({
   onClose,
   setSelectedIndex,
 }: EntityReferenceMenuProps) {
+  const { t } = useTranslation();
   const { setItemRef } = useMenuItemRefs(selectedIndex);
   const selectable = selectableEntityReferences(groups);
   let itemIndex = 0;
@@ -98,7 +111,7 @@ export function EntityReferenceMenu({
       testId="entity-reference-menu"
       position={null}
       clientRect={clientRect}
-      title="Reference work items"
+      title={t("task:referenceWorkItems")}
       selectedIndex={selectedIndex}
       onClose={onClose}
       hasItems={hasContent}
@@ -132,13 +145,13 @@ export function EntityReferenceMenu({
             })
           ) : (
             <div className="min-h-11 px-3 py-2 text-xs text-muted-foreground">
-              {GROUP_STATUS_LABELS[group.status] ?? "Provider unavailable"}
+              {groupStatusLabel(t, group.status)}
             </div>
           )}
         </div>
       ))}
       {isSearching && selectable.length > 0 && (
-        <div className="px-3 py-1 text-[11px] text-muted-foreground">Updating…</div>
+        <div className="px-3 py-1 text-[11px] text-muted-foreground">{t("task:updating")}</div>
       )}
     </PopupMenu>
   );

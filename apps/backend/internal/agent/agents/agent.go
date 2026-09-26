@@ -63,6 +63,21 @@ type Agent interface {
 	InstallScript() string
 }
 
+// VirtualAgent marks an agent family that is visible to settings and profile
+// configuration but cannot launch an inference process itself.
+type VirtualAgent interface {
+	Agent
+	IsVirtual() bool
+}
+
+// IsVirtualAgent reports whether an agent is a non-launchable virtual family.
+// Keeping this as an optional capability lets existing concrete agents remain
+// unchanged while callers can fail closed at launch and discovery boundaries.
+func IsVirtualAgent(agent Agent) bool {
+	virtual, ok := agent.(VirtualAgent)
+	return ok && virtual.IsVirtual()
+}
+
 // InferenceAgent is an optional capability marker for agents that support
 // one-shot LLM inference via the host utility manager. The actual model list
 // is populated dynamically from the ACP probe — agents no longer declare a
@@ -70,6 +85,14 @@ type Agent interface {
 type InferenceAgent interface {
 	// InferenceConfig returns the configuration for one-shot inference.
 	InferenceConfig() *InferenceConfig
+}
+
+// HostUtilityInferenceAgent is an optional capability for agents whose host
+// utility command differs from the command used by a task executor. The
+// default InferenceConfig remains executor-safe; host utility callers can use
+// this capability when they run on the backend host.
+type HostUtilityInferenceAgent interface {
+	HostUtilityInferenceConfig() *InferenceConfig
 }
 
 // ManagedNPMRuntimeAgent is an optional capability for built-in agents whose
@@ -117,10 +140,33 @@ type LoginAgent interface {
 }
 
 // IsPassthroughOnly returns true if the agent only supports passthrough mode
-// and should not have interactive MCP tools (e.g. ask_user_question) registered.
+// (a raw CLI under a PTY, no ACP protocol mode). It governs execution mode —
+// notably seeding the agent's default profile as CLI passthrough — and is true
+// for every TUI agent regardless of MCP configuration.
+//
+// For "should interactive MCP tools be registered?", use
+// SupportsInteractiveMCPTools instead. The two questions used to share this one
+// predicate, which is why a custom TUI agent could never get ask_user_question.
 func IsPassthroughOnly(a Agent) bool {
 	_, ok := a.(*TUIAgent)
 	return ok
+}
+
+// SupportsInteractiveMCPTools reports whether interactive MCP tools (notably
+// ask_user_question) should be registered for the agent's session.
+//
+// A TUI agent with no MCP injection strategy is a plain terminal tool that
+// never speaks MCP: registering a tool it cannot call just means a question
+// that hangs forever. A TUI agent *with* a strategy wraps a real MCP-capable
+// CLI that kandev points at the per-session server, so it should get the same
+// tools as the built-in claude-acp agent running in passthrough mode. Every
+// non-TUI agent supports them.
+func SupportsInteractiveMCPTools(a Agent) bool {
+	tui, ok := a.(*TUIAgent)
+	if !ok {
+		return true
+	}
+	return tui.MCPStrategy() != nil
 }
 
 // LogoVariant selects light or dark logo.
@@ -176,6 +222,9 @@ type CommandOptions struct {
 	// standalone CLI was found in the execution environment. Such agents emit
 	// the native binary (e.g. "copilot --acp") instead of "npx -y <pkg>".
 	PreferNativeBinary bool
+	// ManagedRuntimeVersion is an internal exact version override for trusted
+	// managed npm ACP runtimes. Empty uses the built-in exact version pin.
+	ManagedRuntimeVersion string
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.
@@ -234,6 +283,11 @@ type RuntimeConfig struct {
 	// final child env after adapter merge; the inference executor strips
 	// them from the one-shot probe/inference subprocess env.
 	StripEnv []string
+	// NamespacesMCPToolsByServer is true for clients that add the MCP server
+	// name to every tool before presenting it to the model. The per-instance
+	// Kandev MCP server removes that presentation suffix before the client adds
+	// it back, so the model sees the canonical tool name.
+	NamespacesMCPToolsByServer bool
 }
 
 // MountTemplate defines a mount with template variables.
@@ -336,24 +390,28 @@ type PassthroughConfig struct {
 	// without touching the user's global config. Nil means no MCP injection.
 	MCPStrategy     mcpconfig.PassthroughMCPStrategy
 	WaitForTerminal bool
-	// AutoInjectPrompt enables writing the task description to the PTY stdin
-	// after the first idle window. Default false preserves today's behavior.
+	// AutoInjectPrompt is retained in discovered passthrough metadata for
+	// compatibility. Initial prompt delivery is selected by PromptFlag: when it
+	// is empty, the lifecycle manager writes the task description to PTY stdin.
+	// The value no longer gates that delivery.
 	AutoInjectPrompt bool
 	// SubmitSequence is appended after the prompt text when auto-injecting
 	// and when routing chat-compose messages to the PTY. "\r" for most TUIs.
 	// Empty inherits DefaultPassthroughSubmitSequence at PTY write sites.
 	SubmitSequence string
-	// DisableBracketedPaste sends prompt bytes verbatim (plus SubmitSequence).
-	// Claude Code enables bracketed-paste *mode* (?2004h) in its Ink TUI; injecting
-	// ESC[200~…ESC[201~ delimiters breaks input (nothing appears in the prompt).
+	// DisableBracketedPaste sends the prompt body without ESC[200~…ESC[201~
+	// delimiters. The planner then paces the body in writes that each fit within
+	// one terminal read, because a TUI can drop whole reads of a larger unframed
+	// burst. Set it only for a TUI that does not accept bracketed-paste input;
+	// framed bodies arrive whole at any length.
 	DisableBracketedPaste bool
-	// SubmitDelay is the wait inserted before each non-first chunk when writing the
-	// prompt+submit sequence to PTY stdin. Ink-based TUIs (Claude Code) detect a
+	// SubmitDelay is the wait inserted before the separate submit chunk when
+	// writing a prompt to PTY stdin. Ink-based TUIs (Claude Code) detect a
 	// "paste burst" when many stdin bytes arrive in one read and absorb the
 	// trailing \r into the pasted content instead of dispatching it as Enter.
-	// Splitting the prompt body from the submit byte with a small delay forces the
-	// submit to arrive as a discrete keystroke. 0 disables (other TUIs handle one
-	// atomic write fine).
+	// Writing the submit byte on its own after a small delay makes it arrive as
+	// a discrete keystroke. 0 appends the submit sequence to the final body
+	// write (other TUIs handle prompt and submit in one read).
 	SubmitDelay time.Duration
 }
 
@@ -397,6 +455,11 @@ type InferenceConfig struct {
 	Command Command
 	// ModelFlag is the flag template for specifying the model (e.g., ["--model", "{model}"]).
 	ModelFlag Param
+	// OperatorDefined marks a Command that the install operator registered in
+	// Settings rather than one compiled into this binary. The host utility's
+	// probe allow-list is built from literals, which a command that does not
+	// exist until it is typed can never join.
+	OperatorDefined bool
 }
 
 // InferenceModel describes a model available for inference.
@@ -411,6 +474,17 @@ type InferenceModel struct {
 type RemoteAuth struct {
 	Methods []RemoteAuthMethod `json:"methods"`
 }
+
+// RemoteAuthFileConflictPolicy defines how a credential transfer handles an existing target.
+type RemoteAuthFileConflictPolicy string
+
+// RemoteAuthFileConflictPolicyMergeJSONObject preserves target-only keys and replaces collisions with source values.
+const RemoteAuthFileConflictPolicyMergeJSONObject RemoteAuthFileConflictPolicy = "merge_json_object"
+
+const (
+	remoteAuthMethodTypeFiles = "files"
+	remoteAuthLabelCopyFiles  = "Copy auth files"
+)
 
 // RemoteAuthMethod describes one way an agent can authenticate in a remote environment.
 type RemoteAuthMethod struct {
@@ -427,10 +501,39 @@ type RemoteAuthMethod struct {
 	TargetRelDir string `json:"target_rel_dir,omitempty"`
 	// Label is a UI label for the file copy option (for type="files").
 	Label string `json:"label,omitempty"`
+	// FileConflictPolicy controls how an existing target file is handled. It is
+	// an internal transfer contract and is not part of the remote-auth API.
+	FileConflictPolicy RemoteAuthFileConflictPolicy `json:"-"`
 	// SetupScript is an optional shell script that runs on the remote after the
 	// env var is resolved. Used to bootstrap credential files from env vars.
 	// Only meaningful for type="env". Can reference the env var by name.
 	SetupScript string `json:"setup_script,omitempty"`
+}
+
+// PortableConfigAgent is an optional capability for agents that have a small,
+// explicitly allowlisted set of user configuration files that can be copied
+// into an isolated executor. It is intentionally separate from RemoteAuth.
+type PortableConfigAgent interface {
+	PortableConfig() *PortableConfig
+}
+
+// PortableConfig declares safe configuration bundles for an agent.
+type PortableConfig struct {
+	Bundles []PortableConfigBundle `json:"bundles"`
+}
+
+// PortableConfigBundle is one stable, user-selectable configuration unit.
+type PortableConfigBundle struct {
+	ID    string               `json:"id"`
+	Label string               `json:"label"`
+	Files []PortableConfigFile `json:"files"`
+}
+
+// PortableConfigFile maps an OS-specific host path relative to the host home
+// directory to a relative path below the executor user's home directory.
+type PortableConfigFile struct {
+	SourcePaths map[string]string `json:"source_paths"`
+	TargetPath  string            `json:"target_path"`
 }
 
 // Command is a domain value type representing a CLI command with arguments.

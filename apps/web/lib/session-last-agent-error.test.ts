@@ -16,8 +16,92 @@ const OTHER_TAB_SESSION_ID = "session-other-tab";
 const THIS_TAB_SESSION_ID = "session-this-tab";
 const OTHER_TAB_STAMP = "stamp-other";
 const THIS_TAB_STAMP = "stamp-this";
+const MANAGED_RUNTIME_NPM_FAILURE = "managed_runtime_npm_resolution";
+const NPM_ERROR_CODE_ETARGET = "npm error code ETARGET";
 
 describe("readLastAgentError", () => {
+  it("reads structured failure fields in snake_case", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: AGENT_ERROR_MESSAGE,
+          failure_code: MANAGED_RUNTIME_NPM_FAILURE,
+          failure_details: NPM_ERROR_CODE_ETARGET,
+        },
+      }),
+    ).toMatchObject({
+      code: MANAGED_RUNTIME_NPM_FAILURE,
+      details: NPM_ERROR_CODE_ETARGET,
+    });
+  });
+
+  it("reads structured failure fields in camelCase", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: AGENT_ERROR_MESSAGE,
+          code: MANAGED_RUNTIME_NPM_FAILURE,
+          details: NPM_ERROR_CODE_ETARGET,
+        },
+      }),
+    ).toMatchObject({
+      code: MANAGED_RUNTIME_NPM_FAILURE,
+      details: NPM_ERROR_CODE_ETARGET,
+    });
+  });
+});
+
+// eslint-disable-next-line max-lines-per-function -- this group preserves the complete metadata compatibility matrix.
+describe("readLastAgentError optional metadata", () => {
+  it("reads bootstrap correlation and bounded causes", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: "The agent could not start.",
+          execution_id: "execution-1",
+          phase: "bootstrap",
+          attempt_id: "attempt-1",
+          causes: [
+            {
+              operation: "resume",
+              code: "permission_denied",
+              detail: "The required contribution access was denied.",
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      executionId: "execution-1",
+      phase: "bootstrap",
+      attemptId: "attempt-1",
+      causes: [
+        {
+          operation: "resume",
+          code: "permission_denied",
+          detail: "The required contribution access was denied.",
+        },
+      ],
+    });
+  });
+
+  it("reads typed launch recovery fields and keeps action order bounded", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: "base branch is missing",
+          code: "base_branch_missing",
+          recovery_actions: ["pick_base_branch", "pick_base_branch", "unknown", "retry_default"],
+          task_repository_id: "task-repo-1",
+          stamp: "launch-stamp-1",
+        },
+      }),
+    ).toMatchObject({
+      recoveryActions: ["pick_base_branch", "retry_default"],
+      taskRepositoryId: "task-repo-1",
+      stamp: "launch-stamp-1",
+    });
+  });
+
   it("reads snake_case metadata and keeps occurredAt optional", () => {
     expect(
       readLastAgentError({
@@ -30,6 +114,40 @@ describe("readLastAgentError", () => {
       message: AGENT_ERROR_MESSAGE,
       agentExecutionId: AGENT_EXECUTION_ID,
     });
+  });
+
+  it("reads the remediation_url field from snake_case and camelCase metadata", () => {
+    const url = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go";
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: AGENT_ERROR_MESSAGE,
+          remediation_url: url,
+        },
+      }),
+    ).toEqual({
+      message: AGENT_ERROR_MESSAGE,
+      remediationUrl: url,
+    });
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: AGENT_ERROR_MESSAGE,
+          remediationUrl: url,
+        },
+      }),
+    ).toEqual({
+      message: AGENT_ERROR_MESSAGE,
+      remediationUrl: url,
+    });
+  });
+
+  it("omits remediationUrl when the metadata carries no URL", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: { message: AGENT_ERROR_MESSAGE, remediation_url: "" },
+      }),
+    ).toEqual({ message: AGENT_ERROR_MESSAGE });
   });
 
   it("reads camelCase metadata after a store round trip", () => {

@@ -102,6 +102,47 @@ func TestAppendAndListRouteAttempts_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestAppendAndListRouteAttempts_TierSourceRoundTrip pins the JSON-free
+// round-trip for the new tier_source column, including the empty-string
+// default (a max-attempts-exceeded row, or any attempt appended before
+// this column existed, never resolved a tier).
+func TestAppendAndListRouteAttempts_TierSourceRoundTrip(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	seedRun(t, repo, "run-1", "agent-1", now)
+
+	withSource := &models.RouteAttempt{
+		RunID: "run-1", Seq: 1, ProviderID: "claude-acp", Model: "haiku",
+		Tier: "economy", TierSource: "role", Outcome: "launched", StartedAt: now,
+	}
+	if err := repo.AppendRouteAttempt(ctx, withSource); err != nil {
+		t.Fatalf("append with tier_source: %v", err)
+	}
+	withoutSource := &models.RouteAttempt{
+		RunID: "run-1", Seq: 2, ProviderID: "claude-acp", Model: "sonnet",
+		Tier: "balanced", Outcome: "launched", StartedAt: now.Add(time.Minute),
+	}
+	if err := repo.AppendRouteAttempt(ctx, withoutSource); err != nil {
+		t.Fatalf("append without tier_source: %v", err)
+	}
+
+	attempts, err := repo.ListRouteAttempts(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(attempts) != 2 {
+		t.Fatalf("expected 2 attempts, got %d", len(attempts))
+	}
+	if attempts[0].TierSource != "role" {
+		t.Errorf("attempts[0].TierSource = %q, want role", attempts[0].TierSource)
+	}
+	if attempts[1].TierSource != "" {
+		t.Errorf("attempts[1].TierSource = %q, want empty", attempts[1].TierSource)
+	}
+}
+
 func TestListRouteAttempts_EmptyReturnsEmptySlice(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()

@@ -2,9 +2,33 @@ import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
+import { seedRunningGeneratingSession } from "../../helpers/generating-session";
+import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
+import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
+import {
+  expectSendNowInterruptsRunningFIFOTurn,
+  expectSendNowWorkflowRunning,
+} from "./message-queue-workflow-helpers";
+import {
+  registerSeparateQueueRows,
+  requestMessageQueueSettings,
+} from "../../helpers/message-queue-settings";
+import { watchWs } from "../../helpers/causal-waits";
+
+registerSeparateQueueRows(test);
+
+test("Send Now keeps a workflow transition running", async ({ testPage, apiClient, seedData }) => {
+  await expectSendNowWorkflowRunning(testPage, apiClient, seedData, false);
+});
+
+test("Send Now interrupts a running FIFO turn", async ({ testPage, apiClient, seedData }) => {
+  test.setTimeout(150_000);
+  const gateway = watchWs(testPage);
+  await expectSendNowInterruptsRunningFIFOTurn(testPage, apiClient, seedData, false, gateway);
+});
 
 // ---------------------------------------------------------------------------
 // Quick Chat queue tests
@@ -34,8 +58,8 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
 
   const setup = dialog.getByTestId("quick-chat-setup");
   if (!(await setup.isVisible({ timeout: 1_000 }).catch(() => false))) {
-    await dialog.getByLabel("Start new chat").click();
-    await page.getByRole("menu", { name: "New chat" }).getByText("Quick chat").click();
+    await dialog.getByTestId("quick-chat-add-menu-trigger").click();
+    await page.getByTestId("quick-chat-new-agent").click();
   }
   await expect(setup).toBeVisible({ timeout: 5_000 });
 
@@ -51,23 +75,7 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
   }
   await dialog.getByTestId("quick-chat-start").click();
 
-  // Wait for chat input to appear AND become editable. Eager init means the
-  // agent starts during the picker → tab transition; the input is briefly
-  // disabled while the FE store catches up to the RUNNING session state.
-  //
-  // Race fix: `contenteditable="true"` was observed as a momentary flicker
-  // before the session settled into STARTING/RUNNING and flipped the input
-  // back to false. Callers then hit `editor.fill()` against a non-editable
-  // node and the test failed. Wait for the agent-status indicator to clear
-  // (STARTING/RUNNING both render a "Agent is …" status; IDLE renders none),
-  // then assert editability — by that point the input has reached its
-  // stable, ready state.
-  const editor = dialog.locator(".tiptap.ProseMirror");
-  await expect(editor).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("status", { name: /Agent is (starting|running)/ })).not.toBeVisible({
-    timeout: 30_000,
-  });
-  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+  await waitForQuickChatComposerReady(dialog);
   return dialog;
 }
 
@@ -95,7 +103,7 @@ test.describe("Quick chat queue", () => {
         timeout: 15_000,
       },
     );
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(dialog);
 
     await typeWhileBusy(testPage, editor, "hello world");
     await testPage.keyboard.press(`${modifier}+Enter`);
@@ -136,7 +144,7 @@ test.describe("Quick chat queue", () => {
         timeout: 15_000,
       },
     );
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(dialog);
 
     // Before typing, only the cancel button should be visible (no send button).
     const submitBtn = dialog.getByTestId("submit-message-button");
@@ -170,13 +178,18 @@ test.describe("Quick chat queue", () => {
 // Task session queue tests
 // ---------------------------------------------------------------------------
 
+type SeededSessionPage = SessionPage & {
+  taskId: string;
+  sessionId: string;
+};
+
 async function seedTaskAndWaitForIdle(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
   description = "/e2e:simple-message",
-): Promise<SessionPage> {
+): Promise<SeededSessionPage> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -194,8 +207,47 @@ async function seedTaskAndWaitForIdle(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  if (!task.session_id) {
+    throw new Error("task did not have a primary session");
+  }
 
-  return session;
+  return Object.assign(session, { taskId: task.id, sessionId: task.session_id });
+}
+
+async function queueMessages(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+  messages: string[],
+): Promise<void> {
+  const identity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+  for (const message of messages) {
+    await apiClient.queueMessage(identity, message);
+  }
+}
+
+function scriptedQueueMessage(marker: string, delayMs = 250): string {
+  return `e2e:delay(${delayMs})\ne2e:message("${marker}")`;
+}
+
+async function expectSeparateTurnsInOrder(scope: Locator, markers: string[]): Promise<void> {
+  const agentBodies = scope.locator("[data-agent-message-body][data-message-id]");
+  for (const marker of markers) {
+    await expect(agentBodies.filter({ hasText: marker })).toHaveCount(1, { timeout: 45_000 });
+  }
+
+  const agentTexts = await agentBodies.allTextContents();
+  const agentIndexes = markers.map((marker) =>
+    agentTexts.findIndex((text) => text.includes(marker)),
+  );
+  expect(agentIndexes.every((index) => index >= 0)).toBe(true);
+  expect(agentIndexes).toEqual([...agentIndexes].sort((a, b) => a - b));
+
+  const userTexts = await scope.getByTestId("user-message-bubble").allTextContents();
+  const userIndexes = markers.map((marker) => userTexts.findIndex((text) => text.includes(marker)));
+  expect(userIndexes.every((index) => index >= 0)).toBe(true);
+  expect(new Set(userIndexes).size).toBe(markers.length);
+  expect(userIndexes).toEqual([...userIndexes].sort((a, b) => a - b));
 }
 
 test.describe("Task session queue", () => {
@@ -206,7 +258,7 @@ test.describe("Task session queue", () => {
     apiClient,
     seedData,
   }) => {
-    const session = await seedFullQueueTask(
+    const { session } = await seedFullQueueTask(
       testPage,
       apiClient,
       seedData,
@@ -214,6 +266,80 @@ test.describe("Task session queue", () => {
     );
 
     await expectFullQueueScrolls(session);
+  });
+
+  test("automatic merge compacts compatible user rows and disabled mode keeps them separate", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Automatic queue merge", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+      state: "RUNNING",
+      agentProfileId: seedData.agentProfileId,
+    });
+    const queueIdentity = await apiClient.getQueueSessionIdentity(task.id, sessionId);
+    await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: true });
+
+    await apiClient.queueMessage(queueIdentity, "automatic first");
+    await apiClient.queueMessage(queueIdentity, "automatic second");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await openQueuePanel(session.activeChat());
+    const panel = session.activeChat().getByTestId("queued-ghost-list");
+    const entries = panel.getByTestId("queue-entry-text");
+    await expect(entries).toHaveCount(1);
+    const autoMerge = panel.getByTestId("queue-auto-merge");
+    await expect(autoMerge).toHaveAttribute("data-state", "checked");
+    await autoMerge.click();
+    await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
+
+    await expect(entries.first()).toContainText("automatic first");
+    await expect(entries.first()).toContainText("automatic second");
+
+    await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: false });
+    await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: true });
+    await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
+    await apiClient.queueMessage(queueIdentity, "separate third");
+    await apiClient.queueMessage(queueIdentity, "separate fourth");
+    await expect(entries).toHaveCount(3, { timeout: 10_000 });
+    await expect(entries.nth(1)).toHaveText("separate third");
+    await expect(entries.nth(2)).toHaveText("separate fourth");
+  });
+
+  test("automatic merge accepts a compatible message into a full queue", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { taskId, sessionId, session } = await seedFullQueueTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Full queue auto merge",
+    );
+
+    // The queue is at capacity (10 separate rows, auto-merge off per spec
+    // isolation). Enabling automatic merge must fold the next compatible
+    // message into the tail instead of rejecting it as "queue full".
+    await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: true });
+    const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+    await apiClient.queueMessage(queueIdentity, "folded while full");
+
+    const chat = session.activeChat();
+    const chip = chat.getByTestId("queue-chip");
+    await expect(chip).toBeVisible({ timeout: 10_000 });
+    await chip.click();
+    const panel = chat.getByTestId("queued-ghost-list");
+    const entries = panel.getByTestId("queue-entry-text");
+    await expect(entries).toHaveCount(10);
+    await expect(entries.last()).toContainText("Queued item 10");
+    await expect(entries.last()).toContainText("folded while full");
   });
 
   test("queue message via submit button on task session page", async ({
@@ -233,7 +359,7 @@ test.describe("Task session queue", () => {
     // Send a slow command to keep the agent busy.
     await session.sendMessage("/slow 5s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     // Type a message while agent is busy.
     const editor = testPage.locator(".tiptap.ProseMirror").first();
@@ -259,6 +385,134 @@ test.describe("Task session queue", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
+  test("Send Now resumes Auto-run with the selected row first", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue Send Now row test",
+    );
+    await session.sendMessage("/slow 30s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await expect(session.chat.getByText("Running slow response (30s total)...")).toBeVisible({
+      timeout: 15_000,
+    });
+    const taskID = new URL(testPage.url()).pathname.split("/").pop();
+    if (!taskID) throw new Error("task URL did not contain a task ID");
+    const workflowStepBefore = (await apiClient.getTask(taskID)).workflow_step_id;
+
+    const markerA = "targeted A response";
+    const markerB = "targeted B response";
+    const markerC = "targeted C response";
+    const task = await apiClient.getTask(taskID);
+    const sessionID = task.primary_session_id;
+    if (!sessionID) throw new Error("task did not have a primary session");
+    await queueMessages(apiClient, taskID, sessionID, [
+      scriptedQueueMessage(markerA),
+      scriptedQueueMessage(markerB, 5_000),
+      scriptedQueueMessage(markerC),
+    ]);
+
+    await openQueuePanel(testPage);
+    const panel = testPage.getByTestId("queued-ghost-list");
+    await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
+    const autoRun = panel.getByTestId("queue-auto-run");
+    await expect(autoRun).toHaveAttribute("data-state", "checked");
+    await autoRun.click();
+    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+
+    const target = panel.getByTestId("queue-entry").filter({ hasText: markerB });
+    await expect(target).toBeVisible();
+    await target.hover();
+    const sendNow = target.getByTestId("queue-entry-send-now");
+    await expect(sendNow).toBeVisible({ timeout: 10_000 });
+    await expect(sendNow).toBeEnabled({ timeout: 10_000 });
+    await sendNow.click();
+
+    await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
+    await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText(markerA);
+    await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText(markerC);
+    await expect(autoRun).toHaveAttribute("data-state", "checked", { timeout: 10_000 });
+
+    // Send Now's internal interruption must not behave like an explicit user
+    // cancellation. Check while the selected replacement turn is still active;
+    // successful turn completion may legitimately advance the workflow later.
+    await expect(
+      session.chat.getByTestId("user-message-bubble").filter({ hasText: markerB }),
+    ).toHaveCount(1, { timeout: 20_000 });
+    await expect(session.agentStatus()).toBeVisible({ timeout: 20_000 });
+    expect((await apiClient.getTask(taskID)).workflow_step_id).toBe(workflowStepBefore);
+
+    await expectSeparateTurnsInOrder(session.chat, [markerB, markerA, markerC]);
+    await session.waitForChatIdle({ timeout: 45_000 });
+    await expect(panel).not.toBeVisible({ timeout: 15_000 });
+    await expect(session.chat).not.toContainText("Turn cancelled by user");
+  });
+
+  test("Auto-run OFF finishes the current turn, survives reload, then resumes FIFO", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue Auto-run hold and resume",
+    );
+    await session.sendMessage("/slow 8s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await waitForComposerQueueMode(testPage);
+
+    const taskID = new URL(testPage.url()).pathname.split("/").pop();
+    if (!taskID) throw new Error("task URL did not contain a task ID");
+    const task = await apiClient.getTask(taskID);
+    const sessionID = task.primary_session_id;
+    if (!sessionID) throw new Error("task did not have a primary session");
+    const markers = ["auto-run A response", "auto-run B response", "auto-run C response"];
+    await queueMessages(
+      apiClient,
+      taskID,
+      sessionID,
+      markers.map((marker) => scriptedQueueMessage(marker)),
+    );
+    await openQueuePanel(testPage);
+    let panel = testPage.getByTestId("queued-ghost-list");
+    await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
+    let autoRun = panel.getByTestId("queue-auto-run");
+    await expect(autoRun).toHaveAttribute("data-state", "checked");
+    await autoRun.click();
+    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+
+    await expect(session.chat.getByText("Slow response complete", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
+    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await openQueuePanel(testPage);
+    panel = testPage.getByTestId("queued-ghost-list");
+    autoRun = panel.getByTestId("queue-auto-run");
+    await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
+    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+
+    await autoRun.click();
+    await expectSeparateTurnsInOrder(session.chat, markers);
+    await session.waitForChatIdle({ timeout: 45_000 });
+    await expect(testPage.getByTestId("queue-chip")).not.toBeVisible({ timeout: 15_000 });
+  });
+
   test("queue editor textarea scrolls when content is long", async ({
     testPage,
     apiClient,
@@ -276,7 +530,7 @@ test.describe("Task session queue", () => {
     // Send a slow command to keep the agent busy.
     await session.sendMessage("/slow 10s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     // Type a short message while agent is busy and queue it.
     const editor = testPage.locator(".tiptap.ProseMirror").first();
@@ -309,20 +563,184 @@ test.describe("Task session queue", () => {
       el.dispatchEvent(new Event("change", { bubbles: true }));
     }, longText);
 
-    // Allow layout to settle after content change.
-    await testPage.waitForTimeout(300);
-
     // Verify the textarea has a constrained max-height and is scrollable.
-    const metrics = await textarea.evaluate((el: HTMLTextAreaElement) => ({
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
-      maxHeight: getComputedStyle(el).maxHeight,
-      overflowY: getComputedStyle(el).overflowY,
-    }));
+    // The auto-grow effect re-measures after React commits the new value, so
+    // poll the metrics rather than sampling them once behind a fixed settle.
+    await expect
+      .poll(
+        async () =>
+          textarea.evaluate((el: HTMLTextAreaElement) => ({
+            scrollable: el.scrollHeight > el.clientHeight,
+            maxHeight: getComputedStyle(el).maxHeight,
+            overflowY: getComputedStyle(el).overflowY,
+          })),
+        { timeout: 5_000 },
+      )
+      .toEqual({ scrollable: true, maxHeight: "200px", overflowY: "auto" });
+  });
 
-    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
-    expect(metrics.maxHeight).toBe("200px");
-    expect(metrics.overflowY).toBe("auto");
+  test("editing a later queued entry does not pause earlier FIFO delivery", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const gateway = watchWs(testPage);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue edit lease ordering test",
+    );
+    await session.sendMessage("/slow 10s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await waitForComposerQueueMode(testPage);
+    const queueIdentity = await apiClient.getQueueSessionIdentity(
+      session.taskId,
+      session.sessionId,
+    );
+
+    await queueMessages(apiClient, session.taskId, session.sessionId, [
+      scriptedQueueMessage("first queued"),
+      scriptedQueueMessage("second queued"),
+    ]);
+    await openQueuePanel(testPage);
+
+    const rows = testPage.getByTestId("queue-entry");
+    await expect(rows).toHaveCount(2, { timeout: 10_000 });
+    await rows.nth(1).getByTestId("queue-entry-edit").click();
+
+    const textarea = testPage.getByTestId("queue-edit-textarea");
+    await expect(textarea).toBeVisible({ timeout: 5_000 });
+    await textarea.fill(scriptedQueueMessage("second edited"));
+
+    // The later entry stays leased while the earlier FIFO turn drains.
+    await waitForAgentMessage(apiClient, session.sessionId, "first queued");
+    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(1);
+
+    const saveResponse = gateway.waitForResponse("message.queue.update");
+    await testPage.getByRole("button", { name: "Save", exact: true }).click();
+    await saveResponse;
+
+    // Saving releases the lease and resumes Auto-run for the edited entry.
+    await waitForAgentMessage(apiClient, session.sessionId, "second edited");
+    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(0);
+    await expect(rows).toHaveCount(0);
+  });
+
+  test("saving the held head after its turn completes resumes Auto-run", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const gateway = watchWs(testPage);
+    test.setTimeout(120_000);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue edit save dispatch test",
+    );
+    await session.sendMessage("/slow 10s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await waitForComposerQueueMode(testPage);
+    const queueIdentity = await apiClient.getQueueSessionIdentity(
+      session.taskId,
+      session.sessionId,
+    );
+    await queueMessages(apiClient, session.taskId, session.sessionId, [
+      scriptedQueueMessage("edited head dispatched"),
+    ]);
+
+    await openQueuePanel(testPage);
+    const row = testPage.getByTestId("queue-entry").first();
+    await row.getByTestId("queue-entry-edit").click();
+    await testPage
+      .getByTestId("queue-edit-textarea")
+      .fill(scriptedQueueMessage("edited head dispatched after save"));
+
+    await waitForAgentMessage(apiClient, session.sessionId, "Slow response complete");
+    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(1);
+
+    const saveResponse = gateway.waitForResponse("message.queue.update");
+    await testPage.getByRole("button", { name: "Save", exact: true }).click();
+    await saveResponse;
+    await waitForAgentMessage(apiClient, session.sessionId, "edited head dispatched after save");
+    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(0);
+    await expect(testPage.getByTestId("queue-entry")).toHaveCount(0);
+  });
+
+  test("queue editor reconciles after switching sessions", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const replacementTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Queue editor replacement B",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!replacementTask.session_id) {
+      throw new Error("replacement task did not have a primary session");
+    }
+    await waitForSessionDone(
+      apiClient,
+      replacementTask.id,
+      replacementTask.session_id,
+      "replacement task should finish its seed turn",
+    );
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue editor replacement A",
+    );
+    await session.sendMessage("/slow 30s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await waitForComposerQueueMode(testPage);
+    await queueMessages(apiClient, session.taskId, session.sessionId, [
+      scriptedQueueMessage("replacement first"),
+      scriptedQueueMessage("replacement second"),
+    ]);
+
+    await openQueuePanel(testPage);
+    const rows = testPage.getByTestId("queue-entry");
+    await expect(rows).toHaveCount(2, { timeout: 10_000 });
+    await rows.nth(1).getByTestId("queue-entry-edit").click();
+    await expect(testPage.getByTestId("queue-edit-textarea")).toBeVisible();
+
+    await session.clickTaskInSidebar("Queue editor replacement B");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${replacementTask.id}$`), {
+      timeout: 15_000,
+    });
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    await session.clickTaskInSidebar("Queue editor replacement A");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${session.taskId}$`), {
+      timeout: 15_000,
+    });
+    await session.waitForLoad();
+    await openQueuePanel(testPage);
+    const remountedRows = testPage.getByTestId("queue-entry");
+    await expect(remountedRows).toHaveCount(2, { timeout: 10_000 });
+    await remountedRows.nth(1).getByTestId("queue-entry-edit").click();
+    await testPage.getByTestId("queue-edit-textarea").fill("replacement second edited");
+    await testPage.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(testPage.getByTestId("queue-entry-text").last()).toContainText(
+      "replacement second edited",
+    );
   });
 
   test("merges a queued message into the message above it", async ({
@@ -337,7 +755,7 @@ test.describe("Task session queue", () => {
     // Send a slow command to keep the agent busy while we queue two messages.
     await session.sendMessage("/slow 10s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     const editor = testPage.locator(".tiptap.ProseMirror").first();
     await typeWhileBusy(testPage, editor, "first message");
@@ -384,7 +802,7 @@ test.describe("Task session queue", () => {
     // Send a slow command to keep the agent busy.
     await session.sendMessage("/slow 5s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     // In plan mode with no typed text, only the cancel button should be visible.
     // The auto-added plan context should NOT cause the send button to appear.
@@ -437,7 +855,7 @@ test.describe("Queue affordance", () => {
     await expect(testPage.getByRole("status", { name: /Agent is (starting|running)/ })).toBeVisible(
       { timeout: 15_000 },
     );
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(dialog);
 
     await typeWhileBusy(testPage, editor, "first queued");
     await testPage.keyboard.press(`${modifier}+Enter`);
@@ -474,7 +892,7 @@ test.describe("Queue affordance", () => {
     await expect(testPage.getByRole("status", { name: /Agent is (starting|running)/ })).toBeVisible(
       { timeout: 15_000 },
     );
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(dialog);
 
     await typeWhileBusy(testPage, editor, "queued for esc");
     await testPage.keyboard.press(`${modifier}+Enter`);
@@ -504,7 +922,7 @@ test.describe("Queue affordance", () => {
 
     await session.sendMessage("/slow 10s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     const editor = testPage.locator(".tiptap.ProseMirror").first();
     await typeWhileBusy(testPage, editor, "to be cleared");
@@ -518,5 +936,141 @@ test.describe("Queue affordance", () => {
     // Panel and chip both disappear once the queue is empty.
     await expect(testPage.getByTestId("queued-ghost-list")).not.toBeVisible({ timeout: 5_000 });
     await expect(testPage.getByTestId("queue-chip")).not.toBeVisible({ timeout: 5_000 });
+  });
+});
+
+async function readQueuePreviewMetricsWithoutDisclosure(
+  preview: Locator,
+): Promise<{ clientHeight: number; scrollHeight: number }> {
+  return preview.evaluate((element) => {
+    const disclosure = element
+      .closest('[data-testid="queue-entry"]')
+      ?.querySelector<HTMLElement>('[data-testid="queue-entry-expand"]');
+    const previousDisplay = disclosure?.style.display;
+    try {
+      if (disclosure) disclosure.style.display = "none";
+      return {
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+      };
+    } finally {
+      if (disclosure) disclosure.style.display = previousDisplay ?? "";
+    }
+  });
+}
+
+test.describe("Queued row controls", () => {
+  test.describe.configure({ timeout: 120_000 });
+
+  // @covers AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.9
+  // @covers AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.10
+  test("adapts queued row controls to rendered overflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const fixture = "adaptive-width-probe ".repeat(12).trim();
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    const { session, taskId, sessionId } = await seedRunningGeneratingSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Adaptive queued row controls",
+      { sleepSeconds: 60 },
+    );
+    await testPage.getByRole("button", { name: "Collapse sidebar" }).click();
+    await expect(testPage.getByTestId("app-sidebar")).toHaveAttribute("data-collapsed", "true");
+    const chatMaximize = testPage
+      .locator(
+        '.dv-groupview:has([data-testid^="session-tab-"]) .dv-tabs-and-actions-container [data-testid="dockview-maximize-btn"]',
+      )
+      .first();
+    await expect(chatMaximize).toBeVisible();
+    await chatMaximize.click();
+    const identity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+    const autoRunResponse = await apiClient.setQueueAutoRun(identity, false);
+    expect(autoRunResponse).toMatchObject({ session_id: sessionId, auto_run: false });
+    await waitForComposerQueueMode(testPage);
+    await apiClient.queueMessage(identity, fixture);
+    await expect
+      .poll(() => apiClient.getQueueStatus(identity))
+      .toMatchObject({ count: 1, auto_run: false });
+
+    const chat = session.activeChat();
+    await chat.getByTestId("queue-chip").click();
+    const panel = chat.getByTestId("queued-ghost-list");
+    const row = panel.getByTestId("queue-entry").filter({ hasText: fixture });
+    const preview = row.getByTestId("queue-entry-text");
+    const actions = row.getByTestId("queue-entry-actions");
+    const remove = row.getByTestId("queue-entry-remove");
+    await expect(row).toBeVisible();
+    await expect
+      .poll(async () => {
+        const metrics = await readQueuePreviewMetricsWithoutDisclosure(preview);
+        return metrics.scrollHeight === metrics.clientHeight;
+      })
+      .toBe(true);
+    await expect(row.getByTestId("queue-entry-expand")).toHaveCount(0);
+
+    await testPage.setViewportSize({ width: 800, height: 900 });
+    await expect
+      .poll(async () => {
+        const metrics = await readQueuePreviewMetricsWithoutDisclosure(preview);
+        return metrics.scrollHeight > metrics.clientHeight;
+      })
+      .toBe(true);
+    const expand = row.getByTestId("queue-entry-expand");
+    await expect(expand).toBeVisible();
+
+    await testPage.mouse.move(0, 0);
+    await expect(actions).toHaveCSS("opacity", "0");
+    await row.hover();
+    await expect(actions).toHaveCSS("opacity", "1");
+    expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+    await expect(remove).toHaveAttribute("title", "Remove queued message");
+    await expect(
+      row.getByRole("button", { name: "Remove queued message", exact: true }),
+    ).toHaveCount(1);
+    await expect(remove.locator("svg")).toHaveClass(/tabler-icon-trash/);
+    const order = await actions.evaluate((container) => {
+      const direct = [...container.children] as HTMLElement[];
+      const disclosure = direct.find((element) => element.dataset.testid === "queue-entry-expand");
+      const terminal = direct.at(-1);
+      return {
+        adjacent: disclosure?.nextElementSibling === terminal,
+        terminalTestId: (terminal as HTMLElement | undefined)?.dataset.testid,
+      };
+    });
+    expect(order).toEqual({ adjacent: true, terminalTestId: "queue-entry-remove" });
+
+    const colors = await remove.evaluate((button) => {
+      const muted = document.createElement("span");
+      muted.className = "text-muted-foreground";
+      const destructive = document.createElement("span");
+      destructive.className = "text-destructive";
+      button.parentElement?.append(muted, destructive);
+      const values = {
+        muted: getComputedStyle(muted).color,
+        destructive: getComputedStyle(destructive).color,
+      };
+      muted.remove();
+      destructive.remove();
+      return values;
+    });
+    await expect(remove).toHaveCSS("color", colors.muted);
+    await remove.hover();
+    await expect(remove).toHaveCSS("color", colors.destructive);
+
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    await expect
+      .poll(async () => {
+        const metrics = await readQueuePreviewMetricsWithoutDisclosure(preview);
+        return metrics.scrollHeight === metrics.clientHeight;
+      })
+      .toBe(true);
+    await expect(row.getByTestId("queue-entry-expand")).toHaveCount(0);
+
+    await remove.click();
+    await expect(row).toHaveCount(0);
   });
 });

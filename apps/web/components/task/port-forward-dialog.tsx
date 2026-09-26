@@ -3,9 +3,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   IconNetwork,
-  IconExternalLink,
-  IconCopy,
-  IconCheck,
   IconRefresh,
   IconPlus,
   IconLoader2,
@@ -19,10 +16,13 @@ import { Badge } from "@kandev/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@kandev/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { listPorts, listTunnels, type ListeningPort } from "@/lib/api/domains/port-api";
-import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { useTunnelActions } from "./use-tunnel-actions";
+import { PortUrlActions } from "./port-forward-dialog-actions";
 import { getBackendConfig } from "@/lib/config";
 import { toast } from "@/lib/toast/sonner";
+import { useTranslation } from "react-i18next";
+import { usePortForwardingVisibility } from "./port-forwarding-visibility-provider";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 
 function buildPortProxyUrl(sessionId: string, port: number): string {
   const backendUrl = getBackendConfig().apiBaseUrl;
@@ -48,48 +48,6 @@ function InfoTip({ text }: { text: string }) {
   );
 }
 
-function UrlActions({ url }: { url: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(async () => {
-    if (await copyToClipboard(url)) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }
-  }, [url]);
-
-  return (
-    <div className="flex items-center gap-0.5">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="cursor-pointer h-7 w-7 p-0"
-            onClick={handleCopy}
-          >
-            {copied ? (
-              <IconCheck className="h-3.5 w-3.5 text-green-500" />
-            ) : (
-              <IconCopy className="h-3.5 w-3.5" />
-            )}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Copy URL</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button size="sm" variant="ghost" className="cursor-pointer h-7 w-7 p-0" asChild>
-            <a href={url} target="_blank" rel="noopener noreferrer">
-              <IconExternalLink className="h-3.5 w-3.5" />
-            </a>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Open in new tab</TooltipContent>
-      </Tooltip>
-    </div>
-  );
-}
-
 function TunnelToggleButton({
   isTunnelActive,
   tunnelPending,
@@ -101,6 +59,7 @@ function TunnelToggleButton({
   onStop: () => void;
   onToggleForm: () => void;
 }) {
+  const { t } = useTranslation();
   const Icon = isTunnelActive ? IconPlugConnectedX : IconPlugConnected;
   return (
     <Tooltip>
@@ -108,7 +67,8 @@ function TunnelToggleButton({
         <Button
           size="sm"
           variant="ghost"
-          className={`cursor-pointer h-7 w-7 p-0 ${isTunnelActive ? "text-destructive hover:text-destructive" : ""}`}
+          aria-label={isTunnelActive ? t("task:stopTunnel") : t("task:startTunnel")}
+          className={`cursor-pointer min-h-11 min-w-11 p-0 sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0 ${isTunnelActive ? "text-destructive hover:text-destructive" : ""}`}
           onClick={isTunnelActive ? onStop : onToggleForm}
           disabled={tunnelPending}
         >
@@ -119,7 +79,9 @@ function TunnelToggleButton({
           )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{isTunnelActive ? "Stop tunnel" : "Start tunnel"}</TooltipContent>
+      <TooltipContent>
+        {isTunnelActive ? t("task:stopTunnel") : t("task:startTunnel")}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -129,11 +91,15 @@ function PortUrlRow({
   tip,
   url,
   variant = "outline",
+  onOpenBrowserPanel,
+  browserActionTestId,
 }: {
   label: string;
   tip: string;
   url: string;
   variant?: "outline" | "default";
+  onOpenBrowserPanel?: (url: string) => void;
+  browserActionTestId?: string;
 }) {
   return (
     <div className="flex items-center gap-2 min-w-0">
@@ -143,24 +109,41 @@ function PortUrlRow({
       <InfoTip text={tip} />
       <span className="text-xs text-muted-foreground truncate min-w-0 flex-1">{url}</span>
       <div className="shrink-0">
-        <UrlActions url={url} />
+        <PortUrlActions
+          url={url}
+          onOpenBrowserPanel={onOpenBrowserPanel}
+          browserActionTestId={browserActionTestId}
+        />
       </div>
     </div>
   );
 }
 
-function PortUrlRows({ proxyUrl, tunnelUrl }: { proxyUrl: string; tunnelUrl: string | null }) {
+function PortUrlRows({
+  proxyUrl,
+  tunnelUrl,
+  onOpenBrowserPanel,
+  browserActionTestId,
+}: {
+  proxyUrl: string;
+  tunnelUrl: string | null;
+  onOpenBrowserPanel?: (url: string) => void;
+  browserActionTestId: string;
+}) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1 overflow-hidden">
       <PortUrlRow
-        label="Proxy"
-        tip="Path-based proxy. Works for APIs but may break web apps that expect to be served at /."
+        label={t("task:proxy")}
+        tip={t("task:pathBasedProxyWorksForApis")}
         url={proxyUrl}
+        onOpenBrowserPanel={onOpenBrowserPanel}
+        browserActionTestId={browserActionTestId}
       />
       {tunnelUrl && (
         <PortUrlRow
-          label="Tunnel"
-          tip="Dedicated port tunnel. App is served at /, so assets and routing work correctly."
+          label={t("task:tunnel")}
+          tip={t("task:dedicatedPortTunnelAppIsServed")}
           url={tunnelUrl}
           variant="default"
         />
@@ -174,11 +157,12 @@ type PortRowProps = {
   address?: string;
   process?: string;
   sessionId: string;
-  badge: "Detected" | "Manual";
+  badge: "detected" | "manual";
   tunnelPort?: number;
   tunnelPending?: boolean;
   onTunnelStart: (port: number, requestedPort?: number) => void;
   onTunnelStop: (port: number) => void;
+  onOpenBrowserPanel?: (url: string) => void;
 };
 
 function PortRow({
@@ -191,7 +175,9 @@ function PortRow({
   tunnelPending,
   onTunnelStart,
   onTunnelStop,
+  onOpenBrowserPanel,
 }: PortRowProps) {
+  const { t } = useTranslation();
   const [showTunnelForm, setShowTunnelForm] = useState(false);
   const [tunnelPortInput, setTunnelPortInput] = useState("");
   const proxyUrl = buildPortProxyUrl(sessionId, port);
@@ -204,7 +190,7 @@ function PortRow({
       tunnelPortInput &&
       (isNaN(requestedPort!) || requestedPort! < 1 || requestedPort! > 65535)
     ) {
-      toast.error("Enter a valid port (1-65535) or leave blank for random");
+      toast.error(t("task:enterAValidPort165535"));
       return;
     }
     onTunnelStart(port, requestedPort);
@@ -227,10 +213,10 @@ function PortRow({
             <span className="text-xs text-muted-foreground">{address}</span>
           )}
           <Badge
-            variant={badge === "Detected" ? "secondary" : "outline"}
+            variant={badge === "detected" ? "secondary" : "outline"}
             className="text-[10px] px-1.5 py-0"
           >
-            {badge}
+            {badge === "detected" ? t("task:detected") : t("task:manual")}
           </Badge>
         </div>
         <div className="flex items-center gap-0.5">
@@ -247,7 +233,7 @@ function PortRow({
         <div className="flex items-center gap-2">
           <Input
             type="number"
-            placeholder="Random"
+            placeholder={t("task:random")}
             value={tunnelPortInput}
             onChange={(e) => setTunnelPortInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleStartTunnel())}
@@ -262,13 +248,18 @@ function PortRow({
             onClick={handleStartTunnel}
             disabled={tunnelPending}
           >
-            Start
+            {t("task:start2")}
           </Button>
-          <InfoTip text="Specify a local port or leave blank for a random one. For Docker/K8s, use a port you've pre-exposed." />
+          <InfoTip text={t("task:specifyALocalPortOrLeave")} />
         </div>
       )}
 
-      <PortUrlRows proxyUrl={proxyUrl} tunnelUrl={tunnelUrl} />
+      <PortUrlRows
+        proxyUrl={proxyUrl}
+        tunnelUrl={tunnelUrl}
+        onOpenBrowserPanel={onOpenBrowserPanel}
+        browserActionTestId={`port-forward-open-browser-${port}`}
+      />
     </div>
   );
 }
@@ -284,6 +275,7 @@ function PortListSection({
   pendingTunnels,
   onTunnelStart,
   onTunnelStop,
+  onOpenBrowserPanel,
 }: {
   detectedPorts: ListeningPort[];
   manualPorts: number[];
@@ -295,7 +287,9 @@ function PortListSection({
   pendingTunnels: Set<number>;
   onTunnelStart: (port: number, requestedPort?: number) => void;
   onTunnelStop: (port: number) => void;
+  onOpenBrowserPanel?: (url: string) => void;
 }) {
+  const { t } = useTranslation();
   const detectedPortNumbers = new Set(detectedPorts.map((p) => p.port));
   const uniqueManualPorts = manualPorts.filter((p) => !detectedPortNumbers.has(p));
 
@@ -303,8 +297,8 @@ function PortListSection({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium flex items-center gap-1.5">
-          Listening Ports
-          <InfoTip text="TCP ports with active listeners inside the remote executor. Click refresh to re-scan." />
+          {t("task:listeningPorts")}
+          <InfoTip text={t("task:tcpPortsWithActiveListenersInside")} />
         </span>
         <Button
           size="sm"
@@ -319,16 +313,18 @@ function PortListSection({
           ) : (
             <IconRefresh className="h-3.5 w-3.5" />
           )}
-          Refresh
+          {t("task:refresh")}
         </Button>
       </div>
 
       {!loaded && !loading && (
-        <p className="text-xs text-muted-foreground">Click refresh to detect listening ports.</p>
+        <p className="text-xs text-muted-foreground">
+          {t("task:clickRefreshToDetectListeningPorts")}
+        </p>
       )}
 
       {loaded && detectedPorts.length === 0 && !loading && (
-        <p className="text-xs text-muted-foreground">No listening ports detected.</p>
+        <p className="text-xs text-muted-foreground">{t("task:noListeningPortsDetected")}</p>
       )}
 
       <div className="space-y-1">
@@ -339,11 +335,12 @@ function PortListSection({
             address={p.address}
             process={p.process}
             sessionId={sessionId}
-            badge="Detected"
+            badge="detected"
             tunnelPort={activeTunnels.get(p.port)}
             tunnelPending={pendingTunnels.has(p.port)}
             onTunnelStart={onTunnelStart}
             onTunnelStop={onTunnelStop}
+            onOpenBrowserPanel={onOpenBrowserPanel}
           />
         ))}
         {uniqueManualPorts.map((port) => (
@@ -351,11 +348,12 @@ function PortListSection({
             key={`m-${port}`}
             port={port}
             sessionId={sessionId}
-            badge="Manual"
+            badge="manual"
             tunnelPort={activeTunnels.get(port)}
             tunnelPending={pendingTunnels.has(port)}
             onTunnelStart={onTunnelStart}
             onTunnelStop={onTunnelStop}
+            onOpenBrowserPanel={onOpenBrowserPanel}
           />
         ))}
       </div>
@@ -364,12 +362,13 @@ function PortListSection({
 }
 
 function ManualPortInput({ onAdd }: { onAdd: (port: number) => void }) {
+  const { t } = useTranslation();
   const [value, setValue] = useState("");
 
   const handleAdd = useCallback(() => {
     const port = parseInt(value, 10);
     if (isNaN(port) || port < 1 || port > 65535) {
-      toast.error("Enter a valid port (1-65535)");
+      toast.error(t("task:enterAValidPort1655352"));
       return;
     }
     onAdd(port);
@@ -379,14 +378,14 @@ function ManualPortInput({ onAdd }: { onAdd: (port: number) => void }) {
   return (
     <div className="space-y-2">
       <span className="text-sm font-medium flex items-center gap-1.5">
-        Add Port Manually
-        <InfoTip text="Add a port that isn't auto-detected. Useful for services not yet started." />
+        {t("task:addPortManually")}
+        <InfoTip text={t("task:addAPortThatIsnT")} />
       </span>
       <div className="flex gap-2">
         <Input
           data-testid="port-forward-port-input"
           type="number"
-          placeholder="Port number"
+          placeholder={t("task:portNumber")}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAdd())}
@@ -402,7 +401,7 @@ function ManualPortInput({ onAdd }: { onAdd: (port: number) => void }) {
           onClick={handleAdd}
         >
           <IconPlus className="h-3.5 w-3.5" />
-          Add
+          {t("task:add")}
         </Button>
       </div>
     </div>
@@ -413,11 +412,14 @@ function PortForwardDialogContent({
   sessionId,
   activeTunnels,
   setActiveTunnels,
+  onOpenBrowserPanel,
 }: {
   sessionId: string;
   activeTunnels: Map<number, number>;
   setActiveTunnels: (updater: (prev: Map<number, number>) => Map<number, number>) => void;
+  onOpenBrowserPanel?: (url: string) => void;
 }) {
+  const { t } = useTranslation();
   const [detectedPorts, setDetectedPorts] = useState<ListeningPort[]>([]);
   const [manualPorts, setManualPorts] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
@@ -457,7 +459,7 @@ function PortForwardDialogContent({
   const handleAddManual = useCallback(
     (port: number) => {
       if (manualPorts.includes(port)) {
-        toast.error("Port already added");
+        toast.error(t("task:portAlreadyAdded"));
         return;
       }
       setManualPorts((prev) => [...prev, port]);
@@ -468,16 +470,16 @@ function PortForwardDialogContent({
   return (
     <DialogContent
       data-testid="port-forward-dialog"
-      className="sm:max-w-2xl overflow-hidden"
+      className="max-h-[calc(100dvh-2rem)] overflow-hidden sm:max-w-2xl"
       onOpenAutoFocus={() => !loaded && refresh()}
     >
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2">
           <IconNetwork className="h-5 w-5" />
-          Port Forwarding
+          {t("task:portForwarding")}
         </DialogTitle>
       </DialogHeader>
-      <div className="space-y-4 min-w-0 max-h-[60vh] overflow-y-auto">
+      <div className="min-w-0 max-h-[calc(100dvh-8rem)] space-y-4 overflow-y-auto overscroll-contain sm:max-h-[60vh]">
         <PortListSection
           detectedPorts={detectedPorts}
           manualPorts={manualPorts}
@@ -489,6 +491,7 @@ function PortForwardDialogContent({
           pendingTunnels={pendingTunnels}
           onTunnelStart={handleTunnelStart}
           onTunnelStop={handleTunnelStop}
+          onOpenBrowserPanel={onOpenBrowserPanel}
         />
         <ManualPortInput onAdd={handleAddManual} />
       </div>
@@ -496,17 +499,22 @@ function PortForwardDialogContent({
   );
 }
 
-export function PortForwardButton({
-  isRemoteExecutor,
-  sessionId,
-  isAgentctlReady,
-}: {
-  isRemoteExecutor?: boolean;
-  sessionId?: string | null;
-  isAgentctlReady?: boolean;
-}) {
+export function PortForwardButton({ sessionId }: { sessionId?: string | null }) {
+  const { t } = useTranslation();
+  const { enabled, canToggle, dialogOpen, setDialogOpen } = usePortForwardingVisibility();
+  const openBrowserPanel = useDockviewStore((state) =>
+    state.api ? state.openBrowserPanel : undefined,
+  );
   const [activeTunnels, setActiveTunnelsRaw] = useState<Map<number, number>>(new Map());
   const hasActiveTunnels = activeTunnels.size > 0;
+  const handleOpenBrowserPanel = useCallback(
+    (url: string) => {
+      if (!openBrowserPanel) return;
+      openBrowserPanel(url);
+      setDialogOpen(false);
+    },
+    [openBrowserPanel, setDialogOpen],
+  );
 
   const setActiveTunnels = useCallback(
     (updater: (prev: Map<number, number>) => Map<number, number>) => {
@@ -516,16 +524,24 @@ export function PortForwardButton({
   );
 
   useEffect(() => {
-    if (!sessionId || !isAgentctlReady) return;
+    if (!enabled || !sessionId || !canToggle) {
+      setActiveTunnelsRaw(new Map());
+      return;
+    }
+    let cancelled = false;
     listTunnels(sessionId).then((tunnels) => {
+      if (cancelled) return;
       setActiveTunnelsRaw(new Map(tunnels.map((t) => [t.port, t.tunnel_port])));
     });
-  }, [sessionId, isAgentctlReady]);
+    return () => {
+      cancelled = true;
+    };
+  }, [canToggle, enabled, sessionId]);
 
-  if (!isRemoteExecutor || !sessionId || !isAgentctlReady) return null;
+  if (!enabled || !canToggle || !sessionId) return null;
 
   return (
-    <Dialog>
+    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
           <DialogTrigger asChild>
@@ -541,14 +557,15 @@ export function PortForwardButton({
         </TooltipTrigger>
         <TooltipContent>
           {hasActiveTunnels
-            ? `Port Forwarding (${activeTunnels.size} tunnel${activeTunnels.size > 1 ? "s" : ""} active)`
-            : "Port Forwarding"}
+            ? t("task:portForwardingTunnelActive", { count: activeTunnels.size })
+            : t("task:portForwarding")}
         </TooltipContent>
       </Tooltip>
       <PortForwardDialogContent
         sessionId={sessionId}
         activeTunnels={activeTunnels}
         setActiveTunnels={setActiveTunnels}
+        onOpenBrowserPanel={openBrowserPanel ? handleOpenBrowserPanel : undefined}
       />
     </Dialog>
   );

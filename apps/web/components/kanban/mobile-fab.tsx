@@ -3,6 +3,7 @@
 import { Button } from "@kandev/ui/button";
 import { IconPlus } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 type MobileFabProps = {
   onClick: () => void;
@@ -10,6 +11,7 @@ type MobileFabProps = {
 };
 
 export function MobileFab({ onClick, isDragging = false }: MobileFabProps) {
+  const { t } = useTranslation();
   return (
     <Button
       onClick={onClick}
@@ -29,7 +31,7 @@ export function MobileFab({ onClick, isDragging = false }: MobileFabProps) {
       }}
     >
       <IconPlus className="h-6 w-6" />
-      <span className="sr-only">Add task</span>
+      <span className="sr-only">{t("kanban:addTask")}</span>
     </Button>
   );
 }

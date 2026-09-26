@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/office-fixture";
 import type { Page } from "@playwright/test";
+import { injectLatency, waitForHttp } from "../../helpers/causal-waits";
 
 /**
  * E2E coverage for office task property pickers (status, priority,
@@ -18,7 +19,30 @@ async function gotoTaskPage(testPage: Page, taskId: string, title: string) {
   });
 }
 
+// Mirrors AgentAvatar's initials() in agent-avatar.tsx, so the assertion
+// stays correct for whichever agent the picker actually resolved to
+// (freshly created, or the seed fallback when creation fails).
+function expectedInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
 test.describe("property pickers", () => {
+  test("human assignee is hidden when authentication is disabled", async ({
+    testPage,
+    apiClient,
+    officeSeed,
+  }) => {
+    const task = await apiClient.createTask(officeSeed.workspaceId, "Hidden Human Assignee", {
+      workflow_id: officeSeed.workflowId,
+    });
+    await gotoTaskPage(testPage, task.id, "Hidden Human Assignee");
+
+    await expect(testPage.getByText("Assigned to", { exact: true })).toHaveCount(0);
+  });
+
   test("status picker updates task status and persists", async ({
     testPage,
     apiClient,
@@ -245,6 +269,8 @@ test.describe("property pickers", () => {
       })
       .catch(() => undefined)) as Record<string, unknown> | undefined;
     const reviewerId = (created?.id as string) ?? officeSeed.agentId;
+    // "CEO" is the fallback seed agent's name set in office-fixture.ts.
+    const reviewerName = created ? "Picker Reviewer Agent" : "CEO";
 
     const task = await apiClient.createTask(officeSeed.workspaceId, "Picker Reviewer Task", {
       workflow_id: officeSeed.workflowId,
@@ -255,6 +281,15 @@ test.describe("property pickers", () => {
     await expect(trigger).toBeVisible({ timeout: 10_000 });
     await trigger.click();
     await testPage.getByTestId(`multi-select-add-${reviewerId}`).click();
+
+    // The chip should render a per-agent initials avatar, not the generic
+    // robot glyph every agent used to share. Unconditional regardless of
+    // whether agent creation above succeeded, so this assertion can never
+    // silently no-op.
+    await expect(trigger.getByText(expectedInitials(reviewerName))).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(trigger.getByText("🤖")).not.toBeVisible();
 
     // Re-open if the popover auto-closed and remove the reviewer.
     const removeItem = testPage.getByTestId(`multi-select-remove-${reviewerId}`);
@@ -338,5 +373,166 @@ test.describe("property pickers", () => {
       const after = (await priorityTrigger.textContent())?.trim() ?? "";
       expect(after).toBe(before);
     }).toPass({ timeout: 5_000 });
+  });
+
+  test("a stale failed mutation does not clobber a newer successful one", async ({
+    testPage,
+    apiClient,
+    officeApi,
+    officeSeed,
+  }) => {
+    // Regression test: useOptimisticTaskMutation used to snapshot-and-restore
+    // unconditionally on failure, with no sequencing. If an older mutation for
+    // the same task failed *after* a newer one had already succeeded, the
+    // older failure's rollback clobbered the newer, server-confirmed state.
+    // Concrete repro: drag todo -> in_progress (request A in flight), then
+    // immediately in_progress -> blocked (request B). B succeeds; A then
+    // fails. Pre-fix the UI settled back on the pre-A status instead of
+    // "blocked". The fix threads a per-task sequence guard through
+    // office-task-content-sync.ts so a failure only rolls back when no
+    // later-sequenced write has already succeeded or is still in flight.
+    const task = await apiClient.createTask(officeSeed.workspaceId, "Picker Race Rollback Task", {
+      workflow_id: officeSeed.workflowId,
+    });
+    await gotoTaskPage(testPage, task.id, "Picker Race Rollback Task");
+
+    const patchPathname = `/api/v1/office/tasks/${task.id}`;
+    let patchCallCount = 0;
+    await testPage.route(
+      (url) => url.pathname === patchPathname,
+      async (route) => {
+        if (route.request().method() !== "PATCH") {
+          await route.continue();
+          return;
+        }
+        patchCallCount += 1;
+        if (patchCallCount === 1) {
+          // Hold request A open well past request B's real round trip, so B
+          // is guaranteed to settle first. Fail it with no real backend
+          // effect: the backend's status after this test is driven solely by
+          // request B.
+          await injectLatency(
+            1200,
+            "force the older mutation's response to arrive after the newer one",
+          );
+          await route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "forced older-mutation failure" }),
+          });
+          return;
+        }
+        // Request B: let it hit the real backend and succeed.
+        await route.continue();
+      },
+    );
+
+    const settleOrder: string[] = [];
+    const trigger = testPage.getByTestId("status-picker-trigger");
+    const olderFailure = waitForHttp(testPage, "PATCH", new RegExp(`^${patchPathname}$`), {
+      predicate: (response) => response.status() === 500,
+    }).then((response) => {
+      settleOrder.push("older");
+      return response;
+    });
+    await trigger.click();
+    await testPage.getByTestId("status-picker-option-in_progress").click();
+    await expect(trigger).toContainText(/In Progress/i, { timeout: 5_000 });
+
+    const newerSuccess = waitForHttp(testPage, "PATCH", new RegExp(`^${patchPathname}$`), {
+      predicate: (response) => response.ok(),
+    }).then((response) => {
+      settleOrder.push("newer");
+      return response;
+    });
+    await trigger.click();
+    await testPage.getByTestId("status-picker-option-blocked").click();
+    await expect(trigger).toContainText(/Blocked/i, { timeout: 5_000 });
+
+    // Wait for both requests to actually land, in order, before asserting
+    // the settled state — otherwise the assertion below could pass for the
+    // wrong reason (the stale failure hasn't been processed yet).
+    await newerSuccess;
+    await olderFailure;
+    expect(settleOrder).toEqual(["newer", "older"]);
+
+    // Read the backend's settled value before asserting the UI. This HTTP
+    // round trip gives the older failure's own catch handler — a same-tick
+    // continuation of the response `waitForHttp` already observed above —
+    // time to run, so the UI assertion below checks the truly settled label
+    // instead of racing a still-optimistic "Blocked" that a buggy rollback
+    // has not yet overwritten.
+    const persisted = (await officeApi.getTask(task.id)) as Record<string, unknown>;
+    const inner = (persisted.task as Record<string, unknown>) ?? persisted;
+    const status = (inner.status as string) ?? (inner.state as string) ?? "";
+    expect(status.toLowerCase()).toContain("blocked");
+
+    // The stale failure's catch handler must not roll the UI back to "todo"
+    // (the pre-mutation snapshot) or "In Progress" (request A's optimistic
+    // patch) — the newer, server-confirmed "Blocked" must stand.
+    await expect(trigger).toContainText(/Blocked/i, { timeout: 5_000 });
+  });
+
+  test("started and completed rows show timestamps after a todo -> in_progress -> done transition", async ({
+    testPage,
+    apiClient,
+    officeSeed,
+  }) => {
+    // The office approval gate only allows a "done" write once the task is on
+    // its workflow's terminal step, so this task needs to start there. Seed
+    // it directly (rather than create + move) so the test doesn't route
+    // through the generic task-move path, which treats entering the
+    // workflow's terminal step as completion in its own right (see
+    // handleTaskMoved/finalizeDone) and would pre-empt the very "todo ->
+    // in_progress -> done" transition this test is verifying.
+    const stepsResp = await apiClient.listWorkflowSteps(officeSeed.workflowId);
+    const terminalStep = stepsResp.steps.reduce((max, step) =>
+      step.position > max.position ? step : max,
+    );
+    const seeded = await apiClient.seedTask(officeSeed.workspaceId, "Picker Timeline Task", {
+      workflow_id: officeSeed.workflowId,
+      workflow_step_id: terminalStep.id,
+      state: "TODO",
+    });
+    const task = { id: seeded.task_id };
+
+    // startedAt/completedAt are derived server-side from the status-change
+    // timeline (see deriveTaskTimestamps in the backend) and delivered to
+    // the open page by the "office.task.status_changed" WS handler's
+    // per-task refetch (GET /api/v1/office/tasks/:id) — assert on that
+    // live-page refetch rather than a reload, so a regression of the
+    // refetch itself fails this test.
+    const taskDetailPath = new RegExp(`^/api/v1/office/tasks/${task.id}$`);
+
+    // gotoTaskPage only waits for the title heading, which can render before
+    // the sidebar's own render pass picks up the same task fetch; wait for
+    // the initial GET explicitly instead of racing the property rows against
+    // an unbudgeted paint (see e2e/helpers/causal-waits.ts).
+    const initialLoad = waitForHttp(testPage, "GET", taskDetailPath);
+    await gotoTaskPage(testPage, task.id, "Picker Timeline Task");
+    await initialLoad;
+
+    const startedRow = testPage.getByTestId("started-row");
+    const completedRow = testPage.getByTestId("completed-row");
+    await expect(startedRow).toHaveText("--");
+    await expect(completedRow).toHaveText("--");
+
+    const startedRefetch = waitForHttp(testPage, "GET", taskDetailPath);
+    await testPage.getByTestId("status-picker-trigger").click();
+    await testPage.getByTestId("status-picker-option-in_progress").click();
+    await expect(testPage.getByTestId("status-picker-trigger")).toContainText(/In Progress/i, {
+      timeout: 15_000,
+    });
+    await startedRefetch;
+    await expect(startedRow).not.toHaveText("--", { timeout: 5_000 });
+
+    const completedRefetch = waitForHttp(testPage, "GET", taskDetailPath);
+    await testPage.getByTestId("status-picker-trigger").click();
+    await testPage.getByTestId("status-picker-option-done").click();
+    await expect(testPage.getByTestId("status-picker-trigger")).toContainText(/Done/i, {
+      timeout: 15_000,
+    });
+    await completedRefetch;
+    await expect(completedRow).not.toHaveText("--", { timeout: 5_000 });
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -19,6 +20,10 @@ import { useAppStore } from "@/components/state-provider";
 import { deleteExecutorProfile } from "@/lib/api/domains/settings-api";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
+import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
+import { settingsActionClassName } from "@/components/settings/settings-control";
+import { SettingsGroup } from "@/components/settings/settings-group";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 
 type ProfileWithExecutor = ExecutorProfile & {
   executor_type: string;
@@ -44,25 +49,52 @@ function useAllProfiles(): ProfileWithExecutor[] {
 
 const DefaultIcon = EXECUTOR_ICON_MAP.local;
 
-const EXECUTOR_TYPES = [
-  { type: "local", label: "Local", description: "Run agents directly in the repository folder." },
+// `type` is the persisted executor enum and is also the create route's path
+// segment — never copy. `brandLabel` is a brand/protocol name rendered
+// verbatim; every other label and description travels as a catalog key and
+// resolves at render. These sentences are imperative and deliberately differ
+// from the third-person ones the create and edit headers show; they are not
+// twins of `executors:description*` and must not be folded into them.
+type ExecutorTypeCard = {
+  type: string;
+  labelKey?: string;
+  brandLabel?: string;
+  descriptionKey: string;
+};
+
+const EXECUTOR_TYPES: readonly ExecutorTypeCard[] = [
+  {
+    type: "local",
+    labelKey: "executors:typeLocal",
+    descriptionKey: "executors:hubDescriptionLocal",
+  },
   {
     type: "worktree",
-    label: "Worktree",
-    description: "Create git worktrees for isolated agent sessions.",
+    labelKey: "executors:typeWorktree",
+    descriptionKey: "executors:hubDescriptionWorktree",
   },
-  { type: "local_docker", label: "Docker", description: "Run Docker containers on this machine." },
+  {
+    type: "local_docker",
+    brandLabel: "Docker",
+    descriptionKey: "executors:hubDescriptionDocker",
+  },
   {
     type: "sprites",
-    label: "Sprites.dev",
-    description: "Run agents in Sprites.dev cloud sandboxes.",
+    brandLabel: "Sprites.dev",
+    descriptionKey: "executors:hubDescriptionSprites",
   },
   {
-    type: "ssh",
-    label: "SSH",
-    description: "Connect to a remote host over SSH and run agentctl there.",
+    type: "remote_docker",
+    labelKey: "executors:remoteDocker",
+    descriptionKey: "executors:hubDescriptionRemoteDocker",
   },
-] as const;
+  { type: "ssh", brandLabel: "SSH", descriptionKey: "executors:hubDescriptionSsh" },
+  {
+    type: "k8s",
+    labelKey: "executors:typeKubernetes",
+    descriptionKey: "executors:hubDescriptionKubernetes",
+  },
+];
 
 function ExecutorIconBadge({ type }: { type: string }) {
   const Icon = EXECUTOR_ICON_MAP[type] ?? DefaultIcon;
@@ -76,15 +108,21 @@ function ExecutorIconBadge({ type }: { type: string }) {
 function ProfileCard({
   profile,
   onDelete,
+  canDelete,
 }: {
   profile: ProfileWithExecutor;
   onDelete: (id: string) => void;
+  canDelete: boolean;
 }) {
+  // Subscribes so the `getExecutorLabel` badge below re-renders on a locale
+  // switch; the helper resolves at call time but does not itself notify React.
+  const { t } = useTranslation();
   const router = useRouter();
   return (
     <Card
       className="group cursor-pointer transition-colors hover:bg-muted/50"
-      onClick={() => router.push(`/settings/executors/${profile.id}`)}
+      data-testid={`executor-profile-card-${profile.id}`}
+      onClick={() => router.push(executorProfileSettingsPath(profile.id))}
     >
       <CardContent className="flex items-center gap-3 p-4">
         <ExecutorIconBadge type={profile.executor_type} />
@@ -97,7 +135,11 @@ function ProfileCard({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 shrink-0 cursor-pointer opacity-0 group-hover:opacity-100"
+          className={settingsActionClassName(
+            "shrink-0 cursor-pointer md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100",
+          )}
+          disabled={!canDelete}
+          aria-label={t("executors:deleteProfile")}
           onClick={(e) => {
             e.stopPropagation();
             onDelete(profile.id);
@@ -113,20 +155,35 @@ function ProfileCard({
 function CreateTypeCard({
   execType,
   onClick,
+  disabled = false,
 }: {
-  execType: (typeof EXECUTOR_TYPES)[number];
+  execType: ExecutorTypeCard;
   onClick: () => void;
+  disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <Card
-      className="cursor-pointer ring-primary/40 transition-colors hover:bg-muted/50"
-      onClick={onClick}
+      role="button"
+      aria-disabled={disabled}
+      tabIndex={disabled ? -1 : 0}
+      className={
+        disabled
+          ? "cursor-not-allowed opacity-60"
+          : "cursor-pointer ring-primary/40 transition-colors hover:bg-muted/50"
+      }
+      onClick={disabled ? undefined : onClick}
+      onKeyDown={(event) => {
+        if (disabled || (event.key !== "Enter" && event.key !== " ")) return;
+        event.preventDefault();
+        onClick();
+      }}
     >
       <CardContent className="flex items-center gap-3 p-4">
         <ExecutorIconBadge type={execType.type} />
         <div className="min-w-0 flex-1">
-          <p className="font-medium">{execType.label}</p>
-          <p className="text-xs text-muted-foreground">{execType.description}</p>
+          <p className="font-medium">{execType.brandLabel ?? t(execType.labelKey as string)}</p>
+          <p className="text-xs text-muted-foreground">{t(execType.descriptionKey)}</p>
         </div>
         <IconPlus className="h-4 w-4 shrink-0 text-muted-foreground" />
       </CardContent>
@@ -147,26 +204,31 @@ function DeleteProfileDialog({
   onDelete: () => void;
   deleting: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete Profile</DialogTitle>
+          <DialogTitle>{t("executors:deleteProfile")}</DialogTitle>
           <DialogDescription>
-            Are you sure you want to delete &quot;{profileName}&quot;? This action cannot be undone.
+            {t("executors:deleteProfileConfirm", { name: profileName ?? "" })}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
-            Cancel
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            className={settingsActionClassName("cursor-pointer")}
+          >
+            {t("common:cancel")}
           </Button>
           <Button
             variant="destructive"
             onClick={onDelete}
             disabled={deleting}
-            className="cursor-pointer"
+            className={settingsActionClassName("cursor-pointer")}
           >
-            {deleting ? "Deleting..." : "Delete"}
+            {deleting ? t("executors:deleting") : t("executors:delete")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -175,10 +237,13 @@ function DeleteProfileDialog({
 }
 
 export default function ExecutorsHubPage() {
+  const { t } = useTranslation();
   const router = useRouter();
   const allProfiles = useAllProfiles();
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
+  const role = useAppStore((state) => state.auth.user?.role);
+  const canManageKubernetes = role === undefined || role === "admin";
   const [deleteProfileId, setDeleteProfileId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -188,6 +253,7 @@ export default function ExecutorsHubPage() {
 
   const handleDelete = async () => {
     if (!profileToDelete) return;
+    if (profileToDelete.executor_type === "k8s" && !canManageKubernetes) return;
     setDeleting(true);
     try {
       await deleteExecutorProfile(profileToDelete.parent_executor_id, profileToDelete.id);
@@ -207,35 +273,40 @@ export default function ExecutorsHubPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-2xl font-bold">Executors</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Executor profiles define how and where agents run. Each profile configures an execution
-          environment with scripts, environment variables, and MCP policies.
-        </p>
+        <h2 className="text-2xl font-bold">{t("common:executors")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t("executors:hubDescription")}</p>
       </div>
       <Separator />
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Create New Profile</h3>
+      {!canManageKubernetes && <KubernetesReadOnlyNotice />}
+      {allProfiles.length > 0 && (
+        <SettingsGroup title={t("executors:profiles")} contentClassName="space-y-4 divide-y-0">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {allProfiles.map((profile) => (
+              <ProfileCard
+                key={profile.id}
+                profile={profile}
+                onDelete={setDeleteProfileId}
+                canDelete={profile.executor_type !== "k8s" || canManageKubernetes}
+              />
+            ))}
+          </div>
+        </SettingsGroup>
+      )}
+      <SettingsGroup
+        title={t("executors:createNewProfile")}
+        contentClassName="space-y-4 divide-y-0"
+      >
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {EXECUTOR_TYPES.map((execType) => (
             <CreateTypeCard
               key={execType.type}
               execType={execType}
               onClick={() => router.push(`/settings/executors/new/${execType.type}`)}
+              disabled={execType.type === "k8s" && !canManageKubernetes}
             />
           ))}
         </div>
-      </div>
-      {allProfiles.length > 0 && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">Profiles</h3>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {allProfiles.map((profile) => (
-              <ProfileCard key={profile.id} profile={profile} onDelete={setDeleteProfileId} />
-            ))}
-          </div>
-        </div>
-      )}
+      </SettingsGroup>
       <DeleteProfileDialog
         profileName={profileToDelete?.name}
         open={Boolean(deleteProfileId)}

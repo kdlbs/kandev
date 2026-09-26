@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconTrash } from "@tabler/icons-react";
 import { toast } from "@/lib/toast/sonner";
 import { Button } from "@kandev/ui/button";
@@ -20,6 +21,7 @@ import {
   updateMarketplaceSource,
 } from "@/lib/api/domains/marketplace-api";
 import type { MarketplaceSource } from "@/lib/types/plugins";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type MarketplaceSourcesDialogProps = {
   open: boolean;
@@ -39,18 +41,26 @@ export function MarketplaceSourcesDialog({
   onOpenChange,
   onChanged,
 }: MarketplaceSourcesDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent
+        data-testid="marketplace-sources-dialog"
+        data-layout="contained"
+        className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden"
+      >
         <DialogHeader>
-          <DialogTitle>Marketplace sources</DialogTitle>
+          <DialogTitle>{t("plugins:marketplaceSources")}</DialogTitle>
           <DialogDescription>
-            Add a team or corporate registry to browse its plugins alongside the official catalog.
-            Each source serves an index.json document.
+            {/* `index.json` is the document name a source must serve. */}
+            {t("plugins:marketplaceSourcesDescription", { document: "index.json" })}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-2">
+        <div
+          data-testid="marketplace-sources-list"
+          className="min-h-0 min-w-0 space-y-2 overflow-x-hidden overflow-y-auto overscroll-contain"
+        >
           {sources.map((source) => (
             <SourceItem key={source.id} source={source} onChanged={onChanged} />
           ))}
@@ -63,6 +73,7 @@ export function MarketplaceSourcesDialog({
 }
 
 function SourceItem({ source, onChanged }: { source: MarketplaceSource; onChanged: () => void }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
 
   const toggle = async (enabled: boolean) => {
@@ -71,7 +82,7 @@ function SourceItem({ source, onChanged }: { source: MarketplaceSource; onChange
       await updateMarketplaceSource(source.id, { enabled });
       onChanged();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to update source");
+      toast.error(err instanceof Error ? err.message : t("plugins:failedToUpdateSource"));
     } finally {
       setBusy(false);
     }
@@ -83,7 +94,7 @@ function SourceItem({ source, onChanged }: { source: MarketplaceSource; onChange
       await deleteMarketplaceSource(source.id);
       onChanged();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to remove source");
+      toast.error(err instanceof Error ? err.message : t("plugins:failedToRemoveSource"));
     } finally {
       setBusy(false);
     }
@@ -99,12 +110,12 @@ function SourceItem({ source, onChanged }: { source: MarketplaceSource; onChange
           <span className="text-sm font-medium truncate">{source.name}</span>
           {source.builtin && (
             <Badge variant="outline" className="text-[10px]">
-              Official
+              {t("plugins:sourceOfficial")}
             </Badge>
           )}
           {source.healthy === false && (
             <Badge variant="destructive" className="text-[10px]">
-              Unreachable
+              {t("plugins:sourceUnreachable")}
             </Badge>
           )}
         </div>
@@ -118,8 +129,8 @@ function SourceItem({ source, onChanged }: { source: MarketplaceSource; onChange
             size="icon"
             disabled={busy}
             onClick={remove}
-            className="cursor-pointer"
-            aria-label={`Remove ${source.name}`}
+            className={controlSizingClassName("icon", "cursor-pointer")}
+            aria-label={t("plugins:removeSource", { name: source.name })}
           >
             <IconTrash className="h-4 w-4" />
           </Button>
@@ -130,6 +141,7 @@ function SourceItem({ source, onChanged }: { source: MarketplaceSource; onChange
 }
 
 function AddSourceForm({ onChanged }: { onChanged: () => void }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -143,34 +155,39 @@ function AddSourceForm({ onChanged }: { onChanged: () => void }) {
       setUrl("");
       onChanged();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to add source");
+      toast.error(err instanceof Error ? err.message : t("plugins:failedToAddSource"));
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="space-y-2 border-t border-border/60 pt-3">
+    <div
+      data-testid="marketplace-add-source-form"
+      className="space-y-2 border-t border-border/60 pt-3"
+    >
       <Input
-        placeholder="Source name (e.g. Acme Internal)"
+        placeholder={t("plugins:sourceNamePlaceholder")}
         value={name}
         onChange={(e) => setName(e.target.value)}
+        className={controlSizingClassName("standard")}
         data-testid="marketplace-add-source-name"
       />
       <div className="flex items-center gap-2">
         <Input
-          placeholder="https://.../index.json"
+          placeholder={t("plugins:sourceUrlPlaceholder")}
           value={url}
           onChange={(e) => setUrl(e.target.value)}
+          className={controlSizingClassName("standard")}
           data-testid="marketplace-add-source-url"
         />
         <Button
           disabled={busy || !url.trim()}
           onClick={submit}
-          className="cursor-pointer shrink-0"
+          className={controlSizingClassName("standard", "cursor-pointer shrink-0")}
           data-testid="marketplace-add-source-submit"
         >
-          Add
+          {t("plugins:add")}
         </Button>
       </div>
     </div>

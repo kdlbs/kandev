@@ -1,0 +1,9 @@
+{
+  "@agentclientprotocol/claude-agent-acp": "0.76.0",
+  "@agentclientprotocol/codex-acp": "1.11.0",
+  "@bex-co/muse-code-acp": "0.6.1",
+  "@github/copilot": "1.0.83",
+  "@google/gemini-cli": "0.59.0",
+  "opencode-ai": "1.18.30",
+  "pi-acp": "0.0.33"
+}

@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable max-lines -- this component owns the chat timeline and composer composition. */
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { toast } from "@/lib/toast/sonner";
@@ -12,7 +13,9 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
+import { useChatMotion } from "@/hooks/use-chat-motion";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
 import { createComment } from "@/lib/api/domains/office-api";
 import { formatRelativeTime } from "@/lib/utils";
@@ -35,13 +38,20 @@ import {
   mergeChatEntries,
   type ChatEntry,
 } from "./chat-entries";
+import type { TaskRepository } from "@/lib/types/http";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+
+import { useTranslation } from "react-i18next";
+import { DecisionTimelineEntry, TimelineEntry } from "./task-chat-timeline-entries";
 
 const MAX_INLINE_SESSIONS = 50;
 const AUTOSCROLL_THRESHOLD_PX = 80;
-const PROMPT_INSERTED_MESSAGE = "Enhanced prompt inserted.";
+// A catalog key, not copy: `t()` at module scope would freeze at the boot locale.
+const PROMPT_INSERTED_MESSAGE_KEY = "task:enhancedPromptInserted";
 
 type TaskChatProps = {
   taskId: string;
+  workspaceId?: string;
   comments: TaskComment[];
   timeline?: TimelineEvent[];
   sessions?: TaskSession[];
@@ -53,6 +63,8 @@ type TaskChatProps = {
   onCommentsChanged?: () => void;
   taskTitle?: string;
   taskDescription?: string;
+  statusSummary?: TaskStatusSummary | null;
+  repositories?: TaskRepository[];
 };
 
 function partitionGroups(groups: SessionGroup[]): {
@@ -88,18 +100,19 @@ function CommentEntry({
   turn?: CommentTurnContext;
   hasLaterAgentReply?: boolean;
 }) {
+  const { t } = useTranslation();
   const isAgent = comment.authorType === "agent";
   // Resolve the agent name from the office agents store so renames
   // flow through automatically. Backend session-bridged comments don't
   // carry a name; the mapper leaves authorName empty for agents.
   const resolvedAgentName = useAppStore((s) =>
     isAgent
-      ? (s.office.agentProfiles.find((a) => a.id === comment.authorId)?.name ??
+      ? (selectOfficeAgentProfiles(s).find((a) => a.id === comment.authorId)?.name ??
         comment.authorName ??
-        "Agent")
+        t("task:agent"))
       : "",
   );
-  const displayName = isAgent ? resolvedAgentName : "You";
+  const displayName = isAgent ? resolvedAgentName : t("task:you");
   return (
     <div
       id={`comment-${comment.id}`}
@@ -116,12 +129,13 @@ function CommentEntry({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium text-sm">{displayName}</span>
           {isAgent && comment.source === "session" && (
-            <span className="text-xs text-muted-foreground">via session</span>
+            <span className="text-xs text-muted-foreground">{t("task:viaSession")}</span>
           )}
           {comment.status && (
             <span className="text-xs text-muted-foreground">
               {comment.status}
-              {comment.durationMs != null && ` after ${formatDuration(comment.durationMs)}`}
+              {comment.durationMs != null &&
+                t("task:afterDuration", { duration: formatDuration(comment.durationMs) })}
             </span>
           )}
           <span className="text-xs text-muted-foreground">
@@ -143,7 +157,7 @@ function CommentEntry({
           <Collapsible>
             <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground mt-1 cursor-pointer hover:text-foreground transition-colors">
               <IconCode className="h-3 w-3" />
-              Worked -- ran {comment.toolCalls.length} commands
+              {t("task:workedRanCommands", { count: comment.toolCalls.length })}
               <IconChevronDown className="h-3 w-3" />
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -171,49 +185,6 @@ function CommentEntry({
   );
 }
 
-// formatDecisionLine renders the human-readable summary for a single
-// task decision entry in the timeline. Approve rows read like
-// "CEO approved this task"; request-changes rows append the comment.
-export function formatDecisionLine(decision: TaskDecision): string {
-  const who = decision.deciderName?.trim() || "Someone";
-  if (decision.decision === "approved") {
-    return `${who} approved this task`;
-  }
-  const tail = decision.comment ? `: '${decision.comment}'` : "";
-  return `${who} requested changes${tail}`;
-}
-
-function DecisionTimelineEntry({ decision }: { decision: TaskDecision }) {
-  const isApproval = decision.decision === "approved";
-  return (
-    <div
-      className="flex items-center gap-2 px-4 py-1.5 text-xs text-muted-foreground"
-      data-testid="decision-timeline-entry"
-    >
-      <span className={isApproval ? "text-green-600" : "text-red-600"}>
-        {isApproval ? "approved" : "requested changes"}
-      </span>
-      <span className="truncate">{formatDecisionLine(decision)}</span>
-      <span className="ml-auto shrink-0">{formatRelativeTime(decision.createdAt)}</span>
-    </div>
-  );
-}
-
-function TimelineEntry({ event }: { event: TimelineEvent }) {
-  return (
-    <div className="flex items-center gap-2 px-4 py-1.5 text-xs text-muted-foreground">
-      {event.type === "status_change" && event.from && event.to ? (
-        <span>
-          Status changed from <strong>{event.from}</strong> to <strong>{event.to}</strong>
-        </span>
-      ) : (
-        <span>{event.type.replaceAll("_", " ")}</span>
-      )}
-      <span className="ml-auto shrink-0">{formatRelativeTime(event.at)}</span>
-    </div>
-  );
-}
-
 async function readFileAsMarkdown(file: File): Promise<string> {
   if (file.type.startsWith("image/")) {
     const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -229,6 +200,7 @@ async function readFileAsMarkdown(file: File): Promise<string> {
 }
 
 function useChatInputHandlers(setInput: React.Dispatch<React.SetStateAction<string>>) {
+  const { t } = useTranslation();
   const processFiles = useCallback(
     async (files: File[]) => {
       for (const file of files) {
@@ -236,11 +208,11 @@ function useChatInputHandlers(setInput: React.Dispatch<React.SetStateAction<stri
           const md = await readFileAsMarkdown(file);
           setInput((prev) => (prev ? `${prev}\n\n${md}` : md));
         } catch {
-          toast.error(`Failed to read ${file.name}`);
+          toast.error(t("task:failedToRead", { name: file.name }));
         }
       }
     },
-    [setInput],
+    [setInput, t],
   );
 
   const handleFileSelect = useCallback(
@@ -309,6 +281,7 @@ function CommentComposerFooter({
   applyPending,
   copyPending,
 }: CommentComposerFooterProps) {
+  const { t } = useTranslation();
   const isSendDisabled = submitting || !input.trim();
 
   return (
@@ -333,7 +306,7 @@ function CommentComposerFooter({
               <IconPaperclip className="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Attach files</TooltipContent>
+          <TooltipContent>{t("task:attachFiles")}</TooltipContent>
         </Tooltip>
         <EnhancePromptButton
           onClick={handleEnhance}
@@ -355,7 +328,7 @@ function CommentComposerFooter({
               </Button>
             </span>
           </TooltipTrigger>
-          <TooltipContent>Send comment</TooltipContent>
+          <TooltipContent>{t("task:sendComment")}</TooltipContent>
         </Tooltip>
       </div>
       <div className="px-2 pb-2">
@@ -370,6 +343,7 @@ function CommentComposerFooter({
 }
 
 function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInputProps) {
+  const { t } = useTranslation();
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -403,11 +377,11 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
       setInputAndSync("");
       onSubmitted?.();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to send comment");
+      toast.error(err instanceof Error ? err.message : t("task:failedToSendComment"));
     } finally {
       setSubmitting(false);
     }
-  }, [submitting, taskId, onSubmitted, setInputAndSync]);
+  }, [submitting, taskId, onSubmitted, setInputAndSync, t]);
 
   const handleEnhance = useCallback(() => {
     const current = inputValueRef.current;
@@ -416,11 +390,11 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
     void enhancePrompt(current, (result) => {
       const inserted = promptDelivery.deliver(current, result, generation);
       if (inserted) {
-        toast.success(PROMPT_INSERTED_MESSAGE);
+        toast.success(t(PROMPT_INSERTED_MESSAGE_KEY));
       }
       return inserted;
     });
-  }, [enhancePrompt, promptDelivery]);
+  }, [enhancePrompt, promptDelivery, t]);
 
   return (
     <div className="mt-4 pt-4 border-t border-border">
@@ -436,7 +410,7 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
             }
           }}
           onPaste={handlePaste}
-          placeholder="Add a comment..."
+          placeholder={t("task:addAComment")}
           rows={2}
           className="w-full bg-transparent px-3 py-2 text-sm outline-none resize-none"
         />
@@ -531,6 +505,7 @@ function useChatAutoScroll(
  * the user when they scroll away.
  */
 function useCommentHashScroll(comments: TaskComment[]): void {
+  const motionEnabled = useChatMotion();
   const targetIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -544,12 +519,22 @@ function useCommentHashScroll(comments: TaskComment[]): void {
     if (!targetId) return;
     const el = document.getElementById(targetId);
     if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.scrollIntoView({ behavior: motionEnabled ? "smooth" : "auto", block: "center" });
     targetIdRef.current = null;
-  }, [comments]);
+  }, [comments, motionEnabled]);
 }
 
-function ChatEntries({ taskId, entries }: { taskId: string; entries: ChatEntry[] }) {
+function ChatEntries({
+  taskId,
+  workspaceId,
+  repositories,
+  entries,
+}: {
+  taskId: string;
+  workspaceId: string;
+  repositories?: TaskRepository[];
+  entries: ChatEntry[];
+}) {
   return (
     <>
       {entries.map((entry) => {
@@ -571,7 +556,15 @@ function ChatEntries({ taskId, entries }: { taskId: string; entries: ChatEntry[]
           return <DecisionTimelineEntry key={`d-${entry.data.id}`} decision={entry.data} />;
         }
         if (entry.kind === "error") {
-          return <RunErrorEntry key={`re-${entry.data.id}`} taskId={taskId} error={entry.data} />;
+          return (
+            <RunErrorEntry
+              key={`re-${entry.data.id}`}
+              taskId={taskId}
+              workspaceId={workspaceId}
+              repositories={repositories}
+              error={entry.data}
+            />
+          );
         }
         // Session entries are intentionally not rendered in the Chat
         // tab: every agent message below already shows the same agent
@@ -586,6 +579,7 @@ function ChatEntries({ taskId, entries }: { taskId: string; entries: ChatEntry[]
 
 export function TaskChat({
   taskId,
+  workspaceId = "",
   comments,
   timeline = [],
   sessions = [],
@@ -597,7 +591,9 @@ export function TaskChat({
   onCommentsChanged,
   taskTitle,
   taskDescription,
+  repositories,
 }: TaskChatProps) {
+  const { t } = useTranslation();
   const [showOlder, setShowOlder] = useState(false);
   const groups = useMemo(
     () => groupSessionsForTimeline(sessions, reviewers, approvers),
@@ -649,14 +645,19 @@ export function TaskChat({
           className="self-start text-xs text-muted-foreground hover:text-foreground underline cursor-pointer mb-2"
           data-testid="show-older-sessions"
         >
-          Show {olderGroups.length} older session{olderGroups.length === 1 ? "" : "s"}
+          {t("task:showOlderSessions", { count: olderGroups.length })}
         </button>
       )}
       {isEmpty ? (
-        <p className="text-sm text-muted-foreground py-4">No comments yet</p>
+        <p className="text-sm text-muted-foreground py-4">{t("task:noCommentsYet")}</p>
       ) : (
         <div data-testid="task-chat-entries">
-          <ChatEntries taskId={taskId} entries={entries} />
+          <ChatEntries
+            taskId={taskId}
+            workspaceId={workspaceId}
+            repositories={repositories}
+            entries={entries}
+          />
         </div>
       )}
       {!readOnly && (

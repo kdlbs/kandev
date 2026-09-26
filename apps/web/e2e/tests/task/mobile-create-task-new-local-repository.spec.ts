@@ -6,6 +6,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { exerciseMultiRowCreation } from "./local-repository-multi-row-helpers";
 
 useRegularMode();
 
@@ -42,20 +43,53 @@ async function openCreationDrawer(page: Page): Promise<Locator> {
   await expect(refresh).toBeVisible();
   await expect(action).toBeVisible();
   const searchControl = search.locator("..");
-  const [searchControlBox, refreshBox, actionBox] = await Promise.all([
-    searchControl.boundingBox(),
-    refresh.boundingBox(),
-    action.boundingBox(),
-  ]);
-  expect(searchControlBox).not.toBeNull();
-  expect(refreshBox).not.toBeNull();
-  expect(actionBox).not.toBeNull();
-  expect(searchControlBox!.width).toBeGreaterThan(refreshBox!.width + actionBox!.width);
-  const refreshGap = refreshBox!.x - (searchControlBox!.x + searchControlBox!.width);
-  expect(refreshGap).toBeGreaterThanOrEqual(0);
-  expect(refreshGap).toBeLessThanOrEqual(8);
-  expect(refreshBox!.height).toBeGreaterThanOrEqual(44);
-  expect(actionBox!.height).toBeGreaterThanOrEqual(44);
+  let previousLayoutKey: string | null = null;
+  let stableLayoutReads = 0;
+  await expect
+    .poll(
+      async () => {
+        const [searchControlBox, refreshBox, actionBox] = await Promise.all([
+          searchControl.boundingBox(),
+          refresh.boundingBox(),
+          action.boundingBox(),
+        ]);
+        if (!searchControlBox || !refreshBox || !actionBox) return false;
+        const refreshGap = refreshBox.x - (searchControlBox.x + searchControlBox.width);
+        const validLayout =
+          searchControlBox.width > refreshBox.width + actionBox.width &&
+          refreshGap >= 0 &&
+          refreshGap <= 8 &&
+          refreshBox.height >= 44 &&
+          actionBox.height >= 44;
+        if (!validLayout) {
+          previousLayoutKey = null;
+          stableLayoutReads = 0;
+          return false;
+        }
+        const layoutKey = [
+          searchControlBox.x,
+          searchControlBox.y,
+          searchControlBox.width,
+          searchControlBox.height,
+          refreshBox.x,
+          refreshBox.y,
+          refreshBox.width,
+          refreshBox.height,
+          actionBox.x,
+          actionBox.y,
+          actionBox.width,
+          actionBox.height,
+        ].join(":");
+        stableLayoutReads = layoutKey === previousLayoutKey ? stableLayoutReads + 1 : 1;
+        previousLayoutKey = layoutKey;
+        return stableLayoutReads >= 2;
+      },
+      {
+        timeout: 15_000,
+        message: "repository picker toolbar did not settle into its mobile layout",
+      },
+    )
+    .toBe(true);
   await action.click();
   const drawer = page.getByTestId("create-local-repository-drawer");
   await expect(drawer).toBeVisible();
@@ -108,7 +142,7 @@ async function expectDrawerGeometry(page: Page, drawer: Locator): Promise<void> 
   ).toBe(false);
 }
 
-function expectUnbornMainRepository(repositoryPath: string): void {
+function expectMainRepository(repositoryPath: string): void {
   const symbolicRef = spawnSync("git", ["symbolic-ref", "--short", "HEAD"], {
     cwd: repositoryPath,
     encoding: "utf8",
@@ -117,19 +151,54 @@ function expectUnbornMainRepository(repositoryPath: string): void {
   expect(symbolicRef.status).toBe(0);
   expect(String(symbolicRef.stdout).trim()).toBe("main");
 
+  const branchRef = spawnSync("git", ["show-ref", "--verify", "--quiet", "refs/heads/main"], {
+    cwd: repositoryPath,
+  });
+  expect(branchRef.error).toBeUndefined();
+  expect(branchRef.status).toBe(0);
+
   const head = spawnSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: repositoryPath });
   expect(head.error).toBeUndefined();
-  expect(head.status).not.toBe(0);
+  expect(head.status).toBe(0);
+
+  const commitCount = spawnSync("git", ["rev-list", "--count", "HEAD"], {
+    cwd: repositoryPath,
+    encoding: "utf8",
+  });
+  expect(commitCount.error).toBeUndefined();
+  expect(commitCount.status).toBe(0);
+  expect(String(commitCount.stdout).trim()).toBe("1");
+
+  const tree = spawnSync("git", ["ls-tree", "-r", "--name-only", "HEAD"], {
+    cwd: repositoryPath,
+    encoding: "utf8",
+  });
+  expect(tree.error).toBeUndefined();
+  expect(tree.status).toBe(0);
+  expect(String(tree.stdout).trim()).toBe("");
 }
 
 test.describe("Create task with a new local repository on mobile", () => {
+  test("refreshes and creates from a second repository row", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    await openCreateTask(testPage);
+    await exerciseMultiRowCreation(testPage, apiClient, {
+      workspaceId: seedData.workspaceId,
+      parentPath: backend.tmpDir,
+      mobile: true,
+    });
+  });
   test("creates and selects the repository in a contained, scrollable drawer", async ({
     testPage,
     apiClient,
     seedData,
     backend,
   }) => {
-    const repositoryName = "mobile-unborn-main";
+    const repositoryName = "mobile-real-main";
     const parentName = "mobile-created-parent";
     const parentPath = path.join(backend.tmpDir, parentName);
     const repositoryPath = path.join(parentPath, repositoryName);
@@ -176,7 +245,13 @@ test.describe("Create task with a new local repository on mobile", () => {
     await expect(drawer).not.toBeVisible();
 
     await expect(testPage.getByTestId("repo-chip-trigger")).toContainText(repositoryName);
-    await expect(testPage.getByTestId("branch-chip-trigger").first()).toContainText("main");
+    const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
+    await expect(branchSelector).toBeEnabled({ timeout: 10_000 });
+    await branchSelector.tap();
+    const mainOption = testPage.getByRole("option", { name: /^main\b/ }).first();
+    await expect(mainOption).toBeVisible();
+    await mainOption.tap();
+    await expect(branchSelector).toContainText("main");
     await expect(testPage.getByTestId("executor-profile-selector")).toContainText(
       directExecutor!.name,
     );
@@ -204,6 +279,6 @@ test.describe("Create task with a new local repository on mobile", () => {
         executor_profile_id: directProfile!.id,
       });
     expect(fs.statSync(path.join(repositoryPath, ".git")).isDirectory()).toBe(true);
-    expectUnbornMainRepository(repositoryPath);
+    expectMainRepository(repositoryPath);
   });
 });

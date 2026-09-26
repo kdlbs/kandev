@@ -32,6 +32,11 @@ export class JiraSettingsPage {
     await this.siteInput.waitFor({ state: "visible" });
   }
 
+  async gotoWorkspace(workspaceId: string) {
+    await this.page.goto(`/settings/workspaces/${workspaceId}/integrations/jira`);
+    await this.siteInput.waitFor({ state: "visible" });
+  }
+
   async fillForm(args: { siteUrl: string; email?: string; secret: string; projectKey?: string }) {
     await this.siteInput.fill(args.siteUrl);
     if (args.email !== undefined) await this.emailInput.fill(args.email);
@@ -48,7 +53,11 @@ export class JiraSettingsPage {
 
   /** Open the Auth-method dropdown and pick by visible label. */
   async selectAuth(
-    label: "API token (recommended)" | "Browser session cookie" | "Personal Access Token",
+    label:
+      | "API token (recommended)"
+      | "Browser session cookie"
+      | "Personal Access Token"
+      | "OAuth 2.0",
   ) {
     await this.authSelect.click();
     await this.page.getByRole("option", { name: label, exact: true }).click();

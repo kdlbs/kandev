@@ -7,20 +7,35 @@ import (
 	"github.com/kandev/kandev/internal/office/approvals"
 	"github.com/kandev/kandev/internal/office/channels"
 	"github.com/kandev/kandev/internal/office/config"
+	"github.com/kandev/kandev/internal/office/configsync"
 	"github.com/kandev/kandev/internal/office/costs"
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/labels"
 	"github.com/kandev/kandev/internal/office/onboarding"
+	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/projects"
 	"github.com/kandev/kandev/internal/office/routines"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/skills"
 	"github.com/kandev/kandev/internal/office/tree_controls"
 	"github.com/kandev/kandev/internal/office/workspaces"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 // RegisterAllRoutes delegates route registration to each feature package.
-func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, log *logger.Logger) {
+// handoff wires the guarded agent-caller comment-read branch of
+// dashboard.listComments; it may be nil where no HandoffService is
+// available, in which case an agent request to that route responds 503.
+// handoffDeps backs the cross-workspace handoff runtime action
+// (POST /runtime/handoffs); its zero value disables the action with a
+// runtime-dependency-missing error rather than a nil-pointer panic.
+func RegisterAllRoutes(
+	router *gin.RouterGroup,
+	svcs *Services,
+	handoff *taskservice.HandoffService,
+	handoffDeps officeruntime.HandoffDependencies,
+	log *logger.Logger,
+) {
 	agents.RegisterRoutes(router, svcs.Agents, log)
 	officeruntime.RegisterRoutes(router, officeruntime.NewHandler(
 		svcs.Agents,
@@ -34,9 +49,13 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, log *logger.Logg
 			Runs:          svcs.Workspaces,
 			AgentModifier: svcs.Agents,
 			Skills:        svcs.Skills,
+			Handoff:       handoffDeps,
 		}),
 		svcs.Skills,
 		svcs.Workspaces,
+		newRuntimeDecisionRecorder(svcs.Dashboard),
+		log,
+		svcs.Dashboard,
 	))
 
 	skillsHandler := skills.NewHandler(svcs.Skills)
@@ -56,10 +75,27 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, log *logger.Logg
 	channelsHandler := channels.NewHandler(svcs.Channels)
 	channels.RegisterRoutes(router, channelsHandler)
 
-	configHandler := config.NewHandler(svcs.Config, log)
+	// A typed-nil *configsync.Service must not be assigned directly to the
+	// ActiveSourceChecker interface parameter: that would produce a non-nil
+	// interface wrapping a nil pointer, and Handler's `guard == nil` check
+	// would then miss it, calling HasActiveSource on a nil receiver.
+	var configSyncGuard config.ActiveSourceChecker
+	if svcs.ConfigSync != nil {
+		configSyncGuard = svcs.ConfigSync
+	}
+	configHandler := config.NewHandler(svcs.Config, configSyncGuard, log)
 	config.RegisterRoutes(router, configHandler)
 
-	dashboard.RegisterRoutes(router, svcs.Dashboard, svcs.Repo, svcs.GitManager, log)
+	if svcs.ConfigSync != nil {
+		configSyncHandler := configsync.NewHandler(svcs.ConfigSync, log)
+		configsync.RegisterRoutes(router, configSyncHandler)
+	}
+
+	var dashboardConfigSyncGuard dashboard.ActiveSourceChecker
+	if svcs.ConfigSync != nil {
+		dashboardConfigSyncGuard = svcs.ConfigSync
+	}
+	dashboard.RegisterRoutes(router, svcs.Dashboard, svcs.Repo, svcs.GitManager, handoff, dashboardConfigSyncGuard, log)
 
 	if svcs.Documents != nil {
 		docHandler := dashboard.NewDocumentHandler(svcs.Documents, svcs.KandevHome, log)
@@ -72,4 +108,6 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, log *logger.Logg
 
 	tree_controls.RegisterRoutes(router, tree_controls.NewHandler(svcs.TreeControls))
 	workspaces.RegisterRoutes(router, workspaces.NewHandler(svcs.Workspaces))
+
+	pause.RegisterRoutes(router, pause.NewHandler(svcs.Pause))
 }

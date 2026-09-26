@@ -11,6 +11,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+
+	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // Store backs the task↔MR association used by the topbar / review surface.
@@ -77,7 +80,9 @@ const createTablesSQL = `
 		mr_url TEXT NOT NULL,
 		mr_title TEXT NOT NULL,
 		head_branch TEXT NOT NULL,
+		head_sha TEXT NOT NULL DEFAULT '',
 		base_branch TEXT NOT NULL,
+		base_sha TEXT NOT NULL DEFAULT '',
 		author_username TEXT NOT NULL DEFAULT '',
 		state TEXT NOT NULL DEFAULT 'open',
 		approval_state TEXT NOT NULL DEFAULT '',
@@ -88,6 +93,10 @@ const createTablesSQL = `
 		required_approvals INTEGER DEFAULT 0,
 		pipeline_jobs_total INTEGER DEFAULT 0,
 		pipeline_jobs_pass INTEGER DEFAULT 0,
+		detailed_merge_status TEXT NOT NULL DEFAULT '',
+		reviewer_count INTEGER NOT NULL DEFAULT 0,
+		unapproved_reviewers INTEGER NOT NULL DEFAULT 0,
+		unresolved_discussions INTEGER NOT NULL DEFAULT 0,
 		created_at DATETIME NOT NULL,
 		merged_at DATETIME,
 		closed_at DATETIME,
@@ -210,7 +219,18 @@ const createTablesSQL = `
 `
 
 func (s *Store) createTables() error {
-	if _, err := s.db.Exec(createTablesSQL); err != nil {
+	if _, err := s.db.Exec(gitlabSchemaSQLForDriver(createTablesSQL, s.db.DriverName())); err != nil {
+		return err
+	}
+	if err := s.createMRAutomationTables(); err != nil {
+		return err
+	}
+	if err := s.migrateMRAutomationAutomationColumns(); err != nil {
+		return err
+	}
+	// Must follow migrateMRAutomationAutomationColumns, which adds the
+	// mr_scope_migrated_at column this migration is guarded by.
+	if err := s.migrateTaskMROptionsToMRScope(); err != nil {
 		return err
 	}
 	if err := s.migrateConfigRevision(); err != nil {
@@ -219,10 +239,36 @@ func (s *Store) createTables() error {
 	if err := s.migrateWatchColumns(); err != nil {
 		return err
 	}
+	if err := s.migrateTaskMRAutomationFields(); err != nil {
+		return err
+	}
+	if err := s.migrateTaskMRSHAColumns(); err != nil {
+		return err
+	}
 	if err := s.migrateMRWatchUniqueKey(); err != nil {
 		return err
 	}
-	return s.ensureMRWatchIndexes()
+	if err := s.ensureMRWatchIndexes(); err != nil {
+		return err
+	}
+	return s.healTaskOwnedOrphans()
+}
+
+// migrateTaskMRAutomationFields adds the reviewer/merge-readiness columns
+// (detailed_merge_status, reviewer_count, unapproved_reviewers,
+// unresolved_discussions) that back the "awaiting review" summary label
+// and the auto-merge readiness gate. Idempotent: gitlab_task_mrs already
+// exists in every dev/CI database created since #2125 merged, so these
+// columns are added via ALTER TABLE rather than only listed in the CREATE
+// TABLE above (which is a no-op on an existing table).
+func (s *Store) migrateTaskMRAutomationFields() error {
+	columns := []struct{ name, ddl string }{
+		{"detailed_merge_status", sqlTextDefaultEmpty},
+		{"reviewer_count", sqlIntegerDefaultZero},
+		{"unapproved_reviewers", sqlIntegerDefaultZero},
+		{"unresolved_discussions", sqlIntegerDefaultZero},
+	}
+	return addMissingColumns(s, "gitlab_task_mrs", columns)
 }
 
 // ensureMRWatchIndexes re-creates gitlab_mr_watches' indexes after
@@ -247,10 +293,12 @@ func (s *Store) ensureMRWatchIndexes() error {
 // per branch on the same repository (multi-branch tasks) instead of
 // colliding on the second branch's insert. SQLite can't ALTER TABLE DROP
 // CONSTRAINT, so this uses the same copy-and-rename rebuild as
-// github.Store.migratePRTablesForMultiRepo. Idempotent: only runs when the
-// legacy constraint string is found in sqlite_master, so fresh DBs and
-// already-migrated DBs are no-ops.
+// github.Store.migratePRTablesForMultiRepo. Both paths are idempotent: SQLite
+// checks the stored table DDL, while PostgreSQL checks its unique constraints.
 func (s *Store) migrateMRWatchUniqueKey() error {
+	if dialect.IsPostgres(s.db.DriverName()) {
+		return s.migratePostgresMRWatchUniqueKey()
+	}
 	return s.rebuildIfHasLegacyConstraint(
 		"gitlab_mr_watches",
 		"UNIQUE(session_id, repository_id)\n",
@@ -280,6 +328,106 @@ func (s *Store) migrateMRWatchUniqueKey() error {
 			created_at, updated_at
 		FROM gitlab_mr_watches`,
 	)
+}
+
+// migratePostgresMRWatchUniqueKey replaces the legacy two-column unique
+// constraint with the branch-aware key. PostgreSQL can alter the constraint
+// directly, so it does not need the SQLite table rebuild used above.
+func (s *Store) migratePostgresMRWatchUniqueKey() error {
+	tx, err := s.db.BeginTxx(context.Background(), nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	legacyConstraint, err := postgresMRWatchUniqueConstraint(tx, "session_id", "repository_id")
+	if err != nil {
+		return err
+	}
+	if legacyConstraint == "" {
+		return tx.Commit()
+	}
+
+	if _, err := tx.Exec(
+		`ALTER TABLE gitlab_mr_watches DROP CONSTRAINT ` + quotePostgresIdentifier(legacyConstraint),
+	); err != nil {
+		return fmt.Errorf("drop legacy gitlab MR watch constraint: %w", err)
+	}
+
+	branchConstraint, err := postgresMRWatchUniqueConstraint(tx, "session_id", "repository_id", "branch")
+	if err != nil {
+		return err
+	}
+	if branchConstraint == "" {
+		if _, err := tx.Exec(`
+			ALTER TABLE gitlab_mr_watches
+			ADD CONSTRAINT gitlab_mr_watches_session_repository_branch_key
+			UNIQUE (session_id, repository_id, branch)`); err != nil {
+			return fmt.Errorf("add branch-aware gitlab MR watch constraint: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// postgresMRWatchUniqueConstraint returns the name of an exact-column unique
+// constraint on gitlab_mr_watches. The catalog query handles PostgreSQL's
+// generated names, which vary with the table's creation history.
+func postgresMRWatchUniqueConstraint(tx *sqlx.Tx, columns ...string) (string, error) {
+	rows, err := tx.Query(`
+		SELECT tc.constraint_name, kcu.column_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+			ON kcu.constraint_schema = tc.constraint_schema
+			AND kcu.constraint_name = tc.constraint_name
+			AND kcu.table_schema = tc.table_schema
+			AND kcu.table_name = tc.table_name
+		WHERE tc.table_schema = current_schema()
+			AND tc.table_name = 'gitlab_mr_watches'
+			AND tc.constraint_type = 'UNIQUE'
+		ORDER BY tc.constraint_name, kcu.ordinal_position`)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+
+	constraintColumns := make(map[string][]string)
+	for rows.Next() {
+		var constraintName, columnName string
+		if err := rows.Scan(&constraintName, &columnName); err != nil {
+			return "", err
+		}
+		constraintColumns[constraintName] = append(constraintColumns[constraintName], columnName)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	for constraintName, constraintColumns := range constraintColumns {
+		if sameColumnSet(constraintColumns, columns) {
+			return constraintName, nil
+		}
+	}
+	return "", nil
+}
+
+func sameColumnSet(actual, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(expected))
+	for _, column := range expected {
+		seen[column] = struct{}{}
+	}
+	for _, column := range actual {
+		if _, ok := seen[column]; !ok {
+			return false
+		}
+		delete(seen, column)
+	}
+	return len(seen) == 0
+}
+
+func quotePostgresIdentifier(identifier string) string {
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
 }
 
 // rebuildIfHasLegacyConstraint checks the table's stored CREATE statement in
@@ -332,18 +480,35 @@ func (s *Store) migrateConfigRevision() error {
 	return nil
 }
 
+func (s *Store) migrateTaskMRSHAColumns() error {
+	columns, err := s.tableColumns("gitlab_task_mrs")
+	if err != nil {
+		return err
+	}
+	for _, column := range []string{"head_sha", "base_sha"} {
+		if _, ok := columns[column]; ok {
+			continue
+		}
+		statement := fmt.Sprintf("ALTER TABLE gitlab_task_mrs ADD COLUMN %s TEXT NOT NULL DEFAULT ''", column)
+		if _, err := s.db.Exec(gitlabSchemaSQLForDriver(statement, s.db.DriverName())); err != nil {
+			return fmt.Errorf("migrate gitlab_task_mrs.%s: %w", column, err)
+		}
+	}
+	return nil
+}
+
 func (s *Store) migrateWatchColumns() error {
 	columns := []struct {
 		name string
 		ddl  string
 	}{
-		{"repository_id", "TEXT NOT NULL DEFAULT ''"},
-		{"base_branch", "TEXT NOT NULL DEFAULT ''"},
+		{"repository_id", sqlTextDefaultEmpty},
+		{"base_branch", sqlTextDefaultEmpty},
 		{"max_inflight_tasks", "INTEGER"},
-		{"last_error", "TEXT NOT NULL DEFAULT ''"},
-		{"last_error_at", "DATETIME"},
+		{"last_error", sqlTextDefaultEmpty},
+		{"last_error_at", sqlDateTime},
 		{"generation", "INTEGER NOT NULL DEFAULT 1"},
-		{"deleting", "BOOLEAN NOT NULL DEFAULT 0"},
+		{"deleting", sqlBooleanDefaultFalse},
 	}
 	for _, table := range []string{"gitlab_review_watches", "gitlab_issue_watches"} {
 		existing, err := s.tableColumns(table)
@@ -354,7 +519,8 @@ func (s *Store) migrateWatchColumns() error {
 			if _, ok := existing[column.name]; ok {
 				continue
 			}
-			if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column.name, column.ddl)); err != nil {
+			statement := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column.name, column.ddl)
+			if _, err := s.db.Exec(gitlabSchemaSQLForDriver(statement, s.db.DriverName())); err != nil {
 				return fmt.Errorf("migrate %s.%s: %w", table, column.name, err)
 			}
 		}
@@ -365,7 +531,8 @@ func (s *Store) migrateWatchColumns() error {
 			return err
 		}
 		if _, ok := existing["generation"]; !ok {
-			if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN generation INTEGER NOT NULL DEFAULT 1", table)); err != nil {
+			statement := fmt.Sprintf("ALTER TABLE %s ADD COLUMN generation INTEGER NOT NULL DEFAULT 1", table)
+			if _, err := s.db.Exec(gitlabSchemaSQLForDriver(statement, s.db.DriverName())); err != nil {
 				return fmt.Errorf("migrate %s.generation: %w", table, err)
 			}
 		}
@@ -374,22 +541,19 @@ func (s *Store) migrateWatchColumns() error {
 }
 
 func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
-	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	columns, err := dbutil.TableColumns(s.db, table)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	columns := make(map[string]struct{})
-	for rows.Next() {
-		var cid, notNull, primaryKey int
-		var name, columnType string
-		var defaultValue sql.NullString
-		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return nil, err
-		}
-		columns[name] = struct{}{}
+	result := make(map[string]struct{}, len(columns))
+	for name := range columns {
+		result[name] = struct{}{}
 	}
-	return columns, rows.Err()
+	return result, nil
+}
+
+func gitlabSchemaSQLForDriver(schema, driver string) string {
+	return dialect.MustRenderSchema(driver, schema)
 }
 
 // UpsertMentionScope explicitly binds one workspace to a GitLab host and
@@ -403,13 +567,13 @@ func (s *Store) UpsertMentionScope(ctx context.Context, scope *MentionScope) err
 		return fmt.Errorf("marshal gitlab mention projects: %w", err)
 	}
 	now := time.Now().UTC()
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO gitlab_mention_scopes (workspace_id, host, projects_json, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			host = excluded.host,
 			projects_json = excluded.projects_json,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		scope.WorkspaceID, scope.Host, string(projects), now, now)
 	return err
 }
@@ -422,10 +586,10 @@ func (s *Store) GetMentionScope(ctx context.Context, workspaceID string) (*Menti
 		Host        string `db:"host"`
 		Projects    string `db:"projects_json"`
 	}
-	err := s.ro.GetContext(ctx, &row, `
+	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`
 		SELECT workspace_id, host, projects_json
 		FROM gitlab_mention_scopes
-		WHERE workspace_id = ?`, workspaceID)
+		WHERE workspace_id = ?`), workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -443,9 +607,10 @@ func (s *Store) GetMentionScope(ctx context.Context, workspaceID string) (*Menti
 // still have dropped columns (older revisions defined `unresolved_threads`
 // and `discussion_count` here) don't break sqlx struct binding.
 const taskMRSelectCols = `id, task_id, repository_id, host, project_path, mr_iid,
-	mr_url, mr_title, head_branch, base_branch, author_username, state,
+	mr_url, mr_title, head_branch, head_sha, base_branch, base_sha, author_username, state,
 	approval_state, pipeline_state, merge_status, draft, approval_count,
 	required_approvals, pipeline_jobs_total, pipeline_jobs_pass,
+	detailed_merge_status, reviewer_count, unapproved_reviewers, unresolved_discussions,
 	created_at, merged_at, closed_at, last_synced_at, updated_at`
 
 // taskMRSelectColsQualified is the same projection prefixed with `gtm.`,
@@ -453,10 +618,12 @@ const taskMRSelectCols = `id, task_id, repository_id, host, project_path, mr_iid
 // updated_at).
 const taskMRSelectColsQualified = `gtm.id, gtm.task_id, gtm.repository_id,
 	gtm.host, gtm.project_path, gtm.mr_iid, gtm.mr_url, gtm.mr_title,
-	gtm.head_branch, gtm.base_branch, gtm.author_username, gtm.state,
+	gtm.head_branch, gtm.head_sha, gtm.base_branch, gtm.base_sha, gtm.author_username, gtm.state,
 	gtm.approval_state, gtm.pipeline_state, gtm.merge_status, gtm.draft,
 	gtm.approval_count, gtm.required_approvals, gtm.pipeline_jobs_total,
-	gtm.pipeline_jobs_pass, gtm.created_at, gtm.merged_at, gtm.closed_at,
+	gtm.pipeline_jobs_pass, gtm.detailed_merge_status, gtm.reviewer_count,
+	gtm.unapproved_reviewers, gtm.unresolved_discussions,
+	gtm.created_at, gtm.merged_at, gtm.closed_at,
 	gtm.last_synced_at, gtm.updated_at`
 
 // UpsertTaskMR creates or updates a task↔MR association keyed by
@@ -474,20 +641,22 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 	rows, err := s.db.NamedQueryContext(ctx, `
 		INSERT INTO gitlab_task_mrs (
 			id, task_id, repository_id, host, project_path, mr_iid, mr_url, mr_title,
-			head_branch, base_branch, author_username, state, approval_state, pipeline_state,
+			head_branch, head_sha, base_branch, base_sha, author_username, state, approval_state, pipeline_state,
 			merge_status, draft, approval_count, required_approvals,
 			pipeline_jobs_total, pipeline_jobs_pass,
+			detailed_merge_status, reviewer_count, unapproved_reviewers, unresolved_discussions,
 			created_at, merged_at, closed_at, last_synced_at, updated_at
 		) VALUES (
 			:id, :task_id, :repository_id, :host, :project_path, :mr_iid, :mr_url, :mr_title,
-			:head_branch, :base_branch, :author_username, :state, :approval_state, :pipeline_state,
-			:merge_status, :draft, :approval_count, :required_approvals,
+			:head_branch, :head_sha, :base_branch, :base_sha, :author_username, :state, :approval_state, :pipeline_state,
+			:merge_status, CASE WHEN :draft THEN 1 ELSE 0 END, :approval_count, :required_approvals,
 			:pipeline_jobs_total, :pipeline_jobs_pass,
+			:detailed_merge_status, :reviewer_count, :unapproved_reviewers, :unresolved_discussions,
 			:created_at, :merged_at, :closed_at, :last_synced_at, :updated_at
 		)
 		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
 			host = excluded.host, mr_url = excluded.mr_url, mr_title = excluded.mr_title,
-			head_branch = excluded.head_branch, base_branch = excluded.base_branch,
+			head_branch = excluded.head_branch, head_sha = excluded.head_sha, base_branch = excluded.base_branch, base_sha = excluded.base_sha,
 			author_username = excluded.author_username, state = excluded.state,
 			approval_state = excluded.approval_state, pipeline_state = excluded.pipeline_state,
 			merge_status = excluded.merge_status, draft = excluded.draft,
@@ -495,6 +664,15 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 			required_approvals = excluded.required_approvals,
 			pipeline_jobs_total = excluded.pipeline_jobs_total,
 			pipeline_jobs_pass = excluded.pipeline_jobs_pass,
+			detailed_merge_status = excluded.detailed_merge_status,
+			reviewer_count = excluded.reviewer_count,
+			unapproved_reviewers = excluded.unapproved_reviewers,
+			-- unresolved_discussions is deliberately NOT updated here. It is
+			-- only ever 0 on the incoming row (GetMRStatus never fetches
+			-- discussions — see MRStatus's type doc), so overwriting it on
+			-- every lifecycle sync would clobber the value the auto-fix
+			-- evaluation pass sets via UpdateTaskMRUnresolvedDiscussions for
+			-- automation-subscribed MRs.
 			merged_at = excluded.merged_at, closed_at = excluded.closed_at,
 			last_synced_at = excluded.last_synced_at, updated_at = excluded.updated_at
 		RETURNING id, created_at, updated_at`, tm)
@@ -511,16 +689,43 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 	return rows.Scan(&tm.ID, &tm.CreatedAt, &tm.UpdatedAt)
 }
 
+// UpdateTaskMRUnresolvedDiscussions sets the unresolved-discussion count for
+// a single task-MR row. Deliberately narrow (single column, by primary key)
+// rather than folded into UpsertTaskMR's ON CONFLICT clause — see the
+// comment there for why the general lifecycle sync must never touch this
+// column.
+func (s *Store) UpdateTaskMRUnresolvedDiscussions(ctx context.Context, id string, count int) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE gitlab_task_mrs SET unresolved_discussions = ?, updated_at = ? WHERE id = ?`),
+		count, time.Now().UTC(), id)
+	return err
+}
+
 // GetTaskMR returns one task-MR association keyed by
 // (task_id, repository_id, project_path, mr_iid), or nil when none exists.
 // Used to compare against an incoming refresh before deciding whether it
 // actually changed anything worth publishing.
 func (s *Store) GetTaskMR(ctx context.Context, taskID, repositoryID, projectPath string, iid int) (*TaskMR, error) {
 	var tm TaskMR
-	err := s.ro.GetContext(ctx, &tm, `
+	err := s.ro.GetContext(ctx, &tm, s.ro.Rebind(`
 		SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
 		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?
-		LIMIT 1`, taskID, repositoryID, projectPath, iid)
+		LIMIT 1`), taskID, repositoryID, projectPath, iid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &tm, nil
+}
+
+// GetTaskMRByID returns one association by its stable primary key. It is used
+// by source-aware detach cleanup before the row is removed.
+func (s *Store) GetTaskMRByID(ctx context.Context, id string) (*TaskMR, error) {
+	var tm TaskMR
+	err := s.ro.GetContext(ctx, &tm, s.ro.Rebind(
+		`SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs WHERE id = ? LIMIT 1`), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -533,9 +738,9 @@ func (s *Store) GetTaskMR(ctx context.Context, taskID, repositoryID, projectPath
 // ListTaskMRsByTask returns every MR association for a task, oldest first.
 func (s *Store) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*TaskMR, error) {
 	var mrs []TaskMR
-	if err := s.ro.SelectContext(ctx, &mrs,
+	if err := s.ro.SelectContext(ctx, &mrs, s.ro.Rebind(
 		`SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
-		 WHERE task_id = ? ORDER BY created_at ASC`, taskID); err != nil {
+		 WHERE task_id = ? ORDER BY created_at ASC`), taskID); err != nil {
 		return nil, err
 	}
 	out := make([]*TaskMR, 0, len(mrs))
@@ -545,16 +750,22 @@ func (s *Store) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*TaskMR
 	return out, nil
 }
 
-// ListTaskMRsByWorkspaceID returns every MR association for tasks inside the
-// given workspace, grouped by task_id. Empty map when the workspace has no
-// GitLab MRs.
-func (s *Store) ListTaskMRsByWorkspaceID(ctx context.Context, workspaceID string) (map[string][]*TaskMR, error) {
+// ListTaskMRsByTaskIDs returns every MR association for the supplied tasks,
+// grouped by task_id and ordered by created_at within each task.
+func (s *Store) ListTaskMRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*TaskMR, error) {
+	if len(taskIDs) == 0 {
+		return map[string][]*TaskMR{}, nil
+	}
+	query, args, err := sqlx.In(
+		`SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
+		 WHERE task_id IN (?) ORDER BY created_at ASC`, taskIDs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	query = s.ro.Rebind(query)
 	var mrs []TaskMR
-	if err := s.ro.SelectContext(ctx, &mrs,
-		`SELECT `+taskMRSelectColsQualified+` FROM gitlab_task_mrs gtm
-		 INNER JOIN tasks t ON gtm.task_id = t.id
-		 WHERE t.workspace_id = ?
-		 ORDER BY gtm.created_at ASC`, workspaceID); err != nil {
+	if err := s.ro.SelectContext(ctx, &mrs, query, args...); err != nil {
 		return nil, err
 	}
 	out := make(map[string][]*TaskMR)
@@ -564,8 +775,69 @@ func (s *Store) ListTaskMRsByWorkspaceID(ctx context.Context, workspaceID string
 	return out, nil
 }
 
-// DeleteTaskMR removes a single task↔MR row.
+// ListTaskMRsByWorkspaceID returns every MR association for tasks inside the
+// given workspace, grouped by task_id. Empty map when the workspace has no
+// GitLab MRs.
+func (s *Store) ListTaskMRsByWorkspaceID(ctx context.Context, workspaceID string) (map[string][]*TaskMR, error) {
+	var mrs []TaskMR
+	if err := s.ro.SelectContext(ctx, &mrs, s.ro.Rebind(
+		`SELECT `+taskMRSelectColsQualified+` FROM gitlab_task_mrs gtm
+		 INNER JOIN tasks t ON gtm.task_id = t.id
+		 WHERE t.workspace_id = ?
+		 ORDER BY gtm.created_at ASC`), workspaceID); err != nil {
+		return nil, err
+	}
+	out := make(map[string][]*TaskMR)
+	for i := range mrs {
+		out[mrs[i].TaskID] = append(out[mrs[i].TaskID], &mrs[i])
+	}
+	return out, nil
+}
+
+// DeleteTaskMR removes a single task↔MR row, cascading to that MR's
+// lifecycle checkpoint (gitlab_task_mr_state) and its per-MR automation
+// switches (gitlab_task_mr_automation_options). Without this, re-linking the
+// same MR later would inherit the old checkpoint and could suppress its next
+// lifecycle prompt, or silently re-arm a switch — including auto-merge — that
+// no surface displays but the evaluator still reads. gitlab_task_mrs has no FK
+// relationship to either table (both are keyed by (task_id, repository_id,
+// project_path, mr_iid), not by gitlab_task_mrs.id) for the database to
+// cascade this automatically. Keep in step with
+// DeleteTaskMRForWorkspace, which performs the same three-table cleanup.
 func (s *Store) DeleteTaskMR(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM gitlab_task_mrs WHERE id = ?`, id)
-	return err
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var mr struct {
+		TaskID       string `db:"task_id"`
+		RepositoryID string `db:"repository_id"`
+		ProjectPath  string `db:"project_path"`
+		MRIID        int    `db:"mr_iid"`
+	}
+	err = tx.GetContext(ctx, &mr, tx.Rebind(
+		`SELECT task_id, repository_id, project_path, mr_iid FROM gitlab_task_mrs WHERE id = ?`), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM gitlab_task_mr_state WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+	), mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM gitlab_task_mr_automation_options
+		 WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+	), mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM gitlab_task_mrs WHERE id = ?`), id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

@@ -100,15 +100,30 @@ describe("useResponsiveBreakpoint", () => {
     expect(result.current.usesDesktopWorkbench).toBe(false);
   });
 
-  it("updates workbench mode when crossing compact desktop boundary", () => {
-    setViewport(640, "fine");
+  it("uses mobile composition until the desktop sidebar becomes available", () => {
+    setViewport(767, "fine");
     const { result } = renderHook(() => useResponsiveBreakpoint());
 
+    expect(result.current.breakpoint).toBe("mobile");
     expect(result.current.usesDesktopWorkbench).toBe(false);
 
     notifyResize(768, "fine");
 
     expect(result.current.breakpoint).toBe("compactDesktop");
     expect(result.current.usesDesktopWorkbench).toBe(true);
+  });
+
+  it("updates pointer mode while the subscription remains mounted", () => {
+    const { result } = renderHook(() => useResponsiveBreakpoint());
+
+    expect(result.current.isFinePointer).toBe(true);
+
+    notifyResize(1024, "coarse");
+
+    expect(result.current.isFinePointer).toBe(false);
+    expect(result.current.breakpoint).toBe("desktop");
+
+    notifyResize(1024, "fine");
+    expect(result.current.isFinePointer).toBe(true);
   });
 });

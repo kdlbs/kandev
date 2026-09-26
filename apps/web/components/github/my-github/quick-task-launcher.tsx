@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useRouter } from "@/lib/routing/client-router";
+import { linkToTask } from "@/lib/links";
 import type { Icon } from "@tabler/icons-react";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { useAppStore } from "@/components/state-provider";
@@ -206,7 +207,7 @@ export function QuickTaskLauncher({
   const handleOpenChange = (open: boolean) => {
     if (!open) onClose();
   };
-  const handleSuccess = (task: Task) => {
+  const handleSuccess = (task: Task, _mode?: "create" | "edit", meta?: { autoFocus?: boolean }) => {
     if (payload?.kind === "pr" && workspaceId) {
       const repositoryId = pickRepositoryIdForPR(
         task.repositories,
@@ -236,7 +237,7 @@ export function QuickTaskLauncher({
         });
     }
     onClose();
-    router.push(`/tasks/${task.id}`);
+    if (meta?.autoFocus !== false) router.push(linkToTask(task.id));
   };
 
   if (!workspaceId || !defaultWorkflow || !defaultStep || !dialog) return null;

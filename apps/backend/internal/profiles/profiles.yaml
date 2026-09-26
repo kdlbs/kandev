@@ -37,18 +37,19 @@
 # go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
 # maps them to `features.<name>` Viper keys automatically.
 features:
+  # Retains supported language-server leases across browser disconnects. The
+  # bounded task-host lifecycle is enabled by default; this restart-required
+  # flag remains the operator kill switch.
+  KANDEV_FEATURES_LSP_BROWSER_CONTINUITY:
+    prod: "true"
+    dev:  "true"
+    e2e:  "true"
+
   # Office (autonomous agent surface). Off in prod until the feature
   # is user-ready; on in dev/e2e so contributors and tests exercise it.
   KANDEV_FEATURES_OFFICE:
     prod: "false"
     dev:  "true"
-    e2e:  "true"
-
-  # App status bar. Off until a user opts in; on only in e2e so browser tests
-  # continuously exercise the global surface without changing user defaults.
-  KANDEV_FEATURES_APP_STATUS_BAR:
-    prod: "false"
-    dev:  "false"
     e2e:  "true"
 
   # Opt-in authentication + per-user workspaces. This flag IS the on/off
@@ -61,9 +62,58 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Agent-authored plugin web applications. Off in every shipped profile until
+  # the isolated runtime and lifecycle are ready for opt-in use.
+  KANDEV_FEATURES_CANVASES:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # Organizations: a tenant boundary above users. Requires KANDEV_FEATURES_AUTH;
+  # the backend refuses to start with this on and auth off. Off everywhere until
+  # the runtime-isolation work (per-org filesystem roots, per-org agent
+  # credentials, tenant-pinned executors) lands.
+  KANDEV_FEATURES_MULTI_TENANCY:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # Dynamic agent profiles and provider-error routing. Off in every shipped
+  # profile until the complete guarded implementation is ready.
+  KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # High-risk Claude-only background prompt handoff experiment. Off in every
   # profile so it is exercised only by contributors who deliberately opt in.
   KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # High-risk mid-turn steering experiment: deliver a prompt into a turn that is
+  # still generating. Off in every profile; e2e specs that need it set the env
+  # var per-spec so the default stays honest.
+  KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # Needs-you Inbox: a workspace-scoped sidebar destination listing exactly
+  # the answerable clarification bundles for the active workspace. Off in
+  # prod until the feature is user-ready; on in dev/e2e so contributors and
+  # tests exercise it.
+  KANDEV_FEATURES_NEEDS_YOU_INBOX:
+    prod: "false"
+    dev:  "true"
+    e2e:  "true"
+
+  # Agent survival across a backend restart (worktree/local executors only).
+  # Off in every profile: it replaces the standalone control server's
+  # kill-on-restart safeguard with an adoption handshake, and is unavailable
+  # on Windows. E2E specs that need it set the env var per-spec.
+  KANDEV_FEATURES_AGENT_SURVIVAL:
     prod: "false"
     dev:  "false"
     e2e:  "false"
@@ -126,8 +176,8 @@ debug:
     dev:  "true"
     e2e:  ""
 
-  # Legacy alias for KANDEV_DEBUG_DEV_MODE — kept for compatibility
-  # with older deploy scripts that grep for "pprof".
+  # Legacy debug behavior variable — kept for compatibility with older
+  # deploy scripts that enable pprof. It does not select the dev profile.
   KANDEV_DEBUG_PPROF_ENABLED:
     prod: ""
     dev:  "true"
@@ -150,11 +200,31 @@ debug:
     dev:  "true"
     e2e:  ""
 
+# ── Browser identity ─────────────────────────────────────────────
+# Distinguish the local development tab from release and preview tabs without
+# changing the title of production or e2e environments.
+ui:
+  KANDEV_WEB_TITLE_PREFIX:
+    prod: ""
+    dev:  "Dev"
+    e2e:  ""
+
 # ── E2E test tuning ───────────────────────────────────────────────
 # Behaviour knobs that only matter when running playwright. These
 # don't belong in dev (would mask real interactions) and never in
 # prod (would leak test-only behaviour).
 e2eTuning:
+  # Holds a mock ACP cancellation through navigation and hydration without
+  # changing production cancellation behavior.
+  KANDEV_E2E_CANCEL_HOLD_DURATION:
+    prod: ""
+    dev:  ""
+    e2e:  "8s"
+  KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT:
+    prod: ""
+    dev:  ""
+    e2e:  "3s"
+
   # Auto-approve every permission request in agentctl so e2e specs
   # don't have to script the approval UI. Read by the agentctl child
   # process; the backend forwards its env to children, so setting it

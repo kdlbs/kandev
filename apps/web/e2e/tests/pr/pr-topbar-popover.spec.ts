@@ -3,6 +3,7 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Locator, Page } from "@playwright/test";
+import { dwell } from "../../helpers/causal-waits";
 
 const OWNER = "acme";
 const REPO = "demo";
@@ -10,17 +11,14 @@ const PR_NUMBER = 42;
 const PR_URL = `https://github.com/${OWNER}/${REPO}/pull/${PR_NUMBER}`;
 
 type SeedResult = {
-  workflowId: string;
-  inboxStepId: string;
-  workingStepId: string;
   doneStepId: string;
   taskId: string;
 };
 
 /**
- * Stand up a workspace + workflow + task that reaches the Done column
- * immediately (auto-start + on_turn_complete moves it). Returns the IDs the
- * spec needs to seed PR data + open the task.
+ * Stand up a workspace + workflow + completed task. These tests exercise the
+ * PR popover, so seed the session directly instead of launching an agent and
+ * making unrelated executor timing part of the fixture.
  */
 async function seedTask(
   apiClient: ApiClient,
@@ -30,17 +28,8 @@ async function seedTask(
   title: string,
 ): Promise<SeedResult> {
   const workflow = await apiClient.createWorkflow(workspaceId, `${title} Workflow`);
-  const inbox = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
-  const working = await apiClient.createWorkflowStep(workflow.id, "Working", 1);
-  const done = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
-
-  await apiClient.updateWorkflowStep(working.id, {
-    prompt: 'e2e:message("done")\n{{task_prompt}}',
-    events: {
-      on_enter: [{ type: "auto_start_agent" }],
-      on_turn_complete: [{ type: "move_to_step", config: { step_id: done.id } }],
-    },
-  });
+  await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+  const done = await apiClient.createWorkflowStep(workflow.id, "Done", 1);
 
   await apiClient.saveUserSettings({
     workspace_id: workspaceId,
@@ -53,15 +42,20 @@ async function seedTask(
 
   const task = await apiClient.createTask(workspaceId, title, {
     workflow_id: workflow.id,
-    workflow_step_id: inbox.id,
+    workflow_step_id: done.id,
     agent_profile_id: agentProfileId,
     repository_ids: [repositoryId],
   });
+  const now = new Date().toISOString();
+  await apiClient.seedTaskSession(task.id, {
+    state: "COMPLETED",
+    agentProfileId,
+    repositoryId,
+    startedAt: now,
+    completedAt: now,
+  });
 
   return {
-    workflowId: workflow.id,
-    inboxStepId: inbox.id,
-    workingStepId: working.id,
     doneStepId: done.id,
     taskId: task.id,
   };
@@ -124,14 +118,12 @@ async function expectScrollablePopoverWithinViewport(testPage: Page, locator: Lo
 
 async function openTaskAndWait(
   testPage: import("@playwright/test").Page,
-  apiClient: ApiClient,
   seed: SeedResult,
   title: string,
 ): Promise<SessionPage> {
   const kanban = new KanbanPage(testPage);
   await kanban.goto();
-  await apiClient.moveTask(seed.taskId, seed.workflowId, seed.workingStepId);
-  await expect(kanban.taskCardInColumn(title, seed.doneStepId)).toBeVisible({ timeout: 45_000 });
+  await expect(kanban.taskCardInColumn(title, seed.doneStepId)).toBeVisible({ timeout: 15_000 });
   await kanban.taskCardInColumn(title, seed.doneStepId).click();
   await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
   const session = new SessionPage(testPage);
@@ -141,6 +133,46 @@ async function openTaskAndWait(
 }
 
 test.describe("PR top-bar CI popover", () => {
+  test("single badge shows a conflict bubble beside the left status glyph and keeps its details", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Conflicting failing PR badge";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associatePR(apiClient, seed.taskId, {
+      checks_state: "failure",
+      mergeable_state: "blocked",
+      has_merge_conflicts: true,
+      checks_total: 2,
+      checks_passing: 1,
+      review_state: "changes_requested",
+    });
+    await expect
+      .poll(async () => (await apiClient.getTaskPR(seed.taskId))?.has_merge_conflicts)
+      .toBe(true);
+    const session = await openTaskAndWait(testPage, seed, title);
+    const badge = session.prTopbarButton();
+    await expect(badge).toHaveText("#42");
+    await expect(badge).toHaveAttribute(
+      "aria-label",
+      /Checks failed.*Changes requested.*Conflicts/,
+    );
+    await expect(badge.getByTestId("pr-merge-conflict-warning")).toBeVisible();
+    await expect(badge.locator("svg")).toHaveCount(2);
+    await badge.focus();
+    await expect(testPage.getByTestId("pr-topbar-popover")).toBeVisible();
+    await badge.click();
+    await expect(session.prDetailPanel()).toBeVisible();
+  });
+
   test("counts row uses TaskPR aggregates and hides zero-count buckets", async ({
     testPage,
     apiClient,
@@ -163,7 +195,7 @@ test.describe("PR top-bar CI popover", () => {
       review_count: 1,
       pending_review_count: 0,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
 
     await expect(session.prCheckGroupCount("passed")).toHaveText("22");
@@ -191,7 +223,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 22,
       checks_passing: 22,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
 
     await expect(session.prCheckGroup("passed")).toBeVisible();
@@ -234,7 +266,7 @@ test.describe("PR top-bar CI popover", () => {
         { name: "E2E / e", status: "completed", conclusion: "success", html_url: "" },
       ],
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
 
     await expect(session.prWorkflowRow("Lint")).toBeVisible({ timeout: 10_000 });
@@ -268,7 +300,7 @@ test.describe("PR top-bar CI popover", () => {
       pr_number: PR_NUMBER,
       checks: manyRunningChecks(30),
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
 
     await expect(session.prStatusChip()).toBeVisible();
     await session.hoverPRTopbar();
@@ -299,7 +331,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 1,
       checks_passing: 1,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
 
     await expect(session.prReviewRow()).toBeVisible();
@@ -331,7 +363,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 1,
       checks_passing: 1,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
 
     await expect(session.prReviewRow()).toBeVisible();
@@ -357,9 +389,12 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 1,
       checks_passing: 1,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
 
     await session.hoverPRTopbar();
+    // The hover helper focuses the trigger to make the synthetic hover
+    // reliable. Blur it here so this assertion exercises pointer-only close.
+    await session.prTopbarButton().blur();
     // Move the cursor far away from the popover; close timer fires and the
     // popover unmounts.
     await testPage.mouse.move(0, 0);
@@ -399,7 +434,7 @@ test.describe("PR top-bar CI popover", () => {
         },
       ],
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
 
     // Wait for the async CI content so the popover is at its final size/position
@@ -417,7 +452,12 @@ test.describe("PR top-bar CI popover", () => {
 
     // Past the 150ms close delay the popover must still be open and its buttons
     // clickable.
-    await testPage.waitForTimeout(600);
+    await dwell(
+      testPage,
+      600,
+      "product-timer",
+      "outlasts our own 150ms hover-intent close delay; the assertion is that the popover is still there afterwards, and a close that must not happen publishes nothing to wait on",
+    );
     await expect(popover).toBeVisible();
     await expect(openButton).toBeVisible();
     await expect(session.prWorkflowAddContextButton("Lint")).toBeEnabled();
@@ -456,7 +496,7 @@ test.describe("PR top-bar CI popover", () => {
         },
       ],
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await expect(session.prStatusChip()).toBeVisible();
     await session.hoverPRChip();
 
@@ -473,7 +513,12 @@ test.describe("PR top-bar CI popover", () => {
 
     // Past the 150ms close delay the popover must still be open and interactive,
     // not merely mounted — parity with the topbar test.
-    await testPage.waitForTimeout(600);
+    await dwell(
+      testPage,
+      600,
+      "product-timer",
+      "outlasts our own 150ms hover-intent close delay; the assertion is that the popover survives the gap crossing, and a close that must not happen publishes nothing to wait on",
+    );
     await expect(popover).toBeVisible();
     await expect(openButton).toBeVisible();
     await expect(popover.getByTestId("pr-workflow-add-context").first()).toBeEnabled();
@@ -512,7 +557,7 @@ test.describe("PR top-bar CI popover", () => {
         },
       ],
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
     // Move into the popover so it stays open while we read the row.
     await session.prTopbarPopover().hover();
@@ -537,7 +582,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 1,
       checks_passing: 1,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
     await expect(session.prPopoverPRLink()).toHaveAttribute("href", PR_URL);
     await expect(session.prTopbarPopover().getByLabel("View all checks on GitHub")).toHaveCount(0);
@@ -558,7 +603,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 0,
       checks_passing: 0,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
     await expect(session.prChecksEmpty()).toBeVisible();
     await expect(session.prChecksEmpty()).toContainText("No checks have started");
@@ -580,7 +625,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 2,
       checks_passing: 1,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
     await expect(session.prPopoverReconnectLink()).toBeVisible();
     await expect(session.prPopoverReconnectLink()).toHaveAttribute("href", /settings/);
@@ -605,7 +650,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 27,
       checks_passing: 22,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
     await session.prTopbarPopover().hover();
     await expect(session.prCheckGroupCount("passed")).toHaveText("22");
@@ -617,5 +662,64 @@ test.describe("PR top-bar CI popover", () => {
       checks_passing: 25,
     });
     await expect(session.prCheckGroupCount("passed")).toHaveText("25", { timeout: 5_000 });
+  });
+
+  test("footer reports the refresh instead of claiming the data is fresh", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Refresh Indicator";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associatePR(apiClient, seed.taskId, {
+      checks_state: "success",
+      checks_total: 3,
+      checks_passing: 3,
+    });
+    // Feedback must actually resolve to something cacheable, or the footer has
+    // no timestamp to fall back to once the refresh settles.
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: [
+        { name: "CI / build", status: "completed", conclusion: "success", html_url: "" },
+        { name: "CI / lint", status: "completed", conclusion: "success", html_url: "" },
+        { name: "CI / test", status: "completed", conclusion: "success", html_url: "" },
+      ],
+    });
+
+    // Hold the PRFeedback fetch open so the indicator is observable. Asserting
+    // on a real refresh would race the response, which usually lands in well
+    // under a frame against the mock backend.
+    let releaseFeedback: () => void = () => {};
+    const feedbackHeld = new Promise<void>((resolve) => {
+      releaseFeedback = resolve;
+    });
+    await testPage.route(
+      (url) => /\/api\/v1\/github\/prs\/[^/]+\/[^/]+\/\d+$/.test(url.pathname),
+      async (route) => {
+        await feedbackHeld;
+        await route.continue();
+      },
+    );
+
+    const session = await openTaskAndWait(testPage, seed, title);
+    await session.hoverPRTopbar();
+    await session.prTopbarPopover().hover();
+
+    await expect(session.prPopoverUpdating()).toBeVisible({ timeout: 10_000 });
+    await expect(session.prPopoverUpdatedAt()).toHaveCount(0);
+
+    releaseFeedback();
+    await expect(session.prPopoverUpdatedAt()).toBeVisible({ timeout: 10_000 });
+    await expect(session.prPopoverUpdating()).toHaveCount(0);
   });
 });

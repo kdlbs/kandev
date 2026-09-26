@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-persistence-migration", "02-app-token-primitives", "03-workspace-credential-resolver"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 04: App Installation And Personal OAuth Lifecycle

@@ -67,7 +67,12 @@ func (h *TerminalHandler) remoteExecutionWithClientReady(
 	deadline time.Time,
 ) (*lifecycle.AgentExecution, bool) {
 	execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
-	if !exists || execution.GetAgentCtlClient() == nil {
+	if !exists {
+		return nil, false
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
 		return nil, false
 	}
 	remaining := time.Until(deadline)
@@ -81,7 +86,7 @@ func (h *TerminalHandler) remoteExecutionWithClientReady(
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	if err := execution.GetAgentCtlClient().Health(probeCtx); err != nil {
+	if err := client.Health(probeCtx); err != nil {
 		h.logger.Debug("remote execution agentctl client not ready",
 			zap.String("session_id", sessionID),
 			zap.String("execution_id", execution.ID),

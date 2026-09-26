@@ -3,6 +3,7 @@ package runtime_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,8 @@ type fakeBackend struct {
 	launchReq    *lifecycle.LaunchRequest
 	launchExec   *lifecycle.AgentExecution
 	launchErr    error
+	startCalls   []string
+	startErr     error
 	promptCalls  []promptCall
 	promptResult *lifecycle.PromptResult
 	promptErr    error
@@ -46,12 +49,39 @@ type mcpCall struct {
 	mode        string
 }
 
+type fakeOwnerAdmission struct {
+	calls int
+	err   error
+}
+
+func (f *fakeOwnerAdmission) AdmitExecution(context.Context, lifecycle.ExecutionOwner) error {
+	f.calls++
+	return f.err
+}
+
 func (f *fakeBackend) Launch(_ context.Context, req *lifecycle.LaunchRequest) (*lifecycle.AgentExecution, error) {
 	f.launchReq = req
 	if f.launchErr != nil {
 		return nil, f.launchErr
 	}
+	if f.launchExec != nil {
+		f.executions[f.launchExec.ID] = f.launchExec
+	}
 	return f.launchExec, nil
+}
+
+// StartAgentProcess is intentionally present in the test backend even before
+// Runtime.Start is wired. The failing contract test below proves the facade
+// does not expose the required start-and-prompt seam yet.
+func (f *fakeBackend) StartAgentProcess(_ context.Context, executionID string) error {
+	f.startCalls = append(f.startCalls, executionID)
+	if f.launchReq != nil && f.launchReq.TaskDescription != "" {
+		f.promptCalls = append(f.promptCalls, promptCall{
+			executionID: executionID,
+			prompt:      f.launchReq.TaskDescription,
+		})
+	}
+	return f.startErr
 }
 
 func (f *fakeBackend) PromptAgent(_ context.Context, executionID, prompt string, _ []v1.MessageAttachment, dispatchOnly bool) (*lifecycle.PromptResult, error) {
@@ -152,6 +182,91 @@ func TestRuntime_Launch_TranslatesSpecToLaunchRequest(t *testing.T) {
 	}
 	if got.Metadata["source"] != "engine" {
 		t.Errorf("Metadata[source] = %v", got.Metadata["source"])
+	}
+}
+
+func TestRuntime_StartDispatchesInitialPromptOnce(t *testing.T) {
+	t.Parallel()
+	backend := newFakeBackend()
+	backend.launchExec = &lifecycle.AgentExecution{ID: "exec-start", SessionID: "session-start"}
+	rt := agentruntime.New(backend)
+	starter, ok := rt.(interface {
+		Start(context.Context, agentruntime.LaunchSpec) (agentruntime.ExecutionRef, error)
+	})
+	if !ok {
+		t.Fatal("runtime does not expose Start")
+	}
+	if _, err := starter.Start(context.Background(), agentruntime.LaunchSpec{Prompt: "initial"}); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if len(backend.startCalls) != 1 || backend.startCalls[0] != "exec-start" {
+		t.Fatalf("start calls = %#v, want one call for exec-start", backend.startCalls)
+	}
+	if len(backend.promptCalls) != 1 || backend.promptCalls[0].prompt != "initial" {
+		t.Fatalf("prompt calls = %#v, want one initial prompt", backend.promptCalls)
+	}
+}
+
+func TestRuntime_StartRollsBackRegistrationFailure(t *testing.T) {
+	t.Parallel()
+	backend := newFakeBackend()
+	backend.launchExec = &lifecycle.AgentExecution{ID: "exec-rollback", SessionID: "session-rollback"}
+	backend.startErr = errors.New("startup failed")
+	rt := agentruntime.New(backend)
+	starter, ok := rt.(interface {
+		Start(context.Context, agentruntime.LaunchSpec) (agentruntime.ExecutionRef, error)
+	})
+	if !ok {
+		t.Fatal("runtime does not expose Start")
+	}
+	if _, err := starter.Start(context.Background(), agentruntime.LaunchSpec{}); err == nil {
+		t.Fatal("Start returned nil error after startup failure")
+	}
+	if len(backend.stopCalls) != 1 || backend.stopCalls[0].executionID != "exec-rollback" {
+		t.Fatalf("stop calls = %#v, want one rollback for exec-rollback", backend.stopCalls)
+	}
+}
+
+func TestRuntime_RunOwnerAdmissionRejectsStaleAttempt(t *testing.T) {
+	t.Parallel()
+	backend := newFakeBackend()
+	backend.launchExec = &lifecycle.AgentExecution{ID: "exec-owner"}
+	admission := &fakeOwnerAdmission{err: errors.New("run attempt is stale")}
+	rt := agentruntime.New(backend)
+	_, err := rt.Launch(context.Background(), agentruntime.LaunchSpec{
+		Owner: lifecycle.ExecutionOwner{
+			Kind:         lifecycle.ExecutionOwnerRun,
+			WorkspaceID:  "workspace-owner",
+			RunID:        "run-owner",
+			RunSessionID: "session-owner",
+			Attempt:      3,
+		},
+		OwnerAdmission: admission,
+	})
+	if err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("Launch error = %v, want stale-owner rejection", err)
+	}
+	if admission.calls != 1 {
+		t.Fatalf("admission calls = %d, want 1", admission.calls)
+	}
+	if backend.launchReq != nil {
+		t.Fatal("backend launch ran after owner admission rejected the attempt")
+	}
+}
+
+func TestRuntime_TaskOwnerDoesNotRequireRunAdmission(t *testing.T) {
+	t.Parallel()
+	backend := newFakeBackend()
+	backend.launchExec = &lifecycle.AgentExecution{ID: "exec-task-owner"}
+	rt := agentruntime.New(backend)
+	if _, err := rt.Launch(context.Background(), agentruntime.LaunchSpec{
+		Owner: lifecycle.ExecutionOwner{
+			Kind:      lifecycle.ExecutionOwnerTask,
+			TaskID:    "task-owner",
+			SessionID: "session-owner",
+		},
+	}); err != nil {
+		t.Fatalf("task-owned Launch returned error: %v", err)
 	}
 }
 
@@ -303,8 +418,8 @@ func TestRuntime_GetExecution_ReturnsSnapshot(t *testing.T) {
 		FinishedAt:     &finishedAt,
 		ExitCode:       &exit,
 		ACPSessionID:   "acp-1",
-		Metadata:       map[string]interface{}{"k": "v"},
 	}
+	backend.executions["exec-1"].SetMetadataForTesting(map[string]interface{}{"k": "v"})
 	rt := agentruntime.New(backend)
 	got, err := rt.GetExecution(context.Background(), "exec-1")
 	if err != nil {

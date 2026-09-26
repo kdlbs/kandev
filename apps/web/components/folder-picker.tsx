@@ -15,6 +15,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { listDirectory, type DirectoryListing } from "@/lib/api/domains/fs-api";
+import {
+  isTauriWebview,
+  nativeFolderPicker,
+  NativeFolderPickerUnavailableError,
+} from "@/lib/desktop/folder-picker";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 
 type FolderPickerProps = {
   /** Currently chosen absolute path; empty when nothing is picked. */
@@ -24,20 +31,82 @@ type FolderPickerProps = {
   placeholder?: string;
 };
 
+type NativeFolderPickerTriggerProps = {
+  triggerClass: string;
+  hasValue: boolean;
+  triggerLabel: string;
+  loading: boolean;
+  error: string | null;
+  onChoose: () => void;
+};
+
+function NativeFolderPickerTrigger({
+  triggerClass,
+  hasValue,
+  triggerLabel,
+  loading,
+  error,
+  onChoose,
+}: NativeFolderPickerTriggerProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex min-w-0 flex-col items-start gap-1">
+      <button
+        type="button"
+        data-testid="folder-picker-trigger"
+        className={triggerClass}
+        disabled={loading}
+        aria-busy={loading}
+        onClick={onChoose}
+      >
+        {hasValue ? (
+          <IconFolder className="h-3.5 w-3.5 flex-shrink-0" />
+        ) : (
+          <IconBox className="h-3.5 w-3.5 flex-shrink-0" />
+        )}
+        <span className="truncate max-w-[260px]">
+          {loading ? t("common:loading") : triggerLabel}
+        </span>
+      </button>
+      {error && (
+        <p
+          role="alert"
+          data-testid="folder-picker-native-error"
+          className="text-xs text-destructive"
+        >
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function nativePickerErrorMessage(error: unknown, t: TFunction): string {
+  if (error instanceof NativeFolderPickerUnavailableError) {
+    return t("common:nativeFolderPickerUnavailable");
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return t("common:nativeFolderPickerFailed");
+}
+
 /**
  * Folder picker for repo-less tasks. Drives GET /api/v1/fs/list-dir on the
  * local kandev backend (browsers can't enumerate the host filesystem). The
  * trigger lives in the chip row and the popover handles browse + commit.
  */
 export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const { listing, loading, error, load } = useDirectoryListing(open, value);
+  const [nativeLoading, setNativeLoading] = useState(false);
+  const [nativeError, setNativeError] = useState<string | null>(null);
+  const tauriWebview = isTauriWebview();
+  const { listing, loading, error, load } = useDirectoryListing(open && !tauriWebview, value);
   const leaf = leafName(value);
-  const triggerLabel = leaf || placeholder || "scratch workspace";
+  const triggerLabel = leaf || placeholder || t("common:scratchWorkspace");
   const hasValue = !!value;
 
   const triggerClass = cn(
-    "h-7 inline-flex items-center gap-1.5 rounded-md px-2.5 text-xs cursor-pointer",
+    "h-7 inline-flex items-center gap-1.5 rounded-md px-2.5 text-xs cursor-pointer [@media(pointer:coarse)]:h-11",
     "border border-border/60 transition-colors",
     hasValue
       ? "bg-primary/10 text-foreground hover:bg-primary/15"
@@ -54,6 +123,39 @@ export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps
       <span className="truncate max-w-[260px]">{triggerLabel}</span>
     </button>
   );
+
+  const chooseNativeFolder = async () => {
+    setNativeError(null);
+    if (!nativeFolderPicker.isAvailable()) {
+      setNativeError(t("common:nativeFolderPickerUnavailable"));
+      return;
+    }
+    setNativeLoading(true);
+    try {
+      const outcome = await nativeFolderPicker.pickDirectory();
+      if (outcome.status === "selected") onChange(outcome.path);
+      if (outcome.status === "failed") {
+        setNativeError(outcome.message || t("common:nativeFolderPickerFailed"));
+      }
+    } catch (error) {
+      setNativeError(nativePickerErrorMessage(error, t));
+    } finally {
+      setNativeLoading(false);
+    }
+  };
+
+  if (tauriWebview) {
+    return (
+      <NativeFolderPickerTrigger
+        triggerClass={triggerClass}
+        hasValue={hasValue}
+        triggerLabel={triggerLabel}
+        loading={nativeLoading}
+        error={nativeError}
+        onChoose={() => void chooseNativeFolder()}
+      />
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -106,27 +208,31 @@ function leafName(path: string): string {
 }
 
 export function useDirectoryListing(open: boolean, value: string) {
+  const { t } = useTranslation();
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestGeneration = useRef(0);
 
-  const load = useCallback(async (path: string) => {
-    const generation = ++requestGeneration.current;
-    setLoading(true);
-    setError(null);
-    setListing(null);
-    try {
-      const nextListing = await listDirectory(path);
-      if (generation !== requestGeneration.current) return;
-      setListing(nextListing);
-    } catch (err) {
-      if (generation !== requestGeneration.current) return;
-      setError(err instanceof Error ? err.message : "Failed to load directory");
-    } finally {
-      if (generation === requestGeneration.current) setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (path: string) => {
+      const generation = ++requestGeneration.current;
+      setLoading(true);
+      setError(null);
+      setListing(null);
+      try {
+        const nextListing = await listDirectory(path);
+        if (generation !== requestGeneration.current) return;
+        setListing(nextListing);
+      } catch (err) {
+        if (generation !== requestGeneration.current) return;
+        setError(err instanceof Error ? err.message : t("common:failedToLoadDirectory"));
+      } finally {
+        if (generation === requestGeneration.current) setLoading(false);
+      }
+    },
+    [t],
+  );
 
   useEffect(() => {
     // Reset cached listing when the popover closes so the next open reloads
@@ -197,11 +303,12 @@ function Breadcrumb({
   onNavigate: (p: string) => void;
   touchRows?: boolean;
 }) {
+  const { t } = useTranslation();
   const segs = pathSegments(path);
   return (
     <div className="flex items-center gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border bg-muted/30 px-2 py-1.5">
       {segs.length === 0 && (
-        <span className="text-[11px] text-muted-foreground italic">Loading…</span>
+        <span className="text-[11px] text-muted-foreground italic">{t("common:loading")}</span>
       )}
       {segs.map((seg, i) => {
         const last = i === segs.length - 1;
@@ -280,6 +387,7 @@ function DirectoryBrowserToolbar({
   onCreateDirectory: (name: string) => Promise<void>;
   touchRows: boolean;
 }) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -294,7 +402,7 @@ function DirectoryBrowserToolbar({
       await onCreateDirectory(trimmedName);
       setEditing(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create folder");
+      setError(err instanceof Error ? err.message : t("common:failedToCreateFolder"));
     } finally {
       setCreating(false);
     }
@@ -303,60 +411,21 @@ function DirectoryBrowserToolbar({
   return (
     <div className="shrink-0 border-b border-border bg-muted/10 px-3 py-2">
       {editing ? (
-        <div className="space-y-1.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <IconFolderPlus className="size-4 shrink-0 text-muted-foreground" />
-            <Input
-              aria-label="New folder name"
-              value={name}
-              onChange={(event) => {
-                setName(event.target.value);
-                setError(null);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  void createFolder();
-                } else if (event.key === "Escape") {
-                  setEditing(false);
-                }
-              }}
-              placeholder="Folder name"
-              autoFocus
-              className={cn("min-w-0 flex-1", touchRows && "h-10")}
-            />
-            <Button
-              type="button"
-              size={touchRows ? "icon-lg" : "icon"}
-              className={touchRows ? "size-11" : undefined}
-              onClick={() => void createFolder()}
-              disabled={!name.trim() || creating}
-              aria-label="Create folder"
-              title="Create folder"
-            >
-              <IconCheck />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size={touchRows ? "icon-lg" : "icon"}
-              className={touchRows ? "size-11" : undefined}
-              onClick={() => setEditing(false)}
-              aria-label="Cancel new folder"
-              title="Cancel"
-            >
-              <IconX />
-            </Button>
-          </div>
-          {error ? (
-            <p role="alert" className="pl-6 text-xs text-destructive">
-              {error}
-            </p>
-          ) : null}
-        </div>
+        <NewFolderForm
+          name={name}
+          error={error}
+          creating={creating}
+          touchRows={touchRows}
+          onNameChange={(next) => {
+            setName(next);
+            setError(null);
+          }}
+          onSubmit={() => void createFolder()}
+          onCancel={() => setEditing(false)}
+        />
       ) : (
         <div className="flex items-center justify-between gap-3">
-          <span className="text-xs font-medium text-muted-foreground">Folders</span>
+          <span className="text-xs font-medium text-muted-foreground">{t("common:folders")}</span>
           <Button
             type="button"
             variant="ghost"
@@ -366,10 +435,82 @@ function DirectoryBrowserToolbar({
             disabled={disabled}
           >
             <IconFolderPlus />
-            New folder
+            {t("common:newFolder")}
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** The inline "new folder" row, extracted to keep the toolbar under the
+ * max-lines-per-function cap. */
+function NewFolderForm({
+  name,
+  error,
+  creating,
+  touchRows,
+  onNameChange,
+  onSubmit,
+  onCancel,
+}: {
+  name: string;
+  error: string | null;
+  creating: boolean;
+  touchRows: boolean;
+  onNameChange: (next: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <div className="flex min-w-0 items-center gap-2">
+        <IconFolderPlus className="size-4 shrink-0 text-muted-foreground" />
+        <Input
+          aria-label={t("common:newFolderName")}
+          value={name}
+          onChange={(event) => onNameChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onSubmit();
+            } else if (event.key === "Escape") {
+              onCancel();
+            }
+          }}
+          placeholder={t("common:folderName")}
+          autoFocus
+          className={cn("min-w-0 flex-1", touchRows && "h-10")}
+        />
+        <Button
+          type="button"
+          size={touchRows ? "icon-lg" : "icon"}
+          className={touchRows ? "size-11" : undefined}
+          onClick={onSubmit}
+          disabled={!name.trim() || creating}
+          aria-label={t("common:createFolder")}
+          title={t("common:createFolder")}
+        >
+          <IconCheck />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size={touchRows ? "icon-lg" : "icon"}
+          className={touchRows ? "size-11" : undefined}
+          onClick={onCancel}
+          aria-label={t("common:cancelNewFolder")}
+          title={t("common:cancel")}
+        >
+          <IconX />
+        </Button>
+      </div>
+      {error ? (
+        <p role="alert" className="pl-6 text-xs text-destructive">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -389,10 +530,11 @@ function Entries({
   touchRows?: boolean;
   fillAvailableHeight?: boolean;
 }) {
-  if (loading) return <EmptyRow text="Loading…" />;
+  const { t } = useTranslation();
+  if (loading) return <EmptyRow text={t("common:loading")} />;
   if (error) return <EmptyRow text={error} variant="error" testId="folder-picker-error" />;
   if (!listing || listing.entries.length === 0) {
-    return <EmptyRow text="No folders here — pick this one or go up" />;
+    return <EmptyRow text={t("common:noFoldersHerePickThisOne")} />;
   }
   return (
     <div
@@ -445,6 +587,7 @@ function Footer({
   onUseScratch: () => void;
   onChoose: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between gap-2 border-t border-border bg-muted/20 px-2 py-1.5">
       <button
@@ -454,7 +597,7 @@ function Footer({
         className="inline-flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
       >
         <IconBox className="h-3 w-3" />
-        Use scratch instead
+        {t("common:useScratchInstead")}
       </button>
       <button
         type="button"
@@ -468,7 +611,7 @@ function Footer({
         )}
       >
         <IconFolder className="h-3 w-3" />
-        Use this folder
+        {t("common:useThisFolder")}
       </button>
     </div>
   );

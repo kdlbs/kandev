@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 )
 
 func TestMaterializeRuntimeProjectMCPForPiWritesProjectFile(t *testing.T) {
@@ -16,7 +18,7 @@ func TestMaterializeRuntimeProjectMCPForPiWritesProjectFile(t *testing.T) {
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
 		WorkspacePath:  t.TempDir(),
-		Metadata:       map[string]interface{}{},
+		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
 	agentConfig, ok := mgr.registry.Get("pi-acp")
@@ -24,7 +26,7 @@ func TestMaterializeRuntimeProjectMCPForPiWritesProjectFile(t *testing.T) {
 		t.Fatal("pi-acp agent missing from test registry")
 	}
 
-	if err := mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig); err != nil {
+	if err := mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig, nil, ""); err != nil {
 		t.Fatalf("materializeRuntimeProjectMCP: %v", err)
 	}
 
@@ -58,7 +60,7 @@ func TestMaterializeRuntimeProjectMCPForCursorWritesProjectFile(t *testing.T) {
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
 		WorkspacePath:  t.TempDir(),
-		Metadata:       map[string]interface{}{},
+		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
 	agentConfig, ok := mgr.registry.Get("cursor-acp")
@@ -66,7 +68,7 @@ func TestMaterializeRuntimeProjectMCPForCursorWritesProjectFile(t *testing.T) {
 		t.Fatal("cursor-acp agent missing from test registry")
 	}
 
-	if err := mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig); err != nil {
+	if err := mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig, nil, ""); err != nil {
 		t.Fatalf("materializeRuntimeProjectMCP: %v", err)
 	}
 
@@ -96,14 +98,14 @@ func TestMaterializeRuntimeProjectMCPSkipsWhenPortUnavailable(t *testing.T) {
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
 		WorkspacePath:  t.TempDir(),
-		Metadata:       map[string]interface{}{},
+		metadata:       map[string]interface{}{},
 	}
 	agentConfig, ok := mgr.registry.Get("pi-acp")
 	if !ok {
 		t.Fatal("pi-acp agent missing from test registry")
 	}
 
-	if err := mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig); err != nil {
+	if err := mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig, nil, ""); err != nil {
 		t.Fatalf("materializeRuntimeProjectMCP: %v", err)
 	}
 
@@ -125,7 +127,7 @@ func TestPromoteWorkspaceExecutionResetsCommandWhenProjectMCPFails(t *testing.T)
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
 		WorkspacePath:  workspace,
-		Metadata:       map[string]interface{}{},
+		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
 	req := &LaunchRequest{
@@ -152,5 +154,58 @@ func TestPromoteWorkspaceExecutionResetsCommandWhenProjectMCPFails(t *testing.T)
 	}
 	if execution.IsPassthrough {
 		t.Fatal("IsPassthrough should be reset after failed promotion")
+	}
+}
+
+func TestPromoteWorkspaceExecutionUsesResolvedExecutionProfileForCursorAuth(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workspace := t.TempDir()
+	cursorHome := filepath.Join(home, ".cursor")
+	projects := filepath.Join(cursorHome, "projects")
+	if err := os.MkdirAll(filepath.Join(projects, "source-project"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projects, "source-project", "mcp-auth.json"), []byte(`{"figma":{"token":"opaque"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := mcpconfig.LinkCursorMCPAuth(workspace, cursorHome); err != nil {
+		t.Fatalf("create existing bridge link: %v", err)
+	}
+
+	resolver := &mockPassthroughProfileResolver{
+		profiles: map[string]*AgentProfileInfo{
+			"office-stable-profile":    {AgentName: "cursor-acp", CursorMCPAuthEnabled: true},
+			"cursor-execution-profile": {AgentName: "cursor-acp", CursorMCPAuthEnabled: false},
+		},
+	}
+	mgr := newTestManager(t)
+	mgr.profileResolver = resolver
+	execution := &AgentExecution{
+		ID:             "exec-1",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		WorkspacePath:  workspace,
+		ExecutorType:   "worktree",
+		metadata:       map[string]interface{}{},
+		standalonePort: 45678,
+	}
+	req := &LaunchRequest{
+		TaskID:             "task-1",
+		SessionID:          "session-1",
+		AgentProfileID:     "office-stable-profile",
+		ExecutionProfileID: "cursor-execution-profile",
+		ExecutorType:       "worktree",
+	}
+
+	if err := mgr.promoteWorkspaceExecution(context.Background(), execution, req); err != nil {
+		t.Fatalf("promoteWorkspaceExecution: %v", err)
+	}
+	if len(resolver.resolvedIDs) != 1 || resolver.resolvedIDs[0] != "cursor-execution-profile" {
+		t.Fatalf("resolved profile IDs = %v, want only cursor execution profile", resolver.resolvedIDs)
+	}
+	destination := cursorMCPAuthDestinationForTest(t, projects, workspace)
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		t.Fatalf("resolved disabled execution profile kept shared link, lstat err=%v", err)
 	}
 }

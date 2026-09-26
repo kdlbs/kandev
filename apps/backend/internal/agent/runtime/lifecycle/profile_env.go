@@ -2,60 +2,61 @@ package lifecycle
 
 import (
 	"context"
-
-	"go.uber.org/zap"
+	"errors"
+	"fmt"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/githubauth"
+	"go.uber.org/zap"
 )
 
-// metadataKeyProfileEnvResolved caches resolved profile env vars on an execution
-// so configureAndStartAgent does not re-resolve secrets on the same launch.
-const metadataKeyProfileEnvResolved = "profile_env_resolved"
+var ErrProfileSecretUnavailable = errors.New("BLOCKED_PROFILE_SECRET")
 
 // mergeAgentProfileEnv fills missing keys in env from the agent profile's
 // env_vars. Existing keys in env (office tokens, executor profile env, etc.)
 // are never overwritten.
-func (m *Manager) mergeAgentProfileEnv(ctx context.Context, profileID string, env map[string]string) {
+func (m *Manager) mergeAgentProfileEnv(ctx context.Context, profileID string, env map[string]string) error {
+	return m.mergeAgentProfileEnvWithPartial(ctx, profileID, env, false)
+}
+
+// mergeAgentProfileEnvWithPartial is mergeAgentProfileEnv with the partial-vs-
+// fail-closed choice exposed. The ACP session-launch env builder passes
+// partial=true so a broken secret on one profile var drops that var instead of
+// blanking the agent's whole environment (AC-004.1); every other caller keeps
+// the fail-closed default.
+func (m *Manager) mergeAgentProfileEnvWithPartial(ctx context.Context, profileID string, env map[string]string, partial bool) error {
 	if profileID == "" || env == nil || m.profileResolver == nil {
-		return
+		return nil
 	}
 	info, err := m.profileResolver.ResolveProfile(ctx, profileID)
 	if err != nil || info == nil {
-		return
+		return err
 	}
-	m.mergeAgentProfileEnvFromInfo(ctx, info, env)
+	return m.mergeAgentProfileEnvFromInfoWithPartial(ctx, info, env, partial)
 }
 
-func (m *Manager) mergeAgentProfileEnvFromInfo(ctx context.Context, info *AgentProfileInfo, env map[string]string) {
+func (m *Manager) mergeAgentProfileEnvFromInfo(ctx context.Context, info *AgentProfileInfo, env map[string]string) error {
+	return m.mergeAgentProfileEnvFromInfoWithPartial(ctx, info, env, false)
+}
+
+func (m *Manager) mergeAgentProfileEnvFromInfoWithPartial(ctx context.Context, info *AgentProfileInfo, env map[string]string, partial bool) error {
 	if info == nil || env == nil || len(info.EnvVars) == 0 {
-		return
+		return nil
 	}
-	resolved := m.resolveAgentProfileEnvVars(ctx, info.EnvVars)
+	resolved, err := m.resolveAgentProfileEnvVarsWithPartial(ctx, info.EnvVars, partial)
+	if err != nil {
+		return err
+	}
 	mergeEnvFillMissing(env, resolved)
+	return nil
 }
 
-func (m *Manager) cacheResolvedProfileEnv(execution *AgentExecution, resolved map[string]string) {
-	if execution == nil || len(resolved) == 0 {
-		return
-	}
-	if execution.Metadata == nil {
-		execution.Metadata = make(map[string]interface{})
-	}
-	execution.Metadata[metadataKeyProfileEnvResolved] = cloneStringMap(resolved)
-}
-
-func (m *Manager) mergeAgentProfileEnvForExecution(ctx context.Context, execution *AgentExecution, env map[string]string) {
-	if execution != nil {
-		if cached, ok := execution.Metadata[metadataKeyProfileEnvResolved].(map[string]string); ok && len(cached) > 0 {
-			mergeEnvFillMissing(env, cached)
-			return
-		}
-	}
+func (m *Manager) mergeAgentProfileEnvForExecution(ctx context.Context, execution *AgentExecution, env map[string]string) error {
 	if execution == nil {
-		return
+		return nil
 	}
-	m.mergeAgentProfileEnv(ctx, execution.AgentProfileID, env)
+	return m.mergeAgentProfileEnv(ctx, execution.AgentProfileID, env)
 }
 
 func mergeEnvFillMissing(dst, src map[string]string) {
@@ -76,13 +77,61 @@ func mergeEnvFillMissing(dst, src map[string]string) {
 	}
 }
 
+// composeExecutionRuntimeEnvironment updates an existing execution snapshot
+// with a per-run overlay. Host GitHub helpers are Kandev-owned generated
+// entries and are removed before composition so a later request can replace
+// or remove them without hiding inherited user configuration.
+func composeExecutionRuntimeEnvironment(base, overlay map[string]string) (map[string]string, error) {
+	removeObsoleteManagedCredentialEnvironment(base)
+	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
+		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("remove generated host GitHub helper: %w", err)
+	}
+	return gitconfigenv.Merge(filtered, overlay)
+}
+
+func removeObsoleteManagedCredentialEnvironment(env map[string]string) {
+	for _, key := range []string{
+		githubauth.CredentialBrokerURLEnv,
+		githubauth.CredentialHelperPathEnv,
+		githubauth.CredentialCLIShimDirEnv,
+		githubauth.CredentialCLIBashEnvEnv,
+		githubauth.CredentialParentBashEnv,
+		githubauth.CredentialLeaseEnv,
+		githubauth.CredentialReissueCapabilityEnv,
+		githubauth.CredentialTaskIDEnv,
+		githubauth.CredentialSessionIDEnv,
+		githubauth.CredentialRepositoryEnv,
+		githubauth.CredentialOwnerEnv,
+		githubauth.CredentialRepoEnv,
+		githubauth.CredentialHostEnv,
+		githubauth.CredentialScopesEnv,
+	} {
+		delete(env, key)
+	}
+}
+
 // resolveAgentProfileEnvVars resolves profile env entries. SecretID wins over
-// Value; if secret resolution fails, the entry is skipped rather than falling
-// back. Literal Value is used only when SecretID is empty, and empty keys are
-// ignored.
-func (m *Manager) resolveAgentProfileEnvVars(ctx context.Context, envVars []settingsmodels.ProfileEnvVar) map[string]string {
+// Value. A missing secret store or failed reveal aborts the whole profile
+// environment rather than falling back to a literal value or partial map.
+func (m *Manager) resolveAgentProfileEnvVars(ctx context.Context, envVars []settingsmodels.ProfileEnvVar) (map[string]string, error) {
+	return m.resolveAgentProfileEnvVarsWithPartial(ctx, envVars, false)
+}
+
+// resolveAgentProfileEnvVarsWithPartial resolves profile env entries. When
+// partial is true a single secret-store miss or failed reveal drops only that
+// entry (with a warn log) and the remaining entries are still delivered — a
+// broken secret reference on one variable must not blank the agent's whole
+// environment at session launch. When partial is false the whole environment is
+// aborted (the passthrough-restart and terminal-env callers rely on that
+// fail-closed behavior). Cancellation errors always propagate.
+func (m *Manager) resolveAgentProfileEnvVarsWithPartial(
+	ctx context.Context, envVars []settingsmodels.ProfileEnvVar, partial bool,
+) (map[string]string, error) {
 	if len(envVars) == 0 {
-		return nil
+		return nil, nil
 	}
 	resolved := make(map[string]string, len(envVars))
 	for _, ev := range envVars {
@@ -92,18 +141,27 @@ func (m *Manager) resolveAgentProfileEnvVars(ctx context.Context, envVars []sett
 		}
 		if ev.SecretID != "" {
 			if m.secretStore == nil {
-				m.logger.Warn("secret store not configured for profile env var",
-					zap.String("key", key),
-					zap.String("secret_id", ev.SecretID))
-				continue
+				if partial {
+					m.logger.Warn("agent profile env var references a secret but no secret store is configured; dropping entry",
+						zap.String("env_key", key))
+					continue
+				}
+				return nil, profileSecretError(key)
 			}
-			value, err := m.secretStore.Reveal(ctx, ev.SecretID)
+			value, err := m.revealGlobalSecret(ctx, ev.SecretID)
 			if err != nil {
-				m.logger.Warn("failed to resolve secret for profile env var",
-					zap.String("key", key),
-					zap.String("secret_id", ev.SecretID),
-					zap.Error(err))
-				continue
+				// Preserve caller cancellation identity. The sanitized sentinel is
+				// for secret failures only; callers use context errors to stop work
+				// without misclassifying a cancelled request as bad configuration.
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return nil, err
+				}
+				if partial {
+					m.logger.Warn("failed to reveal secret for agent profile env var; dropping entry",
+						zap.String("env_key", key), zap.Error(err))
+					continue
+				}
+				return nil, profileSecretError(key)
 			}
 			resolved[key] = value
 			continue
@@ -112,5 +170,13 @@ func (m *Manager) resolveAgentProfileEnvVars(ctx context.Context, envVars []sett
 			resolved[key] = ev.Value
 		}
 	}
-	return resolved
+	return resolved, nil
+}
+
+func profileSecretError(key string) error {
+	return fmt.Errorf("%w: env key %q unavailable", ErrProfileSecretUnavailable, key)
+}
+
+func (m *Manager) revealGlobalSecret(ctx context.Context, secretID string) (string, error) {
+	return revealGlobalSecret(ctx, m.secretStore, secretID)
 }

@@ -7,9 +7,13 @@ description: "Install Kandev under systemd or launchd and operate it safely."
 
 The native Kandev launcher can install itself as a systemd service on Linux or a launchd service on macOS. Use this for a persistent workstation or server. Windows Service Control Manager, OpenRC, and SysV init are not supported.
 
-Install Kandev first using a persistent [CLI installation](cli.md#install). Do not install a long-lived service from an ephemeral `npx` invocation: the generated unit records the absolute native executable and release-bundle paths.
+For the simplest path, install Kandev persistently before creating the service; see [CLI installation](cli.md#install). A plain `npx -y kandev@...` launch is ephemeral, but `npx -y kandev@latest service install` can create a managed npx user service. That service depends on the cached npx package remaining present: reinstall it after upgrades, and expect npm cache cleanup to invalidate its recorded absolute paths. Prefer global npm for a durable service. Do not hand-write a long-lived service around an npx command.
 
-> **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. Before allowing remote access, enable [opt-in authentication](authentication.md) (the **Authentication & users** feature toggle, or `KANDEV_FEATURES_AUTH=true`) and terminate TLS in a reverse proxy — authentication does not replace HTTPS. A server bound to non-loopback interfaces without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
+Stable is the default release channel. A verified Kandev-managed npm/npx user service can opt into
+the npm Nightly channel from **Settings → System → Updates**. Desktop, Homebrew, and system services
+remain Stable-only.
+
+> **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. For one trusted user, use the narrow private-network boundary in [Mobile Remote Access](mobile-remote-access.md). For shared access, enable [opt-in authentication](authentication.md) and terminate TLS in a protected proxy. Authentication does not replace HTTPS. A non-loopback server without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
 
 ## Quick path
 
@@ -48,13 +52,13 @@ kandev service status
 kandev service logs
 ```
 
-The installer writes the managed unit or plist and starts the process. It does **not** poll `/health`; use `status` and `logs` first. The logs print the actual listener URL because the launcher selects a free fallback port when `38429` is unavailable. Copy that URL and append `/health`; for example, if the log reports port `43127`:
+The installer writes the managed unit or plist and starts the process. It does **not** poll `/health`; use `status` and `logs` first. The logs print the actual listener URL because the launcher selects a free fallback port when `38429` is unavailable. Copy that URL and append `/ready`; for example, if the log reports port `43127`:
 
 ```bash
-curl --fail http://127.0.0.1:43127/health
+curl --fail http://127.0.0.1:43127/ready
 ```
 
-`/health` reports backend readiness after routes and the agent registry are initialized and the HTTP listener is accepting connections. It is not a deep health check of the database, message bus, executors, or remote providers.
+`/ready` reports backend readiness after routes and the agent registry are initialized and the HTTP listener is accepting connections. While it returns 503, its `startup` object reports the current phase and elapsed time for database opening, backup, migrations, service initialization, or session recovery. It is not a deep health check of the database, message bus, executors, or remote providers.
 
 ### System service
 
@@ -85,14 +89,28 @@ recursively chown the data tree or add a broad Git `safe.directory` exception.
 
 ## Bind safely
 
-The backend config loader searches `config.yaml` in its working directory and then `/etc/kandev`. launchd sets the working directory to the Kandev home, but the generated systemd unit does not. For a shared conventional path, create `/etc/kandev/config.yaml` before first start, or stop and restart after changing it:
+The backend config loader searches `config.yaml` in its working directory,
+then `<KANDEV_HOME_DIR>/config.yaml` (or `~/.kandev/config.yaml`), then
+`/etc/kandev/config.yaml`. launchd sets the working directory to the Kandev
+home; the generated systemd unit uses the selected home and carries the exact
+selected file into the managed backend. Kandev uses only the first existing
+candidate and does not merge files. For a shared conventional path, create
+`/etc/kandev/config.yaml` before first start, or stop and restart after
+changing it:
 
 ```yaml
 server:
   host: 127.0.0.1
 ```
 
-The working-directory file wins when both exist, so on macOS merge or remove a conflicting `<KANDEV_HOME_DIR>/config.yaml` if `/etc/kandev/config.yaml` should be authoritative. The service unit has an intentionally small fixed environment and does not inherit arbitrary exports from the installing shell. Put supported settings in the configuration file; see [Configuration](configuration.md). A system service needs permission to read the file, while secret-bearing configuration should not be world-readable.
+The working-directory file wins when both exist, followed by the home file and
+then `/etc/kandev/config.yaml`. If the first existing file is unreadable or
+invalid, startup fails instead of falling through. A home configuration file
+cannot set `homeDir`. The service unit has an intentionally small fixed
+environment and does not inherit arbitrary exports from the installing shell.
+Put supported settings in the configuration file; see
+[Configuration](configuration.md). A system service needs permission to read
+the file, while secret-bearing configuration should use owner-only mode `0600`.
 
 To access a loopback-only instance remotely, use SSH port forwarding:
 
@@ -100,7 +118,7 @@ To access a loopback-only instance remotely, use SSH port forwarding:
 ssh -L 38429:127.0.0.1:38429 user@server
 ```
 
-Then open `http://127.0.0.1:38429` locally. For shared access, terminate TLS and enforce authentication in a reverse proxy or private access layer.
+Then open `http://127.0.0.1:38429` locally. For private phone access, follow [Mobile Remote Access](mobile-remote-access.md). For shared access, terminate TLS and enforce authentication in a proxy or private access layer.
 
 ## Commands and flags
 
@@ -154,7 +172,7 @@ On macOS, installation writes the plist, removes an already loaded job, bootstra
 
 If the target unit/plist already exists and lacks Kandev's managed marker, installation saves it as `<path>.bak` before replacing it. Review that backup; uninstall does not restore or remove it.
 
-The service manager starts the control plane only. Agents still need their configured executor dependencies and credentials—for example Docker access for a Docker profile or network reachability and keys for SSH. See [Executors](executors.md).
+The service manager starts the control plane only. Agents still need their configured executor dependencies and credentials, for example Docker access for a Docker profile or network reachability and keys for SSH. See [Executors](executors.md).
 
 ## Operate and inspect
 
@@ -185,15 +203,47 @@ sudo journalctl -u kandev.service -n 200 --no-pager
 
 For a user service installed by `kandev service install`, use **Settings → System → Updates → Apply update** when a newer release is available. Kandev verifies the managed unit or plist and its owner-only `<home>/service/install.json` metadata before enabling this action. System services still require a terminal update because they need elevated privileges.
 
-If the Apply action is unavailable or fails, upgrade the package manually, reinstall with the same mode and home flags so absolute paths and bundle metadata are refreshed, then restart explicitly:
+For a verified global npm user service, or an existing managed npx user service, the same page also
+provides an install-wide **Stable** or **Nightly** choice. A global npm install is the recommended
+durable service path. An npx-managed service is a recoverable but fragile fallback because its
+executable lives in npm's transient cache. Stable reads signed GitHub Releases and remains selected
+by default. Nightly reads npm's `kandev@nightly` tag and may contain unstable code from `main`. Select the row, use
+**Save changes**, inspect the exact version, and then apply it separately. Apply submits that exact
+immutable version; it does not re-resolve either mutable channel source. The backend accepts it
+only while it still matches the selected channel's cached target. If that cache changes, Apply
+returns a conflict and the page must refresh before you retry with the newly displayed target.
+
+To leave Nightly, select Stable, save, and apply the displayed stable release. If the UI cannot do
+that, use the manual stable recovery below. Homebrew, Desktop, system-service, unmanaged,
+local-checkout, unknown, and invalid-metadata installs cannot select Nightly.
+
+If the Apply action is unavailable or fails, use the recovery command that matches the original install. Repeat custom `--home-dir`, `--port`, and `--no-boot-start` values only on `service install`; `service restart` and `service status` accept `--system` but not those install-time flags.
 
 ```bash
-# npm example; use `brew upgrade kandev` for Homebrew
+# Global npm service
 npm install --global kandev@latest
-kandev service install --home-dir "$HOME/.kandev"
+# Append original install-time flags here when used.
+kandev service install
 kandev service restart
 kandev service status
+
+# Existing managed npx service recovery only (run each service command through npx)
+# This service points into npm's cache. Reinstall after upgrades; npm cache cleanup invalidates it.
+# Prefer a global npm installation for a durable service.
+# Append original install-time flags to service install when used.
+npx -y kandev@latest service install
+npx -y kandev@latest service restart
+npx -y kandev@latest service status
+
+# Homebrew service (Stable only)
+brew upgrade kandev
+# Append original install-time flags here when used.
+kandev service install
+kandev service restart
 ```
+
+To remain on Nightly during a manual npm or npx recovery, use `kandev@nightly` in the matching command.
+Do not use a Homebrew `HEAD` build as an equivalent channel; no Homebrew Nightly is published.
 
 For system mode:
 
@@ -290,3 +340,16 @@ Reinstall using the upgraded `kandev` binary, preserve the original `--system` a
 ### Service starts but agents fail
 
 Read service logs first. A service has a smaller `PATH` and no interactive shell environment, so tools or credentials visible in a terminal may be absent. Configure executor credentials through Kandev's profile/settings paths, use stable executable paths, and verify Docker/SSH/Sprites connectivity as described in [Executors](executors.md#troubleshooting).
+
+Linux user services include `~/.npm-global/bin` in their generated `PATH` for
+agent CLIs installed with that npm prefix. After upgrading an existing user
+service, regenerate its unit and restart it to apply the updated `PATH`:
+
+```bash
+# Repeat your original install-time flags when used.
+kandev service install
+kandev service restart
+```
+
+Restarting alone does not update an older unit's `PATH`. Other custom npm
+prefixes are not automatically added to the service environment.

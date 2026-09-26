@@ -1,5 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
+import { waitForLatestSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("PR checks running timer", () => {
@@ -16,7 +16,7 @@ test.describe("PR checks running timer", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
 
     // --- Seed workflow ---
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Checks Timer Workflow");
@@ -74,9 +74,6 @@ test.describe("PR checks running timer", () => {
       repository_ids: [seedData.repositoryId],
     });
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
     // Move task to Working -> auto_start -> Done
     await apiClient.moveTask(task.id, workflow.id, workingStep.id);
 
@@ -93,21 +90,31 @@ test.describe("PR checks running timer", () => {
       author_login: "test-user",
     });
 
-    // Wait for task to reach Done
-    await expect(kanban.taskCardInColumn("Timer Check Task", doneStep.id)).toBeVisible({
-      timeout: 45_000,
-    });
+    // Wait for the durable workflow transition before opening the task. The
+    // Kanban WebSocket update can lag behind the backend transition under CI
+    // load, while the timer panel only needs the task's settled state.
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id ?? "", {
+        timeout: 90_000,
+        message: "timer task should reach the Done workflow step",
+      })
+      .toBe(doneStep.id);
+    await waitForLatestSessionDone(
+      apiClient,
+      task.id,
+      1,
+      "timer task session should finish before opening the PR panel",
+    );
 
     // --- Open task ---
-    await kanban.taskCardInColumn("Timer Check Task", doneStep.id).click();
+    await testPage.goto(`/t/${task.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForLoad(45_000);
 
     // Open PR detail panel
-    await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
+    await expect(session.prTopbarButton()).toBeVisible({ timeout: 30_000 });
     await session.prTopbarButton().click();
     await expect(session.prDetailPanel()).toBeVisible({ timeout: 10_000 });
 

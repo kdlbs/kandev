@@ -1,0 +1,662 @@
+import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
+import { SessionPage } from "../../pages/session-page";
+import { expectTaskDescription, readTaskDescription } from "../../pages/task-description-editor";
+import type { ApiClient } from "../../helpers/api-client";
+import type { Page } from "@playwright/test";
+import {
+  canvasHref,
+  type CanvasRecord,
+  enableCanvasFeature,
+  expectCanvasFrameFillsHost,
+  getCanvas,
+  publishTaskCanvas,
+  removeCanvas,
+  promoteCanvas,
+  seedCanvasWorkspacePreview,
+  seedTaskCanvas,
+  waitForTaskCanvas,
+} from "./canvas-fixture";
+
+async function approvePendingCanvasThroughHost(
+  page: Page,
+  apiClient: ApiClient,
+  canvas: CanvasRecord,
+): Promise<CanvasRecord> {
+  const pendingReleaseId = canvas.pending_release?.id;
+
+  await expect(page).toHaveURL(new RegExp(`${canvasHref(canvas.id)}$`), { timeout: 30_000 });
+  if (!pendingReleaseId) {
+    await expect(page.getByTestId("canvas-host-state")).toHaveText("Ready", {
+      timeout: 20_000,
+    });
+    let activeCanvas: CanvasRecord | null = null;
+    await expect
+      .poll(
+        async () => {
+          activeCanvas = await getCanvas(apiClient, canvas.id);
+          return activeCanvas?.active_release_status === "valid";
+        },
+        { timeout: 30_000, message: "The owner-created canvas release did not activate." },
+      )
+      .toBe(true);
+    if (!activeCanvas) throw new Error("The active canvas record was empty.");
+    return activeCanvas;
+  }
+
+  await expect(page.getByTestId("canvas-host-state")).toHaveText("Permission review required");
+  await page.getByTestId("canvas-mobile-actions").tap();
+  const actionsSheet = page.getByTestId("canvas-mobile-actions-sheet");
+  await expect(actionsSheet).toBeVisible();
+  await actionsSheet.getByRole("button", { name: "Releases and permissions", exact: true }).tap();
+  const releasesDialog = page.getByTestId("canvas-releases-dialog");
+  await expect(releasesDialog).toBeVisible();
+  await expect(
+    releasesDialog.getByTestId(`canvas-release-permissions-${pendingReleaseId}`),
+  ).toBeVisible();
+  await releasesDialog.getByRole("button", { name: "Approve release", exact: true }).tap();
+  await expect(page.getByTestId("canvas-host-state")).toHaveText("Ready", { timeout: 20_000 });
+
+  let approvedCanvas: CanvasRecord | null = null;
+  await expect
+    .poll(
+      async () => {
+        approvedCanvas = await getCanvas(apiClient, canvas.id);
+        return approvedCanvas?.active_release_status === "valid";
+      },
+      { timeout: 30_000, message: "The mobile approval did not activate the canvas release." },
+    )
+    .toBe(true);
+  if (!approvedCanvas) throw new Error("The approved canvas record was empty.");
+  return approvedCanvas;
+}
+
+test.describe("Plugin-backed canvases on mobile", () => {
+  test("creates a scratch canvas task from workspace settings with editable choices", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    const canvasIds: string[] = [];
+    let taskId: string | undefined;
+    let alternateWorkflowId: string | undefined;
+    try {
+      const { executors } = await apiClient.listExecutors();
+      const localExecutor = executors.find((executor) =>
+        ["local", "local_pc"].includes(executor.type),
+      );
+      const localProfile = localExecutor?.profiles?.[0];
+      expect(
+        localProfile,
+        "a direct local executor profile is required by the fixture",
+      ).toBeDefined();
+
+      const alternateWorkflow = await apiClient.createWorkflow(
+        seedData.workspaceId,
+        "E2E Canvas Alternative Workflow",
+        "simple",
+      );
+      alternateWorkflowId = alternateWorkflow.id;
+
+      await testPage.goto(
+        `/settings/workspaces/${encodeURIComponent(seedData.workspaceId)}/canvases`,
+      );
+      await expect(testPage.getByTestId("workspace-canvases-page")).toBeVisible();
+      await testPage.getByTestId("settings-create-canvas").tap();
+
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("source-mode-scratch")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      await expect(dialog.getByTestId("source-mode-workspace")).toBeVisible();
+      await expect(dialog.getByTestId("executor-profile-selector")).toContainText(
+        localProfile!.name,
+      );
+
+      const tasksBeforeCancel = await apiClient.listTasks(seedData.workspaceId);
+      await dialog.getByTestId("task-title-input").fill("Cancelled canvas task");
+      await dialog
+        .getByTestId("task-description-input")
+        .fill("This draft must not create a task or canvas.");
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).tap();
+      await expect(dialog).toBeHidden();
+      const tasksAfterCancel = await apiClient.listTasks(seedData.workspaceId);
+      expect(tasksAfterCancel.tasks.map((task) => task.id)).toEqual(
+        tasksBeforeCancel.tasks.map((task) => task.id),
+      );
+
+      await testPage.getByTestId("settings-create-canvas").tap();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("task-title-input")).toHaveValue("Create a canvas");
+      await expectTaskDescription(
+        dialog.getByTestId("task-description-input"),
+        "Create a new Kandev canvas with a coordinator view that lists the existing tasks.\n\n@create-canvas",
+      );
+
+      const agentSelector = dialog.getByTestId("agent-profile-selector");
+      await expect(agentSelector).toBeEnabled();
+      await agentSelector.tap();
+      await expect(testPage.getByRole("option").first()).toBeVisible();
+      await testPage.keyboard.press("Escape");
+
+      const workflowSelector = dialog.getByTestId("workflow-selector-trigger");
+      await expect(workflowSelector).toBeVisible();
+      await workflowSelector.tap();
+      await expect(
+        testPage.getByRole("button", { name: alternateWorkflow.name, exact: true }),
+      ).toBeVisible();
+      await expect(
+        testPage.getByRole("button", { name: "E2E Workflow", exact: true }).last(),
+      ).toBeVisible();
+      // The open selector keeps its current value as the trigger and renders
+      // the same label again as a popover option. The last matching button is
+      // the option, so this remains deterministic under strict locators.
+      await testPage.getByRole("button", { name: "E2E Workflow", exact: true }).last().tap();
+
+      const defaultPrompt = await readTaskDescription(dialog.getByTestId("task-description-input"));
+      expect(defaultPrompt).toBe(
+        "Create a new Kandev canvas with a coordinator view that lists the existing tasks.\n\n@create-canvas",
+      );
+      expect(defaultPrompt).not.toContain("e2e:mcp:");
+      await expect
+        .poll(() =>
+          testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        )
+        .toBe(true);
+
+      const canvasTitle = "E2E Guided Canvas";
+      const taskTitle = "E2E Guided Canvas Task";
+      const description = [
+        `e2e:mcp:kandev:create_canvas_kandev(${JSON.stringify({
+          title: canvasTitle,
+          summary: "Canvas created through the guided settings task flow.",
+        })})`,
+        'e2e:message("Canvas created from settings.")',
+        "Create a canvas that shows the current task list.",
+        ...Array.from(
+          { length: 20 },
+          (_, index) =>
+            `Canvas detail ${index + 1}: keep this longer edited goal inside the form scroll area.`,
+        ),
+        "",
+        "@create-canvas",
+      ].join("\n");
+      await dialog.getByTestId("task-title-input").fill(taskTitle);
+      await dialog.getByTestId("task-description-input").fill(description);
+      await dialog.getByTestId("task-create-advanced-settings-trigger").tap();
+
+      const formBody = dialog.getByTestId("task-create-form-body");
+      const formGeometry = await testPage.evaluate(() => {
+        const readRect = (testId: string) => {
+          const rect = document.querySelector(`[data-testid="${testId}"]`)?.getBoundingClientRect();
+          if (!rect) return null;
+          return {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            height: rect.height,
+          };
+        };
+        const viewport = window.visualViewport;
+        return {
+          viewport: {
+            left: viewport?.offsetLeft ?? 0,
+            top: viewport?.offsetTop ?? 0,
+            right: (viewport?.offsetLeft ?? 0) + (viewport?.width ?? window.innerWidth),
+            bottom: (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight),
+          },
+          dialog: readRect("create-task-dialog"),
+          body: readRect("task-create-form-body"),
+          footer: readRect("task-create-dialog-footer"),
+          cancel: readRect("submit-cancel"),
+          start: readRect("submit-start-agent"),
+        };
+      });
+      expect(formGeometry.dialog).not.toBeNull();
+      expect(formGeometry.body).not.toBeNull();
+      expect(formGeometry.footer).not.toBeNull();
+      expect(formGeometry.cancel?.height).toBeGreaterThanOrEqual(44);
+      expect(formGeometry.start?.height).toBeGreaterThanOrEqual(44);
+      expect(formGeometry.dialog!.left).toBeGreaterThanOrEqual(formGeometry.viewport.left - 1);
+      expect(formGeometry.dialog!.top).toBeGreaterThanOrEqual(formGeometry.viewport.top - 1);
+      expect(formGeometry.dialog!.right).toBeLessThanOrEqual(formGeometry.viewport.right + 1);
+      expect(formGeometry.dialog!.bottom).toBeLessThanOrEqual(formGeometry.viewport.bottom + 1);
+      expect(formGeometry.body!.bottom).toBeLessThanOrEqual(formGeometry.footer!.top + 1);
+      expect(formGeometry.footer!.bottom).toBeLessThanOrEqual(formGeometry.dialog!.bottom + 1);
+
+      const scrollMetrics = await formBody.evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+        scrollTop: element.scrollTop,
+      }));
+      expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+      await formBody.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect
+        .poll(() => formBody.evaluate((element) => element.scrollTop))
+        .toBeGreaterThan(scrollMetrics.scrollTop);
+
+      let failNextTaskCreate = true;
+      await testPage.route("**/api/v1/tasks", async (route) => {
+        if (failNextTaskCreate && route.request().method() === "POST") {
+          failNextTaskCreate = false;
+          await route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "controlled canvas task creation failure" }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      const startAgent = dialog.getByTestId("submit-start-agent");
+      await expect(startAgent).toBeEnabled();
+      await startAgent.tap();
+      await expect(
+        testPage
+          .locator('[data-testid="toast-message"]')
+          .filter({ hasText: "Failed to create task" }),
+      ).toBeVisible();
+      await expectTaskDescription(dialog.getByTestId("task-description-input"), description);
+
+      const responsePromise = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
+      await startAgent.tap();
+      const response = await responsePromise;
+      const responseBody = await response.text();
+      expect(response.status(), responseBody).toBe(200);
+      const created = JSON.parse(responseBody) as { id: string; session_id?: string };
+      taskId = created.id;
+      expect(taskId).toBeTruthy();
+
+      await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}(?:[?]|$)`));
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 45_000 });
+
+      let taskSessionId = created.session_id ?? "";
+      await expect
+        .poll(
+          async () => {
+            if (!taskSessionId) {
+              const { sessions } = await apiClient.listTaskSessions(taskId!);
+              taskSessionId = sessions[0]?.id ?? "";
+            }
+            return taskSessionId;
+          },
+          { timeout: 30_000, message: "The guided canvas task did not expose a session." },
+        )
+        .not.toBe("");
+
+      const canvas = await waitForTaskCanvas(apiClient, taskId, canvasTitle);
+      canvasIds.push(canvas.id);
+      const published = await publishTaskCanvas({
+        apiClient,
+        taskId,
+        taskSessionId,
+        session,
+        canvas,
+        useMobileSubmit: true,
+      });
+      await approvePendingCanvasThroughHost(testPage, apiClient, published);
+
+      const createdTask = await apiClient.getTask(taskId);
+      expect(createdTask.description).toBe(description);
+      expect(createdTask.repositories ?? []).toHaveLength(0);
+      const { sessions } = await apiClient.listTaskSessions(taskId);
+      expect(
+        sessions.find((candidate) => candidate.id === taskSessionId)?.executor_profile_id,
+      ).toBe(localProfile!.id);
+    } finally {
+      await testPage.unroute("**/api/v1/tasks").catch(() => undefined);
+      await Promise.all(canvasIds.map((canvasId) => removeCanvas(apiClient, canvasId)));
+      if (alternateWorkflowId)
+        await apiClient.deleteWorkflow(alternateWorkflowId).catch(() => undefined);
+      if (taskId) await apiClient.deleteTask(taskId).catch(() => undefined);
+      await releaseFeature();
+    }
+  });
+
+  test("opens an owner-created canvas without an initial permission review", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    const canvasIds: string[] = [];
+    try {
+      const seeded = await seedTaskCanvas(testPage, apiClient, seedData, true);
+      canvasIds.push(seeded.canvas.id);
+
+      await expect(testPage).toHaveURL(new RegExp(`${canvasHref(seeded.canvas.id)}$`), {
+        timeout: 30_000,
+      });
+      await approvePendingCanvasThroughHost(testPage, apiClient, seeded.canvas);
+    } finally {
+      await Promise.all(canvasIds.map((canvasId) => removeCanvas(apiClient, canvasId)));
+      await releaseFeature();
+    }
+  });
+
+  test("reviews workspace data for a legacy task canvas before enabling it", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    const canvasIds: string[] = [];
+    try {
+      const seeded = await seedTaskCanvas(testPage, apiClient, seedData, true);
+      canvasIds.push(seeded.canvas.id);
+      const activeCanvas = await approvePendingCanvasThroughHost(
+        testPage,
+        apiClient,
+        seeded.canvas,
+      );
+      const legacyCanvas = { ...activeCanvas, data_scope_kind: "task" };
+      const permissionDigest = "legacy-task-canvas-review";
+      const grantGeneration = activeCanvas.grant_generation ?? 0;
+      let workspaceDataEnabled = false;
+      let submittedReview: Record<string, unknown> | undefined;
+      const canvasURL = new RegExp(`/api/v1/canvases/${activeCanvas.id}(?:\\?.*)?$`);
+
+      await testPage.route(canvasURL, async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...activeCanvas,
+            data_scope_kind: workspaceDataEnabled ? "workspace" : "task",
+          }),
+        });
+      });
+      await testPage.route(
+        new RegExp(`/api/v1/canvases/${activeCanvas.id}/workspace-data-preview(?:\\?.*)?$`),
+        async (route) => {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              canvas: legacyCanvas,
+              active_release_id: activeCanvas.active_release_id,
+              permission_digest: permissionDigest,
+              grant_generation: grantGeneration,
+              current_data_scope_kind: "task",
+              target_data_scope_kind: "workspace",
+              permissions: {
+                reads: ["tasks"],
+                writes: ["messages"],
+                events: ["task.updated"],
+                shared_state: false,
+                external_origins: [],
+              },
+            }),
+          });
+        },
+      );
+      await testPage.route(
+        new RegExp(`/api/v1/canvases/${activeCanvas.id}/workspace-data(?:\\?.*)?$`),
+        async (route) => {
+          submittedReview = route.request().postDataJSON() as Record<string, unknown>;
+          workspaceDataEnabled = true;
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ ...legacyCanvas, data_scope_kind: "workspace" }),
+          });
+        },
+      );
+
+      await testPage.goto(canvasHref(activeCanvas.id));
+      await expect(testPage.getByTestId("canvas-data-scope")).toHaveText("Task data");
+      await testPage.getByTestId("canvas-mobile-actions").tap();
+      const actions = testPage.getByTestId("canvas-mobile-actions-sheet");
+      await actions.getByTestId("canvas-action-enable-workspace-data").tap();
+
+      const review = testPage.getByTestId("canvas-workspace-data-dialog");
+      await expect(review).toBeVisible();
+      await expect(review.getByTestId("canvas-workspace-data-release")).toHaveText(
+        activeCanvas.active_release_id ?? "",
+      );
+      await expect(review.getByTestId("canvas-workspace-data-current-scope")).toHaveText(
+        "Task data",
+      );
+      await expect(review.getByTestId("canvas-workspace-data-target-scope")).toHaveText(
+        "Workspace data",
+      );
+      await expect(review.getByText("Read task data")).toBeVisible();
+      await review.getByRole("button", { name: "Enable workspace data", exact: true }).tap();
+
+      await expect(review).toHaveCount(0);
+      await expect(testPage.getByTestId("canvas-data-scope")).toHaveText("Workspace data");
+      expect(submittedReview).toEqual({
+        expected_release_id: activeCanvas.active_release_id,
+        expected_permission_digest: permissionDigest,
+        expected_grant_generation: grantGeneration,
+      });
+      await testPage.getByTestId("canvas-mobile-actions").tap();
+      await expect(
+        testPage
+          .getByTestId("canvas-mobile-actions-sheet")
+          .getByTestId("canvas-action-enable-workspace-data"),
+      ).toHaveCount(0);
+    } finally {
+      await Promise.all(canvasIds.map((canvasId) => removeCanvas(apiClient, canvasId)));
+      await releaseFeature();
+    }
+  });
+
+  test("uses a focused route, workspace navigation, and an inset action drawer", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    const canvasIds: string[] = [];
+    let workspacePreview: Awaited<ReturnType<typeof seedCanvasWorkspacePreview>> | undefined;
+    try {
+      workspacePreview = await seedCanvasWorkspacePreview(apiClient, seedData);
+      const seeded = await seedTaskCanvas(testPage, apiClient, seedData, true, {
+        foreignWorkspaceId: workspacePreview.foreignWorkspaceId,
+      });
+      canvasIds.push(seeded.canvas.id);
+      const activeCanvas = await approvePendingCanvasThroughHost(
+        testPage,
+        apiClient,
+        seeded.canvas,
+      );
+      const activeReleaseId = activeCanvas.active_release_id;
+
+      await expect(testPage.getByTestId("dockview-task-layout")).toHaveCount(0);
+
+      await testPage.goto(canvasHref(activeCanvas.id));
+      await expect(testPage.getByTestId("canvas-host-route")).toBeVisible({ timeout: 20_000 });
+      await expect(testPage.getByTestId("dockview-task-layout")).toHaveCount(0);
+      await expect(testPage.getByTestId("web-app-frame")).toHaveAttribute(
+        "data-frame-state",
+        "ready",
+        { timeout: 20_000 },
+      );
+      await expectCanvasFrameFillsHost(testPage);
+      const fixture = testPage.frameLocator('iframe[title="E2E Plugin Canvas"]');
+      await expect(fixture.getByTestId("canvas-fixture-script")).toHaveText("inline-ready");
+      await expect(fixture.getByTestId("canvas-fixture-appearance-mode")).toHaveText("light");
+      await expect(fixture.getByTestId("canvas-fixture-appearance-color-scheme")).toHaveText(
+        "light",
+      );
+      await expect(fixture.getByTestId("canvas-fixture-appearance-background")).not.toHaveText(
+        "loading",
+      );
+      await expect(fixture.getByTestId("canvas-fixture-context")).toHaveText(seeded.taskId);
+      await expect(fixture.getByTestId("canvas-fixture-sse-status")).toHaveText("connected");
+      const expectedTaskCount = (await apiClient.listTasks(seedData.workspaceId)).tasks.length;
+      expect(expectedTaskCount).toBeGreaterThanOrEqual(2);
+      await fixture.getByTestId("canvas-fixture-refresh").tap();
+      await expect(fixture.getByTestId("canvas-fixture-refresh-status")).toHaveText("refreshed");
+      await expect(fixture.getByTestId("canvas-fixture-task-count")).toHaveText(
+        String(expectedTaskCount),
+      );
+      await expect(fixture.locator(".task-item")).toHaveCount(expectedTaskCount);
+      await expect(fixture.getByTestId("canvas-fixture-task-ids")).toContainText(seeded.taskId);
+      await expect(fixture.getByTestId("canvas-fixture-task-ids")).toContainText(
+        workspacePreview.workspaceTaskId,
+      );
+      await expect(fixture.getByTestId("canvas-fixture-foreign-workspace-status")).toHaveText(
+        "denied:403",
+      );
+
+      const actionsButton = testPage.getByTestId("canvas-mobile-actions");
+      await expect(actionsButton).toBeVisible();
+      expect((await actionsButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await actionsButton.tap();
+
+      const actionsSheet = testPage.getByTestId("canvas-mobile-actions-sheet");
+      await expect(actionsSheet).toBeVisible();
+      const promoteButton = actionsSheet.getByRole("button", {
+        name: "Promote canvas",
+        exact: true,
+      });
+      await expect(promoteButton).toBeVisible();
+      expect((await promoteButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await promoteButton.tap();
+
+      const promotionDialog = testPage.getByTestId("canvas-promotion-dialog");
+      await expect(promotionDialog).toBeVisible();
+      await expect(promotionDialog.getByTestId("canvas-promotion-target-scope")).toHaveText(
+        "Workspace",
+      );
+      await promotionDialog.getByRole("button", { name: "Confirm promotion", exact: true }).tap();
+
+      await expect
+        .poll(async () => (await getCanvas(apiClient, activeCanvas.id))?.scope_kind ?? null)
+        .toBe("workspace");
+      await expect
+        .poll(async () => (await getCanvas(apiClient, activeCanvas.id))?.active_release_id ?? null)
+        .toBe(activeReleaseId ?? null);
+
+      await testPage.goto("/");
+      await expect(testPage.getByTestId("kanban-board")).toBeVisible({ timeout: 20_000 });
+      const menuButton = testPage.getByTestId("app-nav-trigger");
+      await expect(menuButton).toBeVisible();
+      await menuButton.tap();
+
+      const workspaceCanvas = testPage.getByTestId(`mobile-workspace-canvas-${activeCanvas.id}`);
+      await expect(workspaceCanvas).toBeVisible({ timeout: 15_000 });
+      expect((await workspaceCanvas.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await workspaceCanvas.tap();
+
+      await expect(testPage).toHaveURL(new RegExp(`${canvasHref(activeCanvas.id)}$`));
+      await expect(testPage.getByTestId("canvas-host-route")).toBeVisible({ timeout: 20_000 });
+      await expect(testPage.getByTestId("dockview-task-layout")).toHaveCount(0);
+      await expect(testPage.getByTestId("canvas-mobile-actions")).toBeVisible();
+      await expect
+        .poll(() =>
+          testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        )
+        .toBe(true);
+
+      const secondSeeded = await seedTaskCanvas(testPage, apiClient, seedData, true);
+      canvasIds.push(secondSeeded.canvas.id);
+      const secondApproved = await approvePendingCanvasThroughHost(
+        testPage,
+        apiClient,
+        secondSeeded.canvas,
+      );
+      await promoteCanvas(apiClient, secondApproved);
+
+      await testPage.goto(canvasHref(activeCanvas.id));
+      await expect(testPage.getByTestId("canvas-host-route")).toBeVisible({ timeout: 20_000 });
+      await expect(testPage.getByTestId("web-app-frame")).toHaveAttribute(
+        "data-frame-state",
+        "ready",
+        { timeout: 20_000 },
+      );
+      await expectCanvasFrameFillsHost(testPage);
+      await testPage.getByTestId("canvas-mobile-actions").tap();
+      const picker = testPage.getByTestId("canvas-mobile-picker");
+      await expect(picker).toBeVisible();
+      const secondCanvasItem = picker.getByTestId(`canvas-mobile-picker-item-${secondApproved.id}`);
+      await expect(secondCanvasItem).toBeVisible();
+      expect((await secondCanvasItem.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await secondCanvasItem.tap();
+
+      await expect(testPage).toHaveURL(new RegExp(`${canvasHref(secondApproved.id)}$`));
+      await expect(testPage.getByTestId("canvas-host-route")).toBeVisible({ timeout: 20_000 });
+      await expect(testPage.getByTestId("web-app-frame")).toHaveAttribute(
+        "data-frame-state",
+        "ready",
+        { timeout: 20_000 },
+      );
+      await testPage.getByTestId("canvas-mobile-actions").tap();
+      await expect(testPage.getByTestId(`canvas-mobile-picker-item-${canvasIds[0]}`)).toBeVisible();
+      await expect(
+        testPage.getByRole("button", { name: "Releases and permissions", exact: true }),
+      ).toBeVisible();
+    } finally {
+      await Promise.all(canvasIds.map((canvasId) => removeCanvas(apiClient, canvasId)));
+      await workspacePreview?.cleanup();
+      await releaseFeature();
+    }
+  });
+
+  test("opens one published task canvas after returning and keeps Back usable", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    let canvasId: string | undefined;
+    let taskId: string | undefined;
+    let authoringPage: Page | undefined;
+    try {
+      await testPage.goto("/");
+      authoringPage = await testPage.context().newPage();
+      const seeded = await seedTaskCanvas(authoringPage, apiClient, seedData, true);
+      canvasId = seeded.canvas.id;
+      taskId = seeded.taskId;
+      await authoringPage.close();
+      authoringPage = undefined;
+
+      await testPage.reload();
+      await testPage.goto(`/t/${encodeURIComponent(seeded.taskId)}`);
+      await expect(testPage).toHaveURL(new RegExp(`${canvasHref(seeded.canvas.id)}$`), {
+        timeout: 30_000,
+      });
+      await expect(testPage.getByTestId("canvas-host-route")).toBeVisible({ timeout: 20_000 });
+      await expect(testPage.getByTestId("web-app-frame")).toHaveAttribute(
+        "data-frame-state",
+        "ready",
+        { timeout: 20_000 },
+      );
+
+      await testPage.goBack();
+      await expect(testPage).toHaveURL(new RegExp(`/t/${seeded.taskId}(?:[?]|$)`));
+      await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible({ timeout: 20_000 });
+      await expect(testPage.getByTestId("canvas-host-route")).toHaveCount(0);
+    } finally {
+      await authoringPage?.close();
+      if (canvasId) await removeCanvas(apiClient, canvasId);
+      if (taskId) await apiClient.deleteTask(taskId).catch(() => undefined);
+      await releaseFeature();
+    }
+  });
+});

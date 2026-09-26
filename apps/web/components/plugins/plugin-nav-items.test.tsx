@@ -60,6 +60,32 @@ describe("PluginNavItems", () => {
     expect(screen.queryByTestId("plugin-nav-item-settings-item")).toBeNull();
   });
 
+  it("keeps integration items out of the main plugin rail", () => {
+    pluginRegistry.forPlugin("plugin-a").registerNavItem({
+      id: "integration-item",
+      label: "Integration Item",
+      path: "/plugins/integration-item",
+      section: "integrations",
+    });
+
+    renderNavItems();
+
+    expect(screen.queryByTestId("plugin-nav-item-integration-item")).toBeNull();
+  });
+
+  it("keeps sidebar-footer items out of the main plugin rail", () => {
+    pluginRegistry.forPlugin("plugin-a").registerNavItem({
+      id: "insights-item",
+      label: "Insights Item",
+      path: "/plugins/insights-item",
+      section: "sidebar-footer",
+    });
+
+    renderNavItems();
+
+    expect(screen.queryByTestId("plugin-nav-item-insights-item")).toBeNull();
+  });
+
   it("renders the named curated icon, falling back to the puzzle glyph", () => {
     pluginRegistry
       .forPlugin("plugin-a")

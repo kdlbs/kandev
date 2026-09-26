@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/filescan"
 )
 
 const (
@@ -40,6 +41,8 @@ type Inventory struct {
 	EnvironmentPaths []string
 	ExecutionPaths   []string
 	ScratchRoots     []ScratchRoot
+	KnownTaskIDs     map[string]struct{}
+	ArchivedTaskIDs  map[string]struct{}
 }
 
 type InventorySource interface {
@@ -63,6 +66,8 @@ type Config struct {
 	Now         func() time.Time
 	NewID       func() string
 	Pruner      WorktreePruner
+	Scanner     *filescan.Limiter
+	OnProgress  func(filescan.Progress)
 }
 
 type WorktreePruner interface {
@@ -72,6 +77,13 @@ type WorktreePruner interface {
 type CleanupResult struct {
 	Candidates     int      `json:"candidates"`
 	Quarantined    int      `json:"quarantined"`
+	ReclaimedBytes int64    `json:"reclaimed_bytes"`
+	Warnings       []string `json:"warnings,omitempty"`
+}
+
+type DependencyCleanupResult struct {
+	Workspaces     int      `json:"workspaces"`
+	Directories    int      `json:"directories"`
 	ReclaimedBytes int64    `json:"reclaimed_bytes"`
 	Warnings       []string `json:"warnings,omitempty"`
 }

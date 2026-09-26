@@ -1,5 +1,5 @@
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
-import { areStepDraftsEqual } from "./workflow-card-actions";
+import { areStepDraftsEqual } from "./workflow-step-equality";
 
 function valuesEqual(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
@@ -9,7 +9,7 @@ function valuesEqual(left: unknown, right: unknown): boolean {
 export function isWorkflowFieldDirty(
   draft: Workflow,
   saved: Workflow | undefined,
-  field: "name" | "description" | "agent_profile_id",
+  field: "name" | "description" | "prompt" | "agent_profile_id",
 ): boolean {
   if (!saved) return true;
   return !valuesEqual(draft[field] ?? "", saved[field] ?? "");

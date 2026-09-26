@@ -9,6 +9,7 @@ import type { Skill } from "@/lib/state/slices/office/types";
 import { SkillList } from "./skill-list";
 import { SkillDetail } from "./skill-detail";
 import { CreateSkillForm } from "./create-skill-form";
+import { useTranslation } from "react-i18next";
 
 type ViewMode = "view" | "create";
 
@@ -23,6 +24,7 @@ function useSkillActions(
   setViewMode: (mode: ViewMode) => void,
   skills: Skill[],
 ) {
+  const { t } = useTranslation();
   const addSkill = useAppStore((s) => s.addSkill);
   const updateSkillInStore = useAppStore((s) => s.updateSkill);
   const removeSkillFromStore = useAppStore((s) => s.removeSkill);
@@ -37,10 +39,11 @@ function useSkillActions(
         setViewMode("view");
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
+        // Matched against the BACKEND's English error text — protocol, not copy.
         if (msg.includes("already exists") || msg.includes("duplicate") || msg.includes("unique")) {
-          toast.error("A skill with this name already exists");
+          toast.error(t("office:aSkillWithThisNameAlready"));
         } else {
-          toast.error("Failed to create skill");
+          toast.error(t("office:failedToCreateSkill"));
         }
       }
     },
@@ -167,6 +170,7 @@ function SkillContentPanel({
   onDelete: (id: string) => void;
   onCancelCreate: () => void;
 }) {
+  const { t } = useTranslation();
   if (viewMode === "create") {
     return <CreateSkillForm onCreate={onCreate} onCancel={onCancelCreate} />;
   }
@@ -176,10 +180,8 @@ function SkillContentPanel({
   return (
     <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
       <IconBoxMultiple className="h-12 w-12 mb-4 opacity-30" />
-      <p className="text-sm">Select a skill to view</p>
-      <p className="text-xs mt-1">
-        Skills teach agents how to perform specific tasks. Import from GitHub or create your own.
-      </p>
+      <p className="text-sm">{t("office:selectASkillToView")}</p>
+      <p className="text-xs mt-1">{t("office:skillsTeachAgentsHowToPerform")}</p>
     </div>
   );
 }

@@ -22,20 +22,18 @@ import {
 } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
-import {
-  getChangeRequestTerminology,
-  resolveChangeRequestTerminology,
-  useChangeRequestTerminology,
-  useGitOperations,
-} from "@/hooks/use-git-operations";
-import { useAppStore } from "@/components/state-provider";
-import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
+import { useChangeRequestTerminology } from "@/hooks/use-git-operations";
+import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
-import { useToast } from "@/components/toast-provider";
-import { openExternalLink } from "@/lib/desktop/external-links";
 import type { FileInfo } from "@/lib/state/slices";
-import { getChangeRequestFailureFeedback } from "./change-request-feedback";
+import { Trans, useTranslation } from "react-i18next";
+import { createChangeRequestWithProvider } from "@/lib/plugins/change-request-creation";
+import { useChangeRequestProviderTarget } from "@/hooks/use-change-request-provider-target";
+import {
+  useCreateChangeRequestHandler,
+  type CreateChangeRequestInput,
+} from "./use-create-change-request-handler";
 
 type VcsDialogsContextValue = {
   /** When `repo` is provided, the commit is scoped to that repo only. */
@@ -55,10 +53,26 @@ export function useVcsDialogs() {
 type VcsDialogsProviderProps = {
   sessionId: string | null;
   baseBranch?: string;
+  pullRequestBaseBranch?: string;
+  pullRequestTargetsByRepository?: Record<string, string>;
   taskTitle?: string;
   displayBranch?: string | null;
   children: ReactNode;
 };
+
+export function resolvePullRequestBaseBranch(
+  selectedRepo: string | undefined,
+  targetsByRepository: Record<string, string> | undefined,
+  fallback: string | undefined,
+): string | undefined {
+  if (!selectedRepo || !targetsByRepository) return fallback;
+  const direct = targetsByRepository[selectedRepo];
+  if (direct) return direct;
+  const selectedBase = selectedRepo.split(" · ")[0];
+  const baseTarget = targetsByRepository[selectedBase];
+  if (baseTarget) return baseTarget;
+  return fallback;
+}
 
 type FileSummary = { count: number; additions: number; deletions: number };
 
@@ -86,11 +100,13 @@ function computeFileSummary(
 }
 
 function FileSummaryText({ count, additions, deletions }: FileSummary) {
-  if (count === 0) return <span>No changes to commit</span>;
+  const { t } = useTranslation();
+  if (count === 0) return <span>{t("integrations:noChangesToCommit")}</span>;
   return (
     <span>
-      <span className="font-medium text-foreground">{count}</span> file{count !== 1 ? "s" : ""}{" "}
-      changed
+      <Trans i18nKey="integrations:filesChanged" count={count} values={{ count }}>
+        <span className="font-medium text-foreground">{count}</span> files changed
+      </Trans>
       {(additions > 0 || deletions > 0) && (
         <span className="ml-2">
           (<span className="text-green-600">+{additions}</span>
@@ -142,13 +158,16 @@ function CommitDialog({
   isGeneratingDescription,
   isUtilityConfigured,
 }: CommitDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconGitCommit className="h-5 w-5" />
-            {scopedRepo ? `Commit Changes — ${scopedRepo}` : "Commit Changes"}
+            {scopedRepo
+              ? t("integrations:commitChangesScoped", { scopedRepo })
+              : t("integrations:commitChanges")}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -158,7 +177,7 @@ function CommitDialog({
           <div className="relative min-w-0">
             <Input
               data-testid="commit-title-input"
-              placeholder="Enter commit message..."
+              placeholder={t("integrations:enterCommitMessage")}
               value={commitMessage}
               onChange={(e) => onCommitMessageChange(e.target.value)}
               className="pr-10"
@@ -169,7 +188,7 @@ function CommitDialog({
                 onClick={onGenerateMessage}
                 isGenerating={isGenerating}
                 disabled={fileSummary.count === 0}
-                tooltip="Generate commit message with AI"
+                tooltip={t("integrations:generateCommitMessageWithAi")}
                 isConfigured={isUtilityConfigured}
               />
             </div>
@@ -189,26 +208,26 @@ function CommitDialog({
               onCheckedChange={(checked) => onStageAllChange(checked === true)}
             />
             <Label htmlFor="vcs-stage-all" className="text-sm text-muted-foreground cursor-pointer">
-              Stage all changes before committing
+              {t("integrations:stageAllChangesBeforeCommitting")}
             </Label>
           </div>
         </div>
         <DialogFooter>
           <DialogClose asChild>
             <Button type="button" variant="outline" className="cursor-pointer">
-              Cancel
+              {t("common:cancel")}
             </Button>
           </DialogClose>
           <Button onClick={onCommit} disabled={!commitMessage.trim() || isGitLoading}>
             {isGitLoading ? (
               <>
                 <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
-                Committing...
+                {t("integrations:committingEllipsis")}
               </>
             ) : (
               <>
                 <IconCheck className="h-4 w-4 mr-2" />
-                Commit
+                {t("integrations:commit")}
               </>
             )}
           </Button>
@@ -227,9 +246,9 @@ type UseCommitDialogReturn = {
   setBody: (v: string) => void;
   stageAll: boolean;
   setStageAll: (v: boolean) => void;
-  /** Repo this commit is scoped to in multi-repo mode; "" = all repos with staged. */
-  repo: string;
-  setRepo: (v: string) => void;
+  /** Undefined means all repos; "" is an explicit workspace-root scope. */
+  repo: string | undefined;
+  setRepo: (v: string | undefined) => void;
   openDialog: (repo?: string) => void;
 };
 
@@ -238,14 +257,14 @@ function useCommitDialogState(): UseCommitDialogReturn {
   const [message, setMessage] = useState("");
   const [body, setBody] = useState("");
   const [stageAll, setStageAll] = useState(false);
-  const [repo, setRepo] = useState("");
+  const [repo, setRepo] = useState<string | undefined>(undefined);
   const openDialog = useCallback((nextRepo?: string) => {
     setMessage("");
     setBody("");
     setStageAll(false);
     // Defensive: callers binding `openDialog` directly to onClick can leak the
     // React MouseEvent into nextRepo. Only accept actual repo strings.
-    setRepo(typeof nextRepo === "string" ? nextRepo : "");
+    setRepo(typeof nextRepo === "string" ? nextRepo : undefined);
     setOpen(true);
   }, []);
   return {
@@ -274,9 +293,9 @@ type UsePRDialogReturn = {
   setDraft: (v: boolean) => void;
   branchPushed: boolean;
   setBranchPushed: (v: boolean) => void;
-  /** Repo this PR is scoped to in multi-repo mode; "" = workspace root. */
-  repo: string;
-  setRepo: (v: string) => void;
+  /** Undefined means the default scope; "" is an explicit workspace-root scope. */
+  repo: string | undefined;
+  setRepo: (v: string | undefined) => void;
   openDialog: (taskTitle?: string, repo?: string) => void;
 };
 
@@ -286,14 +305,14 @@ function usePRDialogState(): UsePRDialogReturn {
   const [body, setBody] = useState("");
   const [draft, setDraft] = useState(true);
   const [branchPushed, setBranchPushed] = useState(false);
-  const [repo, setRepo] = useState("");
+  const [repo, setRepo] = useState<string | undefined>(undefined);
   const openDialog = useCallback((taskTitle?: string, nextRepo?: string) => {
     setTitle(taskTitle || "");
     setBody("");
     setBranchPushed(false);
     // Defensive: callers binding `openDialog` directly to onClick can leak the
     // React MouseEvent into nextRepo. Only accept actual repo strings.
-    setRepo(typeof nextRepo === "string" ? nextRepo : "");
+    setRepo(typeof nextRepo === "string" ? nextRepo : undefined);
     setOpen(true);
   }, []);
   return {
@@ -315,8 +334,8 @@ function usePRDialogState(): UsePRDialogReturn {
 
 /**
  * Computes the file summary for the commit dialog: an explicit repo scope
- * uses that repo's files; an empty scope in multi-repo sums across every
- * repo (showing the fan-out total); single-repo falls back to the legacy
+ * uses that repo's files; no scope in multi-repo sums across every repo
+ * (showing the fan-out total); single-repo falls back to the legacy
  * workspace-level status.
  */
 function useScopedFileSummary({
@@ -326,7 +345,7 @@ function useScopedFileSummary({
   isMultiRepo,
   stageAll,
 }: {
-  scopedRepo: string;
+  scopedRepo: string | undefined;
   statusByRepo: ReturnType<typeof useSessionGitStatusByRepo>;
   gitStatus: ReturnType<typeof useSessionGitStatus>;
   isMultiRepo: boolean;
@@ -334,7 +353,7 @@ function useScopedFileSummary({
   stageAll: boolean;
 }): FileSummary {
   return useMemo(() => {
-    if (scopedRepo) {
+    if (scopedRepo !== undefined) {
       const scoped = statusByRepo.find((s) => s.repository_name === scopedRepo);
       return computeFileSummary(scoped?.status?.files, stageAll);
     }
@@ -359,90 +378,85 @@ function useScopedFileSummary({
  * empty scope resolves to the primary single-repo display name, or "All
  * repos" when the workspace has multiple repos and the dialog is fanning out.
  */
-function pickRepoLabel(
-  scopedRepo: string,
+export function pickRepoLabel(
+  scopedRepo: string | undefined,
   isMultiRepo: boolean,
   resolveDisplayName: (name: string) => string | undefined,
+  // Structural, matching the other translate-taking helpers in the app: this
+  // only ever looks a key up, so both the hook's `t` and the module-level one
+  // from `@/lib/i18n` qualify. The branded `TFunction` excluded the latter.
+  t: (key: string) => string,
 ): string {
-  if (scopedRepo) return resolveDisplayName(scopedRepo) || scopedRepo;
-  if (isMultiRepo) return "All repos";
-  return resolveDisplayName("") || "Repository";
+  if (scopedRepo !== undefined) {
+    return scopedRepo
+      ? resolveDisplayName(scopedRepo) || scopedRepo
+      : resolveDisplayName("") || t("integrations:repository");
+  }
+  if (isMultiRepo) return t("integrations:allRepos");
+  return resolveDisplayName("") || t("integrations:repository");
 }
 
-function useCreatePRHandler(
-  ps: UsePRDialogReturn,
-  baseBranch: string | undefined,
-  createPR: ReturnType<typeof useGitOperations>["createPR"],
-  toast: ReturnType<typeof useToast>["toast"],
-  defaultTerminology: ReturnType<typeof getChangeRequestTerminology>,
-) {
-  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const setPendingPrUrlForTask = useAppStore((state) => state.setPendingPrUrlForTask);
-  return useCallback(async () => {
-    if (!ps.title.trim()) return;
-    ps.setOpen(false);
-    try {
-      const result = await createPR(
-        ps.title.trim(),
-        ps.body.trim(),
-        baseBranch,
-        ps.draft,
-        ps.repo || undefined,
-      );
-      if (result.success) {
-        const terms = resolveChangeRequestTerminology(result.provider, defaultTerminology);
-        const title = ps.draft ? `Draft ${terms.shortName} created` : `${terms.shortName} created`;
-        toast({
-          title,
-          description: result.pr_url || `${terms.longName} created successfully`,
-          variant: "success",
-        });
-        if (result.pr_url) {
-          if (activeTaskId) {
-            setPendingPrUrlForTask(activeTaskId, ps.repo || "", result.pr_url);
-          }
-          void openExternalLink(result.pr_url).catch(() => undefined);
-        }
-      } else {
-        const feedback = getChangeRequestFailureFeedback(result, defaultTerminology);
-        toast(feedback);
-        if (result.branch_pushed) {
-          ps.setBranchPushed(true);
-          ps.setOpen(true);
-          return;
-        }
-      }
-    } catch (e) {
-      toast({
-        title: `Create ${defaultTerminology.shortName} failed`,
-        description: e instanceof Error ? e.message : "An error occurred",
-        variant: "error",
-      });
-    }
-    ps.setTitle("");
-    ps.setBody("");
-    ps.setBranchPushed(false);
-  }, [ps, baseBranch, createPR, toast, defaultTerminology, activeTaskId, setPendingPrUrlForTask]);
-}
-
+// eslint-disable-next-line max-lines-per-function -- Coordinates the shared commit and change-request surfaces.
 function useVcsDialogsState(
   sessionId: string | null,
   taskTitle: string | undefined,
   baseBranch: string | undefined,
+  pullRequestBaseBranch: string | undefined,
+  pullRequestTargetsByRepository: Record<string, string> | undefined,
 ) {
+  const { t } = useTranslation();
   const cs = useCommitDialogState();
   const ps = usePRDialogState();
-  const { toast } = useToast();
+  const defaultPullRequestBaseBranch = pullRequestBaseBranch ?? baseBranch;
+  const effectivePullRequestBaseBranch = resolvePullRequestBaseBranch(
+    ps.repo,
+    pullRequestTargetsByRepository,
+    defaultPullRequestBaseBranch,
+  );
   const gitWithFeedback = useGitWithFeedback();
   const gitStatus = useSessionGitStatus(sessionId);
   const statusByRepo = useSessionGitStatusByRepo(sessionId);
   // Use SessionGit so commit fans out per-repo for multi-repo workspaces.
   // useGitOperations.commit hits the workspace root, which fails for multi-repo
   // tasks because the task root isn't itself a git repo (exit 1).
-  const { commit, createPR, repoNames, isLoading: isGitLoading } = useSessionGit(sessionId);
+  const {
+    commit,
+    createPR: createBuiltInPR,
+    push,
+    repoNames,
+    isLoading: isGitLoading,
+  } = useSessionGit(sessionId);
+  const registeredCreateTarget = useChangeRequestProviderTarget(sessionId, ps.repo);
+  const createPR = useCallback(
+    (input: CreateChangeRequestInput) => {
+      if (!registeredCreateTarget || !sessionId) {
+        return createBuiltInPR(
+          input.title,
+          input.body,
+          input.baseBranch,
+          input.draft,
+          input.repositoryScope,
+        );
+      }
+      return createChangeRequestWithProvider({
+        target: registeredCreateTarget,
+        push,
+        repositoryScope: input.repositoryScope,
+        title: input.title,
+        body: input.body,
+        baseBranch: input.baseBranch,
+        draft: input.draft,
+        branchAlreadyPushed: input.branchAlreadyPushed,
+        sessionId,
+        signal: input.signal,
+      });
+    },
+    [createBuiltInPR, push, registeredCreateTarget, sessionId],
+  );
+  const supportsDraft = registeredCreateTarget?.provider.supportsDraft !== false;
   const repoDisplayName = useRepoDisplayName(sessionId);
-  const isMultiRepo = repoNames.filter((r) => r !== "").length > 1;
-  const changeRequestTerminology = useChangeRequestTerminology(sessionId, ps.repo || undefined);
+  const isMultiRepo = repoNames.length > 1;
+  const changeRequestTerminology = useChangeRequestTerminology(sessionId, ps.repo);
   const fileSummary = useScopedFileSummary({
     scopedRepo: cs.repo,
     statusByRepo,
@@ -456,22 +470,19 @@ function useVcsDialogsState(
     const title = cs.message.trim();
     const body = cs.body.trim();
     const fullMessage = body ? `${title}\n\n${body}` : title;
-    const label = cs.repo ? `Commit (${cs.repo})` : "Commit";
-    await gitWithFeedback(
-      () => commit(fullMessage, cs.stageAll, false, cs.repo || undefined),
-      label,
-    );
+    const label = gitOperationLabel(t, "common:gitOpCommit", cs.repo);
+    await gitWithFeedback(() => commit(fullMessage, cs.stageAll, false, cs.repo), label);
     cs.setMessage("");
     cs.setBody("");
-    cs.setRepo("");
-  }, [cs, gitWithFeedback, commit]);
-  const handleCreatePR = useCreatePRHandler(
-    ps,
-    baseBranch,
-    createPR,
-    toast,
-    changeRequestTerminology,
-  );
+    cs.setRepo(undefined);
+  }, [cs, gitWithFeedback, commit, t]);
+  const handleCreatePR = useCreateChangeRequestHandler({
+    dialog: ps,
+    baseBranch: effectivePullRequestBaseBranch,
+    createChangeRequest: createPR,
+    defaultTerminology: changeRequestTerminology,
+    supportsDraft,
+  });
   const contextValue = useMemo(
     () => ({
       openCommitDialog: cs.openDialog,
@@ -487,23 +498,34 @@ function useVcsDialogsState(
     handleCommit,
     handleCreatePR,
     contextValue,
+    pullRequestBaseBranch: effectivePullRequestBaseBranch,
     repoDisplayName,
     isMultiRepo,
     changeRequestTerminology,
+    supportsDraft,
   };
 }
 
 export function VcsDialogsProvider({
   sessionId,
   baseBranch,
+  pullRequestBaseBranch,
+  pullRequestTargetsByRepository,
   taskTitle,
   displayBranch,
   children,
 }: VcsDialogsProviderProps) {
-  const state = useVcsDialogsState(sessionId, taskTitle, baseBranch);
+  const { t } = useTranslation();
+  const state = useVcsDialogsState(
+    sessionId,
+    taskTitle,
+    baseBranch,
+    pullRequestBaseBranch,
+    pullRequestTargetsByRepository,
+  );
   const { cs, ps, isGitLoading, fileSummary, handleCommit, handleCreatePR, contextValue } = state;
-  const effectiveRepoLabel = pickRepoLabel(cs.repo, state.isMultiRepo, state.repoDisplayName);
-  const effectivePRLabel = pickRepoLabel(ps.repo, state.isMultiRepo, state.repoDisplayName);
+  const effectiveRepoLabel = pickRepoLabel(cs.repo, state.isMultiRepo, state.repoDisplayName, t);
+  const effectivePRLabel = pickRepoLabel(ps.repo, state.isMultiRepo, state.repoDisplayName, t);
   const isUtilityConfigured = useIsUtilityConfigured();
   const {
     isGeneratingCommitMessage,
@@ -543,13 +565,14 @@ export function VcsDialogsProvider({
         onOpenChange={ps.setOpen}
         scopedRepo={effectivePRLabel}
         displayBranch={displayBranch}
-        baseBranch={baseBranch}
+        baseBranch={state.pullRequestBaseBranch}
         title={ps.title}
         onTitleChange={ps.setTitle}
         body={ps.body}
         onBodyChange={ps.setBody}
         draft={ps.draft}
         onDraftChange={ps.setDraft}
+        supportsDraft={state.supportsDraft}
         loading={isGitLoading}
         branchPushed={ps.branchPushed}
         onCreate={handleCreatePR}

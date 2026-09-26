@@ -1,7 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, memo, type RefObject } from "react";
+/* eslint-disable max-lines -- this component composes the complete transcript surface. */
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  memo,
+  type MutableRefObject,
+  type RefObject,
+} from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
+import { ComposerFooterAllocation } from "./chat/composer-disclosure";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import {
   type ChatInputContainerHandle,
@@ -15,16 +27,15 @@ import {
   getLastUserMessageId,
   getFirstUserMessageId,
   resolveLastPromptControls,
-  shouldLoadMoreForTranscriptTarget,
 } from "@/components/task/chat/message-list-shared";
 import { AnchoredLastPromptBar } from "@/components/task/chat/anchored-last-prompt-bar";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { ChatInputArea, useSubmitHandler, useChatPanelHandlers } from "./chat/chat-input-area";
-import { ClarificationInputOverlay } from "./chat/clarification-input-overlay";
-import { ResizeHandle } from "./chat/resize-handle";
-import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
+import { useDockviewStore, type TranscriptScrollTarget } from "@/lib/state/dockview-store";
+import { ClarificationPanelSection } from "./chat/clarification-panel-section";
+import { useComposerAgentStartHint } from "./chat/use-composer-agent-start-hint";
 import { PanelSearchBar } from "@/components/search/panel-search-bar";
 import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
 import { usePanelSearch } from "@/hooks/use-panel-search";
@@ -33,21 +44,28 @@ import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { findUnreadDividerItemId, lastRenderedMessageId } from "@/lib/session-unread-divider";
 import { useSessionReadTracking } from "./chat/use-session-read-tracking";
 import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
-import { useAppStore } from "@/components/state-provider";
-import type { Message } from "@/lib/types/http";
+import type { RenderItem } from "@/hooks/use-processed-messages";
+
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
+import type { AppState } from "@/lib/state/store";
+import type { StoreApi } from "zustand";
 import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
+import { useTranslation } from "react-i18next";
 
-/**
- * Cap on how many extra pages the last-prompt background lookup will fetch
- * (see the `lastPromptLookupPagesRef` effect below) before giving up and
- * falling back to the transcript's manual "Load older messages" pagination.
- * 3 pages of 20 covers a long single agent turn without silently draining
- * an entire long-lived conversation that happens to have no recent user
- * message at all.
- */
-const MAX_LAST_PROMPT_LOOKUP_PAGES = 3;
+import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-window";
+import { LaunchWarning } from "./launch-warning";
+import { useTaskLaunchErrorContext } from "./task-launch-error-context";
+import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
+import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
+import { statusSummaryTaskError } from "@/lib/task-status-summary";
+import { LaunchQueueStatus } from "./launch-queue-status";
+import { WipQueueStatus } from "./wip-queue-status";
+import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 
+/** Returns a `clarificationKey` that increments each time a pending
+ * clarification is resolved, letting the composer reset its input state for
+ * the next clarification round. */
 function useClarificationKey(agentMessageCount: number) {
   const lastCountRef = useRef(agentMessageCount);
   const [clarificationKey, setClarificationKey] = useState(0);
@@ -58,6 +76,431 @@ function useClarificationKey(agentMessageCount: number) {
   return { clarificationKey, handleClarificationResolved };
 }
 
+/** Identity for a prompt-history target owned by a non-Dockview host. */
+export type PendingMessageScrollTarget = {
+  sessionId: string;
+  messageId: string;
+  token: number;
+  hostPanelId: string;
+};
+/** Reports whether a target has a dedicated DOM row in the transcript. */
+export function isMessageRowRendered(items: readonly RenderItem[], messageId: string): boolean {
+  return items.some((item) => item.type === "message" && item.message.id === messageId);
+}
+
+/** Scrolls a non-Dockview host target after the message row becomes rendered. */
+type PendingMessageScrollOptions = {
+  messageListRef: RefObject<MessageListHandle | null>;
+  sessionId: string | null;
+  messageId: string | null | undefined;
+  target?: PendingMessageScrollTarget | null;
+  onConsumed: ((messageId: string) => void) | undefined;
+  readinessKey: string;
+  isInitialMessagesLoading: boolean;
+  isVisible?: boolean;
+};
+
+type MessageTargetLifecycle = {
+  sessionId: string | null;
+  messageId: string | null | undefined;
+  target?: PendingMessageScrollTarget | null;
+  isVisible: boolean;
+};
+
+type AroundWindowRequestOptions = {
+  sessionId: string;
+  messageId: string;
+  targetKey: string;
+  store: StoreApi<AppState>;
+  requestKeysRef: MutableRefObject<Set<string>>;
+  mountedRef: MutableRefObject<boolean>;
+  isCurrentTarget: () => boolean;
+  setLoading: (loading: boolean) => void;
+  onMerged: () => void;
+  onCancelled: () => void;
+};
+
+function requestMessageWindowAround({
+  sessionId,
+  messageId,
+  targetKey,
+  store,
+  requestKeysRef,
+  mountedRef,
+  isCurrentTarget,
+  setLoading,
+  onMerged,
+  onCancelled,
+}: AroundWindowRequestOptions) {
+  requestKeysRef.current.add(targetKey);
+  setLoading(true);
+  void loadMessageWindowAround(sessionId, messageId, isCurrentTarget, store)
+    .then((result) => {
+      if (!isCurrentTarget()) return;
+      if (result.kind === "merged") onMerged();
+      else if (result.kind === "deleted-target") onCancelled();
+    })
+    .catch(() => {
+      if (isCurrentTarget()) onCancelled();
+    })
+    .finally(() => {
+      requestKeysRef.current.delete(targetKey);
+      if (mountedRef.current) setLoading(requestKeysRef.current.size > 0);
+    });
+}
+
+type TargetReassertionOptions = {
+  targetKey: string;
+  timerRef: MutableRefObject<number | null>;
+  attemptedRef: MutableRefObject<Set<string>>;
+  completedAroundRef: MutableRefObject<Set<string>>;
+  isCurrentTarget: () => boolean;
+  scroll: () => void;
+  consume: () => void;
+};
+
+function scheduleTargetReassertion({
+  targetKey,
+  timerRef,
+  attemptedRef,
+  completedAroundRef,
+  isCurrentTarget,
+  scroll,
+  consume,
+}: TargetReassertionOptions) {
+  if (timerRef.current !== null || attemptedRef.current.has(targetKey) || !isCurrentTarget()) {
+    return;
+  }
+  timerRef.current = window.setTimeout(() => {
+    timerRef.current = null;
+    if (!isCurrentTarget()) return;
+    attemptedRef.current.add(targetKey);
+    scroll();
+    completedAroundRef.current.delete(targetKey);
+    consume();
+  }, 250);
+}
+
+function cancelTargetReassertion(timerRef: MutableRefObject<number | null>) {
+  if (timerRef.current === null) return;
+  window.clearTimeout(timerRef.current);
+  timerRef.current = null;
+}
+
+type PendingMessageScrollEffectOptions = {
+  messageListRef: RefObject<MessageListHandle | null>;
+  target: PendingMessageScrollTarget | null | undefined;
+  onConsumed: ((messageId: string) => void) | undefined;
+  readinessKey: string;
+  isInitialMessagesLoading: boolean;
+  isVisible: boolean;
+  effectiveSessionId: string | null;
+  effectiveMessageId: string | null | undefined;
+  effectiveTargetKey: string | null;
+  targetBelongsToHost: boolean;
+  store: StoreApi<AppState>;
+  refs: {
+    requestKeys: MutableRefObject<Set<string>>;
+    completedAround: MutableRefObject<Set<string>>;
+    targetIdentity: MutableRefObject<string | null>;
+    scrollSucceededTarget: MutableRefObject<string | null>;
+    reassertionTimer: MutableRefObject<number | null>;
+    reassertionAttempted: MutableRefObject<Set<string>>;
+    mounted: MutableRefObject<boolean>;
+    lifecycle: MutableRefObject<MessageTargetLifecycle>;
+  };
+  setIsLoading: (loading: boolean) => void;
+};
+type PendingMessageTargetAttemptOptions = {
+  messageListRef: RefObject<MessageListHandle | null>;
+  sessionId: string;
+  messageId: string;
+  targetKey: string;
+  isInitialMessagesLoading: boolean;
+  store: StoreApi<AppState>;
+  refs: PendingMessageScrollEffectOptions["refs"];
+  setIsLoading: (loading: boolean) => void;
+  isCurrentTarget: () => boolean;
+  consume: () => void;
+};
+
+function attemptPendingMessageScroll({
+  messageListRef,
+  sessionId,
+  messageId,
+  targetKey,
+  isInitialMessagesLoading,
+  store,
+  refs,
+  setIsLoading,
+  isCurrentTarget,
+  consume,
+}: PendingMessageTargetAttemptOptions) {
+  if (!isCurrentTarget()) return;
+  if (
+    refs.completedAround.current.has(targetKey) &&
+    (refs.reassertionTimer.current !== null || refs.reassertionAttempted.current.has(targetKey))
+  ) {
+    return;
+  }
+  const scheduleReassertion = () =>
+    scheduleTargetReassertion({
+      targetKey,
+      timerRef: refs.reassertionTimer,
+      attemptedRef: refs.reassertionAttempted,
+      completedAroundRef: refs.completedAround,
+      isCurrentTarget,
+      scroll: () => {
+        messageListRef.current?.scrollToMessage(messageId, {
+          align: "start",
+          behavior: "auto",
+        });
+      },
+      consume,
+    });
+  if (
+    messageListRef.current?.scrollToMessage(messageId, {
+      align: "start",
+      behavior: "auto",
+    })
+  ) {
+    refs.scrollSucceededTarget.current = targetKey;
+    if (refs.completedAround.current.has(targetKey)) scheduleReassertion();
+    else if (!refs.requestKeys.current.has(targetKey)) consume();
+    return;
+  }
+  if (isInitialMessagesLoading) return;
+  const loaded = store
+    .getState()
+    .messages.bySession[sessionId]?.some((message) => message.id === messageId);
+  if (
+    loaded ||
+    refs.requestKeys.current.has(targetKey) ||
+    refs.completedAround.current.has(targetKey)
+  ) {
+    return;
+  }
+  requestMessageWindowAround({
+    sessionId,
+    messageId,
+    targetKey,
+    store,
+    requestKeysRef: refs.requestKeys,
+    mountedRef: refs.mounted,
+    isCurrentTarget,
+    setLoading: setIsLoading,
+    onMerged: () => {
+      refs.completedAround.current.add(targetKey);
+      if (refs.scrollSucceededTarget.current === targetKey) scheduleReassertion();
+    },
+    onCancelled: consume,
+  });
+}
+
+function usePendingMessageScrollEffect(options: PendingMessageScrollEffectOptions) {
+  const {
+    messageListRef,
+    target,
+    onConsumed,
+    readinessKey,
+    isInitialMessagesLoading,
+    isVisible,
+    effectiveSessionId,
+    effectiveMessageId,
+    effectiveTargetKey,
+    targetBelongsToHost,
+    store,
+    refs,
+    setIsLoading,
+  } = options;
+  useEffect(() => {
+    const cancelReassertion = () => cancelTargetReassertion(refs.reassertionTimer);
+    if (!targetBelongsToHost) {
+      refs.targetIdentity.current = null;
+      refs.completedAround.current.clear();
+      cancelReassertion();
+      setIsLoading(false);
+      if (target) onConsumed?.(target.messageId);
+      return;
+    }
+    if (!effectiveSessionId || !effectiveMessageId || !effectiveTargetKey) {
+      refs.targetIdentity.current = null;
+      refs.completedAround.current.clear();
+      cancelReassertion();
+      setIsLoading(false);
+      return;
+    }
+    if (refs.targetIdentity.current !== effectiveTargetKey) {
+      refs.targetIdentity.current = effectiveTargetKey;
+      refs.scrollSucceededTarget.current = null;
+      refs.completedAround.current.clear();
+      cancelReassertion();
+    }
+    if (!isVisible) {
+      cancelReassertion();
+      refs.completedAround.current.delete(effectiveTargetKey);
+      return;
+    }
+    const isCurrentTarget = () =>
+      refs.mounted.current &&
+      refs.lifecycle.current.isVisible &&
+      refs.targetIdentity.current === effectiveTargetKey &&
+      refs.lifecycle.current.sessionId === effectiveSessionId &&
+      refs.lifecycle.current.messageId === effectiveMessageId;
+    const consume = () => onConsumed?.(effectiveMessageId);
+    const frame = requestAnimationFrame(() => {
+      attemptPendingMessageScroll({
+        messageListRef,
+        sessionId: effectiveSessionId,
+        messageId: effectiveMessageId,
+        targetKey: effectiveTargetKey,
+        isInitialMessagesLoading,
+        store,
+        refs,
+        setIsLoading,
+        isCurrentTarget,
+        consume,
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    effectiveMessageId,
+    effectiveSessionId,
+    effectiveTargetKey,
+    isInitialMessagesLoading,
+    isVisible,
+    messageListRef,
+    onConsumed,
+    readinessKey,
+    refs,
+    setIsLoading,
+    store,
+    target,
+    targetBelongsToHost,
+  ]);
+}
+
+export function usePendingMessageScroll({
+  messageListRef,
+  sessionId,
+  messageId,
+  target,
+  onConsumed,
+  readinessKey,
+  isInitialMessagesLoading,
+  isVisible = true,
+}: PendingMessageScrollOptions) {
+  const store = useAppStoreApi();
+  const [isLoading, setIsLoading] = useState(false);
+  const refs = useMemo(
+    () => ({
+      requestKeys: { current: new Set<string>() },
+      completedAround: { current: new Set<string>() },
+      targetIdentity: { current: null as string | null },
+      scrollSucceededTarget: { current: null as string | null },
+      reassertionTimer: { current: null as number | null },
+      reassertionAttempted: { current: new Set<string>() },
+      mounted: { current: true },
+      lifecycle: { current: { sessionId, messageId, target, isVisible } },
+    }),
+    [],
+  );
+  const effectiveSessionId = target?.sessionId ?? sessionId;
+  const effectiveMessageId = target?.messageId ?? messageId;
+  const targetToken = target?.token ?? 0;
+  const targetHostPanelId = target?.hostPanelId ?? "pending";
+  const effectiveTargetKey =
+    effectiveSessionId && effectiveMessageId
+      ? `${effectiveSessionId}\u0000${effectiveMessageId}\u0000${targetToken}\u0000${targetHostPanelId}`
+      : null;
+  refs.lifecycle.current = {
+    sessionId: effectiveSessionId,
+    messageId: effectiveMessageId,
+    target,
+    isVisible,
+  };
+  useEffect(() => {
+    refs.mounted.current = true;
+    return () => {
+      refs.mounted.current = false;
+      cancelTargetReassertion(refs.reassertionTimer);
+    };
+  }, [refs]);
+  usePendingMessageScrollEffect({
+    messageListRef,
+    target,
+    onConsumed,
+    readinessKey,
+    isInitialMessagesLoading,
+    isVisible,
+    effectiveSessionId,
+    effectiveMessageId,
+    effectiveTargetKey,
+    targetBelongsToHost: !target || target.sessionId === sessionId,
+    store,
+    refs,
+    setIsLoading,
+  });
+  return { isLoading };
+}
+
+const SCROLL_TO_START_RETRY_DELAY_MS = 50;
+const MAX_SCROLL_TO_START_ATTEMPTS = 120;
+
+type PendingScrollToStartOptions = {
+  messageListRef: RefObject<MessageListHandle | null>;
+  firstMessageId: string | null;
+  hasMore: boolean;
+  pending: boolean;
+  requestKey: number;
+  onComplete: (didScroll: boolean) => void;
+};
+
+/** Keeps a scroll-to-start request alive until the final page's row is mounted. */
+export function usePendingScrollToStart({
+  messageListRef,
+  firstMessageId,
+  hasMore,
+  pending,
+  requestKey,
+  onComplete,
+}: PendingScrollToStartOptions) {
+  useEffect(() => {
+    if (!pending || hasMore) return;
+    if (!firstMessageId) {
+      onComplete(false);
+      return;
+    }
+
+    let cancelled = false;
+    let frameId: number | null = null;
+    let timeoutId: number | null = null;
+    let attempts = 0;
+    const attempt = () => {
+      if (cancelled) return;
+      attempts += 1;
+      const didScroll = Boolean(
+        messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" }),
+      );
+      if (didScroll || attempts >= MAX_SCROLL_TO_START_ATTEMPTS) {
+        onComplete(didScroll);
+        return;
+      }
+      timeoutId = window.setTimeout(attempt, SCROLL_TO_START_RETRY_DELAY_MS);
+    };
+
+    frameId = requestAnimationFrame(attempt);
+    return () => {
+      cancelled = true;
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [firstMessageId, hasMore, messageListRef, onComplete, pending, requestKey]);
+}
+
+/** Computes the render-item key the unread "New" divider should appear
+ * immediately before: tracks the latest rendered message id for session read
+ * tracking, then maps the resulting divider anchor onto the grouped items. */
 function useUnreadDividerBeforeItemKey(
   sessionId: string | null,
   isVisible: boolean,
@@ -77,6 +520,9 @@ function useUnreadDividerBeforeItemKey(
   );
 }
 
+/** Floating session-search overlay over the transcript: the search bar plus
+ * its hits list, with next/prev cycling through hits. Renders nothing while
+ * the search is closed. */
 function SessionSearchOverlay({
   search,
   agentLabel,
@@ -169,13 +615,29 @@ type TaskChatPanelProps = {
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId?: string | null;
   taskId?: string | null;
-  onOpenFile?: (path: string) => void;
+  /**
+   * Task this panel belongs to, independent of whether it has a session yet.
+   * Only the status row uses it, so a task with no session still shows its
+   * dependency and autopilot chips. `taskId` above stays session-gated because
+   * it also drives plan mode, the composer, and read tracking.
+   */
+  statusTaskId?: string | null;
+  onOpenFile?: (path: string, repo?: string) => void;
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
   /** Callback to open a file at a specific line (for comment clicks) */
-  onOpenFileAtLine?: (filePath: string) => void;
+  onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
   /** Hide the sessions dropdown (session tabs in dockview replace it) */
   hideSessionsDropdown?: boolean;
+  /** Mobile layout renders the task queue above its session picker. */
+  hideLaunchQueueStatus?: boolean;
+  /** Mobile layout renders the WIP queue above its session picker. */
+  hideWipQueueStatus?: boolean;
+  /**
+   * Embedded multi-panel hosts do not own the global workbench or shortcuts.
+   * They keep the conversation and composer, but suppress those side effects.
+   */
+  embedded?: boolean;
   /**
    * Whether this panel is the one actually on screen — gates the
    * Slack-style unread-divider read tracking (see
@@ -185,27 +647,434 @@ type TaskChatPanelProps = {
    * already implies visibility for them.
    */
   isVisible?: boolean;
+  panelId?: string | null;
+  /** Legacy message-only target for non-Dockview hosts. */
+  pendingScrollToMessageId?: string | null;
+  /** Identity-bearing target for mobile/non-Dockview prompt navigation. */
+  pendingScrollTarget?: PendingMessageScrollTarget | null;
+  /** Called after a non-Dockview scroll target reaches a rendered row. */
+  onPendingScrollConsumed?: (messageId: string) => void;
 };
+
+type ScrollTargetConsumptionParams = {
+  resolvedSessionId: string | null;
+  isVisible: boolean;
+  panelId: string | null;
+  messageListRef: RefObject<MessageListHandle | null>;
+  /** Whether the target row is present in the current message snapshot. */
+  targetRendered?: boolean;
+  isInitialMessagesLoading: boolean;
+  /** Rendered-transcript revision: retry a retained target when a row mounts
+   * after the initial load or when older pages are prepended. */
+  renderedMessageCount: number;
+};
+
+function shouldDeferTargetWindowLoad(
+  messages: readonly { id: string }[],
+  targetMessageId: string,
+  isInitialMessagesLoading: boolean,
+  targetRendered: boolean,
+) {
+  if (isInitialMessagesLoading) return true;
+  return messages.some((message) => message.id === targetMessageId) && targetRendered;
+}
+
+const pendingDockviewOwnerCleanups = new Map<string, number>();
+
+function cancelDockviewOwnerCleanup(ownerKey: string) {
+  const timer = pendingDockviewOwnerCleanups.get(ownerKey);
+  if (timer === undefined) return;
+  window.clearTimeout(timer);
+  pendingDockviewOwnerCleanups.delete(ownerKey);
+}
+
+function scheduleDockviewOwnerCleanup(
+  ownerKey: string,
+  targetToken: number,
+  clearScrollTarget: (token: number) => void,
+) {
+  cancelDockviewOwnerCleanup(ownerKey);
+  const timer = window.setTimeout(() => {
+    if (pendingDockviewOwnerCleanups.get(ownerKey) !== timer) return;
+    pendingDockviewOwnerCleanups.delete(ownerKey);
+    clearScrollTarget(targetToken);
+  }, 0);
+  pendingDockviewOwnerCleanups.set(ownerKey, timer);
+}
+
+type DockviewOwnerLifecycleOptions = {
+  resolvedSessionId: string | null;
+  panelId: string | null;
+  scrollTarget: TranscriptScrollTarget | null;
+  clearScrollTarget: (token: number) => void;
+  clearScrollTargetForOwner: (sessionId: string, panelId: string) => void;
+  cancelReassertion: () => void;
+};
+
+function useDockviewOwnerLifecycle({
+  resolvedSessionId,
+  panelId,
+  scrollTarget,
+  clearScrollTarget,
+  clearScrollTargetForOwner,
+  cancelReassertion,
+}: DockviewOwnerLifecycleOptions) {
+  const previousOwnerRef = useRef<{ sessionId: string; panelId: string } | null>(null);
+  const ownerTargetRef = useRef<TranscriptScrollTarget | null>(null);
+  ownerTargetRef.current =
+    panelId && scrollTarget?.sessionId === resolvedSessionId && scrollTarget.hostPanelId === panelId
+      ? scrollTarget
+      : null;
+  const ownerKey = ownerTargetRef.current
+    ? `${ownerTargetRef.current.sessionId}\u0000${ownerTargetRef.current.hostPanelId}\u0000${ownerTargetRef.current.token}`
+    : null;
+
+  useEffect(() => {
+    if (!panelId) return;
+    const previousOwner = previousOwnerRef.current;
+    previousOwnerRef.current = resolvedSessionId ? { sessionId: resolvedSessionId, panelId } : null;
+    if (
+      previousOwner &&
+      (previousOwner.sessionId !== resolvedSessionId || previousOwner.panelId !== panelId)
+    ) {
+      clearScrollTargetForOwner(previousOwner.sessionId, previousOwner.panelId);
+      cancelReassertion();
+    }
+  }, [cancelReassertion, clearScrollTargetForOwner, panelId, resolvedSessionId]);
+
+  useEffect(() => {
+    if (ownerKey) cancelDockviewOwnerCleanup(ownerKey);
+  }, [ownerKey]);
+
+  useEffect(() => {
+    if (!panelId) return;
+    return () => {
+      cancelReassertion();
+      const target = ownerTargetRef.current;
+      if (!target || target.sessionId !== resolvedSessionId || target.hostPanelId !== panelId)
+        return;
+      const cleanupKey = `${target.sessionId}\u0000${target.hostPanelId}\u0000${target.token}`;
+      scheduleDockviewOwnerCleanup(cleanupKey, target.token, clearScrollTarget);
+    };
+  }, [cancelReassertion, clearScrollTarget, panelId, resolvedSessionId]);
+}
+
+type DockviewTargetRefs = {
+  activeTargetKey: MutableRefObject<string | null>;
+  reassertionAttempted: MutableRefObject<Set<string>>;
+  requestKeys: MutableRefObject<Set<string>>;
+  completedAround: MutableRefObject<Set<string>>;
+  scrollSucceededTarget: MutableRefObject<string | null>;
+  reassertionTimer: MutableRefObject<number | null>;
+  mounted: MutableRefObject<boolean>;
+  lifecycle: MutableRefObject<{
+    resolvedSessionId: string | null;
+    isVisible: boolean;
+    panelId: string | null;
+  }>;
+};
+
+type DockviewTargetAttemptOptions = {
+  target: TranscriptScrollTarget;
+  targetKey: string;
+  messageListRef: RefObject<MessageListHandle | null>;
+  isInitialMessagesLoading: boolean;
+  targetRendered: boolean;
+  appStore: StoreApi<AppState>;
+  refs: DockviewTargetRefs;
+  setJumpLoading: (loading: boolean) => void;
+  clearScrollTarget: (token: number) => void;
+  isCurrentTarget: () => boolean;
+};
+
+function attemptDockviewScrollTarget(options: DockviewTargetAttemptOptions) {
+  const {
+    target,
+    targetKey,
+    messageListRef,
+    isInitialMessagesLoading,
+    targetRendered,
+    appStore,
+    refs,
+    setJumpLoading,
+    clearScrollTarget,
+    isCurrentTarget,
+  } = options;
+  if (
+    refs.completedAround.current.has(targetKey) &&
+    (refs.reassertionTimer.current !== null || refs.reassertionAttempted.current.has(targetKey))
+  ) {
+    return;
+  }
+  if (!isCurrentTarget()) return;
+  const didScroll = messageListRef.current?.scrollToMessage(target.messageId, {
+    align: "start",
+  });
+  const consume = () => clearScrollTarget(target.token);
+  const scheduleReassertion = () =>
+    scheduleTargetReassertion({
+      targetKey,
+      timerRef: refs.reassertionTimer,
+      attemptedRef: refs.reassertionAttempted,
+      completedAroundRef: refs.completedAround,
+      isCurrentTarget,
+      scroll: () => {
+        messageListRef.current?.scrollToMessage(target.messageId, {
+          align: "start",
+          behavior: "auto",
+        });
+      },
+      consume,
+    });
+  if (didScroll) {
+    refs.scrollSucceededTarget.current = targetKey;
+    if (refs.completedAround.current.has(targetKey)) scheduleReassertion();
+    else if (!refs.requestKeys.current.has(targetKey)) consume();
+    return;
+  }
+  const sessionMessages = appStore.getState().messages.bySession[target.sessionId] ?? [];
+  if (
+    shouldDeferTargetWindowLoad(
+      sessionMessages,
+      target.messageId,
+      isInitialMessagesLoading,
+      targetRendered,
+    ) ||
+    refs.requestKeys.current.has(targetKey) ||
+    refs.completedAround.current.has(targetKey)
+  ) {
+    return;
+  }
+  requestMessageWindowAround({
+    sessionId: target.sessionId,
+    messageId: target.messageId,
+    targetKey,
+    store: appStore,
+    requestKeysRef: refs.requestKeys,
+    mountedRef: refs.mounted,
+    isCurrentTarget,
+    setLoading: setJumpLoading,
+    onMerged: () => {
+      refs.completedAround.current.add(targetKey);
+      if (refs.scrollSucceededTarget.current === targetKey) scheduleReassertion();
+    },
+    onCancelled: consume,
+  });
+}
+
+type DockviewTargetEffectOptions = ScrollTargetConsumptionParams & {
+  scrollTarget: TranscriptScrollTarget | null;
+  appStore: StoreApi<AppState>;
+  refs: DockviewTargetRefs;
+  setJumpLoading: (loading: boolean) => void;
+  clearScrollTarget: (token: number) => void;
+  cancelReassertion: () => void;
+};
+
+function useDockviewTargetEffect(options: DockviewTargetEffectOptions) {
+  const {
+    resolvedSessionId,
+    isVisible,
+    panelId,
+    messageListRef,
+    targetRendered = false,
+    isInitialMessagesLoading,
+    renderedMessageCount,
+    scrollTarget,
+    appStore,
+    refs,
+    setJumpLoading,
+    clearScrollTarget,
+    cancelReassertion,
+  } = options;
+  useEffect(() => {
+    if (
+      !isVisible ||
+      !scrollTarget ||
+      !panelId ||
+      scrollTarget.sessionId !== resolvedSessionId ||
+      scrollTarget.hostPanelId !== panelId
+    ) {
+      return;
+    }
+    const targetKey = `${scrollTarget.sessionId}\u0000${scrollTarget.hostPanelId}\u0000${scrollTarget.token}`;
+    if (refs.activeTargetKey.current !== targetKey) {
+      refs.activeTargetKey.current = targetKey;
+      refs.reassertionAttempted.current.delete(targetKey);
+      refs.scrollSucceededTarget.current = null;
+      cancelReassertion();
+    }
+    const isCurrentTarget = () => {
+      const latest = useDockviewStore.getState().scrollTarget;
+      return (
+        refs.mounted.current &&
+        refs.lifecycle.current.isVisible &&
+        refs.lifecycle.current.resolvedSessionId === scrollTarget.sessionId &&
+        refs.lifecycle.current.panelId === scrollTarget.hostPanelId &&
+        latest?.token === scrollTarget.token &&
+        latest.sessionId === scrollTarget.sessionId &&
+        latest.hostPanelId === scrollTarget.hostPanelId
+      );
+    };
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        attemptDockviewScrollTarget({
+          target: scrollTarget,
+          targetKey,
+          messageListRef,
+          isInitialMessagesLoading,
+          targetRendered,
+          appStore,
+          refs,
+          setJumpLoading,
+          clearScrollTarget,
+          isCurrentTarget,
+        });
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    appStore,
+    cancelReassertion,
+    clearScrollTarget,
+    isInitialMessagesLoading,
+    isVisible,
+    messageListRef,
+    panelId,
+    refs,
+    renderedMessageCount,
+    resolvedSessionId,
+    scrollTarget,
+    setJumpLoading,
+    targetRendered,
+  ]);
+}
+
+/**
+ * Consumes Dockview prompt-history targets. Around-window targets stay owned
+ * through their first rendered placement and one delayed reassertion.
+ */
+export function useScrollTargetConsumption({
+  resolvedSessionId,
+  isVisible,
+  panelId,
+  messageListRef,
+  isInitialMessagesLoading,
+  targetRendered = false,
+  renderedMessageCount,
+}: ScrollTargetConsumptionParams) {
+  const scrollTarget = useDockviewStore((state) => state.scrollTarget);
+  const clearScrollTarget = useDockviewStore((state) => state.clearScrollTarget);
+  const clearScrollTargetForOwner = useDockviewStore((state) => state.clearScrollTargetForOwner);
+  const appStore = useAppStoreApi();
+  const [jumpLoading, setJumpLoading] = useState(false);
+  const refs = useMemo<DockviewTargetRefs>(
+    () => ({
+      activeTargetKey: { current: null },
+      reassertionAttempted: { current: new Set<string>() },
+      requestKeys: { current: new Set<string>() },
+      completedAround: { current: new Set<string>() },
+      scrollSucceededTarget: { current: null },
+      reassertionTimer: { current: null },
+      mounted: { current: true },
+      lifecycle: { current: { resolvedSessionId, isVisible, panelId } },
+    }),
+    [],
+  );
+  refs.lifecycle.current = { resolvedSessionId, isVisible, panelId };
+  const cancelReassertion = useCallback(
+    () => cancelTargetReassertion(refs.reassertionTimer),
+    [refs],
+  );
+  useEffect(() => {
+    refs.mounted.current = true;
+    return () => {
+      refs.mounted.current = false;
+      cancelReassertion();
+    };
+  }, [cancelReassertion, refs]);
+  useDockviewOwnerLifecycle({
+    resolvedSessionId,
+    panelId,
+    scrollTarget,
+    clearScrollTarget,
+    clearScrollTargetForOwner,
+    cancelReassertion,
+  });
+  useEffect(() => {
+    if (isVisible) return;
+    cancelReassertion();
+    if (
+      scrollTarget &&
+      panelId &&
+      scrollTarget.sessionId === resolvedSessionId &&
+      scrollTarget.hostPanelId === panelId
+    ) {
+      const targetKey = `${scrollTarget.sessionId}\u0000${scrollTarget.hostPanelId}\u0000${scrollTarget.token}`;
+      refs.completedAround.current.delete(targetKey);
+      if (refs.scrollSucceededTarget.current === targetKey) clearScrollTarget(scrollTarget.token);
+    }
+  }, [
+    cancelReassertion,
+    clearScrollTarget,
+    isVisible,
+    panelId,
+    refs,
+    resolvedSessionId,
+    scrollTarget,
+  ]);
+  useDockviewTargetEffect({
+    resolvedSessionId,
+    isVisible,
+    panelId,
+    messageListRef,
+    targetRendered,
+    isInitialMessagesLoading,
+    renderedMessageCount,
+    scrollTarget,
+    appStore,
+    refs,
+    setJumpLoading,
+    clearScrollTarget,
+    cancelReassertion,
+  });
+  return jumpLoading;
+}
 
 // eslint-disable-next-line complexity, max-lines-per-function -- composes many sub-panels; each concern already factored into its own hook
 export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
   taskId: taskIdHint = null,
+  statusTaskId = null,
   onOpenFile,
   showRequestChangesTooltip = false,
   onRequestChangesTooltipDismiss,
   onOpenFileAtLine,
   hideSessionsDropdown,
+  embedded = false,
   isVisible = true,
+  panelId = null,
+  pendingScrollToMessageId = null,
+  pendingScrollTarget,
+  onPendingScrollConsumed,
+  hideLaunchQueueStatus = false,
+  hideWipQueueStatus = false,
 }: TaskChatPanelProps) {
   const isArchived = useIsTaskArchived();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
-
+  const launchErrorContext = useTaskLaunchErrorContext();
+  const summaryTaskId = statusTaskId ?? taskIdHint ?? launchErrorContext?.taskId ?? null;
+  const launchStatusSummary = useTaskStatusSummary(
+    summaryTaskId,
+    launchErrorContext?.taskId === summaryTaskId ? launchErrorContext.statusSummary : undefined,
+  );
+  const { t } = useTranslation();
   useSettingsData(true);
   const panelState = useChatPanelState({
     sessionId,
     taskId: taskIdHint,
+    disableWorkbenchEffects: embedded,
     onOpenFile,
     onOpenFileAtLine,
   });
@@ -216,7 +1085,11 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     taskId,
     isWorking,
     messagesLoading,
+    historyRefreshPending,
     isInitialMessagesLoading,
+    historyStatus,
+    historyError,
+    retryHistory,
     groupedItems,
     allMessages,
     footerActionMessages,
@@ -226,29 +1099,59 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarification,
     pendingClarificationGroup,
   } = panelState;
+  const taskLaunchError = statusSummaryTaskError(launchStatusSummary);
+  const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
+  const launchErrorOwned = Boolean(taskLaunchError);
+  const showAgentStartHint = useComposerAgentStartHint(
+    resolvedSessionId,
+    session?.state,
+    allMessages,
+    footerActionMessages,
+  );
+  const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, chatInputRef, {
+    enableFocusShortcut: !embedded,
+  });
+  const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
+
+  const panelRef = useRef<HTMLDivElement>(null);
+  const messageListRef = useRef<MessageListHandle>(null);
   const dividerBeforeItemKey = useUnreadDividerBeforeItemKey(
     resolvedSessionId,
     isVisible,
     groupedItems,
     isInitialMessagesLoading,
   );
-  const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, chatInputRef);
-  const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
-  const {
-    height: clarificationHeight,
-    containerRef: clarificationContainerRef,
-    resetHeight: clarificationResetHeight,
-    resizeHandleProps: clarificationResizeProps,
-  } = useResizableClarificationOverlay();
-
-  // Reset the dragged height when the overlay closes so a fresh
-  // clarification starts auto-sized instead of inheriting a stale value.
-  useEffect(() => {
-    if (!pendingClarification) clarificationResetHeight();
-  }, [pendingClarification, clarificationResetHeight]);
-
-  const panelRef = useRef<HTMLDivElement>(null);
-  const messageListRef = useRef<MessageListHandle>(null);
+  // Kanban previews intentionally pass `isVisible=false` so they do not
+  // advance the read cursor, but their transcript is rendered in a visible
+  // non-Dockview host. Keep read visibility separate from scroll geometry.
+  const transcriptIsVisible = panelId === null || isVisible;
+  const dockviewTargetMessageId = useDockviewStore(
+    (state) => state.scrollTarget?.messageId ?? null,
+  );
+  const isDockviewJumpLoading = useScrollTargetConsumption({
+    resolvedSessionId,
+    isVisible,
+    panelId,
+    messageListRef,
+    isInitialMessagesLoading,
+    targetRendered: Boolean(
+      dockviewTargetMessageId && isMessageRowRendered(groupedItems, dockviewTargetMessageId),
+    ),
+    renderedMessageCount: allMessages.length,
+  });
+  const { isLoading: isPendingJumpLoading } = usePendingMessageScroll({
+    messageListRef,
+    sessionId: resolvedSessionId,
+    messageId: pendingScrollToMessageId,
+    target: pendingScrollTarget,
+    onConsumed: onPendingScrollConsumed,
+    readinessKey: `${allMessages.length}:${isInitialMessagesLoading}:${
+      allMessages[0]?.id ?? ""
+    }:${allMessages.at(-1)?.id ?? ""}`,
+    isInitialMessagesLoading,
+    isVisible,
+  });
+  const isJumpLoading = isDockviewJumpLoading || isPendingJumpLoading;
   const lastPromptMessageId = useMemo(() => getLastUserMessageId(allMessages), [allMessages]);
   const lastPromptMessage = useMemo(
     () =>
@@ -261,10 +1164,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const showAnchoredPromptBar = useAppStore((state) => state.userSettings.showAnchoredPromptBar);
   const showScrollToLastPrompt = useAppStore((state) => state.userSettings.showScrollToLastPrompt);
   const showScrollToStart = useAppStore((state) => state.userSettings.showScrollToStart);
-  const { isMobile } = useResponsiveBreakpoint();
-  // The anchored bar is a desktop-only, opt-in affordance; mobile always
-  // falls back to the scroll button.
-  const showAnchoredBar = !isMobile && showAnchoredPromptBar;
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  // The anchored bar is a desktop-only, fine-pointer affordance; coarse
+  // pointers use the compact scroll control instead.
+  const showAnchoredBar = isFinePointer && !isMobile && showAnchoredPromptBar;
   const [anchoredBarHeight, setAnchoredBarHeight] = useState(0);
   const { anchoredBarVisible, scrollButtonEligible, scrollDirection } =
     resolveLastPromptControls(lastPromptEdge);
@@ -279,7 +1182,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const [isFirstMessageHidden, setIsFirstMessageHidden] = useState(false);
   const showScrollToStartButton =
     showScrollToStart && Boolean(firstMessageId) && isFirstMessageHidden;
-  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(resolvedSessionId);
+  const { loadMoreRaw, hasMore } = useLazyLoadMessages(resolvedSessionId);
   // A paginated session's `firstMessageId` only reflects the oldest message in
   // the currently loaded page while `hasMore` is true — jumping there directly
   // lands on a partial-page boundary, not the transcript's real start. Drain
@@ -287,44 +1190,37 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   // which grows as pages prepend) has settled on the true first prompt by the
   // time the scroll fires.
   const [pendingScrollToStart, setPendingScrollToStart] = useState(false);
+  const [scrollToStartRequest, setScrollToStartRequest] = useState(0);
   useDrainOlderMessages(resolvedSessionId, pendingScrollToStart && hasMore);
-  useEffect(() => {
-    if (!pendingScrollToStart || hasMore) return;
+  const completeScrollToStart = useCallback((didScroll: boolean) => {
     setPendingScrollToStart(false);
-    if (firstMessageId) {
-      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
-    }
-  }, [pendingScrollToStart, hasMore, firstMessageId]);
+    if (didScroll) setIsFirstMessageHidden(false);
+  }, []);
+  usePendingScrollToStart({
+    messageListRef,
+    firstMessageId,
+    hasMore,
+    pending: pendingScrollToStart,
+    requestKey: scrollToStartRequest,
+    onComplete: completeScrollToStart,
+  });
   const scrollToStart = useCallback(() => {
-    if (hasMore) {
-      setPendingScrollToStart(true);
-      return;
-    }
-    if (firstMessageId) {
-      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
-    }
-  }, [hasMore, firstMessageId]);
-  // Bounded background lookup: the last prompt is usually within a page or
-  // two of a long single agent turn, but a session with no recent user
-  // message at all (e.g. hours of tool-only activity) would otherwise drain
-  // its *entire* history just to power this convenience affordance. Stop
-  // after a handful of pages and fall back to the manual "Load older
-  // messages" pagination the transcript already offers.
-  const lastPromptLookupPagesRef = useRef(0);
-  useEffect(() => {
-    lastPromptLookupPagesRef.current = 0;
-  }, [resolvedSessionId]);
-  useEffect(() => {
-    if (lastPromptMessageId !== null) {
-      lastPromptLookupPagesRef.current = 0;
-      return;
-    }
-    if (isLoadingMore || lastPromptLookupPagesRef.current >= MAX_LAST_PROMPT_LOOKUP_PAGES) return;
-    if (!shouldLoadMoreForTranscriptTarget("last_prompt", allMessages, hasMore)) return;
-    lastPromptLookupPagesRef.current += 1;
-    void loadMore();
-  }, [allMessages, hasMore, isLoadingMore, loadMore, lastPromptMessageId, resolvedSessionId]);
-  const search = useSessionSearch(resolvedSessionId, loadMore);
+    setScrollToStartRequest((request) => request + 1);
+    setPendingScrollToStart(true);
+  }, []);
+  // Search can target backend rows before the visible transcript boundary.
+  const navigateSearchHit = useCallback(
+    (id: string) => {
+      if (!messageListRef.current?.scrollToMessage(id, { align: "center" })) return null;
+      return (
+        panelRef.current?.querySelector<HTMLElement>(
+          `.chat-message-list [id="msg-${CSS.escape(id)}"]`,
+        ) ?? null
+      );
+    },
+    [messageListRef],
+  );
+  const search = useSessionSearch(resolvedSessionId, loadMoreRaw, navigateSearchHit);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({
     containerRef: panelRef,
@@ -341,123 +1237,130 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     (e: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(e, panelRef),
     [],
   );
-
   return (
     <PanelRoot
       ref={panelRef}
       data-testid="session-chat"
       data-panel-kind="session"
+      data-session-id={resolvedSessionId ?? undefined}
       tabIndex={-1}
       onMouseDown={handlePanelMouseDown}
       className="outline-none"
     >
-      <PanelBody padding={false} className="relative">
-        <MessageList
-          ref={messageListRef}
-          items={groupedItems}
-          messages={allMessages}
-          footerActionMessages={footerActionMessages}
-          permissionsByToolCallId={permissionsByToolCallId}
-          childrenByParentToolCallId={childrenByParentToolCallId}
-          taskId={taskId ?? undefined}
-          sessionId={resolvedSessionId}
-          messagesLoading={messagesLoading}
-          isWorking={isWorking}
-          sessionState={session?.state}
-          worktreePath={getSessionWorkspacePath(session)}
-          onOpenFile={onOpenFile}
-          dividerBeforeItemKey={dividerBeforeItemKey}
-          lastPromptMessageId={lastPromptMessageId}
-          onLastPromptEdgeChange={setLastPromptEdge}
-          firstMessageId={firstMessageId}
-          onFirstMessageHiddenChange={setIsFirstMessageHidden}
-          anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
-          stickyPromptBar={
-            showAnchoredBar && lastPromptMessage ? (
-              <AnchoredLastPromptBar
-                promptText={lastPromptMessage.content}
-                isVisible={anchoredBarVisible}
-                onScrollUp={scrollToLastPrompt}
-                showScrollToLastPrompt={showScrollToLastPrompt}
-                onHeightChange={setAnchoredBarHeight}
+      {!hideLaunchQueueStatus && <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />}
+      {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
+      <PanelBody
+        padding={false}
+        scroll={false}
+        className="relative flex min-h-0 flex-col overflow-hidden"
+      >
+        <div className="flex min-h-0 flex-1 flex-col">
+          {resolvedSessionId ? (
+            <div className="shrink-0 px-2">
+              <LaunchWarning sessionId={resolvedSessionId} />
+            </div>
+          ) : null}
+          <div className="min-h-0 flex-1">
+            <TaskMarkdownFileLinkProvider
+              taskId={taskId}
+              sessionId={resolvedSessionId}
+              worktreePath={getSessionWorkspacePath(session)}
+              onOpenFile={onOpenFile}
+            >
+              <MessageList
+                ref={messageListRef}
+                items={groupedItems}
+                messages={allMessages}
+                footerActionMessages={footerActionMessages}
+                permissionsByToolCallId={permissionsByToolCallId}
+                childrenByParentToolCallId={childrenByParentToolCallId}
+                taskId={taskId ?? undefined}
+                sessionId={resolvedSessionId}
+                messagesLoading={messagesLoading}
+                historyRefreshPending={historyRefreshPending}
+                historyStatus={historyStatus}
+                historyError={historyError}
+                onRetryHistory={retryHistory}
+                isWorking={isWorking}
+                sessionState={session?.state}
+                worktreePath={getSessionWorkspacePath(session)}
+                onOpenFile={onOpenFile}
+                dividerBeforeItemKey={dividerBeforeItemKey}
+                lastPromptMessageId={lastPromptMessageId}
+                onLastPromptEdgeChange={setLastPromptEdge}
+                firstMessageId={firstMessageId}
+                onFirstMessageHiddenChange={setIsFirstMessageHidden}
+                anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
+                isVisible={transcriptIsVisible}
+                launchErrorOwned={launchErrorOwned}
+                launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
+                launchErrorOccurredAt={launchErrorOwned ? taskLaunchError?.occurred_at : undefined}
+                stickyPromptBar={
+                  showAnchoredBar && lastPromptMessage ? (
+                    <AnchoredLastPromptBar
+                      promptText={lastPromptMessage.content}
+                      isVisible={anchoredBarVisible}
+                      onScrollUp={scrollToLastPrompt}
+                      showScrollToLastPrompt={showScrollToLastPrompt}
+                      onHeightChange={setAnchoredBarHeight}
+                    />
+                  ) : undefined
+                }
               />
-            ) : undefined
-          }
-        />
+            </TaskMarkdownFileLinkProvider>
+          </div>
+        </div>
+        {isJumpLoading && (
+          <div
+            data-testid="transcript-jump-loading"
+            role="status"
+            aria-live="polite"
+            className="absolute right-3 top-3 rounded-md bg-background px-2 py-1 text-xs text-muted-foreground shadow"
+          >
+            {t("task:loading")}
+          </div>
+        )}
         <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
       </PanelBody>
-      <ClarificationSection
-        pendingClarification={Boolean(pendingClarification)}
-        isArchived={isArchived}
-        containerRef={clarificationContainerRef}
-        resizeProps={clarificationResizeProps}
-        height={clarificationHeight}
-        messages={pendingClarificationGroup}
-        onResolved={handleClarificationResolved}
-        shortcutScopeRef={panelRef}
-      />
-      <ChatFooter
-        isArchived={isArchived}
-        chatInputRef={chatInputRef}
-        clarificationKey={clarificationKey}
-        onClarificationResolved={handleClarificationResolved}
-        handleSubmit={handleSubmit}
-        handleCancelTurn={handleCancelTurn}
-        showRequestChangesTooltip={showRequestChangesTooltip}
-        onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
-        panelState={panelState}
-        isSending={isSending}
-        hideSessionsDropdown={hideSessionsDropdown}
-        showScrollToLastPrompt={showScrollButton}
-        onScrollToLastPrompt={scrollToLastPrompt}
-        lastPromptScrollDirection={scrollDirection}
-        showScrollToStart={showScrollToStartButton}
-        onScrollToStart={scrollToStart}
-      />
+      <ComposerFooterAllocation>
+        {!isArchived && (
+          <ClarificationPanelSection
+            pending={Boolean(pendingClarification)}
+            messages={pendingClarificationGroup}
+            agentDisconnected={session?.pending_action === null}
+            onResolved={handleClarificationResolved}
+            onLateAnswer={lateAnswer.send}
+            lateAnswerState={lateAnswer.state}
+            shortcutScopeRef={panelRef}
+            maxHeightVh={50}
+          />
+        )}
+        <ChatFooter
+          isArchived={isArchived}
+          chatInputRef={chatInputRef}
+          clarificationKey={clarificationKey}
+          onClarificationResolved={handleClarificationResolved}
+          handleSubmit={handleSubmit}
+          handleCancelTurn={handleCancelTurn}
+          showRequestChangesTooltip={showRequestChangesTooltip}
+          onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
+          panelState={panelState}
+          isSending={isSending}
+          hideSessionsDropdown={hideSessionsDropdown}
+          hidePlanMode={embedded}
+          showScrollToLastPrompt={showScrollButton}
+          onScrollToLastPrompt={scrollToLastPrompt}
+          lastPromptScrollDirection={scrollDirection}
+          showScrollToStart={showScrollToStartButton}
+          onScrollToStart={scrollToStart}
+          statusTaskId={statusTaskId ?? taskIdHint}
+          showAgentStartHint={showAgentStartHint}
+          launchErrorOwned={launchErrorOwned}
+        />
+      </ComposerFooterAllocation>
     </PanelRoot>
   );
 });
-
-type ClarificationSectionProps = {
-  pendingClarification: boolean;
-  isArchived: boolean;
-  containerRef: RefObject<HTMLDivElement | null>;
-  resizeProps: { onMouseDown: (e: React.MouseEvent) => void; onDoubleClick: () => void };
-  height: number | null;
-  messages: readonly Message[] | null | undefined;
-  onResolved: () => void;
-  shortcutScopeRef: RefObject<HTMLElement | null>;
-};
-
-function ClarificationSection({
-  pendingClarification,
-  isArchived,
-  containerRef,
-  resizeProps,
-  height,
-  messages,
-  onResolved,
-  shortcutScopeRef,
-}: ClarificationSectionProps) {
-  if (!pendingClarification || isArchived) return null;
-  return (
-    <div className="relative flex-shrink-0 border-t border-sky-400/30 bg-card">
-      <ResizeHandle {...resizeProps} />
-      <div
-        ref={containerRef}
-        data-testid="clarification-overlay-container"
-        className="px-1 overflow-y-scroll overscroll-contain max-h-[50vh]"
-        style={height === null ? undefined : { height }}
-      >
-        <ClarificationInputOverlay
-          messages={messages}
-          onResolved={onResolved}
-          shortcutScopeRef={shortcutScopeRef}
-        />
-      </div>
-    </div>
-  );
-}
 
 type ChatFooterProps = {
   isArchived: boolean;
@@ -473,13 +1376,23 @@ type ChatFooterProps = {
   panelState: ReturnType<typeof useChatPanelState>;
   isSending: boolean;
   hideSessionsDropdown?: boolean;
+  hidePlanMode?: boolean;
   showScrollToLastPrompt: boolean;
   onScrollToLastPrompt: () => void;
   lastPromptScrollDirection: "up" | "down";
   showScrollToStart: boolean;
   onScrollToStart: () => void;
+  statusTaskId: string | null;
+  /** Recovered-idle sessions render the composer hint (see ChatInputArea). */
+  showAgentStartHint: boolean;
+  launchErrorOwned: boolean;
 };
 
+/**
+ * Composer footer: renders the chat input area (or the read-only archived
+ * banner) and forwards the recovered-idle agent-start-hint visibility from
+ * the panel down to the input.
+ */
 function ChatFooter({
   isArchived,
   chatInputRef,
@@ -492,16 +1405,21 @@ function ChatFooter({
   panelState,
   isSending,
   hideSessionsDropdown,
+  hidePlanMode,
   showScrollToLastPrompt,
   onScrollToLastPrompt,
   lastPromptScrollDirection,
   showScrollToStart,
   onScrollToStart,
+  statusTaskId,
+  showAgentStartHint,
+  launchErrorOwned,
 }: ChatFooterProps) {
+  const { t } = useTranslation();
   if (isArchived) {
     return (
       <div className="bg-muted/50 flex-shrink-0 px-4 py-3 text-center text-sm text-muted-foreground border-t">
-        This task is archived and read-only.
+        {t("task:thisTaskIsArchivedAndRead")}
       </div>
     );
   }
@@ -517,11 +1435,15 @@ function ChatFooter({
       panelState={panelState}
       isSending={isSending}
       hideSessionsDropdown={hideSessionsDropdown}
+      hidePlanMode={hidePlanMode}
       showScrollToLastPrompt={showScrollToLastPrompt}
       onScrollToLastPrompt={onScrollToLastPrompt}
       lastPromptScrollDirection={lastPromptScrollDirection}
       showScrollToStart={showScrollToStart}
       onScrollToStart={onScrollToStart}
+      statusTaskId={statusTaskId}
+      showAgentStartHint={showAgentStartHint}
+      launchErrorOwned={launchErrorOwned}
     />
   );
 }

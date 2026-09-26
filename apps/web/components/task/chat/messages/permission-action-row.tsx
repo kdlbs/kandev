@@ -4,6 +4,7 @@ import { memo } from "react";
 import { IconCheck, IconChecks, IconX } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { Button } from "@kandev/ui/button";
+import { useTranslation } from "react-i18next";
 
 type PermissionActionRowProps = {
   onApprove: () => void;
@@ -24,13 +25,14 @@ export const PermissionActionRow = memo(function PermissionActionRow({
   onAllowAlways,
   isResponding = false,
 }: PermissionActionRowProps) {
+  const { t } = useTranslation();
   return (
     <div
       className="flex flex-wrap items-center gap-2 px-3 py-2  rounded-sm bg-amber-500/10"
       data-testid="permission-action-row"
     >
       <span className="text-xs text-amber-600 dark:text-amber-400 flex-1 min-w-0">
-        Approve this action?
+        {t("task:approveThisAction")}
       </span>
       <Button
         size="xs"
@@ -41,7 +43,7 @@ export const PermissionActionRow = memo(function PermissionActionRow({
         className={ACTION_BUTTON_CLASS}
       >
         <IconX className="h-4 w-4 mr-1 text-red-500" />
-        Deny
+        {t("task:deny")}
       </Button>
       <Button
         size="xs"
@@ -56,7 +58,7 @@ export const PermissionActionRow = memo(function PermissionActionRow({
         ) : (
           <IconCheck className="h-4 w-4 mr-1 text-green-500" />
         )}
-        Approve
+        {t("task:approve")}
       </Button>
       {onAllowAlways && (
         <Button
@@ -68,7 +70,7 @@ export const PermissionActionRow = memo(function PermissionActionRow({
           className={ACTION_BUTTON_CLASS}
         >
           <IconChecks className="h-4 w-4 mr-1 text-green-500" />
-          Always allow
+          {t("task:alwaysAllow")}
         </Button>
       )}
     </div>

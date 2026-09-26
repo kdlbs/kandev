@@ -1,9 +1,13 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
+import { useAppStore } from "@/components/state-provider";
+import { utilityProfileEligibility } from "@/components/settings/utility-agent-profile-picker";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useUtilityAgents } from "@/hooks/domains/settings/use-utility-agents";
 import type { PluginConfigField } from "@/lib/plugins/config-schema";
 
@@ -11,6 +15,7 @@ import type { PluginConfigField } from "@/lib/plugins/config-schema";
  * collide with it, and Radix rejects value="" items. */
 const ENUM_UNSET_SENTINEL = "__kandev_enum_unset__";
 const UTILITY_AGENT_UNSET_SENTINEL = "__kandev_utility_agent_unset__";
+const AGENT_PROFILE_UNSET_SENTINEL = "__kandev_agent_profile_unset__";
 
 type PluginConfigFormProps = {
   fields: PluginConfigField[];
@@ -58,6 +63,8 @@ type ConfigFieldRowProps = {
 };
 
 function ConfigFieldRow({ field, value, isDirty, disabled, onChange }: ConfigFieldRowProps) {
+  // `field.label` and `field.description` come from the plugin's manifest —
+  // third-party data, not our copy.
   const inputId = `plugin-config-${field.name}`;
   return (
     <div className="space-y-1.5" data-testid={`plugin-config-field-${field.name}`}>
@@ -88,6 +95,7 @@ function ConfigFieldControl({
   disabled,
   onChange,
 }: ConfigFieldControlProps) {
+  const { t } = useTranslation();
   if (field.type === "boolean") {
     return (
       <div>
@@ -117,7 +125,7 @@ function ConfigFieldControl({
           className="max-w-md cursor-pointer"
           data-settings-dirty={isDirty}
         >
-          <SelectValue placeholder="Select..." />
+          <SelectValue placeholder={t("plugins:selectPlaceholder")} />
         </SelectTrigger>
         <SelectContent>
           {!field.required && (
@@ -125,7 +133,7 @@ function ConfigFieldControl({
               value={ENUM_UNSET_SENTINEL}
               className="cursor-pointer text-muted-foreground"
             >
-              Not set
+              {t("plugins:notSet")}
             </SelectItem>
           )}
           {(field.enumValues ?? []).map((option) => (
@@ -141,6 +149,19 @@ function ConfigFieldControl({
   if (field.type === "utility_agent") {
     return (
       <UtilityAgentSelect
+        field={field}
+        inputId={inputId}
+        value={value}
+        isDirty={isDirty}
+        disabled={disabled}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (field.type === "agent_profile") {
+    return (
+      <AgentProfileSelect
         field={field}
         inputId={inputId}
         value={value}
@@ -176,11 +197,13 @@ function UtilityAgentSelect({
   disabled,
   onChange,
 }: ConfigFieldControlProps) {
+  const { t } = useTranslation();
   const { agents, loading, error } = useUtilityAgents();
   const selectedID = typeof value === "string" ? value : "";
   const selectedAgent = agents.find((agent) => agent.id === selectedID);
-  const selectedLabel = selectedAgent?.name ?? selectedUtilityAgentFallback(selectedID, loading);
-  const placeholder = utilityAgentPlaceholder(loading, error);
+  const selectedLabelKey = selectedUtilityAgentFallbackKey(selectedID, loading);
+  const selectedLabel = selectedAgent?.name ?? (selectedLabelKey ? t(selectedLabelKey) : undefined);
+  const placeholder = t(utilityAgentPlaceholderKey(loading, error));
 
   return (
     <Select
@@ -199,7 +222,7 @@ function UtilityAgentSelect({
             value={UTILITY_AGENT_UNSET_SENTINEL}
             className="cursor-pointer text-muted-foreground"
           >
-            Not set
+            {t("plugins:notSet")}
           </SelectItem>
         )}
         {agents.map((agent) => (
@@ -217,15 +240,79 @@ function UtilityAgentSelect({
   );
 }
 
-function selectedUtilityAgentFallback(selectedID: string, loading: boolean): string | undefined {
-  if (selectedID === "") return undefined;
-  return loading ? "Loading selected utility agent..." : "Selected utility agent unavailable";
+function AgentProfileSelect({
+  field,
+  inputId,
+  value,
+  isDirty,
+  disabled,
+  onChange,
+}: ConfigFieldControlProps) {
+  const { t } = useTranslation();
+  // The plugin settings route does not otherwise hydrate settings state, so
+  // direct visits must initiate the profile load themselves.
+  useSettingsData(true);
+  const profiles = useAppStore((state) => state.agentProfiles.items);
+  const selectedID = typeof value === "string" ? value : "";
+  const selectedProfile = profiles.find((profile) => profile.id === selectedID);
+  const eligibleProfiles = profiles.filter((profile) => utilityProfileEligibility(profile));
+  const isStale =
+    selectedID !== "" && !eligibleProfiles.some((profile) => profile.id === selectedID);
+  const selectedProfileLabel =
+    selectedProfile?.label || selectedProfile?.agent_name || selectedProfile?.id || selectedID;
+  const selectedLabel = isStale
+    ? t("settings:utilityUnavailableProfile", { name: selectedProfileLabel })
+    : selectedProfileLabel || undefined;
+
+  return (
+    <Select
+      value={selectedID}
+      disabled={disabled}
+      onValueChange={(next) =>
+        onChange(field.name, next === AGENT_PROFILE_UNSET_SENTINEL ? "" : next)
+      }
+    >
+      <SelectTrigger id={inputId} className="max-w-md cursor-pointer" data-settings-dirty={isDirty}>
+        <SelectValue placeholder={t("plugins:selectPlaceholder")}>{selectedLabel}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {!field.required && (
+          <SelectItem
+            value={AGENT_PROFILE_UNSET_SENTINEL}
+            className="cursor-pointer text-muted-foreground"
+          >
+            {t("plugins:notSet")}
+          </SelectItem>
+        )}
+        {isStale && (
+          <SelectItem value={selectedID} className="cursor-pointer" disabled>
+            {selectedLabel}
+          </SelectItem>
+        )}
+        {eligibleProfiles.map((profile) => (
+          <SelectItem key={profile.id} value={profile.id} className="cursor-pointer">
+            {profile.label || profile.agent_name || profile.id}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 }
 
-function utilityAgentPlaceholder(loading: boolean, error: Error | null): string {
-  if (loading) return "Loading utility agents...";
-  if (error) return "Utility agents unavailable";
-  return "Select a utility agent...";
+// These two return catalog keys rather than messages: a plain function that
+// returns copy is invisible to the guard, and resolving at the call site keeps
+// the text following a locale switch.
+function selectedUtilityAgentFallbackKey(selectedID: string, loading: boolean): string | undefined {
+  if (selectedID === "") return undefined;
+  return loading
+    ? "plugins:loadingSelectedUtilityAgent"
+    : "plugins:selectedUtilityAgentUnavailable";
+}
+
+function utilityAgentPlaceholderKey(loading: boolean, error: Error | null): string {
+  if (loading) return "plugins:loadingUtilityAgents";
+  if (error) return "plugins:utilityAgentsUnavailable";
+  return "plugins:selectAUtilityAgent";
 }
 
 function inputType(field: PluginConfigField): string {

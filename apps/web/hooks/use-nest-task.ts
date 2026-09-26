@@ -5,9 +5,24 @@ import { toast } from "@/lib/toast/sonner";
 import { detachTask, updateTask } from "@/lib/api";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
+import { t } from "@/lib/i18n";
 
 type StoreApi = ReturnType<typeof useAppStoreApi>;
 type SnapshotTask = WorkflowSnapshotData["tasks"][number];
+
+/**
+ * Resolves the workflow id a task belongs to from the multi-workflow
+ * snapshots. Snapshot tasks carry no workflow_id themselves; the snapshot
+ * key is the workflow. Returns null when the task is not in any snapshot
+ * (the caller then skips the optimistic patch and lets the WS event
+ * reconcile state).
+ */
+export function taskWorkflowIdFromSnapshots(store: StoreApi, taskId: string): string | null {
+  const snapshots = store.getState().kanbanMulti?.snapshots ?? {};
+  return (
+    Object.keys(snapshots).find((wf) => snapshots[wf]?.tasks.some((t) => t.id === taskId)) ?? null
+  );
+}
 
 // One re-parent operation's context, threaded to the optimistic helpers.
 type NestOp = {
@@ -59,6 +74,26 @@ function rollbackParent(op: NestOp): void {
 }
 
 /**
+ * useNestTaskByDrag returns the drag-drop nesting action used by the sidebar
+ * and the mobile task sheet: it resolves the dragged task's workflow from the
+ * snapshot keys (snapshot tasks carry no workflow_id themselves) and runs the
+ * same composite nest operation the context menu uses. No-ops when the task
+ * is not in any snapshot (the WS event reconciles state either way).
+ */
+export function useNestTaskByDrag() {
+  const store = useAppStoreApi();
+  const nestTask = useNestTask();
+  return useCallback(
+    (taskId: string, parentTaskId: string) => {
+      const workflowId = taskWorkflowIdFromSnapshots(store, taskId);
+      if (!workflowId) return;
+      void nestTask(taskId, workflowId, parentTaskId);
+    },
+    [store, nestTask],
+  );
+}
+
+/**
  * useNestTask returns a function that nests a task under a parent (or un-nests
  * it when `parentId` is null). The multi-workflow snapshot may not be
  * populated yet (e.g. initial /t/:id load renders the sidebar from the active
@@ -93,7 +128,7 @@ export function useNestTask() {
         }
       } catch (error) {
         rollbackParent(op);
-        toast.error(error instanceof Error ? error.message : "Failed to nest task");
+        toast.error(error instanceof Error ? error.message : t("task:failedToNestTask"));
       }
     },
     [store],

@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/plugins"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -53,6 +56,17 @@ type Hub struct {
 	sessionDataProvider       SessionDataProvider
 	sessionGitDataProvider    SessionGitDataProvider
 	userSubscriptionListeners []func(userID string)
+	pluginConversationService *plugins.Service
+	conversationSourceReader  ConversationSourceReader
+	conversationEpoch         string
+	// sessionLaunchWarnings keeps the latest launch warning long enough for a
+	// client that subscribes after the event was published to receive it.
+	sessionLaunchWarnings map[string][]byte
+
+	// clientDisconnectListener releases connection-bound resources after a
+	// client is removed from the hub. It runs asynchronously so durable cleanup
+	// cannot block the hub event loop.
+	clientDisconnectListener func(connectionID string)
 
 	// sessionMode tracks per-session focus state and fires listeners when
 	// effective mode (paused/slow/fast) transitions. See hub_session_mode.go.
@@ -89,8 +103,29 @@ func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 		broadcast:                make(chan *ws.Message, 256),
 		dispatcher:               dispatcher,
 		sessionMode:              newSessionModeTracker(),
+		sessionLaunchWarnings:    make(map[string][]byte),
 		logger:                   log.WithFields(zap.String("component", "ws_hub")),
+		conversationEpoch:        uuid.NewString(),
 	}
+}
+
+func (h *Hub) SetPluginConversationService(service *plugins.Service) {
+	h.mu.Lock()
+	h.pluginConversationService = service
+	h.mu.Unlock()
+}
+
+// SetConversationSourceReader wires the authorized task source used to
+// establish the initial revision for Host-only conversation subscriptions.
+func (h *Hub) SetConversationSourceReader(reader ConversationSourceReader) {
+	h.mu.Lock()
+	h.conversationSourceReader = reader
+	h.mu.Unlock()
+}
+
+type ConversationSourceReader interface {
+	GetTaskSession(context.Context, string) (*models.TaskSession, error)
+	ReadConversationRevision(context.Context, string) (models.ConversationRevision, error)
 }
 
 type SystemMetricsInterestTracker interface {
@@ -109,6 +144,9 @@ func (h *Hub) Run(ctx context.Context) {
 	h.mu.Lock()
 	h.dispatchCtx = ctx
 	h.mu.Unlock()
+	checksDone := make(chan struct{})
+	go func() { defer close(checksDone); h.runConversationChecks(ctx) }()
+	defer func() { <-checksDone }()
 
 	for {
 		select {
@@ -137,7 +175,9 @@ func (h *Hub) Run(ctx context.Context) {
 func (h *Hub) closeAllClients() {
 	h.mu.Lock()
 	metricClientIDs := make([]string, 0, len(h.systemMetricsSubscribers))
+	disconnectedIDs := make([]string, 0, len(h.clients))
 	for client := range h.clients {
+		disconnectedIDs = append(disconnectedIDs, client.ID)
 		if client.systemMetricsSubscribed {
 			metricClientIDs = append(metricClientIDs, client.ID)
 			client.systemMetricsSubscribed = false
@@ -146,8 +186,10 @@ func (h *Hub) closeAllClients() {
 		delete(h.clients, client)
 	}
 	tracker := h.metricsInterestTracker
+	listener := h.clientDisconnectListener
 	h.taskSubscribers = make(map[string]map[*Client]bool)
 	h.sessionSubscribers = make(map[string]map[*Client]bool)
+	h.sessionLaunchWarnings = make(map[string][]byte)
 	h.runSubscribers = make(map[string]map[*Client]bool)
 	h.systemMetricsSubscribers = make(map[*Client]bool)
 	h.sessionMode.focusByClient = make(map[string]map[*Client]bool)
@@ -156,6 +198,12 @@ func (h *Hub) closeAllClients() {
 	for _, clientID := range metricClientIDs {
 		if tracker != nil {
 			tracker.MetricsUnsubscribe(clientID)
+		}
+	}
+
+	if listener != nil {
+		for _, clientID := range disconnectedIDs {
+			go listener(clientID)
 		}
 	}
 
@@ -205,10 +253,15 @@ func (h *Hub) removeClient(client *Client) {
 		metricClientID = client.ID
 		tracker = h.metricsInterestTracker
 	}
+	listener := h.clientDisconnectListener
 	h.mu.Unlock()
 
 	if tracker != nil && metricClientID != "" {
 		tracker.MetricsUnsubscribe(metricClientID)
+	}
+
+	if listener != nil {
+		go listener(client.ID)
 	}
 
 	for _, sessionID := range dedupStrings(affectedSessions) {
@@ -216,6 +269,14 @@ func (h *Hub) removeClient(client *Client) {
 	}
 
 	h.logger.Debug("Client unregistered", zap.String("client_id", client.ID))
+}
+
+// SetClientDisconnectListener registers a callback for connection teardown.
+// The callback runs once for each client that was present in the hub.
+func (h *Hub) SetClientDisconnectListener(listener func(connectionID string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.clientDisconnectListener = listener
 }
 
 func (h *Hub) SetSystemMetricsInterestTracker(tracker SystemMetricsInterestTracker) {
@@ -307,6 +368,17 @@ func (h *Hub) setAuthPolicy(policy AuthPolicy) {
 // event never disappears entirely because ownership could not be resolved;
 // it only stops crossing user boundaries once ownership is known.
 func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
+	// Prefer the reach set: with team access a workspace is readable by its
+	// members and, when it is org-visible, by the whole organization. Routing
+	// to the owner alone would deliver a shared board's updates to nobody but
+	// the person who happened to create it.
+	if readers := h.authPolicy.WorkspaceReaders; readers != nil && workspaceID != "" {
+		recipients, err := readers(h.DispatchContext(), workspaceID)
+		if err == nil {
+			h.broadcastToUsers(recipients, msg)
+			return
+		}
+	}
 	resolver := h.authPolicy.WorkspaceOwner
 	if resolver == nil || workspaceID == "" {
 		h.Broadcast(msg)
@@ -317,6 +389,63 @@ func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
 		h.Broadcast(msg)
 		return
 	}
+	h.broadcastToOwner(owner, msg)
+}
+
+// broadcastToUsers delivers to exactly the given user IDs. An empty set
+// delivers to nobody: "no one may read this workspace" is a real answer, and
+// falling back to a global broadcast would invert it.
+func (h *Hub) broadcastToUsers(userIDs []string, msg *ws.Message) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("Failed to marshal workspace broadcast", zap.Error(err))
+		return
+	}
+	allowed := make(map[string]struct{}, len(userIDs))
+	for _, id := range userIDs {
+		allowed[id] = struct{}{}
+	}
+	h.mu.RLock()
+	recipients := make([]*Client, 0, len(h.clients))
+	for client := range h.clients {
+		if clientMayReceiveAny(client, allowed) {
+			recipients = append(recipients, client)
+		}
+	}
+	h.mu.RUnlock()
+	h.sendToClients(data, recipients, msg.Action)
+}
+
+// BroadcastToWorkspaceOrDrop is the fail-closed sibling of
+// BroadcastToWorkspace: when per-user auth is enforced it DROPS the message
+// unless the workspace is non-empty AND resolves to a known owner — it never
+// falls back to a global broadcast. Every notification using this path is
+// workspace-scoped, so a payload whose workspace could not be resolved must
+// never cross user boundaries. With auth disabled (single
+// user) it degrades to a plain global broadcast, preserving today's
+// behavior.
+func (h *Hub) BroadcastToWorkspaceOrDrop(workspaceID string, msg *ws.Message) {
+	if !h.workspaceScopeEnforced() {
+		h.BroadcastToWorkspace(workspaceID, msg)
+		return
+	}
+	if workspaceID == "" {
+		return // fail closed: no unattributed workspace fan-out under auth
+	}
+	resolver := h.authPolicy.WorkspaceOwner
+	if resolver == nil {
+		return // fail closed: cannot scope without an owner resolver
+	}
+	owner, err := resolver(h.DispatchContext(), workspaceID)
+	if err != nil || owner == "" {
+		return // fail closed: unresolvable workspace must not go global
+	}
+	h.broadcastToOwner(owner, msg)
+}
+
+// broadcastToOwner fans a message out to the clients allowed to see the
+// workspace owner. Shared by the workspace-scoped broadcast paths.
+func (h *Hub) broadcastToOwner(owner string, msg *ws.Message) {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		h.logger.Error("Failed to marshal workspace broadcast", zap.Error(err))
@@ -331,19 +460,6 @@ func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
 	}
 	h.mu.RUnlock()
 	h.sendToClients(data, recipients, msg.Action)
-}
-
-// BroadcastToWorkspaceOrDrop routes like BroadcastToWorkspace but, when auth is
-// enforced and the workspace is unknown, DROPS the message instead of falling
-// back to a global broadcast. Every Office notification is workspace-scoped, so
-// an office payload whose workspace could not be resolved must never cross user
-// boundaries. With auth disabled (single user) it degrades to a plain global
-// broadcast, preserving today's behavior.
-func (h *Hub) BroadcastToWorkspaceOrDrop(workspaceID string, msg *ws.Message) {
-	if workspaceID == "" && h.workspaceScopeEnforced() {
-		return // fail closed: no unattributed office fan-out under auth
-	}
-	h.BroadcastToWorkspace(workspaceID, msg)
 }
 
 // workspaceScopeEnforced reports whether per-user auth is currently on.
@@ -390,7 +506,7 @@ func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-	clients := h.getSubscribersLocked(h.taskSubscribers, taskID)
+	clients := h.authorizedTaskRecipients(taskID)
 	h.logger.Debug("BroadcastToTask",
 		zap.String("task_id", taskID),
 		zap.String("action", msg.Action),
@@ -438,12 +554,64 @@ func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-	clients := h.getSessionRecipientsLocked(sessionID)
+	clients := h.authorizedSessionRecipients(sessionID)
 	h.logger.Debug("BroadcastToSession",
 		zap.String("session_id", sessionID),
 		zap.String("action", msg.Action),
 		zap.Int("recipient_count", len(clients)))
 	h.sendToClients(data, clients, msg.Action)
+}
+
+func (h *Hub) authorizedTaskRecipients(taskID string) []*Client {
+	clients := h.getSubscribersLocked(h.taskSubscribers, taskID)
+	allowed, denied := h.partitionAuthorized(clients, taskID, h.authPolicy.Subscriptions.Task)
+	if len(denied) == 0 {
+		return allowed
+	}
+	h.mu.Lock()
+	for _, client := range denied {
+		removeClientFromSubscriberMap(h.taskSubscribers, taskID, client)
+		delete(client.subscriptions, taskID)
+	}
+	h.mu.Unlock()
+	return allowed
+}
+
+func (h *Hub) authorizedSessionRecipients(sessionID string) []*Client {
+	clients := h.getSessionRecipientsLocked(sessionID)
+	allowed, denied := h.partitionAuthorized(clients, sessionID, h.authPolicy.Subscriptions.Session)
+	if len(denied) == 0 {
+		return allowed
+	}
+	h.mu.Lock()
+	for _, client := range denied {
+		removeClientFromSubscriberMap(h.sessionSubscribers, sessionID, client)
+		removeClientFromSubscriberMap(h.sessionMode.focusByClient, sessionID, client)
+		delete(client.sessionSubscriptions, sessionID)
+		delete(client.sessionFocus, sessionID)
+	}
+	h.mu.Unlock()
+	h.recomputeSessionMode(sessionID)
+	return allowed
+}
+
+func (h *Hub) partitionAuthorized(
+	clients []*Client,
+	topicID string,
+	authorize func(context.Context, string) error,
+) (allowed, denied []*Client) {
+	if authorize == nil {
+		return clients, nil
+	}
+	allowed = make([]*Client, 0, len(clients))
+	for _, client := range clients {
+		if err := authorize(client.dispatchContext(), topicID); err != nil {
+			denied = append(denied, client)
+			continue
+		}
+		allowed = append(allowed, client)
+	}
+	return allowed, denied
 }
 
 // BroadcastToUser sends a notification to clients subscribed to a specific user
@@ -521,6 +689,9 @@ func (h *Hub) SubscribeToSession(client *Client, sessionID string) bool {
 		zap.String("session_id", sessionID))
 
 	h.recomputeSessionMode(sessionID)
+	if !wasSubscribed {
+		h.replaySessionLaunchWarning(client, sessionID)
+	}
 	return !wasSubscribed
 }
 

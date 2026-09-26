@@ -118,29 +118,10 @@
  *
  *   Chat panel rendering (bug: remote-executor agent reply persisted but UI
  *   doesn't render it until the user refreshes the page)
- *     [chat:virtuoso]                VirtuosoMessageList render-branch snapshots
- *                                    (fallback vs virtuoso) and VirtuosoBody mount —
- *                                    captures itemCount / firstItemIndex /
- *                                    initialTopMostItemIndex at the moment Virtuoso
- *                                    first anchors its scroll. If itemCount at
- *                                    `mount` is < the final item count, Virtuoso
- *                                    anchored on an earlier item and the new last
- *                                    item lands below the fold.
- *     [chat:virtuoso:scrollParent]   `useVisibleScrollParent` lifecycle —
- *                                    ref-callback-ready / ref-callback-defer /
- *                                    ro-attach / ro-ready. A long delay between
- *                                    items growing and `ro-ready` firing is the
- *                                    smoking gun for the mount-too-early race.
- *     [chat:virtuoso:firstIndex]     `useStableFirstItemIndex` transitions —
- *                                    init + key-list deltas. A non-monotonic
- *                                    `delta` between two transitions means
- *                                    Virtuoso saw the keyspace shift in a way
- *                                    that throws off scroll anchoring.
  *     [chat:prepare-progress]        PrepareProgress status / autoExpand / expanded
  *                                    transitions per session. Status stuck on
- *                                    "preparing" with `expanded=true` while
- *                                    Virtuoso is mounted explains the
- *                                    agent-reply-pushed-below-fold scenario.
+ *                                    "preparing" with `expanded=true` explains
+ *                                    the agent-reply-pushed-below-fold scenario.
  *
  *   Agent running-state (bug: ACP turn completes but chat still shows the agent
  *   as running). The chat "agent is working" indicator is driven by
@@ -216,7 +197,14 @@
  *   Other
  *     [ws:connection]         WS hook mount + status transitions
  *     [dockview:*]            layout restore / save / env-switch / session-tabs / task-select
- *     [messages:*]            message fetch / process / lazyload
+ *     [messages:*]            message fetch / process / lazyload / pagination
+ *     [messages:pagination]   older-page trigger, visible boundary, and scroll geometry
+ *     [messages:read-tracking]
+ *                             unread visit capture and per-session mark-read
+ *                             request dispatch/apply/discard/failure
+ *     [messages:scroll-placement]
+ *                             initial placement owner/geometry and later
+ *                             work/message-driven bottom writes
  *     [session:env-mapping]   session → environment ID mapping
  *
  * Tip: in Chrome devtools the console filter input takes substrings and regex.

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	officeenginedispatcher "github.com/kandev/kandev/internal/office/engine_dispatcher"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
@@ -29,6 +29,8 @@ const (
 	approvalCallerErrEmpty           = "caller type and id are required"
 	approvalCommentRequiredOnRequest = "comment is required for request_changes"
 	decisionStoreNotWiredErr         = "decision store not wired"
+	ApprovalGateReasonWorkflowStep   = "workflow_step"
+	ApprovalGateReasonApprovals      = "approvals"
 )
 
 // userParticipantSentinel is the participant_id used for decisions
@@ -38,13 +40,29 @@ const (
 const userParticipantSentinel = "user"
 
 // ApprovalsPendingError is returned by UpdateTaskStatus when a task is
-// being transitioned to "done" but one or more approvers have no
-// current approved decision recorded. The handler maps it to HTTP 409
-// and surfaces the redirected status in the response body.
+// being transitioned to "done" but either it is not yet on a terminal
+// workflow step, or it is and one or more approvers have no current
+// approved decision recorded. The handler maps it to HTTP 409 and
+// surfaces the redirected status in the response body.
 type ApprovalsPendingError struct {
 	// Pending is the list of approver agent IDs without a current
-	// approved decision.
+	// approved decision. Empty when the gate fired on the step-position
+	// check instead.
 	Pending []string
+	// Reason identifies the gate that caused the redirect. It is stable API
+	// data for clients that need to distinguish workflow position from votes.
+	Reason string
+}
+
+// WorkflowStepChangedError reports that the task moved to another workflow
+// step after the completion gate read it. The caller can retry against the
+// new step without risking a stale completion write.
+type WorkflowStepChangedError struct {
+	TaskID string
+}
+
+func (e *WorkflowStepChangedError) Error() string {
+	return fmt.Sprintf("task %s workflow step changed during status update", e.TaskID)
 }
 
 // InvalidTaskStatusError identifies a caller-provided status value that the
@@ -61,12 +79,27 @@ func (e *InvalidTaskStatusError) Error() string {
 // through the Office runtime boundary.
 func (e *InvalidTaskStatusError) IsTaskStatusValidationError() {}
 
-// Error implements the error interface.
+// Error implements the error interface. An empty Pending means the gate
+// fired on the step-position check rather than on outstanding approvals.
 func (e *ApprovalsPendingError) Error() string {
+	if len(e.Pending) == 0 {
+		return "task is not on a terminal workflow step; redirected to in_review"
+	}
 	return fmt.Sprintf(
 		"approvals pending from %d approver(s): %s",
 		len(e.Pending), strings.Join(e.Pending, ","),
 	)
+}
+
+// ReasonCode returns the stable gate reason used in HTTP responses.
+func (e *ApprovalsPendingError) ReasonCode() string {
+	if e.Reason == "" {
+		if len(e.Pending) == 0 {
+			return ApprovalGateReasonWorkflowStep
+		}
+		return ApprovalGateReasonApprovals
+	}
+	return e.Reason
 }
 
 // PendingApproverIDs exposes the pending identities to runtime transports
@@ -220,10 +253,30 @@ type decisionInput struct {
 	decision   string
 }
 
+// decisionRecordingDispatcher is the AC-57a additive capability this
+// function needs from s.engineDispatcher. Named locally and reached via a
+// type assertion rather than widening shared.WorkflowEngineDispatcher,
+// mirroring the handledWorkflowEngineDispatcher precedent
+// (service_tasks.go) — see AC-57d's implementation note.
+type decisionRecordingDispatcher interface {
+	RecordDecision(
+		ctx context.Context, in officeenginedispatcher.RecordDecisionInput,
+	) (officeenginedispatcher.RecordDecisionResult, error)
+}
+
 // recordTaskDecision performs the shared body of ApproveTask /
 // RequestTaskChanges: validates inputs, resolves the caller's role,
-// persists the decision, fires events + activity, and queues
+// persists the decision and re-evaluates the guarded transition through
+// the engine's AC-57a entry point, fires events + activity, and queues
 // reactivity runs via the configured queuer.
+//
+// AC-57b confines this repoint to the resolve/persist/re-evaluate core:
+// resolveDeciderRole and resolveParticipantID are unchanged, and every
+// downstream side-effect (publishDecisionRecorded, logDecisionActivity,
+// runReactivityForDecision, the returned DecisionRecord shape) is
+// preserved. AC-57c: when the engine entry point isn't wired, this SHALL
+// reject the call rather than falling back to a second, office-side
+// implementation of the write.
 func (s *DashboardService) recordTaskDecision(
 	ctx context.Context, in decisionInput,
 ) (*DecisionRecord, error) {
@@ -231,6 +284,10 @@ func (s *DashboardService) recordTaskDecision(
 		return nil, fmt.Errorf("%s", approvalCallerErrEmpty)
 	}
 	if s.decisions == nil {
+		return nil, fmt.Errorf("%s", decisionStoreNotWiredErr)
+	}
+	dispatcher, ok := s.engineDispatcher.(decisionRecordingDispatcher)
+	if !ok {
 		return nil, fmt.Errorf("%s", decisionStoreNotWiredErr)
 	}
 	role, err := s.resolveDeciderRole(ctx, in.callerType, in.callerID, in.taskID)
@@ -246,20 +303,35 @@ func (s *DashboardService) recordTaskDecision(
 	}
 	participantID := s.resolveParticipantID(ctx, stepID, in.taskID, role, in.callerType, in.callerID)
 
-	row := &workflowmodels.WorkflowStepDecision{
-		ID:            uuid.New().String(),
+	result, err := dispatcher.RecordDecision(ctx, officeenginedispatcher.RecordDecisionInput{
 		TaskID:        in.taskID,
 		StepID:        stepID,
 		ParticipantID: participantID,
 		Decision:      in.decision,
-		DecidedAt:     time.Now().UTC(),
 		DeciderType:   in.callerType,
 		DeciderID:     in.callerID,
 		Role:          role,
 		Comment:       in.comment,
-	}
-	if err := s.decisions.RecordStepDecision(ctx, row); err != nil {
+	})
+	if err != nil {
 		return nil, fmt.Errorf("record decision: %w", err)
+	}
+
+	// AC-57b-i: the engine stamped decision_id/decided_at once at write
+	// time; they are echoed back here, never re-derived. result.StepID is
+	// the AC-37 validated step, which is stepID unless the task moved
+	// between validation and write.
+	row := &workflowmodels.WorkflowStepDecision{
+		ID:            result.DecisionID,
+		TaskID:        in.taskID,
+		StepID:        result.StepID,
+		ParticipantID: participantID,
+		Decision:      in.decision,
+		DecidedAt:     result.DecidedAt,
+		DeciderType:   in.callerType,
+		DeciderID:     in.callerID,
+		Role:          role,
+		Comment:       in.comment,
 	}
 
 	rec := fromWorkflowDecision(row)
@@ -272,10 +344,10 @@ func (s *DashboardService) recordTaskDecision(
 // resolveParticipantID looks up the workflow_step_participants row for
 // (step, task, role, agent) and returns its id. Singleton-user callers
 // project to a stable sentinel because the user has no participant row.
-// A miss for an agent caller falls back to the sentinel as well — the
-// office user is treated as the implicit fallback identity per Wave-E
-// spec, and RecordStepDecision tolerates a non-empty arbitrary
-// participant_id (it has no FK).
+// A miss for an agent caller falls back to a stable caller sentinel. The
+// decision repository still revalidates an existing agent seat inside its
+// write transaction, so a seat claimed after this lookup cannot accept a
+// stale decision.
 func (s *DashboardService) resolveParticipantID(
 	ctx context.Context, stepID, taskID, role, callerType, callerID string,
 ) string {
@@ -383,10 +455,10 @@ func (s *DashboardService) logDecisionActivity(ctx context.Context, d *DecisionR
 }
 
 // runReactivityForDecision queues the appropriate run after a
-// decision lands. For changes_requested, the assignee is woken with
-// the comment passed through. For approved, when all approvers now
-// have current approved decisions AND the task is in_review, the
-// assignee is woken with task_ready_to_close.
+// decision lands. For changes_requested and rejected (synonyms), the
+// assignee is woken with the comment passed through. For approved,
+// when all approvers now have current approved decisions AND the task
+// is in_review, the assignee is woken with task_ready_to_close.
 //
 // Best-effort — failures are logged, never propagated.
 func (s *DashboardService) runReactivityForDecision(ctx context.Context, d *DecisionRecord) {
@@ -417,7 +489,7 @@ func (s *DashboardService) buildDecisionRuns(
 	ctx context.Context, d *DecisionRecord, exec *sqlite.TaskExecutionFields,
 ) []ApprovalRun {
 	switch d.Decision {
-	case models.DecisionChangesRequested:
+	case models.DecisionChangesRequested, models.DecisionRejected:
 		return []ApprovalRun{{
 			AgentID:         exec.AssigneeAgentProfileID,
 			Reason:          runTaskChangesRequested,
@@ -426,6 +498,7 @@ func (s *DashboardService) buildDecisionRuns(
 			ActorID:         d.DeciderID,
 			ActorType:       d.DeciderType,
 			DecisionComment: d.Comment,
+			IdempotencyKey:  decisionRunIdempotencyKey(d),
 		}}
 	case models.DecisionApproved:
 		if !s.allApproversApproved(ctx, d.TaskID) {
@@ -435,15 +508,26 @@ func (s *DashboardService) buildDecisionRuns(
 			return nil
 		}
 		return []ApprovalRun{{
-			AgentID:     exec.AssigneeAgentProfileID,
-			Reason:      runTaskReadyToClose,
-			TaskID:      d.TaskID,
-			WorkspaceID: exec.WorkspaceID,
-			ActorID:     d.DeciderID,
-			ActorType:   d.DeciderType,
+			AgentID:        exec.AssigneeAgentProfileID,
+			Reason:         runTaskReadyToClose,
+			TaskID:         d.TaskID,
+			WorkspaceID:    exec.WorkspaceID,
+			ActorID:        d.DeciderID,
+			ActorType:      d.DeciderType,
+			IdempotencyKey: decisionRunIdempotencyKey(d),
 		}}
 	}
 	return nil
+}
+
+// decisionRunIdempotencyKey scopes an approval-flow wake to the durable
+// decision that produced it. A task may enter review more than once, so the
+// scheduler's default (reason, task, agent) key would suppress later rounds.
+func decisionRunIdempotencyKey(d *DecisionRecord) string {
+	if d == nil || d.ID == "" {
+		return ""
+	}
+	return "decision:" + d.ID
 }
 
 // isReviewState returns true when a stored task state represents the

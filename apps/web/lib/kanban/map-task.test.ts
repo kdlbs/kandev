@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toKanbanTask, type TaskLike } from "./map-task";
+import { toKanbanTask, preserveOmittedExecutorFields, type TaskLike } from "./map-task";
 
 /**
  * Parity matrix: the HTTP DTO and the WS payload describe the same task from
@@ -15,7 +15,7 @@ const BASE_SCALARS = {
   description: "Do it well",
   position: 3,
   state: "TODO" as const,
-  priority: 0,
+  priority: "critical",
   is_ephemeral: false,
   created_at: "2026-04-22T10:00:00Z",
   updated_at: "2026-04-22T10:05:00Z",
@@ -45,6 +45,7 @@ function httpDTO(overrides: Partial<TaskLike> = {}): TaskLike {
 function wsPayload(overrides: Partial<TaskLike> = {}): TaskLike {
   return {
     task_id: "task-1",
+    workspace_id: "ws-1",
     workflow_id: "wf-1",
     ...BASE_SCALARS,
     // Backend WS task.updated emits both the primary repository_id *and* the
@@ -66,8 +67,38 @@ function wsPayload(overrides: Partial<TaskLike> = {}): TaskLike {
 }
 
 describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
+  // @covers AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4
+  it("maps is_from_office to isFromOffice", () => {
+    const officeProjection: Partial<TaskLike> = { is_from_office: true };
+    const http = toKanbanTask(httpDTO(officeProjection));
+    const ws = toKanbanTask(wsPayload(officeProjection));
+
+    expect(http.isFromOffice).toBe(true);
+    expect(ws.isFromOffice).toBe(true);
+  });
+
+  it("carries workspace identity and archived state through both task shapes", () => {
+    const archivedAt = "2026-08-04T10:00:00Z";
+    const http = toKanbanTask(httpDTO({ archived_at: archivedAt } as Partial<TaskLike>));
+    const ws = toKanbanTask(wsPayload({ archived_at: archivedAt } as Partial<TaskLike>));
+
+    expect(http.workspaceId).toBe("ws-1");
+    expect(http.isArchived).toBe(true);
+    expect(ws.workspaceId).toBe("ws-1");
+    expect(ws.isArchived).toBe(true);
+  });
   it("plain task: both shapes produce identical KanbanTask", () => {
     expect(toKanbanTask(httpDTO())).toEqual(toKanbanTask(wsPayload()));
+  });
+
+  it("carries task metadata through both shapes", () => {
+    const metadata = { port_forwarding_enabled: true, unrelated: "preserve" };
+    const http = toKanbanTask(httpDTO({ metadata }));
+    const ws = toKanbanTask(wsPayload({ metadata }));
+
+    expect(http.metadata).toEqual(metadata);
+    expect(ws.metadata).toEqual(metadata);
+    expect(ws).toEqual(http);
   });
 
   it("PR review task: review_watch_id flags isPRReview from both shapes", () => {
@@ -96,6 +127,34 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(wsPayload()).repositoryId).toBe("repo-a");
   });
 
+  it("preserves branch policy snapshot fields through HTTP and WS mapping", () => {
+    const repositories = [
+      {
+        repository_id: "repo-a",
+        base_branch: "main",
+        checkout_branch: "feature/ship-it",
+        branch_policy_id: "policy-a",
+        branch_policy_name: "Feature branches",
+        branch_policy_base_branch: "main",
+        branch_policy_branch_template: "feature/{title}-{suffix}",
+        branch_policy_pull_request_target: "develop",
+      },
+    ];
+    const http = toKanbanTask(httpDTO({ repositories }));
+    const ws = toKanbanTask(wsPayload({ repositories }));
+
+    expect(http.repositories?.[0]).toMatchObject({
+      branch_policy_id: "policy-a",
+      branch_policy_name: "Feature branches",
+      branch_policy_base_branch: "main",
+      branch_policy_branch_template: "feature/{title}-{suffix}",
+      branch_policy_pull_request_target: "develop",
+    });
+    expect(ws.repositories).toEqual(http.repositories);
+  });
+});
+
+describe("toKanbanTask — pending and status fields", () => {
   it("maps primary session pending action from HTTP and WS shapes", () => {
     const pendingAction = {
       primary_session_pending_action: "clarification",
@@ -132,6 +191,18 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(wsPayload(invalid)).taskPendingAction).toBeUndefined();
   });
 
+  it("maps the interrupted marker from HTTP and WS shapes", () => {
+    const marked = { interrupted: true } as Partial<TaskLike>;
+    const http = toKanbanTask(httpDTO(marked));
+    const ws = toKanbanTask(wsPayload(marked));
+    expect(http.interrupted).toBe(true);
+    expect(ws.interrupted).toBe(true);
+    // Absent field maps to undefined so a partial update can never synthesize
+    // an interrupted reading.
+    expect(toKanbanTask(httpDTO()).interrupted).toBeUndefined();
+    expect(toKanbanTask(wsPayload()).interrupted).toBeUndefined();
+  });
+
   it("maps the bounded status summary from HTTP and WS task shapes", () => {
     const statusSummary = {
       revision: 7,
@@ -146,6 +217,53 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(http.statusSummary).toEqual(statusSummary);
     expect(ws.statusSummary).toEqual(statusSummary);
     expect(http).toEqual(ws);
+  });
+});
+
+describe("toKanbanTask — human assignee", () => {
+  // The kanban board and the task top bar both read the assignee out of the
+  // store, so this mapper is the only hop between the backend field and every
+  // kanban surface. Dropping it here reads as "nobody is assigned to anything"
+  // with no error anywhere.
+  it("carries the human assignee through both task shapes", () => {
+    const http = toKanbanTask(httpDTO({ assignee_user_id: "user-7" }));
+    const ws = toKanbanTask(wsPayload({ assignee_user_id: "user-7" }));
+
+    expect(http.assigneeUserId).toBe("user-7");
+    expect(ws.assigneeUserId).toBe("user-7");
+  });
+
+  it("leaves the assignee undefined when the backend omits it", () => {
+    expect(toKanbanTask(httpDTO()).assigneeUserId).toBeUndefined();
+  });
+});
+
+describe("toKanbanTask — autopilot", () => {
+  it("preserves the immutable task creation mode for HTTP and websocket payloads", () => {
+    expect(toKanbanTask(httpDTO({ autopilot: true }))).toMatchObject({ autopilot: true });
+    expect(toKanbanTask(wsPayload({ autopilot: true }))).toMatchObject({ autopilot: true });
+    expect(toKanbanTask(httpDTO()).autopilot).toBeUndefined();
+  });
+});
+
+describe("toKanbanTask — parked-on-background-work parity", () => {
+  it("maps parked-on-background-work + revision + epoch from HTTP and WS shapes", () => {
+    const parked = {
+      parked_on_background_work: true,
+      parked_revision: 4,
+      parked_epoch: 1723000000000,
+    } as Partial<TaskLike>;
+    const http = toKanbanTask(httpDTO(parked));
+    const ws = toKanbanTask(wsPayload(parked));
+
+    expect(http).toEqual(ws);
+    expect(http.parkedOnBackgroundWork).toBe(true);
+    expect(http.parkedRevision).toBe(4);
+    expect(http.parkedEpoch).toBe(1723000000000);
+    // Absent fields map to undefined so a partial update can never synthesize
+    // a parked reading.
+    expect(toKanbanTask(httpDTO()).parkedOnBackgroundWork).toBeUndefined();
+    expect(toKanbanTask(wsPayload()).parkedOnBackgroundWork).toBeUndefined();
   });
 });
 
@@ -192,8 +310,12 @@ describe("toKanbanTask — state normalization", () => {
     expect(first.isIssueWatch).toBe(false);
     expect(first.issueUrl).toBeUndefined();
     expect(first.issueNumber).toBeUndefined();
+    expect(mapped[1].metadata).toBeUndefined();
+    expect(mapped[2].metadata).toEqual({});
+    const { metadata: _firstMetadata, ...firstWithoutMetadata } = first;
     for (const out of mapped.slice(1)) {
-      expect(out).toEqual(first);
+      const { metadata: _metadata, ...outWithoutMetadata } = out;
+      expect(outWithoutMetadata).toEqual(firstWithoutMetadata);
     }
   });
 
@@ -219,5 +341,87 @@ describe("toKanbanTask — state normalization", () => {
 
     expect(detached.parentTaskId).toBeUndefined();
     expect(detached.workspaceMode).toBe("shared_group");
+  });
+});
+
+describe("toKanbanTask priority", () => {
+  it("preserves the canonical priority from HTTP and WebSocket payloads", () => {
+    expect(toKanbanTask(httpDTO()).priority).toBe("critical");
+    expect(toKanbanTask(wsPayload()).priority).toBe("critical");
+  });
+});
+
+describe("toKanbanTask runner mutability", () => {
+  it("carries an explicit true/false and reason through both task shapes", () => {
+    const http = toKanbanTask(
+      httpDTO({ runner_editable: true, runner_ineligible_reason: "eligible" }),
+    );
+    expect(http.runnerEditable).toBe(true);
+    expect(http.runnerIneligibleReason).toBe("eligible");
+
+    const ws = toKanbanTask(
+      wsPayload({ runner_editable: false, runner_ineligible_reason: "session_exists" }),
+    );
+    expect(ws.runnerEditable).toBe(false);
+    expect(ws.runnerIneligibleReason).toBe("session_exists");
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-001.9: an omitted projection must fail closed, never
+  // read as the last-known value — unlike executor identity, this is not
+  // gap-filled from a cached task on merge (see mergeTaskUpdate in
+  // lib/ws/handlers/tasks.ts, which has no preserve entry for these fields).
+  it("fails closed to editable=false when the source omits the projection", () => {
+    const task = toKanbanTask(
+      httpDTO({ runner_editable: undefined, runner_ineligible_reason: undefined }),
+    );
+    expect(task.runnerEditable).toBe(false);
+    expect(task.runnerIneligibleReason).toBe("evaluation_unavailable");
+  });
+});
+
+describe("preserveOmittedExecutorFields", () => {
+  const existing = toKanbanTask(
+    httpDTO({
+      primary_executor_id: "exec-1",
+      primary_executor_type: "worktree",
+      primary_executor_name: "Worktree",
+      is_remote_executor: false,
+    }),
+  );
+
+  it("backfills all four executor fields when the incoming task omits them", () => {
+    const incoming = toKanbanTask(
+      httpDTO({
+        primary_executor_id: undefined,
+        primary_executor_type: undefined,
+        primary_executor_name: undefined,
+        is_remote_executor: undefined,
+      }),
+    );
+
+    preserveOmittedExecutorFields(incoming, existing);
+
+    expect(incoming.primaryExecutorId).toBe("exec-1");
+    expect(incoming.primaryExecutorType).toBe("worktree");
+    expect(incoming.primaryExecutorName).toBe("Worktree");
+    expect(incoming.isRemoteExecutor).toBe(false);
+  });
+
+  it("leaves a real incoming executor value untouched", () => {
+    const incoming = toKanbanTask(
+      httpDTO({
+        primary_executor_id: "exec-2",
+        primary_executor_type: "ssh",
+        primary_executor_name: "Remote box",
+        is_remote_executor: true,
+      }),
+    );
+
+    preserveOmittedExecutorFields(incoming, existing);
+
+    expect(incoming.primaryExecutorId).toBe("exec-2");
+    expect(incoming.primaryExecutorType).toBe("ssh");
+    expect(incoming.primaryExecutorName).toBe("Remote box");
+    expect(incoming.isRemoteExecutor).toBe(true);
   });
 });

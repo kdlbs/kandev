@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -355,13 +356,18 @@ test.describe("Code walkthrough", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-basic", "5-step tour");
     const card = await openWalkthrough(testPage);
 
+    await expect(card.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
     await card.getByRole("textbox").fill("Why does this line exist?");
     await expect(card.getByRole("button", { name: "Add" })).toBeEnabled();
     await expect(card.getByRole("button", { name: "Run" })).toBeEnabled();
+    await prCapture.screenshot("desktop-walkthrough-feedback-controls", {
+      caption: "Desktop walkthrough keeps Add and Run without an inert Cancel action",
+    });
     await card.getByRole("button", { name: "Run" }).click();
     await expect(card.getByRole("textbox")).toHaveValue("");
   });
@@ -391,6 +397,7 @@ test.describe("Code walkthrough", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const session = await seedWalkthroughTask(
       testPage,
@@ -414,7 +421,12 @@ test.describe("Code walkthrough", () => {
     const reviewProgress = reviewDialog.getByText(/^0 of \d+ files reviewed$/);
     await expect(reviewProgress).toBeVisible({ timeout: 15_000 });
     const initialProgress = await reviewProgress.textContent();
-    await testPage.waitForTimeout(600);
+    await dwell(
+      testPage,
+      600,
+      "negative-assertion",
+      "asserts the walkthrough behind the dialog never scrolls the review or advances its progress; both checks are absences, so they need the window in which a stray scroll or auto-review would land to elapse first",
+    );
     await expect(reviewDialog.getByTestId("review-diff-scroll")).toHaveJSProperty("scrollTop", 0);
     await expect(reviewProgress).toHaveText(initialProgress ?? "");
     await expectWalkthroughBehindDialog(testPage, reviewDialog, [
@@ -427,25 +439,36 @@ test.describe("Code walkthrough", () => {
     await session.walkthroughLauncher().hover();
     await expect(session.walkthroughDiscardButton()).toBeVisible({ timeout: 5_000 });
     await session.walkthroughDiscardButton().click();
-    const discardDialog = session.walkthroughDiscardDialog();
-    await expect(discardDialog).toBeVisible();
-    await expectWalkthroughBehindDialog(testPage, discardDialog, [
-      { locator: card, name: "walkthrough window" },
-      { locator: session.walkthroughLauncher().locator(".."), name: "walkthrough launcher" },
+    const discardConfirmation = session.walkthroughDiscardConfirmation();
+    await expect(discardConfirmation).toBeVisible();
+    await expect(discardConfirmation).toHaveAttribute("role", "dialog");
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await prCapture.screenshot("desktop-walkthrough-discard-confirmation", {
+      caption: "Desktop walkthrough confirms discard in its anchored toolbar",
+    });
+    const [confirmationZIndex, launcherZIndex] = await Promise.all([
+      discardConfirmation.evaluate((element) =>
+        Number.parseInt(getComputedStyle(element).zIndex, 10),
+      ),
+      session
+        .walkthroughLauncher()
+        .locator("..")
+        .evaluate((element) => Number.parseInt(getComputedStyle(element).zIndex, 10)),
     ]);
-    await discardDialog.getByRole("button", { name: "Cancel" }).click();
+    expect(confirmationZIndex).toBeGreaterThan(launcherZIndex);
+    await discardConfirmation.getByRole("button", { name: "Cancel" }).click();
     await expect(card).toBeVisible();
     await expect(session.walkthroughLauncher()).toHaveCount(1);
 
     await session.walkthroughLauncher().hover();
     await session.walkthroughDiscardButton().click();
-    await expect(session.walkthroughDiscardDialog()).toBeVisible();
+    await expect(session.walkthroughDiscardConfirmation()).toBeVisible();
     await session
-      .walkthroughDiscardDialog()
+      .walkthroughDiscardConfirmation()
       .getByRole("button", { name: "Discard walkthrough" })
       .click();
 
-    await expect(session.walkthroughDiscardDialog()).toBeHidden({ timeout: 10_000 });
+    await expect(session.walkthroughDiscardConfirmation()).toBeHidden({ timeout: 10_000 });
     await expect(session.walkthroughLauncher()).toHaveCount(0);
     await expect(session.walkthroughFloating()).toHaveCount(0);
     await expect(session.walkthroughEditorRange()).toHaveCount(0);

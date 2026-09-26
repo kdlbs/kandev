@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 )
 
 // DeletedProfileError carries the soft-deleted profile's ID and name so the
@@ -17,6 +20,11 @@ type DeletedProfileError struct {
 	ProfileID   string
 	ProfileName string
 }
+
+// ErrVirtualProfile marks a profile family that is a routing owner rather
+// than a concrete subprocess. Direct lifecycle launches must stop here; the
+// shared dynamic conductor is the only owner allowed to select a candidate.
+var ErrVirtualProfile = errors.New("agent profile belongs to a virtual execution family")
 
 func (e *DeletedProfileError) Error() string {
 	if e.ProfileName != "" {
@@ -60,6 +68,12 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 	if err != nil {
 		return nil, fmt.Errorf("agent not found for profile: %w", err)
 	}
+	if err := r.migrateCursorProfile(ctx, profile, agent); err != nil {
+		return nil, err
+	}
+	if agent.Name == agents.DynamicAgentID {
+		return nil, fmt.Errorf("profile %s: %w", profile.ID, ErrVirtualProfile)
+	}
 
 	// Resolve agent capabilities from the registry.
 	model, nativeSessionResume := r.resolveAgentCapabilities(agent.Name, profile.Model)
@@ -71,6 +85,9 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		AgentName:                  agent.Name,
 		Model:                      model,
 		Mode:                       profile.Mode,
+		FallbackModel:              profile.FallbackModel,
+		AutoFallback:               profile.AutoFallback,
+		RequireExactModel:          profile.RequireExactModel,
 		ConfigOptions:              profile.ConfigOptions,
 		AutoApprove:                profile.AutoApprove,
 		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
@@ -78,10 +95,38 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		CLIFlags:                   profile.CLIFlags,
 		CommandPrefix:              profile.CommandPrefix,
 		EnvVars:                    profile.EnvVars,
+		ProviderKind:               profile.ProviderKind,
+		ProviderBaseURL:            profile.ProviderBaseURL,
+		ProviderAPIKeySecretID:     profile.ProviderAPIKeySecretID,
 		CLIPassthrough:             profile.CLIPassthrough,
+		CursorMCPAuthEnabled:       profile.CursorMCPAuthEnabled,
 		NativeSessionResume:        nativeSessionResume,
 		SupportsMCP:                agent.SupportsMCP,
 	}, nil
+}
+
+func (r *StoreProfileResolver) migrateCursorProfile(
+	ctx context.Context,
+	profile *models.AgentProfile,
+	agent *models.Agent,
+) error {
+	if profile == nil || agent == nil {
+		return nil
+	}
+	agentID := agent.Name
+	if agentID == "" {
+		agentID = agent.ID
+	}
+	model, options, changed := acpcompat.MigrateCursorModel(agentID, profile.Model, profile.ConfigOptions)
+	if !changed {
+		return nil
+	}
+	profile.Model = model
+	profile.ConfigOptions = options
+	if err := r.store.UpdateAgentProfile(ctx, profile); err != nil {
+		return fmt.Errorf("migrate Cursor profile %q: %w", profile.ID, err)
+	}
+	return nil
 }
 
 // checkSoftDeleted returns a *DeletedProfileError when the missing-row error

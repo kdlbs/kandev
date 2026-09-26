@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { TaskPR } from "@/lib/types/github";
-import { getPRStatusColor, getPRTooltip } from "./pr-task-icon";
+import { getPRStatusColor } from "./pr-task-icon";
+import { derivePRTaskStatusSummary } from "./pr-task-status-summary";
 
 function draftPR(): TaskPR {
   return {
     id: "id",
+    workspace_id: "workspace-1",
     task_id: "task",
     owner: "o",
     repo: "r",
@@ -39,9 +41,23 @@ describe("draft PR task status", () => {
     expect(getPRStatusColor(draftPR())).toBe("text-muted-foreground");
   });
 
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.20
+  it("stays muted when checks fail", () => {
+    expect(getPRStatusColor({ ...draftPR(), checks_state: "failure" })).toBe(
+      "text-muted-foreground",
+    );
+  });
+
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.20
+  it("stays muted when changes are requested", () => {
+    expect(getPRStatusColor({ ...draftPR(), review_state: "changes_requested" })).toBe(
+      "text-muted-foreground",
+    );
+  });
+
   it("identifies the draft without claiming it is ready to merge", () => {
-    const tooltip = getPRTooltip(draftPR());
-    expect(tooltip).toContain("Draft");
-    expect(tooltip).not.toContain("Ready to merge");
+    const summary = derivePRTaskStatusSummary(draftPR(), false);
+    expect(summary.rows.at(-1)).toEqual({ kind: "merge", status: "draft", tone: "muted" });
+    expect(summary.rows.some((row) => row.status === "ready")).toBe(false);
   });
 });

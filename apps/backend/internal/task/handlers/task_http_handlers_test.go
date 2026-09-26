@@ -38,10 +38,12 @@ import (
 // LaunchSession to short-circuit the two-phase create flow before its async
 // start goroutine spawns (keeping assertions race-free).
 type captureOrchestrator struct {
-	mu                 sync.Mutex
-	requests           []*orchestrator.LaunchSessionRequest
-	prepErr            error
-	startCreatedCalled chan struct{}
+	mu                   sync.Mutex
+	requests             []*orchestrator.LaunchSessionRequest
+	prepErr              error
+	startCreatedErr      error
+	startCreatedResponse *orchestrator.LaunchSessionResponse
+	startCreatedCalled   chan struct{}
 }
 
 func (m *captureOrchestrator) LaunchSession(_ context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
@@ -54,10 +56,31 @@ func (m *captureOrchestrator) LaunchSession(_ context.Context, req *orchestrator
 		default:
 		}
 	}
+	if req.Intent == orchestrator.IntentStartCreated {
+		if m.startCreatedErr != nil {
+			return nil, m.startCreatedErr
+		}
+		if m.startCreatedResponse != nil {
+			return m.startCreatedResponse, nil
+		}
+	}
 	if m.prepErr != nil {
 		return nil, m.prepErr
 	}
 	return &orchestrator.LaunchSessionResponse{SessionID: "sess-1"}, nil
+}
+
+type captureAgentProfileRecentUseRecorder struct {
+	profileIDs chan string
+}
+
+func (r *captureAgentProfileRecentUseRecorder) RecordAgentProfileRecentUse(
+	_ context.Context,
+	_ usermodels.AgentProfileRecentUseContext,
+	profileID string,
+) (*usermodels.AgentProfileRecentUse, error) {
+	r.profileIDs <- profileID
+	return &usermodels.AgentProfileRecentUse{ProfileIDs: []string{profileID}}, nil
 }
 
 func (m *captureOrchestrator) EnsureSession(_ context.Context, _ string, _ ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
@@ -101,29 +124,14 @@ func TestWorkspaceSourceHTTPStatusMapsRepositoryNotFound(t *testing.T) {
 }
 
 func TestParseHTTPWorkspaceSourcesPreservesSnakeCaseFields(t *testing.T) {
-	sources, err := parseHTTPWorkspaceSources([]json.RawMessage{json.RawMessage(`{"kind":"repository","repository_id":"repo-1","base_branch":"main","checkout_branch":"feature/x"}`)})
+	sources, err := parseHTTPWorkspaceSources([]json.RawMessage{json.RawMessage(`{"kind":"repository","repository_id":"repo-1","base_branch":"main","checkout_branch":"feature/x","provider_host":"https://provider.example.test","provider_scope":"account-1"}`)})
 	require.NoError(t, err)
 	require.Len(t, sources, 1)
 	assert.Equal(t, "repo-1", sources[0].RepositoryID)
 	assert.Equal(t, "main", sources[0].BaseBranch)
 	assert.Equal(t, "feature/x", sources[0].CheckoutBranch)
-}
-
-func TestTaskPendingActionPtrAggregatesInputCapableSessions(t *testing.T) {
-	sessions := []*models.TaskSession{
-		{ID: "running", State: models.TaskSessionStateRunning},
-		{ID: "waiting", State: models.TaskSessionStateWaitingForInput},
-		{ID: "starting", State: models.TaskSessionStateStarting},
-	}
-	actions := map[string]models.TaskPendingAction{
-		"running":  models.TaskPendingActionClarification,
-		"waiting":  models.TaskPendingActionPermission,
-		"starting": models.TaskPendingActionPermission,
-	}
-
-	got := taskPendingActionPtr(sessions, actions)
-	require.NotNil(t, got)
-	assert.Equal(t, "permission", *got)
+	assert.Equal(t, "https://provider.example.test", sources[0].ProviderHost)
+	assert.Equal(t, "account-1", sources[0].ProviderScope)
 }
 
 func TestQuickChatResolveParamsForcesWorktreeForRepositoryContext(t *testing.T) {
@@ -142,6 +150,7 @@ func TestQuickChatResolveParamsForcesWorktreeForRepositoryContext(t *testing.T) 
 type quickChatHandlerRepo struct {
 	mockRepository
 	taskRepos []*models.TaskRepository
+	task      *models.Task
 }
 
 func (r *quickChatHandlerRepo) GetWorkspace(_ context.Context, id string) (*models.Workspace, error) {
@@ -158,6 +167,11 @@ func (r *quickChatHandlerRepo) GetRepository(_ context.Context, id string) (*mod
 	return &models.Repository{ID: id, WorkspaceID: "ws-1", Name: id, DefaultBranch: "main"}, nil
 }
 
+func (r *quickChatHandlerRepo) CreateTask(_ context.Context, task *models.Task) error {
+	r.task = task
+	return nil
+}
+
 func (r *quickChatHandlerRepo) CreateTaskRepository(_ context.Context, taskRepo *models.TaskRepository) error {
 	r.taskRepos = append(r.taskRepos, taskRepo)
 	return nil
@@ -167,7 +181,7 @@ func (r *quickChatHandlerRepo) ListTaskRepositories(_ context.Context, _ string)
 	return r.taskRepos, nil
 }
 
-func newQuickChatHandlerForTest(t *testing.T) (*TaskHandlers, *captureOrchestrator) {
+func newQuickChatHandlerForTest(t *testing.T) (*TaskHandlers, *captureOrchestrator, *quickChatHandlerRepo) {
 	t.Helper()
 	log := newTestLogger(t)
 	repo := &quickChatHandlerRepo{}
@@ -179,7 +193,7 @@ func newQuickChatHandlerForTest(t *testing.T) (*TaskHandlers, *captureOrchestrat
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
 	orch := &captureOrchestrator{}
-	return &TaskHandlers{service: svc, orchestrator: orch, logger: log}, orch
+	return &TaskHandlers{service: svc, orchestrator: orch, logger: log}, orch, repo
 }
 
 func TestHTTPStartQuickChatRejectsInvalidRepositoryShapes(t *testing.T) {
@@ -208,7 +222,7 @@ func TestHTTPStartQuickChatRejectsInvalidRepositoryShapes(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			h, orch := newQuickChatHandlerForTest(t)
+			h, orch, _ := newQuickChatHandlerForTest(t)
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/workspaces/ws-1/quick-chat", strings.NewReader(tc.body))
@@ -223,20 +237,66 @@ func TestHTTPStartQuickChatRejectsInvalidRepositoryShapes(t *testing.T) {
 	}
 }
 
+func TestHTTPStartQuickChatForwardsAutoTitleAndKeepsProvisionalTitle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, orch, repo := newQuickChatHandlerForTest(t)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/workspaces/ws-1/quick-chat", strings.NewReader(`{
+		"title":"Agent A - Chat 1",
+		"agent_profile_id":"profile-1",
+		"auto_title":true
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+
+	h.httpStartQuickChat(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.NotNil(t, repo.task)
+	assert.Equal(t, "Agent A - Chat 1", repo.task.Title)
+	assert.True(t, models.IsAgentTitlePending(repo.task.Metadata))
+	assert.Len(t, orch.requests, 1)
+}
+
+func TestHTTPStartQuickChatWithoutAutoTitleDoesNotMarkPendingTitle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, orch, repo := newQuickChatHandlerForTest(t)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/workspaces/ws-1/quick-chat", strings.NewReader(`{
+		"title":"Ordinary quick chat",
+		"agent_profile_id":"profile-1",
+		"auto_title":false
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+
+	h.httpStartQuickChat(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.NotNil(t, repo.task)
+	assert.False(t, models.IsAgentTitlePending(repo.task.Metadata))
+	assert.Len(t, orch.requests, 1)
+}
+
 // TestStartAgentForNewTask_SetsDeferredStart pins the call-site half of the
 // passthrough start_agent prompt-delivery fix: the synchronous prepare must
 // carry DeferredStart=true so launchPrepare does not eagerly upgrade a
 // passthrough profile into a promptless PTY launch and pre-empt the
-// prompt-bearing IntentStartCreated that follows. Returning an error from the
-// prepare call keeps the async start goroutine from spawning, so the assertion
-// reads orch.requests without racing it.
+// prompt-bearing IntentStartCreated that follows. A prepare error returns a
+// nil dispatch, and dispatchTaskSession no-ops on a nil dispatch — the
+// caller structurally cannot reach the async start goroutine without a
+// successful prepare, so the assertion reads orch.requests without racing it.
 func TestStartAgentForNewTask_SetsDeferredStart(t *testing.T) {
 	orch := &captureOrchestrator{prepErr: errors.New("prepare failed")}
 	h := &TaskHandlers{orchestrator: orch, logger: newTestLogger(t)}
 
 	resp := &createTaskResponse{}
 	body := httpCreateTaskRequest{StartAgent: true, AgentProfileID: "profile-1"}
-	h.startAgentForNewTask(context.Background(), resp, "task-1", "do the thing", body, "step-1")
+	dispatch := h.prepareStartAgentSession(context.Background(), resp, "task-1", body, "step-1")
+	require.Nil(t, dispatch, "a prepare failure must not produce a dispatch")
+	h.dispatchTaskSession(context.Background(), "task-1", "do the thing", body, dispatch)
 
 	orch.mu.Lock()
 	defer orch.mu.Unlock()
@@ -245,6 +305,106 @@ func TestStartAgentForNewTask_SetsDeferredStart(t *testing.T) {
 	assert.Equal(t, orchestrator.IntentPrepare, prep.Intent)
 	assert.True(t, prep.DeferredStart,
 		"sync prepare must defer the start so the passthrough PTY is launched with the prompt by the follow-up IntentStartCreated")
+}
+
+func TestDispatchTaskSessionMarksExplicitCreationPrompt(t *testing.T) {
+	called := make(chan struct{}, 1)
+	orch := &captureOrchestrator{
+		startCreatedCalled:   called,
+		startCreatedResponse: &orchestrator.LaunchSessionResponse{Success: true, SessionID: "session-1"},
+	}
+	h := &TaskHandlers{orchestrator: orch, logger: newTestLogger(t)}
+
+	h.dispatchTaskSession(
+		context.Background(),
+		"task-1",
+		"initial request",
+		httpCreateTaskRequest{WorkflowStepID: "step-explicit", AgentProfileID: "profile-1"},
+		&startAgentDispatch{sessionID: "session-1", initialCreatePrompt: true},
+	)
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("async IntentStartCreated launch did not complete")
+	}
+
+	orch.mu.Lock()
+	defer orch.mu.Unlock()
+	require.Len(t, orch.requests, 1)
+	assert.True(t, orch.requests[0].InitialCreatePrompt)
+}
+
+func TestDispatchTaskSessionRecordsOnlyTheSuccessfulEffectiveProfile(t *testing.T) {
+	t.Run("successful launch uses the resolved profile", func(t *testing.T) {
+		recorder := &captureAgentProfileRecentUseRecorder{profileIDs: make(chan string, 1)}
+		orch := &captureOrchestrator{startCreatedResponse: &orchestrator.LaunchSessionResponse{
+			Success:        true,
+			SessionID:      "session-1",
+			AgentProfileID: "workflow-profile",
+		}}
+		h := &TaskHandlers{
+			orchestrator:                  orch,
+			agentProfileRecentUseRecorder: recorder,
+			logger:                        newTestLogger(t),
+		}
+
+		h.dispatchTaskSession(
+			context.Background(),
+			"task-1",
+			"do the thing",
+			httpCreateTaskRequest{AgentProfileID: "requested-profile"},
+			&startAgentDispatch{sessionID: "session-1"},
+		)
+
+		select {
+		case profileID := <-recorder.profileIDs:
+			assert.Equal(t, "workflow-profile", profileID)
+		case <-time.After(time.Second):
+			t.Fatal("successful launch did not record profile recency")
+		}
+	})
+
+	t.Run("failed launch does not record recency", func(t *testing.T) {
+		recorder := &captureAgentProfileRecentUseRecorder{profileIDs: make(chan string, 1)}
+		orch := &captureOrchestrator{startCreatedErr: errors.New("launch failed")}
+		h := &TaskHandlers{
+			orchestrator:                  orch,
+			agentProfileRecentUseRecorder: recorder,
+			logger:                        newTestLogger(t),
+		}
+
+		h.dispatchTaskSession(
+			context.Background(),
+			"task-1",
+			"do the thing",
+			httpCreateTaskRequest{AgentProfileID: "requested-profile"},
+			&startAgentDispatch{sessionID: "session-1"},
+		)
+
+		select {
+		case profileID := <-recorder.profileIDs:
+			t.Fatalf("failed launch recorded profile %q", profileID)
+		case <-time.After(50 * time.Millisecond):
+		}
+	})
+}
+
+func TestEligibleInitialCreatePromptRequiresOriginalExplicitStepAndText(t *testing.T) {
+	tests := []struct {
+		name string
+		body httpCreateTaskRequest
+		want bool
+	}{
+		{name: "eligible", body: httpCreateTaskRequest{StartAgent: true, WorkflowStepID: "step-1", Description: "build"}, want: true},
+		{name: "inferred step", body: httpCreateTaskRequest{StartAgent: true, Description: "build"}, want: false},
+		{name: "empty text", body: httpCreateTaskRequest{StartAgent: true, WorkflowStepID: "step-1"}, want: false},
+		{name: "prepare only", body: httpCreateTaskRequest{WorkflowStepID: "step-1", Description: "build"}, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, eligibleInitialCreatePrompt(tc.body))
+		})
+	}
 }
 
 // configChatRepo returns a non-nil workspace so resolveConfigChatDefaults does
@@ -560,10 +720,11 @@ func TestHTTPCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 	require.Equal(t, 1, recorder.calls)
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
-		RepositoryID:      "repo-2",
-		Branch:            "feature/current",
-		AgentProfileID:    "agent-2",
-		ExecutorProfileID: "exec-profile-2",
+		RepositoryID:           "repo-2",
+		Branch:                 "feature/current",
+		AgentProfileID:         "agent-2",
+		ExecutorProfileID:      "exec-profile-2",
+		WorkflowIDsByWorkspace: map[string]string{"ws-1": "wf-1"},
 	}, recorder.got)
 }
 
@@ -602,8 +763,9 @@ func TestHTTPCreateTaskRecordsRepositoryWithoutProfileIDs(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 	require.Equal(t, 1, recorder.calls)
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
-		RepositoryID: "repo-2",
-		Branch:       "main",
+		RepositoryID:           "repo-2",
+		Branch:                 "main",
+		WorkflowIDsByWorkspace: map[string]string{"ws-1": "wf-1"},
 	}, recorder.got)
 }
 
@@ -642,6 +804,21 @@ func TestBuildTaskCreateLastUsedPatchRecordsFirstWorkspaceRepository(t *testing.
 		RepositoryID:      "repo-without-branch",
 		AgentProfileID:    "agent-2",
 		ExecutorProfileID: "exec-profile-2",
+	}, patch)
+}
+
+func TestBuildTaskCreateLastUsedPatchRecordsWorkspaceWorkflow(t *testing.T) {
+	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
+		WorkspaceID:       "workspace-1",
+		WorkflowID:        "workflow-1",
+		AgentProfileID:    "agent-2",
+		ExecutorProfileID: "exec-profile-2",
+	}, nil)
+
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		WorkflowIDsByWorkspace: map[string]string{"workspace-1": "workflow-1"},
+		AgentProfileID:         "agent-2",
+		ExecutorProfileID:      "exec-profile-2",
 	}, patch)
 }
 
@@ -725,10 +902,11 @@ func TestWSCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	require.Equal(t, 1, recorder.calls)
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
-		RepositoryID:      "repo-2",
-		Branch:            "feature/current",
-		AgentProfileID:    "agent-2",
-		ExecutorProfileID: "exec-profile-2",
+		RepositoryID:           "repo-2",
+		Branch:                 "feature/current",
+		AgentProfileID:         "agent-2",
+		ExecutorProfileID:      "exec-profile-2",
+		WorkflowIDsByWorkspace: map[string]string{"ws-1": "wf-1"},
 	}, recorder.got)
 }
 
@@ -797,8 +975,9 @@ func TestWSCreateTaskRecordsFreshBranchRequestBase(t *testing.T) {
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	require.Equal(t, 1, recorder.calls)
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
-		RepositoryID: "repo-2",
-		Branch:       "main",
+		RepositoryID:           "repo-2",
+		Branch:                 "main",
+		WorkflowIDsByWorkspace: map[string]string{"ws-1": "wf-1"},
 	}, recorder.got)
 }
 
@@ -975,6 +1154,103 @@ func TestHTTPCreateTask_StartAgentKeepsCreatedStateWhenSchedulingUpdateFails(t *
 	requireStartCreatedLaunch(t, startCreatedCalled)
 }
 
+// TestHTTPCreateTask_PlanModeStartAgentPreservesPlanMode pins the task.create
+// contract: plan_mode describes the execution prompt and must survive both
+// task persistence and the deferred launch intent, even when start_agent is
+// true.
+func TestHTTPCreateTask_PlanModeStartAgentPreservesPlanMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
+	h := &TaskHandlers{service: svc, orchestrator: &captureOrchestrator{}, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"workflow_id": "wf-1",
+		"workflow_step_id": "step-1",
+		"title": "Plan then boot",
+		"description": "Plan a refactor and start an agent",
+		"priority": "medium",
+		"agent_profile_id": "profile-1",
+		"start_agent": true,
+		"plan_mode": true
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.NotNil(t, repo.captured, "CreateTask must persist the task")
+	require.NotNil(t, repo.captured.Metadata, "task metadata must hold the deferred intent")
+
+	deferredRaw, ok := repo.captured.Metadata[models.MetaKeyDeferredLaunch]
+	require.True(t, ok, "start_agent=true must persist a deferred_launch intent")
+	deferred, ok := deferredRaw.(map[string]interface{})
+	require.True(t, ok, "deferred_launch intent must be a map[string]interface{}")
+	pmFlag, present := deferred["plan_mode"]
+	require.True(t, present, "the deferred intent must carry the plan_mode key (to assert the !StartAgent guard)")
+	assert.Equal(t, true, pmFlag,
+		"plan_mode=true must remain true in the deferred launch intent")
+}
+
+// TestHTTPCreateTask_PlanModePrepareSessionKeepsPlanMode pins the
+// non-conflicting half of the matrix: a plan-mode task whose deferred
+// intent is prepare (not start_agent) keeps plan_mode=true on the
+// intent. Prepare does not launch the agent, so plan mode is allowed
+// to ride through to the eventual prompt-bearing start path.
+func TestHTTPCreateTask_PlanModePrepareSessionKeepsPlanMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
+	h := &TaskHandlers{service: svc, orchestrator: &captureOrchestrator{}, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"workflow_id": "wf-1",
+		"workflow_step_id": "step-1",
+		"title": "Prepare plan session",
+		"description": "Prepare a session under plan mode",
+		"priority": "medium",
+		"agent_profile_id": "profile-1",
+		"prepare_session": true,
+		"plan_mode": true
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.NotNil(t, repo.captured)
+	deferredRaw, ok := repo.captured.Metadata[models.MetaKeyDeferredLaunch]
+	require.True(t, ok)
+	deferred, ok := deferredRaw.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, deferred["plan_mode"],
+		"plan_mode=true + prepare_session=true must persist plan_mode=true (prepare does not start an agent)")
+}
+
 func requireStartCreatedLaunch(t *testing.T, started <-chan struct{}) {
 	t.Helper()
 	select {
@@ -1107,6 +1383,7 @@ func TestHandleSelectedMoveError(t *testing.T) {
 		name             string
 		err              error
 		want             int
+		wantCode         string
 		wantBodyContains string
 	}{
 		{
@@ -1115,9 +1392,10 @@ func TestHandleSelectedMoveError(t *testing.T) {
 			want: http.StatusNotFound,
 		},
 		{
-			name: "move conflict",
-			err:  errors.New("task task-1 cannot be moved: task has an active session (running)"),
-			want: http.StatusConflict,
+			name:     "move conflict",
+			err:      errors.New("task task-1 cannot be moved: task has an active session (running)"),
+			want:     http.StatusConflict,
+			wantCode: moveConflictCodeActiveSession,
 		},
 		{
 			name: "bad request validation",
@@ -1140,6 +1418,11 @@ func TestHandleSelectedMoveError(t *testing.T) {
 			handleSelectedMoveError(c, log, tc.err)
 
 			assert.Equal(t, tc.want, rec.Code)
+			if tc.wantCode != "" {
+				var body map[string]any
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+				assert.Equal(t, tc.wantCode, body["code"])
+			}
 			if tc.wantBodyContains != "" {
 				assert.Contains(t, rec.Body.String(), tc.wantBodyContains)
 			}
@@ -1161,6 +1444,10 @@ func (m *moveTaskConflictRepo) GetTask(ctx context.Context, id string) (*models.
 func (m *moveTaskConflictRepo) UpdateTask(ctx context.Context, task *models.Task) error {
 	m.task = task
 	return nil
+}
+
+func (m *moveTaskConflictRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return m.UpdateTask(ctx, task)
 }
 
 func (m *moveTaskConflictRepo) GetWorkflow(ctx context.Context, id string) (*models.Workflow, error) {
@@ -1552,6 +1839,22 @@ func TestResolveFreshBranchName(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.assert(t, resolveFreshBranchName(tc.raw, tc.taskTitle))
 		})
+	}
+}
+
+func TestResolveFreshBranchNameForTaskUsesPolicySnapshot(t *testing.T) {
+	task := &models.Task{
+		ID:         "task-123",
+		Identifier: "KAN-7",
+		Metadata:   map[string]interface{}{},
+	}
+	taskRepository := &models.TaskRepository{
+		BranchPolicyBranchTemplate: "bugfix/{ticket}-{title}-{suffix}",
+	}
+
+	got := resolveFreshBranchNameForTask("", "Fix login", task, taskRepository)
+	if !strings.HasPrefix(got, "bugfix/kan-7-fix-login-") {
+		t.Fatalf("policy branch = %q, want bugfix/kan-7-fix-login-*", got)
 	}
 }
 

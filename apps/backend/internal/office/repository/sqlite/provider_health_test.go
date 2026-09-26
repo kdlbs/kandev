@@ -27,6 +27,10 @@ func TestScopeFromCode(t *testing.T) {
 			sqlite.HealthScopeProvider, ""},
 		{"quota_limited", "quota_limited", "opus", routing.TierBalanced,
 			sqlite.HealthScopeProvider, ""},
+		{"model_capacity", "model_capacity", "opus", routing.TierBalanced,
+			sqlite.HealthScopeModel, "opus"},
+		{"network_unavailable", "network_unavailable", "opus", routing.TierBalanced,
+			sqlite.HealthScopeProvider, ""},
 		{"unknown_code_defaults_provider", "bogus", "", routing.TierBalanced,
 			sqlite.HealthScopeProvider, ""},
 	}
@@ -190,6 +194,42 @@ func TestMarkProviderDegraded_TransitionFromHealthyResetsStep(t *testing.T) {
 	if got.BackoffStep != 0 {
 		t.Errorf("step after healthy-cycle = %d, want 0 (caller floor)",
 			got.BackoffStep)
+	}
+}
+
+func TestMarkProviderDegraded_ShortRetryDoesNotConsumeLongBackoff(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	retry := time.Now().UTC().Add(time.Minute)
+	short := models.ProviderHealth{
+		WorkspaceID: "ws-1", ProviderID: "claude-acp",
+		Scope: sqlite.HealthScopeProvider, ScopeValue: "",
+		State: sqlite.HealthStateShortRetry, ErrorCode: "model_capacity",
+		RetryAt: &retry,
+	}
+	for i := 0; i < 3; i++ {
+		if err := repo.MarkProviderDegraded(ctx, short); err != nil {
+			t.Fatalf("short retry mark %d: %v", i+1, err)
+		}
+	}
+	got, err := repo.GetProviderHealth(ctx, "ws-1", "claude-acp",
+		sqlite.HealthScopeProvider, "")
+	if err != nil || got == nil {
+		t.Fatalf("get short retry row: %v %+v", err, got)
+	}
+	if got.BackoffStep != 0 {
+		t.Fatalf("short retry backoff step = %d, want 0", got.BackoffStep)
+	}
+
+	short.State = sqlite.HealthStateDegraded
+	short.ErrorCode = "provider_unavailable"
+	if err := repo.MarkProviderDegraded(ctx, short); err != nil {
+		t.Fatalf("promote degraded: %v", err)
+	}
+	got, _ = repo.GetProviderHealth(ctx, "ws-1", "claude-acp",
+		sqlite.HealthScopeProvider, "")
+	if got.BackoffStep != 0 {
+		t.Fatalf("first long degradation after short phase = %d, want 0", got.BackoffStep)
 	}
 }
 

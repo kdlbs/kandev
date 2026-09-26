@@ -1,7 +1,30 @@
 import type { DockviewApi, SerializedDockview } from "dockview-react";
-import type { LayoutState, LayoutColumn, LayoutGroup, LayoutPanel, LayoutNode } from "./types";
+import type {
+  LayoutState,
+  LayoutColumn,
+  LayoutGroup,
+  LayoutPanel,
+  LayoutNode,
+  LayoutOrientation,
+} from "./types";
 import { computeColumnWidths, computeGroupHeights } from "./sizing";
-import { SIDEBAR_LOCK, KNOWN_PANEL_IDS, STRUCTURAL_COMPONENTS } from "./constants";
+import {
+  SIDEBAR_LOCK,
+  DEV_SERVER_PANEL_ID,
+  KNOWN_PANEL_IDS,
+  STRUCTURAL_COMPONENTS,
+  TERMINAL_DEFAULT_ID,
+  canonicalPanelTitle,
+  CENTER_GROUP,
+  RIGHT_TOP_GROUP,
+  RIGHT_BOTTOM_GROUP,
+} from "./constants";
+import { panelTitle } from "./panel-title";
+import { canonicalPluginPanelTitle } from "./plugin-panels";
+
+/** Canonical English, because `normalizePanel` produces a stored LayoutState. */
+// i18n-exempt: canonical English persisted in saved layouts, compared when restoring.
+const TERMINAL_CANONICAL_TITLE = canonicalPanelTitle(TERMINAL_DEFAULT_ID) ?? "Terminal";
 
 // Dockview serialized grid node types (internal format)
 type SerializedLeafNode = {
@@ -24,10 +47,15 @@ type SerializedBranchNode = {
 
 type SerializedGridNode = SerializedLeafNode | SerializedBranchNode;
 
-type SerializationCtx = { counter: number };
+type SerializationCtx = { counter: number; usedGroupIds: Set<string> };
 
 function nextGroupId(ctx: SerializationCtx): string {
-  return `group-${++ctx.counter}`;
+  let groupId: string;
+  do {
+    groupId = `group-${++ctx.counter}`;
+  } while (ctx.usedGroupIds.has(groupId));
+  ctx.usedGroupIds.add(groupId);
+  return groupId;
 }
 
 // ─── Serialization: LayoutState → SerializedDockview ───────────────────────
@@ -39,6 +67,7 @@ function serializeGroup(
   ctx: SerializationCtx,
 ): SerializedLeafNode {
   const groupId = group.id ?? nextGroupId(ctx);
+  if (group.id) ctx.usedGroupIds.add(group.id);
   const views = group.panels.map((p) => p.id);
   const isSidebar = columnId === "sidebar";
   return {
@@ -137,7 +166,12 @@ function serializePanels(state: LayoutState): Record<
         panels[panel.id] = {
           id: panel.id,
           contentComponent: panel.component,
-          title: panel.title,
+          // RENDER direction: this feeds `api.fromJSON`, so the tab the user
+          // reads is resolved here, in the active locale. `LayoutState` itself
+          // keeps the canonical English title — see `panelFromDockviewPanel`,
+          // which canonicalizes again on capture so a translated title can
+          // never reach storage.
+          title: panelTitle(panel.id, panel.title, panel.component),
           ...(panel.tabComponent ? { tabComponent: panel.tabComponent } : {}),
           ...(panel.params ? { params: panel.params } : {}),
         };
@@ -156,7 +190,15 @@ export function toSerializedDockview(
   totalHeight: number,
   pinnedWidths: Map<string, number>,
 ): SerializedDockview {
-  const ctx: SerializationCtx = { counter: 0 };
+  const ctx: SerializationCtx = {
+    counter: 0,
+    usedGroupIds: new Set(
+      state.columns.flatMap((column) =>
+        column.groups.flatMap((group) => (group.id ? [group.id] : [])),
+      ),
+    ),
+  };
+  const rootOrientation = state.rootOrientation ?? "HORIZONTAL";
   const widths = computeColumnWidths(state.columns, totalWidth, pinnedWidths);
 
   const root: SerializedBranchNode = {
@@ -170,7 +212,7 @@ export function toSerializedDockview(
       root,
       width: totalWidth,
       height: totalHeight,
-      orientation: "HORIZONTAL",
+      orientation: rootOrientation,
     },
     panels: serializePanels(state),
     activeGroup: undefined,
@@ -184,7 +226,13 @@ function panelFromDockviewPanel(panel: any): LayoutPanel {
   return {
     id: panel.id,
     component: panel.view?.contentComponent ?? panel.id,
-    title: panel.title ?? panel.id,
+    // CAPTURE direction: dockview holds the localized title, and this result is
+    // what gets persisted, so a registry panel goes back to canonical English.
+    title:
+      canonicalPluginPanelTitle(panel.id) ??
+      canonicalPanelTitle(panel.id, panel.view?.contentComponent) ??
+      panel.title ??
+      panel.id,
     ...(panel.view?.tabComponent ? { tabComponent: panel.view.tabComponent } : {}),
     ...(panel.params ? { params: panel.params as Record<string, unknown> } : {}),
   };
@@ -229,8 +277,51 @@ function captureNode(
   return { type: "leaf", group, size };
 }
 
-/** Panel IDs that indicate the "right" column. */
+/** Panel IDs that indicate the "right" column when no structural identity exists. */
 const RIGHT_PANEL_IDS = new Set(["files", "changes"]);
+
+function hasCanonicalRightIdentity(column: Pick<LayoutColumn, "id" | "groups">): boolean {
+  const groups = column.groups ?? [];
+  return (
+    column.id === "right" ||
+    groups.some((group) => group.id === RIGHT_TOP_GROUP || group.id === RIGHT_BOTTOM_GROUP)
+  );
+}
+
+/** True when the column contains the Agent surface or the canonical center group. */
+export function isCenterColumn(column: Pick<LayoutColumn, "id" | "groups">): boolean {
+  if (hasCanonicalRightIdentity(column)) return false;
+  const groups = column.groups ?? [];
+  return (
+    column.id === "center" ||
+    groups.some(
+      (group) =>
+        group.id === CENTER_GROUP ||
+        group.panels.some(
+          (panel) =>
+            panel.component === "chat" || panel.id === "chat" || panel.id.startsWith("session:"),
+        ),
+    )
+  );
+}
+
+/** Content panes retain their flexible sizing when tool tabs are merged into them. */
+function contextualPanel(column: Pick<LayoutColumn, "groups">): LayoutPanel | undefined {
+  return column.groups
+    .flatMap((group) => group.panels)
+    .find(
+      (panel) =>
+        panel.component === "plan" || panel.component === "browser" || panel.component === "vscode",
+    );
+}
+
+/** True when the column owns the standard right-side groups or column ID. */
+export function isRightColumn(column: Pick<LayoutColumn, "id" | "groups">): boolean {
+  if (hasCanonicalRightIdentity(column)) return true;
+  if (isCenterColumn(column) || contextualPanel(column)) return false;
+  const groups = column.groups ?? [];
+  return groups.some((group) => group.panels.some((panel) => RIGHT_PANEL_IDS.has(panel.id)));
+}
 
 /** Determine column ID and pinned status from its groups. */
 function inferColumnMeta(
@@ -239,20 +330,28 @@ function inferColumnMeta(
 ): { columnId: string; isPinned: boolean } {
   if (groups.length === 0) return { columnId: `col-${index}`, isPinned: false };
 
-  const allPanelIds = new Set(groups.flatMap((g) => g.panels.map((p) => p.id)));
+  const column = { id: `col-${index}`, groups };
 
-  if (allPanelIds.has("sidebar")) return { columnId: "sidebar", isPinned: true };
-  if (allPanelIds.has("chat")) return { columnId: "center", isPinned: false };
-
-  // Column containing files/changes panels is the "right" column
-  for (const id of allPanelIds) {
-    if (RIGHT_PANEL_IDS.has(id)) return { columnId: "right", isPinned: true };
+  if (groups.some((group) => group.panels.some((panel) => panel.id === "sidebar"))) {
+    return { columnId: "sidebar", isPinned: true };
   }
+  if (isCenterColumn(column)) return { columnId: "center", isPinned: false };
 
-  const firstPanelId = groups[0].panels[0]?.id;
+  if (isRightColumn(column)) return { columnId: "right", isPinned: true };
+
+  const firstPanelId = contextualPanel(column)?.id ?? groups[0].panels[0]?.id;
   if (firstPanelId) return { columnId: firstPanelId, isPinned: false };
 
   return { columnId: `col-${index}`, isPinned: false };
+}
+
+function readRootOrientation(
+  root: { orientation?: unknown } | null | undefined,
+  splitview: { orientation?: unknown } | null | undefined,
+): LayoutOrientation {
+  return root?.orientation === "VERTICAL" || splitview?.orientation === "VERTICAL"
+    ? "VERTICAL"
+    : "HORIZONTAL";
 }
 
 /**
@@ -262,9 +361,10 @@ function inferColumnMeta(
  */
 export function fromDockviewApi(api: DockviewApi): LayoutState {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sv = (api as any).component?.gridview?.root?.splitview;
+  const root = (api as any).component?.gridview?.root;
+  const sv = root?.splitview;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rootChildren = (api as any).component?.gridview?.root?.children;
+  const rootChildren = root?.children;
 
   if (!rootChildren || !sv) {
     console.warn("fromDockviewApi: no root splitview or children found");
@@ -289,7 +389,7 @@ export function fromDockviewApi(api: DockviewApi): LayoutState {
     });
   }
 
-  return { columns };
+  return { columns, rootOrientation: readRootOrientation(root, sv) };
 }
 
 // ─── Ephemeral Filtering ───────────────────────────────────────────────────
@@ -326,12 +426,22 @@ function normalizePanel(
   counters: { terminal: number; browser: number },
 ): LayoutPanel {
   if (p.component === "terminal") {
+    // The dev-server panel shares the terminal component but is a read-only
+    // view of the dev process output — it owns no PTY, so it must keep its
+    // own id, params and title instead of being coerced into a shell tab.
+    if (p.id === DEV_SERVER_PANEL_ID) {
+      return {
+        ...p,
+        params: { type: DEV_SERVER_PANEL_ID },
+        title: canonicalPanelTitle(p.id, p.component) ?? p.title,
+      };
+    }
     if (KNOWN_PANEL_IDS.has(p.id) || isDbBackedTerminalId(p.id)) {
       // Default panel (terminal-default) and user-created DB-backed
       // terminals (shell-<uuid>) — preserve id + params so the live PTY
       // and store record match on restore. Coerce presentation in case
       // the saved layout predates the custom tab + plain title.
-      return { ...p, tabComponent: "terminalTab", title: "Terminal" };
+      return { ...p, tabComponent: "terminalTab", title: TERMINAL_CANONICAL_TITLE };
     }
     // Legacy ephemeral terminal id (e.g. `terminal-saved-1` from older
     // layouts) — mint a fresh id so it reconnects to a new PTY.
@@ -341,16 +451,20 @@ function normalizePanel(
       id,
       params: { terminalId: id },
       tabComponent: "terminalTab",
-      title: "Terminal",
+      title: TERMINAL_CANONICAL_TITLE,
     };
   }
 
-  if (KNOWN_PANEL_IDS.has(p.id)) return p;
+  // A layout saved before this split (or by an older build) can carry a
+  // translated title; normalise it back to canonical English so the render
+  // direction is the only place a locale is applied.
+  if (KNOWN_PANEL_IDS.has(p.id))
+    return { ...p, title: canonicalPanelTitle(p.id, p.component) ?? p.title };
 
   if (p.component === "browser") {
     const url = (p.params?.url as string) ?? "";
     const id = url ? `browser:${url}` : `browser-saved-${++counters.browser}`;
-    return { ...p, id, params: { url } };
+    return { ...p, id, params: { url }, title: canonicalPanelTitle(id, p.component) ?? p.title };
   }
   return p;
 }

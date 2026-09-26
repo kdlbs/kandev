@@ -24,7 +24,8 @@ type LoginIdentity struct {
 	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
 }
 
-// Session is a browser session backed by the kandev_session cookie.
+// Session is a browser session backed by the session cookie (base name
+// kandev_session; effective name derived from the request host).
 type Session struct {
 	ID         string    `db:"id" json:"id"`
 	UserID     string    `db:"user_id" json:"user_id"`
@@ -50,10 +51,12 @@ type APIToken struct {
 
 // Invite is a tokenized invitation URL minted by an admin.
 type Invite struct {
-	ID        string     `db:"id" json:"id"`
-	TokenHash string     `db:"token_sha256" json:"-"`
-	Email     string     `db:"email" json:"email"`
-	Role      string     `db:"role" json:"role"`
+	ID        string `db:"id" json:"id"`
+	TokenHash string `db:"token_sha256" json:"-"`
+	Email     string `db:"email" json:"email"`
+	Role      string `db:"role" json:"role"`
+	// OrgID is the organization the accepted account will join.
+	OrgID     string     `db:"org_id" json:"org_id,omitempty"`
 	CreatedBy string     `db:"created_by" json:"created_by"`
 	CreatedAt time.Time  `db:"created_at" json:"created_at"`
 	ExpiresAt time.Time  `db:"expires_at" json:"expires_at"`

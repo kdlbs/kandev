@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { listPlugins } from "@/lib/api/domains/plugins-api";
+import { t } from "@/lib/i18n";
 import { useAppStore } from "@/components/state-provider";
 
 /**
@@ -27,7 +28,7 @@ export function usePlugins() {
         setPlugins(response);
       })
       .catch((err) => {
-        setPluginsError(err instanceof Error ? err.message : "Failed to load plugins");
+        setPluginsError(err instanceof Error ? err.message : t("plugins:failedToLoadPlugins"));
       })
       .finally(() => {
         setPluginsLoading(false);

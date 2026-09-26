@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // RegisterTaskMRHTTPRoutes registers the explicit link/unlink endpoints on an
@@ -36,6 +37,8 @@ func (c *Controller) httpCreateTaskMR(ctx *gin.Context) {
 		ctx.Request.Context(), workspaceID, request.TaskID, request.RepositoryID, request.MRURL,
 	)
 	if err != nil {
+		c.logger.Error("link task merge request failed",
+			zap.String("task_id", request.TaskID), zap.Error(err))
 		writeTaskMRError(ctx, err)
 		return
 	}
@@ -50,6 +53,8 @@ func (c *Controller) httpDeleteTaskMR(ctx *gin.Context) {
 		return
 	}
 	if err := c.service.UnlinkTaskMR(ctx.Request.Context(), workspaceID, associationID); err != nil {
+		c.logger.Error("unlink task merge request failed",
+			zap.String("association_id", associationID), zap.Error(err))
 		writeTaskMRError(ctx, err)
 		return
 	}

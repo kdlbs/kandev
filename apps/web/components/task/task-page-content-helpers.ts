@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   taskId as toTaskId,
   workflowId as toWorkflowId,
@@ -7,6 +8,28 @@ import {
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
+import { repositorySlug } from "@/lib/repository-slug";
+import { remoteRepositoryBrowserUrl } from "@/lib/utils/remote-repository-browser-url";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
+import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
+import { useAppStore } from "@/components/state-provider";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+
+const EMPTY_REPOSITORIES: Repository[] = [];
+
+export type TaskTopbarRepository = {
+  displayName: string;
+  fullName: string;
+  provider: string;
+  browserUrl: string | null;
+};
+
+export function selectWorkspaceRepositories(
+  itemsByWorkspaceId: Record<string, Repository[]>,
+  workspaceId: string | null | undefined,
+): Repository[] {
+  return (workspaceId && itemsByWorkspaceId[workspaceId]) || EMPTY_REPOSITORIES;
+}
 
 type ACPDebugInfo = {
   sessionId: unknown;
@@ -119,28 +142,77 @@ export function resolveEffectiveTask(
   return null;
 }
 
+export function resolveLatestTaskProjection(
+  taskId: string | null,
+  activeTasks: KanbanState["tasks"],
+  snapshots: Record<string, { tasks: KanbanState["tasks"] }>,
+): KanbanState["tasks"][number] | null {
+  if (!taskId) return null;
+  const candidates = [activeTasks, ...Object.values(snapshots).map((snapshot) => snapshot.tasks)];
+  let latestTask: KanbanState["tasks"][number] | null = null;
+  let latestTimestamp: bigint | null = null;
+
+  for (const tasks of candidates) {
+    for (const task of tasks) {
+      if (task.id !== taskId) continue;
+      const updatedAt = parseTurnTimestamp(task.updatedAt ?? undefined);
+      if (
+        !latestTask ||
+        (updatedAt !== null && (latestTimestamp === null || updatedAt > latestTimestamp))
+      ) {
+        latestTask = task;
+        latestTimestamp = updatedAt;
+      }
+    }
+  }
+
+  return latestTask;
+}
+
+export function resolveWorkflowCurrentStepId(
+  sessionStepId: string | null,
+  taskStepId: string | null,
+  workflowStepIds: readonly string[],
+): string | null {
+  // The resolved task step is freshest across sources. Only use the session
+  // step as a fallback when it belongs to this workflow.
+  if (taskStepId) return taskStepId;
+  if (sessionStepId && workflowStepIds.includes(sessionStepId)) return sessionStepId;
+  return null;
+}
+
+function hasNewerKanbanState(
+  baseTask: Task,
+  kanbanTimestamp: bigint,
+  baseTimestamp: bigint | null,
+): boolean {
+  return Boolean(baseTask.archived_at && baseTimestamp !== null && kanbanTimestamp > baseTimestamp);
+}
+
 export function mergeBaseWithKanban(
   baseTask: Task,
   kanbanTask: KanbanState["tasks"][number] | null,
 ): Task {
   if (!kanbanTask) return baseTask;
-  const kanbanUpdatedAt = Date.parse(kanbanTask.updatedAt ?? "");
-  const baseUpdatedAt = Date.parse(baseTask.updated_at ?? "");
-  const hasNewerKanbanState =
-    Boolean(baseTask.archived_at) &&
-    Number.isFinite(kanbanUpdatedAt) &&
-    Number.isFinite(baseUpdatedAt) &&
-    kanbanUpdatedAt > baseUpdatedAt;
+  const kanbanTimestamp = parseTurnTimestamp(kanbanTask.updatedAt ?? undefined);
+  const baseTimestamp = parseTurnTimestamp(baseTask.updated_at);
+  if (kanbanTimestamp === null || (baseTimestamp !== null && kanbanTimestamp < baseTimestamp)) {
+    return baseTask;
+  }
+  const hasCompletePlacement = Boolean(kanbanTask.workflowId && kanbanTask.workflowStepId);
   return {
     ...baseTask,
     title: kanbanTask.title ?? baseTask.title,
     description: kanbanTask.description ?? baseTask.description,
-    workflow_step_id:
-      (kanbanTask.workflowStepId as string | undefined) ?? baseTask.workflow_step_id,
+    workflow_id: hasCompletePlacement ? toWorkflowId(kanbanTask.workflowId) : baseTask.workflow_id,
+    workflow_step_id: hasCompletePlacement ? kanbanTask.workflowStepId : baseTask.workflow_step_id,
     position: kanbanTask.position ?? baseTask.position,
     state: (kanbanTask.state as Task["state"] | undefined) ?? baseTask.state,
     repositories: baseTask.repositories,
-    archived_at: hasNewerKanbanState ? null : baseTask.archived_at,
+    metadata: kanbanTask.metadata !== undefined ? kanbanTask.metadata : baseTask.metadata,
+    archived_at: hasNewerKanbanState(baseTask, kanbanTimestamp, baseTimestamp)
+      ? null
+      : baseTask.archived_at,
   };
 }
 
@@ -153,11 +225,12 @@ export function buildTaskFromKanban(kanbanTask: KanbanState["tasks"][number]): T
     position: kanbanTask.position,
     state: kanbanTask.state ?? "CREATED",
     workspace_id: toWorkspaceId(""),
-    workflow_id: toWorkflowId(""),
-    priority: 0,
+    workflow_id: toWorkflowId(kanbanTask.workflowId ?? ""),
+    priority: kanbanTask.priority ?? "medium",
     repositories: [],
     created_at: "",
     updated_at: kanbanTask.updatedAt ?? "",
+    metadata: kanbanTask.metadata,
   };
 }
 
@@ -165,9 +238,10 @@ export function buildArchivedValue(task: Task | null, repository: Repository | n
   const isArchived = !!task?.archived_at;
   return {
     isArchived,
+    archivedTask: isArchived ? (task ?? undefined) : undefined,
     archivedTaskId: isArchived ? task?.id : undefined,
     archivedTaskTitle: isArchived ? task?.title : undefined,
-    archivedTaskRepositoryPath: isArchived ? (repository?.local_path ?? undefined) : undefined,
+    archivedTaskRepositoryLabel: isArchived && repository ? repositorySlug(repository) : undefined,
     archivedTaskUpdatedAt: isArchived ? task?.updated_at : undefined,
   };
 }
@@ -199,42 +273,156 @@ export function syncActiveTaskSession(params: {
   initialTaskId: string | undefined;
   fallbackTaskId: string | null | undefined;
   initialSessionId: string | null;
+  activeTaskId: string | null;
+  previousRouteTaskId: string | null | undefined;
   setActiveSessionAuto: (taskId: string, sessionId: string) => void;
   setActiveTask: (taskId: string) => void;
-}) {
+}): boolean {
   const taskId = params.initialTaskId ?? params.fallbackTaskId;
-  if (!taskId) return;
+  if (!taskId) return false;
+  const routeChanged = params.previousRouteTaskId !== taskId;
+  if (!routeChanged && params.activeTaskId !== taskId) return false;
   if (params.initialSessionId) params.setActiveSessionAuto(taskId, params.initialSessionId);
   else params.setActiveTask(taskId);
+  return true;
 }
 
 export function resolveTaskIds(task: Task | null) {
+  const taskValues = task ?? ({} as Task);
+  const primaryRepository = taskValues.repositories?.[0];
   return {
-    taskId: task?.id ?? null,
-    workflowId: task?.workflow_id ?? null,
-    workspaceId: task?.workspace_id ?? null,
-    workflowStepId: task?.workflow_step_id ?? null,
-    baseBranch: task?.repositories?.[0]?.base_branch,
-    isArchived: !!task?.archived_at,
+    taskId: taskValues.id ?? null,
+    workflowId: taskValues.workflow_id ?? null,
+    workspaceId: taskValues.workspace_id ?? null,
+    projectId: taskValues.project_id ?? null,
+    workflowStepId: taskValues.workflow_step_id ?? null,
+    primaryExecutorType: taskValues.primary_executor_type ?? null,
+    baseBranch: primaryRepository?.base_branch,
+    pullRequestTarget: primaryRepository?.branch_policy_pull_request_target || undefined,
+    isArchived: !!taskValues.archived_at,
   };
 }
 
-export function resolveTaskProps(task: Task | null, repository: Repository | null) {
+function buildPullRequestTargetsByRepository(
+  task: Pick<Task, "repositories"> | null,
+  repositories: Repository[],
+): Record<string, string> {
+  const targets: Record<string, string> = {};
+  for (const taskRepository of task?.repositories ?? []) {
+    const target = taskRepository.branch_policy_pull_request_target?.trim();
+    if (!target) continue;
+    targets[taskRepository.repository_id] = target;
+    const workspaceRepository = repositories.find(
+      (candidate) => candidate.id === taskRepository.repository_id,
+    );
+    if (!workspaceRepository) continue;
+    targets[workspaceRepository.id] = target;
+    if (workspaceRepository.name) targets[workspaceRepository.name] = target;
+    const slug = repositorySlug(workspaceRepository);
+    if (slug) targets[slug] = target;
+  }
+  return targets;
+}
+
+/**
+ * The detail top bar's actions-menu subject: a live board-row lookup against
+ * the workflow snapshots with the flat task list as fallback (the same lookup
+ * `useSidebarTaskEdit` performs), NOT the detail page's own task record. The
+ * page's own record stays loaded on tasks the board has pruned (e.g. after a
+ * peer archives/deletes it, or for a task that was never on any board, such
+ * as an Office-managed task), so using it directly would make the
+ * "unresolved-row" identifier-only tier (AC-TASKS-TASK-ACTIONS-MENU-002.5)
+ * unreachable. Returns null when the subject genuinely has no board row.
+ */
+export function useTaskActionsMenuBoardRow(task: Task | null): TaskActionsMenuBoardRow | null {
+  const taskId = task?.id ?? null;
+  const taskPriority = task?.priority;
+  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  return useMemo(() => {
+    if (!taskId) return null;
+    const boardTask = findTaskInSnapshots(taskId, snapshots, kanbanTasks);
+    if (!boardTask) return null;
+    return {
+      id: boardTask.id,
+      title: boardTask.title,
+      description: boardTask.description,
+      workflowStepId: boardTask.workflowStepId,
+      state: boardTask.state,
+      priority: boardTask.priority ?? taskPriority,
+      repositoryId: boardTask.repositoryId,
+      repositories: boardTask.repositories,
+      parentTaskId: boardTask.parentTaskId,
+      primaryExecutorType: boardTask.primaryExecutorType,
+      workspaceMode: boardTask.workspaceMode,
+    };
+  }, [kanbanTasks, snapshots, taskId, taskPriority]);
+}
+
+export function resolveTaskPullRequestProps(
+  task: Pick<Task, "title" | "repositories"> | null,
+  repositories: Repository[] = [],
+) {
+  const primaryRepository = task?.repositories?.[0];
+  return {
+    baseBranch: primaryRepository?.base_branch,
+    pullRequestTarget: primaryRepository?.branch_policy_pull_request_target || undefined,
+    pullRequestTargetsByRepository: buildPullRequestTargetsByRepository(task, repositories),
+    taskTitle: task?.title,
+  };
+}
+
+export function resolveTaskProps(
+  task: Task | null,
+  repository: Repository | null,
+  repositories: Repository[] = [],
+) {
   const ids = resolveTaskIds(task);
   const issue = issueFieldsFromMetadata(task?.metadata);
+  const pullRequestProps = resolveTaskPullRequestProps(task, repositories);
   return {
     ...ids,
-    taskTitle: task?.title,
     taskDescription: task?.description,
     issueUrl: issue.issueUrl,
     issueNumber: issue.issueNumber,
     repositoryPath: repository?.local_path ?? null,
     repositoryName: repository?.name ?? null,
     /**
+     * What the top bar shows so a user can tell which project an open task
+     * belongs to: the same `owner/repo` identity the sidebar rows and the
+     * repository filter use, never the local clone path.
+     */
+    repositoryLabel: repository ? repositorySlug(repository) : null,
+    topbarRepository: resolveTaskTopbarRepository(task, repository),
+    ...pullRequestProps,
+    /**
      * Total number of repositories linked to the task. Used by the top-bar
      * breadcrumb to render a "+N" chip next to the primary repo name when
      * the task is multi-repo. 0 / 1 means single-repo (no chip).
      */
     repositoryCount: task?.repositories?.length ?? 0,
+  };
+}
+
+function resolveTaskTopbarRepository(
+  task: Task | null,
+  repository: Repository | null,
+): TaskTopbarRepository | null {
+  const linkedRepository = task?.repositories?.[0];
+  if (
+    task?.repositories?.length !== 1 ||
+    !repository ||
+    linkedRepository?.repository_id !== repository.id ||
+    repository.source_type !== "provider"
+  ) {
+    return null;
+  }
+
+  const displayName = repository.provider_name?.trim() || repository.name?.trim();
+  return {
+    displayName: displayName || repositorySlug(repository),
+    fullName: repositorySlug(repository),
+    provider: repository.provider,
+    browserUrl: remoteRepositoryBrowserUrl(repository.remote_url, repository.provider),
   };
 }

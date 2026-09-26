@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { IconChevronDown, IconGitMerge } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,7 +17,8 @@ import { useRepoMergeMethods } from "@/hooks/domains/github/use-repo-merge-metho
 import { mergePR } from "@/lib/api/domains/github-api";
 import { getGitHubMutationActor } from "@/lib/github-auth";
 import type { MergeMethod, TaskPR } from "@/lib/types/github";
-import { isPRReadyToMerge } from "./pr-task-icon";
+import { canAttemptPRMerge } from "./pr-task-icon";
+import { useTranslation } from "react-i18next";
 
 function MutationActor({ actor }: { actor: string | null }) {
   if (!actor) return null;
@@ -31,6 +33,7 @@ function CompactMergeButton({
   extraMethods,
   onPickMethod,
 }: Omit<MergeButtonShellProps, "compact">) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-1.5">
       <button
@@ -45,7 +48,7 @@ function CompactMergeButton({
       </button>
       {extraMethods.length > 0 && (
         <div className="flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
-          <span>or</span>
+          <span>{t("github:or")}</span>
           {extraMethods.map((method) => (
             <button
               key={method}
@@ -58,7 +61,7 @@ function CompactMergeButton({
               }}
               className="cursor-pointer rounded px-1.5 py-0.5 font-medium hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-60"
             >
-              {mergeShortLabel(method)}
+              {t(mergeShortLabelKey(method))}
             </button>
           ))}
         </div>
@@ -84,27 +87,23 @@ export function PRMergeButton({
   onMerged?: () => void;
   compact?: boolean;
 }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [merging, setMerging] = useState(false);
-  // After a successful merge we stay hidden until the store catches up to
-  // state="merged" — otherwise the button briefly re-enables during the async
-  // refresh window and a double-click would hit the GitHub API again.
-  const [merged, setMerged] = useState(false);
+  // After GitHub accepts a direct or queued merge, stay hidden until refreshed
+  // provider state catches up so a repeat click cannot submit a second request.
+  const [acceptedFor, setAcceptedFor] = useState<string | null>(null);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const methods = useRepoMergeMethods(workspaceId, taskPR.owner, taskPR.repo);
   const { status } = useGitHubStatus(workspaceId);
   const mutationActor = getGitHubMutationActor(status);
 
-  // If the same component instance ever renders a different PR (e.g. the user
-  // switches the active task while the panel/popover stays mounted), the
-  // sticky `merged` flag from a previous merge would hide the button for an
-  // unrelated, still-mergeable PR. Reset it whenever the underlying PR id
-  // changes.
-  useEffect(() => {
-    setMerged(false);
-  }, [taskPR.id]);
+  // Reset after switching PRs or after GitHub reports an observable lifecycle
+  // or mergeability transition, including a PR ejected from a merge queue.
+  const signature = `${taskPR.id}:${taskPR.state}:${taskPR.mergeable_state}`;
+  const accepted = acceptedFor === signature;
 
-  if (merged || !isPRReadyToMerge(taskPR)) return null;
+  if (accepted || !canAttemptPRMerge(taskPR)) return null;
   // `methods` may be null on first render, on lookup failure, or after the
   // 5-minute cache window. We still render the button — clicking with no
   // method routes through the backend's GetRepoMergeMethods resolver, so
@@ -116,16 +115,28 @@ export function PRMergeButton({
 
   const runMerge = async (method?: MergeMethod) => {
     if (!workspaceId) return;
+    const submittedSignature = signature;
     setMerging(true);
     try {
-      await mergePR(workspaceId, taskPR.owner, taskPR.repo, taskPR.pr_number, method);
-      setMerged(true);
-      toast({ description: "PR merged", variant: "success" });
+      const result = await mergePR(
+        workspaceId,
+        taskPR.owner,
+        taskPR.repo,
+        taskPR.pr_number,
+        method,
+      );
+      setAcceptedFor(submittedSignature);
+      toast({
+        description: t(
+          result.status === "queued" ? "github:prAddedToMergeQueue" : "github:prMerged",
+        ),
+        variant: "success",
+      });
       onMerged?.();
     } catch (err) {
       toast({
-        title: "Failed to merge",
-        description: err instanceof Error ? err.message : "An error occurred",
+        title: t("github:failedToMerge"),
+        description: err instanceof Error ? err.message : t("github:anErrorOccurred"),
         variant: "error",
       });
     } finally {
@@ -141,11 +152,21 @@ export function PRMergeButton({
   return (
     <MergeButtonShell
       compact={compact}
-      label={merging ? "Merging..." : mergeLabel(primary)}
+      label={
+        merging
+          ? t("github:merging")
+          : t(
+              taskPR.mergeable_state === "blocked"
+                ? "github:mergeMethodDefault"
+                : mergeLabelKey(primary),
+            )
+      }
       disabled={merging}
       actor={mutationActor}
       onPrimaryClick={handlePrimary}
-      extraMethods={allowed.filter((m) => m !== primary)}
+      extraMethods={
+        taskPR.mergeable_state === "blocked" ? [] : allowed.filter((m) => m !== primary)
+      }
       onPickMethod={(m) => void runMerge(m)}
     />
   );
@@ -170,6 +191,7 @@ function MergeButtonShell({
   extraMethods,
   onPickMethod,
 }: MergeButtonShellProps) {
+  const { t } = useTranslation();
   // Compact (hover popover): a single full-width primary button plus quiet
   // "or <method>" links for the alternates. Deliberately avoids a dropdown —
   // its menu renders in a detached portal that closes the hover popover the
@@ -192,8 +214,10 @@ function MergeButtonShell({
   const primaryBtn = (
     <Button
       data-testid="pr-merge-button"
-      size="sm"
-      className={`cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 ${showDropdown ? "rounded-r-none" : ""}`}
+      className={controlSizingClassName(
+        "standard",
+        `cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 ${showDropdown ? "rounded-r-none" : ""}`,
+      )}
       onClick={onPrimaryClick}
       disabled={disabled}
     >
@@ -220,7 +244,7 @@ function MergeButtonShell({
             <button
               type="button"
               data-testid="pr-merge-button-more"
-              aria-label="Choose merge method"
+              aria-label={t("github:chooseMergeMethod")}
               disabled={disabled}
               onClick={(e) => e.stopPropagation()}
               className="inline-flex items-center rounded-r-md border-l border-green-700/40 bg-green-600 px-2 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 disabled:opacity-60 cursor-pointer"
@@ -231,7 +255,7 @@ function MergeButtonShell({
           <DropdownMenuContent align="end" className="w-auto">
             {extraMethods.map((m) => (
               <DropdownMenuItem key={m} onSelect={() => onPickMethod(m)}>
-                {mergeLabel(m)}
+                {t(mergeLabelKey(m))}
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
@@ -242,29 +266,30 @@ function MergeButtonShell({
   );
 }
 
-function mergeLabel(method?: MergeMethod): string {
+/** `method` is GitHub's persisted merge method; only the label is copy. */
+function mergeLabelKey(method?: MergeMethod): string {
   switch (method) {
     case "squash":
-      return "Squash and merge";
+      return "github:mergeMethodSquash";
     case "rebase":
-      return "Rebase and merge";
+      return "github:mergeMethodRebase";
     case "merge":
-      return "Create a merge commit";
+      return "github:mergeMethodMergeCommit";
     default:
-      return "Merge PR";
+      return "github:mergeMethodDefault";
   }
 }
 
 // Short form used by the compact "or <method>" alternates so the row fits the
 // narrow popover without wrapping.
-function mergeShortLabel(method: MergeMethod): string {
+function mergeShortLabelKey(method: MergeMethod): string {
   switch (method) {
     case "squash":
-      return "Squash";
+      return "github:mergeMethodSquashShort";
     case "rebase":
-      return "Rebase";
+      return "github:mergeMethodRebaseShort";
     case "merge":
-      return "Merge commit";
+      return "github:mergeMethodMergeCommitShort";
   }
 }
 

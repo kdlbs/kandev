@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Inbox", () => {
   test("inbox starts empty", async ({ officeApi, officeSeed }) => {
@@ -13,7 +14,7 @@ test.describe("Inbox", () => {
 
   test("inbox page renders", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office/inbox");
-    await expect(testPage.getByRole("heading", { name: /inbox/i })).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/inbox/i, {
       timeout: 10_000,
     });
   });

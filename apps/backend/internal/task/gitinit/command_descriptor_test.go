@@ -73,7 +73,7 @@ func TestRunHelperRejectsNonDirectoryDescriptor(t *testing.T) {
 	t.Cleanup(func() { _ = readPipe.Close() })
 	t.Cleanup(func() { _ = writePipe.Close() })
 
-	command := exec.Command(os.Args[0], helperArgument, os.Args[0])
+	command := exec.Command(os.Args[0], helperArgument, os.Args[0], "init", "--initial-branch=main")
 	command.ExtraFiles = []*os.File{readPipe}
 	command.Env = withHelperEnvironment(os.Environ())
 	output, err := command.CombinedOutput()

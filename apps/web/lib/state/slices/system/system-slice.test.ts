@@ -53,6 +53,7 @@ const DISK_USAGE: DiskUsageResponse = {
 const DB_STATS: DatabaseStats = {
   driver: "sqlite",
   path: "/data/kandev.db",
+  backup_directory: "/data/backups",
   size_bytes: 12345,
   wal_size_bytes: 678,
   schema_version: "1.0.0",
@@ -61,7 +62,6 @@ const DB_STATS: DatabaseStats = {
 
 const SNAPSHOT: SnapshotInfo = {
   name: "manual-1.db",
-  path: "/data/backups/manual-1.db",
   size_bytes: 1024,
   mtime: "2026-05-17T00:00:00Z",
   kind: "manual",
@@ -73,6 +73,9 @@ const UPDATES: UpdatesResponse = {
   latest_url: "https://github.com/kdlbs/kandev/releases/1.2.4",
   latest_checked_at: TS,
   update_available: true,
+  channel: "stable",
+  channel_editable: true,
+  channel_unsupported_reason: "",
 };
 
 const JOB: SystemJob = {
@@ -81,6 +84,20 @@ const JOB: SystemJob = {
   state: "running",
   started_at: TS,
 };
+
+const ANALYSIS = {
+  generation: 1,
+  state: "ready",
+  started_at: TS,
+  completed_at: TS,
+  duration_ms: 10,
+  cache_ttl_seconds: 900,
+  refresh_due_at: "2026-05-18T00:15:00Z",
+  stale: false,
+  error: null,
+  progress: { completed_sources: 8, total_sources: 8, sources: {} },
+  partial_summary: null,
+} as const;
 
 describe("system storage slice", () => {
   it("stores storage overview, runs, and quarantine state", () => {
@@ -92,7 +109,7 @@ describe("system storage slice", () => {
         idle_for_minutes: 10,
         orphan_grace_hours: 168,
         quarantine_retention_hours: 168,
-        workspaces: { enabled: true },
+        workspaces: { enabled: true, dependency_cleanup_enabled: false },
         kandev_containers: { enabled: true },
         go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
         docker: {
@@ -107,6 +124,7 @@ describe("system storage slice", () => {
       capabilities: {
         managed_go_cache_path: "/data/cache/go-build",
         go_cache_adoption_available: true,
+        temporary_artifacts_available: false,
         docker_available: false,
         docker_host: "",
         host_global_docker_cleanup_allowed: false,
@@ -115,6 +133,10 @@ describe("system storage slice", () => {
         workspaces: { active_bytes: 1, candidate_bytes: 2 },
         go_cache: { path: "/data/cache/go-build", size_bytes: 3, owned: true, enabled: false },
         quarantine: { count: 0, size_bytes: 0 },
+        temporary_artifacts: {
+          available: false,
+          warning: "temporary artifact registry unavailable",
+        },
         docker: {
           available: false,
           build_cache_bytes: 0,
@@ -123,6 +145,7 @@ describe("system storage slice", () => {
           managed_container_bytes: 0,
         },
       },
+      analysis: ANALYSIS,
       analyzed_at: "2026-07-23T12:00:00Z",
       last_run: null,
     } satisfies StorageOverviewResponse;
@@ -134,6 +157,8 @@ describe("system storage slice", () => {
     expect(store.getState().system.storage).toEqual({
       policy,
       overview,
+      analysisRevision: 0,
+      disk: null,
       runs: [],
       quarantine: [],
     });
@@ -173,6 +198,30 @@ describe("system slice", () => {
     const store = makeStore();
     store.getState().setSystemDatabase(DB_STATS);
     expect(store.getState().system.database).toEqual(DB_STATS);
+  });
+
+  it("setSystemRetention stores the status", () => {
+    const store = makeStore();
+    expect(store.getState().system.retention).toBeNull();
+    const status = {
+      settings: {
+        enabled: true,
+        sweep_interval_hours: 6,
+        batch_limit: 5000,
+        routine_runs: { window_days: 30, floor_per_owner: 50, warn_rows: 25000 },
+        runs: { window_days: 30, floor_per_owner: 50, warn_rows: 25000 },
+        run_events: { warn_rows: 250000 },
+      },
+      last_sweep: null,
+      skip_count: 0,
+      retained_counts: {
+        office_routine_runs: { state: "not_computed" as const, retained_count: 0, as_of: "" },
+        runs: { state: "not_computed" as const, retained_count: 0, as_of: "" },
+        run_events: { state: "not_computed" as const, retained_count: 0, as_of: "" },
+      },
+    };
+    store.getState().setSystemRetention(status);
+    expect(store.getState().system.retention).toEqual(status);
   });
 
   it("setSystemBackups marks the list as loaded", () => {
@@ -216,5 +265,13 @@ describe("system slice", () => {
     const store = makeStore();
     store.getState().clearSystemJob("does-not-exist");
     expect(store.getState().system.jobs).toEqual({});
+  });
+
+  it("advances the storage analysis revision for live updates", () => {
+    const store = makeStore();
+    expect(store.getState().system.storage.analysisRevision).toBe(0);
+    store.getState().bumpSystemStorageAnalysisRevision();
+    store.getState().bumpSystemStorageAnalysisRevision();
+    expect(store.getState().system.storage.analysisRevision).toBe(2);
   });
 });

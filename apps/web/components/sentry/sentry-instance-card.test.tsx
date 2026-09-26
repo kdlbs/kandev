@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { SentryConfig } from "@/lib/types/sentry";
 import { SentryInstanceCard } from "./sentry-instance-card";
 
@@ -17,9 +17,33 @@ function instance(id: string, name: string): SentryConfig {
   };
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+});
 
 describe("SentryInstanceCard", () => {
+  it("names the phone instance in a sheet and keeps its delete button mounted", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const onCancel = vi.fn();
+    render(
+      <SentryInstanceCard
+        instance={instance("production", "Production")}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        isFinePointer={false}
+        confirmingDelete
+        onDeleteCancel={onCancel}
+        onDeleteConfirm={vi.fn()}
+      />,
+    );
+    const sheet = screen.getByRole("dialog");
+    expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+    expect(sheet.textContent).toContain("Production");
+    expect(screen.getByTestId("sentry-instance-delete-button").isConnected).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalledExactlyOnceWith("production");
+  });
   it("gives each instance action a distinct accessible name", () => {
     render(
       <>
@@ -27,16 +51,44 @@ describe("SentryInstanceCard", () => {
           instance={instance("instance-1", "Production")}
           onEdit={() => {}}
           onDelete={() => {}}
+          isFinePointer
+          confirmingDelete={false}
+          onDeleteCancel={() => {}}
+          onDeleteConfirm={() => {}}
         />
         <SentryInstanceCard
           instance={instance("instance-2", "Self-hosted")}
           onEdit={() => {}}
           onDelete={() => {}}
+          isFinePointer
+          confirmingDelete={false}
+          onDeleteCancel={() => {}}
+          onDeleteConfirm={() => {}}
         />
       </>,
     );
 
     expect(screen.getByRole("button", { name: "Edit Production Sentry instance" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Delete Self-hosted Sentry instance" })).toBeTruthy();
+  });
+
+  it("reports which instance owns a closing confirmation", () => {
+    const onDeleteCancel = vi.fn();
+
+    render(
+      <SentryInstanceCard
+        instance={instance("instance-2", "Self-hosted")}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        isFinePointer
+        confirmingDelete
+        onDeleteCancel={onDeleteCancel}
+        onDeleteConfirm={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onDeleteCancel).toHaveBeenCalledWith("instance-2");
   });
 });

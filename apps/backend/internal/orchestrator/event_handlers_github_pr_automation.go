@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/github"
-	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -134,25 +133,9 @@ func (s *Service) dispatchTaskPRAgentPrompt(
 	if err != nil || task == nil || task.ArchivedAt != nil {
 		return "", fmt.Errorf("task is no longer active: %s", pr.TaskID)
 	}
-	if s.messageQueue == nil {
-		return "", fmt.Errorf("message queue is not configured")
-	}
 	metadata := taskPRAgentPromptMetadata(pr, event, prURL)
 	coalesceKey := fmt.Sprintf("github-pr:%s:%d:%s", pr.RepositoryID, pr.PRNumber, event)
-	if _, _, accepted, err := s.messageQueue.QueueLifecycleMessageWithCoalesceKey(
-		ctx, session.ID, pr.TaskID, prompt, "", messagequeue.QueuedByWorkflow,
-		false, nil, metadata, coalesceKey, true,
-	); err != nil {
-		return "", err
-	} else if !accepted {
-		return "", errTaskPRAgentInactive
-	}
-	s.publishQueueStatusEvent(ctx, session.ID)
-	if ciAutomationSessionCanReceivePrompt(session) &&
-		(session.State == models.TaskSessionStateWaitingForInput || session.State == models.TaskSessionStateIdle) {
-		s.drainQueuedMessageForPromptableSession(ctx, session.ID)
-	}
-	return session.ID, nil
+	return s.queueAndDrainLifecyclePrompt(ctx, session, pr.TaskID, prompt, metadata, coalesceKey, errTaskPRAgentInactive)
 }
 
 func (s *Service) resolveTaskPRAgentSession(ctx context.Context, taskID string) (*models.TaskSession, error) {

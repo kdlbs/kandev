@@ -33,17 +33,20 @@ type dataRecordingHost struct {
 	messagePage   *PageInfo
 	utilityText   string
 
-	lastTaskFilter    TaskFilter
-	lastSessionFilter SessionFilter
-	lastMessageFilter MessageFilter
-	lastWorkspaceID   string
-	lastWorkflowID    string
-	lastUtilityPrompt string
+	lastTaskFilter     TaskFilter
+	lastSessionFilter  SessionFilter
+	lastMessageFilter  MessageFilter
+	lastWorkspaceID    string
+	lastWorkflowID     string
+	lastUtilityPrompt  string
+	lastUtilityOptions []UtilityAgentOptions
 
 	createdTask     Task
 	lastCreateInput CreateTaskInput
 	updatedTask     Task
 	lastUpdateInput UpdateTaskInput
+	movedOutcome    MoveTaskOutcome
+	lastMoveInput   MoveTaskInput
 	messageDispatch MessageDispatch
 	lastSendTask    string
 	lastSendSession string
@@ -82,8 +85,9 @@ func (h *dataRecordingHost) Repositories() RepositoryReader {
 	return dataRecordingRepositoryReader{h}
 }
 func (h *dataRecordingHost) Messages() MessageReader { return dataRecordingMessageReader{h} }
-func (h *dataRecordingHost) InvokeUtilityAgent(_ context.Context, prompt string) (string, error) {
+func (h *dataRecordingHost) InvokeUtilityAgent(_ context.Context, prompt string, options ...UtilityAgentOptions) (string, error) {
 	h.lastUtilityPrompt = prompt
+	h.lastUtilityOptions = append([]UtilityAgentOptions(nil), options...)
 	return h.utilityText, nil
 }
 
@@ -112,6 +116,12 @@ func (r dataRecordingTaskReader) Update(_ context.Context, in UpdateTaskInput) (
 	r.h.lastUpdateInput = in
 	task := r.h.updatedTask
 	return &task, nil
+}
+
+func (r dataRecordingTaskReader) Move(_ context.Context, in MoveTaskInput) (*MoveTaskOutcome, error) {
+	r.h.lastMoveInput = in
+	outcome := r.h.movedOutcome
+	return &outcome, nil
 }
 
 type dataRecordingSessionReader struct{ h *dataRecordingHost }
@@ -175,22 +185,29 @@ func (r dataRecordingMessageReader) Send(_ context.Context, taskID, sessionID, t
 func TestHostData_TasksListAndGet(t *testing.T) {
 	impl := &dataRecordingHost{
 		tasks: map[string]Task{
-			"task-1": {ID: "task-1", Title: "Fix the bug", State: "todo"},
+			"task-1": {ID: "task-1", Title: "Fix the bug", State: "todo", Repositories: []TaskRepository{{
+				ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix",
+			}}},
 		},
-		taskList:     []Task{{ID: "task-1", Title: "Fix the bug", State: "todo"}},
+		taskList: []Task{{ID: "task-1", Title: "Fix the bug", State: "todo", Repositories: []TaskRepository{{
+			ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix",
+		}}}},
 		taskPageInfo: &PageInfo{NextCursor: "next-1", HasMore: true},
 	}
 	host := dialHostOverBufconn(t, impl)
 
 	tasks, pageInfo, err := host.Tasks().List(context.Background(), TaskFilter{States: []string{"todo"}}, Page{Limit: 10})
 	require.NoError(t, err)
-	require.Equal(t, []Task{{ID: "task-1", Title: "Fix the bug", State: "todo"}}, tasks)
+	require.Equal(t, []Task{{ID: "task-1", Title: "Fix the bug", State: "todo", Repositories: []TaskRepository{{
+		ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix",
+	}}}}, tasks)
 	require.Equal(t, &PageInfo{NextCursor: "next-1", HasMore: true}, pageInfo)
 	require.Equal(t, TaskFilter{States: []string{"todo"}}, impl.lastTaskFilter)
 
 	task, err := host.Tasks().Get(context.Background(), "task-1")
 	require.NoError(t, err)
 	require.Equal(t, "Fix the bug", task.Title)
+	require.Equal(t, "feature/fix", task.Repositories[0].CheckoutBranch)
 
 	_, err = host.Tasks().Get(context.Background(), "missing")
 	require.Error(t, err)
@@ -240,10 +257,75 @@ func TestHostData_TaskWritesAndMessage(t *testing.T) {
 	require.Equal(t, "rerun the tests", impl.lastSendText)
 }
 
+// TestHostData_TaskMove proves MoveTask round-trips through
+// grpcHostClient -> proto -> grpcHostServer, including the optional
+// workflow_id pointer, the position field, and the outcome's
+// queued_for_step_id/transitioned/from_step_id fields.
+func TestHostData_TaskMove(t *testing.T) {
+	impl := &dataRecordingHost{
+		movedOutcome: MoveTaskOutcome{
+			Task:            &Task{ID: "task-1", State: "IN_PROGRESS"},
+			Transitioned:    true,
+			QueuedForStepID: nil,
+			FromStepID:      "step-1",
+		},
+	}
+	host := dialHostOverBufconn(t, impl)
+
+	workflowID := "wf-1"
+	outcome, err := host.Tasks().Move(context.Background(), MoveTaskInput{
+		TaskID: "task-1", WorkflowStepID: "step-2", WorkflowID: &workflowID, Position: 3,
+	})
+	require.NoError(t, err)
+	require.True(t, outcome.Transitioned)
+	require.Nil(t, outcome.QueuedForStepID)
+	require.Equal(t, "step-1", outcome.FromStepID)
+	require.Equal(t, "task-1", outcome.Task.ID)
+
+	require.Equal(t, "task-1", impl.lastMoveInput.TaskID)
+	require.Equal(t, "step-2", impl.lastMoveInput.WorkflowStepID)
+	require.NotNil(t, impl.lastMoveInput.WorkflowID)
+	require.Equal(t, "wf-1", *impl.lastMoveInput.WorkflowID)
+	require.Equal(t, int32(3), impl.lastMoveInput.Position)
+}
+
+// TestHostData_TaskMove_OmittedWorkflowIDStaysNilAcrossWire proves an
+// omitted workflow_id (nil, meaning "inherit the task's current workflow",
+// AC-005.4) survives the proto round-trip as nil rather than being coerced
+// to an empty string, which would be indistinguishable from an explicit
+// present-but-empty rejection (AC-005.5).
+func TestHostData_TaskMove_OmittedWorkflowIDStaysNilAcrossWire(t *testing.T) {
+	impl := &dataRecordingHost{movedOutcome: MoveTaskOutcome{Task: &Task{ID: "task-1"}}}
+	host := dialHostOverBufconn(t, impl)
+
+	_, err := host.Tasks().Move(context.Background(), MoveTaskInput{TaskID: "task-1", WorkflowStepID: "step-2"})
+	require.NoError(t, err)
+	require.Nil(t, impl.lastMoveInput.WorkflowID)
+}
+
+// TestHostData_TaskMove_ReportsQueuedForStepID proves a non-nil
+// QueuedForStepID (AC-002.1/002.2: landing on a step at its WIP limit) also
+// survives the wire round-trip.
+func TestHostData_TaskMove_ReportsQueuedForStepID(t *testing.T) {
+	impl := &dataRecordingHost{movedOutcome: MoveTaskOutcome{
+		Task:            &Task{ID: "task-1"},
+		Transitioned:    false,
+		QueuedForStepID: strPtr("step-2"),
+		FromStepID:      "step-2",
+	}}
+	host := dialHostOverBufconn(t, impl)
+
+	outcome, err := host.Tasks().Move(context.Background(), MoveTaskInput{TaskID: "task-1", WorkflowStepID: "step-2"})
+	require.NoError(t, err)
+	require.False(t, outcome.Transitioned)
+	require.NotNil(t, outcome.QueuedForStepID)
+	require.Equal(t, "step-2", *outcome.QueuedForStepID)
+}
+
 func TestHostData_SessionsListAndCodeStats(t *testing.T) {
 	impl := &dataRecordingHost{
 		sessions:  []Session{{ID: "session-1", TaskID: "task-1", State: "running"}},
-		codeStats: []SessionCodeStats{{SessionID: "session-1", LinesAddedCommitted: 10}},
+		codeStats: []SessionCodeStats{{SessionID: "session-1", LinesAddedCommitted: 10, CommittedLinesAvailable: true}},
 	}
 	host := dialHostOverBufconn(t, impl)
 
@@ -270,10 +352,11 @@ func TestHostData_InvokeUtilityAgent(t *testing.T) {
 	impl := &dataRecordingHost{utilityText: "the completion"}
 	host := dialHostOverBufconn(t, impl)
 
-	text, err := host.InvokeUtilityAgent(context.Background(), "do the thing")
+	text, err := host.InvokeUtilityAgent(context.Background(), "do the thing", UtilityAgentOptions{ProfileID: "profile-1"})
 	require.NoError(t, err)
 	require.Equal(t, "the completion", text)
 	require.Equal(t, "do the thing", impl.lastUtilityPrompt)
+	require.Equal(t, []UtilityAgentOptions{{ProfileID: "profile-1"}}, impl.lastUtilityOptions)
 }
 
 func TestHostData_Messages(t *testing.T) {
@@ -326,7 +409,11 @@ func TestHostData_AgentProfiles(t *testing.T) {
 }
 
 func TestHostData_Repositories(t *testing.T) {
-	impl := &dataRecordingHost{repositories: []Repository{{ID: "repo-1", WorkspaceID: "ws-1", Name: "kdlbs/kandev"}}}
+	impl := &dataRecordingHost{repositories: []Repository{{
+		ID: "repo-1", WorkspaceID: "ws-1", Name: "team/kandev", SourceType: "provider", ProviderID: "example-vcs",
+		ProviderRepositoryID: "repo-42", ProviderHost: "code.example.test", OwnerOrProject: "team", ProviderName: "kandev",
+		RemoteURL: "https://code.example.test/scm/team/kandev.git",
+	}}}
 	host := dialHostOverBufconn(t, impl)
 
 	repos, _, err := host.Repositories().List(context.Background(), "ws-1", Page{})

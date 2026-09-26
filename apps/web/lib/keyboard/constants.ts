@@ -3,6 +3,7 @@
  */
 
 // Modifier keys
+// i18n-exempt: DOM KeyboardEvent.key values, compared against real events.
 export const MODIFIER_KEYS = {
   CTRL: "Control",
   CMD: "Meta",
@@ -167,12 +168,6 @@ export const SHORTCUTS = {
     key: KEYS.F,
     modifiers: { ctrlOrCmd: true },
   },
-  // Cmd+Shift+M starts/stops voice input on the chat composer. The default
-  // is configurable per-user via the Voice Mode settings page.
-  VOICE_INPUT_TOGGLE: {
-    key: KEYS.M,
-    modifiers: { ctrlOrCmd: true, shift: true },
-  },
   // Ctrl+R opens the bash-style reverse-i-search overlay on the chat composer.
   // Defaults to plain Ctrl (not ctrlOrCmd) so the Mac browser refresh shortcut
   // Cmd+R keeps working out of the box.
@@ -185,5 +180,14 @@ export const SHORTCUTS = {
   OPEN_TASK_PR: {
     key: KEYS.G,
     modifiers: { ctrlOrCmd: true, shift: true },
+  },
+  // Cmd+E opens the sidebar-header workspace picker with focus inside the
+  // menu, so a workspace can be switched with arrows + Enter alone. Cmd+Shift+
+  // Space (the natural pairing with TASK_SWITCHER) is taken by
+  // TASK_SWITCHER_REVERSE; the browser defaults on Cmd/Ctrl+E (omnibox search,
+  // macOS find-selection) all yield to preventDefault.
+  WORKSPACE_PICKER: {
+    key: KEYS.E,
+    modifiers: { ctrlOrCmd: true },
   },
 } as const;

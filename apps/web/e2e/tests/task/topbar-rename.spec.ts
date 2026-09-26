@@ -27,7 +27,10 @@ test.describe("Task topbar inline rename", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    const title = testPage.locator('[data-testid="task-topbar"] [aria-current="page"]');
+    // The rename control itself, not the surrounding title crumb: the crumb is
+    // a flex wrapper that may also hold an icon or subtitle, and the tooltip,
+    // the double-click target and the truncation all belong to the control.
+    const title = testPage.locator('[data-testid="task-topbar"] [data-testid="task-topbar-title"]');
     await expect(title).toHaveText(originalTitle, { timeout: 10_000 });
 
     await title.hover();

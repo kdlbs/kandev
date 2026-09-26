@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { IconPlus } from "@tabler/icons-react";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import {
   listRoutines,
   createRoutine,
@@ -21,11 +22,15 @@ import type {
   AgentProfile,
   RoutineRun,
   RoutineTrigger,
+  CreateRoutineInput,
 } from "@/lib/state/slices/office/types";
 import { RoutineRow } from "./routine-row";
 import { RunRow } from "./run-row";
 import { CreateRoutineDialog } from "./create-routine-dialog";
 import { EmptyState } from "../components/shared/empty-state";
+import { routineNotFiringMessage } from "../lib/routine-not-firing";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type RoutineFormData = {
   name: string;
@@ -41,18 +46,42 @@ type RoutineFormData = {
   timezone: string;
 };
 
+// A refetch failure after a create/trigger call must not swallow the toast
+// reporting that call's own outcome, and must not become an unhandled
+// rejection; it is reported as its own toast instead.
+async function refreshRoutinesOrReportFailure(
+  fetchRoutines: () => Promise<void>,
+  t: TFunction,
+): Promise<void> {
+  try {
+    await fetchRoutines();
+  } catch {
+    toast.error(t("office:failedToLoad"));
+  }
+}
+
+function buildCreateRoutineInput(data: RoutineFormData): CreateRoutineInput {
+  return {
+    name: data.name,
+    description: data.description,
+    taskTemplate: { title: data.taskTitle, description: data.taskDescription },
+    assigneeAgentProfileId: data.assigneeAgentProfileId,
+    concurrencyPolicy: data.concurrencyPolicy,
+    catchUpPolicy: data.catchUpPolicy,
+    catchUpMax: data.catchUpMax,
+  };
+}
+
 function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Promise<void>) {
+  const { t } = useTranslation();
   const handleToggle = useCallback(
     async (id: string, active: boolean) => {
       try {
-        await updateRoutine(id, { status: active ? "active" : "paused" } as Record<
-          string,
-          unknown
-        >);
+        await updateRoutine(id, { status: active ? "active" : "paused" });
         await fetchRoutines();
-        toast.success(active ? "Routine activated" : "Routine paused");
+        toast.success(active ? t("office:routineActivated") : t("office:routinePaused"));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to update routine");
+        toast.error(err instanceof Error ? err.message : t("office:failedToUpdateRoutine"));
       }
     },
     [fetchRoutines],
@@ -63,48 +92,52 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
       try {
         await deleteRoutine(id);
         await fetchRoutines();
-        toast.success("Routine deleted");
+        toast.success(t("office:routineDeleted"));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to delete routine");
+        toast.error(err instanceof Error ? err.message : t("office:failedToDeleteRoutine"));
       }
     },
     [fetchRoutines],
   );
 
+  // Returns whether the routine itself was created, which is also whether
+  // the create dialog should close and reset its form: true covers both the
+  // full-success and trigger-create-failed cases (a real routine now
+  // exists), false only when createRoutine itself rejected (nothing to
+  // close or reset — the user's input needs to stay for a retry).
   const handleCreate = useCallback(
-    async (data: RoutineFormData, onDone: () => void) => {
-      if (!workspaceId) return;
+    async (data: RoutineFormData): Promise<boolean> => {
+      if (!workspaceId) return false;
+      let routine: Routine;
       try {
-        const template = JSON.stringify({
-          title: data.taskTitle,
-          description: data.taskDescription,
-        });
-        const res = await createRoutine(workspaceId, {
-          name: data.name,
-          description: data.description,
-          taskTemplate: JSON.parse(template),
-          assigneeAgentProfileId: data.assigneeAgentProfileId,
-          concurrencyPolicy: data.concurrencyPolicy,
-          catchUpPolicy: data.catchUpPolicy,
-          catchUpMax: data.catchUpMax,
-        } as Record<string, unknown>);
-        if (data.triggerKind === "cron" && data.cronExpression && res) {
-          const routineObj = res as unknown as { routine?: { id: string } };
-          const routineId = routineObj.routine?.id ?? (res as unknown as { id: string }).id;
-          if (routineId) {
-            await createRoutineTrigger(routineId, {
-              kind: data.triggerKind as "cron",
-              cronExpression: data.cronExpression,
-              timezone: data.timezone,
-            });
-          }
-        }
-        onDone();
-        await fetchRoutines();
-        toast.success("Routine created");
+        routine = await createRoutine(workspaceId, buildCreateRoutineInput(data));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to create routine");
+        toast.error(err instanceof Error ? err.message : t("office:failedToCreateRoutine"));
+        return false;
       }
+
+      const cronExpression = data.cronExpression.trim();
+      if (data.triggerKind === "cron" && cronExpression) {
+        try {
+          await createRoutineTrigger(routine.id, {
+            kind: "cron",
+            cronExpression,
+            timezone: data.timezone,
+          });
+        } catch (err) {
+          await refreshRoutinesOrReportFailure(fetchRoutines, t);
+          toast.error(
+            t("office:routineCreatedWithoutSchedule", {
+              error: err instanceof Error ? err.message : t("office:failedToCreateRoutine"),
+            }),
+          );
+          return true;
+        }
+      }
+
+      await refreshRoutinesOrReportFailure(fetchRoutines, t);
+      toast.success(t("office:routineCreated"));
+      return true;
     },
     [workspaceId, fetchRoutines],
   );
@@ -182,8 +215,9 @@ function useRoutinesData(workspaceId: string | null) {
 }
 
 export function RoutinesContent() {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
   const [showCreate, setShowCreate] = useState(false);
   const { routines, runs, setRuns, triggersByRoutine, fetchRoutines, fetchRuns } =
     useRoutinesData(workspaceId);
@@ -198,9 +232,9 @@ export function RoutinesContent() {
       try {
         await runRoutine(id);
         setRuns(await fetchRuns());
-        toast.success("Routine started");
+        toast.success(t("office:routineStarted"));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to run routine");
+        toast.error(routineNotFiringMessage(err, t, "office:failedToRunRoutine"));
       }
     },
     [fetchRuns, setRuns],
@@ -210,17 +244,17 @@ export function RoutinesContent() {
     <div className="space-y-4 p-6">
       <div className="flex justify-end">
         <Button size="sm" onClick={() => setShowCreate(true)} className="cursor-pointer">
-          <IconPlus className="h-4 w-4 mr-1" /> New Routine
+          <IconPlus className="h-4 w-4 mr-1" /> {t("office:newRoutine")}
         </Button>
       </div>
 
       <Tabs defaultValue="routines">
         <TabsList>
           <TabsTrigger value="routines" className="cursor-pointer">
-            All
+            {t("office:all")}
           </TabsTrigger>
           <TabsTrigger value="runs" className="cursor-pointer">
-            Runs
+            {t("office:runs")}
           </TabsTrigger>
         </TabsList>
 
@@ -244,7 +278,7 @@ export function RoutinesContent() {
         open={showCreate}
         onOpenChange={setShowCreate}
         agents={agents}
-        onSubmit={(data) => handleCreate(data, () => setShowCreate(false))}
+        onSubmit={handleCreate}
       />
     </div>
   );
@@ -265,13 +299,14 @@ function RoutinesList({
   onRunNow: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   if (routines.length === 0) {
     return (
       <EmptyState
-        message="No routines yet."
-        description="Routines automatically create tasks on a schedule or webhook trigger."
+        message={t("office:noRoutinesYet")}
+        description={t("office:routinesAutomaticallyCreateTasksOnA")}
       />
     );
   }
@@ -295,11 +330,12 @@ function RoutinesList({
 }
 
 function RunsList({ runs }: { runs: RoutineRun[] }) {
+  const { t } = useTranslation();
   if (runs.length === 0) {
     return (
       <EmptyState
-        message="No runs yet."
-        description="Runs appear here when a routine is triggered."
+        message={t("office:noRunsYet")}
+        description={t("office:runsAppearHereWhenARoutine")}
       />
     );
   }

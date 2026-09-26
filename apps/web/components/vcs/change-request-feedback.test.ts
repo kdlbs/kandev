@@ -1,6 +1,32 @@
 import { describe, expect, it } from "vitest";
 import { getChangeRequestTerminology } from "@/hooks/use-git-operations";
-import { getChangeRequestFailureFeedback } from "./change-request-feedback";
+import {
+  getChangeRequestFailureFeedback,
+  getChangeRequestSuccessFeedback,
+} from "./change-request-feedback";
+
+describe("getChangeRequestSuccessFeedback", () => {
+  it("warns without inviting duplicate creation when association failed", () => {
+    expect(
+      getChangeRequestSuccessFeedback(
+        {
+          success: true,
+          branch_pushed: true,
+          pr_url: "https://bitbucket.test/pr/42",
+          provider: "bitbucket",
+          linked: false,
+          association_error: "Task association could not be saved",
+        },
+        false,
+        getChangeRequestTerminology("github"),
+      ),
+    ).toEqual({
+      title: "PR created; task link needs attention",
+      description: "Task association could not be saved. Use Link in the task menu to retry.",
+      variant: "default",
+    });
+  });
+});
 
 describe("getChangeRequestFailureFeedback", () => {
   it.each([
@@ -36,6 +62,24 @@ describe("getChangeRequestFailureFeedback", () => {
     ).toEqual({
       title: "Create MR failed",
       description: "Authentication failed",
+      variant: "error",
+    });
+  });
+
+  it("maps empty-remote publication failures to recovery copy", () => {
+    expect(
+      getChangeRequestFailureFeedback(
+        {
+          success: false,
+          provider: "github",
+          error: "raw push output",
+          error_code: "empty_remote_branch_publish_failed",
+        },
+        getChangeRequestTerminology("github"),
+      ),
+    ).toEqual({
+      title: "Create PR failed",
+      description: "The base branch was published, but the task branch was not. Try Push again.",
       variant: "error",
     });
   });

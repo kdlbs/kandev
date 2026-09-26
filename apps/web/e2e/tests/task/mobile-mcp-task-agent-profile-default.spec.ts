@@ -1,32 +1,29 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("MCP-created task agent profile default on mobile", () => {
-  test("Task Actions choice is touch-usable, viewport-safe, and persists", async ({
+  test("Creating and opening tasks choice is touch-usable, viewport-safe, and persists", async ({
     testPage,
     apiClient,
   }) => {
-    await testPage.goto("/settings/general");
-    const taskActionsLink = testPage.getByRole("link", { name: /Task Actions/ });
-    await expect(taskActionsLink).toBeVisible({ timeout: 15_000 });
-    await taskActionsLink.tap();
+    await testPage.goto("/settings");
+    const taskBehaviorLink = testPage.getByRole("link", { name: /Task Behavior/ });
+    await expect(taskBehaviorLink).toBeVisible({ timeout: 15_000 });
+    await taskBehaviorLink.tap();
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/task-actions$/);
-    await expect(
-      testPage.getByRole("heading", { name: "Task Actions", exact: true }),
-    ).toBeVisible();
-    await expect(
-      testPage.getByText(/when an agent calls a Kandev MCP tool that creates a task/i),
-    ).toBeVisible();
-    await expect(testPage.getByText("create_task_kandev", { exact: true })).toBeVisible();
-    await expect(testPage.getByText("spawn_session_kandev", { exact: true })).toBeVisible();
-
-    await testPage.getByRole("button", { name: "About affected Kandev MCP tools" }).tap();
-    await expect(testPage.getByRole("tooltip")).toContainText(
-      "spawn_session_kandev adds a session to the current task",
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/task-behavior$/);
+    await expect(testPage.getByTestId("task-behavior-creating-title")).toBeVisible();
+    await expect(testPage.getByText("create_task_kandev", { exact: true })).not.toBeVisible();
+    await testPage.getByRole("button", { name: "About Profile for Tasks Created by Agents" }).tap();
+    const info = testPage.getByRole("dialog", { name: "Profile for Tasks Created by Agents" });
+    await expect(info).toContainText("create_task_kandev");
+    await expect(info).toContainText("spawn_session_kandev");
+    await expect(info).toContainText("effective model, mode, and options");
+    await expect(info).toContainText("Workflow-selected profiles win first");
+    await expect(info).toContainText(
+      "skips the creating session and source or parent task profiles",
     );
-    await testPage.getByRole("heading", { name: "Task Actions", exact: true }).tap();
-
-    const currentTask = testPage.getByRole("radio", { name: "Current task profile" });
+    await info.getByRole("button", { name: "Close", exact: true }).tap();
+    const currentTask = testPage.getByRole("radio", { name: "Creating session profile" });
     const workspaceDefault = testPage.getByRole("radio", {
       name: "Workspace default profile",
     });
@@ -34,7 +31,7 @@ test.describe("MCP-created task agent profile default on mobile", () => {
 
     const choice = testPage.locator('label[for="mcp-task-profile-workspace_default"]');
     const card = testPage
-      .locator('[data-slot="card"]')
+      .locator('[data-settings-group-card="true"]')
       .filter({ hasText: "Profile for Tasks Created by Agents" });
     const [choiceBox, cardBox, viewport] = await Promise.all([
       choice.boundingBox(),

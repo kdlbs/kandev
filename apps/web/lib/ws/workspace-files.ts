@@ -32,12 +32,13 @@ export async function requestFileContent(
   sessionId: string,
   path: string,
   repo?: string,
-): Promise<FileContentResponse> {
-  return client.request<FileContentResponse>("workspace.file.get", {
+): Promise<FileContentResponse & { is_binary: boolean }> {
+  const response = await client.request<FileContentResponse>("workspace.file.get", {
     session_id: sessionId,
     path,
     ...(repo ? { repo } : {}),
   });
+  return normalizeFileContentResponse(response);
 }
 
 /**
@@ -51,13 +52,20 @@ export async function requestFileContentAtRef(
   path: string,
   ref: string,
   repo?: string,
-): Promise<FileContentResponse> {
-  return client.request<FileContentResponse>("workspace.file.get_at_ref", {
+): Promise<FileContentResponse & { is_binary: boolean }> {
+  const response = await client.request<FileContentResponse>("workspace.file.get_at_ref", {
     session_id: sessionId,
     path,
     ref,
     ...(repo ? { repo } : {}),
   });
+  return normalizeFileContentResponse(response);
+}
+
+function normalizeFileContentResponse(
+  response: FileContentResponse,
+): FileContentResponse & { is_binary: boolean } {
+  return { ...response, is_binary: response.is_binary === true };
 }
 
 /**

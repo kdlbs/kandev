@@ -6,14 +6,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jmoiron/sqlx"
-
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
@@ -55,6 +56,11 @@ func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
 		ExecutorType:  string(models.ExecutorTypeWorktree),
 		Status:        models.TaskEnvironmentStatusReady,
 		WorkspacePath: "/task-root/kandev",
+		Repos: []*models.TaskEnvironmentRepo{{
+			RepositoryID: "repo-root",
+			WorktreeID:   "worktree-primary",
+			WorktreePath: "/task-root/kandev",
+		}},
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
@@ -66,16 +72,6 @@ func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID:           "session-worktree-root",
-		SessionID:    sessionID,
-		WorktreeID:   "worktree-primary",
-		WorktreePath: "/task-root/kandev",
-		Position:     0,
-	}); err != nil {
-		t.Fatalf("CreateTaskSessionWorktree: %v", err)
-	}
-
 	env, err := repo.GetTaskEnvironment(ctx, envID)
 	if err != nil {
 		t.Fatalf("GetTaskEnvironment: %v", err)
@@ -102,6 +98,123 @@ func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
 	}
 	if len(listed) != 1 || listed[0].WorkspacePath != "/task-root" {
 		t.Fatalf("ListTaskSessions workspace = %+v, want %q", listed, "/task-root")
+	}
+}
+
+// ListLiveWorkspaceSessions backs the orphan-reap ownership check's other-task
+// path resolution. It must report the same effective (environment-overridden)
+// workspace_path as GetTaskSession/ListTaskSessions above, never the stale
+// task_sessions column left behind after the linked environment's root moved -
+// a check built on the stale column would compare candidate cwds against a
+// path that is no longer actually owned by anyone, missing real ownership.
+func TestListLiveWorkspaceSessionsUsesCurrentEnvironmentRootNotStaleSessionColumn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const (
+		taskID    = "task-live-workspace-root"
+		sessionID = "session-live-workspace-root"
+		envID     = "env-live-workspace-root"
+	)
+
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Live workspace root"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:            envID,
+		TaskID:        taskID,
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		Status:        models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/stale-root/kandev",
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                sessionID,
+		TaskID:            taskID,
+		TaskEnvironmentID: envID,
+		WorkspacePath:     "/stale-root/kandev",
+		State:             models.TaskSessionStateRunning,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	// The environment's root moves (e.g. a promoted multi-repo task), but
+	// nothing ever rewrites the session row's own workspace_path column -
+	// that staleness is the case ListLiveWorkspaceSessions must not surface.
+	env, err := repo.GetTaskEnvironment(ctx, envID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	env.WorkspacePath = "/current-root"
+	if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("UpdateTaskEnvironment: %v", err)
+	}
+
+	live, err := repo.ListLiveWorkspaceSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListLiveWorkspaceSessions: %v", err)
+	}
+	if len(live) != 1 {
+		t.Fatalf("expected exactly one live session, got %+v", live)
+	}
+	if live[0].WorkspacePath != "/current-root" {
+		t.Fatalf("ListLiveWorkspaceSessions WorkspacePath = %q, want the current environment root %q (not the stale session column)",
+			live[0].WorkspacePath, "/current-root")
+	}
+}
+
+// AC-TASKS-ORPHAN-REAP-003.2: ListLiveWorkspaceSessions is the ownership
+// check's authorization boundary, so the state list it filters on must be
+// exactly the five live states, no more and no fewer - a terminal-state
+// session must never block a reap root, and every live state must.
+func TestListLiveWorkspaceSessionsFiltersToExactlyTheLiveStates(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-live-state-filter"
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Live state filter"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	liveStates := map[models.TaskSessionState]bool{
+		models.TaskSessionStateCreated:         true,
+		models.TaskSessionStateStarting:        true,
+		models.TaskSessionStateRunning:         true,
+		models.TaskSessionStateIdle:            true,
+		models.TaskSessionStateWaitingForInput: true,
+		models.TaskSessionStateCompleted:       false,
+		models.TaskSessionStateFailed:          false,
+		models.TaskSessionStateCancelled:       false,
+	}
+
+	for state := range liveStates {
+		sessionID := "session-" + strings.ToLower(string(state))
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID:            sessionID,
+			TaskID:        taskID,
+			WorkspacePath: "/live-state-filter/" + strings.ToLower(string(state)),
+			State:         state,
+		}); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", state, err)
+		}
+	}
+
+	live, err := repo.ListLiveWorkspaceSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListLiveWorkspaceSessions: %v", err)
+	}
+
+	gotStates := make(map[models.TaskSessionState]bool, len(live))
+	for _, sess := range live {
+		gotStates[sess.State] = true
+	}
+	for state, wantLive := range liveStates {
+		if gotStates[state] != wantLive {
+			t.Fatalf("state %s: ListLiveWorkspaceSessions returned it = %v, want %v (full result: %+v)",
+				state, gotStates[state], wantLive, live)
+		}
+	}
+	if len(live) != 5 {
+		t.Fatalf("expected exactly the 5 live-state sessions, got %d: %+v", len(live), live)
 	}
 }
 
@@ -174,6 +287,167 @@ func TestCreateOfficeTaskSessionMarksOnlyTheFirstConcurrentSessionAsOrigin(t *te
 	}
 }
 
+func TestCreateTaskSessionPersistsImmutableWorkflowInitialSnapshot(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-workflow-initial-snapshot"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Initial snapshot"}))
+
+	first := &models.TaskSession{ID: "initial-snapshot-session", TaskID: taskID, AgentProfileID: "profile-original"}
+	require.NoError(t, repo.CreateTaskSession(ctx, first))
+
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	snapshot, ok := models.LoadWorkflowInitialSessionSnapshot(task.Metadata)
+	require.True(t, ok)
+	require.Equal(t, models.WorkflowInitialSessionSnapshot{
+		SessionID:      first.ID,
+		AgentProfileID: first.AgentProfileID,
+	}, snapshot)
+
+	second := &models.TaskSession{
+		ID:             "later-snapshot-session",
+		TaskID:         taskID,
+		AgentProfileID: "profile-later",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyOrigin: models.SessionOriginTaskInitial,
+		},
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, second))
+
+	task, err = repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	snapshot, ok = models.LoadWorkflowInitialSessionSnapshot(task.Metadata)
+	require.True(t, ok)
+	require.Equal(t, first.ID, snapshot.SessionID)
+	require.Equal(t, first.AgentProfileID, snapshot.AgentProfileID)
+
+	require.NoError(t, repo.DeleteTaskSession(ctx, first))
+	task, err = repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	snapshot, ok = models.LoadWorkflowInitialSessionSnapshot(task.Metadata)
+	require.True(t, ok)
+	require.Equal(t, first.ID, snapshot.SessionID)
+}
+
+func TestCreateTaskSessionWithInitialRuntimeSeedConsumesOnceAcrossConcurrentAndReplacementSessions(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-initial-runtime-seed-race"
+	seed := models.SessionRuntimeConfig{
+		Model:         "mock-smart",
+		Mode:          "plan-mock",
+		ConfigOptions: map[string]string{"effort": "max"},
+	}
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:    taskID,
+		Title: "Initial runtime seed race",
+		Metadata: map[string]interface{}{
+			models.MetaKeyInitialSessionRuntimeConfig:          seed,
+			models.MetaKeyInitialSessionRuntimeConfigProfileID: "profile-1",
+		},
+	}))
+
+	sessions := []*models.TaskSession{
+		{ID: "initial-runtime-session-1", TaskID: taskID, AgentProfileID: "profile-1", State: models.TaskSessionStateCreated},
+		{ID: "initial-runtime-session-2", TaskID: taskID, AgentProfileID: "profile-1", State: models.TaskSessionStateCreated},
+	}
+	errs := make([]error, len(sessions))
+	var wg sync.WaitGroup
+	for i, session := range sessions {
+		wg.Add(1)
+		go func(i int, session *models.TaskSession) {
+			defer wg.Done()
+			errs[i] = repo.CreateTaskSessionWithInitialRuntimeSeed(ctx, session)
+		}(i, session)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		require.NoError(t, err, "CreateTaskSessionWithInitialRuntimeSeed(%d)", i)
+	}
+
+	created, err := repo.ListTaskSessions(ctx, taskID)
+	require.NoError(t, err)
+	require.Len(t, created, len(sessions))
+	initialCount := 0
+	initialSessionID := ""
+	for _, session := range created {
+		if overrides, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
+			initialCount++
+			initialSessionID = session.ID
+			require.Equal(t, seed.Model, overrides.Model)
+			require.Equal(t, seed.Mode, overrides.Mode)
+			require.Equal(t, "max", overrides.ConfigOptions["effort"])
+		}
+	}
+	require.Equal(t, 1, initialCount)
+
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	if _, ok := task.Metadata[models.MetaKeyInitialSessionRuntimeConfig]; ok {
+		t.Fatalf("initial runtime seed remained in task metadata: %#v", task.Metadata)
+	}
+	if _, ok := task.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]; ok {
+		t.Fatalf("initial runtime seed profile remained in task metadata: %#v", task.Metadata)
+	}
+
+	initialSession, err := repo.GetTaskSession(ctx, initialSessionID)
+	require.NoError(t, err)
+	require.NoError(t, repo.DeleteTaskSession(ctx, initialSession))
+	replacement := &models.TaskSession{
+		ID:             "initial-runtime-session-replacement",
+		TaskID:         taskID,
+		AgentProfileID: "profile-replacement",
+		State:          models.TaskSessionStateCreated,
+	}
+	require.NoError(t, repo.CreateTaskSessionWithInitialRuntimeSeed(ctx, replacement))
+	createdReplacement, err := repo.GetTaskSession(ctx, replacement.ID)
+	require.NoError(t, err)
+	if _, ok := models.LoadSessionRuntimeConfigOverrides(createdReplacement.Metadata); ok {
+		t.Fatalf("replacement session unexpectedly received initial runtime overrides: %#v", createdReplacement.Metadata)
+	}
+}
+
+func TestCreateTaskSessionWithInitialRuntimeSeedConsumesMismatchedProfile(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-initial-runtime-seed-profile-mismatch"
+	seed := models.SessionRuntimeConfig{
+		Model:         "mock-smart",
+		Mode:          "plan-mock",
+		ConfigOptions: map[string]string{"effort": "max"},
+	}
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:    taskID,
+		Title: "Initial runtime seed profile mismatch",
+		Metadata: map[string]interface{}{
+			models.MetaKeyInitialSessionRuntimeConfig:          seed,
+			models.MetaKeyInitialSessionRuntimeConfigProfileID: "profile-owner",
+			models.MetaKeyAgentProfileID:                       "profile-selected",
+		},
+	}))
+
+	mismatched := &models.TaskSession{
+		ID:             "initial-runtime-session-mismatched-profile",
+		TaskID:         taskID,
+		AgentProfileID: "profile-selected",
+		State:          models.TaskSessionStateCreated,
+	}
+	require.NoError(t, repo.CreateTaskSessionWithInitialRuntimeSeed(ctx, mismatched))
+
+	created, err := repo.GetTaskSession(ctx, mismatched.ID)
+	require.NoError(t, err)
+	_, hasOverrides := models.LoadSessionRuntimeConfigOverrides(created.Metadata)
+	require.False(t, hasOverrides, "mismatched profile must not receive the creator runtime seed")
+
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	_, hasSeed := task.Metadata[models.MetaKeyInitialSessionRuntimeConfig]
+	require.False(t, hasSeed, "mismatched profile must consume the launch-only seed")
+	_, hasOwner := task.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]
+	require.False(t, hasOwner, "mismatched profile must consume the seed owner")
+}
+
 func TestPostgresCreateOfficeTaskSessionMarksOnlyTheFirstConcurrentSessionAsOrigin(t *testing.T) {
 	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
 	repo, err := NewWithDB(db, db, nil)
@@ -242,9 +516,16 @@ func seedForMsgTest(t *testing.T, repo *Repository, taskID, sessionID, turnID st
 	}
 	_, err = repo.db.Exec(repo.db.Rebind(`
 		INSERT OR IGNORE INTO task_sessions
-			(id, task_id, started_at, updated_at)
-		VALUES (?, ?, ?, ?)
-	`), sessionID, taskID, now, now)
+			(id, task_id, queue_incarnation_id, started_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), sessionID, taskID, "incarnation-"+sessionID, now, now)
+	if err != nil && strings.Contains(err.Error(), "no column named queue_incarnation_id") {
+		_, err = repo.db.Exec(repo.db.Rebind(`
+			INSERT OR IGNORE INTO task_sessions
+				(id, task_id, started_at, updated_at)
+			VALUES (?, ?, ?, ?)
+		`), sessionID, taskID, now, now)
+	}
 	if err != nil {
 		t.Fatalf("seed session %s: %v", sessionID, err)
 	}
@@ -571,6 +852,54 @@ func TestClaimPromptableTaskSessionIfActive(t *testing.T) {
 	})
 }
 
+func TestPromptableSessionClaimAndRestoreRequireExactIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-identity", "session-identity", "turn-identity")
+	_, err := repo.db.ExecContext(
+		ctx,
+		`UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?`,
+		"current-incarnation",
+		"session-identity",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx, "session-identity", models.TaskSessionStateWaitingForInput, "",
+	))
+	session, err := repo.GetTaskSession(ctx, "session-identity")
+	require.NoError(t, err)
+	require.NotEmpty(t, session.QueueIncarnationID)
+
+	stale, err := repo.ClaimPromptableTaskSessionIfActiveForIdentity(
+		ctx, session.TaskID, session.ID, "replaced-incarnation",
+	)
+	require.NoError(t, err)
+	require.Equal(t, models.PromptableTaskSessionInactive, stale.Status)
+	persisted, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, persisted.State)
+
+	claim, err := repo.ClaimPromptableTaskSessionIfActiveForIdentity(
+		ctx, session.TaskID, session.ID, session.QueueIncarnationID,
+	)
+	require.NoError(t, err)
+	require.Equal(t, models.PromptableTaskSessionClaimed, claim.Status)
+	restored, _, err := repo.UpdateTaskSessionStateIfCurrentIdentity(
+		ctx,
+		session.TaskID,
+		session.ID,
+		"replaced-incarnation",
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateWaitingForInput,
+		"",
+	)
+	require.NoError(t, err)
+	require.False(t, restored)
+	persisted, err = repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateRunning, persisted.State)
+}
+
 func TestClaimPromptableTaskSessionIfActive_ZeroRowAfterConcurrentBusyTransition(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForSessionTests(t)
@@ -648,6 +977,119 @@ func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
 	}
 }
 
+func TestSetSessionMetadataKeyIfStateGuardsTheSessionState(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-session-marker", "session-session-marker", "turn-session-marker")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-session-marker", "keep", "value"))
+
+	changed, err := repo.SetSessionMetadataKeyIfState(
+		ctx,
+		"session-session-marker",
+		"completion_follow_up",
+		true,
+		models.TaskSessionStateCreated,
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx,
+		"session-session-marker",
+		models.TaskSessionStateCancelled,
+		"stopped",
+	))
+	changed, err = repo.SetSessionMetadataKeyIfState(
+		ctx,
+		"session-session-marker",
+		"completion_follow_up",
+		false,
+		models.TaskSessionStateCreated,
+	)
+	require.NoError(t, err)
+	require.False(t, changed)
+
+	stored, err := repo.GetTaskSession(ctx, "session-session-marker")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, stored.State)
+	require.Equal(t, true, stored.Metadata["completion_follow_up"])
+	require.Equal(t, "value", stored.Metadata["keep"])
+}
+
+func TestSetSessionMetadataKeyIfAbsentOrDifferentStepSQLiteReplacesOnlyStaleStep(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-step-claim", "session-step-claim", "turn-step-claim")
+	ctx := context.Background()
+
+	first := models.PendingStepCompletionSignal{StepID: "step-1", Summary: "first"}
+	stored, err := repo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, "session-step-claim", models.SessionMetaKeyPendingStepCompletion, "step-1", first)
+	require.NoError(t, err)
+	require.True(t, stored, "an empty signal bag should be claimed")
+
+	second := models.PendingStepCompletionSignal{StepID: "step-2", Summary: "second"}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, "session-step-claim", models.SessionMetaKeyPendingStepCompletion, "step-2", second)
+	require.NoError(t, err)
+	require.True(t, stored, "a signal from an older step should be replaced")
+
+	third := models.PendingStepCompletionSignal{StepID: "step-2", Summary: "third"}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, "session-step-claim", models.SessionMetaKeyPendingStepCompletion, "step-2", third)
+	require.NoError(t, err)
+	require.False(t, stored, "a signal for the current step should keep the first payload")
+
+	session, err := repo.GetTaskSession(ctx, "session-step-claim")
+	require.NoError(t, err)
+	signal, ok := models.LoadPendingStepSignal(session.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "step-2", signal.StepID)
+	require.Equal(t, "second", signal.Summary)
+}
+
+func TestSetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStepRejectsMovedTask(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-step-cas", "session-step-cas", "turn-step-cas")
+
+	task, err := repo.GetTask(ctx, "task-step-cas")
+	require.NoError(t, err)
+	task.WorkflowStepID = "step-review"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	signal := models.PendingStepCompletionSignal{StepID: "step-review", Summary: "review complete"}
+	stored, err := repo.SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
+		ctx,
+		"task-step-cas",
+		"session-step-cas",
+		models.SessionMetaKeyPendingStepCompletion,
+		"step-review",
+		signal,
+	)
+	require.NoError(t, err)
+	require.True(t, stored)
+
+	task.WorkflowStepID = "step-work"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+	late := models.PendingStepCompletionSignal{StepID: "step-review", Summary: "late review signal"}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
+		ctx,
+		"task-step-cas",
+		"session-step-cas",
+		models.SessionMetaKeyPendingStepCompletion,
+		"step-review",
+		late,
+	)
+	require.NoError(t, err)
+	require.False(t, stored, "a moved task must reject a stale launch-step signal")
+
+	session, err := repo.GetTaskSession(ctx, "session-step-cas")
+	require.NoError(t, err)
+	got, ok := models.LoadPendingStepSignal(session.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "review complete", got.Summary)
+}
+
 func TestUpdateSessionContextWindowSQLiteCountsStrictUsageDrops(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -703,48 +1145,60 @@ func TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB(t *testing.T) {
 	}
 }
 
+func TestSetSessionMetadataKeyIfAbsentOrDifferentStepQueryUsesPostgresJSONB(t *testing.T) {
+	query := setSessionMetadataKeyIfAbsentOrDifferentStepQuery(dialect.PGX)
+	if strings.Contains(query, "json_set") || strings.Contains(query, "json_extract") || strings.Contains(query, "json(?)") {
+		t.Fatalf("postgres step-aware claim query uses SQLite JSON functions: %s", query)
+	}
+	if !strings.Contains(query, "jsonb_set") || !strings.Contains(query, "jsonb_extract_path_text") || !strings.Contains(query, "IS DISTINCT FROM") {
+		t.Fatalf("postgres step-aware claim query must use atomic JSONB comparison: %s", query)
+	}
+}
+
 func TestListTaskSessionWorktreesFiltersInactiveRows(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-worktrees", "session-worktrees", "turn-worktrees")
-	worktrees := []*models.TaskSessionWorktree{
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-worktrees", TaskID: "task-worktrees", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if _, err := repo.db.Exec(repo.db.Rebind(
+		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`),
+		"env-worktrees", "session-worktrees"); err != nil {
+		t.Fatalf("link session to env: %v", err)
+	}
+	worktrees := []*models.TaskEnvironmentRepo{
 		{
-			ID:           "wt-active",
-			SessionID:    "session-worktrees",
-			WorktreeID:   "worktree-active",
-			RepositoryID: "repo-1",
-			BranchSlug:   "main",
+			ID: "wt-active", TaskEnvironmentID: "env-worktrees",
+			WorktreeID: "worktree-active", RepositoryID: "repo-1", BranchSlug: "main",
 		},
 		{
-			ID:           "wt-status-deleted",
-			SessionID:    "session-worktrees",
-			WorktreeID:   "worktree-status-deleted",
-			RepositoryID: "repo-1",
-			BranchSlug:   "deleted-status",
+			ID: "wt-status-deleted", TaskEnvironmentID: "env-worktrees",
+			WorktreeID: "worktree-status-deleted", RepositoryID: "repo-1", BranchSlug: "deleted-status",
 		},
 		{
-			ID:           "wt-timestamp-deleted",
-			SessionID:    "session-worktrees",
-			WorktreeID:   "worktree-timestamp-deleted",
-			RepositoryID: "repo-1",
-			BranchSlug:   "deleted-at",
+			ID: "wt-timestamp-deleted", TaskEnvironmentID: "env-worktrees",
+			WorktreeID: "worktree-timestamp-deleted", RepositoryID: "repo-1", BranchSlug: "deleted-at",
 		},
 	}
 	for _, wt := range worktrees {
-		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
-			t.Fatalf("CreateTaskSessionWorktree(%s): %v", wt.ID, err)
+		if err := repo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
+			t.Fatalf("CreateTaskEnvironmentRepo(%s): %v", wt.ID, err)
 		}
 	}
 	now := time.Now().UTC()
 	if _, err := repo.db.Exec(repo.db.Rebind(`
-		UPDATE task_session_worktrees
+		UPDATE task_environment_repos
 		SET status = 'deleted', updated_at = ?
 		WHERE id = ?
 	`), now, "wt-status-deleted"); err != nil {
 		t.Fatalf("mark status deleted: %v", err)
 	}
 	if _, err := repo.db.Exec(repo.db.Rebind(`
-		UPDATE task_session_worktrees
+		UPDATE task_environment_repos
 		SET deleted_at = ?, updated_at = ?
 		WHERE id = ?
 	`), now, now, "wt-timestamp-deleted"); err != nil {
@@ -772,26 +1226,27 @@ func TestUpdateTaskSessionWorktreeBranchByRepositoryScopesUpdate(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-worktrees", "session-worktrees", "turn-worktrees")
+	linkSessionToEnvForTest(t, repo, "session-worktrees", "env-worktrees")
 
-	worktrees := []*models.TaskSessionWorktree{
+	worktrees := []*models.TaskEnvironmentRepo{
 		{
-			ID:             "wt-repo-1",
-			SessionID:      "session-worktrees",
-			WorktreeID:     "worktree-repo-1",
-			RepositoryID:   "repo-1",
-			WorktreeBranch: "feature/old-one",
+			ID:                "wt-repo-1",
+			TaskEnvironmentID: "env-worktrees",
+			WorktreeID:        "worktree-repo-1",
+			RepositoryID:      "repo-1",
+			WorktreeBranch:    "feature/old-one",
 		},
 		{
-			ID:             "wt-repo-2",
-			SessionID:      "session-worktrees",
-			WorktreeID:     "worktree-repo-2",
-			RepositoryID:   "repo-2",
-			WorktreeBranch: "feature/old-two",
+			ID:                "wt-repo-2",
+			TaskEnvironmentID: "env-worktrees",
+			WorktreeID:        "worktree-repo-2",
+			RepositoryID:      "repo-2",
+			WorktreeBranch:    "feature/old-two",
 		},
 	}
 	for _, wt := range worktrees {
-		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
-			t.Fatalf("CreateTaskSessionWorktree(%s): %v", wt.ID, err)
+		if err := repo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
+			t.Fatalf("CreateTaskEnvironmentRepo(%s): %v", wt.ID, err)
 		}
 	}
 
@@ -815,8 +1270,54 @@ func TestUpdateTaskSessionWorktreeBranchByRepositoryScopesUpdate(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskSessionWorktreeBranchByWorktreeScopesRepeatedRepository(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-repeated-repo", "session-repeated-repo", "turn-repeated-repo")
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-repeated-repo", TaskID: "task-repeated-repo", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if _, err := repo.db.Exec(repo.db.Rebind(
+		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`),
+		"env-repeated-repo", "session-repeated-repo"); err != nil {
+		t.Fatalf("link session to env: %v", err)
+	}
+	for _, wt := range []*models.TaskEnvironmentRepo{
+		{ID: "wt-repeated-one", TaskEnvironmentID: "env-repeated-repo", WorktreeID: "worktree-repeated-one", RepositoryID: "repo-repeated", BranchSlug: "one", WorktreeBranch: "feature/one", Position: 0},
+		{ID: "wt-repeated-two", TaskEnvironmentID: "env-repeated-repo", WorktreeID: "worktree-repeated-two", RepositoryID: "repo-repeated", BranchSlug: "two", WorktreeBranch: "feature/two", Position: 1},
+	} {
+		require.NoError(t, repo.CreateTaskEnvironmentRepo(ctx, wt))
+	}
+	require.NoError(t, repo.UpdateTaskSessionWorktreeBranchByWorktree(ctx, "session-repeated-repo", "worktree-repeated-two", "feature/two-renamed"))
+	worktrees, err := repo.ListTaskSessionWorktrees(ctx, "session-repeated-repo")
+	require.NoError(t, err)
+	require.Equal(t, "feature/one", worktrees[0].WorktreeBranch)
+	require.Equal(t, "feature/two-renamed", worktrees[1].WorktreeBranch)
+}
+
 // TestGetLastAgentMessage_NoMessages verifies that a session with no messages
 // returns an empty string and sql.ErrNoRows.
+// linkSessionToEnvForTest creates the environment row a worktree test
+// references and points the session at it.
+func linkSessionToEnvForTest(t *testing.T, repo *Repository, sessionID, envID string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: envID, TaskID: "task-worktrees", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if _, err := repo.db.Exec(repo.db.Rebind(
+		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`),
+		envID, sessionID); err != nil {
+		t.Fatalf("link session to env: %v", err)
+	}
+}
+
 func TestGetLastAgentMessage_NoMessages(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -898,10 +1399,10 @@ func TestIncrementTaskSessionUsage_AccumulatesAcrossCalls(t *testing.T) {
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-usage", "sess-usage", "turn-usage")
 
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-usage", 100, 200, 50); err != nil {
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-usage", 100, 0, 200, 50); err != nil {
 		t.Fatalf("first increment: %v", err)
 	}
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-usage", 10, 20, 5); err != nil {
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-usage", 10, 0, 20, 5); err != nil {
 		t.Fatalf("second increment: %v", err)
 	}
 
@@ -921,7 +1422,7 @@ func TestIncrementTaskSessionUsage_AccumulatesAcrossCalls(t *testing.T) {
 // missing row (subscriber may race against session creation).
 func TestIncrementTaskSessionUsage_UnknownSessionNoError(t *testing.T) {
 	repo := newRepoForSessionTests(t)
-	if err := repo.IncrementTaskSessionUsage(context.Background(), "no-such", 1, 2, 3); err != nil {
+	if err := repo.IncrementTaskSessionUsageTx(context.Background(), nil, "no-such", 1, 1, 2, 3); err != nil {
 		t.Errorf("expected no error for unknown session, got %v", err)
 	}
 }
@@ -930,7 +1431,7 @@ func TestIncrementTaskSessionUsage_UnknownSessionNoError(t *testing.T) {
 // orchestrator publishing a usage event before SessionID is set.
 func TestIncrementTaskSessionUsage_EmptySessionIDNoOp(t *testing.T) {
 	repo := newRepoForSessionTests(t)
-	if err := repo.IncrementTaskSessionUsage(context.Background(), "", 1, 2, 3); err != nil {
+	if err := repo.IncrementTaskSessionUsageTx(context.Background(), nil, "", 1, 1, 2, 3); err != nil {
 		t.Errorf("empty session id should be a no-op, got %v", err)
 	}
 }
@@ -986,7 +1487,7 @@ func rebuildSessionsWithoutCostColumns(t *testing.T, repo *Repository) {
 // TestMigrateSessionsAddCostColumns_BackfillsLegacySchema reproduces the office
 // cost subscriber failure ("no such column: tokens_in"): a task_sessions table
 // that predates the cost columns and no longer contains the rebuild trigger
-// columns can never gain them, so IncrementTaskSessionUsage fails. The additive
+// columns can never gain them, so IncrementTaskSessionUsageTx fails. The additive
 // migration must backfill the columns idempotently.
 func TestMigrateSessionsAddCostColumns_BackfillsLegacySchema(t *testing.T) {
 	repo := newRepoForSessionTests(t)
@@ -996,20 +1497,20 @@ func TestMigrateSessionsAddCostColumns_BackfillsLegacySchema(t *testing.T) {
 	seedForMsgTest(t, repo, "task-mig", "sess-mig", "turn-mig")
 
 	// Precondition: this is the reported bug on a legacy schema.
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 2, 3); err == nil {
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-mig", 1, 1, 2, 3); err == nil {
 		t.Fatal("expected missing-column error before backfill")
 	}
 
 	repo.migrateSessionsAddCostColumns()
 
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 2, 3); err != nil {
-		t.Fatalf("IncrementTaskSessionUsage after backfill: %v", err)
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-mig", 1, 1, 2, 3); err != nil {
+		t.Fatalf("IncrementTaskSessionUsageTx after backfill: %v", err)
 	}
 
 	// Idempotent: a second pass over a table that already has the columns is a no-op.
 	repo.migrateSessionsAddCostColumns()
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 10, 20, 30); err != nil {
-		t.Fatalf("IncrementTaskSessionUsage after second pass: %v", err)
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-mig", 10, 10, 20, 30); err != nil {
+		t.Fatalf("IncrementTaskSessionUsageTx after second pass: %v", err)
 	}
 }
 
@@ -1232,6 +1733,7 @@ func TestCancelActiveTaskSessionIsTerminalSafe(t *testing.T) {
 		t.Fatalf("seed running state: %v", err)
 	}
 	insertSession(t, repo, "session-completed", "task-cas", string(models.TaskSessionStateCompleted))
+	insertSession(t, repo, "session-idle", "task-cas", string(models.TaskSessionStateIdle))
 
 	changed, cancelledAt, err := repo.CancelActiveTaskSession(ctx, "session-running", "coordinator stop")
 	if err != nil {
@@ -1242,6 +1744,16 @@ func TestCancelActiveTaskSessionIsTerminalSafe(t *testing.T) {
 	}
 	if got := sessionState(t, repo, "session-running"); got != string(models.TaskSessionStateCancelled) {
 		t.Fatalf("running session state = %q, want CANCELLED", got)
+	}
+	changed, _, err = repo.CancelActiveTaskSession(ctx, "session-idle", "coordinator stop")
+	if err != nil {
+		t.Fatalf("cancel idle session: %v", err)
+	}
+	if !changed {
+		t.Fatal("idle session was not cancelled")
+	}
+	if got := sessionState(t, repo, "session-idle"); got != string(models.TaskSessionStateCancelled) {
+		t.Fatalf("idle session state = %q, want CANCELLED", got)
 	}
 	cancelled, err := repo.GetTaskSession(ctx, "session-running")
 	if err != nil {
@@ -1477,6 +1989,102 @@ func TestDismissLastAgentErrorMatchesEquivalentTimestampText(t *testing.T) {
 	}
 }
 
+// Nothing used to retire a stored agent failure, so installations carry records
+// whose errors the agent recovered from long ago — each one still painting a red
+// icon on the task list.
+func TestClearRecoveredAgentErrorsBackfill(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	occurredAt := time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC)
+	seedStale := func(t *testing.T, taskID, sessionID, turnID string) {
+		t.Helper()
+		seedForMsgTest(t, repo, taskID, sessionID, turnID)
+		if err := repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLastAgentError,
+			models.LastAgentError{Message: "agent crashed", OccurredAt: occurredAt}); err != nil {
+			t.Fatalf("seed last agent error on %s: %v", sessionID, err)
+		}
+	}
+
+	// Recovered: an ordinary agent message lands after the failure.
+	seedStale(t, "task-recovered", "sess-recovered", "turn-recovered")
+	insertAgentMsg(t, repo, "msg-recovered", "sess-recovered", "turn-recovered",
+		"agent", "back on track", occurredAt.Add(time.Hour))
+
+	// Still failing: nothing successful has happened since.
+	seedStale(t, "task-current", "sess-current", "turn-current")
+
+	// Recovery that predates the failure must not count.
+	seedStale(t, "task-older", "sess-older", "turn-older")
+	insertAgentMsg(t, repo, "msg-older", "sess-older", "turn-older",
+		"agent", "earlier output", occurredAt.Add(-time.Hour))
+
+	// A user message after the failure is not the agent producing good output.
+	seedStale(t, "task-user", "sess-user", "turn-user")
+	insertAgentMsg(t, repo, "msg-user", "sess-user", "turn-user",
+		"user", "are you stuck?", occurredAt.Add(time.Hour))
+
+	// These statements scan every session before filtering, so a row the
+	// repository wrote as "no metadata" must not abort them. migrate.Apply
+	// swallows SQL errors, so the proof is that the recovered session below is
+	// still cleared with these rows present — an aborted statement would leave
+	// it untouched.
+	for index, blank := range []string{"", "null"} {
+		id := fmt.Sprintf("sess-blank-%d", index)
+		seedForMsgTest(t, repo, "task-blank-"+strconv.Itoa(index), id, "turn-blank-"+strconv.Itoa(index))
+		if _, err := repo.db.Exec(repo.db.Rebind(
+			`UPDATE task_sessions SET metadata = ? WHERE id = ?`), blank, id); err != nil {
+			t.Fatalf("seed %q metadata: %v", blank, err)
+		}
+	}
+
+	// The cached summary keeps the icon up until it is cleared too.
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO task_status_summaries (task_id, workspace_id, revision, summary, updated_at)
+		VALUES (?, '', 4, ?, ?)
+	`), "task-recovered",
+		`{"active_error":{"session_id":"sess-recovered","stamp":"s","preview":"agent crashed"},"pending_action":"permission"}`,
+		time.Now().UTC()); err != nil {
+		t.Fatalf("seed status summary: %v", err)
+	}
+
+	if err := repo.clearRecoveredAgentErrors(); err != nil {
+		t.Fatalf("clearRecoveredAgentErrors: %v", err)
+	}
+
+	hasError := func(t *testing.T, sessionID string) bool {
+		t.Helper()
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("get session %s: %v", sessionID, err)
+		}
+		_, ok := models.LoadLastAgentError(session.Metadata)
+		return ok
+	}
+
+	if hasError(t, "sess-recovered") {
+		t.Fatalf("a failure the agent recovered from must be cleared")
+	}
+	for _, sessionID := range []string{"sess-current", "sess-older", "sess-user"} {
+		if !hasError(t, sessionID) {
+			t.Fatalf("%s has no successful agent work after the failure; it must stay", sessionID)
+		}
+	}
+
+	var summary string
+	if err := repo.db.QueryRow(repo.db.Rebind(
+		`SELECT summary FROM task_status_summaries WHERE task_id = ?`), "task-recovered",
+	).Scan(&summary); err != nil {
+		t.Fatalf("read status summary: %v", err)
+	}
+	if strings.Contains(summary, "active_error") {
+		t.Fatalf("summary = %s, want the cached error cleared", summary)
+	}
+	if !strings.Contains(summary, "permission") {
+		t.Fatalf("summary = %s, want the rest of the projection preserved", summary)
+	}
+}
+
 func sessionCancellationMetadata(t *testing.T, repo *Repository, sessionID string) (string, sql.NullTime, time.Time) {
 	t.Helper()
 	var errorMessage string
@@ -1493,7 +2101,7 @@ func sessionCancellationMetadata(t *testing.T, repo *Repository, sessionID strin
 
 func assertReapedSession(t *testing.T, repo *Repository, sessionID string, reapedAfter time.Time) {
 	t.Helper()
-	if got := sessionState(t, repo, sessionID); got != "CANCELLED" {
+	if got := sessionState(t, repo, sessionID); got != sessionStateCancelled {
 		t.Errorf("%s = %q, want CANCELLED", sessionID, got)
 	}
 	errorMessage, completedAt, updatedAt := sessionCancellationMetadata(t, repo, sessionID)
@@ -1579,6 +2187,198 @@ func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
 	}
 }
 
+// TestCancelActiveTaskSessionsByIDs verifies the session-scoped cancel: only
+// the listed still-active sessions of the target task transition to
+// CANCELLED. Active siblings outside the ID list — including ones that
+// became active after the caller classified its set — and other tasks'
+// sessions survive, which is the structural guard the reconciliation
+// sweep's heal path relies on.
+func TestCancelActiveTaskSessionsByIDs(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	seedRepoLink(t, repo, "ws-r", "repo-r", "task-r", "sess-r1", "WAITING_FOR_INPUT")
+	insertSession(t, repo, "sess-r2", "task-r", "RUNNING")
+	insertSession(t, repo, "sess-r3", "task-r", "CREATED")
+	insertSession(t, repo, "sess-r4", "task-r", "COMPLETED")
+	seedRepoLink(t, repo, "ws-r", "repo-other", "task-other", "sess-o1", "RUNNING")
+
+	sessions, err := repo.CancelActiveTaskSessionsByIDs(ctx, "task-r", []string{"sess-r1", "sess-r3", "sess-r4", "sess-o1"}, "orphaned session")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var gotIDs []string
+	for _, sess := range sessions {
+		gotIDs = append(gotIDs, sess.ID)
+		if sess.TaskID != "task-r" {
+			t.Errorf("session %s TaskID = %q, want task-r", sess.ID, sess.TaskID)
+		}
+		if sess.State != models.TaskSessionStateCancelled {
+			t.Errorf("session %s State = %q, want CANCELLED", sess.ID, sess.State)
+		}
+	}
+	if !sameStringSet(gotIDs, []string{"sess-r1", "sess-r3"}) {
+		t.Errorf("cancelled ids = %v, want [sess-r1 sess-r3]", gotIDs)
+	}
+	// The unlisted active sibling keeps running: the write's predicate is
+	// the ID list, not the task.
+	if got := sessionState(t, repo, "sess-r2"); got != "RUNNING" {
+		t.Errorf("sess-r2 (unlisted) = %q, want unchanged RUNNING", got)
+	}
+	// Other tasks' sessions listed by mistake are never touched.
+	if got := sessionState(t, repo, "sess-o1"); got != "RUNNING" {
+		t.Errorf("sess-o1 (other task) = %q, want unchanged RUNNING", got)
+	}
+
+	// Idempotent: repeating the same scope changes nothing.
+	sessions, err = repo.CancelActiveTaskSessionsByIDs(ctx, "task-r", []string{"sess-r1", "sess-r3"}, "orphaned session")
+	if err != nil {
+		t.Fatalf("unexpected error on second call: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("expected 0 sessions on idempotent re-run, got %v", sessions)
+	}
+}
+
+func TestCancelActiveTaskSessionsByCandidatesRejectsNewActivityAndTurn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedRepoLink(t, repo, "ws-candidate", "repo-candidate", "task-candidate", "session-candidate", "RUNNING")
+
+	turn := &models.Turn{
+		ID:            "turn-candidate",
+		TaskSessionID: "session-candidate",
+		TaskID:        "task-candidate",
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-candidate")
+	if err != nil {
+		t.Fatalf("GetTaskSession after turn: %v", err)
+	}
+	candidate := models.ActiveSessionCancellationCandidate{
+		SessionID:           session.ID,
+		ExpectedUpdatedAt:   session.UpdatedAt,
+		ExpectedLastEventAt: session.UpdatedAt,
+		ExpectedTurnID:      turn.ID,
+	}
+
+	// A successor turn refreshes the session activity clock and changes the
+	// current-turn identity. The old candidate must lose the write race.
+	newTurn := &models.Turn{
+		ID:            "turn-candidate-successor",
+		TaskSessionID: "session-candidate",
+		TaskID:        "task-candidate",
+	}
+	if err := repo.CreateTurn(ctx, newTurn); err != nil {
+		t.Fatalf("Create successor turn: %v", err)
+	}
+	cancelled, err := repo.CancelActiveTaskSessionsByCandidates(ctx, "task-candidate", []models.ActiveSessionCancellationCandidate{candidate}, "orphaned session")
+	if err != nil {
+		t.Fatalf("guarded cancellation: %v", err)
+	}
+	if len(cancelled) != 0 {
+		t.Fatalf("cancelled sessions = %v, want none after successor turn", cancelled)
+	}
+	if got := sessionState(t, repo, "session-candidate"); got != "RUNNING" {
+		t.Fatalf("session state = %q, want RUNNING", got)
+	}
+}
+
+func TestRecoverTaskSessionByCandidatePreservesConversationAndGuardsTurn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedRepoLink(t, repo, "ws-recover", "repo-recover", "task-recover", "session-recover", "RUNNING")
+	seedRepoLink(t, repo, "ws-recover", "repo-recover-2", "task-recover-2", "session-recover-2", "RUNNING")
+	seedRepoLink(t, repo, "ws-recover", "repo-recover-created", "task-recover-created", "session-recover-created", "CREATED")
+
+	created, err := repo.GetTaskSession(ctx, "session-recover-created")
+	if err != nil {
+		t.Fatalf("GetTaskSession created candidate: %v", err)
+	}
+	recovered, err := repo.RecoverTaskSessionByCandidate(ctx, models.ActiveSessionRecoveryCandidate{
+		TaskID:              created.TaskID,
+		SessionID:           created.ID,
+		ExpectedState:       created.State,
+		ExpectedUpdatedAt:   created.UpdatedAt,
+		ExpectedLastEventAt: created.UpdatedAt,
+	}, time.Now().UTC().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("RecoverTaskSessionByCandidate created session: %v", err)
+	}
+	if recovered == nil {
+		t.Fatal("RecoverTaskSessionByCandidate created session returned nil")
+	}
+	if !models.HasInterruptedRecoveryPending(recovered.Metadata) {
+		t.Fatalf("created recovered metadata = %#v, want durable recovery marker", recovered.Metadata)
+	}
+	if _, ok := models.LoadInterruptedRecoverySettlement(recovered.Metadata); !ok {
+		t.Fatalf("created recovered metadata = %#v, want settlement snapshot", recovered.Metadata)
+	}
+
+	idleCandidate, err := repo.GetTaskSession(ctx, "session-recover")
+	if err != nil {
+		t.Fatalf("GetTaskSession idle candidate: %v", err)
+	}
+	// A cutoff in the future admits this stale snapshot. The absence of an
+	// active turn is part of the candidate predicate for a session whose actor
+	// died before a turn row was persisted.
+	recovered, err = repo.RecoverTaskSessionByCandidate(ctx, models.ActiveSessionRecoveryCandidate{
+		TaskID:              idleCandidate.TaskID,
+		SessionID:           idleCandidate.ID,
+		ExpectedState:       idleCandidate.State,
+		ExpectedUpdatedAt:   idleCandidate.UpdatedAt,
+		ExpectedLastEventAt: idleCandidate.UpdatedAt,
+	}, time.Now().UTC().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("RecoverTaskSessionByCandidate without turn: %v", err)
+	}
+	if recovered == nil {
+		t.Fatal("RecoverTaskSessionByCandidate without turn returned nil")
+	}
+	if recovered.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("recovered state = %q, want WAITING_FOR_INPUT", recovered.State)
+	}
+	if recovered.TaskID != idleCandidate.TaskID {
+		t.Fatalf("recovered task id = %q, want %q", recovered.TaskID, idleCandidate.TaskID)
+	}
+
+	turn := &models.Turn{ID: "turn-recover", TaskSessionID: "session-recover-2", TaskID: "task-recover-2"}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	turnCandidate, err := repo.GetTaskSession(ctx, "session-recover-2")
+	if err != nil {
+		t.Fatalf("GetTaskSession turn candidate: %v", err)
+	}
+	guarded := models.ActiveSessionRecoveryCandidate{
+		TaskID:              turnCandidate.TaskID,
+		SessionID:           turnCandidate.ID,
+		ExpectedState:       turnCandidate.State,
+		ExpectedUpdatedAt:   turnCandidate.UpdatedAt,
+		ExpectedLastEventAt: turnCandidate.UpdatedAt,
+		ExpectedTurnID:      turn.ID,
+	}
+	// A successor turn refreshes the session and invalidates the observed
+	// identity before the recovery write.
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-recover-successor", TaskSessionID: "session-recover-2", TaskID: "task-recover-2",
+	}); err != nil {
+		t.Fatalf("Create successor turn: %v", err)
+	}
+	recovered, err = repo.RecoverTaskSessionByCandidate(ctx, guarded, time.Time{})
+	if err != nil {
+		t.Fatalf("RecoverTaskSessionByCandidate stale turn: %v", err)
+	}
+	if recovered != nil {
+		t.Fatalf("stale turn candidate recovered session = %+v, want nil", recovered)
+	}
+	if got := sessionState(t, repo, "session-recover-2"); got != "RUNNING" {
+		t.Fatalf("session with successor turn = %q, want RUNNING", got)
+	}
+}
+
 // sameStringSet reports whether got and want contain the same strings,
 // ignoring order and duplicates count-for-count — used to compare the set of
 // cancelled session IDs against an expected set regardless of return order.
@@ -1599,4 +2399,875 @@ func sameStringSet(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// --- Turn lifecycle -------------------------------------------------------
+//
+// task_session_turns is the analytics/duration record behind the UI's
+// last-turn readout. AbandonTurn's zero-duration close is the subtle part:
+// it must collapse an orphaned turn to started_at rather than to now.
+
+func seedSessionForTurns(t *testing.T, repo *Repository, taskID, sessionID string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: taskID}); err != nil {
+		t.Fatalf("CreateTask(%s): %v", taskID, err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateRunning,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(%s): %v", sessionID, err)
+	}
+}
+
+func TestCreateTurnRoundTripsEveryFieldAndDefaultsTimestamps(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForTurns(t, repo, "task-turn-full", "session-turn-full")
+
+	completedAt := time.Date(2026, 5, 5, 10, 30, 0, 0, time.UTC)
+	want := &models.Turn{
+		ID:            "turn-full",
+		TaskSessionID: "session-turn-full",
+		TaskID:        "task-turn-full",
+		StartedAt:     time.Date(2026, 5, 5, 10, 0, 0, 0, time.UTC),
+		CompletedAt:   &completedAt,
+		Metadata:      map[string]interface{}{"tokens": float64(1234), "model": "opus"},
+		CreatedAt:     time.Date(2026, 5, 5, 9, 59, 0, 0, time.UTC),
+	}
+	if err := repo.CreateTurn(ctx, want); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+
+	got, err := repo.GetTurn(ctx, "turn-full")
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if got.ID != want.ID || got.TaskSessionID != want.TaskSessionID || got.TaskID != want.TaskID {
+		t.Errorf("identity = %q/%q/%q, want %q/%q/%q",
+			got.ID, got.TaskSessionID, got.TaskID, want.ID, want.TaskSessionID, want.TaskID)
+	}
+	assertTimeEqual(t, "StartedAt", got.StartedAt, want.StartedAt)
+	assertTimeEqual(t, "CreatedAt", got.CreatedAt, want.CreatedAt)
+	assertTimeEqual(t, "UpdatedAt", got.UpdatedAt, want.UpdatedAt)
+	if got.CompletedAt == nil {
+		t.Fatal("CompletedAt = nil, want the supplied value")
+	}
+	assertTimeEqual(t, "CompletedAt", *got.CompletedAt, completedAt)
+	assertJSONMapEqual(t, "Metadata", got.Metadata, want.Metadata)
+
+	// An id-less, timestamp-less turn gets both stamped.
+	before := time.Now().UTC().Add(-time.Second)
+	bare := &models.Turn{TaskSessionID: "session-turn-full", TaskID: "task-turn-full"}
+	if err := repo.CreateTurn(ctx, bare); err != nil {
+		t.Fatalf("CreateTurn(bare): %v", err)
+	}
+	if bare.ID == "" {
+		t.Error("ID left empty; a UUID should have been generated")
+	}
+	if bare.StartedAt.Before(before) || bare.CreatedAt.Before(before) {
+		t.Errorf("StartedAt=%v CreatedAt=%v, want fresh stamps after %v", bare.StartedAt, bare.CreatedAt, before)
+	}
+	gotBare, err := repo.GetTurn(ctx, bare.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(bare): %v", err)
+	}
+	if gotBare.CompletedAt != nil {
+		t.Errorf("CompletedAt = %v, want nil for an open turn", *gotBare.CompletedAt)
+	}
+	if gotBare.Metadata != nil {
+		t.Errorf("Metadata = %#v, want nil (the {} sentinel decodes to nil)", gotBare.Metadata)
+	}
+}
+
+// TestCreateTurnRefreshesSessionUpdatedAt verifies that turn persistence
+// refreshes the parent session row's updated_at: the session reconciliation
+// sweep measures event silence from task_sessions.updated_at (and the newest
+// message), so a turn dispatched without a user message — auto-start,
+// workflow on_enter — must reset the clock even when no message row exists
+// yet. Both entry points (CreateTurn and the step-stamped transaction) are
+// covered.
+func TestCreateTurnRefreshesSessionUpdatedAt(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForTurns(t, repo, "task-turn-clock", "session-turn-clock")
+
+	oldRowTime := time.Now().UTC().Add(-3 * time.Hour)
+	if _, err := repo.DB().ExecContext(ctx, `UPDATE task_sessions SET updated_at = ? WHERE id = ?`, oldRowTime, "session-turn-clock"); err != nil {
+		t.Fatalf("age session row: %v", err)
+	}
+
+	turn := &models.Turn{
+		ID: "turn-clock", TaskSessionID: "session-turn-clock", TaskID: "task-turn-clock",
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-turn-clock")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if !session.UpdatedAt.After(oldRowTime.Add(time.Hour)) {
+		t.Errorf("updated_at = %v after CreateTurn, want refreshed well past the aged %v", session.UpdatedAt, oldRowTime)
+	}
+
+	// The step-stamped transactional path refreshes it too.
+	if _, err := repo.DB().ExecContext(ctx, `UPDATE task_sessions SET updated_at = ? WHERE id = ?`, oldRowTime, "session-turn-clock"); err != nil {
+		t.Fatalf("age session row again: %v", err)
+	}
+	stamped := &models.Turn{
+		ID: "turn-clock-2", TaskSessionID: "session-turn-clock", TaskID: "task-turn-clock",
+	}
+	if _, err := repo.CreateTurnWithStepStamp(ctx, stamped); err != nil {
+		t.Fatalf("CreateTurnWithStepStamp: %v", err)
+	}
+	session, err = repo.GetTaskSession(ctx, "session-turn-clock")
+	if err != nil {
+		t.Fatalf("GetTaskSession (second): %v", err)
+	}
+	if !session.UpdatedAt.After(oldRowTime.Add(time.Hour)) {
+		t.Errorf("updated_at = %v after CreateTurnWithStepStamp, want refreshed well past the aged %v", session.UpdatedAt, oldRowTime)
+	}
+}
+
+func TestCreateTurnRollsBackWhenSessionActivityRefreshFails(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForTurns(t, repo, "task-turn-atomic", "session-turn-atomic")
+	oldRowTime := time.Now().UTC().Add(-3 * time.Hour)
+	if _, err := repo.DB().ExecContext(ctx,
+		`UPDATE task_sessions SET updated_at = ? WHERE id = ?`, oldRowTime, "session-turn-atomic"); err != nil {
+		t.Fatalf("age session row: %v", err)
+	}
+	if _, err := repo.DB().ExecContext(ctx, `
+		CREATE TRIGGER fail_turn_session_clock
+		BEFORE UPDATE OF updated_at ON task_sessions
+		WHEN OLD.id = 'session-turn-atomic'
+		BEGIN
+			SELECT RAISE(ABORT, 'session activity refresh rejected');
+		END;
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-atomic",
+		TaskSessionID: "session-turn-atomic",
+		TaskID:        "task-turn-atomic",
+	})
+	if err == nil {
+		t.Fatal("CreateTurn succeeded despite a failed session activity refresh")
+	}
+
+	var turnCount int
+	if err := repo.DB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM task_session_turns WHERE id = ?`, "turn-atomic").Scan(&turnCount); err != nil {
+		t.Fatalf("count inserted turn: %v", err)
+	}
+	if turnCount != 0 {
+		t.Fatalf("turn row count = %d after failed session refresh, want 0", turnCount)
+	}
+	var gotSessionTime time.Time
+	if err := repo.DB().QueryRowContext(ctx,
+		`SELECT updated_at FROM task_sessions WHERE id = ?`, "session-turn-atomic").Scan(&gotSessionTime); err != nil {
+		t.Fatalf("read session clock: %v", err)
+	}
+	if !gotSessionTime.Equal(oldRowTime) {
+		t.Fatalf("session updated_at = %v after rollback, want %v", gotSessionTime, oldRowTime)
+	}
+}
+
+func TestGetTurnAndActiveTurnReturnErrNoRowsWhenAbsent(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForTurns(t, repo, "task-turn-none", "session-turn-none")
+
+	if _, err := repo.GetTurn(ctx, "turn-missing"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("GetTurn error = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := repo.GetActiveTurnBySessionID(ctx, "session-turn-none"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("GetActiveTurnBySessionID error = %v, want sql.ErrNoRows", err)
+	}
+	turns, err := repo.ListTurnsBySession(ctx, "session-turn-none")
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	if len(turns) != 0 {
+		t.Errorf("ListTurnsBySession = %+v, want empty", turns)
+	}
+}
+
+func TestGetActiveTurnBySessionIDPicksNewestOpenTurn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForTurns(t, repo, "task-turn-active", "session-turn-active")
+	seedSessionForTurns(t, repo, "task-turn-other", "session-turn-other")
+
+	base := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	closedAt := base.Add(30 * time.Minute)
+	turns := []*models.Turn{
+		{ID: "turn-closed", TaskSessionID: "session-turn-active", TaskID: "task-turn-active",
+			StartedAt: base, CompletedAt: &closedAt},
+		{ID: "turn-open-old", TaskSessionID: "session-turn-active", TaskID: "task-turn-active",
+			StartedAt: base.Add(time.Hour)},
+		{ID: "turn-open-new", TaskSessionID: "session-turn-active", TaskID: "task-turn-active",
+			StartedAt: base.Add(2 * time.Hour)},
+		{ID: "turn-foreign", TaskSessionID: "session-turn-other", TaskID: "task-turn-other",
+			StartedAt: base.Add(3 * time.Hour)},
+	}
+	for _, turn := range turns {
+		if err := repo.CreateTurn(ctx, turn); err != nil {
+			t.Fatalf("CreateTurn(%s): %v", turn.ID, err)
+		}
+	}
+
+	active, err := repo.GetActiveTurnBySessionID(ctx, "session-turn-active")
+	if err != nil {
+		t.Fatalf("GetActiveTurnBySessionID: %v", err)
+	}
+	if active.ID != "turn-open-new" {
+		t.Errorf("GetActiveTurnBySessionID = %q, want turn-open-new (newest open turn)", active.ID)
+	}
+
+	listed, err := repo.ListTurnsBySession(ctx, "session-turn-active")
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	wantOrder := []string{"turn-closed", "turn-open-old", "turn-open-new"}
+	if len(listed) != len(wantOrder) {
+		t.Fatalf("ListTurnsBySession returned %d turns, want %d (session-scoped)", len(listed), len(wantOrder))
+	}
+	for i := range wantOrder {
+		if listed[i].ID != wantOrder[i] {
+			t.Fatalf("ListTurnsBySession order = %q at index %d, want %q (started_at ASC)", listed[i].ID, i, wantOrder[i])
+		}
+	}
+	if listed[0].CompletedAt == nil {
+		t.Error("turn-closed CompletedAt = nil, want it populated in the list read")
+	}
+	if listed[1].CompletedAt != nil {
+		t.Errorf("turn-open-old CompletedAt = %v, want nil", *listed[1].CompletedAt)
+	}
+}
+
+func TestGetActiveTurnBySessionIDUsesDeterministicTieBreak(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-turn-tie"
+	const sessionID = "session-turn-tie"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+
+	startedAt := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	createdAt := startedAt.Add(time.Minute)
+	for _, id := range []string{"turn-tie-z", "turn-tie-a"} {
+		if err := repo.CreateTurn(ctx, &models.Turn{
+			ID: id, TaskSessionID: sessionID, TaskID: taskID,
+			StartedAt: startedAt, CreatedAt: createdAt,
+		}); err != nil {
+			t.Fatalf("CreateTurn(%s): %v", id, err)
+		}
+	}
+
+	active, err := repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetActiveTurnBySessionID: %v", err)
+	}
+	if active.ID != "turn-tie-z" {
+		t.Fatalf("GetActiveTurnBySessionID = %q, want turn-tie-z", active.ID)
+	}
+
+	listed, err := repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	wantOrder := []string{"turn-tie-a", "turn-tie-z"}
+	if len(listed) != len(wantOrder) {
+		t.Fatalf("ListTurnsBySession returned %d turns, want %d", len(listed), len(wantOrder))
+	}
+	for index, wantID := range wantOrder {
+		if listed[index].ID != wantID {
+			t.Fatalf("ListTurnsBySession[%d] = %q, want %q", index, listed[index].ID, wantID)
+		}
+	}
+}
+
+func TestTurnReadsHideEmptyUnpublishedReservationUntilMessageEvidence(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-turn-reserved"
+	const sessionID = "session-turn-reserved"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+	base := time.Date(2026, 8, 15, 18, 0, 0, 0, time.UTC)
+	for _, turn := range []*models.Turn{
+		{ID: "turn-accepted", TaskSessionID: sessionID, TaskID: taskID, StartedAt: base},
+		{
+			ID: "turn-unpublished", TaskSessionID: sessionID, TaskID: taskID,
+			StartedAt: base.Add(time.Minute),
+			Metadata: map[string]interface{}{
+				models.TurnMetaKeyPromptDispatchPending:   true,
+				models.TurnMetaKeyPromptDispatchAttempted: true,
+			},
+		},
+	} {
+		if err := repo.CreateTurn(ctx, turn); err != nil {
+			t.Fatalf("CreateTurn(%s): %v", turn.ID, err)
+		}
+	}
+
+	active, err := repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetActiveTurnBySessionID: %v", err)
+	}
+	if active.ID != "turn-unpublished" {
+		t.Fatalf("active turn = %q, want attempted reservation", active.ID)
+	}
+	listed, err := repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "turn-accepted" {
+		t.Fatalf("listed turns = %#v, want only accepted predecessor", listed)
+	}
+
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: "message-reserved-output", TaskSessionID: sessionID, TaskID: taskID,
+		TurnID: "turn-unpublished", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeMessage, Content: "accepted output", CreatedAt: base.Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	active, err = repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetActiveTurnBySessionID after output: %v", err)
+	}
+	if active.ID != "turn-unpublished" {
+		t.Fatalf("active turn after output = %q, want ambiguous accepted reservation", active.ID)
+	}
+	listed, err = repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession after output: %v", err)
+	}
+	if len(listed) != 2 || listed[1].ID != "turn-unpublished" {
+		t.Fatalf("listed turns after output = %#v, want reservation restored", listed)
+	}
+}
+
+func TestUpdateTurnWritesCompletionAndMetadata(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForTurns(t, repo, "task-turn-update", "session-turn-update")
+
+	turn := &models.Turn{
+		ID: "turn-update", TaskSessionID: "session-turn-update", TaskID: "task-turn-update",
+		StartedAt: time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC),
+		Metadata:  map[string]interface{}{"stage": "start"},
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+
+	completedAt := time.Date(2026, 6, 2, 8, 45, 0, 0, time.UTC)
+	turn.CompletedAt = &completedAt
+	turn.Metadata = map[string]interface{}{"stage": "done", "tokens": float64(42)}
+	if err := repo.UpdateTurn(ctx, turn); err != nil {
+		t.Fatalf("UpdateTurn: %v", err)
+	}
+
+	got, err := repo.GetTurn(ctx, "turn-update")
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if got.CompletedAt == nil {
+		t.Fatal("CompletedAt = nil after UpdateTurn")
+	}
+	assertTimeEqual(t, "CompletedAt", *got.CompletedAt, completedAt)
+	assertJSONMapEqual(t, "Metadata", got.Metadata, turn.Metadata)
+	assertTimeEqual(t, "StartedAt", got.StartedAt, turn.StartedAt)
+	if !got.UpdatedAt.After(got.StartedAt) {
+		t.Errorf("UpdatedAt = %v, want it bumped past StartedAt %v", got.UpdatedAt, got.StartedAt)
+	}
+
+	// Clearing Metadata writes the {} sentinel back, which reads as nil.
+	turn.Metadata = nil
+	if err := repo.UpdateTurn(ctx, turn); err != nil {
+		t.Fatalf("UpdateTurn(clear metadata): %v", err)
+	}
+	got, err = repo.GetTurn(ctx, "turn-update")
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if got.Metadata != nil {
+		t.Errorf("Metadata = %#v, want nil after being cleared", got.Metadata)
+	}
+}
+
+func TestUpdateTurnRejectsSnapshotStaleBehindMetadataPatch(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForTurns(t, repo, "task-turn-stale", "session-turn-stale")
+	turn := &models.Turn{
+		ID: "turn-stale", TaskSessionID: "session-turn-stale", TaskID: "task-turn-stale",
+		Metadata: map[string]interface{}{"initial": true},
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	stale, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(stale snapshot): %v", err)
+	}
+	updated, _, _, err := repo.UpdateActiveTurnMetadata(
+		ctx,
+		turn.TaskSessionID,
+		turn.ID,
+		map[string]interface{}{models.TurnMetaKeyPromptDispatchAttempted: true},
+		nil,
+	)
+	if err != nil || !updated {
+		t.Fatalf("UpdateActiveTurnMetadata: updated=%v err=%v", updated, err)
+	}
+	stale.Metadata["prompt_usage"] = map[string]interface{}{"input_tokens": float64(1)}
+
+	if err := repo.UpdateTurn(ctx, stale); err == nil {
+		t.Fatal("UpdateTurn accepted a stale full metadata snapshot")
+	}
+	persisted, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(persisted): %v", err)
+	}
+	if attempted, _ := persisted.Metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool); !attempted {
+		t.Fatalf("stale update dropped dispatch-attempt marker: %#v", persisted.Metadata)
+	}
+	if _, exists := persisted.Metadata["prompt_usage"]; exists {
+		t.Fatalf("stale update committed prompt metadata: %#v", persisted.Metadata)
+	}
+}
+
+func TestCompleteTurnStampsNowAndAbandonTurnCollapsesToStartedAt(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForTurns(t, repo, "task-turn-close", "session-turn-close")
+
+	startedAt := time.Date(2026, 6, 3, 8, 0, 0, 0, time.UTC)
+	for _, id := range []string{"turn-complete", "turn-abandon", "turn-already-closed"} {
+		if err := repo.CreateTurn(ctx, &models.Turn{
+			ID: id, TaskSessionID: "session-turn-close", TaskID: "task-turn-close", StartedAt: startedAt,
+		}); err != nil {
+			t.Fatalf("CreateTurn(%s): %v", id, err)
+		}
+	}
+
+	if err := repo.CompleteTurn(ctx, "turn-complete"); err != nil {
+		t.Fatalf("CompleteTurn: %v", err)
+	}
+	completed, err := repo.GetTurn(ctx, "turn-complete")
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if completed.CompletedAt == nil {
+		t.Fatal("CompletedAt = nil after CompleteTurn")
+	}
+	if !completed.CompletedAt.After(startedAt) {
+		t.Errorf("CompletedAt = %v, want a wall-clock stamp after StartedAt %v", *completed.CompletedAt, startedAt)
+	}
+
+	// AbandonTurn gives the orphaned turn zero duration rather than hours of
+	// dead time.
+	if err := repo.AbandonTurn(ctx, "turn-abandon"); err != nil {
+		t.Fatalf("AbandonTurn: %v", err)
+	}
+	abandoned, err := repo.GetTurn(ctx, "turn-abandon")
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if abandoned.CompletedAt == nil {
+		t.Fatal("CompletedAt = nil after AbandonTurn")
+	}
+	assertTimeEqual(t, "abandoned CompletedAt", *abandoned.CompletedAt, startedAt)
+
+	// AbandonTurn must not rewrite a turn that is already closed.
+	closedAt := startedAt.Add(90 * time.Minute)
+	alreadyClosed, err := repo.GetTurn(ctx, "turn-already-closed")
+	if err != nil {
+		t.Fatalf("GetTurn(turn-already-closed): %v", err)
+	}
+	alreadyClosed.CompletedAt = &closedAt
+	if err := repo.UpdateTurn(ctx, alreadyClosed); err != nil {
+		t.Fatalf("UpdateTurn: %v", err)
+	}
+	if err := repo.AbandonTurn(ctx, "turn-already-closed"); err != nil {
+		t.Fatalf("AbandonTurn(already closed): %v", err)
+	}
+	stillClosed, err := repo.GetTurn(ctx, "turn-already-closed")
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	assertTimeEqual(t, "already-closed CompletedAt", *stillClosed.CompletedAt, closedAt)
+}
+
+// --- Batch and active-session reads --------------------------------------
+//
+// These feed the kanban card summaries and the environment-sharing guards.
+// They share one fixture: three tasks with a mix of primary/secondary and
+// active/terminal sessions on two task environments.
+
+type sessionBatchFixture struct {
+	repo *Repository
+}
+
+func seedSessionBatchFixture(t *testing.T) *sessionBatchFixture {
+	t.Helper()
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	for _, taskID := range []string{"task-batch-1", "task-batch-2", "task-batch-3"} {
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: taskID}); err != nil {
+			t.Fatalf("CreateTask(%s): %v", taskID, err)
+		}
+	}
+	// One environment per task (task_environments.task_id is UNIQUE); the
+	// "shared" one is owned by task-batch-1 and borrowed by task-batch-2.
+	for envID, ownerTaskID := range map[string]string{
+		"env-batch-shared": "task-batch-1",
+		"env-batch-solo":   "task-batch-3",
+	} {
+		if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: envID, TaskID: ownerTaskID, ExecutorType: string(models.ExecutorTypeLocal),
+			Status: models.TaskEnvironmentStatusReady,
+		}); err != nil {
+			t.Fatalf("CreateTaskEnvironment(%s): %v", envID, err)
+		}
+	}
+
+	sessions := []*models.TaskSession{
+		{ID: "session-b1-primary", TaskID: "task-batch-1", IsPrimary: true,
+			State: models.TaskSessionStateRunning, TaskEnvironmentID: "env-batch-shared",
+			EnvironmentID: "env-batch-shared", ReviewStatus: models.ReviewStatusPending},
+		{ID: "session-b1-secondary", TaskID: "task-batch-1",
+			State: models.TaskSessionStateCompleted, TaskEnvironmentID: "env-batch-shared"},
+		{ID: "session-b2-primary", TaskID: "task-batch-2", IsPrimary: true,
+			State: models.TaskSessionStateWaitingForInput, TaskEnvironmentID: "env-batch-shared"},
+		// task-batch-3 has only a non-primary, terminal session.
+		{ID: "session-b3-secondary", TaskID: "task-batch-3",
+			State: models.TaskSessionStateCompleted, TaskEnvironmentID: "env-batch-solo"},
+	}
+	for _, session := range sessions {
+		if err := repo.CreateTaskSession(ctx, session); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", session.ID, err)
+		}
+	}
+	return &sessionBatchFixture{repo: repo}
+}
+
+func TestGetPrimarySessionIDsByTaskIDsOmitsTasksWithoutAPrimary(t *testing.T) {
+	fixture := seedSessionBatchFixture(t)
+	ctx := context.Background()
+
+	got, err := fixture.repo.GetPrimarySessionIDsByTaskIDs(ctx,
+		[]string{"task-batch-1", "task-batch-2", "task-batch-3", "task-batch-missing"})
+	if err != nil {
+		t.Fatalf("GetPrimarySessionIDsByTaskIDs: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("map = %v, want exactly the two tasks with a primary session", got)
+	}
+	if got["task-batch-1"] != "session-b1-primary" {
+		t.Errorf("task-batch-1 = %q, want session-b1-primary", got["task-batch-1"])
+	}
+	if got["task-batch-2"] != "session-b2-primary" {
+		t.Errorf("task-batch-2 = %q, want session-b2-primary", got["task-batch-2"])
+	}
+
+	empty, err := fixture.repo.GetPrimarySessionIDsByTaskIDs(ctx, nil)
+	if err != nil {
+		t.Fatalf("GetPrimarySessionIDsByTaskIDs(nil): %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Errorf("nil input = %v, want a non-nil empty map", empty)
+	}
+}
+
+func TestGetSessionCountsByTaskIDsCountsEverySessionState(t *testing.T) {
+	fixture := seedSessionBatchFixture(t)
+	ctx := context.Background()
+
+	got, err := fixture.repo.GetSessionCountsByTaskIDs(ctx,
+		[]string{"task-batch-1", "task-batch-2", "task-batch-3", "task-batch-missing"})
+	if err != nil {
+		t.Fatalf("GetSessionCountsByTaskIDs: %v", err)
+	}
+	want := map[string]int{"task-batch-1": 2, "task-batch-2": 1, "task-batch-3": 1}
+	if len(got) != len(want) {
+		t.Fatalf("map = %v, want %v (tasks with no sessions are omitted)", got, want)
+	}
+	for taskID, count := range want {
+		if got[taskID] != count {
+			t.Errorf("count[%s] = %d, want %d", taskID, got[taskID], count)
+		}
+	}
+
+	empty, err := fixture.repo.GetSessionCountsByTaskIDs(ctx, nil)
+	if err != nil {
+		t.Fatalf("GetSessionCountsByTaskIDs(nil): %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Errorf("nil input = %v, want a non-nil empty map", empty)
+	}
+}
+
+func TestGetPrimarySessionInfoByTaskIDsProjectsStateAndExecutor(t *testing.T) {
+	fixture := seedSessionBatchFixture(t)
+	ctx := context.Background()
+
+	got, err := fixture.repo.GetPrimarySessionInfoByTaskIDs(ctx,
+		[]string{"task-batch-1", "task-batch-2", "task-batch-3"})
+	if err != nil {
+		t.Fatalf("GetPrimarySessionInfoByTaskIDs: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("map has %d entries (%v), want 2 — task-batch-3 has no primary", len(got), got)
+	}
+	first := got["task-batch-1"]
+	if first == nil {
+		t.Fatal("task-batch-1 missing from the result")
+	}
+	if first.ID != "session-b1-primary" || first.TaskID != "task-batch-1" {
+		t.Errorf("identity = %q/%q, want session-b1-primary/task-batch-1", first.ID, first.TaskID)
+	}
+	if first.State != models.TaskSessionStateRunning {
+		t.Errorf("State = %q, want RUNNING", first.State)
+	}
+	if first.ReviewStatus != models.ReviewStatusPending {
+		t.Errorf("ReviewStatus = %q, want %q", first.ReviewStatus, models.ReviewStatusPending)
+	}
+	second := got["task-batch-2"]
+	if second == nil || second.State != models.TaskSessionStateWaitingForInput {
+		t.Errorf("task-batch-2 = %+v, want a WAITING_FOR_INPUT primary session", second)
+	}
+
+	empty, err := fixture.repo.GetPrimarySessionInfoByTaskIDs(ctx, nil)
+	if err != nil {
+		t.Fatalf("GetPrimarySessionInfoByTaskIDs(nil): %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Errorf("nil input = %v, want a non-nil empty map", empty)
+	}
+}
+
+func TestListActiveTaskSessionsFiltersTerminalStates(t *testing.T) {
+	fixture := seedSessionBatchFixture(t)
+	ctx := context.Background()
+
+	all, err := fixture.repo.ListActiveTaskSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListActiveTaskSessions: %v", err)
+	}
+	activeIDs := make(map[string]bool, len(all))
+	for _, session := range all {
+		activeIDs[session.ID] = true
+	}
+	if len(all) != 2 {
+		t.Fatalf("ListActiveTaskSessions returned %d sessions (%v), want 2", len(all), activeIDs)
+	}
+	if !activeIDs["session-b1-primary"] || !activeIDs["session-b2-primary"] {
+		t.Errorf("active sessions = %v, want the RUNNING and WAITING_FOR_INPUT rows", activeIDs)
+	}
+	if activeIDs["session-b1-secondary"] || activeIDs["session-b3-secondary"] {
+		t.Errorf("active sessions = %v, must exclude COMPLETED rows", activeIDs)
+	}
+
+	scoped, err := fixture.repo.ListActiveTaskSessionsByTaskID(ctx, "task-batch-1")
+	if err != nil {
+		t.Fatalf("ListActiveTaskSessionsByTaskID: %v", err)
+	}
+	if len(scoped) != 1 || scoped[0].ID != "session-b1-primary" {
+		t.Errorf("task-scoped active sessions = %+v, want only session-b1-primary", scoped)
+	}
+	none, err := fixture.repo.ListActiveTaskSessionsByTaskID(ctx, "task-batch-3")
+	if err != nil {
+		t.Fatalf("ListActiveTaskSessionsByTaskID(terminal-only): %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("terminal-only task returned %+v, want empty", none)
+	}
+}
+
+func TestTaskEnvironmentSharingGuardsSeeOnlyActiveForeignSessions(t *testing.T) {
+	fixture := seedSessionBatchFixture(t)
+	ctx := context.Background()
+	repo := fixture.repo
+
+	hasActive, err := repo.HasActiveTaskSessionsByEnvironment(ctx, "env-batch-shared")
+	if err != nil {
+		t.Fatalf("HasActiveTaskSessionsByEnvironment: %v", err)
+	}
+	if !hasActive {
+		t.Error("HasActiveTaskSessionsByEnvironment = false, want true for the RUNNING session")
+	}
+	hasActive, err = repo.HasActiveTaskSessionsByEnvironment(ctx, "env-batch-solo")
+	if err != nil {
+		t.Fatalf("HasActiveTaskSessionsByEnvironment(solo): %v", err)
+	}
+	if hasActive {
+		t.Error("HasActiveTaskSessionsByEnvironment(solo) = true, want false — its only session is COMPLETED")
+	}
+
+	// task-batch-2's active session borrows env-batch-shared, so the guard
+	// fires for task-batch-1 but not for task-batch-2 itself.
+	borrowed, err := repo.HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx, "env-batch-shared", "task-batch-1")
+	if err != nil {
+		t.Fatalf("HasActiveTaskSessionsByTaskEnvironmentExcludingTask: %v", err)
+	}
+	if !borrowed {
+		t.Error("guard = false, want true — task-batch-2 holds an active session on the shared environment")
+	}
+	borrowerID, err := repo.FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx, "env-batch-shared", "task-batch-1")
+	if err != nil {
+		t.Fatalf("FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask: %v", err)
+	}
+	if borrowerID != "task-batch-2" {
+		t.Errorf("borrower = %q, want task-batch-2", borrowerID)
+	}
+
+	borrowed, err = repo.HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx, "env-batch-shared", "task-batch-2")
+	if err != nil {
+		t.Fatalf("guard excluding task-batch-2: %v", err)
+	}
+	if !borrowed {
+		t.Error("guard = false, want true — task-batch-1 also holds an active session there")
+	}
+
+	// No active foreign session at all: both guards report the empty answer
+	// rather than an error.
+	borrowed, err = repo.HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx, "env-batch-solo", "task-batch-3")
+	if err != nil {
+		t.Fatalf("guard on the solo environment: %v", err)
+	}
+	if borrowed {
+		t.Error("guard = true on the solo environment, want false")
+	}
+	borrowerID, err = repo.FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx, "env-batch-solo", "task-batch-3")
+	if err != nil {
+		t.Fatalf("borrower lookup on the solo environment: %v", err)
+	}
+	if borrowerID != "" {
+		t.Errorf("borrower = %q, want an empty string when nothing matches", borrowerID)
+	}
+}
+
+func TestGetTaskSessionByTaskIDReturnsNewestWhileActiveVariantFiltersState(t *testing.T) {
+	fixture := seedSessionBatchFixture(t)
+	ctx := context.Background()
+	repo := fixture.repo
+
+	// GetTaskSessionByTaskID is newest-by-started_at, not primary-first, so
+	// pin the two task-batch-1 sessions with the terminal one newest.
+	stamps := map[string]time.Time{
+		"session-b1-primary":   time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC),
+		"session-b1-secondary": time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC),
+	}
+	for sessionID, startedAt := range stamps {
+		if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(
+			`UPDATE task_sessions SET started_at = ? WHERE id = ?`), startedAt, sessionID); err != nil {
+			t.Fatalf("pin started_at for %s: %v", sessionID, err)
+		}
+	}
+
+	got, err := repo.GetTaskSessionByTaskID(ctx, "task-batch-1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionByTaskID: %v", err)
+	}
+	if got.ID != "session-b1-secondary" {
+		t.Errorf("GetTaskSessionByTaskID = %q, want session-b1-secondary (newest by started_at)", got.ID)
+	}
+
+	// The active-only variant skips the newer COMPLETED row.
+	active, err := repo.GetActiveTaskSessionByTaskID(ctx, "task-batch-1")
+	if err != nil {
+		t.Fatalf("GetActiveTaskSessionByTaskID: %v", err)
+	}
+	if active.ID != "session-b1-primary" {
+		t.Errorf("GetActiveTaskSessionByTaskID = %q, want session-b1-primary (the only active row)", active.ID)
+	}
+	if active.State != models.TaskSessionStateRunning {
+		t.Errorf("State = %q, want RUNNING", active.State)
+	}
+
+	// task-batch-3's only session is COMPLETED: found by the plain read,
+	// reported as not-found by the active-only read.
+	got, err = repo.GetTaskSessionByTaskID(ctx, "task-batch-3")
+	if err != nil {
+		t.Fatalf("GetTaskSessionByTaskID(task-batch-3): %v", err)
+	}
+	if got.ID != "session-b3-secondary" {
+		t.Errorf("GetTaskSessionByTaskID = %q, want session-b3-secondary", got.ID)
+	}
+	_, err = repo.GetActiveTaskSessionByTaskID(ctx, "task-batch-3")
+	if !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Errorf("GetActiveTaskSessionByTaskID(terminal-only) error = %v, want ErrTaskSessionNotFound", err)
+	}
+	_, err = repo.GetTaskSessionByTaskID(ctx, "task-batch-missing")
+	if !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Errorf("GetTaskSessionByTaskID(missing) error = %v, want ErrTaskSessionNotFound", err)
+	}
+}
+
+// TestHasActiveTaskSessionsByEnvironmentKeysOffEnvironmentIDNotTaskEnvironmentID
+// discriminates the two columns. The shared batch fixture sets environment_id
+// and task_environment_id to the same value, so on its own it cannot tell
+// which column the guard reads — swapping them there would go unnoticed.
+func TestHasActiveTaskSessionsByEnvironmentKeysOffEnvironmentIDNotTaskEnvironmentID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-envcol", Title: "env column"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-col-taskenv", TaskID: "task-envcol",
+		ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	// Active, but only task_environment_id points at env-col-taskenv;
+	// environment_id is left empty.
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-envcol-taskenv-only", TaskID: "task-envcol",
+		State: models.TaskSessionStateRunning, TaskEnvironmentID: "env-col-taskenv",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(task-env only): %v", err)
+	}
+
+	hasActive, err := repo.HasActiveTaskSessionsByEnvironment(ctx, "env-col-taskenv")
+	if err != nil {
+		t.Fatalf("HasActiveTaskSessionsByEnvironment: %v", err)
+	}
+	if hasActive {
+		t.Error("HasActiveTaskSessionsByEnvironment = true for a value only present in task_environment_id; " +
+			"the guard must key off environment_id")
+	}
+	// The task-environment guard does see the same row, which is what makes
+	// the negative above meaningful rather than an empty-table artifact.
+	borrowed, err := repo.HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx, "env-col-taskenv", "task-other")
+	if err != nil {
+		t.Fatalf("HasActiveTaskSessionsByTaskEnvironmentExcludingTask: %v", err)
+	}
+	if !borrowed {
+		t.Fatal("task-environment guard = false; the fixture row is not visible, so the negative above proves nothing")
+	}
+
+	// Now a session whose environment_id carries the value: the guard fires.
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-envcol-envid", TaskID: "task-envcol",
+		State: models.TaskSessionStateRunning, EnvironmentID: "env-col-envid",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(environment_id): %v", err)
+	}
+	hasActive, err = repo.HasActiveTaskSessionsByEnvironment(ctx, "env-col-envid")
+	if err != nil {
+		t.Fatalf("HasActiveTaskSessionsByEnvironment(environment_id): %v", err)
+	}
+	if !hasActive {
+		t.Error("HasActiveTaskSessionsByEnvironment = false for a value present in environment_id, want true")
+	}
 }

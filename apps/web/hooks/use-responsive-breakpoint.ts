@@ -1,7 +1,6 @@
 import * as React from "react";
 
-const MOBILE_BREAKPOINT = 640;
-const COMPACT_DESKTOP_BREAKPOINT = 768;
+const MOBILE_BREAKPOINT = 768;
 const DESKTOP_BREAKPOINT = 1024;
 
 export type Breakpoint = "mobile" | "tablet" | "compactDesktop" | "desktop";
@@ -21,9 +20,7 @@ function getBreakpoint(width: number, isFinePointer: boolean): Breakpoint {
   if (width < MOBILE_BREAKPOINT) {
     return "mobile";
   }
-  // Fine-pointer devices below 768px stay on the tablet layout; that range is
-  // too narrow to host the full workbench even with a mouse.
-  if (width >= COMPACT_DESKTOP_BREAKPOINT && width < DESKTOP_BREAKPOINT && isFinePointer) {
+  if (width < DESKTOP_BREAKPOINT && isFinePointer) {
     return "compactDesktop";
   }
   if (width < DESKTOP_BREAKPOINT) {
@@ -91,8 +88,7 @@ function subscribeBreakpoint(callback: () => void): () => void {
   }
   const mediaQueries = [
     `(max-width: ${MOBILE_BREAKPOINT - 1}px)`,
-    `(min-width: ${MOBILE_BREAKPOINT}px) and (max-width: ${COMPACT_DESKTOP_BREAKPOINT - 1}px)`,
-    `(min-width: ${COMPACT_DESKTOP_BREAKPOINT}px) and (max-width: ${DESKTOP_BREAKPOINT - 1}px)`,
+    `(min-width: ${MOBILE_BREAKPOINT}px) and (max-width: ${DESKTOP_BREAKPOINT - 1}px)`,
     `(min-width: ${DESKTOP_BREAKPOINT}px)`,
     "(pointer: fine)",
   ];
@@ -111,4 +107,20 @@ function subscribeBreakpoint(callback: () => void): () => void {
 // third arg, matching the prior behavior for hydration.
 export function useResponsiveBreakpoint(): ResponsiveBreakpoint {
   return React.useSyncExternalStore(subscribeBreakpoint, getClientSnapshot, () => SERVER_SNAPSHOT);
+}
+
+/**
+ * One-shot check for code that cannot subscribe to the hook — a global keydown
+ * dispatcher reads it inside the event handler rather than at render.
+ *
+ * Answers "is the AppSidebar rendered?": it uses the same `md`/768px boundary
+ * as `isMobile` and as the sidebar's own `hidden md:block`, so a shortcut that
+ * targets a sidebar-only surface can bail where that surface is `display:none`.
+ * Defaults to true without `matchMedia`, matching the desktop server snapshot.
+ */
+export function isAppSidebarViewport(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return true;
+  }
+  return window.matchMedia(`(min-width: ${MOBILE_BREAKPOINT}px)`).matches;
 }

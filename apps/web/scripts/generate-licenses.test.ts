@@ -89,4 +89,15 @@ describe("generated/licenses.json", () => {
     expect(eco.has("npm")).toBe(true);
     expect(eco.has("go")).toBe(true);
   });
+
+  it("contains the notice for the vendored shadcn/ui Tailwind CSS", () => {
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        name: "shadcn/ui Tailwind CSS",
+        version: "3.6.3",
+        license: "MIT",
+        ecosystem: "source",
+      }),
+    );
+  });
 });

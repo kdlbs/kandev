@@ -1,9 +1,14 @@
 "use client";
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 type PluginErrorBoundaryProps = {
-  /** Identifies what threw in the console log, e.g. `slot "task-sidebar"` or `route "/plugins/hello"`. */
+  /**
+   * Identifies what threw in the console log, e.g. `slot "task-sidebar"` or
+   * `route "/plugins/hello"`. A developer diagnostic that never reaches the
+   * DOM — `context` is in the guard's `jsx-attributes.exclude` for that reason.
+   */
   context: string;
   /** Rendered in place of `children` after a throw. Defaults to nothing (silent). */
   fallback?: ReactNode;
@@ -42,9 +47,10 @@ export class PluginErrorBoundary extends Component<
 
 /** Shared fallback for a plugin-owned top-level or settings route that threw during render. */
 export function PluginRouteFallback() {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-      This plugin page failed to load.
+      {t("plugins:pluginPageFailedToLoad")}
     </div>
   );
 }

@@ -11,8 +11,11 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/logger"
 
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type fakeSearcher struct {
@@ -25,7 +28,7 @@ func TestHandlerRegisterRoutesUsesExistingWorkspaceWildcardName(t *testing.T) {
 	router.GET("/api/v1/workspaces/:id", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	handler := NewHandler(fakeSearcher{search: func(_ context.Context, request SearchRequest) (*apiv1.MentionSearchResponse, error) {
 		return &apiv1.MentionSearchResponse{Query: request.Query}, nil
-	}})
+	}}, nil)
 
 	var recovered any
 	func() {
@@ -56,7 +59,7 @@ func TestHandlerSearch_ReturnsNormalizedResponse(t *testing.T) {
 				Results: []apiv1.EntityReference{},
 			}},
 		}, nil
-	}}).RegisterRoutes(router)
+	}}, nil).RegisterRoutes(router)
 
 	request := httptest.NewRequest(http.MethodGet,
 		"/api/v1/workspaces/workspace-1/mentions/search?q=auth&limit=99", nil)
@@ -81,7 +84,7 @@ func TestHandlerSearch_RejectsInvalidLimitWithoutSearching(t *testing.T) {
 	NewHandler(fakeSearcher{search: func(_ context.Context, _ SearchRequest) (*apiv1.MentionSearchResponse, error) {
 		t.Fatal("search called for invalid limit")
 		return nil, nil
-	}}).RegisterRoutes(router)
+	}}, nil).RegisterRoutes(router)
 
 	request := httptest.NewRequest(http.MethodGet,
 		"/api/v1/workspaces/workspace-1/mentions/search?q=auth&limit=not-a-number", nil)
@@ -110,7 +113,7 @@ func TestHandlerSearch_MapsSafeErrorsWithoutLeaking(t *testing.T) {
 			router := gin.New()
 			NewHandler(fakeSearcher{search: func(_ context.Context, _ SearchRequest) (*apiv1.MentionSearchResponse, error) {
 				return nil, test.err
-			}}).RegisterRoutes(router)
+			}}, nil).RegisterRoutes(router)
 
 			request := httptest.NewRequest(http.MethodGet,
 				"/api/v1/workspaces/workspace-1/mentions/search?q=auth", nil)
@@ -125,4 +128,70 @@ func TestHandlerSearch_MapsSafeErrorsWithoutLeaking(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandlerSearch_MapsClientCancellationTo499WithoutLogging(t *testing.T) {
+	log, observed := newMentionObserverLogger(t)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	NewHandler(fakeSearcher{search: func(context.Context, SearchRequest) (*apiv1.MentionSearchResponse, error) {
+		return nil, context.Canceled
+	}}, log).RegisterRoutes(router)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/workspaces/workspace-1/mentions/search?q=secret-query",
+		nil,
+	))
+
+	if response.Code != 499 {
+		t.Fatalf("status = %d, want 499; body = %s", response.Code, response.Body.String())
+	}
+	if observed.Len() != 0 {
+		t.Fatalf("cancellation emitted %d log records, want none", observed.Len())
+	}
+}
+
+func TestHandlerSearchLogsUnexpectedFailureOnceWithSafeFields(t *testing.T) {
+	log, observed := newMentionObserverLogger(t)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	NewHandler(fakeSearcher{search: func(context.Context, SearchRequest) (*apiv1.MentionSearchResponse, error) {
+		return nil, errors.New("secret database address")
+	}}, log).RegisterRoutes(router)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/workspaces/workspace-1/mentions/search?q=secret-query",
+		nil,
+	))
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusInternalServerError)
+	}
+	entries := observed.All()
+	if len(entries) != 1 || entries[0].Level != zap.ErrorLevel {
+		t.Fatalf("unexpected error records = %#v", entries)
+	}
+	fields := entries[0].ContextMap()
+	if fields["workspace_id"] != "workspace-1" || fields["failure_stage"] != "search" ||
+		fields["failure_class"] != "internal" {
+		t.Fatalf("safe failure fields = %#v", fields)
+	}
+	serialized := entries[0].Message + response.Body.String() + fmt.Sprint(entries[0].ContextMap())
+	if strings.Contains(serialized, "secret-query") || strings.Contains(serialized, "secret database address") {
+		t.Fatalf("sensitive mention-search detail leaked: %s", serialized)
+	}
+}
+
+func newMentionObserverLogger(t *testing.T) (*logger.Logger, *observer.ObservedLogs) {
+	t.Helper()
+	core, observed := observer.New(zap.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	return log, observed
 }

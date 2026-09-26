@@ -8,6 +8,7 @@ import { MobileTerminalsPicker } from "./mobile-terminals-section";
 import { MobileTerminalsProvider, useMobileTerminalsContext } from "./mobile-terminals-context";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
+import { useTranslation } from "react-i18next";
 
 function TerminalSlot({
   terminal,
@@ -61,7 +62,11 @@ function TerminalSlot({
   }, [isActive, terminal.id, ws]);
 
   return (
-    <div className={`absolute inset-0 ${isActive ? "block" : "hidden"}`}>
+    <div
+      data-testid={`mobile-terminal-slot-${terminal.id}`}
+      data-state={isActive ? "active" : "inactive"}
+      className={`absolute inset-0 ${isActive ? "block" : "hidden"}`}
+    >
       <PassthroughTerminal
         mode="shell"
         environmentId={environmentId}
@@ -70,7 +75,6 @@ function TerminalSlot({
         autoFocus={isActive}
         disableWebgl
         manualInputRouting
-        enableTouchScroll
         onXtermReady={setXterm}
         onWsReady={handleWsReady}
       />
@@ -79,13 +83,14 @@ function TerminalSlot({
 }
 
 function MobileTerminalPaneInner({ sessionId }: { sessionId: string | null }) {
+  const { t } = useTranslation();
   const { terminals, terminalTabValue, environmentId } = useMobileTerminalsContext();
   const activeId = terminals.find((t) => t.id === terminalTabValue)?.id ?? terminals[0]?.id;
 
   if (!sessionId || !environmentId) {
     return (
       <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
-        Terminal unavailable — no active session.
+        {t("task:terminalUnavailableNoActiveSession")}
       </div>
     );
   }
@@ -98,7 +103,7 @@ function MobileTerminalPaneInner({ sessionId }: { sessionId: string | null }) {
       <div className="relative flex-1 min-h-0">
         {terminals.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
-            Starting terminal…
+            {t("task:startingTerminal")}
           </div>
         )}
         {terminals.map((t) => (

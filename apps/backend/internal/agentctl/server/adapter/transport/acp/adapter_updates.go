@@ -5,10 +5,14 @@ import (
 	"strings"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
+
+const acpUserRole = "user"
 
 // notifWork is the item type carried on notifQueue. notif is populated for a
 // real SDK notification (the common case); sync identifies a barrier and may
@@ -169,9 +173,24 @@ func (a *Adapter) handleACPUpdate(
 	sessionID := string(n.SessionId)
 
 	suppressed := a.dialect.suppresses(n)
+	handled := suppressed
 	var event, leadingEvent *AgentEvent
 	if !suppressed {
 		event = a.convertNotification(n)
+		if a.observesResponseAttemptReset(promptGeneration, event) {
+			leadingEvent = &AgentEvent{
+				Type:             streams.EventTypeResponseAttemptReset,
+				SessionID:        sessionID,
+				PromptGeneration: promptGeneration,
+			}
+		}
+		if event != nil && (a.observeCodexProviderEvidence(promptGeneration, event) ||
+			a.observeCursorRetriableEvidence(promptGeneration, event)) {
+			// Suppress provider control/evidence chunks. The adapter emits one
+			// normalized error after the prompt barrier instead.
+			event = nil
+			handled = true
+		}
 		if n.Update.UsageUpdate != nil {
 			lifecycleEvent := usageLifecycleEvent(
 				sessionID,
@@ -213,7 +232,7 @@ func (a *Adapter) handleACPUpdate(
 			event.Type, rawData, event)
 		a.sendUpdate(*event)
 		a.maybeScheduleAsyncTurnComplete(*event)
-	} else if !suppressed {
+	} else if !handled {
 		if updateJSON, err := json.Marshal(n.Update); err == nil {
 			a.logger.Warn("unhandled ACP session notification",
 				zap.String("session_id", sessionID),
@@ -228,10 +247,79 @@ func (a *Adapter) handleACPUpdate(
 	}
 }
 
-// emitDialectContextWindow derives and enqueues an agent-specific context
-// sample while holding the same lock that protects the active session/model.
-// This keeps a model switch from interleaving between size selection and event
-// delivery.
+func (a *Adapter) observesResponseAttemptReset(promptGeneration uint64, event *AgentEvent) bool {
+	if event == nil || event.Type != streams.EventTypeSessionInfo || promptGeneration == 0 ||
+		!a.dialect.resetsResponseAttempt(event.SessionMeta) {
+		return false
+	}
+	turn := a.currentPromptTurn()
+	return turn != nil && turn.promptGeneration == promptGeneration
+}
+
+func (a *Adapter) observeCursorRetriableEvidence(promptGeneration uint64, event *AgentEvent) bool {
+	if a.agentID != acpcompat.CursorAgentID || event == nil || promptGeneration == 0 {
+		return false
+	}
+	turn := a.currentPromptTurn()
+	if turn == nil || turn.promptGeneration != promptGeneration {
+		return false
+	}
+	if event.Type == streams.EventTypeMessageChunk && event.Role != acpUserRole &&
+		isCursorRetriableStreamReset(event.Text) {
+		turn.setCursorRetriable()
+		return true
+	}
+	if cursorProviderProgress(event) {
+		turn.clearCursorRetriable()
+	}
+	return false
+}
+
+func cursorProviderProgress(event *AgentEvent) bool {
+	switch event.Type {
+	case streams.EventTypeMessageChunk:
+		return event.Role != acpUserRole && strings.TrimSpace(event.Text) != ""
+	case streams.EventTypeReasoning:
+		return strings.TrimSpace(event.ReasoningText) != ""
+	case streams.EventTypeToolCall:
+		return event.ToolCallID != ""
+	default:
+		return false
+	}
+}
+
+func (a *Adapter) observeCodexProviderEvidence(promptGeneration uint64, event *AgentEvent) bool {
+	if a.agentID != codexAgentID || event == nil || promptGeneration == 0 {
+		return false
+	}
+	turn := a.currentPromptTurn()
+	if turn == nil || turn.promptGeneration != promptGeneration {
+		return false
+	}
+	systemError := event.Type == streams.EventTypeSessionInfo && codexSystemErrorMeta(event.SessionMeta)
+	capacity := event.Type == streams.EventTypeMessageChunk && codexModelCapacityMessage(event.Text)
+	if !systemError && !capacity {
+		return false
+	}
+	wasSystemError := turn.hasCodexSystemError()
+	turn.observeCodexEvidence(systemError, capacity)
+	return capacity && (systemError || wasSystemError)
+}
+
+// emitDialectContextWindow derives an agent-specific context sample while
+// holding the same lock that protects the active session/model -- this keeps
+// a model switch from interleaving between size selection and event
+// delivery -- then delivers it after releasing that lock.
+//
+// This is a COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): delivery uses the
+// existing sendUpdate helper, which blocks rather than drops when updatesCh is
+// full and is cancelable via lifetimeCtx/closedCh on adapter shutdown -- it
+// was already built for exactly this purpose (see its doc comment) and is
+// already used by sibling sites in this package (e.g. SetMode), so no new
+// primitive is needed here. sendUpdate must not be called while a.mu is held:
+// Close() acquires a.mu as its first act before cancelling lifetimeCtx, so
+// parking under the lock (the old sendUpdateLocked behavior this replaces)
+// would deadlock Close against this very send.
 func (a *Adapter) emitDialectContextWindow(sessionID string, meta map[string]any) *AgentEvent {
 	a.mu.Lock()
 	if a.closed || sessionID != a.sessionID {
@@ -252,15 +340,9 @@ func (a *Adapter) emitDialectContextWindow(sessionID string, meta map[string]any
 		ContextWindowRemaining: remaining,
 		ContextEfficiency:      float64(sample.used) / float64(sample.size) * 100,
 	}
-	sent := a.sendUpdateLocked(event)
-	if sent {
-		a.contextSamples[sessionID] = sample
-	}
+	a.contextSamples[sessionID] = sample
 	a.mu.Unlock()
-	if !sent {
-		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
-		return nil
-	}
+	a.sendUpdate(event)
 	return &event
 }
 
@@ -282,7 +364,7 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		return a.convertMessageChunkWithProtocolID(
 			sessionID,
 			u.UserMessageChunk.Content,
-			"user",
+			acpUserRole,
 			derefStr(u.UserMessageChunk.MessageId),
 		)
 
@@ -373,6 +455,7 @@ type usageTracker struct {
 	consumedUsed         int64
 	latestCostSubcents   int64
 	consumedCostSubcents int64
+	costObserved         bool
 	// maxSize is the largest context-window size reported for this session.
 	// claude-acp's default model emits a 200K turn-start frame and a 1M
 	// turn-end frame; sticky-max prevents the stale 200K from shrinking
@@ -410,6 +493,7 @@ func (a *Adapter) retainConsumedUsageBaselineLocked(sessionID string) {
 	a.usageBySession[sessionID] = tracker
 	tracker.consumedUsed = tracker.latestUsed
 	tracker.consumedCostSubcents = tracker.latestCostSubcents
+	tracker.costObserved = false
 }
 
 // recordUsageAndMaxSize updates per-session usage/cost tracking and returns
@@ -429,6 +513,7 @@ func (a *Adapter) recordUsageAndMaxSize(sessionID string, size, used int64, cost
 	}
 	tr.latestUsed = used
 	if cost != nil && strings.EqualFold(cost.Currency, "USD") {
+		tr.costObserved = true
 		costSubcents := max(int64(cost.Amount*10000), 0)
 		if costSubcents < tr.latestCostSubcents {
 			tr.consumedCostSubcents = costSubcents
@@ -453,17 +538,29 @@ func (a *Adapter) resetContextWindowMaxSize(sessionID string) {
 // previous prompt boundary and the delta in cumulative USD session cost. Both
 // consumed baselines advance to the latest observed sample.
 func (a *Adapter) consumeUsageDelta(sessionID string) (int64, int64) {
+	delta, cost, _ := a.consumeUsageDeltaWithPresence(sessionID)
+	return delta, cost
+}
+
+// consumeUsageDeltaWithPresence returns nonnegative growth in context
+// occupancy, the cumulative USD cost delta, and whether the provider supplied
+// a USD cost sample for this turn. The presence bit is intentionally separate
+// from cost: an explicit zero is authoritative and must not fall through to
+// list-price estimation.
+func (a *Adapter) consumeUsageDeltaWithPresence(sessionID string) (int64, int64, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	tr := a.usageBySession[sessionID]
 	if tr == nil {
-		return 0, 0
+		return 0, 0, false
 	}
 	delta := max(tr.latestUsed-tr.consumedUsed, 0)
 	cost := max(tr.latestCostSubcents-tr.consumedCostSubcents, 0)
+	present := tr.costObserved
 	tr.consumedUsed = tr.latestUsed
 	tr.consumedCostSubcents = tr.latestCostSubcents
-	return delta, cost
+	tr.costObserved = false
+	return delta, cost, present
 }
 
 // consumeUsageBaselineLocked marks replayed usage and cost as historical so
@@ -473,6 +570,7 @@ func (a *Adapter) consumeUsageBaselineLocked(sessionID string) {
 	if tr := a.usageBySession[sessionID]; tr != nil {
 		tr.consumedUsed = tr.latestUsed
 		tr.consumedCostSubcents = tr.latestCostSubcents
+		tr.costObserved = false
 	}
 }
 
@@ -531,7 +629,7 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 	}
 
 	// Only set Role for user messages (assistant is the default)
-	if role == "user" {
+	if role == acpUserRole {
 		event.Role = role
 	}
 
@@ -556,6 +654,13 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 			}
 		}
 		event.Text = text
+		classified := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: text})
+		// Only an assistant chunk may carry the diagnostic-candidate marker: the
+		// downstream clearing rule only reads an unmarked assistant/thought
+		// chunk, so a marked user chunk would never be cleared by the ordinary-
+		// output path.
+		event.ProviderDiagnosticCandidate = role == "assistant" &&
+			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
 		return event
 	}
 
@@ -614,7 +719,7 @@ func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.Session
 		seen[cmd.Name] = struct{}{}
 		ac := streams.AvailableCommand{
 			Name:        cmd.Name,
-			Description: cmd.Description,
+			Description: acpcompat.NormalizeCommandDescription(a.agentID, cmd.Description),
 		}
 		if cmd.Input != nil && cmd.Input.Unstructured != nil {
 			ac.InputHint = cmd.Input.Unstructured.Hint

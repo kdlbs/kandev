@@ -3,15 +3,22 @@
 import { memo, useState, useEffect, useMemo, useRef } from "react";
 import { IconRefresh, IconExternalLink } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { DropdownMenuItem } from "@kandev/ui/dropdown-menu";
 import { Input } from "@kandev/ui/input";
-import { PanelRoot, PanelBody, PanelHeaderBar } from "./panel-primitives";
+import {
+  PanelRoot,
+  PanelBody,
+  PanelHeaderBarSplit,
+  PanelHeaderOverflowMenu,
+} from "./panel-primitives";
 import { useAppStore } from "@/components/state-provider";
 import { detectPreviewUrlFromOutput, rewritePreviewUrlForProxy } from "@/lib/preview-url-detector";
-import { InspectButton } from "./inspector/inspect-button";
-import { AnnotationsPanel } from "./inspector/annotations-panel";
-import { useInspectMode } from "@/hooks/use-inspect-mode";
+import { PreviewFeedbackControls } from "./inspector/preview-feedback-controls";
+import { usePreviewCapture } from "@/hooks/use-preview-capture";
 import { usePreviewConsoleForwarder } from "@/hooks/use-preview-console-forwarder";
 import { openExternalLink } from "@/lib/desktop/external-links";
+import { previewSourceLabel } from "@/lib/preview-feedback-source";
+import { useTranslation } from "react-i18next";
 
 function BrowserPanelContent({
   showIframeDelayed,
@@ -26,13 +33,14 @@ function BrowserPanelContent({
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   onIframeLoad: () => void;
 }) {
+  const { t } = useTranslation();
   if (showIframeDelayed) {
     return (
       <iframe
         ref={iframeRef}
         key={refreshKey}
         src={iframeSrc}
-        title="Browser Preview"
+        title={t("task:browserPreview")}
         className="h-full w-full border-0"
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
         referrerPolicy="no-referrer"
@@ -44,13 +52,13 @@ function BrowserPanelContent({
     return (
       <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-        <p className="text-sm">Loading preview...</p>
+        <p className="text-sm">{t("task:loadingPreview")}</p>
       </div>
     );
   }
   return (
     <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
-      <p className="text-sm">Enter a URL above or start the dev server</p>
+      <p className="text-sm">{t("task:enterAUrlAboveOrStart")}</p>
     </div>
   );
 }
@@ -60,11 +68,16 @@ type BrowserPanelProps = {
   params: Record<string, unknown>;
 };
 
-function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
+function useBrowserPanelUrl(initialUrl: string) {
   const [userUrl, setUserUrl] = useState(initialUrl);
   const [urlDraft, setUrlDraft] = useState(initialUrl);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showIframe, setShowIframe] = useState(false);
+
+  useEffect(() => {
+    setUserUrl(initialUrl);
+    setUrlDraft(initialUrl);
+  }, [initialUrl]);
 
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const devProcessId = useAppStore((state) =>
@@ -85,12 +98,9 @@ function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
     return rewritePreviewUrlForProxy(directUrl, activeSessionId);
   }, [directUrl, activeSessionId]);
 
-  // Default to the direct URL so the page renders normally; clicking Inspect
-  // switches to the proxied src so the inspector script can be injected. The
-  // gateway port-proxy rewrites root-absolute asset references and patches the
-  // network-facing browser APIs at runtime, so the proxied page works for SPA
-  // routers and dynamic asset URLs too.
-  const iframeSrc = useProxy && proxiedUrl ? proxiedUrl : directUrl;
+  // Eligible local pages stay behind the proxy so task markers and the capture
+  // bridge survive route changes even while selection mode is inactive.
+  const iframeSrc = proxiedUrl ?? directUrl;
 
   // Key the loading-spinner gate to the underlying URL (and the refresh key),
   // NOT to `iframeSrc`. Toggling Inspect mode flips `iframeSrc` between the
@@ -137,17 +147,110 @@ function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
 
 export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const inspect = useInspectMode(iframeRef);
   usePreviewConsoleForwarder(iframeRef);
-  // Inspect mode = "load this page through the proxy so the inspector script
-  // can be injected". Toggling Inspect remounts the iframe with a different src.
-  const url = useBrowserPanelUrl((params.url as string) || "", inspect.isInspectMode);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const url = useBrowserPanelUrl((params.url as string) || "");
   const showInspect = url.canProxy;
+  const capture = usePreviewCapture({
+    taskId: activeTaskId,
+    iframeRef,
+    enabled: showInspect && !!activeTaskId,
+    source: {
+      kind: "browser",
+      sessionId: activeSessionId ?? undefined,
+      label: previewSourceLabel(url.directUrl),
+    },
+  });
 
   return (
-    <PanelRoot>
-      <PanelHeaderBar>
+    <PanelRoot data-testid="browser-panel">
+      <BrowserPanelHeader
+        url={url}
+        capture={capture}
+        showInspect={showInspect}
+        enabled={!!activeTaskId}
+      />
+
+      <PanelBody padding={false} scroll={false}>
+        <BrowserPanelContent
+          showIframeDelayed={url.showIframeDelayed}
+          iframeSrc={url.iframeSrc}
+          refreshKey={url.refreshKey}
+          iframeRef={iframeRef}
+          onIframeLoad={capture.handleIframeLoad}
+        />
+      </PanelBody>
+    </PanelRoot>
+  );
+});
+
+function BrowserPanelHeader({
+  url,
+  capture,
+  showInspect,
+  enabled,
+}: {
+  url: ReturnType<typeof useBrowserPanelUrl>;
+  capture: ReturnType<typeof usePreviewCapture>;
+  showInspect: boolean;
+  enabled: boolean;
+}) {
+  const { t } = useTranslation();
+  const directActions = (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={url.handleOpenInTab}
+        disabled={!url.directUrl}
+        className="cursor-pointer"
+        title={t("task:openInBrowserTab")}
+        aria-label={t("task:openInBrowserTab")}
+      >
+        <IconExternalLink className="h-4 w-4" />
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => url.setRefreshKey((v) => v + 1)}
+        disabled={!url.directUrl}
+        className="cursor-pointer"
+        title={t("task:refresh")}
+        aria-label={t("task:refresh")}
+      >
+        <IconRefresh className="h-4 w-4" />
+      </Button>
+      {showInspect && <PreviewFeedbackControls capture={capture} enabled={enabled} />}
+    </>
+  );
+  const overflowActions = (
+    <PanelHeaderOverflowMenu label={t("common:showMoreActions")}>
+      <DropdownMenuItem
+        className="cursor-pointer gap-2"
+        disabled={!url.directUrl}
+        onSelect={url.handleOpenInTab}
+      >
+        <IconExternalLink className="size-4" />
+        {t("task:openInBrowserTab")}
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        className="cursor-pointer gap-2"
+        disabled={!url.directUrl}
+        onSelect={() => url.setRefreshKey((v) => v + 1)}
+      >
+        <IconRefresh className="size-4" />
+        {t("task:refresh")}
+      </DropdownMenuItem>
+    </PanelHeaderOverflowMenu>
+  );
+
+  return (
+    <PanelHeaderBarSplit
+      leftClassName="flex-1"
+      left={
         <Input
+          controlSize="none"
           value={url.displayDraft}
           onChange={(e) => url.setUrlDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -157,52 +260,16 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
             }
           }}
           placeholder={url.detectedUrl || "http://localhost:3000"}
-          className="h-6 flex-1 min-w-[180px]"
+          className="h-6 min-w-0 flex-1"
         />
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={url.handleOpenInTab}
-          disabled={!url.directUrl}
-          className="cursor-pointer"
-          title="Open in browser tab"
-        >
-          <IconExternalLink className="h-4 w-4" />
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => url.setRefreshKey((v) => v + 1)}
-          disabled={!url.directUrl}
-          className="cursor-pointer"
-          title="Refresh"
-        >
-          <IconRefresh className="h-4 w-4" />
-        </Button>
-        {showInspect && (
-          <InspectButton
-            active={inspect.isInspectMode}
-            count={inspect.annotations.length}
-            onToggle={inspect.toggleInspect}
-          />
-        )}
-      </PanelHeaderBar>
-
-      <AnnotationsPanel
-        annotations={inspect.annotations}
-        onRemove={inspect.handleRemoveAnnotation}
-        onClear={inspect.handleClearAnnotations}
-      />
-
-      <PanelBody padding={false} scroll={false}>
-        <BrowserPanelContent
-          showIframeDelayed={url.showIframeDelayed}
-          iframeSrc={url.iframeSrc}
-          refreshKey={url.refreshKey}
-          iframeRef={iframeRef}
-          onIframeLoad={inspect.handleIframeLoad}
-        />
-      </PanelBody>
-    </PanelRoot>
+      }
+      right={directActions}
+      rightClassName="overflow-visible"
+      rightWhenOverflow={
+        showInspect ? <PreviewFeedbackControls capture={capture} enabled={enabled} /> : undefined
+      }
+      overflow={overflowActions}
+      overflowAt={420}
+    />
   );
-});
+}

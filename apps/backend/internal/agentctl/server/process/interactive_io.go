@@ -3,6 +3,7 @@ package process
 import (
 	"time"
 
+	"github.com/kandev/kandev/internal/common/ptyexec"
 	"go.uber.org/zap"
 )
 
@@ -53,7 +54,7 @@ func (r *InteractiveRunner) readOutput(proc *interactiveProcess) {
 
 // respondToTerminalQueries sends synthetic terminal responses (DSR/DA1) to the PTY
 // when no direct output writer (real terminal) is connected yet.
-func (r *InteractiveRunner) respondToTerminalQueries(proc *interactiveProcess, ptyInstance PtyHandle, data []byte) {
+func (r *InteractiveRunner) respondToTerminalQueries(proc *interactiveProcess, ptyInstance ptyexec.PtyHandle, data []byte) {
 	if containsDSRQuery(data) {
 		response := "\x1b[1;1R"
 		if _, err := ptyInstance.Write([]byte(response)); err != nil {
@@ -79,7 +80,7 @@ func (r *InteractiveRunner) respondToTerminalQueries(proc *interactiveProcess, p
 // It responds to terminal queries, feeds the status tracker, buffers the output,
 // routes it to the direct writer or event bus, and manages the prompt-pattern window.
 // Returns the updated recentOutput string.
-func (r *InteractiveRunner) processOutputData(proc *interactiveProcess, ptyInstance PtyHandle, data []byte, recentOutput string) string {
+func (r *InteractiveRunner) processOutputData(proc *interactiveProcess, ptyInstance ptyexec.PtyHandle, data []byte, recentOutput string) string {
 	dataStr := string(data)
 
 	// Respond to cursor position queries (DSR) if no terminal is connected yet.
@@ -190,14 +191,18 @@ func (r *InteractiveRunner) resetIdleTimer(proc *interactiveProcess) {
 }
 
 func (r *InteractiveRunner) emitTurnComplete(proc *interactiveProcess) {
+	// Invoke the callback before releasing firstIdleCh. Callers that inject the
+	// initial prompt use the callback to consume the startup completion boundary;
+	// waking the injector first could let it clear that marker before the
+	// callback observes it.
+	if r.turnCompleteCallback != nil {
+		r.turnCompleteCallback(proc.info.SessionID, proc.info.ID)
+	}
 	// Close firstIdleCh exactly once — used by callers that want to react to
 	// the very first idle window (e.g. auto-injecting the task prompt).
 	proc.firstIdleOnce.Do(func() {
 		close(proc.firstIdleCh)
 	})
-	if r.turnCompleteCallback != nil {
-		r.turnCompleteCallback(proc.info.SessionID)
-	}
 	r.logger.Debug("turn complete detected",
 		zap.String("process_id", proc.info.ID),
 		zap.String("session_id", proc.info.SessionID))

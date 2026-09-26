@@ -33,6 +33,33 @@ func lastTurnCompletedHadOutput(t *testing.T, eventBus *MockEventBus) (bool, boo
 	return false, false
 }
 
+func lastTurnCompletedReceiptHadOutput(t *testing.T, eventBus *MockEventBus) (bool, bool) {
+	t.Helper()
+	published := eventBus.GetPublishedEvents()
+	for i := len(published) - 1; i >= 0; i-- {
+		ev := published[i]
+		if ev.Type != events.TurnCompleted {
+			continue
+		}
+		data, ok := ev.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("turn.completed event data is not a map: %T", ev.Data)
+		}
+		receipt, ok := data["conversation_receipt"].(*models.ConversationMutationReceipt)
+		if !ok || receipt == nil {
+			return false, false
+		}
+		for _, operation := range receipt.Operations {
+			if operation.Entity != models.ConversationEntityTurn || operation.HadOutput == nil {
+				continue
+			}
+			return *operation.HadOutput, true
+		}
+		return false, false
+	}
+	return false, false
+}
+
 func TestCompleteTurn_PublishesHadOutput(t *testing.T) {
 	tests := []struct {
 		name string
@@ -95,7 +122,63 @@ func TestCompleteTurn_PublishesHadOutput(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("had_output = %v, want %v", got, tt.want)
 			}
+			receiptGot, receiptFound := lastTurnCompletedReceiptHadOutput(t, eventBus)
+			if !receiptFound {
+				t.Fatal("conversation receipt missing had_output")
+			}
+			if receiptGot != tt.want {
+				t.Errorf("conversation receipt had_output = %v, want %v", receiptGot, tt.want)
+			}
 		})
+	}
+}
+
+// A turn that ends in a recoverable agent failure carries the error entry as
+// its outcome, so its completion must report had_output=true even though the
+// recovery/status message does not count as agent output. Otherwise the
+// frontend shows a spurious empty-turn notice for the failed turn.
+func TestCompleteTurn_ErrorTerminatedTurnReportsHadOutput(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	turn := &models.Turn{
+		ID:            "turn-error-terminated",
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		StartedAt:     time.Now().UTC(),
+		Metadata:      map[string]interface{}{models.TurnMetaKeyErrorTerminated: true},
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	// Only a status message belongs to the turn — this would compute
+	// had_output=false without the error-terminated marker.
+	status := &models.Message{
+		ID:            "msg-status",
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        turn.ID,
+		AuthorType:    models.MessageAuthorAgent,
+		Type:          models.MessageTypeStatus,
+		Content:       "Agent encountered an error: boom",
+	}
+	if err := repo.CreateMessage(ctx, status); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	eventBus.ClearEvents()
+	if err := svc.CompleteTurn(ctx, turn.ID); err != nil {
+		t.Fatalf("CompleteTurn: %v", err)
+	}
+
+	got, found := lastTurnCompletedHadOutput(t, eventBus)
+	if !found {
+		t.Fatal("expected a turn.completed event to be published")
+	}
+	if !got {
+		t.Error("had_output = false, want true (error-terminated turn must suppress the notice)")
 	}
 }
 
@@ -173,6 +256,11 @@ func TestTurnHadAgentOutput(t *testing.T) {
 		{
 			name: "agent tool call",
 			msgs: []*models.Message{agentMsg(models.MessageTypeToolCall, "")},
+			want: true,
+		},
+		{
+			name: "agent search tool",
+			msgs: []*models.Message{agentMsg(models.MessageTypeToolSearch, "")},
 			want: true,
 		},
 		{

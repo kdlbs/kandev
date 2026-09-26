@@ -84,20 +84,3 @@ func validatePolicy(pol *service.WorkspacePolicy) error {
 	}
 	return nil
 }
-
-// mergeWorkspaceMetadata merges the workspace-policy metadata block into
-// the user-supplied metadata. The workspace block always wins for the
-// "workspace" key so callers can't inject conflicting policy via raw
-// metadata.
-func mergeWorkspaceMetadata(base map[string]interface{}, ws map[string]interface{}) map[string]interface{} {
-	if len(ws) == 0 {
-		return base
-	}
-	if base == nil {
-		base = map[string]interface{}{}
-	}
-	for k, v := range ws {
-		base[k] = v
-	}
-	return base
-}

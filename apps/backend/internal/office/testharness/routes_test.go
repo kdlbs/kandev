@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +20,10 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	officemodels "github.com/kandev/kandev/internal/office/models"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
@@ -62,7 +66,7 @@ func seedTask(t *testing.T, db *sqlx.DB, taskID string) {
 func newRouter(t *testing.T, repo *sqliterepo.Repository, eb bus.EventBus) *gin.Engine {
 	t.Helper()
 	r := gin.New()
-	RegisterRoutes(r, repo, nil, nil, nil, eb, logger.Default())
+	RegisterRoutes(r, repo, nil, nil, nil, eb, logger.Default(), nil, nil)
 	return r
 }
 
@@ -102,6 +106,97 @@ func TestHealthRouteReturnsOK(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestSeedCostEventPreservesOutputTokenPresence(t *testing.T) {
+	taskRepo, sqlxDB := newTestRepo(t)
+	omittedTaskID := uuid.New().String()
+	zeroTaskID := uuid.New().String()
+	seedTask(t, sqlxDB, omittedTaskID)
+	seedTask(t, sqlxDB, zeroTaskID)
+
+	officeRepo, err := officesqlite.NewWithDB(sqlxDB, sqlxDB, logger.Default())
+	if err != nil {
+		t.Fatalf("new office repo: %v", err)
+	}
+	router := gin.New()
+	RegisterRoutes(router, taskRepo, officeRepo, nil, nil, nil, logger.Default(), nil, nil)
+
+	post := func(body map[string]any) {
+		t.Helper()
+		requestBody := mustJSON(t, body)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/cost-events", bytes.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("seed cost event status=%d body=%s", res.Code, res.Body.String())
+		}
+	}
+
+	post(map[string]any{
+		"agent_profile_id": "agent-1",
+		"task_id":          omittedTaskID,
+		"tokens_in":        10,
+		"estimated":        true,
+	})
+	post(map[string]any{
+		"agent_profile_id": "agent-1",
+		"task_id":          zeroTaskID,
+		"tokens_in":        10,
+		"tokens_out":       0,
+		"estimated":        true,
+	})
+
+	events, err := officeRepo.ListCostEvents(t.Context(), "ws-1")
+	if err != nil {
+		t.Fatalf("list cost events: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("cost event count = %d, want 2", len(events))
+	}
+	byTask := make(map[string]*officemodels.CostEvent, len(events))
+	for _, event := range events {
+		byTask[event.TaskID] = event
+	}
+	omitted, ok := byTask[omittedTaskID]
+	if !ok {
+		t.Fatalf("missing cost event for task %s", omittedTaskID)
+	}
+	zero, ok := byTask[zeroTaskID]
+	if !ok {
+		t.Fatalf("missing cost event for task %s", zeroTaskID)
+	}
+	if got := omitted.TokensOut; got != nil {
+		t.Fatalf("omitted tokens_out = %v, want nil", *got)
+	}
+	if got := zero.TokensOut; got == nil || *got != 0 {
+		t.Fatalf("explicit zero tokens_out = %v, want non-nil 0", got)
+	}
+	for _, taskID := range []string{omittedTaskID, zeroTaskID} {
+		version := byTask[taskID].CostContractVersion
+		if version == nil || *version != officemodels.CostContractVersion {
+			t.Errorf("cost_contract_version for %s = %v, want %d", taskID, version, officemodels.CostContractVersion)
+		}
+	}
+}
+
+func TestBackgroundProbeRouteNotMountedWithoutOrchestrator(t *testing.T) {
+	// newRouter always passes a nil orchestratorSvc — this pins that
+	// RegisterRoutes only mounts POST /background-probe when one is supplied
+	// (task-09's e2e feasibility depends on the real wiring test, run via
+	// helpers.go with the real *orchestrator.Service; this test only pins the
+	// nil-guard so the route never panics on a nil *orchestrator.Service).
+	repo, _ := newTestRepo(t)
+	r := newRouter(t, repo, nil)
+	w := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"session_id":"s1","results":["live"]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/background-probe", body)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when no orchestrator service is supplied, got %d", w.Code)
 	}
 }
 
@@ -254,6 +349,51 @@ func TestSeedTaskSessionUsesRequestedSessionID(t *testing.T) {
 	}
 	if session.TaskID != taskID {
 		t.Fatalf("task_id = %q, want %q", session.TaskID, taskID)
+	}
+}
+
+func TestSeedTaskSessionUpdateAppliesErrorMessage(t *testing.T) {
+	repo, sqlxDB := newTestRepo(t)
+	taskID := uuid.New().String()
+	sessionID := uuid.New().String()
+	seedTask(t, sqlxDB, taskID)
+	r := newRouter(t, repo, nil)
+
+	body := mustJSON(t, map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"state":      "RUNNING",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/task-sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	completedAt := time.Now().UTC().Format(time.RFC3339)
+	updateBody := mustJSON(t, map[string]interface{}{
+		"task_id":       taskID,
+		"session_id":    sessionID,
+		"state":         "FAILED",
+		"completed_at":  completedAt,
+		"error_message": "boom",
+	})
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/_test/task-sessions", bytes.NewReader(updateBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("get updated session: %v", err)
+	}
+	if session.ErrorMessage != "boom" {
+		t.Fatalf("error_message = %q, want %q", session.ErrorMessage, "boom")
 	}
 }
 
@@ -439,6 +579,377 @@ func TestSeedMessageRejectsUnknownSession(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// seedMessageAndCollect seeds a session + a message through the harness routes
+// and returns the repo, the session id, the response message id, and any
+// message.added events published to the bus.
+func seedMessageAndCollect(t *testing.T, body map[string]interface{}) (*sqliterepo.Repository, string, string, []*bus.Event) {
+	t.Helper()
+	repo, sqlxDB := newTestRepo(t)
+	taskID := uuid.New().String()
+	seedTask(t, sqlxDB, taskID)
+	eb := bus.NewMemoryEventBus(logger.Default())
+	var published []*bus.Event
+	var mu sync.Mutex
+	if _, err := eb.Subscribe(events.MessageAdded, func(_ context.Context, e *bus.Event) error {
+		mu.Lock()
+		defer mu.Unlock()
+		published = append(published, e)
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	r := newRouter(t, repo, eb)
+
+	sessBody := mustJSON(t, map[string]interface{}{"task_id": taskID, "state": "RUNNING"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/task-sessions", bytes.NewReader(sessBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("session seed: expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var sessResp seedTaskSessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &sessResp)
+
+	body["session_id"] = sessResp.SessionID
+	msgBody := mustJSON(t, body)
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/_test/messages", bytes.NewReader(msgBody))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("message seed: expected 200, got %d body=%s", w2.Code, w2.Body.String())
+	}
+	var resp struct {
+		MessageID string `json:"message_id"`
+	}
+	_ = json.Unmarshal(w2.Body.Bytes(), &resp)
+	return repo, sessResp.SessionID, resp.MessageID, published
+}
+
+// TestSeedMessageUserAuthorPersistsPromptIndex verifies that a seeded user message is persisted with a derived prompt index.
+func TestSeedMessageUserAuthorPersistsPromptIndex(t *testing.T) {
+	repo, _, messageID, published := seedMessageAndCollect(t, map[string]interface{}{
+		"type":        "message",
+		"content":     "user prompt",
+		"author_type": "user",
+	})
+
+	indexed, err := repo.GetMessageWithPromptIndex(context.Background(), messageID)
+	if err != nil {
+		t.Fatalf("GetMessageWithPromptIndex: %v", err)
+	}
+	if indexed.AuthorType != models.MessageAuthorUser {
+		t.Fatalf("author type = %q, want user", indexed.AuthorType)
+	}
+	if indexed.PromptIndex != 1 {
+		t.Fatalf("prompt_index = %d, want 1", indexed.PromptIndex)
+	}
+	// The ordinal is read-time derived: the legacy hot path stays zero.
+	legacy, err := repo.GetMessage(context.Background(), messageID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if legacy.PromptIndex != 0 {
+		t.Fatalf("legacy GetMessage prompt_index = %d, want 0", legacy.PromptIndex)
+	}
+
+	// The published WS event carries the ordinal and RFC3339Nano precision.
+	if len(published) != 1 {
+		t.Fatalf("published events = %d, want 1", len(published))
+	}
+	data, ok := published[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data = %T, want map", published[0].Data)
+	}
+	if got, ok := data["prompt_index"]; !ok || got != 1 {
+		t.Fatalf("event prompt_index = %#v, want 1", got)
+	}
+	if created, ok := data["created_at"].(string); !ok || !strings.Contains(created, ".") {
+		t.Fatalf("event created_at = %#v, want RFC3339Nano fractional precision", data["created_at"])
+	}
+	receipt, ok := data["conversation_receipt"].(*models.ConversationMutationReceipt)
+	if !ok {
+		t.Fatalf("conversation_receipt = %T, want *models.ConversationMutationReceipt", data["conversation_receipt"])
+	}
+	if !receipt.Complete || receipt.Revision != receipt.BaseRevision+1 {
+		t.Fatalf("conversation_receipt = %+v, want one complete revision", receipt)
+	}
+}
+
+// TestSeedMessageDefaultsToAgentWithoutPromptIndex verifies that non-user seeded messages carry no prompt index.
+func TestSeedMessageDefaultsToAgentWithoutPromptIndex(t *testing.T) {
+	repo, _, messageID, published := seedMessageAndCollect(t, map[string]interface{}{
+		"type":    "message",
+		"content": "agent reply",
+	})
+
+	indexed, err := repo.GetMessageWithPromptIndex(context.Background(), messageID)
+	if err != nil {
+		t.Fatalf("GetMessageWithPromptIndex: %v", err)
+	}
+	if indexed.AuthorType != models.MessageAuthorAgent {
+		t.Fatalf("author type = %q, want agent default", indexed.AuthorType)
+	}
+	if indexed.PromptIndex != 0 {
+		t.Fatalf("agent prompt_index = %d, want 0", indexed.PromptIndex)
+	}
+	if len(published) != 1 {
+		t.Fatalf("published events = %d, want 1", len(published))
+	}
+	data, ok := published[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data = %T, want map", published[0].Data)
+	}
+	if _, ok := data["prompt_index"]; ok {
+		t.Fatalf("agent event carries prompt_index %v", data["prompt_index"])
+	}
+}
+
+// TestSeedMessageExplicitPastTimestampRejected verifies that explicit timestamps before the newest session message are rejected.
+func TestSeedMessageExplicitPastTimestampRejected(t *testing.T) {
+	repo, _, messageID, _ := seedMessageAndCollect(t, map[string]interface{}{
+		"type":        "message",
+		"content":     "first",
+		"author_type": "user",
+	})
+	// A second user seed with an explicit timestamp EARLIER than the newest
+	// user message is an invalid reordering: the explicit-import branch
+	// rejects it (the live branch would have advanced instead).
+	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
+	second := mustJSON(t, map[string]interface{}{
+		"session_id":  seedSessionIDFromMessage(t, repo, messageID),
+		"type":        "message",
+		"content":     "second",
+		"author_type": "user",
+		"created_at":  past,
+	})
+	r := newRouter(t, repo, nil)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/messages", bytes.NewReader(second))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("explicit-past seed status = %d body=%s, want 500 (strictly-after-max rejection)", w.Code, w.Body.String())
+	}
+}
+
+// seedSessionIDFromMessage resolves the session id for a seeded message.
+func seedSessionIDFromMessage(t *testing.T, repo *sqliterepo.Repository, messageID string) string {
+	t.Helper()
+	msg, err := repo.GetMessage(context.Background(), messageID)
+	if err != nil {
+		t.Fatalf("GetMessage(%s): %v", messageID, err)
+	}
+	return msg.TaskSessionID
+}
+
+// TestSeedMessageExplicitCreatedAtPreserved verifies that an explicit future-ordered created_at is preserved on the persisted row.
+func TestSeedMessageExplicitCreatedAtPreserved(t *testing.T) {
+	explicit := time.Date(2026, 8, 19, 10, 0, 0, 123456000, time.UTC)
+	repo, _, messageID, published := seedMessageAndCollect(t, map[string]interface{}{
+		"type":        "message",
+		"content":     "deterministic prompt",
+		"author_type": "user",
+		"created_at":  explicit.Format(time.RFC3339Nano),
+	})
+
+	stored, err := repo.GetMessage(context.Background(), messageID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if !stored.CreatedAt.Equal(explicit) {
+		t.Fatalf("stored created_at = %v, want explicit %v", stored.CreatedAt, explicit)
+	}
+	indexed, err := repo.GetMessageWithPromptIndex(context.Background(), messageID)
+	if err != nil {
+		t.Fatalf("GetMessageWithPromptIndex: %v", err)
+	}
+	if indexed.PromptIndex != 1 {
+		t.Fatalf("prompt_index = %d, want 1", indexed.PromptIndex)
+	}
+	// The WS event preserves the explicit timestamp with full fractional
+	// precision (RFC3339Nano), not second-truncated RFC3339.
+	if len(published) != 1 {
+		t.Fatalf("published events = %d, want 1", len(published))
+	}
+	data, ok := published[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data = %T, want map", published[0].Data)
+	}
+	created, ok := data["created_at"].(string)
+	if !ok {
+		t.Fatalf("event created_at = %#v, want string", data["created_at"])
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, created)
+	if err != nil {
+		t.Fatalf("event created_at %q not RFC3339Nano: %v", created, err)
+	}
+	if !parsed.Equal(explicit) {
+		t.Fatalf("event created_at = %v, want %v", parsed, explicit)
+	}
+}
+
+// TestSeedMessageUserOrdinalsIncrement verifies that consecutive seeded user messages receive strictly increasing ordinals.
+func TestSeedMessageUserOrdinalsIncrement(t *testing.T) {
+	repo, sessionID, _, _ := seedMessageAndCollect(t, map[string]interface{}{
+		"type":        "message",
+		"content":     "first",
+		"author_type": "user",
+	})
+	// Second user seed on the same session gets ordinal 2.
+	second := mustJSON(t, map[string]interface{}{
+		"session_id":  sessionID,
+		"type":        "message",
+		"content":     "second",
+		"author_type": "user",
+	})
+	r := newRouter(t, repo, nil)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/messages", bytes.NewReader(second))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("second seed: expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	msgs, err := repo.ListMessages(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d, want 2", len(msgs))
+	}
+	for _, m := range msgs {
+		indexed, err := repo.GetMessageWithPromptIndex(context.Background(), m.ID)
+		if err != nil {
+			t.Fatalf("GetMessageWithPromptIndex(%s): %v", m.ID, err)
+		}
+		if indexed.AuthorType == models.MessageAuthorUser && indexed.PromptIndex < 1 {
+			t.Fatalf("user message %s prompt_index = %d, want >= 1", m.ID, indexed.PromptIndex)
+		}
+	}
+}
+
+// TestSeedMessagePersistsTurnMetadata covers the harness turn-metadata
+// contract: a later seed updates the pre-existing active turn's metadata, and
+// a seed without turn_metadata leaves existing metadata untouched.
+func TestSeedMessagePersistsTurnMetadata(t *testing.T) {
+	repo, sqlxDB := newTestRepo(t)
+	taskID := uuid.New().String()
+	seedTask(t, sqlxDB, taskID)
+	r := newRouter(t, repo, nil)
+
+	sessBody := mustJSON(t, map[string]interface{}{
+		"task_id": taskID,
+		"state":   "RUNNING",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/task-sessions", bytes.NewReader(sessBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("session seed: expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var sessResp seedTaskSessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &sessResp)
+
+	// Seed a message first WITHOUT turn metadata: the harness creates the
+	// active turn, and the later seed must update that same turn.
+	firstBody := mustJSON(t, map[string]interface{}{
+		"session_id": sessResp.SessionID,
+		"type":       "message",
+		"content":    "first message",
+	})
+	wFirst := httptest.NewRecorder()
+	reqFirst := httptest.NewRequest(http.MethodPost, "/api/v1/_test/messages", bytes.NewReader(firstBody))
+	reqFirst.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(wFirst, reqFirst)
+	if wFirst.Code != http.StatusOK {
+		t.Fatalf("first seed: expected 200, got %d body=%s", wFirst.Code, wFirst.Body.String())
+	}
+
+	turnMeta := map[string]interface{}{
+		"runtime_config_snapshot": map[string]interface{}{
+			"config_baseline": map[string]interface{}{"mode": "default", "model": "anthropic/claude-sonnet-5"},
+			"config_options": []interface{}{
+				map[string]interface{}{"id": "mode", "name": "Mode", "value": "default", "value_name": "Default"},
+			},
+		},
+	}
+	msgBody := mustJSON(t, map[string]interface{}{
+		"session_id":    sessResp.SessionID,
+		"type":          "message",
+		"content":       "hello world",
+		"turn_metadata": turnMeta,
+	})
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/_test/messages", bytes.NewReader(msgBody))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w2.Code, w2.Body.String())
+	}
+
+	// Exactly one active turn exists, both seeded messages share its id, and
+	// the second seed updated the metadata on the pre-existing turn.
+	turns, err := repo.ListTurnsBySession(context.Background(), sessResp.SessionID)
+	if err != nil {
+		t.Fatalf("list turns: %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("expected exactly 1 turn, got %d", len(turns))
+	}
+	turn := turns[0]
+	msgs, err := repo.ListMessages(context.Background(), sessResp.SessionID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	}
+	for _, m := range msgs {
+		if m.TurnID != turn.ID {
+			t.Fatalf("message %q on turn %q, expected shared turn %q", m.ID, m.TurnID, turn.ID)
+		}
+	}
+	if turn.Metadata == nil {
+		t.Fatal("expected turn metadata to be persisted")
+	}
+	snapshot, ok := turn.Metadata["runtime_config_snapshot"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected runtime_config_snapshot object, got %#v", turn.Metadata["runtime_config_snapshot"])
+	}
+	if snapshot["config_baseline"] == nil {
+		t.Fatal("expected config_baseline inside the snapshot")
+	}
+
+	// Seeding another message WITHOUT turn_metadata must leave the existing
+	// metadata untouched (nil must not clear it).
+	thirdBody := mustJSON(t, map[string]interface{}{
+		"session_id": sessResp.SessionID,
+		"type":       "message",
+		"content":    "third message",
+	})
+	w3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/_test/messages", bytes.NewReader(thirdBody))
+	req3.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("third seed: expected 200, got %d body=%s", w3.Code, w3.Body.String())
+	}
+	turnAfter, err := repo.GetTurn(context.Background(), turn.ID)
+	if err != nil {
+		t.Fatalf("get turn after third seed: %v", err)
+	}
+	afterSnapshot, ok := turnAfter.Metadata["runtime_config_snapshot"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected runtime_config_snapshot to survive a nil turn_metadata seed, got %#v", turnAfter.Metadata)
+	}
+	if afterSnapshot["config_baseline"] == nil {
+		t.Fatal("expected config_baseline to survive a nil turn_metadata seed")
 	}
 }
 

@@ -17,6 +17,31 @@ import (
 	"github.com/kandev/kandev/internal/testutil"
 )
 
+// TestPostgresDynamicInstallationKeyUsesBytea verifies the PostgreSQL schema
+// branch for the installation binding key. SQLite accepts BLOB, while
+// PostgreSQL requires BYTEA. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresDynamicInstallationKeyUsesBytea(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+
+	var dataType string
+	err := db.QueryRowContext(context.Background(), `
+		SELECT data_type
+		FROM information_schema.columns
+		WHERE table_schema = current_schema()
+		  AND table_name = 'dynamic_installation_keys'
+		  AND column_name = 'key_bytes'
+	`).Scan(&dataType)
+	if err != nil {
+		t.Fatalf("inspect dynamic_installation_keys.key_bytes: %v", err)
+	}
+	if dataType != "bytea" {
+		t.Fatalf("dynamic_installation_keys.key_bytes data type = %q, want bytea", dataType)
+	}
+}
+
 // TestPostgresExecutorRunningLocalPIDMigration is the Postgres counterpart to
 // TestExecutorRunningLocalPIDMigrationOnLegacyDB (SQLite): local_pid is on the
 // shared migration path, so ADR 0027 asks for env-gated Postgres replay coverage
@@ -55,7 +80,7 @@ func TestPostgresExecutorRunningLocalPIDMigration(t *testing.T) {
 	if _, err := db.Exec(`ALTER TABLE executors_running DROP COLUMN local_pid`); err != nil {
 		t.Fatalf("simulate legacy schema (drop local_pid): %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations on legacy postgres DB: %v", err)
 	}
 
@@ -160,10 +185,10 @@ func TestPostgresImproveKandevWorkflowIndexMigration(t *testing.T) {
 			t.Fatalf("seed legacy workflow %q: %v", id, err)
 		}
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("migrate legacy postgres workflow duplicates: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay postgres improve kandev migration: %v", err)
 	}
 	var count int
@@ -279,10 +304,10 @@ func TestPostgresExecutionProfileMigration(t *testing.T) {
 			t.Fatalf("drop %s.execution_profile_id: %v", table, err)
 		}
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations on legacy postgres schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay postgres migrations: %v", err)
 	}
 
@@ -399,7 +424,12 @@ func TestPostgresUpdateSessionContextWindowCountsStrictUsageDrops(t *testing.T) 
 	}
 }
 
-func TestPostgresSkipsLegacyTaskEnvironmentBackfill(t *testing.T) {
+// TestPostgresNormalizeTaskWorktreeOwnershipIsNoOpOnFreshSchema proves the
+// one-time cutover is a no-op on a database that already carries the final
+// schema: the legacy table does not exist, so nothing is normalized and the
+// orphaned session stays untouched (the startup heal
+// healSessionTaskEnvironmentIDs owns that repair on final-schema databases).
+func TestPostgresNormalizeTaskWorktreeOwnershipIsNoOpOnFreshSchema(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
@@ -420,8 +450,8 @@ func TestPostgresSkipsLegacyTaskEnvironmentBackfill(t *testing.T) {
 		t.Fatalf("insert orphaned session: %v", err)
 	}
 
-	if err := repo.backfillTaskEnvironments(); err != nil {
-		t.Fatalf("backfill task environments: %v", err)
+	if err := repo.normalizeTaskWorktreeOwnership(); err != nil {
+		t.Fatalf("normalize task worktree ownership: %v", err)
 	}
 
 	var count int
@@ -431,8 +461,22 @@ func TestPostgresSkipsLegacyTaskEnvironmentBackfill(t *testing.T) {
 		t.Fatalf("count task environments: %v", err)
 	}
 	if count != 0 {
-		t.Fatalf("task environment count = %d, want 0", count)
+		t.Fatalf("task environment count = %d, want 0 (cutover is a no-op on the final schema)", count)
 	}
+}
+
+func TestPostgresCutoverHybridNormalizedEnvironmentWithLegacySessionWorktrees(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("seed final postgres schema: %v", err)
+	}
+	seed := seedHybridCutoverState(t, db, "postgres")
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("upgrade hybrid postgres schema: %v", err)
+	}
+	assertHybridCutoverResult(t, repo, seed)
 }
 
 func TestPostgresWorkflowHiddenRoundTrip(t *testing.T) {
@@ -529,6 +573,50 @@ func TestPostgresTaskEnvironmentReposMultiBranchMigration(t *testing.T) {
 		) VALUES ('ter-dupe', 'env-1', 'repo-1', '', 'wt-dupe', $1, $1)
 	`, now); err == nil {
 		t.Fatal("expected duplicate env/repo/branch insert to fail")
+	}
+}
+
+func TestPostgresRepositorySecretBindingsSchemaReplay(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+
+	if _, err := db.Exec("DROP TABLE repository_secret_bindings"); err != nil {
+		t.Fatalf("drop repository secret bindings table: %v", err)
+	}
+	if err := repo.runMigrations(context.Background()); err != nil {
+		t.Fatalf("replay repository secret bindings migration: %v", err)
+	}
+	if err := repo.runMigrations(context.Background()); err != nil {
+		t.Fatalf("replay repository secret bindings migration twice: %v", err)
+	}
+
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-postgres-secret-bindings")
+	repository := &models.Repository{
+		ID:          "repo-postgres-secret-bindings",
+		WorkspaceID: "ws-postgres-secret-bindings",
+		Name:        "postgres secrets",
+	}
+	bindings := []models.RepositorySecretBinding{{Key: "NPM_TOKEN", SecretID: "secret-pg-npm"}}
+	if err := repo.CreateRepositoryWithSecretBindings(ctx, repository, bindings); err != nil {
+		t.Fatalf("create repository with bindings after replay: %v", err)
+	}
+	got, err := repo.GetRepository(ctx, repository.ID)
+	if err != nil {
+		t.Fatalf("get repository after replay: %v", err)
+	}
+	if len(got.SecretBindings) != 1 {
+		t.Fatalf("repository bindings = %+v, want one binding", got.SecretBindings)
+	}
+	gotBinding := got.SecretBindings[0]
+	if gotBinding.RepositoryID != repository.ID || gotBinding.Key != bindings[0].Key || gotBinding.SecretID != bindings[0].SecretID {
+		t.Fatalf("repository binding = %+v, want repository=%q key=%q secret=%q", gotBinding, repository.ID, bindings[0].Key, bindings[0].SecretID)
+	}
+	if gotBinding.CreatedAt.IsZero() || gotBinding.UpdatedAt.IsZero() {
+		t.Fatalf("repository binding timestamps = %+v, want persisted timestamps", gotBinding)
 	}
 }
 
@@ -650,5 +738,163 @@ func TestPostgresSetSessionPrimary_ConcurrentPromotionsLeaveExactlyOnePrimary(t 
 	}
 	if primaryCount != 1 {
 		t.Errorf("expected exactly 1 primary session after %d concurrent promotions, got %d — FOR UPDATE lock not serializing across connections", concurrency, primaryCount)
+	}
+}
+
+func TestPostgresSetSessionPrimaryIfNonterminalRejectsTerminalAndSerializesPromotions(t *testing.T) {
+	const concurrency = 4
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), concurrency)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`INSERT INTO tasks (id, workspace_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`), "task-primary-nonterminal-pg", "ws-primary-nonterminal-pg", "Task", now, now); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	terminal := &models.TaskSession{ID: "terminal-primary-pg", TaskID: "task-primary-nonterminal-pg", State: models.TaskSessionStateCompleted}
+	if err := repo.CreateTaskSession(ctx, terminal); err != nil {
+		t.Fatalf("seed terminal session: %v", err)
+	}
+	promoted, err := repo.SetSessionPrimaryIfNonterminal(ctx, terminal.ID)
+	if err != nil || promoted {
+		t.Fatalf("terminal promotion = (%t, %v), want (false, nil)", promoted, err)
+	}
+
+	ids := make([]string, concurrency)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("active-primary-pg-%d", i)
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: ids[i], TaskID: terminal.TaskID, State: models.TaskSessionStateWaitingForInput}); err != nil {
+			t.Fatalf("seed active session: %v", err)
+		}
+	}
+	var wg sync.WaitGroup
+	for _, id := range ids {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			ok, promoteErr := repo.SetSessionPrimaryIfNonterminal(ctx, id)
+			if promoteErr != nil || !ok {
+				t.Errorf("promote %s = (%t, %v), want (true, nil)", id, ok, promoteErr)
+			}
+		}(id)
+	}
+	wg.Wait()
+	var count int
+	if err := db.Get(&count, db.Rebind(`SELECT COUNT(*) FROM task_sessions WHERE task_id = ? AND is_primary = 1`), terminal.TaskID); err != nil {
+		t.Fatalf("count primaries: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("primary count = %d, want 1", count)
+	}
+}
+
+// TestPostgresClearRecoveredAgentErrors is the Postgres counterpart to
+// TestClearRecoveredAgentErrorsBackfill. clearRecoveredAgentErrors is built from
+// three dialect-sensitive helpers (jsonColumn, jsonText/timestamp*,
+// jsonRemoveKey), so ADR 0027 asks for env-gated Postgres behavior coverage —
+// schema replay would not exercise the jsonb operators at all.
+//
+// migrate.Apply swallows SQL errors, so the assertions below are the only proof
+// the statements ran: a dialect mistake leaves the recovered row untouched
+// rather than returning an error. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresClearRecoveredAgentErrors(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+
+	occurredAt := time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC)
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "task-pg-recovered", "ws-pg-recovered", "Task", occurredAt, occurredAt); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	// recovered: agent output after the failure. current: none since.
+	// blank/nulled: rows the repository wrote as "no metadata" — both dialects
+	// raise on parsing those, and the statements scan every row before
+	// filtering, so an unguarded cast aborts the migration for everyone.
+	for _, sessionID := range []string{"pg-recovered", "pg-current", "pg-blank", "pg-nulled"} {
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: sessionID, TaskID: "task-pg-recovered", State: models.TaskSessionStateWaitingForInput,
+		}); err != nil {
+			t.Fatalf("CreateTaskSession %s: %v", sessionID, err)
+		}
+	}
+	// Seeded with plain SQL on purpose so this migration fixture keeps its exact
+	// metadata shape. SetSessionMetadataKey's dialect-aware JSON update is
+	// covered by the dedicated PostgreSQL launch-error test.
+	lastAgentError := `{"last_agent_error":{"message":"agent crashed","occurred_at":"` +
+		occurredAt.Format(time.RFC3339Nano) + `"}}`
+	for _, sessionID := range []string{"pg-recovered", "pg-current"} {
+		if _, err := db.Exec(db.Rebind(
+			`UPDATE task_sessions SET metadata = ? WHERE id = ?`), lastAgentError, sessionID); err != nil {
+			t.Fatalf("seed last agent error on %s: %v", sessionID, err)
+		}
+	}
+	for value, sessionID := range map[string]string{"": "pg-blank", "null": "pg-nulled"} {
+		if _, err := db.Exec(db.Rebind(
+			`UPDATE task_sessions SET metadata = ? WHERE id = ?`), value, sessionID); err != nil {
+			t.Fatalf("seed %q metadata: %v", value, err)
+		}
+	}
+
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`), "pg-turn", "pg-recovered", "task-pg-recovered", occurredAt, occurredAt, occurredAt); err != nil {
+		t.Fatalf("seed turn: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_session_messages
+			(id, task_session_id, task_id, turn_id, author_type, content, type, metadata, created_at)
+		VALUES (?, ?, '', ?, 'agent', 'back on track', 'message', '{}', ?)
+	`), "pg-msg", "pg-recovered", "pg-turn", occurredAt.Add(time.Hour)); err != nil {
+		t.Fatalf("seed agent message: %v", err)
+	}
+
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_status_summaries (task_id, workspace_id, revision, summary, updated_at)
+		VALUES (?, ?, 4, ?, ?)
+	`), "task-pg-recovered", "ws-pg-recovered",
+		`{"active_error":{"session_id":"pg-recovered","stamp":"s","preview":"agent crashed"},"pending_action":"permission"}`,
+		occurredAt); err != nil {
+		t.Fatalf("seed status summary: %v", err)
+	}
+
+	if err := repo.clearRecoveredAgentErrors(); err != nil {
+		t.Fatalf("clearRecoveredAgentErrors: %v", err)
+	}
+
+	hasError := func(sessionID string) bool {
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("get session %s: %v", sessionID, err)
+		}
+		_, ok := models.LoadLastAgentError(session.Metadata)
+		return ok
+	}
+	if hasError("pg-recovered") {
+		t.Fatal("a failure the agent recovered from must be cleared on Postgres")
+	}
+	if !hasError("pg-current") {
+		t.Fatal("a failure with no successful work after it must be left alone")
+	}
+
+	var summary string
+	if err := db.Get(&summary, db.Rebind(
+		`SELECT summary FROM task_status_summaries WHERE task_id = ?`), "task-pg-recovered"); err != nil {
+		t.Fatalf("read status summary: %v", err)
+	}
+	if strings.Contains(summary, "active_error") {
+		t.Fatalf("summary = %s, want the cached error cleared", summary)
+	}
+	if !strings.Contains(summary, "permission") {
+		t.Fatalf("summary = %s, want the rest of the projection preserved", summary)
 	}
 }

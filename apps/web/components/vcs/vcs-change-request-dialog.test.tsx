@@ -1,8 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { getChangeRequestTerminology } from "@/hooks/use-git-operations";
 import { VcsChangeRequestDialog } from "./vcs-change-request-dialog";
+
+afterEach(cleanup);
 
 describe.each([
   ["gitlab", "merge request", "MR"],
@@ -39,5 +41,36 @@ describe.each([
       `Branch was pushed; retry ${longName} creation.`,
     );
     expect(screen.getByRole("button", { name: `Retry ${shortName}` })).toBeTruthy();
+  });
+});
+
+describe("VcsChangeRequestDialog provider capabilities", () => {
+  it("hides draft creation when the active provider does not support it", () => {
+    render(
+      <TooltipProvider>
+        <VcsChangeRequestDialog
+          open
+          onOpenChange={() => {}}
+          title="Title"
+          onTitleChange={() => {}}
+          body=""
+          onBodyChange={() => {}}
+          draft={false}
+          onDraftChange={() => {}}
+          supportsDraft={false}
+          loading={false}
+          branchPushed={false}
+          onCreate={() => {}}
+          onGenerateTitle={() => {}}
+          generatingTitle={false}
+          onGenerateDescription={() => {}}
+          generatingDescription={false}
+          utilityConfigured
+          terminology={getChangeRequestTerminology("bitbucket")}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByLabelText("Create as draft")).toBeNull();
   });
 });

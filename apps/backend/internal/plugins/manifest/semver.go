@@ -1,9 +1,57 @@
 package manifest
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
+
+// CheckMinimumKandevVersion enforces a package minimum against a stamped
+// release build. Development and git-describe builds deliberately skip the
+// check because they do not provide a trustworthy release boundary.
+func CheckMinimumKandevVersion(minVersion, runningVersion string) error {
+	if strings.TrimSpace(minVersion) == "" || strings.TrimSpace(runningVersion) == "" || strings.EqualFold(strings.TrimSpace(runningVersion), "dev") {
+		return nil
+	}
+	running, runningRelease := NormalizeReleaseVersion(runningVersion)
+	if !runningRelease {
+		return nil
+	}
+	minimum, minimumRelease := NormalizeReleaseVersion(minVersion)
+	if !minimumRelease {
+		return fmt.Errorf("plugins: min_kandev_version %q is not a release version", minVersion)
+	}
+	if CompareVersions(running, minimum) < 0 {
+		return fmt.Errorf("plugins: requires kandev >= %s, running %s", minVersion, runningVersion)
+	}
+	return nil
+}
+
+// NormalizeReleaseVersion returns a dotted numeric release version suitable
+// for compatibility comparisons. Kandev release builds are tagged `vX.Y.Z`,
+// while plugin manifests use `X.Y.Z`; development and git-describe strings
+// are deliberately not release versions and must not fall through to the
+// byte-wise fallback in CompareVersions.
+func NormalizeReleaseVersion(raw string) (string, bool) {
+	version := strings.TrimSpace(raw)
+	if strings.HasPrefix(version, "v") || strings.HasPrefix(version, "V") {
+		version = version[1:]
+	}
+	parts := strings.Split(version, ".")
+	if version == "" || len(parts) > 3 {
+		return "", false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return "", false
+		}
+		value, err := strconv.Atoi(part)
+		if err != nil || value < 0 {
+			return "", false
+		}
+	}
+	return version, true
+}
 
 // CompareVersions performs a best-effort, dependency-free comparison of two
 // dotted version strings (e.g. plugin manifest "version" values), for

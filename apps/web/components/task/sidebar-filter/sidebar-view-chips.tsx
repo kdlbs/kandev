@@ -1,5 +1,7 @@
 "use client";
 
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+
 import { useCallback, useRef, type PointerEvent } from "react";
 import {
   DndContext,
@@ -15,14 +17,16 @@ import { CSS } from "@dnd-kit/utilities";
 import { useAppStore } from "@/components/state-provider";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { cn } from "@/lib/utils";
+import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { useTranslation } from "react-i18next";
 
 const DRAG_ACTIVATION_DISTANCE = 8;
 const TOUCH_DRAG_DELAY_MS = 250;
 const TOUCH_DRAG_TOLERANCE = 5;
 
 export function SidebarViewChips() {
-  const views = useAppStore((s) => s.sidebarViews.views);
-  const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
+  const views = useAppStore((s) => selectSidebarViews(s).views);
+  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
   const setActive = useAppStore((s) => s.setSidebarActiveView);
   const reorderViews = useAppStore((s) => s.reorderSidebarViews);
   // Use MouseSensor (not PointerSensor) deliberately: this chip row lives in an
@@ -80,6 +84,7 @@ function SidebarViewChip({
   active: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: view.id,
   });
@@ -150,10 +155,10 @@ function SidebarViewChip({
           : "border-transparent text-muted-foreground hover:text-foreground",
         isDragging && "z-50 cursor-grabbing",
       )}
-      title={view.name}
+      title={sidebarViewName(view, t)}
       onClick={handleClick}
     >
-      <span className="block max-w-[120px] truncate">{view.name}</span>
+      <span className="block max-w-[120px] truncate">{sidebarViewName(view, t)}</span>
     </button>
   );
 }

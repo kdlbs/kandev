@@ -43,6 +43,25 @@ func TestCompareSemver(t *testing.T) {
 	}
 }
 
+func TestCompareSemverCoreFallsBackForInvalidInputs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		a    string
+		b    string
+	}{
+		{name: "invalid below valid", a: "not-a-version", b: "v1.2.3"},
+		{name: "valid above invalid", a: "v1.2.3", b: "not-a-version"},
+		{name: "both invalid", a: "invalid-b", b: "invalid-a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want := compareSemver(tc.a, tc.b)
+			if got := compareSemverCore(tc.a, tc.b); got != want {
+				t.Fatalf("compareSemverCore(%q, %q)=%d want fallback %d", tc.a, tc.b, got, want)
+			}
+		})
+	}
+}
+
 func TestGitDescribeCommits(t *testing.T) {
 	cases := []struct {
 		name   string

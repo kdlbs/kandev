@@ -3,9 +3,11 @@
 import { useMemo } from "react";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeProjects } from "@/lib/state/slices/office/selectors";
 import { updateTask } from "@/lib/api/domains/office-extended-api";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
 import type { Task } from "@/app/office/tasks/[id]/types";
+import { useTranslation } from "react-i18next";
 
 type ProjectPickerProps = {
   task: Task;
@@ -14,15 +16,16 @@ type ProjectPickerProps = {
 const NO_PROJECT = "__none__";
 
 export function ProjectPicker({ task }: ProjectPickerProps) {
-  const projects = useAppStore((s) => s.office.projects);
+  const { t } = useTranslation();
+  const projects = useAppStore(selectOfficeProjects);
   const mutate = useOptimisticTaskMutation();
 
   const options = useMemo<ComboboxOption[]>(() => {
     const noOpt: ComboboxOption = {
       value: NO_PROJECT,
-      label: "No project",
+      label: t("task:noProject"),
       keywords: ["none"],
-      renderLabel: () => <span className="text-muted-foreground">No project</span>,
+      renderLabel: () => <span className="text-muted-foreground">{t("task:noProject")}</span>,
     };
     const projectOpts = projects.map<ComboboxOption>((p) => ({
       value: p.id,
@@ -41,7 +44,7 @@ export function ProjectPicker({ task }: ProjectPickerProps) {
       ),
     }));
     return [noOpt, ...projectOpts];
-  }, [projects]);
+  }, [projects, t]);
 
   const currentValue = task.projectId || NO_PROJECT;
 
@@ -69,9 +72,9 @@ export function ProjectPicker({ task }: ProjectPickerProps) {
       options={options}
       value={currentValue}
       onValueChange={handleSelect}
-      placeholder="No project"
-      searchPlaceholder="Search projects..."
-      emptyMessage="No projects found."
+      placeholder={t("task:noProject")}
+      searchPlaceholder={t("task:searchProjects")}
+      emptyMessage={t("task:noProjectsFound")}
       triggerClassName="h-7 w-full justify-end px-2"
       popoverAlign="end"
       testId="project-picker-trigger"

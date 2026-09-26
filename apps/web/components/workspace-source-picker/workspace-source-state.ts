@@ -5,6 +5,7 @@ import type {
 } from "@/lib/types/http";
 import { getWorkspaceSourceCapabilities } from "./executor-capabilities";
 import { looksLikeSupportedRemoteURL } from "./remote-url";
+import { t } from "@/lib/i18n";
 
 export type WorkspaceSourceRow = {
   key: string;
@@ -13,7 +14,7 @@ export type WorkspaceSourceRow = {
   repositoryId?: string;
   localPath?: string;
   remoteUrl?: string;
-  provider?: "github" | "gitlab" | "azure_devops";
+  provider?: string;
   providerRepoId?: string;
   providerOwner?: string;
   providerName?: string;
@@ -84,18 +85,18 @@ function validateRow(
 ): string | null {
   if (row.kind === "folder") {
     const path = canonicalPath(row.localPath);
-    if (!path) return "Choose a folder.";
-    if (folderPaths.has(path)) return "This folder is already selected.";
+    if (!path) return t("workspaces:sourceChooseAFolder");
+    if (folderPaths.has(path)) return t("workspaces:sourceFolderAlreadySelected");
     folderPaths.add(path);
     return null;
   }
   const locator = repositoryLocator(row);
-  if (row.remoteUrl && !isValidRemoteUrl(row.remoteUrl)) {
-    return "Enter a valid remote repository URL and base branch.";
+  if (row.remoteUrl && !row.provider && !isValidRemoteUrl(row.remoteUrl)) {
+    return t("workspaces:sourceEnterValidRemoteUrl");
   }
-  if (!locator || !row.baseBranch?.trim()) return "Choose a repository and base branch.";
+  if (!locator || !row.baseBranch?.trim()) return t("workspaces:sourceChooseRepoAndBranch");
   const duplicateKey = `${locator}\u0000${row.baseBranch.trim()}\u0000${row.checkoutBranch?.trim() ?? ""}`;
-  if (repositoryKeys.has(duplicateKey)) return "This repository and branch are already selected.";
+  if (repositoryKeys.has(duplicateKey)) return t("workspaces:sourceRepoBranchAlreadySelected");
   repositoryKeys.add(duplicateKey);
   return null;
 }

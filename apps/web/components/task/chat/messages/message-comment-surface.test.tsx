@@ -185,6 +185,34 @@ describe("MessageCommentSurface", () => {
   });
 });
 
+describe("MessageCommentSurface layering", () => {
+  it("keeps the selection trigger below overlay popovers", () => {
+    const content = "A selection sits above the chat input.";
+    const selectedText = "selection";
+    render(
+      <MessageCommentSurface message={message(content)} sessionId={SESSION_ID} isTurnActive={false}>
+        <span data-testid={MESSAGE_TEXT_TEST_ID}>{content}</span>
+      </MessageCommentSurface>,
+    );
+
+    const text = screen.getByTestId(MESSAGE_TEXT_TEST_ID).firstChild!;
+    const range = document.createRange();
+    const start = content.indexOf(selectedText);
+    range.setStart(text, start);
+    range.setEnd(text, start + selectedText.length);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent.mouseUp(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
+
+    expect(
+      screen
+        .getByRole("button", { name: "Comment on selection" })
+        .parentElement?.classList.contains("z-40"),
+    ).toBe(true);
+  });
+});
+
 describe("MessageCommentSurface mobile drawer", () => {
   it("keeps mobile feedback open when the selected quote was rewritten", () => {
     TOUCH_DRAWER.enabled = true;

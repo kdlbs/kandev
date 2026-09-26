@@ -11,17 +11,35 @@ import (
 )
 
 type fakeExecutorProfileReader struct {
-	session     *models.TaskSession
-	sessionErr  error
-	env         *models.TaskEnvironment
-	envErr      error
-	profiles    map[string]*models.ExecutorProfile
-	profileErr  error
-	profileArgs []string
+	task          *models.Task
+	taskErr       error
+	session       *models.TaskSession
+	sessionErr    error
+	cleanupActive bool
+	cleanupErr    error
+	env           *models.TaskEnvironment
+	envErr        error
+	profiles      map[string]*models.ExecutorProfile
+	profileErr    error
+	profileArgs   []string
+}
+
+func (f *fakeExecutorProfileReader) GetTask(_ context.Context, id string) (*models.Task, error) {
+	if f.taskErr != nil {
+		return nil, f.taskErr
+	}
+	if f.task != nil {
+		return f.task, nil
+	}
+	return &models.Task{ID: id}, nil
 }
 
 func (f *fakeExecutorProfileReader) GetTaskSession(_ context.Context, _ string) (*models.TaskSession, error) {
 	return f.session, f.sessionErr
+}
+
+func (f *fakeExecutorProfileReader) HasActiveTaskResourceCleanupJob(context.Context, string) (bool, error) {
+	return f.cleanupActive, f.cleanupErr
 }
 
 func (f *fakeExecutorProfileReader) GetTaskEnvironment(_ context.Context, _ string) (*models.TaskEnvironment, error) {
@@ -72,7 +90,10 @@ func TestExecutorProfileEnvForSession_ResolvesValuesAndSecrets(t *testing.T) {
 	}
 	m := newExecutorProfileEnvManager(t, reader)
 
-	got := m.ExecutorProfileEnvForSession(context.Background(), "session-1", "env-1")
+	got, err := m.ExecutorProfileEnvForSession(context.Background(), "session-1", "env-1")
+	if err != nil {
+		t.Fatalf("ExecutorProfileEnvForSession: %v", err)
+	}
 
 	if got["PLAIN"] != "plain-value" {
 		t.Fatalf("PLAIN = %q, want literal profile value", got["PLAIN"])
@@ -97,7 +118,10 @@ func TestExecutorProfileEnvForSession_PrefersSessionProfileOverStaleEnvironmentR
 	}
 	m := newExecutorProfileEnvManager(t, reader)
 
-	got := m.ExecutorProfileEnvForSession(context.Background(), "session-2", "env-1")
+	got, err := m.ExecutorProfileEnvForSession(context.Background(), "session-2", "env-1")
+	if err != nil {
+		t.Fatalf("ExecutorProfileEnvForSession: %v", err)
+	}
 
 	if got["TOKEN"] != "current" {
 		t.Fatalf("TOKEN = %q, want the session's profile value, not the stale environment row", got["TOKEN"])
@@ -140,7 +164,10 @@ func TestExecutorProfileEnvForSession_FallsBackToEnvironmentRow(t *testing.T) {
 			}
 			m := newExecutorProfileEnvManager(t, tt.reader)
 
-			got := m.ExecutorProfileEnvForSession(context.Background(), tt.sessionID, "env-1")
+			got, err := m.ExecutorProfileEnvForSession(context.Background(), tt.sessionID, "env-1")
+			if err != nil {
+				t.Fatalf("ExecutorProfileEnvForSession: %v", err)
+			}
 
 			if got["TOKEN"] != "from-env-row" {
 				t.Fatalf("TOKEN = %q, want environment-row fallback", got["TOKEN"])
@@ -188,9 +215,33 @@ func TestExecutorProfileEnvForSession_EmptyCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newExecutorProfileEnvManager(t, tt.reader)
-			if got := m.ExecutorProfileEnvForSession(context.Background(), "", tt.envID); len(got) != 0 {
+			if got, err := m.ExecutorProfileEnvForSession(context.Background(), "", tt.envID); err != nil {
+				t.Fatalf("ExecutorProfileEnvForSession error = %v, want nil", err)
+			} else if len(got) != 0 {
 				t.Fatalf("got %#v, want empty", got)
 			}
 		})
+	}
+}
+
+func TestExecutorProfileEnvForSessionReturnsSecretFailure(t *testing.T) {
+	reader := &fakeExecutorProfileReader{
+		env: &models.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-1"},
+		profiles: map[string]*models.ExecutorProfile{
+			"prof-1": {
+				ID:      "prof-1",
+				EnvVars: []models.ProfileEnvVar{{Key: "TOKEN", SecretID: "deleted-secret"}},
+			},
+		},
+	}
+	m := newExecutorProfileEnvManager(t, reader)
+
+	got, err := m.ExecutorProfileEnvForSession(context.Background(), "", "env-1")
+
+	if !errors.Is(err, ErrProfileSecretUnavailable) {
+		t.Fatalf("error = %v, want ErrProfileSecretUnavailable", err)
+	}
+	if got != nil {
+		t.Fatalf("environment = %#v, want nil on secret failure", got)
 	}
 }

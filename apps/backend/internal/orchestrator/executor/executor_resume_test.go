@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,8 +10,12 @@ import (
 	"testing"
 	"time"
 
+	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -48,6 +53,66 @@ func TestResumeSession_RejectsArchivedTask(t *testing.T) {
 	}
 }
 
+func TestResumeSession_PropagatesTaskEnvironmentPersistenceFailure(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	attachManagedGitHubRepositoryForResume(t, repo)
+	persistErr := errors.New("inventory write failed")
+	repo.createTaskEnvironmentRepoErr = persistErr
+	repo.taskEnvironments["env-1"] = &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	repo.sessions["sess-1"].TaskEnvironmentID = "env-1"
+
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				WorktreePath:     "/workspace/task-1",
+				Worktrees: []RepoWorktreeResult{{
+					RepositoryID: "repo-1", WorktreeID: "wt-1", WorktreePath: "/workspace/task-1",
+				}},
+			}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], false)
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("ResumeSession error = %v, want %v", err, persistErr)
+	}
+}
+
+func TestResumeSession_BlocksWorktreeRecoveryBeforeStateChangeOrLaunch(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	agentManager := &mockAgentManager{}
+	exec := newTestExecutor(t, agentManager, repo)
+	recoveryErr := &worktree.WorktreeRecoveryError{
+		TaskID: "task-1", Checkout: "/tasks/task-1/repo", Reason: "recovery is required",
+	}
+	exec.SetWorktreeRecoveryAdmission(func(_ context.Context, taskID string) error {
+		if taskID != "task-1" {
+			t.Fatalf("admission task ID = %q, want task-1", taskID)
+		}
+		return recoveryErr
+	})
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if !errors.Is(err, worktree.ErrWorktreeCorrupted) {
+		t.Fatalf("ResumeSession() error = %v, want worktree recovery error", err)
+	}
+	if state := repo.sessions["sess-1"].State; state != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %s, want unchanged waiting state", state)
+	}
+	if agentManager.launchAgentCallCount != 0 {
+		t.Fatalf("LaunchAgent calls = %d, want 0", agentManager.launchAgentCallCount)
+	}
+}
+
 // setupLiveResumeTestFixture seeds a repo + task + session + executor-running
 // record suitable for exercising the ResumeSession launch path.
 func setupLiveResumeTestFixture(repo *mockRepository) {
@@ -72,6 +137,219 @@ func setupLiveResumeTestFixture(repo *mockRepository) {
 	}
 }
 
+func TestBuildResumeRequestUsesAuthoritativeKubernetesRunningRecord(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	session := repo.sessions["sess-1"]
+	session.ExecutorID = "repointed-executor"
+	session.ExecutorProfileID = "deleted-or-invalid-profile"
+	session.Metadata = map[string]interface{}{
+		lifecycle.MetadataKeyKubernetesPodUID:          "hostile-pod-uid",
+		lifecycle.MetadataKeyKubernetesProfileSnapshot: "hostile-snapshot",
+		lifecycle.MetadataKeyKubernetesNamespace:       "hostile-namespace",
+		lifecycle.MetadataKeyAuthTokenSecret:           "stale-session-auth-secret",
+		lifecycle.MetadataKeyBootstrapNonceSecret:      "stale-session-nonce-secret",
+	}
+	repo.executors["recorded-kubernetes-executor"] = &models.Executor{
+		ID: "recorded-kubernetes-executor", Type: models.ExecutorTypeKubernetes, Resumable: true,
+		Config: map[string]string{
+			lifecycle.MetadataKeyKubernetesAuthMode:              "kubeconfig",
+			lifecycle.MetadataKeyKubernetesKubeconfigPath:        "/etc/kandev/current-kubeconfig",
+			lifecycle.MetadataKeyKubernetesKubeContext:           "current-context",
+			lifecycle.MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+			lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+		},
+	}
+	repo.executors["repointed-executor"] = &models.Executor{
+		ID: "repointed-executor", Type: models.ExecutorTypeLocal,
+	}
+	repo.executorsRunning["sess-1"] = &models.ExecutorRunning{
+		ID: "sess-1", SessionID: "sess-1", TaskID: "task-1",
+		ExecutorID: "recorded-kubernetes-executor", Runtime: agentruntime.RuntimeKubernetes,
+		AgentExecutionID: "recorded-execution", Metadata: recordedKubernetesResumeMetadata(),
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	req, _, config, _, running, err := exec.buildResumeRequest(
+		context.Background(), &v1.Task{ID: "task-1", WorkspaceID: "workspace-1"}, session, true,
+	)
+
+	if err != nil {
+		t.Fatalf("buildResumeRequest() error = %v", err)
+	}
+	if running != repo.executorsRunning["sess-1"] {
+		t.Fatal("buildResumeRequest() did not retain the authoritative running row")
+	}
+	if req.ExecutorType != string(models.ExecutorTypeKubernetes) || config.ExecutorID != "recorded-kubernetes-executor" {
+		t.Fatalf("executor = type %q id %q", req.ExecutorType, config.ExecutorID)
+	}
+	if req.PreviousExecutionID != "recorded-execution" {
+		t.Fatalf("PreviousExecutionID = %q", req.PreviousExecutionID)
+	}
+	if got := req.Metadata[lifecycle.MetadataKeyKubernetesPodUID]; got != "recorded-pod-uid" {
+		t.Fatalf("Pod UID = %v, want recorded-pod-uid", got)
+	}
+	if got := req.Metadata[lifecycle.MetadataKeyKubernetesProfileSnapshot]; got != recordedKubernetesResumeMetadata()[lifecycle.MetadataKeyKubernetesProfileSnapshot] {
+		t.Fatalf("snapshot = %v, want recorded workload snapshot", got)
+	}
+	if got := req.Metadata[lifecycle.MetadataKeyExecutorProfileID]; got != "recorded-profile" {
+		t.Fatalf("executor profile = %v, want recorded-profile", got)
+	}
+	if got := req.Metadata[lifecycle.MetadataKeyAuthTokenSecret]; got != "recorded-auth-secret" {
+		t.Fatalf("auth secret reference = %v, want recorded-auth-secret", got)
+	}
+	if got := req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret]; got != "recorded-nonce-secret" {
+		t.Fatalf("nonce secret reference = %v, want recorded-nonce-secret", got)
+	}
+	if config.ExecutorCfg[lifecycle.MetadataKeyKubernetesKubeContext] != "current-context" ||
+		config.ExecutorCfg[lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds] != "45" {
+		t.Fatalf("current connection config was not retained: %#v", config.ExecutorCfg)
+	}
+	if session.ExecutorID != "recorded-kubernetes-executor" {
+		t.Fatalf("session executor = %q, want recorded Kubernetes executor", session.ExecutorID)
+	}
+}
+
+func TestBuildResumeRequestFailsClosedWhenRecordedKubernetesExecutorChangedType(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	session := repo.sessions["sess-1"]
+	session.ExecutorID = "repointed-executor"
+	repo.executors["recorded-kubernetes-executor"] = &models.Executor{
+		ID: "recorded-kubernetes-executor", Type: models.ExecutorTypeLocal,
+	}
+	repo.executorsRunning["sess-1"] = &models.ExecutorRunning{
+		ID: "sess-1", SessionID: "sess-1", TaskID: "task-1",
+		ExecutorID: "recorded-kubernetes-executor", Runtime: agentruntime.RuntimeKubernetes,
+		AgentExecutionID: "recorded-execution", Metadata: recordedKubernetesResumeMetadata(),
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	_, _, _, _, _, err := exec.buildResumeRequest(
+		context.Background(), &v1.Task{ID: "task-1", WorkspaceID: "workspace-1"}, session, true,
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "current Kubernetes executor is unavailable") {
+		t.Fatalf("buildResumeRequest() error = %v", err)
+	}
+}
+
+func TestBuildResumeRequestFailsClosedWhenRecordedKubernetesInventoryIsIncomplete(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	session := repo.sessions["sess-1"]
+	session.ExecutorID = "recorded-kubernetes-executor"
+	repo.executors["recorded-kubernetes-executor"] = &models.Executor{
+		ID: "recorded-kubernetes-executor", Type: models.ExecutorTypeKubernetes, Resumable: true,
+		Config: map[string]string{
+			lifecycle.MetadataKeyKubernetesAuthMode:              "in_cluster",
+			lifecycle.MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+			lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+		},
+	}
+	incomplete := recordedKubernetesResumeMetadata()
+	delete(incomplete, lifecycle.MetadataKeyKubernetesPodUID)
+	repo.executorsRunning["sess-1"] = &models.ExecutorRunning{
+		ID: "sess-1", SessionID: "sess-1", TaskID: "task-1",
+		ExecutorID: "recorded-kubernetes-executor", Runtime: agentruntime.RuntimeKubernetes,
+		AgentExecutionID: "recorded-execution", Metadata: incomplete,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	_, _, _, _, _, err := exec.buildResumeRequest(
+		context.Background(), &v1.Task{ID: "task-1", WorkspaceID: "workspace-1"}, session, true,
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "validate recorded Kubernetes runtime") {
+		t.Fatalf("buildResumeRequest() error = %v, want incomplete inventory rejection", err)
+	}
+}
+
+func TestBuildResumeRequestFailsClosedWhenRuntimeInventoryReadFails(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.getExecutorRunningFunc = func(context.Context, string) (*models.ExecutorRunning, error) {
+		return nil, errors.New("database unavailable")
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	_, _, _, _, _, err := exec.buildResumeRequest(
+		context.Background(),
+		&v1.Task{ID: "task-1", WorkspaceID: "workspace-1"},
+		repo.sessions["sess-1"],
+		true,
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "load runtime inventory") {
+		t.Fatalf("buildResumeRequest() error = %v, want runtime inventory read failure", err)
+	}
+}
+
+func recordedKubernetesResumeMetadata() map[string]interface{} {
+	return recordedKubernetesResumeMetadataFor("task-1", "sess-1", "recorded-execution")
+}
+
+func recordedKubernetesResumeMetadataFor(taskID, sessionID, executionID string) map[string]interface{} {
+	profile := kubeexecutor.ProfileConfig{
+		Platform:      kubeexecutor.PlatformLinuxAMD64,
+		MainContainer: kubeexecutor.DefaultMainContainerName,
+		PodTemplateYAML: "apiVersion: v1\nkind: PodTemplate\ntemplate:\n  spec:\n" +
+			"    containers:\n      - name: kandev-agent\n        image: example.test/agent:latest\n",
+		Workspace: kubeexecutor.WorkspaceConfig{Mode: kubeexecutor.WorkspaceModeEmptyDir},
+	}
+	snapshot, _ := json.Marshal(profile)
+	profileHash := sha256.Sum256(snapshot)
+	templateHash := sha256.Sum256([]byte(profile.PodTemplateYAML))
+	return map[string]interface{}{
+		lifecycle.MetadataKeyExecutorProfileID:               "recorded-profile",
+		lifecycle.MetadataKeyKubernetesInventoryState:        lifecycle.KubernetesInventoryStateReady,
+		lifecycle.MetadataKeyKubernetesNamespace:             "kandev-agents",
+		lifecycle.MetadataKeyKubernetesPodName:               "recorded-pod",
+		lifecycle.MetadataKeyKubernetesPodUID:                "recorded-pod-uid",
+		lifecycle.MetadataKeyKubernetesMainContainer:         "kandev-agent",
+		lifecycle.MetadataKeyKubernetesRuntimeWorkspaceMode:  "empty_dir",
+		lifecycle.MetadataKeyKubernetesAgentctlRemotePort:    "41001",
+		lifecycle.MetadataKeyKubernetesAgentctlInstanceID:    executionID,
+		lifecycle.MetadataKeyKubernetesResourceExecutorID:    "recorded-kubernetes-executor",
+		lifecycle.MetadataKeyKubernetesResourceProfileID:     "recorded-profile",
+		lifecycle.MetadataKeyKubernetesResourceInstanceID:    executionID,
+		lifecycle.MetadataKeyKubernetesResourceTaskID:        taskID,
+		lifecycle.MetadataKeyKubernetesResourceSessionID:     sessionID,
+		lifecycle.MetadataKeyKubernetesResourceEnvironmentID: "environment-1",
+		lifecycle.MetadataKeyKubernetesExecutorConfigHash:    "recorded-executor-hash",
+		lifecycle.MetadataKeyKubernetesProfileConfigHash:     fmt.Sprintf("%x", profileHash),
+		lifecycle.MetadataKeyKubernetesTemplateHash:          fmt.Sprintf("%x", templateHash),
+		lifecycle.MetadataKeyKubernetesProfileSnapshot:       string(snapshot),
+		lifecycle.MetadataKeyAuthTokenSecret:                 "recorded-auth-secret",
+		lifecycle.MetadataKeyBootstrapNonceSecret:            "recorded-nonce-secret",
+	}
+}
+
+func TestBuildResumeRequestWithOptions_ForwardsBranchReplacementPermission(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	req, _, _, _, _, err := exec.buildResumeRequestAtCredentialBoundaryWithOptions(
+		context.Background(), repo.tasks["task-1"].ToAPI(), repo.sessions["sess-1"], true, nil,
+		ResumeOptions{AllowBranchReplacement: true},
+	)
+	if err != nil {
+		t.Fatalf("buildResumeRequestWithOptions returned error: %v", err)
+	}
+	if !req.AllowBranchReplacement {
+		t.Fatal("resume request lost explicit branch replacement permission")
+	}
+
+	normalReq, _, _, _, _, err := exec.buildResumeRequest(context.Background(), repo.tasks["task-1"].ToAPI(), repo.sessions["sess-1"], true)
+	if err != nil {
+		t.Fatalf("normal buildResumeRequest returned error: %v", err)
+	}
+	if normalReq.AllowBranchReplacement {
+		t.Fatal("normal resume unexpectedly enabled branch replacement")
+	}
+}
+
 type resumeCredentialStateIssuer struct {
 	repo          *mockRepository
 	observedState models.TaskSessionState
@@ -79,25 +357,25 @@ type resumeCredentialStateIssuer struct {
 	afterIssue    func()
 }
 
-func (i *resumeCredentialStateIssuer) IssueGitHubCredentialLease(
+func (i *resumeCredentialStateIssuer) Issue(
 	ctx context.Context,
-	req GitHubCredentialLeaseRequest,
-) (GitHubCredentialLease, error) {
+	req gitcredentials.Scope,
+) (gitcredentials.Lease, error) {
 	session, err := i.repo.GetTaskSession(ctx, req.SessionID)
 	if err != nil {
-		return GitHubCredentialLease{}, err
+		return gitcredentials.Lease{}, err
 	}
 	i.observedState = session.State
 	if i.err != nil {
-		return GitHubCredentialLease{}, i.err
+		return gitcredentials.Lease{}, i.err
 	}
 	if session.State != models.TaskSessionStateStarting {
-		return GitHubCredentialLease{}, fmt.Errorf("GitHub credential scope denied: session is terminal")
+		return gitcredentials.Lease{}, fmt.Errorf("Git credential scope denied: session is terminal")
 	}
 	if i.afterIssue != nil {
 		i.afterIssue()
 	}
-	return GitHubCredentialLease{Token: "opaque-lease"}, nil
+	return gitcredentials.Lease{Token: "opaque-lease"}, nil
 }
 
 func attachManagedGitHubRepositoryForResume(t *testing.T, repo *mockRepository) {
@@ -397,6 +675,7 @@ func TestRollbackResumeStateAfterFailure_SkipsTransitionAfterConcurrentStateChan
 		context.Context,
 		string,
 		string,
+		*models.TaskSessionState,
 		models.TaskSessionState,
 		string,
 		func(),
@@ -418,27 +697,37 @@ func TestRollbackResumeStateAfterFailure_SkipsTransitionAfterConcurrentStateChan
 	}
 }
 
-func TestResumeSession_RollsBackStartingOnLiveAlreadyRunningRace(t *testing.T) {
-	repo := newMockRepository()
-	setupLiveResumeTestFixture(repo)
-	var runningChecks int
-	agentMgr := &mockAgentManager{
-		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
-			return nil, fmt.Errorf("%w: session %q", lifecycle.ErrAgentAlreadyRunning, req.SessionID)
-		},
-		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool {
-			runningChecks++
-			return runningChecks > 1
-		},
-	}
-	exec := newTestExecutor(t, agentMgr, repo)
+func TestResumeSession_PreservesStartingOnLiveAlreadyRunningRace(t *testing.T) {
+	for _, initialState := range []models.TaskSessionState{
+		models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateStarting,
+	} {
+		t.Run(string(initialState), func(t *testing.T) {
+			repo := newMockRepository()
+			setupLiveResumeTestFixture(repo)
+			repo.sessions["sess-1"].State = initialState
+			repo.sessions["sess-1"].UpdatedAt = time.Now().Add(-time.Minute)
+			var runningChecks int
+			agentMgr := &mockAgentManager{
+				launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+					return nil, fmt.Errorf("%w: session %q", lifecycle.ErrAgentAlreadyRunning, req.SessionID)
+				},
+				isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool {
+					runningChecks++
+					return runningChecks > 1
+				},
+			}
+			exec := newTestExecutor(t, agentMgr, repo)
 
-	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
-	if !errors.Is(err, ErrExecutionAlreadyRunning) {
-		t.Fatalf("ResumeSession error = %v, want ErrExecutionAlreadyRunning", err)
-	}
-	if repo.sessions["sess-1"].State != models.TaskSessionStateWaitingForInput {
-		t.Fatalf("session state after live race = %s, want %s", repo.sessions["sess-1"].State, models.TaskSessionStateWaitingForInput)
+			_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+			if !errors.Is(err, ErrExecutionAlreadyRunning) {
+				t.Fatalf("ResumeSession error = %v, want ErrExecutionAlreadyRunning", err)
+			}
+			if got := repo.sessions["sess-1"].State; got != models.TaskSessionStateStarting {
+				t.Fatalf("session state after live race from %s = %s, want %s", initialState, got, models.TaskSessionStateStarting)
+			}
+		})
 	}
 }
 
@@ -730,6 +1019,104 @@ func TestResumeSession_ArchiveCancelledWithoutRunningRow_ClearsTaskDescription(t
 	if capturedReq.TaskDescription != "" {
 		t.Errorf("TaskDescription = %q, want empty — auto-resuming an archive-cancelled "+
 			"session without a running row must not replay the original prompt", capturedReq.TaskDescription)
+	}
+}
+
+// TestResumeSession_OrphanCancelledWithoutRunningRow_ClearsTaskDescription
+// preserves the prompt-free recovery contract for legacy rows that the
+// reconciliation sweep cancelled after losing their runtime inventory.
+func TestResumeSession_OrphanCancelledWithoutRunningRow_ClearsTaskDescription(t *testing.T) {
+	repo := newMockRepository()
+	now := time.Now().UTC()
+	repo.tasks["task-1"] = &models.Task{
+		ID:          "task-1",
+		WorkspaceID: "workspace-1",
+		Description: "do the original thing",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	repo.sessions["sess-1"] = &models.TaskSession{
+		ID:             "sess-1",
+		TaskID:         "task-1",
+		AgentProfileID: "profile-1",
+		State:          models.TaskSessionStateCancelled,
+		ErrorMessage:   models.SessionOrphanedCancelReason,
+	}
+
+	var capturedReq *LaunchAgentRequest
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			capturedReq = req
+			return &LaunchAgentResponse{AgentExecutionID: "exec-new", Status: v1.AgentStatusStarting}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	callerSession := *repo.sessions["sess-1"]
+	if _, err := exec.ResumeSession(context.Background(), &callerSession, true); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+	if capturedReq == nil {
+		t.Fatal("LaunchAgent was not called")
+	}
+	if capturedReq.TaskDescription != "" {
+		t.Errorf("TaskDescription = %q, want empty — auto-resuming an orphan-cancelled "+
+			"session without a running row must not replay the original prompt", capturedReq.TaskDescription)
+	}
+}
+
+func TestApplyRunningRecordToResumeRequest_OrphanCancelledTokenlessRowClearsTaskDescription(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskDescription: "do the original thing"}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{
+		ID: "sess-1", State: models.TaskSessionStateCancelled,
+		ErrorMessage: models.SessionOrphanedCancelReason,
+	}
+
+	exec.applyRunningRecordToResumeRequest(req, task, session, true, &models.ExecutorRunning{})
+	if req.TaskDescription != "" {
+		t.Fatalf("TaskDescription = %q, want empty for tokenless orphan recovery", req.TaskDescription)
+	}
+}
+
+func TestApplyRunningRecordToResumeRequest_FailedSessionKeepsTaskDescription(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskDescription: "recover the failed task"}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{
+		ID:                     "sess-1",
+		State:                  models.TaskSessionStateFailed,
+		DownstreamACPSessionID: "previous-conversation",
+	}
+
+	exec.applyRunningRecordToResumeRequest(req, task, session, true, nil)
+
+	if req.TaskDescription != "recover the failed task" {
+		t.Fatalf("failed-session TaskDescription = %q, want original prompt", req.TaskDescription)
+	}
+	if req.ACPSessionID != "" {
+		t.Fatalf("failed-session ACP session ID = %q, want empty", req.ACPSessionID)
+	}
+}
+
+func TestApplyRunningRecordToResumeRequest_CompletedTokenlessRunningRowClearsTaskDescription(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskDescription: "recover the completed task"}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{
+		ID:    "sess-1",
+		State: models.TaskSessionStateCompleted,
+	}
+	running := &models.ExecutorRunning{SessionID: "sess-1", TaskID: "task-1"}
+
+	exec.applyRunningRecordToResumeRequest(req, task, session, true, running)
+
+	if req.TaskDescription != "" {
+		t.Fatalf("completed-session TaskDescription = %q, want empty", req.TaskDescription)
 	}
 }
 
@@ -1151,6 +1538,103 @@ func TestApplyResumeRepoConfig_BaseBranchByExecutorType(t *testing.T) {
 	}
 }
 
+func TestResolveResumeBaseBranchPrefersCurrentTaskRepository(t *testing.T) {
+	got := resolveResumeBaseBranch("repo-1", "branch-that-no-longer-exists", []*repoInfo{
+		{RepositoryID: "repo-1", BaseBranch: "main"},
+	})
+	if got != "main" {
+		t.Fatalf("base branch = %q, want main", got)
+	}
+}
+
+func TestResolveResumeBaseBranchKeepsLegacyValueWhenRepositoryRowsAreAmbiguous(t *testing.T) {
+	got := resolveResumeBaseBranch("repo-1", "session-base", []*repoInfo{
+		{RepositoryID: "repo-1", BaseBranch: "main"},
+		{RepositoryID: "repo-1", BaseBranch: "release"},
+	})
+	if got != "session-base" {
+		t.Fatalf("base branch = %q, want session-base", got)
+	}
+}
+
+func TestResumeUsesTaskRepositoryBranchPolicyTemplateSnapshot(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		snapshot string
+		want     string
+	}{
+		{name: "policy snapshot overrides repository template", snapshot: "policy/{title}", want: "policy/{title}"},
+		{name: "empty snapshot falls back to repository template", want: "repository/{title}"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := newMockRepository()
+			repo.repositories["repo-1"] = &models.Repository{
+				ID: "repo-1", WorkspaceID: "workspace-1", Name: "widgets", SourceType: sourceTypeLocal,
+				LocalPath: t.TempDir(), WorktreeBranchTemplate: "repository/{title}",
+			}
+			repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+				ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1",
+				BranchPolicyBranchTemplate: testCase.snapshot,
+			}
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+			info, err := exec.resolveTaskRepoInfoForSession(context.Background(), "session-1", repo.taskRepositories["task-repo-1"])
+			if err != nil {
+				t.Fatalf("resolveTaskRepoInfoForSession: %v", err)
+			}
+			if info.WorktreeBranchTemplate != testCase.want {
+				t.Fatalf("resolved worktree template = %q, want %q", info.WorktreeBranchTemplate, testCase.want)
+			}
+
+			req := &LaunchAgentRequest{}
+			exec.applyResumeWorktreeConfig(
+				context.Background(), &v1.Task{ID: "task-1", Title: "Resume task"}, req,
+				repo.repositories["repo-1"], "repo-1", repo.repositories["repo-1"].LocalPath, "main", nil,
+			)
+			if req.WorktreeBranchTemplate != testCase.want {
+				t.Fatalf("resume request worktree template = %q, want %q", req.WorktreeBranchTemplate, testCase.want)
+			}
+		})
+	}
+}
+
+func TestApplyResumeWorktreeConfigPreservesSelectedRepositoryDestination(t *testing.T) {
+	primaryDestination := resumeTestContributionDestination("200")
+	selectedDestination := resumeTestContributionDestination("201")
+	primaryMetadata := map[string]interface{}{}
+	if err := models.PutContributionDestination(primaryMetadata, &primaryDestination); err != nil {
+		t.Fatalf("PutContributionDestination() = %v", err)
+	}
+
+	repo := newMockRepository()
+	repo.taskRepositories["primary-link"] = &models.TaskRepository{
+		ID: "primary-link", TaskID: "task-1", RepositoryID: "repo-primary", Metadata: primaryMetadata,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{ContributionDestination: &selectedDestination}
+	exec.applyResumeWorktreeConfig(
+		context.Background(), &v1.Task{ID: "task-1"}, req,
+		&models.Repository{ID: "repo-selected"}, "repo-selected", "/tmp/repo", "main", nil,
+	)
+
+	if req.ContributionDestination == nil || req.ContributionDestination.TargetRepository.ProviderID != "201" {
+		t.Fatalf("resume destination = %#v, want selected repository destination", req.ContributionDestination)
+	}
+}
+
+func resumeTestContributionDestination(providerID string) models.ContributionDestination {
+	return models.ContributionDestination{
+		Version:  models.ContributionDestinationVersion,
+		Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "alice/kandev", ProviderID: providerID, RemoteURL: "https://github.com/alice/kandev.git",
+		},
+	}
+}
+
 // TestApplyResumeRepoConfig_WorktreeStampsTaskDir locks in the fix for
 // resumes of single-repo worktree tasks: the lifecycle preparer hands the
 // request to worktree.Manager.Create, which rejects requests missing
@@ -1304,11 +1788,10 @@ func TestResumeSession_RefreshesStaleEnvironmentRow(t *testing.T) {
 	// LaunchAgent fails before persistTaskEnvironment writes the worktree
 	// fields back.
 	repo.taskEnvironments["env-stale"] = &models.TaskEnvironment{
-		ID:           "env-stale",
-		TaskID:       taskID,
-		Status:       models.TaskEnvironmentStatusStopped,
-		WorktreePath: "",
-		TaskDirName:  "",
+		ID:          "env-stale",
+		TaskID:      taskID,
+		Status:      models.TaskEnvironmentStatusStopped,
+		TaskDirName: "",
 	}
 
 	const newWorktreePath = "/home/u/.kandev/tasks/resume-after-failure_abc/my-repo"
@@ -1334,11 +1817,12 @@ func TestResumeSession_RefreshesStaleEnvironmentRow(t *testing.T) {
 		t.Errorf("env.Status = %q, want %q — without the refresh the frontend keeps showing the executor as unavailable",
 			env.Status, models.TaskEnvironmentStatusReady)
 	}
-	if env.WorktreePath != newWorktreePath {
-		t.Errorf("env.WorktreePath = %q, want %q", env.WorktreePath, newWorktreePath)
+	envRepos := repo.taskEnvironmentRepos["env-stale"]
+	if len(envRepos) != 1 || envRepos[0].WorktreePath != newWorktreePath {
+		t.Errorf("env repos = %+v, want one row with path %q", envRepos, newWorktreePath)
 	}
-	if env.WorktreeID != "wt-new" {
-		t.Errorf("env.WorktreeID = %q, want %q", env.WorktreeID, "wt-new")
+	if len(envRepos) != 1 || envRepos[0].WorktreeID != "wt-new" {
+		t.Errorf("env repos = %+v, want worktree id %q", envRepos, "wt-new")
 	}
 	if env.TaskDirName == "" {
 		t.Error("env.TaskDirName must not be empty after resume; the worktree manager needs it for the on-disk task root")

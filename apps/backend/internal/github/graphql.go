@@ -25,13 +25,18 @@ type GraphQLExecutor interface {
 const graphQLPRBatchAlias = "pr"
 
 // graphQLBatchChunkSize bounds the number of aliased fields per request to
-// stay well under GitHub's per-query node-count limit (500). 50 PRs × ~10
-// fields = ~500 nodes, leaving headroom.
+// keep initial status queries and their decoded response size manageable.
 const graphQLBatchChunkSize = 50
+
+// Each continuation can return 100 review-thread nodes. Five continuations
+// keep a follow-up query near 500 connection nodes while preserving batching.
+const graphQLReviewThreadContinuationChunkSize = 5
 
 // graphQLBranchProbeLimit fetches two matches so branch lookup can detect
 // ambiguous fork heads instead of linking the first arbitrary PR.
 const graphQLBranchProbeLimit = 2
+
+const graphQLReviewThreadPageSize = 100
 
 // reviewNode is one PR review entry from the batched GraphQL query.
 type reviewNode struct {
@@ -49,6 +54,85 @@ type graphQLPRRef struct {
 	Number int
 }
 
+type graphQLPRRepoGroup struct {
+	Owner string
+	Repo  string
+	Refs  []graphQLPRRef
+}
+
+func groupGraphQLPRRefs(refs []graphQLPRRef) []graphQLPRRepoGroup {
+	byKey := make(map[string]*graphQLPRRepoGroup)
+	keys := make([]string, 0)
+	for _, ref := range refs {
+		key := ref.Owner + "/" + ref.Repo
+		group, ok := byKey[key]
+		if !ok {
+			group = &graphQLPRRepoGroup{Owner: ref.Owner, Repo: ref.Repo}
+			byKey[key] = group
+			keys = append(keys, key)
+		}
+		group.Refs = append(group.Refs, ref)
+	}
+	sort.Strings(keys)
+
+	groups := make([]graphQLPRRepoGroup, 0, len(keys))
+	for _, key := range keys {
+		groups = append(groups, *byKey[key])
+	}
+	return groups
+}
+
+type reviewThreadNode struct {
+	IsResolved bool `json:"isResolved"`
+}
+
+type graphQLPageInfo struct {
+	HasNextPage bool   `json:"hasNextPage"`
+	EndCursor   string `json:"endCursor"`
+}
+
+type reviewThreadConnection struct {
+	TotalCount int                `json:"totalCount"`
+	Nodes      []reviewThreadNode `json:"nodes"`
+	PageInfo   graphQLPageInfo    `json:"pageInfo"`
+}
+
+type reviewThreadContinuation struct {
+	Ref            graphQLPRRef
+	Cursor         string
+	SeenCursors    map[string]struct{}
+	RemainingPages int
+	Status         *PRStatus
+}
+
+func newReviewThreadContinuation(
+	ref graphQLPRRef,
+	connection reviewThreadConnection,
+	status *PRStatus,
+) (reviewThreadContinuation, error) {
+	cursor := connection.PageInfo.EndCursor
+	if cursor == "" {
+		return reviewThreadContinuation{}, fmt.Errorf(
+			"review thread pagination for %s/%s#%d returned an empty cursor",
+			ref.Owner, ref.Repo, ref.Number,
+		)
+	}
+	remainingThreads := connection.TotalCount - len(connection.Nodes)
+	if remainingThreads <= 0 {
+		return reviewThreadContinuation{}, fmt.Errorf(
+			"review thread pagination for %s/%s#%d exceeded totalCount %d",
+			ref.Owner, ref.Repo, ref.Number, connection.TotalCount,
+		)
+	}
+	return reviewThreadContinuation{
+		Ref:            ref,
+		Cursor:         cursor,
+		SeenCursors:    map[string]struct{}{cursor: {}},
+		RemainingPages: (remainingThreads + graphQLReviewThreadPageSize - 1) / graphQLReviewThreadPageSize,
+		Status:         status,
+	}, nil
+}
+
 // graphQLBranchRef is one entry in a batched branch-lookup request.
 type graphQLBranchRef struct {
 	Owner  string
@@ -59,12 +143,16 @@ type graphQLBranchRef struct {
 // chunkedRefs splits refs into chunks of at most graphQLBatchChunkSize so
 // callers can keep individual GraphQL queries under the node-count limit.
 func chunkedRefs[T any](refs []T) [][]T {
+	return chunkRefs(refs, graphQLBatchChunkSize)
+}
+
+func chunkRefs[T any](refs []T, chunkSize int) [][]T {
 	if len(refs) == 0 {
 		return nil
 	}
-	out := make([][]T, 0, (len(refs)+graphQLBatchChunkSize-1)/graphQLBatchChunkSize)
-	for i := 0; i < len(refs); i += graphQLBatchChunkSize {
-		end := i + graphQLBatchChunkSize
+	out := make([][]T, 0, (len(refs)+chunkSize-1)/chunkSize)
+	for i := 0; i < len(refs); i += chunkSize {
+		end := i + chunkSize
 		if end > len(refs) {
 			end = len(refs)
 		}
@@ -73,22 +161,78 @@ func chunkedRefs[T any](refs []T) [][]T {
 	return out
 }
 
+// timelineActor is a GraphQL Actor's login, used by the closed-event
+// timeline selection to attribute who closed a PR.
+type timelineActor struct {
+	Login string `json:"login"`
+}
+
+// timelineClosedEventNode is one node of the `timelineItems(itemTypes:
+// CLOSED_EVENT)` selection. Actor is a pointer because GitHub can return a
+// null actor (e.g. a bot-deleted account), which must leave closure
+// attribution unpopulated rather than writing an empty login.
+type timelineClosedEventNode struct {
+	Actor *timelineActor `json:"actor"`
+}
+
+type mergeQueueRemovalEventNode struct {
+	ID           string    `json:"id"`
+	CreatedAt    time.Time `json:"createdAt"`
+	Reason       string    `json:"reason"`
+	BeforeCommit *struct {
+		OID string `json:"oid"`
+	} `json:"beforeCommit"`
+}
+
+type batchedMergeQueueEntry struct {
+	ID                   string `json:"id"`
+	State                string `json:"state"`
+	Position             *int   `json:"position"`
+	EstimatedTimeToMerge *int   `json:"estimatedTimeToMerge"`
+	HeadCommit           *struct {
+		OID string `json:"oid"`
+	} `json:"headCommit"`
+}
+
 // batchedPRResult is the decoded shape of one aliased pullRequest block.
 type batchedPRResult struct {
-	State       string `json:"state"`
-	Title       string `json:"title"`
-	URL         string `json:"url"`
-	IsDraft     bool   `json:"isDraft"`
-	Mergeable   string `json:"mergeable"`
-	MergeStatus string `json:"mergeStateStatus"`
-	HeadRefName string `json:"headRefName"`
-	BaseRefName string `json:"baseRefName"`
-	HeadRefOid  string `json:"headRefOid"`
-	Additions   int    `json:"additions"`
-	Deletions   int    `json:"deletions"`
-	Author      struct {
+	State string `json:"state"`
+	Title string `json:"title"`
+	URL   string `json:"url"`
+	// IsDraft is a pointer: AC-12a requires distinguishing an upstream
+	// response that omits or nulls isDraft from one that genuinely reports
+	// false, and a plain bool can't tell the two apart after decode.
+	IsDraft         *bool                   `json:"isDraft"`
+	Mergeable       string                  `json:"mergeable"`
+	MergeStatus     string                  `json:"mergeStateStatus"`
+	MergeQueueEntry *batchedMergeQueueEntry `json:"mergeQueueEntry"`
+	HeadRefName     string                  `json:"headRefName"`
+	BaseRefName     string                  `json:"baseRefName"`
+	HeadRefOid      string                  `json:"headRefOid"`
+	BaseRefOid      string                  `json:"baseRefOid"`
+	HeadRepository  ghRepository            `json:"headRepository"`
+	HeadRepoOwner   ghRepositoryOwner       `json:"headRepositoryOwner"`
+	Additions       int                     `json:"additions"`
+	Deletions       int                     `json:"deletions"`
+	// ChangedFiles is a pointer for the same reason as IsDraft (AC-12a): 0 is
+	// a legitimate observation and must stay distinguishable from absent/null.
+	ChangedFiles *int `json:"changedFiles"`
+	Author       struct {
 		Login string `json:"login"`
 	} `json:"author"`
+	// MergedBy is a value (not a pointer) because GitHub always serializes
+	// the field for a PullRequest, using a zero-value login when there is no
+	// merger; the empty-login case is handled explicitly in
+	// convertBatchedPRResult rather than relying on a nil check.
+	MergedBy struct {
+		Login string `json:"login"`
+	} `json:"mergedBy"`
+	// AutoMergeRequest is a pointer: GitHub returns null when auto-merge was
+	// never armed. Any non-nil value means "armed at fetch time" — never
+	// "merged by auto-merge" (auto_merge is cleared once it fires).
+	AutoMergeRequest *struct {
+		EnabledAt string `json:"enabledAt"`
+	} `json:"autoMergeRequest"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	MergedAt  string    `json:"mergedAt"`
@@ -99,13 +243,8 @@ type batchedPRResult struct {
 	ReviewRequests struct {
 		TotalCount int `json:"totalCount"`
 	} `json:"reviewRequests"`
-	ReviewThreads struct {
-		TotalCount int `json:"totalCount"`
-		Nodes      []struct {
-			IsResolved bool `json:"isResolved"`
-		} `json:"nodes"`
-	} `json:"reviewThreads"`
-	Commits struct {
+	ReviewThreads reviewThreadConnection `json:"reviewThreads"`
+	Commits       struct {
 		Nodes []struct {
 			Commit struct {
 				StatusCheckRollup *struct {
@@ -114,6 +253,17 @@ type batchedPRResult struct {
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
+	// TimelineItems carries at most the single most-recent CLOSED_EVENT, so
+	// closed-by attribution reflects the latest closure even across a
+	// reopen-then-close cycle. closedBy has no equivalent on the REST pulls
+	// endpoint or the gh CLI's PR field set (AC-09, AC-15) — this GraphQL
+	// selection is the only source.
+	TimelineItems struct {
+		Nodes []timelineClosedEventNode `json:"nodes"`
+	} `json:"timelineItems"`
+	MergeQueueRemovalEvents struct {
+		Nodes []mergeQueueRemovalEventNode `json:"nodes"`
+	} `json:"mergeQueueRemovalEvents"`
 }
 
 type batchedBranchPRNode struct {
@@ -186,6 +336,31 @@ func graphQLErrorsToErr(errs []graphQLError) error {
 	return fmt.Errorf("graphql error: %s (and %d more)", errs[0].Message, len(errs)-1)
 }
 
+func laterRetryAt(current, candidate *time.Time) *time.Time {
+	if current == nil {
+		return copyTime(candidate)
+	}
+	if candidate != nil && candidate.After(*current) {
+		return copyTime(candidate)
+	}
+	return copyTime(current)
+}
+
+func graphQLRetryAtFromData(data map[string]json.RawMessage) *time.Time {
+	raw, ok := data["rateLimit"]
+	if !ok || len(raw) == 0 || string(raw) == jsonNullLiteral {
+		return nil
+	}
+	var rate graphQLRateLimit
+	if err := json.Unmarshal(raw, &rate); err != nil || rate.ResetAt.IsZero() {
+		return nil
+	}
+	if rate.Remaining > 0 {
+		return nil
+	}
+	return copyTime(&rate.ResetAt)
+}
+
 // classifyBatchedErrors splits the GraphQL errors[] array into "this
 // repo is permanently unresolvable" and "everything else", mapping each
 // resolution error's path-prefix alias back to the (owner, repo) it
@@ -218,19 +393,10 @@ func classifyBatchedErrors(errs []graphQLError, aliasToRepo map[string]repoRef) 
 // resolution-failure error's path[0] is always the outer repository
 // alias ("repo0", "repo1", ...).
 func aliasMapForPRRefs(refs []graphQLPRRef) map[string]repoRef {
-	byKey := map[string]repoRef{}
-	var keys []string
-	for _, r := range refs {
-		k := r.Owner + "/" + r.Repo
-		if _, ok := byKey[k]; !ok {
-			byKey[k] = repoRef{Owner: r.Owner, Repo: r.Repo}
-			keys = append(keys, k)
-		}
-	}
-	sort.Strings(keys)
-	out := make(map[string]repoRef, len(keys))
-	for i, k := range keys {
-		out[fmt.Sprintf("repo%d", i)] = byKey[k]
+	groups := groupGraphQLPRRefs(refs)
+	out := make(map[string]repoRef, len(groups))
+	for i, group := range groups {
+		out[fmt.Sprintf("repo%d", i)] = repoRef{Owner: group.Owner, Repo: group.Repo}
 	}
 	return out
 }
@@ -276,34 +442,13 @@ type graphQLRateLimit struct {
 // The shape mirrors gh pr view fields used by the existing converter so we
 // can reuse the conversion logic without reshaping callers.
 func buildBatchedPRQuery(refs []graphQLPRRef) (string, map[string]any) {
-	// Group refs by (owner, repo) and assign deterministic indices so aliases
-	// stay stable across runs (helpful for tests and snapshot debugging).
-	type group struct {
-		owner   string
-		repo    string
-		numbers []int
-	}
-	byKey := map[string]*group{}
-	keys := []string{}
-	for _, r := range refs {
-		key := r.Owner + "/" + r.Repo
-		g, ok := byKey[key]
-		if !ok {
-			g = &group{owner: r.Owner, repo: r.Repo}
-			byKey[key] = g
-			keys = append(keys, key)
-		}
-		g.numbers = append(g.numbers, r.Number)
-	}
-	sort.Strings(keys)
-
 	var b strings.Builder
 	b.WriteString("query Batch { ")
-	for repoIdx, key := range keys {
-		g := byKey[key]
-		fmt.Fprintf(&b, `repo%d: repository(owner: %q, name: %q) { `, repoIdx, g.owner, g.repo)
-		for prIdx, n := range g.numbers {
-			fmt.Fprintf(&b, `%s%d: pullRequest(number: %d) { %s } `, graphQLPRBatchAlias, prIdx, n, prFieldsBlock())
+	for repoIdx, group := range groupGraphQLPRRefs(refs) {
+		fmt.Fprintf(&b, `repo%d: repository(owner: %q, name: %q) { `, repoIdx, group.Owner, group.Repo)
+		for prIdx, ref := range group.Refs {
+			fmt.Fprintf(&b, `%s%d: pullRequest(number: %d) { %s } `,
+				graphQLPRBatchAlias, prIdx, ref.Number, prFieldsBlock())
 		}
 		b.WriteString(`} `)
 	}
@@ -317,12 +462,17 @@ func buildBatchedPRQuery(refs []graphQLPRRef) (string, map[string]any) {
 // the batched and single-PR paths returning the same data.
 func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
-		`headRefName baseRefName headRefOid additions deletions ` +
-		`author { login } createdAt updatedAt mergedAt closedAt ` +
+		`headRefName baseRefName headRefOid baseRefOid headRepository { id name nameWithOwner url } headRepositoryOwner { login } additions deletions changedFiles ` +
+		`author { login } mergedBy { login } autoMergeRequest { enabledAt } ` +
+		`mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } } ` +
+		`createdAt updatedAt mergedAt closedAt ` +
 		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
-		`reviewThreads(first: 100) { totalCount nodes { isResolved } } ` +
-		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`
+		fmt.Sprintf(`reviewThreads(first: %d) { totalCount nodes { isResolved } pageInfo { hasNextPage endCursor } } `,
+			graphQLReviewThreadPageSize) +
+		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } ` +
+		`timelineItems(last: 1, itemTypes: CLOSED_EVENT) { nodes { ... on ClosedEvent { actor { login } } } } ` +
+		`mergeQueueRemovalEvents: timelineItems(last: 1, itemTypes: REMOVED_FROM_MERGE_QUEUE_EVENT) { nodes { ... on RemovedFromMergeQueueEvent { id createdAt reason beforeCommit { oid } } } }`
 }
 
 // buildBatchedBranchQuery emits one aliased pullRequests(headRefName:) block
@@ -346,61 +496,176 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 	if raw.MergedAt != "" {
 		state = prStateMerged
 	}
-	pr := &PR{
-		Number:         number,
-		Title:          raw.Title,
-		URL:            raw.URL,
-		HTMLURL:        raw.URL,
-		State:          state,
-		HeadBranch:     raw.HeadRefName,
-		HeadSHA:        raw.HeadRefOid,
-		BaseBranch:     raw.BaseRefName,
-		AuthorLogin:    raw.Author.Login,
-		RepoOwner:      owner,
-		RepoName:       repo,
-		Draft:          raw.IsDraft,
-		Mergeable:      raw.Mergeable == "MERGEABLE",
-		MergeableState: strings.ToLower(raw.MergeStatus),
-		Additions:      raw.Additions,
-		Deletions:      raw.Deletions,
-		CreatedAt:      raw.CreatedAt,
-		UpdatedAt:      raw.UpdatedAt,
-		MergedAt:       parseTimePtr(raw.MergedAt),
-		ClosedAt:       parseTimePtr(raw.ClosedAt),
+	draft, changedFiles := false, 0
+	if raw.IsDraft != nil {
+		draft = *raw.IsDraft
 	}
+	if raw.ChangedFiles != nil {
+		changedFiles = *raw.ChangedFiles
+	}
+	pr := &PR{
+		Number:               number,
+		Title:                raw.Title,
+		URL:                  raw.URL,
+		HTMLURL:              raw.URL,
+		State:                state,
+		HeadBranch:           raw.HeadRefName,
+		HeadSHA:              raw.HeadRefOid,
+		BaseBranch:           raw.BaseRefName,
+		BaseSHA:              raw.BaseRefOid,
+		AuthorLogin:          raw.Author.Login,
+		RepoOwner:            owner,
+		RepoName:             repo,
+		BaseRepoOwner:        owner,
+		BaseRepoName:         repo,
+		HeadRepoNodeID:       raw.HeadRepository.ID,
+		HeadRepoOwner:        raw.HeadRepoOwner.Login,
+		HeadRepoName:         raw.HeadRepository.Name,
+		HeadRepoCloneURL:     httpsCloneURLFromRepositoryURL(raw.HeadRepository.URL),
+		Draft:                draft,
+		IsDraftObserved:      raw.IsDraft != nil,
+		Mergeable:            raw.Mergeable == ghMergeableState,
+		MergeableState:       strings.ToLower(raw.MergeStatus),
+		Additions:            raw.Additions,
+		Deletions:            raw.Deletions,
+		ChangedFiles:         changedFiles,
+		ChangedFilesObserved: raw.ChangedFiles != nil,
+		MergedByLogin:        raw.MergedBy.Login,
+		AutoMergeEnabled:     raw.AutoMergeRequest != nil,
+		CreatedAt:            raw.CreatedAt,
+		UpdatedAt:            raw.UpdatedAt,
+		MergedAt:             parseTimePtr(raw.MergedAt),
+		ClosedAt:             parseTimePtr(raw.ClosedAt),
+	}
+	fillMissingHeadRepositoryIdentity(pr, raw.HeadRepository.NameWithOwner)
 
 	reviewState := summarizeReviewState(raw.Reviews.Nodes)
 	checksState := ""
 	if len(raw.Commits.Nodes) > 0 && raw.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
-		checksState = strings.ToLower(raw.Commits.Nodes[0].Commit.StatusCheckRollup.State)
+		checksState = normalizeGraphQLCheckRollupState(raw.Commits.Nodes[0].Commit.StatusCheckRollup.State)
 	}
-	// Count unresolved threads from the fetched nodes. When the page is
-	// capped (totalCount > nodes), fall back to totalCount for the
-	// resolved-vs-unresolved estimate so the popover doesn't undercount on
-	// busy PRs. The fallback is conservative: we have no way to tell from
-	// the truncated page how many of the un-fetched threads are resolved,
-	// so attribute the unseen tail to "unresolved" — the popover's value
-	// is meant to be actionable, not exact, and over-reporting is safer
-	// than silently hiding open feedback.
 	unresolved := 0
 	for _, t := range raw.ReviewThreads.Nodes {
 		if !t.IsResolved {
 			unresolved++
 		}
 	}
-	if total := raw.ReviewThreads.TotalCount; total > len(raw.ReviewThreads.Nodes) {
-		unresolved += total - len(raw.ReviewThreads.Nodes)
-	}
+	closedByLogin, closureAttributionPopulated := closedEventActor(raw.TimelineItems.Nodes)
+	mergeQueueState, mergeQueuePosition, mergeQueueEstimate, mergeQueueEntryID, mergeQueueEntryHeadSHA := convertMergeQueueEntry(raw.MergeQueueEntry)
+	removalID, removalAt, removalReason, removalBeforeSHA := convertMergeQueueRemoval(raw.MergeQueueRemovalEvents.Nodes)
 	return &PRStatus{
-		PR:                               pr,
-		ReviewState:                      reviewState,
-		ChecksState:                      checksState,
-		MergeableState:                   pr.MergeableState,
-		ReviewCount:                      countApprovedReviewerNodes(raw.Reviews.Nodes),
-		PendingReviewCount:               raw.ReviewRequests.TotalCount,
-		ReviewCountsPopulated:            true,
-		UnresolvedReviewThreads:          unresolved,
-		UnresolvedReviewThreadsPopulated: true,
+		PR:                                    pr,
+		ReviewState:                           reviewState,
+		ChecksState:                           checksState,
+		MergeableState:                        pr.MergeableState,
+		ReviewCount:                           countApprovedReviewerNodes(raw.Reviews.Nodes),
+		PendingReviewCount:                    raw.ReviewRequests.TotalCount,
+		ReviewCountsPopulated:                 true,
+		UnresolvedReviewThreads:               unresolved,
+		UnresolvedReviewThreadsPopulated:      true,
+		OutcomeFieldsPopulated:                true,
+		ClosedByLogin:                         closedByLogin,
+		ClosureAttributionPopulated:           closureAttributionPopulated,
+		MergeQueueState:                       mergeQueueState,
+		MergeQueuePosition:                    mergeQueuePosition,
+		MergeQueueEntryID:                     mergeQueueEntryID,
+		MergeQueueEntryHeadSHA:                mergeQueueEntryHeadSHA,
+		MergeQueueEstimatedTimeToMergeSeconds: mergeQueueEstimate,
+		MergeQueueLastRemovalID:               removalID,
+		MergeQueueLastRemovedAt:               removalAt,
+		MergeQueueLastRemovalReason:           removalReason,
+		MergeQueueLastRemovalBeforeSHA:        removalBeforeSHA,
+		mergeQueuePopulated:                   true,
+		mergeQueueRecoveryPopulated:           true,
+	}
+}
+
+func fillMissingHeadRepositoryIdentity(pr *PR, nameWithOwner string) {
+	if pr.HeadRepoOwner != "" && pr.HeadRepoName != "" {
+		return
+	}
+	parts := strings.SplitN(nameWithOwner, "/", 2)
+	if len(parts) != 2 {
+		return
+	}
+	if pr.HeadRepoOwner == "" {
+		pr.HeadRepoOwner = parts[0]
+	}
+	if pr.HeadRepoName == "" {
+		pr.HeadRepoName = parts[1]
+	}
+}
+
+func convertMergeQueueEntry(entry *batchedMergeQueueEntry) (string, *int, *int, string, string) {
+	if entry == nil {
+		return "", nil, nil, "", ""
+	}
+	headSHA := ""
+	if entry.HeadCommit != nil {
+		headSHA = entry.HeadCommit.OID
+	}
+	return normalizeMergeQueueState(entry.State), positiveIntPtr(entry.Position), nonNegativeIntPtr(entry.EstimatedTimeToMerge), entry.ID, headSHA
+}
+
+func convertMergeQueueRemoval(nodes []mergeQueueRemovalEventNode) (string, *time.Time, string, string) {
+	if len(nodes) == 0 {
+		return "", nil, "", ""
+	}
+	node := nodes[0]
+	var beforeSHA string
+	if node.BeforeCommit != nil {
+		beforeSHA = node.BeforeCommit.OID
+	}
+	removedAt := node.CreatedAt
+	return node.ID, &removedAt, node.Reason, beforeSHA
+}
+
+func normalizeMergeQueueState(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func positiveIntPtr(value *int) *int {
+	if value == nil || *value <= 0 {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func nonNegativeIntPtr(value *int) *int {
+	if value == nil || *value < 0 {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+// closedEventActor extracts the closed-event actor's login from a
+// `timelineItems(itemTypes: CLOSED_EVENT)` node list. Returns
+// populated=false when there is no node or the node's actor is null (e.g. a
+// bot-deleted account) — the caller must not write an empty login as if it
+// were an observation (AC-15).
+func closedEventActor(nodes []timelineClosedEventNode) (login string, populated bool) {
+	if len(nodes) == 0 || nodes[0].Actor == nil || nodes[0].Actor.Login == "" {
+		return "", false
+	}
+	return nodes[0].Actor.Login, true
+}
+
+// normalizeGraphQLCheckRollupState converts GitHub's GraphQL status-rollup
+// enum to the smaller contract shared by REST and TaskPR persistence.
+func normalizeGraphQLCheckRollupState(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return ""
+	case checkStatusSuccess:
+		return checkStatusSuccess
+	case checkConclusionFail, "error":
+		return checkConclusionFail
+	case "expected", checkStatusPending:
+		return checkStatusPending
+	default:
+		return ""
 	}
 }
 
@@ -454,7 +719,12 @@ func (c *PATClient) ExecuteGraphQL(ctx context.Context, query string, variables 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
 	if resp.StatusCode >= 400 {
 		c.maybeMarkRateExhaustedFromBody("/graphql", resp.StatusCode, respBody)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: "/graphql", Body: string(respBody)}
+		return &GitHubAPIError{
+			StatusCode: resp.StatusCode,
+			Endpoint:   "/graphql",
+			Body:       string(respBody),
+			RetryAt:    retryAtFromHTTPResponse(resp, ResourceGraphQL, time.Now().UTC()),
+		}
 	}
 	if err := json.Unmarshal(respBody, out); err != nil {
 		return fmt.Errorf("decode graphql response: %w", err)
@@ -541,6 +811,8 @@ func runBatchedPRQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQL
 	// repos landed in the negative cache.
 	var allMissing []repoRef
 	var allResidual []graphQLError
+	var retryAt *time.Time
+	var continuations []reviewThreadContinuation
 	for _, chunk := range chunkedRefs(refs) {
 		query, vars := buildBatchedPRQuery(chunk)
 		var resp struct {
@@ -550,6 +822,7 @@ func runBatchedPRQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQL
 		if err := exec.ExecuteGraphQL(ctx, query, vars, &resp); err != nil {
 			return nil, err
 		}
+		retryAt = laterRetryAt(retryAt, graphQLRetryAtFromData(resp.Data))
 		// GitHub returns HTTP 200 with a top-level "errors" array for partial
 		// auth failures, schema mismatches, or per-alias errors. Split out
 		// "Could not resolve to a Repository" entries via classifyBatchedErrors
@@ -557,67 +830,211 @@ func runBatchedPRQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQL
 		// partial results for the ones that resolved; non-resolution errors
 		// still bubble up so the caller falls back to per-watch checks.
 		missing, residual := classifyBatchedErrors(resp.Errors, aliasMapForPRRefs(chunk))
-		if err := decodeBatchedPRChunk(chunk, resp.Data, result); err != nil {
+		chunkContinuations, err := decodeBatchedPRChunk(chunk, resp.Data, result)
+		if err != nil {
 			return nil, err
 		}
+		continuations = append(continuations, chunkContinuations...)
 		allMissing = append(allMissing, missing...)
 		allResidual = append(allResidual, residual...)
 	}
-	if err := wrapBatchedErrors(allMissing, allResidual); err != nil {
+	return finishBatchedQuery(ctx, exec, result, allMissing, allResidual, continuations, retryAt)
+}
+
+func finishBatchedQuery(
+	ctx context.Context,
+	exec GraphQLExecutor,
+	result map[string]*PRStatus,
+	missing []repoRef,
+	residual []graphQLError,
+	continuations []reviewThreadContinuation,
+	retryAt *time.Time,
+) (map[string]*PRStatus, error) {
+	batchErr := withPRDiscoveryRetryAt(wrapBatchedErrors(missing, residual), retryAt)
+	if batchErr != nil && (len(missing) == 0 || len(residual) > 0) {
+		return nil, batchErr
+	}
+	if err := completeReviewThreadContinuations(ctx, exec, continuations); err != nil {
+		if len(missing) > 0 {
+			return nil, &batchedMissingReposErr{Repos: missing, Inner: err}
+		}
+		return nil, err
+	}
+	if batchErr != nil {
 		// When the error is purely "missing repos" across all chunks,
 		// partial Statuses for the other refs are still in `result`;
 		// surface them to the caller alongside the typed error so it
 		// can populate the negative cache without dropping the good data.
-		if len(allMissing) > 0 && len(allResidual) == 0 {
-			return result, err
-		}
-		return nil, err
+		return result, batchErr
 	}
 	return result, nil
+}
+
+func buildReviewThreadPageQuery(continuations []reviewThreadContinuation) string {
+	var b strings.Builder
+	b.WriteString("query ReviewThreadPages { ")
+	for i, continuation := range continuations {
+		fmt.Fprintf(&b,
+			`repo%d: repository(owner: %q, name: %q) { pr0: pullRequest(number: %d) { reviewThreads(first: %d, after: %q) { nodes { isResolved } pageInfo { hasNextPage endCursor } } } } `,
+			i, continuation.Ref.Owner, continuation.Ref.Repo, continuation.Ref.Number,
+			graphQLReviewThreadPageSize, continuation.Cursor,
+		)
+	}
+	b.WriteString(`rateLimit { limit remaining resetAt cost } }`)
+	return b.String()
+}
+
+func completeReviewThreadContinuations(
+	ctx context.Context,
+	exec GraphQLExecutor,
+	continuations []reviewThreadContinuation,
+) error {
+	for len(continuations) > 0 {
+		next := make([]reviewThreadContinuation, 0, len(continuations))
+		for _, chunk := range chunkRefs(continuations, graphQLReviewThreadContinuationChunkSize) {
+			var resp struct {
+				Data   map[string]json.RawMessage `json:"data"`
+				Errors []graphQLError             `json:"errors"`
+			}
+			if err := exec.ExecuteGraphQL(ctx, buildReviewThreadPageQuery(chunk), nil, &resp); err != nil {
+				return err
+			}
+			if err := graphQLErrorsToErr(resp.Errors); err != nil {
+				return withPRDiscoveryRetryAt(err, graphQLRetryAtFromData(resp.Data))
+			}
+			chunkNext, err := applyReviewThreadPageChunk(chunk, resp.Data)
+			if err != nil {
+				return err
+			}
+			next = append(next, chunkNext...)
+		}
+		continuations = next
+	}
+	return nil
+}
+
+func applyReviewThreadPageChunk(
+	continuations []reviewThreadContinuation,
+	data map[string]json.RawMessage,
+) ([]reviewThreadContinuation, error) {
+	next := make([]reviewThreadContinuation, 0, len(continuations))
+	for i, continuation := range continuations {
+		page, err := decodeReviewThreadPage(i, data)
+		if err != nil {
+			return nil, err
+		}
+		continuation, hasNext, err := advanceReviewThreadContinuation(continuation, page)
+		if err != nil {
+			return nil, err
+		}
+		if hasNext {
+			next = append(next, continuation)
+		}
+	}
+	return next, nil
+}
+
+func decodeReviewThreadPage(index int, data map[string]json.RawMessage) (reviewThreadConnection, error) {
+	repoAlias := fmt.Sprintf("repo%d", index)
+	rawRepo, ok := data[repoAlias]
+	if !ok || isNullGraphQLValue(rawRepo) {
+		return reviewThreadConnection{}, fmt.Errorf("review thread response missing repository alias %s", repoAlias)
+	}
+	var repoBlock map[string]json.RawMessage
+	if err := json.Unmarshal(rawRepo, &repoBlock); err != nil {
+		return reviewThreadConnection{}, fmt.Errorf("decode review thread repo alias %s: %w", repoAlias, err)
+	}
+	rawPR, ok := repoBlock["pr0"]
+	if !ok || isNullGraphQLValue(rawPR) {
+		return reviewThreadConnection{}, fmt.Errorf("review thread response missing PR alias %s.pr0", repoAlias)
+	}
+	var rawPage struct {
+		ReviewThreads json.RawMessage `json:"reviewThreads"`
+	}
+	if err := json.Unmarshal(rawPR, &rawPage); err != nil {
+		return reviewThreadConnection{}, fmt.Errorf("decode review thread PR alias %s.pr0: %w", repoAlias, err)
+	}
+	if isNullGraphQLValue(rawPage.ReviewThreads) {
+		return reviewThreadConnection{}, fmt.Errorf(
+			"review thread response missing connection %s.pr0.reviewThreads",
+			repoAlias,
+		)
+	}
+	var page reviewThreadConnection
+	if err := json.Unmarshal(rawPage.ReviewThreads, &page); err != nil {
+		return reviewThreadConnection{}, fmt.Errorf("decode review thread connection %s.pr0: %w", repoAlias, err)
+	}
+	return page, nil
+}
+
+func advanceReviewThreadContinuation(
+	continuation reviewThreadContinuation,
+	page reviewThreadConnection,
+) (reviewThreadContinuation, bool, error) {
+	if continuation.RemainingPages <= 0 {
+		return continuation, false, reviewThreadPageLimitError(continuation.Ref)
+	}
+	continuation.RemainingPages--
+	for _, thread := range page.Nodes {
+		if !thread.IsResolved {
+			continuation.Status.UnresolvedReviewThreads++
+		}
+	}
+	if !page.PageInfo.HasNextPage {
+		return continuation, false, nil
+	}
+	if continuation.RemainingPages == 0 {
+		return continuation, false, reviewThreadPageLimitError(continuation.Ref)
+	}
+	nextCursor := page.PageInfo.EndCursor
+	if nextCursor == "" {
+		return continuation, false, fmt.Errorf(
+			"review thread pagination for %s/%s#%d returned an empty cursor",
+			continuation.Ref.Owner, continuation.Ref.Repo, continuation.Ref.Number,
+		)
+	}
+	if _, seen := continuation.SeenCursors[nextCursor]; seen {
+		return continuation, false, fmt.Errorf(
+			"review thread pagination for %s/%s#%d repeated cursor %q",
+			continuation.Ref.Owner, continuation.Ref.Repo, continuation.Ref.Number, nextCursor,
+		)
+	}
+	continuation.SeenCursors[nextCursor] = struct{}{}
+	continuation.Cursor = nextCursor
+	return continuation, true, nil
+}
+
+func reviewThreadPageLimitError(ref graphQLPRRef) error {
+	return fmt.Errorf(
+		"review thread pagination for %s/%s#%d exceeded its page limit",
+		ref.Owner, ref.Repo, ref.Number,
+	)
+}
+
+func isNullGraphQLValue(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null"))
 }
 
 // decodeBatchedPRChunk maps the aliased response back to the input refs and
 // fills in the result map. Refs whose alias is missing or null are skipped
 // (e.g. PR was deleted upstream); the next poller tick will retry.
-func decodeBatchedPRChunk(refs []graphQLPRRef, data map[string]json.RawMessage, result map[string]*PRStatus) error {
-	type group struct {
-		idx    int
-		owner  string
-		repo   string
-		prRefs []graphQLPRRef
-	}
-	groups := []*group{}
-	byKey := map[string]*group{}
-	for _, r := range refs {
-		k := r.Owner + "/" + r.Repo
-		g, ok := byKey[k]
-		if !ok {
-			g = &group{idx: len(groups), owner: r.Owner, repo: r.Repo}
-			byKey[k] = g
-			groups = append(groups, g)
-		}
-		g.prRefs = append(g.prRefs, r)
-	}
-	keys := make([]string, 0, len(byKey))
-	for k := range byKey {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	// Reassign group indices in sorted order to match buildBatchedPRQuery.
-	for i, k := range keys {
-		byKey[k].idx = i
-	}
-	for _, k := range keys {
-		g := byKey[k]
-		raw, ok := data[fmt.Sprintf("repo%d", g.idx)]
+func decodeBatchedPRChunk(
+	refs []graphQLPRRef,
+	data map[string]json.RawMessage,
+	result map[string]*PRStatus,
+) ([]reviewThreadContinuation, error) {
+	continuations := make([]reviewThreadContinuation, 0)
+	for repoIdx, group := range groupGraphQLPRRefs(refs) {
+		raw, ok := data[fmt.Sprintf("repo%d", repoIdx)]
 		if !ok || len(raw) == 0 {
 			continue
 		}
 		repoBlock := map[string]json.RawMessage{}
 		if err := json.Unmarshal(raw, &repoBlock); err != nil {
-			return fmt.Errorf("decode repo block: %w", err)
+			return nil, fmt.Errorf("decode repo block: %w", err)
 		}
-		for prIdx, ref := range g.prRefs {
+		for prIdx, ref := range group.Refs {
 			alias := fmt.Sprintf("%s%d", graphQLPRBatchAlias, prIdx)
 			rawPR, ok := repoBlock[alias]
 			if !ok || len(rawPR) == 0 || string(rawPR) == "null" {
@@ -625,26 +1042,58 @@ func decodeBatchedPRChunk(refs []graphQLPRRef, data map[string]json.RawMessage, 
 			}
 			var raw batchedPRResult
 			if err := json.Unmarshal(rawPR, &raw); err != nil {
-				return fmt.Errorf("decode pr alias %s: %w", alias, err)
+				return nil, fmt.Errorf("decode pr alias %s: %w", alias, err)
 			}
-			result[prStatusCacheKey(ref.Owner, ref.Repo, ref.Number)] = convertBatchedPRResult(&raw, ref.Owner, ref.Repo, ref.Number)
+			status := convertBatchedPRResult(&raw, ref.Owner, ref.Repo, ref.Number)
+			result[prStatusCacheKey(ref.Owner, ref.Repo, ref.Number)] = status
+			if raw.ReviewThreads.PageInfo.HasNextPage {
+				continuation, err := newReviewThreadContinuation(
+					ref, raw.ReviewThreads, status,
+				)
+				if err != nil {
+					return nil, err
+				}
+				continuations = append(continuations, continuation)
+			}
 		}
 	}
-	return nil
+	return continuations, nil
+}
+
+// branchBatchResult is the outcome of one batched branch lookup.
+//
+// Statuses holds the branches that resolved to exactly one OPEN PR, keyed by
+// graphqlBranchKey. ResolvedEmpty holds the branch keys whose repository alias
+// resolved and reported ZERO open PRs — a definitive "no PR on this branch"
+// that callers must NOT re-ask one watch at a time. A branch in neither set is
+// unknown: its alias did not resolve, or it carried several open PRs and
+// selectBatchedBranchPRNode deliberately refused to guess.
+//
+// Both maps are read-only at the call sites (they are shared through the
+// service singleflight).
+type branchBatchResult struct {
+	Statuses      map[string]*PRStatus
+	ResolvedEmpty map[string]struct{}
 }
 
 // runBatchedBranchQuery executes the branch-lookup query in chunks and maps
 // each branch name to its unambiguous OPEN PR (if any). Result keys are
 // "owner/repo/branch" so callers can index by their input refs.
-func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQLBranchRef) (map[string]*PRStatus, error) {
+func runBatchedBranchQuery(
+	ctx context.Context, exec GraphQLExecutor, refs []graphQLBranchRef,
+) (branchBatchResult, error) {
 	if exec == nil || len(refs) == 0 {
-		return nil, nil
+		return branchBatchResult{}, nil
 	}
-	result := make(map[string]*PRStatus, len(refs))
+	out := branchBatchResult{
+		Statuses:      make(map[string]*PRStatus, len(refs)),
+		ResolvedEmpty: make(map[string]struct{}, len(refs)),
+	}
 	// Same accumulation pattern as runBatchedPRQuery — see that function
 	// for the rationale (one dead-repo chunk must not drop later chunks).
 	var allMissing []repoRef
 	var allResidual []graphQLError
+	var retryAt *time.Time
 	for _, chunk := range chunkedRefs(refs) {
 		query, vars := buildBatchedBranchQuery(chunk)
 		var resp struct {
@@ -652,25 +1101,33 @@ func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []gra
 			Errors []graphQLError             `json:"errors"`
 		}
 		if err := exec.ExecuteGraphQL(ctx, query, vars, &resp); err != nil {
-			return nil, err
+			return branchBatchResult{}, err
 		}
+		retryAt = laterRetryAt(retryAt, graphQLRetryAtFromData(resp.Data))
 		missing, residual := classifyBatchedErrors(resp.Errors, aliasMapForBranchRefs(chunk))
-		if err := decodeBatchedBranchChunk(chunk, resp.Data, result); err != nil {
-			return nil, err
+		if err := decodeBatchedBranchChunk(chunk, resp.Data, &out); err != nil {
+			return branchBatchResult{}, err
 		}
 		allMissing = append(allMissing, missing...)
 		allResidual = append(allResidual, residual...)
 	}
-	if err := wrapBatchedErrors(allMissing, allResidual); err != nil {
-		if len(allMissing) > 0 && len(allResidual) == 0 {
-			return result, err
-		}
-		return nil, err
+	statuses, err := finishBatchedQuery(ctx, exec, out.Statuses, allMissing, allResidual, nil, retryAt)
+	if statuses == nil {
+		// finishBatchedQuery dropped the partial decode (residual errors, or a
+		// failed review-thread continuation). The negatives decoded alongside
+		// it are no longer trustworthy as a whole-response answer, so surface
+		// nothing rather than let a caller skip a fallback on their strength.
+		return branchBatchResult{}, err
 	}
-	return result, nil
+	out.Statuses = statuses
+	return out, err
 }
 
-func decodeBatchedBranchChunk(refs []graphQLBranchRef, data map[string]json.RawMessage, result map[string]*PRStatus) error {
+func decodeBatchedBranchChunk(
+	refs []graphQLBranchRef,
+	data map[string]json.RawMessage,
+	out *branchBatchResult,
+) error {
 	for i, ref := range refs {
 		alias := fmt.Sprintf("b%d", i)
 		raw, ok := data[alias]
@@ -687,10 +1144,16 @@ func decodeBatchedBranchChunk(refs []graphQLBranchRef, data map[string]json.RawM
 		}
 		node, ok := selectBatchedBranchPRNode(inner.PullRequests.Nodes)
 		if !ok {
+			// Zero nodes is a definitive answer: the repository resolved and
+			// has no open PR on this branch. Two or more is ambiguous and
+			// stays unknown so the caller keeps its per-watch fallback.
+			if len(inner.PullRequests.Nodes) == 0 {
+				out.ResolvedEmpty[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = struct{}{}
+			}
 			continue
 		}
 		status := convertBatchedPRResult(&node.batchedPRResult, ref.Owner, ref.Repo, node.Number)
-		result[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
+		out.Statuses[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
 	}
 	return nil
 }

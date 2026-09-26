@@ -1,0 +1,233 @@
+"use client";
+
+import { useRef, type FocusEvent, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
+import { IconSubtask } from "@tabler/icons-react";
+import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useTaskSubtasks, type TaskSubtask } from "@/hooks/domains/kanban/use-task-subtasks";
+import { useHoverPopover } from "@/components/integrations/use-hover-popover";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { cn } from "@/lib/utils";
+import { TaskSubtaskRow } from "./task-subtask-row";
+
+const MAX_VISIBLE_SUBTASKS = 12;
+const OPEN_DELAY_MS = 200;
+const CLOSE_DELAY_MS = 100;
+const PREVIEW_FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function focusFirstPreviewTarget(contentRef: RefObject<HTMLDivElement | null>) {
+  contentRef.current?.querySelector<HTMLElement>(PREVIEW_FOCUSABLE_SELECTOR)?.focus();
+}
+
+function SubtasksSection({ subtasks }: { subtasks: TaskSubtask[] }) {
+  const { t } = useTranslation();
+  if (subtasks.length === 0) return null;
+
+  const visible = subtasks.slice(0, MAX_VISIBLE_SUBTASKS);
+  const overflowCount = subtasks.length - visible.length;
+
+  return (
+    <div
+      className="mt-2.5 border-t border-border/60 pt-2.5"
+      data-testid="task-title-hover-subtasks"
+    >
+      <div className="text-[11px] font-medium text-muted-foreground">
+        {t("task:subtasksHeading", { count: subtasks.length })}
+      </div>
+      <div className="mt-1.5 space-y-0.5">
+        {visible.map((subtask) => (
+          <TaskSubtaskRow key={subtask.id} subtask={subtask} />
+        ))}
+        {overflowCount > 0 && (
+          <div className="px-1 py-1 text-xs text-muted-foreground">
+            {t("task:moreNotShown", { count: overflowCount })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DescriptionSection({ description }: { description?: string }) {
+  if (!description) return null;
+  return (
+    <div
+      data-testid="task-title-hover-description"
+      className="mt-2 whitespace-pre-wrap break-words text-xs text-muted-foreground [overflow-wrap:anywhere]"
+    >
+      {description}
+    </div>
+  );
+}
+
+function ParentSection({ parentTaskId }: { parentTaskId?: string | null }) {
+  const { t } = useTranslation();
+  const parentTitle = useTaskById(parentTaskId)?.title ?? null;
+  if (!parentTaskId) return null;
+  // Matches KanbanCardRelationship's fallback (kanban-card-status-strip.tsx)
+  // so the two "show the parent relationship" surfaces don't diverge when the
+  // parent title isn't resolvable from the store.
+  const relationshipTitle = parentTitle ?? t("task:subtask");
+  return (
+    <div
+      data-testid="task-title-hover-parent"
+      className="mt-2 flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground"
+    >
+      <IconSubtask className="h-3 w-3 shrink-0" />
+      <span className="shrink-0 font-medium">{t("kanban:subtaskOf")}</span>
+      <span className="min-w-0 truncate">{relationshipTitle}</span>
+    </div>
+  );
+}
+
+function DesktopTaskTitlePreview({
+  title,
+  children,
+  description,
+  parentTaskId,
+  subtasks,
+  side,
+  align,
+  triggerClassName,
+}: {
+  title: string;
+  children: ReactNode;
+  description?: string;
+  parentTaskId?: string | null;
+  subtasks: TaskSubtask[];
+  side: "top" | "right" | "bottom" | "left";
+  align: "start" | "center" | "end";
+  triggerClassName?: string;
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const keyboardSessionRef = useRef(false);
+  const hover = useHoverPopover({ openDelayMs: OPEN_DELAY_MS, closeDelayMs: CLOSE_DELAY_MS });
+
+  const handleTriggerClick = (event: MouseEvent<HTMLButtonElement>) => {
+    if (event.detail !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    keyboardSessionRef.current = true;
+    if (hover.open) {
+      focusFirstPreviewTarget(contentRef);
+      return;
+    }
+    hover.onOpenChange(true);
+  };
+
+  const handleContentBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) hover.onContentLeave(event);
+  };
+
+  return (
+    <Popover open={hover.open} onOpenChange={hover.onOpenChange}>
+      <PopoverAnchor asChild>
+        <button
+          ref={triggerRef}
+          type="button"
+          data-testid="task-title-preview-trigger"
+          aria-haspopup="dialog"
+          aria-expanded={hover.open}
+          onPointerEnter={hover.onTriggerEnter}
+          onPointerLeave={hover.onTriggerLeave}
+          onFocus={hover.onTriggerEnter}
+          onBlur={hover.onTriggerLeave}
+          onKeyDown={(event) => {
+            // Only swallow keys while the preview is open (protects it from
+            // the card/row's own keyboard shortcuts, e.g. drag pickup).
+            // Escape must always fall through to close the surface it sits
+            // on (kanban preview panel, dialog, ...) even when the trigger
+            // merely has focus from a plain click and the preview isn't open.
+            if (!hover.open && event.key === "Escape") return;
+            event.stopPropagation();
+          }}
+          onClick={handleTriggerClick}
+          onContextMenu={(event) => event.stopPropagation()}
+          className={cn(
+            "min-w-0 max-w-full cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+            triggerClassName,
+          )}
+        >
+          {children}
+        </button>
+      </PopoverAnchor>
+      <PopoverContent
+        ref={contentRef}
+        side={side}
+        align={align}
+        data-testid="task-title-hover-card"
+        className="w-80 max-w-[calc(100vw-1rem)] max-h-80 overflow-y-auto p-3"
+        onPointerEnter={hover.onContentEnter}
+        onPointerLeave={() => {
+          if (!contentRef.current?.contains(document.activeElement)) hover.onContentLeave();
+        }}
+        onFocusCapture={hover.onContentEnter}
+        onBlurCapture={handleContentBlur}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          if (keyboardSessionRef.current) focusFirstPreviewTarget(contentRef);
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (keyboardSessionRef.current) triggerRef.current?.focus();
+          keyboardSessionRef.current = false;
+        }}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div className="text-pretty break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">
+          {title}
+        </div>
+        <DescriptionSection description={description} />
+        <ParentSection parentTaskId={parentTaskId} />
+        <SubtasksSection subtasks={subtasks} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Interactive desktop preview with direct mobile navigation as the coarse-pointer fallback. */
+export function TaskTitleHoverCard({
+  taskId,
+  title,
+  children,
+  description,
+  parentTaskId,
+  isTitleTruncated,
+  side = "bottom",
+  align = "start",
+  triggerClassName,
+}: {
+  taskId: string;
+  title: string;
+  children: ReactNode;
+  description?: string;
+  parentTaskId?: string | null;
+  isTitleTruncated?: boolean;
+  side?: "top" | "right" | "bottom" | "left";
+  align?: "start" | "center" | "end";
+  triggerClassName?: string;
+}) {
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const subtasks = useTaskSubtasks(taskId);
+  const hasContent = Boolean(description) || Boolean(parentTaskId) || subtasks.length > 0;
+
+  if (!isFinePointer || (!hasContent && !isTitleTruncated)) return <>{children}</>;
+
+  return (
+    <DesktopTaskTitlePreview
+      title={title}
+      description={description}
+      parentTaskId={parentTaskId}
+      subtasks={subtasks}
+      side={side}
+      align={align}
+      triggerClassName={triggerClassName}
+    >
+      {children}
+    </DesktopTaskTitlePreview>
+  );
+}

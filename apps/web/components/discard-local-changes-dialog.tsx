@@ -10,6 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
+import { useTranslation } from "react-i18next";
 
 const MAX_VISIBLE_FILES = 20;
 
@@ -30,9 +31,15 @@ export function DiscardLocalChangesDialog({
   onConfirm,
   onCancel,
 }: DiscardLocalChangesDialogProps) {
+  const { t } = useTranslation();
   const visible = dirtyFiles.slice(0, MAX_VISIBLE_FILES);
   const overflow = dirtyFiles.length - visible.length;
-  const target = repoPath ? ` in your local clone at ${repoPath}` : " in your local clone";
+  // One complete sentence per branch rather than a stem plus a " in your local
+  // clone at X" tail: the tail's position in the sentence is the translator's
+  // call, and a concatenated fragment freezes it here.
+  const description = repoPath
+    ? t("common:discardLocalChangesAtPathDescription", { repoPath })
+    : t("common:discardLocalChangesDescription");
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -44,11 +51,8 @@ export function DiscardLocalChangesDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <AlertDialogHeader>
-          <AlertDialogTitle>Discard local changes?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Starting this task will permanently discard the uncommitted changes
-            {target}. Back up anything you want to keep before continuing.
-          </AlertDialogDescription>
+          <AlertDialogTitle>{t("common:discardLocalChanges")}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <ul
           className="max-h-48 overflow-auto rounded-md border border-border bg-muted/40 p-2 text-xs font-mono text-muted-foreground space-y-0.5"
@@ -64,7 +68,7 @@ export function DiscardLocalChangesDialog({
               className="pt-1 text-[11px] italic text-muted-foreground/80"
               data-testid="discard-local-changes-overflow"
             >
-              +{overflow} more
+              {t("common:andMoreFiles", { count: overflow })}
             </li>
           )}
         </ul>
@@ -74,14 +78,14 @@ export function DiscardLocalChangesDialog({
             data-testid="discard-local-changes-cancel"
             onClick={onCancel}
           >
-            Cancel
+            {t("common:cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
             data-testid="discard-local-changes-confirm"
             onClick={onConfirm}
           >
-            Discard and continue
+            {t("common:discardAndContinue")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

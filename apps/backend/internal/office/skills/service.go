@@ -2,14 +2,13 @@ package skills
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/skillslug"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 
@@ -27,6 +26,8 @@ type skillRepo interface {
 	GetSkillBySlug(ctx context.Context, workspaceID, slug string) (*models.Skill, error)
 	ListSkills(ctx context.Context, workspaceID string) ([]*models.Skill, error)
 	ListSystemSkills(ctx context.Context, workspaceID string) ([]*models.Skill, error)
+	ListNonSystemSkills(ctx context.Context, workspaceID string) ([]*models.Skill, error)
+	NormalizeSkillSlug(ctx context.Context, workspaceID, skillID, oldSlug, newSlug string) (bool, error)
 	UpdateSkill(ctx context.Context, skill *models.Skill) error
 	DeleteSkill(ctx context.Context, id string) error
 
@@ -132,13 +133,22 @@ func (s *SkillService) countSkillUsage(ctx context.Context) map[string]int {
 
 // ValidateAndPrepareSkill validates and prepares a skill for creation.
 // Call this before CreateSkill to auto-generate slug and validate uniqueness.
+//
+// Slug handling follows AC-001.11/AC-001.12: a caller-supplied slug must be
+// well-formed or the request is rejected outright (no coercion); a
+// well-formed slug is then normalized to its canonical (kandev-prefixed)
+// form before the uniqueness check runs, so both the persisted slug and the
+// duplicate check operate on the same canonical value.
 func (s *SkillService) ValidateAndPrepareSkill(ctx context.Context, skill *models.Skill) error {
 	if skill.Name == "" {
 		return fmt.Errorf("skill name is required")
 	}
 	if skill.Slug == "" {
 		skill.Slug = GenerateSlug(skill.Name)
+	} else if !skillslug.WellFormed(skill.Slug) {
+		return fmt.Errorf("invalid skill slug %q: must contain only letters, digits, underscore, and hyphen", skill.Slug)
 	}
+	skill.Slug = skillslug.Normalize(skill.Slug)
 	if err := s.validateSlugUnique(ctx, skill.WorkspaceID, skill.Slug, ""); err != nil {
 		return err
 	}
@@ -153,16 +163,42 @@ func prepareSkillPackageMetadata(skill *models.Skill) {
 	if skill.ApprovalState == "" {
 		skill.ApprovalState = "approved"
 	}
-	sum := sha256.Sum256([]byte(skill.Content + "\x00" + skill.FileInventory + "\x00" + skill.SourceLocator))
-	skill.ContentHash = hex.EncodeToString(sum[:])
+	skill.ContentHash = models.SkillPackageContentHash(
+		skill.Content, skill.FileInventory, skill.SourceLocator,
+	)
 }
 
-// ValidateSkillUpdate validates a skill update for slug uniqueness.
-func (s *SkillService) ValidateSkillUpdate(ctx context.Context, skill *models.Skill) error {
-	if skill.Slug != "" {
-		return s.validateSlugUnique(ctx, skill.WorkspaceID, skill.Slug, skill.ID)
+// ValidateSkillUpdate validates a skill update for slug uniqueness. Slug
+// handling mirrors ValidateAndPrepareSkill: an empty slug is not
+// well-formed and is rejected like any other not-well-formed slug when the
+// caller supplies one; the caller omits the field entirely (slugRequested
+// false) to leave the slug unchanged. A well-formed slug is normalized to
+// canonical form before the uniqueness check runs.
+//
+// A request that never mentions slug must never fail on slug grounds. The
+// config-import path can create a row with an empty stored slug outside
+// this service's own validation, so an unrelated update to such a row
+// heals it to a free name-derived slug rather than rejecting the caller's
+// edit; if every candidate collides, the stored empty value is left as-is.
+func (s *SkillService) ValidateSkillUpdate(ctx context.Context, skill *models.Skill, slugRequested bool) error {
+	if !slugRequested && skill.Slug == "" {
+		s.healEmptySlug(ctx, skill)
+		return nil
 	}
-	return nil
+	if !skillslug.WellFormed(skill.Slug) {
+		return fmt.Errorf("invalid skill slug %q: must contain only letters, digits, underscore, and hyphen", skill.Slug)
+	}
+	skill.Slug = skillslug.Normalize(skill.Slug)
+	return s.validateSlugUnique(ctx, skill.WorkspaceID, skill.Slug, skill.ID)
+}
+
+// healEmptySlug assigns skill a name-derived slug when one is free in its
+// workspace, and leaves its stored empty slug untouched otherwise.
+func (s *SkillService) healEmptySlug(ctx context.Context, skill *models.Skill) {
+	candidate := skillslug.Normalize(GenerateSlug(skill.Name))
+	if s.validateSlugUnique(ctx, skill.WorkspaceID, candidate, skill.ID) == nil {
+		skill.Slug = candidate
+	}
 }
 
 func (s *SkillService) validateSlugUnique(ctx context.Context, workspaceID, slug, excludeID string) error {
@@ -271,8 +307,18 @@ func (s *SkillService) ListSkillsFromConfig(ctx context.Context, workspaceID str
 // shows up as an empty System group in the UI, not a 500 from the
 // list endpoint.
 func (s *SkillService) ensureSystemSkillsForWorkspace(ctx context.Context, workspaceID string) {
-	if _, err := SyncSystemSkills(ctx, s.repo, []string{workspaceID}, nil, s.logger); err != nil {
+	report, err := SyncSystemSkills(ctx, s.repo, []string{workspaceID}, nil, s.logger)
+	if err != nil {
 		s.logger.Warn("ensure system skills for workspace failed",
 			zap.String("workspace_id", workspaceID), zap.Error(err))
+		return
+	}
+	if len(report.Inserted) == 0 && len(report.Removed) == 0 {
+		return
+	}
+	if backfiller, ok := s.agents.(interface {
+		BackfillDefaultSkillsForWorkspace(context.Context, string)
+	}); ok {
+		backfiller.BackfillDefaultSkillsForWorkspace(ctx, workspaceID)
 	}
 }

@@ -1,6 +1,20 @@
+import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { openTaskSession } from "../../helpers/session";
 import { isScrolledIntoView, seedScrollTestConversation } from "../../helpers/unread-divider";
+import { routeMarkReadResponseHold } from "../../helpers/mark-read-response-hold";
+import { waitForStableActiveSession } from "../../helpers/session-store";
+
+const MOBILE_END_TOLERANCE_PX = 10;
+
+async function switchMobileTask(testPage: Page, title: string): Promise<void> {
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
+  const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+  const taskRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: title });
+  await expect(taskRow).toBeVisible({ timeout: 15_000 });
+  await taskRow.click();
+  await expect(sheet).not.toBeVisible({ timeout: 10_000 });
+}
 
 /**
  * Mobile parity for the Slack-style unread divider: the same
@@ -67,7 +81,10 @@ test.describe("Mobile unread divider", () => {
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
     let session = await openTaskSession(testPage, task.id);
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    // No live-tail observation has happened yet, so the normal reload recovery
+    // is safe here and prevents a missed fast WS transition from consuming the
+    // whole test timeout. The post-send wait below remains reload-free.
+    await session.waitForChatIdle({ timeout: 60_000 });
     const initialMessages = await apiClient.listSessionMessages(task.session_id);
     const initialTail = initialMessages.messages[initialMessages.messages.length - 1];
     if (!initialTail) throw new Error("expected the initial transcript to contain a message");
@@ -83,7 +100,69 @@ test.describe("Mobile unread divider", () => {
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
 
     await session.sendMessageViaButton("prompt while actively reading");
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
+  });
+
+  test("completed task switch keeps each read cursor and returns to the bottom on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const taskA = await seedScrollTestConversation(
+      apiClient,
+      seedData,
+      "Completed read cursor mobile A",
+    );
+    const taskB = await seedScrollTestConversation(
+      apiClient,
+      seedData,
+      "Completed read cursor mobile B",
+    );
+    const responseHold = await routeMarkReadResponseHold(testPage, taskA.sessionId);
+
+    const session = await openTaskSession(testPage, taskA.taskId);
+    await waitForStableActiveSession(testPage, taskA.sessionId);
+    await expect(session.activeChat().getByTestId("unread-divider")).toBeVisible();
+    await responseHold.waitUntilHeld();
+    await session
+      .activeChat()
+      .locator(".chat-message-list")
+      .evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+        element.dispatchEvent(new Event("scroll"));
+      });
+
+    const taskBMarkRead = testPage.waitForResponse(
+      (response) =>
+        response.url().includes(`/api/v1/task-sessions/${taskB.sessionId}/mark-read`) &&
+        response.request().method() === "POST",
+    );
+    await switchMobileTask(testPage, "Completed read cursor mobile B");
+    await waitForStableActiveSession(testPage, taskB.sessionId);
+    await taskBMarkRead;
+    await session
+      .activeChat()
+      .locator(".chat-message-list")
+      .evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+        element.dispatchEvent(new Event("scroll"));
+      });
+
+    await responseHold.releaseHeldResponse();
+    await switchMobileTask(testPage, "Completed read cursor mobile A");
+    await waitForStableActiveSession(testPage, taskA.sessionId);
+
+    const activeChat = session.activeChat();
+    const scrollContainer = activeChat.locator(".chat-message-list");
+    await expect(activeChat.getByTestId("unread-divider")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        scrollContainer.evaluate(
+          (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+        ),
+      )
+      .toBeLessThan(MOBILE_END_TOLERANCE_PX);
   });
 });

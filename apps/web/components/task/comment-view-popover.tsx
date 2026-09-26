@@ -4,12 +4,13 @@ import { useRef, useState, useCallback } from "react";
 import { IconEdit, IconTrash, IconGripHorizontal } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import { CommentForm } from "@/components/diff/comment-form";
 import { useDraggablePopover, usePopoverDismiss } from "@/components/task/use-draggable-popover";
+import { useTranslation } from "react-i18next";
 
 type CommentViewPopoverProps = {
-  comments: DiffComment[];
+  comments: ReviewComment[];
   position: { x: number; y: number };
   onDelete: (commentId: string) => void;
   onUpdate?: (commentId: string, text: string) => void;
@@ -28,13 +29,14 @@ function CommentItem({
   onStartEdit,
   onCancelEdit,
 }: {
-  comment: DiffComment;
+  comment: ReviewComment;
   onDelete: (id: string) => void;
   onUpdate?: (id: string, text: string) => void;
   isEditing: boolean;
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
 }) {
+  const { t } = useTranslation();
   const handleUpdate = useCallback(
     (text: string) => {
       onUpdate?.(comment.id, text);
@@ -47,7 +49,9 @@ function CommentItem({
     <div className="p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="px-2 py-0.5 rounded-md bg-muted text-[10px] font-mono text-muted-foreground">
-          {formatLineRange(comment.startLine, comment.endLine)}
+          {comment.source === "review-file"
+            ? t("review:fileComment")
+            : formatLineRange(comment.startLine, comment.endLine)}
         </span>
         <div className="flex items-center gap-1">
           {onUpdate && !isEditing && (
@@ -55,8 +59,8 @@ function CommentItem({
               size="sm"
               variant="ghost"
               className="h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:text-foreground"
-              aria-label="Edit comment"
-              title="Edit comment"
+              aria-label={t("task:editComment")}
+              title={t("task:editComment")}
               onClick={() => onStartEdit(comment.id)}
             >
               <IconEdit className="h-3.5 w-3.5" />
@@ -66,8 +70,8 @@ function CommentItem({
             size="sm"
             variant="ghost"
             className="h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:text-destructive"
-            aria-label="Delete comment"
-            title="Delete comment"
+            aria-label={t("task:deleteComment")}
+            title={t("task:deleteComment")}
             onClick={() => onDelete(comment.id)}
           >
             <IconTrash className="h-3.5 w-3.5" />
@@ -83,7 +87,7 @@ function CommentItem({
         />
       ) : (
         <>
-          {comment.codeContent && (
+          {comment.source === "diff" && comment.codeContent && (
             <pre className="mb-2 p-2 rounded-md bg-muted/50 text-[10px] text-muted-foreground font-mono max-h-[80px] overflow-auto whitespace-pre-wrap">
               {comment.codeContent}
             </pre>
@@ -104,6 +108,7 @@ export function CommentViewPopover({
   onUpdate,
   onClose,
 }: CommentViewPopoverProps) {
+  const { t } = useTranslation();
   const popoverRef = useRef<HTMLDivElement>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const { pos, onDragStart } = useDraggablePopover(position, 350, 200);
@@ -123,7 +128,7 @@ export function CommentViewPopover({
         onMouseDown={onDragStart}
       >
         <span className="text-xs text-muted-foreground">
-          {comments.length} comment{comments.length !== 1 ? "s" : ""}
+          {t("task:commentCount", { count: comments.length })}
         </span>
         <IconGripHorizontal className="h-3.5 w-3.5 text-muted-foreground/40" />
       </div>

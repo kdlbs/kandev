@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-path-independent-git-helper", "02-login-shell-shim-restoration"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 03: Review Blocker Remediation

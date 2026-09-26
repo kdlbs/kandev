@@ -7,19 +7,21 @@ import { Input } from "@kandev/ui/input";
 import { IconUserPlus } from "@tabler/icons-react";
 import { ApiError } from "@/lib/api/client";
 import { acceptInvite, previewInvite, type InvitePreview } from "@/lib/api/domains/auth-api";
+import { useTranslation } from "react-i18next";
 
 type InvitePageProps = {
   token?: string;
 };
 
 function useInvitePreview(token: string | undefined) {
+  const { t } = useTranslation();
   const [preview, setPreview] = useState<InvitePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!token) {
-      setPreviewError("This invite link is missing its token.");
+      setPreviewError(t("auth:inviteLinkMissingToken"));
       setLoading(false);
       return;
     }
@@ -34,8 +36,8 @@ function useInvitePreview(token: string | undefined) {
         if (cancelled) return;
         setPreviewError(
           err instanceof ApiError
-            ? "This invite link is invalid or has expired. Ask an admin for a new one."
-            : "Could not load this invite. Please try again.",
+            ? t("auth:inviteLinkInvalidOrExpired")
+            : t("auth:couldNotLoadInvite"),
         );
       })
       .finally(() => {
@@ -74,11 +76,12 @@ function AcceptForm({
   submitting,
   onSubmit,
 }: AcceptFormProps) {
+  const { t } = useTranslation();
   return (
     <form className="flex flex-col gap-3" onSubmit={onSubmit}>
       <div className="flex flex-col gap-1">
         <label htmlFor="invite-display-name" className="text-xs text-muted-foreground">
-          Display name
+          {t("auth:displayName")}
         </label>
         <Input
           id="invite-display-name"
@@ -91,7 +94,7 @@ function AcceptForm({
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="invite-email" className="text-xs text-muted-foreground">
-          Email
+          {t("auth:email")}
         </label>
         <Input
           id="invite-email"
@@ -106,7 +109,7 @@ function AcceptForm({
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="invite-password" className="text-xs text-muted-foreground">
-          Password
+          {t("auth:password")}
         </label>
         <Input
           id="invite-password"
@@ -130,13 +133,14 @@ function AcceptForm({
         disabled={submitting}
         data-testid="invite-accept-submit"
       >
-        {submitting ? "Joining..." : "Accept invite"}
+        {submitting ? t("auth:joining") : t("auth:acceptInvite")}
       </Button>
     </form>
   );
 }
 
 export function InvitePage({ token }: InvitePageProps) {
+  const { t } = useTranslation();
   const { preview, previewError, loading } = useInvitePreview(token);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -160,8 +164,8 @@ export function InvitePage({ token }: InvitePageProps) {
       setSubmitting(false);
       setError(
         err instanceof ApiError
-          ? (err.message ?? "Could not accept this invite.")
-          : "Something went wrong. Please try again.",
+          ? (err.message ?? t("auth:couldNotAcceptInvite"))
+          : t("auth:somethingWentWrong"),
       );
     }
   }
@@ -171,16 +175,18 @@ export function InvitePage({ token }: InvitePageProps) {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <IconUserPlus className="h-4 w-4" /> Accept invite
+            <IconUserPlus className="h-4 w-4" /> {t("auth:acceptInvite")}
           </CardTitle>
           <CardDescription>
-            {preview ? `You've been invited as ${preview.role}.` : "Join this Kandev deployment."}
+            {preview
+              ? t("auth:youVeBeenInvitedAs", { role: preview.role })
+              : t("auth:joinThisKandevDeployment")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {loading && (
             <p className="text-sm text-muted-foreground" data-testid="invite-loading">
-              Checking invite...
+              {t("auth:checkingInvite")}
             </p>
           )}
           {!loading && previewError && (

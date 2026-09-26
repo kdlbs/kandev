@@ -3,6 +3,8 @@
 // designed for quick tasks like generating commit messages or PR descriptions.
 package utility
 
+import "github.com/kandev/kandev/internal/common/acpprovider"
+
 // PromptRequest is the request for executing an inference prompt.
 type PromptRequest struct {
 	// Prompt is the fully resolved prompt text to send to the LLM.
@@ -17,6 +19,10 @@ type PromptRequest struct {
 	// Mode is the optional session mode to set before sending the prompt.
 	// If empty, no session/set_mode call is made and the agent default is used.
 	Mode string `json:"mode,omitempty"`
+
+	// Profile-owned launch policy. These values are resolved by the backend
+	// at call start and are never accepted from an external client.
+	AutoApprovePermissions *bool `json:"auto_approve_permissions,omitempty"`
 
 	// InferenceConfig is the agent's inference configuration.
 	// This is passed from the backend which has access to the agent registry.
@@ -60,6 +66,18 @@ type ProbeRequest struct {
 	// AgentID is the agent to probe (e.g., "claude-acp", "codex-acp").
 	AgentID string `json:"agent_id" binding:"required"`
 
+	// Model optionally asks the probe to apply a model after session/new and
+	// return the provider's resulting configuration options.
+	Model string `json:"model,omitempty"`
+
+	// Mode optionally selects a session mode before the probe returns its
+	// resolved configuration options.
+	Mode string `json:"mode,omitempty"`
+
+	// ConfigOptions optionally applies additional select values before the
+	// probe returns its resolved configuration options.
+	ConfigOptions map[string]string `json:"config_options,omitempty"`
+
 	// Refresh asks agent-specific discovery fallbacks to invalidate their own
 	// model caches. ACP session discovery itself always starts a fresh process.
 	Refresh bool `json:"refresh,omitempty"`
@@ -76,6 +94,10 @@ type ProbeResponse struct {
 
 	// Error is the error message if the probe failed.
 	Error string `json:"error,omitempty"`
+
+	// FailureCode is a stable classification for failures the backend can
+	// handle without receiving raw subprocess diagnostics.
+	FailureCode ProbeFailureCode `json:"failure_code,omitempty"`
 
 	// DurationMs is the probe duration in milliseconds.
 	DurationMs int `json:"duration_ms,omitempty"`
@@ -102,7 +124,7 @@ type ProbeResponse struct {
 	CurrentModeID string `json:"current_mode_id,omitempty"`
 
 	// ConfigOptions are select-style session options advertised by session/new.
-	ConfigOptions []ProbeConfigOption `json:"config_options,omitempty"`
+	ConfigOptions []ProbeConfigOption `json:"config_options"`
 
 	// Commands are the slash commands the agent advertises via the
 	// `available_commands_update` session notification (drained briefly
@@ -114,6 +136,18 @@ type ProbeResponse struct {
 	// PromptCapabilities reports which content block types the agent accepts.
 	PromptCapabilities ProbePromptCapabilities `json:"prompt_capabilities,omitempty"`
 }
+
+// ProbeFailureCode identifies a bounded, machine-actionable probe failure.
+type ProbeFailureCode string
+
+const (
+	// ProbeFailureManagedRuntimeNPMResolution means the trusted top-level npm
+	// package failed exact-version resolution with ETARGET.
+	ProbeFailureManagedRuntimeNPMResolution ProbeFailureCode = "managed_runtime_npm_resolution"
+	// ProbeFailureManagedRuntimeNPMPolicy means npm rejected the trusted exact
+	// package version under a date-qualified release policy.
+	ProbeFailureManagedRuntimeNPMPolicy ProbeFailureCode = "managed_runtime_npm_policy"
+)
 
 // ProbeAuthMethod is a single advertised authentication method.
 type ProbeAuthMethod struct {
@@ -184,7 +218,20 @@ type InferenceConfigDTO struct {
 	Env map[string]string `json:"env,omitempty"`
 	// StripEnv lists environment variables to strip from the inference
 	// subprocess environment entirely (not just set to empty).
-	StripEnv []string `json:"strip_env,omitempty"`
+	StripEnv      []string `json:"strip_env,omitempty"`
+	CLIFlags      []string `json:"cli_flags,omitempty"`
+	CommandPrefix []string `json:"command_prefix,omitempty"`
+	// ProviderGatewayAuth, when set, makes the probe/inference subprocess
+	// authenticate against a Kandev-configured OpenAI-compatible provider
+	// (base URL + bearer key) right after the ACP initialize handshake, the
+	// same mechanism the live session adapter uses.
+	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
+	// OperatorDefined marks a command that came from a custom agent the
+	// install operator registered in Settings rather than from an agent
+	// definition compiled into the binary. Such a command cannot appear in
+	// the probe allow-list, because it does not exist until the operator
+	// types it. See resolveSpawnCommand.
+	OperatorDefined bool `json:"operator_defined,omitempty"`
 }
 
 // PromptResponse is the response from executing a utility prompt.

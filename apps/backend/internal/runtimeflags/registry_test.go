@@ -2,6 +2,7 @@ package runtimeflags
 
 import (
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -36,6 +37,84 @@ func TestDefinitionsIncludeOfficeExperimentalMetadata(t *testing.T) {
 	}
 }
 
+func TestDefinitionsIncludeDynamicAgentRoutingMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.dynamicAgentRouting")
+	if !ok {
+		t.Fatal("features.dynamicAgentRouting definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want %q", def.Stability, StabilityExperimental)
+	}
+	if def.RiskLevel != RiskHigh {
+		t.Fatalf("RiskLevel = %q, want %q", def.RiskLevel, RiskHigh)
+	}
+	if def.RiskDescription == "" {
+		t.Fatal("RiskDescription empty")
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+	if !def.Mutable {
+		t.Fatal("Mutable = false, want true")
+	}
+}
+
+func TestDefinitionsNeedsYouInboxLabelIsInbox(t *testing.T) {
+	def, ok := DefinitionByKey("features.needsYouInbox")
+	if !ok {
+		t.Fatal("features.needsYouInbox definition missing")
+	}
+	if def.Label != "Inbox" {
+		t.Fatalf("Label = %q, want %q", def.Label, "Inbox")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_NEEDS_YOU_INBOX" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_NEEDS_YOU_INBOX", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want %q", def.Stability, StabilityExperimental)
+	}
+	if def.RiskLevel != RiskLow {
+		t.Fatalf("RiskLevel = %q, want %q", def.RiskLevel, RiskLow)
+	}
+	if def.RiskDescription == "" {
+		t.Fatal("RiskDescription empty")
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+	if !def.Mutable {
+		t.Fatal("Mutable = false, want true")
+	}
+}
+
+func TestDefinitionsIncludeCanvasMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.canvases")
+	if !ok {
+		t.Fatal("features.canvases definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_CANVASES" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_CANVASES", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want %q", def.Stability, StabilityExperimental)
+	}
+	if def.RiskLevel != RiskHigh {
+		t.Fatalf("RiskLevel = %q, want %q", def.RiskLevel, RiskHigh)
+	}
+	if def.RiskDescription == "" {
+		t.Fatal("RiskDescription empty")
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+	if !def.Mutable {
+		t.Fatal("Mutable = false, want true")
+	}
+}
+
 // TestDefinitionsExcludePlugins pins the graduation of the plugin system out
 // of the feature-flag tier: plugins ship in the base product, so no toggle may
 // reappear in Settings > System > Feature Toggles.
@@ -59,17 +138,24 @@ func TestRetiredRuntimeFlagIdentitiesIncludePlugins(t *testing.T) {
 	t.Fatal("graduated plugins flag identity is missing from the retired identity set")
 }
 
-func TestDefinitionsIncludeAppStatusBarMetadata(t *testing.T) {
-	def, ok := DefinitionByKey("features.appStatusBar")
-	if !ok {
-		t.Fatal("features.appStatusBar definition missing")
+func TestDefinitionsExcludeAppStatusBar(t *testing.T) {
+	if _, ok := DefinitionByKey(retiredAppStatusBarKey); ok {
+		t.Fatal("features.appStatusBar definition present; visibility is a user setting")
 	}
-	if def.EnvVar != "KANDEV_FEATURES_APP_STATUS_BAR" {
-		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_APP_STATUS_BAR", def.EnvVar)
+	for _, def := range Definitions() {
+		if def.EnvVar == retiredAppStatusBarEnvVar {
+			t.Fatalf("definition %q still binds KANDEV_FEATURES_APP_STATUS_BAR", def.Key)
+		}
 	}
-	if !def.RestartRequired {
-		t.Fatal("RestartRequired = false, want true")
+}
+
+func TestRetiredRuntimeFlagIdentitiesIncludeAppStatusBar(t *testing.T) {
+	for _, identity := range retiredRuntimeFlagIdentities {
+		if identity.key == retiredAppStatusBarKey && identity.envVar == retiredAppStatusBarEnvVar {
+			return
+		}
 	}
+	t.Fatal("graduated App status bar identity is missing from the retired identity set")
 }
 
 func TestDefinitionsIncludeClaudeBackgroundPromptHandoffMetadata(t *testing.T) {
@@ -398,5 +484,85 @@ func assertFeatureConfigRoundTrips(t *testing.T, fields map[string]featureFieldB
 		if features.Field(field.fieldIndex).Bool() || ValuesFromConfig(cfg)[key] {
 			t.Fatalf("ApplyStatesToConfig(%q) did not disable target field %s", key, field.fieldName)
 		}
+	}
+}
+
+func TestDefinitionsIncludeClaudeMidTurnSteeringMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.claudeMidTurnSteering")
+	if !ok {
+		t.Fatal("features.claudeMidTurnSteering definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want experimental", def.Stability)
+	}
+	if def.RiskLevel != RiskHigh {
+		t.Fatalf("RiskLevel = %q, want high", def.RiskLevel)
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+}
+
+// TestDefinitionsIncludeAgentSurvivalMetadata pins the registration for
+// AC-EXECUTORS-SURVIVAL-005.2/5.4: off by default, restart-required, and
+// carrying a host-availability probe (checked separately below).
+func TestDefinitionsIncludeAgentSurvivalMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.agentSurvival")
+	if !ok {
+		t.Fatal("features.agentSurvival definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_AGENT_SURVIVAL" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_AGENT_SURVIVAL", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want experimental", def.Stability)
+	}
+	if def.RiskLevel != RiskHigh {
+		t.Fatalf("RiskLevel = %q, want high", def.RiskLevel)
+	}
+	if def.RiskDescription == "" {
+		t.Fatal("RiskDescription empty")
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+	if !def.Mutable {
+		t.Fatal("Mutable = false, want true")
+	}
+	if def.Available == nil {
+		t.Fatal("Available probe missing; AC-EXECUTORS-SURVIVAL-005.4 requires the platform-unsupported state to be reportable")
+	}
+	defaults, err := profiles.FeatureFlagDefaults()
+	if err != nil {
+		t.Fatalf("profiles.FeatureFlagDefaults: %v", err)
+	}
+	if got := defaults["agent_survival"]; got != "false" {
+		t.Fatalf("profiles.yaml agent_survival default = %q, want %q (AC-EXECUTORS-SURVIVAL-005.2: off by default)", got, "false")
+	}
+}
+
+// TestAgentSurvivalAvailabilityMatchesPlatformScope pins the platform-scope
+// decision (macOS + Linux only) against whatever GOOS this test actually runs
+// on, so the Windows CI job exercises the unavailable branch for real instead
+// of every job only ever seeing "available".
+func TestAgentSurvivalAvailabilityMatchesPlatformScope(t *testing.T) {
+	available, reasonCode := agentSurvivalAvailability()
+	if runtime.GOOS == "windows" {
+		if available {
+			t.Fatal("agentSurvivalAvailability() = available, want unavailable on Windows")
+		}
+		if reasonCode != ReasonPlatformUnsupported {
+			t.Fatalf("reasonCode = %q, want %q", reasonCode, ReasonPlatformUnsupported)
+		}
+		return
+	}
+	if !available {
+		t.Fatalf("agentSurvivalAvailability() = unavailable (%q), want available on %s", reasonCode, runtime.GOOS)
+	}
+	if reasonCode != "" {
+		t.Fatalf("reasonCode = %q, want empty when available", reasonCode)
 	}
 }

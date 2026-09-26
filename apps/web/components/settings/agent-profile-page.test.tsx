@@ -5,6 +5,7 @@ import {
   preserveNewerProfileDraft,
   ProfileEnvVarsEditor,
 } from "@/components/settings/agent-profile-page";
+import { isProfileDirty } from "@/components/settings/agent-profile-dirty";
 import type { AgentProfile, ProfileEnvVar } from "@/lib/types/http";
 
 afterEach(cleanup);
@@ -29,6 +30,32 @@ function EnvVarsHarness({ initialEnvVars = [] }: { initialEnvVars?: ProfileEnvVa
     </>
   );
 }
+
+describe("isProfileDirty", () => {
+  const saved = {
+    id: "p1",
+    name: "default",
+    model: "claude-sonnet-4-5",
+    cliPassthrough: false,
+    enabled: true,
+    cliFlags: [],
+    envVars: [],
+  } as unknown as AgentProfile;
+
+  it("is clean when nothing changed", () => {
+    expect(isProfileDirty({ ...saved }, { ...saved }, {})).toBe(false);
+  });
+
+  it("turning the enabled toggle off marks the profile dirty", () => {
+    expect(isProfileDirty({ ...saved, enabled: false }, { ...saved }, {})).toBe(true);
+  });
+
+  it("missing enabled defaults to true on both sides", () => {
+    const legacy = { ...saved } as unknown as AgentProfile;
+    delete (legacy as { enabled?: boolean }).enabled;
+    expect(isProfileDirty({ ...legacy }, { ...legacy }, {})).toBe(false);
+  });
+});
 
 describe("ProfileEnvVarsEditor", () => {
   it("does not emit unchanged env vars on mount", () => {

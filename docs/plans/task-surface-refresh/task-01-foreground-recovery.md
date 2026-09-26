@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/task-surface-refresh.md"
+spec: "../../specs/ui/requirements/task-surface-refresh.md"
 ---
 
 # Task 01: Foreground recovery

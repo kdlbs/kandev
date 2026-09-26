@@ -13,37 +13,46 @@ import {
 } from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export function GitHubAccessHelp({
   label,
   title,
   description,
   content,
+  icon,
+  onOpen,
 }: {
   label: string;
   title: string;
   description: string;
   content?: ReactNode;
+  icon?: ReactNode;
+  onOpen?: () => void;
 }) {
   const usesTouchDrawer = useTouchDrawer();
   const [open, setOpen] = useState(false);
+  const handleDrawerOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (nextOpen) onOpen?.();
+  };
   const button = (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      className="h-11 w-11 shrink-0 cursor-pointer text-muted-foreground sm:h-6 sm:w-6"
+      className={controlSizingClassName("icon", "shrink-0 cursor-pointer text-muted-foreground")}
       aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
       aria-expanded={usesTouchDrawer ? open : undefined}
       aria-label={label}
     >
-      <IconInfoCircle className="h-4 w-4" />
+      {icon ?? <IconInfoCircle className="h-4 w-4" />}
     </Button>
   );
   const trigger = usesTouchDrawer ? (
     <DrawerTrigger asChild>{button}</DrawerTrigger>
   ) : (
-    <Tooltip>
+    <Tooltip onOpenChange={(nextOpen) => nextOpen && onOpen?.()}>
       <TooltipTrigger asChild>{button}</TooltipTrigger>
       <TooltipContent side="top" align="start" className="max-w-[320px] text-xs leading-relaxed">
         {content ?? description}
@@ -52,7 +61,7 @@ export function GitHubAccessHelp({
   );
 
   return (
-    <Drawer open={open} onOpenChange={setOpen}>
+    <Drawer open={open} onOpenChange={handleDrawerOpenChange}>
       {trigger}
       <DrawerContent>
         <DrawerHeader>
@@ -61,7 +70,11 @@ export function GitHubAccessHelp({
             {description}
           </DrawerDescription>
         </DrawerHeader>
-        {content && <div className="px-4 pb-4">{content}</div>}
+        {content && (
+          <div className="max-h-[min(60dvh,32rem)] overflow-y-auto overscroll-contain px-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+            {content}
+          </div>
+        )}
       </DrawerContent>
     </Drawer>
   );

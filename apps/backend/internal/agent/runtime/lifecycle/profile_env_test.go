@@ -2,10 +2,12 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/secrets"
 )
 
@@ -72,6 +74,33 @@ func TestMergeEnvFillMissingComposesIndexedGitConfigMismatchedCount(t *testing.T
 	}
 }
 
+func TestComposeExecutionRuntimeEnvironmentRemovesObsoleteManagedCredentials(t *testing.T) {
+	base := map[string]string{
+		githubauth.CredentialBrokerURLEnv: "https://broker.example/old",
+		githubauth.CredentialLeaseEnv:     "old-lease",
+		"GIT_CONFIG_COUNT":                "2",
+		"GIT_CONFIG_KEY_0":                "core.hooksPath",
+		"GIT_CONFIG_VALUE_0":              "/user/hooks",
+		"GIT_CONFIG_KEY_1":                "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_1":              "!f() { : " + githubauth.HostGitHubCredentialHelperMarker + "; '/old/gh' auth git-credential \"$@\"; }; f",
+	}
+
+	got, err := composeExecutionRuntimeEnvironment(base, map[string]string{"CURRENT": "yes"})
+	if err != nil {
+		t.Fatalf("composeExecutionRuntimeEnvironment() error = %v", err)
+	}
+	if _, present := got[githubauth.CredentialBrokerURLEnv]; present {
+		t.Fatalf("obsolete broker URL remained: %#v", got)
+	}
+	if _, present := got[githubauth.CredentialLeaseEnv]; present {
+		t.Fatalf("obsolete credential lease remained: %#v", got)
+	}
+	if got["CURRENT"] != "yes" || got["GIT_CONFIG_COUNT"] != "1" ||
+		got["GIT_CONFIG_KEY_0"] != "core.hooksPath" || got["GIT_CONFIG_VALUE_0"] != "/user/hooks" {
+		t.Fatalf("composed runtime environment = %#v, want current value and inherited user config", got)
+	}
+}
+
 func TestResolveAgentProfileEnvVars_SecretAndValue(t *testing.T) {
 	store := newInMemorySecretStore()
 	_ = store.Create(context.Background(), &secrets.SecretWithValue{
@@ -81,14 +110,70 @@ func TestResolveAgentProfileEnvVars_SecretAndValue(t *testing.T) {
 
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	m := &Manager{logger: log, secretStore: store}
-	resolved := m.resolveAgentProfileEnvVars(context.Background(), []settingsmodels.ProfileEnvVar{
+	resolved, err := m.resolveAgentProfileEnvVars(context.Background(), []settingsmodels.ProfileEnvVar{
 		{Key: "PLAIN", Value: "plain"},
 		{Key: "FROM_SECRET", SecretID: "sec-1"},
 	})
+	if err != nil {
+		t.Fatalf("resolveAgentProfileEnvVars: %v", err)
+	}
 	if resolved["PLAIN"] != "plain" {
 		t.Fatalf("PLAIN: got %q", resolved["PLAIN"])
 	}
 	if resolved["FROM_SECRET"] != "secret-value" {
 		t.Fatalf("FROM_SECRET: got %q", resolved["FROM_SECRET"])
+	}
+}
+
+func TestResolveAgentProfileEnvVars_RejectsWorkspaceSecret(t *testing.T) {
+	store := newInMemorySecretStore()
+	if err := store.Create(context.Background(), &secrets.SecretWithValue{
+		Secret: secrets.Secret{ID: "workspace-secret", Name: "workspace", Scope: secrets.ScopeWorkspace, WorkspaceID: "workspace-1"},
+		Value:  "must-not-resolve",
+	}); err != nil {
+		t.Fatalf("seed workspace secret: %v", err)
+	}
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	m := &Manager{logger: log, secretStore: store}
+	resolved, err := m.resolveAgentProfileEnvVars(context.Background(), []settingsmodels.ProfileEnvVar{{
+		Key: "WORKSPACE_ONLY", SecretID: "workspace-secret",
+	}})
+	if err == nil {
+		t.Fatal("workspace secret resolved without an error")
+	}
+	if len(resolved) != 0 {
+		t.Fatalf("workspace secret was resolved into profile environment: %#v", resolved)
+	}
+}
+
+func TestResolveAgentProfileEnvVarsPreservesCancellation(t *testing.T) {
+	for name, cause := range map[string]error{
+		"canceled":          context.Canceled,
+		"deadline exceeded": context.DeadlineExceeded,
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := newInMemorySecretStore()
+			store.revealErr = cause
+			_ = store.Create(context.Background(), &secrets.SecretWithValue{
+				Secret: secrets.Secret{ID: "sec-cancel", Name: "cancel"},
+				Value:  "secret-value",
+			})
+
+			log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+			m := &Manager{logger: log, secretStore: store}
+			resolved, err := m.resolveAgentProfileEnvVars(context.Background(), []settingsmodels.ProfileEnvVar{
+				{Key: "FROM_SECRET", SecretID: "sec-cancel"},
+			})
+			if !errors.Is(err, cause) {
+				t.Fatalf("error = %v, want %v", err, cause)
+			}
+			if errors.Is(err, ErrProfileSecretUnavailable) {
+				t.Fatalf("cancellation was sanitized as a profile secret error: %v", err)
+			}
+			if resolved != nil {
+				t.Fatalf("resolved = %#v, want nil", resolved)
+			}
+		})
 	}
 }

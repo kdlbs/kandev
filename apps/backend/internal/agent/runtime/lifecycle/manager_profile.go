@@ -28,26 +28,34 @@ func (m *Manager) ResolveAgentProfile(ctx context.Context, profileID string) (*A
 // getAgentConfigForExecution retrieves the agent configuration for an execution.
 // The execution must have AgentCommand set (which includes the agent type).
 func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (agents.Agent, error) {
+	agentConfig, _, err := m.getAgentConfigAndProfileForExecution(context.Background(), execution)
+	return agentConfig, err
+}
+
+func (m *Manager) getAgentConfigAndProfileForExecution(ctx context.Context, execution *AgentExecution) (agents.Agent, *AgentProfileInfo, error) {
 	if execution.AgentProfileID == "" {
-		return nil, fmt.Errorf("execution %s has no agent profile ID", execution.ID)
+		return nil, nil, fmt.Errorf("execution %s has no agent profile ID", execution.ID)
 	}
 
 	if m.profileResolver == nil {
-		return nil, fmt.Errorf("profile resolver not configured")
+		return nil, nil, fmt.Errorf("profile resolver not configured")
 	}
 
-	profileInfo, err := m.profileResolver.ResolveProfile(context.Background(), execution.AgentProfileID)
+	profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve profile: %w", err)
+		return nil, nil, fmt.Errorf("failed to resolve profile: %w", err)
+	}
+	if profileInfo == nil {
+		return nil, nil, errors.New("failed to resolve profile: empty profile")
 	}
 
 	agentTypeName := profileInfo.AgentName
 	agentConfig, ok := m.registry.Get(agentTypeName)
 	if !ok {
-		return nil, fmt.Errorf("agent type not found: %s", agentTypeName)
+		return nil, nil, fmt.Errorf("agent type not found: %s", agentTypeName)
 	}
 
-	return agentConfig, nil
+	return agentConfig, profileInfo, nil
 }
 
 // resolveMcpServers centralizes MCP resolution for a session:
@@ -58,7 +66,7 @@ func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecuti
 	if execution == nil {
 		return nil, nil
 	}
-	return m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.Metadata, agentConfig)
+	return m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig)
 }
 
 // applyExecutorMcpPolicy reads executor metadata and applies any executor-scoped MCP policy
@@ -158,6 +166,46 @@ func (m *Manager) resolveProfileSessionConfig(ctx context.Context, profileID str
 	return info.Model, info.Mode, info.ConfigOptions
 }
 
+// resolveProfileSessionConfigAndPolicy resolves the ACP session config and
+// the no-silent-model-fallback policy from a single ResolveProfile call.
+// Session start needs both, so a shared lookup avoids two DB reads of the
+// same profile per session.
+func (m *Manager) resolveProfileSessionConfigAndPolicy(ctx context.Context, profileID string) (string, string, map[string]string, StartModelPolicy) {
+	if profileID == "" || m.profileResolver == nil {
+		return "", "", nil, StartModelPolicy{}
+	}
+	info, err := m.profileResolver.ResolveProfile(ctx, profileID)
+	if err != nil || info == nil {
+		return "", "", nil, StartModelPolicy{}
+	}
+	return info.Model, info.Mode, info.ConfigOptions, StartModelPolicy{
+		Model:             info.Model,
+		FallbackModel:     info.FallbackModel,
+		AutoFallback:      info.AutoFallback,
+		RequireExactModel: info.RequireExactModel,
+	}
+}
+
+// resolveStartModelPolicy resolves the profile's no-silent-model-fallback
+// policy (start model + optional fallback + legacy toggle). Returns a zero
+// policy when the profile cannot be resolved, which the policy helper treats
+// as "no start model configured".
+func (m *Manager) resolveStartModelPolicy(ctx context.Context, profileID string) StartModelPolicy {
+	if profileID == "" || m.profileResolver == nil {
+		return StartModelPolicy{}
+	}
+	info, err := m.profileResolver.ResolveProfile(ctx, profileID)
+	if err != nil || info == nil {
+		return StartModelPolicy{}
+	}
+	return StartModelPolicy{
+		Model:             info.Model,
+		FallbackModel:     info.FallbackModel,
+		AutoFallback:      info.AutoFallback,
+		RequireExactModel: info.RequireExactModel,
+	}
+}
+
 // initializeACPSession delegates to SessionManager for full ACP session initialization and prompting.
 // We pass MarkBootReady (not MarkReady) for the no-prompt branches: dispatchInitialPrompt only
 // invokes the callback when there's no taskDescription/attachments to send, which is a *boot*
@@ -168,12 +216,22 @@ func (m *Manager) resolveProfileSessionConfig(ctx context.Context, profileID str
 // profile defaults. This preserves user-selected model and reasoning-effort
 // values across process recovery.
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
-	profileModel, profileMode, profileConfigOptions := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
+	profileModel, profileMode, profileConfigOptions, policy := m.resolveProfileSessionConfigAndPolicy(ctx, execution.AgentProfileID)
 	runtimeModel, runtimeMode, runtimeConfigOptions := m.sessionRuntimeOverrides(ctx, execution)
+	startupGeneration := execution.startupAttemptSnapshot()
+	markBootReady := func(executionID string) error {
+		return m.markBootReadyForStartup(context.Background(), executionID, startupGeneration)
+	}
+	// The effective runtime model (user-selected, persisted session state)
+	// takes precedence over the profile's start model for the session; the
+	// policy still carries the profile's fallback settings so a gone
+	// effective model is handled the same way (InitializeAndPromptWithLayers
+	// resolves the effective model and applies the policy).
 	return m.sessionManager.InitializeAndPromptWithLayers(
-		ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady,
+		ctx, execution, agentConfig, taskDescription, attachments, mcpServers, markBootReady,
 		profileModel, profileMode, profileConfigOptions,
 		runtimeModel, runtimeMode, runtimeConfigOptions,
+		policy,
 	)
 }
 
@@ -190,12 +248,25 @@ func (m *Manager) sessionRuntimeOverrides(ctx context.Context, execution *AgentE
 }
 
 func (m *Manager) effectiveSessionRuntimeConfig(ctx context.Context, execution *AgentExecution, profileModel, profileMode string, profileConfigOptions map[string]string) (string, string, map[string]string) {
+	model, mode, configOptions, _ := m.effectiveSessionRuntimeConfigWithPresence(
+		ctx, execution, profileModel, profileMode, profileConfigOptions,
+	)
+	return model, mode, configOptions
+}
+
+func (m *Manager) effectiveSessionRuntimeConfigWithPresence(
+	ctx context.Context,
+	execution *AgentExecution,
+	profileModel, profileMode string,
+	profileConfigOptions map[string]string,
+) (string, string, map[string]string, bool) {
 	model := profileModel
 	mode := profileMode
 	configOptions := maps.Clone(profileConfigOptions)
+	configOptionsSet := profileConfigOptions != nil
 	info := m.sessionWorkspaceInfo(ctx, execution)
 	if info == nil {
-		return model, mode, configOptions
+		return model, mode, configOptions, configOptionsSet
 	}
 	if info.RuntimeModel != "" {
 		model = info.RuntimeModel
@@ -205,8 +276,12 @@ func (m *Manager) effectiveSessionRuntimeConfig(ctx context.Context, execution *
 	}
 	if info.RuntimeConfigOptionsSet {
 		configOptions = maps.Clone(info.RuntimeConfigOptions)
+		if configOptions == nil {
+			configOptions = make(map[string]string)
+		}
+		configOptionsSet = true
 	}
-	return model, mode, configOptions
+	return model, mode, configOptions, configOptionsSet
 }
 
 // effectiveSessionMode prefers a session-level permission mode persisted in the

@@ -1,7 +1,7 @@
 name: release
 
-# Maintainer-only release workflow.
-# Trigger: GitHub Actions UI → "Run workflow" (workflow_dispatch).
+# Stable releases are maintainer-dispatched. npm nightlies run from main at
+# 12:00 UTC when main has changed since the latest stable npm release.
 #
 # Flow (one click → everything below):
 #   1. prepare           — bump version, regen CHANGELOG, open + merge release PR, push tag vX.Y.Z
@@ -19,6 +19,7 @@ name: release
 #   9. publish-release   — create GH release with runtime + desktop assets and release notes
 #  10. publish-npm       — publish kandev@X.Y.Z + @kdlbs/runtime-*@X.Y.Z to npmjs
 #  11. update-homebrew-tap — push updated Formula/kandev.rb to kdlbs/homebrew-kandev
+#  12. update-scoop-bucket — push updated bucket/kandev.json to kdlbs/scoop-kandev
 #
 # npm publishing uses Trusted Publishers (OIDC) — no NPM_TOKEN required.
 # Each package (kandev + 5 @kdlbs/runtime-* packages) must have this workflow
@@ -26,6 +27,7 @@ name: release
 #
 # Required repository secret for public releases:
 #   HOMEBREW_TAP_DEPLOY_KEY — SSH private key for kdlbs/homebrew-kandev deploy key
+#   SCOOP_BUCKET_DEPLOY_KEY — SSH private key for kdlbs/scoop-kandev deploy key
 # Required configuration in the `release` environment:
 #   RELEASE_GPG_PRIVATE_KEY — secret containing the ASCII-armored release tag signing key
 #   RELEASE_GPG_FINGERPRINT — variable containing the key's full fingerprint
@@ -39,10 +41,20 @@ name: release
 #   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD — updater artifact signing
 
 on:
+  schedule:
+    - cron: "0 12 * * *"
   workflow_dispatch:
     inputs:
+      channel:
+        description: "Release channel"
+        required: true
+        type: choice
+        default: stable
+        options:
+          - stable
+          - nightly
       bump:
-        description: "Version bump"
+        description: "Stable only: version bump"
         required: true
         type: choice
         default: minor
@@ -51,18 +63,25 @@ on:
           - minor
           - major
       dry_run:
-        description: "Dry run (no PR, tag, npm publish, or tap update)"
+        description: "Validate selected channel without publishing"
         type: boolean
         default: false
       desktop_validation_only:
-        description: "Build desktop artifacts only (no PR, tag, publish, npm, or tap update)"
+        description: "Stable only: build desktop artifacts without publishing"
         type: boolean
         default: false
       backfill_tag:
-        description: "Existing release tag to rebuild/publish (for recovery; leave empty for normal release)"
+        description: "Stable only: existing release tag to rebuild/publish"
         required: false
         default: ""
         type: string
+
+# A Stable tag is pushed before its npm job is ready. Serializing whole runs
+# prevents a Nightly from using the previous npm baseline during that window.
+concurrency:
+  group: release-npm-publication
+  cancel-in-progress: false
+  queue: max
 
 # Default to read-only at the workflow level. Each job opts into the writes
 # it actually needs.
@@ -72,6 +91,7 @@ permissions:
 jobs:
   prepare:
     name: Prepare release (bump version, PR, tag)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' }}
     runs-on: ubuntu-latest
     environment: ${{ (!inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '') && 'release' || 'release-validation' }}
     permissions:
@@ -386,7 +406,8 @@ jobs:
           pnpm -C apps install --no-frozen-lockfile
           git-cliff --tag "$TAG" -o CHANGELOG.md
 
-      - name: Create release PR + squash-merge
+      - name: Create release PR
+        id: release_pr
         if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -395,9 +416,9 @@ jobs:
         run: |
           set -euo pipefail
           # main is protected by a ruleset that requires PRs, so we go through
-          # a release branch + auto-merged PR rather than pushing directly.
+          # a release branch and administrator-merged PR instead of pushing directly.
           BRANCH="release/$TAG"
-          MSG="release: $NEXT"
+          MSG="release: publish $NEXT"
 
           git checkout -b "$BRANCH"
           git add apps/cli/package.json apps/desktop/package.json apps/desktop/src-tauri/Cargo.lock apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/tauri.conf.json CHANGELOG.md apps/pnpm-lock.yaml
@@ -410,22 +431,70 @@ jobs:
           git push origin --delete "$BRANCH" 2>/dev/null || true
           git push -u origin "$BRANCH"
 
-          gh pr create \
+          HEAD_SHA="$(git rev-parse HEAD)"
+          PR_URL="$(gh pr create \
             --title "$MSG" \
             --body "Automated release: \`$NEXT\`" \
             --head "$BRANCH" \
-            --base main
-          # Immediate squash-merge. This relies on main's ruleset requiring
-          # only "PR required" with no status checks. If status checks are
-          # added to the ruleset later, this needs to switch to `--auto` +
-          # polling for merge completion before the tag steps below.
-          gh pr merge "$BRANCH" --squash --delete-branch --subject "$MSG" --body ""
+            --base main)"
+          echo "url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Merge release PR with administrator token
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_BYPASS_TOKEN }}
+          PR_URL: ${{ steps.release_pr.outputs.url }}
+          EXPECTED_HEAD: ${{ steps.release_pr.outputs.head }}
+          MSG: "release: publish ${{ steps.compute.outputs.version }}"
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "RELEASE_PR_BYPASS_TOKEN is required in the release environment." >&2
+            exit 1
+          fi
+          gh pr merge "$PR_URL" \
+            --admin \
+            --squash \
+            --match-head-commit "$EXPECTED_HEAD" \
+            --subject "$MSG" \
+            --body ""
+
+      - name: Select merged release commit
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ steps.release_pr.outputs.url }}
+          EXPECTED_HEAD: ${{ steps.release_pr.outputs.head }}
+        run: |
+          set -euo pipefail
+          PR_JSON="$(gh pr view "$PR_URL" --json state,mergedAt,mergeCommit,headRefOid)"
+          PR_STATE="$(jq -r '.state' <<<"$PR_JSON")"
+          MERGED_AT="$(jq -r '.mergedAt // empty' <<<"$PR_JSON")"
+          PR_HEAD="$(jq -r '.headRefOid' <<<"$PR_JSON")"
+          MERGE_COMMIT="$(jq -r '.mergeCommit.oid // empty' <<<"$PR_JSON")"
+
+          if [ "$PR_STATE" != "MERGED" ] || [ -z "$MERGED_AT" ]; then
+            echo "The release pull request did not merge." >&2
+            exit 1
+          fi
+          if [ "$PR_HEAD" != "$EXPECTED_HEAD" ]; then
+            echo "The merged release pull request head does not match the expected commit." >&2
+            exit 1
+          fi
+          if ! [[ "$MERGE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "The release pull request did not report a valid merge commit." >&2
+            exit 1
+          fi
 
           # Pull the squashed commit into local main. The signing key is not
           # imported until all repository-controlled release work is complete.
           git fetch origin main
-          git checkout main
-          git reset --hard origin/main
+          if ! git merge-base --is-ancestor "$MERGE_COMMIT" origin/main; then
+            echo "The reported release merge commit is not on origin/main." >&2
+            exit 1
+          fi
+          git checkout --detach "$MERGE_COMMIT"
 
       - name: Validate merged release signing public key
         id: merged_release_gpg
@@ -574,15 +643,91 @@ jobs:
           echo "DRY RUN: apps/cli/package.json bumped to $NEXT (in-runner only)."
           echo "DRY RUN: CHANGELOG.md regenerated (in-runner only)."
 
+  nightly-prepare:
+    name: Prepare npm nightly metadata
+    if: >-
+      ${{
+        github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && inputs.channel == 'nightly')
+      }}
+    runs-on: ubuntu-latest
+    outputs:
+      should_publish: ${{ steps.metadata.outputs.should_publish }}
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
+      ref: ${{ steps.metadata.outputs.ref }}
+      stable_version: ${{ steps.metadata.outputs.stable_version }}
+      nightly_version_at_start: ${{ steps.metadata.outputs.nightly_version_at_start }}
+      nightly_tags_at_start: ${{ steps.metadata.outputs.nightly_tags_at_start }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Validate manual Nightly request
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          CURRENT_REF: ${{ github.ref }}
+          DESKTOP_VALIDATION_ONLY: ${{ inputs.desktop_validation_only }}
+          BACKFILL_TAG: ${{ inputs.backfill_tag }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          if [ "$CURRENT_REF" != "refs/heads/main" ]; then
+            echo "Manual Nightlies must be dispatched from refs/heads/main (got $CURRENT_REF)." >&2
+            exit 1
+          fi
+          if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then
+            echo "desktop_validation_only cannot be combined with channel=nightly." >&2
+            exit 1
+          fi
+          if [ -n "$BACKFILL_TAG" ]; then
+            echo "backfill_tag cannot be combined with channel=nightly." >&2
+            exit 1
+          fi
+          echo "::notice::The Stable-only bump input ($BUMP) is ignored for Nightly."
+
+      - name: Resolve nightly metadata
+        id: metadata
+        run: |
+          bash scripts/release/nightly-release.sh prepare \
+            --scheduled-sha "${{ github.sha }}" \
+            --output "$GITHUB_OUTPUT"
+
+      - name: Nightly dry-run summary
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        env:
+          SHOULD_PUBLISH: ${{ steps.metadata.outputs.should_publish }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+          REF: ${{ steps.metadata.outputs.ref }}
+        run: |
+          if [ "$SHOULD_PUBLISH" = "true" ]; then
+            echo "DRY RUN: Would publish $VERSION from $REF under npm's nightly dist-tag."
+          else
+            echo "DRY RUN: Nightly preflight found no eligible publication."
+          fi
+          echo "DRY RUN: No bundles were built and npm was not changed."
+
   build-web:
     name: Build web SPA
-    needs: prepare
-    if: ${{ !inputs.dry_run }}
+    needs: [prepare, nightly-prepare]
+    if: >-
+      ${{ !cancelled() && (
+        (github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && needs.prepare.result == 'success' && !inputs.dry_run) ||
+        ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.channel == 'nightly' && !inputs.dry_run)) && needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.should_publish == 'true')
+      ) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.ref || needs.prepare.outputs.ref }}
           persist-credentials: false
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
@@ -596,20 +741,73 @@ jobs:
         run: pnpm -C apps install --frozen-lockfile
       - name: Build web (Vite)
         env:
-          KANDEV_VERSION: ${{ needs.prepare.outputs.tag }}
+          KANDEV_VERSION: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.tag || needs.prepare.outputs.tag }}
           VITE_KANDEV_API_PORT: ""
           VITE_KANDEV_DEBUG: ""
         run: pnpm -C apps --filter @kandev/web build
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+      - name: Upload web bundle (attempt 1)
+        id: upload_web_bundle_1
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: web-bundle
           path: apps/web/dist
+          if-no-files-found: error
           include-hidden-files: true
+
+      - name: Wait before web bundle upload retry (attempt 2)
+        if: steps.upload_web_bundle_1.outcome == 'failure'
+        run: |
+          echo "::warning::web-bundle upload attempt 1/3 failed; retrying in 30 seconds."
+          sleep 30
+
+      - name: Upload web bundle (attempt 2)
+        id: upload_web_bundle_2
+        if: steps.upload_web_bundle_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: web-bundle
+          path: apps/web/dist
+          if-no-files-found: error
+          include-hidden-files: true
+          overwrite: true
+
+      - name: Wait before web bundle upload retry (attempt 3)
+        if: steps.upload_web_bundle_2.outcome == 'failure'
+        run: |
+          echo "::warning::web-bundle upload attempt 2/3 failed; retrying in 60 seconds."
+          sleep 60
+
+      - name: Upload web bundle (attempt 3)
+        id: upload_web_bundle_3
+        if: steps.upload_web_bundle_2.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: web-bundle
+          path: apps/web/dist
+          if-no-files-found: error
+          include-hidden-files: true
+          overwrite: true
+
+      - name: Fail after web bundle upload retries
+        if: >-
+          steps.upload_web_bundle_1.outcome == 'failure' &&
+          steps.upload_web_bundle_2.outcome == 'failure' &&
+          steps.upload_web_bundle_3.outcome == 'failure'
+        run: |
+          echo "::error::web-bundle upload failed after 3 attempts." >&2
+          exit 1
 
   build-bundles:
     name: Build platform bundle (${{ matrix.platform }})
-    needs: [prepare, build-web]
-    if: ${{ !inputs.dry_run }}
+    needs: [prepare, nightly-prepare, build-web]
+    if: >-
+      ${{ !cancelled() && needs.build-web.result == 'success' && (
+        (github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && needs.prepare.result == 'success' && !inputs.dry_run) ||
+        ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.channel == 'nightly' && !inputs.dry_run)) && needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.should_publish == 'true')
+      ) }}
     strategy:
       matrix:
         include:
@@ -642,13 +840,13 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.ref || needs.prepare.outputs.ref }}
           persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: web-bundle
           path: apps/backend/internal/webapp/embedded/generated
@@ -671,7 +869,7 @@ jobs:
       - name: Build backend binaries
         env:
           CC: ${{ matrix.cc || '' }}
-          KANDEV_VERSION: ${{ needs.prepare.outputs.tag }}
+          KANDEV_VERSION: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.tag || needs.prepare.outputs.tag }}
         run: |
           test -f apps/backend/internal/webapp/embedded/generated/index.html
           cd apps/backend
@@ -711,22 +909,98 @@ jobs:
           cp apps/backend/bin/agentctl-linux-arm64 dist/kandev/bin/
           cp apps/backend/bin/agentctl-darwin-arm64 dist/kandev/bin/
           cp apps/backend/bin/agentctl-darwin-amd64 dist/kandev/bin/
+          bash scripts/release/package-bundle.sh --bundle-dir dist/kandev
           cd dist
           tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev
           shasum -a 256 "kandev-${{ matrix.platform }}.tar.gz" > "kandev-${{ matrix.platform }}.tar.gz.sha256"
+          # Windows package managers cannot consume the tarball: winget's
+          # InstallerType enum accepts zip as its only archive format, and
+          # Chocolatey's unzip helper needs two 7-Zip passes for a .tar.gz.
+          # The zip is published alongside the tarball, not instead of it —
+          # Homebrew and the npm runtime packages still read the tarball.
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip -qr "kandev-${{ matrix.platform }}.zip" kandev
+            shasum -a 256 "kandev-${{ matrix.platform }}.zip" > "kandev-${{ matrix.platform }}.zip.sha256"
+          fi
 
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+      - name: Upload runtime bundle (attempt 1)
+        id: upload_runtime_bundle_1
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bundle-${{ matrix.platform }}
+          # The zip entries match nothing on the four non-Windows platforms.
+          path: |
+            dist/kandev-${{ matrix.platform }}.tar.gz
+            dist/kandev-${{ matrix.platform }}.tar.gz.sha256
+            dist/kandev-${{ matrix.platform }}.zip
+            dist/kandev-${{ matrix.platform }}.zip.sha256
+          if-no-files-found: error
+
+      - name: Wait before runtime bundle upload retry (attempt 2)
+        if: steps.upload_runtime_bundle_1.outcome == 'failure'
+        run: |
+          echo "::warning::${{ matrix.platform }} runtime bundle upload attempt 1/3 failed; retrying in 30 seconds."
+          sleep 30
+
+      - name: Upload runtime bundle (attempt 2)
+        id: upload_runtime_bundle_2
+        if: steps.upload_runtime_bundle_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bundle-${{ matrix.platform }}
           path: |
             dist/kandev-${{ matrix.platform }}.tar.gz
             dist/kandev-${{ matrix.platform }}.tar.gz.sha256
+            dist/kandev-${{ matrix.platform }}.zip
+            dist/kandev-${{ matrix.platform }}.zip.sha256
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Wait before runtime bundle upload retry (attempt 3)
+        if: steps.upload_runtime_bundle_2.outcome == 'failure'
+        run: |
+          echo "::warning::${{ matrix.platform }} runtime bundle upload attempt 2/3 failed; retrying in 60 seconds."
+          sleep 60
+
+      - name: Upload runtime bundle (attempt 3)
+        id: upload_runtime_bundle_3
+        if: steps.upload_runtime_bundle_2.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bundle-${{ matrix.platform }}
+          path: |
+            dist/kandev-${{ matrix.platform }}.tar.gz
+            dist/kandev-${{ matrix.platform }}.tar.gz.sha256
+            dist/kandev-${{ matrix.platform }}.zip
+            dist/kandev-${{ matrix.platform }}.zip.sha256
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Fail after runtime bundle upload retries
+        if: >-
+          steps.upload_runtime_bundle_1.outcome == 'failure' &&
+          steps.upload_runtime_bundle_2.outcome == 'failure' &&
+          steps.upload_runtime_bundle_3.outcome == 'failure'
+        run: |
+          echo "::error::${{ matrix.platform }} runtime bundle upload failed after 3 attempts." >&2
+          exit 1
 
   build-desktop:
     name: Build desktop app (${{ matrix.platform }})
     needs: [prepare, build-bundles]
-    if: ${{ !inputs.dry_run }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        needs.prepare.result == 'success' &&
+        needs.build-bundles.result == 'success'
+      }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - platform: macos-arm64
@@ -836,7 +1110,7 @@ jobs:
       - name: Install dependencies
         run: pnpm -C apps install --frozen-lockfile
 
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bundle-${{ matrix.platform }}
           path: dist/desktop-runtime
@@ -1130,7 +1404,7 @@ jobs:
 
       - name: Upload macOS desktop diagnostics
         if: failure() && startsWith(matrix.platform, 'macos-')
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-diagnostics-${{ matrix.platform }}
           path: |
@@ -1257,10 +1531,57 @@ jobs:
           fi
           ls -lh "$out_dir"
 
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+      - name: Upload desktop artifacts (attempt 1)
+        id: upload_desktop_artifacts_1
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-${{ matrix.platform }}
           path: dist/desktop-artifacts/*
+          if-no-files-found: error
+
+      - name: Wait before desktop artifact upload retry (attempt 2)
+        if: steps.upload_desktop_artifacts_1.outcome == 'failure'
+        run: |
+          echo "::warning::${{ matrix.platform }} desktop artifact upload attempt 1/3 failed; retrying in 30 seconds."
+          sleep 30
+
+      - name: Upload desktop artifacts (attempt 2)
+        id: upload_desktop_artifacts_2
+        if: steps.upload_desktop_artifacts_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: dist/desktop-artifacts/*
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Wait before desktop artifact upload retry (attempt 3)
+        if: steps.upload_desktop_artifacts_2.outcome == 'failure'
+        run: |
+          echo "::warning::${{ matrix.platform }} desktop artifact upload attempt 2/3 failed; retrying in 60 seconds."
+          sleep 60
+
+      - name: Upload desktop artifacts (attempt 3)
+        id: upload_desktop_artifacts_3
+        if: steps.upload_desktop_artifacts_2.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: dist/desktop-artifacts/*
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Fail after desktop artifact upload retries
+        if: >-
+          steps.upload_desktop_artifacts_1.outcome == 'failure' &&
+          steps.upload_desktop_artifacts_2.outcome == 'failure' &&
+          steps.upload_desktop_artifacts_3.outcome == 'failure'
+        run: |
+          echo "::error::${{ matrix.platform }} desktop artifact upload failed after 3 attempts." >&2
+          exit 1
 
   # ---------------------------------------------------------------------------
   # Docker base image — split per arch onto native runners, then stitched into
@@ -1271,7 +1592,15 @@ jobs:
   docker-amd64:
     name: Build & push container image (amd64)
     needs: [prepare, build-bundles]
-    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.build-bundles.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1285,7 +1614,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bundle-linux-x64
           path: dist/bundle
@@ -1299,10 +1628,10 @@ jobs:
           tar -xzf dist/bundle/kandev-linux-x64.tar.gz --strip-components=1 -C ctx/bundle
           cp docker-entrypoint.sh ctx/
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Login to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1315,34 +1644,58 @@ jobs:
       # page link + provenance tooling rely on these annotations.
       - name: Docker metadata (labels)
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/kdlbs/kandev
 
+      # The inline Buildx command uses the GHA cache backend directly. This
+      # helper exposes ACTIONS_RUNTIME_TOKEN and ACTIONS_CACHE_URL, which
+      # docker/build-push-action normally prepares for its own invocation.
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+
       - name: Build and push (amd64 staging tag)
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: ./ctx
-          file: ./Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: ${{ env.STAGING_IMAGE }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # provenance/sbom would attach an extra attestation manifest, which
-          # turns `imagetools inspect --raw` into an OCI index and breaks the
-          # size gate's `.layers[].size` query. The final multi-arch tags
-          # don't preserve attestations through `imagetools create` anyway,
-          # so disabling here doesn't change user-facing image content.
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=base-amd64
-          cache-to: type=gha,mode=max,scope=base-amd64
+        env:
+          DOCKER_LABELS: ${{ steps.meta.outputs.labels }}
+        run: |
+          set -euo pipefail
+          metadata_file="$RUNNER_TEMP/docker-metadata.json"
+          label_args=()
+          while IFS= read -r label; do
+            [ -z "$label" ] && continue
+            label_args+=(--label "$label")
+          done <<<"$DOCKER_LABELS"
+
+          bash scripts/release/retry-ghcr-command.sh \
+            docker buildx build \
+            --file ./Dockerfile \
+            --platform linux/amd64 \
+            --push \
+            --tag "$STAGING_IMAGE" \
+            "${label_args[@]}" \
+            --provenance=false \
+            --sbom=false \
+            --cache-from type=gha,scope=base-amd64 \
+            --cache-to type=gha,mode=max,scope=base-amd64 \
+            --metadata-file "$metadata_file" \
+            ./ctx
+
+          digest="$(jq -er '."containerimage.digest"' "$metadata_file")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
   docker-arm64:
     name: Build & push container image (arm64)
-    needs: [prepare, build-bundles]
-    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
+    needs: [prepare, build-bundles, docker-amd64]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.build-bundles.result == 'success' &&
+        needs.docker-amd64.result == 'success'
+      }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -1352,11 +1705,12 @@ jobs:
     env:
       STAGING_IMAGE: ghcr.io/kdlbs/kandev:base-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-arm64
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bundle-linux-arm64
           path: dist/bundle
@@ -1368,10 +1722,10 @@ jobs:
           tar -xzf dist/bundle/kandev-linux-arm64.tar.gz --strip-components=1 -C ctx/bundle
           cp docker-entrypoint.sh ctx/
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Login to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1379,37 +1733,68 @@ jobs:
 
       - name: Docker metadata (labels)
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/kdlbs/kandev
 
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+
       - name: Build and push (arm64 staging tag)
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: ./ctx
-          file: ./Dockerfile
-          push: true
-          platforms: linux/arm64
-          tags: ${{ env.STAGING_IMAGE }}
-          labels: ${{ steps.meta.outputs.labels }}
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=base-arm64
-          cache-to: type=gha,mode=max,scope=base-arm64
+        env:
+          DOCKER_LABELS: ${{ steps.meta.outputs.labels }}
+        run: |
+          set -euo pipefail
+          metadata_file="$RUNNER_TEMP/docker-metadata.json"
+          label_args=()
+          while IFS= read -r label; do
+            [ -z "$label" ] && continue
+            label_args+=(--label "$label")
+          done <<<"$DOCKER_LABELS"
+
+          bash scripts/release/retry-ghcr-command.sh \
+            docker buildx build \
+            --file ./Dockerfile \
+            --platform linux/arm64 \
+            --push \
+            --tag "$STAGING_IMAGE" \
+            "${label_args[@]}" \
+            --provenance=false \
+            --sbom=false \
+            --cache-from type=gha,scope=base-arm64 \
+            --cache-to type=gha,mode=max,scope=base-arm64 \
+            --metadata-file "$metadata_file" \
+            ./ctx
+
+          digest="$(jq -er '."containerimage.digest"' "$metadata_file")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
   docker-manifest:
     name: Assemble multi-arch base manifest
     needs: [prepare, docker-amd64, docker-arm64]
-    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.docker-amd64.result == 'success' &&
+        needs.docker-arm64.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/kdlbs/kandev
           tags: |
@@ -1418,10 +1803,10 @@ jobs:
             type=sha
             type=raw,value=latest
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Login to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1445,7 +1830,9 @@ jobs:
             [ -z "$tag" ] && continue
             tag_args+=(--tag "$tag")
           done <<<"$TAGS"
-          docker buildx imagetools create "${tag_args[@]}" "$AMD64_REF" "$ARM64_REF"
+          bash scripts/release/retry-ghcr-command.sh \
+            docker buildx imagetools create \
+            "${tag_args[@]}" "$AMD64_REF" "$ARM64_REF"
 
   # ---------------------------------------------------------------------------
   # Universal image — same per-arch native split, on top of the base image
@@ -1455,7 +1842,15 @@ jobs:
   docker-universal-amd64:
     name: Build & push universal image (amd64)
     needs: [prepare, docker-manifest]
-    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.docker-manifest.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1469,10 +1864,10 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Login to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1480,34 +1875,56 @@ jobs:
 
       - name: Docker metadata (labels)
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/kdlbs/kandev
 
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+
       - name: Build and push (universal amd64 staging tag)
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: Dockerfile.universal
-          push: true
-          platforms: linux/amd64
-          build-args: |
-            BASE_IMAGE=ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}
-          tags: ${{ env.STAGING_IMAGE }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # provenance/sbom off so `imagetools inspect --raw` on the staging
-          # tag returns the plain image manifest, not an OCI index — required
-          # by the size gate in docker-universal-manifest.
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=universal-amd64
-          cache-to: type=gha,mode=max,scope=universal-amd64
+        env:
+          DOCKER_LABELS: ${{ steps.meta.outputs.labels }}
+        run: |
+          set -euo pipefail
+          metadata_file="$RUNNER_TEMP/docker-metadata.json"
+          label_args=()
+          while IFS= read -r label; do
+            [ -z "$label" ] && continue
+            label_args+=(--label "$label")
+          done <<<"$DOCKER_LABELS"
+
+          bash scripts/release/retry-ghcr-command.sh \
+            docker buildx build \
+            --file Dockerfile.universal \
+            --platform linux/amd64 \
+            --push \
+            --build-arg BASE_IMAGE="ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}" \
+            --tag "$STAGING_IMAGE" \
+            "${label_args[@]}" \
+            --provenance=false \
+            --sbom=false \
+            --cache-from type=gha,scope=universal-amd64 \
+            --cache-to type=gha,mode=max,scope=universal-amd64 \
+            --metadata-file "$metadata_file" \
+            .
+
+          digest="$(jq -er '."containerimage.digest"' "$metadata_file")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
   docker-universal-arm64:
     name: Build & push universal image (arm64)
-    needs: [prepare, docker-manifest]
-    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
+    needs: [prepare, docker-manifest, docker-universal-amd64]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.docker-manifest.result == 'success' &&
+        needs.docker-universal-amd64.result == 'success'
+      }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -1517,14 +1934,15 @@ jobs:
     env:
       STAGING_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-arm64
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Login to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1532,33 +1950,58 @@ jobs:
 
       - name: Docker metadata (labels)
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/kdlbs/kandev
 
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+
       - name: Build and push (universal arm64 staging tag)
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: Dockerfile.universal
-          push: true
-          platforms: linux/arm64
-          build-args: |
-            BASE_IMAGE=ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}
-          tags: ${{ env.STAGING_IMAGE }}
-          labels: ${{ steps.meta.outputs.labels }}
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=universal-arm64
-          cache-to: type=gha,mode=max,scope=universal-arm64
+        env:
+          DOCKER_LABELS: ${{ steps.meta.outputs.labels }}
+        run: |
+          set -euo pipefail
+          metadata_file="$RUNNER_TEMP/docker-metadata.json"
+          label_args=()
+          while IFS= read -r label; do
+            [ -z "$label" ] && continue
+            label_args+=(--label "$label")
+          done <<<"$DOCKER_LABELS"
+
+          bash scripts/release/retry-ghcr-command.sh \
+            docker buildx build \
+            --file Dockerfile.universal \
+            --platform linux/arm64 \
+            --push \
+            --build-arg BASE_IMAGE="ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}" \
+            --tag "$STAGING_IMAGE" \
+            "${label_args[@]}" \
+            --provenance=false \
+            --sbom=false \
+            --cache-from type=gha,scope=universal-arm64 \
+            --cache-to type=gha,mode=max,scope=universal-arm64 \
+            --metadata-file "$metadata_file" \
+            .
+
+          digest="$(jq -er '."containerimage.digest"' "$metadata_file")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
   docker-universal-manifest:
     name: Gate size + promote universal manifest
     # docker-universal-manifest is included in publish-release's `needs` so
     # its size gate (and any per-arch build failure) blocks the release.
     needs: [prepare, docker-universal-amd64, docker-universal-arm64]
-    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.docker-universal-amd64.result == 'success' &&
+        needs.docker-universal-arm64.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1567,10 +2010,15 @@ jobs:
       AMD64_REF: ghcr.io/kdlbs/kandev@${{ needs.docker-universal-amd64.outputs.digest }}
       ARM64_REF: ghcr.io/kdlbs/kandev@${{ needs.docker-universal-arm64.outputs.digest }}
     steps:
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Login to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1606,7 +2054,8 @@ jobs:
       - name: Promote staging to final tags
         run: |
           set -euo pipefail
-          docker buildx imagetools create \
+          bash scripts/release/retry-ghcr-command.sh \
+            docker buildx imagetools create \
             --tag "ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.version }}-universal" \
             --tag "ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}-universal" \
             --tag "ghcr.io/kdlbs/kandev:universal" \
@@ -1615,7 +2064,17 @@ jobs:
   publish-release:
     name: Publish GitHub release
     needs: [prepare, build-bundles, build-desktop, docker-universal-manifest]
-    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.build-bundles.result == 'success' &&
+        needs.build-desktop.result == 'success' &&
+        needs.docker-universal-manifest.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: write    # softprops/action-gh-release creates the release
@@ -1666,8 +2125,10 @@ jobs:
           set -euo pipefail
 
           unsigned=()
+          macos_unsigned=false
           if ! bash scripts/release/desktop-signing-ready.sh macos >/dev/null 2>&1; then
             unsigned+=("macOS")
+            macos_unsigned=true
           fi
           if ! bash scripts/release/desktop-signing-ready.sh windows >/dev/null 2>&1; then
             unsigned+=("Windows")
@@ -1685,18 +2146,26 @@ jobs:
             echo "> [!WARNING]"
             echo "> $platforms desktop installers in this release are unsigned development builds."
             echo "> They may require manual OS security bypasses and are not trusted downloads."
+            if [ "$macos_unsigned" = "true" ]; then
+              echo ">"
+              echo "> If macOS blocks Kandev after you verify the checksum, run:"
+              echo ">"
+              echo '> ```bash'
+              echo "> xattr -d com.apple.quarantine /Applications/Kandev.app"
+              echo '> ```'
+            fi
             echo
             cat RELEASE_NOTES.md
           } > "$tmp"
           mv "$tmp" RELEASE_NOTES.md
 
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: bundle-*
           path: dist/release-assets
           merge-multiple: true
 
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: desktop-*
           path: dist/release-assets
@@ -1715,6 +2184,17 @@ jobs:
             fi
             if [ ! -f "$checksum" ]; then
               echo "Missing required checksum: $checksum" >&2
+              exit 1
+            fi
+          done
+          # The Windows zip is the only archive winget and Chocolatey can read.
+          # Losing it would break those channels while every other check here
+          # still passed, so it is verified explicitly.
+          for artifact in \
+            dist/release-assets/kandev-windows-x64.zip \
+            dist/release-assets/kandev-windows-x64.zip.sha256; do
+            if [ ! -f "$artifact" ]; then
+              echo "Missing required Windows artifact: $artifact" >&2
               exit 1
             fi
           done
@@ -1746,7 +2226,7 @@ jobs:
           fi
 
       - name: Publish release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: ${{ needs.prepare.outputs.tag }}
@@ -1758,6 +2238,8 @@ jobs:
             dist/release-assets/kandev-macos-*.tar.gz.sha256
             dist/release-assets/kandev-windows-*.tar.gz
             dist/release-assets/kandev-windows-*.tar.gz.sha256
+            dist/release-assets/kandev-windows-*.zip
+            dist/release-assets/kandev-windows-*.zip.sha256
             dist/release-assets/kandev-desktop-*
             dist/release-assets/latest.json
           preserve_order: true
@@ -1765,7 +2247,15 @@ jobs:
   publish-npm:
     name: Publish npm packages
     needs: [prepare, publish-release]
-    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write    # Required for OIDC trusted publishing
@@ -1794,13 +2284,76 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           bash scripts/release/publish-npm.sh \
-            "${{ needs.prepare.outputs.version }}" \
-            "${{ needs.prepare.outputs.tag }}"
+            --version "${{ needs.prepare.outputs.version }}" \
+            --dist-tag latest \
+            --release-tag "${{ needs.prepare.outputs.tag }}"
+
+  publish-npm-nightly:
+    name: Publish npm nightly packages
+    needs: [nightly-prepare, build-bundles]
+    if: >-
+      ${{ !cancelled() &&
+        (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.channel == 'nightly' && !inputs.dry_run)) &&
+        needs.nightly-prepare.result == 'success' &&
+        needs.nightly-prepare.outputs.should_publish == 'true' &&
+        needs.build-bundles.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write    # Required for OIDC trusted publishing
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.nightly-prepare.outputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: "9.15.9"
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm -C apps install --frozen-lockfile
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: bundle-*
+          path: dist/nightly-assets
+          merge-multiple: true
+
+      - name: Publish npm nightly packages
+        env:
+          NIGHTLY_BASELINE: ${{ needs.nightly-prepare.outputs.stable_version }}
+          NIGHTLY_AT_START: ${{ needs.nightly-prepare.outputs.nightly_version_at_start }}
+          NIGHTLY_TAGS_AT_START: ${{ needs.nightly-prepare.outputs.nightly_tags_at_start }}
+        run: |
+          bash scripts/release/nightly-release.sh publish \
+            --stable-at-start "$NIGHTLY_BASELINE" \
+            --nightly-at-start "$NIGHTLY_AT_START" \
+            --tags-at-start "$NIGHTLY_TAGS_AT_START" \
+            --version "${{ needs.nightly-prepare.outputs.version }}" \
+            --assets-dir dist/nightly-assets
 
   update-homebrew-tap:
     name: Update Homebrew tap
     needs: [prepare, publish-release]
-    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success'
+      }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -1813,5 +2366,47 @@ jobs:
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: |
           bash scripts/release/update-homebrew-tap.sh \
+            "${{ needs.prepare.outputs.version }}" \
+            "${{ needs.prepare.outputs.tag }}"
+
+  update-scoop-bucket:
+    name: Update Scoop bucket
+    needs: [prepare, publish-release]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # Backfill application artifacts come from the selected tag, but the
+          # publication helper must come from the current workflow revision.
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Require Scoop bucket deploy key
+        env:
+          SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SCOOP_BUCKET_DEPLOY_KEY" ]; then
+            echo "::error::SCOOP_BUCKET_DEPLOY_KEY is required to publish the Scoop bucket." >&2
+            exit 1
+          fi
+
+      - name: Update Scoop bucket
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
+        run: |
+          bash scripts/release/update-scoop-bucket.sh \
             "${{ needs.prepare.outputs.version }}" \
             "${{ needs.prepare.outputs.tag }}"

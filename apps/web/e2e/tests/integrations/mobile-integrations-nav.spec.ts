@@ -16,8 +16,8 @@ test.describe("Integrations section on mobile", () => {
     testPage,
     apiClient,
   }) => {
-    // Make GitHub report authenticated so useConfiguredIntegrationLinks yields
-    // the GitHub link before the page loads its status.
+    // Make GitHub report authenticated so the navigation manifest resolves the
+    // GitHub destination before the page loads its status.
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
 
@@ -30,6 +30,8 @@ test.describe("Integrations section on mobile", () => {
     // sidebar that shares the same "GitHub" link accessible name.
     const sheet = testPage.getByRole("dialog");
     await expect(sheet.getByText("Integrations", { exact: true })).toBeVisible();
+
+    await sheet.getByRole("button", { name: "Integrations", exact: true }).click();
 
     const githubLink = sheet.getByRole("link", { name: "GitHub" });
     await expect(githubLink).toBeVisible({ timeout: 10_000 });

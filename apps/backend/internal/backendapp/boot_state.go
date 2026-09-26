@@ -75,20 +75,38 @@ func bootInitialState(
 			return state
 		}
 	}
+	if p.agentRuntimeAvailability != nil {
+		if snapshot, ok := p.agentRuntimeAvailability.Snapshot(); ok {
+			state["agentRuntime"] = snapshot
+		}
+	}
+	builder.addAgentProfileRecentUseState(ctx, state)
 
 	if route.Route == webapp.RouteSettings {
-		builder.addWorkspaceState(ctx, state, nil)
-		builder.addUserSettingsState(ctx, state, "")
+		// Resolve an active workspace rather than emitting null. The SPA derives
+		// Office-vs-kanban chrome from the active workspace record, so a settings
+		// boot that names no workspace leaves the sidebar unable to tell which
+		// mode it is in until the client's own fetch lands.
+		// One workspace snapshot for both selection and serialisation: listing
+		// twice could name an activeId that a concurrent deletion has already
+		// removed from items.
+		workspaces, ok := builder.listBootWorkspaces(ctx)
+		activeID := ""
+		if ok {
+			activeID = builder.settingsWorkspaceID(ctx, req, workspaces)
+			builder.addWorkspaceStateFrom(workspaces, state, &activeID)
+		}
+		builder.addUserSettingsState(ctx, state, activeID)
 		builder.addSettingsRouteState(ctx, state, route.Path)
 	}
-	// Home and unknown SPA routes both render the full app shell (nav,
+	// Home, Threads, and unknown SPA routes all render the full app shell (nav,
 	// workspace picker) without a route-specific data payload. Unknown
 	// covers plugin-owned routes (e.g. /github-plugin) registered at
 	// runtime, which the backend classifier can't enumerate — they still
 	// need the base workspace/workflow/kanban context so native plugin UI
 	// (like host.ui.TaskCreateDialog) has workspaces and workflows to work
 	// with, not an empty store.
-	if route.Route == webapp.RouteHome || route.Route == webapp.RouteUnknown {
+	if route.Route == webapp.RouteHome || route.Route == webapp.RouteThreads || route.Route == webapp.RouteUnknown {
 		builder.addHomeKanbanRouteState(ctx, req, state)
 	}
 	if route.Route == webapp.RouteTasks {
@@ -103,6 +121,7 @@ func bootInitialState(
 		builder.addOfficeRouteState(ctx, req, state)
 	}
 	builder.addQuickChatState(ctx, req, state, route)
+	builder.addNeedsYouInboxState(ctx, req, state, route)
 	return state
 }
 
@@ -147,14 +166,32 @@ type bootStateBuilder struct {
 }
 
 func (b bootStateBuilder) addWorkspaceState(ctx context.Context, state map[string]any, activeID *string) {
-	if b.p.taskSvc == nil {
+	workspaces, ok := b.listBootWorkspaces(ctx)
+	if !ok {
 		return
+	}
+	b.addWorkspaceStateFrom(workspaces, state, activeID)
+}
+
+// listBootWorkspaces returns the workspace snapshot a boot payload is built
+// from; ok is false when the service is unavailable or the listing fails.
+func (b bootStateBuilder) listBootWorkspaces(ctx context.Context) ([]*taskmodels.Workspace, bool) {
+	if b.p.taskSvc == nil {
+		return nil, false
 	}
 	workspaces, err := b.p.taskSvc.ListWorkspaces(ctx)
 	if err != nil {
 		b.logBootError("list workspaces", err)
-		return
+		return nil, false
 	}
+	return workspaces, true
+}
+
+func (b bootStateBuilder) addWorkspaceStateFrom(
+	workspaces []*taskmodels.Workspace,
+	state map[string]any,
+	activeID *string,
+) {
 	items := make([]taskdto.WorkspaceDTO, 0, len(workspaces))
 	for _, workspace := range workspaces {
 		if workspace == nil {
@@ -172,6 +209,30 @@ func (b bootStateBuilder) addWorkspaceState(ctx context.Context, state map[strin
 	}
 }
 
+// settingsWorkspaceID resolves the active workspace for a /settings boot:
+// whatever the user last had active, then their stored preference, then the
+// first workspace that exists.
+//
+// Deliberately not filtered to kanban workspaces. Settings is shared chrome —
+// reachable from either mode — so preferring a kanban workspace here would
+// silently switch an Office user's active workspace just by opening Settings.
+func (b bootStateBuilder) settingsWorkspaceID(
+	ctx context.Context,
+	req *http.Request,
+	workspaces []*taskmodels.Workspace,
+) string {
+	settingsWorkspaceID := ""
+	if settings, ok := b.userSettings(ctx); ok {
+		settingsWorkspaceID = settings.Settings.WorkspaceID
+	}
+	return firstValidID(
+		workspaceIDSet(workspaces),
+		readActiveWorkspaceCookie(req),
+		settingsWorkspaceID,
+		firstWorkspaceID(workspaces),
+	)
+}
+
 func (b bootStateBuilder) addUserSettingsState(ctx context.Context, state map[string]any, workspaceID string) {
 	if b.p.userCtrl == nil {
 		return
@@ -182,6 +243,30 @@ func (b bootStateBuilder) addUserSettingsState(ctx context.Context, state map[st
 		return
 	}
 	state["userSettings"] = mapUserSettingsState(response, workspaceID)
+}
+
+func (b bootStateBuilder) addAgentProfileRecentUseState(ctx context.Context, state map[string]any) {
+	if b.p.userCtrl == nil {
+		return
+	}
+	records, err := b.p.userCtrl.GetAgentProfileRecentUse(ctx)
+	if err != nil {
+		b.logBootError("get agent profile recent use", err)
+		return
+	}
+	state["agentProfileRecentUse"] = mapAgentProfileRecentUseState(records)
+}
+
+func mapAgentProfileRecentUseState(records []userdto.AgentProfileRecentUseDTO) map[string]any {
+	byContext := make(map[string]any, len(records))
+	for _, record := range records {
+		byContext[string(record.Context)] = map[string]any{
+			"profileIds": append([]string{}, record.ProfileIDs...),
+			"revision":   record.Revision,
+			"updatedAt":  record.UpdatedAt,
+		}
+	}
+	return map[string]any{"records": byContext, "loaded": true}
 }
 
 func (b bootStateBuilder) addSettingsRouteState(ctx context.Context, state map[string]any, path string) {
@@ -258,6 +343,8 @@ func (b bootStateBuilder) addHomeKanbanRouteState(ctx context.Context, req *http
 		state["userSettings"] = mapUserSettingsStateWithWorkflow(settings, activeWorkspaceID, activeWorkflowID)
 	}
 	b.addRepositoriesState(ctx, state, activeWorkspaceID)
+	b.addRepositorySetsState(ctx, state, activeWorkspaceID)
+	b.addRepositoryBranchPoliciesState(ctx, state, activeWorkspaceID)
 	b.addKanbanSnapshotsState(ctx, state, workflows, activeWorkflowID)
 }
 
@@ -316,6 +403,27 @@ func (b bootStateBuilder) addRepositoriesState(ctx context.Context, state map[st
 	}
 }
 
+// addRepositorySetsState hydrates the home/kanban route with the workspace's
+// repository sets, so the create dialog can offer them without a fetch.
+func (b bootStateBuilder) addRepositorySetsState(ctx context.Context, state map[string]any, workspaceID string) {
+	items := repositorySetsToDTOs(nil)
+	loaded := false
+	sets, err := b.p.taskSvc.ListRepositorySets(ctx, workspaceID)
+	if err != nil {
+		// Not loaded, so the client's hook still fetches; see
+		// repositorySetsForState.
+		b.logBootError("list home repository sets", err)
+	} else {
+		items = repositorySetsToDTOs(sets)
+		loaded = true
+	}
+	state["repositorySets"] = repositorySetsState(workspaceID, items, loaded)
+}
+
+func (b bootStateBuilder) addRepositoryBranchPoliciesState(ctx context.Context, state map[string]any, workspaceID string) {
+	b.repositoryBranchPoliciesForState(ctx, workspaceID, state)
+}
+
 func (b bootStateBuilder) addQuickChatState(
 	ctx context.Context,
 	req *http.Request,
@@ -331,9 +439,21 @@ func (b bootStateBuilder) addQuickChatState(
 		b.logBootError("list quick-chat sessions", err)
 		return
 	}
+	terminalTabs := []any{}
+	if b.p.quickTerminalSvc != nil {
+		if tabs, terminalErr := b.p.quickTerminalSvc.List(ctx, workspaceID); terminalErr != nil {
+			b.logBootError("list quick-terminal tabs", terminalErr)
+		} else {
+			terminalTabs = make([]any, 0, len(tabs))
+			for _, tab := range tabs {
+				terminalTabs = append(terminalTabs, tab)
+			}
+		}
+	}
 	state["quickChat"] = map[string]any{
 		"isOpen":          false,
 		"sessions":        quickChat.sessions,
+		"terminalTabs":    terminalTabs,
 		"activeSessionId": nil,
 	}
 	mergeBootTaskSessionItems(state, quickChat.taskSessions)
@@ -416,6 +536,7 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 		sessionDTO := taskdto.FromTaskSession(item.Session)
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichCancellationPending(&sessionDTO, b.p.orchestratorSvc)
+			taskdto.EnrichParkedProjection(&sessionDTO, b.p.orchestratorSvc)
 		}
 		taskSessions[item.SessionID] = sessionDTO
 	}
@@ -637,13 +758,29 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		pendingActionsBySession = map[string]taskmodels.TaskPendingAction{}
 	}
 	if summaryErr == nil && pendingErr == nil {
-		statusSummaries, err = b.p.taskSvc.HydrateMissingTaskStatusSummaries(
+		reconciledSummaries, reconcileErr := b.p.taskSvc.ReconcileTaskStatusSummaries(
 			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
 		)
-		if err != nil {
-			b.logBootError("repair missing task status summaries", err)
+		statusSummaries = reconciledSummaries
+		if reconcileErr != nil {
+			b.logBootError("reconcile task status summaries", reconcileErr)
 		}
 	}
+	// Stamp the authoritative per-task queued prompt count onto every summary so
+	// the boot payload shows the sidebar badge on first paint, matching the
+	// shared list/snapshot assembly. Best-effort: a counter failure omits the
+	// badge instead of failing the boot payload.
+	queuedByTask, queuedErr := b.p.taskSvc.CountPendingQueuedByTaskIDs(ctx, taskIDs)
+	if queuedErr != nil {
+		b.logBootError("queued prompt counts", queuedErr)
+	}
+	// Dependency state is derived per read (never stored, so the auto-start gate
+	// can never read a stale value). One batched call for the whole boot payload.
+	dependencyViews := b.p.taskSvc.BuildDependencyViews(ctx, tasks)
+	// The boot payload is a board-snapshot projection path, so it must run the
+	// runner-mutability evaluation itself rather than rely on
+	// FromTaskWithSessionInfo's fail-closed default.
+	runnerViews := b.p.taskSvc.BuildRunnerMutabilityViews(ctx, tasks)
 	result := make([]taskdto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		if task == nil {
@@ -670,9 +807,11 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			sessionCount,
 			info.reviewStatus,
 			info.executorID,
+			info.executorProfileID,
 			info.executorType,
 			info.executorName,
 			info.agentName,
+			info.agentProfileID,
 			info.workingDirectory,
 			info.sessionState,
 			bootPendingActionPtr(info.sessionID, pendingActionsBySession),
@@ -684,8 +823,21 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		// No-op when no session is running.
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
+			taskdto.EnrichTaskParkedProjection(&dto, b.p.orchestratorSvc)
 		}
-		dto.StatusSummary = statusSummaries[task.ID]
+		taskdto.EnrichTaskDependencies(&dto, bootDependencyProjection(dependencyViews[task.ID]), task)
+		taskdto.EnrichTaskRunnerMutability(&dto, bootRunnerMutabilityProjection(runnerViews[task.ID]))
+		taskdto.EnrichTaskStatusSummary(&dto, task.ID, statusSummaries)
+		if dto.StatusSummary != nil {
+			switch {
+			case queuedErr != nil:
+				// Counter failed: honor the documented no-badge fallback in the
+				// boot payload without persisting the cleared value.
+				dto.StatusSummary.QueuedPromptCount = 0
+			case queuedByTask != nil:
+				dto.StatusSummary.QueuedPromptCount = queuedByTask[task.ID]
+			}
+		}
 		result = append(result, dto)
 	}
 	return result
@@ -715,14 +867,16 @@ func taskDTOs(tasks []*taskmodels.Task) []taskdto.TaskDTO {
 }
 
 type bootSessionInfoFields struct {
-	sessionID        *string
-	reviewStatus     taskmodels.ReviewStatus
-	sessionState     *string
-	executorID       *string
-	executorType     *string
-	executorName     *string
-	agentName        *string
-	workingDirectory *string
+	sessionID         *string
+	reviewStatus      taskmodels.ReviewStatus
+	sessionState      *string
+	executorID        *string
+	executorProfileID *string
+	executorType      *string
+	executorName      *string
+	agentName         *string
+	agentProfileID    *string
+	workingDirectory  *string
 }
 
 func bootSessionInfo(session *taskmodels.TaskSession) bootSessionInfoFields {
@@ -743,6 +897,10 @@ func bootSessionInfo(session *taskmodels.TaskSession) bootSessionInfoFields {
 		value := session.ExecutorID
 		info.executorID = &value
 	}
+	if session.ExecutorProfileID != "" {
+		value := session.ExecutorProfileID
+		info.executorProfileID = &value
+	}
 	if session.ExecutorSnapshot != nil {
 		if value, ok := session.ExecutorSnapshot["executor_type"].(string); ok && value != "" {
 			info.executorType = &value
@@ -755,6 +913,10 @@ func bootSessionInfo(session *taskmodels.TaskSession) bootSessionInfoFields {
 		if value, ok := session.AgentProfileSnapshot["name"].(string); ok && value != "" {
 			info.agentName = &value
 		}
+	}
+	if session.AgentProfileID != "" {
+		value := session.AgentProfileID
+		info.agentProfileID = &value
 	}
 	if session.RepositorySnapshot != nil {
 		if value, ok := session.RepositorySnapshot["path"].(string); ok && value != "" {
@@ -982,6 +1144,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichForegroundActivity(&dto, b.p.orchestratorSvc)
 			taskdto.EnrichCancellationPending(&dto, b.p.orchestratorSvc)
+			taskdto.EnrichParkedProjection(&dto, b.p.orchestratorSvc)
 		}
 		dto.PendingAction = bootPendingActionPtr(&session.ID, pendingActionsBySession)
 		sessionItems[session.ID] = dto
@@ -995,7 +1158,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 				"sessionId":    session.ID,
 				"repositoryId": nullString(dto.RepositoryID),
 				"path":         nullString(dto.WorktreePath),
-				"branch":       nullString(dto.WorktreeBranch),
+				branchFieldKey: nullString(dto.WorktreeBranch),
 			}
 			worktreesBySession[session.ID] = []string{dto.WorktreeID}
 		}
@@ -1085,6 +1248,9 @@ func taskSessionModelsBootState(
 		"models":         models,
 		"configOptions":  options,
 	}
+	if snapshot.ConfigOptionsSettled {
+		state["configOptionsSettled"] = true
+	}
 	if len(baseline) > 0 {
 		state["configBaseline"] = baseline
 	}
@@ -1110,8 +1276,8 @@ func (b bootStateBuilder) addTaskDetailAgentsState(ctx context.Context, state ma
 	state["settingsAgents"] = map[string]any{"items": response.Agents}
 	state["settingsData"] = map[string]any{"agentsLoaded": true, "executorsLoaded": false}
 	state["agentProfiles"] = map[string]any{
-		"items":   agentProfileOptionStates(response.Agents),
-		"version": 0,
+		"items":         agentProfileOptionStates(response.Agents),
+		versionFieldKey: 0,
 	}
 }
 

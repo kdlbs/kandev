@@ -1,0 +1,11 @@
+package pinfixtures
+
+// Shape (d): a step writer placed in a subdirectory of the scanned package.
+// os.ReadDir(dir) is non-recursive, so this file is invisible unless the
+// scan walks into nested directories.
+type NestedRepo struct{}
+
+func (r *NestedRepo) deeplyNestedStepMutator(step, id string) error {
+	_, err := r.exec("UPDATE tasks SET workflow_step_id = ? WHERE id = ?", step, id)
+	return err
+}

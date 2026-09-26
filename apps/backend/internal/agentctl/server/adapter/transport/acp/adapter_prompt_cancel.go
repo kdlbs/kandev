@@ -149,11 +149,47 @@ func (a *Adapter) markPromptHandoff(sessionID string, promptGeneration uint64) b
 	a.promptTurnMu.Lock()
 	defer a.promptTurnMu.Unlock()
 	turn := a.promptTurn
-	if turn == nil ||
-		turn.promptGeneration != promptGeneration ||
-		!turn.allowHandoff ||
-		!turn.gateOwned ||
-		turn.finishing {
+	if turn == nil || turn.promptGeneration != promptGeneration {
+		return false
+	}
+	return a.handOffTurnLocked(turn, sessionID)
+}
+
+// beginSteerHandoff hands the in-flight turn off at the operator's request
+// rather than on a provider-attested foreground-idle event. It deliberately does
+// not match a prompt generation: the trigger is the arriving successor, not a
+// frame belonging to the predecessor, so there is no generation to compare.
+//
+// Reports whether a handoff is now pending, which lets a caller distinguish
+// "steering" from "there was nothing to steer" for logging. Callers must treat
+// false as benign: an idle session, or a synthetic wakeup holding the gate
+// (allowHandoff is false for those), both land here and correctly fall through
+// to ordinary gate acquisition.
+func (a *Adapter) beginSteerHandoff() bool {
+	a.mu.RLock()
+	sessionID := a.sessionID
+	a.mu.RUnlock()
+
+	a.promptTurnMu.Lock()
+	defer a.promptTurnMu.Unlock()
+	turn := a.promptTurn
+	if turn == nil {
+		return false
+	}
+	return a.handOffTurnLocked(turn, sessionID)
+}
+
+// handOffTurnLocked marks turn handed off and wakes any waiting human successor.
+// Callers hold promptTurnMu.
+//
+// It deliberately leaves the physical gate token in place so a synthetic wakeup
+// cannot consume the handoff, and protects the background work that was live at
+// the boundary so the successor's prompt-end sweeps cannot retire a predecessor's
+// still-running workload. Both properties are load-bearing: a backgrounded shell
+// has been observed outliving two prompt resolutions and reporting only much
+// later, as assistant text with no tool update.
+func (a *Adapter) handOffTurnLocked(turn *promptTurnState, sessionID string) bool {
+	if !turn.allowHandoff || !turn.gateOwned || turn.finishing {
 		return false
 	}
 	if !turn.handedOff {
@@ -205,19 +241,26 @@ func (a *Adapter) signalPromptTurnAbort() *promptTurnState {
 	return turn
 }
 
-func waitForPromptRPCAfterCancel(turn *promptTurnState) error {
+func (a *Adapter) promptCancelTimeout() time.Duration {
+	if a.cancelJoinTimeout > 0 {
+		return a.cancelJoinTimeout
+	}
+	return promptCancelJoinTimeout
+}
+
+func (a *Adapter) waitForPromptRPCAfterCancel(turn *promptTurnState) error {
 	if turn == nil {
 		return nil
 	}
 	select {
 	case <-turn.rpcDone:
 		return nil
-	case <-time.After(promptCancelJoinTimeout):
+	case <-time.After(a.promptCancelTimeout()):
 		if turn.endTurn != nil {
 			turn.endTurn(ErrTurnCancelNotAcknowledged)
 		}
 		return fmt.Errorf("%w: in-flight session/prompt did not end within %s",
-			ErrTurnCancelNotAcknowledged, promptCancelJoinTimeout)
+			ErrTurnCancelNotAcknowledged, a.promptCancelTimeout())
 	}
 }
 
@@ -244,19 +287,19 @@ func (a *Adapter) waitForPromptRPCAfterUserCancel(turn *promptTurnState, session
 			select {
 			case <-turn.rpcDone:
 				return providerErr
-			case <-time.After(promptCancelJoinTimeout):
+			case <-time.After(a.promptCancelTimeout()):
 				return providerErr
 			}
 		case <-turn.abortCh:
 			select {
 			case <-turn.rpcDone:
 				return nil
-			case <-time.After(promptCancelJoinTimeout):
+			case <-time.After(a.promptCancelTimeout()):
 				if turn.endTurn != nil {
 					turn.endTurn(ErrTurnCancelNotAcknowledged)
 				}
 				a.logger.Warn("in-flight session/prompt did not end after cancel; releasing prompt gate",
-					zap.Duration("timeout", promptCancelJoinTimeout))
+					zap.Duration("timeout", a.promptCancelTimeout()))
 				return errPromptAbandonedAfterCancel
 			}
 		}

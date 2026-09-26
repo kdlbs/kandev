@@ -11,9 +11,10 @@ import (
 // It is deliberately separate from the task's own agent profile: the point of the
 // feature is that a different model can review than implemented.
 type ReviewerIdentity struct {
-	AgentID string
-	Model   string
-	Mode    string
+	ProfileID string
+	AgentID   string
+	Model     string
+	Mode      string
 	// Source names where the identity came from, for the run record and logs:
 	// "agent_profile", "utility_agent", or "user_default".
 	Source string
@@ -49,10 +50,18 @@ type UtilityAgentLookup interface {
 	CodeReviewAgent(ctx context.Context) (agentID, model string, enabled, found bool, err error)
 }
 
+type UtilityProfileLookup interface {
+	CodeReviewAgentProfile(ctx context.Context) (profileID string, enabled, found bool, err error)
+}
+
 // DefaultsLookup resolves the user's default utility agent/model pair, used when
 // the code-review utility agent leaves the model blank.
 type DefaultsLookup interface {
 	DefaultUtilitySettings(ctx context.Context) (agentID, model string, err error)
+}
+
+type DefaultProfileLookup interface {
+	DefaultUtilityProfileID(ctx context.Context) (string, error)
 }
 
 // Resolver picks the reviewer identity for a run.
@@ -135,10 +144,11 @@ func (r *Resolver) resolveFromProfile(ctx context.Context, profileID string) (Re
 			ErrAgentUnavailable, describeProfile(profile, profileID))
 	}
 	return ReviewerIdentity{
-		AgentID: profile.AgentID,
-		Model:   model,
-		Mode:    profile.Mode,
-		Source:  SourceAgentProfile,
+		ProfileID: profileID,
+		AgentID:   profile.AgentID,
+		Model:     model,
+		Mode:      profile.Mode,
+		Source:    SourceAgentProfile,
 	}, nil
 }
 
@@ -163,6 +173,16 @@ func (r *Resolver) sameAgentDefaultModel(ctx context.Context, agentID string) st
 }
 
 func (r *Resolver) resolveFromUtilityAgent(ctx context.Context) (ReviewerIdentity, error) {
+	if profileLookup, ok := r.Utility.(UtilityProfileLookup); ok {
+		profileID, enabled, found, err := profileLookup.CodeReviewAgentProfile(ctx)
+		if err != nil {
+			return ReviewerIdentity{}, fmt.Errorf("%w: load code-review utility profile: %v", ErrAgentUnavailable, err)
+		}
+		if !found || !enabled || profileID == "" {
+			return ReviewerIdentity{}, fmt.Errorf("%w: code-review utility profile is not configured", errDeferToDefaults)
+		}
+		return ReviewerIdentity{ProfileID: profileID, Source: SourceUtilityAgent}, nil
+	}
 	if r.Utility == nil {
 		return ReviewerIdentity{}, fmt.Errorf("%w: %w: no code-review utility agent is wired",
 			ErrAgentUnavailable, errDeferToDefaults)
@@ -205,6 +225,16 @@ func (r *Resolver) resolveFromUtilityAgent(ctx context.Context) (ReviewerIdentit
 }
 
 func (r *Resolver) resolveFromDefaults(ctx context.Context) (ReviewerIdentity, error) {
+	if profileLookup, ok := r.Defaults.(DefaultProfileLookup); ok {
+		profileID, err := profileLookup.DefaultUtilityProfileID(ctx)
+		if err != nil {
+			return ReviewerIdentity{}, fmt.Errorf("%w: load default utility profile: %v", ErrAgentUnavailable, err)
+		}
+		if profileID == "" {
+			return ReviewerIdentity{}, fmt.Errorf("%w: no default utility profile configured", ErrAgentUnavailable)
+		}
+		return ReviewerIdentity{ProfileID: profileID, Source: SourceUserDefault}, nil
+	}
 	if r.Defaults == nil {
 		return ReviewerIdentity{}, fmt.Errorf("%w: no default utility agent is configured", ErrAgentUnavailable)
 	}

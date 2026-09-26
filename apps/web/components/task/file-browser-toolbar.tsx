@@ -7,8 +7,12 @@ import {
   IconFolderOpen,
   IconCopy,
   IconCheck,
+  IconFilePlus,
+  IconFolderUp,
   IconPlus,
+  IconUpload,
   IconDots,
+  IconLoader2,
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -21,6 +25,7 @@ import { Skeleton } from "@kandev/ui/skeleton";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
 import { PanelHeaderBarSplit } from "./panel-primitives";
+import { useTranslation } from "react-i18next";
 
 function ToolbarButton({
   onClick,
@@ -35,7 +40,7 @@ function ToolbarButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
-          className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
           aria-label={label}
           onClick={onClick}
         >
@@ -54,10 +59,13 @@ type FileBrowserToolbarProps = {
   expandedPathsSize: number;
   onCopyPath: (text: string) => void;
   onStartCreate?: () => void;
-  onOpenFolder: () => void;
+  onOpenFolder: (opener?: HTMLButtonElement) => void;
+  isOpeningFolder?: boolean;
+  isFolderDisabled?: boolean;
   onStartSearch: () => void;
   onCollapseAll: () => void;
   showCreateButton: boolean;
+  onUploadFiles?: (mode: "files" | "folder") => void;
   onAddSources?: (opener: HTMLButtonElement) => void;
   addSourcesButtonRef?: Ref<HTMLButtonElement>;
   addSourcesDisabledReason?: string;
@@ -68,12 +76,13 @@ function CopyWorkspacePathButton({
   copied,
   onCopyPath,
 }: Pick<FileBrowserToolbarProps, "fullPath" | "copied" | "onCopyPath">) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
-          className="relative shrink-0 cursor-pointer"
-          aria-label="Copy workspace path"
+          className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
+          aria-label={t("task:copyWorkspacePath")}
           onClick={() => {
             if (fullPath) void onCopyPath(fullPath);
           }}
@@ -91,7 +100,7 @@ function CopyWorkspacePathButton({
           )}
         </button>
       </TooltipTrigger>
-      <TooltipContent>Copy workspace path</TooltipContent>
+      <TooltipContent>{t("task:copyWorkspacePath")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -126,17 +135,131 @@ function useMobileDrawerFocusRestoration(triggerRef: RefObject<HTMLButtonElement
   }, [isMobile]);
 }
 
+function CreateMenu({
+  onStartCreate,
+  onUploadFiles,
+}: {
+  onStartCreate: () => void;
+  onUploadFiles?: (mode: "files" | "folder") => void;
+}) {
+  const { t } = useTranslation();
+  const createAfterCloseRef = useRef(false);
+  const handleCreateSelect = useCallback(() => {
+    createAfterCloseRef.current = true;
+  }, []);
+  const handleCloseAutoFocus = useCallback(
+    (event: Event) => {
+      if (!createAfterCloseRef.current) return;
+      event.preventDefault();
+      createAfterCloseRef.current = false;
+      onStartCreate();
+    },
+    [onStartCreate],
+  );
+
+  // Without an upload handler there is only one action, so keep the original
+  // one-click button rather than burying New File behind a menu.
+  if (!onUploadFiles) {
+    return (
+      <ToolbarButton
+        onClick={onStartCreate}
+        label={t("task:newFile")}
+        icon={<IconPlus className="h-3.5 w-3.5" />}
+      />
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={t("task:addToWorkspace")}
+              data-testid="files-create-menu"
+              className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer max-md:size-11 [@media(pointer:coarse)]:size-11"
+            >
+              <IconPlus className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{t("task:addToWorkspace")}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-56" onCloseAutoFocus={handleCloseAutoFocus}>
+        <DropdownMenuItem
+          className="min-h-8 cursor-pointer gap-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          onSelect={handleCreateSelect}
+        >
+          <IconFilePlus className="h-3.5 w-3.5" />
+          {t("task:newFile")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="min-h-8 cursor-pointer gap-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          onSelect={() => onUploadFiles("files")}
+        >
+          <IconUpload className="h-3.5 w-3.5" />
+          {t("task:uploadFiles")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="min-h-8 cursor-pointer gap-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          onSelect={() => onUploadFiles("folder")}
+        >
+          <IconFolderUp className="h-3.5 w-3.5" />
+          {t("task:uploadFolder")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function OpenWorkspaceFolderMenuItem({
+  isOpening,
+  disabled,
+  onSelect,
+}: {
+  isOpening?: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <DropdownMenuItem
+      className="min-h-8 cursor-pointer gap-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+      disabled={disabled || isOpening}
+      aria-busy={isOpening}
+      onSelect={onSelect}
+    >
+      {isOpening ? (
+        <IconLoader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+      ) : (
+        <IconFolderOpen className="h-3.5 w-3.5" aria-hidden />
+      )}
+      {t("task:openWorkspaceFolder")}
+    </DropdownMenuItem>
+  );
+}
+
 function WorkspaceActionsMenu({
   onAddSources,
   onOpenFolder,
+  isOpeningFolder,
+  isFolderDisabled,
   addSourcesButtonRef,
   addSourcesDisabledReason,
 }: Pick<
   FileBrowserToolbarProps,
-  "onAddSources" | "onOpenFolder" | "addSourcesButtonRef" | "addSourcesDisabledReason"
+  | "onAddSources"
+  | "onOpenFolder"
+  | "isOpeningFolder"
+  | "isFolderDisabled"
+  | "addSourcesButtonRef"
+  | "addSourcesDisabledReason"
 >) {
+  const { t } = useTranslation();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const openSourcesAfterCloseRef = useRef(false);
+  const openFolderAfterCloseRef = useRef(false);
   const restoreMobileFocusAfterDrawerClose = useMobileDrawerFocusRestoration(triggerRef);
   const setTriggerRef = useCallback(
     (node: HTMLButtonElement | null) => {
@@ -151,7 +274,7 @@ function WorkspaceActionsMenu({
   );
   const disabledReason =
     addSourcesDisabledReason ??
-    (onAddSources ? undefined : "This task needs a repository before sources can be added.");
+    (onAddSources ? undefined : t("task:taskNeedsRepositoryForSources"));
 
   return (
     <DropdownMenu>
@@ -161,20 +284,27 @@ function WorkspaceActionsMenu({
             <button
               ref={setTriggerRef}
               type="button"
-              aria-label="Workspace actions"
+              aria-label={t("task:workspaceActions")}
               data-testid="files-workspace-actions"
-              className="inline-flex size-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer sm:size-8"
+              className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer max-md:size-11 [@media(pointer:coarse)]:size-11"
             >
               <IconDots className="h-4 w-4" />
             </button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Workspace actions</TooltipContent>
+        <TooltipContent>{t("task:workspaceActions")}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
         align="end"
         className="w-72"
         onCloseAutoFocus={(event) => {
+          if (openFolderAfterCloseRef.current) {
+            event.preventDefault();
+            openFolderAfterCloseRef.current = false;
+            triggerRef.current?.focus();
+            onOpenFolder(triggerRef.current ?? undefined);
+            return;
+          }
           if (!openSourcesAfterCloseRef.current) return;
           event.preventDefault();
           openSourcesAfterCloseRef.current = false;
@@ -183,7 +313,7 @@ function WorkspaceActionsMenu({
       >
         <DropdownMenuItem
           disabled={Boolean(disabledReason)}
-          className="min-h-11 cursor-pointer gap-2 sm:min-h-8"
+          className="min-h-8 cursor-pointer gap-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           onSelect={() => {
             openSourcesAfterCloseRef.current = true;
             restoreMobileFocusAfterDrawerClose();
@@ -191,7 +321,7 @@ function WorkspaceActionsMenu({
         >
           <IconPlus className="h-3.5 w-3.5" />
           <span className="min-w-0">
-            <span className="block">Add Repositories to workspace</span>
+            <span className="block">{t("task:addRepositoriesToWorkspace")}</span>
             {disabledReason && (
               <span className="block text-[10px] text-muted-foreground normal-case">
                 {disabledReason}
@@ -199,13 +329,13 @@ function WorkspaceActionsMenu({
             )}
           </span>
         </DropdownMenuItem>
-        <DropdownMenuItem
-          className="min-h-11 cursor-pointer gap-2 sm:min-h-8"
-          onSelect={onOpenFolder}
-        >
-          <IconFolderOpen className="h-3.5 w-3.5" />
-          Open workspace folder
-        </DropdownMenuItem>
+        <OpenWorkspaceFolderMenuItem
+          isOpening={isOpeningFolder}
+          disabled={isFolderDisabled}
+          onSelect={() => {
+            openFolderAfterCloseRef.current = true;
+          }}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -219,13 +349,17 @@ export function FileBrowserToolbar({
   onCopyPath,
   onStartCreate,
   onOpenFolder,
+  isOpeningFolder,
+  isFolderDisabled,
   onStartSearch,
   onCollapseAll,
   showCreateButton,
+  onUploadFiles,
   onAddSources,
   addSourcesButtonRef,
   addSourcesDisabledReason,
 }: FileBrowserToolbarProps) {
+  const { t } = useTranslation();
   return (
     <PanelHeaderBarSplit
       className="group/header"
@@ -235,7 +369,10 @@ export function FileBrowserToolbar({
           {displayPath ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+                <span
+                  className="min-w-0 truncate text-xs font-medium text-muted-foreground"
+                  data-testid="file-browser-workspace-path"
+                >
                   {displayPath}
                 </span>
               </TooltipTrigger>
@@ -251,27 +388,25 @@ export function FileBrowserToolbar({
       right={
         <>
           {showCreateButton && onStartCreate && (
-            <ToolbarButton
-              onClick={onStartCreate}
-              label="New file"
-              icon={<IconPlus className="h-3.5 w-3.5" />}
-            />
+            <CreateMenu onStartCreate={onStartCreate} onUploadFiles={onUploadFiles} />
           )}
           <WorkspaceActionsMenu
             onAddSources={onAddSources}
             onOpenFolder={onOpenFolder}
+            isOpeningFolder={isOpeningFolder}
+            isFolderDisabled={isFolderDisabled}
             addSourcesButtonRef={addSourcesButtonRef}
             addSourcesDisabledReason={addSourcesDisabledReason}
           />
           <ToolbarButton
             onClick={onStartSearch}
-            label="Search files"
+            label={t("task:searchFiles")}
             icon={<IconSearch className="h-3.5 w-3.5" />}
           />
           {expandedPathsSize > 0 && (
             <ToolbarButton
               onClick={onCollapseAll}
-              label="Collapse all"
+              label={t("task:collapseAll")}
               icon={<IconListTree className="h-3.5 w-3.5" />}
             />
           )}

@@ -1,0 +1,25 @@
+{
+  "gateway": "litellm",
+  "agentId": "claude-acp",
+  "classifying": false,
+  "case": "later-output",
+  "capture": "reconstructed",
+  "source": "https://docs.litellm.ai/docs/exception_mapping",
+  "identity": {
+    "sessionId": "litellm-later-output",
+    "executionId": "exec-litellm-later-output",
+    "promptGeneration": 7
+  },
+  "frames": [
+    {"kind": "message_chunk", "role": "assistant", "text": "LiteLLM proxy error: APIConnectionError from the configured model deployment."},
+    {"kind": "message_chunk", "role": "assistant", "text": "Trying a fallback deployment instead."},
+    {"kind": "prompt_error", "code": -32603, "message": "LiteLLM proxy error: APIConnectionError from the configured model deployment.", "data": {"errorKind": "api_connection_error"}}
+  ],
+  "expect": {
+    "events": ["message_chunk", "message_chunk", "error"],
+    "providerError": {"source": "acp_prompt", "rpcCode": -32603, "errorKind": "api_connection_error", "providerId": "claude-acp"},
+    "diagnosticCode": "agent_runtime_error",
+    "preResultSafe": false,
+    "recordedDiagnosticCode": ""
+  }
+}

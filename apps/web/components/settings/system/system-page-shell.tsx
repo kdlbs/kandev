@@ -1,25 +1,31 @@
 import { ReactNode } from "react";
 import { Separator } from "@kandev/ui/separator";
+import { SettingsPageHeader } from "@/components/settings/settings-typography";
 
 type SystemPageShellProps = {
   title: string;
   description?: string;
+  tabs?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
 };
 
-export function SystemPageShell({ title, description, actions, children }: SystemPageShellProps) {
+export function SystemPageShell({
+  title,
+  description,
+  tabs,
+  actions,
+  children,
+}: SystemPageShellProps) {
   return (
     <div className="space-y-6" data-testid="system-page-shell">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold" data-testid="system-page-title">
-            {title}
-          </h2>
-          {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
-        </div>
-        {actions && <div className="flex items-center gap-2">{actions}</div>}
-      </div>
+      <SettingsPageHeader
+        title={title}
+        description={description}
+        tabs={tabs}
+        actions={actions && <div className="flex flex-col gap-2 md:flex-row">{actions}</div>}
+        titleTestId="system-page-title"
+      />
 
       <Separator />
 

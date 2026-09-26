@@ -1,0 +1,219 @@
+package models
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestLoadLastAgentErrorUsesExplicitStampAndNormalizesRecoveryFields(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyLastAgentError: map[string]interface{}{
+			"message":            "base branch is missing",
+			"occurred_at":        "2026-08-19T10:00:00Z",
+			"stamp":              "pr-state-1",
+			"task_repository_id": "task-repo-1",
+			"recovery_actions":   []string{"retry_default", "retry_default", "unknown", "pick_base_branch", "mark_review_done"},
+		},
+	}
+
+	lastError, ok := LoadLastAgentError(metadata)
+	require.True(t, ok)
+	require.Equal(t, "pr-state-1", lastError.Stamp())
+	require.Equal(t, "task-repo-1", lastError.TaskRepositoryID)
+	require.Equal(t, []string{
+		RecoveryActionRetryDefault,
+		RecoveryActionPickBaseBranch,
+		RecoveryActionMarkReviewDone,
+	}, lastError.RecoveryActions)
+}
+
+func TestNormalizeRecoveryActionsForCategoryFiltersActionsByLaunchCause(t *testing.T) {
+	tests := []struct {
+		name     string
+		category string
+		input    []string
+		want     []string
+	}{
+		{
+			name:     "generic launch failure",
+			category: LaunchErrorCategoryGenericLaunchFailure,
+			input:    []string{RecoveryActionRetryDefault, RecoveryActionPickBaseBranch, RecoveryActionMarkReviewDone},
+			want:     []string{RecoveryActionRetryLaunch},
+		},
+		{
+			name:     "workspace checkout failure",
+			category: LaunchErrorCategoryWorkspaceCheckoutFailed,
+			input:    []string{RecoveryActionRetryDefault, RecoveryActionRetryLaunch},
+			want:     []string{RecoveryActionRetryLaunch},
+		},
+		{
+			name:     "missing base branch",
+			category: LaunchErrorCategoryBaseBranchMissing,
+			input:    []string{RecoveryActionRetryLaunch, RecoveryActionRetryDefault, RecoveryActionPickBaseBranch},
+			want:     []string{RecoveryActionRetryDefault, RecoveryActionPickBaseBranch},
+		},
+		{
+			name:     "closed pull request",
+			category: LaunchErrorCategoryPRAlreadyClosed,
+			input:    []string{RecoveryActionRetryLaunch, RecoveryActionMarkReviewDone},
+			want:     []string{RecoveryActionMarkReviewDone},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, NormalizeRecoveryActionsForCategory(test.category, test.input))
+		})
+	}
+}
+
+func TestTaskLaunchErrorStoreIsNoOpForSameStamp(t *testing.T) {
+	firstTime := time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)
+	secondTime := firstTime.Add(time.Minute)
+	metadata := map[string]interface{}{}
+
+	first := TaskLaunchError{
+		Message:          "base branch is missing",
+		OccurredAt:       firstTime,
+		StampValue:       "pr-state-1",
+		TaskRepositoryID: "task-repo-1",
+		RecoveryActions:  []string{RecoveryActionRetryDefault},
+	}
+	require.True(t, SetTaskLaunchError(metadata, first))
+
+	second := first
+	second.OccurredAt = secondTime
+	second.Message = "a newer message for the same PR state"
+	require.False(t, SetTaskLaunchError(metadata, second))
+
+	stored, ok := LoadTaskLaunchError(metadata)
+	require.True(t, ok)
+	require.Equal(t, firstTime, stored.OccurredAt)
+	require.Equal(t, first.Message, stored.Message)
+	require.Equal(t, first.StampValue, stored.Stamp())
+}
+
+func TestTaskLaunchErrorClearRequiresMatchingStamp(t *testing.T) {
+	metadata := map[string]interface{}{}
+	require.True(t, SetTaskLaunchError(metadata, TaskLaunchError{
+		Message:    "base branch is missing",
+		OccurredAt: time.Now().UTC(),
+		StampValue: "pr-state-1",
+	}))
+
+	require.False(t, ClearTaskLaunchError(metadata, "pr-state-old"))
+	require.True(t, ClearTaskLaunchError(metadata, "pr-state-1"))
+	_, ok := LoadTaskLaunchError(metadata)
+	require.False(t, ok)
+}
+
+func TestStableLaunchErrorStampIsDeterministicAndBounded(t *testing.T) {
+	first := StableLaunchErrorStamp("repo-1", "123", "open")
+	second := StableLaunchErrorStamp("repo-1", "123", "open")
+	require.Equal(t, first, second)
+	require.Len(t, first, 32)
+	require.NotEqual(t, first, StableLaunchErrorStamp("repo-1", "123", "closed"))
+}
+
+func TestLaunchErrorNormalizationBoundsPersistedMessages(t *testing.T) {
+	longMessage := strings.Repeat("x", maxLaunchErrorMessageBytes+100)
+
+	taskMetadata := map[string]interface{}{
+		MetaKeyLastLaunchError: TaskLaunchError{Message: longMessage},
+	}
+	taskError, ok := LoadTaskLaunchError(taskMetadata)
+	require.True(t, ok)
+	require.Len(t, taskError.Message, maxLaunchErrorMessageBytes)
+
+	sessionMetadata := map[string]interface{}{
+		SessionMetaKeyLastAgentError: LastAgentError{Message: longMessage},
+	}
+	sessionError, ok := LoadLastAgentError(sessionMetadata)
+	require.True(t, ok)
+	require.Len(t, sessionError.Message, maxLaunchErrorMessageBytes)
+}
+
+func TestLaunchErrorMatchesStampDoesNotFallBackWhenExplicitStampExists(t *testing.T) {
+	occurredAt := time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)
+	legacyStamp := occurredAt.Format(time.RFC3339Nano) + ":boom"
+
+	taskError := TaskLaunchError{Message: "boom", OccurredAt: occurredAt, StampValue: "explicit-task"}
+	require.True(t, taskError.MatchesStamp("explicit-task"))
+	require.False(t, taskError.MatchesStamp(legacyStamp))
+
+	sessionError := LastAgentError{Message: "boom", OccurredAt: occurredAt, StampValue: "explicit-session"}
+	require.True(t, sessionError.MatchesStamp("explicit-session"))
+	require.False(t, sessionError.MatchesStamp(legacyStamp))
+}
+
+func TestLastAgentErrorNormalizesBootstrapCorrelationAndCauses(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyLastAgentError: map[string]interface{}{
+			"message":      "The agent could not start.",
+			"occurred_at":  "2026-09-11T10:00:00Z",
+			"phase":        "bootstrap",
+			"execution_id": strings.Repeat("e", maxLaunchErrorIDBytes+20),
+			"attempt_id":   strings.Repeat("a", maxLaunchErrorIDBytes+20),
+			"details":      strings.Repeat("d", maxLaunchErrorDetailsBytes),
+			"causes": []map[string]interface{}{
+				{
+					"operation": "resume",
+					"code":      AgentErrorCauseCodePermissionDenied,
+					"detail":    strings.Repeat("r", maxAgentErrorCauseDetailBytes+20),
+				},
+				{
+					"operation": "restore_workspace",
+					"code":      AgentErrorCauseCodeTransportUnavailable,
+					"detail":    "workspace access failed",
+				},
+				{
+					"operation": "resume",
+					"code":      "raw-provider-error",
+					"detail":    "must be ignored",
+				},
+			},
+		},
+	}
+
+	lastError, ok := LoadLastAgentError(metadata)
+	require.True(t, ok)
+	require.Equal(t, LaunchErrorPhaseBootstrap, lastError.Phase)
+	require.Len(t, lastError.ExecutionID, maxLaunchErrorIDBytes)
+	require.Len(t, lastError.AttemptID, maxLaunchErrorIDBytes)
+	require.Len(t, lastError.Causes, 2)
+	require.Len(t, lastError.Causes[0].Detail, maxAgentErrorCauseDetailBytes)
+	require.Equal(t, AgentErrorCauseCodePermissionDenied, lastError.Causes[0].Code)
+	require.Equal(t, AgentErrorCauseCodeTransportUnavailable, lastError.Causes[1].Code)
+	require.LessOrEqual(t, len(lastError.Details)+sumCauseDetailBytes(lastError.Causes), maxLaunchErrorDetailsBytes)
+}
+
+func TestLoadLastAgentErrorIgnoresMalformedOptionalBootstrapFields(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyLastAgentError: map[string]interface{}{
+			"message":      "The agent could not start.",
+			"occurred_at":  "2026-09-11T10:00:00Z",
+			"phase":        map[string]interface{}{"unexpected": true},
+			"execution_id": []string{"unexpected"},
+			"attempt_id":   42,
+			"causes":       "not-a-cause-list",
+		},
+	}
+
+	lastError, ok := LoadLastAgentError(metadata)
+	require.True(t, ok)
+	require.Equal(t, "", lastError.Phase)
+	require.Equal(t, "", lastError.ExecutionID)
+	require.Equal(t, "", lastError.AttemptID)
+	require.Empty(t, lastError.Causes)
+}
+
+func sumCauseDetailBytes(causes []AgentErrorCause) int {
+	total := 0
+	for _, cause := range causes {
+		total += len(cause.Detail)
+	}
+	return total
+}

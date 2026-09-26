@@ -1,33 +1,16 @@
 "use client";
 
 import { useEffect, type Dispatch, type SetStateAction } from "react";
-import { formatDistanceToNow } from "date-fns";
-import { IconArchive, IconArrowRight, IconHammer, IconLoader2 } from "@tabler/icons-react";
-import {
-  Command,
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandShortcut,
-} from "@kandev/ui/command";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import { Command, CommandEmpty, CommandInput, CommandList } from "@kandev/ui/command";
+import { CommandPanelDialog } from "./command-panel-dialog";
 import { Kbd, KbdGroup } from "@kandev/ui/kbd";
-import { Badge } from "@kandev/ui/badge";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
-import {
-  getCommandSearchTerms,
-  scoreCommandSearch,
-  sortCommandsForSearch,
-} from "@/lib/commands/search";
-import { formatShortcut } from "@/lib/keyboard/utils";
 import type { Task } from "@/lib/types/http";
+import type { CommandPanelLiveTask } from "@/lib/commands/task-result-activity";
 import type { FileSearchResult } from "@/lib/types/backend";
-import { FileIcon } from "@/components/ui/file-icon";
 import { WorkspaceContentSearch } from "@/components/workspace-content-search";
-import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
-import { groupByRepositoryName, isSingleRepoGroup } from "@/lib/group-by-repo";
 import {
   CommandPanelScopeSwitcher,
   getAdjacentCommandPanelScope,
@@ -36,283 +19,66 @@ import {
 } from "@/components/command-panel-scope-switcher";
 import type { WorkspaceContentSearchError } from "@/hooks/domains/session/use-workspace-content-search";
 import type { WorkspaceContentSearchResult } from "@/lib/types/backend";
+import {
+  CommandPanelConfirmation,
+  dismissCommandConfirmation,
+  getCommandConfirmationState,
+} from "@/components/command-panel-confirmation";
+import {
+  CommandsListContent,
+  FileSearchContent,
+  MODE_COMMANDS,
+  MODE_COMMAND_CHILDREN,
+  MODE_SEARCH_CONTENT,
+  MODE_SEARCH_FILES,
+  MODE_SEARCH_TASKS,
+  TaskSearchContent,
+  type StepMap,
+} from "@/components/command-panel-results";
 
-const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
-export const MODE_COMMANDS: CommandPanelMode = "commands";
-export const MODE_SEARCH_FILES: CommandPanelMode = "search-files";
-export const MODE_SEARCH_CONTENT: CommandPanelMode = "search-content";
+export {
+  MODE_COMMANDS,
+  MODE_COMMAND_CHILDREN,
+  MODE_SEARCH_CONTENT,
+  MODE_SEARCH_FILES,
+  MODE_SEARCH_TASKS,
+  getFileResultValue,
+  getTaskResultValue,
+} from "@/components/command-panel-results";
 
-const STEP_COLOR_MAP: Record<string, string> = {
-  "bg-slate-500": "#64748b",
-  "bg-red-500": "#ef4444",
-  "bg-orange-500": "#f97316",
-  "bg-yellow-500": "#eab308",
-  "bg-green-500": "#22c55e",
-  "bg-cyan-500": "#06b6d4",
-  "bg-blue-500": "#3b82f6",
-  "bg-indigo-500": "#6366f1",
-  "bg-purple-500": "#a855f7",
-};
-
-function getFileName(filePath: string) {
-  return filePath.split("/").pop() ?? filePath;
+// `mode` stays an untranslated discriminant — it is compared with `===`
+// throughout. Only the labels it selects are copy.
+function getInputPlaceholder(
+  t: TFunction,
+  mode: CommandPanelMode,
+  inputCommand: CommandItemType | null,
+) {
+  if (mode === "input") return inputCommand?.inputPlaceholder ?? t("common:enterValue");
+  if (mode === MODE_SEARCH_TASKS) return t("common:searchForTasks");
+  if (mode === MODE_SEARCH_FILES) return t("common:searchForFiles");
+  if (mode === MODE_SEARCH_CONTENT) return t("common:searchTaskContents");
+  return t("common:typeACommand");
 }
 
-export function getTaskResultValue(task: Task) {
-  return `__task:${task.id} ${task.title}`;
-}
-
-export function getFileResultValue(filePath: string) {
-  return `__file:${filePath}`;
-}
-
-function CommandItemRow({
-  cmd,
-  onSelect,
-}: {
-  cmd: CommandItemType;
-  onSelect: (cmd: CommandItemType) => void;
-}) {
-  return (
-    <CommandItem
-      key={cmd.id}
-      value={cmd.id}
-      keywords={getCommandSearchTerms(cmd)}
-      onSelect={() => onSelect(cmd)}
-    >
-      {cmd.icon && <span className="text-muted-foreground">{cmd.icon}</span>}
-      <span>{cmd.label}</span>
-      {cmd.shortcut && <CommandShortcut>{formatShortcut(cmd.shortcut)}</CommandShortcut>}
-      {cmd.enterMode && (
-        <span className="ml-auto text-muted-foreground">
-          <IconArrowRight className="size-3" />
-        </span>
-      )}
-    </CommandItem>
-  );
-}
-
-type TaskResultItemProps = {
-  task: Task;
-  stepMap: Map<string, { name: string; color: string }>;
-  repoMap: Map<string, string>;
-  onSelect: (task: Task) => void;
-};
-
-function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProps) {
-  const isArchived = ARCHIVED_STATES.has(task.state);
-  const step = stepMap.get(task.workflow_step_id);
-  const stepHex = step ? STEP_COLOR_MAP[step.color] : undefined;
-  const rawPath =
-    task.primary_working_directory ??
-    (task.repositories?.[0] ? repoMap.get(task.repositories[0].repository_id) : undefined);
-  const workDir = rawPath ? getFileName(rawPath) : undefined;
-  const details: string[] = [];
-  if (workDir) details.push(workDir);
-  if (task.primary_agent_name) details.push(task.primary_agent_name);
-  if (task.updated_at) {
-    details.push(formatDistanceToNow(new Date(task.updated_at), { addSuffix: true }));
+function getEnterLabel(t: TFunction, mode: CommandPanelMode) {
+  if (mode === "input") return t("common:confirm");
+  if (mode === MODE_SEARCH_TASKS || mode === MODE_SEARCH_FILES || mode === MODE_SEARCH_CONTENT) {
+    return t("common:open");
   }
-  return (
-    <CommandItem
-      key={task.id}
-      value={getTaskResultValue(task)}
-      onSelect={() => onSelect(task)}
-      className={isArchived ? "opacity-60" : ""}
-      forceMount
-    >
-      <div className="flex items-center gap-2 min-w-0 w-full">
-        {isArchived ? (
-          <IconArchive className="size-3 shrink-0 text-muted-foreground" />
-        ) : (
-          <IconHammer className="size-3 shrink-0 text-muted-foreground" />
-        )}
-        <span className="truncate font-medium">{task.title}</span>
-        {step && (
-          <Badge
-            variant="secondary"
-            className="text-[0.6rem] shrink-0"
-            style={stepHex ? { backgroundColor: stepHex + "22", color: stepHex } : undefined}
-          >
-            {step.name}
-          </Badge>
-        )}
-        {details.length > 0 && (
-          <span className="ml-auto text-[0.6rem] text-muted-foreground truncate shrink-0">
-            {details.join(" · ")}
-          </span>
-        )}
-      </div>
-    </CommandItem>
-  );
+  return t("common:select");
 }
 
-type CommandsListContentProps = {
-  commands: CommandItemType[];
-  grouped: [string, CommandItemType[]][];
-  search: string;
-  onSelect: (cmd: CommandItemType) => void;
-  taskResults: Task[];
-  isSearching: boolean;
-  stepMap: Map<string, { name: string; color: string }>;
-  repoMap: Map<string, string>;
-  onTaskSelect: (task: Task) => void;
-};
-
-function CommandsListContent({
-  commands,
-  grouped,
-  search,
-  onSelect,
-  taskResults,
-  isSearching,
-  stepMap,
-  repoMap,
-  onTaskSelect,
-}: CommandsListContentProps) {
-  const hasInlineResults = taskResults.length > 0 || isSearching;
-  return (
-    <>
-      {!hasInlineResults && !isSearching && <CommandEmpty>No commands found.</CommandEmpty>}
-      {isSearching && taskResults.length === 0 && (
-        <CommandGroup heading="Active Tasks" forceMount>
-          <div className="flex items-center justify-center py-3">
-            <IconLoader2 className="size-3.5 animate-spin text-muted-foreground" />
-          </div>
-        </CommandGroup>
-      )}
-      {taskResults.length > 0 && (
-        <CommandGroup heading={search.trim() ? "Tasks" : "Active Tasks"} forceMount>
-          {taskResults.map((task) => (
-            <TaskResultItem
-              key={task.id}
-              task={task}
-              stepMap={stepMap}
-              repoMap={repoMap}
-              onSelect={onTaskSelect}
-            />
-          ))}
-        </CommandGroup>
-      )}
-      {search.trim() ? (
-        <CommandGroup heading="Commands">
-          {sortCommandsForSearch(commands, search)
-            .filter((cmd) => scoreCommandSearch(cmd.id, search, getCommandSearchTerms(cmd)) > 0)
-            .map((cmd) => (
-              <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
-            ))}
-        </CommandGroup>
-      ) : (
-        grouped.map(([group, items]) => (
-          <CommandGroup key={group} heading={group}>
-            {items.map((cmd) => (
-              <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
-            ))}
-          </CommandGroup>
-        ))
-      )}
-    </>
-  );
-}
-
-type FileSearchContentProps = {
-  files: FileSearchResult[];
-  isSearching: boolean;
-  search: string;
-  sessionId: string | null;
-  onSelect: (path: string) => void;
-};
-
-function FileSearchContent({
-  files,
-  isSearching,
-  search,
-  sessionId,
-  onSelect,
-}: FileSearchContentProps) {
-  const getRepoDisplayName = useRepoDisplayName(sessionId);
-  if (isSearching && files.length === 0) {
-    return (
-      <div className="flex items-center justify-center py-6">
-        <IconLoader2 className="size-4 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-  if (search.trim() && files.length === 0) return <CommandEmpty>No files found.</CommandEmpty>;
-  if (!search.trim()) return <CommandEmpty>Type to search files...</CommandEmpty>;
-
-  const groups = groupByRepositoryName(files, (file) => file.repository_name);
-  const singleRepo = isSingleRepoGroup(groups);
-  return groups.map((group) => (
-    <CommandGroup
-      key={group.repositoryName || "workspace"}
-      heading={
-        singleRepo
-          ? "Files"
-          : (getRepoDisplayName(group.repositoryName) ?? group.repositoryName ?? "Workspace")
-      }
-      forceMount
-      data-testid="file-search-repo-group"
-      data-repository={group.repositoryName}
-    >
-      {group.items.map((file) => {
-        const repositoryPrefix = file.repository_name ? `${file.repository_name}/` : "";
-        const displayPath = file.path.startsWith(repositoryPrefix)
-          ? file.path.slice(repositoryPrefix.length)
-          : file.path;
-        const fileName = getFileName(displayPath);
-        const lastSlash = displayPath.lastIndexOf("/");
-        const dir = lastSlash > 0 ? displayPath.slice(0, lastSlash) : "";
-        return (
-          <CommandItem
-            key={file.path}
-            value={getFileResultValue(file.path)}
-            onSelect={() => onSelect(file.path)}
-            forceMount
-          >
-            <FileIcon fileName={fileName} className="shrink-0" />
-            <span className="truncate font-medium">{fileName}</span>
-            {dir && <span className="ml-1 truncate text-xs text-muted-foreground">{dir}</span>}
-          </CommandItem>
-        );
-      })}
-    </CommandGroup>
-  ));
-}
-
-function getInputPlaceholder(mode: CommandPanelMode, inputCommand: CommandItemType | null) {
-  if (mode === "input") return inputCommand?.inputPlaceholder ?? "Enter value...";
-  if (mode === "search-tasks") return "Search for tasks...";
-  if (mode === MODE_SEARCH_FILES) return "Search for files...";
-  if (mode === MODE_SEARCH_CONTENT) return "Search task contents…";
-  return "Type a command...";
-}
-
-function getEnterLabel(mode: CommandPanelMode) {
-  if (mode === "input") return "Confirm";
-  if (mode === "search-tasks" || mode === MODE_SEARCH_FILES || mode === MODE_SEARCH_CONTENT) {
-    return "Open";
-  }
-  return "Select";
-}
-
-function getModeLabel(mode: CommandPanelMode, inputCommand: CommandItemType | null) {
-  if (mode === "input") return inputCommand?.label;
-  if (mode === "search-tasks") return "Tasks";
-  if (mode === MODE_SEARCH_FILES) return "Files";
-  if (mode === MODE_SEARCH_CONTENT) return "Contents";
+function getModeLabel(t: TFunction, mode: CommandPanelMode, inputCommand: CommandItemType | null) {
+  if (mode === "input" || mode === MODE_COMMAND_CHILDREN) return inputCommand?.label;
+  if (mode === MODE_SEARCH_TASKS) return t("common:tasks");
+  if (mode === MODE_SEARCH_FILES) return t("common:files");
+  if (mode === MODE_SEARCH_CONTENT) return t("common:contents");
   return null;
 }
 
-function CommandPanelFooter({
-  mode,
-  workspaceSearchAvailable,
-}: {
-  mode: CommandPanelMode;
-  workspaceSearchAvailable: boolean;
-}) {
+function CommandPanelFooter({ mode }: { mode: CommandPanelMode }) {
+  const { t } = useTranslation();
   const isScopeMode = isCommandPanelScopeMode(mode);
-  const canSwitchScope = workspaceSearchAvailable && isScopeMode;
   return (
     <div className="border-t border-border px-3 py-1.5 flex items-center gap-3 text-[0.6rem] text-muted-foreground">
       {isScopeMode && (
@@ -320,35 +86,35 @@ function CommandPanelFooter({
           <KbdGroup>
             <Kbd>↑</Kbd>
             <Kbd>↓</Kbd>
-            <span>Navigate</span>
+            <span>{t("common:navigate")}</span>
           </KbdGroup>
-          {canSwitchScope && (
-            <KbdGroup>
-              <Kbd>Tab</Kbd>
-              <span>Switch mode</span>
-            </KbdGroup>
-          )}
+          <KbdGroup>
+            <Kbd>Tab</Kbd>
+            <span>{t("common:switchMode")}</span>
+          </KbdGroup>
         </>
       )}
       <KbdGroup>
         <Kbd>↵</Kbd>
-        <span>{getEnterLabel(mode)}</span>
+        <span>{getEnterLabel(t, mode)}</span>
       </KbdGroup>
       {!isScopeMode && (
         <KbdGroup>
           <Kbd>⌫</Kbd>
-          <span>Back</span>
+          <span>{t("common:back")}</span>
         </KbdGroup>
       )}
       <KbdGroup>
+        {/* A key name, not copy — it labels the physical key. */}
         <Kbd>esc</Kbd>
-        <span>Close</span>
+        <span>{t(mode === MODE_COMMAND_CHILDREN ? "common:back" : "common:close")}</span>
       </KbdGroup>
     </div>
   );
 }
 
 export type CommandPanelViewProps = {
+  onEscapeKeyDown?: (event: KeyboardEvent) => void;
   open: boolean;
   setOpen: (open: boolean) => void;
   mode: CommandPanelMode;
@@ -374,8 +140,10 @@ export type CommandPanelViewProps = {
   handleSelect: (cmd: CommandItemType) => void;
   isSearching: boolean;
   taskResults: Task[];
-  stepMap: Map<string, { name: string; color: string }>;
+  stepMap: StepMap;
   repoMap: Map<string, string>;
+  liveTasksById: Map<string, CommandPanelLiveTask>;
+  lastStepIdByWorkflowId: ReadonlyMap<string, string>;
   handleTaskSelect: (task: Task) => void;
 };
 
@@ -389,30 +157,34 @@ function CommandPanelInputHeader({
   goBack,
   workspaceSearchAvailable,
 }: CommandPanelViewProps) {
+  const { t } = useTranslation();
   const isTopLevelMode = isCommandPanelScopeMode(mode);
-  const canSwitchScope = workspaceSearchAvailable && isTopLevelMode;
-  const modeLabel = getModeLabel(mode, inputCommand);
+  const modeLabel = getModeLabel(t, mode, inputCommand);
   const onInputKeyDown = (event: React.KeyboardEvent) => {
     if (
-      canSwitchScope &&
+      isTopLevelMode &&
       event.key === "Tab" &&
       !event.altKey &&
       !event.ctrlKey &&
       !event.metaKey
     ) {
       event.preventDefault();
-      onScopeChange(getAdjacentCommandPanelScope(mode, event.shiftKey));
+      onScopeChange(getAdjacentCommandPanelScope(mode, event.shiftKey, workspaceSearchAvailable));
       return;
     }
     handleKeyDown(event);
   };
   return (
-    <div className="flex min-h-10 items-center border-b border-border [&>[data-slot=command-input-wrapper]]:min-w-0 [&>[data-slot=command-input-wrapper]]:flex-1 [&>[data-slot=command-input-wrapper]]:pb-1">
+    // Four scope tabs do not fit beside the input on a phone, and the tablist
+    // does not shrink, so the input would collapse to a few characters. The
+    // min-width forces the tablist onto its own row instead of squeezing the
+    // query out of view.
+    <div className="flex min-h-10 flex-wrap items-center border-b border-border [&>[data-slot=command-input-wrapper]]:min-w-44 [&>[data-slot=command-input-wrapper]]:flex-1 [&>[data-slot=command-input-wrapper]]:pb-1">
       {!isTopLevelMode && (
         <button
           onClick={goBack}
-          tabIndex={-1}
-          className="shrink-0 pl-2 flex min-h-10 cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          aria-label={t("common:back")}
+          className="shrink-0 pl-2 flex min-h-10 [@media(pointer:coarse)]:min-h-11 cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           <span>←</span>
           <span>{modeLabel}</span>
@@ -420,17 +192,24 @@ function CommandPanelInputHeader({
         </button>
       )}
       <CommandInput
-        placeholder={getInputPlaceholder(mode, inputCommand)}
+        placeholder={getInputPlaceholder(t, mode, inputCommand)}
         value={search}
         onValueChange={setSearch}
         onKeyDown={onInputKeyDown}
       />
-      {canSwitchScope && <CommandPanelScopeSwitcher mode={mode} onScopeChange={onScopeChange} />}
+      {isTopLevelMode && (
+        <CommandPanelScopeSwitcher
+          mode={mode}
+          onScopeChange={onScopeChange}
+          workspaceSearchAvailable={workspaceSearchAvailable}
+        />
+      )}
     </div>
   );
 }
 
 function CommandPanelResultList(props: CommandPanelViewProps) {
+  const { t } = useTranslation();
   const {
     mode,
     inputCommand,
@@ -450,21 +229,42 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
     taskResults,
     stepMap,
     repoMap,
+    liveTasksById,
+    lastStepIdByWorkflowId,
     handleTaskSelect,
   } = props;
+  const { confirmationCommand, visibleCommands, visibleGroups } = getCommandConfirmationState(
+    commands,
+    grouped,
+  );
   return (
     <CommandList>
-      {mode === MODE_COMMANDS && (
+      {confirmationCommand && <CommandPanelConfirmation command={confirmationCommand} />}
+      {(mode === MODE_COMMANDS || mode === MODE_COMMAND_CHILDREN) && (
         <CommandsListContent
-          commands={commands}
-          grouped={grouped}
+          commands={visibleCommands}
+          grouped={visibleGroups}
           search={search}
           onSelect={handleSelect}
           taskResults={taskResults}
           isSearching={isSearching}
           stepMap={stepMap}
           repoMap={repoMap}
+          liveTasksById={liveTasksById}
+          lastStepIdByWorkflowId={lastStepIdByWorkflowId}
           onTaskSelect={handleTaskSelect}
+        />
+      )}
+      {mode === MODE_SEARCH_TASKS && (
+        <TaskSearchContent
+          tasks={taskResults}
+          isSearching={isSearching}
+          search={search}
+          stepMap={stepMap}
+          repoMap={repoMap}
+          liveTasksById={liveTasksById}
+          lastStepIdByWorkflowId={lastStepIdByWorkflowId}
+          onSelect={handleTaskSelect}
         />
       )}
       {mode === MODE_SEARCH_FILES && (
@@ -488,9 +288,9 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
       )}
       {mode === "input" &&
         (!search.trim() ? (
-          <CommandEmpty>{inputCommand?.inputPlaceholder ?? "Enter a value..."}</CommandEmpty>
+          <CommandEmpty>{inputCommand?.inputPlaceholder ?? t("common:enterAValue")}</CommandEmpty>
         ) : (
-          <CommandEmpty>Press Enter to confirm</CommandEmpty>
+          <CommandEmpty>{t("common:pressEnterToConfirm")}</CommandEmpty>
         ))}
     </CommandList>
   );
@@ -514,10 +314,16 @@ export function CommandPanelView(props: CommandPanelViewProps) {
     if (workspaceModeUnavailable) onScopeChange("commands");
   }, [onScopeChange, workspaceModeUnavailable]);
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) dismissCommandConfirmation(props.commands);
+    setOpen(nextOpen);
+  };
+
   return (
-    <CommandDialog
+    <CommandPanelDialog
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={handleOpenChange}
+      contentProps={{ onEscapeKeyDown: props.onEscapeKeyDown }}
       overlayClassName="supports-backdrop-filter:backdrop-blur-none!"
     >
       <Command
@@ -541,12 +347,14 @@ export function CommandPanelView(props: CommandPanelViewProps) {
         onValueChange={setSelectedValue}
       >
         <CommandPanelInputHeader {...renderedProps} />
+        {mode === MODE_COMMAND_CHILDREN && props.inputCommand?.context && (
+          <div className="truncate border-b px-3 py-1 text-xs text-muted-foreground">
+            {props.inputCommand.context}
+          </div>
+        )}
         <CommandPanelResultList {...renderedProps} />
-        <CommandPanelFooter
-          mode={renderedProps.mode}
-          workspaceSearchAvailable={workspaceSearchAvailable}
-        />
+        <CommandPanelFooter mode={renderedProps.mode} />
       </Command>
-    </CommandDialog>
+    </CommandPanelDialog>
   );
 }

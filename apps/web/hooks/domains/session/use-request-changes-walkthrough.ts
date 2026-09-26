@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { listPrompts } from "@/lib/api";
@@ -38,11 +39,13 @@ async function loadChangesWalkthroughPromptTemplate(): Promise<string> {
 async function queueWalkthroughRequest(params: {
   taskId: string;
   sessionId: string;
+  sessionIncarnationId: string;
   content: string;
   planModeEnabled: boolean;
 }) {
   await queueMessage({
     session_id: params.sessionId,
+    session_incarnation_id: params.sessionIncarnationId,
     task_id: params.taskId,
     content: params.content,
     ...planModePayload(params.planModeEnabled),
@@ -79,6 +82,7 @@ export function useRequestChangesWalkthrough({
 }: UseRequestChangesWalkthroughParams) {
   const storeApi = useAppStoreApi();
   const { toast } = useToast();
+  const { t } = useTranslation("review");
 
   return useCallback(async () => {
     if (!taskId || !sessionId) return;
@@ -88,7 +92,7 @@ export function useRequestChangesWalkthrough({
     const inputMode = deriveSessionInputMode(activeSession);
     const planModeEnabled = state.chatInput.planModeBySessionId[sessionId] ?? false;
     if (!ready) {
-      toast({ title: "Changes are still loading", variant: "error" });
+      toast({ title: t("review:changesStillLoading"), variant: "error" });
       return;
     }
     if (inputMode === "unavailable") {
@@ -97,8 +101,8 @@ export function useRequestChangesWalkthrough({
       // is nothing session-specific to say.
       const title =
         activeSession && TERMINAL_SESSION_STATES.has(activeSession.state)
-          ? "Session has ended. Please create a new session to continue."
-          : "Session is not available for input";
+          ? t("task:sessionEndedCreateNew")
+          : t("task:sessionUnavailableForInput");
       toast({ title, variant: "error" });
       return;
     }
@@ -106,21 +110,25 @@ export function useRequestChangesWalkthrough({
       const template = await loadChangesWalkthroughPromptTemplate();
       const content = buildChangesWalkthroughPrompt(template);
       if (inputMode === "queue") {
+        if (!activeSession?.queue_incarnation_id) {
+          throw new Error("Session is not available for input");
+        }
         await queueWalkthroughRequest({
           taskId,
           sessionId,
+          sessionIncarnationId: activeSession.queue_incarnation_id,
           content,
           planModeEnabled,
         });
-        toast({ title: "Walkthrough request queued", variant: "success" });
+        toast({ title: t("review:walkthroughRequestQueued"), variant: "success" });
         return;
       }
 
       await sendWalkthroughRequest({ taskId, sessionId, content, planModeEnabled, state });
-      toast({ title: "Walkthrough request sent", variant: "success" });
+      toast({ title: t("review:walkthroughRequestSent"), variant: "success" });
     } catch (error) {
       console.error("Failed to request walkthrough:", error);
-      toast({ title: "Failed to request walkthrough", variant: "error" });
+      toast({ title: t("review:failedToRequestWalkthrough"), variant: "error" });
     }
-  }, [ready, sessionId, storeApi, taskId, toast]);
+  }, [ready, sessionId, storeApi, t, taskId, toast]);
 }

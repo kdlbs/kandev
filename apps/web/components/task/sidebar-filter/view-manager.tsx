@@ -1,9 +1,19 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
+import { useTranslation } from "react-i18next";
+import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type HeaderMode = "view" | "rename" | "saveAs";
 
@@ -16,11 +26,16 @@ type HeaderProps = {
   onRename: (id: string, name: string) => void;
   onDiscard: () => void;
   onDelete: () => void;
+  deleteAnchorRef?: RefObject<HTMLButtonElement | null>;
+  deleteDensity?: "compact" | "touch";
+  deleteConfirmation?: ReactNode;
   renameRequestedViewId?: string | null;
   onRenameRequestHandled?: (viewId: string) => void;
 };
 
 export function ViewHeaderRow(props: HeaderProps) {
+  const { isMobile } = useResponsiveBreakpoint();
+  const { t } = useTranslation();
   const [mode, setMode] = useState<HeaderMode>("view");
   const [nameDraft, setNameDraft] = useState("");
   const [editingViewId, setEditingViewId] = useState<string | null>(null);
@@ -68,35 +83,44 @@ export function ViewHeaderRow(props: HeaderProps) {
     setEditingViewId(null);
   }, [activeViewId, editingViewId, mode]);
 
+  if (props.deleteConfirmation && !isMobile) {
+    return <div className="min-w-0 p-1">{props.deleteConfirmation}</div>;
+  }
+
   return (
-    <div className="flex items-center justify-between gap-2">
-      <div className="flex flex-1 items-center gap-2 text-xs">
-        <span className="text-muted-foreground">{mode === "saveAs" ? "Save as:" : "View:"}</span>
-        {isEditing ? (
-          <NameInput
-            mode={mode}
-            value={nameDraft}
-            onChange={setNameDraft}
-            onSubmit={submit}
-            onCancel={exit}
-          />
-        ) : (
-          <NameDisplay activeView={props.activeView} hasDraft={props.hasDraft} />
-        )}
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-1 items-center gap-2 text-xs">
+          <span className="text-muted-foreground">
+            {mode === "saveAs" ? t("task:saveAs") : t("task:view")}
+          </span>
+          {isEditing ? (
+            <NameInput
+              mode={mode}
+              value={nameDraft}
+              onChange={setNameDraft}
+              onSubmit={submit}
+              onCancel={exit}
+            />
+          ) : (
+            <NameDisplay activeView={props.activeView} hasDraft={props.hasDraft} />
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {isEditing ? (
+            <EditingActions
+              mode={mode}
+              canSubmit={!!nameDraft.trim()}
+              onSubmit={submit}
+              onCancel={exit}
+            />
+          ) : (
+            <ViewActions {...props} onRename={enterRename} onSaveAs={enterSaveAs} />
+          )}
+        </div>
       </div>
-      <div className="flex items-center gap-1">
-        {isEditing ? (
-          <EditingActions
-            mode={mode}
-            canSubmit={!!nameDraft.trim()}
-            onSubmit={submit}
-            onCancel={exit}
-          />
-        ) : (
-          <ViewActions {...props} onRename={enterRename} onSaveAs={enterSaveAs} />
-        )}
-      </div>
-    </div>
+      {isMobile ? props.deleteConfirmation : null}
+    </>
   );
 }
 
@@ -107,16 +131,17 @@ function NameDisplay({
   activeView: SidebarView | undefined;
   hasDraft: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <span className="font-medium" data-testid="sidebar-filter-active-view-name">
-        {activeView?.name ?? "—"}
+        {activeView ? sidebarViewName(activeView, t) : t("task:none")}
       </span>
       {hasDraft && (
         <span
           className="h-1.5 w-1.5 rounded-full bg-amber-500"
           data-testid="sidebar-filter-dirty-indicator"
-          title="Unsaved changes"
+          title={t("common:unsavedChanges")}
         />
       )}
     </>
@@ -136,6 +161,7 @@ function NameInput({
   onSubmit: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
 
   useLayoutEffect(() => {
@@ -143,17 +169,27 @@ function NameInput({
     inputRef.current?.select();
   }, []);
 
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
   return (
     <Input
       ref={inputRef}
-      aria-label={mode === "rename" ? "View name" : "New view name"}
+      controlSize="none"
+      autoFocus
+      aria-label={mode === "rename" ? t("task:viewName") : t("task:newViewName")}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") onSubmit();
         if (e.key === "Escape") onCancel();
       }}
-      placeholder={mode === "saveAs" ? "New view name" : undefined}
+      placeholder={mode === "saveAs" ? t("task:newViewName") : undefined}
       className="h-6 flex-1 text-xs"
       data-testid={mode === "rename" ? "view-rename-input" : "view-save-as-name-input"}
     />
@@ -171,6 +207,7 @@ function EditingActions({
   onSubmit: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <Button
@@ -181,7 +218,7 @@ function EditingActions({
         disabled={!canSubmit}
         data-testid={mode === "rename" ? "view-rename-confirm" : "view-save-as-confirm"}
       >
-        {mode === "rename" ? "Save" : "Create"}
+        {mode === "rename" ? t("common:save") : t("task:create")}
       </Button>
       <Button
         type="button"
@@ -190,7 +227,7 @@ function EditingActions({
         className="h-6 cursor-pointer text-xs"
         onClick={onCancel}
       >
-        Cancel
+        {t("common:cancel")}
       </Button>
     </>
   );
@@ -205,6 +242,8 @@ function ViewActions({
   onRename,
   onDiscard,
   onDelete,
+  deleteAnchorRef,
+  deleteDensity = "compact",
 }: {
   activeView: SidebarView | undefined;
   hasDraft: boolean;
@@ -214,7 +253,10 @@ function ViewActions({
   onRename: () => void;
   onDiscard: () => void;
   onDelete: () => void;
+  deleteAnchorRef?: RefObject<HTMLButtonElement | null>;
+  deleteDensity?: "compact" | "touch";
 }) {
+  const { t } = useTranslation();
   const canOverwrite = hasDraft && !!activeView;
   return (
     <>
@@ -227,7 +269,7 @@ function ViewActions({
           onClick={onSaveOverwrite}
           data-testid="view-save-button"
         >
-          Save
+          {t("common:save")}
         </Button>
       )}
       {hasDraft && (
@@ -239,7 +281,7 @@ function ViewActions({
           onClick={onSaveAs}
           data-testid="view-save-as-button"
         >
-          Save as…
+          {t("task:saveAs2")}
         </Button>
       )}
       {hasDraft && (
@@ -251,7 +293,7 @@ function ViewActions({
           onClick={onDiscard}
           data-testid="view-discard-button"
         >
-          Discard
+          {t("task:discard")}
         </Button>
       )}
       {!hasDraft && activeView && (
@@ -263,19 +305,20 @@ function ViewActions({
           onClick={onRename}
           data-testid="view-rename-button"
         >
-          Rename
+          {t("task:rename")}
         </Button>
       )}
       {!hasDraft && activeView && canDelete && (
         <Button
+          ref={deleteAnchorRef}
           type="button"
           size="sm"
           variant="ghost"
-          className="h-6 cursor-pointer text-xs text-destructive"
+          className={`${deleteDensity === "touch" ? "min-h-11" : "h-6"} cursor-pointer text-xs text-destructive`}
           onClick={onDelete}
           data-testid="view-delete-button"
         >
-          Delete
+          {t("task:delete")}
         </Button>
       )}
     </>

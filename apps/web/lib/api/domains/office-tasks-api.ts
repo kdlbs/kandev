@@ -4,6 +4,7 @@
 // budget.
 import { fetchJson, type ApiRequestOptions } from "../client";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
+import { normalizeOfficeTask, type OfficeTaskWire } from "./office-task-normalize";
 
 const BASE = "/api/v1/office";
 
@@ -29,6 +30,12 @@ export type ListTasksParams = {
 
 export type ListTasksResponse = {
   tasks: OfficeTask[];
+  next_cursor?: string;
+  next_id?: string;
+};
+
+type ListTasksWireResponse = {
+  tasks: OfficeTaskWire[];
   next_cursor?: string;
   next_id?: string;
 };
@@ -75,8 +82,13 @@ export function listTasks(
     params = paramsOrOptions as ListTasksParams | undefined;
     options = maybeOptions;
   }
-  return fetchJson<ListTasksResponse>(
+  return fetchJson<ListTasksWireResponse>(
     `${BASE}/workspaces/${workspaceId}/tasks${buildTaskListQuery(params)}`,
     options,
+  ).then(
+    (response): ListTasksResponse => ({
+      ...response,
+      tasks: response.tasks.map(normalizeOfficeTask),
+    }),
   );
 }

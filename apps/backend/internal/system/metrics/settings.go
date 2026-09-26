@@ -19,6 +19,20 @@ const (
 	MaxIntervalSeconds     = 5 * 60
 )
 
+// Diagnostic per-instance agentctl metrics. These are deliberately NOT
+// registered in isKnownMetric, so NormalizeSettings rejects them and they can
+// never enter persisted GlobalSettings — which means they can never reach the
+// periodic broadcast or the status bar. They exist only so a single
+// agentctl instance's own /api/v1/system/metrics can be asked for them
+// directly via ?metrics=, e.g. to measure whether tracker startup dominates
+// instance creation before any optimization work is attempted.
+const (
+	MetricAgentctlGoroutines    = "agentctl_goroutines"
+	MetricAgentctlGitPollMillis = "agentctl_git_poll_ms"
+	MetricAgentctlMonitorMillis = "agentctl_monitor_poll_ms"
+	MetricAgentctlCreateReadyMs = "agentctl_create_ready_ms"
+)
+
 type GlobalSettings struct {
 	Metrics          []string `json:"metrics"`
 	IntervalSeconds  int      `json:"interval_seconds"`

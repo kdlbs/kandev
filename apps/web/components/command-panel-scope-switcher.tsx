@@ -6,22 +6,38 @@ import type { ConfigurableShortcutId } from "@/lib/keyboard/shortcut-overrides";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
-export type CommandPanelScopeMode = "commands" | "search-files" | "search-content";
+export type CommandPanelScopeMode = "commands" | "search-tasks" | "search-files" | "search-content";
 
 type ScopeOption = {
   mode: CommandPanelScopeMode;
-  label: string;
-  shortcutId: ConfigurableShortcutId;
+  /**
+   * Catalog key, resolved at render. `mode` stays the untranslated
+   * discriminant — it is compared with `===` in `isCommandPanelScopeMode` and
+   * threaded through the command-panel state.
+   */
+  labelKey: string;
+  /** Omitted for scopes that are reachable by click and Tab but unbound. */
+  shortcutId?: ConfigurableShortcutId;
+  /** Scopes that read a checked-out worktree, so they need an open session. */
+  requiresWorkspace?: boolean;
 };
 
 const SCOPE_OPTIONS: ScopeOption[] = [
-  { mode: "commands", label: "Commands", shortcutId: "SEARCH" },
-  { mode: "search-files", label: "Files", shortcutId: "FILE_SEARCH" },
+  { mode: "commands", labelKey: "common:scopeCommands", shortcutId: "SEARCH" },
+  { mode: "search-tasks", labelKey: "common:scopeTasks" },
+  {
+    mode: "search-files",
+    labelKey: "common:scopeFiles",
+    shortcutId: "FILE_SEARCH",
+    requiresWorkspace: true,
+  },
   {
     mode: "search-content",
-    label: "Contents",
+    labelKey: "common:scopeContents",
     shortcutId: "CONTENT_SEARCH",
+    requiresWorkspace: true,
   },
 ];
 
@@ -29,43 +45,62 @@ export function isCommandPanelScopeMode(mode: CommandPanelMode): mode is Command
   return SCOPE_OPTIONS.some((scope) => scope.mode === mode);
 }
 
+function availableScopes(workspaceSearchAvailable: boolean): ScopeOption[] {
+  return SCOPE_OPTIONS.filter((scope) => workspaceSearchAvailable || !scope.requiresWorkspace);
+}
+
+/** Commands and Tasks are always reachable, so the switcher always has tabs. */
+export function getAvailableCommandPanelScopes(
+  workspaceSearchAvailable: boolean,
+): CommandPanelScopeMode[] {
+  return availableScopes(workspaceSearchAvailable).map((scope) => scope.mode);
+}
+
 export function getAdjacentCommandPanelScope(
   mode: CommandPanelScopeMode,
   reverse = false,
+  workspaceSearchAvailable = true,
 ): CommandPanelScopeMode {
-  const currentIndex = SCOPE_OPTIONS.findIndex((scope) => scope.mode === mode);
+  const scopes = availableScopes(workspaceSearchAvailable);
+  const currentIndex = scopes.findIndex((scope) => scope.mode === mode);
   const offset = reverse ? -1 : 1;
-  const nextIndex = (currentIndex + offset + SCOPE_OPTIONS.length) % SCOPE_OPTIONS.length;
-  return SCOPE_OPTIONS[nextIndex].mode;
+  const nextIndex = (currentIndex + offset + scopes.length) % scopes.length;
+  return scopes[nextIndex].mode;
 }
 
 export function CommandPanelScopeSwitcher({
   mode,
   onScopeChange,
+  workspaceSearchAvailable,
 }: {
   mode: CommandPanelScopeMode;
   onScopeChange: (mode: CommandPanelScopeMode) => void;
+  workspaceSearchAvailable: boolean;
 }) {
+  const { t } = useTranslation();
   const keyboardShortcuts = useAppStore((state) => state.userSettings.keyboardShortcuts);
 
   return (
     <div
       role="tablist"
-      aria-label="Command palette mode"
-      className="mr-1 flex h-10 shrink-0 items-stretch gap-0.5"
+      aria-label={t("common:commandPaletteMode")}
+      className="mr-1 flex h-10 max-w-full shrink-0 items-stretch gap-0.5 overflow-x-auto"
     >
-      {SCOPE_OPTIONS.map((scope) => {
+      {availableScopes(workspaceSearchAvailable).map((scope) => {
         const active = mode === scope.mode;
-        const shortcut = formatShortcut(getShortcut(scope.shortcutId, keyboardShortcuts));
+        const shortcut = scope.shortcutId
+          ? formatShortcut(getShortcut(scope.shortcutId, keyboardShortcuts))
+          : null;
+        const label = t(scope.labelKey);
         return (
           <button
             key={scope.mode}
             type="button"
             role="tab"
-            aria-label={scope.label}
+            aria-label={label}
             aria-selected={active}
             tabIndex={-1}
-            title={`${scope.label} (${shortcut})`}
+            title={shortcut ? t("common:scopeTitleWithShortcut", { label, shortcut }) : label}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onScopeChange(scope.mode)}
             className={cn(
@@ -75,7 +110,7 @@ export function CommandPanelScopeSwitcher({
                 : "after:scale-x-75 after:opacity-0",
             )}
           >
-            <span>{scope.label}</span>
+            <span>{label}</span>
           </button>
         );
       })}

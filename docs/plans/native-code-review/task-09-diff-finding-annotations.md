@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["08-frontend-state-and-types"]
 plan: "plan.md"
-spec: "../../specs/native-code-review/spec.md"
+spec: "../../specs/agents/requirements/native-code-review.md"
 ---
 
 # Task 09: Render findings as anchored diff annotations

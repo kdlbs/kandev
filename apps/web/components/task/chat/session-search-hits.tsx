@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { AgentLogo } from "@/components/agent-logo";
 import type { MessageSearchHit } from "@/lib/api/domains/session-api";
+import { useTranslation } from "react-i18next";
 
 type SessionSearchHitsProps = {
   hits: MessageSearchHit[];
@@ -80,14 +81,15 @@ function HitAuthor({
   agentLabel?: string | null;
   agentName?: string | null;
 }) {
+  const { t } = useTranslation();
   if (authorType === "user") {
     return (
       <span className="text-[0.6875rem] uppercase tracking-wide font-medium text-primary/80 truncate">
-        You
+        {t("task:you")}
       </span>
     );
   }
-  const label = agentLabel?.trim() || "Agent";
+  const label = agentLabel?.trim() || t("common:agent");
   return (
     <span className="text-[0.6875rem] uppercase tracking-wide font-medium text-muted-foreground inline-flex items-center gap-1.5 min-w-0">
       {agentName && <AgentLogo agentName={agentName} size={12} className="shrink-0" />}
@@ -105,14 +107,15 @@ export function SessionSearchHits({
   agentLabel,
   agentName,
 }: SessionSearchHitsProps) {
+  const { t } = useTranslation();
   if (!query.trim()) return null;
   return (
     <div className="w-[28rem] max-h-80 overflow-auto rounded-md border border-border bg-background shadow-lg text-xs">
       {isSearching && hits.length === 0 && (
-        <div className="p-3 text-muted-foreground">Searching…</div>
+        <div className="p-3 text-muted-foreground">{t("task:searching")}</div>
       )}
       {!isSearching && hits.length === 0 && (
-        <div className="p-3 text-muted-foreground">No matches</div>
+        <div className="p-3 text-muted-foreground">{t("task:noMatches")}</div>
       )}
       {hits.map((hit) => (
         <button

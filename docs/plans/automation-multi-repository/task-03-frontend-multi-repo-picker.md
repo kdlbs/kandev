@@ -5,14 +5,14 @@ status: pending
 wave: 2
 depends_on: ["01-backend-data-model"]
 plan: "plan.md"
-spec: "../../specs/office/automations-settings.md"
+spec: "../../specs/office/requirements/automations-settings.md"
 ---
 
 # Task 03: Frontend multi-repository picker
 
 ## Inputs
 
-- `docs/specs/office/automations-settings.md` — the "Multi-repository
+- `docs/specs/office/requirements/automations-settings.md` — the "Multi-repository
   selection is gated on the selected executor profile's capability" bullets
   under `## What`, plus the corresponding Scenarios.
 - `apps/web/components/task-create-dialog-multi-repo-guard.ts` —

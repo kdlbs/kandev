@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { usePluginActionSurface } from "@/components/plugins/plugin-action-surface";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { MainTopBarPluginActions, type MainTopBarSlotProps } from "./main-top-bar-plugin-actions";
 
@@ -23,14 +24,14 @@ describe("MainTopBarPluginActions", () => {
       const ctx = slotProps as MainTopBarSlotProps;
       return (
         <div data-testid="plugin-app-bar">
-          {`${ctx.workspaceId}|${ctx.workspaceLabel}|${ctx.currentPage}`}
+          {`${ctx.workspaceId}|${ctx.workspaceLabel}|${ctx.currentPage}|${ctx.presentation}`}
         </div>
       );
     });
 
     render(<MainTopBarPluginActions workspaceId="w1" workspaceLabel="Acme" currentPage="tasks" />);
 
-    expect(screen.getByTestId("plugin-app-bar").textContent).toBe("w1|Acme|tasks");
+    expect(screen.getByTestId("plugin-app-bar").textContent).toBe("w1|Acme|tasks|desktop");
   });
 
   it("normalizes an absent workspace id to null", () => {
@@ -43,4 +44,62 @@ describe("MainTopBarPluginActions", () => {
 
     expect(screen.getByTestId("plugin-app-bar").textContent).toBe("null");
   });
+
+  it("preserves the action slot subtree when topbar props do not change", () => {
+    let pluginRenders = 0;
+    pluginRegistry.forPlugin("plugin-a").registerComponent(SLOT, () => {
+      pluginRenders += 1;
+      return <div data-testid="stable-plugin-slot" />;
+    });
+
+    const { rerender } = render(<MainTopBarPluginActions currentPage="kanban" />);
+    rerender(<MainTopBarPluginActions currentPage="kanban" />);
+
+    expect(screen.getByTestId("stable-plugin-slot")).toBeTruthy();
+    expect(pluginRenders).toBe(1);
+  });
+
+  it("passes mobile presentation and preserves touch targets for labeled controls", () => {
+    pluginRegistry.forPlugin("plugin-a").registerComponent(SLOT, ({ slotProps }) => {
+      const ctx = slotProps as MainTopBarSlotProps;
+      return (
+        <button data-slot="button" data-testid="plugin-button">
+          <svg />
+          {ctx.presentation}
+        </button>
+      );
+    });
+
+    render(<MainTopBarPluginActions currentPage="kanban" presentation="mobile" />);
+
+    expect(screen.getByTestId("plugin-button").textContent).toBe("mobile");
+    expect(screen.getByTestId("mobile-main-top-bar-plugin-actions").className).toContain(
+      "[&_[data-slot=button]]:!min-h-11",
+    );
+  });
+
+  it.each(["desktop", "mobile"] as const)(
+    "provides the topbar action surface for %s",
+    (presentation) => {
+      pluginRegistry.forPlugin("plugin-a").registerComponent(SLOT, () => {
+        const surface = usePluginActionSurface();
+        return (
+          <div
+            data-testid="plugin-action-surface"
+            data-surface={surface?.surface}
+            data-presentation={surface?.presentation}
+          />
+        );
+      });
+
+      render(<MainTopBarPluginActions currentPage="kanban" presentation={presentation} />);
+
+      expect(screen.getByTestId("plugin-action-surface").getAttribute("data-surface")).toBe(
+        "topbar",
+      );
+      expect(screen.getByTestId("plugin-action-surface").getAttribute("data-presentation")).toBe(
+        presentation,
+      );
+    },
+  );
 });

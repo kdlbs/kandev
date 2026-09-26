@@ -16,13 +16,15 @@ import {
   iconForPresetKey,
   type JiraStoredPreset,
 } from "@/components/jira/my-jira/presets";
-import {
-  ScriptEditor,
-  computeEditorHeight,
-} from "@/components/settings/profile-edit/script-editor";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import {
+  settingsActionClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
 
 // A function rather than a const because `description` is copy — it is shown in
 // the editor's completion list — and a module-scope `t()` would freeze it at the
@@ -65,6 +67,7 @@ const MY_JIRA_ROUTE = "/jira";
 // seeded in one locale and saved unedited would keep that locale's text forever.
 // Same contract as `newPreset` in components/github/action-presets-section.tsx.
 function newPreset(): JiraStoredPreset {
+  // i18n-exempt: persisted, editable preset label. See the comment above.
   return {
     id: `preset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     label: "New action",
@@ -78,7 +81,10 @@ function IconSelect({ value, onChange }: { value: string; onChange: (v: string) 
   const { t } = useTranslation();
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="!h-8 py-0.5 text-sm cursor-pointer" aria-label={t("jira:icon")}>
+      <SelectTrigger
+        className={settingsControlClassName("py-0.5 text-sm cursor-pointer")}
+        aria-label={t("jira:icon")}
+      >
         <SelectValue>
           {createElement(iconForPresetKey(value), { className: "h-4 w-4" })}
         </SelectValue>
@@ -139,7 +145,7 @@ function PresetRow({
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] text-muted-foreground">{t("jira:label")}</span>
           <Input
-            className="h-8 w-40"
+            className={settingsControlClassName("w-40")}
             value={preset.label}
             data-settings-dirty={fieldIsDirty("label")}
             placeholder={t("jira:label")}
@@ -149,7 +155,7 @@ function PresetRow({
         <div className="flex flex-col gap-0.5 flex-1">
           <span className="text-[10px] text-muted-foreground">{t("jira:hint")}</span>
           <Input
-            className="h-8"
+            className={settingsControlClassName()}
             value={preset.hint}
             data-settings-dirty={fieldIsDirty("hint")}
             placeholder={t("jira:hintOptional")}
@@ -158,8 +164,7 @@ function PresetRow({
         </div>
         <Button
           variant="outline"
-          size="sm"
-          className="h-8 cursor-pointer text-xs"
+          className={settingsActionClassName("cursor-pointer")}
           onClick={onToggle}
         >
           {expanded ? t("jira:hidePrompt") : t("jira:editPrompt")}
@@ -167,7 +172,7 @@ function PresetRow({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 cursor-pointer text-destructive"
+          className={controlSizingClassName("icon", "cursor-pointer text-destructive")}
           onClick={onRemove}
           aria-label={t("jira:remove")}
         >
@@ -201,38 +206,38 @@ function PresetPromptEditor({
   // array on every render would re-register the provider on every keystroke.
   const placeholders = useMemo(() => jiraPromptPlaceholders(t), [t]);
   return (
-    <div className="px-2 pb-2 space-y-1">
-      <div className="rounded-md border overflow-hidden" data-settings-dirty={isDirty}>
-        <ScriptEditor
-          value={preset.prompt_template}
-          onChange={(v) => onPatch({ prompt_template: v })}
-          language="markdown"
-          height={computeEditorHeight(preset.prompt_template)}
-          lineNumbers="off"
-          placeholders={placeholders}
-        />
-      </div>
-      <p className="text-[11px] text-muted-foreground/60">
-        {/* The five `{{…}}` tokens are passed as values, never written into the
-            catalog, where i18next would interpolate them away. */}
-        <Trans
-          i18nKey="jira:presetPromptPlaceholderHelp"
-          values={{
-            token: "{{",
-            key: "{{key}}",
-            url: "{{url}}",
-            title: "{{title}}",
-            description: "{{description}}",
-          }}
-        >
-          Type {"{{token}}"} to see available placeholders.{" "}
-          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{key}}"}</code>,{" "}
-          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{url}}"}</code>,{" "}
-          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{title}}"}</code>, and{" "}
-          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{description}}"}</code> are
-          substituted when the action runs.
-        </Trans>
-      </p>
+    <div className="px-2 pb-2">
+      <SettingsPromptEditor
+        value={preset.prompt_template}
+        onChange={(v) => onPatch({ prompt_template: v })}
+        placeholders={placeholders}
+        promptReferences
+        isDirty={isDirty}
+        testId={`jira-task-prompt-editor-${preset.id}`}
+        help={
+          <p className="text-[11px] text-muted-foreground/60">
+            {/* The five `{{…}}` tokens are passed as values, never written into the
+                catalog, where i18next would interpolate them away. */}
+            <Trans
+              i18nKey="jira:presetPromptPlaceholderHelp"
+              values={{
+                token: "{{",
+                key: "{{key}}",
+                url: "{{url}}",
+                title: "{{title}}",
+                description: "{{description}}",
+              }}
+            >
+              Type {"{{token}}"} to see available placeholders.{" "}
+              <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{key}}"}</code>,{" "}
+              <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{url}}"}</code>,{" "}
+              <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{title}}"}</code>, and{" "}
+              <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{description}}"}</code>{" "}
+              are substituted when the action runs.
+            </Trans>
+          </p>
+        }
+      />
     </div>
   );
 }
@@ -322,11 +327,10 @@ export function TaskPresetsSection() {
       action={
         <div className="flex gap-2">
           <Button
-            size="sm"
             variant="outline"
             onClick={reset}
             disabled={!loaded}
-            className="cursor-pointer"
+            className={settingsActionClassName("cursor-pointer")}
           >
             <IconRefresh className="h-3.5 w-3.5 mr-1" />
             {t("common:reset")}
@@ -346,7 +350,11 @@ export function TaskPresetsSection() {
             onRemove={() => remove(index)}
           />
         ))}
-        <Button size="sm" variant="outline" onClick={add} className="cursor-pointer">
+        <Button
+          variant="outline"
+          onClick={add}
+          className={settingsActionClassName("cursor-pointer")}
+        >
           <IconPlus className="h-3.5 w-3.5 mr-1" />
           {t("jira:addPreset")}
         </Button>

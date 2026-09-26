@@ -6,11 +6,13 @@ import type { TaskCIAutomationOptions } from "@/lib/types/github";
 
 const apiMocks = vi.hoisted(() => ({
   getOptionsMock: vi.fn(),
+  retryMergeMock: vi.fn(),
   updateOptionsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api/domains/github-api", () => ({
   getTaskCIAutomationOptions: apiMocks.getOptionsMock,
+  retryTaskCIAutoMerge: apiMocks.retryMergeMock,
   updateTaskCIAutomationOptions: apiMocks.updateOptionsMock,
 }));
 
@@ -30,12 +32,14 @@ function makeOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAu
     using_default_prompt: true,
     updated_at: "2026-06-18T10:00:00Z",
     pr_states: [],
+    pr_options: [],
     ...overrides,
   };
 }
 
 beforeEach(() => {
   apiMocks.getOptionsMock.mockReset();
+  apiMocks.retryMergeMock.mockReset();
   apiMocks.updateOptionsMock.mockReset();
 });
 
@@ -58,7 +62,9 @@ describe("useTaskCIAutomationOptions", () => {
     apiMocks.getOptionsMock.mockResolvedValue(
       makeOptions({ auto_fix_prompt_override: "Custom prompt" }),
     );
-    apiMocks.updateOptionsMock.mockResolvedValue(makeOptions({ auto_fix_prompt_override: null }));
+    apiMocks.updateOptionsMock.mockResolvedValue(
+      makeOptions({ auto_fix_prompt_override: null, updated_at: "2026-06-18T10:01:00Z" }),
+    );
 
     const { result } = renderHook(() => useTaskCIAutomationOptions("task-1"), { wrapper });
     await waitFor(() => expect(result.current.options).not.toBeNull());
@@ -73,6 +79,24 @@ describe("useTaskCIAutomationOptions", () => {
       { cache: "no-store" },
     );
     expect(result.current.options?.auto_fix_prompt_override).toBeNull();
+    expect(result.current.saving).toBe(false);
+  });
+
+  it("requests an explicit merge retry without treating acceptance as provider success", async () => {
+    apiMocks.getOptionsMock.mockResolvedValue(makeOptions());
+    apiMocks.retryMergeMock.mockResolvedValue({ accepted: true });
+
+    const { result } = renderHook(() => useTaskCIAutomationOptions("task-1"), { wrapper });
+    await waitFor(() => expect(result.current.options).not.toBeNull());
+
+    await act(async () => {
+      await result.current.retryMerge("repo-1", 42);
+    });
+
+    expect(apiMocks.retryMergeMock).toHaveBeenCalledWith("task-1", "repo-1", 42, {
+      cache: "no-store",
+    });
+    expect(apiMocks.getOptionsMock).toHaveBeenCalledTimes(1);
     expect(result.current.saving).toBe(false);
   });
 
@@ -166,11 +190,11 @@ describe("useTaskCIAutomationOptions updates", () => {
       firstUpdate = result.current.update({ auto_fix_enabled: true });
       secondUpdate = result.current.update({ auto_merge_enabled: true });
     });
-    resolveSecond(makeOptions({ auto_merge_enabled: true }));
+    resolveSecond(makeOptions({ auto_merge_enabled: true, updated_at: "2026-06-18T10:02:00Z" }));
     await act(async () => {
       await secondUpdate!;
     });
-    resolveFirst(makeOptions({ auto_fix_enabled: true }));
+    resolveFirst(makeOptions({ auto_fix_enabled: true, updated_at: "2026-06-18T10:01:00Z" }));
     await act(async () => {
       await firstUpdate!;
     });

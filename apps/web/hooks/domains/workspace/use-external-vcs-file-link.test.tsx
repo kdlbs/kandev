@@ -66,6 +66,7 @@ function repository(overrides: Partial<Repository> = {}): Repository {
 function githubPR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-link-1",
+    workspace_id: WORKSPACE_ID,
     task_id: TASK_ID,
     repository_id: GITHUB_REPOSITORY_ID,
     owner: "acme",
@@ -119,6 +120,9 @@ function gitlabMR(overrides: Partial<TaskMR> = {}): TaskMR {
     required_approvals: 0,
     pipeline_jobs_total: 0,
     pipeline_jobs_pass: 0,
+    reviewer_count: 0,
+    unapproved_reviewers: 0,
+    unresolved_discussions: 0,
     created_at: "",
     updated_at: "",
     ...overrides,
@@ -208,6 +212,7 @@ function wrapper(options: InitialOptions = {}) {
       tasks: [
         {
           id: TASK_ID,
+          workflowId: "wf-1",
           workflowStepId: "step-1",
           title: "External links",
           position: 0,

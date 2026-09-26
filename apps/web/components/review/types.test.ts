@@ -25,7 +25,7 @@ describe("reviewDiffUnavailableLabel", () => {
       old_path: "src/old-name.ts",
       diff_skip_reason: "binary",
     });
-    expect(reviewDiffUnavailableLabel(file)).toBe("Binary file — not diffable");
+    expect(reviewDiffUnavailableLabel(file)).toBe("Binary file; not diffable");
   });
 
   it.each([

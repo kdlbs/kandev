@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { toast } from "@/lib/toast/sonner";
 import {
   IconLayout,
@@ -17,16 +17,6 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Checkbox } from "@kandev/ui/checkbox";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -49,20 +39,24 @@ import { Badge } from "@kandev/ui/badge";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
   BUILT_IN_LAYOUT_PROFILES,
-  createLayoutProfile,
   createLayoutProfileId,
-  deleteLayoutProfile,
   getBuiltInLayoutOverride,
   getLayoutProfileCompatibility,
   isBuiltInLayoutOverride,
   type BuiltInLayoutProfileId,
+  type CreateLayoutProfileInput,
 } from "@/lib/layout/layout-profiles";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { updateUserSettings } from "@/lib/api/domains/settings-api";
-import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { SavedLayout } from "@/lib/types/http";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
+import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { resolveLayoutApplySessionIds } from "./layout-preset-selector-session-ids";
+import { SavedLayoutDeleteConfirmation } from "./saved-layout-delete-confirmation";
+import { useSavedLayoutMutations } from "./use-saved-layout-mutations";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type PresetOption = {
   id: BuiltInLayoutProfileId;
@@ -86,22 +80,27 @@ const BUILT_IN_PRESETS: PresetOption[] = BUILT_IN_LAYOUT_PROFILES.map((profile) 
 }));
 
 function mutationError(error: unknown): string {
-  return error instanceof Error ? error.message : "Please try again.";
+  return error instanceof Error ? error.message : t("task:pleaseTryAgain");
+}
+
+function isSavedLayoutConfirmationTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest("[data-confirmation-boundary]") !== null;
 }
 
 function SaveLayoutDialog({
   open,
   onOpenChange,
+  onSave,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSave: (input: CreateLayoutProfileInput) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [isDefault, setIsDefault] = useState(false);
   const [saving, setSaving] = useState(false);
   const captureCurrentLayout = useDockviewStore((s) => s.captureCurrentLayout);
-  const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
-  const setUserSettings = useAppStore((s) => s.setUserSettings);
 
   const handleSave = useCallback(async () => {
     const trimmed = name.trim();
@@ -109,43 +108,38 @@ function SaveLayoutDialog({
     setSaving(true);
     try {
       const layout = captureCurrentLayout();
-      const response = await updateUserSettings({
-        saved_layouts: createLayoutProfile(savedLayouts, {
-          id: createLayoutProfileId(),
-          name: trimmed,
-          isDefault,
-          layout,
-          createdAt: new Date().toISOString(),
-        }),
+      await onSave({
+        id: createLayoutProfileId(),
+        name: trimmed,
+        isDefault,
+        layout,
+        createdAt: new Date().toISOString(),
       });
-      setUserSettings(mapUserSettingsResponse(response));
       setName("");
       setIsDefault(false);
       onOpenChange(false);
     } catch (error) {
-      toast.error("Failed to save layout", { description: mutationError(error) });
+      toast.error(t("task:failedToSaveLayout"), { description: mutationError(error) });
     } finally {
       setSaving(false);
     }
-  }, [name, isDefault, captureCurrentLayout, savedLayouts, setUserSettings, onOpenChange]);
+  }, [name, isDefault, captureCurrentLayout, onOpenChange, onSave, t]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Save Current Layout</DialogTitle>
-          <DialogDescription>
-            Save your current panel arrangement as a reusable layout.
-          </DialogDescription>
+          <DialogTitle>{t("task:saveCurrentLayout")}</DialogTitle>
+          <DialogDescription>{t("task:saveYourCurrentPanelArrangementAs")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label htmlFor="layout-name">Name</Label>
+            <Label htmlFor="layout-name">{t("task:name")}</Label>
             <Input
               id="layout-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="My layout"
+              placeholder={t("task:myLayout")}
               autoFocus
             />
           </div>
@@ -156,7 +150,7 @@ function SaveLayoutDialog({
               onCheckedChange={(checked) => setIsDefault(checked === true)}
             />
             <Label htmlFor="layout-default" className="text-sm font-normal cursor-pointer">
-              Set as default layout
+              {t("task:setAsDefaultLayout")}
             </Label>
           </div>
         </div>
@@ -167,7 +161,7 @@ function SaveLayoutDialog({
             className="cursor-pointer"
             onClick={() => onOpenChange(false)}
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             size="sm"
@@ -175,7 +169,7 @@ function SaveLayoutDialog({
             onClick={handleSave}
             disabled={!name.trim() || saving}
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? t("task:saving") : t("common:save")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -186,40 +180,92 @@ function SaveLayoutDialog({
 function SavedLayoutItems({
   layouts,
   onApply,
+  isFinePointer,
+  confirmingDeleteId,
   onDelete,
+  onCancelDelete,
+  onCloseDelete,
+  onConfirmDelete,
 }: {
   layouts: SavedLayout[];
   onApply: (layout: SavedLayout) => void | Promise<void>;
-  onDelete: (layout: SavedLayout) => void;
+  isFinePointer: boolean;
+  confirmingDeleteId: string | null;
+  onDelete: (layout: SavedLayout, anchor: HTMLElement) => void;
+  onCancelDelete: () => void;
+  onCloseDelete: () => void;
+  onConfirmDelete: (layoutId: string) => void | Promise<void>;
 }) {
+  const { t } = useTranslation();
   if (layouts.length === 0) {
-    return <div className="px-2 py-1.5 text-xs text-muted-foreground">No saved layouts</div>;
+    return (
+      <div className="px-2 py-1.5 text-xs text-muted-foreground">{t("task:noSavedLayouts")}</div>
+    );
   }
-  return layouts.map((layout) => (
-    <div key={layout.id} className="flex items-stretch" role="presentation">
-      <DropdownMenuItem
-        className="min-w-0 flex-1 cursor-pointer"
-        onSelect={() => void onApply(layout)}
-      >
-        <IconCheck className="mr-2 h-3.5 w-3.5 shrink-0 opacity-0" />
-        <span className="flex-1 truncate text-xs">{layout.name}</span>
-        {layout.is_default && (
-          <Badge variant="secondary" className="ml-1 px-1 py-0 text-[9px]">
-            default
-          </Badge>
-        )}
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        className="min-h-11 min-w-11 shrink-0 cursor-pointer justify-center px-2 text-destructive/60 focus:text-destructive sm:min-h-7 sm:min-w-7"
-        aria-label={`Delete ${layout.name}`}
-        data-testid="layout-saved-delete"
-        data-layout-id={layout.id}
-        onSelect={() => onDelete(layout)}
-      >
-        <IconTrash className="h-3.5 w-3.5" />
-      </DropdownMenuItem>
-    </div>
-  ));
+  return layouts.map((layout) => {
+    const isConfirming = !isFinePointer && confirmingDeleteId === layout.id;
+    if (isConfirming) {
+      const title = t("task:deleteLayoutConfirm", { name: layout.name });
+      const description = layout.is_default
+        ? t("task:theBuiltInDefaultLayoutWill")
+        : t("task:thisSavedLayoutWillBePermanently");
+      return (
+        <div key={layout.id} className="min-w-0" role="presentation">
+          <InlineConfirmActions
+            density="touch"
+            testId="layout-saved-delete-inline-confirmation"
+            ariaLabel={title}
+            description={description}
+            cancelLabel={t("common:cancel")}
+            confirmLabel={t("task:delete")}
+            confirmAriaLabel={t("task:delete2", { name: layout.name })}
+            confirmTestId="layout-saved-delete-confirm"
+            onCancel={onCancelDelete}
+            onClose={onCloseDelete}
+            onConfirm={() => onConfirmDelete(layout.id)}
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div key={layout.id} className="flex min-w-0 items-stretch" role="presentation">
+        <DropdownMenuItem
+          className="min-w-0 flex-1 cursor-pointer"
+          onSelect={() => void onApply(layout)}
+        >
+          <SavedLayoutLabel layout={layout} />
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="min-h-11 min-w-11 shrink-0 cursor-pointer justify-center px-2 text-destructive/60 focus:text-destructive md:min-h-7 md:min-w-7"
+          aria-label={t("task:delete2", { name: layout.name })}
+          data-testid="layout-saved-delete"
+          data-layout-id={layout.id}
+          onSelect={(event) => {
+            event.preventDefault();
+            onDelete(layout, event.currentTarget as HTMLElement);
+          }}
+        >
+          <IconTrash className="h-3.5 w-3.5" />
+        </DropdownMenuItem>
+      </div>
+    );
+  });
+}
+
+function SavedLayoutLabel({ layout }: { layout: SavedLayout }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <IconCheck className="mr-2 h-3.5 w-3.5 shrink-0 opacity-0" />
+      <span className="flex-1 truncate text-xs">{layout.name}</span>
+      {layout.is_default && (
+        <Badge variant="secondary" className="ml-1 px-1 py-0 text-[9px]">
+          {t("common:default")}
+        </Badge>
+      )}
+    </>
+  );
 }
 
 /** Built-in preset menu items. Code-defined presets reset widths; customized
@@ -295,91 +341,148 @@ function useApplyBuiltInLayout(
   );
 }
 
-function DeleteLayoutDialog({
-  layout,
-  onClose,
+type PresetDropdownProps = {
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  onCloseAutoFocus: (event: Event) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  deleteMenuRef: RefObject<HTMLDivElement | null>;
+  tooltipOpen: boolean;
+  onTooltipOpenChange: (open: boolean) => void;
+  resetLayout: () => void;
+  savedLayouts: SavedLayout[];
+  isFinePointer: boolean;
+  onApplyCustom: (layout: SavedLayout) => void | Promise<void>;
+  onApplyBuiltIn: (presetId: BuiltInLayoutProfileId) => void;
+  confirmingDeleteId: string | null;
+  onDelete: (layout: SavedLayout, anchor: HTMLElement) => void;
+  onCancelDelete: () => void;
+  onCloseDelete: () => void;
+  onConfirmDelete: (layoutId: string) => void | Promise<void>;
+  onSaveLayout: () => void;
+};
+
+function PresetDropdown({
+  triggerRef,
+  onCloseAutoFocus,
+  open,
+  onOpenChange,
+  deleteMenuRef,
+  tooltipOpen,
+  onTooltipOpenChange,
+  resetLayout,
+  savedLayouts,
+  isFinePointer,
+  onApplyCustom,
+  onApplyBuiltIn,
+  confirmingDeleteId,
   onDelete,
-}: {
-  layout: SavedLayout | null;
-  onClose: () => void;
-  onDelete: (layoutId: string) => Promise<void>;
-}) {
-  const [deleting, setDeleting] = useState(false);
-  const handleDelete = async () => {
-    if (!layout) return;
-    setDeleting(true);
-    try {
-      await onDelete(layout.id);
-      onClose();
-    } catch (error) {
-      toast.error("Failed to delete layout", { description: mutationError(error) });
-    } finally {
-      setDeleting(false);
-    }
-  };
+  onCancelDelete,
+  onCloseDelete,
+  onConfirmDelete,
+  onSaveLayout,
+}: PresetDropdownProps) {
+  const { t } = useTranslation();
   return (
-    <AlertDialog open={Boolean(layout)} onOpenChange={(open) => !open && !deleting && onClose()}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete {layout?.name ?? "saved layout"}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            {layout?.is_default
-              ? "The built-in Default layout will become the default."
-              : "This saved layout will be permanently removed."}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer" disabled={deleting}>
-            Cancel
-          </AlertDialogCancel>
-          <AlertDialogAction
-            className="cursor-pointer"
-            disabled={deleting}
-            onClick={(event) => {
-              event.preventDefault();
-              void handleDelete();
-            }}
-          >
-            {deleting ? "Deleting..." : "Delete"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
+      <Tooltip open={tooltipOpen} onOpenChange={onTooltipOpenChange}>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              ref={triggerRef}
+              size="sm"
+              variant="outline"
+              className="cursor-pointer px-2"
+              data-testid="layout-preset-trigger"
+              aria-label={t("task:layoutPresets")}
+            >
+              <IconLayout className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{t("task:layoutPresets")}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent
+        onCloseAutoFocus={onCloseAutoFocus}
+        ref={deleteMenuRef}
+        align="end"
+        className="w-60"
+        onFocusOutside={(event) => {
+          if (confirmingDeleteId && isSavedLayoutConfirmationTarget(event.target)) {
+            event.preventDefault();
+          }
+        }}
+        onInteractOutside={(event) => {
+          if (confirmingDeleteId && isSavedLayoutConfirmationTarget(event.target)) {
+            event.preventDefault();
+          }
+        }}
+      >
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs">{t("task:presets")}</DropdownMenuLabel>
+          <BuiltInPresetItems onApply={onApplyBuiltIn} />
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          data-testid="layout-reset-item"
+          onClick={resetLayout}
+          className="cursor-pointer"
+        >
+          <IconRestore className="h-4 w-4 mr-2 shrink-0" />
+          <span className="text-xs">{t("task:resetLayout")}</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs">{t("task:savedLayouts")}</DropdownMenuLabel>
+          <SavedLayoutItems
+            layouts={savedLayouts.filter((layout) => !isBuiltInLayoutOverride(layout))}
+            onApply={onApplyCustom}
+            isFinePointer={isFinePointer}
+            confirmingDeleteId={confirmingDeleteId}
+            onDelete={onDelete}
+            onCancelDelete={onCancelDelete}
+            onCloseDelete={onCloseDelete}
+            onConfirmDelete={onConfirmDelete}
+          />
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={onSaveLayout} className="cursor-pointer">
+          <IconDeviceFloppy className="h-4 w-4 mr-2 shrink-0" />
+          <span className="text-xs">{t("task:saveCurrentLayout2")}</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-export function LayoutPresetSelector() {
-  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+function usePresetDropdownVisibility(onClose: () => void) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
-  const [deleteCandidate, setDeleteCandidate] = useState<SavedLayout | null>(null);
   const recentlyClosedRef = useRef(false);
-  const resetLayout = useDockviewStore((s) => s.resetLayout);
-  const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
-  const setUserSettings = useAppStore((s) => s.setUserSettings);
-  const handleApplyCustom = useApplySavedLayout();
-  const handleApplyBuiltIn = useApplyBuiltInLayout(savedLayouts, handleApplyCustom);
-
-  const handleDeleteLayout = useCallback(
-    async (layoutId: string) => {
-      const response = await updateUserSettings({
-        saved_layouts: deleteLayoutProfile(savedLayouts, layoutId),
-      });
-      setUserSettings(mapUserSettingsResponse(response));
+  const recentlyClosedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleDropdownOpenChange = useCallback(
+    (open: boolean) => {
+      setDropdownOpen(open);
+      if (!open) {
+        onClose();
+        recentlyClosedRef.current = true;
+        setTooltipOpen(false);
+        if (recentlyClosedTimerRef.current !== null) clearTimeout(recentlyClosedTimerRef.current);
+        recentlyClosedTimerRef.current = setTimeout(() => {
+          recentlyClosedRef.current = false;
+          recentlyClosedTimerRef.current = null;
+        }, 200);
+      }
     },
-    [savedLayouts, setUserSettings],
+    [onClose],
   );
 
-  const handleDropdownOpenChange = useCallback((open: boolean) => {
-    setDropdownOpen(open);
-    if (!open) {
-      recentlyClosedRef.current = true;
-      setTooltipOpen(false);
-      setTimeout(() => {
-        recentlyClosedRef.current = false;
-      }, 200);
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (recentlyClosedTimerRef.current !== null) clearTimeout(recentlyClosedTimerRef.current);
+    },
+    [],
+  );
 
   const handleTooltipOpenChange = useCallback(
     (open: boolean) => {
@@ -389,59 +492,99 @@ export function LayoutPresetSelector() {
     [dropdownOpen],
   );
 
+  return { dropdownOpen, tooltipOpen, handleDropdownOpenChange, handleTooltipOpenChange };
+}
+
+export function LayoutPresetSelector() {
+  const { t } = useTranslation();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [deleteCandidate, setDeleteCandidate] = useState<SavedLayout | null>(null);
+  const cancelDelete = useCallback(() => setDeleteCandidate(null), []);
+  useConfirmationBoundary(deleteCandidate !== null, deleteCandidate?.id ?? "", cancelDelete);
+  const deleteAnchorRef = useRef<HTMLElement>(null);
+  const deleteMenuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const pendingTarget = useRef<SavedLayout | null>(null);
+  const resetLayout = useDockviewStore((s) => s.resetLayout);
+  const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
+  const handleApplyCustom = useApplySavedLayout();
+  const handleApplyBuiltIn = useApplyBuiltInLayout(savedLayouts, handleApplyCustom);
+  const { saveLayout, deleteLayout } = useSavedLayoutMutations();
+  const { dropdownOpen, tooltipOpen, handleDropdownOpenChange, handleTooltipOpenChange } =
+    usePresetDropdownVisibility(cancelDelete);
+  const beginDelete = useCallback(
+    (layout: SavedLayout, anchor: HTMLElement) => {
+      if (isMobile) {
+        pendingTarget.current = layout;
+        handleDropdownOpenChange(false);
+        return;
+      }
+      deleteAnchorRef.current = anchor;
+      setDeleteCandidate(layout);
+    },
+    [isMobile, handleDropdownOpenChange],
+  );
+
+  const closeDelete = useCallback(() => {
+    setDeleteCandidate(null);
+    handleDropdownOpenChange(false);
+  }, [handleDropdownOpenChange]);
+
+  const confirmDeleteLayout = useCallback(
+    async (layoutId: string) => {
+      handleDropdownOpenChange(false);
+      try {
+        await deleteLayout(layoutId);
+      } catch (error) {
+        toast.error(t("task:failedToDeleteLayout"), { description: mutationError(error) });
+      }
+    },
+    [deleteLayout, handleDropdownOpenChange, t],
+  );
+
   return (
     <>
-      <DropdownMenu open={dropdownOpen} onOpenChange={handleDropdownOpenChange}>
-        <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                className="cursor-pointer px-2"
-                data-testid="layout-preset-trigger"
-              >
-                <IconLayout className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Layout presets</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="end" className="w-60">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-xs">Presets</DropdownMenuLabel>
-            <BuiltInPresetItems onApply={handleApplyBuiltIn} />
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            data-testid="layout-reset-item"
-            onClick={resetLayout}
-            className="cursor-pointer"
-          >
-            <IconRestore className="h-4 w-4 mr-2 shrink-0" />
-            <span className="text-xs">Reset Layout</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-xs">Saved Layouts</DropdownMenuLabel>
-            <SavedLayoutItems
-              layouts={savedLayouts.filter((layout) => !isBuiltInLayoutOverride(layout))}
-              onApply={handleApplyCustom}
-              onDelete={setDeleteCandidate}
-            />
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setSaveDialogOpen(true)} className="cursor-pointer">
-            <IconDeviceFloppy className="h-4 w-4 mr-2 shrink-0" />
-            <span className="text-xs">Save current layout...</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <SaveLayoutDialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen} />
-      <DeleteLayoutDialog
+      <PresetDropdown
+        triggerRef={triggerRef}
+        onCloseAutoFocus={(event) => {
+          const target = pendingTarget.current;
+          pendingTarget.current = null;
+          if (!target) return;
+          event.preventDefault();
+          if (savedLayouts.some((layout) => layout.id === target.id)) setDeleteCandidate(target);
+        }}
+        open={dropdownOpen}
+        onOpenChange={handleDropdownOpenChange}
+        deleteMenuRef={deleteMenuRef}
+        tooltipOpen={!isMobile && tooltipOpen}
+        onTooltipOpenChange={handleTooltipOpenChange}
+        resetLayout={resetLayout}
+        savedLayouts={savedLayouts}
+        isFinePointer={isMobile || isFinePointer}
+        onApplyCustom={handleApplyCustom}
+        onApplyBuiltIn={handleApplyBuiltIn}
+        confirmingDeleteId={deleteCandidate?.id ?? null}
+        onDelete={beginDelete}
+        onCancelDelete={cancelDelete}
+        onCloseDelete={closeDelete}
+        onConfirmDelete={confirmDeleteLayout}
+        onSaveLayout={() => setSaveDialogOpen(true)}
+      />
+      <SaveLayoutDialog
+        open={saveDialogOpen}
+        onOpenChange={setSaveDialogOpen}
+        onSave={saveLayout}
+      />
+      <SavedLayoutDeleteConfirmation
         layout={deleteCandidate}
-        onClose={() => setDeleteCandidate(null)}
-        onDelete={handleDeleteLayout}
+        open={(isMobile || isFinePointer) && deleteCandidate !== null}
+        anchorRef={isMobile ? triggerRef : deleteAnchorRef}
+        focusBoundaryRef={deleteMenuRef}
+        onOpenChange={(open) => {
+          if (!open) cancelDelete();
+        }}
+        onConfirm={confirmDeleteLayout}
       />
     </>
   );

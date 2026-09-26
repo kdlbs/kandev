@@ -52,7 +52,7 @@ function makeFetchedData(): FetchedSessionData {
       workflow_id: workflowId("workflow-1"),
       workflow_step_id: "step-1",
       state: "CREATED",
-      priority: 0,
+      priority: "medium",
       position: 0,
       repositories: [],
       created_at: "2026-06-16T00:00:00Z",

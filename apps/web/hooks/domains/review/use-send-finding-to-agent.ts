@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { appendToQueue } from "@/lib/api/domains/queue-api";
 import { formatFindingAsMarkdown } from "@/lib/review/format";
 import type { TaskReviewFinding } from "@/lib/types/review";
-import type { Message } from "@/lib/types/http";
+import type { Message, TaskSession } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { generateUUID } from "@/lib/utils";
 
@@ -19,6 +20,42 @@ function isAgentBusy(state: string | undefined): boolean {
   return state === "STARTING" || state === "RUNNING";
 }
 
+async function queueFinding(
+  taskId: string,
+  session: TaskSession | null,
+  sessionId: string,
+  content: string,
+  planMode: boolean,
+) {
+  if (!session?.queue_incarnation_id) {
+    throw new Error("Session is not available for input");
+  }
+  await appendToQueue({
+    session_id: sessionId,
+    session_incarnation_id: session.queue_incarnation_id,
+    task_id: taskId,
+    content,
+    ...(planMode ? { plan_mode: true } : {}),
+  });
+}
+
+async function sendFinding(taskId: string, sessionId: string, content: string, planMode: boolean) {
+  const client = getWebSocketClient();
+  if (!client) throw new Error("WebSocket client unavailable");
+  return client.request<Message | undefined>(
+    "message.add",
+    {
+      task_id: taskId,
+      session_id: sessionId,
+      client_message_id: generateUUID(),
+      content,
+      has_review_comments: true,
+      ...(planMode ? { plan_mode: true } : {}),
+    },
+    10000,
+  );
+}
+
 /**
  * Sends a finding to the active session as follow-up context.
  *
@@ -29,6 +66,7 @@ function isAgentBusy(state: string | undefined): boolean {
 export function useSendFindingToAgent({ taskId, sessionId }: Params) {
   const storeApi = useAppStoreApi();
   const { toast } = useToast();
+  const { t } = useTranslation("review");
 
   return useCallback(
     async (finding: TaskReviewFinding) => {
@@ -40,41 +78,21 @@ export function useSendFindingToAgent({ taskId, sessionId }: Params) {
 
       try {
         if (isAgentBusy(session?.state)) {
-          await appendToQueue({
-            session_id: sessionId,
-            task_id: taskId,
-            content,
-            ...(planMode ? { plan_mode: true } : {}),
-          });
-          toast({ title: "Finding queued for the agent", variant: "success" });
+          await queueFinding(taskId, session, sessionId, content, planMode);
+          toast({ title: t("review:findingQueuedForAgent"), variant: "success" });
           return;
         }
-        const client = getWebSocketClient();
-        if (!client) throw new Error("WebSocket client unavailable");
-        const created = await client.request<Message | undefined>(
-          "message.add",
-          {
-            task_id: taskId,
-            session_id: sessionId,
-            client_message_id: generateUUID(),
-            content,
-            has_review_comments: true,
-            ...(planMode ? { plan_mode: true } : {}),
-          },
-          10000,
-        );
-        // Add the returned message directly so the chat updates even if the
-        // broadcast is missed; addMessage is idempotent on id.
+        const created = await sendFinding(taskId, sessionId, content, planMode);
         if (created?.id && created.session_id) storeApi.getState().addMessage(created);
-        toast({ title: "Finding sent to the agent", variant: "success" });
+        toast({ title: t("review:findingSentToAgent"), variant: "success" });
       } catch (error) {
         toast({
-          title: "Could not send the finding",
-          description: error instanceof Error ? error.message : "An error occurred",
+          title: t("review:couldNotSendFinding"),
+          description: error instanceof Error ? error.message : t("common:anErrorOccurred"),
           variant: "error",
         });
       }
     },
-    [taskId, sessionId, storeApi, toast],
+    [taskId, sessionId, storeApi, t, toast],
   );
 }

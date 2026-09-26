@@ -21,11 +21,18 @@ import (
 // adapters need. Defined as an interface so tests can swap in fakes.
 type WorkflowRepo interface {
 	ListStepParticipantsForTask(ctx context.Context, stepID, taskID string) ([]*models.WorkflowStepParticipant, error)
+	ListParticipantsForTaskAnyStep(ctx context.Context, taskID string) ([]*models.WorkflowStepParticipant, error)
 	ListStepDecisions(ctx context.Context, taskID, stepID string) ([]*models.WorkflowStepDecision, error)
 	RecordStepDecision(ctx context.Context, d *models.WorkflowStepDecision) error
 	ClearStepDecisions(ctx context.Context, taskID, stepID string) (int64, error)
 	ResolveCurrentRunner(ctx context.Context, stepID, taskID string) (string, error)
 	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
+	HasRoleSeatForTaskWorkflow(ctx context.Context, workflowID, taskID, role string) (bool, error)
+	EnsureRoleSeat(ctx context.Context, workflowID, stepID, taskID, role, agentProfileID string) (*models.WorkflowStepParticipant, bool, error)
+}
+
+type workflowScopedParticipantRepo interface {
+	ListParticipantsForTaskWorkflow(ctx context.Context, taskID, workflowID string) ([]*models.WorkflowStepParticipant, error)
 }
 
 // Compile-time check that *repository.Repository satisfies WorkflowRepo.
@@ -50,6 +57,60 @@ func (a *ParticipantAdapter) ListStepParticipants(
 	rows, err := a.Repo.ListStepParticipantsForTask(ctx, stepID, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list step participants: %w", err)
+	}
+	out := make([]engine.ParticipantInfo, 0, len(rows))
+	for _, p := range rows {
+		out = append(out, engine.ParticipantInfo{
+			ID:               p.ID,
+			StepID:           p.StepID,
+			TaskID:           p.TaskID,
+			Role:             string(p.Role),
+			AgentProfileID:   p.AgentProfileID,
+			DecisionRequired: p.DecisionRequired,
+			Position:         p.Position,
+		})
+	}
+	return out, nil
+}
+
+// ListTaskParticipants satisfies engine.ParticipantStore. It returns every
+// per-task participant row for the task regardless of step_id, unmerged
+// with template-level rows — the AC-49 port the quorum engine's
+// requiredSeats uses to count participation that persists across steps.
+func (a *ParticipantAdapter) ListTaskParticipants(
+	ctx context.Context, taskID string,
+) ([]engine.ParticipantInfo, error) {
+	rows, err := a.Repo.ListParticipantsForTaskAnyStep(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task participants: %w", err)
+	}
+	out := make([]engine.ParticipantInfo, 0, len(rows))
+	for _, p := range rows {
+		out = append(out, engine.ParticipantInfo{
+			ID:               p.ID,
+			StepID:           p.StepID,
+			TaskID:           p.TaskID,
+			Role:             string(p.Role),
+			AgentProfileID:   p.AgentProfileID,
+			DecisionRequired: p.DecisionRequired,
+			Position:         p.Position,
+		})
+	}
+	return out, nil
+}
+
+// ListTaskParticipantsForWorkflow satisfies engine.WorkflowScopedParticipantStore
+// when the repository can filter durable task overrides by active workflow.
+func (a *ParticipantAdapter) ListTaskParticipantsForWorkflow(
+	ctx context.Context, taskID, workflowID string,
+) ([]engine.ParticipantInfo, error) {
+	repo, ok := a.Repo.(workflowScopedParticipantRepo)
+	if !ok {
+		return a.ListTaskParticipants(ctx, taskID)
+	}
+	rows, err := repo.ListParticipantsForTaskWorkflow(ctx, taskID, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("list task participants for workflow: %w", err)
 	}
 	out := make([]engine.ParticipantInfo, 0, len(rows))
 	for _, p := range rows {
@@ -98,6 +159,12 @@ func (a *DecisionAdapter) ListStepDecisions(
 			ParticipantID: d.ParticipantID,
 			Decision:      d.Decision,
 			Note:          d.Note,
+			DecidedAt:     d.DecidedAt,
+			DeciderType:   d.DeciderType,
+			DeciderID:     d.DeciderID,
+			Role:          d.Role,
+			Comment:       d.Comment,
+			SupersededAt:  d.SupersededAt,
 		})
 	}
 	return out, nil
@@ -114,6 +181,11 @@ func (a *DecisionAdapter) RecordStepDecision(
 		ParticipantID: d.ParticipantID,
 		Decision:      d.Decision,
 		Note:          d.Note,
+		DecidedAt:     d.DecidedAt,
+		DeciderType:   d.DeciderType,
+		DeciderID:     d.DeciderID,
+		Role:          d.Role,
+		Comment:       d.Comment,
 	}
 	return a.Repo.RecordStepDecision(ctx, row)
 }
@@ -123,6 +195,47 @@ func (a *DecisionAdapter) ClearStepDecisions(
 	ctx context.Context, taskID, stepID string,
 ) (int64, error) {
 	return a.Repo.ClearStepDecisions(ctx, taskID, stepID)
+}
+
+// ParticipantSeatWriterAdapter implements engine.ParticipantSeatWriter.
+type ParticipantSeatWriterAdapter struct {
+	Repo WorkflowRepo
+}
+
+// NewParticipantSeatWriterAdapter builds a ParticipantSeatWriterAdapter
+// wrapping the workflow repo.
+func NewParticipantSeatWriterAdapter(repo WorkflowRepo) *ParticipantSeatWriterAdapter {
+	return &ParticipantSeatWriterAdapter{Repo: repo}
+}
+
+// HasRoleSeatForTaskWorkflow satisfies engine.ParticipantSeatWriter.
+func (a *ParticipantSeatWriterAdapter) HasRoleSeatForTaskWorkflow(
+	ctx context.Context, workflowID, taskID, role string,
+) (bool, error) {
+	seated, err := a.Repo.HasRoleSeatForTaskWorkflow(ctx, workflowID, taskID, role)
+	if err != nil {
+		return false, fmt.Errorf("check existing role seat: %w", err)
+	}
+	return seated, nil
+}
+
+// EnsureRoleSeat satisfies engine.ParticipantSeatWriter.
+func (a *ParticipantSeatWriterAdapter) EnsureRoleSeat(
+	ctx context.Context, workflowID, stepID, taskID, role, agentProfileID string,
+) (engine.ParticipantInfo, error) {
+	seat, _, err := a.Repo.EnsureRoleSeat(ctx, workflowID, stepID, taskID, role, agentProfileID)
+	if err != nil {
+		return engine.ParticipantInfo{}, fmt.Errorf("ensure role seat: %w", err)
+	}
+	return engine.ParticipantInfo{
+		ID:               seat.ID,
+		StepID:           seat.StepID,
+		TaskID:           seat.TaskID,
+		Role:             string(seat.Role),
+		AgentProfileID:   seat.AgentProfileID,
+		DecisionRequired: seat.DecisionRequired,
+		Position:         seat.Position,
+	}, nil
 }
 
 // PrimaryAgentAdapter implements engine.PrimaryAgentResolver. The "primary"
@@ -160,4 +273,5 @@ var (
 	_ engine.DecisionStore          = (*DecisionAdapter)(nil)
 	_ engine.PrimaryAgentResolver   = (*PrimaryAgentAdapter)(nil)
 	_ engine.TargetTaskStepResolver = (*PrimaryAgentAdapter)(nil)
+	_ engine.ParticipantSeatWriter  = (*ParticipantSeatWriterAdapter)(nil)
 )

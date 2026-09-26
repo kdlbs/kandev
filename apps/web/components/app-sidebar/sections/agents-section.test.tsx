@@ -1,4 +1,3 @@
-import { act } from "react";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
@@ -15,17 +14,6 @@ const defaultAgentId = "claude";
 const defaultAgentDisplayName = "Claude";
 const defaultAgentModel = "claude-sonnet-4-5";
 const timestamp = "2026-01-01T00:00:00Z";
-type Deferred<T> = {
-  resolve: (value: T) => void;
-  promise: Promise<T>;
-};
-const createDeferred = <T,>() => {
-  let resolve: (value: T) => void = () => {};
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve } as Deferred<T>;
-};
 
 const state = {
   appSidebar: {
@@ -34,10 +22,10 @@ const state = {
     } as Record<string, boolean>,
   },
   office: {
-    agentProfiles: [] as AgentProfile[],
-    projects: [] as Array<unknown>,
-    inboxItems: [] as Array<unknown>,
-    inboxCount: 0,
+    agentProfilesByWorkspaceId: {} as Record<string, AgentProfile[]>,
+    projectsByWorkspaceId: {} as Record<string, Array<unknown>>,
+    inboxItemsByWorkspaceId: {} as Record<string, Array<unknown>>,
+    inboxCountByWorkspaceId: {} as Record<string, number>,
   },
   workspaces: {
     activeId: defaultWorkspaceId as string | null,
@@ -127,10 +115,10 @@ vi.mock("@kandev/ui/tooltip", () => ({
 import { AgentsSection } from "./agents-section";
 
 const resetOfficeState = () => {
-  state.office.agentProfiles = [];
-  state.office.projects = [];
-  state.office.inboxItems = [];
-  state.office.inboxCount = 0;
+  state.office.agentProfilesByWorkspaceId = {};
+  state.office.projectsByWorkspaceId = {};
+  state.office.inboxItemsByWorkspaceId = {};
+  state.office.inboxCountByWorkspaceId = {};
   state.workspaces.activeId = defaultWorkspaceId;
 };
 
@@ -159,16 +147,18 @@ describe("AgentsSection header", () => {
   });
 });
 
-describe("AgentsSection stale state cleanup", () => {
+describe("AgentsSection workspace scoping", () => {
   it("does not render stale agent links when no office workspace is active", () => {
     state.workspaces.activeId = null;
-    state.office.agentProfiles = [
-      createAgentProfile({
-        id: "stale-agent",
-        workspace: staleWorkspaceId,
-        name: "Stale Agent",
-      }),
-    ];
+    state.office.agentProfilesByWorkspaceId = {
+      [staleWorkspaceId]: [
+        createAgentProfile({
+          id: "stale-agent",
+          workspace: staleWorkspaceId,
+          name: "Stale Agent",
+        }),
+      ],
+    };
 
     render(<AgentsSection collapsed={false} />);
 
@@ -176,116 +166,66 @@ describe("AgentsSection stale state cleanup", () => {
     expect(screen.getByText(noAgentsText)).toBeTruthy();
   });
 
-  it("clears all office data when workspace becomes inactive", () => {
+  it("renders only the active workspace's agents, without clearing the other's", () => {
+    // Before the office collections were keyed by workspace, this section had
+    // to actively wipe the store when the active workspace went away. Keying
+    // makes the wipe unnecessary: the other workspace's agents simply are not
+    // reachable through the selector, and their data survives a switch back.
     state.workspaces.activeId = defaultWorkspaceId;
-    state.office.agentProfiles = [
-      createAgentProfile({
-        id: "active-agent",
-        workspace: defaultWorkspaceId,
-        name: "Active Agent",
-      }),
-    ];
-    state.office.projects = [{ id: "project-1" }];
-    state.office.inboxItems = [{ id: "item-1" }];
-    state.office.inboxCount = 2;
-
-    const { rerender } = render(<AgentsSection collapsed={false} />);
-    state.workspaces.activeId = null;
-    rerender(<AgentsSection collapsed={false} />);
-
-    expect(state.setOfficeAgentProfiles).toHaveBeenCalledWith([]);
-    expect(state.setProjects).toHaveBeenCalledWith([]);
-    expect(state.setInboxItems).toHaveBeenCalledWith([]);
-    expect(state.setInboxCount).toHaveBeenCalledWith(0);
-  });
-
-  it("does not overwrite stale agent state when workspace changes mid-fetch", async () => {
-    let resolveAgents: (value: { agents: AgentProfile[] }) => void = () => {};
-    const pending = new Promise<{ agents: AgentProfile[] }>((resolve) => {
-      resolveAgents = resolve;
-    });
-
-    vi.mocked(listAgentProfiles).mockReturnValue(pending);
-
-    state.workspaces.activeId = staleWorkspaceId;
-    render(<AgentsSection collapsed={false} />);
-
-    state.workspaces.activeId = null;
-    const staleAgents = {
-      agents: [
+    state.office.agentProfilesByWorkspaceId = {
+      [defaultWorkspaceId]: [
         createAgentProfile({
-          id: "race-agent",
+          id: "active-agent",
+          workspace: defaultWorkspaceId,
+          name: "Active Agent",
+        }),
+      ],
+      [staleWorkspaceId]: [
+        createAgentProfile({
+          id: "other-agent",
           workspace: staleWorkspaceId,
-          name: "Race Agent",
+          name: "Other Agent",
         }),
       ],
     };
 
-    await act(async () => {
-      resolveAgents(staleAgents);
-      await pending;
-    });
-
-    expect(state.setOfficeAgentProfiles).not.toHaveBeenCalled();
-  });
-});
-
-describe("AgentsSection request sequencing", () => {
-  it("applies only the latest response after rapid workspace switches", async () => {
-    const request1 = createDeferred<{ agents: AgentProfile[] }>();
-    const request2 = createDeferred<{ agents: AgentProfile[] }>();
-    const request3 = createDeferred<{ agents: AgentProfile[] }>();
-    const agentFromFirstRequest = createAgentProfile({
-      id: "agent-a",
-      workspace: defaultWorkspaceId,
-      name: "First Agent",
-    });
-    const agentFromSecondRequest = createAgentProfile({
-      id: "agent-b",
-      workspace: staleWorkspaceId,
-      name: "Second Agent",
-    });
-    const agentFromThirdRequest = createAgentProfile({
-      id: "agent-c",
-      workspace: defaultWorkspaceId,
-      name: "Third Agent",
-    });
-
-    vi.mocked(listAgentProfiles)
-      .mockReturnValueOnce(request1.promise)
-      .mockReturnValueOnce(request2.promise)
-      .mockReturnValueOnce(request3.promise);
-
-    state.workspaces.activeId = defaultWorkspaceId;
     const { rerender } = render(<AgentsSection collapsed={false} />);
+    expect(screen.getByRole("link", { name: /active agent/i })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /other agent/i })).toBeNull();
+
     state.workspaces.activeId = staleWorkspaceId;
     rerender(<AgentsSection collapsed={false} />);
-    state.workspaces.activeId = defaultWorkspaceId;
-    rerender(<AgentsSection collapsed={false} />);
 
-    await act(async () => {
-      request1.resolve({ agents: [agentFromFirstRequest] });
-      request2.resolve({ agents: [agentFromSecondRequest] });
-      request3.resolve({ agents: [agentFromThirdRequest] });
-      await request1.promise;
-      await request2.promise;
-      await request3.promise;
-    });
+    expect(screen.getByRole("link", { name: /other agent/i })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /active agent/i })).toBeNull();
+    expect(state.setOfficeAgentProfiles).not.toHaveBeenCalledWith(expect.anything(), []);
+  });
 
-    expect(state.setOfficeAgentProfiles).toHaveBeenCalledTimes(1);
-    expect(state.setOfficeAgentProfiles).toHaveBeenCalledWith([agentFromThirdRequest]);
+  it("fetches nothing of its own", () => {
+    // Agent loading moved to `useOfficeWorkspaceData`, so this section renders
+    // whatever the store holds and never issues a request. The race and
+    // request-sequencing cases that used to live here moved with it, to
+    // `hooks/use-office-workspace-data.test.ts`.
+    render(<AgentsSection collapsed={false} />);
+
+    expect(vi.mocked(listAgentProfiles)).not.toHaveBeenCalled();
+    expect(state.setOfficeAgentProfiles).not.toHaveBeenCalled();
   });
 });
 
 describe("AgentsSection error badge", () => {
   const renderWithFailedRuns = (failedRuns: number) => {
-    state.office.agentProfiles = [
-      createAgentProfile({ id: "agent-1", workspace: defaultWorkspaceId, name: "Alfa" }),
-    ];
-    state.office.inboxItems = Array.from({ length: failedRuns }, () => ({
-      type: "agent_run_failed",
-      payload: { agent_profile_id: agentProfileId("agent-1") },
-    }));
+    state.office.agentProfilesByWorkspaceId = {
+      [defaultWorkspaceId]: [
+        createAgentProfile({ id: "agent-1", workspace: defaultWorkspaceId, name: "Alfa" }),
+      ],
+    };
+    state.office.inboxItemsByWorkspaceId = {
+      [defaultWorkspaceId]: Array.from({ length: failedRuns }, () => ({
+        type: "agent_run_failed",
+        payload: { agent_profile_id: agentProfileId("agent-1") },
+      })),
+    };
     render(<AgentsSection collapsed={false} />);
   };
 

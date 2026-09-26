@@ -7,7 +7,7 @@ function source(relativePath: string): string {
 
 describe("programmatic external links", () => {
   it.each([
-    ["../../components/settings/pty-terminal-dialog.tsx", "PTY login links"],
+    ["../../components/settings/pty-terminal-view.tsx", "PTY terminal links"],
     ["../../hooks/use-terminal-link-handler.ts", "terminal links"],
     ["../../components/task/browser-panel.tsx", "browser panel tabs"],
   ])("routes %s through the shared desktop-aware opener", (path) => {
@@ -17,10 +17,16 @@ describe("programmatic external links", () => {
     expect(contents).not.toContain("window.open(");
   });
 
-  it.each([
-    ["../../hooks/use-open-session-in-editor.ts", "editor custom schemes"],
-    ["../../app/office/workspace/settings/export/export-preview.tsx", "downloads"],
-  ])("preserves WebView-owned window.open for %s", (path) => {
-    expect(source(path)).toContain("window.open(");
+  it("preserves WebView-owned window.open for editor custom schemes", () => {
+    expect(source("../../hooks/use-open-session-in-editor.ts")).toContain("window.open(");
+  });
+
+  it("uses the browser-owned download flow for selected Office exports", () => {
+    const contents = source("../../app/office/workspace/settings/export/export-preview.tsx");
+    const downloadHelper = source("../utils/file-download.ts");
+
+    expect(contents).toContain('triggerBlobDownload(blob, "kandev-config-selected.zip")');
+    expect(downloadHelper).toContain("anchor.download = fileName");
+    expect(downloadHelper).toContain("anchor.click()");
   });
 });

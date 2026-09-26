@@ -1,10 +1,11 @@
 "use client";
 
-import type { HTMLAttributes } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { IconChevronRight, IconGripVertical } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export type SwimlaneHeaderProps = {
   workflowName: string;
@@ -14,6 +15,8 @@ export type SwimlaneHeaderProps = {
   dragHandleProps?: HTMLAttributes<HTMLDivElement>;
   onToggleMultiSelect?: () => void;
   isMultiSelectMode?: boolean;
+  /** Per-lane column visibility control; the header stays a pure props component. */
+  columnsMenu?: ReactNode;
 };
 
 export function SwimlaneHeader({
@@ -24,7 +27,9 @@ export function SwimlaneHeader({
   dragHandleProps,
   onToggleMultiSelect,
   isMultiSelectMode,
+  columnsMenu,
 }: SwimlaneHeaderProps) {
+  const { t } = useTranslation();
   return (
     <div
       className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 py-1.5 w-full"
@@ -56,7 +61,7 @@ export function SwimlaneHeader({
               tabIndex={-1}
               aria-hidden
             />
-            Multi-select
+            {t("kanban:multiSelect")}
           </div>
         )}
         <div className="flex-1 border-t border-dashed border-border/50" />
@@ -73,7 +78,10 @@ export function SwimlaneHeader({
           <span className="text-muted-foreground/60">{taskCount}</span>
         </Badge>
       </button>
-      <div className="border-t border-dashed border-border/50" />
+      <div className="flex items-center gap-1">
+        <div className="flex-1 border-t border-dashed border-border/50" />
+        {columnsMenu}
+      </div>
     </div>
   );
 }

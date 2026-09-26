@@ -18,8 +18,9 @@ test.describe("Sentry settings — instances", () => {
     });
 
     const settings = new SentrySettingsPage(testPage);
-    await settings.goto();
+    await settings.goto(seedData.workspaceId);
     const card = settings.cardByName("Original Sentry");
+    await expect(card).toBeVisible({ timeout: 15_000 });
     await card.getByTestId("sentry-instance-edit-button").click();
     await testPage.getByTestId("sentry-edit-name-input").fill("Renamed Sentry");
 
@@ -37,11 +38,15 @@ test.describe("Sentry settings — instances", () => {
 
   // The settings page manages a LIST of named instances per workspace. This
   // covers add → the card appears → the backend probe flips it healthy.
-  test("adds a named instance and reports it healthy", async ({ testPage, apiClient }) => {
+  test("adds a named instance and reports it healthy", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     await apiClient.mockSentryReset();
 
     const settings = new SentrySettingsPage(testPage);
-    await settings.goto();
+    await settings.goto(seedData.workspaceId);
 
     // The add form pre-fills the SaaS URL default.
     await settings.addInstanceButton.click();
@@ -55,7 +60,7 @@ test.describe("Sentry settings — instances", () => {
     // flips lastOk true; reload to pick up the health banner deterministically.
     await expect(settings.cardByName("Production")).toBeVisible();
     await apiClient.waitForIntegrationAuthHealthy("sentry");
-    await settings.goto();
+    await settings.goto(seedData.workspaceId);
     await expect(
       settings.cardByName("Production").getByTestId("integration-auth-status-banner"),
     ).toHaveAttribute("data-state", "ok");
@@ -105,15 +110,16 @@ test.describe("Sentry settings — instances", () => {
     // UI: the delete is surfaced as an error and the primary card survives; the
     // watcher-free secondary deletes cleanly.
     const settings = new SentrySettingsPage(testPage);
-    await settings.goto();
+    await settings.goto(seedData.workspaceId);
     await expect(settings.cards).toHaveCount(2);
-    testPage.on("dialog", (d) => d.accept());
 
     await settings.cardByName("Primary").getByTestId("sentry-instance-delete-button").click();
+    await testPage.getByRole("button", { name: 'Remove Sentry instance "Primary"?' }).click();
     await expect(testPage.getByText(/still bound to it/i)).toBeVisible();
     await expect(settings.cardByName("Primary")).toBeVisible();
 
     await settings.cardByName("Secondary").getByTestId("sentry-instance-delete-button").click();
+    await testPage.getByRole("button", { name: 'Remove Sentry instance "Secondary"?' }).click();
     await expect(settings.cardByName("Secondary")).toHaveCount(0);
     await expect(settings.cardByName("Primary")).toBeVisible();
   });
@@ -150,7 +156,7 @@ test.describe("Sentry settings — issue watchers", () => {
     ]);
 
     const settings = new SentrySettingsPage(testPage);
-    await settings.goto();
+    await settings.goto(seedData.workspaceId);
 
     await testPage.getByRole("button", { name: "New watcher" }).click();
     const dialog = testPage.getByRole("dialog");
@@ -190,5 +196,66 @@ test.describe("Sentry settings — issue watchers", () => {
     await prCapture.screenshot("watcher-table-multi-project-persisted", {
       caption: "Saved watcher polling both selected projects",
     });
+  });
+
+  // One non-default lookback token carried end to end through the dialog, so
+  // the assertion cannot pass on the dialog's 24h default. The full token
+  // matrix is covered elsewhere: the request-shape test sends every offered
+  // token on both endpoints, and the form test pins the option values.
+  //
+  // @covers AC-INTEGRATIONS-SENTRY-WATCHER-LOOKBACK-PERIODS-001.1, AC-INTEGRATIONS-SENTRY-WATCHER-LOOKBACK-PERIODS-001.3
+  test("persists selected lookback period", async ({ testPage, apiClient, seedData }) => {
+    await apiClient.mockSentryReset();
+    const instance = await apiClient.createSentryInstance({
+      workspaceId: seedData.workspaceId,
+      name: "Lookback Sentry",
+      secret: TOKEN,
+    });
+    await apiClient.mockSentrySetAuthHealth({ instanceId: instance.id, ok: true });
+    await apiClient.mockSentrySetOrganizations(instance.id, [
+      { id: "acme", slug: "acme", name: "Acme" },
+    ]);
+    await apiClient.mockSentrySetProjects(instance.id, [
+      { id: "frontend", slug: "frontend", name: "Frontend", orgSlug: "acme" },
+    ]);
+
+    const settings = new SentrySettingsPage(testPage);
+    await settings.goto(seedData.workspaceId);
+
+    await testPage.getByRole("button", { name: "New watcher" }).click();
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    const pick = async (label: string, option: string | RegExp) => {
+      await comboboxByLabel(dialog, label).click();
+      await testPage.getByRole("listbox").getByRole("option", { name: option }).click();
+    };
+
+    await pick("Sentry instance", "Lookback Sentry");
+    // The sole org auto-selects once the lookup resolves.
+    await expect(comboboxByLabel(dialog, "Organization slug")).toContainText("acme");
+
+    await comboboxByLabel(dialog, "Project slug").click();
+    await testPage
+      .getByRole("listbox")
+      .getByRole("option", { name: "Frontend (frontend)" })
+      .click();
+    await expect(comboboxByLabel(dialog, "Project slug")).toContainText("Frontend (frontend)");
+    await testPage.keyboard.press("Escape");
+
+    await pick("Stats period", "Last 30 days");
+
+    await pick("Workflow", "E2E Workflow");
+    await comboboxByLabel(dialog, "Workflow Step").click();
+    await testPage.getByRole("listbox").getByRole("option").first().click();
+
+    const createButton = dialog.getByRole("button", { name: "Create" });
+    await expect(createButton).toBeEnabled();
+    await createButton.click();
+    await expect(dialog).toBeHidden();
+
+    // Reload before asserting so the summary comes from the persisted row.
+    await settings.goto(seedData.workspaceId);
+    await expect(testPage.getByText("period:30d")).toBeVisible();
   });
 });

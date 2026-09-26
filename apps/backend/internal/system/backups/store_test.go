@@ -51,7 +51,7 @@ func newTestService(t *testing.T) (*Service, string) {
 	t.Helper()
 	pool, dataDir := newTestPool(t)
 	tracker := jobs.NewTracker(nil, newTestLogger(t))
-	svc := NewService(dataDir, pool, tracker, newTestLogger(t))
+	svc := NewService(filepath.Join(dataDir, "kandev.db"), pool, tracker, newTestLogger(t))
 	return svc, dataDir
 }
 
@@ -204,6 +204,9 @@ func TestCreate_AtomicRenameLeavesNoTmpAndReportsFullSize(t *testing.T) {
 	}
 	if reported != info.Size() {
 		t.Errorf("reported size %d != on-disk size %d", reported, info.Size())
+	}
+	if _, ok := job.Result["path"]; ok {
+		t.Fatal("job result exposes the install's absolute backup path")
 	}
 }
 

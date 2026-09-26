@@ -128,3 +128,54 @@ describe("AppSidebarSection", () => {
     expect(storeState.toggleAppSidebarSection).toHaveBeenCalledWith("office-work", true);
   });
 });
+
+describe("AppSidebarSection collapsed summary", () => {
+  beforeEach(() => {
+    storeState.appSidebar.sectionExpanded = { tasks: true };
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("shows a collapsed summary only while the accordion is shut", () => {
+    // A section that starts folded has to say how much it is hiding, or it
+    // reads as empty and nobody opens it. Once it is open the rows say it.
+    storeState.appSidebar.sectionExpanded = { tasks: false };
+    const { rerender } = render(
+      <TooltipProvider>
+        <AppSidebarSection
+          id="tasks"
+          label="Tasks"
+          icon={IconCircleDot}
+          collapsed={false}
+          collapsedSummary={4}
+        >
+          <div data-testid={CHILDREN_TESTID}>children</div>
+        </AppSidebarSection>
+      </TooltipProvider>,
+    );
+
+    const summary = screen.getByTestId("sidebar-section-collapsed-summary");
+    expect(summary.textContent).toBe("4");
+    // Muted, so it reads as a footnote to the label rather than a second label.
+    expect(summary.className).toContain("text-muted-foreground");
+
+    storeState.appSidebar.sectionExpanded = { tasks: true };
+    rerender(
+      <TooltipProvider>
+        <AppSidebarSection
+          id="tasks"
+          label="Tasks"
+          icon={IconCircleDot}
+          collapsed={false}
+          collapsedSummary={4}
+        >
+          <div data-testid={CHILDREN_TESTID}>children</div>
+        </AppSidebarSection>
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByTestId("sidebar-section-collapsed-summary")).toBeNull();
+  });
+});

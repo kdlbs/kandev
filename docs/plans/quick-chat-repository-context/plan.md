@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/quick-chat-repository-context.md
+spec: docs/specs/tasks/requirements/quick-chat-repository-context.md
 created: 2026-07-14
 status: complete
 ---

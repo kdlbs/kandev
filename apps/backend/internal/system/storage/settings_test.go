@@ -2,11 +2,14 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -15,6 +18,19 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 )
+
+func TestDefaultSettingsDisablesWorkspaceDependencyCleanup(t *testing.T) {
+	raw, err := json.Marshal(DefaultSettings())
+	if err != nil {
+		t.Fatalf("marshal defaults: %v", err)
+	}
+	if !strings.Contains(string(raw), `"dependency_cleanup_enabled":false`) {
+		t.Fatalf("defaults = %s, want dependency cleanup disabled", raw)
+	}
+	if !strings.Contains(string(raw), `"temporary_artifacts":{"enabled":false}`) {
+		t.Fatalf("defaults = %s, want scheduled temporary cleanup disabled", raw)
+	}
+}
 
 func TestSettingsStoreMissingUsesDisabledDefaults(t *testing.T) {
 	store, _ := newTestStores(t)
@@ -29,8 +45,9 @@ func TestSettingsStoreMissingUsesDisabledDefaults(t *testing.T) {
 		IdleForMinutes:           10,
 		OrphanGraceHours:         168,
 		QuarantineRetentionHours: 168,
-		Workspaces:               ResourceSettings{Enabled: true},
+		Workspaces:               WorkspaceSettings{Enabled: true},
 		KandevContainers:         ResourceSettings{Enabled: true},
+		TemporaryArtifacts:       ResourceSettings{Enabled: false},
 		GoCache: GoCacheSettings{
 			Enabled:     false,
 			MaxBytes:    16106127360,
@@ -90,6 +107,47 @@ func TestSettingsStoreInvalidSavePreservesPreviousValue(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("settings after invalid save = %#v, want %#v", got, want)
+	}
+}
+
+func TestPatchSettingsPreservesDisjointConcurrentUpdates(t *testing.T) {
+	store, _ := newTestStores(t)
+	ctx := context.Background()
+	if _, err := store.SaveSettings(ctx, DefaultSettings()); err != nil {
+		t.Fatalf("seed settings: %v", err)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errors := make(chan error, 2)
+	patches := []map[string]json.RawMessage{
+		{"enabled": json.RawMessage(`true`)},
+		{"workspaces.enabled": json.RawMessage(`false`)},
+	}
+	for _, patch := range patches {
+		wg.Add(1)
+		go func(patch map[string]json.RawMessage) {
+			defer wg.Done()
+			<-start
+			_, err := store.PatchSettingsWithConfirmations(ctx, patch, SaveConfirmations{})
+			errors <- err
+		}(patch)
+	}
+	close(start)
+	wg.Wait()
+	close(errors)
+	for err := range errors {
+		if err != nil {
+			t.Fatalf("concurrent patch: %v", err)
+		}
+	}
+
+	got, err := store.GetSettings(ctx)
+	if err != nil {
+		t.Fatalf("read patched settings: %v", err)
+	}
+	if !got.Enabled || got.Workspaces.Enabled {
+		t.Fatalf("disjoint patches lost an update: %#v", got)
 	}
 }
 

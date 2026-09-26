@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const MIN_HEIGHT = 120;
-const MAX_VIEWPORT_RATIO = 0.5;
+const DEFAULT_MAX_VIEWPORT_RATIO = 0.5;
 
 function viewportHeight(): number {
   return typeof window === "undefined" ? 800 : window.innerHeight;
 }
 
-function clampHeight(value: number): number {
-  const max = Math.round(viewportHeight() * MAX_VIEWPORT_RATIO);
+function clampHeight(value: number, maxViewportRatio: number): number {
+  const max = Math.round(viewportHeight() * maxViewportRatio);
   return Math.min(Math.max(value, MIN_HEIGHT), max);
 }
 
@@ -20,14 +20,20 @@ function clampHeight(value: number): number {
  * Default behaviour: the container sizes to its content (`height === null` →
  * caller omits the inline height style). Once the user drags the resize
  * handle, the height switches to an explicit pixel value clamped between
- * MIN_HEIGHT and 50% of the viewport. Double-clicking the handle returns to
- * the auto-sized default.
+ * MIN_HEIGHT and `maxViewportRatio` (default 50%) of the viewport.
+ * Double-clicking the handle returns to the auto-sized default.
+ *
+ * `maxViewportRatio` MUST match whatever CSS `max-height` the caller renders
+ * on the same container — a mismatch creates a dead zone where the drag
+ * keeps computing a larger height than CSS will actually render.
  *
  * Callers MUST invoke `resetHeight()` when the overlay closes so a fresh
  * clarification starts with auto-sized height instead of inheriting a
  * dragged value.
  */
-export function useResizableClarificationOverlay() {
+export function useResizableClarificationOverlay(
+  maxViewportRatio: number = DEFAULT_MAX_VIEWPORT_RATIO,
+) {
   // null = auto-size to content; number = user-driven pixel height.
   const [height, setHeight] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -55,7 +61,7 @@ export function useResizableClarificationOverlay() {
       // Dragging the handle UP grows the overlay (it expands toward the top
       // of the screen), so a smaller clientY → larger height.
       const delta = startY.current - e.clientY;
-      setHeight(clampHeight(startHeight.current + delta));
+      setHeight(clampHeight(startHeight.current + delta, maxViewportRatio));
     };
     const handleMouseUp = () => {
       if (!isDragging.current) return;
@@ -74,7 +80,7 @@ export function useResizableClarificationOverlay() {
         document.body.style.userSelect = "";
       }
     };
-  }, []);
+  }, [maxViewportRatio]);
 
   return {
     height,

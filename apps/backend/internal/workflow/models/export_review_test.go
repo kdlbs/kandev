@@ -81,7 +81,7 @@ func TestConvertReviewProfileToPortable_NilResolverAndEmptyConfig(t *testing.T) 
 }
 
 func TestConvertReviewProfileToID_MatchesLocalProfile(t *testing.T) {
-	match := func(agentName, model, mode string) string {
+	match := func(agentName, model, mode, _ string) string {
 		if agentName == "codex" && model == "gpt-5.3" && mode == "review" {
 			return "profile-imported"
 		}
@@ -106,7 +106,7 @@ func TestConvertReviewProfileToID_MatchesLocalProfile(t *testing.T) {
 func TestConvertReviewProfileToID_DropsUnmatchedDescriptor(t *testing.T) {
 	events := ConvertReviewProfileToID(reviewStepEvents(map[string]any{
 		ReviewAgentProfilePortableKey: map[string]any{"agent_name": "unknown"},
-	}), func(string, string, string) string { return "" })
+	}), func(string, string, string, string) string { return "" })
 
 	config := reviewActionConfig(t, events)
 	if _, present := config[ReviewAgentProfileConfigKey]; present {
@@ -121,7 +121,7 @@ func TestReviewProfileRoundTripAcrossWorkspaces(t *testing.T) {
 	resolve := func(string) *AgentProfilePortable {
 		return &AgentProfilePortable{AgentName: "claude", Model: "haiku"}
 	}
-	match := func(agentName, model, _ string) string {
+	match := func(agentName, model, _, _ string) string {
 		if agentName == "claude" && model == "haiku" {
 			return "profile-in-target-workspace"
 		}

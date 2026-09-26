@@ -19,16 +19,24 @@ const rateLimitSeedTimeout = 5 * time.Second
 // implementation we ended up with, then seeds initial snapshots. The seed is
 // best-effort — a missing CLI or network blip should not block startup.
 func attachRateTracker(client Client, tracker *RateTracker, log *logger.Logger) {
+	wireRateTracker(client, tracker)
+	c, ok := client.(*GHClient)
+	if !ok {
+		return
+	}
+	seedCtx, cancel := context.WithTimeout(context.Background(), rateLimitSeedTimeout)
+	defer cancel()
+	if err := c.FetchRateLimit(seedCtx); err != nil {
+		log.Debug("seed gh rate limit failed", zap.Error(err))
+	}
+}
+
+func wireRateTracker(client Client, tracker *RateTracker) {
 	switch c := client.(type) {
 	case *PATClient:
 		c.WithRateTracker(tracker)
 	case *GHClient:
 		c.WithRateTracker(tracker)
-		seedCtx, cancel := context.WithTimeout(context.Background(), rateLimitSeedTimeout)
-		defer cancel()
-		if err := c.FetchRateLimit(seedCtx); err != nil {
-			log.Debug("seed gh rate limit failed", zap.Error(err))
-		}
 	}
 }
 

@@ -29,6 +29,7 @@ test.describe("GitLab MR push-detection auto-link", () => {
       provider_host: backend.baseUrl,
       provider_owner: "platform",
       provider_name: "kandev",
+      pull_before_worktree: false,
     });
 
     // First turn: commit a change but do NOT push yet, so the branch has no

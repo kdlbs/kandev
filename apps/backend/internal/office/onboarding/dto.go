@@ -18,6 +18,7 @@ type OnboardingStateResponse struct {
 type OnboardingImportFSResponse struct {
 	WorkspaceIDs  []string `json:"workspaceIds"`
 	ImportedCount int      `json:"importedCount"`
+	Warnings      []string `json:"warnings,omitempty"`
 }
 
 // OnboardingCompleteRequest is the request body for POST /onboarding/complete.

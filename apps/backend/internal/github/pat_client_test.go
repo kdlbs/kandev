@@ -18,7 +18,7 @@ func TestConvertPatPR(t *testing.T) {
 		Title:     "Feature Y",
 		HTMLURL:   "https://github.com/org/repo/pull/10",
 		State:     "open",
-		Draft:     false,
+		Draft:     boolPtr(false),
 		Additions: 200,
 		Deletions: 30,
 		CreatedAt: time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC),
@@ -43,6 +43,7 @@ func TestConvertPatPR(t *testing.T) {
 		}{Ref: "feature-y", SHA: "deadbeef1234"},
 		Base: struct {
 			Ref string `json:"ref"`
+			SHA string `json:"sha"`
 		}{Ref: "main"},
 	}
 
@@ -66,6 +67,9 @@ func TestConvertPatPR(t *testing.T) {
 	if pr.Mergeable {
 		t.Error("expected mergeable = false when nil")
 	}
+	if !pr.IsDraftObserved {
+		t.Error("expected IsDraftObserved = true when draft is present in the response")
+	}
 	if len(pr.RequestedReviewers) != 2 {
 		t.Fatalf("requested reviewers = %d, want 2", len(pr.RequestedReviewers))
 	}
@@ -77,6 +81,97 @@ func TestConvertPatPR(t *testing.T) {
 	}
 	if pr.MergedAt != nil {
 		t.Error("expected nil MergedAt")
+	}
+}
+
+func TestExecuteGraphQLPreservesHTTPProviderRetryDeadline(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		configure func(http.Header, time.Time)
+		minWait   time.Duration
+	}{
+		{
+			name:    "429 retry-after",
+			status:  http.StatusTooManyRequests,
+			body:    `{"message":"rate limit exceeded"}`,
+			minWait: 119 * time.Second,
+			configure: func(headers http.Header, _ time.Time) {
+				headers.Set("Retry-After", "120")
+			},
+		},
+		{
+			name:    "403 reset",
+			status:  http.StatusForbidden,
+			body:    `{"message":"API rate limit exceeded"}`,
+			minWait: 119 * time.Second,
+			configure: func(headers http.Header, now time.Time) {
+				headers.Set("X-RateLimit-Limit", "5000")
+				headers.Set("X-RateLimit-Remaining", "0")
+				headers.Set("X-RateLimit-Reset", strconv.FormatInt(now.Add(120*time.Second).Unix(), 10))
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Now().UTC()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				tt.configure(w.Header(), now)
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			t.Cleanup(srv.Close)
+			client := newPATClientPointingAt(t, srv.URL)
+			var out map[string]any
+			err := client.ExecuteGraphQL(context.Background(), "query Test { rateLimit { resetAt } }", nil, &out)
+			if err == nil {
+				t.Fatal("ExecuteGraphQL succeeded, want provider error")
+			}
+			var apiErr *GitHubAPIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("error = %T %v, want GitHubAPIError", err, err)
+			}
+			if apiErr.RetryAt == nil || apiErr.RetryAt.Before(now.Add(tt.minWait)) {
+				t.Fatalf("retry deadline = %v, want at least %v", apiErr.RetryAt, now.Add(tt.minWait))
+			}
+		})
+	}
+}
+
+// TestConvertPatPR_MissingDraftAndChangedFilesLeavesUnobserved covers
+// AC-12a on the REST decode path: a response that omits draft and
+// changed_files must decode to unobserved (Observed=false), not a
+// fabricated false/0 masquerading as a real observation.
+func TestConvertPatPR_MissingDraftAndChangedFilesLeavesUnobserved(t *testing.T) {
+	raw := &patPR{Number: 11, State: "open"}
+	pr := convertPatPR(raw, "org", "repo")
+	if pr.IsDraftObserved {
+		t.Error("IsDraftObserved = true, want false when draft is absent from the response")
+	}
+	if pr.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = true, want false when changed_files is absent from the response")
+	}
+}
+
+// TestConvertPatPR_ExplicitFalseAndZeroAreObserved covers AC-12a's other
+// half: a response that genuinely reports draft=false and changed_files=0
+// must be distinguishable from one that omits them — both mark
+// Observed=true.
+func TestConvertPatPR_ExplicitFalseAndZeroAreObserved(t *testing.T) {
+	raw := &patPR{Number: 11, State: "open", Draft: boolPtr(false), ChangedFiles: intPtr(0)}
+	pr := convertPatPR(raw, "org", "repo")
+	if !pr.IsDraftObserved {
+		t.Error("IsDraftObserved = false, want true for an explicit draft=false")
+	}
+	if pr.Draft {
+		t.Error("Draft = true, want false")
+	}
+	if !pr.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = false, want true for an explicit changed_files=0")
+	}
+	if pr.ChangedFiles != 0 {
+		t.Errorf("ChangedFiles = %d, want 0", pr.ChangedFiles)
 	}
 }
 
@@ -95,6 +190,7 @@ func TestConvertPatPR_Merged(t *testing.T) {
 		}{Ref: "fix"},
 		Base: struct {
 			Ref string `json:"ref"`
+			SHA string `json:"sha"`
 		}{Ref: "main"},
 	}
 
@@ -196,6 +292,80 @@ func TestPATClient_ListCheckRunsPaginatesCheckRuns(t *testing.T) {
 	}
 }
 
+func TestPATClient_ListWorkflowRunsPaginatesAndListsAttemptJobs(t *testing.T) {
+	c, requests := newLinkPaginatedPATServer(t, "/repos/acme/widget/actions/runs", []string{
+		`{"workflow_runs":[{"id":7,"run_attempt":1,"workflow_id":9,"name":"Run tests","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"sha","head_branch":"feature","head_repository":{"full_name":"contributor/widget-fork","name":"widget-fork","owner":{"login":"contributor"}},"html_url":"https://github.com/acme/widget/actions/runs/7","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T10:00:00Z","pull_requests":[]}]}`,
+		`{"workflow_runs":[{"id":8,"run_attempt":1,"workflow_id":10,"name":"Lint","event":"pull_request","status":"completed","conclusion":"success","head_sha":"sha","head_branch":"feature","html_url":"https://github.com/acme/widget/actions/runs/8","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T11:00:00Z","pull_requests":[]}]}`,
+	})
+
+	runs, err := c.ListWorkflowRuns(context.Background(), "acme", "widget", "sha")
+	if err != nil {
+		t.Fatalf("ListWorkflowRuns: %v", err)
+	}
+	if len(runs) != 2 || runs[0].HeadRepoOwner != "contributor" || runs[0].HeadRepoName != "widget-fork" {
+		t.Fatalf("runs = %#v", runs)
+	}
+	if len(*requests) != 2 {
+		t.Fatalf("workflow run requests = %d, want 2", len(*requests))
+	}
+	if got := parseQueryValues(t, (*requests)[0].Query).Get("head_sha"); got != "sha" {
+		t.Fatalf("head_sha = %q, want sha", got)
+	}
+	if got := parseQueryValues(t, (*requests)[0].Query).Get("per_page"); got != "100" {
+		t.Fatalf("per_page = %q, want 100", got)
+	}
+
+	jobClient, jobRequests := newRecordingPATServer(t, map[string]string{
+		"/repos/acme/widget/actions/runs/7/attempts/1/jobs": `{"jobs":[{"id":70,"name":"approval gate","status":"completed","conclusion":null}]}`,
+	})
+	jobs, err := jobClient.ListWorkflowRunJobs(context.Background(), "acme", "widget", 7, 1)
+	if err != nil {
+		t.Fatalf("ListWorkflowRunJobs: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].Name != "approval gate" || jobs[0].Conclusion != "" {
+		t.Fatalf("jobs = %#v", jobs)
+	}
+	if len(*jobRequests) != 1 || parseQueryValues(t, (*jobRequests)[0].Query).Get("per_page") != "100" {
+		t.Fatalf("job requests = %#v", *jobRequests)
+	}
+}
+
+func TestPATClient_PRCommitDetailUsesExactSHAAndMergesPages(t *testing.T) {
+	var requested []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = append(requested, r.URL.RequestURI())
+		if r.URL.Path != "/repos/acme/widget/commits/2222222222222222222222222222222222222222" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.URL.Query().Get("per_page") != "100" {
+			t.Errorf("per_page = %q, want 100", r.URL.Query().Get("per_page"))
+		}
+		if r.URL.Query().Get("page") == "2" {
+			_, _ = w.Write([]byte(`{"sha":"2222222222222222222222222222222222222222","commit":{"message":"ignored","author":{"name":"Other","date":"2026-08-05T11:00:00Z"}},"stats":{"additions":99,"deletions":99},"files":[{"filename":"two.txt","status":"removed","additions":0,"deletions":2,"patch":"@@ -1 +0,0 @@\n-gone"}]}`))
+			return
+		}
+		w.Header().Set("Link", `<`+githubAPIBase+`/repos/acme/widget/commits/2222222222222222222222222222222222222222?per_page=100&page=2>; rel="next"`)
+		_, _ = w.Write([]byte(`{"sha":"2222222222222222222222222222222222222222","commit":{"message":"remote detail","author":{"name":"Octo Cat","date":"2026-08-04T11:00:00Z"}},"author":{"login":"octocat"},"stats":{"additions":7,"deletions":3},"files":[{"filename":"one.txt","status":"modified","additions":4,"deletions":1,"patch":"@@ -1 +1 @@\n-old\n+new"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	detail, err := newPATClientPointingAt(t, srv.URL).GetPRCommitDetail(
+		context.Background(), "acme", "widget", "2222222222222222222222222222222222222222",
+	)
+	if err != nil {
+		t.Fatalf("GetPRCommitDetail: %v", err)
+	}
+	if detail.AuthorLogin != "octocat" || detail.AuthorName != "Octo Cat" || detail.FilesChanged != 2 {
+		t.Fatalf("detail = %#v", detail)
+	}
+	if detail.Additions != 7 || detail.Deletions != 3 || len(detail.Files) != 2 {
+		t.Fatalf("detail stats/files = %#v", detail)
+	}
+	if len(requested) != 2 {
+		t.Fatalf("requests = %#v, want two pages", requested)
+	}
+}
+
 func TestConvertPatPR_Mergeable(t *testing.T) {
 	mergeable := true
 	raw := &patPR{
@@ -211,6 +381,7 @@ func TestConvertPatPR_Mergeable(t *testing.T) {
 		}{Ref: "b"},
 		Base: struct {
 			Ref string `json:"ref"`
+			SHA string `json:"sha"`
 		}{Ref: "main"},
 	}
 
@@ -234,6 +405,7 @@ func TestConvertPatPR_MergeableState(t *testing.T) {
 		}{Ref: "b"},
 		Base: struct {
 			Ref string `json:"ref"`
+			SHA string `json:"sha"`
 		}{Ref: "main"},
 	}
 
@@ -340,6 +512,35 @@ func TestPATClient_FindPRByBranch_UsesGraphQLHeadRefName(t *testing.T) {
 	}
 	if pr == nil || pr.Number != 12 || pr.HeadBranch != "feature" {
 		t.Fatalf("unexpected PR: %#v", pr)
+	}
+}
+
+func TestPATClient_FindPRByHead_UsesExactSourceRepository(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/kdlbs/kandev/pulls" {
+			t.Errorf("path = %q, want /repos/kdlbs/kandev/pulls", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("head"); got != "alice:feature" {
+			t.Errorf("head = %q, want alice:feature", got)
+		}
+		if got := r.URL.Query().Get("per_page"); got != "100" {
+			t.Errorf("per_page = %q, want 100", got)
+		}
+		_, _ = w.Write([]byte(`[{"number":12,"title":"fork PR","html_url":"https://x/12","state":"open",
+			"head":{"ref":"feature","sha":"abc123","repo":{"id":200,"name":"kandev","full_name":"alice/kandev","owner":{"login":"alice"}}},
+			"base":{"ref":"main","repo":{"id":100,"name":"kandev","full_name":"kdlbs/kandev","owner":{"login":"kdlbs"}}},
+			"user":{"login":"alice"}}]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	pr, err := newPATClientPointingAt(t, srv.URL).FindPRByHead(
+		context.Background(), "kdlbs", "kandev", "alice", "kandev", "feature",
+	)
+	if err != nil {
+		t.Fatalf("FindPRByHead: %v", err)
+	}
+	if pr == nil || pr.Number != 12 || pr.HeadRepoOwner != "alice" || pr.HeadRepoName != "kandev" {
+		t.Fatalf("PR = %#v, want source alice/kandev", pr)
 	}
 }
 

@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { routeMainWebSocketWithMessageAddResponseDrop } from "../../helpers/ws-drop";
-import { openTaskSession } from "../../helpers/session";
+import { openTaskSession, waitForSessionDone } from "../../helpers/session";
 
 test.describe("Message send under notification pressure", () => {
   test("reconciles a lost response without duplicating the prompt or turn", async ({
@@ -25,6 +25,15 @@ test.describe("Message send under notification pressure", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+    // The response-loss scenario starts with the follow-up below. Finish the
+    // seed turn before attaching the intercepted browser socket so initial
+    // stream traffic cannot race application boot under shard pressure.
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "seed session should be idle before opening the intercepted socket",
+    );
     const session = await openTaskSession(testPage, task.id);
     await session.waitForChatIdle({ timeout: 45_000 });
 

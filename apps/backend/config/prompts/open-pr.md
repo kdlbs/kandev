@@ -32,6 +32,8 @@ Please create and open a Pull Request for the current branch using the GitHub CL
    - Related Issues section with issue links
 
 5. **Create the PR:**
+   - Before creating the PR, read and follow the target repository's contribution
+     guide and agent instructions
    - Use 'gh pr create' command with appropriate flags
    - Set the title and body based on the generated description
    - Set appropriate labels if needed

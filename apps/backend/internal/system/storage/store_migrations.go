@@ -42,6 +42,23 @@ var storageSchemaStatements = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_storage_quarantine_active_original
 		ON storage_quarantine_entries (original_path)
 		WHERE state IN ('quarantined', 'failed')`,
+	`CREATE TABLE IF NOT EXISTS storage_temp_artifacts (
+		id TEXT PRIMARY KEY,
+		kind TEXT NOT NULL,
+		path TEXT NOT NULL UNIQUE,
+		marker_token TEXT NOT NULL UNIQUE,
+		state TEXT NOT NULL,
+		owner_pid BIGINT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		last_heartbeat_at TIMESTAMP NULL,
+		closed_at TIMESTAMP NULL,
+		quarantined_at TIMESTAMP NULL,
+		deleted_at TIMESTAMP NULL,
+		last_error TEXT NOT NULL DEFAULT '',
+		metadata TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_storage_temp_artifacts_state_created
+		ON storage_temp_artifacts (state, created_at)`,
 }
 
 func initStorageSchema(conn *sqlx.DB) error {

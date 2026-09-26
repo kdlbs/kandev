@@ -1,14 +1,17 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/events"
-	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowsvc "github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/workflow/stepevents"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
@@ -77,9 +80,26 @@ func (h *Handlers) handleDeleteWorkflow(ctx context.Context, msg *ws.Message) (*
 
 	if err := h.taskSvc.DeleteWorkflow(ctx, workflowID); err != nil {
 		h.logger.Error("failed to delete workflow", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete workflow", nil)
+		return h.workflowScopeError(msg, err, "Failed to delete workflow")
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}
+
+func (h *Handlers) handleExportWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	workflowID, err := unmarshalStringField(msg.Payload, "workflow_id")
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if workflowID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
+	}
+
+	export, err := h.workflowSvc.ExportWorkflow(ctx, workflowID)
+	if err != nil {
+		h.logger.Error("failed to export workflow", zap.Error(err))
+		return h.workflowScopeError(msg, err, "Failed to export workflow")
+	}
+	return ws.NewResponse(msg.ID, msg.Action, export)
 }
 
 // handleImportWorkflow imports one or more workflows into a workspace from a
@@ -124,28 +144,37 @@ func (h *Handlers) handleImportWorkflow(ctx context.Context, msg *ws.Message) (*
 	result, err := h.workflowSvc.ImportWorkflows(ctx, req.WorkspaceID, &export)
 	if err != nil {
 		h.logger.Error("failed to import workflows", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to import workflows", nil)
+		return h.workflowScopeError(msg, err, "Failed to import workflows")
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 
 func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		WorkflowID                 string               `json:"workflow_id"`
-		Name                       string               `json:"name"`
-		Position                   int                  `json:"position"`
-		Color                      string               `json:"color"`
-		Prompt                     string               `json:"prompt"`
-		IsStartStep                *bool                `json:"is_start_step"`
-		AllowManualMove            *bool                `json:"allow_manual_move"`
-		ShowInCommandPanel         *bool                `json:"show_in_command_panel"`
-		AutoAdvanceRequiresSignal  *bool                `json:"auto_advance_requires_signal"`
-		CancelTriggersTurnComplete *bool                `json:"cancel_triggers_turn_complete"`
-		WIPLimit                   *int                 `json:"wip_limit"`
-		PullFromStepID             *string              `json:"pull_from_step_id"`
-		Events                     *wfmodels.StepEvents `json:"events"`
+		WorkflowID                 string                          `json:"workflow_id"`
+		Name                       string                          `json:"name"`
+		Position                   int                             `json:"position"`
+		Color                      string                          `json:"color"`
+		Prompt                     string                          `json:"prompt"`
+		AgentProfileID             *string                         `json:"agent_profile_id"`
+		ProfileSessionStartPolicy  *string                         `json:"profile_session_start_policy"`
+		ProfileSessionEndPolicy    *string                         `json:"profile_session_end_policy"`
+		IsStartStep                *bool                           `json:"is_start_step"`
+		AllowManualMove            *bool                           `json:"allow_manual_move"`
+		ShowInCommandPanel         *bool                           `json:"show_in_command_panel"`
+		AutoAdvanceRequiresSignal  *bool                           `json:"auto_advance_requires_signal"`
+		CancelTriggersTurnComplete *bool                           `json:"cancel_triggers_turn_complete"`
+		CompleteTaskOnEnter        json.RawMessage                 `json:"complete_task_on_enter"`
+		WIPLimit                   *int                            `json:"wip_limit"`
+		PullFromStepID             *string                         `json:"pull_from_step_id"`
+		SessionTarget              workflowctrl.SessionTargetPatch `json:"session_target"`
+		Events                     *wfmodels.StepEvents            `json:"events"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	completeTaskOnEnter, err := optionalCompleteTaskOnEnter(req.CompleteTaskOnEnter)
+	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	if req.WorkflowID == "" {
@@ -161,12 +190,17 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 		Position:                   req.Position,
 		Color:                      req.Color,
 		Prompt:                     req.Prompt,
+		AgentProfileID:             req.AgentProfileID,
+		ProfileSessionStartPolicy:  req.ProfileSessionStartPolicy,
+		ProfileSessionEndPolicy:    req.ProfileSessionEndPolicy,
 		IsStartStep:                req.IsStartStep,
 		ShowInCommandPanel:         req.ShowInCommandPanel,
 		AutoAdvanceRequiresSignal:  req.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: req.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:        completeTaskOnEnter,
 		WIPLimit:                   req.WIPLimit,
 		PullFromStepID:             req.PullFromStepID,
+		SessionTarget:              req.SessionTarget,
 		Events:                     req.Events,
 	}
 	if req.AllowManualMove != nil {
@@ -176,30 +210,53 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 	resp, err := h.workflowCtrl.CreateStep(ctx, createReq)
 	if err != nil {
 		h.logger.Error("failed to create workflow step", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create workflow step", nil)
+		return h.workflowScopeError(msg, err, "Failed to create workflow step")
 	}
 	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.DemotedStartSteps)
 	h.publishWorkflowStepEvent(ctx, events.WorkflowStepCreated, resp.Step)
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
+func optionalCompleteTaskOnEnter(raw json.RawMessage) (*bool, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, fmt.Errorf("complete_task_on_enter must be a boolean")
+	}
+	var value bool
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
 func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		StepID                     string               `json:"step_id"`
-		Name                       *string              `json:"name"`
-		Color                      *string              `json:"color"`
-		Prompt                     *string              `json:"prompt"`
-		IsStartStep                *bool                `json:"is_start_step"`
-		AllowManualMove            *bool                `json:"allow_manual_move"`
-		ShowInCommandPanel         *bool                `json:"show_in_command_panel"`
-		AutoArchiveAfterHours      *int                 `json:"auto_archive_after_hours"`
-		AutoAdvanceRequiresSignal  *bool                `json:"auto_advance_requires_signal"`
-		CancelTriggersTurnComplete *bool                `json:"cancel_triggers_turn_complete"`
-		WIPLimit                   *int                 `json:"wip_limit"`
-		PullFromStepID             *string              `json:"pull_from_step_id"`
-		Events                     *wfmodels.StepEvents `json:"events"`
+		StepID                     string                          `json:"step_id"`
+		Name                       *string                         `json:"name"`
+		Color                      *string                         `json:"color"`
+		Prompt                     *string                         `json:"prompt"`
+		AgentProfileID             *string                         `json:"agent_profile_id"`
+		ProfileSessionStartPolicy  *string                         `json:"profile_session_start_policy"`
+		ProfileSessionEndPolicy    *string                         `json:"profile_session_end_policy"`
+		IsStartStep                *bool                           `json:"is_start_step"`
+		AllowManualMove            *bool                           `json:"allow_manual_move"`
+		ShowInCommandPanel         *bool                           `json:"show_in_command_panel"`
+		AutoArchiveAfterHours      *int                            `json:"auto_archive_after_hours"`
+		AutoAdvanceRequiresSignal  *bool                           `json:"auto_advance_requires_signal"`
+		CancelTriggersTurnComplete *bool                           `json:"cancel_triggers_turn_complete"`
+		CompleteTaskOnEnter        json.RawMessage                 `json:"complete_task_on_enter"`
+		WIPLimit                   *int                            `json:"wip_limit"`
+		PullFromStepID             *string                         `json:"pull_from_step_id"`
+		SessionTarget              workflowctrl.SessionTargetPatch `json:"session_target"`
+		Events                     *wfmodels.StepEvents            `json:"events"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	completeTaskOnEnter, err := optionalCompleteTaskOnEnter(req.CompleteTaskOnEnter)
+	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	if req.StepID == "" {
@@ -211,21 +268,26 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 		Name:                       req.Name,
 		Color:                      req.Color,
 		Prompt:                     req.Prompt,
+		AgentProfileID:             req.AgentProfileID,
+		ProfileSessionStartPolicy:  req.ProfileSessionStartPolicy,
+		ProfileSessionEndPolicy:    req.ProfileSessionEndPolicy,
 		IsStartStep:                req.IsStartStep,
 		AllowManualMove:            req.AllowManualMove,
 		ShowInCommandPanel:         req.ShowInCommandPanel,
 		AutoArchiveAfterHours:      req.AutoArchiveAfterHours,
 		AutoAdvanceRequiresSignal:  req.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: req.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:        completeTaskOnEnter,
 		WIPLimit:                   req.WIPLimit,
 		PullFromStepID:             req.PullFromStepID,
+		SessionTarget:              req.SessionTarget,
 		Events:                     req.Events,
 	}
 
 	resp, err := h.workflowCtrl.UpdateStep(ctx, updateReq)
 	if err != nil {
 		h.logger.Error("failed to update workflow step", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workflow step", nil)
+		return h.workflowScopeError(msg, err, "Failed to update workflow step")
 	}
 	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.DemotedStartSteps)
 	h.publishWorkflowStepEvent(ctx, events.WorkflowStepUpdated, resp.Step)
@@ -246,7 +308,7 @@ func (h *Handlers) handleDeleteWorkflowStep(ctx context.Context, msg *ws.Message
 
 	if err := h.workflowCtrl.DeleteStep(ctx, stepID); err != nil {
 		h.logger.Error("failed to delete workflow step", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete workflow step", nil)
+		return h.workflowScopeError(msg, err, "Failed to delete workflow step")
 	}
 	if stepResp != nil {
 		h.publishWorkflowStepEvent(ctx, events.WorkflowStepDeleted, stepResp.Step)
@@ -274,49 +336,41 @@ func (h *Handlers) handleReorderWorkflowSteps(ctx context.Context, msg *ws.Messa
 		StepIDs:    req.StepIDs,
 	}); err != nil {
 		h.logger.Error("failed to reorder workflow steps", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to reorder workflow steps", nil)
+		return h.workflowScopeError(msg, err, "Failed to reorder workflow steps")
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
 }
 
+// workflowScopeError answers a workflow-surface failure. A resource the
+// caller may not see, and one that does not exist, share the single not-found
+// reply the workflow package produces for both; anything else is a genuine
+// server failure. Without this, an agent that named a workflow, step or task
+// it cannot reach was told the backend broke.
+func (h *Handlers) workflowScopeError(msg *ws.Message, err error, clientErrMsg string) (*ws.Message, error) {
+	if workflowsvc.IsNotFound(err) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, clientErrMsg, nil)
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
+}
+
+// workflowStepEventSource labels workflow-step events published by this surface.
+const workflowStepEventSource = "mcp-handlers"
+
+// workflowStepEvents returns the shared workflow-step publisher for this
+// surface. Unlike the REST handlers, this Handlers value is assembled field by
+// field — NewHandlers plus the Set* wiring, and tests build it as a struct
+// literal — so eventBus is not final at construction. Building the publisher
+// at publish time reads whatever bus is actually wired; the allocation is
+// negligible next to the bus dispatch.
+func (h *Handlers) workflowStepEvents() *stepevents.Publisher {
+	return stepevents.NewPublisher(h.eventBus, workflowStepEventSource, h.logger)
+}
+
 // publishWorkflowStepEvent publishes a workflow step event to the event bus.
 func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType string, step *wfmodels.WorkflowStep) {
-	if h.eventBus == nil || step == nil {
-		return
-	}
-	data := map[string]interface{}{
-		"step": map[string]interface{}{
-			"id":                            step.ID,
-			"workflow_id":                   step.WorkflowID,
-			"name":                          step.Name,
-			"position":                      step.Position,
-			"color":                         step.Color,
-			"prompt":                        step.Prompt,
-			"events":                        step.Events,
-			"show_in_command_panel":         step.ShowInCommandPanel,
-			"allow_manual_move":             step.AllowManualMove,
-			"is_start_step":                 step.IsStartStep,
-			"auto_archive_after_hours":      step.AutoArchiveAfterHours,
-			"wip_limit":                     step.WIPLimit,
-			"pull_from_step_id":             step.PullFromStepID,
-			"agent_profile_id":              step.AgentProfileID,
-			"stage_type":                    string(step.StageType),
-			"auto_advance_requires_signal":  step.AutoAdvanceRequiresSignal,
-			"cancel_triggers_turn_complete": step.CancelTriggersTurnComplete,
-			"created_at":                    step.CreatedAt,
-			"updated_at":                    step.UpdatedAt,
-		},
-	}
-	if err := h.eventBus.Publish(ctx, eventType, bus.NewEvent(eventType, "mcp-handlers", data)); err != nil {
-		h.logger.Error("failed to publish workflow step event",
-			zap.String("event_type", eventType),
-			zap.String("step_id", step.ID),
-			zap.Error(err))
-	}
+	h.workflowStepEvents().Publish(ctx, eventType, step)
 }
 
 func (h *Handlers) publishWorkflowStepEvents(ctx context.Context, eventType string, steps []*wfmodels.WorkflowStep) {
-	for _, step := range steps {
-		h.publishWorkflowStepEvent(ctx, eventType, step)
-	}
+	h.workflowStepEvents().PublishAll(ctx, eventType, steps)
 }

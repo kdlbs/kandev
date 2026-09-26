@@ -49,6 +49,7 @@ describe("task.deleted cleanup", () => {
         activeSessionId: SESS_PINNED,
         pinnedSessionId: SESS_PINNED,
         lastSessionByTaskId: { t1: SESS_PINNED, t2: SESS_OTHER },
+        resumeSkippedSessionIds: {},
       },
       environmentIdBySessionId: {},
     });
@@ -61,6 +62,46 @@ describe("task.deleted cleanup", () => {
     expect(state.tasks.pinnedSessionId).toBeNull();
     expect(state.tasks.lastSessionByTaskId).not.toHaveProperty("t1");
     expect(state.tasks.lastSessionByTaskId).toHaveProperty("t2", SESS_OTHER);
+    expect(state.clearQueueStatus).toHaveBeenCalledWith(SESS_PINNED);
+  });
+
+  it("clears normalized sessions even when no queue metadata was fetched", () => {
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "sess-normalized": {
+            id: "sess-normalized",
+            task_id: "t1",
+            queue_incarnation_id: "inc-normalized",
+          },
+        },
+      },
+    } as unknown as Partial<AppState>);
+
+    registerTasksHandlers(store)["task.deleted"]!(
+      makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }),
+    );
+
+    expect(store.getState().clearQueueStatus).toHaveBeenCalledWith("sess-normalized");
+  });
+
+  it("removes deleted tasks from the archived sidebar projection", () => {
+    const store = makeStore({
+      sidebarArchivedTasks: {
+        itemsByWorkspaceId: {
+          "ws-1": [{ id: "t1", workspaceId: "ws-1", isArchived: true }],
+        },
+        loadedByWorkspaceId: { "ws-1": true },
+        loadingByWorkspaceId: { "ws-1": false },
+        errorByWorkspaceId: { "ws-1": null },
+      },
+    } as unknown as Partial<AppState>);
+
+    registerTasksHandlers(store)["task.deleted"]!(
+      makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }),
+    );
+
+    expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"]).toEqual([]);
   });
 });
 
@@ -91,6 +132,7 @@ describe("task.deleted live notification + redirect", () => {
         activeSessionId: null,
         pinnedSessionId: null,
         lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
       },
       environmentIdBySessionId: {},
     } as unknown as Partial<AppState>);

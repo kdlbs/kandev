@@ -7,10 +7,13 @@ import (
 )
 
 // TestPromptForPassthroughCommand asserts the gating used by passthroughAgentCommand:
-// AutoInjectPrompt + empty PromptFlag suppresses the positional prompt arg, so the
-// description is delivered exclusively via PTY stdin in autoInjectInitialPrompt.
-// Without this guard, BuildPassthroughCommand would append the description as a
-// positional arg and put Claude (and similar TUIs) into non-interactive `-p` mode.
+// a prompt is passed to BuildPassthroughCommand only when the agent declares a
+// PromptFlag. Without one, the prompt is suppressed (returned as "") so it is
+// delivered exclusively via PTY stdin in autoInjectInitialPrompt — appending it
+// as a positional arg instead drops it for interactive TUIs (e.g. zsh -ic
+// "fuelclaude --model opus" "<prompt>" ignores the positional), which is the
+// bug custom TUI agents hit. AutoInjectPrompt no longer gates suppression: the
+// no-PromptFlag condition is what actually determines CLI-vs-stdin delivery.
 func TestPromptForPassthroughCommand(t *testing.T) {
 	tests := []struct {
 		name string
@@ -19,22 +22,30 @@ func TestPromptForPassthroughCommand(t *testing.T) {
 		want string
 	}{
 		{
-			name: "auto-inject suppresses prompt arg",
+			name: "no prompt flag suppresses prompt arg (auto-inject agent)",
 			pt:   agents.PassthroughConfig{AutoInjectPrompt: true},
 			desc: "refactor cron handler",
 			want: "",
 		},
 		{
-			name: "auto-inject off keeps prompt",
+			name: "no prompt flag suppresses prompt arg (custom TUI agent)",
 			pt:   agents.PassthroughConfig{AutoInjectPrompt: false},
+			desc: "refactor cron handler",
+			want: "",
+		},
+		{
+			name: "explicit PromptFlag keeps prompt — flag delivery wins",
+			pt: agents.PassthroughConfig{
+				AutoInjectPrompt: true,
+				PromptFlag:       agents.NewParam("--prompt", "{prompt}"),
+			},
 			desc: "refactor cron handler",
 			want: "refactor cron handler",
 		},
 		{
-			name: "auto-inject with explicit PromptFlag keeps prompt — flag delivery wins",
+			name: "explicit PromptFlag without auto-inject keeps prompt",
 			pt: agents.PassthroughConfig{
-				AutoInjectPrompt: true,
-				PromptFlag:       agents.NewParam("--prompt", "{prompt}"),
+				PromptFlag: agents.NewParam("--prompt", "{prompt}"),
 			},
 			desc: "refactor cron handler",
 			want: "refactor cron handler",

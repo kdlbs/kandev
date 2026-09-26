@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "@/lib/routing/client-router";
 import { usePathname } from "@/lib/routing/client-router";
 import { useCommands, useCommandPanelOpen } from "@/lib/commands/command-registry";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
-import { findFirstMatchingCommand, selectCommandSearchResult } from "@/lib/commands/search";
+import { selectCommandSearchResult, selectContentSearchResult } from "@/lib/commands/search";
+import { useCommandChildren } from "@/hooks/use-command-children";
 import { useCommandPanelShortcuts } from "@/hooks/use-command-panel-shortcuts";
 import { useContentSearchResultOpener } from "@/hooks/use-content-search-result-opener";
 import { useWorkspaceContentSearch } from "@/hooks/domains/session/use-workspace-content-search";
@@ -15,8 +15,6 @@ import {
   type CommandPanelScopeMode,
 } from "@/components/command-panel-scope-switcher";
 
-import { listTasksByWorkspace } from "@/lib/api";
-import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
 import type { FileSearchResult } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -25,14 +23,43 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getContentSearchResultValue } from "@/components/workspace-content-search";
 import { getFileName } from "@/lib/utils/file-path";
 import { isTaskWorkspaceSearchAvailable } from "@/lib/commands/task-workspace-search";
+import { useCommandPanelTaskNavigation } from "@/hooks/use-command-panel-task-navigation";
+import { useInlineTaskSearchEffect } from "@/hooks/use-command-panel-task-results";
 import {
   CommandPanelView,
   MODE_COMMANDS,
+  MODE_COMMAND_CHILDREN,
   MODE_SEARCH_CONTENT,
   MODE_SEARCH_FILES,
+  MODE_SEARCH_TASKS,
   getFileResultValue,
   getTaskResultValue,
 } from "@/components/command-panel-footer";
+
+function handleImmediateCommand(
+  event: React.KeyboardEvent,
+  commands: CommandItemType[],
+  selectedValue: string,
+  close: () => void,
+) {
+  if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  if (
+    event.repeat ||
+    event.nativeEvent.isComposing ||
+    event.keyCode === 229 ||
+    event.altKey ||
+    event.shiftKey
+  )
+    return true;
+  const command = commands.find((item) => item.id === selectedValue);
+  if (command?.immediateAction && !command.disabled) {
+    close();
+    command.immediateAction();
+  }
+  return true;
+}
 
 function useCommandPanelState(mode: CommandPanelMode, setMode: (mode: CommandPanelMode) => void) {
   const [search, setSearch] = useState("");
@@ -129,138 +156,6 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
   ]);
 }
 
-const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
-
-function resolveVisibleStepIds(steps: { id: string; show_in_command_panel?: boolean }[]) {
-  if (steps.length === 0) return null; // no steps loaded yet — don't filter
-  return new Set(steps.filter((s) => s.show_in_command_panel !== false).map((s) => s.id));
-}
-
-type InlineTaskSearchOptions = {
-  mode: CommandPanelMode;
-  search: string;
-  open: boolean;
-  workspaceId: string | null;
-  steps: { id: string; position: number; show_in_command_panel?: boolean }[];
-  setTaskResults: (tasks: Task[]) => void;
-  setIsSearching: (searching: boolean) => void;
-};
-
-function useStepMaps(steps: InlineTaskSearchOptions["steps"]) {
-  const visibleStepIds = useMemo(() => resolveVisibleStepIds(steps), [steps]);
-  const stepPositionMap = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const step of steps) map.set(step.id, step.position);
-    return map;
-  }, [steps]);
-  return { visibleStepIds, stepPositionMap };
-}
-
-function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
-  const { mode, search, open, workspaceId, steps, setTaskResults, setIsSearching } = opts;
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const { visibleStepIds, stepPositionMap } = useStepMaps(steps);
-
-  useEffect(() => {
-    if (mode !== MODE_COMMANDS) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    abortRef.current?.abort();
-
-    // No search: load active tasks (excluding backlog + done steps)
-    if (!search.trim()) {
-      if (!open || !workspaceId) {
-        setTaskResults([]);
-        setIsSearching(false);
-        return;
-      }
-      setIsSearching(true);
-      const controller = new AbortController();
-      abortRef.current = controller;
-      listTasksByWorkspace(
-        workspaceId,
-        { page: 1, pageSize: 20 },
-        { init: { signal: controller.signal } },
-      )
-        .then((res) => {
-          if (controller.signal.aborted) return;
-          const tasks = (res.tasks ?? []).filter(
-            (t) =>
-              (!visibleStepIds || visibleStepIds.has(t.workflow_step_id)) &&
-              !ARCHIVED_STATES.has(t.state),
-          );
-          tasks.sort(
-            (a, b) =>
-              (stepPositionMap.get(a.workflow_step_id) ?? 99) -
-              (stepPositionMap.get(b.workflow_step_id) ?? 99),
-          );
-          setTaskResults(tasks);
-        })
-        .catch(() => {
-          if (!controller.signal.aborted) setTaskResults([]);
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) setIsSearching(false);
-        });
-      return () => {
-        controller.abort();
-      };
-    }
-
-    // Search with < 2 chars: clear results
-    if (search.trim().length < 2) {
-      setTaskResults([]);
-      setIsSearching(false);
-      return;
-    }
-
-    // Search: query API including archived
-    setIsSearching(true);
-    debounceRef.current = setTimeout(async () => {
-      if (!workspaceId) {
-        setIsSearching(false);
-        return;
-      }
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        const res = await listTasksByWorkspace(
-          workspaceId,
-          { query: search.trim(), page: 1, pageSize: 5, includeArchived: true },
-          { init: { signal: controller.signal } },
-        );
-        if (!controller.signal.aborted) {
-          const tasks = res.tasks ?? [];
-          tasks.sort((a, b) => {
-            const aArchived = ARCHIVED_STATES.has(a.state) ? 1 : 0;
-            const bArchived = ARCHIVED_STATES.has(b.state) ? 1 : 0;
-            return aArchived - bArchived;
-          });
-          setTaskResults(tasks);
-        }
-      } catch {
-        if (!controller.signal.aborted) setTaskResults([]);
-      } finally {
-        if (!controller.signal.aborted) setIsSearching(false);
-      }
-    }, 300);
-
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      abortRef.current?.abort();
-    };
-  }, [
-    mode,
-    search,
-    open,
-    workspaceId,
-    visibleStepIds,
-    stepPositionMap,
-    setTaskResults,
-    setIsSearching,
-  ]);
-}
-
 type CommandPanelEffectsOptions = {
   open: boolean;
   state: ReturnType<typeof useCommandPanelState>;
@@ -353,32 +248,39 @@ function useFirstResultSelection(
   contentResults: ReturnType<typeof useWorkspaceContentSearch>["results"],
 ) {
   const { mode, search, taskResults, fileResults, setSelectedValue } = state;
-  const previousCommandsRef = useRef(commands);
 
-  // `search` intentionally re-applies the first result while debounced results are loading.
+  // Every branch is a functional update, so a re-registration of the command
+  // list or a late batch of results never discards a selection the user moved.
   useEffect(() => {
-    const commandsChanged = previousCommandsRef.current !== commands;
-    previousCommandsRef.current = commands;
     if (!open) return;
 
-    if (mode === MODE_COMMANDS) {
-      const firstTask = taskResults[0];
-      if (commandsChanged) {
-        const taskValues = taskResults.map(getTaskResultValue);
-        setSelectedValue((current) =>
-          selectCommandSearchResult(commands, search, taskValues, current),
-        );
-        return;
-      }
-      if (firstTask) {
-        setSelectedValue(getTaskResultValue(firstTask));
-        return;
-      }
-      if (search.trim()) {
-        setSelectedValue(findFirstMatchingCommand(commands, search)?.id ?? "");
-        return;
-      }
-      setSelectedValue((current) => (current.startsWith("__task:") ? "" : current));
+    if (mode === MODE_COMMANDS || mode === MODE_COMMAND_CHILDREN) {
+      // Matching commands render above the task preview once there is a query,
+      // so the default highlight has to follow that order: Enter on "archive"
+      // must run the Archive command, not the first task the query fuzzy-matched.
+      // Task results arrive 300ms behind the keystroke, so this stays a
+      // functional update: a row the user arrow-keyed to in the meantime must
+      // survive the results landing rather than snap back to the default.
+      const commandsLeadResults = mode === MODE_COMMAND_CHILDREN || Boolean(search.trim());
+      const taskResultValues =
+        mode === MODE_COMMAND_CHILDREN ? [] : taskResults.map(getTaskResultValue);
+      setSelectedValue((current) =>
+        selectCommandSearchResult({
+          commands,
+          search,
+          taskResultValues,
+          preferredValue: current,
+          commandsLeadResults,
+        }),
+      );
+      return;
+    }
+
+    if (mode === MODE_SEARCH_TASKS) {
+      const taskResultValues = taskResults.map(getTaskResultValue);
+      setSelectedValue((current) =>
+        current && taskResultValues.includes(current) ? current : (taskResultValues[0] ?? ""),
+      );
       return;
     }
 
@@ -389,8 +291,8 @@ function useFirstResultSelection(
     }
 
     if (mode === MODE_SEARCH_CONTENT) {
-      const firstResult = contentResults[0];
-      setSelectedValue(firstResult ? getContentSearchResultValue(firstResult) : "");
+      const values = contentResults.map(getContentSearchResultValue);
+      setSelectedValue((current) => selectContentSearchResult(values, current));
       return;
     }
 
@@ -398,15 +300,24 @@ function useFirstResultSelection(
   }, [commands, contentResults, fileResults, mode, open, search, setSelectedValue, taskResults]);
 }
 
-function useCommandPanelHandlers(
-  state: ReturnType<typeof useCommandPanelState>,
-  setOpen: (open: boolean) => void,
-  commands: CommandItemType[],
-  kanbanSteps: { id: string; title: string; color: string }[],
-  repositories: Array<{ id: string; local_path: string }>,
-) {
+type CommandPanelHandlerOptions = {
+  state: ReturnType<typeof useCommandPanelState>;
+  setOpen: (open: boolean) => void;
+  commands: CommandItemType[];
+  kanbanSteps: { id: string; title: string; color: string }[];
+  repositories: Array<{ id: string; local_path: string }>;
+  onTaskSelect: (task: Task) => void;
+};
+
+function useCommandPanelHandlers({
+  state,
+  setOpen,
+  commands,
+  kanbanSteps,
+  repositories,
+  onTaskSelect,
+}: CommandPanelHandlerOptions) {
   const { mode, search, inputCommand, setMode, setSearch, setInputCommand } = state;
-  const router = useRouter();
 
   const grouped = useMemo(() => {
     const map = new Map<string, CommandItemType[]>();
@@ -435,6 +346,7 @@ function useCommandPanelHandlers(
 
   const handleSelect = useCallback(
     (cmd: CommandItemType) => {
+      if (cmd.disabled) return;
       if (cmd.enterMode) {
         if (cmd.enterMode === "input") setInputCommand(cmd);
         setMode(cmd.enterMode);
@@ -442,7 +354,7 @@ function useCommandPanelHandlers(
         return;
       }
       if (cmd.action) {
-        setOpen(false);
+        if (!cmd.keepOpen) setOpen(false);
         cmd.action();
       }
     },
@@ -452,9 +364,9 @@ function useCommandPanelHandlers(
   const handleTaskSelect = useCallback(
     (task: Task) => {
       setOpen(false);
-      router.push(linkToTask(task.id));
+      onTaskSelect(task);
     },
-    [setOpen, router],
+    [onTaskSelect, setOpen],
   );
 
   const handleFileSelect = useCallback(
@@ -507,12 +419,55 @@ function useCommandPanelHandlers(
   };
 }
 
+function findLastWorkflowStepId(steps: { id: string; position: number }[]) {
+  let lastStep: { id: string; position: number } | undefined;
+  for (const step of steps) {
+    if (!lastStep || step.position > lastStep.position) lastStep = step;
+  }
+  return lastStep?.id;
+}
+
+function useCommandPanelLiveTasks() {
+  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
+  const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
+  const kanbanSteps = useAppStore((state) => state.kanban.steps);
+  const kanbanSnapshots = useAppStore((state) => state.kanbanMulti?.snapshots ?? {});
+  return useMemo(() => {
+    const tasks = new Map<string, (typeof kanbanTasks)[number]>();
+    const lastStepIdByWorkflowId = new Map<string, string>();
+    for (const snapshot of Object.values(kanbanSnapshots)) {
+      for (const task of snapshot.tasks) tasks.set(task.id, task);
+    }
+    for (const [workflowId, snapshot] of Object.entries(kanbanSnapshots)) {
+      const lastStepId = findLastWorkflowStepId(snapshot.steps);
+      if (lastStepId) lastStepIdByWorkflowId.set(workflowId, lastStepId);
+    }
+    for (const task of kanbanTasks) tasks.set(task.id, task);
+    const activeLastStepId = findLastWorkflowStepId(kanbanSteps);
+    if (kanbanWorkflowId && activeLastStepId) {
+      lastStepIdByWorkflowId.set(kanbanWorkflowId, activeLastStepId);
+    }
+    return { tasks, lastStepIdByWorkflowId, steps: kanbanSteps };
+  }, [kanbanSnapshots, kanbanSteps, kanbanTasks, kanbanWorkflowId]);
+}
+
+function useCommandPanelRepositories(workspaceId: string | null) {
+  const repositories = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  return workspaceId ? (repositories[workspaceId] ?? []) : [];
+}
+
+// eslint-disable-next-line max-lines-per-function -- composition root keeps hook ordering and view wiring together.
 export function CommandPanel() {
   const { open, setOpen, mode: panelMode, setMode, modeRequestVersion } = useCommandPanelOpen();
-  const commands = useCommands();
+  const registeredCommands = useCommands();
   const pathname = usePathname();
-  const kanbanSteps = useAppStore((state) => state.kanban.steps);
+  const {
+    tasks: liveTasksById,
+    lastStepIdByWorkflowId,
+    steps: kanbanSteps,
+  } = useCommandPanelLiveTasks();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const workspaceSearchAvailable = useAppStore((state) =>
     isTaskWorkspaceSearchAvailable(state, pathname),
@@ -520,9 +475,8 @@ export function CommandPanel() {
   const worktreePath = useAppStore((s) =>
     activeSessionId ? (s.taskSessions.items[activeSessionId]?.worktree_path ?? null) : null,
   );
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
-  const repositories = workspaceId ? (reposByWorkspace[workspaceId] ?? []) : [];
-
+  const repositories = useCommandPanelRepositories(workspaceId);
+  const handleTaskNavigation = useCommandPanelTaskNavigation(pathname, activeTaskId);
   const state = useCommandPanelState(panelMode, setMode);
   const {
     mode,
@@ -536,7 +490,18 @@ export function CommandPanel() {
     setSelectedValue,
     setSearch,
   } = state;
-
+  const children = useCommandChildren({
+    commands: registeredCommands,
+    open,
+    contextKey: `${workspaceId}:${activeTaskId}`,
+    mode,
+    setMode,
+    search,
+    setSearch,
+    selection: selectedValue,
+    setSelection: setSelectedValue,
+  });
+  const commands = children.commands;
   useCommandPanelEffects({
     open,
     state,
@@ -556,7 +521,6 @@ export function CommandPanel() {
     sessionId: activeSessionId,
   });
   useFirstResultSelection(open, state, commands, contentResults);
-
   useCommandPanelShortcuts({
     open,
     setOpen,
@@ -565,36 +529,52 @@ export function CommandPanel() {
     setMode,
     setSearch,
   });
-
-  const {
-    grouped,
-    stepMap,
-    repoMap,
-    handleSelect,
-    handleTaskSelect,
-    handleFileSelect,
-    handleKeyDown,
-    onScopeChange,
-    goBack,
-  } = useCommandPanelHandlers(state, setOpen, commands, kanbanSteps, repositories);
-  const handleContentSelect = useContentSearchResultOpener(setOpen, worktreePath);
+  const handlers = useCommandPanelHandlers({
+    state,
+    setOpen,
+    commands,
+    kanbanSteps,
+    repositories,
+    onTaskSelect: handleTaskNavigation,
+  });
+  const handleContentSelect = useContentSearchResultOpener(setOpen, worktreePath, activeSessionId);
 
   return (
     <CommandPanelView
       open={open}
       setOpen={setOpen}
       mode={mode}
-      inputCommand={inputCommand}
+      inputCommand={children.parent ?? inputCommand}
       selectedValue={selectedValue}
       setSelectedValue={setSelectedValue}
       search={search}
       setSearch={setSearch}
-      handleKeyDown={handleKeyDown}
-      onScopeChange={onScopeChange}
-      goBack={goBack}
+      handleKeyDown={(event) => {
+        if (handleImmediateCommand(event, commands, selectedValue, () => setOpen(false))) return;
+        if (
+          mode === MODE_COMMAND_CHILDREN &&
+          (event.key === "Escape" || (event.key === "Backspace" && !search))
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          children.back();
+          return;
+        }
+        handlers.handleKeyDown(event);
+      }}
+      onEscapeKeyDown={
+        mode === MODE_COMMAND_CHILDREN
+          ? (event) => {
+              event.preventDefault();
+              children.back();
+            }
+          : undefined
+      }
+      onScopeChange={handlers.onScopeChange}
+      goBack={mode === MODE_COMMAND_CHILDREN ? children.back : handlers.goBack}
       fileResults={fileResults}
       isSearchingFiles={isSearchingFiles}
-      handleFileSelect={handleFileSelect}
+      handleFileSelect={handlers.handleFileSelect}
       contentResults={contentResults}
       isSearchingContent={isSearchingContent}
       contentSearchError={contentSearchError}
@@ -602,13 +582,22 @@ export function CommandPanel() {
       workspaceSearchAvailable={workspaceSearchAvailable}
       handleContentSelect={handleContentSelect}
       commands={commands}
-      grouped={grouped}
-      handleSelect={handleSelect}
-      isSearching={isSearching}
-      taskResults={taskResults}
-      stepMap={stepMap}
-      repoMap={repoMap}
-      handleTaskSelect={handleTaskSelect}
+      grouped={handlers.grouped}
+      handleSelect={(command) => {
+        if (command.disabled) return;
+        if (command.children) {
+          children.enter(command);
+          return;
+        }
+        handlers.handleSelect(command);
+      }}
+      isSearching={mode === MODE_COMMAND_CHILDREN ? false : isSearching}
+      taskResults={mode === MODE_COMMAND_CHILDREN ? [] : taskResults}
+      stepMap={handlers.stepMap}
+      repoMap={handlers.repoMap}
+      liveTasksById={liveTasksById}
+      lastStepIdByWorkflowId={lastStepIdByWorkflowId}
+      handleTaskSelect={handlers.handleTaskSelect}
     />
   );
 }

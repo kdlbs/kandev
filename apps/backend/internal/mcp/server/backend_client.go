@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -12,6 +13,9 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
+
+// ErrEmptyBackendPayload identifies a response with no payload bytes when a result sink was provided.
+var ErrEmptyBackendPayload = errors.New("mcp backend response payload was empty")
 
 // MCPRequest represents an MCP request to be sent to the backend.
 type MCPRequest struct {
@@ -27,13 +31,31 @@ type MCPResponse struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
+type backendResponse struct {
+	message   *ws.Message
+	err       error
+	sessionID string
+}
+
+type pendingRequest struct {
+	result    chan backendResponse
+	streamID  string
+	sessionID string
+}
+
 // ChannelBackendClient implements BackendClient using channels.
 // It sends MCP requests through a channel that will be read by the agent stream handler,
 // and receives responses through a callback mechanism.
 type ChannelBackendClient struct {
 	requestCh chan *ws.Message
-	pending   map[string]chan *ws.Message
+	pending   map[string]*pendingRequest
 	pendingMu sync.Mutex
+	sessionID string
+	done      chan struct{}
+	closeOnce sync.Once
+	closeMu   sync.Mutex
+	closed    bool
+	publishWG sync.WaitGroup
 	logger    *logger.Logger
 }
 
@@ -45,8 +67,9 @@ func NewChannelBackendClient(log *logger.Logger) *ChannelBackendClient {
 	}
 	clientLogger = clientLogger.WithFields(zap.String("component", "mcp-backend-client"))
 	return &ChannelBackendClient{
-		requestCh: make(chan *ws.Message, 100),
-		pending:   make(map[string]chan *ws.Message),
+		requestCh: make(chan *ws.Message),
+		pending:   make(map[string]*pendingRequest),
+		done:      make(chan struct{}),
 		logger:    clientLogger,
 	}
 }
@@ -57,16 +80,17 @@ func (c *ChannelBackendClient) GetRequestChannel() <-chan *ws.Message {
 	return c.requestCh
 }
 
+// SetSessionID sets the server-owned session correlation used in bridge logs.
+func (c *ChannelBackendClient) SetSessionID(sessionID string) {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	c.sessionID = sessionID
+}
+
 // HandleResponse handles an incoming MCP response from the backend.
 // This should be called by the agent stream handler when it receives a response.
 func (c *ChannelBackendClient) HandleResponse(msg *ws.Message) {
-	c.pendingMu.Lock()
-	ch, ok := c.pending[msg.ID]
-	delete(c.pending, msg.ID)
-	c.pendingMu.Unlock()
-
-	if ok {
-		ch <- msg
+	if c.completeRequest(msg.ID, backendResponse{message: msg}) {
 		return
 	}
 	c.logger.Debug("dropping MCP response with no pending request",
@@ -75,9 +99,66 @@ func (c *ChannelBackendClient) HandleResponse(msg *ws.Message) {
 		zap.String("action", msg.Action))
 }
 
+// BindRequestToStream records which backend stream delivered a request.
+func (c *ChannelBackendClient) BindRequestToStream(requestID, streamID string) {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	if pending, ok := c.pending[requestID]; ok {
+		pending.streamID = streamID
+	}
+}
+
+// FailRequest releases one pending request after a transport failure.
+func (c *ChannelBackendClient) FailRequest(requestID string, err error) {
+	c.completeRequest(requestID, backendResponse{err: err})
+}
+
+// FailStreamRequests releases requests delivered by one disconnected stream.
+func (c *ChannelBackendClient) FailStreamRequests(streamID string, err error) {
+	c.pendingMu.Lock()
+	failed := make([]*pendingRequest, 0)
+	for id, pending := range c.pending {
+		if pending.streamID == streamID {
+			delete(c.pending, id)
+			failed = append(failed, pending)
+		}
+	}
+	c.pendingMu.Unlock()
+
+	for _, pending := range failed {
+		pending.result <- backendResponse{err: err, sessionID: pending.sessionID}
+	}
+}
+
+func (c *ChannelBackendClient) completeRequest(requestID string, response backendResponse) bool {
+	c.pendingMu.Lock()
+	pending, ok := c.pending[requestID]
+	if ok {
+		delete(c.pending, requestID)
+	}
+	c.pendingMu.Unlock()
+	if ok {
+		if response.sessionID == "" {
+			response.sessionID = pending.sessionID
+		}
+		pending.result <- response
+	}
+	return ok
+}
+
 // RequestPayload sends a request to the backend and unmarshals the response.
 // The request will be cancelled if the context is cancelled or if Reset() is called.
 func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string, payload, result interface{}) error {
+	if !c.beginPublish() {
+		return fmt.Errorf("MCP backend client is closed")
+	}
+	publishing := true
+	defer func() {
+		if publishing {
+			c.publishWG.Done()
+		}
+	}()
+
 	id := uuid.New().String()
 	start := time.Now()
 
@@ -87,15 +168,17 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	}
 
 	// Create response channel
-	respChan := make(chan *ws.Message, 1)
+	respChan := make(chan backendResponse, 1)
 	c.pendingMu.Lock()
-	c.pending[id] = respChan
+	sessionID := c.sessionID
+	c.pending[id] = &pendingRequest{result: respChan, sessionID: sessionID}
 	c.pendingMu.Unlock()
 
 	c.logger.Debug("sending MCP request through agent stream",
 		zap.String("request_id", id),
 		zap.String("action", action),
-		zap.Any("payload", payload))
+		zap.String("session_id", sessionID),
+		zap.Any("payload", backendPayloadForLog(action, payload)))
 
 	// Ensure cleanup on exit
 	defer func() {
@@ -108,10 +191,13 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	select {
 	case c.requestCh <- msg:
 		// Request sent
+	case <-c.done:
+		return fmt.Errorf("MCP backend client is closed")
 	case <-ctx.Done():
 		c.logger.Debug("MCP request cancelled before send",
 			zap.String("request_id", id),
 			zap.String("action", action),
+			zap.String("session_id", sessionID),
 			zap.Duration("duration", time.Since(start)),
 			zap.Error(ctx.Err()))
 		return ctx.Err()
@@ -119,40 +205,51 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 		c.logger.Warn("timed out sending MCP request to agent stream",
 			zap.String("request_id", id),
 			zap.String("action", action),
+			zap.String("session_id", sessionID),
 			zap.Duration("duration", time.Since(start)))
 		return fmt.Errorf("timeout sending request to agent stream")
 	}
+	publishing = false
+	c.publishWG.Done()
 
 	// Wait for response
 	select {
-	case resp, ok := <-respChan:
-		if !ok {
-			// Channel was closed by Reset() - session was cancelled/reset
-			c.logger.Warn("MCP request cancelled by session reset",
+	case response := <-respChan:
+		if response.err != nil {
+			c.logger.Warn("MCP request failed after publication",
 				zap.String("request_id", id),
 				zap.String("action", action),
-				zap.Duration("duration", time.Since(start)))
-			return fmt.Errorf("MCP request cancelled: session reset")
+				zap.String("session_id", response.sessionID),
+				zap.Duration("duration", time.Since(start)),
+				zap.Error(response.err))
+			return response.err
 		}
+		resp := response.message
 		c.logger.Debug("received MCP response from backend",
 			zap.String("request_id", id),
 			zap.String("action", action),
 			zap.String("type", string(resp.Type)),
 			zap.Duration("duration", time.Since(start)))
 		if resp.Type == ws.MessageTypeError {
-			var ep struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			}
+			var ep ws.ErrorPayload
 			if json.Unmarshal(resp.Payload, &ep) == nil {
-				return fmt.Errorf("backend error [%s]: %s", ep.Code, ep.Message)
+				return &BackendError{Code: ep.Code, Message: ep.Message, Details: ep.Details}
 			}
 			return fmt.Errorf("backend error: %s", string(resp.Payload))
 		}
-		if result != nil && len(resp.Payload) > 0 {
-			if err := json.Unmarshal(resp.Payload, result); err != nil {
-				return fmt.Errorf("failed to unmarshal response: %w", err)
-			}
+		if result == nil {
+			return nil
+		}
+		if len(resp.Payload) == 0 {
+			c.logger.Warn(ErrEmptyBackendPayload.Error(),
+				zap.String("request_id", id),
+				zap.String("action", action),
+				zap.String("session_id", response.sessionID),
+				zap.Duration("duration", time.Since(start)))
+			return fmt.Errorf("empty response payload for action %q: %w", action, ErrEmptyBackendPayload)
+		}
+		if err := json.Unmarshal(resp.Payload, result); err != nil {
+			return fmt.Errorf("failed to unmarshal response: %w", err)
 		}
 		return nil
 	case <-ctx.Done():
@@ -162,7 +259,36 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 			zap.Duration("duration", time.Since(start)),
 			zap.Error(ctx.Err()))
 		return ctx.Err()
+	case <-c.done:
+		return fmt.Errorf("MCP backend client is closed")
 	}
+}
+
+func (c *ChannelBackendClient) beginPublish() bool {
+	c.closeMu.Lock()
+	defer c.closeMu.Unlock()
+	if c.closed {
+		return false
+	}
+	c.publishWG.Add(1)
+	return true
+}
+
+func backendPayloadForLog(action string, payload interface{}) interface{} {
+	if action != ws.ActionMCPInvokePluginTool {
+		return payload
+	}
+	values, ok := payload.(map[string]any)
+	if !ok {
+		return "<redacted>"
+	}
+	safe := make(map[string]any, len(values))
+	for key, value := range values {
+		if key != pluginToolArgumentsKey {
+			safe[key] = value
+		}
+	}
+	return safe
 }
 
 // Reset clears all pending MCP requests.
@@ -170,16 +296,28 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 // stale requests from a previous session from interfering.
 func (c *ChannelBackendClient) Reset() {
 	c.pendingMu.Lock()
-	defer c.pendingMu.Unlock()
-
-	// Close all pending response channels to unblock waiting goroutines
-	for id, ch := range c.pending {
-		close(ch)
+	pending := make([]*pendingRequest, 0, len(c.pending))
+	for id, request := range c.pending {
 		delete(c.pending, id)
+		pending = append(pending, request)
+	}
+	c.pendingMu.Unlock()
+
+	for _, request := range pending {
+		request.result <- backendResponse{
+			err:       fmt.Errorf("MCP request cancelled: session reset"),
+			sessionID: request.sessionID,
+		}
 	}
 }
 
-// Close closes the request channel.
+// Close prevents new requests and cancels pending requests.
 func (c *ChannelBackendClient) Close() {
-	close(c.requestCh)
+	c.closeOnce.Do(func() {
+		c.closeMu.Lock()
+		c.closed = true
+		close(c.done)
+		c.closeMu.Unlock()
+	})
+	c.publishWG.Wait()
 }

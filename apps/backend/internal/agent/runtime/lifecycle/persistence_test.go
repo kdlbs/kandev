@@ -9,11 +9,14 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 type captureExecutorRunningWriter struct {
-	prior   *models.ExecutorRunning
-	running *models.ExecutorRunning
+	prior       *models.ExecutorRunning
+	running     *models.ExecutorRunning
+	upsertErr   error
+	deleteCalls int
 }
 
 func (w *captureExecutorRunningWriter) GetExecutorRunningBySessionID(
@@ -27,10 +30,11 @@ func (w *captureExecutorRunningWriter) GetExecutorRunningBySessionID(
 
 func (w *captureExecutorRunningWriter) UpsertExecutorRunning(_ context.Context, running *models.ExecutorRunning) error {
 	w.running = running
-	return nil
+	return w.upsertErr
 }
 
 func (w *captureExecutorRunningWriter) DeleteExecutorRunningBySessionID(_ context.Context, _ string) error {
+	w.deleteCalls++
 	return nil
 }
 
@@ -63,6 +67,62 @@ func TestBuildRunningFromExecutionPersistsLiveAgentctlEndpoint(t *testing.T) {
 	}
 	if running.LastSeenAt == nil {
 		t.Fatal("LastSeenAt = nil, want live endpoint observation timestamp")
+	}
+}
+
+func TestBuildRunningFromExecutionPersistsFreshExecutorIdentity(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		metadata: map[string]interface{}{"executor_id": "  executor-1  "},
+	}, nil)
+
+	if running.ExecutorID != "executor-1" {
+		t.Fatalf("ExecutorID = %q, want executor-1", running.ExecutorID)
+	}
+}
+
+func TestBuildRunningFromExecutionPersistsOfficeAgentIdentity(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID:                   "exec-1",
+		TaskID:               "task-1",
+		SessionID:            "session-1",
+		OfficeAgentProfileID: "reviewer",
+	}, nil)
+
+	if got := getMetadataString(running.Metadata, MetadataKeyOfficeAgentProfileID); got != "reviewer" {
+		t.Fatalf("persisted OfficeAgentProfileID = %q, want reviewer", got)
+	}
+}
+
+func TestBuildRunningFromExecutionPreservesPriorExecutorIdentity(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-2", TaskID: "task-1", SessionID: "session-1",
+		metadata: map[string]interface{}{"executor_id": "hostile-replacement"},
+	}, &models.ExecutorRunning{ExecutorID: "recorded-executor"})
+
+	if running.ExecutorID != "recorded-executor" {
+		t.Fatalf("ExecutorID = %q, want recorded-executor", running.ExecutorID)
+	}
+}
+
+func TestBuildRunningFromExecutionPersistsOfficeAgentProfileID(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		OfficeAgentProfileID: "office-profile-9",
+	}, nil)
+
+	if got := running.Metadata[MetadataKeyOfficeAgentProfileID]; got != "office-profile-9" {
+		t.Fatalf("Metadata[%q] = %v, want office-profile-9", MetadataKeyOfficeAgentProfileID, got)
+	}
+}
+
+func TestBuildRunningFromExecutionOmitsOfficeAgentProfileIDForNonOfficeLaunch(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+	}, nil)
+
+	if _, ok := running.Metadata[MetadataKeyOfficeAgentProfileID]; ok {
+		t.Fatal("Metadata should not carry an office_agent_profile_id key for a non-Office launch")
 	}
 }
 
@@ -113,6 +173,36 @@ func TestPersistExecutorRunningRestoresRecoveredExecutionProfile(t *testing.T) {
 	}
 }
 
+func TestPersistExecutorRunningUsesTrackedExecutionStatus(t *testing.T) {
+	writer := &captureExecutorRunningWriter{}
+	mgr := newTestManager(t)
+	mgr.SetExecutorRunningWriter(writer)
+	execution := &AgentExecution{
+		ID: "exec-tracked-status", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusRunning,
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+	mgr.executionStore.UpdateError(execution.ID, "agentctl not ready")
+
+	require.NoError(t, mgr.persistExecutorRunningResult(context.Background(), execution))
+	require.NotNil(t, writer.running)
+	require.Equal(t, models.ExecutorRunningStatusFailed, writer.running.Status)
+}
+
+func TestPersistExecutorRunningReturnsUpsertFailure(t *testing.T) {
+	writer := &captureExecutorRunningWriter{upsertErr: errors.New("database is locked")}
+	mgr := newTestManager(t)
+	mgr.SetExecutorRunningWriter(writer)
+
+	err := mgr.persistExecutorRunningResult(context.Background(), &AgentExecution{
+		ID: "exec-failed-persist", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusStarting,
+	})
+	if err == nil || !errors.Is(err, writer.upsertErr) {
+		t.Fatalf("persistExecutorRunning error = %v, want %v", err, writer.upsertErr)
+	}
+}
+
 func TestBuildRunningFromExecutionPersistsSSHRuntimePID(t *testing.T) {
 	log := newNopLogger(t)
 	client := agentctl.NewClient("127.0.0.1", 43001, log)
@@ -124,7 +214,7 @@ func TestBuildRunningFromExecutionPersistsSSHRuntimePID(t *testing.T) {
 		RuntimeName: agentruntime.RuntimeSSH,
 		Status:      v1.AgentStatusRunning,
 		agentctl:    client,
-		Metadata: map[string]interface{}{
+		metadata: map[string]interface{}{
 			MetadataKeySSHLocalForwardPort:   "43001",
 			MetadataKeySSHRemoteAgentctlPID:  "9321",
 			MetadataKeySSHRemoteAgentctlPort: "43000",
@@ -243,7 +333,7 @@ func TestSSHRowNeverCarriesLocalPID(t *testing.T) {
 		RuntimeName: agentruntime.RuntimeSSH,
 		Status:      v1.AgentStatusRunning,
 		agentctl:    client,
-		Metadata: map[string]interface{}{
+		metadata: map[string]interface{}{
 			MetadataKeySSHLocalForwardPort:  "43001",
 			MetadataKeySSHRemoteAgentctlPID: "9321",
 		},

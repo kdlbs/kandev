@@ -9,6 +9,8 @@ import { Badge } from "@kandev/ui/badge";
 import { listProjectMembers } from "@/lib/api/domains/gitlab-api";
 import type { GitLabMRUser, GitLabProjectMember } from "@/lib/types/gitlab";
 import { isCurrentIdentityRequest } from "@/hooks/domains/gitlab/request-identity";
+import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export function toggleMemberId(ids: number[], id: number): number[] {
   return ids.includes(id) ? ids.filter((candidate) => candidate !== id) : [...ids, id];
@@ -18,7 +20,14 @@ type Props = {
   workspaceId: string;
   host: string;
   project: string;
-  label: "Reviewers" | "Assignees";
+  /**
+   * A logic discriminant, never display copy. It was `"Reviewers" | "Assignees"`
+   * — a string-literal union doubling as the visible heading — which is the
+   * shape apps/web/AGENTS.md names: translating it in place breaks the type and
+   * makes the aria-labels ungrammatical in any language that does not build
+   * "Remove X from reviewers" by concatenation. Each label now has its own key.
+   */
+  kind: "reviewers" | "assignees";
   current: GitLabMRUser[];
   busy: boolean;
   onSave: (ids: number[]) => Promise<boolean>;
@@ -26,22 +35,26 @@ type Props = {
 
 function SelectedMemberBadges({
   members,
-  label,
+  kind,
   onRemove,
 }: {
   members: Array<Pick<GitLabProjectMember, "id" | "username" | "name">>;
-  label: Props["label"];
+  kind: Props["kind"];
   onRemove: (id: number) => void;
 }) {
+  const { t } = useTranslation();
   if (members.length === 0)
-    return <span className="text-xs text-muted-foreground">None assigned</span>;
+    return <span className="text-xs text-muted-foreground">{t("gitlab:noneAssigned")}</span>;
   return members.map((member) => (
     <Badge key={member.id} variant="secondary" className="gap-1">
       {member.username}
       <button
         type="button"
-        className="flex h-11 w-11 cursor-pointer items-center justify-center sm:h-6 sm:w-6"
-        aria-label={`Remove ${member.username} from ${label.toLowerCase()}`}
+        className={`${controlSizingClassName("icon")} cursor-pointer`}
+        aria-label={t(
+          kind === "reviewers" ? "gitlab:removeFromReviewers" : "gitlab:removeFromAssignees",
+          { username: member.username },
+        )}
         onClick={() => onRemove(member.id)}
       >
         <IconX className="h-3 w-3" />
@@ -55,6 +68,7 @@ function useProjectMemberSearch({
   host,
   project,
 }: Pick<Props, "workspaceId" | "host" | "project">) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [members, setMembers] = useState<GitLabProjectMember[]>([]);
   const [searching, setSearching] = useState(false);
@@ -89,7 +103,9 @@ function useProjectMemberSearch({
       if (isActive(generation, requestIdentity)) setMembers(result);
     } catch (searchError) {
       if (isActive(generation, requestIdentity)) {
-        setError(searchError instanceof Error ? searchError.message : "Member search failed");
+        setError(
+          searchError instanceof Error ? searchError.message : t("gitlab:memberSearchFailed"),
+        );
       }
     } finally {
       if (isActive(generation, requestIdentity)) setSearching(false);
@@ -102,11 +118,14 @@ export function MRReviewerControl({
   workspaceId,
   host,
   project,
-  label,
+  kind,
   current,
   busy,
   onSave,
 }: Props) {
+  const { t } = useTranslation();
+  const sectionLabel = t(kind === "reviewers" ? "gitlab:reviewers" : "gitlab:assignees");
+  const searchLabel = t(kind === "reviewers" ? "gitlab:searchReviewers" : "gitlab:searchAssignees");
   const initialIds = useMemo(() => current.map((member) => member.id), [current]);
   const [selectedIds, setSelectedIds] = useState(initialIds);
   const { query, setQuery, members, searching, error, search } = useProjectMemberSearch({
@@ -124,23 +143,22 @@ export function MRReviewerControl({
     .map((id) => knownMembers.get(id))
     .filter((member): member is Pick<GitLabProjectMember, "id" | "username" | "name"> => !!member);
   return (
-    <section className="space-y-2" aria-label={label}>
+    <section className="space-y-2" aria-label={sectionLabel}>
       <div className="flex items-center justify-between gap-2">
-        <h4 className="text-xs font-semibold">{label}</h4>
+        <h4 className="text-xs font-semibold">{sectionLabel}</h4>
         <Button
-          size="sm"
           variant="outline"
-          className="h-11 cursor-pointer sm:h-8"
+          className={controlSizingClassName("standard", "cursor-pointer")}
           disabled={busy || !changed}
           onClick={() => void onSave(selectedIds)}
         >
-          <IconUserCheck className="mr-1 h-3.5 w-3.5" /> Apply
+          <IconUserCheck className="mr-1 h-3.5 w-3.5" /> {t("gitlab:apply")}
         </Button>
       </div>
       <div className="flex flex-wrap gap-1.5">
         <SelectedMemberBadges
           members={selectedMembers}
-          label={label}
+          kind={kind}
           onRemove={(id) => setSelectedIds((ids) => ids.filter((candidate) => candidate !== id))}
         />
       </div>
@@ -154,14 +172,14 @@ export function MRReviewerControl({
               void search();
             }
           }}
-          placeholder="Search project members"
-          aria-label={`Search ${label.toLowerCase()}`}
+          placeholder={t("gitlab:searchProjectMembers")}
+          aria-label={searchLabel}
         />
         <Button
           size="icon"
           variant="outline"
-          className="h-11 w-11 shrink-0 cursor-pointer sm:h-9 sm:w-9"
-          aria-label={`Search ${label.toLowerCase()}`}
+          className={controlSizingClassName("icon", "shrink-0 cursor-pointer")}
+          aria-label={searchLabel}
           disabled={searching}
           onClick={() => void search()}
         >

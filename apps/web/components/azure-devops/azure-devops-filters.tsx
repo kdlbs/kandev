@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@kandev/ui/textarea";
 import type { AzureDevOpsProject, AzureDevOpsRepository } from "@/lib/types/azure-devops";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export type AzureDevOpsBrowseMode = "board" | "work-items" | "pull-requests";
 
@@ -55,13 +56,14 @@ function ProjectFilter({
   onChange: (value: string) => void;
   compact?: boolean;
 }) {
+  const { t } = useTranslation();
   const controlId = `azure-devops-filter-project${idSuffix}`;
   return (
     <Field compact={compact}>
-      <Label htmlFor={controlId}>Project</Label>
+      <Label htmlFor={controlId}>{t("azuredevops:project")}</Label>
       <Select value={value || undefined} onValueChange={onChange}>
         <SelectTrigger id={controlId} className="w-full">
-          <SelectValue placeholder="Select project" />
+          <SelectValue placeholder={t("azuredevops:selectProject")} />
         </SelectTrigger>
         <SelectContent>
           {projects.map((project) => (
@@ -82,18 +84,21 @@ function PullRequestFilters({
   onChange,
   compact,
 }: Pick<FiltersProps, "idSuffix" | "filters" | "repositories" | "onChange" | "compact">) {
+  const { t } = useTranslation();
   const [advanced, setAdvanced] = useState(false);
   return (
     <>
       <Field compact={compact}>
-        <Label htmlFor={`azure-devops-filter-repository${idSuffix}`}>Repository</Label>
+        <Label htmlFor={`azure-devops-filter-repository${idSuffix}`}>
+          {t("azuredevops:repository")}
+        </Label>
         <Select
           value={filters.repositoryId || undefined}
           onValueChange={(value) => onChange("repositoryId", value)}
           disabled={repositories.length === 0}
         >
           <SelectTrigger id={`azure-devops-filter-repository${idSuffix}`} className="w-full">
-            <SelectValue placeholder="Select repository" />
+            <SelectValue placeholder={t("azuredevops:selectRepository")} />
           </SelectTrigger>
           <SelectContent>
             {repositories.map((repository) => (
@@ -105,22 +110,24 @@ function PullRequestFilters({
         </Select>
       </Field>
       <Field compact={compact}>
-        <Label htmlFor={`azure-devops-filter-status${idSuffix}`}>Status</Label>
+        <Label htmlFor={`azure-devops-filter-status${idSuffix}`}>{t("azuredevops:status")}</Label>
         <Select value={filters.status} onValueChange={(value) => onChange("status", value)}>
           <SelectTrigger id={`azure-devops-filter-status${idSuffix}`} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="abandoned">Abandoned</SelectItem>
-            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="active">{t("azuredevops:statusActive")}</SelectItem>
+            <SelectItem value="completed">{t("azuredevops:statusCompleted")}</SelectItem>
+            <SelectItem value="abandoned">{t("azuredevops:statusAbandoned")}</SelectItem>
+            <SelectItem value="all">{t("azuredevops:statusAll")}</SelectItem>
           </SelectContent>
         </Select>
       </Field>
       <AdvancedFilters open={advanced} onOpenChange={setAdvanced} compact={compact}>
         <Field compact={compact}>
-          <Label htmlFor={`azure-devops-filter-creator${idSuffix}`}>Creator ID</Label>
+          <Label htmlFor={`azure-devops-filter-creator${idSuffix}`}>
+            {t("azuredevops:creatorId")}
+          </Label>
           <Input
             id={`azure-devops-filter-creator${idSuffix}`}
             value={filters.creator}
@@ -128,7 +135,9 @@ function PullRequestFilters({
           />
         </Field>
         <Field compact={compact}>
-          <Label htmlFor={`azure-devops-filter-reviewer${idSuffix}`}>Reviewer ID</Label>
+          <Label htmlFor={`azure-devops-filter-reviewer${idSuffix}`}>
+            {t("azuredevops:reviewerId")}
+          </Label>
           <Input
             id={`azure-devops-filter-reviewer${idSuffix}`}
             value={filters.reviewer}
@@ -151,6 +160,7 @@ function AdvancedFilters({
   compact?: boolean;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   return (
     <Collapsible open={open} onOpenChange={onOpenChange} className={cn(compact && "contents")}>
       <Button
@@ -162,7 +172,7 @@ function AdvancedFilters({
         aria-expanded={open}
       >
         <IconAdjustments className="h-4 w-4" />
-        Advanced
+        {t("azuredevops:advanced")}
         <IconChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
       </Button>
       <CollapsibleContent className={cn(compact && "basis-full")}>
@@ -180,11 +190,14 @@ function WorkItemFilters({
   onChange,
   compact,
 }: Pick<FiltersProps, "idSuffix" | "filters" | "onChange" | "compact">) {
+  const { t } = useTranslation();
   const [advanced, setAdvanced] = useState(false);
   return (
     <>
       <Field compact={compact}>
-        <Label htmlFor={`azure-devops-filter-limit${idSuffix}`}>Result limit</Label>
+        <Label htmlFor={`azure-devops-filter-limit${idSuffix}`}>
+          {t("azuredevops:resultLimit")}
+        </Label>
         <Select
           value={String(filters.top)}
           onValueChange={(value) => onChange("top", Number(value))}
@@ -227,6 +240,7 @@ export function AzureDevOpsFilters({
   onSearch,
   compact,
 }: FiltersProps) {
+  const { t } = useTranslation();
   const disabled =
     loading ||
     !filters.projectId ||
@@ -267,7 +281,7 @@ export function AzureDevOpsFilters({
         data-testid={`azure-devops-search-button${idSuffix}`}
       >
         <IconSearch className="h-4 w-4" />
-        {loading ? "Loading..." : "Search"}
+        {loading ? t("azuredevops:loading") : t("common:presetIconSearch")}
       </Button>
     </div>
   );

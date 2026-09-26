@@ -73,7 +73,9 @@ export function ExecutorProfileDialog({
               id="profile-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={t("executors:eGProductionDevelopment")}
+              placeholder={t("executors:eGProductionDevelopment", {
+                example: t("executors:profileNameExample"),
+              })}
               autoFocus
             />
           </div>

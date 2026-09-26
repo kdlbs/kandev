@@ -2,11 +2,28 @@ import { describe, expect, it, vi } from "vitest";
 import type { MentionItem } from "@/hooks/use-inline-mention";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import {
+  createEntityReferenceInputGate,
   createEntityReferenceSuggestion,
   handleEntityReferenceMenuKeyDown,
+  isEntityReferenceQueryAllowed,
 } from "./tiptap-entity-reference-suggestion";
-import { createMentionSuggestion } from "./tiptap-suggestion";
+import { createMentionSuggestion, MentionSuggestionPluginKey } from "./tiptap-suggestion";
 import * as entityReferenceSuggestions from "./tiptap-entity-reference-suggestion";
+
+function createSuggestionPositioningProps() {
+  return {
+    placement: "bottom-start" as const,
+    offset: { mainAxis: 4, crossAxis: 0 },
+    flip: true,
+    floatingUi: {
+      placement: "bottom-start" as const,
+      strategy: "absolute" as const,
+      middleware: [],
+    },
+    mount: vi.fn(() => vi.fn()),
+    loading: false,
+  };
+}
 
 describe("entity reference suggestion", () => {
   it("provides an independent # suggestion config", () => {
@@ -79,6 +96,113 @@ describe("entity reference suggestion", () => {
   });
 });
 
+describe("entity reference trigger gating", () => {
+  it("starts only after direct # input and keeps a manually typed query active", () => {
+    const gate = createEntityReferenceInputGate();
+    const transaction = { getMeta: () => undefined };
+
+    gate.recordTextInput(1, 1, "#");
+    expect(gate.shouldShow({ from: 1, to: 2 }, transaction)).toBe(true);
+    gate.recordTextInput(2, 2, "auth issue");
+    expect(gate.shouldShow({ from: 1, to: 9 }, transaction)).toBe(true);
+  });
+
+  it("allows a direct trigger to include text that was already present", () => {
+    const gate = createEntityReferenceInputGate();
+    const transaction = { getMeta: () => undefined };
+
+    gate.recordTextInput(1, 1, "#");
+    expect(gate.shouldShow({ from: 1, to: 8 }, transaction)).toBe(true);
+  });
+
+  it("does not start or continue a suggestion from pasted or dropped text", () => {
+    const gate = createEntityReferenceInputGate();
+    const transaction = {
+      getMeta: (key: string) => (key === "uiEvent" ? "paste" : undefined),
+    };
+
+    gate.recordTextInput(1, 1, "#");
+    expect(gate.shouldShow({ from: 1, to: 2 }, transaction)).toBe(false);
+    expect(gate.shouldShow({ from: 1, to: 8 }, { getMeta: () => undefined })).toBe(false);
+
+    gate.recordTextInput(1, 1, "#");
+    expect(
+      gate.shouldShow(
+        { from: 1, to: 2 },
+        { getMeta: (key: string) => (key === "uiEvent" ? "drop" : undefined) },
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps an active range while direct deletion changes the query", () => {
+    const gate = createEntityReferenceInputGate();
+    const transaction = { docChanged: true, getMeta: () => undefined };
+
+    gate.recordTextInput(1, 1, "#");
+    expect(gate.shouldShow({ from: 1, to: 2 }, transaction)).toBe(true);
+
+    gate.recordDeletion();
+    expect(gate.shouldShow({ from: 1, to: 2 }, transaction)).toBe(true);
+
+    gate.recordTextInput(2, 2, "a");
+    expect(gate.shouldShow({ from: 1, to: 3 }, transaction)).toBe(true);
+  });
+
+  it("keeps an active range for a non-document transaction", () => {
+    const gate = createEntityReferenceInputGate();
+    const transaction = { getMeta: () => undefined };
+
+    gate.recordTextInput(1, 1, "#");
+    expect(gate.shouldShow({ from: 1, to: 2 }, transaction)).toBe(true);
+    expect(gate.shouldShow({ from: 1, to: 2 }, transaction)).toBe(true);
+  });
+
+  it("rejects a space after a bare # but allows spaces in a query", () => {
+    expect(isEntityReferenceQueryAllowed("")).toBe(true);
+    expect(isEntityReferenceQueryAllowed(" ")).toBe(false);
+    expect(isEntityReferenceQueryAllowed("auth issue")).toBe(true);
+  });
+
+  it("closes a bare trigger on space while keeping multi-word queries active", () => {
+    const gate = createEntityReferenceInputGate();
+    const suggestion = createEntityReferenceSuggestion(vi.fn(), vi.fn(), gate);
+    const transaction = { docChanged: true, getMeta: () => undefined } as never;
+
+    gate.recordTextInput(1, 1, "#");
+    expect(
+      suggestion.shouldShow?.({
+        editor: {} as never,
+        range: { from: 1, to: 2 },
+        query: "",
+        text: "#",
+        transaction,
+      }),
+    ).toBe(true);
+
+    gate.recordTextInput(2, 2, " ");
+    expect(
+      suggestion.shouldShow?.({
+        editor: {} as never,
+        range: { from: 1, to: 3 },
+        query: " ",
+        text: "# ",
+        transaction,
+      }),
+    ).toBe(false);
+
+    gate.recordTextInput(3, 3, "#auth issue");
+    expect(
+      suggestion.shouldShow?.({
+        editor: {} as never,
+        range: { from: 3, to: 14 },
+        query: "auth issue",
+        text: "#auth issue",
+        transaction,
+      }),
+    ).toBe(true);
+  });
+});
+
 describe("entity reference suggestion lifecycle", () => {
   it("replaces only the active # range with an atom and trailing space", () => {
     const suggestion = createEntityReferenceSuggestion(vi.fn(), vi.fn());
@@ -116,6 +240,8 @@ describe("entity reference suggestion lifecycle", () => {
     const setMenuState = vi.fn();
     const suggestion = createEntityReferenceSuggestion(setMenuState, vi.fn());
     const lifecycle = suggestion.render?.();
+    const transaction = { setMeta: vi.fn(() => ({ id: "exit" })) };
+    const dispatch = vi.fn();
     const props = {
       editor: {} as never,
       range: { from: 1, to: 2 },
@@ -125,6 +251,7 @@ describe("entity reference suggestion lifecycle", () => {
       command: vi.fn(),
       decorationNode: null,
       clientRect: () => new DOMRect(10, 20, 1, 10),
+      ...createSuggestionPositioningProps(),
     };
 
     expect(lifecycle).toBeDefined();
@@ -134,7 +261,7 @@ describe("entity reference suggestion lifecycle", () => {
     );
 
     const handled = lifecycle?.onKeyDown?.({
-      view: {} as never,
+      view: { state: { tr: transaction }, dispatch } as never,
       event: new KeyboardEvent("keydown", { key: "Escape" }),
       range: props.range,
     });
@@ -147,6 +274,8 @@ describe("entity reference suggestion lifecycle", () => {
       command: null,
     });
     expect(props.command).not.toHaveBeenCalled();
+    expect(transaction.setMeta).toHaveBeenCalledWith(expect.anything(), { exit: true });
+    expect(dispatch).toHaveBeenCalledWith({ id: "exit" });
   });
 
   it("allows # at a text-block boundary but rejects tokens and code", () => {
@@ -177,6 +306,29 @@ describe("entity reference suggestion lifecycle", () => {
 });
 
 describe("createMentionSuggestion", () => {
+  it("exits TipTap suggestion state when Escape closes the menu", () => {
+    const suggestion = createMentionSuggestion(
+      { getItems: vi.fn().mockResolvedValue([]), onSelect: vi.fn() },
+      vi.fn(),
+      vi.fn(),
+    );
+    const lifecycle = suggestion.render?.();
+    const transaction = { setMeta: vi.fn(() => ({ id: "exit" })) };
+    const dispatch = vi.fn();
+
+    const handled = lifecycle?.onKeyDown?.({
+      view: { state: { tr: transaction }, dispatch } as never,
+      event: new KeyboardEvent("keydown", { key: "Escape" }),
+      range: { from: 1, to: 2 },
+    });
+
+    expect(handled).toBe(true);
+    expect(transaction.setMeta).toHaveBeenCalledWith(MentionSuggestionPluginKey, {
+      exit: true,
+    });
+    expect(dispatch).toHaveBeenCalledWith({ id: "exit" });
+  });
+
   it("keeps Kandev task discovery in the @ menu", async () => {
     const file: MentionItem = {
       id: "src/app.ts",
@@ -198,7 +350,7 @@ describe("createMentionSuggestion", () => {
       onSelect: vi.fn(),
     };
     const suggestion = createMentionSuggestion(
-      { getItems: vi.fn().mockResolvedValue([task, file]) },
+      { getItems: vi.fn().mockResolvedValue([task, file]), onSelect: vi.fn() },
       vi.fn(),
       vi.fn(),
     );
@@ -208,5 +360,48 @@ describe("createMentionSuggestion", () => {
     });
 
     expect(items).toEqual([task, file]);
+  });
+
+  it("records selection through the shared command path", () => {
+    const task: MentionItem = {
+      id: "task:task-1",
+      kind: "task",
+      label: "Selected task",
+      task: {
+        taskId: "task-1",
+        title: "Selected task",
+        workflowId: "workflow-1",
+        workflowStepId: "step-1",
+        state: null,
+      },
+      onSelect: vi.fn(),
+    };
+    const setMenuState = vi.fn();
+    const onSelect = vi.fn();
+    const suggestion = createMentionSuggestion(
+      { getItems: vi.fn().mockResolvedValue([task]), onSelect },
+      setMenuState,
+      vi.fn(),
+    );
+    const lifecycle = suggestion.render?.();
+    const command = vi.fn();
+
+    lifecycle?.onStart?.({
+      editor: {} as never,
+      range: { from: 1, to: 2 },
+      query: "",
+      text: "@",
+      items: [task],
+      command,
+      decorationNode: null,
+      clientRect: null,
+      ...createSuggestionPositioningProps(),
+    });
+
+    const menu = setMenuState.mock.calls[0]?.[0];
+    menu?.command?.(task);
+
+    expect(command).toHaveBeenCalledOnce();
+    expect(onSelect).toHaveBeenCalledWith(task);
   });
 });

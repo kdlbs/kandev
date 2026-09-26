@@ -1,55 +1,55 @@
 "use client";
 
-import { IconGitPullRequest } from "@tabler/icons-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { cn } from "@/lib/utils";
+import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
+import { useChangeRequestTaskTooltipState } from "@/components/integrations/use-change-request-task-tooltip-state";
+import {
+  CHANGE_REQUEST_STATUS_COLORS,
+  CHANGE_REQUEST_STATUS_RANK,
+  getChangeRequestAggregateStatusColor,
+} from "@/components/integrations/change-request-task-status-color";
+import {
+  getTaskPRsForCurrentWorkspace,
+  useTaskPRTooltipHydration,
+} from "@/hooks/domains/github/use-task-pr-tooltip-hydration";
 import type { TaskPR } from "@/lib/types/github";
+import type { TaskCIAutomationOptions } from "@/lib/types/github";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { derivePRTaskStatusSummary, PRTaskStatusSummary } from "./pr-task-status-summary";
+import {
+  CompactPRTooltipContent,
+  PRTaskIconDrawer,
+  PRTaskIconGlyph,
+  PRTaskIconTooltip,
+  TaskPRAutomationDetails,
+  type PRTaskIconDisclosureProps,
+} from "./pr-task-icon-disclosure";
+import { getTaskPRAutomationSummary, type TaskPRInfo } from "./pr-task-automation";
+import { getTaskPRWorkflowAttention } from "./pr-workflow-attention";
 
-const MUTED_FOREGROUND = "text-muted-foreground";
-const PURPLE_500 = "text-purple-500";
-const RED_500 = "text-red-500";
-const YELLOW_500 = "text-yellow-500";
-const SKY_400 = "text-sky-400";
-const EMERALD_400 = "text-emerald-400";
-const GREEN_500 = "text-green-500";
+export type { TaskPRInfo } from "./pr-task-automation";
+export { getTaskPRAutomationSummary } from "./pr-task-automation";
+export { AutomationIndicatorDots } from "./pr-task-icon-disclosure";
+
+const MUTED_FOREGROUND = CHANGE_REQUEST_STATUS_COLORS.muted;
+const PURPLE_500 = CHANGE_REQUEST_STATUS_COLORS.merged;
+const RED_500 = CHANGE_REQUEST_STATUS_COLORS.danger;
+const YELLOW_500 = CHANGE_REQUEST_STATUS_COLORS.warning;
+const SKY_400 = CHANGE_REQUEST_STATUS_COLORS.review;
+const EMERALD_400 = CHANGE_REQUEST_STATUS_COLORS.ready;
+const QUEUED = CHANGE_REQUEST_STATUS_COLORS.queued;
+const GREEN_500 = CHANGE_REQUEST_STATUS_COLORS.passing;
+const EMPTY_PRS: TaskPR[] = [];
 
 /** Maps the task-level PR projection to the same visual language as live PRs. */
 export function getPRAggregateStatusColor(state: string | null | undefined): string {
-  switch (state?.toLowerCase()) {
-    case "merged":
-      return PURPLE_500;
-    case "closed":
-    case "failure":
-      return RED_500;
-    case "pending":
-      return YELLOW_500;
-    case "awaiting_review":
-      return SKY_400;
-    case "ready":
-      return EMERALD_400;
-    case "passing":
-      return GREEN_500;
-    case "draft":
-    case "blocked":
-    case "neutral":
-    case "open":
-    default:
-      return MUTED_FOREGROUND;
-  }
+  return getChangeRequestAggregateStatusColor(state);
 }
 
-const STATUS_RANK: Record<string, number> = {
-  // Higher = more attention-worthy. Drives the aggregated icon color when a
-  // task has multiple PRs (we surface the worst state).
-  [RED_500]: 5,
-  [YELLOW_500]: 4,
-  [SKY_400]: 3,
-  [EMERALD_400]: 2,
-  [GREEN_500]: 1,
-  [PURPLE_500]: 0,
-  [MUTED_FOREGROUND]: 0,
-};
+// Higher = more attention-worthy. Drives the aggregated icon color when a
+// task has multiple PRs (we surface the worst state).
+const STATUS_RANK = CHANGE_REQUEST_STATUS_RANK;
 
 function hasExplicitPRChecksPassed(pr: TaskPR): boolean {
   return pr.checks_state === "success";
@@ -80,12 +80,14 @@ export function hasPRChecksPassedWithoutReviewWaitForDisplay(pr: TaskPR): boolea
 // syncs that do not populate check details.
 export function isPRReadyToMerge(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
+  if (getTaskPRWorkflowAttention(pr)) return false;
   if (!hasExplicitPRChecksPassed(pr)) return false;
   if (pr.mergeable_state !== "clean") return false;
   // Guard against stale mergeable_state: enforce required_reviews to match GitHub's gate.
   if (pr.required_reviews != null && pr.review_count < pr.required_reviews) {
     return false;
   }
+  if (pr.pending_review_count > 0) return false;
   if (pr.review_state === "approved") return true;
   // No review process: no requested reviewers and no submitted reviews. GitHub
   // sets mergeable_state=clean when branch protection is satisfied, so this
@@ -93,8 +95,140 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
   return pr.review_state === "" && pr.pending_review_count === 0;
 }
 
+// GitHub overloads `blocked` for merge queues and unrelated repository rules.
+// Keep readiness clean-only, but allow a neutral merge attempt so GitHub can
+// authoritatively accept the PR into a queue or return the actual blocker.
+export function canAttemptPRMerge(pr: TaskPR): boolean {
+  if (pr.mergeable_state !== "clean" && pr.mergeable_state !== "blocked") return false;
+  return isPRReadyToMerge({ ...pr, mergeable_state: "clean" });
+}
+
 export function isPRDraft(pr: TaskPR): boolean {
   return pr.state === "open" && pr.mergeable_state === "draft";
+}
+
+export function getPRStatusAccessibleLabels(
+  pr: TaskPR,
+  t: ReturnType<typeof useTranslation>["t"],
+): string[] {
+  const labels: string[] = [];
+  if (pr.state === "merged") labels.push(t("github:merged"));
+  else if (pr.state === "closed") labels.push(t("github:closed"));
+  else if (isPRDraft(pr)) labels.push(t("github:draft"));
+  else if (pr.state === "open") labels.push(t("common:open"));
+
+  if (pr.state === "open") {
+    if (pr.checks_state === "failure") labels.push(t("github:checksFailed"));
+    else if (pr.checks_state === "success") labels.push(t("github:checksPassed"));
+    else if (hasPRChecksInProgressForDisplay(pr)) {
+      const pendingCount =
+        pr.checks_total > 0 ? Math.max(1, pr.checks_total - pr.checks_passing) : 1;
+      labels.push(t("github:checksPendingCount", { count: pendingCount }));
+    }
+
+    if (pr.mergeable_state === "behind") labels.push(t("github:behindBase"));
+    else if (isPRWaitingOnBranchProtection(pr)) {
+      labels.push(t("github:blockedByBranchProtection"));
+    }
+
+    if (pr.review_state === "changes_requested") labels.push(t("github:changesRequested"));
+    else if (pr.review_state === "approved") labels.push(t("github:approved"));
+    else if (pr.review_state === "pending") labels.push(t("github:pendingReview"));
+  }
+  return labels;
+}
+
+function compactPRLifecycleLabel(
+  state: string,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | null {
+  switch (state.toLowerCase()) {
+    case "merged":
+      return t("github:merged");
+    case "closed":
+      return t("github:closed");
+    case "draft":
+      return t("github:draft");
+    case "open":
+      return t("common:open");
+    default:
+      return null;
+  }
+}
+
+function compactPRAggregateLabel(
+  state: string | undefined,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | null {
+  switch (state?.toLowerCase()) {
+    case "failure":
+      return t("github:needsAttention");
+    case "pending":
+      return t("common:pending");
+    case "awaiting_review":
+      return t("github:pendingReview");
+    case "blocked":
+      return t("github:blocked");
+    case "ready":
+      return null;
+    case "queued":
+      return t("github:mergeQueueStateQueued");
+    case "passing":
+      return t("github:checksPassed");
+    case "draft":
+      return t("github:draft");
+    case "merged":
+      return t("github:merged");
+    case "closed":
+      return t("github:closed");
+    default:
+      return null;
+  }
+}
+
+export function getCompactPRStatusAccessibleLabels(
+  prInfo: TaskPRInfo,
+  t: ReturnType<typeof useTranslation>["t"],
+): string[] {
+  return [
+    compactPRLifecycleLabel(prInfo.state, t),
+    compactPRAggregateLabel(prInfo.aggregateState, t),
+  ]
+    .filter((label): label is string => label !== null)
+    .filter((label, index, labels) => labels.indexOf(label) === index);
+}
+
+function getTaskPRStatusAccessibleLabels(
+  prs: TaskPR[],
+  prInfo: TaskPRInfo | undefined,
+  t: ReturnType<typeof useTranslation>["t"],
+): string[] {
+  if (prs.length > 0) {
+    return [...new Set(prs.flatMap((pr) => getPRStatusAccessibleLabels(pr, t)))];
+  }
+  if (prInfo) return getCompactPRStatusAccessibleLabels(prInfo, t);
+  return [];
+}
+
+export function hasPRMergeConflict(pr: TaskPR): boolean {
+  if (pr.state !== "open") return false;
+  return pr.has_merge_conflicts ?? pr.mergeable_state === "dirty";
+}
+
+export function hasAnyPRMergeConflict(prs: TaskPR[]): boolean {
+  return prs.some(hasPRMergeConflict);
+}
+
+function taskPRHasMergeConflict(prs: TaskPR[], prInfo?: TaskPRInfo): boolean {
+  return prs.length > 0 ? hasAnyPRMergeConflict(prs) : prInfo?.hasMergeConflicts === true;
+}
+
+export function isPRQueued(pr: TaskPR): boolean {
+  return (
+    pr.state === "open" &&
+    typeof pr.merge_queue_state === "string" &&
+    pr.merge_queue_state.trim() !== ""
+  );
 }
 
 // CI passed but the PR is still waiting on human review (reviewers requested
@@ -116,6 +250,7 @@ export function isPRAwaitingReview(pr: TaskPR): boolean {
 export function isPRWaitingOnBranchProtection(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
   if (pr.mergeable_state !== "blocked") return false;
+  if (isPRReadyToMerge(pr)) return false;
   if (!hasPRChecksPassedForDisplay(pr)) return false;
   if (pr.review_state === "changes_requested") return false;
   return !isPRAwaitingReview(pr);
@@ -136,14 +271,19 @@ function openMergeBlockerColor(pr: TaskPR): string | null {
 export function getPRStatusColor(pr: TaskPR): string {
   if (pr.state === "merged") return PURPLE_500;
   if (pr.state === "closed") return RED_500;
-  if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
-    return RED_500;
-  }
+  // An active queue entry is the authoritative non-terminal state. Queue
+  // membership must remain visible while provider checks or mergeability
+  // fields hydrate, even when those fields still describe an earlier state.
+  if (isPRQueued(pr)) return QUEUED;
   if (isPRDraft(pr)) {
     return MUTED_FOREGROUND;
   }
+  if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
+    return RED_500;
+  }
   const blockerColor = openMergeBlockerColor(pr);
   if (blockerColor) return blockerColor;
+  if (getTaskPRWorkflowAttention(pr)) return YELLOW_500;
   if (isPRReadyToMerge(pr)) {
     return EMERALD_400;
   }
@@ -166,21 +306,6 @@ export function getPRStatusColor(pr: TaskPR): string {
   return MUTED_FOREGROUND;
 }
 
-export function getPRTooltip(pr: TaskPR): string {
-  const parts = [`PR #${pr.pr_number}: ${pr.pr_title}`];
-  if (pr.state !== "open") parts.push(`State: ${pr.state}`);
-  if (pr.review_state) parts.push(`Review: ${pr.review_state}`);
-  if (pr.checks_state) parts.push(`CI: ${pr.checks_state}`);
-  if (isPRDraft(pr)) {
-    parts.push("Draft");
-  } else if (isPRReadyToMerge(pr)) {
-    parts.push("Ready to merge");
-  } else if (pr.mergeable_state && pr.mergeable_state !== "unknown" && pr.state === "open") {
-    parts.push(`Mergeable: ${pr.mergeable_state}`);
-  }
-  return parts.join(" | ");
-}
-
 /**
  * Picks the most attention-worthy color across N PRs. For multi-repo tasks one
  * red PR should dominate the visual even if the others are green. Terminal
@@ -192,7 +317,7 @@ export function aggregatePRStatusColor(prs: TaskPR[]): string {
   if (prs.length === 0) return MUTED_FOREGROUND;
   const open = prs.filter((p) => p.state === "open");
   const target = open.length > 0 ? open : prs;
-  let bestColor = MUTED_FOREGROUND;
+  let bestColor: string = MUTED_FOREGROUND;
   let bestRank = -1;
   for (const pr of target) {
     const color = getPRStatusColor(pr);
@@ -245,64 +370,158 @@ export function pickDefaultPR(prs: TaskPR[]): TaskPR | null {
   return best;
 }
 
-export function PRTaskIcon({ taskId }: { taskId: string }) {
-  const prs = useAppStore((state) => state.taskPRs.byTaskId[taskId] ?? null);
+export function PRTaskIcon({ taskId, prInfo }: { taskId: string; prInfo?: TaskPRInfo }) {
+  const prs = useAppStore((state) => getTaskPRsForCurrentWorkspace(state, taskId));
+  const hydration = useTaskPRTooltipHydration(taskId, { includeAutomation: true });
+  const fullPRs = normalizeTaskPRs(prs);
 
   // Defensive: an upstream payload may briefly seed byTaskId[taskId] with a
   // non-array value (e.g. an empty object from a partial hydration). Bail
-  // instead of falling through into MultiPRIcon, where for-of throws.
-  if (!Array.isArray(prs) || prs.length === 0) return null;
-  if (prs.length === 1) return <SinglePRIcon taskId={taskId} pr={prs[0]} />;
-  return <MultiPRIcon taskId={taskId} prs={prs} />;
-}
+  // instead of falling through into a full-data summary, where for-of throws.
+  if (fullPRs.length === 0 && !prInfo) return null;
 
-function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          data-testid={`pr-task-icon-${taskId}`}
-          data-pr-state={pr.state}
-          data-pr-count="1"
-          data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
-          className={cn("inline-flex items-center shrink-0", getPRStatusColor(pr))}
-        >
-          <IconGitPullRequest className="h-3.5 w-3.5" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{getPRTooltip(pr)}</TooltipContent>
-    </Tooltip>
+    <PRTaskIconView
+      taskId={taskId}
+      prInfo={prInfo}
+      prs={fullPRs}
+      hydration={hydration}
+      automationOptions={hydration.automationOptions}
+    />
   );
 }
 
-function MultiPRIcon({ taskId, prs }: { taskId: string; prs: TaskPR[] }) {
-  const aggregateColor = aggregatePRStatusColor(prs);
-  const allReady = areAllOpenPRsReadyToMerge(prs);
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          data-testid={`pr-task-icon-${taskId}`}
-          data-pr-count={prs.length}
-          data-pr-ready-to-merge={allReady ? "true" : "false"}
-          className={cn("inline-flex items-center gap-0.5 shrink-0", aggregateColor)}
-        >
-          <IconGitPullRequest className="h-3.5 w-3.5" />
-          <span className="text-[9px] font-semibold leading-none">{prs.length}</span>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>
-        <div className="flex flex-col gap-1 text-xs">
-          {prs.map((pr) => (
-            <div key={pr.id} className="flex items-center gap-2">
-              <span className={cn("inline-flex shrink-0", getPRStatusColor(pr))}>
-                <IconGitPullRequest className="h-3 w-3" />
-              </span>
-              <span>{getPRTooltip(pr)}</span>
-            </div>
-          ))}
-        </div>
-      </TooltipContent>
-    </Tooltip>
+export function normalizeTaskPRs(prs: unknown): TaskPR[] {
+  return Array.isArray(prs) && prs.length > 0 ? prs : EMPTY_PRS;
+}
+
+type TaskPRIconPresentation = {
+  hasFullData: boolean;
+  singlePR: TaskPR | null;
+  readyToMerge: boolean;
+  allReadyToMerge: boolean;
+  summaries: ReturnType<typeof derivePRTaskStatusSummary>[];
+  iconColor: string;
+  displayState: string | undefined;
+  displayCount: number;
+};
+
+function getTaskPRIconPresentation(prs: TaskPR[], prInfo?: TaskPRInfo): TaskPRIconPresentation {
+  const hasFullData = prs.length > 0;
+  const singlePR = prs.length === 1 ? prs[0] : null;
+  const readyToMerge = singlePR ? isPRReadyToMerge(singlePR) : false;
+  return {
+    hasFullData,
+    singlePR,
+    readyToMerge,
+    allReadyToMerge: areAllOpenPRsReadyToMerge(prs),
+    summaries: prs.map((pr) => derivePRTaskStatusSummary(pr, isPRReadyToMerge(pr))),
+    iconColor: getTaskPRIconColor(prs, prInfo),
+    displayState: singlePR?.state ?? (hasFullData ? undefined : prInfo?.state),
+    displayCount: hasFullData ? prs.length : 1,
+  };
+}
+
+function PRTaskIconView({
+  taskId,
+  prInfo,
+  prs,
+  hydration,
+  automationOptions,
+}: {
+  taskId: string;
+  prInfo?: TaskPRInfo;
+  prs: TaskPR[];
+  hydration: ReturnType<typeof useTaskPRTooltipHydration>;
+  automationOptions: TaskCIAutomationOptions | null;
+}) {
+  const { t } = useTranslation();
+  const { hydrate } = hydration;
+  const hasFullData = prs.length > 0;
+  const usesTouchDrawer = useTouchDrawer();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const automation = getTaskPRAutomationSummary(prs, prInfo, automationOptions);
+  const needsHydration =
+    !hasFullData ||
+    ((automation.autoFixEnabled || automation.autoMergeEnabled) && !automationOptions);
+  const hydrateOnDisclosure = useCallback(() => {
+    if (needsHydration) void hydrate();
+  }, [hydrate, needsHydration]);
+  const tooltip = useChangeRequestTaskTooltipState(hydrateOnDisclosure);
+  const {
+    singlePR,
+    readyToMerge,
+    allReadyToMerge,
+    summaries,
+    iconColor,
+    displayState,
+    displayCount,
+  } = getTaskPRIconPresentation(prs, prInfo);
+
+  const statusLabels = getTaskPRStatusAccessibleLabels(prs, prInfo, t);
+  const statusAriaLabel =
+    prs.length > 1
+      ? t("github:pullRequestStatuses", { count: prs.length })
+      : t("github:pullRequestStatus", { number: singlePR?.pr_number ?? prInfo?.number });
+  const automationAria = [
+    automation.autoFixEnabled ? t("github:autoFixEnabledAria") : null,
+    automation.autoMergeEnabled ? t("github:autoMergeEnabledAria") : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const conflict = taskPRHasMergeConflict(prs, prInfo);
+  const ariaLabel = [
+    statusAriaLabel,
+    ...statusLabels,
+    conflict ? t("github:conflicts") : null,
+    automationAria || null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  const disclosureProps: PRTaskIconDisclosureProps = {
+    taskId,
+    prInfo,
+    prs,
+    hasFullData,
+    singlePR,
+    readyToMerge,
+    allReadyToMerge,
+    displayState,
+    displayCount,
+    iconColor,
+    ariaLabel,
+    icon: <PRTaskIconGlyph automation={automation} hasMergeConflicts={conflict} />,
+    content: hasFullData ? (
+      <>
+        <PRTaskStatusSummary summaries={summaries} />
+        <TaskPRAutomationDetails summary={automation} />
+      </>
+    ) : (
+      <>
+        <CompactPRTooltipContent status={hydration.status} />
+        <TaskPRAutomationDetails summary={automation} status={hydration.status} />
+      </>
+    ),
+  };
+
+  return usesTouchDrawer ? (
+    <PRTaskIconDrawer
+      {...disclosureProps}
+      open={drawerOpen}
+      onOpenChange={(nextOpen) => {
+        setDrawerOpen(nextOpen);
+        if (nextOpen) hydrateOnDisclosure();
+      }}
+      t={t}
+    />
+  ) : (
+    <PRTaskIconTooltip {...disclosureProps} tooltip={tooltip} />
   );
+}
+
+function getTaskPRIconColor(prs: TaskPR[], prInfo?: TaskPRInfo): string {
+  if (prs.length === 1) return getPRStatusColor(prs[0]);
+  if (prs.length > 1) return aggregatePRStatusColor(prs);
+  return getPRAggregateStatusColor(prInfo?.aggregateState ?? prInfo?.state);
 }

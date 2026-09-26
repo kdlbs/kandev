@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -19,13 +18,13 @@ type ProxyInvalidator interface {
 
 // VscodeHandlers provides WebSocket handlers for VS Code server operations.
 type VscodeHandlers struct {
-	lifecycleMgr     *lifecycle.Manager
+	lifecycleMgr     ExecutionLookup
 	proxyInvalidator ProxyInvalidator
 	logger           *logger.Logger
 }
 
 // NewVscodeHandlers creates a new VscodeHandlers instance.
-func NewVscodeHandlers(lifecycleMgr *lifecycle.Manager, proxyInvalidator ProxyInvalidator, log *logger.Logger) *VscodeHandlers {
+func NewVscodeHandlers(lifecycleMgr ExecutionLookup, proxyInvalidator ProxyInvalidator, log *logger.Logger) *VscodeHandlers {
 	return &VscodeHandlers{
 		lifecycleMgr:     lifecycleMgr,
 		proxyInvalidator: proxyInvalidator,
@@ -80,7 +79,8 @@ func (h *VscodeHandlers) wsVscodeStart(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found or no active execution: "+err.Error(), nil)
 	}
 
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agentctl client not available", nil)
 	}
@@ -128,7 +128,8 @@ func (h *VscodeHandlers) wsVscodeStop(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found or no active execution: "+err.Error(), nil)
 	}
 
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agentctl client not available", nil)
 	}
@@ -166,7 +167,8 @@ func (h *VscodeHandlers) wsVscodeStatus(ctx context.Context, msg *ws.Message) (*
 		return ws.NewResponse(msg.ID, msg.Action, types.VscodeStatusResponse{Status: "stopped"})
 	}
 
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewResponse(msg.ID, msg.Action, types.VscodeStatusResponse{Status: "stopped"})
 	}
@@ -226,7 +228,8 @@ func (h *VscodeHandlers) wsVscodeOpenFile(ctx context.Context, msg *ws.Message) 
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found or no active execution: "+err.Error(), nil)
 	}
 
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agentctl client not available", nil)
 	}

@@ -1,8 +1,18 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import type { PluginRouteRegistration } from "@/lib/plugins/registry";
 import { PluginPageFrame, resolvePluginPageChrome } from "./plugin-page";
+
+// PageShell's nav sheet and home affordance read the app store, which these
+// registry-focused tests don't set up.
+vi.mock("@/components/navigation/app-nav-sheet", () => ({
+  AppNavSheet: () => null,
+}));
+
+vi.mock("@/hooks/use-home-affordance", () => ({
+  useHomeAffordance: () => ({ mode: "phone", href: "/?home=overview" }),
+}));
 
 const PLUGIN_ID = "plugin-a";
 const PLUGIN_PATH = "/plugins/hello";

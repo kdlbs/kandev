@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "./app-sidebar-constants";
 
 const navigationMock = vi.hoisted(() => ({
@@ -7,6 +8,7 @@ const navigationMock = vi.hoisted(() => ({
 }));
 const officeRouteMock = vi.hoisted(() => ({
   inOffice: false,
+  mode: null as "office" | "kanban" | "unknown" | null,
 }));
 const footerMock = vi.hoisted(() => ({
   onLayout: null as (() => void) | null,
@@ -45,6 +47,11 @@ vi.mock("./sections/tasks-section", () => ({
     </div>
   ),
 }));
+vi.mock("./sections/canvases-section", () => ({
+  CanvasesSection: ({ collapsed }: { collapsed: boolean }) => (
+    <div data-testid="canvases-section" data-collapsed={collapsed ? "true" : "false"} />
+  ),
+}));
 vi.mock("./sections/projects-section", () => ({
   ProjectsSection: () => <div data-testid="projects-section" />,
 }));
@@ -79,16 +86,33 @@ vi.mock("@/lib/routing/client-router", () => ({
 
 vi.mock("@/hooks/use-in-office", () => ({
   useInOffice: () => officeRouteMock.inOffice,
+  // Mode is derived from the active workspace now, not the route. These specs
+  // cover section composition per mode, so they pin a resolved mode directly;
+  // the unresolved case has its own spec below.
+  useOfficeModeState: () =>
+    officeRouteMock.mode ?? (officeRouteMock.inOffice ? "office" : "kanban"),
 }));
 
 vi.mock("@/hooks/use-workflows", () => ({
   useEnsureWorkspaceWorkflows: () => {},
 }));
 
+// Same reason as the workflows hook above: this suite covers the sidebar's
+// layout and section composition, not the workspace-scoped data loads it
+// hoists. `use-office-workspace-data.test.ts` covers those.
+vi.mock("@/hooks/use-office-workspace-data", () => ({
+  useOfficeWorkspaceData: () => {},
+}));
+
 const storeState = {
   features: {
     office: false,
+    canvases: false,
   },
+  workspaces: {
+    activeId: undefined as string | undefined,
+  },
+  userSettings: { sidebarHoverEnabled: true, sidebarHoverDelayMs: 500 },
   appSidebar: {
     collapsed: false,
     sectionExpanded: {
@@ -98,6 +122,8 @@ const storeState = {
       projects: false,
       agents: false,
       integrations: false,
+      canvases: false,
+      automations: false,
       settings: false,
     },
     width: APP_SIDEBAR_EXPANDED_WIDTH,
@@ -115,61 +141,107 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
 }));
 
+// The Automations section fetches its own list; this suite is about sidebar
+// composition, so it only needs the calls to resolve.
+vi.mock("@/lib/api/domains/automation-api", () => ({
+  listAutomations: vi.fn().mockResolvedValue([]),
+  listAutomationSummaries: vi.fn().mockResolvedValue([]),
+}));
+
 import { AppSidebar } from "./app-sidebar";
 
+// The app mounts the sidebar inside the root layout's TooltipProvider
+// (app/layout.tsx), and sidebar sections use tooltips for their rail buttons
+// and header shortcuts. Rendering bare would test it outside its real context.
+function sidebar() {
+  return (
+    <TooltipProvider>
+      <AppSidebar />
+    </TooltipProvider>
+  );
+}
+
+function renderSidebar() {
+  return render(sidebar());
+}
+
+const SIDEBAR = "app-sidebar";
+const COLLAPSED_ATTRIBUTE = "data-collapsed";
+const TASKS_SECTION = "tasks-section";
+const INTEGRATIONS_SECTION = "integrations-section";
+const OFFICE_WORK_SECTION = "office-navigation-section-work";
+const OFFICE_OFFICE_SECTION = "office-navigation-section-office";
+
+function resetSidebarState() {
+  navigationMock.pathname = "/";
+  officeRouteMock.inOffice = false;
+  officeRouteMock.mode = null;
+  storeState.appSidebar.collapsed = false;
+  storeState.appSidebar.settingsMode = false;
+  storeState.appSidebar.sectionExpanded.canvases = false;
+  storeState.features.canvases = false;
+  storeState.toggleAppSidebar = vi.fn();
+  storeState.toggleAppSidebarSection = vi.fn();
+  storeState.toggleAppSidebarSettingsMode = vi.fn();
+  storeState.setAppSidebarSettingsMode = vi.fn((_settingsMode: boolean) => {});
+  footerMock.onLayout = null;
+}
+
 describe("AppSidebar", () => {
-  beforeEach(() => {
-    navigationMock.pathname = "/";
-    officeRouteMock.inOffice = false;
-    storeState.appSidebar.collapsed = false;
-    storeState.appSidebar.settingsMode = false;
-    storeState.toggleAppSidebar = vi.fn();
-    storeState.toggleAppSidebarSection = vi.fn();
-    storeState.toggleAppSidebarSettingsMode = vi.fn();
-    storeState.setAppSidebarSettingsMode = vi.fn((_settingsMode: boolean) => {});
-    footerMock.onLayout = null;
-  });
+  beforeEach(resetSidebarState);
 
   afterEach(() => {
     cleanup();
   });
 
   it("renders the expanded nav inside a clipped animation layer", () => {
-    render(<AppSidebar />);
-    expect(screen.getByTestId("app-sidebar").getAttribute("data-collapsed")).toBe("false");
-    expect(screen.getByTestId("tasks-section")).toBeTruthy();
+    renderSidebar();
+    expect(screen.getByTestId(SIDEBAR).getAttribute(COLLAPSED_ATTRIBUTE)).toBe("false");
+    expect(screen.getByTestId(TASKS_SECTION)).toBeTruthy();
     expect(screen.getByTestId("projects-section")).toBeTruthy();
     expect(screen.getByTestId("agents-section")).toBeTruthy();
     expect(screen.queryByTestId("settings-section")).toBeNull();
     expect(screen.getByTestId("app-sidebar-content").classList).toContain("overflow-hidden");
-    expect(screen.getByTestId("app-sidebar").classList).not.toContain("overflow-hidden");
+    expect(screen.getByTestId(SIDEBAR).classList).not.toContain("overflow-hidden");
   });
 
   it("renders office navigation without kanban-only sections in office mode", () => {
     officeRouteMock.inOffice = true;
     navigationMock.pathname = "/office";
 
-    render(<AppSidebar />);
+    renderSidebar();
 
-    expect(screen.getByTestId("office-navigation-section-work")).toBeTruthy();
-    expect(screen.getByTestId("office-navigation-section-office")).toBeTruthy();
-    expect(screen.queryByTestId("tasks-section")).toBeNull();
-    expect(screen.queryByTestId("integrations-section")).toBeNull();
+    expect(screen.getByTestId(OFFICE_WORK_SECTION)).toBeTruthy();
+    expect(screen.getByTestId(OFFICE_OFFICE_SECTION)).toBeTruthy();
+    expect(screen.queryByTestId(TASKS_SECTION)).toBeNull();
+    expect(screen.queryByTestId(INTEGRATIONS_SECTION)).toBeNull();
+  });
+
+  it("keeps office navigation on shared routes when an office workspace is active", () => {
+    officeRouteMock.inOffice = true;
+    navigationMock.pathname = "/stats";
+
+    renderSidebar();
+
+    expect(screen.getByTestId(OFFICE_WORK_SECTION)).toBeTruthy();
+    expect(screen.getByTestId(OFFICE_OFFICE_SECTION)).toBeTruthy();
+    expect(screen.queryByTestId(TASKS_SECTION)).toBeNull();
+    expect(screen.queryByTestId(INTEGRATIONS_SECTION)).toBeNull();
   });
 
   it("orders office navigation sections around entity groups", () => {
     officeRouteMock.inOffice = true;
     navigationMock.pathname = "/office";
 
-    render(<AppSidebar />);
+    renderSidebar();
 
     const nav = screen.getByRole("navigation");
     const expectedSections = [
       "primary-nav",
-      "office-navigation-section-work",
+      OFFICE_WORK_SECTION,
       "projects-section",
       "agents-section",
-      "office-navigation-section-office",
+      OFFICE_OFFICE_SECTION,
     ];
     expect(
       Array.from(nav.querySelectorAll("[data-testid]"))
@@ -180,13 +252,13 @@ describe("AppSidebar", () => {
 
   it("renders collapsed when store reports collapsed=true", () => {
     storeState.appSidebar.collapsed = true;
-    render(<AppSidebar />);
-    expect(screen.getByTestId("app-sidebar").getAttribute("data-collapsed")).toBe("true");
-    expect(screen.getByTestId("tasks-section").getAttribute("data-collapsed")).toBe("true");
+    renderSidebar();
+    expect(screen.getByTestId(SIDEBAR).getAttribute(COLLAPSED_ATTRIBUTE)).toBe("true");
+    expect(screen.getByTestId(TASKS_SECTION).getAttribute(COLLAPSED_ATTRIBUTE)).toBe("true");
   });
 
   it("invokes toggleAppSidebar when the header collapse button is clicked", () => {
-    render(<AppSidebar />);
+    renderSidebar();
     fireEvent.click(screen.getByTestId("header-toggle"));
     expect(storeState.toggleAppSidebar).toHaveBeenCalledOnce();
   });
@@ -195,7 +267,7 @@ describe("AppSidebar", () => {
     navigationMock.pathname =
       "/settings/agents/opencode-acp/profiles/1f593628-6752-4972-95ab-5c8c3e7eaeab";
 
-    render(<AppSidebar />);
+    renderSidebar();
 
     await waitFor(() => {
       expect(storeState.setAppSidebarSettingsMode).toHaveBeenCalledWith(true);
@@ -213,7 +285,7 @@ describe("AppSidebar", () => {
     });
     footerMock.onLayout = () => storeState.toggleAppSidebarSettingsMode();
 
-    render(<AppSidebar />);
+    renderSidebar();
 
     await waitFor(() => {
       expect(storeState.toggleAppSidebarSettingsMode).toHaveBeenCalledOnce();
@@ -226,14 +298,96 @@ describe("AppSidebar", () => {
     navigationMock.pathname = "/settings/agents";
     storeState.appSidebar.settingsMode = true;
 
-    const { rerender } = render(<AppSidebar />);
+    const { rerender } = renderSidebar();
 
     navigationMock.pathname = "/office/tasks";
-    rerender(<AppSidebar />);
+    rerender(sidebar());
 
     await waitFor(() => {
       expect(storeState.setAppSidebarSettingsMode).toHaveBeenCalledWith(false);
     });
     expect(storeState.toggleAppSidebarSettingsMode).not.toHaveBeenCalled();
+  });
+});
+
+describe("AppSidebar canvas routes", () => {
+  beforeEach(resetSidebarState);
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("does not force-expand the Canvases section for a direct canvas route", async () => {
+    navigationMock.pathname = "/canvases/canvas-1";
+    storeState.features.canvases = true;
+
+    renderSidebar();
+
+    await waitFor(() => expect(screen.getByTestId("canvases-section")).toBeTruthy());
+    expect(storeState.toggleAppSidebarSection).not.toHaveBeenCalledWith("canvases");
+    expect(storeState.appSidebar.sectionExpanded.canvases).toBe(false);
+  });
+});
+
+describe("AppSidebar before the workspace resolves", () => {
+  beforeEach(() => {
+    navigationMock.pathname = "/";
+    officeRouteMock.inOffice = false;
+    officeRouteMock.mode = "unknown";
+    storeState.appSidebar.collapsed = false;
+    storeState.appSidebar.settingsMode = false;
+  });
+
+  afterEach(() => {
+    officeRouteMock.mode = null;
+    cleanup();
+  });
+
+  it("renders only mode-independent rows instead of guessing kanban", () => {
+    // Mode comes from the active workspace. On the first frame of a boot that
+    // ships no workspace list it is genuinely unknown, and painting kanban
+    // sections there means visibly swapping them for Office ones a tick later.
+    renderSidebar();
+
+    expect(screen.getByTestId("primary-nav")).toBeTruthy();
+    expect(screen.queryByTestId(TASKS_SECTION)).toBeNull();
+    expect(screen.queryByTestId(INTEGRATIONS_SECTION)).toBeNull();
+    expect(screen.queryByTestId(OFFICE_WORK_SECTION)).toBeNull();
+  });
+});
+
+// @covers AC-UI-SIDEBAR-HOVER-001.1, AC-UI-SIDEBAR-HOVER-001.2
+describe("sidebar hover reveal", () => {
+  beforeEach(() => {
+    resetSidebarState();
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: !query.includes("max-width"),
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    storeState.appSidebar.collapsed = true;
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("reveals at 500 ms without expanding the layout reservation or saved state", () => {
+    renderSidebar();
+    const panel = screen.getByTestId(SIDEBAR);
+    fireEvent.pointerOver(panel, { pointerType: "mouse" });
+    act(() => vi.advanceTimersByTime(499));
+    expect(panel.style.width).toBe("56px");
+    act(() => vi.advanceTimersByTime(1));
+    expect(panel.style.width).toBe(`${APP_SIDEBAR_EXPANDED_WIDTH}px`);
+    expect(screen.getByTestId("app-sidebar-layout").style.width).toBe("56px");
+    expect(panel.getAttribute(COLLAPSED_ATTRIBUTE)).toBe("true");
+    expect(storeState.toggleAppSidebar).not.toHaveBeenCalled();
   });
 });

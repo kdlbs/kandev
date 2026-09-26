@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/improve-kandev/spec.md"
+spec: "../../specs/workspaces/requirements/improve-kandev.md"
 ---
 
 # Task 01: Select the sole visible workspace workflow
@@ -43,7 +43,7 @@ fallback contract and should be completed in one TDD pass.
 
 ## Inputs
 
-- `docs/specs/improve-kandev/spec.md` hidden-workflow and single-visible-workflow
+- `docs/specs/workspaces/requirements/improve-kandev.md` hidden-workflow and single-visible-workflow
   scenarios.
 - `docs/plans/task-create-visible-workflow-fallback/plan.md`.
 - `computeSingleWorkflowFallbackId` in

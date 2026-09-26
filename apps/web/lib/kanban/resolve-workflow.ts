@@ -50,6 +50,12 @@ export function resolveBoardWorkflowSteps<TStep>({
  *
  * `null` is a valid "All Workflows" selection: when the user has explicitly
  * cleared the filter, we must not silently fall back to the first workflow.
+ *
+ * An explicitly chosen workflow id is honored even when the workflow is
+ * hidden: the display dropdown lists every workflow in the store (hidden ones
+ * like Improve Kandev included), so a selection must survive navigation and
+ * reloads instead of silently reverting to All Workflows. Only an id that is
+ * *absent* from the workspace is treated as stale.
  */
 export function resolveDesiredWorkflowId({
   activeWorkflowId,
@@ -60,13 +66,12 @@ export function resolveDesiredWorkflowId({
   settingsWorkflowId?: string | null;
   workspaceWorkflows: WorkflowsState["items"] | WorkflowLike[];
 }): string | null {
-  const visibleWorkflows = workspaceWorkflows.filter((workflow) => !workflow.hidden);
-  if (activeWorkflowId && visibleWorkflows.some((workflow) => workflow.id === activeWorkflowId)) {
+  if (activeWorkflowId && workspaceWorkflows.some((workflow) => workflow.id === activeWorkflowId)) {
     return activeWorkflowId;
   }
   if (
     settingsWorkflowId &&
-    visibleWorkflows.some((workflow) => workflow.id === settingsWorkflowId)
+    workspaceWorkflows.some((workflow) => workflow.id === settingsWorkflowId)
   ) {
     return settingsWorkflowId;
   }

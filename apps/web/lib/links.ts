@@ -1,6 +1,22 @@
-export function linkToTask(taskId: string, layout?: string): string {
-  const base = `/t/${taskId}`;
-  return layout ? `${base}?layout=${encodeURIComponent(layout)}` : base;
+export type TaskLinkOptions = {
+  layout?: string;
+  sessionId?: string;
+  searchParams?: URLSearchParams;
+};
+
+export function linkToTask(taskId: string, layout?: string): string;
+export function linkToTask(taskId: string, options?: TaskLinkOptions): string;
+export function linkToTask(taskId: string, layoutOrOptions?: string | TaskLinkOptions): string {
+  const base = `/t/${encodeURIComponent(taskId)}`;
+  const options =
+    typeof layoutOrOptions === "string" ? { layout: layoutOrOptions } : (layoutOrOptions ?? {});
+  const searchParams = new URLSearchParams(options.searchParams);
+
+  if (options.layout !== undefined) searchParams.set("layout", options.layout);
+  if (options.sessionId !== undefined) searchParams.set("sessionId", options.sessionId);
+
+  const query = searchParams.toString();
+  return query ? `${base}?${query}` : base;
 }
 
 export function linkToTaskOverview({
@@ -14,6 +30,16 @@ export function linkToTaskOverview({
   if (workspaceId) params.set("workspaceId", workspaceId);
   if (workflowId) params.set("workflowId", workflowId);
   return `/?${params.toString()}`;
+}
+
+/**
+ * The Office home for a workspace. The one builder for this URL: the sidebar
+ * brand link, the Home row, and the topbar's home crumb render side by side,
+ * so their hrefs must be byte-identical for the same workspace.
+ */
+export function linkToOfficeHome({ workspaceId }: { workspaceId?: string } = {}): string {
+  if (!workspaceId) return "/office";
+  return `/office?${new URLSearchParams({ workspaceId }).toString()}`;
 }
 
 /** Task-detail route prefixes the SPA serves: canonical and compatibility. */
@@ -40,4 +66,18 @@ export function replaceTaskUrl(taskId: string): void {
 
 export function linkToTasks(workspaceId?: string): string {
   return workspaceId ? `/tasks?workspace=${workspaceId}` : "/tasks";
+}
+
+/**
+ * The Threads deck: every live agent conversation side by side. `taskId` asks
+ * the deck to scroll that task's column into view on arrival, which is how a
+ * task page hands a specific discussion back to the deck.
+ */
+export function linkToThreads(workspaceId?: string, taskId?: string, sessionId?: string): string {
+  const params = new URLSearchParams();
+  if (workspaceId) params.set("workspace", workspaceId);
+  if (taskId) params.set("taskId", taskId);
+  if (taskId && sessionId) params.set("sessionId", sessionId);
+  const query = params.toString();
+  return query ? `/threads?${query}` : "/threads";
 }

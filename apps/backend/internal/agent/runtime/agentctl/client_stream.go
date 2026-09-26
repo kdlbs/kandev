@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -12,6 +14,11 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
+
+// ErrAgentStreamNotConnected identifies requests that cannot be delivered
+// because the agent updates stream has already disconnected. Callers use this
+// to distinguish an already-stopped agent from a live transport failure.
+var ErrAgentStreamNotConnected = errors.New("agent stream not connected")
 
 // sendStreamRequest sends a request over the agent WebSocket stream and waits for a response.
 // It creates a ws.Message with a UUID, registers a pending response channel,
@@ -22,7 +29,7 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	c.mu.RUnlock()
 
 	if conn == nil {
-		return nil, fmt.Errorf("agent stream not connected")
+		return nil, ErrAgentStreamNotConnected
 	}
 
 	reqID := uuid.New().String()
@@ -43,13 +50,21 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	// Register pending request
 	respCh := make(chan *ws.Message, 1)
 	c.pendingMu.Lock()
+	if c.pendingRequests == nil {
+		c.pendingRequests = make(map[string]chan *ws.Message)
+	}
+	if c.pendingRequestConns == nil {
+		c.pendingRequestConns = make(map[string]*websocket.Conn)
+	}
 	c.pendingRequests[reqID] = respCh
+	c.pendingRequestConns[reqID] = conn
 	c.pendingMu.Unlock()
 
 	// Clean up on exit
 	defer func() {
 		c.pendingMu.Lock()
 		delete(c.pendingRequests, reqID)
+		delete(c.pendingRequestConns, reqID)
 		c.pendingMu.Unlock()
 	}()
 
@@ -61,7 +76,16 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	}
 
 	c.streamWriteMu.Lock()
+	// Honor a caller deadline for the write itself, not just the response wait:
+	// a stalled conn.WriteMessage (full send buffer to a half-open peer) would
+	// otherwise block uninterruptibly and, for a steer, pin the lifecycle lock the
+	// caller holds across this RPC. streamWriteMu serializes writers, so setting
+	// and clearing the shared deadline here cannot race a concurrent write.
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetWriteDeadline(deadline)
+	}
 	writeErr := conn.WriteMessage(websocket.TextMessage, data)
+	_ = conn.SetWriteDeadline(time.Time{}) // clear so later writers are unbounded
 	c.streamWriteMu.Unlock()
 	if writeErr != nil {
 		tracing.TraceWSResponse(span, "", writeErr)
@@ -72,7 +96,7 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	select {
 	case resp := <-respCh:
 		if resp == nil {
-			disconnErr := fmt.Errorf("agent stream disconnected while waiting for response")
+			disconnErr := fmt.Errorf("%w while waiting for response", ErrAgentStreamNotConnected)
 			tracing.TraceWSResponse(span, "", disconnErr)
 			return nil, disconnErr
 		}
@@ -93,27 +117,35 @@ func (c *Client) resolvePendingRequest(msg *ws.Message) bool {
 
 	c.pendingMu.Lock()
 	ch, ok := c.pendingRequests[msg.ID]
+	if ok {
+		// Resolve while holding pendingMu so a stream cleanup cannot close the
+		// channel between the lookup and this send.
+		select {
+		case ch <- msg:
+		default:
+		}
+	}
 	c.pendingMu.Unlock()
 
 	if !ok {
 		return false
 	}
-
-	// Send response to waiting caller (non-blocking since channel is buffered)
-	select {
-	case ch <- msg:
-	default:
-	}
 	return true
 }
 
-// cleanupPendingRequests unblocks all pending requests with nil (signaling disconnect).
-func (c *Client) cleanupPendingRequests() {
+// cleanupPendingRequests unblocks pending requests owned by conn with nil
+// (signaling disconnect). A nil connection retains the all-stream cleanup
+// behavior used by tests and shutdown paths.
+func (c *Client) cleanupPendingRequests(conn *websocket.Conn) {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 
 	for id, ch := range c.pendingRequests {
+		if conn != nil && c.pendingRequestConns[id] != conn {
+			continue
+		}
 		close(ch)
 		delete(c.pendingRequests, id)
+		delete(c.pendingRequestConns, id)
 	}
 }

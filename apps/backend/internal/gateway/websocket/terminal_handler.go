@@ -179,14 +179,16 @@ func (h *TerminalHandler) handleRemoteUserShellWS(
 	terminalID string,
 ) {
 	sessionID := execution.SessionID
-	if execution.GetAgentCtlClient() == nil {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		releaseClient()
 		c.JSON(http.StatusNotFound, gin.H{"error": "remote execution not available"})
 		return
 	}
-	client := execution.GetAgentCtlClient()
 
 	_, initialCommand, httpErr := h.resolveShellLabel(c)
 	if httpErr != "" {
+		releaseClient()
 		c.JSON(http.StatusBadRequest, gin.H{"error": httpErr})
 		return
 	}
@@ -200,6 +202,7 @@ func (h *TerminalHandler) handleRemoteUserShellWS(
 
 	// Create a per-terminal shell on agentctl (idempotent if already exists)
 	if err := client.StartShellTerminal(c.Request.Context(), terminalID, 80, 24); err != nil {
+		releaseClient()
 		h.logger.Error("failed to start remote terminal shell",
 			zap.String("session_id", sessionID),
 			zap.String("terminal_id", terminalID),
@@ -210,6 +213,7 @@ func (h *TerminalHandler) handleRemoteUserShellWS(
 
 	// Open binary WS to the per-terminal shell on agentctl
 	agentctlConn, err := client.StreamShellTerminal(c.Request.Context(), terminalID)
+	releaseClient()
 	if err != nil {
 		h.logger.Error("failed to connect to remote terminal shell stream",
 			zap.String("session_id", sessionID),
@@ -416,18 +420,24 @@ func (h *TerminalHandler) startUserShellProcess(
 		return "", http.StatusServiceUnavailable, err.Error()
 	}
 
-	// Export the executor profile's env vars (secrets revealed) so the terminal
-	// sees the same variables the agent subprocess and the repository setup
-	// script get. Best-effort: an unresolvable profile just yields no extras.
-	profileEnv := h.lifecycleMgr.ExecutorProfileEnvForSession(c.Request.Context(), sessionID, scopeID)
 	shellEnv := execution.RuntimeEnvironment()
+	profileEnv := map[string]string(nil)
 	if shellEnv == nil {
+		// The runtime snapshot is authoritative for a live execution. Only
+		// older/recovered executions without a snapshot need profile lookup.
+		var err error
+		profileEnv, err = h.lifecycleMgr.ExecutorProfileEnvForSession(c.Request.Context(), sessionID, scopeID)
+		if err != nil {
+			h.logger.Warn("failed to resolve executor profile environment for terminal",
+				zap.String("session_id", sessionID), zap.Error(err))
+			return "", http.StatusServiceUnavailable, "executor profile environment unavailable"
+		}
 		shellEnv = make(map[string]string, len(profileEnv))
 	}
 	// The effective runtime environment is authoritative: it includes managed
 	// Git credentials and the shim-first PATH selected for this execution.
-	// Profile resolution remains a best-effort fallback for recovered or older
-	// executions that do not have an in-memory runtime snapshot.
+	// Profile resolution remains a fallback for recovered or older executions
+	// that do not have an in-memory runtime snapshot.
 	for key, value := range profileEnv {
 		if _, exists := shellEnv[key]; !exists {
 			shellEnv[key] = value

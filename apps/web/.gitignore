@@ -12,7 +12,7 @@
 
 # testing
 /coverage
-test-results/
+test-results*/
 e2e-artifacts/
 playwright-report/
 blob-report/

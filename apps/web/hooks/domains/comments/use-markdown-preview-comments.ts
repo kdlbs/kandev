@@ -9,6 +9,7 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import { useCommentsStore, type DiffComment } from "@/lib/state/slices/comments";
 import {
@@ -28,6 +29,7 @@ export type MarkdownCommentView = {
 type UseMarkdownPreviewCommentsArgs = {
   path: string;
   repositoryId?: string | null;
+  repositoryName?: string;
   content: string;
   sessionId?: string;
   taskId?: string | null;
@@ -157,6 +159,7 @@ function useMarkdownCommentShortcut({
 function useMarkdownCommentSubmitters({
   path,
   repositoryId,
+  repositoryName,
   sessionId,
   taskId,
   textSelection,
@@ -164,11 +167,13 @@ function useMarkdownCommentSubmitters({
 }: {
   path: string;
   repositoryId?: string | null;
+  repositoryName?: string;
   sessionId?: string;
   taskId?: string | null;
   textSelection: MarkdownPreviewSelection | null;
   clearTextSelection: () => void;
 }) {
+  const { t } = useTranslation();
   const addComment = useCommentsStore((s) => s.addComment);
   const { runComment } = useRunComment({ sessionId: sessionId ?? null, taskId: taskId ?? null });
   const { toast } = useToast();
@@ -180,6 +185,7 @@ function useMarkdownCommentSubmitters({
       const comment = buildMarkdownPreviewComment({
         filePath: path,
         repositoryId: repositoryId ?? undefined,
+        repositoryName,
         sessionId,
         selectedText: textSelection.selectedText,
         text,
@@ -190,27 +196,30 @@ function useMarkdownCommentSubmitters({
       clearTextSelection();
       return comment;
     },
-    [addComment, clearTextSelection, path, repositoryId, sessionId, textSelection],
+    [addComment, clearTextSelection, path, repositoryId, repositoryName, sessionId, textSelection],
   );
 
+  // Same `editors:` copy as the CodeMirror and Monaco comment flows in
+  // `components/editors/**`, which say exactly this. The markdown preview is
+  // the third surface of the same feature and was the one left in English.
   const submitComment = useCallback(
     (text: string) => {
       const comment = createComment(text);
       if (!comment) return;
       toast({
-        title: "Comment added",
-        description: "Your comment will be sent with your next message.",
+        title: t("editors:commentAdded"),
+        description: t("editors:commentWillBeSentWithNextMessage"),
       });
     },
-    [createComment, toast],
+    [createComment, t, toast],
   );
 
   const submitAndRunComment = useCallback(
     async (text: string) => {
       if (!canRunComment) {
         toast({
-          title: "Failed to send comment",
-          description: "Open a task session before sending to the agent.",
+          title: t("editors:failedToSendComment"),
+          description: t("editors:openTaskSessionBeforeSending"),
           variant: "error",
         });
         return;
@@ -220,18 +229,18 @@ function useMarkdownCommentSubmitters({
       try {
         const { queued } = await runComment(comment);
         toast({
-          title: "Comment sent",
-          description: queued ? "Queued for the agent." : "Sent to the agent.",
+          title: t("editors:commentSent"),
+          description: queued ? t("editors:queuedForTheAgent") : t("editors:sentToTheAgent"),
         });
       } catch {
         toast({
-          title: "Failed to send comment",
-          description: "Please try again.",
+          title: t("editors:failedToSendComment"),
+          description: t("editors:pleaseTryAgain"),
           variant: "error",
         });
       }
     },
-    [canRunComment, createComment, runComment, toast],
+    [canRunComment, createComment, runComment, t, toast],
   );
 
   return { submitComment, submitAndRunComment: canRunComment ? submitAndRunComment : undefined };
@@ -278,6 +287,7 @@ function useVisibleMarkdownCommentActions({
 }: {
   setCommentView: Dispatch<SetStateAction<MarkdownCommentView>>;
 }) {
+  const { t } = useTranslation();
   const removeComment = useCommentsStore((s) => s.removeComment);
   const updateComment = useCommentsStore((s) => s.updateComment);
   const { toast } = useToast();
@@ -289,9 +299,9 @@ function useVisibleMarkdownCommentActions({
         const nextComments = view.comments.filter((comment) => comment.id !== commentId);
         return nextComments.length > 0 ? { ...view, comments: nextComments } : null;
       });
-      toast({ title: "Comment deleted" });
+      toast({ title: t("editors:commentDeleted") });
     },
-    [removeComment, setCommentView, toast],
+    [removeComment, setCommentView, t, toast],
   );
   const updateVisibleComment = useCallback(
     (commentId: string, text: string) => {
@@ -305,9 +315,9 @@ function useVisibleMarkdownCommentActions({
           ),
         };
       });
-      toast({ title: "Comment updated" });
+      toast({ title: t("editors:commentUpdated") });
     },
-    [setCommentView, toast, updateComment],
+    [setCommentView, t, toast, updateComment],
   );
 
   return { removeVisibleComment, updateVisibleComment };
@@ -316,6 +326,7 @@ function useVisibleMarkdownCommentActions({
 export function useMarkdownPreviewComments({
   path,
   repositoryId,
+  repositoryName,
   content,
   sessionId,
   taskId,
@@ -324,7 +335,12 @@ export function useMarkdownPreviewComments({
 }: UseMarkdownPreviewCommentsArgs) {
   const [textSelection, setTextSelection] = useState<MarkdownPreviewSelection | null>(null);
   const [commentView, setCommentView] = useState<MarkdownCommentView>(null);
-  const comments = useDiffFileComments(sessionId ?? "", path, repositoryId ?? undefined);
+  const comments = useDiffFileComments(
+    sessionId ?? "",
+    path,
+    repositoryId ?? undefined,
+    repositoryName ?? "",
+  );
 
   const closeCommentView = useCallback(() => setCommentView(null), []);
   const { currentSelection, setCurrentSelection } = useMarkdownSelectionCapture({
@@ -367,6 +383,7 @@ export function useMarkdownPreviewComments({
   const { submitComment, submitAndRunComment } = useMarkdownCommentSubmitters({
     path,
     repositoryId,
+    repositoryName,
     sessionId,
     taskId,
     textSelection,

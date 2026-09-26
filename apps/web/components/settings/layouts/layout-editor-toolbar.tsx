@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   IconArrowDown,
   IconArrowLeft,
@@ -55,7 +56,7 @@ type ActionState = LayoutEditorActionsProps & {
   perform: (command: () => boolean) => void;
 };
 
-const touchButtonClass = "min-h-11 min-w-11 cursor-pointer sm:min-h-8 sm:min-w-8";
+const touchButtonClass = "cursor-pointer";
 
 /**
  * `direction` is the sentinel handed to the layout commands and must never be
@@ -109,7 +110,7 @@ function ActionTooltip({
         <span tabIndex={disabled ? 0 : -1} className="inline-flex">
           <Button
             type="button"
-            size="icon-sm"
+            size="icon"
             variant="ghost"
             className={touchButtonClass}
             disabled={disabled}
@@ -143,7 +144,7 @@ function MenuTrigger({
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
-              size="icon-sm"
+              size="icon"
               variant="ghost"
               className={touchButtonClass}
               disabled={disabled}
@@ -161,20 +162,33 @@ function MenuTrigger({
 
 function AddPanelAction({ state }: { state: ActionState }) {
   const { t } = useTranslation();
+  // Radix opens DropdownMenu on pointerdown (to support native
+  // press-drag-release selection). On a touch tap, pointerdown and
+  // pointerup land at the same coordinates with no movement between
+  // them; if the menu's first item renders under that point before it
+  // settles into its final position, the pointerup is misread as a
+  // release-to-select on that item, adding it with no user choice.
+  // Controlling `open` and deferring it to the trigger's completed
+  // `click` event (which fires after the whole tap gesture, once
+  // nothing is left to misinterpret) avoids the race entirely.
+  const [open, setOpen] = useState(false);
   const missing = REUSABLE_PANEL_IDS.filter((id) => !state.api?.getPanel(id));
   const disabled = !state.editable || !state.api || missing.length === 0;
   return (
     <div className="absolute bottom-2 left-2 z-20" data-testid="layout-editor-add-panel">
-      <DropdownMenu>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
         <Tooltip>
           <TooltipTrigger asChild>
             <span tabIndex={disabled ? 0 : -1} className="inline-flex">
-              <DropdownMenuTrigger asChild>
+              <DropdownMenuTrigger
+                asChild
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => setOpen((current) => !current)}
+              >
                 <Button
                   type="button"
-                  size="sm"
                   variant="secondary"
-                  className="min-h-11 cursor-pointer shadow-md sm:min-h-8"
+                  className="cursor-pointer shadow-md"
                   disabled={disabled}
                   aria-label={t("settings:addPanel")}
                 >

@@ -87,7 +87,7 @@ func TestProcessOutputFallsBackAfterSinkBreaks(t *testing.T) {
 func TestSummarizeShutdownCountsGracefulForceKilledAndFailed(t *testing.T) {
 	errStop := errors.New("stop failed")
 	got := summarizeShutdown([]managedProcessShutdownResult{
-		{graceful: true},
+		{graceful: true, exitStatusKnown: true},
 		{forceKilled: true},
 		{forceKilled: true, err: errStop},
 	})
@@ -103,6 +103,50 @@ func TestSummarizeShutdownCountsGracefulForceKilledAndFailed(t *testing.T) {
 	}
 }
 
+func TestShutdownExitCodeRequiresEveryProcessToStopCleanly(t *testing.T) {
+	errStop := errors.New("stop failed")
+	tests := []struct {
+		name    string
+		results []managedProcessShutdownResult
+		want    int
+	}{
+		{name: "no children", want: 0},
+		{
+			name:    "graceful",
+			results: []managedProcessShutdownResult{{graceful: true, exitStatusKnown: true}},
+			want:    0,
+		},
+		{name: "uncertain", results: []managedProcessShutdownResult{{}}, want: 1},
+		{name: "nonzero exit", results: []managedProcessShutdownResult{{graceful: true, exitStatusKnown: true, exitCode: 23}}, want: 1},
+		{
+			name:    "forced",
+			results: []managedProcessShutdownResult{{graceful: true, forceKilled: true, exitStatusKnown: true}},
+			want:    1,
+		},
+		{
+			name:    "failed",
+			results: []managedProcessShutdownResult{{graceful: true, exitStatusKnown: true, err: errStop}},
+			want:    1,
+		},
+		{
+			name: "one child failed among graceful children",
+			results: []managedProcessShutdownResult{
+				{graceful: true, exitStatusKnown: true},
+				{graceful: true, forceKilled: true, exitStatusKnown: true},
+			},
+			want: 1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := shutdownExitCode(test.results); got != test.want {
+				t.Fatalf("shutdownExitCode() = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
 func TestSupervisorShutdownRunsOnce(t *testing.T) {
 	var output bytes.Buffer
 	oldStatusOutput := launcherStatusOutput
@@ -112,8 +156,12 @@ func TestSupervisorShutdownRunsOnce(t *testing.T) {
 	})
 
 	supervisor := newSupervisor()
-	supervisor.shutdown("signal interrupt")
-	supervisor.shutdown("backend exit")
+	if got := supervisor.shutdown("signal interrupt"); got != 0 {
+		t.Fatalf("empty supervisor shutdown exit code = %d, want 0", got)
+	}
+	if got := supervisor.shutdown("backend exit"); got != 0 {
+		t.Fatalf("repeated supervisor shutdown exit code = %d, want cached 0", got)
+	}
 
 	got := output.String()
 	if count := strings.Count(got, "graceful shutdown started"); count != 1 {

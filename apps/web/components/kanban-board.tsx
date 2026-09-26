@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
+import { Button } from "@kandev/ui/button";
 import { Task } from "./kanban-card";
 import { TaskCreateDialog } from "./task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -25,6 +26,7 @@ import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskMultiSelect } from "@/hooks/use-task-multi-select";
+import { usePluginTaskFilters } from "@/hooks/use-plugin-task-filters";
 import { HomepageCommands } from "./homepage-commands";
 import { linkToTask } from "@/lib/links";
 import {
@@ -38,6 +40,7 @@ import {
   AlertDialogAction,
 } from "@kandev/ui/alert-dialog";
 import { IconAlertTriangle } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 
 function useWorkflowSelection({
   store,
@@ -213,10 +216,11 @@ type SnapEntry = {
   steps: { id: string; title: string; color?: string | null }[];
 };
 
-function useMultiSelectDerived(
+export function useMultiSelectDerived(
   selectedIds: Set<string>,
   snapshots: Record<string, SnapEntry>,
   activeSteps: { id: string; title: string; color?: string | null }[],
+  hiddenWorkflowStepIds: Record<string, string[]>,
 ) {
   const isMixedWorkflowSelection = useMemo(() => {
     if (selectedIds.size === 0) return false;
@@ -234,14 +238,17 @@ function useMultiSelectDerived(
 
   const multiSelectSteps = useMemo(() => {
     if (selectedIds.size > 0) {
-      for (const snap of Object.values(snapshots)) {
+      for (const [wfId, snap] of Object.entries(snapshots)) {
         if (snap.tasks.some((t) => selectedIds.has(t.id))) {
-          return snap.steps.map((s) => ({ id: s.id, title: s.title, color: s.color ?? "" }));
+          const hidden = new Set(hiddenWorkflowStepIds[wfId] ?? []);
+          return snap.steps
+            .filter((s) => !hidden.has(s.id))
+            .map((s) => ({ id: s.id, title: s.title, color: s.color ?? "" }));
         }
       }
     }
     return activeSteps.map((s) => ({ id: s.id, title: s.title, color: s.color ?? "" }));
-  }, [selectedIds, snapshots, activeSteps]);
+  }, [selectedIds, snapshots, activeSteps, hiddenWorkflowStepIds]);
 
   return { isMixedWorkflowSelection, multiSelectSteps };
 }
@@ -258,7 +265,8 @@ function useEffectiveWorkflowContext({
   activeSteps: ReturnType<typeof useKanbanBoardHooks>["activeSteps"];
 }) {
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const [mobileWorkflowFocusId, setMobileWorkflowFocusId] = useState<string | null>(null);
+  const hiddenWorkflowStepIds = useAppStore((state) => state.userSettings.hiddenWorkflowStepIds);
+  const mobileWorkflowFocusId = useAppStore((state) => state.mobileKanban.focusedWorkflowId);
   const effectiveWorkflowId = resolveBoardWorkflowId({
     isMobile,
     selectedWorkflowId,
@@ -276,14 +284,18 @@ function useEffectiveWorkflowContext({
     [activeSteps, effectiveWorkflowId, hydratedWorkflowId, snapshots],
   );
   const multiSelect = useTaskMultiSelect(effectiveWorkflowId);
-  const selection = useMultiSelectDerived(multiSelect.selectedIds, snapshots, effectiveSteps);
+  const selection = useMultiSelectDerived(
+    multiSelect.selectedIds,
+    snapshots,
+    effectiveSteps,
+    hiddenWorkflowStepIds,
+  );
 
   return {
     effectiveWorkflowId,
     effectiveSteps,
     multiSelect,
     ...selection,
-    setMobileWorkflowFocusId,
   };
 }
 
@@ -332,7 +344,6 @@ function useKanbanBoardSetup(
     multiSelect,
     isMixedWorkflowSelection,
     multiSelectSteps,
-    setMobileWorkflowFocusId,
   } = useEffectiveWorkflowContext({
     isMobile,
     selectedWorkflowId: workflowsState.activeId,
@@ -382,7 +393,6 @@ function useKanbanBoardSetup(
     multiSelectSteps,
     effectiveWorkflowId,
     effectiveSteps,
-    setMobileWorkflowFocusId,
     refresh,
   };
 }
@@ -391,6 +401,11 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
   const s = useKanbanBoardSetup(onPreviewTask, onOpenTask, onBeforeEdit);
   const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
   const setMobileSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
+  const { taskMatchesPluginFilters } = usePluginTaskFilters();
+  const matchesPluginTaskFilters = useCallback(
+    (taskId: string) => taskMatchesPluginFilters({ taskId }),
+    [taskMatchesPluginFilters],
+  );
 
   // Collapse search on unmount so the global flag doesn't auto-open (and focus)
   // the search bar after navigating to another route.
@@ -437,6 +452,12 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         setMoveError={s.setMoveError}
         handleGoToTask={s.handleGoToTask}
       />
+      {s.isMobile && (
+        <MobileSelectionToggle
+          active={s.multiSelect.isMultiSelectMode}
+          onToggle={s.multiSelect.toggleMultiSelect}
+        />
+      )}
       <KanbanSwimlanes
         viewMode={s.kanbanViewMode || ""}
         workflowFilter={s.workflowsState.activeId}
@@ -451,13 +472,13 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         showMaximizeButton={s.enablePreviewOnClick}
         searchQuery={s.searchQuery}
         selectedRepositoryIds={s.userSettings.repositoryIds}
+        matchesPluginTaskFilters={matchesPluginTaskFilters}
         selectedIds={s.multiSelect.selectedIds}
         onToggleSelect={s.multiSelect.toggleSelect}
         onSelectRange={s.multiSelect.selectRange}
         isMultiSelectMode={s.multiSelect.isMultiSelectMode}
         onToggleMultiSelect={s.multiSelect.toggleMultiSelect}
         onWorkflowChange={s.handleWorkflowChange}
-        onMobileWorkflowFocusChange={s.setMobileWorkflowFocusId}
         isMobile={s.isMobile}
         onRefresh={s.refresh}
       />
@@ -466,6 +487,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         steps={s.multiSelectSteps}
         isProcessing={s.multiSelect.isProcessing}
         canMove={!s.isMixedWorkflowSelection}
+        getEligibleSelectedIds={s.multiSelect.getEligibleSelectedIds}
         onClearSelection={s.multiSelect.clearSelection}
         onBulkDelete={s.multiSelect.bulkDelete}
         onBulkArchive={s.multiSelect.bulkArchive}
@@ -538,6 +560,10 @@ function KanbanBoardDialogs({
                 workflowStepId: editingTask.workflowStepId,
                 state: editingTask.state as BackendTask["state"],
                 repositoryId: editingTask.repositoryId,
+                repositories: editingTask.repositories,
+                primaryExecutorProfileId: editingTask.primaryExecutorProfileId ?? undefined,
+                runnerEditable: editingTask.runnerEditable,
+                runnerIneligibleReason: editingTask.runnerIneligibleReason,
               }
             : null
         }
@@ -549,6 +575,7 @@ function KanbanBoardDialogs({
                 description: editingTask.description,
                 state: editingTask.state as BackendTask["state"],
                 repositoryId: editingTask.repositoryId,
+                repositories: editingTask.repositories,
               }
             : undefined
         }
@@ -572,23 +599,41 @@ function ApprovalWarningDialog({
   setMoveError: (error: MoveTaskError | null) => void;
   handleGoToTask: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <AlertDialog open={!!moveError} onOpenChange={(open) => !open && setMoveError(null)}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle className="flex items-center gap-2">
             <IconAlertTriangle className="h-5 w-5 text-amber-500" />
-            Approval Required
+            {t("kanban:approvalRequired")}
           </AlertDialogTitle>
           <AlertDialogDescription>{moveError?.message}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Dismiss</AlertDialogCancel>
+          <AlertDialogCancel>{t("kanban:dismiss")}</AlertDialogCancel>
           {moveError?.taskId && (
-            <AlertDialogAction onClick={handleGoToTask}>Go to Task</AlertDialogAction>
+            <AlertDialogAction onClick={handleGoToTask}>{t("kanban:goToTask")}</AlertDialogAction>
           )}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+function MobileSelectionToggle({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="px-2 py-1">
+      <Button
+        variant="outline"
+        className="cursor-pointer"
+        aria-pressed={active}
+        onClick={onToggle}
+        data-testid="mobile-select-tasks"
+      >
+        {t(active ? "kanban:cancelTaskSelection" : "kanban:selectTasks")}
+      </Button>
+    </div>
   );
 }

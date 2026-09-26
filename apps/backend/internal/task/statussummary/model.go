@@ -4,22 +4,41 @@
 package statussummary
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"reflect"
+	"slices"
 	"time"
 	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
+	// RootRepositoryKey identifies the root repository in summary rebuilds when
+	// a snapshot has no repository_name metadata. It is intentionally stable
+	// across sessions and process restarts.
+	RootRepositoryKey = "default"
+
 	// MaxActiveErrorPreviewBytes keeps an error decoration safe to send with
 	// every task row without turning it into a message-stream transport.
-	MaxActiveErrorPreviewBytes = 512
-	maxSessionIDBytes          = 256
-	maxPendingActionBytes      = 128
-	maxActiveErrorStampBytes   = 64
-	maxPullRequestStateBytes   = 64
-	maxPullRequestURLBytes     = 2048
+	MaxActiveErrorPreviewBytes  = 512
+	MaxActiveErrorDetailsBytes  = 4096
+	maxSessionIDBytes           = 256
+	maxTaskRepositoryIDBytes    = 256
+	maxPendingActionBytes       = 128
+	maxActiveErrorStampBytes    = 64
+	maxActiveErrorCategoryBytes = 64
+	maxPullRequestStateBytes    = 64
+	maxPullRequestURLBytes      = 2048
+	maxLaunchQueueIDBytes       = 256
+	maxLaunchQueueReasonBytes   = 64
+)
+
+const (
+	LaunchQueueReasonSessionCapacity      = "session_capacity"
+	LaunchQueueReasonOwnershipUnavailable = "ownership_unavailable"
+	LaunchQueueReasonReplayError          = "replay_error"
 )
 
 // TaskStatusSummary is the complete replacement value delivered to task-list
@@ -28,13 +47,39 @@ const (
 type TaskStatusSummary struct {
 	Revision            uint64                 `json:"revision"`
 	UpdatedAt           time.Time              `json:"updated_at"`
+	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
 	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
 	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
 	PendingAction       string                 `json:"pending_action,omitempty"`
 	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
+	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
 	Git                 *GitSummary            `json:"git,omitempty"`
 	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
+	// QueuedPromptCount is the number of prompts currently en-queued for the
+	// task across all of its sessions (pending semantics identical to
+	// message.queue.get). Omitted when zero so task rows without queued work
+	// stay byte-identical to earlier builds.
+	QueuedPromptCount int `json:"queued_prompt_count,omitempty"`
+	// LaunchQueue is the live task-level projection for automatic session work
+	// waiting on admission. It is independent of the selected transcript.
+	LaunchQueue *LaunchQueueSummary `json:"launch_queue,omitempty"`
+}
+
+type LaunchQueueSummary struct {
+	SessionID      string               `json:"session_id,omitempty"`
+	AgentProfileID string               `json:"agent_profile_id,omitempty"`
+	WorkflowStepID string               `json:"workflow_step_id,omitempty"`
+	QueuedAt       time.Time            `json:"queued_at"`
+	Reason         string               `json:"reason"`
+	Retrying       bool                 `json:"retrying"`
+	Capacity       *LaunchQueueCapacity `json:"capacity,omitempty"`
+}
+
+type LaunchQueueCapacity struct {
+	InUse      int       `json:"in_use"`
+	Limit      int       `json:"limit"`
+	ObservedAt time.Time `json:"observed_at"`
 }
 
 type PrimarySessionSummary struct {
@@ -43,10 +88,19 @@ type PrimarySessionSummary struct {
 }
 
 type ActiveErrorSummary struct {
-	SessionID  string    `json:"session_id"`
-	Stamp      string    `json:"stamp"`
-	OccurredAt time.Time `json:"occurred_at"`
-	Preview    string    `json:"preview"`
+	Scope            string                   `json:"scope,omitempty"`
+	SessionID        string                   `json:"session_id,omitempty"`
+	TaskRepositoryID string                   `json:"task_repository_id,omitempty"`
+	ExecutionID      string                   `json:"execution_id,omitempty"`
+	AttemptID        string                   `json:"attempt_id,omitempty"`
+	Phase            string                   `json:"phase,omitempty"`
+	Stamp            string                   `json:"stamp"`
+	OccurredAt       time.Time                `json:"occurred_at"`
+	Preview          string                   `json:"preview"`
+	Details          string                   `json:"details,omitempty"`
+	Category         string                   `json:"category,omitempty"`
+	RecoveryActions  []string                 `json:"recovery_actions,omitempty"`
+	Causes           []models.AgentErrorCause `json:"causes,omitempty"`
 }
 
 type GitSummary struct {
@@ -55,18 +109,25 @@ type GitSummary struct {
 	ChangedFiles int `json:"changed_files,omitempty"`
 	Ahead        int `json:"ahead,omitempty"`
 	Behind       int `json:"behind,omitempty"`
+	// ComparisonUnavailable means at least one repository had an explicit
+	// provider-qualified target that could not be materialized or compared.
+	// Numeric comparison totals are suppressed while this is true.
+	ComparisonUnavailable bool `json:"comparison_unavailable,omitempty"`
 }
 
 // PullRequestSummary is intentionally an aggregate plus one representative
 // identity. It is not a list of PR records.
 type PullRequestSummary struct {
-	Count          int    `json:"count,omitempty"`
-	OpenCount      int    `json:"open_count,omitempty"`
-	Attention      bool   `json:"attention,omitempty"`
-	AggregateState string `json:"aggregate_state,omitempty"`
-	State          string `json:"state,omitempty"`
-	Number         int    `json:"number,omitempty"`
-	URL            string `json:"url,omitempty"`
+	Count             int    `json:"count,omitempty"`
+	OpenCount         int    `json:"open_count,omitempty"`
+	Attention         bool   `json:"attention,omitempty"`
+	AutoFixEnabled    bool   `json:"auto_fix_enabled,omitempty"`
+	AutoMergeEnabled  bool   `json:"auto_merge_enabled,omitempty"`
+	HasMergeConflicts bool   `json:"has_merge_conflicts,omitempty"`
+	AggregateState    string `json:"aggregate_state,omitempty"`
+	State             string `json:"state,omitempty"`
+	Number            int    `json:"number,omitempty"`
+	URL               string `json:"url,omitempty"`
 }
 
 // StoredTaskStatusSummary is the persistence boundary for one task. The
@@ -78,13 +139,12 @@ type StoredTaskStatusSummary struct {
 	Summary     TaskStatusSummary
 }
 
-// SemanticEqual compares only fields that task consumers observe as status.
+// SemanticEqual compares valid summaries using the canonical payload stored by
+// the repository, excluding transport metadata and omitted zero values.
 func (s TaskStatusSummary) SemanticEqual(other TaskStatusSummary) bool {
-	s.Revision = 0
-	s.UpdatedAt = time.Time{}
-	other.Revision = 0
-	other.UpdatedAt = time.Time{}
-	return reflect.DeepEqual(s, other)
+	left, leftErr := s.SemanticJSON()
+	right, rightErr := other.SemanticJSON()
+	return leftErr == nil && rightErr == nil && bytes.Equal(left, right)
 }
 
 // Validate enforces the bounded fields at the persistence boundary. Other
@@ -92,6 +152,9 @@ func (s TaskStatusSummary) SemanticEqual(other TaskStatusSummary) bool {
 func (s TaskStatusSummary) Validate() error {
 	if s.ActiveSubagentCount < 0 {
 		return fmt.Errorf("active subagent count cannot be negative")
+	}
+	if s.QueuedPromptCount < 0 {
+		return fmt.Errorf("queued prompt count cannot be negative")
 	}
 	if err := validatePrimarySession(s.PrimarySession); err != nil {
 		return err
@@ -102,7 +165,13 @@ func (s TaskStatusSummary) Validate() error {
 	if err := validateActiveError(s.ActiveError); err != nil {
 		return err
 	}
-	return validatePullRequest(s.PullRequest)
+	if err := validateActiveError(s.TaskError); err != nil {
+		return err
+	}
+	if err := validatePullRequest(s.PullRequest); err != nil {
+		return err
+	}
+	return validateLaunchQueue(s.LaunchQueue)
 }
 
 func validatePrimarySession(session *PrimarySessionSummary) error {
@@ -124,14 +193,39 @@ func validateActiveError(activeError *ActiveErrorSummary) error {
 		value string
 		limit int
 	}{
+		{"active error scope", activeError.Scope, maxActiveErrorCategoryBytes},
 		{"active error session id", activeError.SessionID, maxSessionIDBytes},
-		{"active error stamp", activeError.Stamp, maxSessionIDBytes},
+		{"active error task repository id", activeError.TaskRepositoryID, maxTaskRepositoryIDBytes},
+		{"active error execution id", activeError.ExecutionID, maxSessionIDBytes},
+		{"active error attempt id", activeError.AttemptID, maxSessionIDBytes},
+		{"active error phase", activeError.Phase, maxActiveErrorCategoryBytes},
+		{"active error stamp", activeError.Stamp, maxActiveErrorStampBytes},
 		{"active error preview", activeError.Preview, MaxActiveErrorPreviewBytes},
+		{"active error details", activeError.Details, MaxActiveErrorDetailsBytes},
+		{"active error category", activeError.Category, maxActiveErrorCategoryBytes},
+	}
+	if activeError.Scope != "" && activeError.Scope != models.ErrorScopeSession && activeError.Scope != models.ErrorScopeTask {
+		return fmt.Errorf("active error has unknown scope")
 	}
 	for _, field := range fields {
 		if err := validateUTF8Bytes(field.name, field.value, field.limit); err != nil {
 			return err
 		}
+	}
+	if len(activeError.RecoveryActions) > 3 {
+		return fmt.Errorf("active error has more than three recovery actions")
+	}
+	if !slices.Equal(activeError.RecoveryActions, models.NormalizeRecoveryActionsForCategory(activeError.Category, activeError.RecoveryActions)) {
+		return fmt.Errorf("active error has unknown or duplicate recovery actions")
+	}
+	if activeError.Phase != "" && activeError.Phase != models.LaunchErrorPhaseBootstrap {
+		return fmt.Errorf("active error has unknown phase")
+	}
+	if !slices.Equal(activeError.Causes, models.NormalizeAgentErrorCauses(activeError.Causes)) {
+		return fmt.Errorf("active error has malformed causes")
+	}
+	if activeError.Details != models.NormalizeAgentErrorDetails(activeError.Details, activeError.Causes) {
+		return fmt.Errorf("active error details exceed the combined cause budget")
 	}
 	return nil
 }
@@ -160,6 +254,44 @@ func validatePullRequest(pr *PullRequestSummary) error {
 	return nil
 }
 
+func validateLaunchQueue(queue *LaunchQueueSummary) error {
+	if queue == nil {
+		return nil
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+		limit int
+	}{
+		{"launch queue session id", queue.SessionID, maxLaunchQueueIDBytes},
+		{"launch queue agent profile id", queue.AgentProfileID, maxLaunchQueueIDBytes},
+		{"launch queue workflow step id", queue.WorkflowStepID, maxLaunchQueueIDBytes},
+		{"launch queue reason", queue.Reason, maxLaunchQueueReasonBytes},
+	} {
+		if err := validateUTF8Bytes(field.name, field.value, field.limit); err != nil {
+			return err
+		}
+	}
+	if queue.QueuedAt.IsZero() {
+		return fmt.Errorf("launch queue queued_at is required")
+	}
+	if queue.Reason != LaunchQueueReasonSessionCapacity &&
+		queue.Reason != LaunchQueueReasonOwnershipUnavailable &&
+		queue.Reason != LaunchQueueReasonReplayError {
+		return fmt.Errorf("launch queue has unknown reason")
+	}
+	if queue.Capacity == nil {
+		return nil
+	}
+	if queue.Capacity.InUse < 0 || queue.Capacity.Limit < 0 {
+		return fmt.Errorf("launch queue capacity cannot be negative")
+	}
+	if queue.Capacity.ObservedAt.IsZero() {
+		return fmt.Errorf("launch queue capacity observed_at is required")
+	}
+	return nil
+}
+
 func validateUTF8Bytes(field, value string, maxBytes int) error {
 	if !utf8.ValidString(value) {
 		return fmt.Errorf("%s must be valid UTF-8", field)
@@ -178,22 +310,30 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(semanticPayload{
+		LastActivityAt:      s.LastActivityAt,
 		PrimarySession:      s.PrimarySession,
 		ForegroundActivity:  s.ForegroundActivity,
 		ActiveSubagentCount: s.ActiveSubagentCount,
 		PendingAction:       s.PendingAction,
 		ActiveError:         s.ActiveError,
+		TaskError:           s.TaskError,
 		Git:                 s.Git,
 		PullRequest:         s.PullRequest,
+		QueuedPromptCount:   s.QueuedPromptCount,
+		LaunchQueue:         s.LaunchQueue,
 	})
 }
 
 type semanticPayload struct {
+	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
 	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
 	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
 	PendingAction       string                 `json:"pending_action,omitempty"`
 	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
+	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
 	Git                 *GitSummary            `json:"git,omitempty"`
 	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
+	QueuedPromptCount   int                    `json:"queued_prompt_count,omitempty"`
+	LaunchQueue         *LaunchQueueSummary    `json:"launch_queue,omitempty"`
 }

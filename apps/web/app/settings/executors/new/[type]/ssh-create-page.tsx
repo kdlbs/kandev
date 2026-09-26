@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 import { useRouter } from "@/lib/routing/client-router";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -11,6 +13,7 @@ import { createExecutor, createExecutorProfile } from "@/lib/api/domains/setting
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
 import { getExecutorLabel } from "@/lib/executor-icons";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { buildSSHExecutorConfig } from "./ssh-config";
 import type { Executor } from "@/lib/types/http";
 
@@ -66,7 +69,7 @@ export function SSHCreatePage() {
       const current = store.getState().executors.items;
       const merged = current.some((e) => e.id === next.id) ? current : [...current, next];
       store.getState().setExecutors(merged);
-      router.push(`/settings/executors/${profile.id}`);
+      router.push(executorProfileSettingsPath(profile.id));
     },
     [router, store],
   );
@@ -80,29 +83,31 @@ export function SSHCreatePage() {
 }
 
 function SSHCreateHeader() {
+  const { t } = useTranslation();
   const router = useRouter();
   return (
     <>
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <IconTerminal2 className="h-5 w-5 text-muted-foreground" />
-            <h2 className="text-2xl font-bold">New SSH Executor</h2>
-            <Badge variant="outline" className="text-xs">
+            <h2 className="min-w-0 break-words text-2xl font-bold">
+              {t("executors:newSshExecutor")}
+            </h2>
+            <Badge variant="outline" className="text-[10px]">
               {getExecutorLabel("ssh")}
             </Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Connect to a remote Linux amd64 or macOS host and run agentctl there.
+            {t("executors:sshCreateDescription")}
           </p>
         </div>
         <Button
           variant="outline"
-          size="sm"
           onClick={() => router.push(EXECUTORS_ROUTE)}
-          className="cursor-pointer"
+          className={settingsActionClassName("w-full cursor-pointer text-sm md:w-auto md:text-xs")}
         >
-          Back to Executors
+          {t("executors:backToExecutors")}
         </Button>
       </div>
       <Separator />

@@ -1,3 +1,4 @@
+import { formatDateTime } from "@/lib/i18n/formats";
 import type { PluginRecord } from "@/lib/types/plugins";
 
 /**
@@ -21,7 +22,7 @@ export function PluginErrorDiagnostic({ plugin }: { plugin: PluginRecord }) {
           dateTime={plugin.last_error_at}
           className="mt-1 block text-[11px] text-destructive/70"
         >
-          {new Date(plugin.last_error_at).toLocaleString()}
+          {formatDateTime(plugin.last_error_at)}
         </time>
       )}
     </div>

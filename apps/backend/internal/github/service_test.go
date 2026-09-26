@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -761,9 +762,13 @@ type mockEventBus struct {
 	mu          sync.Mutex
 	events      []*bus.Event
 	publishedCh chan struct{}
+	err         error
 }
 
 func (m *mockEventBus) Publish(_ context.Context, _ string, event *bus.Event) error {
+	if m.err != nil {
+		return m.err
+	}
 	m.mu.Lock()
 	m.events = append(m.events, event)
 	m.mu.Unlock()
@@ -810,6 +815,14 @@ func setupSyncTest(t *testing.T) (*Service, *Store, *mockEventBus) {
 	rawDB.SetMaxIdleConns(1)
 	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
+	if _, err := sqlxDB.Exec(`
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT,
+			archived_at DATETIME
+		)`); err != nil {
+		t.Fatalf("create tasks table: %v", err)
+	}
 
 	store, err := NewStore(sqlxDB, sqlxDB)
 	if err != nil {
@@ -952,6 +965,121 @@ func TestSyncTaskPR_SecondIdenticalSyncNoEvent(t *testing.T) {
 	}
 }
 
+func TestSyncTaskPR_EquivalentRESTAndGraphQLStatusNoSecondEvent(t *testing.T) {
+	svc, store, eb := setupSyncTest(t)
+	ctx := context.Background()
+	createdAt := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Hour)
+	pr := &PR{
+		Number:         1,
+		Title:          "Same status",
+		URL:            "https://github.com/owner/repo/pull/1",
+		HTMLURL:        "https://github.com/owner/repo/pull/1",
+		State:          "open",
+		HeadBranch:     "feat",
+		HeadSHA:        "abc",
+		BaseBranch:     "main",
+		AuthorLogin:    "alice",
+		RepoOwner:      "owner",
+		RepoName:       "repo",
+		Mergeable:      true,
+		MergeableState: "clean",
+		Additions:      3,
+		Deletions:      1,
+		CreatedAt:      createdAt,
+		UpdatedAt:      updatedAt,
+	}
+	restStatus := newPRStatus(
+		pr,
+		[]PRReview{{Author: "alice", State: reviewStateApproved, CreatedAt: updatedAt}},
+		[]CheckRun{{Status: checkStatusCompleted, Conclusion: checkConclusionSuccess}},
+	)
+	raw := &batchedPRResult{
+		State:       "OPEN",
+		Title:       pr.Title,
+		URL:         pr.URL,
+		HeadRefName: pr.HeadBranch,
+		BaseRefName: pr.BaseBranch,
+		HeadRefOid:  pr.HeadSHA,
+		Additions:   pr.Additions,
+		Deletions:   pr.Deletions,
+		CreatedAt:   pr.CreatedAt,
+		UpdatedAt:   pr.UpdatedAt,
+	}
+	raw.Author.Login = pr.AuthorLogin
+	raw.Mergeable = "MERGEABLE"
+	raw.MergeStatus = "CLEAN"
+	raw.Reviews.Nodes = []reviewNode{{State: "APPROVED"}}
+	raw.Reviews.Nodes[0].Author.Login = "alice"
+	raw.Reviews.Nodes[0].SubmittedAt = updatedAt
+	raw.Commits.Nodes = []struct {
+		Commit struct {
+			StatusCheckRollup *struct {
+				State string `json:"state"`
+			} `json:"statusCheckRollup"`
+		} `json:"commit"`
+	}{{}}
+	raw.Commits.Nodes[0].Commit.StatusCheckRollup = &struct {
+		State string `json:"state"`
+	}{State: "SUCCESS"}
+	graphqlStatus := convertBatchedPRResult(raw, "owner", "repo", 1)
+	if graphqlStatus.ChecksState != restStatus.ChecksState {
+		t.Fatalf("GraphQL checks state = %q, REST = %q", graphqlStatus.ChecksState, restStatus.ChecksState)
+	}
+	if graphqlStatus.ReviewState != restStatus.ReviewState || graphqlStatus.ReviewCount != restStatus.ReviewCount {
+		t.Fatalf("GraphQL review summary = (%q, %d), REST = (%q, %d)", graphqlStatus.ReviewState, graphqlStatus.ReviewCount, restStatus.ReviewState, restStatus.ReviewCount)
+	}
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:     "t1",
+		Owner:      "owner",
+		Repo:       "repo",
+		PRNumber:   1,
+		PRURL:      pr.URL,
+		PRTitle:    "Old title",
+		HeadBranch: pr.HeadBranch,
+		BaseBranch: pr.BaseBranch,
+		State:      "open",
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", restStatus); err != nil {
+		t.Fatalf("REST sync: %v", err)
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", graphqlStatus); err != nil {
+		t.Fatalf("GraphQL sync: %v", err)
+	}
+	if got := eb.publishedCount(); got != 1 {
+		t.Fatalf("equivalent REST and GraphQL snapshots published %d events, want 1", got)
+	}
+}
+
+func TestSyncTaskPR_ChangedFields(t *testing.T) {
+	taskPR := &TaskPR{
+		State:              "open",
+		PRTitle:            "before",
+		Additions:          1,
+		Deletions:          2,
+		ReviewState:        "pending",
+		ChecksState:        "pending",
+		MergeableState:     "blocked",
+		ReviewCount:        1,
+		PendingReviewCount: 2,
+		ChecksTotal:        3,
+		ChecksPassing:      1,
+		BaseBranch:         "main",
+	}
+	status := &PRStatus{PR: &PR{Title: "after", State: "merged", Additions: 4, Deletions: 5, BaseBranch: "release", MergeableState: "clean"}, ReviewState: "approved", ChecksState: "success", ReviewCount: 2, PendingReviewCount: 0, ChecksTotal: 4, ChecksPassing: 4}
+	next := taskPRSyncState{
+		state: "merged", mergeableState: "clean", reviewCount: 2, pendingReviewCount: 0,
+		checksTotal: 4, checksPassing: 4, baseBranch: "release",
+	}
+	want := []string{"state", "pr_title", "additions", "deletions", "review_state", "checks_state", "mergeable_state", "review_count", "pending_review_count", "checks_total", "checks_passing", "base_branch"}
+	got := taskPRChangedFields(taskPR, status, next)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("taskPRChangedFields() = %#v, want %#v", got, want)
+	}
+}
+
 func TestSyncTaskPR_PublishesEventOnMergeableStateChange(t *testing.T) {
 	svc, store, eb := setupSyncTest(t)
 	ctx := context.Background()
@@ -1056,6 +1184,81 @@ func TestSyncTaskPR_DraftOverridesCleanMergeableState(t *testing.T) {
 	}
 	if stored.MergeableState != "draft" {
 		t.Fatalf("stored mergeable_state = %q, want draft", stored.MergeableState)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-CONFLICT-INDICATOR-001.2
+func TestSyncTaskPR_DraftKeepsRawConflictObservation(t *testing.T) {
+	svc, store, _ := setupSyncTest(t)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "t1", Owner: "owner", Repo: "repo", PRNumber: 1,
+		PRURL: "https://github.com/owner/repo/pull/1", PRTitle: "Draft conflict",
+		HeadBranch: "feat", BaseBranch: "main", State: "open",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status := &PRStatus{
+		PR: &PR{Number: 1, Title: "Draft conflict", State: "open", Draft: true,
+			RepoOwner: "owner", RepoName: "repo"},
+		ChecksState: "failure", MergeableState: "dirty",
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetTaskPR(ctx, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.MergeableState != "draft" {
+		t.Fatalf("effective mergeable state = %q, want draft", stored.MergeableState)
+	}
+	encoded, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["has_merge_conflicts"] != true {
+		t.Fatalf("has_merge_conflicts = %v, want true", payload["has_merge_conflicts"])
+	}
+}
+
+func TestObservedPRMergeConflictPreservesUnknownAndClearsOnAuthoritativeResult(t *testing.T) {
+	previous := true
+	if got := observedPRMergeConflict(nil, "unknown"); got != nil {
+		t.Fatalf("unknown initial observation = %v, want nil", *got)
+	}
+	if got := observedPRMergeConflict(&previous, ""); got == nil || !*got {
+		t.Fatalf("empty observation lost existing conflict: %v", got)
+	}
+	if got := observedPRMergeConflict(&previous, "clean"); got == nil || *got {
+		t.Fatalf("clean observation did not clear conflict: %v", got)
+	}
+}
+
+func TestReplaceTaskPR_DraftAndConflictOnInitialAssociation(t *testing.T) {
+	_, store, _ := setupSyncTest(t)
+	ctx := context.Background()
+	tp := &TaskPR{
+		TaskID: "t1", Owner: "owner", Repo: "repo", PRNumber: 1,
+		PRURL: "https://github.com/owner/repo/pull/1", PRTitle: "Draft conflict",
+		HeadBranch: "feat", BaseBranch: "main", State: "open",
+	}
+	_, err := store.ReplaceTaskPR(ctx, tp, &PRStatus{PR: &PR{
+		Number: 1, State: "open", Draft: true, MergeableState: "dirty",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetTaskPR(ctx, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.MergeableState != "draft" || stored.HasMergeConflicts == nil || !*stored.HasMergeConflicts {
+		t.Fatalf("draft conflict association = (%q, %v)", stored.MergeableState, stored.HasMergeConflicts)
 	}
 }
 

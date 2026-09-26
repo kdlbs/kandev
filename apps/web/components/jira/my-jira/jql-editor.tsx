@@ -4,6 +4,7 @@ import { useState } from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
+import { useTranslation } from "react-i18next";
 
 type JqlEditorProps = {
   composedJql: string;
@@ -15,6 +16,7 @@ type JqlEditorProps = {
 // Inline editor that exposes the JQL being sent to Jira. Users can tweak it
 // for one-off advanced queries; pressing Reset returns to pill-driven mode.
 export function JqlEditor({ composedJql, customJql, onApply, onReset }: JqlEditorProps) {
+  const { t } = useTranslation();
   const source = customJql ?? composedJql;
   const [draft, setDraft] = useState(source);
   const [prevSource, setPrevSource] = useState(source);
@@ -33,9 +35,9 @@ export function JqlEditor({ composedJql, customJql, onApply, onReset }: JqlEdito
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <IconInfoCircle className="h-3.5 w-3.5" />
         {overriding ? (
-          <span>Custom JQL override — pill filters are paused.</span>
+          <span>{t("jira:customJqlOverridePillFiltersAre")}</span>
         ) : (
-          <span>JQL is generated from the pills above. Edit to override.</span>
+          <span>{t("jira:jqlIsGeneratedFromThePills")}</span>
         )}
       </div>
       <Textarea
@@ -51,7 +53,7 @@ export function JqlEditor({ composedJql, customJql, onApply, onReset }: JqlEdito
           disabled={!dirty || !draft.trim()}
           className="cursor-pointer h-7 text-xs"
         >
-          Apply
+          {t("jira:apply")}
         </Button>
         {overriding && (
           <Button
@@ -60,7 +62,7 @@ export function JqlEditor({ composedJql, customJql, onApply, onReset }: JqlEdito
             onClick={onReset}
             className="cursor-pointer h-7 text-xs"
           >
-            Reset to pills
+            {t("jira:resetToPills")}
           </Button>
         )}
       </div>

@@ -1,25 +1,25 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { IconHistory, IconUser, IconRestore, IconLoader2 } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@kandev/ui/dialog";
 import { toast } from "@/lib/toast/sonner";
 import type { TaskPlanRevision } from "@/lib/types/http";
 import { formatPreciseTime } from "@/lib/utils";
+import { formatNumber } from "@/lib/i18n/formats";
 import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { WorkflowStepMessageBadge } from "./chat/messages/workflow-step-message-badge";
 import { PlanRevisionPreviewDialog } from "./task-plan-preview-dialog";
 import { PlanRevisionDiffDialog } from "./task-plan-diff-dialog";
+import { RevertConfirmDialog } from "./task-plan-revert-confirm-dialog";
+import { TaskPlanRevisionRow } from "./task-plan-revision-row";
+import { useTranslation } from "react-i18next";
+import { MobileRevisionRestoreConfirmation } from "./task-plan-revision-restore-actions";
+import type { TFunction } from "i18next";
 
 type ComparePair = [string | null, string | null];
 
@@ -45,14 +45,30 @@ type TaskPlanRevisionsProps = {
 
 /** Label rendered in the UI for any user-authored revision. Display-only —
  * the backend still stamps its own author_name on the row. */
-const USER_DISPLAY_NAME = "You";
+/** Catalog key, not copy — resolving at module scope freezes the locale. */
+const USER_DISPLAY_NAME_KEY = "common:you";
 
 export function TaskPlanRevisions(props: TaskPlanRevisionsProps) {
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const [open, setOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<TaskPlanRevision | null>(null);
+  const [rowConfirmTarget, setRowConfirmTarget] = useState<TaskPlanRevision | null>(null);
   const [diffOpen, setDiffOpen] = useState(false);
+  const [mobileTarget, setMobileTarget] = useState<TaskPlanRevision | null>(null);
+  const pendingMobileTarget = useRef<TaskPlanRevision | null>(null);
+  const historyTriggerRef = useRef<HTMLButtonElement>(null);
   const agentName = useActiveAgentBackendName();
-  const handleOpenChange = useTriggerOnFirstOpen(setOpen, props.onOpen);
+  const triggerOpenChange = useTriggerOnFirstOpen(setOpen, props.onOpen);
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen) setRowConfirmTarget(null);
+      triggerOpenChange(nextOpen);
+    },
+    [triggerOpenChange],
+  );
+  const closePopover = useCallback(() => handleOpenChange(false), [handleOpenChange]);
+
+  const handleRevert = useRevisionRestore(props, closePopover, setDiffOpen);
 
   const previewRevision = useMemo(
     () => props.revisions.find((r) => r.id === props.previewRevisionId) ?? null,
@@ -66,15 +82,48 @@ export function TaskPlanRevisions(props: TaskPlanRevisionsProps) {
     [props.revisions, props.comparePair],
   );
   const headRevision = props.revisions[0] ?? null;
+  useEffect(() => {
+    if (
+      mobileTarget &&
+      (mobileTarget.task_id !== props.taskId ||
+        !props.revisions.slice(1).some((revision) => revision.id === mobileTarget.id))
+    ) {
+      setMobileTarget(null);
+    }
+  }, [mobileTarget, props.taskId, props.revisions]);
 
   return (
     <>
       <RevisionsPopover
+        historyTriggerRef={historyTriggerRef}
+        onCloseAutoFocus={(event) => {
+          const target = pendingMobileTarget.current;
+          pendingMobileTarget.current = null;
+          if (!target || target.task_id !== props.taskId) return;
+          event.preventDefault();
+          setMobileTarget(target);
+        }}
         open={open}
         onOpenChange={handleOpenChange}
         agentName={agentName}
-        confirmTargetSetter={setConfirmTarget}
+        rowConfirmTarget={rowConfirmTarget}
+        isFinePointer={isFinePointer}
+        onRowRevertRequest={(revision) => {
+          if (!isMobile) return setRowConfirmTarget(revision);
+          pendingMobileTarget.current = revision;
+          closePopover();
+        }}
+        onRowRevertCancel={() => setRowConfirmTarget(null)}
+        onRowRevert={handleRevert}
         {...props}
+      />
+      <MobileRevisionRestoreConfirmation
+        taskId={props.taskId}
+        target={mobileTarget}
+        anchorRef={historyTriggerRef}
+        isSaving={props.isSaving}
+        onClose={() => setMobileTarget(null)}
+        onRevert={handleRevert}
       />
       <RevisionsDialogStack
         revisions={props.revisions}
@@ -85,15 +134,41 @@ export function TaskPlanRevisions(props: TaskPlanRevisionsProps) {
         isSaving={props.isSaving}
         loadRevisionContent={props.loadRevisionContent}
         headRevision={headRevision}
-        onRevert={props.onRevert}
+        onRevert={handleRevert}
         setConfirmTarget={setConfirmTarget}
         setDiffOpen={setDiffOpen}
         setPreviewRevision={props.setPreviewRevision}
         clearComparePair={props.clearComparePair}
         toggleCompareSelection={props.toggleCompareSelection}
-        closePopover={() => setOpen(false)}
       />
     </>
+  );
+}
+
+function useRevisionRestore(
+  props: Pick<TaskPlanRevisionsProps, "onRevert" | "setPreviewRevision">,
+  closePopover: () => void,
+  setDiffOpen: (open: boolean) => void,
+) {
+  const { t } = useTranslation();
+  return useCallback(
+    async (revision: TaskPlanRevision) => {
+      try {
+        const result = await props.onRevert(revision.id);
+        if (result) {
+          toast.success(t("task:planRestoredToV", { revisionnumber: revision.revision_number }));
+          closePopover();
+          props.setPreviewRevision(null);
+          setDiffOpen(false);
+        } else {
+          // The persistence hook reports a failed restore as null.
+          toast.error(t("task:failedToRestorePlan"));
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("task:failedToRestorePlan"));
+      }
+    },
+    [closePopover, props.onRevert, props.setPreviewRevision, setDiffOpen, t],
   );
 }
 
@@ -114,36 +189,52 @@ function useTriggerOnFirstOpen(setOpen: (v: boolean) => void, onOpen: () => void
 }
 
 function RevisionsPopover({
+  historyTriggerRef,
+  onCloseAutoFocus,
   open,
   onOpenChange,
   agentName,
-  confirmTargetSetter,
+  rowConfirmTarget,
+  isFinePointer,
+  onRowRevertRequest,
+  onRowRevertCancel,
+  onRowRevert,
   revisions,
   isLoading,
+  isSaving,
   setPreviewRevision,
   disabled = false,
 }: TaskPlanRevisionsProps & {
+  historyTriggerRef: React.RefObject<HTMLButtonElement | null>;
+  onCloseAutoFocus: (event: Event) => void;
   open: boolean;
   onOpenChange: (next: boolean) => void;
   agentName: string | null;
-  confirmTargetSetter: (rev: TaskPlanRevision | null) => void;
+  rowConfirmTarget: TaskPlanRevision | null;
+  isFinePointer: boolean;
+  onRowRevertRequest: (revision: TaskPlanRevision) => void;
+  onRowRevertCancel: () => void;
+  onRowRevert: (revision: TaskPlanRevision) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const hasRevisions = revisions.length > 0;
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         <Button
+          ref={historyTriggerRef}
           size="icon"
           variant="ghost"
-          className="h-7 w-7 cursor-pointer"
+          className="h-11 w-11 md:h-7 md:w-7 cursor-pointer"
           disabled={disabled || !hasRevisions}
           data-testid="plan-rewind-button"
-          title="View plan history"
+          title={t("task:viewPlanHistory")}
         >
           <IconHistory className="h-4 w-4" />
         </Button>
       </PopoverTrigger>
       <PopoverContent
+        onCloseAutoFocus={onCloseAutoFocus}
         align="end"
         // Override the popover's default `gap-4` between flex children — it
         // was rendering as visible empty space above the top-most row.
@@ -151,7 +242,7 @@ function RevisionsPopover({
         data-testid="plan-revisions-popover"
       >
         <div className="flex items-center justify-between px-3 py-2 border-b">
-          <span className="text-sm font-medium">Plan history</span>
+          <span className="text-sm font-medium">{t("task:planHistory")}</span>
           {isLoading && <IconLoader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
         </div>
         {/* Plain overflow-y-auto is more reliable than ScrollArea inside a Popover
@@ -161,8 +252,13 @@ function RevisionsPopover({
           <RevisionList
             revisions={revisions}
             isLoading={isLoading}
+            isSaving={isSaving}
             agentName={agentName}
-            onRevertClick={confirmTargetSetter}
+            rowConfirmTarget={rowConfirmTarget}
+            isFinePointer={isFinePointer}
+            onRevertRequest={onRowRevertRequest}
+            onRevertCancel={onRowRevertCancel}
+            onRevert={onRowRevert}
             onRowClick={(rev) => setPreviewRevision(rev.id)}
           />
         </div>
@@ -180,13 +276,12 @@ type DialogStackProps = {
   isSaving: boolean;
   loadRevisionContent: (revisionId: string) => Promise<string>;
   headRevision: TaskPlanRevision | null;
-  onRevert: (revisionId: string) => Promise<TaskPlanRevision | null>;
+  onRevert: (revision: TaskPlanRevision) => Promise<void>;
   setConfirmTarget: (rev: TaskPlanRevision | null) => void;
   setDiffOpen: (v: boolean) => void;
   setPreviewRevision: (id: string | null) => void;
   clearComparePair: () => void;
   toggleCompareSelection: (id: string) => void;
-  closePopover: () => void;
 };
 
 function RevisionsDialogStack({
@@ -204,8 +299,8 @@ function RevisionsDialogStack({
   setPreviewRevision,
   clearComparePair,
   toggleCompareSelection,
-  closePopover,
 }: DialogStackProps) {
+  const { t } = useTranslation();
   const isPreviewCurrent = previewRevision !== null && previewRevision.id === headRevision?.id;
   const previousRevision = useMemo(() => {
     if (!previewRevision) return null;
@@ -213,28 +308,6 @@ function RevisionsDialogStack({
     // first entry whose revision_number is strictly less than the previewed one.
     return revisions.find((r) => r.revision_number < previewRevision.revision_number) ?? null;
   }, [revisions, previewRevision]);
-
-  const handleRevert = useCallback(
-    async (revision: TaskPlanRevision) => {
-      try {
-        const result = await onRevert(revision.id);
-        if (result) {
-          toast.success(`Plan restored to v${revision.revision_number}`);
-          closePopover();
-          setPreviewRevision(null);
-          setDiffOpen(false);
-        } else {
-          // `revertTo` (the hook impl) swallows errors and returns null, so
-          // we surface the failure here too — without this branch the dialog
-          // closes silently on failure and the user has no feedback.
-          toast.error("Failed to restore plan");
-        }
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to restore plan");
-      }
-    },
-    [onRevert, setPreviewRevision, setDiffOpen, closePopover],
-  );
 
   const seedComparePair = useCallback(
     (a: TaskPlanRevision, b: TaskPlanRevision) => {
@@ -264,7 +337,7 @@ function RevisionsDialogStack({
         // Remount on revision change so loader state resets without setState-in-effect.
         key={`preview-${previewRevision?.id ?? "none"}`}
         revision={previewRevision}
-        authorLabel={previewRevision ? authorLabel(previewRevision) : ""}
+        authorLabel={previewRevision ? authorLabel(previewRevision, t) : ""}
         loadContent={loadRevisionContent}
         onClose={() => setPreviewRevision(null)}
         onRestore={() => {
@@ -292,7 +365,7 @@ function RevisionsDialogStack({
         onConfirm={async () => {
           if (!confirmTarget) return;
           try {
-            await handleRevert(confirmTarget);
+            await onRevert(confirmTarget);
           } finally {
             setConfirmTarget(null);
           }
@@ -304,9 +377,9 @@ function RevisionsDialogStack({
 
 /** Display label for an author. User revisions always render as "You";
  * agent revisions use the stored author_name (the agent profile display name). */
-function authorLabel(revision: TaskPlanRevision): string {
-  if (revision.author_kind === "user") return USER_DISPLAY_NAME;
-  return revision.author_name || "Agent";
+function authorLabel(revision: TaskPlanRevision, t: TFunction): string {
+  if (revision.author_kind === "user") return t(USER_DISPLAY_NAME_KEY);
+  return revision.author_name || t("common:agent");
 }
 
 /** Resolve the active session's agent backend name (e.g. "claude", "codex") so
@@ -326,34 +399,56 @@ function useActiveAgentBackendName(): string | null {
 function RevisionList({
   revisions,
   isLoading,
+  isSaving,
   agentName,
-  onRevertClick,
+  rowConfirmTarget,
+  isFinePointer,
+  onRevertRequest,
+  onRevertCancel,
+  onRevert,
   onRowClick,
 }: {
   revisions: TaskPlanRevision[];
   isLoading: boolean;
+  isSaving: boolean;
   agentName: string | null;
-  onRevertClick: (rev: TaskPlanRevision) => void;
+  rowConfirmTarget: TaskPlanRevision | null;
+  isFinePointer: boolean;
+  onRevertRequest: (revision: TaskPlanRevision) => void;
+  onRevertCancel: () => void;
+  onRevert: (revision: TaskPlanRevision) => Promise<void>;
   onRowClick: (rev: TaskPlanRevision) => void;
 }) {
+  const { t } = useTranslation();
   if (revisions.length === 0 && !isLoading) {
     return (
       <div className="px-3 py-6 text-xs text-muted-foreground text-center">
-        No revisions yet. Edits will appear here.
+        {t("task:noRevisionsYetEditsWillAppear")}
       </div>
     );
   }
   return (
     <ul className="divide-y">
       {revisions.map((rev, i) => (
-        <RevisionRow
+        <TaskPlanRevisionRow
           key={rev.id}
           revision={rev}
           isCurrent={i === 0}
-          agentName={agentName}
-          onRevertClick={onRevertClick}
-          onRowClick={onRowClick}
-        />
+          isSaving={isSaving}
+          rowConfirmTarget={rowConfirmTarget}
+          isFinePointer={isFinePointer}
+          onRevertRequest={onRevertRequest}
+          onRevertCancel={onRevertCancel}
+          onRevert={onRevert}
+        >
+          <RevisionRowBody
+            revision={rev}
+            previousRevision={revisions[i + 1] ?? null}
+            isCurrent={i === 0}
+            agentName={agentName}
+            onRowClick={onRowClick}
+          />
+        </TaskPlanRevisionRow>
       ))}
     </ul>
   );
@@ -366,6 +461,7 @@ function RevisionAuthor({
   revision: TaskPlanRevision;
   agentName: string | null;
 }) {
+  const { t } = useTranslation();
   if (revision.author_kind === "agent") {
     return (
       <>
@@ -380,25 +476,41 @@ function RevisionAuthor({
     <>
       <IconUser className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
       <span className="text-xs text-foreground truncate" data-testid="plan-revision-author">
-        {USER_DISPLAY_NAME}
+        {t(USER_DISPLAY_NAME_KEY)}
       </span>
     </>
   );
 }
 
-function RevisionRow({
+/** Signed, thousands-separated delta string ("+1,234" / "−40,612"), or null
+ * when either side's character count is unknown or unchanged. Uses U+2212
+ * (minus sign) rather than a hyphen for the negative case, matching the
+ * design's typographic minus. */
+function formatContentDelta(
+  current: number | undefined,
+  previous: number | undefined,
+): string | null {
+  if (current === undefined || previous === undefined) return null;
+  const delta = current - previous;
+  if (delta === 0) return null;
+  const magnitude = formatNumber(Math.abs(delta));
+  return delta > 0 ? `+${magnitude}` : `−${magnitude}`;
+}
+
+function RevisionRowBody({
   revision,
+  previousRevision,
   isCurrent,
   agentName,
-  onRevertClick,
   onRowClick,
 }: {
   revision: TaskPlanRevision;
+  previousRevision: TaskPlanRevision | null;
   isCurrent: boolean;
   agentName: string | null;
-  onRevertClick: (rev: TaskPlanRevision) => void;
-  onRowClick: (rev: TaskPlanRevision) => void;
+  onRowClick: (revision: TaskPlanRevision) => void;
 }) {
+  const { t } = useTranslation();
   // Force re-render every 30s so the precise timestamp ("5m ago", "Today,
   // 14:32", …) refreshes as the revision ages — `formatPreciseTime` derives
   // from `revision.updated_at` on every render.
@@ -408,115 +520,80 @@ function RevisionRow({
     return () => clearInterval(id);
   }, []);
   const timestamp = formatPreciseTime(revision.updated_at);
+  const delta = formatContentDelta(revision.content_length, previousRevision?.content_length);
+  // A coalesced write bumps updated_at without changing created_at (the
+  // original write's timestamp), so a mismatch means this row absorbed a
+  // later edit rather than being written once.
+  const wasCoalesced = revision.updated_at !== revision.created_at;
 
   return (
-    <li
-      // items-center keeps the Restore button vertically centered against the
-      // row body, even when the body grows taller (timestamp + restored-from
-      // marker on revert rows).
-      className="px-3 py-2.5 flex items-center gap-3 hover:bg-accent/30"
-      data-testid="plan-revision-row"
-      data-revision-id={revision.id}
-      data-revision-number={revision.revision_number}
+    <button
+      type="button"
+      onClick={() => onRowClick(revision)}
+      className="flex-1 min-w-0 text-left cursor-pointer"
+      data-testid="plan-revision-row-body"
     >
-      <button
-        type="button"
-        onClick={() => onRowClick(revision)}
-        className="flex-1 min-w-0 text-left cursor-pointer"
-        data-testid="plan-revision-row-body"
-      >
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-semibold">v{revision.revision_number}</span>
-          <RevisionAuthor revision={revision} agentName={agentName} />
-          {isCurrent && (
-            <Badge
-              variant="secondary"
-              className="h-4 text-[10px] px-1.5"
-              data-testid="plan-revision-current-badge"
-            >
-              current
-            </Badge>
-          )}
-        </div>
-        <div className="text-[11px] text-muted-foreground mt-1" data-testid="plan-revision-time">
-          {timestamp}
-        </div>
-        {revision.revert_of_revision_id && (
-          <div
-            className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1"
-            data-testid="plan-revision-revert-marker"
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-semibold">v{revision.revision_number}</span>
+        <RevisionAuthor revision={revision} agentName={agentName} />
+        {isCurrent && (
+          <Badge
+            variant="secondary"
+            className="h-4 text-[10px] px-1.5"
+            data-testid="plan-revision-current-badge"
           >
-            <IconRestore className="h-3 w-3" />
-            restored from earlier version
-          </div>
+            {t("task:current")}
+          </Badge>
         )}
-      </button>
-      {!isCurrent && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 px-2 text-xs cursor-pointer shrink-0 gap-1"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRevertClick(revision);
-          }}
-          data-testid="plan-revision-revert-button"
+        {revision.workflow_step_id && (
+          <WorkflowStepMessageBadge
+            workflow={{
+              stepId: revision.workflow_step_id,
+              stepName: revision.workflow_step_name,
+              stepColor: revision.workflow_step_color,
+            }}
+            size="xs"
+            tooltipI18nKey="task:planRevisionWorkflowStepTooltip"
+          />
+        )}
+      </div>
+      <div
+        className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1.5 flex-wrap"
+        data-testid="plan-revision-time"
+      >
+        <span>{timestamp}</span>
+        {revision.content_length !== undefined && (
+          <span data-testid="plan-revision-char-count">
+            {t("task:planRevisionCharCount", {
+              count: revision.content_length,
+              formatted: formatNumber(revision.content_length),
+            })}
+          </span>
+        )}
+        {delta && (
+          <span
+            className={
+              delta.startsWith("+") ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"
+            }
+            data-testid="plan-revision-delta"
+            title={t("task:planRevisionDeltaTooltip", { delta })}
+          >
+            {delta}
+          </span>
+        )}
+        {wasCoalesced && (
+          <span data-testid="plan-revision-coalesced-hint">{t("task:planRevisionEdited")}</span>
+        )}
+      </div>
+      {revision.revert_of_revision_id && (
+        <div
+          className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1"
+          data-testid="plan-revision-revert-marker"
         >
-          <IconRestore className="h-3.5 w-3.5" />
-          Restore
-        </Button>
+          <IconRestore className="h-3 w-3" />
+          {t("task:restoredFromEarlierVersion")}
+        </div>
       )}
-    </li>
-  );
-}
-
-function RevertConfirmDialog({
-  target,
-  isSaving,
-  onCancel,
-  onConfirm,
-}: {
-  target: TaskPlanRevision | null;
-  isSaving: boolean;
-  onCancel: () => void;
-  onConfirm: () => void | Promise<void>;
-}): ReactNode {
-  const open = target !== null;
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        if (!v) onCancel();
-      }}
-    >
-      <DialogContent data-testid="plan-revert-confirm-dialog">
-        <DialogHeader>
-          <DialogTitle>Restore to version {target?.revision_number}?</DialogTitle>
-          <DialogDescription>
-            This creates a new version with v{target?.revision_number}&#39;s content. Nothing is
-            lost; the current version stays in history.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={onCancel}
-            disabled={isSaving}
-            className="cursor-pointer"
-            data-testid="plan-revert-confirm-cancel"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={onConfirm}
-            disabled={isSaving}
-            className="cursor-pointer"
-            data-testid="plan-revert-confirm-ok"
-          >
-            {isSaving ? "Restoring..." : "Restore"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    </button>
   );
 }

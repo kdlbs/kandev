@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["05-frontend-settings"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 06: Responsive Browse And Task PR UI

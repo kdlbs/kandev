@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { E2E_DOCKER_SCOPE } from "../fixtures/docker-probe";
 
 /**
  * Live SSH server handle returned by startSSHServer. Tests use the host/port
@@ -34,8 +35,8 @@ const SSH_BASE_PORT = 22000;
  * Start a fresh sshd container for a Playwright worker. Each worker gets:
  *   - A unique published port (SSH_BASE_PORT + workerIndex).
  *   - A unique ed25519 keypair generated into workDir.
- *   - A unique container name `kandev-sshd-e2e-<workerIndex>` (labeled
- *     `kandev.managed=true` so the shared cleanup hook destroys it).
+ *   - A process-scoped container name and ownership label so cleanup cannot
+ *     remove another shard's SSH target.
  *
  * Blocks until sshd answers TCP connections and a stable host fingerprint
  * is observable via `ssh-keyscan`.
@@ -47,7 +48,7 @@ export function startSSHServer(
 ): SSHServerHandle {
   fs.mkdirSync(workDir, { recursive: true });
   const port = SSH_BASE_PORT + workerIndex;
-  const containerName = `kandev-sshd-e2e-${workerIndex}`;
+  const containerName = `kandev-sshd-e2e-${E2E_DOCKER_SCOPE}-${workerIndex}`;
 
   const identityFile = path.join(workDir, "id_ed25519");
   const publicKeyFile = `${identityFile}.pub`;
@@ -73,6 +74,8 @@ export function startSSHServer(
       containerName,
       "--label",
       "kandev.managed=true",
+      "--label",
+      `kandev.e2e.run=${E2E_DOCKER_SCOPE}`,
       "--label",
       "kandev.e2e.role=ssh-target",
       "--cap-add",
@@ -281,7 +284,7 @@ export function countSshdConnections(handle: SSHServerHandle): number {
 
 // --- internals ---
 
-function generateKeypair(identityFile: string): void {
+export function generateKeypair(identityFile: string): void {
   if (fs.existsSync(identityFile)) {
     fs.rmSync(identityFile, { force: true });
     fs.rmSync(`${identityFile}.pub`, { force: true });
@@ -323,11 +326,11 @@ export function execInContainer(handle: SSHServerHandle, argv: string[]): string
   return res.stdout;
 }
 
-function removeContainerIfExists(name: string): void {
+export function removeContainerIfExists(name: string): void {
   spawnSync("docker", ["rm", "-f", name], { stdio: "ignore" });
 }
 
-function waitForTCPOpen(host: string, port: number, timeoutMs = 30_000): void {
+export function waitForTCPOpen(host: string, port: number, timeoutMs = 30_000): void {
   const deadline = Date.now() + timeoutMs;
   let lastErr = "";
   while (Date.now() < deadline) {
@@ -343,7 +346,7 @@ function waitForTCPOpen(host: string, port: number, timeoutMs = 30_000): void {
   throw new Error(`sshd at ${host}:${port} did not open within ${timeoutMs}ms: ${lastErr}`);
 }
 
-function scanHostFingerprint(host: string, port: number): string {
+export function scanHostFingerprint(host: string, port: number): string {
   // ssh-keyscan prints the host's public key on stdout; `# host SSH-2.0-...`
   // comment lines go to stderr. We retry briefly because the first scan can
   // race the container's first sshd accept.

@@ -46,7 +46,26 @@ export type SessionModelsPayload = {
   current_model_id: string;
   models: SessionModelInfoPayload[];
   config_options: ConfigOptionPayload[];
+  config_options_settled?: boolean;
   config_baseline?: Record<string, string>;
+  timestamp: string;
+};
+
+export type SessionModelSelectionWarningPayload = {
+  task_id: string;
+  session_id: string;
+  agent_id: string;
+  warning: {
+    kind: string;
+    decision_id: string;
+    reason: string;
+    requested_model?: string;
+    effective_model?: string;
+    fallback_model?: string;
+    agent_id: string;
+    executor_type: string;
+    executor_profile_id: string;
+  };
   timestamp: string;
 };
 
@@ -60,6 +79,16 @@ export type MCPAttachmentServerPayload = {
   summary?: string;
   connection_id?: string;
   tool_count?: number;
+  tools_listed_at?: string;
+  tools?: Array<{
+    name: string;
+    description?: string;
+    input_schema?: unknown;
+    input_schema_truncated?: boolean;
+    estimated_tokens?: number;
+  }>;
+  tool_catalog_truncated?: boolean;
+  tool_token_estimator?: string;
 };
 
 export type MCPAttachmentAttemptPayload = {

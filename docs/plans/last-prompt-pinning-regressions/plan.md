@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/last-prompt-pinning-regressions/spec.md
+spec: docs/specs/ui/requirements/last-prompt-pinning-regressions.md
 created: 2026-07-28
 status: completed
 ---

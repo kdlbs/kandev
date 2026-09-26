@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -52,6 +53,7 @@ type ExecutorRunningWriter interface {
 // Optional only for tests that don't exercise the persistence path.
 func (m *Manager) SetExecutorRunningWriter(w ExecutorRunningWriter) {
 	m.runningWriter = w
+	m.wireKubernetesEnvironmentStore()
 }
 
 // buildRunningFromExecution maps an in-memory execution into the persistence
@@ -71,10 +73,18 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		lastSeenAt = &now
 	}
 
+	metadata := execution.MetadataSnapshot()
+	if execution.OfficeAgentProfileID != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
+	}
 	running := &models.ExecutorRunning{
-		ID:                 execution.SessionID,
-		SessionID:          execution.SessionID,
+		ID:                 executionInventorySessionID(execution),
+		SessionID:          executionInventorySessionID(execution),
 		TaskID:             execution.TaskID,
+		ExecutorID:         strings.TrimSpace(getMetadataString(metadata, "executor_id")),
 		ExecutionProfileID: execution.AgentProfileID,
 		Runtime:            execution.RuntimeName,
 		Status:             executorRunningStatusFromExecution(execution),
@@ -84,14 +94,30 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		AgentctlURL:        agentctlURL,
 		AgentctlPort:       agentctlPort,
 		PID:                pid,
-		WorktreeID:         getMetadataString(execution.Metadata, MetadataKeyWorktreeID),
-		WorktreePath:       getMetadataString(execution.Metadata, "worktree_path"),
-		WorktreeBranch:     getMetadataString(execution.Metadata, MetadataKeyWorktreeBranch),
-		Metadata:           FilterPersistentMetadata(execution.Metadata),
+		WorktreeID:         getMetadataString(metadata, MetadataKeyWorktreeID),
+		WorktreePath:       getMetadataString(metadata, "worktree_path"),
+		WorktreeBranch:     getMetadataString(metadata, MetadataKeyWorktreeBranch),
+		Metadata:           FilterPersistentMetadata(metadata),
 		LastSeenAt:         lastSeenAt,
 	}
+	if officeProfileID := strings.TrimSpace(execution.OfficeAgentProfileID); officeProfileID != "" {
+		if running.Metadata == nil {
+			running.Metadata = make(map[string]interface{})
+		}
+		running.Metadata[MetadataKeyOfficeAgentProfileID] = officeProfileID
+	}
+	if execution.Owner.Kind == ExecutionOwnerRun {
+		if running.Metadata == nil {
+			running.Metadata = make(map[string]interface{})
+		}
+		running.Metadata[runExecutionOwnerMetadataKey] = execution.Owner
+		running.Resumable = false
+		running.WorktreePath = execution.WorkspacePath
+	}
 	if prior != nil {
-		running.ExecutorID = prior.ExecutorID
+		if strings.TrimSpace(prior.ExecutorID) != "" {
+			running.ExecutorID = prior.ExecutorID
+		}
 		if prior.ExecutionProfileID == execution.AgentProfileID {
 			running.ResumeToken = prior.ResumeToken
 			running.LastMessageUUID = prior.LastMessageUUID
@@ -119,10 +145,10 @@ func agentctlPortFromExecution(execution *AgentExecution, agentctlURL string) in
 	if execution.standalonePort > 0 {
 		return execution.standalonePort
 	}
-	if port := metadataInt(execution.Metadata, MetadataKeySSHLocalForwardPort); port > 0 {
+	if port := execution.metadataInt(MetadataKeySSHLocalForwardPort); port > 0 {
 		return port
 	}
-	if port := metadataInt(execution.Metadata, MetadataKeyLocalPort); port > 0 {
+	if port := execution.metadataInt(MetadataKeyLocalPort); port > 0 {
 		return port
 	}
 	if agentctlURL == "" {
@@ -160,7 +186,7 @@ func agentctlPIDFromExecution(execution *AgentExecution) int {
 	if execution == nil {
 		return 0
 	}
-	return metadataInt(execution.Metadata, MetadataKeySSHRemoteAgentctlPID)
+	return execution.metadataInt(MetadataKeySSHRemoteAgentctlPID)
 }
 
 func metadataInt(metadata map[string]interface{}, key string) int {
@@ -230,21 +256,44 @@ func executorRunningStatusFromExecution(execution *AgentExecution) string {
 // runtime / status; the orchestrator owns resume_token / last_message_uuid /
 // metadata.context_window via narrow CAS updates.
 //
-// Logs and continues on persistence failure rather than failing the launch —
-// the in-memory store already has the truth, and the row will be re-upserted
-// on the next launch through this same path. (storeResumeToken does NOT
-// re-create a missing row; it uses a narrow CAS UPDATE keyed on
-// agent_execution_id, so a failure here leaves resume_token persistence broken
-// until the next full launch.) The store is the runtime authority; the row is
-// its durable mirror.
+// Status-only persistence is best-effort: the in-memory store is still the
+// runtime authority and a later transition can re-upsert its durable mirror.
+// New-runtime registration calls persistExecutorRunningResult directly and
+// fails closed because task cleanup relies on this row for race inventory.
 func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentExecution) {
+	_ = m.persistExecutorRunningResult(ctx, execution)
+}
+
+// buildRunningForPersistence reads a tracked execution while the execution
+// store's read lock is held. Status transitions use that store lock, so taking
+// the same lock here prevents persistence from racing with an asynchronous
+// readiness failure. Callers that are persisting an execution before it is
+// tracked still use the mapper directly.
+func (m *Manager) buildRunningForPersistence(
+	execution *AgentExecution,
+	prior *models.ExecutorRunning,
+) *models.ExecutorRunning {
+	if execution == nil || m.executionStore == nil {
+		return buildRunningFromExecution(execution, prior)
+	}
+
+	var running *models.ExecutorRunning
+	if err := m.executionStore.WithRLock(execution.ID, func(tracked *AgentExecution) {
+		running = buildRunningFromExecution(tracked, prior)
+	}); err == nil {
+		return running
+	}
+	return buildRunningFromExecution(execution, prior)
+}
+
+func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *AgentExecution) error {
 	if m.runningWriter == nil {
 		// Permitted in tests that don't exercise persistence; logged so a
 		// missed wire-up in production stands out.
 		m.logger.Debug("no executor-running writer configured; skipping row persistence",
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", execution.SessionID))
-		return
+		return nil
 	}
 
 	// Best-effort read of any pre-existing row so we carry forward the orchestrator-
@@ -261,7 +310,7 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 	// its current columns and the next transition (or reconciliation) re-persists.
 	var prior *models.ExecutorRunning
 	if reader, ok := m.runningWriter.(executorRunningReader); ok {
-		existing, err := reader.GetExecutorRunningBySessionID(ctx, execution.SessionID)
+		existing, err := reader.GetExecutorRunningBySessionID(ctx, executionInventorySessionID(execution))
 		switch {
 		case err == nil:
 			prior = existing
@@ -272,14 +321,14 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 				zap.String("execution_id", execution.ID),
 				zap.String("session_id", execution.SessionID),
 				zap.Error(err))
-			return
+			return err
 		}
 	}
 	if execution.AgentProfileID == "" && prior != nil {
 		execution.AgentProfileID = prior.ExecutionProfileID
 	}
 
-	running := buildRunningFromExecution(execution, prior)
+	running := m.buildRunningForPersistence(execution, prior)
 	// Attach the host-local liveness handle for local/standalone rows. Kept out
 	// of buildRunningFromExecution (a pure mapper) because the PID lives on the
 	// manager, wired from the agentctl launcher at DI. resolveLocalPID returns 0
@@ -304,7 +353,9 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", execution.SessionID),
 			zap.Error(err))
+		return err
 	}
+	return nil
 }
 
 // deleteExecutorRunning tears down the persistence row when an execution is
@@ -312,72 +363,126 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 // so the in-memory and persistent state are gone in the same operation.
 //
 // Resume-safety invariant (#1597 resume-safety invariant): a row that still holds
-// a resume_token is REPAIRED in place (status=stopped, local_pid cleared) rather
-// than deleted, so a session stays resumable even if a subsequent relaunch fails.
-// On the happy path the relaunch UPSERTs a fresh row over the repaired one, so
-// repairing costs nothing; on the failure path it preserves the only handle to a
-// resumable conversation. Rows with no resume_token are deleted as before.
+// a resume_token, or still claims a running execution, is REPAIRED in place
+// (status=stopped, local_pid cleared) rather than deleted. This keeps a
+// non-terminal session visible while a stale runtime is being replaced and
+// preserves resumable conversations if a subsequent relaunch fails. On the
+// happy path the relaunch UPSERTs a fresh row over the repaired one, so
+// repairing costs nothing. Rows that are already stopped and have no token are
+// deleted as before.
 //
-// Deliberate deviation from models.RowMustBePreserved, which also preserves
-// tokenless rows backing a non-terminal session: this path gates on the token
-// alone because the token IS the resumable agent state. A row without one means
-// the agent never established (or never reported) an ACP session — there is no
-// agent-side context a preserved row could resume, and Kandev's own chat
-// history lives in the task tables, untouched by this delete. Preserving a
-// tokenless row here would keep only incidental metadata that the relaunch
-// upsert rebuilds anyway, at the cost of wiring session-state reads into the
-// lifecycle tier. Orchestrator-side reconciliation, which already knows session
-// state, applies the full invariant via pruneOrRepairExecutorRow.
+// This remains a narrower rule than models.RowMustBePreserved because the
+// lifecycle tier does not own task-session state. The running status is the
+// local signal that a non-terminal session may still need the row; the
+// orchestrator applies the full task-state invariant during reconciliation.
 //
 // Best-effort: a failure here is logged but doesn't propagate.
-func (m *Manager) deleteExecutorRunning(ctx context.Context, sessionID string) {
+func (m *Manager) deleteExecutorRunning(ctx context.Context, sessionID string, expectedExecutionIDs ...string) {
 	if m.runningWriter == nil {
 		return
 	}
-
-	// Inspect the row first so we never delete one we couldn't read (fail-safe:
-	// an unreadable row might hold a resume_token).
-	if reader, ok := m.runningWriter.(executorRunningReader); ok {
-		existing, err := reader.GetExecutorRunningBySessionID(ctx, sessionID)
-		switch {
-		case err == nil && existing != nil && existing.ResumeToken != "":
-			if repairErr := m.runningWriter.RepairExecutorRunningDead(ctx, sessionID); repairErr != nil &&
-				!errors.Is(repairErr, models.ErrExecutorRunningNotFound) {
-				m.logger.Warn("failed to repair resumable executors_running row on cleanup; leaving row intact",
-					zap.String("session_id", sessionID),
-					zap.Error(repairErr))
-			} else {
-				m.logger.Info("repaired resumable executors_running row instead of deleting (resume-safety invariant)",
-					zap.String("session_id", sessionID))
-			}
-			return
-		case errors.Is(err, models.ErrExecutorRunningNotFound):
-			m.logger.Debug("delete executors_running on cleanup: row not found",
-				zap.String("session_id", sessionID))
-			return
-		case err != nil:
-			m.logger.Warn("skipping executors_running delete: prior-row read failed, refusing to risk deleting a resumable row",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			return
-		}
-	} else {
-		m.logger.Warn("delete executors_running on cleanup: writer does not support reading; resume-safety check skipped",
-			zap.String("session_id", sessionID))
+	expectedExecutionID := ""
+	if len(expectedExecutionIDs) > 0 {
+		expectedExecutionID = expectedExecutionIDs[0]
 	}
 
-	if err := m.runningWriter.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+	if m.skipExecutorRunningCleanup(ctx, sessionID, expectedExecutionID) {
+		return
+	}
+
+	deleteErr := m.deleteExecutorRunningRow(ctx, sessionID, expectedExecutionID)
+	if deleteErr != nil {
 		// "not found" is expected for sessions that were never launched; everything
 		// else is a real I/O failure (write timeout, locked DB) and should surface.
-		if errors.Is(err, models.ErrExecutorRunningNotFound) {
+		if errors.Is(deleteErr, models.ErrExecutorRunningNotFound) {
 			m.logger.Debug("delete executors_running on cleanup: row not found",
 				zap.String("session_id", sessionID))
 		} else {
 			m.logger.Warn("delete executors_running on cleanup",
 				zap.String("session_id", sessionID),
-				zap.Error(err))
+				zap.Error(deleteErr))
 		}
 	}
+}
+
+// skipExecutorRunningCleanup inspects the row before deletion. It returns true
+// when cleanup must stop because the row is rotated, resumable, missing, or
+// unreadable. A writer without a reader keeps the historical best-effort path.
+func (m *Manager) skipExecutorRunningCleanup(ctx context.Context, sessionID, expectedExecutionID string) bool {
+	reader, ok := m.runningWriter.(executorRunningReader)
+	if !ok {
+		m.logger.Warn("delete executors_running on cleanup: writer does not support reading; resume-safety check skipped",
+			zap.String("session_id", sessionID))
+		return false
+	}
+	existing, err := reader.GetExecutorRunningBySessionID(ctx, sessionID)
+	if expectedExecutionID != "" && existing != nil && existing.AgentExecutionID != expectedExecutionID {
+		m.logger.Info("skipping executors_running cleanup for rotated execution",
+			zap.String("session_id", sessionID),
+			zap.String("expected_execution_id", expectedExecutionID),
+			zap.String("current_execution_id", existing.AgentExecutionID))
+		return true
+	}
+	if err == nil && existing != nil &&
+		(existing.ResumeToken != "" || existing.Status == models.ExecutorRunningStatusRunning) {
+		return m.repairExecutorRunningAfterCleanup(ctx, sessionID, expectedExecutionID, existing.UpdatedAt)
+	}
+	if errors.Is(err, models.ErrExecutorRunningNotFound) {
+		m.logger.Debug("delete executors_running on cleanup: row not found",
+			zap.String("session_id", sessionID))
+		return true
+	}
+	if err != nil {
+		m.logger.Warn("skipping executors_running delete: prior-row read failed, refusing to risk deleting a resumable row",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return true
+	}
+	return false
+}
+
+func (m *Manager) repairExecutorRunningAfterCleanup(
+	ctx context.Context,
+	sessionID, expectedExecutionID string,
+	expectedUpdatedAt time.Time,
+) bool {
+	var repairErr error
+	if casWriter, ok := m.runningWriter.(executorRunningCASWriter); ok && expectedExecutionID != "" {
+		repairErr = casWriter.RepairExecutorRunningDeadIfCurrent(
+			ctx, sessionID, expectedExecutionID, expectedUpdatedAt,
+		)
+	} else {
+		repairErr = m.runningWriter.RepairExecutorRunningDead(ctx, sessionID)
+	}
+	if repairErr == nil || errors.Is(repairErr, models.ErrExecutorRunningNotFound) {
+		m.logger.Info("repaired resumable executors_running row instead of deleting (resume-safety invariant)",
+			zap.String("session_id", sessionID))
+		return true
+	}
+	if errors.Is(repairErr, models.ErrExecutionRotated) {
+		m.logger.Info("skipping executors_running repair for rotated execution",
+			zap.String("session_id", sessionID),
+			zap.String("expected_execution_id", expectedExecutionID))
+		return true
+	}
+	m.logger.Warn("failed to repair resumable executors_running row on cleanup; leaving row intact",
+		zap.String("session_id", sessionID),
+		zap.Error(repairErr))
+	return true
+}
+
+func (m *Manager) deleteExecutorRunningRow(ctx context.Context, sessionID, expectedExecutionID string) error {
+	casWriter, hasCAS := m.runningWriter.(executorRunningCASWriter)
+	if !hasCAS || expectedExecutionID == "" {
+		return m.runningWriter.DeleteExecutorRunningBySessionID(ctx, sessionID)
+	}
+	var expectedUpdatedAt time.Time
+	if reader, ok := m.runningWriter.(executorRunningReader); ok {
+		if current, readErr := reader.GetExecutorRunningBySessionID(ctx, sessionID); readErr == nil && current != nil {
+			expectedUpdatedAt = current.UpdatedAt
+		}
+	}
+	return casWriter.DeleteExecutorRunningIfCurrent(ctx, sessionID, expectedExecutionID, expectedUpdatedAt)
 }
 
 // executorRunningReader is the optional read-side of the writer used to fetch
@@ -386,4 +491,39 @@ func (m *Manager) deleteExecutorRunning(ctx context.Context, sessionID string) {
 // fresh state (acceptable for first-time inserts).
 type executorRunningReader interface {
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+}
+
+// executorRunningLister is the optional read-side used to enumerate the
+// startup recovery inventory: every live (non-terminal) executors_running row
+// on the standalone control server (worktree/local executors). A writer that
+// doesn't implement it has no recovery candidates to offer.
+type executorRunningLister interface {
+	ListExecutorsRunningLiveStandalone(ctx context.Context) ([]*models.ExecutorRunning, error)
+}
+
+// ListLiveStandaloneExecutorsRunning returns the startup recovery inventory:
+// every live standalone executors_running row, read at startup step 3 before
+// any control-server contact, so the recovery guard can be taken against it
+// (discovery H). Best-effort: a writer that doesn't support listing yields no
+// candidates rather than an error, matching this file's other optional
+// capabilities.
+func (m *Manager) ListLiveStandaloneExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	lister, ok := m.runningWriter.(executorRunningLister)
+	if !ok {
+		return nil, nil
+	}
+	return lister.ListExecutorsRunningLiveStandalone(ctx)
+}
+
+type executorRunningCASWriter interface {
+	RepairExecutorRunningDeadIfCurrent(
+		ctx context.Context,
+		sessionID, expectedExecutionID string,
+		expectedUpdatedAt time.Time,
+	) error
+	DeleteExecutorRunningIfCurrent(
+		ctx context.Context,
+		sessionID, expectedExecutionID string,
+		expectedUpdatedAt time.Time,
+	) error
 }

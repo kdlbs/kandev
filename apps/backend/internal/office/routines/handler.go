@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +15,44 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/shared"
 )
+
+// fieldError/fieldPaused/fieldWorkspaceID/fieldReason mirror the response
+// field names already used throughout this handler's other gin.H literals;
+// named here so writeDispatchError's occurrences don't trip goconst's
+// repeated-string threshold on their own.
+const (
+	fieldError       = "error"
+	fieldPaused      = "paused"
+	fieldWorkspaceID = "workspace_id"
+	fieldReason      = "reason"
+)
+
+// writeDispatchError maps a routine-dispatch error to its HTTP status.
+// A confirmed pause is a 409 (the request is understood but the
+// workspace is stopped); a gate-read error is a 503 (retryable — the
+// pause state itself couldn't be determined). A confirmed pause also
+// carries the blocking pause's workspace id and reason
+// (AC-OFFICE-KILL-SWITCH-002.3) when checkPauseGate attached them via
+// *pausedDispatchError; a gate-read error carries neither, since the pause
+// state itself is unknown.
+func writeDispatchError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, shared.ErrWorkspacePaused):
+		body := gin.H{fieldError: err.Error(), fieldPaused: true}
+		var pausedErr *pausedDispatchError
+		if errors.As(err, &pausedErr) {
+			body[fieldWorkspaceID] = pausedErr.workspaceID
+			body[fieldReason] = pausedErr.reason
+		}
+		c.JSON(http.StatusConflict, body)
+	case errors.Is(err, shared.ErrPauseGateUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{fieldError: err.Error()})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{fieldError: err.Error()})
+	}
+}
 
 // Handler provides HTTP handlers for routine routes.
 type Handler struct {
@@ -43,12 +81,36 @@ func RegisterRoutes(api *gin.RouterGroup, h *Handler) {
 }
 
 func (h *Handler) listRoutines(c *gin.Context) {
-	routines, err := h.svc.ListRoutinesFromConfig(c.Request.Context(), c.Param("wsId"))
+	ctx := c.Request.Context()
+	routines, err := h.svc.ListRoutinesFromConfig(ctx, c.Param("wsId"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, RoutineListResponse{Routines: routines})
+	withSchedule, err := h.svc.AttachScheduleState(ctx, routines)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, RoutineListResponse{Routines: withSchedule})
+}
+
+// withScheduleState classifies a single routine's schedule state, for the
+// single-routine response shapes (create/get/update).
+func (h *Handler) withScheduleState(c *gin.Context, routine *Routine) (*RoutineWithSchedule, error) {
+	withSchedule, err := h.svc.AttachScheduleState(c.Request.Context(), []*Routine{routine})
+	if err != nil {
+		return nil, err
+	}
+	return withSchedule[0], nil
+}
+
+// jsonErrorKey is the JSON body key used for error responses in this package.
+const jsonErrorKey = "error"
+
+// respondInternalError writes a 500 response carrying err's message.
+func respondInternalError(c *gin.Context, err error) {
+	c.JSON(http.StatusInternalServerError, gin.H{jsonErrorKey: err.Error()})
 }
 
 func (h *Handler) createRoutine(c *gin.Context) {
@@ -66,7 +128,7 @@ func (h *Handler) createRoutine(c *gin.Context) {
 	}
 	catchUpPolicy := models.RoutineCatchUpPolicy(req.CatchUpPolicy)
 	if catchUpPolicy == "" {
-		catchUpPolicy = models.CatchUpPolicyEnqueueMissedWithCap
+		catchUpPolicy = models.CatchUpPolicySummarizeMissed
 	}
 	if !concurrencyPolicy.Valid() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid concurrency_policy: " + req.ConcurrencyPolicy})
@@ -89,10 +151,15 @@ func (h *Handler) createRoutine(c *gin.Context) {
 		Variables:              req.Variables,
 	}
 	if err := h.svc.CreateRoutine(c.Request.Context(), routine); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, RoutineResponse{Routine: routine})
+	withSchedule, err := h.withScheduleState(c, routine)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, RoutineResponse{Routine: withSchedule})
 }
 
 func (h *Handler) getRoutine(c *gin.Context) {
@@ -101,7 +168,12 @@ func (h *Handler) getRoutine(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, RoutineResponse{Routine: routine})
+	withSchedule, err := h.withScheduleState(c, routine)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, RoutineResponse{Routine: withSchedule})
 }
 
 func (h *Handler) updateRoutine(c *gin.Context) {
@@ -110,7 +182,12 @@ func (h *Handler) updateRoutine(c *gin.Context) {
 		c.JSON(statusCode, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, RoutineResponse{Routine: routine})
+	withSchedule, err := h.withScheduleState(c, routine)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, RoutineResponse{Routine: withSchedule})
 }
 
 func (h *Handler) doUpdateRoutine(c *gin.Context) (*Routine, int, error) {
@@ -150,7 +227,12 @@ func (h *Handler) runRoutine(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 	run, err := h.svc.FireManual(c.Request.Context(), c.Param("id"), req.Variables)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		var notFiring *RoutineNotFiringError
+		if errors.As(err, &notFiring) {
+			c.JSON(http.StatusConflict, routineNotFiringBody(notFiring.Status))
+			return
+		}
+		writeDispatchError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, RoutineRunResponse{Run: run})
@@ -183,7 +265,11 @@ func (h *Handler) createTrigger(c *gin.Context) {
 		Enabled:        true,
 	}
 	if err := h.svc.CreateRoutineTrigger(c.Request.Context(), trigger); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrInvalidTrigger) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	trigger.Secret = "" // redact before sending response
@@ -251,13 +337,32 @@ func (h *Handler) fireWebhookTrigger(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "routine not found"})
 		return
 	}
+	if !models.RoutineStatus(routine.Status).CanFire() {
+		c.JSON(http.StatusConflict, routineNotFiringBody(routine.Status))
+		return
+	}
 
-	run, err := h.svc.DispatchRoutineRun(ctx, routine, trigger, "webhook", vars)
+	run, err := h.svc.DispatchRoutineRunWithIdempotencyKey(
+		ctx, routine, trigger, "webhook", vars, c.GetHeader("Idempotency-Key"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeDispatchError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"run_id": run.ID, "status": run.Status})
+}
+
+// routineNotFiringBody is the shared 409 body for a fire refused on
+// routine status, returned identically by the manual and webhook routes.
+// `error` is a human-readable fallback for a caller with no localized
+// copy; `error_code` is what a surface recognizes to select its own
+// localized message; `status` is the observed value, verbatim, so the
+// surface can interpolate it.
+func routineNotFiringBody(status string) gin.H {
+	return gin.H{
+		"error":      fmt.Sprintf("routine cannot fire: status is %q", status),
+		"error_code": RoutineNotFiringErrorCode,
+		"status":     status,
+	}
 }
 
 // redactTriggerSecrets clears the Secret field on each trigger to prevent

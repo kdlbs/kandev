@@ -59,14 +59,14 @@ func TestOptionsFromConfigParsesUppercaseTruthyEnv(t *testing.T) {
 	}
 }
 
-func TestOptionsFromConfigParsesUppercaseTruthyEnvForAppStatusBar(t *testing.T) {
-	preserveEnv(t, "KANDEV_FEATURES_APP_STATUS_BAR")
-	t.Setenv("KANDEV_FEATURES_APP_STATUS_BAR", "TRUE")
+func TestOptionsFromConfigIgnoresRetiredAppStatusBarEnv(t *testing.T) {
+	preserveEnv(t, retiredAppStatusBarEnvVar)
+	t.Setenv(retiredAppStatusBarEnvVar, "TRUE")
 
 	opts := OptionsFromConfig(&config.Config{})
 
-	if !opts.EnvValues["KANDEV_FEATURES_APP_STATUS_BAR"] {
-		t.Fatal("KANDEV_FEATURES_APP_STATUS_BAR TRUE parsed false, want true")
+	if _, ok := opts.EnvValues[retiredAppStatusBarEnvVar]; ok {
+		t.Fatal("retired KANDEV_FEATURES_APP_STATUS_BAR remains active")
 	}
 }
 
@@ -81,25 +81,15 @@ func TestOptionsFromConfigParsesClaudeBackgroundPromptHandoffEnv(t *testing.T) {
 	}
 }
 
-func TestApplyStatesToConfigSetsAppStatusBar(t *testing.T) {
-	cfg := &config.Config{Features: config.FeaturesConfig{AppStatusBar: true}}
+func TestApplyStatesToConfigIgnoresRetiredAppStatusBar(t *testing.T) {
+	cfg := &config.Config{}
 	ApplyStatesToConfig(cfg, []RuntimeFlagState{{
-		Key:            "features.appStatusBar",
-		EffectiveValue: false,
+		Key:            retiredAppStatusBarKey,
+		EffectiveValue: true,
 	}})
 
-	if cfg.Features.AppStatusBar {
-		t.Fatal("ApplyStatesToConfig did not set Features.AppStatusBar = false")
-	}
-}
-
-func TestValuesFromConfigIncludesAppStatusBar(t *testing.T) {
-	cfg := &config.Config{Features: config.FeaturesConfig{AppStatusBar: true}}
-
-	values := ValuesFromConfig(cfg)
-
-	if !values["features.appStatusBar"] {
-		t.Fatal("ValuesFromConfig did not surface features.appStatusBar = true")
+	if _, ok := ValuesFromConfig(cfg)[retiredAppStatusBarKey]; ok {
+		t.Fatal("ValuesFromConfig surfaced retired features.appStatusBar")
 	}
 }
 
@@ -169,4 +159,88 @@ func preserveEnv(t *testing.T, name string) {
 		}
 		_ = os.Unsetenv(name)
 	})
+}
+
+func TestOptionsFromConfigParsesClaudeMidTurnSteeringEnv(t *testing.T) {
+	preserveEnv(t, "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING")
+	t.Setenv("KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING", "TRUE")
+
+	opts := OptionsFromConfig(&config.Config{})
+
+	if !opts.EnvValues["KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING"] {
+		t.Fatal("KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING TRUE parsed false, want true")
+	}
+}
+
+func TestValuesFromConfigIncludesClaudeMidTurnSteering(t *testing.T) {
+	cfg := &config.Config{}
+	field := reflect.ValueOf(&cfg.Features).Elem().FieldByName("ClaudeMidTurnSteering")
+	if !field.IsValid() {
+		t.Fatal("FeaturesConfig.ClaudeMidTurnSteering field missing")
+	}
+	field.SetBool(true)
+
+	values := ValuesFromConfig(cfg)
+
+	if !values["features.claudeMidTurnSteering"] {
+		t.Fatal("ValuesFromConfig did not surface features.claudeMidTurnSteering = true")
+	}
+}
+
+func TestApplyStatesToConfigSetsClaudeMidTurnSteering(t *testing.T) {
+	cfg := &config.Config{}
+	ApplyStatesToConfig(cfg, []RuntimeFlagState{{
+		Key:            "features.claudeMidTurnSteering",
+		EffectiveValue: true,
+	}})
+
+	field := reflect.ValueOf(&cfg.Features).Elem().FieldByName("ClaudeMidTurnSteering")
+	if !field.IsValid() || !field.Bool() {
+		t.Fatal("ApplyStatesToConfig did not set Features.ClaudeMidTurnSteering = true")
+	}
+}
+
+func TestLSPBrowserContinuityFlagContract(t *testing.T) {
+	const key = "features.lspBrowserContinuity"
+	const envVar = "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY"
+	definition, ok := DefinitionByKey(key)
+	if !ok {
+		t.Fatalf("runtime flag definition %q is missing", key)
+	}
+	if definition.EnvVar != envVar {
+		t.Fatalf("EnvVar = %q, want %q", definition.EnvVar, envVar)
+	}
+	if !definition.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+	defaults, err := profiles.FeatureFlagDefaults()
+	if err != nil {
+		t.Fatalf("FeatureFlagDefaults: %v", err)
+	}
+	if got := defaults["lsp_browser_continuity"]; got != "true" {
+		t.Fatalf("profile default = %q, want true", got)
+	}
+
+	cfg := &config.Config{}
+	ApplyStatesToConfig(cfg, []RuntimeFlagState{{Key: key, EffectiveValue: false}})
+	if ValuesFromConfig(cfg)[key] {
+		t.Fatal("explicit false override did not disable LSP browser continuity")
+	}
+}
+
+// TestClaudeMidTurnSteeringIsIndependentOfBackgroundHandoff pins that the two
+// experiments are separately killable: enabling one must not enable the other.
+func TestClaudeMidTurnSteeringIsIndependentOfBackgroundHandoff(t *testing.T) {
+	cfg := &config.Config{}
+	ApplyStatesToConfig(cfg, []RuntimeFlagState{{
+		Key:            "features.claudeMidTurnSteering",
+		EffectiveValue: true,
+	}})
+
+	if !cfg.Features.ClaudeMidTurnSteering {
+		t.Fatal("mid-turn steering did not become enabled")
+	}
+	if cfg.Features.ClaudeBackgroundPromptHandoff {
+		t.Fatal("enabling mid-turn steering also enabled the background prompt handoff experiment")
+	}
 }

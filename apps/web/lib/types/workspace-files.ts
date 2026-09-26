@@ -74,6 +74,7 @@ export type FileChangeNotificationPayload = {
 };
 
 export type OpenFileTab = {
+  resolvedPath?: string;
   path: string;
   name: string;
   repo?: string;
@@ -82,7 +83,7 @@ export type OpenFileTab = {
   originalHash: string;
   isDirty: boolean;
   isBinary?: boolean;
-  markdownPreview?: boolean;
+  renderedPreview?: boolean;
 };
 
 export const FILE_EXTENSION_COLORS: Record<string, string> = {

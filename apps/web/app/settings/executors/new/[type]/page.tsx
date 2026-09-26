@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Badge } from "@kandev/ui/badge";
@@ -18,6 +20,7 @@ import {
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { serializeSettingsRevision } from "@/components/settings/settings-save-revision";
 import { ProfileDetailsCard } from "@/components/settings/profile-edit/profile-details-card";
 import {
@@ -32,9 +35,14 @@ import {
 import { ScriptCard } from "@/components/settings/profile-edit/script-card";
 import {
   DockerfileBuildCard,
+  UserNamespacesCard,
   type DockerBuildSuccess,
 } from "@/components/settings/profile-edit/docker-sections";
 import { SpritesApiKeyCard } from "@/components/settings/profile-edit/sprites-api-key-card";
+import { DockerNetworkCard } from "@/components/settings/profile-edit/docker-network-card";
+import { buildProfileConfig } from "@/components/settings/profile-edit/build-create-profile-config";
+import { dockerNetworksInvalidReasonKey } from "@/components/settings/profile-edit/build-docker-network-config";
+import { useDockerNetworksFormState } from "@/components/settings/profile-edit/use-docker-networks-form-state";
 import { NetworkPoliciesCard } from "@/components/settings/profile-edit/sprites-sections";
 import {
   RemoteCredentialsCard,
@@ -44,8 +52,10 @@ import {
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import type { Executor, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 
-import { EXECUTOR_TYPE_MAP } from "./executor-types";
+import { EXECUTOR_TYPE_MAP, executorTypeLabel, type ExecutorTypeInfo } from "./executor-types";
+import { RemoteDockerCreatePage } from "./remote-docker-create-page";
 import { SSHCreatePage } from "./ssh-create-page";
+import { KubernetesCreatePage } from "./kubernetes-create-page";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
@@ -64,136 +74,64 @@ export default function CreateProfilePage({ executorType }: { executorType: stri
     return <InvalidTypeFallback />;
   }
 
+  if (executorType === "remote_docker") {
+    return <RemoteDockerCreatePage />;
+  }
   if (executorType === "ssh") {
     return <SSHCreatePage />;
+  }
+
+  if (executorType === "k8s") {
+    return <KubernetesCreatePage />;
   }
 
   return <CreateProfileForm executorType={executorType as ExecutorType} typeInfo={typeInfo} />;
 }
 
 function InvalidTypeFallback() {
+  const { t } = useTranslation();
   const router = useRouter();
   return (
     <Card>
       <CardContent className="py-12 text-center">
-        <p className="text-muted-foreground">Unknown executor type</p>
+        <p className="text-muted-foreground">{t("executors:unknownExecutorType")}</p>
         <Button className="mt-4 cursor-pointer" onClick={() => router.push(EXECUTORS_ROUTE)}>
-          Back to Executors
+          {t("executors:backToExecutors")}
         </Button>
       </CardContent>
     </Card>
   );
 }
 
-function CreateProfileHeader({
-  type,
-  label,
-  description,
-}: {
-  type: string;
-  label: string;
-  description: string;
-}) {
+function CreateProfileHeader({ type, typeInfo }: { type: string; typeInfo: ExecutorTypeInfo }) {
+  const { t } = useTranslation();
   const router = useRouter();
   return (
     <>
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <ExecutorTypeIcon type={type} />
-            <h2 className="text-2xl font-bold">New {label} Profile</h2>
-            <Badge variant="outline" className="text-xs">
+            <h2 className="min-w-0 break-words text-2xl font-bold">
+              {t("executors:newTypeProfile", { type: executorTypeLabel(typeInfo, t) })}
+            </h2>
+            <Badge variant="outline" className="text-[10px]">
               {getExecutorLabel(type)}
             </Badge>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t(typeInfo.descriptionKey)}</p>
         </div>
         <Button
           variant="outline"
-          size="sm"
           onClick={() => router.push(EXECUTORS_ROUTE)}
-          className="cursor-pointer"
+          className={settingsActionClassName("w-full cursor-pointer text-sm md:w-auto md:text-xs")}
         >
-          Back to Executors
+          {t("executors:backToExecutors")}
         </Button>
       </div>
       <Separator />
     </>
   );
-}
-
-type BuildProfileConfigInput = {
-  isRemote: boolean;
-  isSprites: boolean;
-  isDocker: boolean;
-  networkPolicyRules: NetworkPolicyRule[];
-  remoteCredentials: string[];
-  agentEnvVars: Record<string, string | null>;
-  gitIdentityMode: GitIdentityMode;
-  localGitIdentity: GitIdentityState;
-  gitUserName: string;
-  gitUserEmail: string;
-  dockerfile: string;
-  imageTag: string;
-};
-
-function buildProfileConfig(input: BuildProfileConfigInput): Record<string, string> | undefined {
-  const {
-    isRemote,
-    isSprites,
-    isDocker,
-    networkPolicyRules,
-    remoteCredentials,
-    agentEnvVars,
-    gitIdentityMode,
-    localGitIdentity,
-    gitUserName,
-    gitUserEmail,
-    dockerfile,
-    imageTag,
-  } = input;
-  const config: Record<string, string> = {};
-  if (isSprites && networkPolicyRules.length > 0) {
-    config.sprites_network_policy_rules = JSON.stringify(networkPolicyRules);
-  }
-  if (isRemote && remoteCredentials.length > 0) {
-    config.remote_credentials = JSON.stringify(remoteCredentials);
-  }
-  const nonNullEnvVars = Object.fromEntries(
-    Object.entries(agentEnvVars).filter(([, v]) => v != null),
-  );
-  if (isRemote && Object.keys(nonNullEnvVars).length > 0) {
-    config.remote_auth_secrets = JSON.stringify(nonNullEnvVars);
-  }
-  if (isRemote) {
-    const effectiveName =
-      gitIdentityMode === "local" ? localGitIdentity.userName.trim() : gitUserName.trim();
-    const effectiveEmail =
-      gitIdentityMode === "local" ? localGitIdentity.userEmail.trim() : gitUserEmail.trim();
-    if (effectiveName) {
-      config.git_user_name = effectiveName;
-    }
-    if (effectiveEmail) {
-      config.git_user_email = effectiveEmail;
-    }
-  }
-  applyDockerCreateConfig(config, isDocker, dockerfile, imageTag);
-  return Object.keys(config).length > 0 ? config : undefined;
-}
-
-function applyDockerCreateConfig(
-  config: Record<string, string>,
-  isDocker: boolean,
-  dockerfile: string,
-  imageTag: string,
-): void {
-  if (!isDocker) return;
-  if (dockerfile.trim()) {
-    config.dockerfile = dockerfile;
-  }
-  if (imageTag.trim()) {
-    config.image_tag = imageTag.trim();
-  }
 }
 
 function useDefaultScripts(executorType: string, setPrepareScript: (v: string) => void) {
@@ -214,12 +152,14 @@ function useCreateRemoteFlags(executorType: ExecutorType) {
   return {
     isRemote,
     isDocker: executorType === "local_docker" || executorType === "remote_docker",
+    isLocalDocker: executorType === "local_docker",
     isSprites: executorType === "sprites",
   };
 }
 
 function useCreateRemoteAuthState() {
   const [remoteCredentials, setRemoteCredentials] = useState<string[]>([]);
+  const [configBundleIds, setConfigBundleIds] = useState<string[]>([]);
   const [agentEnvVars, setAgentEnvVars] = useState<Record<string, string | null>>({});
   const [networkPolicyRules, setNetworkPolicyRules] = useState<NetworkPolicyRule[]>([]);
 
@@ -230,6 +170,8 @@ function useCreateRemoteAuthState() {
   return {
     remoteCredentials,
     setRemoteCredentials,
+    configBundleIds,
+    setConfigBundleIds,
     agentEnvVars,
     handleAgentEnvVarChange,
     networkPolicyRules,
@@ -280,6 +222,7 @@ function useCreateGitIdentityState(isRemote: boolean) {
 }
 
 function useCreateProfileFormState(executorType: ExecutorType) {
+  const { t } = useTranslation();
   const [name, setName] = useState(() => (executorType === "local_docker" ? "Docker" : ""));
   const [mcpPolicy, setMcpPolicy] = useState("");
   const [prepareScript, setPrepareScript] = useState("");
@@ -290,10 +233,12 @@ function useCreateProfileFormState(executorType: ExecutorType) {
   const remoteAuth = useCreateRemoteAuthState();
   const [dockerfile, setDockerfile] = useState("");
   const [imageTag, setImageTag] = useState("");
+  const [allowUserNamespaces, setAllowUserNamespaces] = useState(false);
+  const dockerNetworks = useDockerNetworksFormState(undefined);
   const [builtDockerImage, setBuiltDockerImage] = useState<DockerBuildSuccess | null>(null);
   const flags = useCreateRemoteFlags(executorType);
   const gitIdentity = useCreateGitIdentityState(flags.isRemote);
-  const mcpPolicyError = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
+  const mcpPolicyErrorKey = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
 
   useEffect(() => {
     listScriptPlaceholders()
@@ -323,8 +268,8 @@ function useCreateProfileFormState(executorType: ExecutorType) {
       builtDockerImage?.imageTag === imageTag.trim());
 
   const prepareDesc = flags.isRemote
-    ? "Runs inside the execution environment before the agent starts. Type {{ to see available placeholders."
-    : "Runs on the host machine before the agent starts.";
+    ? t("executors:prepareScriptDescriptionRemote", { trigger: "{{" })
+    : t("executors:prepareScriptDescriptionLocal");
 
   return {
     name,
@@ -346,6 +291,8 @@ function useCreateProfileFormState(executorType: ExecutorType) {
     setNetworkPolicyRules: remoteAuth.setNetworkPolicyRules,
     remoteCredentials: remoteAuth.remoteCredentials,
     setRemoteCredentials: remoteAuth.setRemoteCredentials,
+    configBundleIds: remoteAuth.configBundleIds,
+    setConfigBundleIds: remoteAuth.setConfigBundleIds,
     agentEnvVars: remoteAuth.agentEnvVars,
     handleAgentEnvVarChange: remoteAuth.handleAgentEnvVarChange,
     localGitIdentity: gitIdentity.localGitIdentity,
@@ -355,6 +302,9 @@ function useCreateProfileFormState(executorType: ExecutorType) {
     setDockerfile,
     imageTag,
     setImageTag,
+    allowUserNamespaces,
+    setAllowUserNamespaces,
+    ...dockerNetworks,
     recordDockerBuildSuccess,
     dockerImageBuilt,
     gitUserName: gitIdentity.gitUserName,
@@ -363,14 +313,16 @@ function useCreateProfileFormState(executorType: ExecutorType) {
     setGitUserEmail: gitIdentity.setGitUserEmail,
     isRemote: flags.isRemote,
     isDocker: flags.isDocker,
+    isLocalDocker: flags.isLocalDocker,
     isSprites: flags.isSprites,
-    mcpPolicyError,
+    mcpPolicyErrorKey,
     buildEnvVars,
     prepareDesc,
   };
 }
 
 function useCreateProfileSave(executorId: string) {
+  const { t } = useTranslation();
   const router = useRouter();
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
@@ -388,15 +340,17 @@ function useCreateProfileSave(executorId: string) {
             e.id === executorId ? { ...e, profiles: [...(e.profiles ?? []), profile] } : e,
           ),
         );
-        runWithNavigationBlockerBypassed(() => router.push(`/settings/executors/${profile.id}`));
+        runWithNavigationBlockerBypassed(() =>
+          router.push(executorProfileSettingsPath(profile.id)),
+        );
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to create profile");
+        setError(err instanceof Error ? err.message : t("executors:failedToCreateProfile"));
         throw err;
       } finally {
         setSaving(false);
       }
     },
-    [executorId, executors, setExecutors, router],
+    [executorId, executors, setExecutors, router, t],
   );
 
   return { saving, error, handleSave };
@@ -411,6 +365,7 @@ function CreateProfileSections({
   form: ReturnType<typeof useCreateProfileFormState>;
   secrets: ReturnType<typeof useSecrets>["items"];
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <ProfileDetailsCard name={form.name} baselineName="" onNameChange={form.setName} />
@@ -423,38 +378,36 @@ function CreateProfileSections({
         />
       )}
       {form.isDocker && (
-        <DockerfileBuildCard
-          dockerfile={form.dockerfile}
-          baselineDockerfile=""
-          onDockerfileChange={form.setDockerfile}
-          imageTag={form.imageTag}
-          baselineImageTag=""
-          onImageTagChange={form.setImageTag}
-          onBuildSuccess={form.recordDockerBuildSuccess}
-        />
+        <>
+          <DockerfileBuildCard
+            dockerfile={form.dockerfile}
+            baselineDockerfile=""
+            onDockerfileChange={form.setDockerfile}
+            imageTag={form.imageTag}
+            baselineImageTag=""
+            onImageTagChange={form.setImageTag}
+            onBuildSuccess={form.recordDockerBuildSuccess}
+          />
+          <DockerNetworkCard
+            primaryNetwork={form.primaryNetwork}
+            onPrimaryNetworkChange={form.setPrimaryNetwork}
+            primaryGwPriority={form.primaryGwPriority}
+            onPrimaryGwPriorityChange={form.setPrimaryGwPriority}
+            additionalNetworks={form.additionalNetworks}
+            onAddAdditionalNetwork={form.addAdditionalNetwork}
+            onUpdateAdditionalNetwork={form.updateAdditionalNetwork}
+            onRemoveAdditionalNetwork={form.removeAdditionalNetwork}
+          />
+          {form.isLocalDocker && (
+            <UserNamespacesCard
+              enabled={form.allowUserNamespaces}
+              baselineEnabled={false}
+              onChange={form.setAllowUserNamespaces}
+            />
+          )}
+        </>
       )}
-      {form.isRemote && (
-        <RemoteCredentialsCard
-          isRemote={form.isRemote}
-          selectedIds={form.remoteCredentials}
-          baselineSelectedIds={[]}
-          onChange={form.setRemoteCredentials}
-          agentEnvVars={form.agentEnvVars}
-          baselineAgentEnvVars={{}}
-          onAgentEnvVarChange={form.handleAgentEnvVarChange}
-          secrets={secrets}
-          gitIdentityMode={form.gitIdentityMode}
-          baselineGitIdentityMode="override"
-          onGitIdentityModeChange={form.setGitIdentityMode}
-          gitUserName={form.gitUserName}
-          gitUserEmail={form.gitUserEmail}
-          baselineGitUserName=""
-          baselineGitUserEmail=""
-          onGitUserNameChange={form.setGitUserName}
-          onGitUserEmailChange={form.setGitUserEmail}
-          localGitIdentity={form.localGitIdentity}
-        />
-      )}
+      <CreateRemoteCredentialsSection executorType={executorType} form={form} secrets={secrets} />
       {form.isSprites && (
         <NetworkPoliciesCard
           rules={form.networkPolicyRules}
@@ -471,7 +424,7 @@ function CreateProfileSections({
         onRemove={form.removeEnvVar}
       />
       <ScriptCard
-        title="Prepare Script"
+        title={t("executors:prepareScript")}
         description={form.prepareDesc}
         value={form.prepareScript}
         baselineValue=""
@@ -482,8 +435,8 @@ function CreateProfileSections({
       />
       {form.isRemote && (
         <ScriptCard
-          title="Cleanup Script"
-          description="Runs after the agent session ends for cleanup tasks."
+          title={t("executors:cleanupScript")}
+          description={t("executors:runsAfterTheAgentSessionEnds")}
           value={form.cleanupScript}
           baselineValue=""
           onChange={form.setCleanupScript}
@@ -495,28 +448,67 @@ function CreateProfileSections({
       <McpPolicyCard
         mcpPolicy={form.mcpPolicy}
         baselinePolicy=""
-        mcpPolicyError={form.mcpPolicyError}
+        mcpPolicyErrorKey={form.mcpPolicyErrorKey}
         onPolicyChange={form.setMcpPolicy}
       />
     </>
   );
 }
 
-function getCreateDisabledReason(
+function CreateRemoteCredentialsSection({
+  executorType,
+  form,
+  secrets,
+}: {
+  executorType: ExecutorType;
+  form: ReturnType<typeof useCreateProfileFormState>;
+  secrets: ReturnType<typeof useSecrets>["items"];
+}) {
+  if (!form.isRemote) return null;
+  return (
+    <RemoteCredentialsCard
+      isRemote
+      selectedIds={form.remoteCredentials}
+      baselineSelectedIds={[]}
+      onChange={form.setRemoteCredentials}
+      configBundleIds={form.configBundleIds}
+      onConfigBundleChange={form.setConfigBundleIds}
+      isSSH={executorType === "ssh"}
+      agentEnvVars={form.agentEnvVars}
+      baselineAgentEnvVars={{}}
+      onAgentEnvVarChange={form.handleAgentEnvVarChange}
+      secrets={secrets}
+      gitIdentityMode={form.gitIdentityMode}
+      baselineGitIdentityMode="override"
+      onGitIdentityModeChange={form.setGitIdentityMode}
+      gitUserName={form.gitUserName}
+      gitUserEmail={form.gitUserEmail}
+      baselineGitUserName=""
+      baselineGitUserEmail=""
+      onGitUserNameChange={form.setGitUserName}
+      onGitUserEmailChange={form.setGitUserEmail}
+      localGitIdentity={form.localGitIdentity}
+    />
+  );
+}
+
+// Returns a catalog key (or null when the form is submittable) so the reason
+// resolves at render rather than at module load.
+function getCreateDisabledReasonKey(
   form: ReturnType<typeof useCreateProfileFormState>,
   spritesTokenMissing: boolean,
   saving: boolean,
 ) {
-  if (saving) return "Creating profile...";
-  if (!form.name.trim()) return "Enter a profile name.";
-  if (form.mcpPolicyError) return form.mcpPolicyError;
-  if (spritesTokenMissing) return "Add a Sprites API key before creating the profile.";
+  if (saving) return "executors:creatingProfile";
+  if (!form.name.trim()) return "executors:enterAProfileName";
+  if (form.mcpPolicyErrorKey) return form.mcpPolicyErrorKey;
+  if (spritesTokenMissing) return "executors:addASpritesApiKeyBeforeCreating";
   if (form.isDocker) {
-    if (!form.imageTag.trim()) return "Enter an image tag before creating the profile.";
-    if (!form.dockerfile.trim()) return "Add Dockerfile content before creating the profile.";
-    if (!form.dockerImageBuilt) return "Build this Docker image before creating the profile.";
+    if (!form.imageTag.trim()) return "executors:enterAnImageTagBeforeCreating";
+    if (!form.dockerfile.trim()) return "executors:addDockerfileContentBeforeCreating";
+    if (!form.dockerImageBuilt) return "executors:buildThisDockerImageBeforeCreating";
   }
-  return null;
+  return dockerNetworksInvalidReasonKey(form);
 }
 
 function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormState>) {
@@ -527,8 +519,10 @@ function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormS
       isRemote: form.isRemote,
       isSprites: form.isSprites,
       isDocker: form.isDocker,
+      isLocalDocker: form.isLocalDocker,
       networkPolicyRules: form.networkPolicyRules,
       remoteCredentials: form.remoteCredentials,
+      configBundleIds: form.configBundleIds,
       agentEnvVars: form.agentEnvVars,
       gitIdentityMode: form.gitIdentityMode,
       localGitIdentity: form.localGitIdentity,
@@ -536,6 +530,10 @@ function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormS
       gitUserEmail: form.gitUserEmail,
       dockerfile: form.dockerfile,
       imageTag: form.imageTag,
+      allowUserNamespaces: form.allowUserNamespaces,
+      primaryNetwork: form.primaryNetwork,
+      primaryGwPriority: form.primaryGwPriority,
+      additionalNetworks: form.additionalNetworks,
     }),
     prepare_script: form.prepareScript,
     cleanup_script: form.cleanupScript,
@@ -548,37 +546,34 @@ function CreateProfileForm({
   typeInfo,
 }: {
   executorType: ExecutorType;
-  typeInfo: { executorId: string; label: string; description: string };
+  typeInfo: ExecutorTypeInfo;
 }) {
+  const { t } = useTranslation();
   const { items: secrets } = useSecrets();
   const form = useCreateProfileFormState(executorType);
   const { saving, error, handleSave } = useCreateProfileSave(typeInfo.executorId);
   const spritesTokenMissing = form.isSprites && !form.spritesSecretId;
-  const disabledReason = getCreateDisabledReason(form, spritesTokenMissing, saving);
+  const disabledReasonKey = getCreateDisabledReasonKey(form, spritesTokenMissing, saving);
   const savePayload = buildCreateProfilePayload(form);
   const saveRevision = serializeSettingsRevision(savePayload);
   useSettingsSaveContributor({
     id: `executor-profile:new:${typeInfo.executorId}`,
     revision: saveRevision,
     isDirty: true,
-    canSave: !disabledReason,
-    invalidReason: disabledReason ?? undefined,
+    canSave: !disabledReasonKey,
+    invalidReason: disabledReasonKey ? t(disabledReasonKey) : undefined,
     save: () => handleSave(savePayload),
     discard: () => undefined,
   });
 
   return (
     <div className="space-y-8">
-      <CreateProfileHeader
-        type={executorType}
-        label={typeInfo.label}
-        description={typeInfo.description}
-      />
+      <CreateProfileHeader type={executorType} typeInfo={typeInfo} />
       <fieldset disabled={saving} className="space-y-8">
         <CreateProfileSections executorType={executorType} form={form} secrets={secrets} />
       </fieldset>
       {spritesTokenMissing && (
-        <p className="text-sm text-destructive">Sprites API key is required.</p>
+        <p className="text-sm text-destructive">{t("executors:spritesApiKeyIsRequired")}</p>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>

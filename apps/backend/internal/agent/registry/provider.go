@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -16,7 +17,8 @@ import (
 // Provide creates and loads the agent registry.
 //
 // KANDEV_MOCK_AGENT controls mock-agent availability:
-//   - "only"  → E2E mode: only register mock agent, skip all others
+//   - "only"  → E2E mode: register virtual families and the mock agent,
+//     skip all other inference agents
 //   - "true"  → Dev mode: load all agents AND enable mock agent
 //   - unset   → Production: load all agents, mock agent disabled
 //
@@ -38,7 +40,11 @@ func Provide(log *logger.Logger) (*Registry, func() error, error) {
 	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
 	mockProviders := os.Getenv("KANDEV_MOCK_PROVIDERS")
 	if mockMode == "only" {
-		// E2E mode: only register mock agent — skip agent discovery for all others
+		// E2E mode keeps inference isolated to the mock provider, but virtual
+		// families are still part of the settings and routing contract. They do
+		// not launch a process or discover a host binary, so retaining them does
+		// not weaken the isolation boundary.
+		_ = reg.Register(agents.NewDynamicAgent())
 		_ = reg.Register(agents.NewMockAgent())
 		configureMockAgent(reg, "mock-agent", log)
 		registerExtraMockProviders(reg, log, mockProviders)
@@ -90,23 +96,8 @@ func validateMockProviders(reg *Registry, raw string, log *logger.Logger) {
 // HTTP /routing/retry endpoint can flip a degraded provider back to
 // healthy without waiting for the next real launch.
 func registerRealProvidersProber(reg *Registry, log *logger.Logger) {
-	resolver := func(providerID string) ([]string, map[string]string, bool) {
-		ag, ok := reg.Get(providerID)
-		if !ok || !ag.Enabled() {
-			return nil, nil, false
-		}
-		cmd := ag.BuildCommand(agents.CommandOptions{})
-		if cmd.IsEmpty() {
-			return nil, nil, false
-		}
-		var env map[string]string
-		if rt := ag.Runtime(); rt != nil && len(rt.Env) > 0 {
-			env = make(map[string]string, len(rt.Env))
-			for k, v := range rt.Env {
-				env[k] = v
-			}
-		}
-		return cmd.Args(), env, true
+	resolver := func(ctx context.Context, providerID string) ([]string, map[string]string, bool) {
+		return reg.resolveProviderCommand(ctx, providerID)
 	}
 	probe := routingerr.NewACPProbe(resolver, log)
 	for _, id := range RoutableProviderIDs {
@@ -120,6 +111,67 @@ func registerRealProvidersProber(reg *Registry, log *logger.Logger) {
 		}
 		routingerr.RegisterProber(id, probe)
 	}
+}
+
+// resolveProviderCommand builds the host command used by a recovery probe.
+// Managed agents must use the same persisted selection as ordinary host
+// launches. A selection read failure therefore returns no command instead of
+// silently probing the unversioned package.
+func (r *Registry) resolveProviderCommand(
+	ctx context.Context,
+	providerID string,
+) ([]string, map[string]string, bool) {
+	ag, ok := r.Get(providerID)
+	if !ok || !ag.Enabled() {
+		return nil, nil, false
+	}
+	managedRuntimeVersion, ok := r.resolveManagedProviderVersion(ctx, providerID, ag)
+	if !ok {
+		return nil, nil, false
+	}
+	opts := agents.CommandOptions{
+		Runtime:               agentruntime.RuntimeStandalone,
+		ManagedRuntimeVersion: managedRuntimeVersion,
+	}
+	cmd := ag.BuildCommand(opts)
+	if cmd.IsEmpty() {
+		return nil, nil, false
+	}
+	var env map[string]string
+	if rt := ag.Runtime(); rt != nil && len(rt.Env) > 0 {
+		env = make(map[string]string, len(rt.Env))
+		for k, v := range rt.Env {
+			env[k] = v
+		}
+	}
+	return cmd.Args(), env, true
+}
+
+func (r *Registry) resolveManagedProviderVersion(
+	ctx context.Context,
+	providerID string,
+	ag agents.Agent,
+) (string, bool) {
+	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return "", true
+	}
+	selectionStore := r.managedRuntimeSelectionReader()
+	if selectionStore == nil {
+		return "", false
+	}
+	spec := managed.ManagedNPMRuntime()
+	selection, found, err := selectionStore.Get(ctx, providerID, spec.Package)
+	if err != nil {
+		return "", false
+	}
+	if !found || selection.Package != spec.Package {
+		return spec.DefaultVersion, true
+	}
+	if selection.Version == "" {
+		return spec.DefaultVersion, true
+	}
+	return selection.Version, true
 }
 
 // registerExtraMockProviders parses the supplied comma-separated list

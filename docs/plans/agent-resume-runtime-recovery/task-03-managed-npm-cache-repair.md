@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agent-resume-runtime-recovery/spec.md"
+spec: "../../specs/agents/requirements/agent-resume-runtime-recovery.md"
 ---
 
 # Task 03: Repair corrupt managed npm execution caches
@@ -50,7 +50,7 @@ lockfile, or package configuration.
 ## Inputs
 
 - Repair spec final two regression scenarios and cache safety constraints
-- `docs/specs/agents/runtime-updates.md` failure mode and corrupt-cache scenario
+- `docs/specs/agents/requirements/runtime-updates.md` failure mode and corrupt-cache scenario
 - Plan section `Repair one managed npm execution cache`
 - Existing direct-argv `RuntimeUpdater`, job output ring, and update retry
   patterns

@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -86,6 +87,20 @@ func TestResolveExecutorConfig_AuthoritativeSSHKeys_ClobberTaskMetadata(t *testi
 			taskValue:    "bash --norc",
 			wantMetadata: "",
 		},
+		{
+			name:         "userns_profile_wins_when_set",
+			key:          lifecycle.MetadataKeyAllowUserNamespaces,
+			profileValue: "true",
+			taskValue:    "false",
+			wantMetadata: "true",
+		},
+		{
+			name:         "empty_userns_profile_clobbers_task",
+			key:          lifecycle.MetadataKeyAllowUserNamespaces,
+			profileValue: "",
+			taskValue:    "true",
+			wantMetadata: "",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -135,5 +150,125 @@ func TestResolveExecutorConfig_PassthroughKeys_DontClobberTaskMetadata(t *testin
 
 	if got, _ := cfg.Metadata["git_user_name"].(string); got != "Task Author" {
 		t.Fatalf("metadata[git_user_name] = %q, want task value to survive empty profile", got)
+	}
+}
+
+// TestResolveExecutorConfig_AuthoritativeKeysClearedWithoutProfile pins
+// AC-6 for the launch paths that attach no executor profile. The
+// authoritative-key projection only runs inside applyProfile, so before
+// this test a task whose metadata carried allow_user_namespaces="true"
+// kept it whenever no profile was selected, the profile ID was stale, or
+// the profile lookup failed — and DockerExecutor.buildContainerLaunchConfig
+// reads that key verbatim, launching a relaxed container from purely
+// task-supplied metadata. Task metadata is caller-writable through
+// POST/PATCH /api/v1/tasks (task_http_handlers.go:924, :1576) and
+// task.create/task.update over WS, none of which filter keys.
+func TestResolveExecutorConfig_AuthoritativeKeysClearedWithoutProfile(t *testing.T) {
+	cases := []struct {
+		name      string
+		profileID string
+	}{
+		{name: "no_profile_selected", profileID: ""},
+		{name: "profile_id_does_not_resolve", profileID: "prof-missing"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, key := range []string{
+				lifecycle.MetadataKeyAllowUserNamespaces,
+				lifecycle.MetadataKeySSHWorkdirRoot,
+				lifecycle.MetadataKeySSHShell,
+			} {
+				t.Run(key, func(t *testing.T) {
+					repo := newMockRepository()
+					exec := newTestExecutor(t, &mockAgentManager{}, repo)
+					repo.executors["exec-docker-1"] = &models.Executor{
+						ID:   "exec-docker-1",
+						Type: models.ExecutorTypeLocalDocker,
+					}
+
+					metadata := map[string]interface{}{key: "true"}
+					if tc.profileID != "" {
+						metadata["executor_profile_id"] = tc.profileID
+					}
+					cfg := exec.resolveExecutorConfig(context.Background(), "exec-docker-1", "ws-1", metadata)
+
+					if got, _ := cfg.Metadata[key].(string); got != "" {
+						t.Fatalf("metadata[%q] = %q, want it cleared when no profile supplies it", key, got)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestResolveExecutorConfig_KubernetesProfileConfigClobbersTaskMetadata(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.executors["exec-k8s"] = &models.Executor{ID: "exec-k8s", Type: models.ExecutorTypeKubernetes}
+	profileConfig := map[string]string{
+		lifecycle.MetadataKeyKubernetesProfilePlatform:       "linux/arm64",
+		lifecycle.MetadataKeyKubernetesProfileMainContainer:  "trusted-agent",
+		lifecycle.MetadataKeyKubernetesPodTemplateYAML:       "trusted pod template",
+		lifecycle.MetadataKeyKubernetesWorkspaceMode:         "existing_claim",
+		lifecycle.MetadataKeyKubernetesWorkspaceSize:         "",
+		lifecycle.MetadataKeyKubernetesWorkspaceStorageClass: "",
+		lifecycle.MetadataKeyKubernetesWorkspaceAccessModes:  "",
+		lifecycle.MetadataKeyKubernetesWorkspaceClaimName:    "trusted-claim",
+	}
+	repo.executorProfiles["profile-k8s"] = &models.ExecutorProfile{
+		ID: "profile-k8s", ExecutorID: "exec-k8s", Config: profileConfig,
+	}
+	metadata := map[string]interface{}{"executor_profile_id": "profile-k8s"}
+	for key := range profileConfig {
+		metadata[key] = "hostile-task-override"
+	}
+	cfg := exec.resolveExecutorConfig(context.Background(), "exec-k8s", "ws-1", metadata)
+	got := make(map[string]string, len(profileConfig))
+	for key := range profileConfig {
+		got[key], _ = cfg.Metadata[key].(string)
+	}
+	if !reflect.DeepEqual(got, profileConfig) {
+		t.Fatalf("Kubernetes launch metadata = %#v, want authoritative profile config %#v", got, profileConfig)
+	}
+}
+
+func TestResolveExecutorConfig_KubernetesProfileKeysDoNotClobberNonKubernetesMetadata(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.executors["exec-docker"] = &models.Executor{ID: "exec-docker", Type: models.ExecutorTypeLocalDocker}
+	profileConfig := map[string]string{
+		lifecycle.MetadataKeyKubernetesProfilePlatform:       "linux/arm64",
+		lifecycle.MetadataKeyKubernetesProfileMainContainer:  "profile-agent",
+		lifecycle.MetadataKeyKubernetesPodTemplateYAML:       "profile pod template",
+		lifecycle.MetadataKeyKubernetesWorkspaceMode:         "empty_dir",
+		lifecycle.MetadataKeyKubernetesWorkspaceSize:         "",
+		lifecycle.MetadataKeyKubernetesWorkspaceStorageClass: "",
+		lifecycle.MetadataKeyKubernetesWorkspaceAccessModes:  "",
+		lifecycle.MetadataKeyKubernetesWorkspaceClaimName:    "",
+	}
+	repo.executorProfiles["profile-docker"] = &models.ExecutorProfile{
+		ID: "profile-docker", ExecutorID: "exec-docker", Config: profileConfig,
+	}
+	want := map[string]string{
+		lifecycle.MetadataKeyKubernetesProfilePlatform:       "task-platform",
+		lifecycle.MetadataKeyKubernetesProfileMainContainer:  "task-container",
+		lifecycle.MetadataKeyKubernetesPodTemplateYAML:       "task pod template",
+		lifecycle.MetadataKeyKubernetesWorkspaceMode:         "task-mode",
+		lifecycle.MetadataKeyKubernetesWorkspaceSize:         "task-size",
+		lifecycle.MetadataKeyKubernetesWorkspaceStorageClass: "task-storage-class",
+		lifecycle.MetadataKeyKubernetesWorkspaceAccessModes:  "task-access-modes",
+		lifecycle.MetadataKeyKubernetesWorkspaceClaimName:    "task-claim",
+	}
+	metadata := map[string]interface{}{"executor_profile_id": "profile-docker"}
+	for key, value := range want {
+		metadata[key] = value
+	}
+	cfg := exec.resolveExecutorConfig(context.Background(), "exec-docker", "ws-1", metadata)
+	got := make(map[string]string, len(want))
+	for key := range want {
+		got[key], _ = cfg.Metadata[key].(string)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("non-Kubernetes launch metadata = %#v, want task metadata unchanged %#v", got, want)
 	}
 }

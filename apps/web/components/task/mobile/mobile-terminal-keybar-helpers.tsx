@@ -9,30 +9,34 @@ import { isActive } from "@/lib/terminal/shell-modifiers";
 export type KeyDef = {
   /** Stable id used for data-testid (e.g. `keybar-key-esc`). */
   id: string;
-  /** Rendered button label. */
+  /** Rendered button label. A key cap or glyph, not translatable copy. */
   label: ReactNode;
-  /** Accessible label. */
-  ariaLabel: string;
+  /**
+   * Catalog key for the accessible label. A key holds the spoken name, which a
+   * screen reader does read out, so it is copy — but this table is module
+   * scope, so a resolved `t()` here would freeze at the boot locale.
+   */
+  ariaLabelKey: string;
   /** Sequence emitted on tap. Ctrl/Shift transforms are applied downstream. */
   seq: string;
 };
 
 export const KEYS: readonly KeyDef[] = [
-  { id: "esc", label: "Esc", ariaLabel: "Escape", seq: KEY_SEQUENCES.esc },
-  { id: "tab", label: "Tab", ariaLabel: "Tab", seq: KEY_SEQUENCES.tab },
-  { id: "up", label: "↑", ariaLabel: "Arrow Up", seq: KEY_SEQUENCES.up },
-  { id: "down", label: "↓", ariaLabel: "Arrow Down", seq: KEY_SEQUENCES.down },
-  { id: "left", label: "←", ariaLabel: "Arrow Left", seq: KEY_SEQUENCES.left },
-  { id: "right", label: "→", ariaLabel: "Arrow Right", seq: KEY_SEQUENCES.right },
-  { id: "home", label: "Home", ariaLabel: "Home", seq: KEY_SEQUENCES.home },
-  { id: "end", label: "End", ariaLabel: "End", seq: KEY_SEQUENCES.end },
-  { id: "pageup", label: "PgUp", ariaLabel: "Page Up", seq: KEY_SEQUENCES.pageUp },
-  { id: "pagedown", label: "PgDn", ariaLabel: "Page Down", seq: KEY_SEQUENCES.pageDown },
-  { id: "pipe", label: "|", ariaLabel: "Pipe", seq: "|" },
-  { id: "tilde", label: "~", ariaLabel: "Tilde", seq: "~" },
-  { id: "slash", label: "/", ariaLabel: "Slash", seq: "/" },
-  { id: "dash", label: "-", ariaLabel: "Dash", seq: "-" },
-  { id: "underscore", label: "_", ariaLabel: "Underscore", seq: "_" },
+  { id: "esc", label: "Esc", ariaLabelKey: "task:keyEscape", seq: KEY_SEQUENCES.esc },
+  { id: "tab", label: "Tab", ariaLabelKey: "task:keyTab", seq: KEY_SEQUENCES.tab },
+  { id: "up", label: "↑", ariaLabelKey: "task:keyArrowUp", seq: KEY_SEQUENCES.up },
+  { id: "down", label: "↓", ariaLabelKey: "task:keyArrowDown", seq: KEY_SEQUENCES.down },
+  { id: "left", label: "←", ariaLabelKey: "task:keyArrowLeft", seq: KEY_SEQUENCES.left },
+  { id: "right", label: "→", ariaLabelKey: "task:keyArrowRight", seq: KEY_SEQUENCES.right },
+  { id: "home", label: "Home", ariaLabelKey: "task:keyHome", seq: KEY_SEQUENCES.home },
+  { id: "end", label: "End", ariaLabelKey: "task:keyEnd", seq: KEY_SEQUENCES.end },
+  { id: "pageup", label: "PgUp", ariaLabelKey: "task:keyPageUp", seq: KEY_SEQUENCES.pageUp },
+  { id: "pagedown", label: "PgDn", ariaLabelKey: "task:keyPageDown", seq: KEY_SEQUENCES.pageDown },
+  { id: "pipe", label: "|", ariaLabelKey: "task:keyPipe", seq: "|" },
+  { id: "tilde", label: "~", ariaLabelKey: "task:keyTilde", seq: "~" },
+  { id: "slash", label: "/", ariaLabelKey: "task:keySlash", seq: "/" },
+  { id: "dash", label: "-", ariaLabelKey: "task:keyDash", seq: "-" },
+  { id: "underscore", label: "_", ariaLabelKey: "task:keyUnderscore", seq: "_" },
 ];
 
 type KeybarButtonProps = {

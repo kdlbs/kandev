@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchSystemInfo, requestRestart } from "@/lib/api/domains/system-api";
+import { registerBackendReloadOwner } from "@/lib/platform/backend-reload-coordinator";
 // The module-level `t` (not the hook) so these resolve when the callback fires
 // and stay out of the callbacks' dependency arrays. This file has no JSX, so
 // `mode: "jsx-only"` can never see the strings below.
@@ -10,7 +11,6 @@ import { t } from "@/lib/i18n";
 export type KandevRestartPhase = "idle" | "starting" | "restarting" | "done" | "error";
 
 const POLL_INTERVAL_MS = 2000;
-const MAX_DURATION_MS = 3 * 60 * 1000;
 
 type UseKandevRestartArgs = {
   onComplete?: () => void;
@@ -31,37 +31,52 @@ export function useKandevRestart({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [previousBootID, setPreviousBootID] = useState<string | null>(null);
   const activeRef = useRef(false);
-  const startedAtRef = useRef<number | null>(null);
+  const ownerReleaseRef = useRef<(() => void) | null>(null);
 
-  const fail = useCallback((message: string) => {
-    activeRef.current = false;
-    setErrorMessage(message);
-    setPhase("error");
+  const claimReloadOwnership = useCallback(() => {
+    if (!ownerReleaseRef.current) ownerReleaseRef.current = registerBackendReloadOwner();
   }, []);
+
+  const releaseReloadOwnership = useCallback(() => {
+    ownerReleaseRef.current?.();
+    ownerReleaseRef.current = null;
+  }, []);
+
+  const fail = useCallback(
+    (message: string) => {
+      activeRef.current = false;
+      releaseReloadOwnership();
+      setErrorMessage(message);
+      setPhase("error");
+    },
+    [releaseReloadOwnership],
+  );
 
   const start = useCallback(async () => {
     if (activeRef.current) return;
+    claimReloadOwnership();
     activeRef.current = true;
     setErrorMessage(null);
     setPhase("starting");
     try {
       const before = await fetchSystemInfo({ cache: "no-store" });
       setPreviousBootID(before.boot_id);
-      startedAtRef.current = Date.now();
       await requestRestart();
       setPhase("restarting");
     } catch (e) {
       fail(e instanceof Error ? e.message : t("system:restartStartFailed"));
     }
-  }, [fail]);
+  }, [claimReloadOwnership, fail]);
 
   const dismiss = useCallback(() => {
     activeRef.current = false;
+    releaseReloadOwnership();
     setPhase("idle");
     setErrorMessage(null);
     setPreviousBootID(null);
-    startedAtRef.current = null;
-  }, []);
+  }, [releaseReloadOwnership]);
+
+  useEffect(() => releaseReloadOwnership, [releaseReloadOwnership]);
 
   useEffect(() => {
     if (phase !== "restarting") return;
@@ -69,13 +84,6 @@ export function useKandevRestart({
     let cancelled = false;
 
     const tick = async () => {
-      const startedAt = startedAtRef.current ?? Date.now();
-      if (Date.now() - startedAt > MAX_DURATION_MS) {
-        if (!cancelled) {
-          fail(t("system:restartTimedOut"));
-        }
-        return;
-      }
       try {
         const info = await fetchSystemInfo({ cache: "no-store" });
         if (cancelled) return;

@@ -2,9 +2,21 @@ package scheduler
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/office/waveidentity"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
+	"github.com/kandev/kandev/internal/runs/dedupkeys"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
+	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
 // Canonical lowercase status values used inside the pipeline. Backend
@@ -41,10 +53,17 @@ type TaskMutation struct {
 	// What's changing.
 	NewStatus     *string // nil = unchanged
 	NewAssigneeID *string
-	NewPriority   *string
-	Comment       *MutationComment // user/agent comment if this mutation includes one
-	ReopenIntent  bool             // explicit reopen=true (or status moves done|cancelled → todo|in_progress)
-	ResumeIntent  bool             // explicit resume=true (validated upstream to require comment)
+	// AssignmentGeneration is the value the assigning transaction committed,
+	// carried here rather than re-read (a producer reading the task's
+	// current generation after the fact can observe a later occurrence's
+	// value — see docs/specs/office/system-design/run-dedup-generation-01.md
+	// #carrying-the-generation). Nil means the caller could not supply one;
+	// reactToAssigneeChange then enqueues keyless rather than guess.
+	AssignmentGeneration *int64
+	NewPriority          *string
+	Comment              *MutationComment // user/agent comment if this mutation includes one
+	ReopenIntent         bool             // explicit reopen=true (or status moves done|cancelled → todo|in_progress)
+	ResumeIntent         bool             // explicit resume=true (validated upstream to require comment)
 
 	// Who is acting.
 	ActorID   string
@@ -110,11 +129,31 @@ func (ss *SchedulerService) ApplyTaskMutation(
 			return
 		}
 		seen[key] = struct{}{}
-		if err := ss.QueueRunCtx(ctx, agentID, c); err != nil {
+		outcome, err := ss.QueueRunCtx(ctx, agentID, c)
+		if err != nil {
+			if errors.Is(err, shared.ErrWorkspacePaused) {
+				// A confirmed operator pause is not a reactivity failure —
+				// the paused workspace already logged its own pause event.
+				ss.logger.Debug("reactivity run skipped (workspace paused)",
+					zap.String("agent", agentID),
+					zap.String("reason", c.Reason))
+				return
+			}
+			if errors.Is(err, shared.ErrPauseGateUnavailable) {
+				// A transient gate-read failure, not a reactivity failure —
+				// the gate site that returned it already logged a Warn.
+				ss.logger.Warn("reactivity run skipped (pause gate unavailable)",
+					zap.String("agent", agentID),
+					zap.String("reason", c.Reason))
+				return
+			}
 			ss.logger.Error("reactivity run failed",
 				zap.String("agent", agentID),
 				zap.String("reason", c.Reason),
 				zap.Error(err))
+			return
+		}
+		if outcome != runsservice.QueueOutcomeQueued {
 			return
 		}
 		res.Runs = append(res.Runs, QueuedRunSummary{
@@ -128,8 +167,13 @@ func (ss *SchedulerService) ApplyTaskMutation(
 	}
 
 	// --- Assignee handoff ---
-	if change.NewAssigneeID != nil && *change.NewAssigneeID != task.AssigneeAgentProfileID {
-		ss.reactToAssigneeChange(task, *change.NewAssigneeID, change, queue, res)
+	// Fires on every non-nil NewAssigneeID, including a repeat assignment to
+	// the agent that already holds the seat: that is a real occurrence (the
+	// operator is asking for the work again), not a no-op, so this no longer
+	// gates on the two ids differing. reactToAssigneeChange itself guards the
+	// session interrupt.
+	if change.NewAssigneeID != nil {
+		ss.reactToAssigneeChange(ctx, task, *change.NewAssigneeID, change, queue, res)
 	}
 
 	// --- Comment reactions (assignee + @mentions) ---
@@ -175,7 +219,13 @@ func (ss *SchedulerService) reactToStatusChange(
 		ss.cascadeReviewRequested(ctx, task, change, queue)
 
 	case prev == statusBlocked && next != statusBlocked:
-		// Unblocked — wake assignee with task_unblocked.
+		// Unblocked — no durable occurrence row to key on: keyless by design.
+		// Reported only when there's an assignee to enqueue for — queue()
+		// silently drops an empty agent id, so reporting unconditionally
+		// would count an enqueue that never happened.
+		if task.AssigneeAgentProfileID != "" {
+			runsservice.ReportKeylessEnqueue(RunReasonTaskUnblocked, runsservice.KeylessCauseByDesign, "")
+		}
 		queue(task.AssigneeAgentProfileID, RunContext{
 			Reason:      RunReasonTaskUnblocked,
 			TaskID:      task.ID,
@@ -185,7 +235,7 @@ func (ss *SchedulerService) reactToStatusChange(
 		})
 
 	case (prev == statusDone || prev == statusCancelled) && (next == statusTodo || next == statusInProgress):
-		// Reopen — different reason if a comment was attached.
+		// Reopen — different reason (and dedup identity) if a comment was attached.
 		reason := RunReasonTaskReopened
 		commentID := ""
 		if change.Comment != nil {
@@ -196,13 +246,23 @@ func (ss *SchedulerService) reactToStatusChange(
 			// Explicit resume always uses the comment-flavoured reason.
 			reason = RunReasonTaskReopenedComment
 		}
+		var key string
+		if reason == RunReasonTaskReopenedComment {
+			key = fmt.Sprintf("%s:%s:%s", RunReasonTaskReopenedComment, commentID, task.AssigneeAgentProfileID)
+		} else if task.AssigneeAgentProfileID != "" {
+			// Silent reopen (no comment) — no durable occurrence row: keyless
+			// by design. Reported only when there's an assignee to enqueue
+			// for, matching the task_unblocked case above.
+			runsservice.ReportKeylessEnqueue(RunReasonTaskReopened, runsservice.KeylessCauseByDesign, "")
+		}
 		queue(task.AssigneeAgentProfileID, RunContext{
-			Reason:      reason,
-			TaskID:      task.ID,
-			WorkspaceID: task.WorkspaceID,
-			ActorID:     change.ActorID,
-			ActorType:   change.ActorType,
-			CommentID:   commentID,
+			Reason:         reason,
+			TaskID:         task.ID,
+			WorkspaceID:    task.WorkspaceID,
+			ActorID:        change.ActorID,
+			ActorType:      change.ActorType,
+			CommentID:      commentID,
+			IdempotencyKey: key,
 		})
 	}
 }
@@ -217,32 +277,58 @@ func (ss *SchedulerService) reactToStatusChange(
 //
 // The previous assignee is NOT separately notified — interrupting their
 // run is the signal that they're no longer in charge.
+//
+// ApplyTaskMutation now calls this for every non-nil NewAssigneeID,
+// including a repeat assignment to the agent that already holds the seat.
+// The interrupt must NOT fire for that case — it would hard-cancel the
+// agent's own in-flight run — so unlike the removed caller-side equality
+// gate, this comparison stays local to the interrupt decision and does not
+// also guard the wake.
 func (ss *SchedulerService) reactToAssigneeChange(
+	ctx context.Context,
 	task *TaskSnapshot,
 	newAssigneeID string,
 	change TaskMutation,
 	queue func(string, RunContext),
 	res *ApplyTaskMutationResult,
 ) {
-	// Cancel the prior assignee's session if there was one. We re-use
-	// InterruptSessionID — status→cancelled also sets it; either reason
-	// for hard-cancelling produces the same downstream call.
-	if task.AssigneeAgentProfileID != "" && res.InterruptSessionID == "" {
+	if task.AssigneeAgentProfileID != "" && newAssigneeID != task.AssigneeAgentProfileID {
 		res.InterruptSessionID = task.ID
 	}
 
-	// Wake the new assignee.
+	if newAssigneeID == "" {
+		// Unassignment: the interrupt above (if any) already fired; queue's
+		// own empty-agent-id guard would catch this too, but there is no key
+		// to build or keyless cause to report for a run that will never be
+		// attempted.
+		return
+	}
+
+	// The current step must accept an auto-started run before this wake is
+	// queued — the interrupt above already fired and is unaffected. See
+	// shared.IsAssignmentWakeEligible for the fail-open rationale.
+	if !shared.IsAssignmentWakeEligible(ctx, ss.logger, ss.repo, ss.workflowStepGetter, task.ID, "reactivity.assignee_change") {
+		return
+	}
+
 	commentID := ""
 	if change.Comment != nil {
 		commentID = change.Comment.ID
 	}
+	var key string
+	if change.AssignmentGeneration != nil {
+		key = dedupkeys.AssignmentKey(task.ID, newAssigneeID, *change.AssignmentGeneration)
+	} else {
+		runsservice.ReportKeylessEnqueue(RunReasonTaskAssigned, runsservice.KeylessCauseUnresolved, "nil_mutation_generation")
+	}
 	queue(newAssigneeID, RunContext{
-		Reason:      RunReasonTaskAssigned,
-		TaskID:      task.ID,
-		WorkspaceID: task.WorkspaceID,
-		ActorID:     change.ActorID,
-		ActorType:   change.ActorType,
-		CommentID:   commentID,
+		Reason:         RunReasonTaskAssigned,
+		TaskID:         task.ID,
+		WorkspaceID:    task.WorkspaceID,
+		ActorID:        change.ActorID,
+		ActorType:      change.ActorType,
+		CommentID:      commentID,
+		IdempotencyKey: key,
 	})
 }
 
@@ -257,13 +343,15 @@ func (ss *SchedulerService) reactToComment(
 
 	// Assignee wake — skip if self-comment or task is closed.
 	if !comment.SkipAssigneeWake && !selfComment && !closed {
+		key := commentkeys.TaskComment(comment.ID) + ":" + task.AssigneeAgentProfileID
 		queue(task.AssigneeAgentProfileID, RunContext{
-			Reason:      RunReasonTaskComment,
-			TaskID:      task.ID,
-			WorkspaceID: task.WorkspaceID,
-			ActorID:     comment.AuthorID,
-			ActorType:   comment.AuthorType,
-			CommentID:   comment.ID,
+			Reason:         RunReasonTaskComment,
+			TaskID:         task.ID,
+			WorkspaceID:    task.WorkspaceID,
+			ActorID:        comment.AuthorID,
+			ActorType:      comment.AuthorType,
+			CommentID:      comment.ID,
+			IdempotencyKey: key,
 		})
 	}
 
@@ -281,13 +369,15 @@ func (ss *SchedulerService) reactToComment(
 		if agentID == comment.AuthorID {
 			continue
 		}
+		key := fmt.Sprintf("%s:%s:%s", RunReasonTaskMentioned, comment.ID, agentID)
 		queue(agentID, RunContext{
-			Reason:      RunReasonTaskMentioned,
-			TaskID:      task.ID,
-			WorkspaceID: task.WorkspaceID,
-			ActorID:     comment.AuthorID,
-			ActorType:   comment.AuthorType,
-			CommentID:   comment.ID,
+			Reason:         RunReasonTaskMentioned,
+			TaskID:         task.ID,
+			WorkspaceID:    task.WorkspaceID,
+			ActorID:        comment.AuthorID,
+			ActorType:      comment.AuthorType,
+			CommentID:      comment.ID,
+			IdempotencyKey: key,
 		})
 	}
 }
@@ -315,9 +405,21 @@ func (ss *SchedulerService) cascadeReviewRequested(
 			zap.String("task_id", task.ID), zap.Error(err))
 		return
 	}
+	reported := map[string]struct{}{}
 	for _, p := range parts {
 		if p.AgentProfileID == "" {
 			continue
+		}
+		if p.Role != models.ParticipantRoleReviewer && p.Role != models.ParticipantRoleApprover {
+			continue
+		}
+		// No durable occurrence row to key on: keyless by design, reported
+		// once per distinct agent rather than per role — an agent seated as
+		// both reviewer and approver is one recipient, and queue()'s own
+		// seen-map dedup only attempts one enqueue for it.
+		if _, dup := reported[p.AgentProfileID]; !dup {
+			reported[p.AgentProfileID] = struct{}{}
+			runsservice.ReportKeylessEnqueue(RunReasonTaskReviewRequested, runsservice.KeylessCauseByDesign, "")
 		}
 		queue(p.AgentProfileID, RunContext{
 			Reason:      RunReasonTaskReviewRequested,
@@ -344,25 +446,50 @@ func (ss *SchedulerService) cascadeBlockersResolved(
 	}
 	for _, blockedID := range blockedTaskIDs {
 		// Verify all OTHER blockers are also resolved.
-		ready, err := ss.allBlockersResolvedExcept(ctx, blockedID, task.ID)
-		if err != nil || !ready {
+		ready, blockers, err := ss.allBlockersResolvedExcept(ctx, blockedID, task.ID)
+		if err != nil {
+			ss.logger.Error("check blockers resolved failed",
+				zap.String("task_id", blockedID), zap.Error(err))
+			continue
+		}
+		if !ready {
 			continue
 		}
 		assignee, err := ss.repo.GetTaskAssignee(ctx, blockedID)
 		if err != nil || assignee == "" {
 			continue
 		}
+		blockerIDs := make([]string, 0, len(blockers))
+		for _, b := range blockers {
+			blockerIDs = append(blockerIDs, b.BlockerTaskID)
+		}
+		if len(blockerIDs) == 0 {
+			continue
+		}
+		key := fmt.Sprintf("%s:%s:%s:%s",
+			RunReasonTaskBlockersResolved, blockedID, assignee, dedupkeys.BlockerDigest(blockerIDs))
 		queue(assignee, RunContext{
 			Reason:                RunReasonTaskBlockersResolved,
 			TaskID:                blockedID,
 			WorkspaceID:           task.WorkspaceID,
 			ResolvedBlockerTaskID: task.ID,
+			IdempotencyKey:        key,
 		})
 	}
 }
 
 // cascadeChildrenCompleted wakes the parent if all its children are now
 // in a terminal state.
+//
+// The wake's idempotency key is a digest over the parent's current child
+// set, not the default {reason}:{taskID}:{agentID} key — that default is
+// permanently unique per (reason, task, agent), so a parent that
+// delegates iteratively (finish wave 1, read the result, fan out wave 2)
+// would only ever be woken for its first wave: wave 2's key would
+// collide with wave 1's already-consumed one. Keying on the child set
+// instead means a new delegation wave — which necessarily adds new child
+// task IDs — produces a distinct key, while a duplicate cascade over the
+// same terminal children still dedupes to the same key.
 func (ss *SchedulerService) cascadeChildrenCompleted(
 	ctx context.Context, task *TaskSnapshot, queue func(string, RunContext),
 ) {
@@ -377,22 +504,249 @@ func (ss *SchedulerService) cascadeChildrenCompleted(
 	if err != nil || parentAssignee == "" {
 		return
 	}
-	queue(parentAssignee, RunContext{
-		Reason:      RunReasonTaskChildrenCompleted,
-		TaskID:      task.ParentID,
-		WorkspaceID: task.WorkspaceID,
-		ChildTaskID: task.ID,
-	})
+	// ListChildStates is a separate read from AreAllChildrenTerminal, with no
+	// enclosing transaction. A concurrent child insert between the two reads
+	// can produce a snapshot that is no longer all-terminal. Do not queue from
+	// that snapshot. A newly inserted child then adds its ID to the later
+	// terminal snapshot, so that transition can queue a distinct wake.
+	children, err := ss.repo.ListChildStates(ctx, task.ParentID)
+	if err != nil {
+		ss.logger.Error("list child states failed",
+			zap.String("parent_id", task.ParentID), zap.Error(err))
+		return
+	}
+	for _, child := range children {
+		if child.State != "COMPLETED" && child.State != "CANCELLED" {
+			return
+		}
+	}
+
+	waveKey, waveString, ok := ss.resolveWaveIdentity(ctx, task.ParentID)
+	if !ok {
+		return
+	}
+
+	stepID, actionPayload := ss.resolveWaveActionPayload(ctx, task.ParentID, parentAssignee)
+	rc := RunContext{
+		Reason:         RunReasonTaskChildrenCompleted,
+		TaskID:         task.ParentID,
+		WorkspaceID:    task.WorkspaceID,
+		ChildTaskID:    task.ID,
+		WorkflowStepID: stepID,
+		IdempotencyKey: childrenCompletedIdempotencyKey(task.ParentID, parentAssignee, children),
+		WaveKey:        waveKey,
+		WaveString:     waveString,
+		ExtraPayload:   actionPayload,
+	}
+	queue(parentAssignee, rc)
+}
+
+// resolveWaveIdentity performs the terminality-confirming last read: a
+// wave identity is derived from, and only from, a wave-member read that
+// itself observed every member terminal. It does not trust the earlier
+// ListChildStates loop above, which counts every child (not just wave
+// members) and is a separate, unsynchronized read. A read error, any
+// non-terminal wave member, or an empty wave-member set (a parent with no
+// wave members has no wave) all report ok=false: the caller queues
+// nothing and the backstop delivers the wake later.
+func (ss *SchedulerService) resolveWaveIdentity(
+	ctx context.Context, parentID string,
+) (waveKey, waveString string, ok bool) {
+	members, err := ss.repo.ListWaveMembers(ctx, parentID)
+	if err != nil {
+		ss.logger.Debug("list wave members failed",
+			zap.String("parent_id", parentID), zap.Error(err))
+		return "", "", false
+	}
+	if len(members) == 0 {
+		return "", "", false
+	}
+	ids := make([]string, 0, len(members))
+	for _, m := range members {
+		if m.State != "COMPLETED" && m.State != "CANCELLED" {
+			return "", "", false
+		}
+		ids = append(ids, m.TaskID)
+	}
+	return waveidentity.WaveKey(parentID, ids), waveidentity.WaveString(parentID, ids), true
+}
+
+// resolveWaveActionPayload resolves the parent's current workflow step id
+// and, from that step's on_children_completed trigger, the
+// workflow-authored payload the engine would attach to a run targeting the
+// same recipient cascade wakes — so a cascade wake that never touches the
+// engine still carries it. The step id is returned even when no matching
+// action payload is found, since the staleness-guard equivalence between
+// producers needs it regardless of whether the step also authors a
+// payload. Any failure to resolve the step itself — no getter wired, no
+// step bound, lookup error — returns ("", nil) and logs the omission at
+// debug: the wake itself is unconditional, an optional field is not worth
+// skipping it for.
+//
+// Cascade always wakes the parent's assignee, so a queue_run action only
+// collides with it when its resolved Target is the implicit-default or
+// explicit "primary" (QueueRunCallback.resolveTarget's own default case),
+// and a queue_run_for_each_participant action only collides with it when
+// its fanned-out seats include the parent's assignee — resolved via the
+// same seat-resolution the engine itself would use
+// (engine.ResolveFanOutSeats). A step authoring more than one queue_run(
+// _for_each_participant) action on this trigger — one to
+// "workspace.ceo_agent", say, one implicit-primary — must not have its
+// non-colliding action's payload attached here: parity is only required
+// between producers waking the *same* target, and the first non-empty
+// payload regardless of target would silently carry the wrong recipient's
+// content.
+//
+// Each action must also be reasoned task_children_completed, mirroring
+// QueueRunCallback.Execute's and QueueRunForEachParticipantCallback.
+// Execute's own reasonTaskChildrenCompleted gates: an action left at its
+// default reason resolves to the trigger name in the engine, never
+// task_children_completed, so it is excluded here too. A step authoring a
+// second on_children_completed action for an unrelated reason must not
+// have its payload attached to this wave.
+func (ss *SchedulerService) resolveWaveActionPayload(
+	ctx context.Context, parentID, parentAssignee string,
+) (stepID string, payload map[string]any) {
+	stepID, err := ss.repo.GetTaskWorkflowStepID(ctx, parentID)
+	if err != nil || stepID == "" {
+		ss.logger.Debug("wave payload parity: no workflow step bound",
+			zap.String("parent_id", parentID), zap.Error(err))
+		return "", nil
+	}
+	if ss.workflowStepGetter == nil {
+		return stepID, nil
+	}
+	step, err := ss.workflowStepGetter.GetStep(ctx, stepID)
+	if err != nil || step == nil {
+		ss.logger.Debug("wave payload parity: step lookup failed",
+			zap.String("parent_id", parentID), zap.String("step_id", stepID), zap.Error(err))
+		return stepID, nil
+	}
+	spec := engine.CompileStep(step)
+	for _, action := range spec.Events[engine.TriggerOnChildrenCompleted] {
+		switch action.Kind {
+		case engine.ActionQueueRun:
+			if p, ok := matchQueueRunActionPayload(action); ok {
+				return stepID, p
+			}
+		case engine.ActionQueueRunForEachParticipant:
+			if p, ok := ss.matchFanOutActionPayload(ctx, action, stepID, parentID, parentAssignee); ok {
+				return stepID, p
+			}
+		}
+	}
+	return stepID, nil
+}
+
+// matchQueueRunActionPayload reports the action's payload when it is a
+// task_children_completed-reasoned queue_run targeting the implicit-default
+// or explicit "primary" — the target cascade's fixed-recipient wake collides
+// with. See resolveWaveActionPayload for why non-colliding targets and
+// other reasons are excluded. A collision is decided by reason and target
+// alone, never by whether the action happens to author a payload: the
+// engine dispatches this same action first (author order) regardless of
+// its payload's length, so stopping here — even with a nil/empty payload —
+// is what keeps cascade's selection aligned with which action actually
+// wins the engine-routed producers' wave-unique insertion. Skipping past
+// an empty-payload match to a later, non-empty one would let cascade
+// attach content the engine path would never have selected.
+func matchQueueRunActionPayload(action engine.Action) (map[string]any, bool) {
+	if action.QueueRun == nil {
+		return nil, false
+	}
+	if action.QueueRun.Reason != RunReasonTaskChildrenCompleted {
+		return nil, false
+	}
+	target := strings.TrimSpace(action.QueueRun.Target)
+	if target == "" || target == engine.TargetPrimary {
+		return action.QueueRun.Payload, true
+	}
+	return nil, false
+}
+
+// matchFanOutActionPayload reports the action's payload when it is a
+// task_children_completed-reasoned queue_run_for_each_participant action
+// whose fanned-out seats (resolved via engine.ResolveFanOutSeats, the exact
+// seat resolution QueueRunForEachParticipantCallback.Execute uses) include
+// the parent's assignee — the recipient cascade's fixed-recipient wake
+// collides with. Any resolution failure (no participant store wired, no
+// workflow id, seat lookup error) reports no match rather than blocking the
+// wake: see resolveWaveActionPayload's doc comment on the wake being
+// unconditional. As with matchQueueRunActionPayload, a collision never
+// depends on the action's payload being non-empty — only on reason, role,
+// and resolved seat membership — so cascade stops at the same action the
+// engine would dispatch first, regardless of what that action authors.
+func (ss *SchedulerService) matchFanOutActionPayload(
+	ctx context.Context, action engine.Action, stepID, parentID, parentAssignee string,
+) (map[string]any, bool) {
+	cfg := action.QueueRunForEachParticipant
+	if cfg == nil || cfg.Role == "" {
+		return nil, false
+	}
+	reason := cfg.Reason
+	if reason == "" {
+		reason = string(engine.TriggerOnChildrenCompleted)
+	}
+	if reason != RunReasonTaskChildrenCompleted {
+		return nil, false
+	}
+	if ss.participantStore == nil {
+		return nil, false
+	}
+	workflowID, err := ss.repo.GetTaskWorkflowID(ctx, parentID)
+	if err != nil {
+		ss.logger.Debug("wave payload parity: workflow id lookup failed",
+			zap.String("parent_id", parentID), zap.Error(err))
+		return nil, false
+	}
+	seats, err := engine.ResolveFanOutSeats(ctx, ss.participantStore, stepID, parentID, workflowID, cfg.Role)
+	if err != nil {
+		ss.logger.Debug("wave payload parity: fan-out seat resolution failed",
+			zap.String("parent_id", parentID), zap.String("role", cfg.Role), zap.Error(err))
+		return nil, false
+	}
+	for _, seat := range seats {
+		if seat.AgentProfileID == parentAssignee {
+			return cfg.Payload, true
+		}
+	}
+	return nil, false
+}
+
+// childrenCompletedIdempotencyKey digests the parent's child ID set
+// (already ordered by id via ListChildStates) into an idempotency key for
+// the task_children_completed wake. See cascadeChildrenCompleted for why
+// this must vary across delegation waves instead of being permanently
+// unique per (parent, agent).
+//
+// Only IDs go into the digest, not each child's state string. By the time
+// this runs, cascadeChildrenCompleted has already confirmed every child is
+// terminal, so a wave is identified by WHICH children exist, not which
+// terminal state each one happens to be in — hashing the state as well
+// would make an unrelated terminal-to-terminal edit (e.g. a cancelled
+// sibling later marked completed by a user) look like a new wave and
+// produce a spurious wake, even though the child set never changed.
+func childrenCompletedIdempotencyKey(parentID, agentID string, children []sqlite.ChildState) string {
+	parts := make([]string, 0, len(children))
+	for _, c := range children {
+		parts = append(parts, c.TaskID)
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, ",")))
+	return fmt.Sprintf("%s:%s:%s:%x", RunReasonTaskChildrenCompleted, parentID, agentID, sum)
 }
 
 // allBlockersResolvedExcept returns true if every blocker on `taskID`
-// other than `excludeBlockerID` is in a terminal step.
+// other than `excludeBlockerID` is in a terminal step, alongside the full
+// blocker-task-id set it read to decide — the caller digests that same
+// slice for the wake's dedup key rather than re-reading it (AC-001.9
+// applied to a set: a second read could observe a different set than the
+// one this readiness decision was actually made against).
 func (ss *SchedulerService) allBlockersResolvedExcept(
 	ctx context.Context, taskID, excludeBlockerID string,
-) (bool, error) {
+) (bool, []*models.TaskBlocker, error) {
 	blockers, err := ss.repo.ListTaskBlockers(ctx, taskID)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	for _, b := range blockers {
 		if b.BlockerTaskID == excludeBlockerID {
@@ -400,13 +754,13 @@ func (ss *SchedulerService) allBlockersResolvedExcept(
 		}
 		done, err := ss.repo.IsTaskInTerminalStep(ctx, b.BlockerTaskID)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		if !done {
-			return false, nil
+			return false, blockers, nil
 		}
 	}
-	return true, nil
+	return true, blockers, nil
 }
 
 // normalisedStatus maps both backend uppercase task states (TODO,

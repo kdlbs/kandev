@@ -2,9 +2,7 @@ package github
 
 import (
 	"context"
-	"crypto/sha256"
 	"testing"
-	"time"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -55,6 +53,9 @@ func TestHandleTaskUpdated_ArchiveDeletesWatches(t *testing.T) {
 
 	seedTask(t, store, "t1", false)
 	mustCreateWatch(t, store, "s1", "t1")
+	if err := store.CreateTaskPR(ctx, &TaskPR{TaskID: "t1", WorkspaceID: testWorkspaceID, Owner: "owner", Repo: "repo", PRNumber: 1}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
 
 	// Simulate task-service publishing task.updated with archived_at set.
 	event := bus.NewEvent(events.TaskUpdated, "task-service", map[string]interface{}{
@@ -67,6 +68,10 @@ func TestHandleTaskUpdated_ArchiveDeletesWatches(t *testing.T) {
 
 	if got, _ := store.GetPRWatchBySession(ctx, "s1"); got != nil {
 		t.Errorf("expected watch to be deleted after archive event, got %+v", got)
+	}
+	// AC4: archive must not delete the task/PR association, only the watch.
+	if got, _ := store.ListTaskPRsByTaskIncludingDetached(ctx, "t1"); len(got) != 1 {
+		t.Errorf("task PRs after archive event = %d, want 1 (association retained)", len(got))
 	}
 }
 
@@ -121,7 +126,7 @@ func TestHandleTaskDeletedRevokesCredentialLeases(t *testing.T) {
 	if err := svc.handleTaskDeleted(context.Background(), event); err != nil {
 		t.Fatalf("handleTaskDeleted: %v", err)
 	}
-	if got := len(broker.leases); got != 0 {
+	if got := broker.ActiveLeaseCount(); got != 0 {
 		t.Fatalf("lease records = %d, want 0", got)
 	}
 }
@@ -132,6 +137,14 @@ func TestHandleTaskEvents_MalformedPayloadIsNoop(t *testing.T) {
 
 	seedTask(t, store, "t1", false)
 	mustCreateWatch(t, store, "s1", "t1")
+	if err := store.CreateTaskPR(ctx, &TaskPR{TaskID: "t1", WorkspaceID: testWorkspaceID, Owner: "owner", Repo: "repo", PRNumber: 1}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	// Nil event — should be ignored, not crash.
+	if err := svc.handleTaskDeleted(ctx, nil); err != nil {
+		t.Fatalf("handleTaskDeleted nil event: %v", err)
+	}
 
 	// Wrong payload type — should be ignored, not crash.
 	bad := bus.NewEvent(events.TaskUpdated, "task-service", "not-a-map")
@@ -147,6 +160,9 @@ func TestHandleTaskEvents_MalformedPayloadIsNoop(t *testing.T) {
 
 	if got, _ := store.GetPRWatchBySession(ctx, "s1"); got == nil {
 		t.Error("expected watch to persist when payload is malformed")
+	}
+	if got, _ := store.ListTaskPRsByTaskIncludingDetached(ctx, "t1"); len(got) != 1 {
+		t.Errorf("task PRs after malformed events = %d, want 1", len(got))
 	}
 }
 
@@ -200,7 +216,7 @@ func TestHandleWorkspaceDeletedRevokesCredentialLeasesWithoutSecretStore(t *test
 	if err := svc.handleWorkspaceDeleted(context.Background(), event); err != nil {
 		t.Fatalf("handleWorkspaceDeleted: %v", err)
 	}
-	if got := len(broker.leases); got != 0 {
+	if got := broker.ActiveLeaseCount(); got != 0 {
 		t.Fatalf("lease records = %d, want 0", got)
 	}
 }
@@ -220,7 +236,7 @@ func TestSubscribeTaskEventsTerminalSessionRevokesCredentialLease(t *testing.T) 
 	if err := svc.eventBus.Publish(context.Background(), events.TaskSessionStateChanged, event); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	if got := len(broker.leases); got != 0 {
+	if got := broker.ActiveLeaseCount(); got != 0 {
 		t.Fatalf("lease records = %d, want 0", got)
 	}
 }
@@ -265,16 +281,18 @@ func mustCreateWatch(t *testing.T, store *Store, sessionID, taskID string) {
 }
 
 func revocationTestBroker(workspaceID, taskID, sessionID string) *CredentialBroker {
-	hash := sha256.Sum256([]byte(workspaceID + taskID + sessionID))
-	return &CredentialBroker{
-		leases: map[[sha256.Size]byte]credentialLeaseRecord{
-			hash: {
-				WorkspaceID: workspaceID,
-				TaskID:      taskID,
-				SessionID:   sessionID,
-				ExpiresAt:   time.Now().Add(time.Hour),
-			},
-		},
-		now: time.Now,
+	connection := &WorkspaceConnection{
+		WorkspaceID: workspaceID, Source: ConnectionSourcePAT, Status: ConnectionStatusActive,
 	}
+	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{workspaceID: connection}}
+	broker := NewCredentialBroker(connections, NewCredentialResolver(connections, fakeAuthSecrets{
+		WorkspacePATSecretKey(workspaceID): "transient",
+	}), &fakeBrokerAuthorizer{})
+	if _, err := broker.Issue(context.Background(), CredentialLeaseRequest{
+		WorkspaceID: workspaceID, TaskID: taskID, SessionID: sessionID, RepositoryID: "repository-1",
+		Owner: "owner", Repo: "repo", Host: defaultGitHubHost,
+	}); err != nil {
+		panic(err)
+	}
+	return broker
 }

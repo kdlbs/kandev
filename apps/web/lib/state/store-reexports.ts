@@ -4,7 +4,13 @@ import type { SessionRuntimeSlice, SessionSliceActions } from "./slices";
 
 export type WorkspaceSourceStoreState = Pick<
   SessionRuntimeSlice,
-  "workspaceFilesRefresh" | "bumpWorkspaceFilesRefresh"
+  | "workspaceFilesRefresh"
+  | "bumpWorkspaceFilesRefresh"
+  | "workspaceRestoration"
+  | "beginWorkspaceRestoration"
+  | "completeWorkspaceRestoration"
+  | "failWorkspaceRestoration"
+  | "clearWorkspaceRestoration"
 > &
   Pick<SessionSliceActions, "reconcileWorkspaceSourcesAdopted">;
 
@@ -29,7 +35,10 @@ export type {
   SecretsState,
   NotificationProvidersState,
   SettingsDataState,
+  SleepInhibitionStoreState,
   UserSettingsState,
+  AgentProfileRecentUseState,
+  AgentProfileRecentUseRecord,
   MessagesState,
   TurnsState,
   TaskSessionsState,

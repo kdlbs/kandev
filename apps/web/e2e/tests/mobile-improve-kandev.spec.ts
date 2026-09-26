@@ -6,8 +6,10 @@ const HEALTH_URL = "**/api/v1/system/health";
 test.describe("Improve Kandev on mobile", () => {
   test("dismisses the intro and reaches the issue-only task option without overflow", async ({
     testPage,
+    apiClient,
     seedData,
   }) => {
+    await apiClient.saveUserSettings({ agent_generated_task_titles: false });
     await testPage.route(HEALTH_URL, (route) =>
       route.fulfill({
         status: 200,
@@ -20,6 +22,7 @@ test.describe("Improve Kandev on mobile", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
+          workspace_id: seedData.workspaceId,
           repository_id: seedData.repositoryId,
           workflow_id: seedData.workflowId,
           issue_workflow_id: seedData.workflowId,
@@ -28,13 +31,14 @@ test.describe("Improve Kandev on mobile", () => {
           bundle_file: "/tmp/kandev-improve-mobile-e2e/diagnostic-bundle.zip",
           github_login: "octocat",
           has_write_access: false,
-          fork_status: "unknown",
+          fork_status: "blocked_managed",
+          fork_reason_code: "managed_unavailable",
         }),
       }),
     );
 
     await testPage.goto("/");
-    await testPage.getByRole("button", { name: "Open menu" }).tap();
+    await testPage.getByTestId("app-nav-trigger").tap();
     const improveButton = testPage.getByTestId("mobile-improve-kandev-button");
     await expect(improveButton).toBeVisible();
     await improveButton.tap();
@@ -48,10 +52,19 @@ test.describe("Improve Kandev on mobile", () => {
 
     const createDialog = testPage.getByTestId("create-task-dialog");
     await expect(createDialog).toBeVisible({ timeout: 10_000 });
+    await expect(
+      createDialog.getByText(
+        "Managed GitHub access could not prepare a verified fork for this task. Check the workspace GitHub connection or open an issue instead.",
+      ),
+    ).toBeVisible();
+    await createDialog.getByTestId("task-title-input").fill("Mobile issue fallback");
+    await createDialog.getByTestId("task-description-input").fill("Describe the problem");
+    await expect(createDialog.getByTestId("submit-start-agent")).toBeDisabled();
     await createDialog.getByRole("tab", { name: "Open issue" }).tap();
     await expect(
       createDialog.getByText(/only create a GitHub issue.*will not implement/i),
     ).toBeVisible();
+    await expect(createDialog.getByTestId("submit-start-agent")).toBeEnabled({ timeout: 10_000 });
     expect(
       await testPage.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,

@@ -1,6 +1,19 @@
+import { mapSidebarWorkspaces } from "../ui/sidebar-workspace-state";
+import type { UISliceState } from "../ui/types";
 import type { StateCreator } from "zustand";
 import { createDefaultUserSettings } from "@/lib/ssr/user-settings";
-import type { SettingsSlice, SettingsSliceState } from "./types";
+import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
+import {
+  refreshProfileCapabilities,
+  refreshSettingsAgentsCapabilities,
+  isStaleAvailableAgentsSnapshot,
+  type SettingsSlice,
+  type SettingsSliceState,
+} from "./types";
+import {
+  mergeAgentProfileRecentUseState,
+  type AgentProfileRecentUseState,
+} from "@/lib/agent-profile-recent-use";
 
 export const defaultSettingsState: SettingsSliceState = {
   executors: { items: [] },
@@ -22,7 +35,10 @@ export const defaultSettingsState: SettingsSliceState = {
     loading: false,
   },
   settingsData: { executorsLoaded: false, agentsLoaded: false },
+  sleepInhibition: { response: null, loaded: false, loading: false, error: false },
   userSettings: createDefaultUserSettings(),
+  agentProfileRecentUse: { records: {}, loaded: false },
+  sshReachability: { byExecutorId: {} },
 };
 
 type ImmerSet = Parameters<
@@ -165,6 +181,23 @@ function createAgentUpdateJobActions(
   };
 }
 
+function applyUserSettingsState(
+  draft: SettingsSlice,
+  settings: SettingsSliceState["userSettings"],
+) {
+  const order = compareUserSettingsRevisions(settings.revision, draft.userSettings.revision);
+  if (order !== null && order < 0) return;
+  draft.userSettings = settings;
+  if ("sidebarViewsByWorkspace" in draft) {
+    const sidebar = draft as SettingsSlice & Pick<UISliceState, "sidebarViewsByWorkspace">;
+    sidebar.sidebarViewsByWorkspace = mapSidebarWorkspaces(
+      settings.sidebarViewsByWorkspace,
+      sidebar.sidebarViewsByWorkspace,
+      settings.revision,
+    );
+  }
+}
+
 function createCoreActions(
   set: ImmerSet,
 ): Pick<
@@ -205,10 +238,27 @@ function createCoreActions(
       }),
     setAvailableAgents: (agents, tools) =>
       set((draft) => {
+        if (isStaleAvailableAgentsSnapshot(draft.availableAgents.items, agents)) {
+          // The request completed, even though its data is stale. Keep the
+          // newer snapshot but do not leave the polling indicator stuck.
+          draft.availableAgents.loading = false;
+          draft.availableAgents.loaded = true;
+          return;
+        }
         draft.availableAgents.items = agents;
         if (tools) draft.availableAgents.tools = tools;
         draft.availableAgents.loading = false;
         draft.availableAgents.loaded = true;
+        // The revalidation poll in use-available-agents.ts is the only place
+        // a probing/not_configured status ever settles outside a WS push
+        // (agents.ts's "agent.available.updated" handler covers that path);
+        // without applying the same refresh here, a settled status never
+        // reaches agentProfiles/settingsAgents on a cold launch.
+        draft.agentProfiles.items = refreshProfileCapabilities(draft.agentProfiles.items, agents);
+        draft.settingsAgents.items = refreshSettingsAgentsCapabilities(
+          draft.settingsAgents.items,
+          agents,
+        );
       }),
     setAvailableAgentsLoading: (loading) =>
       set((draft) => {
@@ -218,9 +268,12 @@ function createCoreActions(
       set((draft) => {
         draft.agentProfiles.items = profiles;
       }),
-    setEditors: (editors) =>
+    setEditors: (editors, folderOpeningAvailable) =>
       set((draft) => {
         draft.editors.items = editors;
+        if (folderOpeningAvailable !== undefined) {
+          draft.editors.folderOpeningAvailable = folderOpeningAvailable;
+        }
         draft.editors.loaded = true;
       }),
     setEditorsLoading: (loading) =>
@@ -242,11 +295,63 @@ function createCoreActions(
       }),
     setUserSettings: (settings) =>
       set((draft) => {
-        draft.userSettings = settings;
+        applyUserSettingsState(draft, settings);
       }),
     bumpAgentProfilesVersion: () =>
       set((draft) => {
         draft.agentProfiles.version += 1;
+      }),
+  };
+}
+
+function createAgentProfileRecentUseActions(
+  set: ImmerSet,
+): Pick<SettingsSlice, "setAgentProfileRecentUse" | "applyAgentProfileRecentUse"> {
+  return {
+    setAgentProfileRecentUse: (state) =>
+      set((draft) => {
+        draft.agentProfileRecentUse = mergeAgentProfileRecentUseState(
+          draft.agentProfileRecentUse as unknown as AgentProfileRecentUseState,
+          state,
+        ) as unknown as typeof draft.agentProfileRecentUse;
+      }),
+    applyAgentProfileRecentUse: (context, record) =>
+      set((draft) => {
+        const current = draft.agentProfileRecentUse.records[context];
+        if (!current || record.revision >= current.revision) {
+          draft.agentProfileRecentUse.records[context] = {
+            profileIds: [...record.profileIds],
+            revision: record.revision,
+            updatedAt: record.updatedAt,
+          };
+        }
+        draft.agentProfileRecentUse.loaded = true;
+      }),
+  };
+}
+
+function createSleepInhibitionActions(
+  set: ImmerSet,
+): Pick<
+  SettingsSlice,
+  "setSleepInhibition" | "setSleepInhibitionLoading" | "setSleepInhibitionError"
+> {
+  return {
+    setSleepInhibition: (response) =>
+      set((draft) => {
+        draft.sleepInhibition.response = response;
+        draft.sleepInhibition.loaded = true;
+        draft.sleepInhibition.loading = false;
+        draft.sleepInhibition.error = false;
+      }),
+    setSleepInhibitionLoading: (loading) =>
+      set((draft) => {
+        draft.sleepInhibition.loading = loading;
+      }),
+    setSleepInhibitionError: (error) =>
+      set((draft) => {
+        draft.sleepInhibition.error = error;
+        if (error) draft.sleepInhibition.loaded = true;
       }),
   };
 }
@@ -265,6 +370,7 @@ function createSecretAndSpriteActions(
   | "setSpritesLoading"
   | "removeSpritesInstance"
   | "setNotificationProviders"
+  | "setAppriseAvailable"
   | "setNotificationProvidersLoading"
 > {
   return {
@@ -315,13 +421,42 @@ function createSecretAndSpriteActions(
       set((draft) => {
         draft.notificationProviders.items = state.items;
         draft.notificationProviders.events = state.events;
-        draft.notificationProviders.appriseAvailable = state.appriseAvailable;
+        if (state.appriseAvailable !== undefined) {
+          draft.notificationProviders.appriseAvailable = state.appriseAvailable;
+        }
         draft.notificationProviders.loaded = state.loaded;
         draft.notificationProviders.loading = state.loading;
+      }),
+    setAppriseAvailable: (available) =>
+      set((draft) => {
+        draft.notificationProviders.appriseAvailable = available;
       }),
     setNotificationProvidersLoading: (loading) =>
       set((draft) => {
         draft.notificationProviders.loading = loading;
+      }),
+  };
+}
+
+// reachabilityUpdatedAtMs parses updated_at to epoch ms for reconciliation.
+// A null updated_at (the synthesized never-probed placeholder) sorts as
+// "always older" so any real record replaces it.
+function reachabilityUpdatedAtMs(updatedAt: string | null): number {
+  return updatedAt ? Date.parse(updatedAt) : -Infinity;
+}
+
+function createSSHReachabilityActions(set: ImmerSet): Pick<SettingsSlice, "setSSHReachability"> {
+  return {
+    setSSHReachability: (record) =>
+      set((draft) => {
+        const current = draft.sshReachability.byExecutorId[record.executor_id];
+        if (
+          current &&
+          reachabilityUpdatedAtMs(current.updated_at) > reachabilityUpdatedAtMs(record.updated_at)
+        ) {
+          return;
+        }
+        draft.sshReachability.byExecutorId[record.executor_id] = record;
       }),
   };
 }
@@ -334,7 +469,10 @@ export const createSettingsSlice: StateCreator<
 > = (set) => ({
   ...defaultSettingsState,
   ...createCoreActions(set),
+  ...createAgentProfileRecentUseActions(set),
+  ...createSleepInhibitionActions(set),
   ...createInstallJobActions(set),
   ...createAgentUpdateJobActions(set),
   ...createSecretAndSpriteActions(set),
+  ...createSSHReachabilityActions(set),
 });

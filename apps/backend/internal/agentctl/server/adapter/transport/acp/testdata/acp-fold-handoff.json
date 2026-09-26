@@ -1,0 +1,80 @@
+{
+ "kind": "fold_handoff",
+ "frames": [
+  {
+   "dir": "sent",
+   "method": "session/prompt",
+   "id": 3
+  },
+  {
+   "dir": "received",
+   "update": "tool_call",
+   "toolCallId": "toolu_01Y5EzGN7EGhwesAU13HhkYd",
+   "title": "Terminal",
+   "status": "pending"
+  },
+  {
+   "dir": "received",
+   "update": "tool_call_update",
+   "toolCallId": "toolu_01Y5EzGN7EGhwesAU13HhkYd",
+   "title": "sleep 20",
+   "status": null
+  },
+  {
+   "dir": "sent",
+   "method": "session/prompt",
+   "id": 4
+  },
+  {
+   "dir": "received",
+   "update": "tool_call_update",
+   "toolCallId": "toolu_01Y5EzGN7EGhwesAU13HhkYd",
+   "title": null,
+   "status": null
+  },
+  {
+   "dir": "received",
+   "update": "tool_call_update",
+   "toolCallId": "toolu_01Y5EzGN7EGhwesAU13HhkYd",
+   "title": null,
+   "status": "completed"
+  },
+  {
+   "dir": "received",
+   "promptResponseFor": 3,
+   "stopReason": "end_turn",
+   "usage": {
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "cachedReadTokens": 0,
+    "cachedWriteTokens": 0
+   }
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": ""
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": "ST"
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": "EERED"
+  },
+  {
+   "dir": "received",
+   "promptResponseFor": 4,
+   "stopReason": "end_turn",
+   "usage": {
+    "inputTokens": 13853,
+    "outputTokens": 118,
+    "cachedReadTokens": 30399,
+    "cachedWriteTokens": 15974
+   }
+  }
+ ]
+}

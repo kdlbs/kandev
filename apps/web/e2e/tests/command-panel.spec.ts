@@ -2,6 +2,7 @@ import { test, expect } from "../fixtures/test-base";
 import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
 import { waitForSessionDone } from "../helpers/session";
+import { createSubmoduleReviewFixture } from "./review/submodule-review-helpers";
 
 type CommandAliasExpectation = {
   query: string;
@@ -13,11 +14,11 @@ const HOME_COMMAND_ALIASES: CommandAliasExpectation[] = [
   { query: "statistics", label: "Go to Stats" },
   { query: "issues", label: "Go to GitHub Dashboard" },
   { query: "pull request", label: "Go to GitHub Dashboard" },
-  { query: "agent profiles", label: "Agents Settings" },
-  { query: "claude", label: "Agents Settings" },
-  { query: "execution environment", label: "Executors Settings" },
-  { query: "custom prompts", label: "Prompts Settings" },
-  { query: "prompt templates", label: "Prompts Settings" },
+  { query: "agent profiles", label: "Agents" },
+  { query: "claude", label: "Agents" },
+  { query: "execution environment", label: "Executors" },
+  { query: "custom prompts", label: "Prompts" },
+  { query: "prompt templates", label: "Prompts" },
   { query: "color theme", label: "Switch to Dark Mode" },
   { query: "new quick chat", label: "Quick Chat" },
   { query: "configure kandev", label: "Configuration Chat" },
@@ -113,6 +114,35 @@ test.describe("Command Panel", () => {
     await expect(commandOption(testPage, "Environments Settings")).toHaveCount(0);
   });
 
+  test("settings discovery stays quiet until typing and lands on an exact control", async ({
+    testPage,
+  }) => {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await openCommandPanel(testPage);
+    const dialog = commandDialog(testPage);
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await expect(commandOption(testPage, "Terminal Font Size")).toHaveCount(0);
+
+    const input = dialog.getByRole("combobox");
+    await input.fill("terminal font size");
+    await expect(dialog.locator("[cmdk-group-heading]")).toHaveText(["Settings"]);
+    const option = commandOption(testPage, "Terminal Font Size");
+    await expect(option).toBeVisible();
+    await expect(option.getByText("Settings › Terminal & Editors", { exact: true })).toBeVisible();
+    await expect(option).toHaveAttribute("data-selected", "true");
+    await input.press("Enter");
+
+    await expect(dialog).not.toBeVisible();
+    await expect(testPage).toHaveURL(
+      /\/settings\/preferences\/terminal-editors#setting-terminal-font-size$/,
+    );
+    const target = testPage.locator('[data-settings-target="setting-terminal-font-size"]');
+    await expect(target).toHaveAttribute("data-settings-target-highlight", "true");
+    await expect(testPage.getByTestId("terminal-font-size-input")).toBeFocused();
+  });
+
   test("common aliases find worktree session commands", async ({
     testPage,
     apiClient,
@@ -144,7 +174,8 @@ test.describe("Command Panel", () => {
       .toBe("ready");
 
     await testPage.goto(`/t/${task.id}`);
-    await expect(testPage.getByTestId("task-topbar")).toBeVisible();
+    const session = new SessionPage(testPage);
+    await session.showSessionContext();
 
     await openCommandPanel(testPage);
     const dialog = commandDialog(testPage);
@@ -201,6 +232,50 @@ test.describe("Command Panel", () => {
     await expect(dialog.getByText("Type to search files...")).toBeVisible();
   });
 
+  test("Cmd+Shift+K finds root and submodule files", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(180_000);
+    const fixture = await createSubmoduleReviewFixture(
+      apiClient,
+      seedData,
+      backend.tmpDir,
+      "Submodule file search E2E",
+    );
+
+    try {
+      await testPage.goto(`/t/${fixture.taskId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 45_000 });
+      await fixture.waitForWorktree(apiClient);
+
+      await openFileSearch(testPage);
+      const dialog = commandDialog(testPage);
+      await expect(dialog).toBeVisible({ timeout: 5_000 });
+      await dialog.getByRole("combobox").fill("README.md");
+
+      const groups = dialog.getByTestId("file-search-repo-group");
+      await expect(groups).toHaveCount(3, { timeout: 45_000 });
+      await expect(
+        dialog.locator('[data-testid="file-search-repo-group"][data-repository=""]'),
+      ).toBeVisible();
+      await expect(
+        dialog.locator('[data-testid="file-search-repo-group"][data-repository="vendor/outer"]'),
+      ).toBeVisible();
+      await expect(
+        dialog.locator(
+          '[data-testid="file-search-repo-group"][data-repository="vendor/outer/vendor/inner"]',
+        ),
+      ).toBeVisible();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   test("Cmd+K inline task search shows matching tasks", async ({
     testPage,
     apiClient,
@@ -225,17 +300,118 @@ test.describe("Command Panel", () => {
     // Type the task name — task search requires ≥2 characters
     await dialog.locator("input").fill("Searchable");
 
-    // Should show the task in a "Tasks" group (inline search, debounced)
-    await expect(dialog.getByText("Tasks")).toBeVisible({ timeout: 10_000 });
+    // Should show the task in a "Tasks" group (inline search, debounced).
+    // Scope the heading lookup: "Tasks" is also the label of the Tasks tab.
+    await expect(dialog.getByTestId("command-panel-task-preview")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(dialog.getByText("Searchable E2E Task")).toBeVisible({ timeout: 5_000 });
   });
 
+  // @covers AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.1, AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.2,
+  // AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.3, AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.5,
+  // AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.6, AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.7
+  test("archived task results show archive cues and follow active results", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const unarchivedCompleted = await apiClient.createTask(
+      seedData.workspaceId,
+      "Command panel unarchived completed",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
+    await apiClient.updateTaskState(unarchivedCompleted.id, "COMPLETED");
+
+    const archivedInProgress = await apiClient.createTask(
+      seedData.workspaceId,
+      "Command panel archived in progress",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
+    await apiClient.archiveTask(archivedInProgress.id);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await openCommandPanel(testPage);
+    const dialog = commandDialog(testPage);
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await dialog.getByRole("combobox").fill("Command panel");
+
+    const taskResults = dialog.getByTestId("command-panel-task-preview");
+    await expect(taskResults).toBeVisible({ timeout: 10_000 });
+    const resultOptions = taskResults.getByRole("option");
+    await expect(resultOptions).toHaveCount(2);
+    await expect(resultOptions.nth(0)).toContainText(unarchivedCompleted.title);
+    await expect(resultOptions.nth(1)).toContainText(archivedInProgress.title);
+
+    const archivedOption = resultOptions.nth(1);
+    const startStep = seedData.steps.find((step) => step.id === seedData.startStepId)!;
+    await expect(archivedOption.getByTestId("task-state-archived")).toBeVisible();
+    await expect(archivedOption.getByRole("img", { name: "Archived" })).toBeVisible();
+    await expect(archivedOption.getByText("Archived", { exact: true })).toBeVisible();
+    await expect(archivedOption.getByText(startStep.name, { exact: true })).toHaveCount(0);
+    await expect(resultOptions.nth(0).getByTestId("task-state-archived")).toHaveCount(0);
+    await expect(resultOptions.nth(0).getByText("Archived", { exact: true })).toHaveCount(0);
+
+    await archivedOption.click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${archivedInProgress.id}$`));
+  });
+
+  test("task activity icon distinguishes running and idle search results", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const runningTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Running Activity Icon E2E",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:steer-fold-setup",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await apiClient.createTask(seedData.workspaceId, "Idle Activity Icon E2E", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await expect(kanban.taskCardByTitle(runningTask.title)).toBeVisible({ timeout: 10_000 });
+
+    await openCommandPanel(testPage);
+    const dialog = commandDialog(testPage);
+    const input = dialog.getByRole("combobox");
+    await input.fill("Running Activity Icon");
+    const runningOption = dialog.getByRole("option").filter({ hasText: runningTask.title });
+    await expect(runningOption).toBeVisible({ timeout: 10_000 });
+    await expect(runningOption.getByTestId("task-state-running")).toBeVisible();
+    await expect(runningOption.getByRole("img", { name: "In progress" })).toBeVisible();
+
+    await input.fill("Idle Activity Icon");
+    const idleOption = dialog.getByRole("option").filter({ hasText: "Idle Activity Icon E2E" });
+    await expect(idleOption).toBeVisible({ timeout: 10_000 });
+    await expect(idleOption.getByTestId("task-state-backlog")).toBeVisible();
+    await expect(idleOption.getByRole("img", { name: "Created" })).toBeVisible();
+  });
+
+  // @covers AC-UI-COMMAND-PANEL-TASK-ACTIVITY-001.8
   test("inline task search shows workflow step badge", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    await apiClient.createTask(seedData.workspaceId, "Badged Task E2E", {
+    const task = await apiClient.createTask(seedData.workspaceId, "Badged Task E2E", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
@@ -259,6 +435,11 @@ test.describe("Command Panel", () => {
     const taskOption = dialog.getByRole("option", { name: /Badged Task E2E/ });
     await expect(taskOption).toBeVisible({ timeout: 5_000 });
     await expect(taskOption.getByText(startStep.name)).toBeVisible({ timeout: 5_000 });
+
+    const reviewStep = seedData.steps.find((s) => s.name === "Review")!;
+    await apiClient.moveTask(task.id, seedData.workflowId, reviewStep.id);
+    await expect(taskOption.getByText(reviewStep.name)).toBeVisible({ timeout: 10_000 });
+    await expect(taskOption.getByText(startStep.name)).not.toBeVisible({ timeout: 5_000 });
   });
 
   test("inline task search selects the first matching task after loading", async ({

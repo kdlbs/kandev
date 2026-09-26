@@ -3,19 +3,23 @@ package improvekandev
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/system/logbundle"
+	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -40,6 +44,14 @@ const (
 	issueTemplateID   = "report-kandev-issue"
 	issueWorkflowName = "Report Kandev Issue"
 	issueWorkflowDesc = "Hidden workflow for publishing a kdlbs/kandev issue without changing code."
+
+	// improveWorkspaceName aliases the canonical identity in task/models so
+	// every guard and the bootstrap agree on the exact name.
+	improveWorkspaceName = taskmodels.WorkspaceNameImproveKandev
+	improveWorkspaceDesc = "Dedicated workspace for Improve Kandev contribution tasks, isolated from regular work."
+
+	// errorKey is the JSON key every error response body uses.
+	errorKey = "error"
 )
 
 // Cloner is the minimal subset of repoclone.Cloner the bootstrap endpoint uses.
@@ -51,38 +63,85 @@ type Cloner interface {
 	) (string, error)
 }
 
+// GitHubWorkspaceCopier copies a workspace's GitHub connection onto another
+// workspace. Implemented by the github service; nil disables the copy.
+type GitHubWorkspaceCopier interface {
+	CopyWorkspaceConnectionToWorkspace(ctx context.Context, srcWorkspaceID, dstWorkspaceID string) error
+}
+
+// ManagedGitHubForkProber is the workspace-scoped provider capability used
+// when task credentials are managed. It must resolve the same automation
+// identity that will receive the task's credential leases.
+type ManagedGitHubForkProber interface {
+	DescribeTaskGitCredentialPolicy(ctx context.Context, workspaceID string) (github.TaskGitCredentialPolicy, error)
+	ProbeContributionForkCapabilityForWorkspace(
+		ctx context.Context,
+		workspaceID, owner, repo string,
+	) (github.ContributionForkResolution, error)
+}
+
+// DefaultWorkspaceResolver resolves the workspace whose GitHub configuration
+// the dedicated workspace inherits on creation (active workspace in user
+// settings → first-created workspace → literal "default").
+type DefaultWorkspaceResolver func(ctx context.Context) (string, error)
+
 // Handler exposes the improve-kandev HTTP endpoints.
 type Handler struct {
 	taskSvc    *taskservice.Service
 	cloner     Cloner
 	log        *logger.Logger
 	logBundles diagnosticBundleService
+	// ghCopier copies the default workspace's GitHub connection onto the
+	// dedicated workspace when bootstrap creates it. Nil disables the copy.
+	ghCopier GitHubWorkspaceCopier
+	// defaultWorkspaceResolver picks the source workspace for the copy. Nil
+	// disables the copy.
+	defaultWorkspaceResolver DefaultWorkspaceResolver
 	// gh resolves the authenticated user's login and write access. Defaults
 	// to a gh-CLI shell-out; tests can substitute a fake.
 	gh GitHubInfo
 	// resolveRemote resolves a local repo path's origin remote. Defaults to
 	// service.ResolveGitRemoteProvider; tests can substitute a fake.
 	resolveRemote remoteResolver
+	managedGitHub ManagedGitHubForkProber
+	tempArtifacts *tempartifacts.Registry
 }
 
 type diagnosticBundleService interface {
 	OpenArchive(owner, id string) (*os.File, logbundle.JobView, error)
 }
 
-// NewHandler constructs a Handler.
-func NewHandler(taskSvc *taskservice.Service, cloner Cloner, version string, log *logger.Logger) *Handler {
+// NewHandler constructs a Handler. version is embedded into bundle metadata.
+func NewHandler(
+	taskSvc *taskservice.Service,
+	cloner Cloner,
+	ghCopier GitHubWorkspaceCopier,
+	defaultWorkspaceResolver DefaultWorkspaceResolver,
+	version string,
+	log *logger.Logger,
+) *Handler {
 	_ = version
 	return &Handler{
-		taskSvc:       taskSvc,
-		cloner:        cloner,
-		log:           log,
-		gh:            newDefaultGitHubInfo(),
-		resolveRemote: taskservice.ResolveGitRemoteProvider,
+		taskSvc:                  taskSvc,
+		cloner:                   cloner,
+		log:                      log,
+		ghCopier:                 ghCopier,
+		defaultWorkspaceResolver: defaultWorkspaceResolver,
+		gh:                       newDefaultGitHubInfo(),
+		resolveRemote:            taskservice.ResolveGitRemoteProvider,
 	}
 }
 
 func (h *Handler) SetLogBundles(service diagnosticBundleService) {
 	h.logBundles = service
+}
+
+func (h *Handler) SetTemporaryArtifactRegistry(registry *tempartifacts.Registry) {
+	h.tempArtifacts = registry
+}
+
+func (h *Handler) SetManagedGitHubForkProber(prober ManagedGitHubForkProber) {
+	h.managedGitHub = prober
 }
 
 // RegisterRoutes registers the bootstrap and diagnostic-bundle lease endpoints.
@@ -97,7 +156,16 @@ func RegisterRoutes(router *gin.Engine, h *Handler) {
 
 // BootstrapRequest is the JSON body for POST /bootstrap.
 type BootstrapRequest struct {
-	WorkspaceID string `json:"workspace_id"`
+	// WorkspaceID is the fallback workspace (the user's active workspace) used
+	// when the dedicated Improve Kandev workspace does not exist and the user
+	// declines to create it (CreateWorkspace=false). It is ignored when the
+	// dedicated workspace exists or is being created.
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	// CreateWorkspace opts into creating the dedicated Improve Kandev
+	// workspace when it does not exist (surfaced to the user as a checkbox in
+	// the dialog). When false and the workspace is missing, bootstrap falls
+	// back to WorkspaceID (legacy behavior).
+	CreateWorkspace bool `json:"create_workspace,omitempty"`
 }
 
 // ForkStatus reports the result of the bootstrap fork-capability probe. The
@@ -109,13 +177,20 @@ const (
 	// ForkStatusWritable: user has push access on the upstream repo, no fork
 	// is needed.
 	ForkStatusWritable ForkStatus = "writable"
-	// ForkStatusReady: user already has a fork at github.com/{login}/kandev,
-	// so the PR step can push to it without forking again.
+	// ForkStatusReady: the workspace identity has a verified fork in the
+	// canonical repository's fork network, so the PR step can push to it
+	// without forking again.
 	ForkStatusReady ForkStatus = "ready"
+	// ForkStatusCreatable: the managed human automation identity can create
+	// its exact fork during task creation.
+	ForkStatusCreatable ForkStatus = "creatable"
 	// ForkStatusBlockedEMU: the authenticated user looks like an Enterprise
 	// Managed User. EMU accounts cannot fork repositories outside their
 	// owning enterprise, so the contribution flow will fail at the PR step.
 	ForkStatusBlockedEMU ForkStatus = "blocked_emu"
+	// ForkStatusBlockedManaged means the selected workspace automation
+	// connection cannot prove or prepare a safe destination.
+	ForkStatusBlockedManaged ForkStatus = "blocked_managed"
 	// ForkStatusUnknown: bootstrap could not determine fork eligibility
 	// (e.g., gh CLI lookup failed). Frontend should proceed and rely on the
 	// PR step to surface any errors.
@@ -124,6 +199,9 @@ const (
 
 // BootstrapResponse describes the artifacts the dialog needs to submit a task.
 type BootstrapResponse struct {
+	// WorkspaceID is the dedicated Improve Kandev workspace the task must be
+	// created in.
+	WorkspaceID     string     `json:"workspace_id"`
 	RepositoryID    string     `json:"repository_id"`
 	WorkflowID      string     `json:"workflow_id"`
 	IssueWorkflowID string     `json:"issue_workflow_id"`
@@ -133,38 +211,42 @@ type BootstrapResponse struct {
 	GitHubLogin     string     `json:"github_login"`
 	HasWriteAccess  bool       `json:"has_write_access"`
 	ForkStatus      ForkStatus `json:"fork_status"`
-	ForkMessage     string     `json:"fork_message,omitempty"`
+	ForkReasonCode  string     `json:"fork_reason_code,omitempty"`
 }
 
 func (h *Handler) httpBootstrap(c *gin.Context) {
 	identity, ok := authn.FromGin(c)
 	if !ok || identity.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		c.JSON(http.StatusUnauthorized, gin.H{errorKey: "authentication required"})
 		return
 	}
 	var req BootstrapRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.WorkspaceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
-		return
-	}
-	workspaceID, err := canonicalWorkspaceID(req.WorkspaceID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id must be a UUID"})
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: "invalid payload"})
 		return
 	}
 
 	ctx := c.Request.Context()
-	repo, err := h.resolveOrCloneRepo(ctx, workspaceID)
+	workspace, err := h.ensureImproveWorkspace(ctx, req.CreateWorkspace, req.WorkspaceID)
+	if err != nil {
+		h.log.Error("improve-kandev: dedicated workspace resolution failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to resolve the Improve Kandev workspace"})
+		return
+	}
+	workspaceID := workspace.ID
+
+	access := h.resolveGitHubAccessForWorkspace(ctx, workspaceID)
+	repo, err := h.resolveOrCloneRepo(ctx, workspaceID, access.providerRepoID)
 	if err != nil {
 		h.log.Error("improve-kandev: repository upsert failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to register kandev repository"})
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to register kandev repository"})
 		return
 	}
 
 	workflows, err := h.taskSvc.ListWorkflows(ctx, workspaceID, true)
 	if err != nil {
 		h.log.Error("improve-kandev: workflow list failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list improve-kandev workflows"})
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to list improve-kandev workflows"})
 		return
 	}
 	workflow, err := h.ensureWorkflow(
@@ -177,7 +259,7 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 	)
 	if err != nil {
 		h.log.Error("improve-kandev: workflow upsert failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to ensure improve-kandev workflow"})
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to ensure improve-kandev workflow"})
 		return
 	}
 	issueWorkflow, err := h.ensureWorkflow(
@@ -190,19 +272,18 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 	)
 	if err != nil {
 		h.log.Error("improve-kandev: issue workflow upsert failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to ensure report-kandev-issue workflow"})
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to ensure report-kandev-issue workflow"})
 		return
 	}
 
-	dir, err := createBundleDir(identity.UserID)
+	dir, err := h.createBundleDir(ctx, identity.UserID)
 	if err != nil {
 		h.log.Error("improve-kandev: bundle dir creation failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create bundle dir"})
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to create bundle dir"})
 		return
 	}
-	access := h.resolveGitHubAccess(ctx)
-
 	c.JSON(http.StatusOK, BootstrapResponse{
+		WorkspaceID:     workspaceID,
 		RepositoryID:    repo.ID,
 		WorkflowID:      workflow.ID,
 		IssueWorkflowID: issueWorkflow.ID,
@@ -212,16 +293,106 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		GitHubLogin:     access.login,
 		HasWriteAccess:  access.hasWrite,
 		ForkStatus:      access.forkStatus,
-		ForkMessage:     access.forkMessage,
+		ForkReasonCode:  access.forkReasonCode,
 	})
 }
 
-func canonicalWorkspaceID(value string) (string, error) {
-	id, err := uuid.Parse(value)
-	if err != nil {
-		return "", err
+func (h *Handler) createBundleDir(ctx context.Context, owner string) (string, error) {
+	if h.tempArtifacts == nil {
+		return createBundleDir(owner)
 	}
-	return id.String(), nil
+	return createBundleDirWithRegistry(ctx, owner, h.tempArtifacts)
+}
+
+// ensureImproveWorkspace returns the dedicated Improve Kandev workspace.
+//
+//   - Exists (matched by exact name): returned as-is; create_workspace and
+//     workspace_id are ignored.
+//   - Missing + createWorkspace: created (kanban-bootstrapped), and the GitHub
+//     connection from the user's default workspace is copied onto it
+//     (best-effort). A creation failure re-reads the list to converge on a
+//     workspace a concurrent bootstrap may have created.
+//   - Missing + !createWorkspace: legacy fallback — returns the requested
+//     fallbackWorkspaceID (the user's active workspace) so improve tasks land
+//     there without a dedicated workspace.
+func (h *Handler) ensureImproveWorkspace(ctx context.Context, createWorkspace bool, fallbackWorkspaceID string) (*taskmodels.Workspace, error) {
+	findByName := func(workspaces []*taskmodels.Workspace) *taskmodels.Workspace {
+		for _, workspace := range workspaces {
+			if workspace != nil && workspace.Name == improveWorkspaceName {
+				return workspace
+			}
+		}
+		return nil
+	}
+
+	workspaces, err := h.taskSvc.ListWorkspaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if workspace := findByName(workspaces); workspace != nil {
+		return workspace, nil
+	}
+
+	if !createWorkspace {
+		if fallbackWorkspaceID == "" {
+			return nil, errors.New("workspace_id is required when the Improve Kandev workspace does not exist")
+		}
+		workspace, err := h.taskSvc.GetWorkspace(ctx, fallbackWorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		return workspace, nil
+	}
+
+	created, err := h.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{
+		Name:        improveWorkspaceName,
+		Description: improveWorkspaceDesc,
+		// No Kanban bootstrap: the dedicated workspace only ever contains the
+		// hidden Improve Kandev / Report Kandev Issue workflows, so its
+		// workflow configuration must not show a default "Kanban" workflow.
+	})
+	if err == nil {
+		// A concurrent bootstrap may have created another row with the same
+		// name in the same instant (workspace names are not unique). Re-read
+		// and converge on the deterministic first match so every caller agrees
+		// on one workspace id; the duplicate row is left to the next bootstrap
+		// to ignore.
+		if latest, listErr := h.taskSvc.ListWorkspaces(ctx); listErr == nil {
+			if winner := findByName(latest); winner != nil {
+				h.copyGitHubConnectionFromDefaultWorkspace(ctx, winner.ID)
+				return winner, nil
+			}
+		}
+		h.copyGitHubConnectionFromDefaultWorkspace(ctx, created.ID)
+		return created, nil
+	}
+
+	latest, listErr := h.taskSvc.ListWorkspaces(ctx)
+	if listErr == nil {
+		if workspace := findByName(latest); workspace != nil {
+			return workspace, nil
+		}
+	}
+	return nil, err
+}
+
+// copyGitHubConnectionFromDefaultWorkspace copies the user's default
+// workspace GitHub connection onto the newly created dedicated workspace.
+// Best-effort: failures are logged, never fail bootstrap.
+func (h *Handler) copyGitHubConnectionFromDefaultWorkspace(ctx context.Context, workspaceID string) {
+	if h.ghCopier == nil || h.defaultWorkspaceResolver == nil {
+		return
+	}
+	srcWorkspaceID, err := h.defaultWorkspaceResolver(ctx)
+	if err != nil || srcWorkspaceID == "" {
+		if err != nil {
+			h.log.Warn("improve-kandev: default workspace resolution failed; skipping GitHub connection copy", zap.Error(err))
+		}
+		return
+	}
+	if err := h.ghCopier.CopyWorkspaceConnectionToWorkspace(ctx, srcWorkspaceID, workspaceID); err != nil {
+		h.log.Warn("improve-kandev: GitHub connection copy failed; improve workspace starts without one", zap.Error(err))
+	}
 }
 
 // resolveOrCloneRepo returns the workspace's kandev repository, preferring an
@@ -231,10 +402,13 @@ func canonicalWorkspaceID(value string) (string, error) {
 //  2. Match by scanning workspace repos whose origin remote resolves to
 //     kdlbs/kandev; backfill provider info on the match.
 //  3. Fall back to cloning into the managed location and registering it.
-func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID string) (*taskmodels.Repository, error) {
+func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID, providerRepoID string) (*taskmodels.Repository, error) {
 	if existing, err := h.taskSvc.GetRepositoryByProviderInfo(ctx, workspaceID, repoProvider, "https://github.com", repoOwner, repoName); err != nil {
 		return nil, err
 	} else if existing != nil {
+		if err := h.ensureKandevProviderRepoID(ctx, existing, providerRepoID); err != nil {
+			return nil, err
+		}
 		return existing, nil
 	}
 
@@ -244,7 +418,9 @@ func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID string) (*
 		// risk a duplicate than fail the bootstrap entirely.
 		h.log.Warn("improve-kandev: list repositories failed; falling back to clone", zap.Error(err))
 	} else if match := findKandevRepoByLocalRemote(repos, h.resolveRemote); match != nil {
-		h.backfillKandevProviderInfo(ctx, match)
+		if err := h.backfillKandevProviderInfo(ctx, match, providerRepoID); err != nil {
+			return nil, err
+		}
 		return match, nil
 	}
 
@@ -255,13 +431,14 @@ func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID string) (*
 		return nil, err
 	}
 	repo, _, err := h.taskSvc.FindOrCreateRepository(ctx, &taskservice.FindOrCreateRepositoryRequest{
-		WorkspaceID:   workspaceID,
-		Provider:      repoProvider,
-		ProviderHost:  "https://github.com",
-		ProviderOwner: repoOwner,
-		ProviderName:  repoName,
-		DefaultBranch: defaultBranch,
-		LocalPath:     localPath,
+		WorkspaceID:    workspaceID,
+		Provider:       repoProvider,
+		ProviderHost:   "https://github.com",
+		ProviderRepoID: providerRepoID,
+		ProviderOwner:  repoOwner,
+		ProviderName:   repoName,
+		DefaultBranch:  defaultBranch,
+		LocalPath:      localPath,
 	})
 	return repo, err
 }
@@ -291,10 +468,13 @@ func findKandevRepoByLocalRemote(repos []*taskmodels.Repository, resolve remoteR
 // backfillKandevProviderInfo fills missing provider/owner/name on an existing
 // repo so subsequent lookups by provider info hit the fast path. Failures are
 // logged but non-fatal — we still return the matched repo to the caller.
-func (h *Handler) backfillKandevProviderInfo(ctx context.Context, repo *taskmodels.Repository) {
+func (h *Handler) backfillKandevProviderInfo(ctx context.Context, repo *taskmodels.Repository, providerRepoID string) error {
+	if err := h.ensureKandevProviderRepoID(ctx, repo, providerRepoID); err != nil {
+		return err
+	}
 	if repo.Provider == repoProvider && repo.ProviderHost == "https://github.com" &&
 		repo.ProviderOwner == repoOwner && repo.ProviderName == repoName {
-		return
+		return nil
 	}
 	provider, providerHost, owner, name := repoProvider, "https://github.com", repoOwner, repoName
 	branch := repo.DefaultBranch
@@ -310,29 +490,45 @@ func (h *Handler) backfillKandevProviderInfo(ctx context.Context, repo *taskmode
 	}); err != nil {
 		h.log.Warn("improve-kandev: backfill provider info failed",
 			zap.String("repository_id", repo.ID), zap.Error(err))
-		return
+		return nil
 	}
 	repo.Provider = provider
 	repo.ProviderHost = providerHost
 	repo.ProviderOwner = owner
 	repo.ProviderName = name
 	repo.DefaultBranch = branch
+	return nil
 }
 
-// emuBlockedMessage explains the EMU-restriction case to the contributor in
-// terms they can act on. Surfaced in the dialog when ForkStatusBlockedEMU is
-// returned.
-const emuBlockedMessage = "Your GitHub account appears to be an Enterprise Managed User (EMU) account, " +
-	"which typically cannot fork repositories outside your owning enterprise. " +
-	"The PR step would fail when forking kdlbs/kandev. Contact your GitHub admin " +
-	"if you'd like to enable this, or contribute via another account."
+func (h *Handler) ensureKandevProviderRepoID(
+	ctx context.Context,
+	repo *taskmodels.Repository,
+	providerRepoID string,
+) error {
+	providerRepoID = strings.TrimSpace(providerRepoID)
+	if repo == nil || providerRepoID == "" {
+		return nil
+	}
+	if repo.ProviderRepoID != "" && repo.ProviderRepoID != providerRepoID {
+		return errors.New("kdlbs/kandev provider identity changed; refusing to reuse the repository row")
+	}
+	if repo.ProviderRepoID == providerRepoID {
+		return nil
+	}
+	if _, err := h.taskSvc.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{ProviderRepoID: &providerRepoID}); err != nil {
+		return fmt.Errorf("backfill kdlbs/kandev provider ID: %w", err)
+	}
+	repo.ProviderRepoID = providerRepoID
+	return nil
+}
 
 // githubAccess is the resolved bootstrap GitHub state.
 type githubAccess struct {
-	login       string
-	hasWrite    bool
-	forkStatus  ForkStatus
-	forkMessage string
+	login          string
+	hasWrite       bool
+	forkStatus     ForkStatus
+	forkReasonCode string
+	providerRepoID string
 }
 
 // resolveGitHubAccess resolves the authenticated user's login, push access,
@@ -343,6 +539,12 @@ func (h *Handler) resolveGitHubAccess(ctx context.Context) githubAccess {
 	out := githubAccess{forkStatus: ForkStatusUnknown}
 	if h.gh == nil {
 		return out
+	}
+	providerRepoID, err := h.gh.GetRepositoryID(ctx, repoOwner, repoName)
+	if err != nil {
+		h.log.Debug("improve-kandev: canonical repository ID lookup failed", zap.Error(err))
+	} else {
+		out.providerRepoID = providerRepoID
 	}
 	login, err := h.gh.GetAuthenticatedLogin(ctx)
 	if err != nil {
@@ -371,9 +573,82 @@ func (h *Handler) resolveGitHubAccess(ctx context.Context) githubAccess {
 	}
 	if isEMULogin(login) {
 		out.forkStatus = ForkStatusBlockedEMU
-		out.forkMessage = emuBlockedMessage
+		out.forkReasonCode = string(ForkReasonAccountCannotFork)
 	}
 	return out
+}
+
+func (h *Handler) resolveGitHubAccessForWorkspace(ctx context.Context, workspaceID string) githubAccess {
+	if h.managedGitHub == nil {
+		return h.resolveGitHubAccess(ctx)
+	}
+	policy, err := h.managedGitHub.DescribeTaskGitCredentialPolicy(ctx, workspaceID)
+	if err != nil {
+		return githubAccess{
+			forkStatus:     ForkStatusBlockedManaged,
+			forkReasonCode: string(managedForkErrorReasonCode(err)),
+		}
+	}
+	if policy.Mode != github.TaskGitCredentialsModeManaged {
+		return h.resolveGitHubAccess(ctx)
+	}
+	result, err := h.managedGitHub.ProbeContributionForkCapabilityForWorkspace(
+		ctx, workspaceID, repoOwner, repoName,
+	)
+	out := githubAccess{
+		login:          result.ActorLogin,
+		forkStatus:     ForkStatusBlockedManaged,
+		providerRepoID: providerRepositoryID(result.Repository),
+	}
+	if err != nil {
+		out.forkReasonCode = string(managedForkErrorReasonCode(err))
+		return out
+	}
+	switch result.Status {
+	case github.ContributionForkStatusDirectWrite:
+		out.hasWrite = true
+		out.forkStatus = ForkStatusWritable
+	case github.ContributionForkStatusReady:
+		out.forkStatus = ForkStatusReady
+	case github.ContributionForkStatusCreatable:
+		out.forkStatus = ForkStatusCreatable
+	default:
+		out.forkReasonCode = string(managedForkErrorReasonCode(errors.New("managed GitHub fork capability is blocked")))
+	}
+	return out
+}
+
+type ForkReasonCode string
+
+const (
+	ForkReasonAccountCannotFork  ForkReasonCode = "account_cannot_fork"
+	ForkReasonAppUnsupported     ForkReasonCode = "app_unsupported"
+	ForkReasonForkConflict       ForkReasonCode = "fork_conflict"
+	ForkReasonForkNotWritable    ForkReasonCode = "fork_not_writable"
+	ForkReasonForkNotReady       ForkReasonCode = "fork_not_ready"
+	ForkReasonManagedUnavailable ForkReasonCode = "managed_unavailable"
+)
+
+func managedForkErrorReasonCode(err error) ForkReasonCode {
+	switch {
+	case errors.Is(err, github.ErrContributionForkAppUnsupported):
+		return ForkReasonAppUnsupported
+	case errors.Is(err, github.ErrContributionForkConflict):
+		return ForkReasonForkConflict
+	case errors.Is(err, github.ErrContributionForkNotWritable):
+		return ForkReasonForkNotWritable
+	case errors.Is(err, github.ErrContributionForkNotReady):
+		return ForkReasonForkNotReady
+	default:
+		return ForkReasonManagedUnavailable
+	}
+}
+
+func providerRepositoryID(repository *github.GitHubRepository) string {
+	if repository == nil || repository.ID <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(repository.ID, 10)
 }
 
 // ensureWorkflow finds or creates a hidden Improve Kandev workflow in the
@@ -448,26 +723,26 @@ type leaseBundleRequest struct {
 func (h *Handler) httpLeaseBundle(c *gin.Context) {
 	identity, ok := authn.FromGin(c)
 	if !ok || identity.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		c.JSON(http.StatusUnauthorized, gin.H{errorKey: "authentication required"})
 		return
 	}
 	var req leaseBundleRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.BundleID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: "invalid payload"})
 		return
 	}
 	dir, err := validateBundleDir(req.BundleDir, identity.UserID)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{errorKey: err.Error()})
 		return
 	}
 	if h.logBundles == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "diagnostic bundles unavailable"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{errorKey: "diagnostic bundles unavailable"})
 		return
 	}
 	archive, view, err := h.logBundles.OpenArchive(identity.UserID, req.BundleID)
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "diagnostic bundle is not ready"})
+		c.JSON(http.StatusConflict, gin.H{errorKey: "diagnostic bundle is not ready"})
 		return
 	}
 	defer func() { _ = archive.Close() }()
@@ -479,10 +754,10 @@ func (h *Handler) httpLeaseBundle(c *gin.Context) {
 		if errors.Is(err, errBundleTooLarge) {
 			status = http.StatusRequestEntityTooLarge
 		}
-		c.JSON(status, gin.H{"error": "failed to lease diagnostic bundle"})
+		c.JSON(status, gin.H{errorKey: "failed to lease diagnostic bundle"})
 		return
 	}
-	time.AfterFunc(staleBundleAge, func() { _ = os.Remove(path) })
+	time.AfterFunc(bundleLeaseAge, func() { _ = os.Remove(path) })
 	c.JSON(http.StatusOK, gin.H{
 		"path": path, "status": view.Status, "sources": view.Sources,
 	})

@@ -1,6 +1,6 @@
 import type {
   Comment,
-  DiffComment,
+  ReviewComment,
   PlanComment,
   PRFeedbackComment,
   WalkthroughComment,
@@ -8,21 +8,22 @@ import type {
 } from "./types";
 import {
   isAgentMessageComment,
-  isDiffComment,
+  isReviewComment,
   isPlanComment,
   isPRFeedbackComment,
   isWalkthroughComment,
 } from "./types";
+import { t } from "@/lib/i18n";
 
 /**
  * Format diff review comments as human-readable markdown for sending to agent.
  */
-export function formatReviewCommentsAsMarkdown(comments: DiffComment[]): string {
+export function formatReviewCommentsAsMarkdown(comments: ReviewComment[]): string {
   if (!comments || comments.length === 0) return "";
 
   const lines: string[] = ["### Review Comments", ""];
 
-  const byFile = new Map<string, DiffComment[]>();
+  const byFile = new Map<string, ReviewComment[]>();
   for (const comment of comments) {
     const existing = byFile.get(comment.filePath) || [];
     existing.push(comment);
@@ -31,12 +32,19 @@ export function formatReviewCommentsAsMarkdown(comments: DiffComment[]): string 
 
   for (const [filePath, fileComments] of byFile) {
     for (const comment of fileComments) {
+      if (comment.source === "review-file") {
+        const prefix = comment.repositoryName ? `${comment.repositoryName}/` : "";
+        lines.push(`**${prefix}${comment.filePath}**`, toBlockquote(comment.text), "");
+        continue;
+      }
       const lineRange =
         comment.startLine === comment.endLine
           ? `${comment.startLine}`
           : `${comment.startLine}-${comment.endLine}`;
 
-      lines.push(`**${filePath}:${lineRange}**`);
+      lines.push(
+        `**${[comment.repositoryName, filePath].filter(Boolean).join("/")}:${lineRange}**`,
+      );
       lines.push("```");
       lines.push(comment.codeContent);
       lines.push("```");
@@ -109,7 +117,7 @@ export function formatWalkthroughCommentsAsMarkdown(comments: WalkthroughComment
   for (const c of comments) {
     const lineRange = c.startLine === c.endLine ? `${c.startLine}` : `${c.startLine}-${c.endLine}`;
     const repoPrefix = c.repo ? `${c.repo}/` : "";
-    const title = c.walkthroughTitle || "Walkthrough";
+    const title = c.walkthroughTitle || t("common:walkthrough");
 
     lines.push(`**${title} · Step ${c.stepIndex + 1} / ${c.stepCount}**`);
     lines.push(`**${repoPrefix}${c.filePath}:${lineRange}**`);
@@ -148,20 +156,20 @@ export function formatAgentMessageCommentsAsMarkdown(comments: AgentMessageComme
  * Format all pending comments for inclusion in a chat message.
  */
 export function formatCommentsForMessage(comments: Comment[]): {
-  diffComments: DiffComment[];
+  diffComments: ReviewComment[];
   planComments: PlanComment[];
   prFeedbackComments: PRFeedbackComment[];
   walkthroughComments: WalkthroughComment[];
   agentMessageComments: AgentMessageComment[];
 } {
-  const diffComments: DiffComment[] = [];
+  const diffComments: ReviewComment[] = [];
   const planComments: PlanComment[] = [];
   const prFeedbackComments: PRFeedbackComment[] = [];
   const walkthroughComments: WalkthroughComment[] = [];
   const agentMessageComments: AgentMessageComment[] = [];
 
   for (const c of comments) {
-    if (isDiffComment(c)) diffComments.push(c);
+    if (isReviewComment(c)) diffComments.push(c);
     else if (isPlanComment(c)) planComments.push(c);
     else if (isPRFeedbackComment(c)) prFeedbackComments.push(c);
     else if (isWalkthroughComment(c)) walkthroughComments.push(c);

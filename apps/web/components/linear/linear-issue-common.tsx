@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { formatDistanceToNow } from "date-fns";
+import { formatTimeDistance } from "@/lib/i18n/date-locale";
 import { Avatar, AvatarFallback, AvatarImage } from "@kandev/ui/avatar";
 import { getLinearIssue, setLinearIssueState } from "@/lib/api/domains/linear-api";
 import type { LinearIssue, LinearStateCategory } from "@/lib/types/linear";
 import { IntegrationAuthErrorMessage } from "@/components/integrations/auth-error-message";
+import { useTranslation } from "react-i18next";
 
 // Matches Linear identifiers like ENG-123. Linear team keys are always
 // uppercase and 1+ chars; we require a leading capital letter to avoid catching
@@ -34,15 +35,15 @@ export function stateBadgeClass(category: LinearStateCategory | undefined): stri
   }
 }
 
-export function formatRelative(iso: string | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return formatDistanceToNow(d, { addSuffix: true });
-}
+// Alias of the one canonical distance formatter, kept under this module's
+// historical name so existing consumers and their imports are unchanged.
+// Callers inside React should pass `useDateLocale()` so the value re-renders
+// when a lazily loaded locale lands; the default keeps other callers correct.
+export const formatRelative = formatTimeDistance;
 
 export function PersonCell({ name, avatar }: { name?: string; avatar?: string }) {
-  if (!name) return <span className="text-muted-foreground">Unassigned</span>;
+  const { t } = useTranslation();
+  if (!name) return <span className="text-muted-foreground">{t("linear:unassigned")}</span>;
   return (
     <>
       <Avatar size="sm" className="size-5">
@@ -163,13 +164,14 @@ type LinearErrorMessageProps = {
 };
 
 export function LinearErrorMessage({ error, compact }: LinearErrorMessageProps) {
+  const { t } = useTranslation();
   return (
     <IntegrationAuthErrorMessage
       error={error}
       name="Linear"
       reconnectHref="/settings/integrations/linear"
       isAuthError={isLinearAuthError}
-      authErrorBody="Your Linear API key is invalid or has been revoked. Reconnect to view this issue."
+      authErrorBody={t("linear:yourLinearApiKeyIsInvalid")}
       compact={compact}
     />
   );

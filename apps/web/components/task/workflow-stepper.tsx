@@ -1,69 +1,66 @@
 "use client";
 
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { useWorkflowMoveSubmit, workflowMoveShortcutLabel } from "./use-workflow-move-submit";
+
+import {
+  useCallback,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+  memo,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { cn } from "@kandev/ui/lib/utils";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
-import { IconArrowRight } from "@tabler/icons-react";
-import { moveTask } from "@/lib/api";
+import { IconAdjustments, IconArrowRight } from "@tabler/icons-react";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
+import {
+  WorkflowMoveOptionsFields,
+  useWorkflowMoveOptionsForm,
+  workflowMoveOptionsPayload,
+} from "./workflow-move-options";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
-import { useAppStore } from "@/components/state-provider";
-import { useContextFilesStore } from "@/lib/state/context-files-store";
-import { useLayoutStore } from "@/lib/state/layout-store";
-import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
-import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
+import {
+  usePresentationToken,
+  useWorkflowStepMove,
+} from "@/hooks/domains/kanban/use-workflow-step-move";
+import { useWorkflowMovePreview } from "@/hooks/domains/kanban/use-workflow-move-preview";
+import { useWorkflowMovePreviewRevision } from "@/hooks/domains/kanban/use-workflow-move-preview-revision";
+import {
+  useWorkflowStepProgress,
+  type WorkflowStepProgress,
+} from "@/hooks/domains/kanban/use-workflow-step-progress";
+import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
+import { useTranslation } from "react-i18next";
+import {
+  MinimalWorkflowStepper,
+  canMoveToStep,
+  getStepLabelClass,
+  type WorkflowStepperStep,
+} from "./workflow-step-disclosure";
+import {
+  StepProgressDetails,
+  workflowStepProgressTranslationKey,
+} from "./workflow-step-progress-details";
+import { StepCircleIndicator } from "./workflow-step-marker";
+import { useHoverPopover } from "@/components/integrations/use-hover-popover";
+import { WorkflowMovePreviewDisclosure } from "./workflow-move-preview";
 
-type Step = {
-  id: string;
-  name: string;
-  color: string;
-  position: number;
-  events?: KanbanStepEvents;
-  allow_manual_move?: boolean;
-  prompt?: string;
-  is_start_step?: boolean;
-  agent_profile_id?: string;
-};
-
-const PLAN_CONTEXT_PATH = "plan:context";
-
-/** Returns a callback that disables plan mode for the active session of a task. */
-function useDisablePlanMode() {
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const planModeEnabled = useAppStore((s) =>
-    activeSessionId ? (s.chatInput.planModeBySessionId[activeSessionId] ?? false) : false,
-  );
-  const setPlanMode = useAppStore((s) => s.setPlanMode);
-  const setActiveDocument = useAppStore((s) => s.setActiveDocument);
-  const closeDocument = useLayoutStore((s) => s.closeDocument);
-  const removeContextFile = useContextFilesStore((s) => s.removeFile);
-  const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
-
-  return useCallback(() => {
-    if (!activeSessionId || !planModeEnabled) return;
-    applyBuiltInPreset("default");
-    closeDocument(activeSessionId);
-    setActiveDocument(activeSessionId, null);
-    setPlanMode(activeSessionId, false);
-    removeContextFile(activeSessionId, PLAN_CONTEXT_PATH);
-  }, [
-    activeSessionId,
-    planModeEnabled,
-    setPlanMode,
-    setActiveDocument,
-    closeDocument,
-    removeContextFile,
-    applyBuiltInPreset,
-  ]);
-}
+type Step = WorkflowStepperStep;
 
 type WorkflowStepperProps = {
   steps: Step[];
   currentStepId: string | null;
   taskId?: string | null;
   workflowId?: string | null;
+  taskState?: string | null;
   isArchived?: boolean;
+  onMoveStart?: () => void;
+  onMoveError?: (error: unknown) => void;
 };
 
 const WorkflowStepper = memo(function WorkflowStepper({
@@ -71,36 +68,38 @@ const WorkflowStepper = memo(function WorkflowStepper({
   currentStepId,
   taskId,
   workflowId,
+  taskState,
   isArchived,
+  onMoveStart,
+  onMoveError,
 }: WorkflowStepperProps) {
-  const [movingToStepId, setMovingToStepId] = useState<string | null>(null);
-  const disablePlanMode = useDisablePlanMode();
+  const { t } = useTranslation();
+  // The task route's continuous presentation of this task: a navigation away
+  // and back changes taskId and back, which must invalidate a request left
+  // over from the earlier presentation the same way a preview close-and-reopen
+  // does for the kanban preview header.
+  const presentationToken = usePresentationToken(taskId ?? null);
+  const { movingToStepId, progressingToStepId, handleMove } = useWorkflowStepMove({
+    taskId,
+    workflowId,
+    currentStepId,
+    taskState,
+    presentationToken,
+    onMoveStart,
+    onMoveError,
+  });
+  const { progressByStepId, agentLabelsByProfileId } = useWorkflowStepProgress({
+    taskId,
+    currentStepId,
+    movingToStepId: progressingToStepId ?? movingToStepId,
+  });
 
-  const sortedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
+  const [openStepId, setOpenStepId] = useState<string | null>(null);
+  const sortedSteps = useMemo(() => sortWorkflowStepsByPosition(steps), [steps]);
 
   const currentIndex = useMemo(
     () => sortedSteps.findIndex((s) => s.id === currentStepId),
     [sortedSteps, currentStepId],
-  );
-
-  const handleMove = useCallback(
-    async (stepId: string) => {
-      if (!taskId || !workflowId) return;
-      disablePlanMode();
-      setMovingToStepId(stepId);
-      try {
-        await moveTask(taskId, {
-          workflow_id: workflowId,
-          workflow_step_id: stepId,
-          position: 0,
-        });
-      } catch (err) {
-        console.error("[WorkflowStepper] Failed to move task:", err);
-      } finally {
-        setMovingToStepId(null);
-      }
-    },
-    [taskId, workflowId, disablePlanMode],
   );
 
   // Collapse to a minimal view when the full stepper can't fit (w-full keeps the measurement track-driven).
@@ -120,6 +119,12 @@ const WorkflowStepper = memo(function WorkflowStepper({
           sortedSteps={sortedSteps}
           currentIndex={currentIndex}
           isArchived={isArchived}
+          taskId={taskId}
+          workflowId={workflowId}
+          movingToStepId={movingToStepId}
+          onMove={handleMove}
+          progressByStepId={progressByStepId}
+          agentLabelsByProfileId={agentLabelsByProfileId}
         />
       ) : (
         <>
@@ -128,12 +133,21 @@ const WorkflowStepper = memo(function WorkflowStepper({
               <WorkflowStepItem
                 key={step.id}
                 step={step}
+                openStepId={openStepId}
+                setOpenStepId={setOpenStepId}
                 index={index}
                 currentIndex={currentIndex}
                 isArchived={isArchived}
                 taskId={taskId}
                 workflowId={workflowId}
                 movingToStepId={movingToStepId}
+                progress={progressByStepId[step.id]}
+                pendingLabel={
+                  progressByStepId[step.id]?.isPending
+                    ? t(workflowStepProgressTranslationKey(progressByStepId[step.id].status))
+                    : undefined
+                }
+                agentLabelsByProfileId={agentLabelsByProfileId}
                 onMove={handleMove}
               />
             ))}
@@ -142,7 +156,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
             <>
               <div className="h-px w-6 shrink-0 bg-border" />
               <span className="text-[11px] font-medium text-amber-500 bg-amber-500/15 px-2 py-0.5 rounded-md whitespace-nowrap">
-                Archived
+                {t("task:filterDimensionArchived")}
               </span>
             </>
           )}
@@ -152,87 +166,59 @@ const WorkflowStepper = memo(function WorkflowStepper({
   );
 });
 
-/** Minimal stepper: current step only (or archived badge), keeping the per-step test id + aria-current. */
-function MinimalWorkflowStepper({
-  sortedSteps,
-  currentIndex,
-  isArchived,
-}: {
-  sortedSteps: Step[];
-  currentIndex: number;
-  isArchived?: boolean;
-}) {
-  if (isArchived) {
-    return (
-      <span
-        data-testid="workflow-stepper-minimal"
-        className="text-[11px] font-medium text-amber-500 bg-amber-500/15 px-2 py-0.5 rounded-md whitespace-nowrap"
-      >
-        Archived
-      </span>
-    );
-  }
-
-  const current = currentIndex >= 0 ? sortedSteps[currentIndex] : sortedSteps[0];
-  if (!current) return null;
-
-  return (
-    <div
-      data-testid="workflow-stepper-minimal"
-      className="flex min-w-0 items-center gap-1.5 rounded-md px-2 py-0.5"
-    >
-      <div
-        data-testid={`workflow-step-${current.name}`}
-        aria-current={currentIndex >= 0 ? "step" : undefined}
-        className="flex min-w-0 items-center gap-1.5 text-xs"
-      >
-        <StepCircleIndicator isCurrent isCompleted={false} />
-        <span className="truncate text-xs font-medium leading-none text-foreground">
-          {current.name}
-        </span>
-      </div>
-      {sortedSteps.length > 1 && (
-        <span className="shrink-0 text-[11px] tabular-nums leading-none text-muted-foreground">
-          {(currentIndex >= 0 ? currentIndex : 0) + 1}/{sortedSteps.length}
-        </span>
-      )}
-    </div>
+function useStepHover(
+  stepId: string,
+  openStepId: string | null,
+  setOpenStepId: Dispatch<SetStateAction<string | null>>,
+) {
+  const onHoverOpenChange = useCallback(
+    (open: boolean) => {
+      setOpenStepId((current) => {
+        if (open) return stepId;
+        return current === stepId ? null : current;
+      });
+    },
+    [setOpenStepId, stepId],
   );
-}
-
-/** Check if a step can be moved to */
-function canMoveToStep(params: {
-  isArchived: boolean | undefined;
-  isCurrent: boolean;
-  taskId: string | null | undefined;
-  workflowId: string | null | undefined;
-  isAdjacent: boolean;
-  allowManualMove: boolean | undefined;
-}): boolean {
-  if (params.isArchived || params.isCurrent || !params.taskId || !params.workflowId) return false;
-  return params.isAdjacent || !!params.allowManualMove;
+  return useHoverPopover({
+    openDelayMs: 200,
+    closeDelayMs: 100,
+    open: openStepId === stepId,
+    onOpenChange: onHoverOpenChange,
+  });
 }
 
 /** Individual step in the workflow stepper */
 function WorkflowStepItem({
   step,
+  openStepId,
+  setOpenStepId,
   index,
   currentIndex,
   isArchived,
   taskId,
   workflowId,
   movingToStepId,
+  progress,
+  pendingLabel,
+  agentLabelsByProfileId,
   onMove,
 }: {
   step: Step;
+  openStepId: string | null;
+  setOpenStepId: Dispatch<SetStateAction<string | null>>;
   index: number;
   currentIndex: number;
   isArchived?: boolean;
   taskId?: string | null;
   workflowId?: string | null;
   movingToStepId: string | null;
-  onMove: (stepId: string) => void;
+  progress?: WorkflowStepProgress;
+  pendingLabel?: string;
+  agentLabelsByProfileId: Readonly<Record<string, string>>;
+  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
 }) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const isCompleted = !isArchived && currentIndex >= 0 && index < currentIndex;
   const isCurrent = !isArchived && index === currentIndex;
   const isAdjacent =
@@ -245,42 +231,72 @@ function WorkflowStepItem({
     isAdjacent,
     allowManualMove: step.allow_manual_move,
   });
+  const hover = useStepHover(step.id, openStepId, setOpenStepId);
 
   return (
     <div className="flex items-center">
-      {index > 0 && <StepConnector isActive={isCompleted || isCurrent} />}
-      <HoverCard openDelay={200} closeDelay={100}>
-        <HoverCardTrigger asChild>
-          <div
+      {index > 0 && (
+        <StepConnector
+          isActive={isCompleted || isCurrent}
+          testId={`workflow-step-connector-${step.id}`}
+        />
+      )}
+      <Popover open={hover.open} onOpenChange={hover.onOpenChange}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            ref={triggerRef}
             data-testid={`workflow-step-${step.name}`}
             aria-current={isCurrent ? "step" : undefined}
             className={cn(
-              "flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs whitespace-nowrap transition-colors cursor-default",
+              "m-0 flex items-center gap-1.5 rounded-md border-0 bg-transparent p-0 px-2 py-0.5 text-left text-xs whitespace-nowrap transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               isCurrent ? "bg-muted/40" : "hover:bg-muted/30",
             )}
+            onMouseEnter={hover.onTriggerEnter}
+            onMouseMove={hover.onTriggerEnter}
+            onPointerEnter={hover.onTriggerEnter}
+            onPointerMove={hover.onTriggerEnter}
+            onFocus={hover.onTriggerEnter}
+            onMouseLeave={hover.onTriggerLeave}
+            onPointerLeave={hover.onTriggerLeave}
+            onBlur={hover.onTriggerLeave}
           >
-            <StepCircleIndicator isCurrent={isCurrent} isCompleted={isCompleted} />
+            <StepCircleIndicator
+              isCurrent={isCurrent}
+              isCompleted={isCompleted}
+              isPending={progress?.isPending}
+              pendingLabel={pendingLabel}
+            />
             <span className={cn("text-xs leading-none", getStepLabelClass(isCurrent, isCompleted))}>
               {step.name}
             </span>
-          </div>
-        </HoverCardTrigger>
+          </button>
+        </PopoverTrigger>
         <StepHoverContent
           step={step}
           isCurrent={isCurrent}
           canMove={canMove}
           isMoving={movingToStepId === step.id}
+          taskId={taskId}
+          workflowId={workflowId}
+          progress={progress}
+          agentLabelsByProfileId={agentLabelsByProfileId}
           onMove={onMove}
+          hover={hover}
+          onReturnFocus={() => triggerRef.current?.focus()}
         />
-      </HoverCard>
+      </Popover>
     </div>
   );
 }
 
 /** Connector line between steps */
-function StepConnector({ isActive }: { isActive: boolean }) {
+function StepConnector({ isActive, testId }: { isActive: boolean; testId?: string }) {
   return (
-    <div className={cn("h-px w-6 shrink-0", isActive ? "bg-muted-foreground/40" : "bg-border")} />
+    <div
+      data-testid={testId}
+      className={cn("h-px w-6 shrink-0", isActive ? "bg-muted-foreground/40" : "bg-border")}
+    />
   );
 }
 
@@ -290,74 +306,167 @@ function StepHoverContent({
   isCurrent,
   canMove,
   isMoving,
+  taskId,
+  workflowId,
+  progress,
+  agentLabelsByProfileId,
   onMove,
+  hover,
+  onReturnFocus,
 }: {
   step: Step;
   isCurrent: boolean;
   canMove: boolean;
   isMoving: boolean;
-  onMove: (stepId: string) => void;
+  taskId?: string | null;
+  workflowId?: string | null;
+  progress?: WorkflowStepProgress;
+  agentLabelsByProfileId: Readonly<Record<string, string>>;
+  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
+  hover: ReturnType<typeof useHoverPopover>;
+  onReturnFocus: () => void;
 }) {
+  const { t } = useTranslation();
+  const stepDetails = (
+    <div className="flex w-full flex-col items-center gap-1.5">
+      {progress && (
+        <StepProgressDetails
+          progress={progress}
+          agentProfileId={step.agent_profile_id}
+          agentLabelsByProfileId={agentLabelsByProfileId}
+          testId={`workflow-step-progress-${step.id}`}
+        />
+      )}
+      <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
+    </div>
+  );
   return (
-    <HoverCardContent
+    <PopoverContent
       side="bottom"
       align="center"
-      className="w-auto min-w-28 p-1.5 flex flex-col items-center gap-1.5"
+      data-testid="workflow-step-popover"
+      className="p-1.5 flex flex-col gap-1.5 items-center w-auto min-w-28 max-w-[calc(100vw-1rem)] data-[state=closed]:hidden"
+      onMouseEnter={hover.onContentEnter}
+      onMouseMove={hover.onContentEnter}
+      onPointerEnter={hover.onContentEnter}
+      onPointerMove={hover.onContentEnter}
+      onMouseLeave={hover.onContentLeave}
+      onPointerLeave={hover.onContentLeave}
+      onFocusCapture={hover.onContentEnter}
+      onBlurCapture={hover.onContentLeave}
+      onOpenAutoFocus={(event) => event.preventDefault()}
+      // Restoring focus after pointer exit would trigger another hover open.
+      onCloseAutoFocus={(event) => event.preventDefault()}
+      onEscapeKeyDown={onReturnFocus}
     >
       {canMove && (
+        <StepMoveControls
+          step={step}
+          taskId={taskId}
+          workflowId={workflowId}
+          previewEnabled={hover.open}
+          children={stepDetails}
+          isMoving={isMoving}
+          onMove={onMove}
+        />
+      )}
+      {isCurrent && (
+        <div className="text-[11px] text-muted-foreground">{t("task:currentStep")}</div>
+      )}
+      {!canMove && stepDetails}
+    </PopoverContent>
+  );
+}
+
+/**
+ * Move button plus an opt-in inline options draft. The options stay hidden
+ * until the user reveals them, so a quick hover-and-click keeps the original
+ * zero-config move; a revealed, filled draft rides along as one-shot
+ * entry_options. Rendered only while the hover card is open, so the draft
+ * hook subscribes lazily and resets whenever the pointer leaves the step.
+ */
+function StepMoveControls({
+  children,
+  step,
+  taskId,
+  workflowId,
+  previewEnabled,
+  isMoving,
+  onMove,
+}: {
+  step: Step;
+  taskId?: string | null;
+  workflowId?: string | null;
+  previewEnabled: boolean;
+  children: ReactNode;
+  isMoving: boolean;
+  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
+}) {
+  const { t } = useTranslation();
+  const [showOptions, setShowOptions] = useState(false);
+  const { draft, patchDraft } = useWorkflowMoveOptionsForm();
+  const entryOptions = workflowMoveOptionsPayload(draft);
+  const invalidationKey = useWorkflowMovePreviewRevision(taskId, workflowId, step.id);
+  const previewState = useWorkflowMovePreview({
+    taskId,
+    workflowId,
+    workflowStepId: step.id,
+    entryOptions,
+    enabled: previewEnabled,
+    invalidationKey,
+  });
+  const submission = useWorkflowMoveSubmit(isMoving, () => onMove(step.id, entryOptions));
+
+  return (
+    <div className="flex w-full flex-col items-stretch gap-1.5">
+      <Button
+        size="sm"
+        variant="default"
+        className="cursor-pointer text-xs h-6 px-2.5 rounded-sm"
+        disabled={submission.busy}
+        onClick={() => void submission.submit()}
+        data-testid="workflow-step-move-here"
+      >
+        <IconArrowRight className="h-3 w-3" />
+        {isMoving ? t("task:moving") : t("task:moveHere")}
+        {showOptions && (
+          <kbd className="self-center font-sans text-[10px] leading-none opacity-60">
+            {workflowMoveShortcutLabel()}
+          </kbd>
+        )}
+      </Button>
+      {showOptions ? (
+        <div
+          className="w-64 max-w-[calc(100vw-2rem)]"
+          onKeyDown={(event) => {
+            submission.onKeyDown(event);
+            event.stopPropagation();
+          }}
+        >
+          <WorkflowMoveOptionsFields
+            draft={draft}
+            onDraftChange={patchDraft}
+            isTouchSurface={false}
+            instructionsRows={3}
+          />
+        </div>
+      ) : (
         <Button
           size="sm"
-          variant="default"
-          className="cursor-pointer text-xs h-6 px-2.5 rounded-sm"
-          disabled={isMoving}
-          onClick={() => onMove(step.id)}
+          variant="ghost"
+          className="cursor-pointer text-xs h-6 px-2.5 rounded-sm text-muted-foreground"
+          onClick={() => setShowOptions(true)}
+          data-testid="workflow-step-move-options-trigger"
         >
-          <IconArrowRight className="h-3 w-3" />
-          {isMoving ? "Moving..." : "Move here"}
+          <IconAdjustments className="h-3 w-3" />
+          {t("task:workflowMoveOptions")}
         </Button>
       )}
-      {isCurrent && <div className="text-[11px] text-muted-foreground">Current step</div>}
-      <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
-    </HoverCardContent>
+      {children}
+      <WorkflowMovePreviewDisclosure state={previewState} isTouchSurface={false} />
+    </div>
   );
-}
-
-/** Circle indicator for step state */
-function StepCircleIndicator({
-  isCurrent,
-  isCompleted,
-}: {
-  isCurrent: boolean;
-  isCompleted: boolean;
-}) {
-  if (isCurrent) {
-    return (
-      <span className="relative flex items-center justify-center shrink-0">
-        <span className="absolute h-3.5 w-3.5 rounded-full border-2 border-primary/40" />
-        <span className="h-2 w-2 rounded-full bg-primary" />
-      </span>
-    );
-  }
-  if (isCompleted) {
-    return (
-      <span className="relative flex items-center justify-center shrink-0">
-        <span className="h-2 w-2 rounded-full bg-muted-foreground/60" />
-      </span>
-    );
-  }
-  return (
-    <span className="relative flex items-center justify-center shrink-0">
-      <span className="h-2 w-2 rounded-full border border-muted-foreground/40" />
-    </span>
-  );
-}
-
-/** Get CSS class for step label based on state */
-function getStepLabelClass(isCurrent: boolean, isCompleted: boolean): string {
-  if (isCurrent) return "text-foreground font-medium";
-  if (isCompleted) return "text-muted-foreground";
-  return "text-muted-foreground/60";
 }
 
 export { WorkflowStepper };
-export type { Step as WorkflowStepperStep };
+export type { WorkflowStepperStep } from "./workflow-step-disclosure";

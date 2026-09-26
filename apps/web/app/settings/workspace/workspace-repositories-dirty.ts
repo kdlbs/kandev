@@ -3,6 +3,18 @@ import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
 
 export type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 
+/**
+ * Returns the repository rows that exist on the backend.
+ *
+ * The settings page keeps unsaved local-repository rows in the same list as
+ * saved rows. Those temporary IDs must not reach repository-set membership.
+ */
+export function persistedRepositoryItems(
+  repositories: RepositoryWithScripts[],
+): RepositoryWithScripts[] {
+  return repositories.filter((repository) => !repository.id.startsWith("temp-repo-"));
+}
+
 const repositoryFields: Array<keyof RepositoryWithScripts> = [
   "name",
   "source_type",
@@ -21,12 +33,32 @@ const repositoryFields: Array<keyof RepositoryWithScripts> = [
   "copy_files",
 ];
 
+function normalizedSecretBindings(repo: RepositoryWithScripts) {
+  return (repo.secret_bindings ?? [])
+    .map((binding) => ({ key: binding.key.trim(), secret_id: binding.secret_id }))
+    .sort((left, right) => left.key.localeCompare(right.key));
+}
+
+export function areRepositorySecretBindingsEqual(
+  left: RepositoryWithScripts,
+  right: RepositoryWithScripts,
+): boolean {
+  return (
+    JSON.stringify(normalizedSecretBindings(left)) ===
+    JSON.stringify(normalizedSecretBindings(right))
+  );
+}
+
 function branchTemplate(repo: RepositoryWithScripts): string {
   return repo.worktree_branch_template || defaultWorktreeBranchTemplate;
 }
 
 export function cloneRepository(repo: RepositoryWithScripts): RepositoryWithScripts {
-  return { ...repo, scripts: repo.scripts.map((script) => ({ ...script })) };
+  return {
+    ...repo,
+    secret_bindings: repo.secret_bindings?.map((binding) => ({ ...binding })),
+    scripts: repo.scripts.map((script) => ({ ...script })),
+  };
 }
 
 export function mergeSavedRepositoryDraft(
@@ -34,7 +66,11 @@ export function mergeSavedRepositoryDraft(
   submitted: RepositoryWithScripts,
   saved: RepositoryWithScripts,
 ): RepositoryWithScripts {
-  if (!isRepositoryDirty(current, submitted) && !areRepositoryScriptsDirty(current, submitted)) {
+  if (
+    !isRepositoryDirty(current, submitted) &&
+    !areRepositoryScriptsDirty(current, submitted) &&
+    areRepositorySecretBindingsEqual(current, submitted)
+  ) {
     return { ...current, ...saved };
   }
   const scripts = current.scripts.map((currentScript) => {
@@ -51,7 +87,17 @@ export function mergeSavedRepositoryDraft(
       ? savedScript
       : { ...savedScript, ...currentScript, id: savedScript.id, repository_id: saved.id };
   });
-  return { ...saved, ...current, id: saved.id, workspace_id: saved.workspace_id, scripts };
+  const secretBindings = areRepositorySecretBindingsEqual(current, submitted)
+    ? saved.secret_bindings
+    : current.secret_bindings;
+  return {
+    ...saved,
+    ...current,
+    id: saved.id,
+    workspace_id: saved.workspace_id,
+    secret_bindings: secretBindings?.map((binding) => ({ ...binding })),
+    scripts,
+  };
 }
 
 export function isRepositoryDirty(
@@ -61,7 +107,8 @@ export function isRepositoryDirty(
   if (!saved) return true;
   return (
     repositoryFields.some((field) => repo[field] !== saved[field]) ||
-    branchTemplate(repo) !== branchTemplate(saved)
+    branchTemplate(repo) !== branchTemplate(saved) ||
+    !areRepositorySecretBindingsEqual(repo, saved)
   );
 }
 

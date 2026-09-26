@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 func newTestLogger() *logger.Logger {
@@ -117,6 +118,47 @@ func (s *mockStore) CountActiveWorktreeReferences(_ context.Context, _ string, _
 	return 0, nil
 }
 
+func (s *mockStore) CountWorktreeBranchOwners(_ context.Context, repositoryPath, branch string) (int, error) {
+	count := 0
+	for _, wt := range s.worktrees {
+		if wt.RepositoryPath == repositoryPath && wt.Branch == branch {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *mockStore) PersistBranchRecoveryHead(_ context.Context, worktreeID, expected, recoveryHead string) (bool, error) {
+	wt := s.worktrees[worktreeID]
+	if wt == nil || (wt.RecoveryHeadSHA != expected && wt.RecoveryHeadSHA != recoveryHead) {
+		return false, nil
+	}
+	wt.RecoveryHeadSHA = recoveryHead
+	return true, nil
+}
+
+func (s *mockStore) PersistBranchCompactionComplete(
+	_ context.Context, worktreeID, expectedRecoveryHead string,
+) (bool, error) {
+	wt := s.worktrees[worktreeID]
+	if wt == nil || wt.RecoveryHeadSHA != expectedRecoveryHead || wt.BranchCompactedAt != nil {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	wt.BranchCompactedAt = &now
+	return true, nil
+}
+
+func (s *mockStore) PersistBranchRecoveryRestored(_ context.Context, worktreeID, expectedRecoveryHead string) (bool, error) {
+	wt := s.worktrees[worktreeID]
+	if wt == nil || wt.RecoveryHeadSHA != expectedRecoveryHead {
+		return false, nil
+	}
+	wt.RecoveryHeadSHA = ""
+	wt.BranchCompactedAt = nil
+	return true, nil
+}
+
 // GetWorktreesBySessionID — MultiRepoStore.
 func (s *mockStore) GetWorktreesBySessionID(_ context.Context, sessionID string) ([]*Worktree, error) {
 	var out []*Worktree
@@ -195,43 +237,6 @@ func TestNewManager_DisabledConfig(t *testing.T) {
 	}
 	if mgr.IsEnabled() {
 		t.Error("expected manager to be disabled")
-	}
-}
-
-func TestManager_IsValid(t *testing.T) {
-	cfg := newTestConfig(t)
-	log := newTestLogger()
-	store := newMockStore()
-
-	mgr, err := NewManager(cfg, store, log)
-	if err != nil {
-		t.Fatalf("NewManager failed: %v", err)
-	}
-
-	// Test non-existent path
-	if mgr.IsValid("/nonexistent/path") {
-		t.Error("expected false for non-existent path")
-	}
-
-	// Create a mock worktree directory
-	worktreePath := filepath.Join(cfg.TasksBasePath, "test-worktree")
-	if err := os.MkdirAll(worktreePath, 0755); err != nil {
-		t.Fatalf("failed to create test dir: %v", err)
-	}
-
-	// Without .git file - should be invalid
-	if mgr.IsValid(worktreePath) {
-		t.Error("expected false for directory without .git file")
-	}
-
-	// With proper .git file
-	gitFile := filepath.Join(worktreePath, ".git")
-	if err := os.WriteFile(gitFile, []byte("gitdir: /some/path/.git/worktrees/test"), 0644); err != nil {
-		t.Fatalf("failed to create .git file: %v", err)
-	}
-
-	if !mgr.IsValid(worktreePath) {
-		t.Error("expected true for valid worktree directory")
 	}
 }
 
@@ -771,7 +776,10 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	ref := mgr.pullBaseBranch(context.Background(), repoPath, "origin/master", nil)
+	ref, err := mgr.pullBaseBranch(context.Background(), repoPath, "origin/master", nil)
+	if err != nil {
+		t.Fatalf("pullBaseBranch() error = %v", err)
+	}
 	if ref != "origin/master" {
 		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "origin/master")
 	}
@@ -782,13 +790,17 @@ esac
 	}
 
 	got := string(envBytes)
-	want := "0|Never|echo|/bin/false|ssh -oBatchMode=yes"
+	wantSSH := "ssh -oBatchMode=yes"
+	if ambientSSH := os.Getenv("GIT_SSH_COMMAND"); ambientSSH != "" {
+		wantSSH = subproc.ForceGitSSHBatchMode(ambientSSH)
+	}
+	want := "0|Never|exit 1|exit 1|" + wantSSH
 	if got != want {
 		t.Fatalf("fake git env = %q, want %q", got, want)
 	}
 }
 
-func TestPullBaseBranch_FetchTimeoutFallsBackQuickly(t *testing.T) {
+func TestPullBaseBranch_FetchTimeoutFailsQuickly(t *testing.T) {
 	scriptDir := writeFakeGitScript(t, `
 case "${1:-}" in
   fetch)
@@ -796,6 +808,9 @@ case "${1:-}" in
     exit 0
     ;;
   rev-parse)
+    if [ "${2:-}" = "--verify" ]; then
+      exit 1
+    fi
     if [ "${2:-}" = "--abbrev-ref" ]; then
       echo "master"
     fi
@@ -820,11 +835,14 @@ esac
 
 	repoPath := t.TempDir()
 	start := time.Now()
-	ref := mgr.pullBaseBranch(context.Background(), repoPath, "master", nil)
+	ref, err := mgr.pullBaseBranch(context.Background(), repoPath, "master", nil)
 	elapsed := time.Since(start)
 
-	if ref != "master" {
-		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "master")
+	if err == nil {
+		t.Fatal("pullBaseBranch() error = nil, want required refresh failure")
+	}
+	if ref != "" {
+		t.Fatalf("pullBaseBranch() ref = %q, want empty on failure", ref)
 	}
 	// Allow CI scheduling variance while still asserting we timed out
 	// well before the fake 2s fetch command completes.
@@ -871,7 +889,10 @@ esac
 	mgr.pullTimeout = 300 * time.Millisecond
 
 	repoPath := t.TempDir()
-	ref := mgr.pullBaseBranch(context.Background(), repoPath, "master", nil)
+	ref, err := mgr.pullBaseBranch(context.Background(), repoPath, "master", nil)
+	if err != nil {
+		t.Fatalf("pullBaseBranch() error = %v", err)
+	}
 	if ref != "origin/master" {
 		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "origin/master")
 	}
@@ -954,6 +975,87 @@ esac
 	}
 }
 
+func TestFetchBranchToLocal_RequiredRefreshRejectsLocalFallback(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: Authentication failed" >&2
+    exit 1
+    ;;
+  rev-parse)
+    if [ "${2:-}" = "--verify" ]; then
+      exit 0
+    fi
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	result, err := mgr.fetchBranchToLocalWithPolicy(
+		context.Background(), t.TempDir(), "feature/pr-branch", 0, true,
+	)
+	if err == nil {
+		t.Fatal("required checkout refresh succeeded after fetch authentication failure")
+	}
+	if result != nil {
+		t.Fatalf("required checkout refresh returned a fallback result: %+v", result)
+	}
+	if strings.Contains(err.Error(), "Using local") {
+		t.Fatalf("required checkout refresh exposed a stale local fallback: %v", err)
+	}
+}
+
+func TestFetchBranchToLocal_RequiredRefreshReportsMissingBranch(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: couldn't find remote ref feature/pr-branch" >&2
+    exit 128
+    ;;
+  rev-parse)
+    if [ "${2:-}" = "--verify" ]; then
+      exit 1
+    fi
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	result, err := mgr.fetchBranchToLocalWithPolicy(
+		context.Background(), t.TempDir(), "feature/pr-branch", 0, true,
+	)
+	if err == nil {
+		t.Fatal("required checkout refresh succeeded for a missing remote branch")
+	}
+	if result != nil {
+		t.Fatalf("required checkout refresh returned a result: %+v", result)
+	}
+	if !errors.Is(err, ErrInvalidBaseBranch) {
+		t.Fatalf("error = %v, want ErrInvalidBaseBranch", err)
+	}
+	if !errors.Is(err, ErrRemoteRefMissing) {
+		t.Fatalf("error = %v, want confirmed remote-ref-missing sentinel", err)
+	}
+}
+
 func TestFetchBranchToLocal_FetchFailsNoBranch(t *testing.T) {
 	scriptDir := writeFakeGitScript(t, `
 case "${1:-}" in
@@ -990,6 +1092,9 @@ esac
 	}
 	if !strings.Contains(err.Error(), "not found locally or on remote") {
 		t.Fatalf("unexpected error message: %v", err)
+	}
+	if !errors.Is(err, ErrInvalidBaseBranch) {
+		t.Fatalf("error = %v, want ErrInvalidBaseBranch", err)
 	}
 }
 
@@ -1032,6 +1137,9 @@ esac
 	}
 	if !strings.Contains(err.Error(), "couldn't find remote ref") {
 		t.Fatalf("expected error to contain git output, got: %v", err)
+	}
+	if !errors.Is(err, ErrInvalidBaseBranch) {
+		t.Fatalf("error = %v, want ErrInvalidBaseBranch", err)
 	}
 }
 

@@ -54,6 +54,22 @@ func TestLoadSessionRuntimeConfigOverridesUsesDedicatedKey(t *testing.T) {
 	}
 }
 
+func TestLoadSessionRuntimeConfigTypedValueClonesOptions(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyRuntimeConfig: SessionRuntimeConfig{
+			Model:         "gpt-5.6-sol",
+			ConfigOptions: map[string]string{"reasoning_effort": "high"},
+		},
+	}
+
+	config, ok := LoadSessionRuntimeConfig(metadata)
+	require.True(t, ok)
+	config.ConfigOptions["reasoning_effort"] = "low"
+
+	stored := metadata[SessionMetaKeyRuntimeConfig].(SessionRuntimeConfig)
+	require.Equal(t, "high", stored.ConfigOptions["reasoning_effort"])
+}
+
 func TestLoadOriginalSessionEffectiveConfiguration(t *testing.T) {
 	metadata := map[string]interface{}{
 		SessionMetaKeyOriginalEffectiveConfig: map[string]interface{}{
@@ -77,6 +93,19 @@ func TestIsOriginalTaskSessionUsesImmutableOriginMarker(t *testing.T) {
 	require.False(t, IsOriginalTaskSession(map[string]interface{}{
 		SessionMetaKeyCreatedBy: SessionCreatedByWorkflowSwitch,
 	}))
+}
+
+func TestIsCompletionFollowUpSessionRequiresTrueBoolean(t *testing.T) {
+	require.True(t, IsCompletionFollowUpSession(map[string]interface{}{
+		SessionMetaKeyCompletionFollowUp: true,
+	}))
+	require.False(t, IsCompletionFollowUpSession(map[string]interface{}{
+		SessionMetaKeyCompletionFollowUp: false,
+	}))
+	require.False(t, IsCompletionFollowUpSession(map[string]interface{}{
+		SessionMetaKeyCompletionFollowUp: "true",
+	}))
+	require.False(t, IsCompletionFollowUpSession(nil))
 }
 
 func TestLoadSessionACPConfigBaselinePreservesEmptyJSONValues(t *testing.T) {
@@ -432,6 +461,7 @@ func TestExecutorTypeRuntime(t *testing.T) {
 		{ExecutorTypeLocalDocker, agentruntime.RuntimeDocker},
 		{ExecutorTypeRemoteDocker, agentruntime.RuntimeRemoteDocker},
 		{ExecutorTypeSprites, agentruntime.RuntimeSprites},
+		{ExecutorTypeKubernetes, agentruntime.RuntimeKubernetes},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.in), func(t *testing.T) {
@@ -451,4 +481,27 @@ func TestExecutorTypeRuntime(t *testing.T) {
 				got, agentruntime.RuntimeStandalone)
 		}
 	})
+}
+
+func TestKubernetesExecutorClassification(t *testing.T) {
+	t.Parallel()
+
+	executorType := ExecutorTypeKubernetes
+	if got := executorType.Runtime(); got != agentruntime.RuntimeKubernetes {
+		t.Fatalf("ExecutorType(k8s).Runtime() = %q, want k8s", got)
+	}
+	if !IsRemoteExecutorType(executorType) {
+		t.Fatal("IsRemoteExecutorType(k8s) = false, want true")
+	}
+	if !IsContainerizedExecutorType(executorType) {
+		t.Fatal("IsContainerizedExecutorType(k8s) = false, want true")
+	}
+}
+
+func TestKubernetesRuntimeIsAlwaysResumable(t *testing.T) {
+	t.Parallel()
+
+	if !IsAlwaysResumableRuntime(agentruntime.RuntimeKubernetes) {
+		t.Fatal("IsAlwaysResumableRuntime(k8s) = false, want true")
+	}
 }

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/remoteauth"
+	"github.com/kandev/kandev/internal/agent/remoteconfig"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
@@ -45,6 +47,7 @@ func (h *ExecutorProfileHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/executor-profiles", h.httpListAllProfiles)
 	api.GET("/executor-profiles/default-script", h.httpGetDefaultScript)
 	api.GET("/remote-credentials", h.httpListRemoteCredentials)
+	api.GET("/agent-config-bundles", h.httpListAgentConfigBundles)
 	api.GET("/git/identity", h.httpGetGitIdentity)
 	api.GET("/script-placeholders", h.httpListScriptPlaceholders)
 	api.GET("/executors/:id/profiles", h.httpListProfiles)
@@ -118,6 +121,10 @@ func (h *ExecutorProfileHandlers) httpListRemoteCredentials(c *gin.Context) {
 	})
 }
 
+func (h *ExecutorProfileHandlers) httpListAgentConfigBundles(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"bundles": h.buildAgentConfigBundles()})
+}
+
 func (h *ExecutorProfileHandlers) httpGetGitIdentity(c *gin.Context) {
 	name := firstNonEmptyGitConfig("user.name")
 	email := firstNonEmptyGitConfig("user.email")
@@ -151,6 +158,13 @@ func (h *ExecutorProfileHandlers) buildRemoteAuthSpecs() []remoteauth.Spec {
 		return remoteauth.BuildCatalog(nil).Specs
 	}
 	return remoteauth.BuildCatalog(h.agentList.ListEnabled()).Specs
+}
+
+func (h *ExecutorProfileHandlers) buildAgentConfigBundles() []remoteconfig.Bundle {
+	if h.agentList == nil {
+		return remoteconfig.BuildCatalog(nil).Bundles
+	}
+	return remoteconfig.BuildCatalog(h.agentList.ListEnabled()).Bundles
 }
 
 func (h *ExecutorProfileHandlers) httpListProfiles(c *gin.Context) {
@@ -200,6 +214,14 @@ func (h *ExecutorProfileHandlers) httpCreateProfile(c *gin.Context) {
 		EnvVars:       body.EnvVars,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, service.ErrInvalidExecutorConfig) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to create executor profile", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "profile not created"})
 		return
@@ -240,6 +262,14 @@ func (h *ExecutorProfileHandlers) httpUpdateProfile(c *gin.Context) {
 		EnvVars:       body.EnvVars,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, service.ErrInvalidExecutorConfig) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to update executor profile", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "profile not updated"})
 		return
@@ -249,6 +279,10 @@ func (h *ExecutorProfileHandlers) httpUpdateProfile(c *gin.Context) {
 
 func (h *ExecutorProfileHandlers) httpDeleteProfile(c *gin.Context) {
 	if err := h.service.DeleteExecutorProfile(c.Request.Context(), c.Param("profileId")); err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to delete executor profile", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "profile not deleted"})
 		return
@@ -338,6 +372,12 @@ func (h *ExecutorProfileHandlers) wsCreateProfile(ctx context.Context, msg *ws.M
 		EnvVars:       req.EnvVars,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
+		}
+		if errors.Is(err, service.ErrInvalidExecutorConfig) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, service.ErrInvalidExecutorConfig.Error(), nil)
+		}
 		h.logger.Error("failed to create executor profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create profile", nil)
 	}
@@ -390,6 +430,12 @@ func (h *ExecutorProfileHandlers) wsUpdateProfile(ctx context.Context, msg *ws.M
 		EnvVars:       req.EnvVars,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
+		}
+		if errors.Is(err, service.ErrInvalidExecutorConfig) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, service.ErrInvalidExecutorConfig.Error(), nil)
+		}
 		h.logger.Error("failed to update executor profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update profile", nil)
 	}
@@ -405,6 +451,9 @@ func (h *ExecutorProfileHandlers) wsDeleteProfile(ctx context.Context, msg *ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 	if err := h.service.DeleteExecutorProfile(ctx, req.ID); err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
+		}
 		h.logger.Error("failed to delete executor profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete profile", nil)
 	}

@@ -31,6 +31,14 @@ type Config struct {
 	// live under this root.
 	HomeDir                string                       `mapstructure:"homeDir"`
 	Server                 ServerConfig                 `mapstructure:"server"`
+	Tasks                  TasksConfig                  `mapstructure:"tasks"`
+	Credentials            CredentialsConfig            `mapstructure:"credentials"`
+	Limits                 LimitsConfig                 `mapstructure:"limits"`
+	MessageQueue           MessageQueueConfig           `mapstructure:"messageQueue"`
+	Agentctl               AgentctlConfig               `mapstructure:"agentctl"`
+	Planning               PlanningConfig               `mapstructure:"planning"`
+	Observability          ObservabilityConfig          `mapstructure:"observability"`
+	Launcher               LauncherConfig               `mapstructure:"launcher"`
 	Database               DatabaseConfig               `mapstructure:"database"`
 	NATS                   NATSConfig                   `mapstructure:"nats"`
 	Events                 EventsConfig                 `mapstructure:"events"`
@@ -43,16 +51,94 @@ type Config struct {
 	RepoClone              RepoCloneConfig              `mapstructure:"repoClone"`
 	Debug                  DebugConfig                  `mapstructure:"debug"`
 	Office                 OfficeConfig                 `mapstructure:"office"`
-	Voice                  VoiceConfig                  `mapstructure:"voice"`
 	Features               FeaturesConfig               `mapstructure:"features"`
 	GitHubCredentialBroker GitHubCredentialBrokerConfig `mapstructure:"githubCredentialBroker"`
+	Executors              ExecutorsConfig              `mapstructure:"executors"`
+	Source                 ConfigSource                 `mapstructure:"-" json:"-"`
+}
+
+// TasksConfig contains task lifecycle startup limits.
+type TasksConfig struct {
+	PreparationTimeout time.Duration `mapstructure:"preparationTimeout"`
+	// StallDetectionThreshold is the event-silence window after which the
+	// session reconciliation sweep classifies an active session with no live
+	// execution as stalled (issue #3712). The orphaned-session healing grace
+	// window is twice this value.
+	StallDetectionThreshold time.Duration `mapstructure:"stallDetectionThreshold"`
+}
+
+// CredentialsConfig contains operator-managed credential file settings.
+type CredentialsConfig struct {
+	File string `mapstructure:"file"`
+}
+
+// ExecutorsConfig contains executor-related startup settings.
+type ExecutorsConfig struct {
+	// SSHReachabilityIntervalSeconds is the raw configured value, not yet
+	// clamped into the reachability package's own 15-3600 bound: 0 disables
+	// the poller, and reachability.ClampInterval owns the rest of the
+	// normalization at construction time.
+	SSHReachabilityIntervalSeconds int `mapstructure:"sshReachabilityIntervalSeconds"`
+}
+
+// LimitsConfig contains process and protocol capacity limits.
+type LimitsConfig struct {
+	GHMaxConcurrent   int `mapstructure:"ghMaxConcurrent"`
+	GitMaxConcurrent  int `mapstructure:"gitMaxConcurrent"`
+	LSPMaxConnections int `mapstructure:"lspMaxConnections"`
+}
+
+// MessageQueueConfig contains prompt queue limits.
+type MessageQueueConfig struct {
+	MaxPerSession int `mapstructure:"maxPerSession"`
+}
+
+// AgentctlConfig contains settings owned by managed agentctl processes.
+type AgentctlConfig struct {
+	IdleTimeout               time.Duration `mapstructure:"idleTimeout"`
+	IdleReaperInterval        time.Duration `mapstructure:"idleReaperInterval"`
+	NotificationQueueCapacity int           `mapstructure:"notificationQueueCapacity"`
+
+	// RecoveryDeadline is the single global bound covering adoption,
+	// enumeration and reconstruction together during standalone agent
+	// survival re-tracking at backend startup.
+	RecoveryDeadline time.Duration `mapstructure:"recoveryDeadline"`
+	// RecoveryReadTimeout and RecoveryReadRetries bound each read of a
+	// reconstruction value from the adopted control server during re-tracking.
+	RecoveryReadTimeout time.Duration `mapstructure:"recoveryReadTimeout"`
+	RecoveryReadRetries int           `mapstructure:"recoveryReadRetries"`
+	// UnownedPeriod is how long a standalone control server tolerates having
+	// no owning backend before it stops its instances and exits.
+	UnownedPeriod time.Duration `mapstructure:"unownedPeriod"`
+	// DetachedEventLimit bounds the per-instance retained-event count while
+	// a standalone control server has no owning backend attached.
+	DetachedEventLimit int `mapstructure:"detachedEventLimit"`
+}
+
+// PlanningConfig contains planning service timing settings.
+type PlanningConfig struct {
+	CoalesceWindowMs int `mapstructure:"coalesceWindowMs"`
+}
+
+// ObservabilityConfig contains process-wide tracing settings.
+type ObservabilityConfig struct {
+	OTLPEndpoint string `mapstructure:"otlpEndpoint"`
+}
+
+// LauncherConfig contains settings used by the native launcher. The backend
+// reads the same values so a selected file remains one source of truth.
+type LauncherConfig struct {
+	WebPort         int  `mapstructure:"webPort"`
+	HealthTimeoutMs int  `mapstructure:"healthTimeoutMs"`
+	NoBrowser       bool `mapstructure:"noBrowser"`
 }
 
 // GitHubCredentialBrokerConfig holds the externally reachable service URL
 // used by managed remote executors. It is independent of GitHub App setup so
 // PAT and named gh CLI workspaces can use remote executors.
 type GitHubCredentialBrokerConfig struct {
-	PublicBaseURL string `mapstructure:"publicBaseUrl" json:"-"`
+	PublicBaseURL     string `mapstructure:"publicBaseUrl" json:"-"`
+	ReissueSigningKey string `mapstructure:"reissueSigningKey" json:"-"`
 }
 
 func (c GitHubCredentialBrokerConfig) validate() error {
@@ -129,10 +215,15 @@ type ServerConfig struct {
 	// Hosts is the YAML-array form of Host, for config files that prefer an
 	// array to a comma-separated string. It is used only when Host is unset.
 	Hosts          []string `mapstructure:"hosts"`
+	TrustedProxies []string `mapstructure:"trustedProxies"`
 	Port           int      `mapstructure:"port"`
 	ReadTimeout    int      `mapstructure:"readTimeout"`  // in seconds
 	WriteTimeout   int      `mapstructure:"writeTimeout"` // in seconds
 	WebInternalURL string   `mapstructure:"webInternalUrl"`
+	// WebTitlePrefix prefixes the browser tab title as "<prefix> Kandev" (for
+	// example "TEST") so several Kandev instances are distinguishable in
+	// adjacent browser tabs. Empty keeps the plain "Kandev" title.
+	WebTitlePrefix string `mapstructure:"webTitlePrefix"`
 }
 
 // splitHosts splits a comma-separated host string, trimming whitespace and
@@ -314,6 +405,12 @@ type EventsConfig struct {
 }
 
 // DockerConfig holds Docker client configuration.
+//
+// Every field here configures Kandev as a Docker *client*, driving the daemon
+// it creates task containers on. None of them configures the container Kandev
+// itself runs in: when Kandev runs from the published image, its own network,
+// volumes, and ports come from the `docker run` or Compose invocation that
+// started it, which Kandev never reads.
 type DockerConfig struct {
 	// Enabled controls whether the Docker runtime is available for task execution.
 	// When true and Docker is accessible, tasks can use Docker-based executors.
@@ -322,7 +419,6 @@ type DockerConfig struct {
 	Host           string `mapstructure:"host"`
 	APIVersion     string `mapstructure:"apiVersion"`
 	TLSVerify      bool   `mapstructure:"tlsVerify"`
-	DefaultNetwork string `mapstructure:"defaultNetwork"`
 	VolumeBasePath string `mapstructure:"volumeBasePath"`
 }
 
@@ -337,8 +433,12 @@ type AuthConfig struct {
 	// is extended whenever it is used with less than TTL-24h remaining.
 	SessionTTLHours int `mapstructure:"sessionTTLHours"`
 
-	// CookieName is the session cookie name. Only override for unusual
-	// reverse-proxy setups that need distinct cookie names per instance.
+	// CookieName is the session cookie base name. Empty (the default) means
+	// the service uses the "kandev_session" base and port-scopes it from the
+	// request host, isolating instances on one host (see
+	// auth.Service.CookieNameForRequest). Only override for unusual
+	// reverse-proxy setups that need a fixed cookie name; a custom value is
+	// used verbatim (never port-suffixed) and disables automatic isolation.
 	CookieName string `mapstructure:"cookieName"`
 }
 
@@ -348,21 +448,37 @@ type OfficeConfig struct {
 	// When empty, a random key is generated at startup — fine for dev, but
 	// means every restart invalidates outstanding agent tokens. Production
 	// deployments should set a stable value (e.g. via KANDEV_OFFICE_JWTSIGNINGKEY).
-	JWTSigningKey string `mapstructure:"jwtSigningKey"`
-}
+	JWTSigningKey   string `mapstructure:"jwtSigningKey"`
+	SchedulerTickMs int    `mapstructure:"schedulerTickMs"`
 
-// VoiceConfig holds configuration for the chat voice-input transcription
-// fallback. The primary voice-input engine runs entirely in the browser
-// (Web Speech API); this server-side fallback is only used when the browser
-// has no SpeechRecognition support (e.g. Firefox).
-//
-// When OpenAIAPIKey is empty the /api/v1/transcribe endpoint returns 503
-// and the frontend hides the fallback path, so the feature is safe to
-// ship un-configured.
-type VoiceConfig struct {
-	// OpenAIAPIKey is the API key used to call OpenAI's Whisper transcription
-	// endpoint. Set via KANDEV_VOICE_OPENAI_API_KEY.
-	OpenAIAPIKey string `mapstructure:"openAIApiKey"`
+	// The following back the launch-safety ceilings/budgets
+	// (REQ-OFFICE-LAUNCH-SAFETY-001/003/004/005) and the backpressure
+	// gate-failure escalation threshold (REQ-OFFICE-BACKPRESSURE-003.5).
+	// Every one is boot-time-only, like SchedulerTickMs above: resolved
+	// once at startup and passed into the owning repository/service via
+	// its SetXxx method, not polled or overridable at runtime. A value
+	// below the documented minimum (1, or 1 for PromotionAgeMinutes) is
+	// replaced by that default and the resolved source is reported as
+	// SourceDefault (applyPositiveIntEnv's existing behavior), matching
+	// the "replaced by the default and logged at warn level" language the
+	// acceptance criteria use for an out-of-range operator override.
+	MaxConcurrentInstance  int `mapstructure:"maxConcurrentInstance"`
+	MaxConcurrentWorkspace int `mapstructure:"maxConcurrentWorkspace"`
+	WorkspaceBudgetPerHour int `mapstructure:"workspaceBudgetPerHour"`
+	RoutineBudgetPerHour   int `mapstructure:"routineBudgetPerHour"`
+	// PromotionAgeMinutes is REQ-OFFICE-BACKPRESSURE-002.1's age-based
+	// priority promotion period, in minutes (converted to
+	// runssqlite.ClaimSafetyLimits.PromotionAge, a time.Duration, at the
+	// wiring site — the catalog only carries plain ints).
+	PromotionAgeMinutes  int `mapstructure:"promotionAgeMinutes"`
+	MaxCausationDepth    int `mapstructure:"maxCausationDepth"`
+	SelfTriggerAllowance int `mapstructure:"selfTriggerAllowance"`
+	// SelfTriggerTotalAllowance is the reason-independent sibling of
+	// SelfTriggerAllowance (AC-OFFICE-LAUNCH-SAFETY-004.8): it may be
+	// configured below SelfTriggerAllowance, in which case it is the
+	// binding limit and the per-reason allowance becomes unreachable.
+	SelfTriggerTotalAllowance int `mapstructure:"selfTriggerTotalAllowance"`
+	GateFailureThreshold      int `mapstructure:"gateFailureThreshold"`
 }
 
 // FeaturesConfig is the typed wire/config shape for runtime feature flags.
@@ -377,14 +493,13 @@ type VoiceConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
+	// LSPBrowserContinuity gates runtime-owned language-server leases that stay
+	// connected across browser attachment loss. Off in every embedded profile.
+	LSPBrowserContinuity bool `mapstructure:"lsp_browser_continuity" json:"lspBrowserContinuity"`
+
 	// Office gates the autonomous-agent feature: backend service construction,
 	// HTTP/WS route registration, and frontend nav/route visibility.
 	Office bool `mapstructure:"office" json:"office"`
-
-	// AppStatusBar gates the global status bar on tablet/desktop and the
-	// corresponding Status drawer on phones. The snake_case mapstructure key
-	// keeps the config and KANDEV_FEATURES_APP_STATUS_BAR environment name aligned.
-	AppStatusBar bool `mapstructure:"app_status_bar" json:"appStatusBar"`
 
 	// Auth is the on/off switch for opt-in authentication and per-user
 	// workspaces. When on, every visitor must sign in (the first becomes the
@@ -395,11 +510,51 @@ type FeaturesConfig struct {
 	// opts in.
 	Auth bool `mapstructure:"auth" json:"auth"`
 
+	// Canvases gates agent-authored plugin web applications and their task and
+	// workspace surfaces. It remains off in every shipped profile until the
+	// isolated runtime and lifecycle are ready for opt-in use.
+	Canvases bool `mapstructure:"canvases" json:"canvases"`
+
+	// MultiTenancy gates organizations: a tenant boundary above users, where
+	// every user belongs to exactly one org and cross-org reach is a bug
+	// rather than a permission level. It requires Auth; enabling it without
+	// authentication is refused at startup, because a tenant boundary with no
+	// identity behind it is not a boundary. Set via the runtime feature toggle
+	// KANDEV_FEATURES_MULTI_TENANCY. Off in every shipped profile.
+	MultiTenancy bool `mapstructure:"multi_tenancy" json:"multiTenancy"`
+
+	// DynamicAgentRouting gates dynamic profile configuration, execution
+	// routing, and the shared route health service. It is disabled in every
+	// embedded profile until the complete feature is ready.
+	DynamicAgentRouting bool `mapstructure:"dynamic_agent_routing" json:"dynamicAgentRouting"`
+
 	// ClaudeBackgroundPromptHandoff gates the high-risk experiment that lets a
 	// claude-acp session accept a successor prompt after an adapter-attested
 	// foreground handoff while background work remains live. It is off in every
 	// embedded profile and must fail closed for every other provider.
 	ClaudeBackgroundPromptHandoff bool `mapstructure:"claude_background_prompt_handoff" json:"claudeBackgroundPromptHandoff"`
+
+	// ClaudeMidTurnSteering gates the high-risk experiment that delivers operator
+	// input into a turn that is still generating, for an agent that advertised
+	// prompt queueing. It is independent of ClaudeBackgroundPromptHandoff: that
+	// flag covers the foreground-idle handoff, this one covers a foreground that
+	// has not yielded. Off in every embedded profile, and it remains the
+	// kill-switch after rollout because the agent-side fold is undocumented and
+	// can regress without notice.
+	ClaudeMidTurnSteering bool `mapstructure:"claude_mid_turn_steering" json:"claudeMidTurnSteering"`
+
+	// NeedsYouInbox gates the Needs-you Inbox: a workspace-scoped sidebar
+	// destination, independent of Office, listing exactly the answerable
+	// clarification bundles for the active workspace. Off in prod until the
+	// feature is user-ready.
+	NeedsYouInbox bool `mapstructure:"needs_you_inbox" json:"needsYouInbox"`
+
+	// AgentSurvival lets a worktree or local-executor agent session survive a
+	// backend restart by adopting its still-running standalone control server
+	// instead of killing it. Off in every embedded profile, and unavailable on
+	// Windows (survival trades the platform's kill-on-job-close safeguard for
+	// an adoption handshake, which is untested there).
+	AgentSurvival bool `mapstructure:"agent_survival" json:"agentSurvival"`
 }
 
 // LoggingConfig holds logging configuration.
@@ -444,14 +599,21 @@ type DebugConfig struct {
 // The Standalone runtime (agentctl) always runs as a core service.
 // Docker runtime is available when docker.enabled=true.
 type AgentConfig struct {
-	// StandaloneHost is the host where standalone agentctl is running (default: localhost)
+	// StandaloneHost is the host where standalone agentctl is running (default: 127.0.0.1)
 	StandaloneHost string `mapstructure:"standaloneHost"`
 
 	// StandalonePort is the control port for standalone agentctl (default: 39429)
 	StandalonePort int `mapstructure:"standalonePort"`
 
-	// StandaloneAuthToken is the per-launch auth token retrieved via handshake.
-	// Set at runtime after agentctl starts; not persisted in config files.
+	// StandaloneAuthToken is the single credential that authenticates both
+	// the agentctl *control server* (instance create/list/delete, health,
+	// ownership rotate/confirm) and every per-instance agentctl server it
+	// supervises (/agent/stream, file tree, shell, ...), per design 01
+	// "Single driver" (AC-EXECUTORS-CONTROL-OWNERSHIP-002.6). After adopting
+	// a surviving control server it holds the freshly rotated credential
+	// (AC-EXECUTORS-CONTROL-OWNERSHIP-002); use it for every client built
+	// against this control server or any instance it supervises. Set at
+	// runtime after agentctl starts; not persisted in config files.
 	StandaloneAuthToken string `mapstructure:"-"`
 
 	// StandalonePID is the OS process id of the standalone agentctl control-server
@@ -506,6 +668,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.readTimeout", 30)
 	v.SetDefault("server.writeTimeout", 30)
 	v.SetDefault("server.webInternalUrl", "")
+	v.SetDefault("server.webTitlePrefix", "")
 
 	// HomeDir default — empty means resolve from KANDEV_HOME_DIR env or ~/.kandev
 	v.SetDefault("homeDir", "")
@@ -536,24 +699,34 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docker.host", DefaultDockerHost())
 	v.SetDefault("docker.apiVersion", "") // Empty = auto-negotiate with daemon
 	v.SetDefault("docker.tlsVerify", false)
-	v.SetDefault("docker.defaultNetwork", "kandev-network")
 	v.SetDefault("docker.volumeBasePath", defaultDockerVolumePath())
 
 	// Agent defaults (runtime selection is now per-task based on executor type)
-	v.SetDefault("agent.standaloneHost", "localhost")
+	//
+	// 127.0.0.1 instead of "localhost": localhost resolution can select an IPv6
+	// loopback address before an IPv4 address. The explicit IPv4 loopback avoids
+	// address-resolution variance when host utility health checks run against
+	// agentctl bound IPv4-only and fail with
+	// "dial tcp [::1]:41001: connect: connection refused" whenever agentctl is
+	// bound IPv4-only (e.g. auth-disabled loopback binds), spinning the
+	// "host utility instance unhealthy; recreating" loop. The loopback
+	// address is explicit and unambiguous; operators with a non-loopback
+	// control plane can still override via KANDEV_AGENT_STANDALONE_HOST.
+	v.SetDefault("agent.standaloneHost", "127.0.0.1")
 	v.SetDefault("agent.standalonePort", ports.AgentCtl)
 
-	// Auth defaults
+	// Auth defaults. auth.cookieName defaults to empty on purpose: the auth
+	// service keeps the "kandev_session" base fallback internally and
+	// port-scopes it from the request host, so an empty default must not be
+	// seeded with a concrete name or the suffixing would never fire in
+	// production. A non-empty configured value is used verbatim.
 	v.SetDefault("auth.jwtSecret", "")
 	v.SetDefault("auth.tokenDuration", 3600)  // 1 hour
 	v.SetDefault("auth.sessionTTLHours", 720) // 30 days, sliding
-	v.SetDefault("auth.cookieName", "kandev_session")
+	v.SetDefault("auth.cookieName", "")
 
 	// Office defaults
 	v.SetDefault("office.jwtSigningKey", "")
-
-	// Voice defaults
-	v.SetDefault("voice.openAIApiKey", "")
 
 	// Feature-flag defaults live in ./features.yaml (symlinked to
 	// apps/backend/internal/features/features.yaml). LoadWithPath applies
@@ -612,31 +785,36 @@ func defaultDockerVolumePath() string {
 // Environment variables use the prefix KANDEV_ with snake_case naming.
 // Config file should be named config.yaml and placed in the current directory or /etc/kandev/.
 func Load() (*Config, error) {
-	return LoadWithPath("")
+	return LoadWithHome("")
+}
+
+// LoadWithHome reads the selected configuration while using homeDir as the
+// bootstrap directory for home-file discovery. The override affects file
+// selection only; environment variables still retain their normal precedence
+// over values read from the selected file.
+func LoadWithHome(homeDir string) (*Config, error) {
+	if path := strings.TrimSpace(os.Getenv(InternalConfigFileEnv)); path != "" {
+		return loadWithPath(path, homeDir)
+	}
+	return loadWithPath("", homeDir)
 }
 
 // LoadWithPath reads configuration from the specified path or default locations.
 func LoadWithPath(configPath string) (*Config, error) {
+	return loadWithPath(configPath, "")
+}
+
+func loadWithPath(configPath, homeDir string) (*Config, error) {
 	v := viper.New()
 
-	// Apply the active runtime profile (prod / dev / e2e) from the
-	// embedded profiles.yaml. This writes env vars onto our own
-	// process so the subsequent AutomaticEnv and the rest of the
-	// codebase's os.Getenv reads see the YAML-declared values.
-	// Vars already set by the launcher / shell / per-spec override
-	// are left alone, giving precedence:
-	//
-	//   shell env / launcher env > profiles.yaml > Go zero values
-	//
-	// A parse error here means someone committed a malformed
-	// profiles.yaml; fail loud so CI catches it before a release ships.
-	if _, _, err := profiles.ApplyProfile(); err != nil {
-		return nil, fmt.Errorf("apply profile defaults: %w", err)
+	profileDefaults, err := profiles.EnvironmentDefaults()
+	if err != nil {
+		return nil, fmt.Errorf("read profile defaults: %w", err)
 	}
 
 	// Set defaults next. setDefaults seeds non-feature config
 	// (server, database, logging, …); feature-flag defaults flow
-	// through env via ApplyProfile + AutomaticEnv below.
+	// through EnvironmentDefaults and AutomaticEnv below.
 	setDefaults(v)
 
 	// Seed Viper's features.* keyspace from profiles.yaml so the
@@ -649,52 +827,64 @@ func LoadWithPath(configPath string) (*Config, error) {
 	for name, value := range flags {
 		v.SetDefault("features."+name, value == "true")
 	}
+	setProfileDefaults(v, profileDefaults)
 
 	// Configure environment variables
 	v.SetEnvPrefix("KANDEV")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
-	// Explicit bindings for snake_case env vars (camelCase config keys)
-	// AutomaticEnv does not handle camelCase to SNAKE_CASE conversion,
-	// so we explicitly bind keys where env var naming differs from config key naming.
-	_ = v.BindEnv("agent.standalonePort", "AGENTCTL_PORT", "KANDEV_AGENT_STANDALONE_PORT")
-	_ = v.BindEnv("agent.standaloneHost", "KANDEV_AGENT_STANDALONE_HOST")
-	_ = v.BindEnv("server.webInternalUrl", "KANDEV_WEB_INTERNAL_URL")
-	_ = v.BindEnv("homeDir", "KANDEV_HOME_DIR")
-	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")
-	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")
-	_ = v.BindEnv("debug.devMode", "KANDEV_DEBUG_DEV_MODE")
-	_ = v.BindEnv("debug.pprofEnabled", "KANDEV_DEBUG_PPROF_ENABLED")
-	_ = v.BindEnv("voice.openAIApiKey", "KANDEV_VOICE_OPENAI_API_KEY")
+	bindCatalogEnvironment(v)
+	// camelCase key, so AutomaticEnv would expose the undocumented
+	// KANDEV_AUTH_COOKIENAME; the canonical override is KANDEV_AUTH_COOKIE_NAME.
+	_ = v.BindEnv("auth.cookieName", "KANDEV_AUTH_COOKIE_NAME")
 	_ = v.BindEnv(
 		"githubCredentialBroker.publicBaseUrl",
 		"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL",
 	)
+	_ = v.BindEnv(
+		"githubCredentialBroker.reissueSigningKey",
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY",
+	)
 
-	// Configure config file
-	v.SetConfigName("config")
-	v.SetConfigType("yaml")
-
-	if configPath != "" {
-		v.AddConfigPath(configPath)
+	selection, found, err := selectConfigFile(configPath, homeDir)
+	if err != nil {
+		return nil, fmt.Errorf("select configuration file: %w", err)
 	}
-	v.AddConfigPath(".")
-	v.AddConfigPath("/etc/kandev/")
-
-	// Read config file (ignore if not found)
-	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, fmt.Errorf("error reading config file: %w", err)
+	if found {
+		if err := readSelectedConfig(v, selection); err != nil {
+			return nil, err
 		}
 	}
+	yamlKeys := configKeys(v)
+	envSnapshot := environmentSnapshot()
 
 	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
+	if err := decodeConfig(v, &cfg); err != nil {
+		if found {
+			return nil, fmt.Errorf("error unmarshaling config file %q: %w", selection.path, err)
+		}
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
+	}
+	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
+	if err := applySurvivalRecoveryEnv(&cfg, envSnapshot, sources); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+	warnings := inspectSecretPermissions(selection, v)
+	warnings = append(warnings, clampOfficeLaunchSafetyConfig(&cfg)...)
+	cfg.Source = buildConfigSource(selection, v, sources, warnings)
+
+	if err := validateStartupSettings(&cfg); err != nil {
+		if found {
+			return nil, fmt.Errorf("config validation failed for %q: %w", selection.path, err)
+		}
+		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
 	if err := validate(&cfg); err != nil {
+		if found {
+			return nil, fmt.Errorf("config validation failed for %q: %w", selection.path, err)
+		}
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 

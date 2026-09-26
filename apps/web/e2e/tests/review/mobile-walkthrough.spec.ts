@@ -48,6 +48,15 @@ test.describe("Mobile code walkthrough", () => {
     const card = testPage.getByTestId("walkthrough-floating");
     await expect(card).toBeVisible({ timeout: 30_000 });
     await expect(card).toHaveAttribute("data-mobile-variant", "bottom-sheet");
+    await expect(card.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "Add", exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "Run", exact: true })).toBeVisible();
+    await card.getByRole("textbox").fill("Why does this line exist?");
+    await expect(card.getByRole("button", { name: "Add", exact: true })).toBeEnabled();
+    await expect(card.getByRole("button", { name: "Run", exact: true })).toBeEnabled();
+    await prCapture.screenshot("mobile-walkthrough-feedback-controls", {
+      caption: "Mobile walkthrough keeps Add and Run without an inert Cancel action",
+    });
 
     const box = await card.boundingBox();
     const viewport = testPage.viewportSize();
@@ -86,7 +95,10 @@ test.describe("Mobile code walkthrough", () => {
   }) => {
     await seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-setup", "changes ready");
 
-    await testPage.getByRole("button", { name: "Changes" }).click();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .click();
     const changes = testPage.getByTestId("mobile-changes-panel");
     await expect(changes).toBeVisible({ timeout: 15_000 });
     const request = changes.getByTestId("changes-request-walkthrough");
@@ -111,7 +123,7 @@ test.describe("Mobile code walkthrough", () => {
     });
     await request.click();
 
-    await testPage.getByRole("button", { name: "Chat" }).click();
+    await testPage.getByRole("button", { name: "Chat", exact: true }).click();
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.activeChat()).toContainText("Walkthrough: Tour of the change", {
@@ -146,18 +158,42 @@ test.describe("Mobile code walkthrough", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await seedWalkthroughTask(testPage, apiClient, seedData);
     const session = new SessionPage(testPage);
 
     await expect(session.walkthroughLauncher()).toBeVisible({ timeout: 30_000 });
     await expect(session.walkthroughDiscardButton()).toBeVisible({ timeout: 5_000 });
-    await session.walkthroughDiscardButton().click();
-    await expect(session.walkthroughDiscardDialog()).toBeVisible();
+    await session.walkthroughDiscardButton().tap();
+    const discardConfirmation = session.walkthroughDiscardConfirmation();
+    await expect(discardConfirmation).toBeVisible();
+    await expect(discardConfirmation).toHaveAttribute("role", "group");
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await expect(testPage.getByRole("dialog")).toHaveAttribute("data-slot", "drawer-content");
+    await prCapture.screenshot("mobile-walkthrough-discard-confirmation", {
+      caption: "Mobile walkthrough discard uses a named bottom sheet with stacked actions",
+    });
+    const actionBoxes = await Promise.all(
+      ["Cancel", "Discard walkthrough"].map((name) =>
+        discardConfirmation.getByRole("button", { name }).boundingBox(),
+      ),
+    );
+    for (const box of actionBoxes) {
+      if (!box) throw new Error("walkthrough discard action geometry unavailable");
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+    await discardConfirmation.getByRole("button", { name: "Cancel" }).tap();
+    await expect(discardConfirmation).toHaveCount(0);
+    await expect(session.walkthroughLauncher()).toBeVisible();
+
+    await session.walkthroughDiscardButton().tap();
+    await expect(session.walkthroughDiscardConfirmation()).toBeVisible();
     await session
-      .walkthroughDiscardDialog()
+      .walkthroughDiscardConfirmation()
       .getByRole("button", { name: "Discard walkthrough" })
-      .click();
+      .tap();
 
     await expect(session.walkthroughLauncher()).toHaveCount(0);
     await expect(session.walkthroughFloating()).toHaveCount(0);

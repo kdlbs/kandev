@@ -53,10 +53,10 @@ function decodeBinaryFrame(payload: Buffer | Uint8Array): string | null {
  *
  *  - JSON `{action: "shell.input", payload: {session_id, data}}` over the
  *    kandev gateway WS — the per-session default shell.
- *  - Raw binary frames over a PassthroughTerminal's dedicated WS — used by
- *    mobile multi-terminal where the on-screen terminal owns its own
- *    AttachAddon connection. The session ID is unknown for these frames
- *    (the WS is env+terminalId scoped) so an empty string is reported.
+ *  - Raw text or binary frames over a PassthroughTerminal's dedicated WS.
+ *    AttachAddon sends ordinary xterm input as text; manual mobile routing
+ *    sends binary. The session ID is unknown for these frames, so an empty
+ *    string is reported.
  *
  * Tests assert on the `data` field, which works the same either way.
  *
@@ -67,9 +67,14 @@ function decodeBinaryFrame(payload: Buffer | Uint8Array): string | null {
 export function attachShellInputCapture(page: Page): { frames: ShellInputFrame[] } {
   const frames: ShellInputFrame[] = [];
   page.on("websocket", (ws) => {
+    const isTerminalSocket = new URL(ws.url()).pathname.startsWith("/terminal/");
     ws.on("framesent", (event) => {
       const payload = event.payload;
       if (typeof payload === "string") {
+        if (isTerminalSocket) {
+          if (payload) frames.push({ sessionId: "", data: payload });
+          return;
+        }
         if (!payload.includes('"shell.input"')) return;
         try {
           const msg = JSON.parse(payload) as ParsedFrame;

@@ -1,9 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 
-const APPEARANCE_PATH = "/settings/general/appearance";
-const TERMINAL_PATH = "/settings/general/terminal";
-const NOTIFICATIONS_PATH = "/settings/general/notifications";
+const APPEARANCE_PATH = "/settings/preferences/appearance";
+const TERMINAL_PATH = "/settings/preferences/terminal-editors";
+const NOTIFICATIONS_PATH = "/settings/preferences/notifications";
+// The menu row the Terminal page now sits on; it was plain "Terminal" before
+// the settings restructure merged Terminal and Editors into one page.
+const TERMINAL_ROW = "Terminal & Editors";
 const CLARIFICATION_REQUESTED = "session.clarification_requested";
 const PROVIDER_NAME = "E2E semantic notifications";
 
@@ -25,18 +28,65 @@ async function seedNotificationProvider(
 }
 
 test.describe("Settings manual save", () => {
+  test("persists rich-output chart motion on this device only after Save", async ({ testPage }) => {
+    await testPage.addInitScript(() => {
+      if (window.localStorage.getItem("kandev.settings.richOutputAnimations") === null) {
+        window.localStorage.setItem("kandev.settings.richOutputAnimations", "true");
+      }
+    });
+    let userSettingsPatches = 0;
+    testPage.on("request", (request) => {
+      if (
+        request.method() === "PATCH" &&
+        new URL(request.url()).pathname === "/api/v1/user/settings"
+      ) {
+        userSettingsPatches += 1;
+      }
+    });
+    await testPage.goto(APPEARANCE_PATH);
+
+    const toggle = testPage.getByRole("switch", { name: "Animate rich-output charts" });
+    await expect(toggle).toBeChecked();
+    const toggleBox = await toggle.boundingBox();
+    expect(toggleBox?.width).toBeGreaterThanOrEqual(44);
+    expect(toggleBox?.height).toBeGreaterThanOrEqual(44);
+
+    await toggle.click();
+    await expect(toggle).not.toBeChecked();
+    expect(
+      await testPage.evaluate(() =>
+        JSON.parse(window.localStorage.getItem("kandev.settings.richOutputAnimations") ?? "null"),
+      ),
+    ).toBe(true);
+
+    const floatingSave = testPage.getByTestId("settings-floating-save");
+    await floatingSave.getByRole("button", { name: "Save changes" }).click();
+    await expect(floatingSave).not.toBeVisible();
+    expect(userSettingsPatches).toBe(0);
+    expect(
+      await testPage.evaluate(() =>
+        JSON.parse(window.localStorage.getItem("kandev.settings.richOutputAnimations") ?? "null"),
+      ),
+    ).toBe(false);
+
+    await testPage.reload();
+    await expect(toggle).not.toBeChecked();
+  });
+
   test("keeps Appearance changes local and guards dirty navigation", async ({
     testPage,
     apiClient,
   }) => {
     const initial = await apiClient.getUserSettings();
     const initialLayout = initial.settings.changes_panel_layout === "tree" ? "tree" : "flat";
+    const initialStatusBarEnabled = initial.settings.app_status_bar_enabled === true;
     const nextLayout = initialLayout === "tree" ? "flat" : "tree";
 
     try {
+      await apiClient.saveUserSettings({ app_status_bar_enabled: true });
       await testPage.goto(APPEARANCE_PATH);
       await expect(
-        testPage.getByRole("heading", { name: "Appearance", exact: true }),
+        testPage.getByRole("heading", { level: 2, name: "Appearance", exact: true }),
       ).toBeVisible();
 
       const layout = testPage.getByTestId("changes-panel-layout-select");
@@ -55,7 +105,47 @@ test.describe("Settings manual save", () => {
         initial.settings.changes_panel_layout,
       );
 
-      await testPage.getByRole("link", { name: "Terminal", exact: true }).first().click();
+      const surface = floatingSave.getByTestId("settings-floating-save-surface");
+      const contentArea = testPage.getByTestId("settings-scroll-container");
+      const configChatButton = testPage.getByRole("button", { name: "Configuration Chat" });
+      const [surfaceBox, contentBox, configChatBox] = await Promise.all([
+        surface.boundingBox(),
+        contentArea.boundingBox(),
+        configChatButton.boundingBox(),
+      ]);
+      expect(surfaceBox).not.toBeNull();
+      expect(contentBox).not.toBeNull();
+      expect(configChatBox).not.toBeNull();
+      expect(surfaceBox!.height).toBeLessThanOrEqual(48);
+      expect(
+        Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (contentBox!.x + contentBox!.width / 2)),
+      ).toBeLessThanOrEqual(2);
+      expect(
+        Math.abs(
+          surfaceBox!.y + surfaceBox!.height / 2 - (configChatBox!.y + configChatBox!.height / 2),
+        ),
+      ).toBeLessThanOrEqual(2);
+      await expect(floatingSave).not.toHaveClass(/bg-success/);
+      await expect(floatingSave.getByRole("button", { name: "Save changes" })).toHaveClass(
+        /bg-success/,
+      );
+
+      await floatingSave.getByRole("button", { name: "Reset" }).click();
+      await expect(floatingSave).not.toBeVisible();
+      await expect(testPage.getByTestId("changes-panel-layout-card")).toHaveAttribute(
+        "data-settings-dirty",
+        "false",
+      );
+      expect((await apiClient.getUserSettings()).settings.changes_panel_layout).toBe(
+        initial.settings.changes_panel_layout,
+      );
+
+      await layout.click();
+      await testPage
+        .getByRole("option", { name: nextLayout === "tree" ? "Tree" : "Flat list" })
+        .click();
+
+      await testPage.getByRole("link", { name: TERMINAL_ROW, exact: true }).first().click();
       const navigationDialog = testPage.getByRole("alertdialog", {
         name: "Save changes before leaving?",
       });
@@ -63,13 +153,14 @@ test.describe("Settings manual save", () => {
       await navigationDialog.getByRole("button", { name: "Continue editing" }).click();
       await expect(testPage).toHaveURL(new RegExp(`${APPEARANCE_PATH}$`));
 
-      await testPage.getByRole("link", { name: "Terminal", exact: true }).first().click();
+      await testPage.getByRole("link", { name: TERMINAL_ROW, exact: true }).first().click();
       await expect(navigationDialog).toBeVisible();
       await navigationDialog.getByRole("button", { name: "Save and leave" }).click();
       await expect(testPage).toHaveURL(new RegExp(`${TERMINAL_PATH}$`));
       expect((await apiClient.getUserSettings()).settings.changes_panel_layout).toBe(nextLayout);
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        app_status_bar_enabled: initialStatusBarEnabled,
         changes_panel_layout: initialLayout,
       });
     }
@@ -118,7 +209,8 @@ test.describe("Settings manual save", () => {
     const initialAutoScrollControl = initial.settings.show_transcript_auto_scroll_control;
 
     try {
-      await testPage.goto("/settings/general/task-actions");
+      await testPage.goto("/settings/preferences/task-behavior");
+      await testPage.getByRole("tab", { name: "Conversation", exact: true }).click();
       const autoScrollControl = testPage.getByRole("switch", {
         name: "Show transcript auto-scroll control",
       });
@@ -140,6 +232,7 @@ test.describe("Settings manual save", () => {
       );
 
       await testPage.reload();
+      await testPage.getByRole("tab", { name: "Conversation", exact: true }).click();
       await expect(autoScrollControl).not.toBeChecked();
     } finally {
       await apiClient.saveUserSettings({

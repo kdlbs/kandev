@@ -1,4 +1,8 @@
 import type { editor, IRange, languages } from "monaco-editor";
+// Module-level `t`, resolved when Monaco asks for completions rather than at
+// import: this is a provider callback, not a component, so there is no hook to
+// bind.
+import { t } from "@/lib/i18n";
 
 /**
  * Builds a Monaco completion provider that suggests sibling instruction
@@ -41,7 +45,7 @@ export function createInstructionFileCompletionProvider(
         .map((name) => ({
           label: `${prefix}${name}`,
           kind: monaco.languages.CompletionItemKind.File,
-          detail: "instruction file",
+          detail: t("office:instructionFileCompletionDetail"),
           insertText: name,
           range,
         }));

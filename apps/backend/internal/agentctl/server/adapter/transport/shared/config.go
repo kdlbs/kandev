@@ -1,6 +1,10 @@
 package shared
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/common/acpprovider"
+)
 
 // DefaultPermissionTimeout is the default timeout for permission requests (5 minutes).
 const DefaultPermissionTimeout = 5 * time.Minute
@@ -13,15 +17,6 @@ type Config struct {
 
 	// AutoApprove automatically approves permission requests
 	AutoApprove bool
-
-	// ApprovalPolicy controls when the agent requests approval.
-	// Valid values: "untrusted" (always), "on-failure", "on-request", "never".
-	// Defaults to "on-request" if empty.
-	ApprovalPolicy string
-
-	// PermissionPolicy controls the permission mode: "autonomous", "supervised", "plan".
-	// Used to determine hook registration and --permission-mode flag.
-	PermissionPolicy string
 
 	// PermissionTimeout is the maximum time to wait for a permission response.
 	// After timeout, the request is auto-denied with interrupt. Defaults to DefaultPermissionTimeout.
@@ -38,7 +33,9 @@ type Config struct {
 	// Used for display purposes.
 	AgentName string
 
-	// For HTTP-based adapters (REST)
+	// BaseURL, AuthHeader, AuthValue, and Headers are unused by any adapter
+	// today (no HTTP-based transport exists). Populated by
+	// adapter.Config.ToSharedConfig but never read by a transport.
 	BaseURL    string            // Base URL of the agent's HTTP API
 	AuthHeader string            // Optional auth header name
 	AuthValue  string            // Optional auth header value
@@ -59,6 +56,17 @@ type Config struct {
 	// adapter's return value to decide whether to kill the entire process
 	// group on shutdown so MCP child processes don't leak.
 	RequiresProcessKill bool
+
+	// NotificationQueueCapacity is the resolved ACP inbound notification queue
+	// capacity. Zero keeps compatibility for directly constructed test configs.
+	NotificationQueueCapacity int
+
+	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
+	PromptCancelJoinTimeout time.Duration
+
+	// ProviderGatewayAuth, when set, makes the ACP adapter authenticate the
+	// agent against an OpenAI-compatible gateway right after initialize.
+	ProviderGatewayAuth *acpprovider.GatewayAuth
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

@@ -14,6 +14,34 @@ import (
 // trigger for it.
 var ErrEngineNoSession = errors.New("workflow engine: no active session for task")
 
+// ErrWorkspacePaused is the typed error every gate site (workspace-kill-
+// switch) returns when PauseGate.PauseState reports a confirmed pause. It
+// is a shared sentinel — not office/pause's own type — so every consumer
+// package (routines, service, scheduler, wakeup) and every caller that
+// branches on it (routine HTTP handlers, the cron ticker, reactivity, the
+// approval adapter) can import it without importing office/pause itself.
+var ErrWorkspacePaused = errors.New("office: workspace paused")
+
+// ErrPauseGateUnavailable is the typed error a gate site returns when
+// PauseGate.PauseState itself failed (read error), distinct from a
+// confirmed pause: the gate fails closed on this error too, but callers
+// that map it to HTTP use 503, not 409, and cron/event logging keeps it at
+// its ordinary level rather than swallowing it the way a confirmed pause is.
+var ErrPauseGateUnavailable = errors.New("office: workspace pause state unavailable")
+
+// PauseGate is the narrow read-only surface every gate site consults
+// before dispatching, queueing, or launching work. Implemented by
+// office/pause.Service and wired in via each consumer's own SetPauseGate
+// setter — defined once here (rather than duplicated per consumer package)
+// because every implementation and every caller share the identical
+// signature and the same two sentinel errors above.
+type PauseGate interface {
+	// PauseState returns the workspace's active pause record, or (nil, nil)
+	// when the workspace is running. A non-nil error means the read itself
+	// failed (fail closed); it is not a signal that the workspace is paused.
+	PauseState(ctx context.Context, workspaceID string) (*models.WorkspacePause, error)
+}
+
 // AgentReader provides read access to agent instances.
 // Implemented by the agents feature (and transitionally by office/service.Service).
 type AgentReader interface {
@@ -35,12 +63,39 @@ type AgentWriter interface {
 	UpdateAgentStatusFields(ctx context.Context, agentID, status, pauseReason string) error
 }
 
+// QueueOutcome reports what a RunQueuer.QueueRun call actually did. This is
+// the neutral queue contract shared by office producers and the runs service.
+// The runs service aliases this type so callers can compare outcomes across
+// the two package boundaries without maintaining duplicate declarations.
+type QueueOutcome string
+
+const (
+	// QueueOutcomeQueued means a new runs row was inserted.
+	QueueOutcomeQueued QueueOutcome = "queued"
+	// QueueOutcomeDeduped means an existing row with the same IdempotencyKey
+	// already existed and no new row was inserted.
+	QueueOutcomeDeduped QueueOutcome = "deduped"
+	// QueueOutcomeCoalesced means the request was merged into an existing
+	// pending run rather than creating a new one.
+	QueueOutcomeCoalesced QueueOutcome = "coalesced"
+	// QueueOutcomeNone means no enqueue was attempted, or the attempt
+	// returned an error before any outcome was determined.
+	QueueOutcomeNone QueueOutcome = ""
+	// QueueOutcomeRateLimited means an agent-initiated assignment wake was
+	// refused because its task allowance was exhausted. No row was inserted
+	// and no existing row was merged.
+	QueueOutcomeRateLimited QueueOutcome = "rate_limited"
+)
+
 // RunQueuer enqueues run requests for agent instances.
 // Implemented by the run feature (and transitionally by office/service.Service).
 type RunQueuer interface {
 	// QueueRun enqueues a run for agentInstanceID with the given reason, payload,
-	// and optional idempotency key (empty string disables deduplication).
-	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) error
+	// and optional idempotency key (empty string disables deduplication). The
+	// returned QueueOutcome reports what actually happened (queued / deduped /
+	// coalesced / none-on-error) so callers that need to distinguish a fresh
+	// insert from a no-op don't have to infer it from side effects.
+	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) (QueueOutcome, error)
 }
 
 // WorkflowEngineDispatcher routes typed office task events through the
@@ -150,9 +205,35 @@ type PricingLookup interface {
 	LookupForModel(ctx context.Context, modelID string) (ModelPricing, bool)
 }
 
-// SessionUsageWriter increments the cumulative tokens/cost columns on
-// task_sessions when a cost event lands. Implemented by the task repo.
-type SessionUsageWriter interface {
-	IncrementTaskSessionUsage(ctx context.Context, sessionID string,
-		tokensIn, tokensOut, costSubcents int64) error
+// PricingCatalogVersioner is an optional capability a PricingLookup
+// implementation may satisfy to report an "as-of" identifier for the
+// pricing data it served — recorded on CostEvent.PricingCatalogVersion so a
+// models.dev-list-priced row can be traced back to the catalogue state that
+// produced it. Deliberately separate from PricingLookup (rather than
+// widening it) so existing implementers and test fakes are unaffected;
+// callers type-assert and treat a missing implementation as "no version
+// available" (NULL column), not an error.
+type PricingCatalogVersioner interface {
+	// CatalogVersion returns an identifier for the currently-served
+	// pricing data, or "" when none is available yet (e.g. cold cache,
+	// nothing loaded). models.dev's dataset carries no version field of
+	// its own, so implementations report the load/fetch time instead.
+	CatalogVersion() string
+}
+
+// PricingLookupWithVersion is an optional capability a PricingLookup
+// implementation may satisfy to return pricing and its catalogue version
+// from one atomic snapshot. Calling LookupForModel and CatalogVersion
+// separately takes two independent lock acquisitions; a background refresh
+// can install a new catalogue in between and pair one catalogue's rates
+// with a different catalogue's version identifier on the stored row — a
+// provenance column that lies, which is the exact failure class
+// CostEvent.CostSource exists to eliminate. Callers type-assert and prefer
+// this over the separate calls whenever both values are needed together.
+type PricingLookupWithVersion interface {
+	// LookupForModelWithVersion behaves like PricingLookup.LookupForModel
+	// but also returns the catalogue version that produced the pricing,
+	// read from the same snapshot so the two can never describe different
+	// catalogue states.
+	LookupForModelWithVersion(ctx context.Context, modelID string) (pricing ModelPricing, version string, ok bool)
 }

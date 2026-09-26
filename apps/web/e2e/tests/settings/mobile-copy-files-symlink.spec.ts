@@ -27,7 +27,7 @@ test("configures symlink mode and creates a task on mobile", async ({
       .poll(
         async () => {
           const environment = await apiClient.getTaskEnvironment(taskId);
-          const worktreePath = environment?.worktree_path;
+          const worktreePath = environment?.repos?.[0]?.worktree_path;
           if (!worktreePath) return false;
           const linkPath = path.join(worktreePath, ".env");
           if (!fs.existsSync(linkPath)) return false;

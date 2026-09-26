@@ -81,11 +81,24 @@ export type TaskMR = {
   required_approvals: number;
   pipeline_jobs_total: number;
   pipeline_jobs_pass: number;
+  /** GitLab 15.6+ merge-readiness verdict (e.g. "mergeable"); empty on older hosts. */
+  detailed_merge_status?: string;
+  reviewer_count: number;
+  unapproved_reviewers: number;
+  /** Only populated for MRs with auto-fix or auto-merge enabled. */
+  unresolved_discussions: number;
   created_at: string;
   merged_at?: string;
   closed_at?: string;
   last_synced_at?: string;
   updated_at: string;
+};
+
+/** Workspace-scoped websocket payload emitted when a task MR association is removed. */
+export type TaskMRDeletedEvent = {
+  workspace_id: string;
+  task_id: string;
+  association_id: string;
 };
 
 /** Response shape for `GET /api/v1/gitlab/workspaces/:id/task-mrs`. */
@@ -155,6 +168,7 @@ export type Issue = {
   project_path: string;
   labels: string[];
   assignees: string[];
+  milestone?: string;
   created_at: string;
   updated_at: string;
   closed_at?: string;
@@ -335,6 +349,18 @@ export type GitLabPipeline = {
   jobs_passing: number;
   started_at?: string;
   finished_at?: string;
+  /** Only populated for the latest pipeline in a GitLabMRFeedback response. */
+  jobs?: GitLabPipelineJob[];
+};
+
+/** Single CI job within a GitLab pipeline. */
+export type GitLabPipelineJob = {
+  id: number;
+  name: string;
+  stage: string;
+  status: string;
+  allow_failure: boolean;
+  web_url?: string;
 };
 
 /** Aggregate feedback for an MR (used by the detail panel). */
@@ -366,3 +392,86 @@ export type GitLabMRCommit = {
 
 /** Project branch entry. */
 export type GitLabRepoBranch = { name: string };
+
+/** Per-MR lifecycle dedupe/checkpoint row (observability only, not editable). */
+export type TaskMRLifecycleState = {
+  task_id: string;
+  repository_id: string;
+  project_path: string;
+  mr_iid: number;
+  review_request_initialized: boolean;
+  last_review_requested: boolean;
+  last_observed_state: string;
+  last_lifecycle_event: string;
+  last_lifecycle_prompt_at?: string;
+  last_lifecycle_session_id?: string;
+  last_error?: string;
+  last_sync_error?: string;
+  last_fix_signature: string;
+  last_fix_checkpoint_json: string;
+  last_fix_enqueued_at?: string;
+  last_fix_session_id?: string;
+  auto_fix_round_count: number;
+  auto_fix_exhausted_at?: string;
+  last_merge_signature: string;
+  last_merge_attempt_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * The five automation switches for one linked merge request. This is the
+ * per-MR source of truth; the same-named booleans on TaskMRAutomationOptions
+ * are an aggregate that only reports "every linked MR has this on".
+ */
+export type TaskMRAutomationOptionsForMR = {
+  task_id: string;
+  repository_id: string;
+  project_path: string;
+  mr_iid: number;
+  auto_fix_enabled: boolean;
+  auto_merge_enabled: boolean;
+  prompt_on_review_requested: boolean;
+  prompt_on_merged: boolean;
+  prompt_on_closed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * Task MR automation preferences: the task-level auto-fix prompt override and
+ * reviewer username, the per-MR switches in `mr_options`, and an aggregate of
+ * those switches in the top-level booleans.
+ */
+export type TaskMRAutomationOptions = {
+  task_id: string;
+  automation_revision?: number;
+  auto_fix_enabled: boolean;
+  auto_merge_enabled: boolean;
+  auto_fix_prompt_override?: string | null;
+  auto_fix_max_rounds: number;
+  effective_auto_fix_prompt: string;
+  using_default_prompt: boolean;
+  prompt_on_review_requested: boolean;
+  prompt_on_merged: boolean;
+  prompt_on_closed: boolean;
+  review_reviewer_username: string;
+  updated_at: string;
+  mr_states: TaskMRLifecycleState[];
+  mr_options: TaskMRAutomationOptionsForMR[];
+};
+
+/** Partial update for task MR automation options. */
+export type TaskMRAutomationPatch = {
+  // Target one linked MR's switches; omit all three to apply them to every MR
+  // currently linked to the task.
+  repository_id?: string;
+  project_path?: string;
+  mr_iid?: number;
+  auto_fix_enabled?: boolean;
+  auto_merge_enabled?: boolean;
+  auto_fix_prompt_override?: string;
+  prompt_on_review_requested?: boolean;
+  prompt_on_merged?: boolean;
+  prompt_on_closed?: boolean;
+};

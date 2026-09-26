@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/subtask-completion-trigger.md
+spec: docs/specs/tasks/requirements/subtask-completion-trigger.md
 created: 2026-06-23
 status: implemented
 ---

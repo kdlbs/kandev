@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/walkthrough-navigation-layout/spec.md"
+spec: "../../specs/ui/requirements/walkthrough-navigation-layout.md"
 ---
 
 # Task 01: Stable navigation footer
@@ -49,7 +49,7 @@ together.
 
 ## Inputs
 
-- [Stable Walkthrough Navigation spec](../../specs/walkthrough-navigation-layout/spec.md)
+- [Stable Walkthrough Navigation spec](../../specs/ui/requirements/walkthrough-navigation-layout.md)
 - [Fix plan](plan.md)
 - Existing `WalkthroughFloatingWindow` mobile bottom-sheet and desktop drag
   behavior.

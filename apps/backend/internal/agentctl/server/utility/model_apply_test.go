@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -42,6 +43,78 @@ func TestApplySessionModel_UsesConfigOptionWhenSessionAdvertisesModelOption(t *t
 		t.Fatalf("method = %q, want session/set_config_option", method)
 	}
 	wantCalls := []string{"config:model:gpt-5.4-mini"}
+	if !reflect.DeepEqual(conn.calls, wantCalls) {
+		t.Fatalf("calls = %#v, want %#v", conn.calls, wantCalls)
+	}
+}
+
+func TestApplySessionModelWithConfigOptions_ReturnsProviderSnapshot(t *testing.T) {
+	t.Parallel()
+
+	modelCat := acp.SessionConfigOptionCategoryModel
+	effortCat := acp.SessionConfigOptionCategory("reasoning_effort")
+	configOptions := []acp.SessionConfigOption{
+		{Select: &acp.SessionConfigOptionSelect{
+			Id:       "model",
+			Category: &modelCat,
+			Type:     "select",
+		}},
+		{Select: &acp.SessionConfigOptionSelect{
+			Id:       "reasoning_effort",
+			Category: &effortCat,
+			Type:     "select",
+		}},
+	}
+	conn := &fakeModelConnWithConfig{configOptions: configOptions}
+
+	method, got, err := applySessionModelWithConfigOptions(
+		context.Background(), conn, "sess-1", "model-with-effort", []acp.SessionConfigOption{
+			{Select: &acp.SessionConfigOptionSelect{
+				Id:       "model",
+				Category: &modelCat,
+				Type:     "select",
+			}},
+		},
+	)
+
+	if err != nil {
+		t.Fatalf("applySessionModelWithConfigOptions() error = %v", err)
+	}
+	if method != "session/set_config_option" {
+		t.Fatalf("method = %q, want session/set_config_option", method)
+	}
+	if !reflect.DeepEqual(got, configOptions) {
+		t.Fatalf("config options = %#v, want %#v", got, configOptions)
+	}
+}
+
+type fakeModelConnWithConfig struct {
+	configOptions []acp.SessionConfigOption
+}
+
+func (f *fakeModelConnWithConfig) SetSessionConfigOption(_ context.Context, _ acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	return acp.SetSessionConfigOptionResponse{ConfigOptions: f.configOptions}, nil
+}
+
+func (f *fakeModelConnWithConfig) UnstableSetSessionModel(_ context.Context, _ acp.UnstableSetSessionModelRequest) (acp.UnstableSetSessionModelResponse, error) {
+	return acp.UnstableSetSessionModelResponse{}, nil
+}
+
+func TestApplySessionConfigOptions_SortsAndAppliesValues(t *testing.T) {
+	t.Parallel()
+
+	conn := &fakeModelConn{}
+	_, err := applySessionConfigOptions(context.Background(), conn, "sess-1", map[string]string{
+		"fast":   "true",
+		"effort": "high",
+	})
+	if err != nil {
+		t.Fatalf("applySessionConfigOptions() error = %v", err)
+	}
+	wantCalls := []string{
+		"config:effort:high",
+		"config:fast:true",
+	}
 	if !reflect.DeepEqual(conn.calls, wantCalls) {
 		t.Fatalf("calls = %#v, want %#v", conn.calls, wantCalls)
 	}
@@ -92,6 +165,67 @@ func TestApplySessionModel_NoOpWhenAgentSupportsNeitherSurface(t *testing.T) {
 		t.Fatalf("method = %q, want empty (MethodNone)", method)
 	}
 	wantCalls := []string{"legacy:sess-1:legacy-model"}
+	if !reflect.DeepEqual(conn.calls, wantCalls) {
+		t.Fatalf("calls = %#v, want %#v", conn.calls, wantCalls)
+	}
+}
+
+// TestApplyProbeModel_LegacyNoConfigOptionsReturnsEmpty pins that when the
+// legacy session/set_model RPC succeeds but the agent surfaces no per-model
+// config options (and pushes no follow-up config-update notification), the
+// probe treats it as a valid empty resolution (nil options, nil error) rather
+// than a hard failure. This is the auggie shape: a flat model list with no
+// reasoning-effort style selectors to resolve.
+func TestApplyProbeModel_LegacyNoConfigOptionsReturnsEmpty(t *testing.T) {
+	t.Parallel()
+
+	conn := &fakeModelConn{}
+	state := newACPProbeNotificationState("auggie")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	options, err := applyProbeModel(ctx, conn, acp.SessionId("sess-1"), "legacy-model", nil, state)
+	if err != nil {
+		t.Fatalf("applyProbeModel() error = %v, want nil", err)
+	}
+	if options != nil {
+		t.Fatalf("options = %#v, want nil (empty resolution)", options)
+	}
+	wantCalls := []string{"legacy:sess-1:legacy-model"}
+	if !reflect.DeepEqual(conn.calls, wantCalls) {
+		t.Fatalf("calls = %#v, want %#v", conn.calls, wantCalls)
+	}
+}
+
+// TestApplyProbeModel_ConfigOptionNoSnapshotReturnsError pins the other half of
+// the narrowing: when the agent advertises a typed model config option (so the
+// model is applied via session/set_config_option) but returns neither inline
+// options nor a config-update notification, applyProbeModel must fail rather than
+// keep the stale pre-switch snapshot. The empty-resolution relaxation is scoped
+// to the legacy session/set_model path only.
+func TestApplyProbeModel_ConfigOptionNoSnapshotReturnsError(t *testing.T) {
+	t.Parallel()
+
+	modelCat := acp.SessionConfigOptionCategoryModel
+	conn := &fakeModelConn{}
+	state := newACPProbeNotificationState("modern-agent")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	options, err := applyProbeModel(ctx, conn, acp.SessionId("sess-1"), "model-with-effort", []acp.SessionConfigOption{
+		{Select: &acp.SessionConfigOptionSelect{
+			Id:       "model",
+			Category: &modelCat,
+			Type:     "select",
+		}},
+	}, state)
+	if err == nil {
+		t.Fatalf("applyProbeModel() error = nil, want no-configuration-options error")
+	}
+	if options != nil {
+		t.Fatalf("options = %#v, want nil on error", options)
+	}
+	wantCalls := []string{"config:model:model-with-effort"}
 	if !reflect.DeepEqual(conn.calls, wantCalls) {
 		t.Fatalf("calls = %#v, want %#v", conn.calls, wantCalls)
 	}

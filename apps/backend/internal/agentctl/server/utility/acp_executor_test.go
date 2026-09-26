@@ -1,17 +1,243 @@
 package utility
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"maps"
+	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
+	"go.uber.org/zap"
 )
 
 func ptr[T any](v T) *T { return &v }
+
+// A probe that outlives its deadline is killed by cleanup, so the ACP client
+// reports the dead pipe rather than the deadline. Reporting that verbatim sends
+// readers after a crashed agent that never crashed.
+func TestDescribeACPFailureNamesTheContextCause(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := describeACPFailure(ctx, "initialize", errors.New("peer disconnected before response"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want it to wrap context.Canceled", err)
+	}
+	if strings.Contains(err.Error(), "peer disconnected") {
+		t.Fatalf("err = %q, want the context cause instead of the wire symptom", err)
+	}
+}
+
+// The deadline is the case the change exists for: the probe timeout kills the
+// child, the SDK reports the dead pipe, and the timeout has to win over it.
+func TestDescribeACPFailureNamesTheDeadline(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	<-ctx.Done()
+
+	err := describeACPFailure(ctx, "initialize", errors.New("peer disconnected before response"))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want it to wrap context.DeadlineExceeded", err)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %q, want it to say the phase timed out", err)
+	}
+}
+
+func TestDescribeACPFailureKeepsGenuineErrors(t *testing.T) {
+	t.Parallel()
+
+	inner := errors.New("peer disconnected before response")
+	err := describeACPFailure(context.Background(), "initialize", inner)
+	if !errors.Is(err, inner) {
+		t.Fatalf("err = %v, want the original failure preserved", err)
+	}
+	if strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %q, must not claim a timeout while the context is live", err)
+	}
+}
+
+func TestStderrBufferTailKeepsTheEnd(t *testing.T) {
+	t.Parallel()
+
+	var buf stderrBuffer
+	if _, err := buf.Write([]byte(strings.Repeat("a", stderrTailLimit))); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := buf.Write([]byte("\nnpm error code ECONNREFUSED")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	tail := buf.tail()
+	if len(tail) > stderrTailLimit {
+		t.Fatalf("tail is %d bytes, want at most %d", len(tail), stderrTailLimit)
+	}
+	if !strings.HasSuffix(tail, "npm error code ECONNREFUSED") {
+		t.Fatalf("tail = %q, want the final line kept", tail)
+	}
+}
+
+// Retention is bounded on write, not on read, so a chatty child cannot hold
+// everything it ever printed in memory until something asks for the tail.
+func TestStderrBufferBoundsRetentionOnWrite(t *testing.T) {
+	t.Parallel()
+
+	var buf stderrBuffer
+	chunk := []byte(strings.Repeat("b", 1024))
+	for range 64 {
+		if n, err := buf.Write(chunk); err != nil || n != len(chunk) {
+			t.Fatalf("Write = (%d, %v), want (%d, nil)", n, err, len(chunk))
+		}
+	}
+
+	if got := buf.buf.Len(); got > stderrTailLimit {
+		t.Fatalf("retained %d bytes after 64 KiB of writes, want at most %d", got, stderrTailLimit)
+	}
+}
+
+// os/exec writes into this buffer from its stderr-copying goroutine while the
+// tail is read during teardown. Exercising both at once means the race detector
+// asserts the synchronisation rather than it being assumed.
+func TestStderrBufferSurvivesConcurrentUse(t *testing.T) {
+	t.Parallel()
+
+	var buf stderrBuffer
+	written := make(chan struct{})
+	go func() {
+		defer close(written)
+		for range 200 {
+			_, _ = buf.Write([]byte("npm error code ECONNREFUSED\n"))
+		}
+	}()
+	for range 200 {
+		_ = buf.tail()
+	}
+	<-written
+
+	if buf.tail() == "" {
+		t.Fatal("tail is empty after concurrent writes")
+	}
+}
+
+// @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.6
+func TestProbeClassifiesTrustedManagedRuntimeETarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a POSIX npx fixture")
+	}
+
+	binDir := t.TempDir()
+	npxPath := filepath.Join(binDir, "npx")
+	fixture := "#!/bin/sh\n" +
+		"printf '%s' \"$4\" > \"$NPM_PREFIX_FILE\"\n" +
+		"printf '%s\\n' 'npm error code ETARGET' " +
+		"'npm error notarget No matching version found for @scope/managed-acp@1.2.3.' >&2\n" +
+		"exit 1\n"
+	if err := os.WriteFile(npxPath, []byte(fixture), 0o755); err != nil {
+		t.Fatalf("write npx fixture: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	home := t.TempDir()
+	workDir := t.TempDir()
+	prefixFile := filepath.Join(t.TempDir(), "npm-prefix")
+
+	executor := NewACPInferenceExecutor(zap.NewNop())
+	response, err := executor.Probe(context.Background(), &ProbeRequest{
+		AgentID: "managed-acp",
+		InferenceConfig: &InferenceConfigDTO{
+			Command: []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@scope/managed-acp@1.2.3"},
+			WorkDir: workDir,
+			Env:     map[string]string{"HOME": home, "NPM_PREFIX_FILE": prefixFile},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if response.FailureCode != ProbeFailureManagedRuntimeNPMResolution {
+		t.Fatalf("failure code = %q, want %q", response.FailureCode, ProbeFailureManagedRuntimeNPMResolution)
+	}
+	if strings.Contains(response.Error, "@scope/managed-acp") || strings.Contains(response.Error, "npm error") {
+		t.Fatalf("probe error exposed subprocess diagnostics: %q", response.Error)
+	}
+	actualPrefixBytes, err := os.ReadFile(prefixFile)
+	if err != nil {
+		t.Fatalf("read probe npm prefix: %v", err)
+	}
+	actualPrefix := string(actualPrefixBytes)
+	if !filepath.IsAbs(actualPrefix) || !strings.HasPrefix(filepath.Clean(actualPrefix), filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+		t.Fatalf("probe npm prefix = %q, want absolute path under %q", actualPrefix, os.TempDir())
+	}
+	if info, err := os.Stat(actualPrefix); err != nil || !info.IsDir() {
+		t.Fatalf("probe did not prepare managed npm prefix: info=%v err=%v", info, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".kandev", "managed-npm-runtime")); !os.IsNotExist(err) {
+		t.Fatalf("probe created managed npm prefix under agent home, stat error = %v", err)
+	}
+}
+
+func TestManagedRuntimeProbeFailureCodeRejectsUntrustedEvidence(t *testing.T) {
+	matching := "npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3."
+	tests := []struct {
+		name    string
+		command []string
+		stderr  string
+	}{
+		{
+			name:    "unversioned package",
+			command: []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "managed-acp"},
+			stderr:  matching,
+		},
+		{
+			name:    "online command",
+			command: []string{"npx", "--yes", "--prefer-online", "--prefix", "~/.kandev/managed-npm-runtime", "managed-acp@1.2.3"},
+			stderr:  matching,
+		},
+		{
+			name:    "different package",
+			command: []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "managed-acp@1.2.3"},
+			stderr:  "npm error code ETARGET\nnpm error notarget No matching version found for dependency@9.9.9.",
+		},
+		{
+			name:    "different npm error",
+			command: []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "managed-acp@1.2.3"},
+			stderr:  "npm error code ECONNREFUSED",
+		},
+		{
+			name:    "missing isolated prefix",
+			command: []string{"npx", "--yes", "--prefer-offline", "managed-acp@1.2.3"},
+			stderr:  matching,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := managedRuntimeProbeFailureCode(test.command, test.stderr); got != "" {
+				t.Fatalf("failure code = %q, want empty", got)
+			}
+		})
+	}
+}
+
+func TestManagedRuntimeProbeClassifiesReleaseAgePolicyFailure(t *testing.T) {
+	command := []string{
+		"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime",
+		"@agentclientprotocol/claude-agent-acp@0.81.0",
+	}
+	stderr := "npm error code ETARGET\n" +
+		"npm error notarget No matching version found for @agentclientprotocol/claude-agent-acp@0.81.0 with a date before 9/22/2026, 12:28:47 PM."
+	if got, want := managedRuntimeProbeFailureCode(command, stderr), ProbeFailureCode("managed_runtime_npm_policy"); got != want {
+		t.Fatalf("failure code = %q, want %q", got, want)
+	}
+}
 
 func TestProbeConfigOptions_PreservesDescriptions(t *testing.T) {
 	t.Parallel()
@@ -97,6 +323,45 @@ func TestResolveProbeCommand_RejectsUnknown(t *testing.T) {
 	t.Parallel()
 	if got := resolveProbeCommand("claude"); got != "" {
 		t.Fatalf("resolveProbeCommand(claude) = %q, want empty", got)
+	}
+}
+
+// The mock agent is the one allow-listed command launched from an absolute
+// path, so on Windows it reaches this lookup as "mock-agent.exe". The coverage
+// above builds Unix-style paths, whose base name never carries an executable
+// suffix, which is why the gap passed on every runner including Windows.
+func TestResolveProbeCommand_ExecutableSuffix(t *testing.T) {
+	t.Parallel()
+
+	const name = "mock-agent"
+	dir := t.TempDir()
+
+	for _, tc := range []struct {
+		file        string
+		wantWindows string
+	}{
+		{file: name + ".exe", wantWindows: name},
+		{file: name + ".EXE", wantWindows: name},
+		{file: name + ".cmd", wantWindows: ""},
+		{file: name + ".txt", wantWindows: ""},
+		{file: name + ".exe.txt", wantWindows: ""},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(dir, tc.file)
+			got := resolveProbeCommand(path)
+
+			// Only Windows trims, and only ".exe" — any other suffix, and any
+			// suffix at all on Unix, leaves the name unmatched.
+			want := ""
+			if runtime.GOOS == "windows" {
+				want = tc.wantWindows
+			}
+			if got != want {
+				t.Fatalf("resolveProbeCommand(%q) = %q, want %q", path, got, want)
+			}
+		})
 	}
 }
 

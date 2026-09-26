@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { PreviewType } from "@/lib/state/dockview-panel-actions";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
+import { useTabContextActions } from "./use-tab-context-actions";
+import { useTranslation } from "react-i18next";
 
 /**
  * Middle-click to close any tab (preview or pinned).
@@ -34,30 +36,12 @@ export function useMiddleClickClose(
   );
 }
 
-function useTabContextActions(
-  api: IDockviewPanelHeaderProps["api"],
-  containerApi: IDockviewPanelHeaderProps["containerApi"],
-) {
-  const handleClose = useCallback(() => {
-    const panel = containerApi.getPanel(api.id);
-    if (panel) containerApi.removePanel(panel);
-  }, [api, containerApi]);
-
-  const handleCloseOthers = useCallback(() => {
-    const toClose = api.group.panels.filter(
-      (p) => p.id !== api.id && p.id !== "chat" && !p.id.startsWith("session:"),
-    );
-    for (const panel of toClose) containerApi.removePanel(panel);
-  }, [api, containerApi]);
-
-  return { handleClose, handleCloseOthers };
-}
-
 /**
  * Preview tab: italic title + double-click to pin + middle-click to close.
  * One per preview type (file-editor / file-diff / commit-detail).
  */
 function PreviewTab(props: IDockviewPanelHeaderProps & { type: PreviewType }) {
+  const { t } = useTranslation();
   const { api, containerApi, type } = props;
   const promote = useDockviewStore((s) => s.promotePreviewToPinned);
   const onMouseDown = useMiddleClickClose(api, containerApi);
@@ -90,7 +74,7 @@ function PreviewTab(props: IDockviewPanelHeaderProps & { type: PreviewType }) {
           )}
           onMouseDown={onMouseDown}
           onDoubleClick={onDoubleClick}
-          title={isPromoted ? undefined : "Double-click to keep this tab open"}
+          title={isPromoted ? undefined : t("task:doubleClickToKeepThisTab")}
           data-testid={`preview-tab-${type}`}
         >
           <DockviewDefaultTab {...props} />
@@ -98,16 +82,16 @@ function PreviewTab(props: IDockviewPanelHeaderProps & { type: PreviewType }) {
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem className="cursor-pointer" onSelect={handleClose}>
-          Close
+          {t("task:close")}
         </ContextMenuItem>
         <ContextMenuItem className="cursor-pointer" onSelect={handleCloseOthers}>
-          Close Others
+          {t("task:closeOthers")}
         </ContextMenuItem>
         {!isPromoted && (
           <>
             <ContextMenuSeparator />
             <ContextMenuItem className="cursor-pointer" onSelect={handleKeepOpen}>
-              Keep Open
+              {t("task:keepOpen")}
             </ContextMenuItem>
           </>
         )}
@@ -131,6 +115,7 @@ export function PreviewCommitTab(props: IDockviewPanelHeaderProps) {
  * Adds middle-click-to-close and a right-click context menu.
  */
 export function PinnedDefaultTab(props: IDockviewPanelHeaderProps) {
+  const { t } = useTranslation();
   const { api, containerApi } = props;
   const onMouseDown = useMiddleClickClose(api, containerApi);
   const { handleClose, handleCloseOthers } = useTabContextActions(api, containerApi);
@@ -149,10 +134,10 @@ export function PinnedDefaultTab(props: IDockviewPanelHeaderProps) {
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem className="cursor-pointer" onSelect={handleClose}>
-          Close
+          {t("task:close")}
         </ContextMenuItem>
         <ContextMenuItem className="cursor-pointer" onSelect={handleCloseOthers}>
-          Close Others
+          {t("task:closeOthers")}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

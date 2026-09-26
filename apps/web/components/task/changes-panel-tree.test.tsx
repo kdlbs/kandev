@@ -105,6 +105,16 @@ describe("ChangesTree", () => {
     expect(isSelected).toHaveBeenCalledWith(FOO_TS);
   });
 
+  it("skips a file entry without a path instead of crashing the route", () => {
+    // Regression: archived-task DB snapshots can replay cumulative-diff
+    // entries lacking a `path` field; the tree used to crash with
+    // "Cannot read properties of undefined (reading 'split')".
+    const pathless = { ...file(FOO_TS), path: undefined as unknown as string };
+    render(<ChangesTree {...baseProps} variant="unstaged" files={[pathless, file(BAR_TS)]} />);
+    expect(screen.getAllByTestId("file-row")).toHaveLength(1);
+    expect(screen.getByTestId("file-row").textContent).toBe(BAR_TS);
+  });
+
   it("indents root files beneath a repository header", () => {
     render(
       <RepoTreeGroup

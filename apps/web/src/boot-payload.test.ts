@@ -23,6 +23,7 @@ describe("readBootPayload", () => {
         runtime: {
           apiPrefix: "/api/v1",
           webSocketPath: "/ws",
+          lspAutoInstallPreferenceLanguages: ["go", "python", "rust", "typescript"],
         },
         initialState: {
           tasks: { activeTaskId: "task-1" },
@@ -42,6 +43,7 @@ describe("readBootPayload", () => {
       runtime: {
         apiPrefix: "/api/v1",
         webSocketPath: "/ws",
+        lspAutoInstallPreferenceLanguages: ["go", "python", "rust", "typescript"],
       },
       initialState: {
         tasks: { activeTaskId: "task-1" },
@@ -74,6 +76,55 @@ describe("readBootPayload", () => {
     expect(readBootPayload(win).runtime?.debug).toBe(true);
     expect(win.__KANDEV_DEBUG).toBe(true);
   });
+
+  it("reads the browser tab title prefix from the runtime block", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: { titlePrefix: "TEST" } },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).runtime?.titlePrefix).toBe("TEST");
+  });
+
+  it("leaves the title prefix undefined when the runtime block omits it", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: { apiPrefix: "/api/v1" } },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).runtime?.titlePrefix).toBeUndefined();
+  });
+});
+
+describe("readBootPayload runtime metadata", () => {
+  it("reads the native folder picker capability from the runtime block", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        runtime: { nativeFolderPickerAvailable: true, desktopRuntime: true },
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).runtime?.nativeFolderPickerAvailable).toBe(true);
+    expect(readBootPayload(win).runtime?.desktopRuntime).toBe(true);
+  });
+
+  it("keeps the backend boot identity from the runtime block", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: { bootId: "boot-123" } },
+    } as unknown as Window;
+
+    expect(readBootPayload(win)).toMatchObject({ runtime: { bootId: "boot-123" } });
+  });
+
+  it("ignores missing or malformed backend boot identities", () => {
+    const missing = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: {} },
+    } as unknown as Window;
+    const malformed = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: { bootId: 123 } },
+    } as unknown as Window;
+
+    expect(readBootPayload(missing).runtime?.bootId).toBeUndefined();
+    expect(readBootPayload(malformed).runtime?.bootId).toBeUndefined();
+  });
 });
 
 describe("readBootPayload plugins", () => {
@@ -86,6 +137,7 @@ describe("readBootPayload plugins", () => {
             name: "Jira",
             bundleUrl: JIRA_BUNDLE_URL,
             styleUrls: ["/api/plugins/jira/style.css"],
+            repositoryProviderIds: ["jira"],
           },
           { id: "hello", name: "Hello", bundleUrl: "/api/plugins/hello/bundle" },
         ],
@@ -98,6 +150,7 @@ describe("readBootPayload plugins", () => {
         name: "Jira",
         bundleUrl: JIRA_BUNDLE_URL,
         styleUrls: ["/api/plugins/jira/style.css"],
+        repositoryProviderIds: ["jira"],
       },
       { id: "hello", name: "Hello", bundleUrl: "/api/plugins/hello/bundle", styleUrls: undefined },
     ]);
@@ -108,13 +161,25 @@ describe("readBootPayload plugins", () => {
       __KANDEV_BOOT_PAYLOAD__: {
         plugins: [
           { id: "no-bundle-url", name: "Missing bundleUrl" },
-          { id: "jira", name: "Jira", bundleUrl: JIRA_BUNDLE_URL, styleUrls: ["ok.css", 3] },
+          {
+            id: "jira",
+            name: "Jira",
+            bundleUrl: JIRA_BUNDLE_URL,
+            styleUrls: ["ok.css", 3],
+            repositoryProviderIds: ["jira", 3, null, "azure_devops"],
+          },
         ],
       },
     } as unknown as Window;
 
     expect(readBootPayload(win).plugins).toEqual([
-      { id: "jira", name: "Jira", bundleUrl: JIRA_BUNDLE_URL, styleUrls: ["ok.css"] },
+      {
+        id: "jira",
+        name: "Jira",
+        bundleUrl: JIRA_BUNDLE_URL,
+        styleUrls: ["ok.css"],
+        repositoryProviderIds: ["jira", "azure_devops"],
+      },
     ]);
   });
 

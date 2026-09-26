@@ -3,179 +3,104 @@
 import { useTranslation } from "react-i18next";
 import { IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Label } from "@kandev/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
-import {
-  configOptionToModelOptions,
-  isModelConfigOption,
-  ModelConfigSelector,
-  type SelectConfigOption,
-  usableConfigOptions,
-} from "@/components/model-config-selector";
-import { InferenceAgentStatusNote } from "@/components/settings/inference-agent-status";
-import type { UtilityAgent, InferenceAgent } from "@/lib/api/domains/utility-api";
-import { SettingsCard } from "@/components/settings/settings-card";
+import type { UtilityAgent } from "@/lib/api/domains/utility-api";
+import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/standalone";
 import { isUtilityAgentDirty } from "@/components/settings/utility-dirty";
+import {
+  UtilityAgentProfilePicker,
+  utilityProfileEligibility,
+} from "@/components/settings/utility-agent-profile-picker";
+import { SettingsGroup } from "@/components/settings/settings-group";
+import { SettingsFieldLabel } from "@/components/settings/settings-typography";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
-const USE_DEFAULT = "__USE_DEFAULT__";
+export const USE_DEFAULT = "__USE_DEFAULT__";
+const UNCONFIGURED = "__UNCONFIGURED__";
 
-export type ModelOption = { value: string; label: string; agentName: string; modelName: string };
-
-type ModelGroup = { agentName: string; models: ModelOption[] };
-
-function groupModelsByAgent(models: ModelOption[]): ModelGroup[] {
-  const map = new Map<string, ModelOption[]>();
-  for (const m of models) {
-    const list = map.get(m.agentName);
-    if (list) list.push(m);
-    else map.set(m.agentName, [m]);
-  }
-  return Array.from(map, ([agentName, items]) => ({ agentName, models: items }));
-}
-
-function utilityConfigOptions(agent: InferenceAgent | undefined): SelectConfigOption[] {
-  return usableConfigOptions(
-    agent?.config_options?.map((option) => ({
-      type: option.type,
-      id: option.id,
-      name: option.name,
-      currentValue: option.current_value,
-      category: option.category,
-      options: option.options,
-    })),
-  );
-}
-
-// Default model selector section
-type DefaultModelSectionProps = {
-  inferenceAgents: InferenceAgent[];
-  defaultAgentId: string;
-  defaultModel: string;
-  onDefaultChange: (agentId: string, model: string) => void;
-  onRefreshAgent: (agentId: string) => Promise<unknown> | void;
-  isDirty: boolean;
+export type BuiltinActionProfileSelection = {
+  value: string;
+  unavailableValue?: string;
 };
+
+export function getBuiltinActionProfileSelection(
+  agent: UtilityAgent,
+): BuiltinActionProfileSelection {
+  const profileId = agent.agent_profile_id || "";
+  if (agent.profile_binding_state === "unconfigured") {
+    const unavailableValue = profileId || UNCONFIGURED;
+    return { value: unavailableValue, unavailableValue };
+  }
+  if (agent.profile_binding_state !== "inherit" && profileId) {
+    return { value: profileId };
+  }
+  return { value: USE_DEFAULT };
+}
 
 export function DefaultModelSection({
-  inferenceAgents,
-  defaultAgentId,
-  defaultModel,
-  onDefaultChange,
-  onRefreshAgent,
+  profiles,
+  profileId,
+  onProfileChange,
   isDirty,
-}: DefaultModelSectionProps) {
+}: {
+  profiles: AgentProfileOption[];
+  profileId: string;
+  onProfileChange: (profileId: string) => void;
+  isDirty: boolean;
+}) {
   const { t } = useTranslation();
-  const selectedAgent = inferenceAgents.find((a) => a.id === defaultAgentId);
-  const modelOptions = selectedAgent?.models ?? [];
-  const currentModelId = modelOptions.find((m) => m.is_default)?.id;
-  const configOptions = utilityConfigOptions(selectedAgent);
-  const modelConfig = configOptions.find(isModelConfigOption);
-  const selectorModels = modelConfig
-    ? configOptionToModelOptions(modelConfig)
-    : modelOptions.map((model) => ({
-        id: model.id,
-        name: model.name,
-        description: model.description || (model.id !== model.name ? model.id : undefined),
-        usageMultiplier:
-          typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
-      }));
-  const selectedModel = defaultModel || modelConfig?.currentValue || currentModelId || null;
-  const selectedConfigOptions = configOptions.map((option) => ({
-    ...option,
-    currentValue:
-      isModelConfigOption(option) && selectedModel ? selectedModel : option.currentValue,
-  }));
-
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
+  const eligibleProfiles = profiles.filter((profile) =>
+    utilityProfileEligibility(profile, dynamicRoutingEnabled),
+  );
+  const selected = eligibleProfiles.find((profile) => profile.id === profileId);
   return (
-    <SettingsCard isDirty={isDirty} data-testid="utility-default-model-card">
-      <CardHeader>
-        <CardTitle className="text-base">
-          <h3>{t("settings:utilityDefaultModelTitle")}</h3>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">
-          {t("settings:utilityDefaultModelDescription")}
-        </p>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <div className="w-full sm:w-[180px]">
-            <Label className="text-xs text-muted-foreground mb-1 block">
-              {t("settings:agent")}
-            </Label>
-            <Select value={defaultAgentId} onValueChange={(v) => onDefaultChange(v, "")}>
-              <SelectTrigger className="cursor-pointer" data-settings-dirty={isDirty}>
-                <SelectValue placeholder={t("settings:utilitySelectAgent")} />
-              </SelectTrigger>
-              <SelectContent>
-                {inferenceAgents.map((ia) => (
-                  <SelectItem key={ia.id} value={ia.id}>
-                    {ia.display_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div
-            className="w-full rounded-md border border-transparent sm:w-[280px]"
-            data-settings-dirty={isDirty}
-          >
-            <Label className="text-xs text-muted-foreground mb-1 block">
-              {t("settings:model")}
-            </Label>
-            <ModelConfigSelector
-              modelOptions={selectorModels}
-              currentModel={selectedModel}
-              configOptions={selectedConfigOptions}
-              onModelChange={(v) => onDefaultChange(defaultAgentId, v)}
-              disabled={!defaultAgentId}
-              placeholder={t("settings:utilitySelectModel")}
-              ariaLabel={t("settings:utilityDefaultModelAriaLabel")}
-            />
-          </div>
-        </div>
-        {defaultAgentId && (
-          <InferenceAgentStatusNote
-            agent={selectedAgent}
-            fallbackName={defaultAgentId}
-            onRefresh={() => onRefreshAgent(defaultAgentId)}
+    <SettingsGroup
+      isDirty={isDirty}
+      title={t("settings:utilityDefaultModelTitle")}
+      description={t("settings:utilityDefaultModelDescription")}
+      discoveryTargetId={SETTINGS_TARGETS.utilityDefaultModel}
+      data-testid="utility-default-model-card"
+    >
+      <div className="space-y-3">
+        <div className="space-y-2">
+          <SettingsFieldLabel>{t("settings:utilityAgentProfile")}</SettingsFieldLabel>
+          <UtilityAgentProfilePicker
+            profiles={profiles}
+            value={profileId || USE_DEFAULT}
+            onValueChange={(value) => onProfileChange(value === USE_DEFAULT ? "" : value)}
+            fallback={{ value: USE_DEFAULT, label: t("settings:utilityNoDefaultProfile") }}
+            unavailableValue={profileId && !selected ? profileId : undefined}
+            testId="utility-profile-picker-default"
+            triggerClassName="w-full max-w-sm font-normal"
           />
-        )}
-      </CardContent>
-    </SettingsCard>
+          {profileId && !selected && (
+            <p className="text-xs text-destructive">{t("settings:utilityProfileNeedsRepair")}</p>
+          )}
+        </div>
+      </div>
+    </SettingsGroup>
   );
 }
-
-// Builtin action row
-type BuiltinActionRowProps = {
-  agent: UtilityAgent;
-  allModels: ModelOption[];
-  defaultLabel: string;
-  onModelChange: (agent: UtilityAgent, value: string) => void;
-  onEdit: (agent: UtilityAgent) => void;
-  isDirty: boolean;
-};
 
 export function BuiltinActionRow({
   agent,
-  allModels,
+  profiles,
   defaultLabel,
-  onModelChange,
+  onProfileChange,
   onEdit,
   isDirty,
-}: BuiltinActionRowProps) {
-  const currentValue =
-    agent.agent_id && agent.model ? `${agent.agent_id}|${agent.model}` : USE_DEFAULT;
-
+}: {
+  agent: UtilityAgent;
+  profiles: AgentProfileOption[];
+  defaultLabel: string;
+  onProfileChange: (agent: UtilityAgent, value: string) => void;
+  onEdit: (agent: UtilityAgent) => void;
+  isDirty: boolean;
+}) {
+  const { t } = useTranslation();
+  const selection = getBuiltinActionProfileSelection(agent);
   return (
     <div
       className="flex flex-col gap-2 py-2 px-2 rounded hover:bg-muted/50 md:flex-row md:items-center md:gap-4"
@@ -183,34 +108,22 @@ export function BuiltinActionRow({
       data-settings-dirty={isDirty}
     >
       <div className="min-w-0 md:flex-1">
-        <div className="text-sm font-medium truncate">{agent.name}</div>
+        <div className="text-sm font-medium leading-5 truncate">{agent.name}</div>
         <p className="text-xs text-muted-foreground truncate">{agent.description}</p>
       </div>
       <div className="flex items-center gap-2">
-        <Select value={currentValue} onValueChange={(v) => onModelChange(agent, v)}>
-          <SelectTrigger
-            className="min-w-0 flex-1 cursor-pointer md:w-[240px] md:flex-none"
-            data-settings-dirty={isDirty}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem value={USE_DEFAULT}>{defaultLabel}</SelectItem>
-            </SelectGroup>
-            {groupModelsByAgent(allModels).map((group) => (
-              <SelectGroup key={group.agentName}>
-                <SelectSeparator />
-                <SelectLabel>{group.agentName}</SelectLabel>
-                {group.models.map((m) => (
-                  <SelectItem key={m.value} value={m.value}>
-                    {m.modelName}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            ))}
-          </SelectContent>
-        </Select>
+        <UtilityAgentProfilePicker
+          profiles={profiles}
+          value={selection.value}
+          onValueChange={(value) => onProfileChange(agent, value)}
+          fallback={{ value: USE_DEFAULT, label: defaultLabel }}
+          unavailableValue={selection.unavailableValue}
+          unavailableLabel={
+            selection.unavailableValue ? t("settings:utilityProfileNeedsRepair") : undefined
+          }
+          testId={`utility-profile-picker-action-${agent.id}`}
+          triggerClassName="min-w-0 flex-1 md:w-[280px] md:flex-none"
+        />
         <Button
           variant="ghost"
           size="sm"
@@ -224,25 +137,79 @@ export function BuiltinActionRow({
   );
 }
 
-// Custom agent row
-type CustomAgentRowProps = {
+export function PerActionOverridesSection({
+  builtins,
+  profiles,
+  defaultLabel,
+  onProfileChange,
+  onEdit,
+  savedBuiltins,
+}: {
+  builtins: UtilityAgent[];
+  profiles: AgentProfileOption[];
+  defaultLabel: string;
+  onProfileChange: (agent: UtilityAgent, value: string) => void;
+  onEdit: (agent: UtilityAgent) => void;
+  savedBuiltins: UtilityAgent[];
+}) {
+  const { t } = useTranslation();
+  if (builtins.length === 0) return null;
+  return (
+    <SettingsGroup
+      isDirty={builtins.some((agent) =>
+        isUtilityAgentDirty(
+          agent,
+          savedBuiltins.find((saved) => saved.id === agent.id),
+        ),
+      )}
+      title={t("settings:utilityActionsTitle")}
+      description={t("settings:utilityActionsDescription")}
+      discoveryTargetId={SETTINGS_TARGETS.utilityActions}
+      data-testid="utility-actions-card"
+    >
+      <div className="space-y-0">
+        {builtins.map((agent) => (
+          <BuiltinActionRow
+            key={agent.id}
+            agent={agent}
+            profiles={profiles}
+            defaultLabel={defaultLabel}
+            onProfileChange={onProfileChange}
+            onEdit={onEdit}
+            isDirty={isUtilityAgentDirty(
+              agent,
+              savedBuiltins.find((saved) => saved.id === agent.id),
+            )}
+          />
+        ))}
+      </div>
+    </SettingsGroup>
+  );
+}
+
+export function CustomAgentRow({
+  agent,
+  profiles,
+  onEdit,
+  onDelete,
+}: {
   agent: UtilityAgent;
+  profiles: AgentProfileOption[];
   onEdit: (agent: UtilityAgent) => void;
   onDelete: (agent: UtilityAgent) => void;
-};
-
-export function CustomAgentRow({ agent, onEdit, onDelete }: CustomAgentRowProps) {
+}) {
   const { t } = useTranslation();
+  const profile = profiles.find((item) => item.id === agent.agent_profile_id);
   return (
-    <div className="flex items-center justify-between py-3 px-3 rounded hover:bg-muted/50">
+    <div className="flex flex-col gap-2 py-3 px-3 rounded hover:bg-muted/50 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">{agent.name}</div>
         <p className="text-xs text-muted-foreground truncate">{agent.description}</p>
+        <p className="text-xs text-muted-foreground truncate">
+          {profile ? profile.label || profile.id : t("settings:utilityProfileNeedsRepair")}
+        </p>
       </div>
       <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground">
-          {agent.model || t("settings:utilityModelNotConfigured")}
-        </span>
         <Button
           variant="ghost"
           size="sm"
@@ -264,111 +231,52 @@ export function CustomAgentRow({ agent, onEdit, onDelete }: CustomAgentRowProps)
   );
 }
 
-// Per-action overrides section
-type PerActionOverridesSectionProps = {
-  builtins: UtilityAgent[];
-  savedBuiltins: UtilityAgent[];
-  allModels: ModelOption[];
-  defaultModel: string;
-  onModelChange: (agent: UtilityAgent, value: string) => void;
-  onEdit: (agent: UtilityAgent) => void;
-};
-
-export function PerActionOverridesSection({
-  builtins,
-  allModels,
-  defaultModel,
-  onModelChange,
+export function CustomAgentsSection({
+  agents,
+  profiles,
+  onAdd,
   onEdit,
-  savedBuiltins,
-}: PerActionOverridesSectionProps) {
-  const { t } = useTranslation();
-  if (builtins.length === 0) return null;
-
-  // The model id is a wire value the user picked, so it is interpolated rather
-  // than written into the catalog.
-  const defaultLabel = defaultModel
-    ? t("settings:utilityDefaultWithModel", { model: defaultModel })
-    : t("settings:default");
-
-  return (
-    <SettingsCard
-      isDirty={builtins.some((agent) =>
-        isUtilityAgentDirty(
-          agent,
-          savedBuiltins.find((saved) => saved.id === agent.id),
-        ),
-      )}
-      data-testid="utility-actions-card"
-    >
-      <CardHeader>
-        <CardTitle className="text-base">
-          <h3>{t("settings:utilityActionsTitle")}</h3>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-0">
-        {builtins.map((agent) => (
-          <BuiltinActionRow
-            key={agent.id}
-            agent={agent}
-            allModels={allModels}
-            defaultLabel={defaultLabel}
-            onModelChange={onModelChange}
-            onEdit={onEdit}
-            isDirty={isUtilityAgentDirty(
-              agent,
-              savedBuiltins.find((saved) => saved.id === agent.id),
-            )}
-          />
-        ))}
-      </CardContent>
-    </SettingsCard>
-  );
-}
-
-// Custom agents section
-type CustomAgentsSectionProps = {
+  onDelete,
+}: {
   agents: UtilityAgent[];
+  profiles: AgentProfileOption[];
   onAdd: () => void;
   onEdit: (agent: UtilityAgent) => void;
   onDelete: (agent: UtilityAgent) => void;
-};
-
-export function CustomAgentsSection({ agents, onAdd, onEdit, onDelete }: CustomAgentsSectionProps) {
+}) {
   const { t } = useTranslation();
   return (
-    <Card data-testid="utility-custom-agents-card">
-      <CardHeader>
-        <CardTitle className="text-base">
-          <h3>{t("settings:utilityCustomAgentsTitle")}</h3>
-        </CardTitle>
-        <CardAction>
-          <Button onClick={onAdd} size="sm" className="cursor-pointer">
-            <IconPlus className="h-4 w-4 mr-1" />
-            {t("settings:utilityAddCustomAgent")}
-          </Button>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          {t("settings:utilityCustomAgentsDescription")}
-        </p>
-        {agents.length === 0 && (
+    <SettingsGroup
+      title={t("settings:utilityCustomAgentsTitle")}
+      description={t("settings:utilityCustomAgentsDescription")}
+      discoveryTargetId={SETTINGS_TARGETS.utilityCustomAgents}
+      data-testid="utility-custom-agents-card"
+      action={
+        <Button onClick={onAdd} size="sm" className={settingsActionClassName("cursor-pointer")}>
+          <IconPlus className="h-4 w-4 mr-1" />
+          {t("settings:utilityAddCustomAgent")}
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        {agents.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4">
             {t("settings:utilityCustomAgentsEmpty")}
           </p>
-        )}
-        {agents.length > 0 && (
+        ) : (
           <div className="space-y-2">
             {agents.map((agent) => (
-              <CustomAgentRow key={agent.id} agent={agent} onEdit={onEdit} onDelete={onDelete} />
+              <CustomAgentRow
+                key={agent.id}
+                agent={agent}
+                profiles={profiles}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
             ))}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </SettingsGroup>
   );
 }
-
-// Export the USE_DEFAULT constant
-export { USE_DEFAULT };

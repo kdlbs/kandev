@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 type BudgetGaugeProps = {
   budgetCents: number;
@@ -7,8 +8,11 @@ type BudgetGaugeProps = {
 };
 
 export function BudgetGauge({ budgetCents, spentCents = 0, className }: BudgetGaugeProps) {
+  const { t } = useTranslation();
   if (budgetCents <= 0) {
-    return <span className={cn("text-xs text-muted-foreground", className)}>No budget</span>;
+    return (
+      <span className={cn("text-xs text-muted-foreground", className)}>{t("office:noBudget")}</span>
+    );
   }
 
   const pct = Math.min(100, Math.round((spentCents / budgetCents) * 100));

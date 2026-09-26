@@ -1,10 +1,16 @@
 import type { StateCreator } from "zustand";
-import type { GitHubSlice, GitHubSliceState } from "./types";
+import type { GitHubSlice, GitHubSliceState, TaskPRScope } from "./types";
+import type { GitHubPRDiscoveryHealth, GitHubPRDiscoveryHealthUpdate } from "@/lib/types/github";
 
 export const defaultGitHubState: GitHubSliceState = {
-  githubStatus: { byWorkspaceId: {} },
+  githubStatus: { byWorkspaceId: {}, pendingPRDiscoveryHealthByWorkspaceId: {} },
   githubAppRegistrations: { byWorkspaceId: {} },
-  taskPRs: { byTaskId: {} },
+  taskPRs: {
+    byTaskId: {},
+    workspaceId: null,
+    workspaceContextGeneration: 0,
+    deletedAssociationIdsByTaskId: {},
+  },
   taskIssues: { workspaceId: null, byTaskId: {} },
   pendingPrUrlByTaskId: { byTaskId: {} },
   prWatches: { items: [], loaded: false, loading: false },
@@ -16,6 +22,20 @@ export const defaultGitHubState: GitHubSliceState = {
 };
 
 const PR_FEEDBACK_CACHE_LIMIT = 20;
+
+function shouldApplyTaskCIAutomationOptions(
+  current: GitHubSlice["taskCIAutomation"]["byTaskId"][string] | undefined,
+  incoming: GitHubSlice["taskCIAutomation"]["byTaskId"][string],
+) {
+  if (!current) return true;
+  const currentUpdatedAt = Date.parse(current.updated_at ?? "");
+  const incomingUpdatedAt = Date.parse(incoming.updated_at ?? "");
+  if (!Number.isFinite(incomingUpdatedAt)) return false;
+  if (!Number.isFinite(currentUpdatedAt)) return true;
+  // Equal versions are intentionally first-writer-wins so replay order cannot
+  // make two payloads carrying the same version produce different state.
+  return incomingUpdatedAt > currentUpdatedAt;
+}
 
 type ImmerSet = Parameters<
   StateCreator<GitHubSlice, [["zustand/immer", never]], [], GitHubSlice>
@@ -29,7 +49,29 @@ function createGitHubStatusActions(
       set((draft) => {
         const entry = draft.githubStatus.byWorkspaceId[workspaceId];
         if (!entry) return;
-        entry.status = status;
+        let nextStatus = status;
+        const currentHealth = entry.status?.pr_discovery_health;
+        const pending = draft.githubStatus.pendingPRDiscoveryHealthByWorkspaceId[workspaceId];
+        if (nextStatus?.authenticated) {
+          let selectedHealth = nextStatus.pr_discovery_health;
+          if (
+            currentHealth &&
+            (!selectedHealth || !shouldApplyDiscoveryHealth(selectedHealth, currentHealth))
+          ) {
+            selectedHealth = currentHealth;
+          }
+          if (
+            pending &&
+            (!selectedHealth || shouldApplyDiscoveryHealth(pending.health, selectedHealth))
+          ) {
+            selectedHealth = pending.health;
+          }
+          if (selectedHealth) {
+            nextStatus = { ...nextStatus, pr_discovery_health: selectedHealth };
+          }
+        }
+        delete draft.githubStatus.pendingPRDiscoveryHealthByWorkspaceId[workspaceId];
+        entry.status = nextStatus;
         entry.loaded = true;
       }),
     setGitHubStatusLoading: (workspaceId, loading) =>
@@ -45,8 +87,23 @@ function createGitHubStatusActions(
           loaded: false,
           loading: false,
         };
+        delete draft.githubStatus.pendingPRDiscoveryHealthByWorkspaceId[workspaceId];
       }),
   };
+}
+
+function shouldApplyDiscoveryHealth(
+  incoming: GitHubPRDiscoveryHealth,
+  current: GitHubPRDiscoveryHealth | undefined,
+): boolean {
+  if (!current) return true;
+  const incomingEpoch = incoming.runtime_epoch ?? 0;
+  const currentEpoch = current.runtime_epoch ?? 0;
+  if (incomingEpoch !== currentEpoch) return incomingEpoch > currentEpoch;
+  if (incoming.credential_generation !== current.credential_generation) {
+    return incoming.credential_generation > current.credential_generation;
+  }
+  return incoming.revision > current.revision;
 }
 
 function createGitHubAppRegistrationActions(
@@ -106,6 +163,30 @@ function clearPendingForTaskPR(
   }
 }
 
+function applyTaskPRScope(draft: GitHubSlice, scope?: TaskPRScope): void {
+  if (!scope) return;
+  const changed =
+    draft.taskPRs.workspaceId !== scope.workspaceId ||
+    draft.taskPRs.workspaceContextGeneration !== scope.workspaceContextGeneration;
+  if (changed) {
+    draft.taskPRs.byTaskId = {};
+    draft.taskPRs.deletedAssociationIdsByTaskId = {};
+  }
+  draft.taskPRs.workspaceId = scope.workspaceId;
+  draft.taskPRs.workspaceContextGeneration = scope.workspaceContextGeneration;
+}
+
+function clearTaskPRDeletionTombstone(draft: GitHubSlice, taskId: string, associationId: string) {
+  const deletedByTask = draft.taskPRs.deletedAssociationIdsByTaskId;
+  if (!deletedByTask) return;
+  const deleted = deletedByTask[taskId];
+  if (!deleted) return;
+  delete deleted[associationId];
+  if (Object.keys(deleted).length === 0) {
+    delete deletedByTask[taskId];
+  }
+}
+
 function createTaskPRActions(
   set: ImmerSet,
 ): Pick<
@@ -118,12 +199,19 @@ function createTaskPRActions(
   | "upsertTaskIssue"
 > {
   return {
-    setTaskPRs: (prs) =>
+    setTaskPRs: (prs, scope) =>
       set((draft) => {
+        applyTaskPRScope(draft, scope);
         draft.taskPRs.byTaskId = prs;
+        draft.taskPRs.deletedAssociationIdsByTaskId = {};
       }),
-    removeTaskPR: (taskId, associationId) =>
+    removeTaskPR: (taskId, associationId, scope) =>
       set((draft) => {
+        applyTaskPRScope(draft, scope);
+        const deletedByTask = (draft.taskPRs.deletedAssociationIdsByTaskId ??= {});
+        const deleted = deletedByTask[taskId] ?? {};
+        deleted[associationId] = true;
+        deletedByTask[taskId] = deleted;
         const current = draft.taskPRs.byTaskId[taskId];
         if (!Array.isArray(current)) return;
         const remaining = current.filter((pr) => pr.id !== associationId);
@@ -141,8 +229,10 @@ function createTaskPRActions(
         draft.taskIssues.workspaceId = workspaceId;
         draft.taskIssues.byTaskId[issue.task_id] = issue;
       }),
-    setTaskPR: (taskId, pr) =>
+    setTaskPR: (taskId, pr, scope) =>
       set((draft) => {
+        applyTaskPRScope(draft, scope);
+        clearTaskPRDeletionTombstone(draft, taskId, pr.id);
         // Upsert by (repository_id, pr_number) so multi-branch tasks can
         // hold N PRs on the same repo as siblings. Keying on
         // repository_id alone collapses every PR for that repo onto one
@@ -319,6 +409,8 @@ function createTaskCIAutomationActions(
   return {
     setTaskCIAutomationOptions: (taskId, options) =>
       set((draft) => {
+        const current = draft.taskCIAutomation.byTaskId[taskId];
+        if (!shouldApplyTaskCIAutomationOptions(current, options)) return;
         draft.taskCIAutomation.byTaskId[taskId] = options;
       }),
     setTaskCIAutomationLoading: (taskId, loading) =>
@@ -336,7 +428,9 @@ function createTaskCIAutomationActions(
   };
 }
 
-function createRateLimitActions(set: ImmerSet): Pick<GitHubSlice, "applyGitHubRateLimitUpdate"> {
+function createRateLimitActions(
+  set: ImmerSet,
+): Pick<GitHubSlice, "applyGitHubRateLimitUpdate" | "applyGitHubPRDiscoveryHealthUpdate"> {
   return {
     applyGitHubRateLimitUpdate: (update) =>
       set((draft) => {
@@ -349,6 +443,25 @@ function createRateLimitActions(set: ImmerSet): Pick<GitHubSlice, "applyGitHubRa
           }
           entry.status = { ...existing, rate_limit: rateLimit };
         }
+      }),
+    applyGitHubPRDiscoveryHealthUpdate: (update: GitHubPRDiscoveryHealthUpdate) =>
+      set((draft) => {
+        if (!update?.workspace_id || !update.health) return;
+        const entry = draft.githubStatus.byWorkspaceId[update.workspace_id];
+        if (!entry?.status) {
+          const pending =
+            draft.githubStatus.pendingPRDiscoveryHealthByWorkspaceId[update.workspace_id];
+          if (!pending || shouldApplyDiscoveryHealth(update.health, pending.health)) {
+            draft.githubStatus.pendingPRDiscoveryHealthByWorkspaceId[update.workspace_id] = update;
+          }
+          return;
+        }
+        if (!shouldApplyDiscoveryHealth(update.health, entry.status.pr_discovery_health)) return;
+        entry.status = {
+          ...entry.status,
+          workspace_id: update.workspace_id,
+          pr_discovery_health: update.health,
+        };
       }),
   };
 }

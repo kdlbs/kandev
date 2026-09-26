@@ -22,18 +22,20 @@ export function useLockedFieldSync(
   workflowId: string | null,
   initialValues: TaskCreateDialogInitialValues | undefined,
   fs: LockedFieldFormState,
+  lockedWorkflow = false,
 ) {
   const repoId = initialValues?.repositoryId;
   const branch = initialValues?.branch;
   useEffect(() => {
     if (!open) return;
-    if (workflowId && workflowId !== fs.selectedWorkflowId) {
+    if (lockedWorkflow && workflowId && workflowId !== fs.selectedWorkflowId) {
       fs.setSelectedWorkflowId(workflowId);
     }
+    if (initialValues?.repositories?.length) return;
     if (!repoId) return;
     const current = fs.repositories[0];
     if (current?.repositoryId === repoId && current?.branch === (branch ?? "")) return;
     fs.setRepositories([{ key: "row-0", repositoryId: repoId, branch: branch ?? "" }]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, workflowId, repoId, branch]);
+  }, [branch, lockedWorkflow, open, repoId, workflowId]);
 }

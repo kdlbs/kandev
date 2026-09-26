@@ -6,14 +6,18 @@ import { Button } from "@kandev/ui/button";
 import { unarchiveTask } from "@/lib/api";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
 import { useToast } from "@/components/toast-provider";
+import { useTranslation } from "react-i18next";
 
 export function TaskUnarchiveButton({
   taskId,
   onUnarchived,
+  mobile = false,
 }: {
   taskId?: string | null;
   onUnarchived?: (taskId: string) => void;
+  mobile?: boolean;
 }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [isPending, setIsPending] = useState(false);
   if (!taskId) return null;
@@ -30,8 +34,8 @@ export function TaskUnarchiveButton({
       }
     } catch (err) {
       toast({
-        title: "Failed to unarchive task",
-        description: err instanceof Error ? err.message : "Unknown error",
+        title: t("task:failedToUnarchiveTask"),
+        description: err instanceof Error ? err.message : t("task:unknownError"),
         variant: "error",
       });
     } finally {
@@ -43,7 +47,7 @@ export function TaskUnarchiveButton({
     <Button
       size="sm"
       variant="outline"
-      className="h-7 cursor-pointer px-2"
+      className={mobile ? "h-11 min-w-11 cursor-pointer px-2" : "h-7 cursor-pointer px-2"}
       disabled={isPending}
       onClick={handleClick}
       data-testid="task-unarchive-button"
@@ -53,7 +57,7 @@ export function TaskUnarchiveButton({
       ) : (
         <IconArchiveOff className="h-3.5 w-3.5" />
       )}
-      Unarchive
+      {t("task:unarchive")}
     </Button>
   );
 }

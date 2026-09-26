@@ -8,6 +8,88 @@ import (
 	"github.com/kandev/kandev/internal/user/models"
 )
 
+// TestFromUserSettingsIncludesAtomicRevision verifies the DTO carries the settings revision.
+func TestFromUserSettingsIncludesAtomicRevision(t *testing.T) {
+	got := FromUserSettings(&models.UserSettings{Revision: 42}).Revision
+	if got != 42 {
+		t.Fatalf("Revision = %d, want 42", got)
+	}
+}
+
+func TestJiraDefaultViewSettingsContract(t *testing.T) {
+	t.Run("response returns saved ID", func(t *testing.T) {
+		got := FromUserSettings(&models.UserSettings{JiraDefaultViewID: "custom-view"})
+		if got.JiraDefaultViewID != "custom-view" {
+			t.Fatalf("JiraDefaultViewID = %q, want custom-view", got.JiraDefaultViewID)
+		}
+	})
+
+	t.Run("patch distinguishes omission from set and clear", func(t *testing.T) {
+		var omitted UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
+			t.Fatalf("decode omitted patch: %v", err)
+		}
+		if omitted.JiraDefaultViewID != nil {
+			t.Fatalf("omitted JiraDefaultViewID = %v, want nil", omitted.JiraDefaultViewID)
+		}
+
+		for _, raw := range []string{`{"jira_default_view_id":"custom-view"}`, `{"jira_default_view_id":""}`} {
+			var req UpdateUserSettingsRequest
+			if err := json.Unmarshal([]byte(raw), &req); err != nil {
+				t.Fatalf("decode %s: %v", raw, err)
+			}
+			if req.JiraDefaultViewID == nil {
+				t.Fatalf("%s did not set JiraDefaultViewID", raw)
+			}
+		}
+	})
+}
+
+func TestSidebarTaskColorAutomationDTOContract(t *testing.T) {
+	value := models.SidebarTaskColorAutomation{
+		Enabled: true,
+		Rules: []models.SidebarTaskColorRule{{
+			ID:        "blocked",
+			Enabled:   true,
+			Condition: models.SidebarTaskColorCondition{Dimension: models.SidebarTaskColorDimensionTaskState, Value: "BLOCKED", Label: "Blocked"},
+			Output:    models.SidebarTaskColorOutput{Kind: models.SidebarTaskColorOutputFixed, Color: "red"},
+		}},
+	}
+	got := FromUserSettings(&models.UserSettings{SidebarTaskColorAutomation: value})
+	if !reflect.DeepEqual(got.SidebarTaskColorAutomation, value) {
+		t.Fatalf("SidebarTaskColorAutomation = %#v, want %#v", got.SidebarTaskColorAutomation, value)
+	}
+
+	var request UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"sidebar_task_color_automation":{"enabled":true,"rules":[]}}`), &request); err != nil {
+		t.Fatalf("decode automatic color patch: %v", err)
+	}
+	if request.SidebarTaskColorAutomation == nil || !request.SidebarTaskColorAutomation.Enabled {
+		t.Fatalf("SidebarTaskColorAutomation patch = %#v, want explicit enabled value", request.SidebarTaskColorAutomation)
+	}
+}
+
+func TestSidebarTaskColorsDTOContract(t *testing.T) {
+	red := "red"
+	value := map[string]*string{"task-red": &red, "task-cleared": nil}
+	got := FromUserSettings(&models.UserSettings{SidebarTaskColors: value})
+	if !reflect.DeepEqual(got.SidebarTaskColors, value) {
+		t.Fatalf("SidebarTaskColors = %#v, want %#v", got.SidebarTaskColors, value)
+	}
+	if got.SidebarTaskColors["task-red"] == value["task-red"] {
+		t.Fatal("DTO color map aliases the model pointer")
+	}
+
+	var request UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"sidebar_task_color_patch":{"if_missing":true,"colors":{"task-red":"red","task-cleared":null}}}`), &request); err != nil {
+		t.Fatalf("decode manual color patch: %v", err)
+	}
+	if request.SidebarTaskColorPatch == nil || !request.SidebarTaskColorPatch.IfMissing {
+		t.Fatalf("SidebarTaskColorPatch = %#v, want missing-only patch", request.SidebarTaskColorPatch)
+	}
+}
+
+// TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences verifies the patch request exposes the Azure DevOps browse preferences field.
 func TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences(t *testing.T) {
 	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("AzureDevOpsBrowsePreferences")
 	if !ok || field.Tag.Get("json") != "azure_devops_browse_preferences,omitempty" {
@@ -15,6 +97,7 @@ func TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences(t *testing
 	}
 }
 
+// TestFromUserSettingsMapsAzureDevOpsBrowsePreferences verifies the DTO passes the Azure DevOps browse preferences through unchanged.
 func TestFromUserSettingsMapsAzureDevOpsBrowsePreferences(t *testing.T) {
 	preferences := json.RawMessage(`{"project-1":{"teamId":"team-1"}}`)
 	settings := FromUserSettings(&models.UserSettings{AzureDevOpsBrowsePreferences: preferences})
@@ -23,6 +106,248 @@ func TestFromUserSettingsMapsAzureDevOpsBrowsePreferences(t *testing.T) {
 	}
 }
 
+// TestUpdateUserSettingsRequestExposesKanbanHiddenStepIDs verifies the patch request exposes the kanban hidden step IDs field.
+func TestUpdateUserSettingsRequestExposesKanbanHiddenStepIDs(t *testing.T) {
+	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("KanbanHiddenStepIDs")
+	if !ok || field.Tag.Get("json") != "kanban_hidden_step_ids,omitempty" {
+		t.Fatalf("KanbanHiddenStepIDs patch field = %+v, want JSON kanban_hidden_step_ids field", field)
+	}
+}
+
+// TestFromUserSettingsMapsKanbanHiddenStepIDs verifies the DTO carries the per-workflow hidden step ID map.
+func TestFromUserSettingsMapsKanbanHiddenStepIDs(t *testing.T) {
+	hidden := map[string][]string{"wf-1": {"step-a", "step-b"}}
+	settings := FromUserSettings(&models.UserSettings{KanbanHiddenStepIDs: hidden})
+	if !reflect.DeepEqual(settings.KanbanHiddenStepIDs, hidden) {
+		t.Fatalf("KanbanHiddenStepIDs = %#v, want %#v", settings.KanbanHiddenStepIDs, hidden)
+	}
+}
+
+// TestUserSettingsDTOKanbanHiddenStepIDsAlwaysSerializesEvenWhenEmpty verifies an empty hidden step ID map serializes as {} instead of being omitted.
+func TestUserSettingsDTOKanbanHiddenStepIDsAlwaysSerializesEvenWhenEmpty(t *testing.T) {
+	// Regression test: the response field must never use `omitempty`. A
+	// client that clears its hidden set to {} needs that {} to actually
+	// appear in the JSON response — if the field were omitted (as it would
+	// be with `omitempty` on a zero-length map), the frontend's
+	// `s.kanban_hidden_step_ids ?? current.hiddenWorkflowStepIds` merge
+	// treats the missing key as "field not sent, preserve current value"
+	// and leaves the previous (now-stale) hidden set in place instead of
+	// clearing it.
+	settings := FromUserSettings(&models.UserSettings{KanbanHiddenStepIDs: map[string][]string{}})
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+	value, present := decoded["kanban_hidden_step_ids"]
+	if !present {
+		t.Fatal("kanban_hidden_step_ids key is absent from the serialized response, want present as {}")
+	}
+	if string(value) != "{}" {
+		t.Fatalf("kanban_hidden_step_ids = %s, want {}", value)
+	}
+}
+
+// TestKanbanHiddenStepIDsRequestDecode verifies decoding distinguishes an omitted field from an explicit empty map.
+func TestKanbanHiddenStepIDsRequestDecode(t *testing.T) {
+	t.Run("omitted value stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanHiddenStepIDs != nil {
+			t.Fatalf("KanbanHiddenStepIDs = %#v, want nil", req.KanbanHiddenStepIDs)
+		}
+	})
+
+	t.Run("explicit empty map is retained, not treated as omitted", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"kanban_hidden_step_ids":{}}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanHiddenStepIDs == nil || len(*req.KanbanHiddenStepIDs) != 0 {
+			t.Fatalf("KanbanHiddenStepIDs = %#v, want non-nil empty map", req.KanbanHiddenStepIDs)
+		}
+	})
+}
+
+func TestWorkflowIDsWithAutoHideEmptyStepsContract(t *testing.T) {
+	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("WorkflowIDsWithAutoHideEmptySteps")
+	if !ok || field.Tag.Get("json") != "workflow_ids_with_auto_hide_empty_steps,omitempty" {
+		t.Fatalf("WorkflowIDsWithAutoHideEmptySteps patch field = %+v, want JSON preference field", field)
+	}
+
+	defaultSettings := FromUserSettings(&models.UserSettings{})
+	encoded, err := json.Marshal(defaultSettings)
+	if err != nil {
+		t.Fatalf("encode default settings: %v", err)
+	}
+	var serialized struct {
+		WorkflowIDs []string `json:"workflow_ids_with_auto_hide_empty_steps"`
+	}
+	if err := json.Unmarshal(encoded, &serialized); err != nil {
+		t.Fatalf("decode default settings: %v", err)
+	}
+	if serialized.WorkflowIDs == nil || len(serialized.WorkflowIDs) != 0 {
+		t.Fatalf("serialized default WorkflowIDs = %#v, want non-nil empty", serialized.WorkflowIDs)
+	}
+
+	want := []string{"wf-a", "wf-b"}
+	source := &models.UserSettings{}
+	sourceField := reflect.ValueOf(source).Elem().FieldByName("WorkflowIDsWithAutoHideEmptySteps")
+	if !sourceField.IsValid() {
+		t.Fatal("models.UserSettings.WorkflowIDsWithAutoHideEmptySteps field is absent")
+	}
+	sourceField.Set(reflect.ValueOf(want))
+	settings := FromUserSettings(source)
+	value := reflect.ValueOf(settings)
+	mapped := value.FieldByName("WorkflowIDsWithAutoHideEmptySteps")
+	if !mapped.IsValid() || !reflect.DeepEqual(mapped.Interface(), want) {
+		t.Fatalf("WorkflowIDsWithAutoHideEmptySteps = %#v, want %#v", mapped, want)
+	}
+
+	var omitted UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
+		t.Fatalf("decode omitted preference: %v", err)
+	}
+	if omitted.WorkflowIDsWithAutoHideEmptySteps != nil {
+		t.Fatalf("omitted WorkflowIDsWithAutoHideEmptySteps = %#v, want nil", omitted.WorkflowIDsWithAutoHideEmptySteps)
+	}
+
+	var cleared UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"workflow_ids_with_auto_hide_empty_steps":[]}`), &cleared); err != nil {
+		t.Fatalf("decode cleared preference: %v", err)
+	}
+	if cleared.WorkflowIDsWithAutoHideEmptySteps == nil || len(*cleared.WorkflowIDsWithAutoHideEmptySteps) != 0 {
+		t.Fatalf("cleared WorkflowIDsWithAutoHideEmptySteps = %#v, want non-nil empty slice", cleared.WorkflowIDsWithAutoHideEmptySteps)
+	}
+}
+
+// TestUpdateUserSettingsRequestExposesKanbanSort verifies the patch request exposes the kanban sort field.
+func TestUpdateUserSettingsRequestExposesKanbanSort(t *testing.T) {
+	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("KanbanSort")
+	if !ok || field.Tag.Get("json") != "kanban_sort,omitempty" {
+		t.Fatalf("KanbanSort patch field = %+v, want JSON kanban_sort field", field)
+	}
+}
+
+// TestUpdateUserSettingsRequestExposesKanbanPriorityFilterTokens verifies the patch request exposes the kanban priority filter tokens field.
+func TestUpdateUserSettingsRequestExposesKanbanPriorityFilterTokens(t *testing.T) {
+	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("KanbanPriorityFilterTokens")
+	if !ok || field.Tag.Get("json") != "kanban_priority_filter_tokens,omitempty" {
+		t.Fatalf("KanbanPriorityFilterTokens patch field = %+v, want JSON kanban_priority_filter_tokens field", field)
+	}
+}
+
+// TestFromUserSettingsMapsKanbanSortAndPriorityFilterTokens verifies the DTO carries both new fields unchanged.
+func TestFromUserSettingsMapsKanbanSortAndPriorityFilterTokens(t *testing.T) {
+	settings := FromUserSettings(&models.UserSettings{
+		KanbanSort:                 "priority_desc",
+		KanbanPriorityFilterTokens: []string{"critical", "high"},
+	})
+	if settings.KanbanSort != "priority_desc" {
+		t.Fatalf("KanbanSort = %q, want priority_desc", settings.KanbanSort)
+	}
+	if !reflect.DeepEqual(settings.KanbanPriorityFilterTokens, []string{"critical", "high"}) {
+		t.Fatalf("KanbanPriorityFilterTokens = %#v, want [critical high]", settings.KanbanPriorityFilterTokens)
+	}
+}
+
+// TestUserSettingsDTOKanbanPriorityFilterTokensAlwaysSerializesEvenWhenEmpty verifies an empty
+// selection serializes as [] instead of being omitted, matching kanban_hidden_step_ids's {} case:
+// the client merge treats a missing key as "field not sent, preserve current value", so an
+// omitted key here would make clearing the filter unobservable.
+func TestUserSettingsDTOKanbanPriorityFilterTokensAlwaysSerializesEvenWhenEmpty(t *testing.T) {
+	settings := FromUserSettings(&models.UserSettings{KanbanPriorityFilterTokens: []string{}})
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+	value, present := decoded["kanban_priority_filter_tokens"]
+	if !present {
+		t.Fatal("kanban_priority_filter_tokens key is absent from the serialized response, want present as []")
+	}
+	if string(value) != "[]" {
+		t.Fatalf("kanban_priority_filter_tokens = %s, want []", value)
+	}
+}
+
+// TestKanbanSortAndPriorityFilterTokensRequestDecode verifies decoding distinguishes an omitted
+// field from an explicit empty value for both new fields (AC-004.8).
+func TestKanbanSortAndPriorityFilterTokensRequestDecode(t *testing.T) {
+	t.Run("omitted kanban_sort stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanSort != nil {
+			t.Fatalf("KanbanSort = %#v, want nil", req.KanbanSort)
+		}
+	})
+
+	t.Run("explicit null kanban_sort decodes to nil, indistinguishable from omitted", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"kanban_sort":null}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanSort != nil {
+			t.Fatalf("KanbanSort = %#v, want nil", req.KanbanSort)
+		}
+	})
+
+	t.Run("wrong JSON type for kanban_sort fails decode", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"kanban_sort":5}`), &req); err == nil {
+			t.Fatal("decode request: want error for a numeric kanban_sort, got nil")
+		}
+	})
+
+	t.Run("omitted kanban_priority_filter_tokens stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanPriorityFilterTokens != nil {
+			t.Fatalf("KanbanPriorityFilterTokens = %#v, want nil", req.KanbanPriorityFilterTokens)
+		}
+	})
+
+	t.Run("explicit empty list is retained, not treated as omitted", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"kanban_priority_filter_tokens":[]}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanPriorityFilterTokens == nil || len(*req.KanbanPriorityFilterTokens) != 0 {
+			t.Fatalf("KanbanPriorityFilterTokens = %#v, want non-nil empty slice", req.KanbanPriorityFilterTokens)
+		}
+	})
+
+	t.Run("explicit null kanban_priority_filter_tokens decodes to nil, indistinguishable from omitted", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"kanban_priority_filter_tokens":null}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanPriorityFilterTokens != nil {
+			t.Fatalf("KanbanPriorityFilterTokens = %#v, want nil", req.KanbanPriorityFilterTokens)
+		}
+	})
+
+	t.Run("wrong JSON type for kanban_priority_filter_tokens fails decode", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"kanban_priority_filter_tokens":"critical"}`), &req); err == nil {
+			t.Fatal("decode request: want error for a bare-string kanban_priority_filter_tokens, got nil")
+		}
+	})
+}
+
+// TestTasksListShowDetailsDTO verifies the DTO mapping and the nil-versus-explicit-false patch semantics.
 func TestTasksListShowDetailsDTO(t *testing.T) {
 	if !FromUserSettings(&models.UserSettings{TasksListShowDetails: true}).TasksListShowDetails {
 		t.Fatal("TasksListShowDetails = false, want true")
@@ -49,6 +374,7 @@ func TestTasksListShowDetailsDTO(t *testing.T) {
 	})
 }
 
+// TestAppStatusBarOrderDTOAndPatchSemantics verifies the status bar order DTO mapping and its patch semantics.
 func TestAppStatusBarOrderDTOAndPatchSemantics(t *testing.T) {
 	want := models.AppStatusBarOrder{
 		LeftItemIDs:  []string{"builtin:connection", "plugin:left"},
@@ -80,6 +406,48 @@ func TestAppStatusBarOrderDTOAndPatchSemantics(t *testing.T) {
 	})
 }
 
+// TestLspStatusLocationDTOAndPatchSemantics verifies the LSP status location DTO normalization and its patch semantics.
+func TestLspStatusLocationDTOAndPatchSemantics(t *testing.T) {
+	t.Run("response normalizes missing and unknown values to toolbar", func(t *testing.T) {
+		for _, value := range []string{"", "future_location"} {
+			got := FromUserSettings(&models.UserSettings{LspStatusLocation: value}).LspStatusLocation
+			if got != models.LspStatusLocationToolbar {
+				t.Fatalf("LspStatusLocation = %q, want toolbar", got)
+			}
+		}
+	})
+
+	t.Run("response preserves status bar", func(t *testing.T) {
+		got := FromUserSettings(&models.UserSettings{
+			LspStatusLocation: models.LspStatusLocationStatusBar,
+		}).LspStatusLocation
+		if got != models.LspStatusLocationStatusBar {
+			t.Fatalf("LspStatusLocation = %q, want status_bar", got)
+		}
+	})
+
+	t.Run("omitted patch stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.LspStatusLocation != nil {
+			t.Fatalf("LspStatusLocation = %#v, want nil", req.LspStatusLocation)
+		}
+	})
+
+	t.Run("explicit patch is retained", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"lsp_status_location":"status_bar"}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.LspStatusLocation == nil || *req.LspStatusLocation != models.LspStatusLocationStatusBar {
+			t.Fatalf("LspStatusLocation = %#v, want status_bar", req.LspStatusLocation)
+		}
+	})
+}
+
+// TestUpdateUserSettingsRequestSystemMetricsDisplayPreservesOmittedFields verifies omitted system metrics display fields stay absent when re-marshaled.
 func TestUpdateUserSettingsRequestSystemMetricsDisplayPreservesOmittedFields(t *testing.T) {
 	var req UpdateUserSettingsRequest
 	if err := json.Unmarshal([]byte(`{"system_metrics_display":{"show_in_topbar":true}}`), &req); err != nil {
@@ -99,6 +467,7 @@ func TestUpdateUserSettingsRequestSystemMetricsDisplayPreservesOmittedFields(t *
 	}
 }
 
+// TestFromUserSettingsIncludesArchiveConfirmation verifies the DTO carries the task archive confirmation flag.
 func TestFromUserSettingsIncludesArchiveConfirmation(t *testing.T) {
 	for _, want := range []bool{true, false} {
 		dto := FromUserSettings(&models.UserSettings{ConfirmTaskArchive: want})
@@ -108,6 +477,7 @@ func TestFromUserSettingsIncludesArchiveConfirmation(t *testing.T) {
 	}
 }
 
+// TestAgentGeneratedTaskTitlesDTOAndPatchSemantics verifies the agent-generated task titles DTO mapping and its patch semantics.
 func TestAgentGeneratedTaskTitlesDTOAndPatchSemantics(t *testing.T) {
 	if !FromUserSettings(&models.UserSettings{AgentGeneratedTaskTitles: true}).AgentGeneratedTaskTitles {
 		t.Fatal("AgentGeneratedTaskTitles = false, want true")
@@ -138,6 +508,7 @@ func TestAgentGeneratedTaskTitlesDTOAndPatchSemantics(t *testing.T) {
 	}
 }
 
+// TestFromUserSettingsIncludesNormalizedMCPTaskAgentProfileDefault verifies the DTO normalizes the MCP task agent profile default.
 func TestFromUserSettingsIncludesNormalizedMCPTaskAgentProfileDefault(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -165,6 +536,7 @@ func TestFromUserSettingsIncludesNormalizedMCPTaskAgentProfileDefault(t *testing
 	}
 }
 
+// TestFromUserSettingsIncludesNormalizedStartupPage verifies the DTO normalizes the startup page.
 func TestFromUserSettingsIncludesNormalizedStartupPage(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -172,6 +544,7 @@ func TestFromUserSettingsIncludesNormalizedStartupPage(t *testing.T) {
 		want  string
 	}{
 		{name: "last task", value: models.StartupPageLastTask, want: models.StartupPageLastTask},
+		{name: "threads", value: "threads", want: "threads"},
 		{name: "unknown defaults to task overview", value: "future_value", want: models.StartupPageTaskOverview},
 	}
 
@@ -192,6 +565,35 @@ func TestFromUserSettingsIncludesNormalizedStartupPage(t *testing.T) {
 	}
 }
 
+// TestFromUserSettingsIncludesNormalizedLastSeenDisplay verifies the DTO normalizes the last-seen display mode.
+func TestFromUserSettingsIncludesNormalizedLastSeenDisplay(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "relative", value: models.LastSeenDisplayRelative, want: models.LastSeenDisplayRelative},
+		{name: "unknown defaults to absolute", value: "future_value", want: models.LastSeenDisplayAbsolute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(FromUserSettings(&models.UserSettings{LastSeenDisplay: tt.value}))
+			if err != nil {
+				t.Fatalf("marshal DTO: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatalf("decode DTO: %v", err)
+			}
+			if got := payload["last_seen_display"]; got != tt.want {
+				t.Fatalf("last_seen_display = %#v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestUpdateUserSettingsRequestStartupPagePatchSemantics verifies startup page patch decoding distinguishes omitted and explicit values.
 func TestUpdateUserSettingsRequestStartupPagePatchSemantics(t *testing.T) {
 	t.Run("omitted value stays nil", func(t *testing.T) {
 		var req UpdateUserSettingsRequest
@@ -214,6 +616,7 @@ func TestUpdateUserSettingsRequestStartupPagePatchSemantics(t *testing.T) {
 	})
 }
 
+// TestUpdateUserSettingsRequestMCPTaskAgentProfileDefaultPatchSemantics verifies MCP task agent profile default patch decoding distinguishes omitted and explicit values.
 func TestUpdateUserSettingsRequestMCPTaskAgentProfileDefaultPatchSemantics(t *testing.T) {
 	t.Run("omitted value stays nil", func(t *testing.T) {
 		var req UpdateUserSettingsRequest
@@ -236,6 +639,7 @@ func TestUpdateUserSettingsRequestMCPTaskAgentProfileDefaultPatchSemantics(t *te
 	})
 }
 
+// TestNullableSidebarDraft verifies sidebar draft decoding distinguishes omitted, null, and object values.
 func TestNullableSidebarDraft(t *testing.T) {
 	t.Run("omitted field is not set", func(t *testing.T) {
 		var req UpdateUserSettingsRequest
@@ -274,6 +678,7 @@ func TestNullableSidebarDraft(t *testing.T) {
 	})
 }
 
+// TestNullableRawMessage verifies raw-message decoding distinguishes omitted, null, and JSON values.
 func TestNullableRawMessage(t *testing.T) {
 	t.Run("omitted field is not set", func(t *testing.T) {
 		var req UpdateUserSettingsRequest

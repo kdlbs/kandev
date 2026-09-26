@@ -1,10 +1,15 @@
 "use client";
 
-import { CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
-import { Label } from "@kandev/ui/label";
+import { CardContent } from "@kandev/ui/card";
 import { Textarea } from "@kandev/ui/textarea";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useTranslation } from "react-i18next";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import {
+  SETTINGS_TYPOGRAPHY,
+  SettingsErrorText,
+  SettingsFieldLabel,
+} from "@/components/settings/settings-typography";
 
 function parseMcpPolicyJson(currentPolicy: string | undefined): Record<string, unknown> {
   try {
@@ -29,15 +34,18 @@ function McpPresetButton({ label, onClick }: { label: string; onClick: () => voi
   );
 }
 
+// Returns a catalog key (or null when valid) so the message resolves at render
+// rather than at module load — the same contract as the local validator in
+// app/settings/executor/[id]/page.tsx.
 export function validateMcpPolicy(value: string | undefined): string | null {
   const raw = value ?? "";
   if (!raw.trim()) return null;
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return "MCP policy must be a JSON object";
+      return "executors:mcpPolicyMustBeAJsonObject";
   } catch {
-    return "Invalid JSON";
+    return "executors:invalidJson";
   }
   return null;
 }
@@ -45,15 +53,17 @@ export function validateMcpPolicy(value: string | undefined): string | null {
 type McpPolicyCardProps = {
   mcpPolicy: string;
   baselinePolicy?: string;
-  mcpPolicyError: string | null;
+  mcpPolicyErrorKey: string | null;
   onPolicyChange: (value: string) => void;
+  discoveryTargetId?: string;
 };
 
 export function McpPolicyCard({
   mcpPolicy,
   baselinePolicy,
-  mcpPolicyError,
+  mcpPolicyErrorKey,
   onPolicyChange,
+  discoveryTargetId,
 }: McpPolicyCardProps) {
   const { t } = useTranslation();
   const isDirty = baselinePolicy !== undefined && mcpPolicy !== baselinePolicy;
@@ -64,18 +74,25 @@ export function McpPolicyCard({
   };
 
   return (
-    <SettingsCard isDirty={isDirty}>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          {t("executors:mcpPolicy")}
-          <span className="rounded-full border border-muted-foreground/30 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-            {t("executors:advanced")}
+    <SettingsCard isDirty={isDirty} discoveryTargetId={discoveryTargetId}>
+      <SettingsCardHeader
+        title={
+          <span className="flex items-center gap-2">
+            {t("executors:mcpPolicy")}
+            <span
+              className={
+                "rounded-full border border-muted-foreground/30 px-2 py-0.5 uppercase tracking-wide " +
+                SETTINGS_TYPOGRAPHY.meta
+              }
+            >
+              {t("executors:advanced")}
+            </span>
           </span>
-        </CardTitle>
-        <CardDescription>{t("executors:mcpPolicyOverridesForProfile")}</CardDescription>
-      </CardHeader>
+        }
+        description={t("executors:mcpPolicyOverridesForProfile")}
+      />
       <CardContent className="space-y-2">
-        <Label htmlFor="mcp-policy">{t("executors:mcpPolicyJson")}</Label>
+        <SettingsFieldLabel htmlFor="mcp-policy">{t("executors:mcpPolicyJson")}</SettingsFieldLabel>
         <Textarea
           id="mcp-policy"
           value={mcpPolicy}
@@ -84,7 +101,7 @@ export function McpPolicyCard({
           rows={8}
           data-settings-dirty={isDirty}
         />
-        {mcpPolicyError && <p className="text-xs text-destructive">{mcpPolicyError}</p>}
+        {mcpPolicyErrorKey && <SettingsErrorText>{t(mcpPolicyErrorKey)}</SettingsErrorText>}
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-xs font-medium text-muted-foreground">{t("executors:quickPresets")}</p>
           <McpPresetButton

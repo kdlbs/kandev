@@ -8,6 +8,7 @@ import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore } from "@/components/state-provider";
 import { startVscode, getVscodeStatus, type VscodeStatus } from "@/lib/api/domains/vscode-api";
 import { getBackendConfig } from "@/lib/config";
+import { useTranslation } from "react-i18next";
 
 function VscodeProgress({
   status,
@@ -20,14 +21,15 @@ function VscodeProgress({
   error?: string;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation();
   if (status === "error") {
     return (
       <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-4">
         <IconAlertCircle className="h-12 w-12 text-destructive opacity-70" />
-        <p className="text-sm font-medium text-destructive">Failed to start VS Code</p>
+        <p className="text-sm font-medium text-destructive">{t("task:failedToStartVsCode")}</p>
         {error && <p className="text-xs text-destructive/80 text-center max-w-xs">{error}</p>}
         <Button size="sm" onClick={onRetry} className="cursor-pointer">
-          Retry
+          {t("task:retry")}
         </Button>
       </div>
     );
@@ -36,20 +38,21 @@ function VscodeProgress({
   return (
     <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-4">
       <IconLoader2 className="h-10 w-10 text-blue-500 animate-spin" />
-      <p className="text-sm font-medium">Starting VS Code Server</p>
+      <p className="text-sm font-medium">{t("task:startingVsCodeServer")}</p>
       {message && <p className="text-xs text-center max-w-xs opacity-70">{message}</p>}
     </div>
   );
 }
 
 function VscodeIframe({ url }: { url: string }) {
+  const { t } = useTranslation();
   const [loaded, setLoaded] = useState(false);
 
   return (
     <div className="h-full w-full bg-card">
       <iframe
         src={url}
-        title="VS Code"
+        title={t("task:vsCode")}
         className={`h-full w-full border-0 transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"}`}
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
         allow="clipboard-read; clipboard-write"
@@ -61,11 +64,14 @@ function VscodeIframe({ url }: { url: string }) {
 }
 
 function VscodeIdle() {
+  const { t } = useTranslation();
   return (
     <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-4">
       <IconBrandVscode className="h-12 w-12 text-blue-500 opacity-50" />
-      <p className="text-sm font-medium">VS Code Server</p>
-      <p className="text-xs text-center max-w-xs opacity-70">Waiting for an active session...</p>
+      <p className="text-sm font-medium">{t("task:vsCodeServer")}</p>
+      <p className="text-xs text-center max-w-xs opacity-70">
+        {t("task:waitingForAnActiveSession")}
+      </p>
     </div>
   );
 }
@@ -107,6 +113,7 @@ function buildBaseUrl(proxyPath: string): string {
 
 /** Manages auto-start, polling, and navigation for the VS Code panel. */
 function useVscodeLifecycle() {
+  const { t } = useTranslation();
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const { resolvedTheme } = useTheme();
   const [status, setStatus] = useState<VscodeStatus>({ status: "stopped" });
@@ -160,7 +167,7 @@ function useVscodeLifecycle() {
     if (!activeSessionId) return;
     startedRef.current = true;
     const theme = resolvedTheme === "light" ? "light" : "dark";
-    setStatus({ status: "installing", message: "Retrying..." });
+    setStatus({ status: "installing", message: t("task:retrying") });
     startVscode(activeSessionId, theme)
       .then(setStatus)
       .catch(() => {

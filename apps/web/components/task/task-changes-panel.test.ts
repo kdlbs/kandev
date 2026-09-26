@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook } from "@testing-library/react";
-import { scrollToFileAndClear } from "./task-changes-panel";
+import { discardTargetFromReviewFileKey, scrollToFileAndClear } from "./task-changes-panel";
 import {
   filterVisibleFiles,
   resolveSelectedFileRepositoryName,
@@ -12,6 +12,15 @@ import {
 import type { ReviewFile } from "@/components/review/types";
 
 const PATH = "src/foo.ts";
+
+describe("discardTargetFromReviewFileKey", () => {
+  it("preserves an explicit workspace-root repository scope", () => {
+    expect(discardTargetFromReviewFileKey("\u0000README.md")).toEqual({
+      repositoryName: "",
+      path: "README.md",
+    });
+  });
+});
 
 describe("shouldCloseFileDiffPanel", () => {
   it("returns false when gitStatus is undefined (not loaded yet)", () => {

@@ -1,0 +1,240 @@
+import { expect, test } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
+import { useRegularMode } from "../../helpers/regular-mode";
+import {
+  waitForAgentMessage,
+  waitForSessionDone,
+  waitForSessionState,
+} from "../../helpers/session";
+import { KanbanPage } from "../../pages/kanban-page";
+import { SessionPage } from "../../pages/session-page";
+
+useRegularMode();
+
+function parentQuestionScript(): string {
+  const args = JSON.stringify({
+    questions: [
+      {
+        id: "risk",
+        title: "Risk",
+        prompt: "Choose the safe path before I continue.",
+        options: [
+          {
+            option_id: "safe",
+            label: "Safe path",
+            description: "Use the conservative implementation.",
+          },
+          {
+            option_id: "fast",
+            label: "Fast path",
+            description: "Use the quicker implementation.",
+          },
+        ],
+      },
+    ],
+    context: "The implementation has two valid paths.",
+  });
+  return `e2e:mcp:kandev:ask_parent_question_kandev(${args})`;
+}
+
+function busyParentScript(): string {
+  return 'e2e:delay(5000)\ne2e:message("Parent is ready.")';
+}
+
+async function waitForParentQuestion(apiClient: ApiClient, parentTaskID: string): Promise<string> {
+  let questionID = "";
+  await expect
+    .poll(
+      async () => {
+        const parentSessions = await apiClient.listTaskSessions(parentTaskID);
+        const parentMessages = await apiClient.listSessionMessages(parentSessions.sessions[0].id);
+        const questions = parentMessages.messages.filter(
+          (message) =>
+            message.metadata?.parent_question === true &&
+            typeof message.metadata.parent_question_id === "string",
+        );
+        questionID =
+          questions.length === 1 ? String(questions[0].metadata?.parent_question_id) : "";
+        return questionID;
+      },
+      { timeout: 30_000, message: "one durable parent question should be delivered" },
+    )
+    .not.toBe("");
+  return questionID;
+}
+
+async function waitForChildAnswerTurn(apiClient: ApiClient, sessionID: string): Promise<void> {
+  // The mock answer turn can complete before a state poll observes RUNNING.
+  // A second durable turn is the stable proof that the parent answer was
+  // admitted and executed, even when the session is already waiting again.
+  await expect
+    .poll(async () => (await apiClient.listSessionTurns(sessionID)).turns.length, {
+      timeout: 60_000,
+      message: "parent answer should create a child turn",
+    })
+    .toBeGreaterThanOrEqual(2);
+}
+
+test.describe("Task autopilot", () => {
+  test("shows the profile, waits for the parent, and resumes once", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(240_000);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.createTaskButton.first().click();
+    const createDialog = testPage.getByTestId("create-task-dialog");
+    await expect(createDialog.getByTestId("autopilot-toggle-row")).toHaveCount(0);
+    await createDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+
+    const parent = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Autopilot Parent",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!parent.session_id) throw new Error("autopilot parent did not return a session ID");
+    await waitForSessionDone(
+      apiClient,
+      parent.id,
+      parent.session_id,
+      "autopilot parent should finish its initial turn before the child asks a question",
+      60_000,
+    );
+    const child = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Autopilot Child",
+      seedData.agentProfileId,
+      {
+        description: parentQuestionScript(),
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        parent_id: parent.id,
+        workspace_mode: "inherit_parent",
+        autopilot: true,
+      },
+    );
+
+    const childSessionId = child.session_id;
+    if (!childSessionId) throw new Error("autopilot child did not return a session ID");
+
+    const childTask = await apiClient.getTask(child.id);
+    expect(childTask.autopilot).toBe(true);
+
+    await testPage.goto(`/t/${parent.id}`);
+    const parentSession = new SessionPage(testPage);
+    await parentSession.waitForLoad();
+    await waitForSessionState(apiClient, {
+      taskId: child.id,
+      sessionId: childSessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: `task ${child.id} should reach WAITING_FOR_INPUT`,
+      timeout: 60_000,
+    });
+    const childRow = parentSession.sidebarTaskItem("Autopilot Child");
+    await expect(childRow).toBeVisible({ timeout: 30_000 });
+    await expect(childRow.getByTestId("task-autopilot-icon")).toBeVisible();
+    await expect(childRow.getByTestId("task-state-waiting-for-input")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    const questionID = await waitForParentQuestion(apiClient, parent.id);
+
+    await waitForChildAnswerTurn(apiClient, childSessionId);
+
+    const childSession = new SessionPage(testPage);
+    await testPage.goto(`/t/${child.id}`);
+    await childSession.waitForLoad();
+    await expect(childSession.chatStatusBar().getByTestId("chat-autopilot-chip")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    const childSessions = await apiClient.listTaskSessions(child.id);
+    const childMessages = await apiClient.listSessionMessages(childSessions.sessions[0].id);
+    const answeredQuestion = childMessages.messages.find(
+      (message) =>
+        message.metadata?.status === "answered" && message.metadata.question_id === questionID,
+    );
+    expect(answeredQuestion).toBeDefined();
+    const correlatedAnswers = childMessages.messages.filter(
+      (message) =>
+        message.author_type === "user" &&
+        message.metadata?.parent_question_id === questionID &&
+        typeof message.metadata.parent_question_response === "string",
+    );
+    expect(correlatedAnswers).toHaveLength(1);
+  });
+
+  test("drains a queued parent question after the parent turn completes", async ({
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(240_000);
+
+    const parent = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Queued Autopilot Parent",
+      seedData.agentProfileId,
+      {
+        description: busyParentScript(),
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!parent.session_id) throw new Error("queued autopilot parent did not return a session ID");
+
+    await waitForSessionState(apiClient, {
+      taskId: parent.id,
+      sessionId: parent.session_id,
+      expectedState: "RUNNING",
+      message: "queued autopilot parent should enter its barrier turn",
+      timeout: 30_000,
+    });
+
+    const child = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Queued Autopilot Child",
+      seedData.agentProfileId,
+      {
+        description: parentQuestionScript(),
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        parent_id: parent.id,
+        workspace_mode: "inherit_parent",
+        autopilot: true,
+      },
+    );
+    if (!child.session_id) throw new Error("queued autopilot child did not return a session ID");
+
+    await waitForSessionState(apiClient, {
+      taskId: child.id,
+      sessionId: child.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "queued autopilot child should pause for its parent",
+      timeout: 60_000,
+    });
+
+    const questionID = await waitForParentQuestion(apiClient, parent.id);
+    await waitForAgentMessage(apiClient, parent.session_id, "Parent is ready.", 60_000);
+    await waitForChildAnswerTurn(apiClient, child.session_id);
+
+    const childMessages = await apiClient.listSessionMessages(child.session_id);
+    expect(
+      childMessages.messages.find(
+        (message) =>
+          message.metadata?.status === "answered" && message.metadata.question_id === questionID,
+      ),
+    ).toBeDefined();
+  });
+});

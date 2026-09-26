@@ -124,7 +124,7 @@ func (e *GitHubEvaluator) checkPRTrigger(ctx context.Context, t *AutomationTrigg
 		)
 		if err != nil {
 			e.logger.Debug("failed to list PRs for automation trigger",
-				zap.String("repo", repo.Owner+"/"+repo.Name),
+				zap.String(automationRepoKey, repo.Owner+"/"+repo.Name),
 				zap.Error(err))
 			continue
 		}
@@ -150,19 +150,19 @@ func (e *GitHubEvaluator) checkPRTrigger(ctx context.Context, t *AutomationTrigg
 
 func (e *GitHubEvaluator) firePRTrigger(ctx context.Context, t *AutomationTrigger, pr *github.PR, dedupKey string) {
 	data, _ := json.Marshal(map[string]interface{}{
-		"number":       pr.Number,
-		"title":        pr.Title,
-		"html_url":     pr.HTMLURL,
-		"author_login": pr.AuthorLogin,
-		"repo":         fmt.Sprintf("%s/%s", pr.RepoOwner, pr.RepoName),
-		"head_branch":  pr.HeadBranch,
-		"base_branch":  pr.BaseBranch,
-		"body":         pr.Body,
-		"draft":        pr.Draft,
-		"state":        pr.State,
+		"number":                 pr.Number,
+		"title":                  pr.Title,
+		automationHTMLURLKey:     pr.HTMLURL,
+		automationAuthorLoginKey: pr.AuthorLogin,
+		automationRepoKey:        fmt.Sprintf("%s/%s", pr.RepoOwner, pr.RepoName),
+		automationHeadBranchKey:  pr.HeadBranch,
+		automationBaseBranchKey:  pr.BaseBranch,
+		automationBodyKey:        pr.Body,
+		"draft":                  pr.Draft,
+		"state":                  pr.State,
 	})
 
-	if err := e.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubPR, data, dedupKey); err != nil {
+	if _, err := e.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubPR, data, DedupKey(dedupKey)); err != nil {
 		e.logger.Error("failed to fire PR trigger",
 			zap.String("trigger_id", t.ID), zap.Error(err))
 	}

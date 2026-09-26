@@ -5,14 +5,14 @@ status: pending
 wave: 2
 depends_on: ["01-backend-data-model"]
 plan: "plan.md"
-spec: "../../specs/office/automations-settings.md"
+spec: "../../specs/office/requirements/automations-settings.md"
 ---
 
 # Task 02: Orchestrator multi-repository resolution
 
 ## Inputs
 
-- `docs/specs/office/automations-settings.md` — Scenarios covering multiple
+- `docs/specs/office/requirements/automations-settings.md` — Scenarios covering multiple
   explicit repositories, empty-list fallback, and `github_pr` override.
 - `apps/backend/internal/orchestrator/event_handlers_automation.go` —
   `resolveAutomationRepository`, `resolveExplicitRepository`,

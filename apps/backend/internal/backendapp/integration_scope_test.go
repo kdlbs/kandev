@@ -23,7 +23,7 @@ func TestWorkspaceIDFromPath(t *testing.T) {
 func TestHasIntegrationPrefix(t *testing.T) {
 	inside := []string{
 		"/api/v1/jira/config", "/api/v1/gitlab/status", "/api/v1/github/status",
-		"/api/v1/linear/config", "/api/v1/sentry/config", "/api/v1/slack/config",
+		"/api/v1/linear/config", "/api/v1/sentry/config",
 		"/api/v1/azure-devops/config", "/api/v1/workflow-sync/status",
 	}
 	outside := []string{

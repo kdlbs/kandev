@@ -63,6 +63,6 @@ test.describe("Office workspace picker", () => {
 
     await testPage.getByTestId("sidebar-workspace-trigger").click();
     await testPage.getByRole("menuitem", { name: "New kanban workspace" }).click();
-    await expect(testPage).toHaveURL(/\/settings\/workspace$/, { timeout: 10_000 });
+    await expect(testPage).toHaveURL(/\/settings\/workspaces$/, { timeout: 10_000 });
   });
 });

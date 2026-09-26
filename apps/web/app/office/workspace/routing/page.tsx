@@ -12,6 +12,8 @@ import { useRoutingPreview } from "@/hooks/domains/office/use-routing-preview";
 import type {
   ProviderProfile,
   ExecutionProfileSummary,
+  RoleMeta,
+  RoleTierMap,
   Tier,
   TierPerReason,
   WorkspaceRouting,
@@ -22,11 +24,20 @@ import {
   ProviderHealthBanner,
   ProviderOrderEditor,
   ProviderTierMapping,
+  RoleTierCard,
   RoutingEnableCard,
   WakeReasonTierCard,
 } from "./components";
+import { useTranslation } from "react-i18next";
 
 const DEFAULT_PROFILE: ProviderProfile = { tier_map: {} };
+
+// Stable fallback: a Zustand selector that returns a fresh `[]` on every call
+// (when `office.meta` hasn't loaded yet) breaks useSyncExternalStore's
+// reference-equality snapshot check and infinite-loops into React error #185
+// ("Maximum update depth exceeded"), caught by the route error boundary. See
+// EMPTY_PREVIEW / EMPTY_HEALTH in the sibling hooks for the same pattern.
+const EMPTY_ROLES: RoleMeta[] = [];
 
 function emptyConfig(): WorkspaceRouting {
   return {
@@ -39,7 +50,9 @@ function emptyConfig(): WorkspaceRouting {
 }
 
 export default function ProviderRoutingPage() {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const roles = useAppStore((s) => s.office.meta?.roles ?? EMPTY_ROLES);
   const routing = useWorkspaceRouting(workspaceId);
   const health = useProviderHealth(workspaceId);
   const preview = useRoutingPreview(workspaceId);
@@ -65,24 +78,25 @@ export default function ProviderRoutingPage() {
     try {
       await routing.update(draft);
       void preview.refresh();
-      toast.success("Routing settings saved");
+      toast.success(t("office:routingSettingsSaved"));
     } catch (err) {
       const errs = extractValidationDetails(err);
       if (errs.length > 0) setFieldErrors(errs);
-      toast.error(err instanceof Error ? err.message : "Failed to save");
+      toast.error(err instanceof Error ? err.message : t("office:failedToSave"));
     } finally {
       setSaving(false);
     }
-  }, [draft, workspaceId, routing, preview]);
+  }, [draft, workspaceId, routing, preview, t]);
 
   if (!workspaceId || !draft) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
+    return <div className="p-6 text-sm text-muted-foreground">{t("common:loading")}</div>;
   }
 
   return (
     <PageBody
       draft={draft}
       setDraft={setDraft}
+      roles={roles}
       knownProviders={routing.knownProviders}
       executionProfiles={routing.executionProfiles}
       saving={saving}
@@ -100,6 +114,7 @@ export default function ProviderRoutingPage() {
 type PageBodyProps = {
   draft: WorkspaceRouting;
   setDraft: (cfg: WorkspaceRouting) => void;
+  roles: RoleMeta[];
   knownProviders: string[];
   executionProfiles: ExecutionProfileSummary[];
   saving: boolean;
@@ -115,6 +130,7 @@ type PageBodyProps = {
 function PageBody({
   draft,
   setDraft,
+  roles,
   knownProviders,
   executionProfiles,
   saving,
@@ -126,9 +142,12 @@ function PageBody({
   previewAgents,
   previewLoading,
 }: PageBodyProps) {
+  const { t } = useTranslation();
   const setEnabled = (v: boolean) => setDraft({ ...draft, enabled: v });
-  const setTier = (t: Tier) => setDraft({ ...draft, default_tier: t });
+  // Named `tier`, not `t`: a parameter called `t` shadows the translate function.
+  const setTier = (tier: Tier) => setDraft({ ...draft, default_tier: tier });
   const setTierPerReason = (m: TierPerReason) => setDraft({ ...draft, tier_per_reason: m });
+  const setRoleTiers = (m: RoleTierMap) => setDraft({ ...draft, role_tiers: m });
   const setOrder = (next: string[]) => {
     const profiles = { ...draft.provider_profiles };
     for (const p of next) {
@@ -144,11 +163,8 @@ function PageBody({
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-4">
       <div>
-        <h1 className="text-lg font-semibold">Provider routing</h1>
-        <p className="text-sm text-muted-foreground">
-          Map Office agents to providers and tiers with controlled fallback. Advanced; off by
-          default.
-        </p>
+        <h1 className="text-lg font-semibold">{t("office:providerRoutingHeading")}</h1>
+        <p className="text-sm text-muted-foreground">{t("office:mapOfficeAgentsToProvidersAnd")}</p>
       </div>
 
       <RoutingEnableCard enabled={draft.enabled} onChange={setEnabled} disabled={saving} />
@@ -156,6 +172,13 @@ function PageBody({
       <DefaultTierSelector
         value={draft.default_tier}
         onChange={setTier}
+        disabled={sectionsDisabled}
+      />
+      <RoleTierCard
+        roles={roles}
+        config={draft}
+        value={draft.role_tiers ?? {}}
+        onChange={setRoleTiers}
         disabled={sectionsDisabled}
       />
       <WakeReasonTierCard
@@ -198,7 +221,7 @@ function PageBody({
         <div className="flex justify-end">
           <Button onClick={onSave} disabled={saving} className="cursor-pointer gap-1.5">
             <IconDeviceFloppy className="h-4 w-4" />
-            {saving ? "Saving…" : "Save"}
+            {saving ? t("office:savingEllipsis") : t("common:save")}
           </Button>
         </div>
       )}
@@ -206,6 +229,10 @@ function PageBody({
   );
 }
 
+/**
+ * Composes the BACKEND's own field names and error messages. Protocol, not copy
+ * — the strings here are echoed from the API response, never authored in the UI.
+ */
 function extractValidationDetails(err: unknown): string[] {
   if (!(err instanceof ApiError)) return [];
   const body = err.body;

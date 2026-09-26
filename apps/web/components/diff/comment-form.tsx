@@ -5,11 +5,12 @@ import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPlayerPlay, IconSend, IconX } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 
 interface CommentFormProps {
   initialContent?: string;
   onSubmit: (content: string) => void;
-  onCancel: () => void;
+  onCancel?: () => void;
   onSubmitAndRun?: (content: string) => void;
   isEditing?: boolean;
   autoFocus?: boolean;
@@ -28,22 +29,25 @@ function ActionButtons({
   modKey: string;
   isEditing: boolean;
   showRunButton: boolean;
-  onCancel: () => void;
+  onCancel?: () => void;
   onSubmit: () => void;
   onSubmitAndRun?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <TooltipProvider delayDuration={400}>
       <div className="flex gap-1">
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onCancel}
-          className="h-6 cursor-pointer px-2 text-xs"
-        >
-          <IconX className="mr-1 h-3 w-3" />
-          Cancel
-        </Button>
+        {onCancel && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onCancel}
+            className="h-6 cursor-pointer px-2 text-xs"
+          >
+            <IconX className="mr-1 h-3 w-3" />
+            {t("common:cancel")}
+          </Button>
+        )}
         <div className="inline-flex">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -55,11 +59,11 @@ function ActionButtons({
                 className={`h-6 cursor-pointer px-2 text-xs ${showRunButton ? "rounded-r-none border-r-0" : ""}`}
               >
                 <IconSend className="mr-1 h-3 w-3" />
-                {isEditing ? "Update" : "Add"}
+                {isEditing ? t("diff:update") : t("diff:add")}
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>Save comment for review ({modKey}+Enter)</p>
+              <p>{t("diff:saveCommentForReview", { modKey })}</p>
             </TooltipContent>
           </Tooltip>
           {showRunButton && onSubmitAndRun && (
@@ -72,11 +76,11 @@ function ActionButtons({
                   className="h-6 cursor-pointer gap-1 rounded-l-none px-2 text-xs"
                 >
                   <IconPlayerPlay className="h-3 w-3" />
-                  Run
+                  {t("diff:run")}
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                <p>Save and send to agent ({modKey}+Shift+Enter)</p>
+                <p>{t("diff:saveAndSendToAgent", { modKey })}</p>
               </TooltipContent>
             </Tooltip>
           )}
@@ -94,6 +98,7 @@ export function CommentForm({
   isEditing = false,
   autoFocus = true,
 }: CommentFormProps) {
+  const { t } = useTranslation();
   const [content, setContent] = useState(initialContent);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -125,7 +130,7 @@ export function CommentForm({
       e.preventDefault();
       if (e.shiftKey && onSubmitAndRun) handleSubmitAndRun();
       else handleSubmit();
-    } else if (e.key === "Escape") {
+    } else if (e.key === "Escape" && onCancel) {
       e.preventDefault();
       onCancel();
     }
@@ -141,13 +146,15 @@ export function CommentForm({
         value={content}
         onChange={(e) => setContent(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Add a comment..."
+        placeholder={t("diff:addAComment")}
         className="min-h-[60px] resize-none text-xs"
         rows={2}
       />
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] text-muted-foreground">
-          {modKey}+Enter to add{onSubmitAndRun ? `, ${modKey}+Shift+Enter to run` : ""}
+          {onSubmitAndRun
+            ? t("diff:enterToAddShiftEnterToRun", { modKey })
+            : t("diff:enterToAdd", { modKey })}
         </span>
         <ActionButtons
           disabled={disabled}

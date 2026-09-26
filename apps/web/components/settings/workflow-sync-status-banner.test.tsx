@@ -21,8 +21,10 @@ function config(overrides: Partial<WorkflowSyncConfig> = {}): WorkflowSyncConfig
   // sync attempt, which is the state most of these cases exercise.
   return {
     workspace_id: "workspace-1",
+    provider: "github",
     repo_owner: "kdlbs",
     repo_name: "kandev",
+    project_path: "",
     branch: "main",
     path: ".kandev/workflows",
     interval_seconds: 300,
@@ -103,7 +105,7 @@ describe("WorkflowSyncStatusCard", () => {
     );
     expect(
       screen.getByText(
-        "Directory (repository root) · auto-sync off · not synced yet — use Sync now",
+        "Directory (repository root) · auto-sync off · not synced yet; use Sync now",
       ),
     ).toBeTruthy();
   });

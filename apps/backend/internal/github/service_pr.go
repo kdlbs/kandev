@@ -116,6 +116,7 @@ func (s *Service) requestReviewersWithClient(
 	key := scopedCacheKey(cacheScope, prStatusCacheKey(owner, repo, number))
 	s.prFeedbackCache.invalidateKey(key)
 	s.prStatusCache.invalidateKey(key)
+	s.invalidateWorkflowAttentionForPR(cacheScope, owner, repo, number, "")
 	return nil
 }
 
@@ -124,11 +125,11 @@ func (s *Service) requestReviewersWithClient(
 // repo allows. The caller is expected to refresh PR feedback after a
 // successful merge — the background poller will catch the merged state on
 // its next pass.
-func (s *Service) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
+func (s *Service) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
 	if s.client == nil {
-		return ErrNoClient
+		return "", ErrNoClient
 	}
-	return s.mergePRWithClient(ctx, s.client, "legacy", owner, repo, number, mergeMethod)
+	return s.mergePRWithClient(ctx, s.client, "legacy", owner, repo, number, MergePRRequest{MergeMethod: mergeMethod})
 }
 
 // MergePRForWorkspace performs a user-triggered merge using the workspace's
@@ -141,20 +142,21 @@ func (s *Service) MergePRForWorkspace(
 	repo string,
 	number int,
 	mergeMethod string,
-) (AuthPrincipal, error) {
+) (AuthPrincipal, MergeOutcome, error) {
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
-		return AuthPrincipal{}, err
+		return AuthPrincipal{}, "", err
 	}
 	resolved, err := s.resolvePersonalWriteClient(ctx, workspaceID, userID, owner, repo)
 	if err != nil {
-		return AuthPrincipal{}, err
+		return AuthPrincipal{}, "", err
 	}
 	if err := requireGitHubCapability(resolved, CapabilityPullRequestWrite); err != nil {
-		return AuthPrincipal{}, err
+		return AuthPrincipal{}, "", err
 	}
-	return resolved.Principal, s.mergePRWithClient(
-		ctx, resolved.Client, resolved.CacheScope, owner, repo, number, mergeMethod,
+	outcome, err := s.mergePRWithClient(
+		ctx, resolved.Client, resolved.CacheScope, owner, repo, number, MergePRRequest{MergeMethod: mergeMethod},
 	)
+	return resolved.Principal, outcome, err
 }
 
 func (s *Service) mergePRWithClient(
@@ -164,9 +166,9 @@ func (s *Service) mergePRWithClient(
 	owner string,
 	repo string,
 	number int,
-	mergeMethod string,
-) error {
-	if mergeMethod == "" {
+	request MergePRRequest,
+) (MergeOutcome, error) {
+	if request.MergeMethod == "" {
 		// Resolve to an allowed method up-front so we don't rely on GitHub's
 		// "default to merge" behavior, which 405s on repos that disallow
 		// merge commits (squash-only / rebase-only). Best-effort: if the
@@ -175,11 +177,11 @@ func (s *Service) mergePRWithClient(
 		// blocking the merge attempt.
 		if methods, err := s.getRepoMergeMethods(ctx, client, cacheScope, owner, repo); err == nil {
 			if pick := pickDefaultMergeMethod(methods); pick != "" {
-				mergeMethod = pick
+				request.MergeMethod = pick
 			}
 		}
 	}
-	return client.MergePR(ctx, owner, repo, number, mergeMethod)
+	return client.MergePR(ctx, owner, repo, number, request)
 }
 
 // GetRepoMergeMethods returns the merge methods a repo allows, cached for
@@ -274,6 +276,22 @@ func (s *Service) GetPRForWorkspace(
 	return resolved.Client.GetPR(ctx, owner, repo, number)
 }
 
+// GetPRForAutomation fetches pull-request details through the workspace-owned
+// automation credential. It is used by background launch paths that have a
+// repository workspace but no interactive user identity.
+func (s *Service) GetPRForAutomation(
+	ctx context.Context, workspaceID, owner, repo string, number int,
+) (*PR, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.Client.GetPR(ctx, owner, repo, number)
+}
+
 // GetIssue fetches basic issue details from GitHub. The create-task dialog is
 // currently the only caller and dedupes requests per URL on the frontend.
 func (s *Service) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
@@ -309,7 +327,8 @@ func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number 
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
-	return s.getPRFeedback(ctx, s.client, "legacy", owner, repo, number)
+	// No workspace to scope a persist to; this legacy entry point reads only.
+	return s.getPRFeedback(ctx, s.client, "legacy", "", owner, repo, number)
 }
 
 func (s *Service) GetPRFeedbackForWorkspace(
@@ -322,11 +341,11 @@ func (s *Service) GetPRFeedbackForWorkspace(
 	if err != nil {
 		return nil, err
 	}
-	return s.getPRFeedback(ctx, resolved.Client, resolved.CacheScope, owner, repo, number)
+	return s.getPRFeedback(ctx, resolved.Client, resolved.CacheScope, workspaceID, owner, repo, number)
 }
 
 func (s *Service) getPRFeedback(
-	ctx context.Context, client Client, cacheScope, owner, repo string, number int,
+	ctx context.Context, client Client, cacheScope, workspaceID, owner, repo string, number int,
 ) (*PRFeedback, error) {
 	// Detach the upstream call's context from the singleflight leader: a
 	// cancelled leader (user closes the tab) would otherwise return its
@@ -338,9 +357,26 @@ func (s *Service) getPRFeedback(
 	// consumed past the deadline.
 	fetchCtx, cancelFetch := derivedFetchContext(ctx)
 	defer cancelFetch()
+	fetchCtx = withWorkflowAttentionCollector(fetchCtx, func(
+		collectorCtx context.Context, collectorClient Client, collectorOwner, collectorRepo string, pr *PR,
+	) (*WorkflowAttention, error) {
+		return s.collectWorkflowAttention(
+			collectorCtx, collectorClient, cacheScope, collectorOwner, collectorRepo, pr,
+		)
+	})
 	key := scopedCacheKey(cacheScope, prStatusCacheKey(owner, repo, number))
 	v, err := s.prFeedbackCache.doOrFetch(key, func() (any, error) {
-		return client.GetPRFeedback(fetchCtx, owner, repo, number)
+		feedback, fetchErr := client.GetPRFeedback(fetchCtx, owner, repo, number)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		// Persist inside the fetch closure, not around doOrFetch: this runs
+		// once per real upstream call (TTL miss, singleflight leader) rather
+		// than on every panel render served from cache, and it inherits
+		// fetchCtx so a client disconnecting mid-flight can't abort the write
+		// that its own fetch just earned.
+		s.persistPRFeedbackState(fetchCtx, workspaceID, feedback)
+		return feedback, nil
 	})
 	if err != nil {
 		return nil, err
@@ -379,6 +415,13 @@ func (s *Service) getPRStatus(
 	// GetPRFeedback for the cascading-cancel + deadline-preserve rationale.
 	fetchCtx, cancelFetch := derivedFetchContext(ctx)
 	defer cancelFetch()
+	fetchCtx = withWorkflowAttentionCollector(fetchCtx, func(
+		collectorCtx context.Context, collectorClient Client, collectorOwner, collectorRepo string, pr *PR,
+	) (*WorkflowAttention, error) {
+		return s.collectWorkflowAttention(
+			collectorCtx, collectorClient, cacheScope, collectorOwner, collectorRepo, pr,
+		)
+	})
 	key := scopedCacheKey(cacheScope, prStatusCacheKey(owner, repo, number))
 	v, err := s.prStatusCache.doOrFetch(key, func() (any, error) {
 		return client.GetPRStatus(fetchCtx, owner, repo, number)
@@ -535,17 +578,68 @@ func (s *Service) GetPRCommits(ctx context.Context, owner, repo string, number i
 	return s.client.ListPRCommits(ctx, owner, repo, number)
 }
 
+// GitHub's pull-request commit endpoint returns at most 250 commits, even
+// when pagination has been requested. Treat a response at that limit as
+// incomplete because the missing older ancestry can change a safe relation
+// into an apparent divergence.
+const githubPRCommitHistoryLimit = 250
+
+func completePRCommitHistory(headSHA string, commits []PRCommitInfo) bool {
+	if headSHA == "" || len(commits) == 0 || len(commits) >= githubPRCommitHistoryLimit {
+		return false
+	}
+	for _, commit := range commits {
+		if commit.SHA == "" {
+			return false
+		}
+	}
+	return commits[len(commits)-1].SHA == headSHA
+}
+
 func (s *Service) GetPRCommitsForWorkspace(
 	ctx context.Context, workspaceID, userID, owner, repo string, number int,
-) ([]PRCommitInfo, error) {
+) (PRCommitsResult, error) {
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
-		return nil, err
+		return PRCommitsResult{}, err
 	}
 	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, owner, repo)
 	if err != nil {
-		return nil, err
+		return PRCommitsResult{}, err
 	}
-	return resolved.Client.ListPRCommits(ctx, owner, repo, number)
+	pr, err := resolved.Client.GetPR(ctx, owner, repo, number)
+	if err != nil {
+		return PRCommitsResult{}, fmt.Errorf("get PR #%d for commit history: %w", number, err)
+	}
+	if pr == nil {
+		return PRCommitsResult{}, fmt.Errorf("get PR #%d for commit history: empty response", number)
+	}
+	commits, err := resolved.Client.ListPRCommits(ctx, owner, repo, number)
+	if err != nil {
+		return PRCommitsResult{}, fmt.Errorf("list PR #%d commits: %w", number, err)
+	}
+	return PRCommitsResult{
+		Commits:  commits,
+		HeadSHA:  pr.HeadSHA,
+		Complete: completePRCommitHistory(pr.HeadSHA, commits),
+	}, nil
+}
+
+// GetPRCommitDetailForWorkspace fetches one commit through the workspace's
+// authorized personal read client. It never consults a task worktree.
+func (s *Service) GetPRCommitDetailForWorkspace(
+	ctx context.Context, workspaceID, userID, owner, repo, sha string,
+) (PRCommitDetail, error) {
+	if err := validateGitHubCommitSHA(sha); err != nil {
+		return PRCommitDetail{}, err
+	}
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return PRCommitDetail{}, err
+	}
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, owner, repo)
+	if err != nil {
+		return PRCommitDetail{}, err
+	}
+	return resolved.Client.GetPRCommitDetail(ctx, owner, repo, sha)
 }
 
 // timeEqual compares two nullable time pointers for equality.
@@ -561,6 +655,28 @@ func timeEqual(a, b *time.Time) bool {
 
 // intPtrEqual compares two nullable int pointers for equality.
 func intPtrEqual(a, b *int) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+// boolPtrEqual compares two nullable bool pointers for equality.
+func boolPtrEqual(a, b *bool) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+// stringPtrEqual compares two nullable string pointers for equality.
+func stringPtrEqual(a, b *string) bool {
 	if a == nil && b == nil {
 		return true
 	}

@@ -17,6 +17,10 @@ export function parseRemoteCredentials(config?: Record<string, string>): string[
   return parseJsonSetting(config?.remote_credentials, []);
 }
 
+export function parseAgentConfigBundles(config?: Record<string, string>): string[] {
+  return parseJsonSetting(config?.agent_config_bundles, []);
+}
+
 export function parseRemoteAuthSecrets(
   config?: Record<string, string>,
 ): Record<string, string | null> {

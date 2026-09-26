@@ -7,19 +7,26 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -35,29 +42,81 @@ import (
 //   - RefreshAgent: re-runs the probe against the existing instance.
 //   - Stop(ctx): deletes each instance from agentctl and removes the tmp parent.
 type Manager struct {
-	registry      *registry.Registry
-	controlHost   string
-	controlPort   int
-	controlClient *agentctlclient.ControlClient
-	authToken     string // per-launch auth token for instance clients
-	log           *logger.Logger
+	registry        *registry.Registry
+	controlHost     string
+	controlPort     int
+	controlClient   *agentctlclient.ControlClient
+	authToken       string // per-launch auth token for instance clients
+	log             *logger.Logger
+	profileResolver interface {
+		Resolve(context.Context, string) (*settingsmodels.AgentProfile, error)
+	}
+	providerGatewayAuthResolver ProviderGatewayAuthResolver
 
-	parentTmpDir string
-	cache        *cache
+	parentTmpDir  string
+	tempArtifacts *tempartifacts.Registry
+	tempLease     *tempartifacts.Lease
+	cache         *cache
+	modelCache    *modelConfigCache
 
-	mu          sync.RWMutex
-	instances   map[string]*instance // keyed by agent type
-	createGroup singleflight.Group
-	startCancel context.CancelFunc
-	stopped     bool
+	mu                       sync.RWMutex
+	instances                map[string]*instance // keyed by agent type
+	createGroup              singleflight.Group
+	modelGroup               singleflight.Group
+	modelGenerationMu        sync.Mutex
+	modelGenerations         map[string]uint64
+	managedRuntimeSelections managedruntime.SelectionReader
+	startCancel              context.CancelFunc
+	stopped                  bool
+}
+
+// ProviderGatewayAuthResolver resolves provider authentication for a saved
+// profile. The lifecycle manager owns profile and secret resolution; the host
+// utility only forwards the resulting ACP data to agentctl.
+type ProviderGatewayAuthResolver func(
+	context.Context,
+	string,
+	string,
+) (*acpprovider.GatewayAuth, string, string, error)
+
+// SetProfileResolver wires the profile eligibility and launch-policy reader.
+func (m *Manager) SetProfileResolver(resolver interface {
+	Resolve(context.Context, string) (*settingsmodels.AgentProfile, error)
+}) {
+	m.profileResolver = resolver
+}
+
+// SetProviderGatewayAuthResolver wires the lifecycle-owned provider resolver.
+func (m *Manager) SetProviderGatewayAuthResolver(resolver ProviderGatewayAuthResolver) {
+	m.providerGatewayAuthResolver = resolver
 }
 
 // instance is a single warm agentctl instance bound to an agent type.
 type instance struct {
-	agentType  string
-	instanceID string
-	workDir    string
-	client     *agentctlclient.Client
+	agentType         string
+	instanceID        string
+	workDir           string
+	client            *agentctlclient.Client
+	operationGateOnce sync.Once
+	operationGate     *semaphore.Weighted
+}
+
+// Shared probes and prompts each take one slot. Repair takes every slot so it
+// cannot remove an npm execution tree while another utility process uses it.
+const hostUtilityOperationCapacity int64 = 1 << 20
+
+func (i *instance) acquireOperation(ctx context.Context, exclusive bool) (func(), error) {
+	i.operationGateOnce.Do(func() {
+		i.operationGate = semaphore.NewWeighted(hostUtilityOperationCapacity)
+	})
+	weight := int64(1)
+	if exclusive {
+		weight = hostUtilityOperationCapacity
+	}
+	if err := i.operationGate.Acquire(ctx, weight); err != nil {
+		return nil, err
+	}
+	return func() { i.operationGate.Release(weight) }, nil
 }
 
 // NewManager constructs a HostUtilityManager.
@@ -69,19 +128,33 @@ func NewManager(
 	log *logger.Logger,
 ) *Manager {
 	return &Manager{
-		registry:      reg,
-		controlHost:   controlHost,
-		controlPort:   controlPort,
-		controlClient: controlClient,
-		log:           log.WithFields(zap.String("component", "host-utility")),
-		cache:         newCache(),
-		instances:     make(map[string]*instance),
+		registry:         reg,
+		controlHost:      controlHost,
+		controlPort:      controlPort,
+		controlClient:    controlClient,
+		log:              log.WithFields(zap.String("component", "host-utility")),
+		cache:            newCache(),
+		modelCache:       newModelConfigCache(),
+		instances:        make(map[string]*instance),
+		modelGenerations: make(map[string]uint64),
 	}
 }
 
 // SetAuthToken sets the per-launch auth token for authenticating instance clients.
 func (m *Manager) SetAuthToken(token string) {
 	m.authToken = token
+}
+
+// SetManagedRuntimeSelectionStore wires the install-wide exact-version
+// resolver used by every host-local managed-runtime command path.
+func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
+	m.managedRuntimeSelections = store
+}
+
+func (m *Manager) SetTemporaryArtifactRegistry(registry *tempartifacts.Registry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.tempArtifacts = registry
 }
 
 // Start boots one warm instance per ACP-capable inference agent and runs an
@@ -110,16 +183,32 @@ func (m *Manager) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create host utility tmp dir: %w", err)
 	}
+	m.mu.RLock()
+	artifactRegistry := m.tempArtifacts
+	m.mu.RUnlock()
+	var tempLease *tempartifacts.Lease
+	if artifactRegistry != nil {
+		tempLease, err = artifactRegistry.RegisterExisting(
+			ctx, storage.TemporaryArtifactKindHostUtility, parent, nil,
+		)
+		if err != nil {
+			_ = os.RemoveAll(parent)
+			return fmt.Errorf("register host utility tmp dir: %w", err)
+		}
+	}
 	m.mu.Lock()
 	if m.stopped {
 		m.mu.Unlock()
-		if err := os.RemoveAll(parent); err != nil {
+		if tempLease != nil {
+			_ = tempLease.Remove(context.Background())
+		} else if err := os.RemoveAll(parent); err != nil {
 			m.log.Warn("failed to remove unused host utility parent tmp dir",
 				zap.String("path", parent), zap.Error(err))
 		}
 		return nil
 	}
 	m.parentTmpDir = parent
+	m.tempLease = tempLease
 	m.mu.Unlock()
 	m.log.Info("host utility parent tmp dir created", zap.String("path", parent))
 
@@ -146,6 +235,9 @@ func (m *Manager) Start(ctx context.Context) error {
 // Only dirs owned by this process are removed; other kandev processes' dirs
 // are untouched.
 func (m *Manager) Stop(ctx context.Context) {
+	if m.modelCache != nil {
+		m.modelCache.clear()
+	}
 	m.mu.Lock()
 	m.stopped = true
 	cancel := m.startCancel
@@ -157,6 +249,8 @@ func (m *Manager) Stop(ctx context.Context) {
 	m.instances = make(map[string]*instance)
 	parentTmpDir := m.parentTmpDir
 	m.parentTmpDir = ""
+	tempLease := m.tempLease
+	m.tempLease = nil
 	m.mu.Unlock()
 
 	if cancel != nil {
@@ -169,7 +263,11 @@ func (m *Manager) Stop(ctx context.Context) {
 		cancel()
 	}
 
-	if parentTmpDir != "" {
+	if tempLease != nil {
+		if err := tempLease.Remove(ctx); err != nil {
+			m.log.Warn("failed to remove host utility parent tmp dir", zap.String("path", parentTmpDir), zap.Error(err))
+		}
+	} else if parentTmpDir != "" {
 		if err := os.RemoveAll(parentTmpDir); err != nil {
 			m.log.Warn("failed to remove host utility parent tmp dir",
 				zap.String("path", parentTmpDir), zap.Error(err))
@@ -241,7 +339,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 		LastCheckedAt: time.Now(),
 	})
 
-	cfg := ia.InferenceConfig()
+	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil || !cfg.Supported {
 		m.cache.set(AgentCapabilities{
 			AgentType:     agentType,
@@ -548,22 +646,144 @@ func (m *Manager) probeWithCommand(
 ) AgentCapabilities {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-
-	req := buildProbeRequest(inst, ia, refresh, command)
-	resp, err := inst.client.Probe(probeCtx, req)
-	now := time.Now()
+	resolvedCommand, err := m.resolveInferenceCommand(probeCtx, inst.agentType, ia, command)
 	if err != nil {
-		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, now)
+		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
 	}
+
+	req := buildProbeRequest(inst, ia, refresh, resolvedCommand)
+	resp, err := m.probeManagedRuntime(probeCtx, inst, ia, resolvedCommand, req)
+	if err != nil {
+		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
+	}
+	return capabilitiesFromProbe(inst.agentType, resp, time.Now())
+}
+
+func (m *Manager) probeManagedRuntime(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	command agents.Command,
+	req *agentctlutil.ProbeRequest,
+) (*agentctlutil.ProbeResponse, error) {
+	release, err := inst.acquireOperation(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := inst.client.Probe(ctx, req)
+	release()
+	if err != nil || resp.Success || resp.FailureCode != agentctlutil.ProbeFailureManagedRuntimeNPMResolution {
+		return resp, err
+	}
+
+	release, err = inst.acquireOperation(ctx, true)
+	if err != nil {
+		return resp, nil
+	}
+	defer release()
+	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, req, resp), nil
+}
+
+func (m *Manager) recoverManagedRuntimeProbe(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	failedCommand agents.Command,
+	failedRequest *agentctlutil.ProbeRequest,
+	initial *agentctlutil.ProbeResponse,
+) *agentctlutil.ProbeResponse {
+	managed, ok := ia.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return initial
+	}
+	spec := managed.ManagedNPMRuntime()
+	retryCommand, packageSpec, ok := managedRuntimeProbeRetry(failedCommand, spec)
+	if !ok {
+		return initial
+	}
+	m.log.Info("recovering managed runtime host capability probe",
+		zap.String("agent_type", inst.agentType),
+		zap.String("recovery_scope", "host_capability_probe"),
+		zap.Int("attempt", 1))
+	failedConfig := failedRequest.InferenceConfig
+	if err := inst.client.RepairManagedRuntimeCacheWithEnvironment(
+		ctx, packageSpec, failedConfig.Env, failedConfig.StripEnv,
+	); err != nil {
+		m.log.Warn("managed runtime host capability probe cache repair failed",
+			zap.String("agent_type", inst.agentType),
+			zap.String("recovery_scope", "host_capability_probe"),
+			zap.Error(err))
+		return initial
+	}
+	response, err := inst.client.Probe(ctx, cloneProbeRequestWithCommand(failedRequest, retryCommand))
+	if err != nil {
+		m.log.Warn("managed runtime host capability probe retry failed",
+			zap.String("agent_type", inst.agentType),
+			zap.String("recovery_scope", "host_capability_probe"),
+			zap.String("outcome", "failed"),
+			zap.Error(err))
+		return &agentctlutil.ProbeResponse{Success: false, Error: err.Error()}
+	}
+	m.log.Info("managed runtime host capability probe retry completed",
+		zap.String("agent_type", inst.agentType),
+		zap.String("recovery_scope", "host_capability_probe"),
+		zap.String("outcome", string(capabilityStatus(response))))
+	return response
+}
+
+func cloneProbeRequestWithCommand(
+	request *agentctlutil.ProbeRequest,
+	command agents.Command,
+) *agentctlutil.ProbeRequest {
+	retry := *request
+	config := *request.InferenceConfig
+	config.Command = command.Args()
+	retry.InferenceConfig = &config
+	return &retry
+}
+
+func capabilityStatus(response *agentctlutil.ProbeResponse) Status {
+	if response != nil && response.Success {
+		return StatusOK
+	}
+	return StatusFailed
+}
+
+func managedRuntimeProbeRetry(
+	command agents.Command,
+	spec agents.ManagedNPMRuntimeSpec,
+) (agents.Command, string, bool) {
+	args := command.Args()
+	if len(args) < 6 || args[0] != "npx" || args[1] != "--yes" || args[2] != "--prefer-offline" ||
+		args[3] != "--prefix" || args[4] != managedruntime.NPMProjectPrefix {
+		return agents.Command{}, "", false
+	}
+	packageSpec := args[5]
+	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
+		return agents.Command{}, "", false
+	}
+	prefix := spec.Package + "@"
+	if !strings.HasPrefix(packageSpec, prefix) {
+		return agents.Command{}, "", false
+	}
+	version := strings.TrimPrefix(packageSpec, prefix)
+	want := spec.ACPCommandWithNpmPreference(version, false).Args()
+	if !slices.Equal(args, want) {
+		return agents.Command{}, "", false
+	}
+	return spec.ACPCommandWithNpmPreference(version, true), packageSpec, true
+}
+
+func capabilitiesFromProbe(agentType string, resp *agentctlutil.ProbeResponse, now time.Time) AgentCapabilities {
 	if !resp.Success {
 		status := StatusFailed
 		if isAuthError(resp.Error) {
 			status = StatusAuthRequired
 		}
-		return probeFailureCapabilities(inst.agentType, status, resp.Error, resp.DurationMs, now)
+		return probeFailureCapabilities(agentType, status, resp.Error, resp.DurationMs, now)
 	}
 	caps := AgentCapabilities{
-		AgentType:       inst.agentType,
+		AgentType:       agentType,
 		AgentName:       resp.AgentName,
 		AgentVersion:    resp.AgentVersion,
 		Status:          StatusOK,
@@ -594,30 +814,52 @@ func (m *Manager) probeWithCommand(
 			ID: m.ID, Name: m.Name, Description: m.Description, Meta: m.Meta,
 		})
 	}
-	for _, opt := range resp.ConfigOptions {
-		choices := make([]ConfigOptionChoice, 0, len(opt.Options))
-		for _, choice := range opt.Options {
-			choices = append(choices, ConfigOptionChoice{
-				Value:       choice.Value,
-				Name:        choice.Name,
-				Description: choice.Description,
-			})
-		}
-		caps.ConfigOptions = append(caps.ConfigOptions, ConfigOption{
-			Type:         opt.Type,
-			ID:           opt.ID,
-			Name:         opt.Name,
-			Description:  opt.Description,
-			CurrentValue: opt.CurrentValue,
-			Category:     opt.Category,
-			Options:      choices,
-		})
-	}
+	caps.ConfigOptions = configOptionsFromProbe(resp.ConfigOptions)
 	for _, c := range resp.Commands {
 		caps.Commands = append(caps.Commands, Command{Name: c.Name, Description: c.Description})
 	}
 	return caps
 }
+
+// resolveInferenceCommand selects the trusted exact host version for ordinary
+// probes and prompts. A non-empty override is reserved for candidate probes.
+func (m *Manager) resolveInferenceCommand(
+	ctx context.Context,
+	agentType string,
+	ia agents.InferenceAgent,
+	override agents.Command,
+) (agents.Command, error) {
+	if !override.IsEmpty() {
+		return override, nil
+	}
+	cfg := inferenceConfigForHostUtility(ia)
+	if cfg == nil || !cfg.Supported {
+		return agents.Command{}, errors.New("inference config not available")
+	}
+	command := cfg.Command
+	ag, ok := ia.(agents.Agent)
+	if !ok || m.managedRuntimeSelections == nil {
+		return command, nil
+	}
+	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return command, nil
+	}
+	spec := managed.ManagedNPMRuntime()
+	if spec.NativeBinaryOnPath() {
+		return spec.NativeCommand(), nil
+	}
+	selection, found, err := m.managedRuntimeSelections.Get(ctx, agentType, spec.Package)
+	if err != nil {
+		return agents.Command{}, fmt.Errorf("resolve active managed runtime version for %s: %w", agentType, err)
+	}
+	if !found || selection.Package != spec.Package {
+		return spec.ACPCommand(spec.DefaultVersion), nil
+	}
+	return spec.ACPCommand(selection.Version), nil
+}
+
+const modelConfigResolveTimeout = 60 * time.Second
 
 func buildProbeRequest(
 	inst *instance,
@@ -625,7 +867,7 @@ func buildProbeRequest(
 	refresh bool,
 	command agents.Command,
 ) *agentctlutil.ProbeRequest {
-	cfg := ia.InferenceConfig()
+	cfg := inferenceConfigForHostUtility(ia)
 	probeCommand := cfg.Command
 	if !command.IsEmpty() {
 		probeCommand = command
@@ -634,13 +876,21 @@ func buildProbeRequest(
 		AgentID: inst.agentType,
 		Refresh: refresh,
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
-			Command:   probeCommand.Args(),
-			ModelFlag: cfg.ModelFlag.Args(),
-			WorkDir:   inst.workDir,
-			Env:       agents.RuntimeEnvFor(ia),
-			StripEnv:  agents.StripEnvFor(ia),
+			Command:         probeCommand.Args(),
+			ModelFlag:       cfg.ModelFlag.Args(),
+			WorkDir:         inst.workDir,
+			Env:             agents.RuntimeEnvFor(ia),
+			StripEnv:        agents.StripEnvFor(ia),
+			OperatorDefined: cfg.OperatorDefined,
 		},
 	}
+}
+
+func inferenceConfigForHostUtility(ia agents.InferenceAgent) *agents.InferenceConfig {
+	if hostAgent, ok := ia.(agents.HostUtilityInferenceAgent); ok {
+		return hostAgent.HostUtilityInferenceConfig()
+	}
+	return ia.InferenceConfig()
 }
 
 func probeFailureCapabilities(

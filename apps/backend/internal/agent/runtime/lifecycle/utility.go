@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 )
 
@@ -41,7 +42,8 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		return nil, fmt.Errorf("no execution available for session %s: %w", sessionID, err)
 	}
 
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return nil, fmt.Errorf("agentctl client not available for session %s", sessionID)
 	}
@@ -53,14 +55,99 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		AgentID: agentID,
 		Model:   model,
 		InferenceConfig: &utility.InferenceConfigDTO{
-			Command:   cfg.Command.Args(),
-			ModelFlag: cfg.ModelFlag.Args(),
-			WorkDir:   execution.WorkspacePath,
-			StripEnv:  agents.StripEnvFor(ia),
+			Command:         cfg.Command.Args(),
+			ModelFlag:       cfg.ModelFlag.Args(),
+			WorkDir:         execution.WorkspacePath,
+			StripEnv:        agents.StripEnvFor(ia),
+			OperatorDefined: cfg.OperatorDefined,
 		},
 	}
 
 	return client.InferencePrompt(ctx, req)
+}
+
+// ExecuteInferenceProfilePrompt resolves a profile once at dispatch time and
+// applies its model, mode, config options, environment, flags, prefix, and
+// permission policy to a session-bound utility call.
+//
+//nolint:cyclop // profile execution validates several independent runtime inputs.
+func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, profileID, prompt string) (*utility.PromptResponse, error) {
+	if m.profileResolver == nil {
+		return nil, fmt.Errorf("agent profile resolver is not configured")
+	}
+	profile, err := m.profileResolver.ResolveProfile(ctx, profileID)
+	if err != nil {
+		return nil, err
+	}
+	if profile == nil || profile.AgentID == "" {
+		return nil, fmt.Errorf("agent profile %q is not executable", profileID)
+	}
+	if sessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	// The registry is keyed by the agent name (claude-acp, codex-acp, ...),
+	// while AgentID is the agents row's generated UUID. AgentName is empty only
+	// for resolvers that never populated it, whose AgentID is already a name.
+	agentName := profile.AgentName
+	if agentName == "" {
+		agentName = profile.AgentID
+	}
+	ia, ok := m.registry.GetInferenceAgent(agentName)
+	if !ok {
+		return nil, fmt.Errorf("agent %q does not support inference", agentName)
+	}
+	cfg := ia.InferenceConfig()
+	if cfg == nil || !cfg.Supported {
+		return nil, fmt.Errorf("agent %q inference not supported", agentName)
+	}
+	agentConfig, _ := ia.(agents.Agent)
+	execution, err := m.GetOrEnsureExecution(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("no execution available for session %s: %w", sessionID, err)
+	}
+	gatewayAuth, providerKeyEnvVar, providerKey, err := m.resolveProviderGatewayAuth(
+		ctx, profile, agentConfig, execution.RuntimeName)
+	if err != nil {
+		return nil, err
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return nil, fmt.Errorf("agentctl client not available for session %s", sessionID)
+	}
+	flags, err := cliflags.Resolve(profile.CLIFlags)
+	if err != nil {
+		return nil, fmt.Errorf("resolve profile cli flags: %w", err)
+	}
+	var prefix []string
+	if profile.CommandPrefix != "" {
+		if err := cliflags.ValidateCommandPrefix(profile.CommandPrefix); err != nil {
+			return nil, err
+		}
+		prefix, err = cliflags.Tokenise(profile.CommandPrefix)
+		if err != nil {
+			return nil, err
+		}
+	}
+	env := make(map[string]string, len(profile.EnvVars))
+	for _, value := range profile.EnvVars {
+		if value.Key != "" && value.SecretID == "" {
+			env[value.Key] = value.Value
+		}
+	}
+	if providerKey != "" && providerKeyEnvVar != "" {
+		env[providerKeyEnvVar] = providerKey // profile-declared provider key wins
+	}
+	autoApprove := profile.AutoApprove
+	return client.InferencePrompt(ctx, &utility.PromptRequest{
+		Prompt: prompt, AgentID: agentName, Model: profile.Model, Mode: profile.Mode,
+		AutoApprovePermissions: &autoApprove,
+		InferenceConfig: &utility.InferenceConfigDTO{
+			Command: cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,
+			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, CommandPrefix: prefix,
+			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
+		},
+	})
 }
 
 // ListInferenceAgents returns agents that support inference with their models.

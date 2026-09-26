@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/native-kandev-cli/spec.md"
+spec: "../../specs/cli/requirements/native-kandev-cli.md"
 ---
 
 # Task 01: Preserve System Service User

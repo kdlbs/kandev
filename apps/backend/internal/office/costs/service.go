@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 
 	"go.uber.org/zap"
@@ -31,6 +32,25 @@ type Repository interface {
 	UpdateBudgetPolicy(ctx context.Context, policy *BudgetPolicy) error
 	DeleteBudgetPolicy(ctx context.Context, id string) error
 	UpdateAgentStatusFields(ctx context.Context, agentID, status, pauseReason string) error
+	SpendWindowForWorkspace(
+		ctx context.Context, workspaceID string, start time.Time, hasStart bool, before time.Time,
+	) (models.SpendWindow, error)
+	SpendWindowForAgent(
+		ctx context.Context, agentInstanceID string, start time.Time, hasStart bool, before time.Time,
+	) (models.SpendWindow, error)
+	SpendWindowForProject(
+		ctx context.Context, projectID string, start time.Time, hasStart bool, before time.Time,
+	) (models.SpendWindow, error)
+	GetWorkspaceBudgetDefault(ctx context.Context, workspaceID string) (limitSubcents int64, found bool, err error)
+	SetWorkspaceBudgetDefault(ctx context.Context, workspaceID string, limitSubcents int64) error
+	// Claim atomically records that (policyID, periodKey, level) may emit its
+	// budget notification, fenced to revision. See
+	// docs/specs/budget-claim-revision-fencing/spec.md.
+	Claim(ctx context.Context, policyID, periodKey, level string, revision int64) (bool, error)
+	// ClaimExceeded atomically records the exceeded-level claim and, only
+	// when this call wins it, the alert-level companion claim, both fenced
+	// to revision. See docs/specs/budget-claim-revision-fencing/spec.md.
+	ClaimExceeded(ctx context.Context, policyID, periodKey string, revision int64) (bool, error)
 }
 
 // CostService handles cost recording, summaries, and budget evaluation.
@@ -61,30 +81,36 @@ func NewCostService(
 
 // RecordCostEvent stores a cost event with caller-provided cost subcents.
 // Cost computation now lives in the subscriber (Layer A / B lookup); this
-// helper is the manual-entry / test-harness path that records a row
-// verbatim. Token counts are stored as int64.
+// manual-entry helper records a row verbatim. TokensOut is a pointer so the
+// caller must state whether the output count was observed: nil stores NULL,
+// while a non-nil zero stores a measured zero. CostContractVersion uses the same
+// models.CostContractVersion the prompt-usage subscriber uses, so a
+// manually-recorded row is never mistaken for a legacy pre-contract one.
 func (s *CostService) RecordCostEvent(
 	ctx context.Context,
 	sessionID, taskID, agentInstanceID, projectID string,
 	model, provider string,
-	tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
+	tokensIn, tokensCachedIn int64,
+	tokensOut *int64,
+	costSubcents int64,
 	estimated bool,
 ) (*CostEvent, error) {
+	contractVersion := models.CostContractVersion
 	event := &CostEvent{
-		SessionID:      sessionID,
-		TaskID:         taskID,
-		AgentProfileID: agentInstanceID,
-		ProjectID:      projectID,
-		Model:          model,
-		Provider:       provider,
-		TokensIn:       tokensIn,
-		TokensCachedIn: tokensCachedIn,
-		TokensOut:      tokensOut,
-		CostSubcents:   costSubcents,
-		Estimated:      estimated,
-		OccurredAt:     time.Now().UTC(),
+		SessionID:           sessionID,
+		TaskID:              taskID,
+		AgentProfileID:      agentInstanceID,
+		ProjectID:           projectID,
+		Model:               model,
+		Provider:            provider,
+		TokensIn:            tokensIn,
+		TokensCachedIn:      tokensCachedIn,
+		TokensOut:           tokensOut,
+		CostSubcents:        costSubcents,
+		Estimated:           estimated,
+		CostContractVersion: &contractVersion,
+		OccurredAt:          time.Now().UTC(),
 	}
-
 	if err := s.repo.CreateCostEvent(ctx, event); err != nil {
 		return nil, err
 	}

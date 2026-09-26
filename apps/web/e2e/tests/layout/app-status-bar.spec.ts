@@ -1,5 +1,11 @@
 import { expect, test } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
+import {
+  captureAppStatusBarSettings,
+  restoreAppStatusBarSettings,
+  setAppStatusBarEnabled,
+  type AppStatusBarSettingsBaseline,
+} from "../../helpers/app-status-bar-settings";
 
 const PIXEL_TOLERANCE = 1;
 
@@ -27,6 +33,56 @@ async function expectStatusBarAfterSidebar(page: Page) {
 }
 
 test.describe("App status bar", () => {
+  let baseline: AppStatusBarSettingsBaseline | undefined;
+
+  test.beforeEach(async ({ apiClient }) => {
+    baseline = await captureAppStatusBarSettings(apiClient);
+    await setAppStatusBarEnabled(apiClient, true);
+  });
+
+  test.afterEach(async ({ apiClient }) => {
+    await restoreAppStatusBarSettings(apiClient, baseline);
+  });
+
+  test("persists the Appearance preference without a restart", async ({
+    testPage,
+    apiClient,
+    prCapture,
+  }) => {
+    await testPage.goto("/settings/preferences/appearance");
+    const toggle = testPage.getByRole("switch", { name: "Show status bar" });
+    const toggleRow = testPage.getByTestId("app-status-bar-toggle-row");
+    const floatingSave = testPage.getByTestId("settings-floating-save");
+    const bar = testPage.getByTestId("app-status-bar");
+
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect((await toggleRow.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await expect(bar).toBeVisible();
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("data-settings-dirty", "true");
+    await floatingSave.getByRole("button", { name: "Save changes" }).click();
+    await expect(bar).toHaveCount(0);
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.app_status_bar_enabled)
+      .toBe(false);
+    await prCapture.screenshot("status-bar-appearance-desktop", {
+      caption: "Desktop Appearance setting with the status bar disabled",
+    });
+
+    await testPage.reload();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expect(bar).toHaveCount(0);
+
+    await toggle.click();
+    await floatingSave.getByRole("button", { name: "Save changes" }).click();
+    await expect(bar).toBeVisible();
+    expect((await bar.boundingBox())?.height).toBe(24);
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.app_status_bar_enabled)
+      .toBe(true);
+  });
+
   test("starts after sidebar and tracks its layout width", async ({ testPage }) => {
     await testPage.setViewportSize({ width: 1600, height: 900 });
     await testPage.goto("/");
@@ -78,22 +134,25 @@ test.describe("App status bar", () => {
     await expectStatusBarAfterSidebar(testPage);
   });
 
-  test("fills available width when responsive layout hides sidebar", async ({ testPage }) => {
+  test("hands the status surface to the drawer once the sidebar is hidden", async ({
+    testPage,
+  }) => {
+    // The sidebar is `hidden md:block` and `useResponsiveBreakpoint` switches to
+    // mobile composition at the same 768px boundary, so no width renders the
+    // inline bar without the sidebar beside it. Below the boundary the drawer
+    // trigger *is* the status surface, and it has to stay reachable across the
+    // whole band — 700px is the width where a 640px trigger class used to hide it.
     await testPage.setViewportSize({ width: 700, height: 900 });
-    await testPage.goto("/");
+    await testPage.goto("/stats");
 
-    const bar = testPage.getByTestId("app-status-bar");
-    await expect(bar).toBeVisible();
     await expect(testPage.getByTestId("app-sidebar")).toBeHidden();
+    await expect(testPage.getByTestId("app-status-bar")).toHaveCount(0);
 
-    const [barBox, viewport] = await Promise.all([
-      bar.boundingBox(),
-      testPage.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
-    ]);
-    if (!barBox) throw new Error("app status bar has no bounding box");
+    const trigger = testPage.getByTestId("app-status-drawer-trigger");
+    await expect(trigger).toBeVisible();
 
-    expect(Math.abs(barBox.x)).toBeLessThanOrEqual(PIXEL_TOLERANCE);
-    expect(Math.abs(barBox.width - viewport.width)).toBeLessThanOrEqual(PIXEL_TOLERANCE);
+    await trigger.click();
+    await expect(testPage.getByTestId("app-status-drawer")).toBeVisible();
   });
 
   test("persists a modifier-mouse move across the spacer", async ({ testPage }) => {

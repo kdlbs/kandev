@@ -6,11 +6,13 @@ import (
 	"github.com/kandev/kandev/internal/office/channels"
 	"github.com/kandev/kandev/internal/office/config"
 	"github.com/kandev/kandev/internal/office/configloader"
+	"github.com/kandev/kandev/internal/office/configsync"
 	"github.com/kandev/kandev/internal/office/costs"
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/infra"
 	"github.com/kandev/kandev/internal/office/labels"
 	"github.com/kandev/kandev/internal/office/onboarding"
+	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/projects"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routines"
@@ -31,14 +33,15 @@ type Services struct {
 	Approvals    *approvals.ApprovalService
 	Channels     *channels.ChannelService
 	Config       *config.ConfigService
+	ConfigSync   *configsync.Service
 	Dashboard    *dashboard.DashboardService
 	Labels       *labels.LabelService
 	Onboarding   *onboarding.OnboardingService
+	Pause        *pause.Service
 	Scheduler    *scheduler.SchedulerService
 	TreeControls *officeservice.Service
 	Workspaces   *officeservice.Service
 	Documents    *taskservice.DocumentService
-	GC           *infra.GarbageCollector
 	Reconciler   *infra.Reconciler
 	Repo         *sqlite.Repository
 	GitManager   *configloader.GitManager

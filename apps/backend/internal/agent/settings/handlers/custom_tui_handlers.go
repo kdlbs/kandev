@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -19,15 +20,27 @@ type createCustomTUIAgentRequest struct {
 	// which the registry splits on whitespace — each entry is one argv element,
 	// so an argument containing a space can only be expressed here.
 	CommandArgs []string `json:"command_args"`
+	// MCPStrategy names how the wrapped CLI loads MCP servers, so kandev can
+	// point it at the per-session server. Empty (the default) = no MCP tools.
+	MCPStrategy string `json:"mcp_strategy"`
+	// Protocol is the runtime kandev drives the command with: empty (the
+	// default) for terminal passthrough, "acp" for ACP on stdin/stdout.
+	Protocol string `json:"protocol"`
+	// DisableBracketedPaste selects paced unframed delivery for terminal TUIs
+	// that do not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool `json:"disable_bracketed_paste"`
 }
 
 func (r createCustomTUIAgentRequest) toControllerRequest() controller.CreateCustomTUIAgentRequest {
 	return controller.CreateCustomTUIAgentRequest{
-		DisplayName: r.DisplayName,
-		Model:       r.Model,
-		Command:     r.Command,
-		Description: r.Description,
-		CommandArgs: r.CommandArgs,
+		DisplayName:           r.DisplayName,
+		Model:                 r.Model,
+		Command:               r.Command,
+		Description:           r.Description,
+		CommandArgs:           r.CommandArgs,
+		MCPStrategy:           r.MCPStrategy,
+		Protocol:              r.Protocol,
+		DisableBracketedPaste: r.DisableBracketedPaste,
 	}
 }
 
@@ -49,7 +62,8 @@ func (h *Handlers) httpCreateCustomTUIAgent(c *gin.Context) {
 	resp, err := h.controller.CreateCustomTUIAgent(c.Request.Context(), body.toControllerRequest())
 	if err != nil {
 		switch err {
-		case controller.ErrInvalidSlug, controller.ErrCommandRequired:
+		case controller.ErrInvalidSlug, controller.ErrCommandRequired, controller.ErrUnknownMCPStrategy,
+			controller.ErrUnknownCustomAgentProtocol, controller.ErrMCPStrategyNotApplicable:
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case controller.ErrAgentAlreadyExists:
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
@@ -78,6 +92,65 @@ func (h *Handlers) httpCreateCustomTUIAgent(c *gin.Context) {
 			})
 			h.hub.Broadcast(notification)
 		}
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+type updateCustomTUIAgentMCPRequest struct {
+	MCPStrategy string `json:"mcp_strategy"`
+}
+
+// httpListMCPStrategies serves the selectable MCP injection strategies. The
+// list is served rather than hardcoded in the client so a strategy added in Go
+// becomes selectable without a matching frontend edit, and so the UI can show
+// each strategy's own description of the mechanism it uses.
+func (h *Handlers) httpListMCPStrategies(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"strategies": mcpconfig.StrategyOptions()})
+}
+
+// httpUpdateCustomTUIAgentMCP changes an existing custom TUI agent's MCP
+// injection strategy. The rest of a tui_config stays immutable; this exists so
+// agents created before the field existed can opt in without being deleted and
+// rebuilt.
+func (h *Handlers) httpUpdateCustomTUIAgentMCP(c *gin.Context) {
+	var body updateCustomTUIAgentMCPRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	resp, err := h.controller.SetCustomTUIAgentMCPStrategy(c.Request.Context(), c.Param("id"), body.MCPStrategy)
+	if err != nil {
+		switch err {
+		case controller.ErrUnknownMCPStrategy, controller.ErrNotCustomTUIAgent,
+			controller.ErrMCPStrategyNotApplicable, controller.ErrUnknownCustomAgentProtocol:
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case controller.ErrAgentNotFound:
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			h.logger.Error("failed to update custom TUI agent MCP strategy", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	// The agent's supports_mcp and tui_config both changed; refresh the agent
+	// list so open settings tabs show the MCP editor appearing or disappearing
+	// without a reload.
+	//
+	// ActionAgentSettingsUpdated, not ActionAgentUpdated: the latter is a
+	// runtime status ping shaped {agentId, status} feeding a different store
+	// slice, so sending an agent record on it inserts {id: undefined} into the
+	// runtime list instead of updating settings.
+	//
+	//ws:global agent settings are not workspace-scoped — the agents list is a
+	// global settings surface, so every connected client's copy is stale after
+	// this change. Matches the sibling agent.profile.* and agent.available.updated
+	// broadcasts in this package.
+	if h.hub != nil {
+		notification, _ := ws.NewNotification(ws.ActionAgentSettingsUpdated, gin.H{"agent": resp})
+		h.hub.Broadcast(notification)
 	}
 
 	c.JSON(http.StatusOK, resp)

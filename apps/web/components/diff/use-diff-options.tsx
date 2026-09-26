@@ -6,6 +6,7 @@ import { FONT } from "@/lib/theme/colors";
 import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
 import { useDiffHeaderToolbar } from "./diff-header-toolbar";
 import type { AnnotationMetadata } from "./use-diff-annotation-renderer";
+import { useTranslation } from "react-i18next";
 
 /** CSS overrides for the Pierre diff viewer, injected via unsafeCSS. */
 const DIFF_UNSAFE_CSS = `
@@ -123,6 +124,7 @@ type UseDiffOptionsResult = {
 };
 
 export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
+  const { t } = useTranslation();
   const {
     filePath,
     diff,
@@ -186,7 +188,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
         // edge into the code area, same as pierre's built-in button does.
         style={{ marginRight: "calc(1ch - 1lh)" }}
         className="flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
-        title="Add comment"
+        title={t("diff:addComment")}
       >
         <IconPlus className="h-3 w-3" />
       </div>

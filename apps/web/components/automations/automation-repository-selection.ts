@@ -7,9 +7,16 @@ import type { ExecutorProfile, LocalRepository, Repository } from "@/lib/types/h
 // before it can be saved) or the single-picker's "Auto" fallback when the
 // executor doesn't support multiple repositories.
 export type RepositorySelection =
-  | { kind: "none" }
-  | { kind: "registered"; id: string }
-  | { kind: "discovered"; path: string; name: string; defaultBranch: string };
+  | { kind: "none"; key?: string; branch?: string }
+  | { kind: "registered"; id: string; key?: string; branch?: string }
+  | {
+      kind: "discovered";
+      path: string;
+      name: string;
+      defaultBranch: string;
+      key?: string;
+      branch?: string;
+    };
 
 export const REPO_NONE_OPTION_ID = "__none__";
 const DISCOVERED_PREFIX = "path:";
@@ -25,9 +32,16 @@ export function selectionToOptionId(sel: RepositorySelection): string {
 // used by the single-picker fallback (executor doesn't support multi-repo)
 // but omitted from per-row multi-repo pickers, where removing a row is how
 // you clear it.
+//
+// `t` is threaded in rather than imported from @/lib/i18n at module scope for
+// two reasons: this is a plain .ts helper with no JSX, so the eslint guard
+// never sees the option label at all, and both callers memoize the result —
+// a captured module-level `t` would leave the memo stale after a locale
+// switch. Every repository name in the list is user data and stays verbatim.
 export function buildRepositoryItems(
   workspaceRepos: Repository[],
   discoveredRepos: LocalRepository[],
+  t: (key: string) => string,
   options: { includeNone?: boolean } = {},
 ): Array<{ id: string; label: string }> {
   const registeredPaths = new Set(
@@ -39,13 +53,13 @@ export function buildRepositoryItems(
   const items: Array<{ id: string; label: string }> =
     options.includeNone === false
       ? []
-      : [{ id: REPO_NONE_OPTION_ID, label: "None — no repository" }];
+      : [{ id: REPO_NONE_OPTION_ID, label: t("automations:repositoryNone") }];
   for (const r of workspaceRepos) {
     items.push({ id: r.id, label: r.name || `${r.provider_owner}/${r.provider_name}` });
   }
   for (const r of discoveredRepos) {
     if (registeredPaths.has(r.path.replace(/\/+$/, ""))) continue;
-    items.push({ id: DISCOVERED_PREFIX + r.path, label: `${r.name} — ${r.path}` });
+    items.push({ id: DISCOVERED_PREFIX + r.path, label: `${r.name} - ${r.path}` });
   }
   return items;
 }
@@ -59,9 +73,13 @@ export function pickSelectionFromOptionId(
   if (optionId.startsWith(DISCOVERED_PREFIX)) {
     const path = optionId.slice(DISCOVERED_PREFIX.length);
     const match = discoveredRepos.find((r) => r.path === path);
+    // i18n-exempt: persisted repository name. See the comment below.
     return {
       kind: "discovered",
       path,
+      // Persisted as the created repository's name (see resolveOneRepositoryId
+      // in automation-payload.ts) — user data, so it stays English rather than
+      // writing a locale-dependent name into the record.
       name: match?.name ?? path.split("/").pop() ?? "New Repository",
       defaultBranch: match?.default_branch ?? "",
     };
@@ -102,18 +120,17 @@ export function resolveExecutorType(
 }
 
 // normalizeRepositorySelections enforces the single-repository invariant at
-// the save boundary: the picker only *renders* repositorySelections[0] once
-// the executor stops supporting multi-repo or a github_pr trigger is active
-// (see RepositoryPickerField in config-section.tsx), but doesn't itself
+// the save boundary: the picker only accepts one row once the executor stops
+// supporting multi-repo, but doesn't itself
 // truncate the underlying selections array — a user who adds 2+ repos, then
-// switches to an incompatible executor or trigger without touching the
+// switches to an incompatible executor without touching the
 // picker again, would otherwise still save every stale entry. Called right
 // before resolveRepositoryIds so the persisted repository_ids always match
 // what's actually rendered.
 export function normalizeRepositorySelections(
   selections: RepositorySelection[],
-  options: { supportsMultiRepo: boolean; isPRTrigger: boolean },
+  options: { supportsMultiRepo: boolean },
 ): RepositorySelection[] {
-  if (options.supportsMultiRepo && !options.isPRTrigger) return selections;
+  if (options.supportsMultiRepo) return selections;
   return selections.slice(0, 1);
 }

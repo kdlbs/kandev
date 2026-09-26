@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   NO_REPOSITORY,
   DEFAULT_BRANCH,
-  DEFAULT_BRANCH_LABEL,
   resolveRepositoryId,
   resolveBaseBranch,
   clearWorkspaceScopedForm,
@@ -29,15 +28,15 @@ describe("resolveBaseBranch", () => {
 
 describe("branchPlaceholder", () => {
   it("prompts to pick a repository first when none is selected", () => {
-    expect(branchPlaceholder("", false)).toBe("Pick a repository first");
+    expect(branchPlaceholder("", false)).toBe("pickRepository");
     // No repo takes precedence over the loading state.
-    expect(branchPlaceholder("", true)).toBe("Pick a repository first");
+    expect(branchPlaceholder("", true)).toBe("pickRepository");
   });
   it("shows a loading hint while branches stream in", () => {
-    expect(branchPlaceholder("repo-1", true)).toBe("Loading…");
+    expect(branchPlaceholder("repo-1", true)).toBe("loading");
   });
   it("shows the default-branch label once a repo is selected and loaded", () => {
-    expect(branchPlaceholder("repo-1", false)).toBe(DEFAULT_BRANCH_LABEL);
+    expect(branchPlaceholder("repo-1", false)).toBe("defaultBranch");
   });
 });
 

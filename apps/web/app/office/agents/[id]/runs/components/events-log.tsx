@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import type { RunEvent } from "@/lib/api/domains/office-extended-api";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   events: RunEvent[];
@@ -23,20 +24,21 @@ const LEVEL_COLOR: Record<string, string> = {
  * Wave 2.E polish.
  */
 export function EventsLog({ events }: Props) {
+  const { t } = useTranslation();
   if (events.length === 0) {
     return (
       <div
         className="rounded-lg border border-border p-4 text-xs text-muted-foreground"
         data-testid="events-log-empty"
       >
-        No events recorded for this run yet.
+        {t("office:noEventsRecordedForThisRun")}
       </div>
     );
   }
   return (
     <div className="rounded-lg border border-border" data-testid="events-log">
       <div className="px-4 py-2 border-b border-border text-xs font-medium uppercase tracking-wider text-muted-foreground">
-        Events
+        {t("office:events")}
       </div>
       <ul className="divide-y divide-border max-h-[400px] overflow-y-auto">
         {events.map((ev) => (

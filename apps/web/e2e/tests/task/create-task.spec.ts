@@ -2,6 +2,8 @@ import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { expectTaskDescription } from "../../pages/task-description-editor";
+import { seedIncompatibleAgentScenario, seedLockedWorkflow } from "./agent-compatibility-helpers";
 
 // Exercises the regular task-create dialog (New Task in the sidebar), so run
 // with the office feature disabled.
@@ -97,6 +99,29 @@ test.describe("Task creation", () => {
     await expect(testPage.getByTestId("agent-profile-selector")).not.toContainText(
       "Select agent...",
     );
+
+    const repositorySelector = testPage.getByTestId("repo-chip-trigger").first();
+    await repositorySelector.click();
+    const repositoryListbox = testPage.getByRole("listbox");
+    const repositoryOptions = repositoryListbox.getByRole("option");
+    await expect(repositoryOptions.first()).toHaveAttribute("aria-selected", "true");
+    await expect(repositoryOptions.first()).toHaveClass(/bg-card/);
+    await testPage.keyboard.press("Escape");
+
+    const agentSelector = testPage.getByTestId("agent-profile-selector");
+    await agentSelector.click();
+    const agentListbox = testPage.getByRole("listbox");
+    const agentOptions = agentListbox.getByRole("option");
+    await expect(agentOptions.first()).toHaveAttribute("aria-selected", "true");
+    await expect(agentOptions.first()).toHaveClass(/bg-card/);
+    await testPage.keyboard.press("Escape");
+
+    const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
+    await branchSelector.click();
+    const branchListbox = testPage.getByRole("listbox");
+    const branchOptions = branchListbox.getByRole("option");
+    await expect(branchOptions.first()).toHaveAttribute("aria-selected", "true");
+    await expect(branchOptions.first()).toHaveClass(/bg-card/);
   });
 
   test("dialog remembers selections after creating a task", async ({ testPage }) => {
@@ -132,6 +157,248 @@ test.describe("Task creation", () => {
     await expect(testPage.getByTestId("agent-profile-selector")).not.toContainText(
       "Select agent...",
     );
+  });
+
+  test("uses the remembered workflow instead of the board filter", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const devWorkflow = await apiClient.createWorkflow(seedData.workspaceId, "Dev", "simple");
+    const devSteps = await apiClient.listWorkflowSteps(devWorkflow.id);
+    const devStartStep = devSteps.steps.find((step) => step.is_start_step) ?? devSteps.steps[0];
+    if (!devStartStep) throw new Error("Dev workflow has no start step");
+
+    try {
+      await apiClient.createTask(seedData.workspaceId, "Remembered Dev task", {
+        workflow_id: devWorkflow.id,
+        workflow_step_id: devStartStep.id,
+      });
+      const { settings } = await apiClient.getUserSettings();
+      expect(
+        settings.task_create_last_used?.workflow_ids_by_workspace?.[seedData.workspaceId],
+      ).toBe(devWorkflow.id);
+
+      // Keep the board filtered to the seeded workflow while remembering a
+      // different workflow for task creation.
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: seedData.workflowId,
+      });
+
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText("Dev");
+    } finally {
+      await apiClient.deleteWorkflow(devWorkflow.id).catch(() => {});
+    }
+  });
+
+  test("shows the selected workflow launch prompt preview", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Launch Preview Workflow",
+    );
+    const configuredStart = await apiClient.createWorkflowStep(workflow.id, "Backlog", 0, {
+      is_start_step: true,
+    });
+    const autoStart = await apiClient.createWorkflowStep(workflow.id, "In Progress", 1);
+
+    await apiClient.updateWorkflowStep(configuredStart.id, { events: {} });
+    await apiClient.updateWorkflowStep(autoStart.id, {
+      prompt: "Launch instructions: {{task_prompt}} | {{task_prompt}} | {task_id} | @saved",
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: seedData.workflowId,
+      task_create_last_used: {
+        repository_id: seedData.repositoryId,
+        branch: "main",
+        agent_profile_id: seedData.agentProfileId,
+        workflow_ids_by_workspace: { [seedData.workspaceId]: seedData.workflowId },
+      },
+    });
+
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      const workflowSelector = dialog.getByTestId("workflow-selector-trigger");
+      await expect(workflowSelector).toContainText("E2E Workflow");
+      await workflowSelector.click();
+      await testPage
+        .getByRole("button", { name: /^Launch Preview Workflow/ })
+        .last()
+        .click();
+
+      await expect(workflowSelector).toContainText("Launch Preview Workflow");
+      await dialog.getByTestId("task-description-input").fill("");
+      const launchStep = dialog.getByTestId("task-create-launch-step");
+      await expect(launchStep).toHaveText("Backlog");
+      await expect(workflowSelector).not.toContainText("Start step:");
+      const selectorBox = await workflowSelector.boundingBox();
+      const launchStepBox = await launchStep.boundingBox();
+      const launchStepInfo = dialog.getByTestId("task-create-launch-step-info");
+      await expect(launchStepInfo).toHaveAttribute("aria-label", "Learn about the task start step");
+      const launchStepInfoBox = await launchStepInfo.boundingBox();
+      if (!selectorBox || !launchStepInfoBox || !launchStepBox) {
+        throw new Error("launch step controls have no layout box");
+      }
+      expect(launchStepInfoBox.x).toBeGreaterThanOrEqual(selectorBox.x + selectorBox.width - 1);
+      expect(launchStepBox.x).toBeGreaterThanOrEqual(
+        launchStepInfoBox.x + launchStepInfoBox.width - 1,
+      );
+      await launchStepInfo.hover();
+      const launchStepTooltip = testPage.getByRole("tooltip", {
+        name: "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
+      });
+      await expect(launchStepTooltip).toBeVisible();
+      await testPage.mouse.move(0, 0);
+      await expect(launchStepTooltip).toBeHidden();
+
+      await dialog.getByTestId("task-title-input").fill("Preview the launch prompt");
+      const description = "Review the launch preview";
+      await dialog.getByTestId("task-description-input").fill(description);
+      await expect(launchStep).toHaveText("In Progress");
+      const toggle = dialog.getByTestId("task-create-launch-preview-toggle");
+      await expect(toggle).toHaveAttribute(
+        "aria-label",
+        "Preview launch prompt with workflow step prompt: In Progress",
+      );
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await toggle.hover();
+      await expect(
+        testPage.getByRole("tooltip", {
+          name: "Preview launch prompt with workflow step prompt: In Progress",
+        }),
+      ).toBeVisible();
+      await toggle.click();
+
+      await expect(dialog.getByTestId("task-create-launch-preview-content")).toContainText(
+        `Launch instructions: ${description} | {{task_prompt}} | {task_id} | @saved`,
+      );
+      await expect(dialog.getByTestId("task-description-input")).toHaveCount(0);
+
+      await toggle.click();
+      await expectTaskDescription(dialog.getByTestId("task-description-input"), description);
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(dialog).not.toBeVisible();
+    } finally {
+      await apiClient.deleteWorkflow(workflow.id).catch(() => {});
+    }
+  });
+
+  test("keeps remembered workflows isolated by workspace after reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    let devWorkflowId = "";
+    let workspaceBId = "";
+
+    try {
+      const devWorkflow = await apiClient.createWorkflow(seedData.workspaceId, "Dev", "simple");
+      devWorkflowId = devWorkflow.id;
+      const devSteps = await apiClient.listWorkflowSteps(devWorkflow.id);
+      const devStartStep = devSteps.steps.find((step) => step.is_start_step) ?? devSteps.steps[0];
+      if (!devStartStep) throw new Error("Dev workflow has no start step");
+
+      const workspaceB = await apiClient.createWorkspace("Workflow Memory B");
+      workspaceBId = workspaceB.id;
+      const supportWorkflow = await apiClient.createWorkflow(workspaceB.id, "Support", "simple");
+      const otherWorkflow = await apiClient.createWorkflow(workspaceB.id, "Other", "simple");
+      const supportSteps = await apiClient.listWorkflowSteps(supportWorkflow.id);
+      const supportStartStep =
+        supportSteps.steps.find((step) => step.is_start_step) ?? supportSteps.steps[0];
+      if (!supportStartStep) throw new Error("Support workflow has no start step");
+
+      await apiClient.createTask(seedData.workspaceId, "Remembered Dev task", {
+        workflow_id: devWorkflow.id,
+        workflow_step_id: devStartStep.id,
+      });
+      await apiClient.createTask(workspaceB.id, "Remembered Support task", {
+        workflow_id: supportWorkflow.id,
+        workflow_step_id: supportStartStep.id,
+      });
+      const { settings } = await apiClient.getUserSettings();
+      expect(settings.task_create_last_used?.workflow_ids_by_workspace).toMatchObject({
+        [seedData.workspaceId]: devWorkflow.id,
+        [workspaceB.id]: supportWorkflow.id,
+      });
+
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: seedData.workflowId,
+      });
+
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText("Dev");
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(dialog).not.toBeVisible();
+
+      await testPage.getByTestId("sidebar-workspace-trigger").click();
+      await testPage.getByTestId(`sidebar-workspace-item-${workspaceB.id}`).click();
+      await expect(testPage).toHaveURL(
+        (url) => url.pathname === "/" && url.searchParams.get("workspaceId") === workspaceB.id,
+      );
+
+      // Give workspace B a conflicting board filter so the remembered Support
+      // workflow is the only source that can select it in the dialog.
+      await apiClient.saveUserSettings({
+        workspace_id: workspaceB.id,
+        workflow_filter_id: otherWorkflow.id,
+      });
+      await testPage.reload();
+      await kanban.board.waitFor({ state: "visible" });
+      await kanban.createTaskButton.first().click();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText("Support");
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(dialog).not.toBeVisible();
+
+      // Reload workspace A again to prove the two memories do not overwrite
+      // each other when the active workspace changes.
+      await testPage.getByTestId("sidebar-workspace-trigger").click();
+      await testPage.getByTestId(`sidebar-workspace-item-${seedData.workspaceId}`).click();
+      await expect(testPage).toHaveURL(
+        (url) =>
+          url.pathname === "/" && url.searchParams.get("workspaceId") === seedData.workspaceId,
+      );
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: seedData.workflowId,
+      });
+      await testPage.reload();
+      await kanban.board.waitFor({ state: "visible" });
+      await kanban.createTaskButton.first().click();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText("Dev");
+    } finally {
+      if (devWorkflowId) await apiClient.deleteWorkflow(devWorkflowId).catch(() => {});
+      if (workspaceBId)
+        await apiClient.deleteWorkspace(workspaceBId, "Workflow Memory B").catch(() => {});
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: seedData.workflowId,
+      });
+    }
   });
 
   test("opens create task dialog from kanban header", async ({ testPage }) => {
@@ -256,7 +523,7 @@ test.describe("Task creation", () => {
 
     const descInput = testPage.getByTestId("task-description-input");
     await descInput.fill("This is a test description");
-    await expect(descInput).toHaveValue("This is a test description");
+    await expectTaskDescription(descInput, "This is a test description");
   });
 
   test("start agent: creates task, starts session, navigates to session", async ({ testPage }) => {
@@ -542,3 +809,129 @@ async function getTaskIdFromPage(page: import("@playwright/test").Page): Promise
   if (!match) throw new Error(`Cannot extract task ID from URL: ${url}`);
   return match[1];
 }
+
+test.describe("Task creation agent compatibility", () => {
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.1
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.2
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.6
+  test("replaces the selected agent with a compatible one when the executor changes", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    await backend.restart({ KANDEV_MOCK_PROVIDERS: "codex-acp" });
+    const scenario = await seedIncompatibleAgentScenario(
+      apiClient,
+      testPage,
+      seedData.agentProfileId,
+      {
+        executor: "E2E Docker Replace Agent",
+        dockerProfile: "Docker Codex Only",
+        compatibleProfile: "Codex Compatible",
+      },
+    );
+
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await dialog.getByTestId("task-title-input").fill("Replace incompatible agent");
+      await dialog.getByTestId("task-description-input").fill("executor switch after agent pick");
+
+      // Make sure the seeded agent is the selection while the default executor
+      // still accepts it. The dialog usually restores it on its own; clicking
+      // an already-selected option would toggle it off, so only pick it when
+      // something else is selected.
+      const agentSelector = dialog.getByTestId("agent-profile-selector");
+      if (!(await agentSelector.textContent())?.includes(scenario.seedProfileName)) {
+        await agentSelector.click();
+        await testPage
+          .getByRole("listbox")
+          .getByRole("option")
+          .filter({ hasText: scenario.seedProfileName })
+          .filter({ hasNotText: scenario.secondAgentDisplayName })
+          .first()
+          .click();
+      }
+      await expect(agentSelector).toContainText(scenario.seedProfileName);
+      await expect(agentSelector).not.toContainText(scenario.secondAgentDisplayName);
+
+      await testPage.getByTestId("executor-profile-selector").click();
+      await testPage.getByRole("option", { name: /Docker Codex Only/i }).click();
+
+      // The mocked alias also ships a default profile, so the replacement can
+      // be either Codex profile; what matters is that it is no longer the seed.
+      await expect(agentSelector).toContainText(scenario.secondAgentDisplayName);
+      await expect(agentSelector).not.toContainText(scenario.seedProfileName);
+      await expect(dialog.getByTestId("agent-profile-empty-state")).toHaveCount(0);
+      await expect(dialog.getByTestId("agent-profile-incompatible-note")).toHaveCount(0);
+      await expect(dialog.getByTestId(START_AGENT_TEST_ID)).toBeEnabled({
+        timeout: START_ENABLED_TIMEOUT,
+      });
+    } finally {
+      await scenario.cleanup();
+      await backend.restart();
+    }
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.5
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.6
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.7
+  test("names the workflow-locked agent when the executor lacks its credentials", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    await backend.restart({ KANDEV_MOCK_PROVIDERS: "codex-acp" });
+    const scenario = await seedIncompatibleAgentScenario(
+      apiClient,
+      testPage,
+      seedData.agentProfileId,
+      {
+        executor: "E2E Docker Locked Agent",
+        dockerProfile: "Docker Locked Auth",
+        compatibleProfile: "Codex Unlocked",
+      },
+    );
+    const workflow = await seedLockedWorkflow(
+      apiClient,
+      seedData.workspaceId,
+      seedData.workflowId,
+      "Locked Agent",
+      seedData.agentProfileId,
+    );
+
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText("Locked Agent");
+      await dialog.getByTestId("task-title-input").fill("Locked agent task");
+      await dialog.getByTestId("task-description-input").fill("workflow-locked incompatible agent");
+
+      await testPage.getByTestId("executor-profile-selector").click();
+      await testPage.getByRole("option", { name: /Docker Locked Auth/i }).click();
+
+      const note = dialog.getByTestId("agent-profile-incompatible-note");
+      await expect(note).toContainText("Locked Agent");
+      await expect(note).toContainText(scenario.seedProfileName);
+      await expect(note).toContainText("Docker Locked Auth");
+      await expect(dialog.getByRole("link", { name: "Configure credentials" })).toHaveAttribute(
+        "href",
+        `/settings/executors/${scenario.dockerProfileId}`,
+      );
+      await expect(dialog.getByTestId("agent-profile-empty-state")).toHaveCount(0);
+      await expect(dialog.getByTestId(START_AGENT_TEST_ID)).toBeDisabled();
+    } finally {
+      await workflow.cleanup();
+      await scenario.cleanup();
+      await backend.restart();
+    }
+  });
+});

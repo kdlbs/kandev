@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { injectLatency } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 /**
@@ -21,7 +22,10 @@ test.describe("Agent profile — ACP-first", () => {
     test.setTimeout(60_000);
 
     const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
+    // Provider registration order is not a stable contract. The mock agent is
+    // the fixture that advertises deterministic ACP modes, so select it by id
+    // instead of relying on the first row returned by the API.
+    const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
     const profileId = agent.profiles[0].id;
 
     await testPage.goto(`/settings/agents/${agent.name}/profiles/${profileId}`);
@@ -46,6 +50,44 @@ test.describe("Agent profile — ACP-first", () => {
 
     // The mock agent advertises modes, so the mode picker is rendered.
     await expect(testPage.getByTestId("profile-mode-field")).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("profile model picker opens from the field start edge", async ({ testPage, apiClient }) => {
+    test.setTimeout(60_000);
+
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
+    const profile = agent.profiles[0];
+
+    await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
+
+    const profileSettingsPanel = testPage.locator(
+      '[data-settings-target^="setting-agent-profile-"][data-settings-target$="-profile-settings"]',
+    );
+    const selector = profileSettingsPanel.getByRole("button", {
+      name: "Profile start model settings",
+    });
+    await expect(selector).toBeVisible({ timeout: 15_000 });
+    await selector.click();
+
+    const popoverContent = testPage.locator('[data-slot="popover-content"]:visible');
+    await expect(popoverContent).toBeVisible();
+    await popoverContent.evaluate(async (element) => {
+      await Promise.all(
+        element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
+      );
+    });
+
+    const [selectorBox, popoverBox] = await Promise.all([
+      selector.boundingBox(),
+      popoverContent.boundingBox(),
+    ]);
+
+    expect(selectorBox).not.toBeNull();
+    expect(popoverBox).not.toBeNull();
+    // Radix may nudge the content by a few pixels to satisfy collision padding;
+    // the regression is the old end alignment, which placed it ~50px inward.
+    expect(Math.abs(popoverBox!.x - selectorBox!.x)).toBeLessThanOrEqual(12);
   });
 
   test("profile name edits persist across reload", async ({ testPage, apiClient }) => {
@@ -128,12 +170,28 @@ test.describe("Agent profile — ACP-first", () => {
     });
 
     try {
+      await testPage.route("**/api/v1/agent-models/mock-agent/resolve", async (route) => {
+        const request = route.request().postDataJSON() as { model?: string };
+        if (request.model === "mock-smart") {
+          await injectLatency(
+            750,
+            "keeps the profile model-option loading state visible during resolution",
+          );
+        }
+        await route.fallback();
+      });
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
       const selector = testPage.getByRole("button", { name: "Profile start model settings" });
       await expect(selector).toBeVisible({ timeout: 15_000 });
       // Shared profile selectors retain the all-values summary; baseline
       // compaction applies only to task chat.
       await expect(selector).toHaveText("Mock Fast / High", { timeout: 10_000 });
+      await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
+        timeout: 15_000,
+      });
+      await expect(testPage.getByTestId("profile-refresh-capabilities")).toBeEnabled({
+        timeout: 15_000,
+      });
 
       await selector.click();
       await expect(
@@ -144,6 +202,39 @@ test.describe("Agent profile — ACP-first", () => {
       await effortTrigger.click();
       await testPage.getByRole("button", { name: "Low", exact: true }).click();
       await expect(selector).toHaveText("Mock Fast / Low");
+
+      // Changing the model must replace the option snapshot. mock-smart
+      // exposes Max while mock-fast exposes Medium, so this also proves the
+      // profile selector does not keep the previous model's option list.
+      await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+      await expect(testPage.getByTestId("model-config-options-loading")).toBeVisible();
+      const selectedModelRow = testPage.getByTestId("model-config-selected-row");
+      await expect(selectedModelRow.locator("svg.tabler-icon-loader")).toBeVisible();
+      await expect(selectedModelRow.locator("svg.tabler-icon-check.absolute")).toHaveCount(0);
+      await expect(testPage.getByTestId("config-option-trigger-effort")).toHaveCount(0);
+      await expect(selector).toHaveAttribute("aria-expanded", "true");
+      await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
+        timeout: 15_000,
+      });
+      await expect(testPage.getByTestId("model-config-options-loading")).toHaveCount(0);
+      await expect(selectedModelRow.locator("svg.tabler-icon-loader")).toHaveCount(0);
+      await expect(selectedModelRow.locator("svg.tabler-icon-check.absolute")).toBeVisible();
+      await expect(selector).toContainText("Mock Smart", { timeout: 10_000 });
+      await expect(testPage.getByTestId("config-option-trigger-effort")).toBeVisible();
+      await testPage.getByTestId("config-option-trigger-effort").click();
+      await expect(testPage.getByRole("button", { name: "Max", exact: true })).toBeVisible();
+      await testPage.getByRole("button", { name: "Max", exact: true }).click();
+      await expect(selector).toHaveText("Mock Smart / Max");
+
+      // Restore the original model before exercising persistence below.
+      await testPage.getByRole("option", { name: /Mock Fast/ }).click();
+      await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
+        timeout: 15_000,
+      });
+      await testPage.getByTestId("config-option-trigger-effort").click();
+      await testPage.getByRole("button", { name: "Low", exact: true }).click();
+      await expect(selector).toHaveText("Mock Fast / Low");
+      await selector.click();
 
       const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
       await expect(saveButton).toBeEnabled({ timeout: 10_000 });
@@ -181,7 +272,7 @@ test.describe("Agent profile — ACP-first", () => {
 
     // 1. Get mock agent and create a profile with mode "plan-mock"
     const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
+    const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
     const profile = await apiClient.createAgentProfile(agent.id, "Mode Test Profile", {
       model: "mock-fast",
       mode: "plan-mock",

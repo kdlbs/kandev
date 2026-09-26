@@ -1,5 +1,5 @@
-// Package backups manages user-facing SQLite snapshots stored under
-// <data-dir>/backups/. The package distinguishes two kinds of snapshots
+// Package backups manages user-facing SQLite snapshots stored in backups/
+// beside the configured SQLite database. The package distinguishes two kinds of snapshots
 // purely by filename prefix:
 //
 //   - "kandev-<...>.db"  -- AUTO snapshots written by the persistence layer

@@ -1,0 +1,98 @@
+{
+  "web": {
+    "zh-tw": {
+      "agents": {
+        "dynamicProfileSettings": "動態設定檔設定"
+      },
+      "settings": {
+        "preventAutoStartAgentOnOpen": "開啟任務時不自動啟動代理程式",
+        "preventAutoStartAgentOnOpenHelp": "重新啟動後，或從工作流程最後一步開啟任務時，不會自動啟動代理程式，改為顯示「啟動代理程式」按鈕。",
+        "chatAnimationsDescription": "在此裝置上為新文字、新聊天項目和滾動新增動畫。遵循減少動態效果的偏好設定。",
+        "requireExactModelHelper": "僅當此精確模型已公佈並成功套用時才啟動工作階段。關閉此選項後，已儲存的備援設定仍可使用。"
+      },
+      "common": {
+        "nativeFolderPickerUnavailable": "原生資料夾選擇器無法使用。請重新載入 Kandev 後再試。",
+        "sidebarWeeks_one": "{{count}}週",
+        "sidebarWeeks_other": "{{count}}週"
+      },
+      "github": {
+        "resolvedFromOneNamedHostAccount": "需要時從一個指定的主機帳戶解析。受管理任務會取得限定範圍的中介身分；除非在下方選取，否則不會繼承主機 Git。",
+        "storedAppCredentialsMintShortLived": "儲存的應用程式認證會簽發短效安裝權杖。受管理任務會針對允許的儲存庫取得限定範圍的應用程式中介身分。",
+        "withManagedWorkspaceCredentialsKandevConfigures": "使用受管理的工作區認證資訊時，Kandev 會在新啟動的任務處理程序中，將 agentctl 設為 Git 的認證輔助程式。當 Git 要求取得已附加 GitHub HTTPS 儲存庫的認證資訊時，輔助程式會兌換僅適用於該任務與儲存庫的 broker 租約。認證資訊會在需要時傳回 Git，且不會寫入儲存庫或 Git 設定。gh 命令會使用 Kandev 支援 broker 的轉接程式。繼承執行器設定則會略過這兩者，改用所選執行器可見的認證資訊。變更會套用至新啟動的任務及下次繼續執行，不會影響已在執行的處理程序。"
+      },
+      "task": {
+        "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。您的訊息會保留。",
+        "proxy": "代理伺服器",
+        "pathBasedProxyWorksForApis": "路徑型代理伺服器。適用於 API，但可能導致預期由 / 提供服務的 Web 應用程式無法正常運作。",
+        "checkoutOptions.providerUnsupported": "高階檢出選項目前適用於 GitHub 儲存庫。"
+      },
+      "workspaces": {
+        "failedToSaveRepository": "無法儲存此儲存庫"
+      },
+      "workflows": {
+        "profileSessionLifecycleIntro": "這些設定適用於工作流程更改代理程式設定檔的情況。",
+        "profileSessionStartReuseDescription": "繼續使用此代理程式設定檔最近可用的工作階段。如果沒有可用工作階段，則開始新工作階段。",
+        "openAgentSettings": "開啟代理程式設定"
+      },
+      "system": {
+        "diskRefreshHelp": "遍歷 Kandev 資料目錄內的所有子目錄並累計檔案大小。結果會快取幾小時；點選可立即重新計算。大型工作區可能需要幾秒。"
+      },
+      "executors": {
+        "containerNetworksDescription": "選擇此設定檔的任務容器所連線的 Docker 網路。",
+        "primaryNetworkMustPublishPorts": "主網路承載已發布的 agentctl 連接埠，因此必須是可發布連接埠的網路。請改為在下方連線 macvlan 或 ipvlan 網路。"
+      },
+      "office": {
+        "exportConfigurationChanged": "設定已變更。請重新載入預覽後再下載。",
+        "selectAWorkspaceToExport": "選擇工作區以匯出。"
+      },
+      "inboxHistory": {
+        "truncatedNotice": "還有更多歷史問題可查看。"
+      }
+    },
+    "zh-hk": {
+      "agents": {
+        "dynamicProfileSettings": "動態設定檔設定"
+      },
+      "settings": {
+        "preventAutoStartAgentOnOpen": "開啟任務時不自動啓動代理程式",
+        "preventAutoStartAgentOnOpenHelp": "重新啓動後，或從工作流程最後一步開啟任務時，不會自動啓動代理程式，改為顯示「啓動代理程式」按鈕。"
+      },
+      "common": {
+        "nativeFolderPickerUnavailable": "原生資料夾選擇器無法使用。請重新載入 Kandev 後再試。",
+        "sidebarWeeks_one": "{{count}}週",
+        "sidebarWeeks_other": "{{count}}週"
+      },
+      "github": {
+        "resolvedFromOneNamedHostAccount": "需要時從一個指定的主機帳戶解析。受管理任務會取得限定範圍的中介身份；除非在下方選取，否則不會繼承主機 Git。",
+        "storedAppCredentialsMintShortLived": "儲存的應用程式認證會簽發短效安裝權杖。受管理任務會針對允許的儲存庫取得限定範圍的應用程式中介身份。",
+        "withManagedWorkspaceCredentialsKandevConfigures": "使用受管理的工作區認證資料時，Kandev 會在新啓動的任務程序中，將 agentctl 設為 Git 的認證輔助程式。當 Git 要求取得已附加 GitHub HTTPS 儲存庫的認證資料時，輔助程式會兌換只適用於該任務及儲存庫的 broker 租約。認證資料會在需要時傳回 Git，且不會寫入儲存庫或 Git 設定。gh 命令會使用 Kandev 支援 broker 的轉接程式。繼承執行器設定則會略過這兩者，改用所選執行器可見的認證資料。變更會套用至新啓動的任務及下次繼續執行，不會影響已在執行的程序。"
+      },
+      "task": {
+        "proxy": "代理伺服器",
+        "pathBasedProxyWorksForApis": "路徑型代理伺服器。適用於 API，但可能導致預期由 / 提供服務的 Web 應用程式無法正常運作。"
+      },
+      "workspaces": {
+        "failedToSaveRepository": "無法儲存此儲存庫"
+      },
+      "workflows": {
+        "profileSessionLifecycleIntro": "這些設定適用於工作流程更改代理程式設定檔的情況。",
+        "profileSessionStartReuseDescription": "繼續使用此代理程式設定檔最近可用的工作階段。如果沒有可用工作階段，則開始新工作階段。",
+        "openAgentSettings": "開啟代理程式設定"
+      },
+      "system": {
+        "diskRefreshHelp": "遍歷 Kandev 數據目錄內的所有子目錄並累計檔案大小。結果會快取幾小時；點擊可立即重新計算。大型工作區可能需要幾秒。"
+      },
+      "executors": {
+        "containerNetworksDescription": "選擇此設定檔的任務容器所連接的 Docker 網絡。",
+        "gatewayPriority": "閘道優先順序",
+        "gatewayPriorityNote": "閘道優先順序最高的連接提供容器的預設路由。將所有優先順序留空可保留 Docker 自身的選擇。",
+        "primaryNetworkMustPublishPorts": "主網絡承載已發佈的 agentctl 連接埠，因此必須是可發佈連接埠的網絡。請改為在下方連接 macvlan 或 ipvlan 網絡。"
+      },
+      "office": {
+        "exportConfigurationChanged": "設定已變更。請重新載入預覽後再下載。",
+        "selectAWorkspaceToExport": "選擇工作區以匯出。"
+      }
+    }
+  },
+  "backend": {}
+}

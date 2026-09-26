@@ -1,6 +1,9 @@
 package engine
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // RunQueueAdapter is the engine's contract with the runs queue. The Phase 2
 // final integration emits QueueRun requests through this interface; Phase 3
@@ -8,11 +11,41 @@ import "context"
 //
 // Implementations MUST be safe for concurrent use and SHOULD treat
 // (IdempotencyKey) as a uniqueness key when set: if a request with the same
-// idempotency key has already been queued the implementation returns nil
-// without enqueuing a duplicate.
+// idempotency key has already been queued the implementation returns
+// QueueOutcomeDeduped (nil error) without enqueuing a duplicate.
 type RunQueueAdapter interface {
-	QueueRun(ctx context.Context, req QueueRunRequest) error
+	QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutcome, error)
 }
+
+// QueueOutcome reports what QueueRun actually did with a request, so a
+// caller that needs to log or act on the result — not just detect an error —
+// doesn't have to infer it from side effects. A duplicated declaration lives
+// in internal/runs/service (see that package's RunQueueAdapter doc); both
+// MUST match.
+type QueueOutcome string
+
+const (
+	// QueueOutcomeQueued means a new runs row was inserted.
+	QueueOutcomeQueued QueueOutcome = "queued"
+	// QueueOutcomeDeduped means an existing row with the same IdempotencyKey
+	// already exists in the durable queue identity, so nothing was inserted.
+	QueueOutcomeDeduped QueueOutcome = "deduped"
+	// QueueOutcomeCoalesced means the request was merged into an existing
+	// queued row for the same agent + reason within the coalescing
+	// window, so nothing new was inserted.
+	QueueOutcomeCoalesced QueueOutcome = "coalesced"
+	// QueueOutcomeNone means no enqueue was attempted, or the attempt
+	// returned an error. It is the zero value, so it is what a widened
+	// signature yields on any path that returns before deciding an
+	// outcome. Declared identically in internal/runs/service — both
+	// declarations MUST match.
+	QueueOutcomeNone QueueOutcome = ""
+	// QueueOutcomeRateLimited means an agent-initiated assignment wake was
+	// refused because its task's REQ-OFFICE-ASSIGN-RATE-001 allowance was
+	// already exhausted: no row was inserted and none was merged. Declared
+	// identically in internal/runs/service — both declarations MUST match.
+	QueueOutcomeRateLimited QueueOutcome = "rate_limited"
+)
 
 // QueueRunRequest is the typed payload the engine hands to RunQueueAdapter.
 //
@@ -23,10 +56,27 @@ type RunQueueAdapter interface {
 type QueueRunRequest struct {
 	AgentProfileID string
 	TaskID         string
+	// CausingTaskID identifies the task whose workflow turn caused this
+	// enqueue. It differs from TaskID when queue_run targets another task.
+	// Keeping the source separate prevents cross-task actions from losing
+	// their causation chain at the target boundary.
+	CausingTaskID  string
 	WorkflowStepID string
 	Reason         string
 	IdempotencyKey string
 	Payload        map[string]any
+	// CausingAgentProfileID is the agent profile whose turn is executing
+	// this action — the trigger session's own agent, not AgentProfileID
+	// (the run being queued). A carrier resolver uses it to scope a
+	// task's currently claimed run to the agent that actually holds it,
+	// since more than one agent can hold a claimed run on the same task.
+	// Empty for triggers with no session (e.g. a routine or wakeup fire).
+	CausingAgentProfileID string
+	// WaveKey and WaveString carry a completion-wave identity through from
+	// OnChildrenCompletedPayload (parent-wake-wave-identity). Empty for
+	// every trigger except on_children_completed.
+	WaveKey    string
+	WaveString string
 }
 
 // ParticipantInfo is a lightweight projection of a workflow_step_participants
@@ -45,6 +95,17 @@ type ParticipantInfo struct {
 }
 
 // DecisionInfo is a lightweight projection of a workflow_step_decisions row.
+//
+// DeciderType, DeciderID, Role and Comment carry the decider's identity and
+// human-facing reason. Role is the role the decision was recorded under
+// (which may differ from a guard's role — AC-42/58). Comment is the
+// human-facing reason column; Note is a separate, unrelated field no Office
+// surface reads.
+//
+// ID and DecidedAt are stamped by Engine.RecordParticipantDecision (AC-66,
+// AC-57b-i) before the write — DecisionStore.RecordStepDecision receives
+// DecisionInfo by value and never generates or echoes back either field, so
+// a caller cannot read them off the row after the call.
 type DecisionInfo struct {
 	ID            string
 	TaskID        string
@@ -52,6 +113,19 @@ type DecisionInfo struct {
 	ParticipantID string
 	Decision      string
 	Note          string
+	DecidedAt     time.Time
+
+	DeciderType string
+	DeciderID   string
+	Role        string
+	Comment     string
+
+	// SupersededAt is non-nil once a rework round has superseded this row
+	// (workflow_step_decisions.superseded_at). ListStepDecisions returns
+	// superseded rows alongside active ones so timelines render full history;
+	// a caller that needs only the currently-decided state must filter on
+	// this field itself rather than treating a non-empty result as "decided".
+	SupersededAt *time.Time
 }
 
 // ParticipantStore reads the workflow_step_participants table for an engine
@@ -64,8 +138,106 @@ type DecisionInfo struct {
 // template-level rows with per-task rows for that task and return the
 // resolved set. Returning nil/empty list is valid and signals a
 // single-agent step for that task.
+//
+// ListTaskParticipants returns every per-task row (task_id = taskID)
+// regardless of step_id — the AC-49 port that makes AC-18's cross-step
+// counting expressible. Template rows are never returned by this method;
+// callers combine it with ListStepParticipants(stepID, "") to gather
+// template rows scoped to one step (AC-50 step 1). An empty result is
+// valid, not an error.
 type ParticipantStore interface {
 	ListStepParticipants(ctx context.Context, stepID, taskID string) ([]ParticipantInfo, error)
+	ListTaskParticipants(ctx context.Context, taskID string) ([]ParticipantInfo, error)
+}
+
+// WorkflowScopedParticipantStore is an optional refinement of
+// ParticipantStore. It limits per-task overrides to the task's active
+// workflow, so rows left by a previous workflow cannot contribute to a new
+// workflow's quorum. The base interface remains small for plugins and test
+// doubles that do not have workflow-aware storage.
+type WorkflowScopedParticipantStore interface {
+	ListTaskParticipantsForWorkflow(ctx context.Context, taskID, workflowID string) ([]ParticipantInfo, error)
+}
+
+// ParticipantSeatWriter is the engine's contract for guaranteeing a
+// decision-required seat exists for a role somewhere in the task's workflow
+// (REQ-OFFICE-REVIEW-SEATS-001). Both methods are workflow+role scoped, not
+// step-scoped: a seat recorded against an earlier step in the same workflow
+// still counts, so re-entry after a rejection round never seats the role
+// twice (AC-001.5, AC-003.5).
+//
+// EnsureParticipantSeatCallback uses HasRoleSeatForTaskWorkflow as a cheap
+// existence peek before invoking the caster (skipping it entirely when a
+// seat already exists), and EnsureRoleSeat as the durable, transactional,
+// concurrency-safe write once the caster has resolved an agent to seat.
+// EnsureRoleSeat is itself the callback's idempotence mechanism: repeated
+// calls for the same (workflowID, taskID, role) converge on the one row a
+// single-transaction check-then-insert produced, so no separate durable
+// idempotency marker is needed.
+type ParticipantSeatWriter interface {
+	HasRoleSeatForTaskWorkflow(ctx context.Context, workflowID, taskID, role string) (bool, error)
+	EnsureRoleSeat(ctx context.Context, workflowID, stepID, taskID, role, agentProfileID string) (ParticipantInfo, error)
+}
+
+// SeatProvenance records why a particular agent was selected to fill a
+// role's seat, for the AC-004 observability counters. It is not persisted
+// on the participant row itself.
+type SeatProvenance string
+
+const (
+	// SeatProvenanceEligiblePool means the caster selected an agent from the
+	// role's normal eligible-agent pool (REQ-002 steps 3-4).
+	SeatProvenanceEligiblePool SeatProvenance = "eligible_pool"
+	// SeatProvenanceRunnerFallback means the eligible pool was empty and the
+	// caster fell back to seating the task's runner (REQ-002 step 2).
+	SeatProvenanceRunnerFallback SeatProvenance = "runner_fallback"
+)
+
+// ParticipantSeatCastResult is the typed outcome of a casting resolution
+// attempt. AgentProfileID and Provenance are meaningless when Unfillable is
+// true — REQ-002 step 2's no-runner branch, meaning no agent could be
+// resolved for the role at all. WorkspaceID is populated on every result,
+// including Unfillable ones, so the AC-OFFICE-REVIEW-SEATS-004.1 warning
+// record can identify the workspace without a second lookup.
+//
+// SelfReview is true both when the chosen agent is the task's runner and
+// when it already holds another seat on this task (the office seat
+// caster's best-effort cross-step exclusion, AC-OFFICE-REVIEW-SEATS-002.3,
+// ran out of alternatives). It is a counter label on RecordSeatProvenance,
+// not a persisted or user-visible field.
+type ParticipantSeatCastResult struct {
+	AgentProfileID string
+	WorkspaceID    string
+	Provenance     SeatProvenance
+	SelfReview     bool
+	Unfillable     bool
+}
+
+// ParticipantSeatCaster resolves which agent should fill a role's seat when
+// none exists yet, per REQ-002's five-step deterministic algorithm. The
+// office package implements this against role-specific workspace agent pools;
+// the engine treats the result as opaque.
+type ParticipantSeatCaster interface {
+	// stepID is the immutable workflow step that the task entered. Callers
+	// must pass this value instead of asking the adapter to re-read mutable
+	// task state after the transition commits. workflowID scopes any
+	// cross-step exclusion read the caster performs to the task's current
+	// workflow, so participant rows left over from a workflow the task has
+	// since switched away from (switch_workflow durably keeps them; see
+	// ListParticipantsForTaskWorkflow's doc comment) never count as already
+	// seated for the new workflow's casting decision.
+	CastParticipantSeat(ctx context.Context, workflowID, taskID, stepID, role string) (ParticipantSeatCastResult, error)
+}
+
+// AgentProfileResolver answers whether an agent profile id still resolves to
+// a live (non-deleted) agent profile. The quorum guard uses it to drop a
+// required seat whose agent was deleted after the seat was cast, rather than
+// waiting forever on an agent that can never decide
+// (REQ-OFFICE-REVIEW-SEATS-004.3). Nil-safe like every other optional Engine
+// dependency: when unwired, every seat is kept exactly as before this
+// capability existed.
+type AgentProfileResolver interface {
+	AgentProfileExists(ctx context.Context, agentProfileID string) (bool, error)
 }
 
 // DecisionStore reads and writes workflow_step_decisions rows. The engine
@@ -95,6 +267,13 @@ type ChildTaskSpec struct {
 	WorkflowID     string
 	StepID         string
 	AgentProfileID string
+	// CausingAgentProfileID is the agent profile whose turn is executing
+	// this action — the trigger session's own agent, not AgentProfileID
+	// (the child task's assignee). A carrier resolver uses it to scope
+	// the parent task's currently claimed run to the agent that actually
+	// holds it, since more than one agent can hold a claimed run on the
+	// same task. Empty for triggers with no session.
+	CausingAgentProfileID string
 }
 
 // TaskCreator is the engine's contract with whoever knows how to create a
@@ -112,6 +291,33 @@ type ChildTaskSpec struct {
 // always commits.
 type TaskCreator interface {
 	CreateChildTask(ctx context.Context, parentTaskID string, spec ChildTaskSpec) (taskID string, err error)
+}
+
+// MarkerBearingStepEntryExecutor is the engine's contract for executing one
+// marker-bearing on_enter action (clear_decisions,
+// queue_run_for_each_participant) from within DispatchStepEntry's loop. The
+// implementation claims the action's step-entry marker before executing and
+// completes it after, so a redelivered arrival — or a concurrent dispatch
+// racing the same entry — is a safe no-op instead of a duplicate side effect
+// (AC-OFFICE-STEP-ENTRY-DISPATCH-002.3/.4). Wired by the orchestrator, which
+// owns both the marker CAS primitives (ClaimStepEntryMarker et al.) and the
+// Phase 2 callbacks these two kinds already use.
+//
+// abandon reports that a concurrent dispatch already holds this position's
+// marker in_progress — not a failure, but per AC-002.10 the caller must still
+// abandon the remainder of this entry's sequence, the same as a genuine
+// error. err is non-nil exactly when the action itself failed (including a
+// prior attempt's recorded failure surfacing on a CAS loss).
+//
+// Nil-safe like every other optional Engine dependency: when unset,
+// DispatchStepEntry executes a marker-bearing action directly and
+// unprotected, matching the pre-convergence behaviour for any write
+// chokepoint that has not allocated a step entry for this arrival
+// (markerEntryID == 0).
+type MarkerBearingStepEntryExecutor interface {
+	ExecuteMarkerBearingStepEntryAction(
+		ctx context.Context, taskID string, step StepSpec, action Action, position int, markerEntryID int64,
+	) (abandon bool, err error)
 }
 
 // WorkflowSwitcher is the engine's contract for in-place workflow swap.

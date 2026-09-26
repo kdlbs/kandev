@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
+	"expvar"
 	"fmt"
 	"io"
 	"os"
@@ -61,6 +63,11 @@ func (fakePostgresStatsConn) QueryContext(
 			return nil, fmt.Errorf("unexpected args for schema version: %#v", args)
 		}
 		return newFakeRows([]string{"value"}, []driver.Value{"v0.99.0"}), nil
+	case "SELECT COALESCE(SUM(LENGTH(content)), 0) FROM task_session_messages",
+		"SELECT COALESCE(SUM(LENGTH(metadata)), 0) FROM task_session_messages",
+		"SELECT COALESCE(SUM(LENGTH(compressed_content)), 0) FROM task_message_payloads",
+		"SELECT COALESCE(SUM(LENGTH(files) + LENGTH(metadata)), 0) FROM task_session_git_snapshots":
+		return newFakeRows([]string{"sum"}, []driver.Value{int64(0)}), nil
 	default:
 		if strings.HasPrefix(normalized, "PRAGMA ") {
 			return nil, fmt.Errorf(`ERROR: syntax error at or near "PRAGMA" (SQLSTATE 42601)`)
@@ -205,7 +212,7 @@ func newTestService(t *testing.T) (*Service, *jobs.Tracker, *stubBus, string) {
 			t.Fatalf("write sentinel: %v", err)
 		}
 	}
-	svc := NewService(pool, dataDir, dirs, tracker, log)
+	svc := NewService(pool, filepath.Join(dataDir, "kandev.db"), dirs, tracker, log)
 	return svc, tracker, stub, dataDir
 }
 
@@ -260,11 +267,97 @@ func TestStats_ReturnsPathSizeAndSchemaVersion(t *testing.T) {
 	if stats.LastBackupAt != nil {
 		t.Errorf("LastBackupAt = %v, want nil (no backups yet)", *stats.LastBackupAt)
 	}
+	payload := statsPayload(t, stats)
+	wantBackupDir := filepath.Join(dataDir, "backups")
+	if got := payload["backup_directory"]; got != wantBackupDir {
+		t.Errorf("backup_directory = %v, want %q", got, wantBackupDir)
+	}
+}
+
+func TestStatsReportsLogicalStorageAndDatabaseGauges(t *testing.T) {
+	svc, _, _, _ := newTestService(t)
+	for _, statement := range []string{
+		`CREATE TABLE task_session_messages (content TEXT, metadata TEXT)`,
+		`CREATE TABLE task_message_payloads (compressed_content BLOB)`,
+		`CREATE TABLE task_session_git_snapshots (files TEXT, metadata TEXT)`,
+		`INSERT INTO task_session_messages VALUES ('hello', '{"a":1}')`,
+		`INSERT INTO task_message_payloads VALUES (x'01020304')`,
+		`INSERT INTO task_session_git_snapshots VALUES ('{"f":1}', '{"m":2}')`,
+	} {
+		if _, err := svc.pool.Writer().Exec(statement); err != nil {
+			t.Fatalf("seed storage metrics with %q: %v", statement, err)
+		}
+	}
+
+	stats, err := svc.Stats()
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	payload := statsPayload(t, stats)
+	for field, want := range map[string]float64{
+		"message_content_bytes":  5,
+		"message_metadata_bytes": 7,
+		"message_payload_bytes":  4,
+		"git_snapshot_bytes":     14,
+	} {
+		if got := payload[field]; got != want {
+			t.Errorf("%s = %v, want %.0f", field, got, want)
+		}
+	}
+
+	for _, name := range []string{
+		"database_size_bytes",
+		"database_wal_size_bytes",
+		"task_message_content_bytes",
+		"task_message_metadata_bytes",
+		"task_message_payload_compressed_bytes",
+		"task_git_snapshot_bytes",
+	} {
+		if expvar.Get(name) == nil {
+			t.Errorf("expvar %q is not published", name)
+		}
+	}
+}
+
+func TestStats_ReturnsConfiguredSQLiteBackupDirectory(t *testing.T) {
+	svc, _, _, dataDir := newTestService(t)
+	svc.databasePath = filepath.Join(dataDir, "nested", "custom.db")
+
+	stats, err := svc.Stats()
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+
+	want := filepath.Join(dataDir, "nested", "backups")
+	if got := statsPayload(t, stats)["backup_directory"]; got != want {
+		t.Errorf("backup_directory = %v, want %q", got, want)
+	}
+}
+
+func TestStats_ResolvesRelativeSQLiteBackupDirectory(t *testing.T) {
+	relativeDatabasePath := filepath.Join("state", "kandev.db")
+	want, err := filepath.Abs(filepath.Join(filepath.Dir(relativeDatabasePath), "backups"))
+	if err != nil {
+		t.Fatalf("resolve expected backup directory: %v", err)
+	}
+
+	svc := NewService(nil, relativeDatabasePath, ResetDirs{}, nil, nil)
+	stats, err := svc.Stats()
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+
+	if stats.BackupDirectory != want {
+		t.Errorf("BackupDirectory = %q, want %q", stats.BackupDirectory, want)
+	}
+	if !filepath.IsAbs(stats.BackupDirectory) {
+		t.Errorf("BackupDirectory = %q, want an absolute path", stats.BackupDirectory)
+	}
 }
 
 func TestStats_PostgresDoesNotUseSQLitePragmas(t *testing.T) {
 	dataDir := t.TempDir()
-	svc := NewService(newFakePostgresStatsPool(t), dataDir, ResetDirs{}, nil, nil)
+	svc := NewService(newFakePostgresStatsPool(t), filepath.Join(dataDir, "kandev.db"), ResetDirs{}, nil, nil)
 
 	stats, err := svc.Stats()
 	if err != nil {
@@ -287,6 +380,9 @@ func TestStats_PostgresDoesNotUseSQLitePragmas(t *testing.T) {
 	}
 	if stats.LastBackupAt != nil {
 		t.Errorf("LastBackupAt = %v, want nil for postgres", *stats.LastBackupAt)
+	}
+	if got := statsPayload(t, stats)["backup_directory"]; got != "" {
+		t.Errorf("backup_directory = %v, want empty for postgres", got)
 	}
 }
 
@@ -334,7 +430,20 @@ func TestHandleStats_Returns200JSON(t *testing.T) {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	if !contains(body, `"driver"`) || !contains(body, `"path"`) || !contains(body, `"schema_version"`) {
+	if !contains(body, `"driver"`) || !contains(body, `"path"`) || !contains(body, `"schema_version"`) || !contains(body, `"backup_directory"`) {
 		t.Errorf("body missing fields: %s", body)
 	}
+}
+
+func statsPayload(t *testing.T, stats Stats) map[string]interface{} {
+	t.Helper()
+	raw, err := json.Marshal(stats)
+	if err != nil {
+		t.Fatalf("marshal stats: %v", err)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal stats: %v", err)
+	}
+	return payload
 }

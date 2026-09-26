@@ -3,7 +3,7 @@
  *
  * Desktop opens Quick Chat via keyboard shortcut, command palette, or the app
  * sidebar — none of which exist on a touch viewport. These tests cover the
- * touch affordances: the kanban header button on Home, the task-switcher sheet
+ * touch affordances: the listing menu on Home, the task-switcher sheet
  * button on a session page, and the explicit close control (touch devices have
  * no Escape key and the full-screen dialog leaves no overlay to tap).
  *
@@ -13,27 +13,84 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import {
+  readQuickChatViewportLayout,
+  startQuickChatFromSetup,
+  waitForQuickChatComposerReady,
+} from "./quick-chat-helpers";
 
 const TASK_LISTING_VIEW_STORAGE_KEY = "kandev.taskListing.view.v1";
 
 test.describe("Quick Chat entry points on mobile", () => {
-  test("opens from the home header and closes with the touch control", async ({ testPage }) => {
+  // @covers AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.5 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.6
+  test("preserves composer containment at the bottom of the phone dialog", async ({ testPage }) => {
+    await testPage.goto("/");
+    await testPage.getByTestId("app-nav-trigger").tap();
+    await testPage.getByTestId("mobile-quick-chat-button").tap();
+
+    const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await startQuickChatFromSetup(dialog, testPage);
+
+    const layout = await readQuickChatViewportLayout(dialog);
+    expect(layout.composerTop).toBeGreaterThan(layout.dialogTop);
+    expect(layout.composerBottom).toBeLessThanOrEqual(layout.dialogBottom + 1);
+    expect(layout.dialogBottom - layout.composerBottom).toBeLessThanOrEqual(8);
+    expect(layout.contentBottom).toBeLessThanOrEqual(layout.dialogBottom + 1);
+    expect(layout.dialogBottom - layout.contentBottom).toBeLessThanOrEqual(2);
+    expect(layout.dialogScrollHeight).toBeLessThanOrEqual(layout.dialogClientHeight + 1);
+
+    // Submit once: replaying a successful send while awaiting editor clearing
+    // creates duplicate bulk turns and changes the layout under measurement.
+    const editor = await waitForQuickChatComposerReady(dialog);
+    await editor.fill("/e2e:bulk:20");
+    await dialog.getByTestId("submit-message-button").tap();
+    await expect(editor).toHaveText("");
+    await expect(dialog.getByText(/Done\. Emitted 20 messages/)).toBeVisible({ timeout: 30_000 });
+
+    const longChatLayout = await readQuickChatViewportLayout(dialog);
+    expect(longChatLayout.messageScrollerScrollHeight).toBeGreaterThan(
+      longChatLayout.messageScrollerClientHeight,
+    );
+    expect(longChatLayout.composerBottom).toBeLessThanOrEqual(longChatLayout.dialogBottom + 1);
+    expect(longChatLayout.dialogBottom - longChatLayout.composerBottom).toBeLessThanOrEqual(8);
+    expect(longChatLayout.dialogScrollHeight).toBeLessThanOrEqual(
+      longChatLayout.dialogClientHeight + 1,
+    );
+  });
+
+  // @covers AC-UI-QUICK-CHAT-ELEVATION-001.4 AC-UI-QUICK-CHAT-ELEVATION-001.7
+  test("opens from the home menu and closes with the touch control", async ({ testPage }) => {
     await testPage.goto("/");
     await testPage.waitForLoadState("networkidle");
     await assertNoDocumentHorizontalOverflow(testPage);
 
-    await testPage.getByTestId("mobile-quick-chat-button").click();
+    await testPage.getByTestId("app-nav-trigger").tap();
+    await testPage.getByTestId("mobile-quick-chat-button").tap();
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 10_000 });
+    const overlay = testPage.locator('[data-slot="dialog-overlay"]');
+    await expect(overlay).toBeAttached();
+    const mobileBackdropStyles = await overlay.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        backgroundColor: styles.backgroundColor,
+        backdropFilter: styles.backdropFilter,
+      };
+    });
+    expect(mobileBackdropStyles.backgroundColor).toMatch(/\/\s*0\.2\)/);
+    expect(mobileBackdropStyles.backdropFilter).toBe("none");
     await assertNoDocumentHorizontalOverflow(testPage);
 
-    await dialog.getByTestId("quick-chat-close").click();
+    await dialog.getByTestId("quick-chat-close").tap();
     await expect(dialog).not.toBeVisible();
+    await expect(testPage.getByTestId("app-nav-trigger")).toBeFocused();
   });
 
   test("chooses configuration mode from the setup panel", async ({ testPage }) => {
     await testPage.goto("/");
+    const context = testPage.getByTestId("app-nav-trigger");
+    await context.tap();
     await testPage.getByTestId("mobile-quick-chat-button").tap();
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
@@ -43,6 +100,9 @@ test.describe("Quick Chat entry points on mobile", () => {
 
     await expect(dialog.getByTestId("config-chat-setup")).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);
+    await dialog.getByTestId("quick-chat-close").tap();
+    await expect(dialog).toBeHidden();
+    await expect(context).toBeFocused();
   });
 
   test("opens from the task switcher sheet on a session page", async ({
@@ -59,10 +119,10 @@ test.describe("Quick Chat entry points on mobile", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(sheet).toBeVisible();
-    await testPage.getByTestId("mobile-sheet-quick-chat").click();
+    await testPage.getByTestId("mobile-sheet-quick-chat").tap();
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 10_000 });
@@ -82,7 +142,8 @@ test.describe("Quick Chat entry points on mobile", () => {
     await testPage.goto(`/tasks?workspace=${seedData.workspaceId}`);
     await testPage.waitForLoadState("networkidle");
 
-    const homeLink = testPage.getByRole("link", { name: "Kandev home" });
+    await testPage.getByTestId("app-nav-trigger").tap();
+    const homeLink = testPage.getByRole("link", { name: "Home", exact: true });
     await expect(homeLink).toHaveAttribute(
       "href",
       `/?home=overview&workspaceId=${seedData.workspaceId}`,

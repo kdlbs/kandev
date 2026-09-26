@@ -14,11 +14,12 @@ import (
 
 // Agent event type string constants.
 const (
-	agentEventComplete  = "complete"
-	agentEventCompleted = "completed"
-	agentEventError     = "error"
-	agentEventToolCall  = "tool_call"
-	agentEventFailed    = "failed"
+	agentEventComplete   = "complete"
+	agentEventCompleted  = "completed"
+	agentEventError      = "error"
+	agentEventToolCall   = "tool_call"
+	agentEventToolUpdate = "tool_update"
+	agentEventFailed     = "failed"
 )
 
 // toolKindToMessageType maps the normalized tool kind to a frontend message type.
@@ -33,13 +34,21 @@ func toolKindToMessageType(normalized *streams.NormalizedPayload) string {
 
 func (s *Service) handleTaskDeleted(ctx context.Context, data watcher.TaskEventData) {
 	s.scheduler.RemoveTask(data.TaskID)
+	s.clearParkedProjectionOnTaskDeleted(data.TaskID)
 }
 
 func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPSessionEventData) {
 	if data.SessionID == "" || data.ACPSessionID == "" {
 		return
 	}
-	s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.AgentExecutionID, data.ACPSessionID, "")
+	guard := s.lockCancelInFlightGuard(data.SessionID)
+	defer guard.release()
+	// A cancellation operation has already claimed the session. Let its owner
+	// invalidate the startup identity before accepting any late provider event.
+	if s.currentCancellation(data.SessionID) != nil || !s.resumeAttemptAllowsExecution(data.SessionID, data.AgentExecutionID, data.AttemptID) {
+		return
+	}
+	s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.AgentExecutionID, data.ACPSessionID, "", data.AttemptID)
 }
 
 // storeResumeToken stores an agent's session ID as the resume token for session recovery.
@@ -59,7 +68,31 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 // The token is always stored when CAS succeeds. NativeSessionResume only gates ACP
 // session/load vs session/new in session.go — agents without native resume (e.g.,
 // Claude Code) use the token for their own --resume CLI flag instead.
-func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expectedExecID, acpSessionID, lastMessageUUID string) {
+func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expectedExecID, acpSessionID, lastMessageUUID string, origin ...string) {
+	if !s.resumeAttemptAllowsExecution(sessionID, expectedExecID, origin...) {
+		s.logger.Info("dropping resume token from cancelled or superseded resume attempt",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("expected_exec_id", expectedExecID),
+			zap.String("resume_token", acpSessionID))
+		return
+	}
+	// The lifecycle manager updates its in-memory ACP session ID before it
+	// publishes reset/start events. Events from the previous ACP session can
+	// still be queued after that point, so reject those events before the
+	// execution-level CAS. The execution ID alone does not identify an ACP
+	// session generation because context resets keep the same execution.
+	if currentACPSessionID := s.currentACPSessionID(sessionID); currentACPSessionID != "" &&
+		acpSessionID != "" && acpSessionID != currentACPSessionID {
+		s.logger.Info("dropping resume token from stale ACP session generation",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("expected_exec_id", expectedExecID),
+			zap.String("resume_token", acpSessionID),
+			zap.String("current_resume_token", currentACPSessionID))
+		return
+	}
+
 	err := s.repo.UpdateResumeToken(ctx, sessionID, expectedExecID, acpSessionID, lastMessageUUID)
 	switch {
 	case err == nil:
@@ -101,6 +134,23 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expec
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+}
+
+// currentACPSessionID returns the lifecycle manager's current ACP session ID
+// when the concrete manager exposes it. The optional seam keeps the generic
+// AgentManagerClient contract unchanged for remote clients and test doubles.
+func (s *Service) currentACPSessionID(sessionID string) string {
+	provider, ok := s.agentManager.(interface {
+		GetACPSessionIDForSession(string) (string, bool)
+	})
+	if !ok {
+		return ""
+	}
+	acpSessionID, ok := provider.GetACPSessionIDForSession(sessionID)
+	if !ok {
+		return ""
+	}
+	return acpSessionID
 }
 
 // persistACPSessionID mirrors the agent's ACP session id into the session's

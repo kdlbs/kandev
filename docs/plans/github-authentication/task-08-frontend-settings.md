@@ -5,7 +5,7 @@ status: completed
 wave: 6
 depends_on: ["07-http-health-mocks"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 08: Workspace And Personal GitHub Settings

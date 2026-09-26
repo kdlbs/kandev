@@ -1,14 +1,23 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { IconPlayerPlay, IconLoader2, IconCheck, IconX, IconTrash } from "@tabler/icons-react";
+import {
+  IconPlayerPlay,
+  IconLoader2,
+  IconCheck,
+  IconX,
+  IconTrash,
+  IconInfoCircle,
+} from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
+import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { Switch } from "@kandev/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
+import { buildRemoteDockerImage } from "@/lib/api/domains/remote-docker-api";
 import {
   buildDockerImage,
   listDockerContainers,
@@ -17,6 +26,9 @@ import {
 } from "@/lib/api/domains/settings-api";
 import type { DockerContainer } from "@/lib/api/domains/settings-api";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { settingsActionClassName } from "@/components/settings/settings-control";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useTranslation } from "react-i18next";
 
 const DEFAULT_IMAGE_TAG = "kandev/multi-agent:latest";
@@ -28,6 +40,7 @@ const DEFAULT_IMAGE_TAG = "kandev/multi-agent:latest";
 //
 // The kandev backend mounts the agentctl binary into /usr/local/bin/agentctl
 // at container creation time, so users do NOT need to bake it in here.
+// i18n-exempt: Dockerfile contents, not prose.
 const DEFAULT_DOCKERFILE = `FROM node:22-slim
 
 RUN apt-get update \\
@@ -107,7 +120,13 @@ async function readDockerStream(
   return hasError;
 }
 
-function useBuildStream(onBuildSuccess?: (result: DockerBuildSuccess) => void) {
+// remoteExecutorId selects the daemon the build runs on. When set, the build
+// targets that executor's own daemon; the image only exists where it is built,
+// so a remote profile built on the install-wide daemon would never find it.
+function useBuildStream(
+  onBuildSuccess?: (result: DockerBuildSuccess) => void,
+  remoteExecutorId?: string,
+) {
   const { t } = useTranslation();
   const [buildStatus, setBuildStatus] = useState<BuildStatus>("idle");
   const [buildLog, setBuildLog] = useState("");
@@ -124,7 +143,9 @@ function useBuildStream(onBuildSuccess?: (result: DockerBuildSuccess) => void) {
       setBuildStatus("building");
       setBuildLog("");
       try {
-        const response = await buildDockerImage({ dockerfile, tag });
+        const response = remoteExecutorId
+          ? await buildRemoteDockerImage(remoteExecutorId, { dockerfile, tag })
+          : await buildDockerImage({ dockerfile, tag });
         if (!response.ok) {
           const text = await response.text();
           setBuildStatus("failed");
@@ -151,7 +172,7 @@ function useBuildStream(onBuildSuccess?: (result: DockerBuildSuccess) => void) {
         );
       }
     },
-    [appendLog, onBuildSuccess, t],
+    [appendLog, onBuildSuccess, remoteExecutorId, t],
   );
 
   return { buildStatus, buildLog, runBuild };
@@ -165,7 +186,42 @@ type DockerfileBuildCardProps = {
   baselineImageTag?: string;
   onImageTagChange: (v: string) => void;
   onBuildSuccess?: (result: DockerBuildSuccess) => void;
+  // Set for a remote Docker profile so the build runs on that executor's
+  // daemon rather than the install-wide one.
+  remoteExecutorId?: string;
 };
+
+/** Build trigger plus its status badge, or the admin-only explanation. */
+function BuildActionRow({
+  canBuild,
+  buildStatus,
+  disabled,
+  onBuild,
+}: {
+  canBuild: boolean;
+  buildStatus: BuildStatus;
+  disabled: boolean;
+  onBuild: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-3">
+      <Button onClick={onBuild} disabled={disabled} className="cursor-pointer">
+        {buildStatus === "building" ? (
+          <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" />
+        ) : (
+          <IconPlayerPlay className="mr-1.5 h-4 w-4" />
+        )}
+        {t("executors:buildImage")}
+      </Button>
+      {canBuild ? (
+        <BuildStatusBadge status={buildStatus} />
+      ) : (
+        <p className="text-sm text-muted-foreground">{t("executors:buildImageAdminOnly")}</p>
+      )}
+    </div>
+  );
+}
 
 export function DockerfileBuildCard({
   dockerfile,
@@ -175,17 +231,21 @@ export function DockerfileBuildCard({
   baselineImageTag,
   onImageTagChange,
   onBuildSuccess,
+  remoteExecutorId,
 }: DockerfileBuildCardProps) {
   const { t } = useTranslation();
-  const { buildStatus, buildLog, runBuild } = useBuildStream(onBuildSuccess);
+  const { buildStatus, buildLog, runBuild } = useBuildStream(onBuildSuccess, remoteExecutorId);
   const logRef = useRef<HTMLPreElement>(null);
+  // Building an image is a host-level operation with no per-user resource, so
+  // the backend gates POST /api/v1/docker/build on the admin role.
+  const canBuild = useIsAdmin();
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [buildLog]);
 
   const handleBuild = () => {
-    if (dockerfile.trim() && imageTag.trim()) void runBuild(dockerfile, imageTag);
+    if (canBuild && dockerfile.trim() && imageTag.trim()) void runBuild(dockerfile, imageTag);
   };
 
   const canFillDefaults = !dockerfile.trim() || !imageTag.trim();
@@ -199,24 +259,22 @@ export function DockerfileBuildCard({
 
   return (
     <SettingsCard isDirty={dockerfileDirty || imageTagDirty}>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <CardTitle>{t("executors:dockerfile")}</CardTitle>
-            <CardDescription>{t("executors:defineTheDockerImageBuildAnd")}</CardDescription>
-          </div>
-          {canFillDefaults && (
+      <SettingsCardHeader
+        title={t("executors:dockerfile")}
+        description={t("executors:defineTheDockerImageBuildAnd")}
+        actions={
+          canFillDefaults ? (
             <Button
               variant="ghost"
               size="sm"
               onClick={fillDefaults}
-              className="cursor-pointer text-xs text-muted-foreground"
+              className={settingsActionClassName("cursor-pointer text-muted-foreground")}
             >
               {t("executors:useDefaults")}
             </Button>
-          )}
-        </div>
-      </CardHeader>
+          ) : undefined
+        }
+      />
       <CardContent className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="image-tag">{t("executors:imageTag")}</Label>
@@ -244,21 +302,14 @@ export function DockerfileBuildCard({
             />
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <Button
-            onClick={handleBuild}
-            disabled={buildStatus === "building" || !dockerfile.trim() || !imageTag.trim()}
-            className="cursor-pointer"
-          >
-            {buildStatus === "building" ? (
-              <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" />
-            ) : (
-              <IconPlayerPlay className="mr-1.5 h-4 w-4" />
-            )}
-            {t("executors:buildImage")}
-          </Button>
-          <BuildStatusBadge status={buildStatus} />
-        </div>
+        <BuildActionRow
+          canBuild={canBuild}
+          buildStatus={buildStatus}
+          disabled={
+            !canBuild || buildStatus === "building" || !dockerfile.trim() || !imageTag.trim()
+          }
+          onBuild={handleBuild}
+        />
         {buildLog && (
           <pre
             ref={logRef}
@@ -384,6 +435,51 @@ function ContainerRow({
   );
 }
 
+export function UserNamespacesCard({
+  enabled,
+  baselineEnabled = false,
+  onChange,
+}: {
+  enabled: boolean;
+  baselineEnabled?: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const isDirty = enabled !== baselineEnabled;
+  return (
+    <SettingsCard isDirty={isDirty}>
+      <SettingsCardHeader
+        title={t("executors:allowUserNamespacesTitle")}
+        description={t("executors:allowUserNamespacesDescription")}
+        actions={
+          <label
+            htmlFor="allow-user-namespaces"
+            className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center md:min-h-0 md:min-w-0"
+          >
+            <Switch
+              id="allow-user-namespaces"
+              aria-label={t("executors:allowUserNamespacesTitle")}
+              checked={enabled}
+              onCheckedChange={onChange}
+              data-settings-dirty={isDirty}
+            />
+          </label>
+        }
+      />
+      <CardContent>
+        <p className="text-sm text-muted-foreground flex items-start gap-2">
+          <IconInfoCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          {t("executors:allowUserNamespacesNote")}
+        </p>
+        <p className="mt-2 flex items-start gap-2 text-sm text-amber-600 dark:text-amber-400">
+          <IconInfoCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          {t("executors:allowUserNamespacesWarning")}
+        </p>
+      </CardContent>
+    </SettingsCard>
+  );
+}
+
 export function DockerContainersCard({ profileId }: { profileId: string }) {
   const { t } = useTranslation();
   const { containers, loading, refresh } = useDockerProfileContainers(profileId);
@@ -404,10 +500,10 @@ export function DockerContainersCard({ profileId }: { profileId: string }) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{t("executors:dockerContainers")}</CardTitle>
-        <CardDescription>{t("executors:dockerContainersCreatedByThisProfile")}</CardDescription>
-      </CardHeader>
+      <SettingsCardHeader
+        title={t("executors:dockerContainers")}
+        description={t("executors:dockerContainersCreatedByThisProfile")}
+      />
       <CardContent>
         {containers.length === 0 ? (
           <ContainersEmptyState loading={loading} />

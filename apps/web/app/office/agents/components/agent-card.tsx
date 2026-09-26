@@ -11,12 +11,14 @@ import { AgentStatusDot } from "./agent-status-dot";
 import { AgentRoleBadge } from "./agent-role-badge";
 import { BudgetGauge } from "./budget-gauge";
 import { providerLabel } from "../../workspace/routing/components/provider-order-editor";
+import { useTranslation } from "react-i18next";
 
 type AgentCardProps = {
   agent: AgentProfile;
 };
 
 export function AgentCard({ agent }: AgentCardProps) {
+  const { t } = useTranslation();
   const isPending = agent.status === "pending_approval";
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const routingEnabled = useAppStore(
@@ -42,7 +44,7 @@ export function AgentCard({ agent }: AgentCardProps) {
               <AgentStatusDot status={agent.status} />
               {isPending && (
                 <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300 text-xs">
-                  Pending Approval
+                  {t("office:pendingApproval")}
                 </Badge>
               )}
             </div>
@@ -50,7 +52,7 @@ export function AgentCard({ agent }: AgentCardProps) {
               <AgentRoleBadge role={agent.role} />
               {agent.desiredSkills && agent.desiredSkills.length > 0 && (
                 <span className="text-xs text-muted-foreground">
-                  {agent.desiredSkills.length} skill{agent.desiredSkills.length !== 1 ? "s" : ""}
+                  {t("office:skillCount", { count: agent.desiredSkills.length })}
                 </span>
               )}
             </div>
@@ -64,6 +66,7 @@ export function AgentCard({ agent }: AgentCardProps) {
 }
 
 function RoutingChip({ preview }: { preview: AgentRoutePreview }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1.5 mt-2 text-[11px]">
       {preview.primary_provider_id ? (
@@ -71,7 +74,7 @@ function RoutingChip({ preview }: { preview: AgentRoutePreview }) {
           {providerLabel(preview.primary_provider_id)}/{preview.primary_model || "?"}
         </span>
       ) : (
-        <span className="text-muted-foreground italic">no route</span>
+        <span className="text-muted-foreground italic">{t("office:noRoute")}</span>
       )}
       <RoutingStatusBadge preview={preview} />
     </div>
@@ -79,23 +82,24 @@ function RoutingChip({ preview }: { preview: AgentRoutePreview }) {
 }
 
 function RoutingStatusBadge({ preview }: { preview: AgentRoutePreview }) {
+  const { t } = useTranslation();
   if (preview.degraded) {
     return (
       <Badge variant="destructive" className="text-[10px] py-0 px-1">
-        Fallback
+        {t("office:fallback")}
       </Badge>
     );
   }
   if (preview.missing.length > 0) {
     return (
       <Badge variant="outline" className="text-[10px] py-0 px-1">
-        Blocked
+        {t("office:routeBlocked")}
       </Badge>
     );
   }
   return (
     <Badge variant="secondary" className="text-[10px] py-0 px-1">
-      Healthy
+      {t("office:healthy")}
     </Badge>
   );
 }

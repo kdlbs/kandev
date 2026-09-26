@@ -1,70 +1,92 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  getTaskColor,
-  setTaskColor,
-  TASK_COLORS_CHANGED_EVENT,
+  clearLegacyTaskColors,
+  readLegacyTaskColors,
+  TASK_COLORS,
+  TASK_COLOR_BAR_CLASS,
+  TASK_COLOR_LABEL_KEYS,
   TASK_COLORS_STORAGE_KEY,
+  parseSidebarTaskColors,
 } from "./task-colors";
+import { i18n, t } from "@/lib/i18n";
 
-describe("task colors storage", () => {
+describe("legacy task colors migration input", () => {
   beforeEach(() => {
     window.localStorage.clear();
-    // Synthesize a cross-tab storage event so the module-level cache invalidates,
-    // matching how a real browser would notify other tabs after localStorage.clear().
-    window.dispatchEvent(new StorageEvent("storage", { key: null }));
   });
 
-  it("returns null when no color is stored", () => {
-    expect(getTaskColor("task-1")).toBeNull();
-  });
-
-  it("stores and reads a color", () => {
-    setTaskColor("task-1", "blue");
-    expect(getTaskColor("task-1")).toBe("blue");
-  });
-
-  it("removes a color when set to null", () => {
-    setTaskColor("task-1", "blue");
-    setTaskColor("task-1", null);
-    expect(getTaskColor("task-1")).toBeNull();
-  });
-
-  it("ignores invalid colors loaded from storage", () => {
+  it("reads valid legacy colors without treating them as server values", () => {
     window.localStorage.setItem(
       TASK_COLORS_STORAGE_KEY,
-      JSON.stringify({ "task-1": "fuchsia", "task-2": "red" }),
+      JSON.stringify({
+        "task-1": "red",
+        "task-cleared": null,
+        "task-automatic-gray": "gray",
+        "task-2": "blue",
+      }),
     );
-    expect(getTaskColor("task-1")).toBeNull();
-    expect(getTaskColor("task-2")).toBe("red");
+    expect(readLegacyTaskColors()).toEqual({ "task-1": "red", "task-2": "blue" });
   });
 
-  it("returns null on malformed storage", () => {
+  it("returns no values for malformed legacy storage", () => {
     window.localStorage.setItem(TASK_COLORS_STORAGE_KEY, "{not json");
-    expect(getTaskColor("task-1")).toBeNull();
+    expect(readLegacyTaskColors()).toEqual({});
   });
 
-  it("dispatches a change event when a color is set", () => {
-    const listener = vi.fn();
-    window.addEventListener(TASK_COLORS_CHANGED_EVENT, listener);
-    setTaskColor("task-1", "green");
-    expect(listener).toHaveBeenCalledTimes(1);
-    window.removeEventListener(TASK_COLORS_CHANGED_EVENT, listener);
+  it("removes the legacy key only when migration asks for removal", () => {
+    window.localStorage.setItem(TASK_COLORS_STORAGE_KEY, JSON.stringify({ "task-1": "red" }));
+    clearLegacyTaskColors();
+    expect(window.localStorage.getItem(TASK_COLORS_STORAGE_KEY)).toBeNull();
+  });
+});
+
+describe("TASK_COLOR_LABEL_KEYS", () => {
+  afterEach(async () => {
+    await i18n.changeLanguage("en");
   });
 
-  it("does not dispatch when setting the same color twice", () => {
-    setTaskColor("task-1", "green");
-    const listener = vi.fn();
-    window.addEventListener(TASK_COLORS_CHANGED_EVENT, listener);
-    setTaskColor("task-1", "green");
-    expect(listener).not.toHaveBeenCalled();
-    window.removeEventListener(TASK_COLORS_CHANGED_EVENT, listener);
+  it("covers every colour, keyed by the persisted wire value", () => {
+    expect(Object.keys(TASK_COLOR_LABEL_KEYS).sort()).toEqual([...TASK_COLORS].sort());
+    // The same wire values index the class table, so they are identity.
+    expect(Object.keys(TASK_COLOR_BAR_CLASS).sort()).toEqual([...TASK_COLORS].sort());
   });
 
-  it("does not dispatch when clearing a non-existent color", () => {
-    const listener = vi.fn();
-    window.addEventListener(TASK_COLORS_CHANGED_EVENT, listener);
-    setTaskColor("task-1", null);
-    expect(listener).not.toHaveBeenCalled();
-    window.removeEventListener(TASK_COLORS_CHANGED_EVENT, listener);
+  it("holds catalog keys that resolve to English copy", () => {
+    expect(TASK_COLOR_LABEL_KEYS.red).toBe("task:colorRed");
+    const labels = TASK_COLORS.map((c) => t(TASK_COLOR_LABEL_KEYS[c]));
+    expect(labels).toEqual(["Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Pink"]);
+  });
+
+  it("stores keys rather than resolved copy, so a locale switch takes effect", async () => {
+    await i18n.changeLanguage("pseudo");
+    for (const color of TASK_COLORS) {
+      const label = t(TASK_COLOR_LABEL_KEYS[color]);
+      // A missing key would resolve to the key itself; frozen copy would stay
+      // English. Both are ruled out by an accented, non-key label.
+      expect(label).not.toBe(TASK_COLOR_LABEL_KEYS[color]);
+      expect(label).toMatch(/[^\p{ASCII}]/u);
+    }
+  });
+});
+
+describe("backend manual task-color map parsing", () => {
+  it("keeps valid colors and tombstones while dropping malformed entries", () => {
+    expect(
+      parseSidebarTaskColors({
+        "task-red": "red",
+        "task-cleared": null,
+        "task-automatic-gray": "gray",
+        "": "blue",
+        "task-object": {},
+      }),
+    ).toEqual({ "task-red": "red", "task-cleared": null });
+  });
+
+  it("caps task IDs by UTF-8 byte length and entry count", () => {
+    expect(parseSidebarTaskColors({ ["é".repeat(65)]: "red" })).toEqual({});
+    const input = Object.fromEntries(
+      Array.from({ length: 10_001 }, (_, index) => [`task-${index}`, "red"]),
+    );
+    expect(Object.keys(parseSidebarTaskColors(input))).toHaveLength(10_000);
   });
 });

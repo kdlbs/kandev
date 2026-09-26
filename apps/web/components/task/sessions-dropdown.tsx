@@ -25,8 +25,13 @@ import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { deleteTask } from "@/lib/api/domains/kanban-api";
+import { resolveSessionDeletionTarget } from "@/lib/session/session-deletion";
 import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { buildAgentLabelsById, resolveAgentLabelFor, sortSessions } from "./session-sort";
+import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type SessionStatus = "running" | "waiting_input" | "complete" | "failed" | "cancelled";
 
@@ -48,12 +53,14 @@ function formatDuration(startedAt: string, isRunning: boolean, now: number): str
   return `${seconds}s`;
 }
 
-const STATUS_LABELS: Record<SessionStatus, string> = {
-  running: "Running",
-  complete: "Complete",
-  waiting_input: "Waiting for input",
-  failed: "Failed",
-  cancelled: "Cancelled",
+/** Catalog keys, not copy — the map is module scope, so the value must stay a
+ * key and resolve at call time (`sessionStatusTooltip`). */
+const STATUS_LABEL_KEYS: Record<SessionStatus, string> = {
+  running: "task:sessionStatusRunning",
+  complete: "task:sessionStatusComplete",
+  waiting_input: "task:sessionStatusWaitingForInput",
+  failed: "task:sessionStatusFailed",
+  cancelled: "task:sessionStatusCancelled",
 };
 
 // The session-icon tooltip reflects the message-derived "needs me" reading
@@ -64,12 +71,17 @@ export function sessionStatusTooltip(
   state: TaskSessionState,
   pending: PendingInput,
   foregroundActivity?: ForegroundActivity | null,
+  parkedOnBackgroundWork = false,
 ): string {
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
-  if (canRequestInput && pending.permission) return "Permission requested";
-  if (canRequestInput && pending.clarification) return "Waiting for input";
-  if (canRequestInput && foregroundActivity === "background") return "Background running";
-  return STATUS_LABELS[mapSessionStatus(state)];
+  if (canRequestInput && pending.permission) return t("task:sessionStatusPermissionRequested");
+  if (canRequestInput && pending.clarification) return t("task:sessionStatusWaitingForInput");
+  if (canRequestInput && foregroundActivity === "background")
+    return t("task:sessionStatusBackgroundRunning");
+  // Parked-on-background-work (AC-51/52): the tooltip must match the icon
+  // (getSessionStateIcon reads SESSION_BACKGROUND_ICON for the same signal).
+  if (canRequestInput && parkedOnBackgroundWork) return t("task:sessionStatusBackgroundRunning");
+  return t(STATUS_LABEL_KEYS[mapSessionStatus(state)]);
 }
 
 function mapSessionStatus(state: TaskSessionState): SessionStatus {
@@ -135,10 +147,12 @@ function useSessionSelectionHandlers(taskId: string | null) {
   return { handleSelectSession };
 }
 
-function useSessionLifecycleActions(
+export function useSessionLifecycleActions(
   taskId: string | null,
   loadSessions: (force?: boolean) => void,
 ) {
+  const removeQuickChatSession = useAppStore((state) => state.removeQuickChatSession);
+  const appStore = useAppStoreApi();
   const handleResumeSession = useCallback(
     async (sessionId: string) => {
       if (!taskId) return;
@@ -160,16 +174,27 @@ function useSessionLifecycleActions(
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
-      const client = getWebSocketClient();
-      if (!client) return;
+      if (!taskId) return;
       try {
-        await client.request("session.delete", { session_id: sessionId }, 15000);
+        const deletionTarget = resolveSessionDeletionTarget(
+          sessionId,
+          taskId,
+          appStore.getState().quickChat.sessions,
+        );
+        if (deletionTarget.kind === "quick-chat-task") {
+          await deleteTask(deletionTarget.taskId);
+        } else {
+          const client = getWebSocketClient();
+          if (!client) return;
+          await client.request("session.delete", { session_id: deletionTarget.sessionId }, 15000);
+        }
+        removeQuickChatSession(sessionId);
         loadSessions(true);
       } catch (error) {
         console.error("Failed to delete session:", error);
       }
     },
-    [loadSessions],
+    [appStore, loadSessions, removeQuickChatSession, taskId],
   );
 
   const handleSetPrimary = useCallback(
@@ -219,6 +244,17 @@ export const SessionsDropdown = memo(function SessionsDropdown({
     return task?.primarySessionId ?? null;
   });
   const primarySessionId = primarySessionIdProp ?? storePrimarySessionId;
+  const taskWorkspaceId = useAppStore((state) =>
+    resolveComposerWorkspaceId({
+      sessionId: null,
+      taskId,
+      quickChatSessions: state.quickChat.sessions,
+      activeWorkflowId: state.kanban.workflowId,
+      activeTasks: state.kanban.tasks,
+      snapshots: Object.values(state.kanbanMulti.snapshots),
+      workflows: state.workflows.items,
+    }),
+  );
   const { sortedSessions, currentTime, loadSessions, resolveAgentLabel } =
     useSessionsDropdownState(taskId);
   const { handleSelectSession } = useSessionSelectionHandlers(taskId);
@@ -243,7 +279,8 @@ export const SessionsDropdown = memo(function SessionsDropdown({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
+            data-testid="sessions-dropdown-trigger"
+            className="h-7 cursor-pointer gap-1.5 px-2 hover:bg-muted/40 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
           >
             <IconStack2 className="h-4 w-4 text-muted-foreground" />
             <Badge variant="secondary" className="h-5 px-1.5 text-xs font-normal">
@@ -268,7 +305,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
         open={showNewSessionDialog}
         onOpenChange={setShowNewSessionDialog}
         mode="session"
-        workspaceId={null}
+        workspaceId={taskWorkspaceId}
         workflowId={null}
         defaultStepId={null}
         steps={[]}
@@ -307,17 +344,18 @@ function SessionDropdownContent({
   onSetPrimary?: (sessionId: string) => void;
   onNewSession: () => void;
 } & SessionLifecycleCallbacks) {
+  const { t } = useTranslation();
   return (
     <DropdownMenuContent align="end" className="w-auto min-w-[240px] max-w-[420px]">
       <div className="flex items-center justify-between px-2 py-0">
-        <span className="text-xs font-medium text-muted-foreground">Agents</span>
+        <span className="text-xs font-medium text-muted-foreground">{t("common:agents")}</span>
         <button
           type="button"
           onClick={onNewSession}
           className="flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:border-border transition-colors cursor-pointer"
         >
           <IconPlus className="h-3.5 w-3.5" />
-          New
+          {t("task:new")}
         </button>
       </div>
       <DropdownMenuSeparator />
@@ -356,10 +394,13 @@ function SessionDropdownList({
   onSelectSession: (sessionId: string) => void;
   onSetPrimary?: (sessionId: string) => void;
 } & SessionLifecycleCallbacks) {
+  const { t } = useTranslation();
   if (sessions.length === 0) {
     return (
       <div className="max-h-[300px] overflow-y-auto">
-        <div className="px-2 py-6 text-center text-sm text-muted-foreground">No agents yet</div>
+        <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+          {t("task:noAgentsYet")}
+        </div>
       </div>
     );
   }
@@ -430,6 +471,7 @@ function SessionRow({
   return (
     <div
       onClick={() => onSelect(session.id)}
+      data-testid={`session-row-${session.id}`}
       className={`w-full flex items-center gap-3 px-2 py-1.5 hover:bg-muted/50 rounded-sm cursor-pointer transition-colors ${isActive ? "bg-muted/50" : ""}`}
     >
       <span className="text-xs font-medium text-muted-foreground w-8 shrink-0">#{number}</span>
@@ -451,17 +493,21 @@ function SessionRow({
         <Tooltip>
           <TooltipTrigger asChild>
             <div>
-              {getSessionStateIcon(
-                session.state,
-                "h-3.5 w-3.5",
-                session.foreground_activity,
-                pending.clarification,
-                pending.permission,
-              )}
+              {getSessionStateIcon(session.state, "h-3.5 w-3.5", {
+                foregroundActivity: session.foreground_activity,
+                hasPendingClarification: pending.clarification,
+                hasPendingPermission: pending.permission,
+                parkedOnBackgroundWork: session.parked_on_background_work,
+              })}
             </div>
           </TooltipTrigger>
           <TooltipContent side="left">
-            {sessionStatusTooltip(session.state, pending, session.foreground_activity)}
+            {sessionStatusTooltip(
+              session.state,
+              pending,
+              session.foreground_activity,
+              session.parked_on_background_work,
+            )}
           </TooltipContent>
         </Tooltip>
       </div>
@@ -483,6 +529,7 @@ function SessionRowActions({
   onResume: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
 }) {
+  const { t } = useTranslation();
   const resumeAction = (e: React.MouseEvent) => {
     e.stopPropagation();
     onResume(session.id);
@@ -509,7 +556,7 @@ function SessionRowActions({
               <IconStar className="h-3.5 w-3.5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="left">Set as Primary</TooltipContent>
+          <TooltipContent side="left">{t("task:setAsPrimary")}</TooltipContent>
         </Tooltip>
       )}
       {isSessionResumable(session.state) && (
@@ -523,7 +570,7 @@ function SessionRowActions({
               <IconPlayerPlayFilled className="h-3 w-3" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="left">Resume agent</TooltipContent>
+          <TooltipContent side="left">{t("task:resumeAgent")}</TooltipContent>
         </Tooltip>
       )}
       {isSessionDeletable(session.state) && (
@@ -537,7 +584,7 @@ function SessionRowActions({
               <IconTrash className="h-3 w-3" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="left">Delete agent</TooltipContent>
+          <TooltipContent side="left">{t("task:deleteAgent")}</TooltipContent>
         </Tooltip>
       )}
     </div>

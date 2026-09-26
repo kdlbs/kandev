@@ -14,9 +14,12 @@ func terminateProcess(p *os.Process) error {
 }
 
 // waitPtyProcess waits for the PTY process to exit and returns exit info.
-// On Windows, uses cmd.Process.Wait() since the process may have been started
-// via ConPTY rather than cmd.Start().
-func waitPtyProcess(cmd *exec.Cmd, _ PtyHandle) (exitCode int, signalName string, err error) {
+// On Windows, uses cmd.Process.Wait() rather than cmd.Wait(): ConPTY started the
+// process, so cmd.Wait() would fail with "exec: not started". cmd.Process is an
+// independent handle to the same PID (resolved via os.FindProcess in
+// ptyexec.Start), so waiting on it does not depend on the ConPTY object's
+// lifetime — which is why neither platform needs the PtyHandle here.
+func waitPtyProcess(cmd *exec.Cmd) (exitCode int, signalName string, err error) {
 	state, err := cmd.Process.Wait()
 	if err != nil {
 		return 1, "", err

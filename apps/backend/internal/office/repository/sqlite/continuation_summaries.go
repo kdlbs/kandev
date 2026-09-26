@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/kandev/kandev/internal/office/truncate"
 )
 
 // continuationSummaryMaxBytes caps the markdown body stored in
@@ -61,7 +63,7 @@ func (r *Repository) GetContinuationSummary(
 func (r *Repository) UpsertContinuationSummary(
 	ctx context.Context, row AgentContinuationSummary,
 ) error {
-	row.Content = truncateUTF8(row.Content, continuationSummaryMaxBytes)
+	row.Content = truncate.UTF8(row.Content, continuationSummaryMaxBytes)
 	if row.UpdatedAt.IsZero() {
 		row.UpdatedAt = time.Now().UTC()
 	}
@@ -78,21 +80,4 @@ func (r *Repository) UpsertContinuationSummary(
 	`), row.AgentProfileID, row.Scope, row.Content, row.ContentTokens,
 		row.UpdatedAt, row.UpdatedByRunID)
 	return err
-}
-
-// truncateUTF8 returns s truncated to at most maxBytes, cutting at a
-// rune boundary. When the cut would split a multi-byte rune the
-// straddling bytes are dropped.
-func truncateUTF8(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
-		return s
-	}
-	// Walk back from maxBytes to the start of the last fully-included
-	// rune. UTF-8 continuation bytes match 10xxxxxx (0x80..0xBF); the
-	// loop terminates as soon as we land on a non-continuation byte.
-	cut := maxBytes
-	for cut > 0 && (s[cut]&0xC0) == 0x80 {
-		cut--
-	}
-	return s[:cut]
 }

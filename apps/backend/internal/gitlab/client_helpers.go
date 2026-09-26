@@ -4,37 +4,50 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/unidiff"
 )
 
 // rawMR is the JSON shape of a GitLab merge request as returned by the
 // REST v4 API.
 type rawMR struct {
-	ID             int64  `json:"id"`
-	IID            int    `json:"iid"`
-	ProjectID      int64  `json:"project_id"`
-	Title          string `json:"title"`
-	Description    string `json:"description"`
-	State          string `json:"state"` // opened, closed, merged, locked
-	WebURL         string `json:"web_url"`
-	Draft          bool   `json:"draft"`
-	WorkInProgress bool   `json:"work_in_progress"`
-	MergeStatus    string `json:"merge_status"`
-	HasConflicts   bool   `json:"has_conflicts"`
-	SourceBranch   string `json:"source_branch"`
-	TargetBranch   string `json:"target_branch"`
-	SHA            string `json:"sha"`
-	References     struct {
+	ID                          int64  `json:"id"`
+	IID                         int    `json:"iid"`
+	ProjectID                   int64  `json:"project_id"`
+	Title                       string `json:"title"`
+	Description                 string `json:"description"`
+	State                       string `json:"state"` // opened, closed, merged, locked
+	WebURL                      string `json:"web_url"`
+	Draft                       bool   `json:"draft"`
+	WorkInProgress              bool   `json:"work_in_progress"`
+	MergeStatus                 string `json:"merge_status"`
+	DetailedMergeStatus         string `json:"detailed_merge_status"`
+	BlockingDiscussionsResolved bool   `json:"blocking_discussions_resolved"`
+	HasConflicts                bool   `json:"has_conflicts"`
+	SourceBranch                string `json:"source_branch"`
+	TargetBranch                string `json:"target_branch"`
+	SHA                         string `json:"sha"`
+	DiffRefs                    struct {
+		BaseSHA string `json:"base_sha"`
+		HeadSHA string `json:"head_sha"`
+	} `json:"diff_refs"`
+	References struct {
 		Full string `json:"full"`
 	} `json:"references"`
-	Author       rawUser    `json:"author"`
-	Reviewers    []rawUser  `json:"reviewers"`
-	Assignees    []rawUser  `json:"assignees"`
-	Labels       []string   `json:"labels"`
-	ChangesCount string     `json:"changes_count"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	MergedAt     *time.Time `json:"merged_at"`
-	ClosedAt     *time.Time `json:"closed_at"`
+	Author             rawUser    `json:"author"`
+	Reviewers          []rawUser  `json:"reviewers"`
+	Assignees          []rawUser  `json:"assignees"`
+	Labels             []string   `json:"labels"`
+	ChangesCount       string     `json:"changes_count"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	MergedAt           *time.Time `json:"merged_at"`
+	ClosedAt           *time.Time `json:"closed_at"`
+	AllowCollaboration bool       `json:"allow_collaboration"`
+	SourceProjectID    int64      `json:"source_project_id"`
+	TargetProjectID    int64      `json:"target_project_id"`
+	SourceProject      rawProject `json:"source_project"`
+	TargetProject      rawProject `json:"target_project"`
 }
 
 type rawUser struct {
@@ -46,6 +59,8 @@ type rawUser struct {
 }
 
 type rawProject struct {
+	HTTPURLToRepo     string `json:"http_url_to_repo"`
+	SSHURLToRepo      string `json:"ssh_url_to_repo"`
 	ID                int64  `json:"id"`
 	Path              string `json:"path"`
 	Name              string `json:"name"`
@@ -59,22 +74,29 @@ type rawProject struct {
 }
 
 type rawIssue struct {
-	ID          int64     `json:"id"`
-	IID         int       `json:"iid"`
-	ProjectID   int64     `json:"project_id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	State       string    `json:"state"`
-	WebURL      string    `json:"web_url"`
-	Author      rawUser   `json:"author"`
-	Labels      []string  `json:"labels"`
-	Assignees   []rawUser `json:"assignees"`
+	ID          int64         `json:"id"`
+	IID         int           `json:"iid"`
+	ProjectID   int64         `json:"project_id"`
+	Title       string        `json:"title"`
+	Description string        `json:"description"`
+	State       string        `json:"state"`
+	WebURL      string        `json:"web_url"`
+	Author      rawUser       `json:"author"`
+	Labels      []string      `json:"labels"`
+	Assignees   []rawUser     `json:"assignees"`
+	Milestone   *rawMilestone `json:"milestone"`
 	References  struct {
 		Full string `json:"full"`
 	} `json:"references"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	ClosedAt  *time.Time `json:"closed_at"`
+}
+
+// rawMilestone is GitLab's milestone sub-object on an issue. GitLab returns
+// milestone: null for an issue with no milestone.
+type rawMilestone struct {
+	Title string `json:"title"`
 }
 
 type rawDiscussion struct {
@@ -113,35 +135,78 @@ type rawPipeline struct {
 	FinishedAt *time.Time `json:"finished_at"`
 }
 
+// rawPipelineJob is the JSON shape of a single entry from
+// GET /projects/:id/pipelines/:id/jobs.
+type rawPipelineJob struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Stage        string `json:"stage"`
+	Status       string `json:"status"`
+	AllowFailure bool   `json:"allow_failure"`
+	WebURL       string `json:"web_url"`
+}
+
 func convertRawMR(raw *rawMR) *MR {
 	state := normalizeMRState(raw.State)
 	namespace, projectPath := splitFullReference(raw.References.Full)
-	mr := &MR{
-		ID:               raw.ID,
-		IID:              raw.IID,
-		ProjectID:        raw.ProjectID,
-		Title:            raw.Title,
-		URL:              raw.WebURL,
-		WebURL:           raw.WebURL,
-		State:            state,
-		HeadBranch:       raw.SourceBranch,
-		HeadSHA:          raw.SHA,
-		BaseBranch:       raw.TargetBranch,
-		AuthorUsername:   raw.Author.Username,
-		ProjectNamespace: namespace,
-		ProjectPath:      projectPath,
-		Body:             raw.Description,
-		Draft:            raw.Draft || raw.WorkInProgress,
-		MergeStatus:      raw.MergeStatus,
-		HasConflicts:     raw.HasConflicts,
-		Reviewers:        convertReviewers(raw.Reviewers),
-		Assignees:        convertReviewers(raw.Assignees),
-		Labels:           append([]string(nil), raw.Labels...),
-		CreatedAt:        raw.CreatedAt,
-		UpdatedAt:        raw.UpdatedAt,
-		MergedAt:         raw.MergedAt,
-		ClosedAt:         raw.ClosedAt,
+	targetProjectID := raw.TargetProjectID
+	if targetProjectID == 0 {
+		targetProjectID = raw.ProjectID
 	}
+	headSHA := raw.SHA
+	if raw.DiffRefs.HeadSHA != "" {
+		headSHA = raw.DiffRefs.HeadSHA
+	}
+	mr := &MR{
+		ID:                          raw.ID,
+		IID:                         raw.IID,
+		ProjectID:                   raw.ProjectID,
+		Title:                       raw.Title,
+		URL:                         raw.WebURL,
+		WebURL:                      raw.WebURL,
+		State:                       state,
+		HeadBranch:                  raw.SourceBranch,
+		HeadSHA:                     headSHA,
+		BaseBranch:                  raw.TargetBranch,
+		BaseSHA:                     raw.DiffRefs.BaseSHA,
+		AuthorUsername:              raw.Author.Username,
+		ProjectNamespace:            namespace,
+		ProjectPath:                 projectPath,
+		SourceProjectID:             raw.SourceProjectID,
+		TargetProjectID:             targetProjectID,
+		AllowCollaboration:          raw.AllowCollaboration,
+		Body:                        raw.Description,
+		Draft:                       raw.Draft || raw.WorkInProgress,
+		MergeStatus:                 raw.MergeStatus,
+		DetailedMergeStatus:         raw.DetailedMergeStatus,
+		BlockingDiscussionsResolved: raw.BlockingDiscussionsResolved,
+		HasConflicts:                raw.HasConflicts,
+		Reviewers:                   convertReviewers(raw.Reviewers),
+		Assignees:                   convertReviewers(raw.Assignees),
+		Labels:                      append([]string(nil), raw.Labels...),
+		CreatedAt:                   raw.CreatedAt,
+		UpdatedAt:                   raw.UpdatedAt,
+		MergedAt:                    raw.MergedAt,
+		ClosedAt:                    raw.ClosedAt,
+	}
+	if raw.SourceProject.PathWithNamespace != "" {
+		mr.SourceProjectPath = raw.SourceProject.PathWithNamespace
+	}
+	// A fork MR can contain only source_project_id and target_project_id. Do
+	// not turn that response into a same-project MR by copying the target path;
+	// PATClient hydrates the source project by ID before this conversion.
+	if mr.SourceProjectPath == "" && (raw.SourceProjectID == 0 ||
+		(targetProjectID > 0 && raw.SourceProjectID == targetProjectID)) {
+		mr.SourceProjectPath = projectPath
+	}
+	mr.SourceProjectRemoteURL = raw.SourceProject.HTTPURLToRepo
+	if raw.TargetProject.PathWithNamespace != "" {
+		mr.TargetProjectPath = raw.TargetProject.PathWithNamespace
+	}
+	if mr.TargetProjectPath == "" {
+		mr.TargetProjectPath = projectPath
+	}
+	mr.TargetDefaultBranch = raw.TargetProject.DefaultBranch
 	return mr
 }
 
@@ -177,6 +242,10 @@ func convertRawIssue(raw *rawIssue) *Issue {
 			assignees = append(assignees, a.Username)
 		}
 	}
+	milestone := ""
+	if raw.Milestone != nil {
+		milestone = raw.Milestone.Title
+	}
 	return &Issue{
 		ID:               raw.ID,
 		IID:              raw.IID,
@@ -191,6 +260,7 @@ func convertRawIssue(raw *rawIssue) *Issue {
 		ProjectPath:      projectPath,
 		Labels:           append([]string(nil), raw.Labels...),
 		Assignees:        assignees,
+		Milestone:        milestone,
 		CreatedAt:        raw.CreatedAt,
 		UpdatedAt:        raw.UpdatedAt,
 		ClosedAt:         raw.ClosedAt,
@@ -272,6 +342,17 @@ func convertRawPipeline(raw *rawPipeline) Pipeline {
 	}
 }
 
+func convertRawPipelineJob(raw *rawPipelineJob) PipelineJob {
+	return PipelineJob{
+		ID:           raw.ID,
+		Name:         raw.Name,
+		Stage:        raw.Stage,
+		Status:       raw.Status,
+		AllowFailure: raw.AllowFailure,
+		WebURL:       raw.WebURL,
+	}
+}
+
 // mrStateOpen is the normalized "open" state value shared with the GitHub
 // integration vocabulary. GitLab's API returns "opened"; we expose "open".
 const mrStateOpen = "open"
@@ -313,12 +394,20 @@ func splitFullReference(full string) (namespace, projectPath string) {
 }
 
 func hasOpenDiscussions(discussions []MRDiscussion) bool {
+	return countUnresolvedDiscussions(discussions) > 0
+}
+
+// countUnresolvedDiscussions counts discussions that are resolvable but not
+// yet resolved — the same predicate hasOpenDiscussions checks, exposed as a
+// count for the automation snapshot and summary UI.
+func countUnresolvedDiscussions(discussions []MRDiscussion) int {
+	count := 0
 	for _, d := range discussions {
 		if d.Resolvable && !d.Resolved {
-			return true
+			count++
 		}
 	}
-	return false
+	return count
 }
 
 func pipelineFailing(pipelines []Pipeline) bool {
@@ -342,14 +431,32 @@ func summarizePipelines(pipelines []Pipeline) (state string, jobsTotal, jobsPass
 	switch latest.Status {
 	case pipelineStatusSuccess:
 		state = pipelineStatusSuccess
-	case pipelineStatusFailed, "canceled":
+	case pipelineStatusFailed, pipelineStatusCanceled:
 		state = pipelineStateFailure
-	case "skipped":
+	case pipelineStatusSkipped:
 		state = ""
 	default:
 		state = statusPending
 	}
 	return state, jobsTotal, jobsPassing
+}
+
+// countUnapprovedReviewers counts assigned reviewers who have not yet
+// recorded an approval (Q2's "awaiting review" signal). GitLab has no
+// distinct "requested but hasn't looked" state, so this only distinguishes
+// "approved" from "everyone else assigned".
+func countUnapprovedReviewers(reviewers []MRReviewer, approvals []MRApproval) int {
+	approved := make(map[string]bool, len(approvals))
+	for _, a := range approvals {
+		approved[a.Username] = true
+	}
+	count := 0
+	for _, r := range reviewers {
+		if !approved[r.Username] {
+			count++
+		}
+	}
+	return count
 }
 
 func summarizeApprovals(have, required int) string {
@@ -399,9 +506,12 @@ func buildMRSearchQuery(filter, customQuery string) string {
 	return values.Encode()
 }
 
-func buildIssueSearchQuery(filter, customQuery string) string {
+func buildIssueSearchQuery(filter, customQuery, milestone string) string {
 	if customQuery != "" {
-		return customQuery
+		if milestone == "" {
+			return customQuery
+		}
+		return foldMilestoneIntoQuery(customQuery, milestone)
 	}
 	values := url.Values{}
 	values.Set("state", gitlabStateOpened)
@@ -409,7 +519,41 @@ func buildIssueSearchQuery(filter, customQuery string) string {
 	if filter != "" {
 		appendFilter(values, filter)
 	}
+	if milestone != "" {
+		values.Set("milestone", milestone)
+	}
 	return values.Encode()
+}
+
+// appendQueryParam adds an escaped key/value pair to a raw query unless that
+// key already exists. URL fragments are kept at the end, outside the query.
+// This also preserves malformed-query behavior for callers that do not validate
+// their input at the HTTP boundary.
+func appendQueryParam(customQuery, key, value string) string {
+	if parsed, err := url.ParseQuery(customQuery); err == nil && parsed.Has(key) {
+		return customQuery
+	}
+	fragment := ""
+	if index := strings.IndexByte(customQuery, '#'); index >= 0 {
+		fragment = customQuery[index:]
+		customQuery = customQuery[:index]
+	}
+	encoded := url.QueryEscape(value)
+	if customQuery == "" {
+		return key + "=" + encoded + fragment
+	}
+	return customQuery + "&" + key + "=" + encoded + fragment
+}
+
+// foldMilestoneIntoQuery merges a milestone into an existing, non-empty
+// customQuery string, mirroring appendLabelsToQuery's precedent: a custom
+// query that already names the `milestone` key wins (even if the value is
+// empty), and an unparseable custom query still gets the milestone appended
+// rather than silently dropping the user's filter selection. The only caller,
+// buildIssueSearchQuery, guards both arguments non-empty before calling this,
+// so there is no empty-customQuery case to handle here.
+func foldMilestoneIntoQuery(customQuery, milestone string) string {
+	return appendQueryParam(customQuery, "milestone", milestone)
 }
 
 // filterTokenReviewRequested is the /gitlab page tab value that maps to
@@ -473,22 +617,17 @@ func appendFilter(values url.Values, filter string) {
 	}
 }
 
-// countDiffLines returns (additions, deletions) by counting lines starting
-// with "+" or "-" (excluding the diff header lines that start with
-// "+++"/"---"). Best-effort; matches the GitLab UI's own counting.
+// countDiffLines returns (additions, deletions) for one file's patch from the
+// MR /changes payload. GitLab's REST API carries no per-file line counts, so the
+// patch body has to be counted here.
+//
+// It counts only lines inside a `@@` hunk. The previous "+++"/"---" prefix test
+// was content-blind: GitLab returns `--- a/<path>` / `+++ b/<path>` headers ahead
+// of the first hunk, but so does a removed SQL comment (`-- x` arrives as
+// `--- x`) or an added C increment (`++n;` arrives as `+++n;`), and those were
+// dropped from the totals.
 func countDiffLines(diff string) (int, int) {
-	additions, deletions := 0, 0
-	for _, line := range strings.Split(diff, "\n") {
-		switch {
-		case strings.HasPrefix(line, "+++"), strings.HasPrefix(line, "---"):
-			continue
-		case strings.HasPrefix(line, "+"):
-			additions++
-		case strings.HasPrefix(line, "-"):
-			deletions++
-		}
-	}
-	return additions, deletions
+	return unidiff.CountLines(diff)
 }
 
 func diffStatus(newFile, deletedFile, renamedFile bool) string {

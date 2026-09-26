@@ -7,12 +7,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 )
@@ -45,6 +48,8 @@ type WorkspaceTracker struct {
 	workDir      string
 	gitIndexPath string // Cached, validated path to git index file (works with worktrees)
 	logger       *logger.Logger
+	gitEnv       []string
+	gitEnvMu     sync.RWMutex
 	// allowedSourceRoots are canonical roots of durable sources explicitly
 	// attached to this workspace. They are deliberately separate from workDir:
 	// a link may point outside the workspace, but only to one of these roots.
@@ -61,6 +66,25 @@ type WorkspaceTracker struct {
 	// Sourced from task_repositories.base_branch on the kandev backend.
 	// Empty for legacy tasks or external branches with no recorded base.
 	baseBranch string
+	// comparisonTarget is the provider-qualified comparison binding. Its
+	// state is independent from baseBranch: an unavailable explicit target must
+	// never resolve through origin/<same-name>.
+	comparisonTarget          *models.ComparisonTarget
+	comparisonTargetRef       string
+	comparisonTargetStatus    string
+	comparisonTargetErrorCode string
+	// comparisonAnchor is set for an initialized submodule. Unlike a branch
+	// name, it must remain pinned to the gitlink commit recorded by the parent
+	// comparison tree, even when the submodule's own default branch moves.
+	comparisonAnchor    string
+	comparisonAnchorSet bool
+
+	// lastBaseBranchLog dedupes the diff-base resolution log. resolveBaseBranch
+	// runs on every status poll (as often as every couple of seconds), so
+	// logging each resolution would bury the signal it exists to provide.
+	// Holds the previously logged "reason|stored|ref" so only a *change* is reported.
+	lastBaseBranchLog string
+	baseBranchLogMu   sync.Mutex
 
 	// Current state
 	currentStatus types.GitStatusUpdate
@@ -107,9 +131,40 @@ type WorkspaceTracker struct {
 	monitorRunning int32 // atomic; 1 if monitorLoop tick is in progress
 	gitPollRunning int32 // atomic; 1 if pollGitChanges tick is in progress
 
+	// gitPollTickCount and gitPollTickTotalNanos accumulate the number and
+	// summed duration of completed pollGitChanges ticks since this tracker
+	// started (never reset — only Stop() ends accumulation). Backs the
+	// diagnostic agentctl_git_poll_ms metric read via GitPollTickStats; see
+	// api.handleSystemMetrics.
+	gitPollTickCount      atomic.Int64
+	gitPollTickTotalNanos atomic.Int64
+	gitPollStatsMu        sync.Mutex
+
+	// monitorTickCount and monitorTickTotalNanos accumulate the number and
+	// summed duration of completed workspace monitor scans since this tracker
+	// started. This includes the initial scan and each later monitor tick. It
+	// backs the diagnostic agentctl_monitor_poll_ms metric.
+	monitorTickCount      atomic.Int64
+	monitorTickTotalNanos atomic.Int64
+	monitorStatsMu        sync.Mutex
+
 	// updateMu prevents concurrent updateGitStatus calls from the two polling loops.
 	// Polling loops use TryLock (skip if busy); RefreshGitStatus uses Lock (always completes).
 	updateMu sync.Mutex
+	// mutationMu serializes final upload target selection and placement. Upload
+	// bytes are staged before this lock, so slow readers do not block other
+	// workspace mutations while the target invariant remains atomic.
+	mutationMu sync.Mutex
+
+	// diagnostic identity is populated by the process manager once the tracker
+	// is attached to an agentctl instance. A tracker can be created before the
+	// owning task/session metadata is available.
+	diagnosticMu        sync.RWMutex
+	diagnosticTaskID    string
+	diagnosticSessionID string
+	runtimeMode         string
+	filesystemWarnings  *fsdiagnostics.WarningLimiter
+	accessDenied        atomic.Bool
 
 	// gitStatusObserver is the expensive live repository observation. Keeping it
 	// as a dependency makes the concurrency contract deterministic to test while
@@ -120,6 +175,9 @@ type WorkspaceTracker struct {
 	gitStatusObserveMu      sync.Mutex
 	gitStatusObserveWG      sync.WaitGroup
 	gitStatusWaiterJoined   func() // Optional test synchronization hook; nil in production.
+	// gitStatusBetweenQueries is an optional test hook invoked between the
+	// tracked and untracked queries. It is nil in production.
+	gitStatusBetweenQueries func()
 
 	// Control
 	stopCh          chan struct{}
@@ -148,12 +206,62 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	return newWorkspaceTracker(resolvedWorkDir, "", log)
 }
 
+// recordGitPollTick accumulates one pollGitChanges tick's duration into the
+// tracker's running count/total, regardless of whether the tick succeeded or
+// failed — see gitPollTick's deferred call site.
+func (wt *WorkspaceTracker) recordGitPollTick(d time.Duration) {
+	wt.gitPollStatsMu.Lock()
+	defer wt.gitPollStatsMu.Unlock()
+	wt.gitPollTickTotalNanos.Add(d.Nanoseconds())
+	wt.gitPollTickCount.Add(1)
+}
+
+// GitPollTickStats returns the number of completed git poll ticks and their
+// summed duration in nanoseconds since this tracker started. count == 0
+// means no tick has completed yet (the diagnostic metric is unavailable).
+func (wt *WorkspaceTracker) GitPollTickStats() (count int64, totalNanos int64) {
+	wt.gitPollStatsMu.Lock()
+	defer wt.gitPollStatsMu.Unlock()
+	return wt.gitPollTickCount.Load(), wt.gitPollTickTotalNanos.Load()
+}
+
+func (wt *WorkspaceTracker) recordMonitorTick(d time.Duration) {
+	wt.monitorStatsMu.Lock()
+	defer wt.monitorStatsMu.Unlock()
+	wt.monitorTickTotalNanos.Add(d.Nanoseconds())
+	wt.monitorTickCount.Add(1)
+}
+
+// MonitorTickStats returns the number of completed workspace monitor scans
+// and their summed duration in nanoseconds since this tracker started.
+func (wt *WorkspaceTracker) MonitorTickStats() (count int64, totalNanos int64) {
+	wt.monitorStatsMu.Lock()
+	defer wt.monitorStatsMu.Unlock()
+	return wt.monitorTickCount.Load(), wt.monitorTickTotalNanos.Load()
+}
+
 // RepositoryName returns the repository name tag applied to events emitted by
 // this tracker. Empty for the bare task-root / single-repo tracker; non-empty
 // for per-repo trackers built via NewWorkspaceTrackerForRepo. Used by the
 // rescan path to decide whether a discovered subdir already has a tracker.
 func (wt *WorkspaceTracker) RepositoryName() string {
 	return wt.repositoryName
+}
+
+// SetGitEnvironment stores a detached copy of the instance environment used
+// for every Git command started by this tracker. Tracker-owned copies prevent
+// a later manager or sibling-tracker update from changing an in-flight command.
+func (wt *WorkspaceTracker) SetGitEnvironment(env []string) {
+	detached := append([]string(nil), env...)
+	wt.gitEnvMu.Lock()
+	wt.gitEnv = detached
+	wt.gitEnvMu.Unlock()
+}
+
+func (wt *WorkspaceTracker) gitEnvironmentSnapshot() []string {
+	wt.gitEnvMu.RLock()
+	defer wt.gitEnvMu.RUnlock()
+	return append([]string(nil), wt.gitEnv...)
 }
 
 // SetBaseBranch records the task's stored base branch for this repository.
@@ -171,11 +279,65 @@ func (wt *WorkspaceTracker) RepositoryName() string {
 func (wt *WorkspaceTracker) SetBaseBranch(baseBranch string) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
+	wt.setBaseBranchLocked(baseBranch)
+}
+
+// SetBaseBranchIfNotSubmodule updates the branch override only while holding
+// the same lock used to publish a comparison anchor. This keeps a concurrent
+// rescan from replacing a submodule anchor with a task-level base branch.
+func (wt *WorkspaceTracker) SetBaseBranchIfNotSubmodule(baseBranch string) bool {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	if wt.comparisonAnchorSet {
+		return false
+	}
+	wt.setBaseBranchLocked(baseBranch)
+	return true
+}
+
+func (wt *WorkspaceTracker) setBaseBranchLocked(baseBranch string) {
+	wt.comparisonAnchor = ""
+	wt.comparisonAnchorSet = false
 	if !IsSafeGitRef(baseBranch) {
 		wt.baseBranch = ""
 		return
 	}
 	wt.baseBranch = baseBranch
+}
+
+// SetComparisonAnchor pins this tracker to the commit recorded by its parent
+// repository at the parent's comparison point. An empty anchor is still
+// meaningful: it records that this is a submodule whose committed base could
+// not be resolved, so later base-branch updates must not substitute an
+// unrelated branch from the task configuration.
+func (wt *WorkspaceTracker) SetComparisonAnchor(anchor string) {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	wt.comparisonAnchorSet = true
+	if !sha1HexPattern.MatchString(anchor) {
+		wt.comparisonAnchor = ""
+		wt.baseBranch = ""
+		return
+	}
+	wt.comparisonAnchor = anchor
+	wt.baseBranch = anchor
+}
+
+// IsSubmodule reports whether this tracker represents a declared submodule,
+// including a child whose parent comparison anchor could not be resolved.
+func (wt *WorkspaceTracker) IsSubmodule() bool {
+	wt.mu.RLock()
+	defer wt.mu.RUnlock()
+	return wt.comparisonAnchorSet
+}
+
+// ComparisonAnchor returns the exact parent-recorded gitlink commit when one
+// was discovered. It is empty when the tracker is not a submodule or when the
+// parent anchor could not be resolved locally.
+func (wt *WorkspaceTracker) ComparisonAnchor() string {
+	wt.mu.RLock()
+	defer wt.mu.RUnlock()
+	return wt.comparisonAnchor
 }
 
 // IsSafeGitRef reports whether ref is safe to splice into a `git`
@@ -252,6 +414,7 @@ func newWorkspaceTracker(resolvedWorkDir, repositoryName string, log *logger.Log
 		gitIndexPath:               gitIndexPath,
 		repositoryName:             repositoryName,
 		logger:                     log.WithFields(logFields...),
+		runtimeMode:                fsdiagnostics.RuntimeMode(strings.EqualFold(strings.TrimSpace(os.Getenv("KANDEV_DESKTOP_RUNTIME")), "true")),
 		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
 		filePollInterval:           DefaultFilePollInterval,
 		gitPollInterval:            DefaultGitPollInterval,
@@ -274,6 +437,7 @@ func newWorkspaceTracker(resolvedWorkDir, repositoryName string, log *logger.Log
 		cancelCtx:               ctx,
 		cancelFunc:              cancel,
 		gitStatusObserveTimeout: workspaceGitStatusObserveTimeout,
+		filesystemWarnings:      fsdiagnostics.NewWarningLimiter(0),
 	}
 	tracker.gitStatusObserver = tracker.computeGitStatus
 	return tracker
@@ -383,6 +547,9 @@ func workDirHasOwnGitEntry(workDir string) bool {
 // so this only checks for subsequent deletion (e.g., worktree cleanup).
 func (wt *WorkspaceTracker) workDirExists() bool {
 	_, err := os.Stat(wt.workDir) //nolint:gosec // workDir is validated at construction via resolveExistingWorkDir
+	if err != nil && fsdiagnostics.IsAccessDenied(err) {
+		wt.recordFilesystemFailure("workspace.file_monitor", "poll", err)
+	}
 	return !os.IsNotExist(err)
 }
 
@@ -421,7 +588,23 @@ func (wt *WorkspaceTracker) armPollModeGrace() {
 	if wt.pollModePushed || wt.pollModeGraceTimer != nil || wt.pollModeGrace <= 0 {
 		return
 	}
-	wt.pollModeGraceTimer = time.AfterFunc(wt.pollModeGrace, wt.demoteUnpushedPollMode)
+	timer := time.NewTimer(wt.pollModeGrace)
+	wt.pollModeGraceTimer = timer
+	// The grace callback owns filesystem work, so it must be part of the
+	// tracker lifecycle. A timer callback launched by time.AfterFunc cannot be
+	// joined by Stop when it races with teardown.
+	wt.wg.Add(1)
+	go wt.pollModeGraceLoop(timer)
+}
+
+func (wt *WorkspaceTracker) pollModeGraceLoop(timer *time.Timer) {
+	defer wt.wg.Done()
+	select {
+	case <-timer.C:
+		wt.demoteUnpushedPollMode(wt.cancelCtx)
+	case <-wt.stopCh:
+	case <-wt.cancelCtx.Done():
+	}
 }
 
 // disarmPollModeGraceLocked stops the fallback timer. Caller must hold pollModeMu.

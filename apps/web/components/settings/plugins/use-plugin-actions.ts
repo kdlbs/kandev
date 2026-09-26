@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { toast } from "@/lib/toast/sonner";
+// Module-level `t`: these callbacks fire outside a render, so each message
+// resolves when the action runs rather than at import.
+import { t } from "@/lib/i18n";
 import type { StoreApi } from "zustand";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useTheme } from "@/components/theme/app-theme";
 import {
   disablePlugin,
   enablePlugin,
@@ -54,18 +56,17 @@ function withStatus(plugin: PluginRecord, status: PluginStatus): PluginRecord {
 async function loadIfActive(
   record: PluginRecord,
   storeApi: StoreApi<AppState>,
-  theme: "light" | "dark",
   evictCache: boolean,
 ) {
   if (record.status !== "active") return;
   const active = toActivePlugin(record);
   if (!active) return;
   if (evictCache) {
-    unloadPlugin(record.id, { evictCache: true });
+    unloadPlugin(record.id, { evictCache: true, transition: "reload" });
   } else {
-    unloadPlugin(record.id);
+    unloadPlugin(record.id, { transition: "reload" });
   }
-  await loadPlugins([active], (pluginId) => buildHostApi(pluginId, storeApi, theme));
+  await loadPlugins([active], (pluginId) => buildHostApi(pluginId, storeApi));
 }
 
 /**
@@ -76,7 +77,6 @@ async function loadIfActive(
  */
 function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
   const storeApi = useAppStoreApi();
-  const { resolvedTheme } = useTheme();
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const handleEnable = async (plugin: PluginRecord) => {
@@ -85,7 +85,7 @@ function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
       await enablePlugin(plugin.id);
       const updated = withStatus(plugin, "active");
       upsertPlugin(updated);
-      await loadIfActive(updated, storeApi, resolvedTheme, false);
+      await loadIfActive(updated, storeApi, false);
     } catch (err) {
       try {
         const refreshed = await getPlugin(plugin.id, { cache: "no-store" });
@@ -94,7 +94,11 @@ function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
         // Preserve the original Enable failure toast if the diagnostic refresh
         // itself cannot reach the backend.
       }
-      toast.error(err instanceof Error ? err.message : `Failed to enable ${plugin.display_name}`);
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t("plugins:failedToEnable", { name: plugin.display_name }),
+      );
     } finally {
       setBusyId(null);
     }
@@ -107,7 +111,11 @@ function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
       unloadPlugin(plugin.id);
       upsertPlugin(withStatus(plugin, "disabled"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Failed to disable ${plugin.display_name}`);
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t("plugins:failedToDisable", { name: plugin.display_name }),
+      );
     } finally {
       setBusyId(null);
     }
@@ -134,7 +142,7 @@ function useAutoUpdateAction(upsertPlugin: (p: PluginRecord) => void) {
       toast.error(
         err instanceof Error
           ? err.message
-          : `Failed to update auto-update for ${plugin.display_name}`,
+          : t("plugins:failedToSetAutoUpdateFor", { name: plugin.display_name }),
       );
     } finally {
       setAutoUpdateBusyId(null);
@@ -145,32 +153,29 @@ function useAutoUpdateAction(upsertPlugin: (p: PluginRecord) => void) {
 }
 
 function useUninstallAction(removePlugin: (id: string) => void) {
-  const [uninstallTarget, setUninstallTarget] = useState<PluginRecord | null>(null);
   const [uninstallBusy, setUninstallBusy] = useState(false);
 
-  const confirmUninstall = async () => {
-    if (!uninstallTarget) return;
-    const target = uninstallTarget;
+  const confirmUninstall = async (target: PluginRecord) => {
     setUninstallBusy(true);
     try {
       await uninstallPlugin(target.id);
       unloadPlugin(target.id);
       removePlugin(target.id);
-      setUninstallTarget(null);
+      return true;
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : `Failed to uninstall ${target.display_name}`,
+        err instanceof Error
+          ? err.message
+          : t("plugins:failedToUninstall", { name: target.display_name }),
       );
+      return false;
     } finally {
       setUninstallBusy(false);
     }
   };
 
   return {
-    uninstallTarget,
     uninstallBusy,
-    openUninstall: setUninstallTarget,
-    closeUninstall: () => setUninstallTarget(null),
     confirmUninstall,
   };
 }
@@ -184,7 +189,6 @@ function useUninstallAction(removePlugin: (id: string) => void) {
  */
 function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
   const storeApi = useAppStoreApi();
-  const { resolvedTheme } = useTheme();
   const [installOpen, setInstallOpenState] = useState(false);
   const [installBusy, setInstallBusy] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
@@ -199,11 +203,11 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
   // "installed" toast, so it takes priority over the success toast.
   const afterInstall = async ({ plugin, warning }: InstallResult) => {
     upsertPlugin(plugin);
-    await loadIfActive(plugin, storeApi, resolvedTheme, true);
+    await loadIfActive(plugin, storeApi, true);
     if (warning) {
       toast.warning(warning);
     } else {
-      toast.success(`${plugin.display_name} installed`);
+      toast.success(t("plugins:pluginInstalled", { name: plugin.display_name }));
     }
     closeInstallDialog();
   };
@@ -215,7 +219,7 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
       const result = await install();
       await afterInstall(result);
     } catch (err) {
-      setInstallError(err instanceof Error ? err.message : "Failed to install plugin");
+      setInstallError(err instanceof Error ? err.message : t("plugins:failedToInstallPlugin"));
     } finally {
       setInstallBusy(false);
     }
@@ -226,13 +230,21 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
   // toast rather than the dialog-scoped installError region — the Browse tab
   // has no such region. It resolves even on failure (after toasting) so its
   // fire-and-forget onClick callers never leak an unhandled rejection; their
-  // try/finally still clears per-entry busy state.
-  const marketplaceInstall = async (url: string) => {
+  // try/finally still clears per-entry busy state. The resolved
+  // `{ ok, error, pluginId }` lets callers that need the outcome (the manual
+  // update action and the Browse tab) reconcile local update state without
+  // also duplicating the toast.
+  const marketplaceInstall = async (
+    url: string,
+  ): Promise<{ ok: boolean; error?: string; pluginId?: string }> => {
     try {
       const result = await installPluginFromUrl(url);
       await afterInstall(result);
+      return { ok: true, pluginId: result.plugin.id };
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to install plugin");
+      const message = err instanceof Error ? err.message : t("plugins:failedToInstallPlugin");
+      toast.error(message);
+      return { ok: false, error: message };
     }
   };
 
@@ -260,12 +272,17 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
  * UI bundle, but (unlike install/enable) this does not hot-load it — an
  * operator can re-enable it (or reload) to pick up the bundle; wiring a
  * silent hot-load here is out of scope for the sync button itself.
+ *
+ * `handleSync` resolves `{ ok }` (never throws) so a caller that chains a
+ * marketplace update check after the sync (plugins-settings.tsx) can skip
+ * that second request when the sync itself already failed — avoiding two
+ * stacked error toasts for what's likely one unreachable-backend root cause.
  */
 function useSyncAction(setPlugins: (plugins: PluginRecord[]) => void) {
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncErrors, setSyncErrors] = useState<SyncError[]>([]);
 
-  const handleSync = async () => {
+  const handleSync = async (): Promise<{ ok: boolean }> => {
     setSyncBusy(true);
     try {
       const result = await syncPlugins();
@@ -273,8 +290,10 @@ function useSyncAction(setPlugins: (plugins: PluginRecord[]) => void) {
       setPlugins(refreshed);
       setSyncErrors(result.errors ?? []);
       toast.success(summarizeSyncResult(result));
+      return { ok: true };
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to sync plugins");
+      toast.error(err instanceof Error ? err.message : t("plugins:failedToSyncPlugins"));
+      return { ok: false };
     } finally {
       setSyncBusy(false);
     }

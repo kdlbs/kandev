@@ -61,7 +61,7 @@ func TestService_Get_FreshDB_ReturnsZeroValues(t *testing.T) {
 	pool := newTestPool(t)
 	svc := NewService(pool, "v1.0.0", nil, logger.Default())
 
-	resp, err := svc.Get()
+	resp, err := svc.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestService_Check_PersistsToMeta(t *testing.T) {
 	}
 
 	// Persistence side-effect: a fresh Get should return the same values.
-	got, err := svc.Get()
+	got, err := svc.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

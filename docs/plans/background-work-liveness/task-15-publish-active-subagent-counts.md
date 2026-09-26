@@ -5,7 +5,7 @@ status: done
 wave: 15
 depends_on: ["14-attest-background-lifecycles"]
 plan: "plan.md"
-spec: "../../specs/platform/background-work-liveness.md"
+spec: "../../specs/platform/requirements/background-work-liveness.md"
 ---
 
 # Task 15: Publish active subagent counts

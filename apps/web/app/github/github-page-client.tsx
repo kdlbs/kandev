@@ -1,12 +1,10 @@
 "use client";
 
 import Link from "@/components/routing/app-link";
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { IconBrandGithub, IconMenu2 } from "@tabler/icons-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { IconBrandGithub } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
-import { Button } from "@kandev/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
-import { PageTopbar } from "@/components/page-topbar";
+import { PageShell } from "@/components/page-shell";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { usePRKeyToTasks } from "@/hooks/domains/github/use-pr-key-to-tasks";
 import { useIssueKeyToTasks } from "@/hooks/domains/github/use-issue-key-to-tasks";
@@ -14,10 +12,10 @@ import type { Repository, Workflow, WorkflowStep } from "@/lib/types/http";
 import type { GitHubIssue, GitHubPR, TaskIssueLink, TaskPR } from "@/lib/types/github";
 import { PRList } from "@/components/github/my-github/pr-list";
 import { IssueList } from "@/components/github/my-github/issue-list";
-import {
-  PresetsSidebar,
-  type SidebarSelection,
-} from "@/components/github/my-github/presets-sidebar";
+import type { SidebarSelection } from "@/components/github/my-github/presets-sidebar";
+import { MobileViewsPicker } from "@/components/github/my-github/mobile-views-picker";
+import { SavedQueryLoadStatus } from "@/components/github/my-github/saved-query-load-status";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { PresetsScopeBar } from "@/components/github/my-github/presets-scope-bar";
 import {
   PR_PRESETS,
@@ -29,8 +27,12 @@ import {
   useDefaultQueryPresets,
   resolvePresetOptions,
 } from "@/components/github/my-github/use-default-query-presets";
-import type { SavedPreset } from "@/components/github/my-github/use-saved-presets";
+import { useSavedPresets, type SavedPreset } from "@/components/github/my-github/use-saved-presets";
 import { useSavedPresetActions } from "@/components/github/my-github/use-saved-preset-actions";
+import {
+  useInitialSidebarSelection,
+  useSidebarSelectionHandler,
+} from "@/components/github/my-github/use-sidebar-selection";
 import { useKnownRepos, resetKnownReposStore } from "@/components/github/my-github/use-known-repos";
 import { useCommittedQuery } from "@/components/github/my-github/use-committed-query";
 import { ListToolbar } from "@/components/github/my-github/list-toolbar";
@@ -48,6 +50,7 @@ import {
 import { useGitHubActionPresets } from "@/hooks/domains/github/use-github-action-presets";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { hasGitHubPersonalActor } from "@/lib/github-auth";
+import { Trans, useTranslation } from "react-i18next";
 
 type GitHubPageClientProps = {
   workspaceId?: string;
@@ -56,30 +59,6 @@ type GitHubPageClientProps = {
   repositories: Repository[];
 };
 
-function PageHeader({ onOpenMobileSidebar }: { onOpenMobileSidebar?: () => void }) {
-  return (
-    <PageTopbar
-      title="GitHub"
-      subtitle="Pull requests and issues across your repos."
-      icon={<IconBrandGithub className="h-4 w-4" />}
-      actions={
-        onOpenMobileSidebar && (
-          <Button
-            variant="outline"
-            size="icon-lg"
-            onClick={onOpenMobileSidebar}
-            className="md:hidden cursor-pointer"
-            data-testid="github-mobile-menu-button"
-            aria-label="Open GitHub filters"
-          >
-            <IconMenu2 className="h-4 w-4" />
-          </Button>
-        )
-      }
-    />
-  );
-}
-
 function NotAuthenticatedNotice({
   workspaceId,
   personalRequired,
@@ -87,31 +66,31 @@ function NotAuthenticatedNotice({
   workspaceId?: string;
   personalRequired: boolean;
 }) {
+  const { t } = useTranslation();
   const settingsHref = workspaceId
-    ? `/settings/workspace/${workspaceId}/integrations/github`
+    ? `/settings/workspaces/${workspaceId}/integrations/github`
     : "/settings/integrations/github";
   return (
     <Alert>
       <AlertDescription>
         {personalRequired
-          ? "Connect your personal GitHub identity to see pull requests and issues assigned to you."
-          : "GitHub is not connected. Configure workspace automation with gh CLI or a personal access token."}{" "}
-        <Link href={settingsHref} className="underline font-medium cursor-pointer">
-          Open GitHub settings
-        </Link>{" "}
-        to see your pull requests and issues.
+          ? t("github:connectYourPersonalGithubIdentityTo")
+          : t("github:githubIsNotConnectedConfigureWorkspace")}{" "}
+        <Trans i18nKey="github:openSettingsToSeePrsAndIssues">
+          <Link href={settingsHref} className="underline font-medium cursor-pointer" />
+          to see your pull requests and issues.
+        </Trans>
       </AlertDescription>
     </Alert>
   );
 }
 
 function NoWorkspaceNotice() {
+  const { t } = useTranslation();
   return (
     <div className="px-6 py-3 border-b shrink-0">
       <Alert>
-        <AlertDescription>
-          No workspace configured. Create a workspace first to start tasks from PRs/issues.
-        </AlertDescription>
+        <AlertDescription>{t("github:noWorkspaceConfiguredCreateAWorkspace")}</AlertDescription>
       </Alert>
     </div>
   );
@@ -126,14 +105,15 @@ function resolveTitle(
   saved: SavedPreset[],
   prPresets: PresetOption[],
   issuePresets: PresetOption[],
+  t: (key: string, values?: Record<string, unknown>) => string,
 ): string {
   if (selection.source === "saved") {
-    return saved.find((p) => p.id === selection.id)?.label ?? "Saved query";
+    return saved.find((p) => p.id === selection.id)?.label ?? t("github:savedQueryFallback");
   }
   const presets = selection.kind === "pr" ? prPresets : issuePresets;
   return (
     presets.find((p) => p.value === selection.id)?.label ??
-    (selection.kind === "pr" ? "Pull requests" : "Issues")
+    (selection.kind === "pr" ? t("github:titlePullRequests") : t("github:titleIssues"))
   );
 }
 
@@ -220,90 +200,15 @@ function useResolvedQueryPresets(workspaceId: string | null = null) {
   return { pr, issue };
 }
 
-function useInitialSidebarSelection(
-  workspaceId: string | null,
-  resolvedPrPresets: PresetOption[],
-  autoResetSearchRef: MutableRefObject<boolean>,
-  setQueryImmediate: (query: string) => void,
-  setRepoFilter: (repo: string) => void,
-) {
-  const userSelectedRef = useRef(false);
-  const [selection, setSelection] = useState<SidebarSelection>(() => ({
-    kind: "pr",
-    source: "preset",
-    id: resolvedPrPresets[0]?.value ?? "",
-  }));
-
-  useEffect(() => {
-    userSelectedRef.current = false;
-    autoResetSearchRef.current = true;
-  }, [workspaceId]);
-
-  useEffect(() => {
-    if (userSelectedRef.current || !autoResetSearchRef.current) return;
-    const first = resolvedPrPresets[0];
-    setSelection({ kind: "pr", source: "preset", id: first?.value ?? "" });
-    setQueryImmediate(first?.filter ?? "");
-    setRepoFilter("");
-  }, [workspaceId, resolvedPrPresets, autoResetSearchRef, setQueryImmediate, setRepoFilter]);
-
-  const setUserSelection = useCallback((next: SidebarSelection) => {
-    userSelectedRef.current = true;
-    setSelection(next);
-  }, []);
-
-  return { selection, setProgrammaticSelection: setSelection, setUserSelection };
-}
-
-function useSidebarSelectionHandler({
-  savedPresets,
-  resolvedPrPresets,
-  resolvedIssuePresets,
-  setQueryImmediate,
-  setRepoFilter,
-  setUserSelection,
-  markSearchInteracted,
-}: {
-  savedPresets: SavedPreset[];
-  resolvedPrPresets: PresetOption[];
-  resolvedIssuePresets: PresetOption[];
-  setQueryImmediate: (query: string) => void;
-  setRepoFilter: (repo: string) => void;
-  setUserSelection: (next: SidebarSelection) => void;
-  markSearchInteracted: () => void;
-}) {
-  return useCallback(
-    (s: SidebarSelection) => {
-      markSearchInteracted();
-      setUserSelection(s);
-      if (s.source === "saved") {
-        const found = savedPresets.find((p) => p.id === s.id);
-        setQueryImmediate(found?.customQuery ?? "");
-        setRepoFilter(found?.repoFilter ?? "");
-        return;
-      }
-      const preset = (s.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets).find(
-        (p) => p.value === s.id,
-      );
-      setQueryImmediate(preset?.filter ?? "");
-      setRepoFilter("");
-    },
-    [
-      savedPresets,
-      setQueryImmediate,
-      resolvedPrPresets,
-      resolvedIssuePresets,
-      setUserSelection,
-      markSearchInteracted,
-    ],
-  );
-}
-
 function useSearchInteractionControls(
   setCustomQueryRaw: (query: string) => void,
   setRepoFilterRaw: (repo: string) => void,
 ) {
   const autoResetSearchRef = useRef(true);
+  const shouldAutoResetSearch = useCallback(() => autoResetSearchRef.current, []);
+  const resetSearchOnWorkspaceChange = useCallback(() => {
+    autoResetSearchRef.current = true;
+  }, []);
   const markSearchInteracted = useCallback(() => {
     autoResetSearchRef.current = false;
   }, []);
@@ -321,10 +226,28 @@ function useSearchInteractionControls(
     },
     [markSearchInteracted, setRepoFilterRaw],
   );
-  return { autoResetSearchRef, markSearchInteracted, setCustomQuery, setRepoFilter };
+  return {
+    autoResetSearch: { shouldAutoResetSearch, resetSearchOnWorkspaceChange },
+    markSearchInteracted,
+    setCustomQuery,
+    setRepoFilter,
+  };
+}
+
+function useSaveQueryDialog(canSaveCurrent: boolean) {
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const saveDialogFocusRef = useRef<HTMLElement | null>(null);
+  const onOpenSaveDialog = () => {
+    if (!canSaveCurrent) return;
+    saveDialogFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSaveDialogOpen(true);
+  };
+  return { saveDialogOpen, setSaveDialogOpen, saveDialogFocusRef, onOpenSaveDialog };
 }
 
 function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
+  const { t } = useTranslation();
   const { pr: resolvedPrPresets, issue: resolvedIssuePresets } =
     useResolvedQueryPresets(workspaceId);
   const {
@@ -335,17 +258,24 @@ function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
     commit: commitCustomQuery,
   } = useCommittedQuery(resolvedPrPresets[0]?.filter ?? "");
   const [repoFilter, setRepoFilterRaw] = useState("");
-  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
-  const { autoResetSearchRef, markSearchInteracted, setCustomQuery, setRepoFilter } =
+  const savedPresetStore = useSavedPresets(workspaceId);
+  const { autoResetSearch, markSearchInteracted, setCustomQuery, setRepoFilter } =
     useSearchInteractionControls(setCustomQueryRaw, setRepoFilterRaw);
-  const { selection, setProgrammaticSelection, setUserSelection } = useInitialSidebarSelection(
+  const { selection, setProgrammaticSelection, setUserSelection } = useInitialSidebarSelection({
     workspaceId,
+    ...autoResetSearch,
     resolvedPrPresets,
-    autoResetSearchRef,
     setQueryImmediate,
-    setRepoFilterRaw,
-  );
-  const { savedPresets, onConfirmSave, onDeleteSaved } = useSavedPresetActions({
+    setRepoFilter: setRepoFilterRaw,
+    savedPresets: savedPresetStore.presets,
+  });
+  const {
+    savedPresets,
+    onConfirmSave,
+    onDeleteSaved,
+    onToggleSavedDefault,
+    defaultMutationPendingId,
+  } = useSavedPresetActions({
     workspaceId,
     selection,
     customQuery,
@@ -354,31 +284,23 @@ function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
     setProgrammaticSelection,
     setQueryImmediate,
     setRepoFilter: setRepoFilterRaw,
+    savedPresetStore,
+    markSearchInteracted,
   });
-
-  const presets = selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
   const search = useGitHubSearch<GitHubPR | GitHubIssue>({
     enabled,
     kind: selection.kind,
-    presets,
+    presets: selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets,
     preset: selection.source === "preset" ? selection.id : "",
     customQuery: committedQuery,
     repoFilter,
     workspaceId,
   });
-  const repoOptions = useRepoOptions(
-    workspaceId,
-    selection,
-    committedQuery,
-    search.items,
-    repoFilter,
-  );
-  const title = useMemo(
-    () => resolveTitle(selection, savedPresets, resolvedPrPresets, resolvedIssuePresets),
-    [selection, savedPresets, resolvedPrPresets, resolvedIssuePresets],
-  );
+  const repos = useRepoOptions(workspaceId, selection, committedQuery, search.items, repoFilter);
+  const title = resolveTitle(selection, savedPresets, resolvedPrPresets, resolvedIssuePresets, t);
 
   const onSelect = useSidebarSelectionHandler({
+    currentKind: selection.kind,
     savedPresets,
     resolvedPrPresets,
     resolvedIssuePresets,
@@ -388,9 +310,13 @@ function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
     markSearchInteracted,
   });
 
-  const canSaveCurrent = customQuery.trim().length > 0 || repoFilter.length > 0;
+  const canSaveCurrent =
+    !savedPresetStore.loading &&
+    !savedPresetStore.error &&
+    (customQuery.trim().length > 0 || repoFilter.length > 0);
+  // i18n-exempt: persisted as the saved query's name, so it must not depend on the creating locale.
   const suggestedLabel = customQuery.trim() || (repoFilter ? `In ${repoFilter}` : "Saved query");
-  const onOpenSaveDialog = () => canSaveCurrent && setSaveDialogOpen(true);
+  const saveDialog = useSaveQueryDialog(canSaveCurrent);
 
   return {
     selection,
@@ -401,17 +327,22 @@ function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
     repoFilter,
     setRepoFilter,
     savedPresets,
+    savedQueryLoad: {
+      loading: savedPresetStore.loading,
+      error: savedPresetStore.error,
+      retry: savedPresetStore.retry,
+    },
     search,
-    repoOptions,
+    repoOptions: repos,
     title,
     onSelect,
     canSaveCurrent,
     suggestedLabel,
-    saveDialogOpen,
-    setSaveDialogOpen,
-    onOpenSaveDialog,
+    ...saveDialog,
     onConfirmSave,
     onDeleteSaved,
+    onToggleSavedDefault,
+    defaultMutationPendingId,
     resolvedPrPresets,
     resolvedIssuePresets,
   };
@@ -431,17 +362,26 @@ function AuthenticatedLayout({
   onStartTask: (payload: LaunchPayload) => void;
 }) {
   const { selection, search, repoOptions, title } = state;
+  const { isMobile } = useResponsiveBreakpoint();
   const prKeyToTasks = usePRKeyToTasks(workspaceId ?? null);
   const issueKeyToTasks = useIssueKeyToTasks(workspaceId ?? null);
   useAllWorkflowSnapshots(workspaceId ?? null);
   return (
-    <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+    // Not a <main>: AppShell owns that landmark, one per page.
+    <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
       <PresetsScopeBar
         className="hidden md:flex"
         selected={selection}
         onSelect={state.onSelect}
         savedPresets={state.savedPresets}
+        savedStatus={
+          state.savedQueryLoad.loading || state.savedQueryLoad.error ? (
+            <SavedQueryLoadStatus {...state.savedQueryLoad} presentation="menu" />
+          ) : undefined
+        }
         onDeleteSaved={state.onDeleteSaved}
+        onToggleSavedDefault={state.onToggleSavedDefault}
+        defaultMutationPendingId={state.defaultMutationPendingId}
         canSaveCurrent={state.canSaveCurrent}
         onSaveCurrent={state.onOpenSaveDialog}
         prPresets={state.resolvedPrPresets}
@@ -449,6 +389,25 @@ function AuthenticatedLayout({
       />
       <ListToolbar
         title={title}
+        titleControl={
+          isMobile ? (
+            <MobileViewsPicker
+              key={workspaceId}
+              title={title}
+              selected={selection}
+              onSelect={state.onSelect}
+              savedPresets={state.savedPresets}
+              savedQueryLoad={state.savedQueryLoad}
+              onDeleteSaved={state.onDeleteSaved}
+              onToggleSavedDefault={state.onToggleSavedDefault}
+              defaultMutationPendingId={state.defaultMutationPendingId}
+              canSaveCurrent={state.canSaveCurrent}
+              onSaveCurrent={state.onOpenSaveDialog}
+              prPresets={state.resolvedPrPresets}
+              issuePresets={state.resolvedIssuePresets}
+            />
+          ) : undefined
+        }
         count={search.total}
         loading={search.loading}
         lastFetchedAt={search.lastFetchedAt}
@@ -462,7 +421,7 @@ function AuthenticatedLayout({
         onRefresh={search.refresh}
       />
       {!workspaceId && <NoWorkspaceNotice />}
-      <div className="flex-1 overflow-auto px-6 py-4">
+      <div className="flex-1 overflow-auto px-3 py-4 md:px-6">
         <ResultsList
           workspaceId={workspaceId ?? null}
           selection={selection}
@@ -482,7 +441,7 @@ function AuthenticatedLayout({
         total={search.total}
         onPageChange={search.setPage}
       />
-    </main>
+    </div>
   );
 }
 
@@ -492,10 +451,10 @@ export function GitHubPageClient({
   steps,
   repositories,
 }: GitHubPageClientProps) {
+  const { t } = useTranslation();
   const { status, loaded } = useGitHubStatus(workspaceId ?? null);
   const authed = hasGitHubUserIdentity(status);
   const [launchPayload, setLaunchPayload] = useState<LaunchPayload | null>(null);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const state = useGitHubPageState(workspaceId ?? null, authed);
   const { presets: storedPresets } = useGitHubActionPresets(workspaceId ?? null);
   const prPresets = useMemo(() => resolvePRPresets(storedPresets), [storedPresets]);
@@ -507,63 +466,38 @@ export function GitHubPageClient({
 
   const onStartTask = useCallback((payload: LaunchPayload) => setLaunchPayload(payload), []);
   const onCloseLaunch = useCallback(() => setLaunchPayload(null), []);
-  const onOpenMobileSidebar = useCallback(() => setMobileSidebarOpen(true), []);
-  // Close the mobile sheet after any sidebar selection. KindToggle clicks also
-  // route through onSelect — closing on every selection is acceptable UX since
-  // the user always wants to see the list after picking a kind or preset.
-  // No useCallback: `state` is a fresh object every render, so memoizing
-  // these handlers would be deceptive — they'd still be new refs each pass.
-  const onMobileSidebarSelect = (s: Parameters<typeof state.onSelect>[0]) => {
-    state.onSelect(s);
-    setMobileSidebarOpen(false);
-  };
-  const onMobileSaveCurrent = () => {
-    setMobileSidebarOpen(false);
-    state.onOpenSaveDialog();
-  };
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <PageHeader onOpenMobileSidebar={loaded && authed ? onOpenMobileSidebar : undefined} />
-      {!loaded && <div className="p-6 text-sm text-muted-foreground">Checking GitHub status…</div>}
-      {loaded && !authed && (
-        <div className="p-6 max-w-2xl">
-          <NotAuthenticatedNotice
+    <PageShell
+      title="GitHub"
+      subtitle={t("github:pullRequestsAndIssuesAcrossYour")}
+      icon={<IconBrandGithub className="h-4 w-4" />}
+      scroll="none"
+    >
+      <div className="flex min-h-0 w-full flex-1 flex-col bg-background">
+        {!loaded && (
+          <div className="p-6 text-sm text-muted-foreground">
+            {t("github:checkingGithubStatus")}
+          </div>
+        )}
+        {loaded && !authed && (
+          <div className="p-6 max-w-2xl">
+            <NotAuthenticatedNotice
+              workspaceId={workspaceId}
+              personalRequired={status?.automation?.source === "github_app_installation"}
+            />
+          </div>
+        )}
+        {loaded && authed && (
+          <AuthenticatedLayout
             workspaceId={workspaceId}
-            personalRequired={status?.automation?.source === "github_app_installation"}
+            state={state}
+            prPresets={prPresets}
+            issuePresets={issuePresets}
+            onStartTask={onStartTask}
           />
-        </div>
-      )}
-      {loaded && authed && (
-        <AuthenticatedLayout
-          workspaceId={workspaceId}
-          state={state}
-          prPresets={prPresets}
-          issuePresets={issuePresets}
-          onStartTask={onStartTask}
-        />
-      )}
-      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-        <SheetContent
-          side="right"
-          className="w-full sm:max-w-sm overflow-y-auto p-0"
-          data-testid="github-mobile-sidebar"
-        >
-          <SheetHeader className="px-4 pt-4 pb-2">
-            <SheetTitle>Filters</SheetTitle>
-          </SheetHeader>
-          <PresetsSidebar
-            selected={state.selection}
-            onSelect={onMobileSidebarSelect}
-            savedPresets={state.savedPresets}
-            onDeleteSaved={state.onDeleteSaved}
-            canSaveCurrent={state.canSaveCurrent}
-            onSaveCurrent={onMobileSaveCurrent}
-            prPresets={state.resolvedPrPresets}
-            issuePresets={state.resolvedIssuePresets}
-          />
-        </SheetContent>
-      </Sheet>
+        )}
+      </div>
       <QuickTaskLauncher
         workspaceId={workspaceId ?? null}
         workflows={workflows}
@@ -573,8 +507,10 @@ export function GitHubPageClient({
         onClose={onCloseLaunch}
       />
       <SavePresetDialog
+        key={workspaceId}
         open={state.saveDialogOpen}
         onOpenChange={state.setSaveDialogOpen}
+        focusReturnRef={state.saveDialogFocusRef}
         kind={state.selection.kind}
         customQuery={state.customQuery}
         repoFilter={state.repoFilter}
@@ -582,6 +518,6 @@ export function GitHubPageClient({
         suggestedLabel={state.suggestedLabel}
         onSave={state.onConfirmSave}
       />
-    </div>
+    </PageShell>
   );
 }

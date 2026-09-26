@@ -33,13 +33,18 @@ const PRIORITY_ORDER = {
   none: 4,
 };
 
-function task(id: string, title: string, parentId?: string): OfficeTask {
+function task(
+  id: string,
+  title: string,
+  parentId?: string,
+  status: OfficeTask["status"] = "todo",
+): OfficeTask {
   return {
     id,
     workspaceId: "workspace-1",
     identifier: id.toUpperCase(),
     title,
-    status: "todo",
+    status,
     priority: "none",
     parentId,
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -52,10 +57,11 @@ function buildNodes(
   expandedIds: Set<string>,
   sortField: TaskSortField = "title",
   sortDir: TaskSortDir = "asc",
+  filters: TaskFilterState = FILTERS,
 ): FlatTaskNode[] {
   return buildTaskTreeNodes({
     tasks,
-    filters: FILTERS,
+    filters,
     sortField,
     sortDir,
     nestingEnabled: true,
@@ -124,5 +130,32 @@ describe("office task tree", () => {
       [child.id, 0, true],
       [grandchild.id, 1, false],
     ]);
+  });
+
+  // office.tasks.items is normalized to the canonical OfficeTaskStatus
+  // vocabulary at ingestion (office-slice.ts setTasks/appendTasks/
+  // patchTaskInStore), so buildTaskTreeNodes only ever sees canonical
+  // values — coverage for the raw-backend-status case (e.g. "CREATED")
+  // lives in office-tasks.test.ts instead.
+  it("filters to the todo status", () => {
+    const todo = task("todo-task", "Todo task", undefined, "todo");
+    const done = task("done-task", "Done task", undefined, "done");
+
+    const nodes = buildNodes([todo, done], new Set(), "title", "asc", {
+      ...FILTERS,
+      statuses: ["todo"],
+    });
+
+    expect(nodes.map((node) => node.task.id)).toEqual([todo.id]);
+  });
+
+  it("sorts by status order", () => {
+    const todo = task("todo-task", "Todo task", undefined, "todo");
+    const inProgress = task("in-progress", "In progress task", undefined, "in_progress");
+    const cancelled = task("cancelled", "Cancelled task", undefined, "cancelled");
+
+    const nodes = buildNodes([cancelled, inProgress, todo], new Set(), "status", "asc");
+
+    expect(nodes.map((node) => node.task.id)).toEqual([todo.id, inProgress.id, cancelled.id]);
   });
 });

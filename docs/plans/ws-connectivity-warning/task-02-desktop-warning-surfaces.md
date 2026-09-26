@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-connection-issue-timing"]
 plan: "plan.md"
-spec: "../../specs/ui/ws-connectivity-warning.md"
+spec: "../../specs/ui/requirements/ws-connectivity-warning.md"
 ---
 
 # Task 02: Desktop warning surfaces

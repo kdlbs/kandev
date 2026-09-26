@@ -1,10 +1,14 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
+import "katex/dist/katex.min.css";
 import "@/app/globals.css";
 import { setOnUnauthorized } from "@/lib/api/client";
-import { PluginModalHost } from "@/components/plugins/plugin-modal-host";
+import { scheduleFrontendErrorReport } from "@/lib/api/domains/frontend-error-log-api";
+import { setBackendReloadDiagnosticReporter } from "@/lib/platform/backend-reload-coordinator";
 import { useAppStoreApi, StateProvider } from "@/components/state-provider";
 import { PluginBootBridge } from "@/lib/plugins/plugin-boot-bridge";
+import { preloadLocale } from "@/lib/i18n";
+import { resolveInitialLocale } from "@/lib/i18n/boot";
 import { AppShell } from "./app-shell";
 import { AuthGatedScreen, useAuthGateDecision } from "./auth-gate";
 import { loadBootPayload } from "./boot-payload";
@@ -12,10 +16,16 @@ import type { BootPayload } from "./boot-payload";
 import { RootErrorBoundary, RouteErrorBoundary } from "./app-error-boundary";
 import { SpaRoutes } from "./spa-routes";
 import { installVitePreloadRecovery } from "./vite-preload-recovery";
+import { installBfcacheRestoreReload } from "./bfcache-restore-reload";
 import { markRenderingEngine } from "@/lib/browser/rendering-engine";
+import { applyTitlePrefix } from "@/lib/browser/document-title";
 
 installVitePreloadRecovery();
+installBfcacheRestoreReload();
 markRenderingEngine(document.documentElement);
+setBackendReloadDiagnosticReporter((source) => {
+  scheduleFrontendErrorReport({ source: "backend-reload", title: source });
+});
 
 const AUTH_ROUTE_PATHS = new Set(["/login", "/setup", "/invite"]);
 
@@ -43,7 +53,6 @@ function AppBody({ payload }: { payload: BootPayload }) {
   return (
     <>
       <PluginBootBridge plugins={payload.plugins} />
-      <PluginModalHost />
       <AppShell>
         <RouteErrorBoundary>
           <SpaRoutes routeData={payload.routeData} />
@@ -67,7 +76,18 @@ if (!root) {
   throw new Error("Missing #root element");
 }
 
-void loadBootPayload().then((payload) => {
+void loadBootPayload().then(async (payload) => {
+  // The Go shell already rewrote <title>; this is the /api/v1/app-state boot
+  // path, which never renders through it.
+  applyTitlePrefix(payload.runtime?.titlePrefix, document);
+
+  // Only `en` ships in the entry chunk, so a non-English boot has to fetch its
+  // catalogs. Awaited HERE, in the promise the mount already waited on, rather
+  // than after mounting: with `returnNull: false` a missing key renders as the
+  // key itself, so rendering first would paint a frame of raw `common:save`
+  // strings. Resolves immediately for `en` — the common case is unchanged.
+  await preloadLocale(resolveInitialLocale(payload));
+
   createRoot(root).render(
     <StrictMode>
       <RootErrorBoundary>

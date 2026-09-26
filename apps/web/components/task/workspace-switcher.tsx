@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 type Workspace = {
   id: string;
@@ -25,13 +26,14 @@ export function WorkspaceSwitcher({
   activeWorkspaceId,
   onSelect,
 }: WorkspaceSwitcherProps) {
+  const { t } = useTranslation();
   const selectedWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
 
   // If only one workspace, show just the name without dropdown
   if (workspaces.length <= 1) {
     return (
       <span className="text-sm font-medium text-muted-foreground truncate">
-        {selectedWorkspace?.name || "Workspace"}
+        {selectedWorkspace?.name || t("common:workspace")}
       </span>
     );
   }
@@ -41,14 +43,14 @@ export function WorkspaceSwitcher({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          title="Switch Workspace"
+          title={t("task:switchWorkspace")}
           className={cn(
             "group flex h-8 min-w-0 items-center gap-1.5 rounded-md border bg-background px-2.5 text-sm font-medium cursor-pointer",
             "text-muted-foreground hover:text-foreground transition-colors duration-150",
             "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           )}
         >
-          <span className="truncate">{selectedWorkspace?.name || "Workspace"}</span>
+          <span className="truncate">{selectedWorkspace?.name || t("common:workspace")}</span>
           <IconChevronDown
             className={cn(
               "h-3.5 w-3.5 shrink-0 opacity-60 group-hover:opacity-80 transition-opacity duration-150",

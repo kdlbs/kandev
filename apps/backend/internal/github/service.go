@@ -94,49 +94,86 @@ type PromptResolver interface {
 	ResolvePromptContent(ctx context.Context, name, fallback string) string
 }
 
+// TaskRepositoryBaseBranchUpdater projects provider base changes into tasks.
+type TaskRepositoryBaseBranchUpdater interface {
+	UpdateTaskRepositoryBaseBranch(
+		ctx context.Context, taskID, repositoryID, headBranch, baseBranch string,
+	) error
+}
+
+// WorkspaceGroupOwnerResolver resolves the workspace-group owner task for a
+// task that may be a non-owner member sharing another task's worktree
+// (inherit_parent / shared_group). It mirrors
+// internal/orchestrator.resolveEffectivePushTaskID's lookup so that a
+// watch-sourced association write is redirected to the same task an
+// orchestrator-side watch would have redirected to — see
+// resolveEffectiveAssociationTaskID for the full rationale.
+type WorkspaceGroupOwnerResolver interface {
+	GetWorkspaceGroupOwnerTaskID(ctx context.Context, taskID string) (string, error)
+}
+
+// WorkspaceGroupOwnerSessionResolver resolves the owner for the exact group
+// bound to an observing session. It prevents a task with multiple active group
+// memberships from selecting an unrelated owner by task ID alone.
+type WorkspaceGroupOwnerSessionResolver interface {
+	GetWorkspaceGroupOwnerTaskIDForSession(ctx context.Context, taskID, sessionID string) (string, error)
+}
+
 // Service coordinates GitHub integration operations.
 type Service struct {
-	mu                       sync.Mutex
-	connectionMutationLocks  [64]sync.Mutex
-	client                   Client
-	authMethod               string
-	secrets                  SecretProvider
-	secretManager            SecretManager
-	connectionSecrets        ConnectionSecretStore
-	personalConnections      *StorePersonalConnectionRepository
-	resolver                 *CredentialResolver
-	appRegistrationRuntimes  map[string]*githubAppRuntime
-	appRegistrationLifecycle *AppRegistrationLifecycleService
-	credentialBroker         *CredentialBroker
-	store                    *Store
-	eventBus                 bus.EventBus
-	logger                   *logger.Logger
-	taskDeleter              TaskDeleter
-	taskIssueStore           TaskIssueStore
+	mu                          sync.Mutex
+	connectionMutationLocks     [64]sync.Mutex
+	client                      Client
+	authMethod                  string
+	secrets                     SecretProvider
+	secretManager               SecretManager
+	connectionSecrets           ConnectionSecretStore
+	personalConnections         *StorePersonalConnectionRepository
+	resolver                    *CredentialResolver
+	appRegistrationRuntimes     map[string]*githubAppRuntime
+	appRegistrationLifecycle    *AppRegistrationLifecycleService
+	credentialBroker            *CredentialBroker
+	store                       *Store
+	eventBus                    bus.EventBus
+	logger                      *logger.Logger
+	taskDeleter                 TaskDeleter
+	taskRepositoryUpdater       TaskRepositoryBaseBranchUpdater
+	comparisonTargetObserver    ComparisonTargetObserver
+	taskIssueStore              TaskIssueStore
+	workspaceGroupOwnerResolver WorkspaceGroupOwnerResolver
+	taskActivityProvider        TaskActivityProvider
+	clockMu                     sync.RWMutex
+	clock                       func() time.Time
 	// cascadeTaskDeleter is the cascade-delete entry point used by the
 	// watch reset flow. It is distinct from taskDeleter (which only deletes
 	// a single task by ID) because reset must walk the task tree and clean
 	// up subtasks, runs, and worktrees too. Wired post-construction via
 	// SetCascadeTaskDeleter to avoid an import cycle with the task service.
-	cascadeTaskDeleter   watchreset.TaskDeleter
-	taskSessionChecker   TaskSessionChecker
-	syncGroup            singleflight.Group
-	taskEventSubs        []bus.Subscription
-	searchCache          *ttlCache
-	prStatusCache        *ttlCache
-	prFeedbackCache      *ttlCache
-	mergeMethodsCache    *ttlCache
-	accessibleReposCache *ttlCache
-	repoErrorCache       *ttlCache
-	protectionCache      *branchProtectionCache
-	rateTracker          *RateTracker
-	promptResolver       PromptResolver
-	tokenClientFactory   func(string) Client
-	ghAccountLister      func(context.Context) ([]GHAccount, error)
-	mockAuth             *MockAuthState
-	workspaceAuthorizer  func(context.Context, string) error
-	freshDefaultsMu      sync.Mutex
-	freshDefaultsDone    bool
+	cascadeTaskDeleter    watchreset.TaskDeleter
+	taskSessionChecker    TaskSessionChecker
+	syncGroup             singleflight.Group
+	taskEventSubs         []bus.Subscription
+	searchCache           *ttlCache
+	prStatusCache         *ttlCache
+	prFeedbackCache       *ttlCache
+	workflowRunsCache     *ttlCache
+	workflowJobsCache     *ttlCache
+	mergeMethodsCache     *ttlCache
+	accessibleReposCache  *ttlCache
+	repoErrorCache        *ttlCache
+	forkParentCache       *ttlCache
+	protectionCache       *branchProtectionCache
+	rateTracker           *RateTracker
+	prDiscoveryHealth     *prDiscoveryHealthStore
+	prDiscoveryAttemptsMu sync.Mutex
+	prDiscoveryAttempts   map[string]*prDiscoveryAttemptResult
+	promptResolver        PromptResolver
+	tokenClientFactory    func(string) Client
+	ghAccountLister       func(context.Context) ([]GHAccount, error)
+	mockAuth              *MockAuthState
+	workspaceAuthorizer   func(context.Context, string) error
+	freshDefaultsMu       sync.Mutex
+	freshDefaultsDone     bool
 
 	// cleanupFailureMu guards cleanupFailureCounts; the cleanup loop is the
 	// only writer but the global sweep + per-watch sweep can run concurrently
@@ -152,6 +189,21 @@ type Service struct {
 	// here because keys are unbounded and short-lived and the hot path is a
 	// LoadOrStore guard, not iteration.
 	inflightWorkspaceRefreshes sync.Map
+
+	// passiveFallback* limits the legacy per-watch fallback used by passive
+	// workspace refreshes. The admission window is shared across workspaces so
+	// a batch outage cannot turn a single background tick into an unbounded CLI
+	// fan-out. Admissions are retained as timestamps to enforce a rolling
+	// minute instead of allowing a wall-clock boundary burst.
+	passiveFallbackMu            sync.Mutex
+	passiveFallbackAdmissions    []passiveFallbackAdmission
+	passiveFallbackTargetCursors map[string]int
+
+	// passiveWorkspaceRefreshAt suppresses repeated workspace reads that find
+	// no due watch. Stale-task refreshes bypass this admission and remain
+	// independent of the passive cooldown.
+	passiveWorkspaceRefreshMu sync.Mutex
+	passiveWorkspaceRefreshAt map[string]time.Time
 
 	// stopCtx / stopCancel / bgWG own the lifecycle of background goroutines
 	// the service spawns lazily (currently refreshStaleWorkspaceWatches).
@@ -185,29 +237,38 @@ func (s *Service) authorizeWorkspaceAccess(ctx context.Context, workspaceID stri
 func NewService(client Client, authMethod string, secrets SecretProvider, store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
 	stopCtx, stopCancel := context.WithCancel(context.Background())
 	service := &Service{
-		client:                  client,
-		authMethod:              authMethod,
-		secrets:                 secrets,
-		store:                   store,
-		eventBus:                eventBus,
-		logger:                  log,
-		searchCache:             newTTLCache(),
-		prStatusCache:           newTTLCache(),
-		prFeedbackCache:         newPRFeedbackCache(),
-		mergeMethodsCache:       newMergeMethodsCache(),
-		accessibleReposCache:    newAccessibleReposCache(),
-		repoErrorCache:          newRepoErrorCache(),
-		protectionCache:         newBranchProtectionCache(),
-		rateTracker:             NewRateTracker(eventBus, log),
-		tokenClientFactory:      func(token string) Client { return NewPATClient(token) },
-		ghAccountLister:         ListGHAccounts,
-		cleanupFailureCounts:    make(map[string]int),
-		appRegistrationRuntimes: make(map[string]*githubAppRuntime),
-		stopCtx:                 stopCtx,
-		stopCancel:              stopCancel,
+		client:                       client,
+		authMethod:                   authMethod,
+		secrets:                      secrets,
+		store:                        store,
+		eventBus:                     eventBus,
+		logger:                       log,
+		searchCache:                  newTTLCache(),
+		prStatusCache:                newTTLCache(),
+		prFeedbackCache:              newPRFeedbackCache(),
+		workflowRunsCache:            newWorkflowAttentionCache(),
+		workflowJobsCache:            newWorkflowAttentionCache(),
+		mergeMethodsCache:            newMergeMethodsCache(),
+		accessibleReposCache:         newAccessibleReposCache(),
+		repoErrorCache:               newRepoErrorCache(),
+		forkParentCache:              newForkParentCache(),
+		protectionCache:              newBranchProtectionCache(),
+		rateTracker:                  NewRateTracker(eventBus, log),
+		prDiscoveryHealth:            newPRDiscoveryHealth(eventBus, log),
+		prDiscoveryAttempts:          make(map[string]*prDiscoveryAttemptResult),
+		tokenClientFactory:           func(token string) Client { return NewPATClient(token) },
+		ghAccountLister:              ListGHAccounts,
+		cleanupFailureCounts:         make(map[string]int),
+		passiveFallbackTargetCursors: make(map[string]int),
+		passiveWorkspaceRefreshAt:    make(map[string]time.Time),
+		appRegistrationRuntimes:      make(map[string]*githubAppRuntime),
+		stopCtx:                      stopCtx,
+		stopCancel:                   stopCancel,
+		clock:                        time.Now,
 	}
 	if store != nil {
 		service.resolver = NewCredentialResolver(store, secrets)
+		service.resolver.SetRateTracker(service.rateTracker)
 		service.resolver.SetLegacyFactory(func(ctx context.Context) (Client, string, error) {
 			return NewClient(ctx, secrets, log)
 		})
@@ -238,6 +299,10 @@ func (s *Service) Stop() {
 	s.stopOnce.Do(func() {
 		s.stopCancel()
 		s.bgWG.Wait()
+		if s.prDiscoveryHealth != nil {
+			s.prDiscoveryHealth.clearAll()
+			s.invalidateAllPRDiscoveryAttempts("")
+		}
 	})
 }
 
@@ -273,6 +338,20 @@ func (s *Service) newPATClient(token string) *PATClient {
 // SetTaskDeleter sets the task deletion dependency for cleanup operations.
 func (s *Service) SetTaskDeleter(d TaskDeleter) { s.taskDeleter = d }
 
+// SetTaskRepositoryBaseBranchUpdater wires best-effort task base projection.
+func (s *Service) SetTaskRepositoryBaseBranchUpdater(updater TaskRepositoryBaseBranchUpdater) {
+	s.taskRepositoryUpdater = updater
+}
+
+// SetWorkspaceGroupOwnerResolver wires the workspace-group owner lookup used
+// by resolveEffectiveAssociationTaskID to redirect watch-sourced association
+// writes away from a non-owner shared-worktree member. Optional — when unset,
+// the redirect is a no-op and association writes keep their pre-existing
+// (potentially member-attributed) behavior.
+func (s *Service) SetWorkspaceGroupOwnerResolver(r WorkspaceGroupOwnerResolver) {
+	s.workspaceGroupOwnerResolver = r
+}
+
 // SetCascadeTaskDeleter wires the cascade-delete dependency used by the
 // watch reset flow (ResetIssueWatch / ResetReviewWatch). Optional — when
 // unset, reset returns an error so the missing wiring is surfaced instead
@@ -285,6 +364,24 @@ func (s *Service) SetCascadeTaskDeleter(d watchreset.TaskDeleter) {
 
 // SetTaskSessionChecker sets the session checker for cleanup operations.
 func (s *Service) SetTaskSessionChecker(c TaskSessionChecker) { s.taskSessionChecker = c }
+
+// SetTaskActivityProvider wires the persisted task activity projection used
+// by passive adaptive searching-watch refreshes.
+func (s *Service) SetTaskActivityProvider(provider TaskActivityProvider) {
+	s.taskActivityProvider = provider
+}
+
+// SetClock installs the service clock used by passive refresh admission.
+// Production uses time.Now; tests can use a fixed clock.
+func (s *Service) SetClock(clock func() time.Time) {
+	s.clockMu.Lock()
+	defer s.clockMu.Unlock()
+	if clock == nil {
+		s.clock = time.Now
+		return
+	}
+	s.clock = clock
+}
 
 // SetSecretManager sets the secret manager for token configuration operations.
 func (s *Service) SetSecretManager(m SecretManager) { s.secretManager = m }
@@ -327,6 +424,17 @@ func (s *Service) ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (m
 		return map[string][]*TaskPR{}, nil
 	}
 	return s.store.ListTaskPRsByTaskIDs(ctx, taskIDs)
+}
+
+// ListTaskPRAutomationOptionsByTaskIDs forwards bounded per-PR automation
+// hydration for task-summary projection without exposing the GitHub store.
+func (s *Service) ListTaskPRAutomationOptionsByTaskIDs(
+	ctx context.Context, taskIDs []string,
+) (map[string][]*TaskPRAutomationOptions, error) {
+	if s.store == nil {
+		return map[string][]*TaskPRAutomationOptions{}, nil
+	}
+	return s.store.ListTaskPRAutomationOptionsByTaskIDs(ctx, taskIDs)
 }
 
 // TestEventBus returns the event bus for test/mock use only.

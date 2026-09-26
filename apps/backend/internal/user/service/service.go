@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -17,73 +20,103 @@ import (
 	"go.uber.org/zap"
 )
 
+// ErrUserSettingsConflict marks an exhausted conditional settings update.
 var (
-	ErrUserNotFound = errors.New("user not found")
-	ErrValidation   = errors.New("validation error")
+	ErrUserNotFound                  = errors.New("user not found")
+	ErrValidation                    = errors.New("validation error")
+	ErrUserSettingsConflict          = store.ErrUserSettingsRevisionConflict
+	ErrAgentProfileRecentUseConflict = store.ErrAgentProfileRecentUseRevisionConflict
 )
 
 const (
 	changesPanelLayoutFlat = "flat"
 	changesPanelLayoutTree = "tree"
+
+	maxUserSettingsCASAttempts = 3
 )
 
 type Service struct {
-	repo        store.Repository
-	eventBus    bus.EventBus
-	logger      *logger.Logger
-	defaultUser string
+	sidebarWorkspaceAccess func(context.Context) ([]string, error)
+	repo                   store.Repository
+	recentUseRepo          store.AgentProfileRecentUseRepository
+	eventBus               bus.EventBus
+	logger                 *logger.Logger
+	defaultUser            string
 }
 
 type UpdateUserSettingsRequest struct {
-	WorkspaceID                     *string
-	KanbanViewMode                  *string
-	StartupPage                     *string
-	WorkflowFilterID                *string
-	RepositoryIDs                   *[]string
-	TasksListSort                   *string
-	TasksListGroup                  *string
-	TasksListShowDetails            *bool
-	InitialSetupComplete            *bool
-	PreferredShell                  *string
-	DefaultEditorID                 *string
-	EnablePreviewOnClick            *bool
-	ChatSubmitKey                   *string
-	ReviewAutoMarkOnScroll          *bool
-	ConfirmTaskArchive              *bool
-	UnreadDivider                   *bool
-	AgentGeneratedTaskTitles        *bool
-	MCPTaskAgentProfileDefault      *string
-	ShowAnchoredPromptBar           *bool
-	ShowScrollToLastPrompt          *bool
-	ShowScrollToStart               *bool
-	ShowTranscriptAutoScrollControl *bool
-	ShowReleaseNotification         *bool
-	ReleaseNotesLastSeenVersion     *string
-	LspAutoStartLanguages           *[]string
-	LspAutoInstallLanguages         *[]string
-	LspServerConfigs                *map[string]map[string]interface{}
-	SavedLayouts                    *[]models.SavedLayout
-	SidebarViews                    *[]models.SidebarView
-	SidebarActiveViewID             *string
-	SidebarDraft                    **models.SidebarViewDraft
-	SidebarTaskPrefs                *models.SidebarTaskPrefs
-	TaskCreateLastUsed              *models.TaskCreateLastUsed
-	JiraSavedViews                  **json.RawMessage
-	JiraTaskPresets                 **json.RawMessage
-	GitHubSavedPresets              **json.RawMessage
-	GitHubDefaultQueryPresets       **json.RawMessage
-	GitLabSavedPresets              **json.RawMessage
-	AzureDevOpsBrowsePreferences    **json.RawMessage
-	DefaultUtilityAgentID           *string
-	DefaultUtilityModel             *string
-	KeyboardShortcuts               *map[string]interface{}
-	TerminalLinkBehavior            *string
-	TerminalFontFamily              *string
-	TerminalFontSize                *int
-	ChangesPanelLayout              *string
-	SystemMetricsDisplay            *SystemMetricsDisplaySettingsPatch
-	AppStatusBarOrder               *models.AppStatusBarOrder
-	VoiceMode                       *models.VoiceModeSettings
+	SidebarViewState                  *models.SidebarWorkspacePatch
+	SidebarLayoutState                *models.SidebarLayoutPatch
+	WorkspaceID                       *string
+	KanbanViewMode                    *string
+	StartupPage                       *string
+	WorkflowFilterID                  *string
+	RepositoryIDs                     *[]string
+	TasksListSort                     *string
+	TasksListGroup                    *string
+	TasksListShowDetails              *bool
+	InitialSetupComplete              *bool
+	PreferredShell                    *string
+	DefaultEditorID                   *string
+	EnablePreviewOnClick              *bool
+	ChatSubmitKey                     *string
+	ReviewAutoMarkOnScroll            *bool
+	ConfirmTaskArchive                *bool
+	PreventAutoStartAgentOnOpen       *bool
+	UnreadDivider                     *bool
+	AgentGeneratedTaskTitles          *bool
+	AutoFocusNewTasks                 *bool
+	MCPTaskAgentProfileDefault        *string
+	ShowAnchoredPromptBar             *bool
+	ShowScrollToLastPrompt            *bool
+	ShowScrollToStart                 *bool
+	ShowTranscriptAutoScrollControl   *bool
+	ShowTodoListPanel                 *bool
+	ShowTodoListPanelOnlyWhenNotEmpty *bool
+	ShowReleaseNotification           *bool
+	ReleaseNotesLastSeenVersion       *string
+	LspAutoStartLanguages             *[]string
+	LspAutoInstallLanguages           *[]string
+	LspServerConfigs                  *map[string]map[string]interface{}
+	LspStatusLocation                 *string
+	SavedLayouts                      *[]models.SavedLayout
+	SidebarViews                      *[]models.SidebarView
+	SidebarActiveViewID               *string
+	SidebarDraft                      **models.SidebarViewDraft
+	ThreadViews                       *[]models.ThreadView
+	ThreadActiveViewID                *string
+	ThreadViewDraft                   **models.ThreadViewDraft
+	SidebarTaskPrefs                  *models.SidebarTaskPrefs
+	SidebarTaskColorAutomation        *models.SidebarTaskColorAutomation
+	SidebarTaskColorPatch             *models.SidebarTaskColorPatch
+	TaskCreateLastUsed                *models.TaskCreateLastUsed
+	JiraSavedViews                    **json.RawMessage
+	JiraDefaultViewID                 *string
+	JiraTaskPresets                   **json.RawMessage
+	GitHubSavedPresets                **json.RawMessage
+	GitHubDefaultQueryPresets         **json.RawMessage
+	GitLabSavedPresets                **json.RawMessage
+	AzureDevOpsBrowsePreferences      **json.RawMessage
+	DefaultUtilityAgentID             *string
+	DefaultUtilityModel               *string
+	DefaultUtilityAgentProfileID      *string
+	KeyboardShortcuts                 *map[string]interface{}
+	TerminalLinkBehavior              *string
+	TerminalFontFamily                *string
+	TerminalFontSize                  *int
+	ChangesPanelLayout                *string
+	LastSeenDisplay                   *string
+	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
+	AppStatusBarEnabled               *bool
+	SidebarHoverEnabled               *bool
+	SidebarHoverDelayMs               *int
+	ResolveSessionHostnames           *bool
+	AppStatusBarOrder                 *models.AppStatusBarOrder
+	QuickChatTabOrderByWorkspace      *map[string][]string
+	KanbanHiddenStepIDs               *map[string][]string
+	WorkflowIDsWithAutoHideEmptySteps *[]string
+	KanbanSort                        *string
+	KanbanPriorityFilterTokens        *[]string
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -91,33 +124,56 @@ type SystemMetricsDisplaySettingsPatch struct {
 	Simplified   *bool
 }
 
+// NewService builds the user settings service with its repository, event bus,
+// and logger.
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
+	recentUseRepo, _ := repo.(store.AgentProfileRecentUseRepository)
+	if recentUseLogger, ok := repo.(interface {
+		SetAgentProfileRecentUseLogger(*logger.Logger)
+	}); ok {
+		recentUseLogger.SetAgentProfileRecentUseLogger(log.WithFields(zap.String("component", "user-store")))
+	}
 	return &Service{
-		repo:        repo,
-		eventBus:    eventBus,
-		logger:      log.WithFields(zap.String("component", "user-service")),
-		defaultUser: store.DefaultUserID,
+		repo:          repo,
+		recentUseRepo: recentUseRepo,
+		eventBus:      eventBus,
+		logger:        log.WithFields(zap.String("component", "user-service")),
+		defaultUser:   store.DefaultUserID,
 	}
 }
 
+// settingsUserID resolves the effective user for settings operations:
+// the authenticated identity when present, otherwise the default user.
+func (s *Service) settingsUserID(ctx context.Context) string {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic || identity.UserID == "" {
+		return s.defaultUser
+	}
+	return identity.UserID
+}
+
+// GetCurrentUser returns the current (or default) user, mapping a missing
+// row to ErrUserNotFound.
 func (s *Service) GetCurrentUser(ctx context.Context) (*models.User, error) {
-	user, err := s.repo.GetUser(ctx, s.defaultUser)
+	user, err := s.repo.GetUser(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return nil, ErrUserNotFound
 	}
 	return user, nil
 }
 
+// GetUserSettings returns the current user's persisted settings.
 func (s *Service) GetUserSettings(ctx context.Context) (*models.UserSettings, error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
-	return settings, nil
+	return s.getSidebarWorkspaceSettings(ctx, settings)
 }
 
+// PreferredShell returns the user's configured shell.
 func (s *Service) PreferredShell(ctx context.Context) (string, error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -126,55 +182,197 @@ func (s *Service) PreferredShell(ctx context.Context) (string, error) {
 
 // GetDefaultUtilitySettings returns the user's default utility agent/model settings.
 func (s *Service) GetDefaultUtilitySettings(ctx context.Context) (agentID, model string, err error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return "", "", err
 	}
 	return settings.DefaultUtilityAgentID, settings.DefaultUtilityModel, nil
 }
 
+// GetDefaultUtilityAgentProfileID returns the profile used by new built-in utility actions.
+func (s *Service) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, error) {
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
+	if err != nil {
+		return "", err
+	}
+	return settings.DefaultUtilityAgentProfileID, nil
+}
+
+// UpdateUserSettings applies a partial settings patch field by field,
+// validates each group, persists the result under expected-revision CAS, and
+// publishes the settings update event.
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	scopedReq, err := s.scopeLegacySidebarPatch(req)
 	if err != nil {
 		return nil, err
 	}
-	if err := applyBasicSettings(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+	req = scopedReq
+	var sidebarWorkspaceIDs []string
+	if s.sidebarWorkspaceAccess != nil {
+		sidebarWorkspaceIDs, err = s.sidebarWorkspaceAccess(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
-	if err := s.applyChatSubmitKey(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+	if err := s.validateSidebarWorkspacePatch(ctx, req, sidebarWorkspaceIDs); err != nil {
+		return nil, err
 	}
-	if err := applyLSPSettings(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+	if err := s.validateSidebarLayoutPatch(ctx, req, sidebarWorkspaceIDs); err != nil {
+		return nil, err
 	}
-	if err := applySavedLayouts(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+	if s.sidebarWorkspaceAccess != nil {
+		settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.getSidebarWorkspaceSettings(ctx, settings, sidebarWorkspaceIDs); err != nil {
+			return nil, err
+		}
 	}
-	if err := applySidebarViews(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
-	}
-	if err := applySidebarViewState(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
-	}
-	if err := applyUserPreferenceBlobs(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
-	}
-	if err := applyVoiceMode(settings, req.VoiceMode); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
-	}
-	settings.UpdatedAt = time.Now().UTC()
 	var taskCreatePatch *models.TaskCreateLastUsed
 	if req.TaskCreateLastUsed != nil && !taskCreateLastUsedPatchEmpty(*req.TaskCreateLastUsed) {
 		taskCreatePatch = req.TaskCreateLastUsed
 	}
-	settings, err = s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, taskCreatePatch)
+	settings, err := s.updateUserSettingsCAS(ctx, func(settings *models.UserSettings) (bool, error) {
+		// The shallow copy is safe only while every apply* helper replaces
+		// reference fields (slices, maps, and json.RawMessage) instead of
+		// mutating them in place. In-place mutation would alias before and make
+		// DeepEqual miss the write.
+		before := *settings
+		if err := applySidebarWorkspacePatch(settings, req); err != nil {
+			return false, err
+		}
+		if err := applySidebarLayoutPatch(settings, req); err != nil {
+			if errors.Is(err, ErrUserSettingsConflict) {
+				return false, err
+			}
+			return false, fmt.Errorf("%w: %s", ErrValidation, err)
+		}
+		if err := applyBasicSettings(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := s.applyChatSubmitKey(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applyLSPSettings(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applySavedLayouts(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applySidebarViews(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applySidebarViewState(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applyThreadViews(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applyThreadViewState(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applySidebarTaskColorAutomation(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applySidebarTaskColors(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applyUserPreferenceBlobs(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		return !reflect.DeepEqual(*settings, before), nil
+	}, taskCreatePatch, &sidebarWorkspaceIDs)
 	if err != nil {
 		return nil, err
 	}
-	s.publishUserSettingsEvent(ctx, settings)
-	return settings, nil
+	projected, err := s.getSidebarWorkspaceSettings(ctx, settings, sidebarWorkspaceIDs)
+	if err == nil {
+		return projected, nil
+	}
+	// The CAS write has already committed. Keep the response successful while
+	// omitting the scoped projection until the next authorized settings read.
+	s.logger.Warn("sidebar workspace response projection failed", zap.Error(err))
+	return withoutSidebarWorkspaceState(settings), nil
 }
 
+// applySidebarTaskColorAutomation replaces the complete personal automatic
+// color rule set after validating its discriminated target and output shape.
+func applySidebarTaskColorAutomation(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.SidebarTaskColorAutomation == nil {
+		return nil
+	}
+	value := *req.SidebarTaskColorAutomation
+	if err := models.ValidateSidebarTaskColorAutomation(value); err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("automatic colors must be serializable: %w", err)
+	}
+	var replacement models.SidebarTaskColorAutomation
+	if err := json.Unmarshal(encoded, &replacement); err != nil {
+		return fmt.Errorf("automatic colors must be serializable: %w", err)
+	}
+	if replacement.Rules == nil {
+		replacement.Rules = []models.SidebarTaskColorRule{}
+	}
+	settings.SidebarTaskColorAutomation = replacement
+	return nil
+}
+
+// updateUserSettingsCAS applies a full-blob user-settings write under
+// expected-revision CAS with bounded retry. apply is evaluated against every
+// freshly read model and reports whether it mutated it; the immutable
+// taskCreatePatch is passed to every attempt so a retry re-applies the same
+// task-create merge against the fresh row. A no-op (apply returned false and
+// no patch) writes and publishes nothing and returns the freshly read
+// (current) settings. Exactly one event is published per successful write.
+func (s *Service) updateUserSettingsCAS(
+	ctx context.Context,
+	apply func(*models.UserSettings) (bool, error),
+	taskCreatePatch *models.TaskCreateLastUsed,
+	sidebarWorkspaceIDs *[]string,
+) (*models.UserSettings, error) {
+	userID := s.settingsUserID(ctx)
+	var lastErr error
+	for attempt := 0; attempt < maxUserSettingsCASAttempts; attempt++ {
+		settings, err := s.repo.GetUserSettings(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		applied, err := apply(settings)
+		if err != nil {
+			return nil, err
+		}
+		if !applied && taskCreatePatch == nil {
+			// No-op: report the freshly read (current) settings, write nothing,
+			// publish nothing.
+			return settings, nil
+		}
+		updated, err := s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, taskCreatePatch, settings.Revision)
+		if err == nil {
+			if sidebarWorkspaceIDs != nil {
+				s.publishUserSettingsEvent(ctx, updated, *sidebarWorkspaceIDs)
+			} else {
+				s.publishUserSettingsEvent(ctx, updated)
+			}
+			return updated, nil
+		}
+		if !errors.Is(err, store.ErrUserSettingsRevisionConflict) {
+			return nil, err
+		}
+		lastErr = err
+	}
+	s.logger.Warn("user settings update exhausted CAS retries",
+		zap.Int("attempts", maxUserSettingsCASAttempts),
+		zap.Error(lastErr),
+	)
+	return nil, fmt.Errorf("user settings update exhausted after %d attempts: %w", maxUserSettingsCASAttempts, lastErr)
+}
+
+// RecordTaskCreateLastUsed persists the last task-creation choices (a no-op
+// for an empty patch) and publishes the settings update event.
 func (s *Service) RecordTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) error {
 	if taskCreateLastUsedPatchEmpty(patch) {
 		return nil
@@ -187,19 +385,29 @@ func (s *Service) RecordTaskCreateLastUsed(ctx context.Context, patch models.Tas
 	return nil
 }
 
+// updateTaskCreateLastUsed delegates the patch to the repository.
 func (s *Service) updateTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
-	return s.repo.UpdateTaskCreateLastUsed(ctx, s.defaultUser, patch)
+	return s.repo.UpdateTaskCreateLastUsed(ctx, s.settingsUserID(ctx), patch)
 }
 
+// taskCreateLastUsedPatchEmpty reports whether every field of the patch is
+// unset, i.e. nothing to record.
 func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 	return patch.RepositoryID == "" &&
 		patch.Branch == "" &&
 		patch.AgentProfileID == "" &&
-		patch.ExecutorProfileID == ""
+		patch.ExecutorProfileID == "" &&
+		len(patch.WorkflowIDsByWorkspace) == 0
 }
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.JiraDefaultViewID != nil {
+		settings.JiraDefaultViewID = strings.TrimSpace(*req.JiraDefaultViewID)
+	}
+	if err := applySidebarHoverSettings(settings, req); err != nil {
+		return err
+	}
 	if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
 		return err
 	}
@@ -216,9 +424,24 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if err := applyChangesPanelLayout(settings, req.ChangesPanelLayout); err != nil {
 		return err
 	}
+	if err := applyLastSeenDisplay(settings, req.LastSeenDisplay); err != nil {
+		return err
+	}
 	applySystemMetricsDisplay(settings, req.SystemMetricsDisplay)
+	if req.AppStatusBarEnabled != nil {
+		settings.AppStatusBarEnabled = *req.AppStatusBarEnabled
+	}
+	if req.ResolveSessionHostnames != nil {
+		settings.ResolveSessionHostnames = *req.ResolveSessionHostnames
+	}
 	if req.AppStatusBarOrder != nil {
 		settings.AppStatusBarOrder = *req.AppStatusBarOrder
+	}
+	if req.QuickChatTabOrderByWorkspace != nil {
+		if err := validateQuickChatTabOrder(*req.QuickChatTabOrderByWorkspace); err != nil {
+			return err
+		}
+		settings.QuickChatTabOrderByWorkspace = store.CloneStringSliceMap(*req.QuickChatTabOrderByWorkspace)
 	}
 	if err := applyTerminalFontPreferences(settings, req); err != nil {
 		return err
@@ -226,6 +449,8 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	return nil
 }
 
+// applyWorkspaceAndTaskListPreferences copies workspace, board, and task-list
+// fields from the patch, validating the hidden-step map and list sort/group.
 func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.WorkspaceID != nil {
 		settings.WorkspaceID = *req.WorkspaceID
@@ -260,23 +485,194 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 	if req.EnablePreviewOnClick != nil {
 		settings.EnablePreviewOnClick = *req.EnablePreviewOnClick
 	}
+	if req.KanbanHiddenStepIDs != nil {
+		if err := validateKanbanHiddenStepIDs(*req.KanbanHiddenStepIDs); err != nil {
+			return err
+		}
+		settings.KanbanHiddenStepIDs = *req.KanbanHiddenStepIDs
+	}
+	if req.WorkflowIDsWithAutoHideEmptySteps != nil {
+		workflowIDs, err := normalizeWorkflowIDsWithAutoHideEmptySteps(
+			*req.WorkflowIDsWithAutoHideEmptySteps,
+		)
+		if err != nil {
+			return err
+		}
+		settings.WorkflowIDsWithAutoHideEmptySteps = workflowIDs
+	}
+	if err := applyKanbanSort(settings, req.KanbanSort); err != nil {
+		return err
+	}
+	if req.KanbanPriorityFilterTokens != nil {
+		if len(*req.KanbanPriorityFilterTokens) > maxKanbanPriorityFilterTokens {
+			return fmt.Errorf(
+				"kanban_priority_filter_tokens: max %d tokens allowed",
+				maxKanbanPriorityFilterTokens,
+			)
+		}
+		if err := validateKanbanPriorityFilterTokensSize(*req.KanbanPriorityFilterTokens); err != nil {
+			return err
+		}
+		settings.KanbanPriorityFilterTokens = normalizeKanbanPriorityFilterTokens(*req.KanbanPriorityFilterTokens)
+	}
 	return nil
 }
 
+const (
+	maxQuickChatTabOrderWorkspaces             = 200
+	maxQuickChatTabOrderReferencesPerWorkspace = 200
+	maxQuickChatTabOrderTotalBytes             = maxUserPreferenceBlobBytes
+	maxKanbanHiddenStepWorkflows               = 200
+	maxKanbanHiddenStepIDsPerWorkflow          = 200
+	// maxKanbanHiddenStepIDsTotalBytes matches maxUserPreferenceBlobBytes, the
+	// sibling cap for other free-form settings blobs. The count caps above
+	// bound shape (how many entries), not size (how long each string is); an
+	// attacker who stays under both count limits could otherwise still submit
+	// a handful of multi-megabyte ids. This bounds total content regardless
+	// of shape, and — unlike an HTTP-only body-size guard — it runs inside
+	// validateKanbanHiddenStepIDs, which both the REST and WebSocket update
+	// paths call, so it isn't bypassable by whichever transport skips a
+	// transport-level guard.
+	maxKanbanHiddenStepIDsTotalBytes     = maxUserPreferenceBlobBytes
+	maxWorkflowIDsWithAutoHideEmptySteps = 200
+	// maxKanbanPriorityFilterTokens bounds the request before
+	// normalizeKanbanPriorityFilterTokens allocates a slice and map sized to the
+	// caller-supplied length. The vocabulary holds only 4 valid tokens, so this is a
+	// generous multiple rather than an exact fit — it exists to cap allocation and
+	// iteration cost on a WS payload (no per-field size guard, unlike the 2MB HTTP
+	// body cap), not to bound legitimate selections.
+	maxKanbanPriorityFilterTokens = 64
+	// maxKanbanPriorityFilterTokensTotalBytes bounds total content regardless of
+	// per-token length, the same total-content guard maxKanbanHiddenStepIDsTotalBytes
+	// applies to its sibling field: the count cap alone still admits 64 individually
+	// oversized tokens before normalizeKanbanPriorityFilterTokens trims and looks up
+	// each one.
+	maxKanbanPriorityFilterTokensTotalBytes = 4096
+)
+
+// validateQuickChatTabOrder bounds the client-supplied mixed-tab order before
+// it is copied into the settings model. The shape limits keep map and slice
+// allocation bounded, while the serialized limit also bounds long opaque ids.
+func validateQuickChatTabOrder(orderByWorkspace map[string][]string) error {
+	if len(orderByWorkspace) > maxQuickChatTabOrderWorkspaces {
+		return fmt.Errorf(
+			"quick_chat_tab_order_by_workspace: max %d workspaces allowed",
+			maxQuickChatTabOrderWorkspaces,
+		)
+	}
+	for workspaceID, references := range orderByWorkspace {
+		if len(references) > maxQuickChatTabOrderReferencesPerWorkspace {
+			return fmt.Errorf(
+				"quick_chat_tab_order_by_workspace[%s]: max %d tab references allowed",
+				workspaceID,
+				maxQuickChatTabOrderReferencesPerWorkspace,
+			)
+		}
+	}
+	serialized, err := json.Marshal(orderByWorkspace)
+	if err != nil {
+		return fmt.Errorf("quick_chat_tab_order_by_workspace: must be serializable: %w", err)
+	}
+	if len(serialized) > maxQuickChatTabOrderTotalBytes {
+		return fmt.Errorf(
+			"quick_chat_tab_order_by_workspace: max %d bytes allowed",
+			maxQuickChatTabOrderTotalBytes,
+		)
+	}
+	return nil
+}
+
+func normalizeWorkflowIDsWithAutoHideEmptySteps(workflowIDs []string) ([]string, error) {
+	unique := make(map[string]struct{}, len(workflowIDs))
+	for _, workflowID := range workflowIDs {
+		unique[workflowID] = struct{}{}
+	}
+	if len(unique) > maxWorkflowIDsWithAutoHideEmptySteps {
+		return nil, fmt.Errorf(
+			"workflow_ids_with_auto_hide_empty_steps: max %d workflow ids allowed",
+			maxWorkflowIDsWithAutoHideEmptySteps,
+		)
+	}
+	totalBytes := 0
+	normalized := make([]string, 0, len(unique))
+	for workflowID := range unique {
+		totalBytes += len(workflowID)
+		if totalBytes > maxUserPreferenceBlobBytes {
+			return nil, fmt.Errorf(
+				"workflow_ids_with_auto_hide_empty_steps: max %d bytes allowed",
+				maxUserPreferenceBlobBytes,
+			)
+		}
+		normalized = append(normalized, workflowID)
+	}
+	sort.Strings(normalized)
+	return normalized, nil
+}
+
+// validateKanbanHiddenStepIDs bounds the per-workflow hidden-step-id map so a
+// single settings write cannot grow the users.settings JSON blob unboundedly
+// on the shared single-writer SQLite connection.
+func validateKanbanHiddenStepIDs(hidden map[string][]string) error {
+	if len(hidden) > maxKanbanHiddenStepWorkflows {
+		return fmt.Errorf("kanban_hidden_step_ids: max %d workflows allowed", maxKanbanHiddenStepWorkflows)
+	}
+	totalBytes := 0
+	for workflowID, ids := range hidden {
+		if len(ids) > maxKanbanHiddenStepIDsPerWorkflow {
+			return fmt.Errorf(
+				"kanban_hidden_step_ids[%s]: max %d step ids allowed",
+				workflowID,
+				maxKanbanHiddenStepIDsPerWorkflow,
+			)
+		}
+		totalBytes += len(workflowID)
+		for _, id := range ids {
+			totalBytes += len(id)
+		}
+		if totalBytes > maxKanbanHiddenStepIDsTotalBytes {
+			return fmt.Errorf("kanban_hidden_step_ids: max %d bytes allowed", maxKanbanHiddenStepIDsTotalBytes)
+		}
+	}
+	return nil
+}
+
+// validateKanbanPriorityFilterTokensSize bounds total token content before
+// normalizeKanbanPriorityFilterTokens trims and looks up each one, so an
+// individually oversized member cannot cost CPU and allocation before the
+// count cap alone would have dropped it as invalid.
+func validateKanbanPriorityFilterTokensSize(tokens []string) error {
+	total := 0
+	for _, token := range tokens {
+		total += len(token)
+		if total > maxKanbanPriorityFilterTokensTotalBytes {
+			return fmt.Errorf(
+				"kanban_priority_filter_tokens: max %d bytes allowed",
+				maxKanbanPriorityFilterTokensTotalBytes,
+			)
+		}
+	}
+	return nil
+}
+
+// applyStartupPage validates and applies the startup page enum.
 func applyStartupPage(settings *models.UserSettings, value *string) error {
 	if value == nil {
 		return nil
 	}
 	v := strings.TrimSpace(*value)
 	switch v {
-	case models.StartupPageTaskOverview, models.StartupPageLastTask:
+	case models.StartupPageTaskOverview, models.StartupPageLastTask, models.StartupPageThreads:
 		settings.StartupPage = v
 		return nil
 	default:
-		return fmt.Errorf("startup_page must be %q or %q", models.StartupPageTaskOverview, models.StartupPageLastTask)
+		return fmt.Errorf("startup_page must be %q, %q, or %q",
+			models.StartupPageTaskOverview, models.StartupPageLastTask, models.StartupPageThreads)
 	}
 }
 
+// applyTaskActionPreferences copies the task-action preference group
+// (archive confirmation, auto-start prevention, transcript display toggles,
+// MCP default profile, release notification) from the patch.
 func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.ReviewAutoMarkOnScroll != nil {
 		settings.ReviewAutoMarkOnScroll = *req.ReviewAutoMarkOnScroll
@@ -284,11 +680,17 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	if req.ConfirmTaskArchive != nil {
 		settings.ConfirmTaskArchive = *req.ConfirmTaskArchive
 	}
+	if req.PreventAutoStartAgentOnOpen != nil {
+		settings.PreventAutoStartAgentOnOpen = *req.PreventAutoStartAgentOnOpen
+	}
 	if req.UnreadDivider != nil {
 		settings.UnreadDivider = *req.UnreadDivider
 	}
 	if req.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *req.AgentGeneratedTaskTitles
+	}
+	if req.AutoFocusNewTasks != nil {
+		settings.AutoFocusNewTasks = *req.AutoFocusNewTasks
 	}
 	if err := applyMCPTaskAgentProfileDefault(settings, req.MCPTaskAgentProfileDefault); err != nil {
 		return err
@@ -305,12 +707,20 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	if req.ShowTranscriptAutoScrollControl != nil {
 		settings.ShowTranscriptAutoScrollControl = *req.ShowTranscriptAutoScrollControl
 	}
+	if req.ShowTodoListPanel != nil {
+		settings.ShowTodoListPanel = *req.ShowTodoListPanel
+	}
+	if req.ShowTodoListPanelOnlyWhenNotEmpty != nil {
+		settings.ShowTodoListPanelOnlyWhenNotEmpty = *req.ShowTodoListPanelOnlyWhenNotEmpty
+	}
 	if req.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *req.ShowReleaseNotification
 	}
 	return nil
 }
 
+// applyUtilityPreferences copies the utility-agent defaults and release-notes
+// version from the patch.
 func applyUtilityPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) {
 	if req.ReleaseNotesLastSeenVersion != nil {
 		settings.ReleaseNotesLastSeenVersion = *req.ReleaseNotesLastSeenVersion
@@ -321,8 +731,12 @@ func applyUtilityPreferences(settings *models.UserSettings, req *UpdateUserSetti
 	if req.DefaultUtilityModel != nil {
 		settings.DefaultUtilityModel = strings.TrimSpace(*req.DefaultUtilityModel)
 	}
+	if req.DefaultUtilityAgentProfileID != nil {
+		settings.DefaultUtilityAgentProfileID = strings.TrimSpace(*req.DefaultUtilityAgentProfileID)
+	}
 }
 
+// applyKeyboardShortcuts validates and applies the keyboard shortcut map.
 func applyKeyboardShortcuts(settings *models.UserSettings, value *map[string]interface{}) error {
 	if value == nil {
 		return nil
@@ -334,6 +748,7 @@ func applyKeyboardShortcuts(settings *models.UserSettings, value *map[string]int
 	return nil
 }
 
+// applySystemMetricsDisplay applies the topbar metrics display patch.
 func applySystemMetricsDisplay(settings *models.UserSettings, value *SystemMetricsDisplaySettingsPatch) {
 	if value == nil {
 		return
@@ -346,6 +761,8 @@ func applySystemMetricsDisplay(settings *models.UserSettings, value *SystemMetri
 	}
 }
 
+// applyTerminalFontPreferences applies the terminal font family and validates
+// the font size range.
 func applyTerminalFontPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.TerminalFontFamily != nil {
 		settings.TerminalFontFamily = strings.TrimSpace(*req.TerminalFontFamily)
@@ -361,6 +778,8 @@ func applyTerminalFontPreferences(settings *models.UserSettings, req *UpdateUser
 	return nil
 }
 
+// applyMCPTaskAgentProfileDefault validates and applies the MCP task agent
+// profile default enum.
 func applyMCPTaskAgentProfileDefault(settings *models.UserSettings, value *string) error {
 	if value == nil {
 		return nil
@@ -377,6 +796,8 @@ func applyMCPTaskAgentProfileDefault(settings *models.UserSettings, value *strin
 	}
 }
 
+// applyTasksListPreferences validates and applies the task list sort and
+// group enums, defaulting empty values.
 func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupValue *string) error {
 	if sortValue != nil {
 		v := strings.TrimSpace(*sortValue)
@@ -401,6 +822,53 @@ func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupVa
 	return nil
 }
 
+// applyKanbanSort validates and applies the board sort enum, defaulting an
+// empty value and rejecting the whole request on an invalid one, modeled on
+// applyTasksListPreferences.
+func applyKanbanSort(settings *models.UserSettings, sortValue *string) error {
+	if sortValue == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*sortValue)
+	if v == "" {
+		v = models.KanbanSortDefault
+	}
+	if !models.IsValidKanbanSort(v) {
+		return fmt.Errorf("kanban_sort must be one of %s", strings.Join(models.KanbanSortValues(), ", "))
+	}
+	settings.KanbanSort = v
+	return nil
+}
+
+// normalizeKanbanPriorityFilterTokens drops any member outside the four
+// priority tokens, removes duplicates, and orders the remainder by priority
+// rank. An invalid member is dropped rather than rejecting the whole request,
+// since this field is a subset selection applied inside the same best-effort
+// settings payload as the record's other fields.
+func normalizeKanbanPriorityFilterTokens(tokens []string) []string {
+	valid := make([]string, 0, len(tokens))
+	seen := make(map[string]struct{}, len(tokens))
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if !models.IsValidKanbanPriorityFilterToken(token) {
+			continue
+		}
+		if _, dup := seen[token]; dup {
+			continue
+		}
+		seen[token] = struct{}{}
+		valid = append(valid, token)
+	}
+	sort.SliceStable(valid, func(i, j int) bool {
+		rankI, _ := models.KanbanPriorityFilterTokenRank(valid[i])
+		rankJ, _ := models.KanbanPriorityFilterTokenRank(valid[j])
+		return rankI < rankJ
+	})
+	return valid
+}
+
+// applyTerminalLinkBehavior validates and applies the terminal link behavior
+// enum.
 func applyTerminalLinkBehavior(settings *models.UserSettings, value *string) error {
 	if value == nil {
 		return nil
@@ -413,6 +881,8 @@ func applyTerminalLinkBehavior(settings *models.UserSettings, value *string) err
 	return nil
 }
 
+// applyChangesPanelLayout validates and applies the changes panel layout
+// enum (flat or tree).
 func applyChangesPanelLayout(settings *models.UserSettings, value *string) error {
 	if value == nil {
 		return nil
@@ -425,63 +895,17 @@ func applyChangesPanelLayout(settings *models.UserSettings, value *string) error
 	return nil
 }
 
-var (
-	validVoiceEngines = map[string]struct{}{
-		"auto":          {},
-		"webSpeech":     {},
-		"whisperWeb":    {},
-		"whisperServer": {},
-	}
-	validVoiceModes = map[string]struct{}{
-		"toggle": {},
-		"hold":   {},
-	}
-	validWhisperWebModels = map[string]struct{}{
-		"tiny":  {},
-		"base":  {},
-		"small": {},
-	}
-)
-
-// applyVoiceMode validates the inbound voice-mode settings and merges them
-// onto the user record. Each sub-field is validated independently so a
-// partial update (e.g. just `engine`) still works.
-//
-// `enabled` and `auto_send` are plain bools — every PATCH carries them. The
-// settings UI always sends the full VoiceMode object so partial updates that
-// would otherwise zero these are not a real concern.
-func applyVoiceMode(settings *models.UserSettings, value *models.VoiceModeSettings) error {
+// applyLastSeenDisplay validates and applies the last-seen display enum
+// (absolute or relative).
+func applyLastSeenDisplay(settings *models.UserSettings, value *string) error {
 	if value == nil {
 		return nil
 	}
-	current := settings.VoiceMode
-	if current.Engine == "" {
-		current.Engine = "auto"
+	v := strings.TrimSpace(*value)
+	if v != models.LastSeenDisplayAbsolute && v != models.LastSeenDisplayRelative {
+		return errors.New("last_seen_display must be 'absolute' or 'relative'")
 	}
-	if value.Engine != "" {
-		if _, ok := validVoiceEngines[value.Engine]; !ok {
-			return errors.New("voice_mode.engine must be 'auto', 'webSpeech', 'whisperWeb', or 'whisperServer'")
-		}
-		current.Engine = value.Engine
-	}
-	if value.Language != "" {
-		current.Language = strings.TrimSpace(value.Language)
-	}
-	if value.Mode != "" {
-		if _, ok := validVoiceModes[value.Mode]; !ok {
-			return errors.New("voice_mode.mode must be 'toggle' or 'hold'")
-		}
-		current.Mode = value.Mode
-	}
-	if value.WhisperWebModel != "" {
-		if _, ok := validWhisperWebModels[value.WhisperWebModel]; !ok {
-			return errors.New("voice_mode.whisper_web_model must be 'tiny', 'base', or 'small'")
-		}
-		current.WhisperWebModel = value.WhisperWebModel
-	}
-	current.AutoSend = value.AutoSend
-	current.Enabled = value.Enabled
-	settings.VoiceMode = current
+	settings.LastSeenDisplay = v
 	return nil
 }
 
@@ -508,13 +932,25 @@ func applyLSPSettings(settings *models.UserSettings, req *UpdateUserSettingsRequ
 		settings.LspAutoStartLanguages = *req.LspAutoStartLanguages
 	}
 	if req.LspAutoInstallLanguages != nil {
-		if err := validateLSPLanguages(*req.LspAutoInstallLanguages); err != nil {
+		if err := validateLSPAutoInstallLanguages(*req.LspAutoInstallLanguages); err != nil {
 			return fmt.Errorf("lsp_auto_install_languages: %w", err)
 		}
 		settings.LspAutoInstallLanguages = *req.LspAutoInstallLanguages
 	}
 	if req.LspServerConfigs != nil {
 		settings.LspServerConfigs = *req.LspServerConfigs
+	}
+	if req.LspStatusLocation != nil {
+		switch *req.LspStatusLocation {
+		case models.LspStatusLocationToolbar, models.LspStatusLocationStatusBar:
+			settings.LspStatusLocation = *req.LspStatusLocation
+		default:
+			return fmt.Errorf(
+				"lsp_status_location must be %q or %q",
+				models.LspStatusLocationToolbar,
+				models.LspStatusLocationStatusBar,
+			)
+		}
 	}
 	return nil
 }
@@ -578,10 +1014,16 @@ func applySidebarViews(settings *models.UserSettings, req *UpdateUserSettingsReq
 		}
 		seen[views[i].ID] = struct{}{}
 	}
+	if len(views) == 0 && req.SidebarActiveViewID == nil {
+		views = store.DefaultSidebarViews()
+		settings.SidebarActiveViewID = store.DefaultSidebarViewID
+	}
 	settings.SidebarViews = views
 	return nil
 }
 
+// applySidebarViewState validates and applies the active sidebar view id and
+// the sidebar draft.
 func applySidebarViewState(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.SidebarActiveViewID != nil {
 		activeViewID := strings.TrimSpace(*req.SidebarActiveViewID)
@@ -599,6 +1041,7 @@ func applySidebarViewState(settings *models.UserSettings, req *UpdateUserSetting
 	return nil
 }
 
+// sidebarViewIDExists reports whether a view with the given id is saved.
 func sidebarViewIDExists(views []models.SidebarView, id string) bool {
 	for _, view := range views {
 		if view.ID == id {
@@ -610,6 +1053,9 @@ func sidebarViewIDExists(views []models.SidebarView, id string) bool {
 
 const maxUserPreferenceBlobBytes = 64 * 1024
 
+// applyUserPreferenceBlobs applies each free-form preference blob (sidebar
+// task prefs, Jira/GitHub/GitLab/Azure saved views and presets), validating
+// size and shape via applyUserPreferenceBlob.
 func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.SidebarTaskPrefs != nil {
 		settings.SidebarTaskPrefs = *req.SidebarTaskPrefs
@@ -635,6 +1081,9 @@ func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSett
 	return nil
 }
 
+// applyUserPreferenceBlob applies one PATCH-distinguished blob: omitted
+// leaves the target untouched, explicit null clears it, and a value is
+// validated before being stored.
 func applyUserPreferenceBlob(field string, value **json.RawMessage, target *json.RawMessage) error {
 	if value == nil {
 		return nil
@@ -650,6 +1099,8 @@ func applyUserPreferenceBlob(field string, value **json.RawMessage, target *json
 	return nil
 }
 
+// validateUserPreferenceBlob enforces the blob size cap and JSON shape
+// (object, array, or null).
 func validateUserPreferenceBlob(field string, value json.RawMessage) error {
 	if len(value) > maxUserPreferenceBlobBytes {
 		return fmt.Errorf("%s: max %d bytes allowed", field, maxUserPreferenceBlobBytes)
@@ -666,68 +1117,131 @@ func validateUserPreferenceBlob(field string, value json.RawMessage) error {
 	}
 }
 
-func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models.UserSettings) {
+// publishUserSettingsEvent broadcasts the full settings snapshot on the
+// UserSettingsUpdated event bus topic so connected clients stay in sync.
+func (s *Service) projectSidebarSettingsForEvent(
+	ctx context.Context,
+	settings *models.UserSettings,
+	provided ...[]string,
+) (*models.UserSettings, bool) {
+	if s.sidebarWorkspaceAccess == nil {
+		return settings, true
+	}
+	ids, err := s.resolveSidebarWorkspaceIDs(ctx, provided...)
+	if err != nil {
+		s.logger.Warn("sidebar workspace projection failed", zap.Error(err))
+		return settings, false
+	}
+	return projectSidebarWorkspaces(settings, ids), true
+}
+
+func addSidebarWorkspaceState(data map[string]interface{}, settings *models.UserSettings, include bool) {
+	if include {
+		data["sidebar_views_by_workspace"] = settings.SidebarViewsByWorkspace
+		data["sidebar_layouts_by_workspace"] = settings.SidebarLayoutsByWorkspace
+	}
+}
+
+func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models.UserSettings, provided ...[]string) {
 	if s.eventBus == nil || settings == nil {
 		return
 	}
+	settings, includeSidebarWorkspaceState := s.projectSidebarSettingsForEvent(ctx, settings, provided...)
 	data := map[string]interface{}{
-		"user_id":                             settings.UserID,
-		"workspace_id":                        settings.WorkspaceID,
-		"kanban_view_mode":                    settings.KanbanViewMode,
-		"startup_page":                        models.NormalizeStartupPage(settings.StartupPage),
-		"workflow_filter_id":                  settings.WorkflowFilterID,
-		"repository_ids":                      settings.RepositoryIDs,
-		"tasks_list_sort":                     settings.TasksListSort,
-		"tasks_list_group":                    settings.TasksListGroup,
-		"tasks_list_show_details":             settings.TasksListShowDetails,
-		"initial_setup_complete":              settings.InitialSetupComplete,
-		"preferred_shell":                     settings.PreferredShell,
-		"default_editor_id":                   settings.DefaultEditorID,
-		"enable_preview_on_click":             settings.EnablePreviewOnClick,
-		"chat_submit_key":                     settings.ChatSubmitKey,
-		"review_auto_mark_on_scroll":          settings.ReviewAutoMarkOnScroll,
-		"confirm_task_archive":                settings.ConfirmTaskArchive,
-		"unread_divider":                      settings.UnreadDivider,
-		"agent_generated_task_titles":         settings.AgentGeneratedTaskTitles,
-		"mcp_task_agent_profile_default":      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
-		"show_anchored_prompt_bar":            settings.ShowAnchoredPromptBar,
-		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
-		"show_scroll_to_start":                settings.ShowScrollToStart,
-		"show_transcript_auto_scroll_control": settings.ShowTranscriptAutoScrollControl,
-		"show_release_notification":           settings.ShowReleaseNotification,
-		"release_notes_last_seen_version":     settings.ReleaseNotesLastSeenVersion,
-		"lsp_auto_start_languages":            settings.LspAutoStartLanguages,
-		"lsp_auto_install_languages":          settings.LspAutoInstallLanguages,
-		"lsp_server_configs":                  settings.LspServerConfigs,
-		"saved_layouts":                       settings.SavedLayouts,
-		"sidebar_views":                       settings.SidebarViews,
-		"sidebar_active_view_id":              settings.SidebarActiveViewID,
-		"sidebar_draft":                       settings.SidebarDraft,
-		"sidebar_task_prefs":                  settings.SidebarTaskPrefs,
-		"task_create_last_used":               settings.TaskCreateLastUsed,
-		"jira_saved_views":                    settings.JiraSavedViews,
-		"jira_task_presets":                   settings.JiraTaskPresets,
-		"github_saved_presets":                settings.GitHubSavedPresets,
-		"github_default_query_presets":        settings.GitHubDefaultQueryPresets,
-		"gitlab_saved_presets":                settings.GitLabSavedPresets,
-		"azure_devops_browse_preferences":     settings.AzureDevOpsBrowsePreferences,
-		"default_utility_agent_id":            settings.DefaultUtilityAgentID,
-		"default_utility_model":               settings.DefaultUtilityModel,
-		"keyboard_shortcuts":                  settings.KeyboardShortcuts,
-		"terminal_link_behavior":              settings.TerminalLinkBehavior,
-		"terminal_font_family":                settings.TerminalFontFamily,
-		"terminal_font_size":                  settings.TerminalFontSize,
-		"changes_panel_layout":                settings.ChangesPanelLayout,
-		"system_metrics_display":              settings.SystemMetricsDisplay,
-		"app_status_bar_order":                settings.AppStatusBarOrder,
-		"voice_mode":                          settings.VoiceMode,
-		"updated_at":                          settings.UpdatedAt.Format(time.RFC3339),
+		"user_id":                                  settings.UserID,
+		"workspace_id":                             settings.WorkspaceID,
+		"kanban_view_mode":                         settings.KanbanViewMode,
+		"startup_page":                             models.NormalizeStartupPage(settings.StartupPage),
+		"workflow_filter_id":                       settings.WorkflowFilterID,
+		"repository_ids":                           settings.RepositoryIDs,
+		"tasks_list_sort":                          settings.TasksListSort,
+		"tasks_list_group":                         settings.TasksListGroup,
+		"tasks_list_show_details":                  settings.TasksListShowDetails,
+		"initial_setup_complete":                   settings.InitialSetupComplete,
+		"preferred_shell":                          settings.PreferredShell,
+		"default_editor_id":                        settings.DefaultEditorID,
+		"enable_preview_on_click":                  settings.EnablePreviewOnClick,
+		"chat_submit_key":                          settings.ChatSubmitKey,
+		"review_auto_mark_on_scroll":               settings.ReviewAutoMarkOnScroll,
+		"confirm_task_archive":                     settings.ConfirmTaskArchive,
+		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
+		"unread_divider":                           settings.UnreadDivider,
+		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
+		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
+		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
+		"show_scroll_to_last_prompt":               settings.ShowScrollToLastPrompt,
+		"show_scroll_to_start":                     settings.ShowScrollToStart,
+		"show_transcript_auto_scroll_control":      settings.ShowTranscriptAutoScrollControl,
+		"show_todo_list_panel":                     settings.ShowTodoListPanel,
+		"show_todo_list_panel_only_when_not_empty": settings.ShowTodoListPanelOnlyWhenNotEmpty,
+		"show_release_notification":                settings.ShowReleaseNotification,
+		"release_notes_last_seen_version":          settings.ReleaseNotesLastSeenVersion,
+		"lsp_auto_start_languages":                 settings.LspAutoStartLanguages,
+		"lsp_auto_install_languages":               settings.LspAutoInstallLanguages,
+		"lsp_server_configs":                       settings.LspServerConfigs,
+		"lsp_status_location":                      models.NormalizeLspStatusLocation(settings.LspStatusLocation),
+		"saved_layouts":                            settings.SavedLayouts,
+		"sidebar_views":                            settings.SidebarViews,
+		"sidebar_active_view_id":                   settings.SidebarActiveViewID,
+		"sidebar_draft":                            settings.SidebarDraft,
+		"thread_views":                             settings.ThreadViews,
+		"thread_active_view_id":                    settings.ThreadActiveViewID,
+		"thread_view_draft":                        settings.ThreadViewDraft,
+		"sidebar_task_prefs":                       settings.SidebarTaskPrefs,
+		"sidebar_task_color_automation":            settings.SidebarTaskColorAutomation,
+		"sidebar_task_colors":                      models.CloneSidebarTaskColors(settings.SidebarTaskColors),
+		"task_create_last_used":                    settings.TaskCreateLastUsed,
+		"jira_saved_views":                         settings.JiraSavedViews,
+		"jira_default_view_id":                     settings.JiraDefaultViewID,
+		"jira_task_presets":                        settings.JiraTaskPresets,
+		"github_saved_presets":                     settings.GitHubSavedPresets,
+		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
+		"gitlab_saved_presets":                     settings.GitLabSavedPresets,
+		"azure_devops_browse_preferences":          settings.AzureDevOpsBrowsePreferences,
+		"default_utility_agent_id":                 settings.DefaultUtilityAgentID,
+		"default_utility_model":                    settings.DefaultUtilityModel,
+		"default_utility_agent_profile_id":         settings.DefaultUtilityAgentProfileID,
+		"keyboard_shortcuts":                       settings.KeyboardShortcuts,
+		"terminal_link_behavior":                   settings.TerminalLinkBehavior,
+		"terminal_font_family":                     settings.TerminalFontFamily,
+		"terminal_font_size":                       settings.TerminalFontSize,
+		"changes_panel_layout":                     settings.ChangesPanelLayout,
+		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
+		"system_metrics_display":                   settings.SystemMetricsDisplay,
+		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,
+		"sidebar_hover_delay_ms":                   settings.SidebarHoverDelayMs,
+		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
+		"app_status_bar_order":                     settings.AppStatusBarOrder,
+		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
+		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
+		"kanban_sort":                              settings.KanbanSort,
+		"kanban_priority_filter_tokens":            settings.KanbanPriorityFilterTokens,
+		"revision":                                 settings.Revision,
+		"updated_at":                               settings.UpdatedAt.Format(time.RFC3339),
 	}
+	s.publishUserSettingsEventData(ctx, data, settings, includeSidebarWorkspaceState)
+}
+
+func (s *Service) publishUserSettingsEventData(
+	ctx context.Context,
+	data map[string]interface{},
+	settings *models.UserSettings,
+	includeSidebarWorkspaceState bool,
+) {
+	addSidebarWorkspaceState(data, settings, includeSidebarWorkspaceState)
+	s.emitUserSettingsEvent(ctx, data)
+}
+
+func (s *Service) emitUserSettingsEvent(ctx context.Context, data map[string]interface{}) {
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))
 	}
 }
 
+// validateKeyboardShortcuts checks the shortcut map shape: each entry must be
+// an object with a non-empty key and boolean-only modifiers.
 func validateKeyboardShortcuts(shortcuts map[string]interface{}) error {
 	for name, raw := range shortcuts {
 		shortcut, ok := raw.(map[string]interface{})
@@ -753,6 +1267,7 @@ func validateKeyboardShortcuts(shortcuts map[string]interface{}) error {
 	return nil
 }
 
+// validateLSPLanguages rejects languages the LSP installer does not support.
 func validateLSPLanguages(langs []string) error {
 	supported := installer.SupportedLanguages()
 	for _, lang := range langs {
@@ -763,23 +1278,33 @@ func validateLSPLanguages(langs []string) error {
 	return nil
 }
 
+// validateLSPAutoInstallLanguages rejects languages that are unsupported or
+// cannot be auto-installed.
+func validateLSPAutoInstallLanguages(langs []string) error {
+	if err := validateLSPLanguages(langs); err != nil {
+		return err
+	}
+	for _, lang := range langs {
+		if !installer.SupportsAutoInstall(lang) {
+			return fmt.Errorf("language %s does not support auto-install", lang)
+		}
+	}
+	return nil
+}
+
+// ClearDefaultEditorID clears the saved default editor when it matches the
+// given editor id (used when an editor is uninstalled), persisting and
+// publishing the change.
 func (s *Service) ClearDefaultEditorID(ctx context.Context, editorID string) error {
 	if editorID == "" {
 		return nil
 	}
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
-	if err != nil {
-		return err
-	}
-	if settings.DefaultEditorID != editorID {
-		return nil
-	}
-	settings.DefaultEditorID = ""
-	settings.UpdatedAt = time.Now().UTC()
-	settings, err = s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, nil)
-	if err != nil {
-		return err
-	}
-	s.publishUserSettingsEvent(ctx, settings)
-	return nil
+	_, err := s.updateUserSettingsCAS(ctx, func(settings *models.UserSettings) (bool, error) {
+		if settings.DefaultEditorID != editorID {
+			return false, nil
+		}
+		settings.DefaultEditorID = ""
+		return true, nil
+	}, nil, nil)
+	return err
 }

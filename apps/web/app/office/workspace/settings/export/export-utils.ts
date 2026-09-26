@@ -45,6 +45,8 @@ export function bundleToExportFiles(bundle: Record<string, unknown>): ExportFile
   const routines = (bundle.routines as Record<string, unknown>[]) ?? [];
   const projects = (bundle.projects as Record<string, unknown>[]) ?? [];
 
+  // `"unnamed"` below is a FILENAME component, not copy: it lands in
+  // `agents/<name>.yml` inside the downloaded bundle.
   if (settings) {
     files.push({ path: "kandev.yml", content: toYamlLike(settings) });
   }

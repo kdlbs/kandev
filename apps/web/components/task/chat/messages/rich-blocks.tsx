@@ -8,6 +8,7 @@ import { TodoMessage } from "@/components/task/chat/messages/todo-message";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import { normalizeDiffString } from "@/lib/diff";
 import type { FileDiffData } from "@/lib/diff/types";
+import { useTranslation } from "react-i18next";
 
 /**
  * Resolve old diff payload format to new FileDiffData format
@@ -71,6 +72,7 @@ function resolveDiffPayload(diff: unknown): FileDiffData | null {
 }
 
 export function RichBlocks({ comment }: { comment: Message }) {
+  const { t } = useTranslation();
   const metadata = comment.metadata as RichMetadata | undefined;
   if (!metadata) return null;
 
@@ -87,7 +89,7 @@ export function RichBlocks({ comment }: { comment: Message }) {
         <div className="mt-3 rounded-md border border-border/50 bg-background/60 px-3 py-2 text-xs">
           <div className="flex items-center gap-2 text-muted-foreground mb-1 uppercase tracking-wide">
             <IconBrain className="h-3.5 w-3.5" />
-            <span>Thinking</span>
+            <span>{t("task:thinking")}</span>
           </div>
           <div className="whitespace-pre-wrap text-foreground/80">{metadata.thinking}</div>
         </div>
@@ -98,7 +100,7 @@ export function RichBlocks({ comment }: { comment: Message }) {
         <div className="mt-3 rounded-md border border-border/50 bg-background/60 px-3 py-2 text-xs">
           <div className="flex items-center gap-2 text-muted-foreground mb-1 uppercase tracking-wide">
             <IconCode className="h-3.5 w-3.5" />
-            <span>Diff</span>
+            <span>{t("task:diff")}</span>
           </div>
           <pre className="whitespace-pre-wrap break-words text-[11px] text-foreground/80">
             {diffText}
@@ -112,25 +114,26 @@ export function RichBlocks({ comment }: { comment: Message }) {
 }
 
 function ContentBlockView({ block }: { block: ContentBlock }) {
+  const { t } = useTranslation();
   switch (block.type) {
     case "image":
       return (
         <div className="mt-3 rounded-md border border-border/50 bg-background/60 p-2">
           <div className="flex items-center gap-2 text-muted-foreground mb-1 text-xs uppercase tracking-wide">
             <IconPhoto className="h-3.5 w-3.5" />
-            <span>Image</span>
+            <span>{t("task:image")}</span>
           </div>
           {block.data && (
             <ImagePreviewDialog
               src={block.uri || `data:${block.mime_type || "image/png"};base64,${block.data}`}
-              alt="Agent image"
+              alt={t("task:agentImage")}
               thumbnailClassName="max-h-96 max-w-full rounded transition-opacity hover:opacity-90"
             />
           )}
           {block.uri && !block.data && (
             <ImagePreviewDialog
               src={block.uri}
-              alt="Agent image"
+              alt={t("task:agentImage")}
               thumbnailClassName="max-h-96 max-w-full rounded transition-opacity hover:opacity-90"
             />
           )}

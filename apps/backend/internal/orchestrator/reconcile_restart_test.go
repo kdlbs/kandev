@@ -9,12 +9,81 @@ import (
 
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 // errWorkTransient is a non-not-found stop error used to assert that a transient
 // stop failure never causes a confirmed-dead row to be pruned.
 var errWorkTransient = errors.New("runtime stop transient failure")
+
+func TestReconcileSessionsOnStartupPublishesSettledSessionState(t *testing.T) {
+	for _, previousState := range []models.TaskSessionState{
+		models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning,
+	} {
+		t.Run(string(previousState), func(t *testing.T) {
+			repo := setupTestRepo(t)
+			ctx := context.Background()
+			seedTaskAndSession(t, repo, "task-startup-event", "session-startup-event", previousState)
+			if err := repo.SetSessionPrimary(ctx, "session-startup-event"); err != nil {
+				t.Fatalf("set primary session: %v", err)
+			}
+			if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+				ID:        "session-startup-event",
+				SessionID: "session-startup-event",
+				TaskID:    "task-startup-event",
+				Runtime:   agentruntime.RuntimeStandalone,
+				Status:    models.ExecutorRunningStatusRunning,
+				LocalPID:  4242,
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("upsert executor row: %v", err)
+			}
+
+			eventBus := &recordingEventBus{}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+			svc.eventBus = eventBus
+			svc.reconcileSessionsOnStartup(ctx)
+
+			var stateEvent *recordedEvent
+			for i := range eventBus.events {
+				if eventBus.events[i].subject == events.TaskSessionStateChanged {
+					stateEvent = &eventBus.events[i]
+					break
+				}
+			}
+			if stateEvent == nil {
+				t.Fatalf("startup reconciliation published no %s event; events=%+v", events.TaskSessionStateChanged, eventBus.events)
+			}
+
+			data, ok := stateEvent.event.Data.(map[string]interface{})
+			if !ok {
+				t.Fatalf("session state event data = %T, want map[string]interface{}", stateEvent.event.Data)
+			}
+			if got := data["old_state"]; got != string(previousState) {
+				t.Errorf("old_state = %v, want %q", got, previousState)
+			}
+			if got := data["new_state"]; got != string(models.TaskSessionStateWaitingForInput) {
+				t.Errorf("new_state = %v, want %q", got, models.TaskSessionStateWaitingForInput)
+			}
+			if got := data["is_primary"]; got != true {
+				t.Errorf("is_primary = %v, want true", got)
+			}
+			foregroundActivity, present := data["foreground_activity"]
+			if !present {
+				t.Fatal("foreground_activity is missing from startup state event")
+			}
+			if foregroundActivity != nil {
+				t.Errorf("foreground_activity = %v, want explicit nil", foregroundActivity)
+			}
+			if got := data["active_subagent_count"]; got != 0 {
+				t.Errorf("active_subagent_count = %v, want 0", got)
+			}
+		})
+	}
+}
 
 // TestReconcileSessionsOnStartupMakesRowsTrue is the restart-reconciliation
 // integration test for #1597 startup reconciliation (the backlog stops

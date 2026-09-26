@@ -6,6 +6,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import type { ProcessInfo } from "@/lib/types/http";
 import type { ProcessStatusEntry } from "@/lib/state/store";
+import { toProcessStatusEntry } from "@/lib/state/process-status";
 import type { PreviewStage, PreviewViewMode } from "@/lib/state/slices";
 import { getLocalStorage } from "@/lib/local-storage";
 import { detectPreviewUrlFromOutput, rewritePreviewUrlForProxy } from "@/lib/preview-url-detector";
@@ -14,21 +15,6 @@ type UsePreviewPanelParams = {
   sessionId: string | null;
   hasDevScript?: boolean;
 };
-
-function toProcessStatusEntry(process: ProcessInfo): ProcessStatusEntry {
-  return {
-    processId: process.id,
-    sessionId: process.session_id,
-    kind: process.kind,
-    scriptName: process.script_name,
-    status: process.status,
-    command: process.command,
-    workingDir: process.working_dir,
-    exitCode: process.exit_code ?? null,
-    startedAt: process.started_at,
-    updatedAt: process.updated_at,
-  };
-}
 
 function sortProcesses(processes: ProcessInfo[]): ProcessInfo[] {
   return processes.slice().sort((a, b) => {

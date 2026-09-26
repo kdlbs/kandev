@@ -2,12 +2,18 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
@@ -77,6 +83,188 @@ func TestBuildReviewTaskRequest_TruncatesTitle(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildReviewTaskRequest_ForkPRRequiresManualStart(t *testing.T) {
+	tests := []struct {
+		name          string
+		headOwner     string
+		headRepo      string
+		wantAutostart bool
+	}{
+		{name: "same repository", headOwner: "acme", headRepo: "widget", wantAutostart: true},
+		{name: "fork repository", headOwner: "contributor", headRepo: "widget"},
+		{name: "missing head repository identity"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evt := newReviewEvent()
+			evt.PR.HeadRepoOwner = tt.headOwner
+			evt.PR.HeadRepoName = tt.headRepo
+
+			if got := reviewPRHeadMatchesBase(evt.PR); got != tt.wantAutostart {
+				t.Errorf("reviewPRHeadMatchesBase() = %v, want %v", got, tt.wantAutostart)
+			}
+			req := buildReviewTaskRequest(evt, nil, "acme/widget")
+			if req.Metadata[taskmodels.MetaKeyAutoStartGuard] != true {
+				t.Fatalf("auto-start guard = %v, want true", req.Metadata[taskmodels.MetaKeyAutoStartGuard])
+			}
+			_, gotAutostart := req.Metadata[taskmodels.MetaKeyAutoStartClaimed]
+			if gotAutostart != tt.wantAutostart {
+				t.Errorf("automatic launch token present = %v, want %v", gotAutostart, tt.wantAutostart)
+			}
+			manualStartMarker, requiresManualStart := req.Metadata[taskmodels.MetaKeyForkPRRequiresManualStart]
+			if requiresManualStart != !tt.wantAutostart || (requiresManualStart && manualStartMarker != true) {
+				t.Errorf("manual-start marker = (%v, present=%v), want (true, present=%v)",
+					manualStartMarker, requiresManualStart, !tt.wantAutostart)
+			}
+		})
+	}
+}
+
+func TestReviewWatchSearchResultIdentityControlsAutoStart(t *testing.T) {
+	tests := []struct {
+		name          string
+		detailPR      *github.PR
+		detailErr     error
+		wantHeadOwner string
+		wantHeadRepo  string
+		wantAutostart bool
+	}{
+		{
+			name: "internal PR",
+			detailPR: &github.PR{
+				HeadRepoOwner: "acme",
+				HeadRepoName:  "widget",
+				BaseRepoOwner: "acme",
+				BaseRepoName:  "widget",
+			},
+			wantHeadOwner: "acme",
+			wantHeadRepo:  "widget",
+			wantAutostart: true,
+		},
+		{
+			name: "fork PR",
+			detailPR: &github.PR{
+				HeadRepoOwner: "contributor",
+				HeadRepoName:  "widget-fork",
+				BaseRepoOwner: "acme",
+				BaseRepoName:  "widget",
+			},
+			wantHeadOwner: "contributor",
+			wantHeadRepo:  "widget-fork",
+		},
+		{
+			name:      "missing identity after detail lookup failure",
+			detailErr: errors.New("GitHub detail lookup failed"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			emitted, prs := triggerReviewWatchForAutoStartTest(t, tt.detailPR, tt.detailErr)
+			if len(prs) != 1 || emitted == nil || emitted.PR == nil {
+				t.Fatalf("review watch result = (%d PRs, event=%v), want one PR event", len(prs), emitted != nil)
+			}
+			if emitted.PR != prs[0] {
+				t.Fatal("published event PR is not the PR returned by TriggerReviewWatch")
+			}
+
+			if emitted.PR.HeadRepoOwner != tt.wantHeadOwner || emitted.PR.HeadRepoName != tt.wantHeadRepo {
+				t.Errorf("emitted PR head identity = %s/%s, want %s/%s",
+					emitted.PR.HeadRepoOwner, emitted.PR.HeadRepoName, tt.wantHeadOwner, tt.wantHeadRepo)
+			}
+			if emitted.PR.RepoOwner != "acme" || emitted.PR.RepoName != "widget" {
+				t.Errorf("emitted PR target identity = %s/%s, want acme/widget", emitted.PR.RepoOwner, emitted.PR.RepoName)
+			}
+			if got := reviewPRHeadMatchesBase(emitted.PR); got != tt.wantAutostart {
+				t.Errorf("reviewPRHeadMatchesBase(emitted PR) = %v, want %v", got, tt.wantAutostart)
+			}
+			request := buildReviewTaskRequest(emitted, nil, "acme/widget")
+			autoStartClaim, hasAutoStartClaim := request.Metadata[taskmodels.MetaKeyAutoStartClaimed]
+			if hasAutoStartClaim != tt.wantAutostart || (hasAutoStartClaim && autoStartClaim != true) {
+				t.Errorf("auto_start_claimed = (%v, present=%v), want true present=%v",
+					autoStartClaim, hasAutoStartClaim, tt.wantAutostart)
+			}
+			manualMarker, hasManualMarker := request.Metadata[taskmodels.MetaKeyForkPRRequiresManualStart]
+			if hasManualMarker != !tt.wantAutostart || (hasManualMarker && manualMarker != true) {
+				t.Errorf("fork_pr_requires_manual_start = (%v, present=%v), want present=%v",
+					manualMarker, hasManualMarker, !tt.wantAutostart)
+			}
+		})
+	}
+}
+
+func triggerReviewWatchForAutoStartTest(
+	t *testing.T,
+	detailPR *github.PR,
+	detailErr error,
+) (*github.NewReviewPREvent, []*github.PR) {
+	t.Helper()
+	ctx := context.Background()
+	store := newReviewWatchGitHubStore(t)
+	mockClient := github.NewMockClient()
+	mockClient.SetReviewRequestedPRs([]*github.PR{{
+		Number: 42, Title: "Review this change", HTMLURL: "https://github.com/acme/widget/pull/42",
+		RepoOwner: "acme", RepoName: "widget", HeadBranch: "feature", BaseBranch: "main",
+	}})
+	mockClient.SetPRDetail("acme", "widget", 42, detailPR, detailErr)
+	if err := store.UpsertWorkspaceConnection(ctx, &github.WorkspaceConnection{
+		WorkspaceID: "ws1", Source: github.ConnectionSourcePAT, GitHubHost: "github.com", Login: "reviewer",
+		Status: github.ConnectionStatusActive,
+	}); err != nil {
+		t.Fatalf("create workspace connection: %v", err)
+	}
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	t.Cleanup(eventBus.Close)
+	var emitted *github.NewReviewPREvent
+	_, err := eventBus.Subscribe(events.GitHubNewReviewPR, func(_ context.Context, event *bus.Event) error {
+		payload, ok := event.Data.(*github.NewReviewPREvent)
+		if !ok {
+			return errors.New("event data is not a NewReviewPREvent")
+		}
+		emitted = payload
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe to review event: %v", err)
+	}
+	githubService := github.NewService(mockClient, github.AuthMethodPAT, nil, store, eventBus, testLogger())
+	t.Cleanup(githubService.Stop)
+	github.NewMockController(mockClient, store, eventBus, githubService, testLogger())
+	watch := &github.ReviewWatch{
+		ID: "watch-1", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "step1",
+		AgentProfileID: testAgentProfileID, Repos: []github.RepoFilter{{Owner: "acme", Name: "widget"}}, Enabled: true,
+	}
+	if err := store.CreateReviewWatch(ctx, watch); err != nil {
+		t.Fatalf("create review watch: %v", err)
+	}
+	prs, err := githubService.TriggerReviewWatch(ctx, watch)
+	if err != nil {
+		t.Fatalf("TriggerReviewWatch: %v", err)
+	}
+	return emitted, prs
+}
+
+func newReviewWatchGitHubStore(t *testing.T) *github.Store {
+	t.Helper()
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "review-watch.db"))
+	if err != nil {
+		t.Fatalf("open review watch database: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	if _, err := sqlxDB.Exec("CREATE TABLE workspaces (id TEXT PRIMARY KEY)"); err != nil {
+		t.Fatalf("create workspace schema: %v", err)
+	}
+	if _, err := sqlxDB.Exec("INSERT INTO workspaces (id) VALUES (?)", "ws1"); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	store, err := github.NewStore(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("create GitHub store: %v", err)
+	}
+	return store
 }
 
 // TestBuildIssueTaskTitle_TruncatesTitle mirrors the review-title regression for
@@ -174,6 +362,7 @@ func newReviewEvent() *github.NewReviewPREvent {
 		PR: &github.PR{
 			Number: 42, Title: "Some PR", HTMLURL: "https://gh/acme/widget/pull/42",
 			RepoOwner: "acme", RepoName: "widget",
+			HeadRepoOwner: "acme", HeadRepoName: "widget",
 		},
 	}
 }
@@ -404,7 +593,7 @@ func TestAutoStart_BothPathsFireExactlyOnce(t *testing.T) {
 
 	// Path A: promotion event-driven auto-start on the same task.
 	// autoStartTaskForStep spawns a goroutine — we synchronise via the launched channel.
-	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.queue_promoted")
+	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.queue_promoted", 0, false)
 
 	// Wait for exactly one launch. Allow 2 seconds for the async goroutine.
 	deadline := time.After(2 * time.Second)
@@ -430,6 +619,110 @@ func TestAutoStart_BothPathsFireExactlyOnce(t *testing.T) {
 	}
 	if len(sessions) != 1 {
 		t.Errorf("expected exactly 1 session in DB, got %d", len(sessions))
+	}
+}
+
+func TestAutoStart_ForkReviewWaitsForManualStart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "task-fork-review-42"
+	const stepID = "step-fork-review"
+
+	sg := newMockStepGetter()
+	sg.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf1", Name: "Review", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
+		},
+	}
+	evt := newReviewEvent()
+	evt.WorkflowStepID = stepID
+	evt.PR.HeadRepoOwner = "contributor"
+	request := buildReviewTaskRequest(evt, nil, "acme/widget")
+	if _, hasToken := request.Metadata[taskmodels.MetaKeyAutoStartClaimed]; hasToken {
+		t.Fatal("fork review task must not carry an unattended auto-start token")
+	}
+	if request.Metadata[taskmodels.MetaKeyForkPRRequiresManualStart] != true {
+		t.Fatal("fork review task must persist the manual-start requirement")
+	}
+
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &taskmodels.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	metadata := make(map[string]interface{}, len(request.Metadata)+1)
+	for key, value := range request.Metadata {
+		metadata[key] = value
+	}
+	metadata[taskmodels.MetaKeyAgentProfileID] = testAgentProfileID
+	task := &taskmodels.Task{
+		ID: taskID, WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: stepID,
+		Title: request.Title, Description: request.Description, State: v1.TaskStateInProgress,
+		Metadata: metadata, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{
+		ID: taskID, State: v1.TaskStateInProgress,
+		Metadata: map[string]interface{}{
+			taskmodels.MetaKeyAutoStartGuard: true,
+			taskmodels.MetaKeyAgentProfileID: testAgentProfileID,
+		},
+	}
+	var launchCount atomic.Int32
+	launched := make(chan struct{}, 2)
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCount.Add(1)
+			launched <- struct{}{}
+			return &executor.LaunchAgentResponse{}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, sg, taskRepo, agentMgr)
+
+	dbTask, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	svc.autoStartReviewTask(ctx, evt, dbTask)
+	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.queue_promoted", 0, false)
+	svc.autoStartTaskForLoadedStep(ctx, dbTask, sg.steps[stepID], "task.moved", false, 0, false)
+	select {
+	case <-launched:
+		t.Fatal("fork review task launched automatically")
+	case <-time.After(250 * time.Millisecond):
+	}
+	if got := launchCount.Load(); got != 0 {
+		t.Fatalf("automatic launch count = %d, want 0", got)
+	}
+	sessions, err := repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		t.Fatalf("ListTaskSessions before manual start: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("sessions before manual start = %d, want 0", len(sessions))
+	}
+	if _, err := svc.StartTask(ctx, taskID, testAgentProfileID, "", "", "", "Review", stepID, false, true, nil); err != errForkPRManualStartRequired {
+		t.Fatalf("automatic StartTask error = %v, want %v", err, errForkPRManualStartRequired)
+	}
+
+	if _, err := svc.StartTask(ctx, taskID, testAgentProfileID, "", "", "", "Review", stepID, false, false, nil); err != nil {
+		t.Fatalf("manual StartTask: %v", err)
+	}
+	select {
+	case <-launched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("manual start did not launch the fork review task")
+	}
+	if got := launchCount.Load(); got != 1 {
+		t.Fatalf("launch count after manual start = %d, want 1", got)
 	}
 }
 
@@ -567,12 +860,95 @@ func TestAutoStart_NoTokenDoesNotBlock(t *testing.T) {
 	}
 	svc := createTestServiceWithScheduler(repo, sg, taskRepo, agentMgr)
 
-	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.moved")
+	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.moved", 0, false)
 
 	select {
 	case <-launched:
 	case <-time.After(2 * time.Second):
 		t.Fatal("autoStartTaskForStep should launch a task with no token")
+	}
+}
+
+// TestAutoStart_FailedLaunchWithoutGuardDoesNotStampClaimed is the regression
+// test for the bogus-claim-restore bug: restoreAutoStartClaim used to run
+// unconditionally on any launch failure, so a task that never carried
+// MetaKeyAutoStartGuard (and therefore never claimed MetaKeyAutoStartClaimed
+// in the first place) still gained the token after a failed launch. A failed
+// launch on a guardless task must leave auto_start_claimed absent, and must
+// stamp auto_start_failed instead so the failure surfaces on the card.
+func TestAutoStart_FailedLaunchWithoutGuardDoesNotStampClaimed(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "task-fail-no-guard"
+	const stepID = "step-review"
+
+	sg := newMockStepGetter()
+	sg.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf1", Name: "Review", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
+		},
+	}
+
+	now := time.Now().UTC()
+	_ = repo.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateWorkflow(ctx, &taskmodels.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTask(ctx, &taskmodels.Task{
+		ID: taskID, WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: stepID,
+		Title: "T", Description: "D", State: v1.TaskStateInProgress,
+		Metadata:  map[string]interface{}{taskmodels.MetaKeyAgentProfileID: testAgentProfileID},
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{
+		ID:    taskID,
+		State: v1.TaskStateInProgress,
+		Metadata: map[string]interface{}{
+			taskmodels.MetaKeyAgentProfileID: testAgentProfileID,
+		},
+	}
+
+	attempted := make(chan struct{}, 1)
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			attempted <- struct{}{}
+			return nil, errors.New("boom")
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, sg, taskRepo, agentMgr)
+
+	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.moved", 0, false)
+
+	select {
+	case <-attempted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected the launch attempt to fire")
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		task, err := repo.GetTask(ctx, taskID)
+		if err != nil {
+			t.Fatalf("GetTask: %v", err)
+		}
+		if task.Metadata[taskmodels.MetaKeyAutoStartFailed] != nil {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for auto_start_failed marker to be set")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.Metadata[taskmodels.MetaKeyAutoStartClaimed] != nil {
+		t.Error("a failed launch on a task without the guard must not stamp auto_start_claimed")
 	}
 }
 

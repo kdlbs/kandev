@@ -4,6 +4,11 @@ import { immer } from "zustand/middleware/immer";
 
 import { createSettingsSlice } from "./settings-slice";
 import type { SettingsSlice } from "./types";
+import type { AvailableAgent, CapabilityStatus } from "@/lib/types/http-agents";
+
+const AGENT_NAME = "claude-acp";
+const TIMESTAMP = "2026-07-26T10:00:00Z";
+const NEWER_TIMESTAMP = "2026-07-26T11:00:00Z";
 
 function makeStore() {
   return create<SettingsSlice>()(immer((set, get, store) => createSettingsSlice(set, get, store)));
@@ -12,15 +17,72 @@ function makeStore() {
 function updateJob(overrides: Record<string, unknown> = {}) {
   return {
     job_id: "update-1",
-    agent_name: "claude-acp",
+    agent_name: AGENT_NAME,
     status: "updating",
     current_version: "1.0.0",
     target_version: "1.1.0",
     output: "",
-    started_at: "2026-07-26T10:00:00Z",
+    started_at: TIMESTAMP,
     ...overrides,
   };
 }
+
+describe("user settings snapshots", () => {
+  it("rejects an older server snapshot but allows an equal-revision optimistic update", () => {
+    const store = makeStore();
+    const actions = store.getState();
+    const current = {
+      ...actions.userSettings,
+      appStatusBarEnabled: true,
+      revision: 2,
+    };
+
+    actions.setUserSettings(current);
+    actions.setUserSettings({ ...current, appStatusBarEnabled: false, revision: 1 });
+    expect(store.getState().userSettings).toMatchObject({
+      appStatusBarEnabled: true,
+      revision: 2,
+    });
+
+    actions.setUserSettings({ ...current, appStatusBarEnabled: false });
+    expect(store.getState().userSettings).toMatchObject({
+      appStatusBarEnabled: false,
+      revision: 2,
+    });
+  });
+});
+
+describe("notification provider availability", () => {
+  it("changes only Apprise availability", () => {
+    const store = makeStore();
+    const before = store.getState().notificationProviders;
+
+    // @covers AC-PLATFORM-APPRISE-RESCAN-001.4
+    store.getState().setAppriseAvailable(true);
+
+    const after = store.getState().notificationProviders;
+    expect(after.appriseAvailable).toBe(true);
+    expect(after.items).toBe(before.items);
+    expect(after.events).toBe(before.events);
+    expect(after.loaded).toBe(before.loaded);
+    expect(after.loading).toBe(before.loading);
+  });
+
+  it("preserves availability when a provider update omits it", () => {
+    const store = makeStore();
+    store.getState().setAppriseAvailable(true);
+    const before = store.getState().notificationProviders;
+
+    store.getState().setNotificationProviders({
+      items: before.items,
+      events: before.events,
+      loaded: true,
+      loading: false,
+    });
+
+    expect(store.getState().notificationProviders.appriseAvailable).toBe(true);
+  });
+});
 
 describe("settings update jobs", () => {
   it("rehydrates the newest retained job for each agent", () => {
@@ -30,7 +92,7 @@ describe("settings update jobs", () => {
     };
 
     actions.setAgentUpdateJobs([
-      updateJob({ job_id: "older", started_at: "2026-07-26T10:00:00Z" }),
+      updateJob({ job_id: "older", started_at: TIMESTAMP }),
       updateJob({ job_id: "newer", started_at: "2026-07-26T10:01:00Z" }),
     ]);
 
@@ -76,7 +138,7 @@ describe("settings update jobs", () => {
       updateJob({
         job_id: "original",
         status: "failed",
-        started_at: "2026-07-26T10:00:00Z",
+        started_at: TIMESTAMP,
       }),
     );
 
@@ -107,5 +169,313 @@ describe("settings update jobs", () => {
     expect(output).toHaveLength(64 * 1024);
     expect(output.endsWith("tail")).toBe(true);
     expect(output.startsWith("old")).toBe(false);
+  });
+});
+
+/** Builds an AvailableAgent fixture reporting the agent as settled-but-uninstalled. */
+function notInstalledAvailableAgent(overrides: Partial<AvailableAgent> = {}): AvailableAgent {
+  return {
+    name: AGENT_NAME,
+    display_name: "Claude",
+    supports_mcp: false,
+    installation_paths: [],
+    available: false,
+    capabilities: {
+      supports_session_resume: false,
+      supports_shell: false,
+      supports_workspace_only: false,
+    },
+    model_config: {
+      default_model: "default",
+      available_models: [],
+      supports_dynamic_models: false,
+      status: "not_installed",
+      error: "agent not installed",
+    },
+    updated_at: TIMESTAMP,
+    ...overrides,
+  };
+}
+
+/**
+ * Builds an AvailableAgent fixture for a non-inference agent (e.g. a
+ * TUI/passthrough agent) that never enters the host-utility probe cache, so
+ * `model_config.status` stays the cache-miss "not_configured" regardless of
+ * install state. `available` reflects the agent's own detection separately.
+ */
+function nonInferenceAvailableAgent(overrides: Partial<AvailableAgent> = {}): AvailableAgent {
+  return {
+    name: AGENT_NAME,
+    display_name: "Claude",
+    supports_mcp: false,
+    installation_paths: [],
+    available: true,
+    capabilities: {
+      supports_session_resume: false,
+      supports_shell: false,
+      supports_workspace_only: false,
+    },
+    model_config: {
+      default_model: "default",
+      available_models: [],
+      supports_dynamic_models: false,
+      status: "not_configured",
+    },
+    updated_at: TIMESTAMP,
+    ...overrides,
+  };
+}
+
+/** Seeds one profile + its owning settingsAgents entry, both under AGENT_NAME/"agent-1". */
+function seedSingleAgentProfile(
+  store: ReturnType<typeof makeStore>,
+  capabilityStatus?: CapabilityStatus,
+) {
+  const capability = capabilityStatus ? { capability_status: capabilityStatus } : {};
+  store.setState((state) => ({
+    ...state,
+    agentProfiles: {
+      ...state.agentProfiles,
+      items: [
+        {
+          id: "profile-1",
+          label: "Claude • Default",
+          agent_id: "agent-1",
+          agent_name: AGENT_NAME,
+          cli_passthrough: false,
+          ...capability,
+        },
+      ],
+    },
+    settingsAgents: {
+      items: [
+        {
+          id: "agent-1",
+          name: AGENT_NAME,
+          supports_mcp: false,
+          profiles: [],
+          created_at: TIMESTAMP,
+          updated_at: TIMESTAMP,
+          ...capability,
+        },
+      ],
+    },
+  }));
+}
+
+describe("setAvailableAgents capability propagation", () => {
+  it("does not let an older HTTP snapshot clobber a newer capability snapshot", () => {
+    const store = makeStore();
+    const actions = store.getState();
+    seedSingleAgentProfile(store, "not_installed");
+
+    actions.setAvailableAgents([
+      notInstalledAvailableAgent({
+        available: true,
+        model_config: {
+          default_model: "default",
+          available_models: [],
+          supports_dynamic_models: false,
+          status: "ok",
+        },
+        updated_at: NEWER_TIMESTAMP,
+      }),
+    ]);
+    actions.setAvailableAgentsLoading(true);
+    actions.setAvailableAgents([notInstalledAvailableAgent({ updated_at: TIMESTAMP })]);
+
+    expect(store.getState().availableAgents.items[0]?.model_config.status).toBe("ok");
+    expect(store.getState().agentProfiles.items[0]?.capability_status).toBe("ok");
+    expect(store.getState().availableAgents.loading).toBe(false);
+  });
+
+  it("flips a profile and its settingsAgents entry from probing to the settled status a poll snapshot reports", () => {
+    const store = makeStore();
+    const actions = store.getState();
+    seedSingleAgentProfile(store, "probing");
+
+    actions.setAvailableAgents([notInstalledAvailableAgent()]);
+
+    const profile = store.getState().agentProfiles.items[0];
+    const settingsAgent = store.getState().settingsAgents.items[0];
+    expect(profile?.capability_status).toBe("not_installed");
+    expect(profile?.capability_error).toBe("agent not installed");
+    expect(settingsAgent?.capability_status).toBe("not_installed");
+    expect(settingsAgent?.capability_error).toBe("agent not installed");
+  });
+
+  it("treats a non-inference agent's own failed detection as not_installed, not healthy", () => {
+    // TUI/passthrough agents never enter the host-utility probe cache (they
+    // are not InferenceAgents), so model_config.status is permanently
+    // "not_configured" regardless of whether the agent is actually
+    // installed. `available: false` is the only signal that its own
+    // detection failed; collapsing "not_configured" to undefined here would
+    // silently show it as healthy in Handoff.
+    const store = makeStore();
+    const actions = store.getState();
+    seedSingleAgentProfile(store);
+
+    actions.setAvailableAgents([nonInferenceAvailableAgent({ available: false })]);
+
+    const profile = store.getState().agentProfiles.items[0];
+    const settingsAgent = store.getState().settingsAgents.items[0];
+    expect(profile?.capability_status).toBe("not_installed");
+    expect(settingsAgent?.capability_status).toBe("not_installed");
+  });
+
+  it("keeps a not-yet-probed non-inference agent healthy when its own detection succeeded", () => {
+    // The pre-existing cache-miss case: available (installed), just not yet
+    // (or never) probed by the host-utility cache. Must stay undefined so
+    // it does not vanish from Handoff.
+    const store = makeStore();
+    const actions = store.getState();
+    seedSingleAgentProfile(store);
+
+    actions.setAvailableAgents([nonInferenceAvailableAgent({ available: true })]);
+
+    const profile = store.getState().agentProfiles.items[0];
+    const settingsAgent = store.getState().settingsAgents.items[0];
+    expect(profile?.capability_status).toBeUndefined();
+    expect(settingsAgent?.capability_status).toBeUndefined();
+  });
+
+  it("leaves capability_status untouched when the poll snapshot has no matching agent name", () => {
+    const store = makeStore();
+    const actions = store.getState();
+
+    store.setState((state) => ({
+      ...state,
+      agentProfiles: {
+        ...state.agentProfiles,
+        items: [
+          {
+            id: "profile-1",
+            label: "Claude • Default",
+            agent_id: "agent-1",
+            agent_name: AGENT_NAME,
+            cli_passthrough: false,
+            capability_status: "probing",
+          },
+        ],
+      },
+    }));
+
+    actions.setAvailableAgents([notInstalledAvailableAgent({ name: "other-agent" })]);
+
+    expect(store.getState().agentProfiles.items[0]?.capability_status).toBe("probing");
+  });
+});
+
+describe("ssh reachability", () => {
+  const EXEC_ID = "exec-1";
+  const BASE_TIMESTAMP = "2026-09-17T00:00:00Z";
+
+  function reachabilityRecord(
+    overrides: Partial<import("@/lib/types/http-ssh").SSHReachabilityRecord> = {},
+  ): import("@/lib/types/http-ssh").SSHReachabilityRecord {
+    return {
+      executor_id: EXEC_ID,
+      state: "reachable",
+      reason: "",
+      consecutive_failures: 0,
+      host: "build.example",
+      checked_at: BASE_TIMESTAMP,
+      last_success_at: BASE_TIMESTAMP,
+      updated_at: BASE_TIMESTAMP,
+      probing_enabled: true,
+      probe_interval_seconds: 60,
+      persisted: true,
+      ...overrides,
+    };
+  }
+
+  it("stores a record keyed by executor id", () => {
+    const store = makeStore();
+    store.getState().setSSHReachability(reachabilityRecord());
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(reachabilityRecord());
+  });
+
+  it("keeps the record with the later updated_at and discards an older one", () => {
+    const store = makeStore();
+    const newer = reachabilityRecord({ state: "unreachable", updated_at: "2026-09-17T01:00:00Z" });
+    const older = reachabilityRecord({ state: "reachable", updated_at: BASE_TIMESTAMP });
+
+    store.getState().setSSHReachability(newer);
+    store.getState().setSSHReachability(older);
+
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(newer);
+  });
+
+  it("applies a reset (null checked_at, newer updated_at) over a stored reachable/unreachable record", () => {
+    // A connection-configuration reset clears checked_at but still advances
+    // updated_at. Reconciling on checked_at would make this reset compare as
+    // older than the record it just invalidated and get discarded, leaving a
+    // stale reachable/unreachable state showing for a host the user just
+    // re-pointed.
+    const store = makeStore();
+    const stale = reachabilityRecord({
+      state: "unreachable",
+      checked_at: "2026-09-17T02:00:00Z",
+      updated_at: "2026-09-17T02:00:00Z",
+    });
+    const reset = reachabilityRecord({
+      state: "unknown",
+      checked_at: null,
+      updated_at: "2026-09-17T03:00:00Z",
+      persisted: false,
+    });
+
+    store.getState().setSSHReachability(stale);
+    store.getState().setSSHReachability(reset);
+
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(reset);
+  });
+
+  it("discards a null-updated_at placeholder applied after a record with a real timestamp", () => {
+    // The synthesized never-probed placeholder always loses.
+    const store = makeStore();
+    const real = reachabilityRecord({ updated_at: BASE_TIMESTAMP });
+    const placeholder = reachabilityRecord({ state: "unknown", updated_at: null });
+
+    store.getState().setSSHReachability(real);
+    store.getState().setSSHReachability(placeholder);
+
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(real);
+  });
+
+  it("applies the first record for an executor even when its updated_at is null", () => {
+    const store = makeStore();
+    const placeholder = reachabilityRecord({ state: "unknown", updated_at: null });
+
+    store.getState().setSSHReachability(placeholder);
+
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(placeholder);
+  });
+
+  it("tracks distinct executors independently", () => {
+    const store = makeStore();
+    const first = reachabilityRecord({ executor_id: EXEC_ID });
+    const second = reachabilityRecord({ executor_id: "exec-2", state: "unreachable" });
+
+    store.getState().setSSHReachability(first);
+    store.getState().setSSHReachability(second);
+
+    expect(store.getState().sshReachability.byExecutorId).toEqual({
+      [EXEC_ID]: first,
+      "exec-2": second,
+    });
+  });
+});
+
+describe("folder opener discovery", () => {
+  it("defaults unavailable and preserves capability through editor preference updates", () => {
+    const store = makeStore();
+    expect(store.getState().editors.folderOpeningAvailable).not.toBe(true);
+    store.getState().setEditors([], true);
+    expect(store.getState().editors.folderOpeningAvailable).toBe(true);
+    store.getState().setEditors([]);
+    expect(store.getState().editors.folderOpeningAvailable).toBe(true);
+    store.getState().setEditors([], false);
+    expect(store.getState().editors.folderOpeningAvailable).toBe(false);
   });
 });

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/link-existing-task-github-issue.md"
+spec: "../../specs/tasks/requirements/link-existing-task-github-issue.md"
 ---
 
 # Task 04: Public Documentation

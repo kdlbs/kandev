@@ -167,6 +167,25 @@ export async function updateTaskCIAutomationOptions(
   );
 }
 
+export async function retryTaskCIAutoMerge(
+  taskId: string,
+  repositoryId: string,
+  prNumber: number,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ accepted: boolean }>(
+    `/api/v1/github/tasks/${encodeURIComponent(taskId)}/ci-automation/retry-merge`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        body: JSON.stringify({ repository_id: repositoryId, pr_number: prNumber }),
+      },
+    },
+  );
+}
+
 // PR watches
 export async function listPRWatches(workspaceId: string, options?: ApiRequestOptions) {
   const params = new URLSearchParams({ workspace_id: workspaceId });
@@ -311,6 +330,9 @@ type AccessibleReposResponse = {
 // configured (HTTP 503 with `code: "github_not_configured"`). Callers use the
 // instanceof check to render a "Connect GitHub" CTA instead of a generic
 // error toast.
+// i18n-exempt: transport/API diagnostic. Callers branch on the error code and
+// render translated copy; this text only ever appears in a console or as an
+// interpolated English diagnostic (see docs/i18n.md on interpolated values).
 export class GitHubUnavailableError extends Error {
   constructor(message = "GitHub is not configured") {
     super(message);

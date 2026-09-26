@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, expectTypeOf } from "vitest";
 import {
   isFromOffice,
   primaryTaskRepository,
@@ -7,6 +7,7 @@ import {
   workflowId as toWorkflowId,
   workspaceId as toWorkspaceId,
   type Task,
+  type TaskPriority,
   type TaskRepository,
 } from "./http";
 
@@ -60,12 +61,18 @@ function task(overrides: Partial<Task>): Task {
     title: "t",
     description: "",
     state: "TODO",
-    priority: 0,
+    priority: "medium",
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     ...overrides,
   };
 }
+
+expectTypeOf<TaskPriority>().toEqualTypeOf<"critical" | "high" | "medium" | "low">();
+
+// @ts-expect-error Numeric task priorities are no longer part of the wire contract.
+const numericPriority: TaskPriority = 0;
+void numericPriority;
 
 describe("isFromOffice", () => {
   it("is false for null/undefined", () => {

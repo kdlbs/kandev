@@ -1,10 +1,13 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { getSingleLineTextInVisualOrder } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 import { REVIEW_SIDEBAR_LIMITS } from "../../../hooks/use-review-sidebar-resize";
 import path from "node:path";
 
 const ADDED_PATH = "review-status-added.ts";
+const DOTTED_PATH = ".agents/skills/pr-fixup/SKILL.md";
 const NESTED_PATH = "review-status-nested/nested.ts";
 const MODIFIED_PATH = "review-status-modified.ts";
 const DELETED_PATH = "review-status-deleted.ts";
@@ -14,6 +17,7 @@ const MOVED_PATH = "review-status-a-very-long-new-name-that-must-truncate.ts";
 test.describe("Review file status", () => {
   test.describe.configure({ timeout: 120_000 });
 
+  // @covers AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.4
   test("shows every status, keeps the marker visible at minimum width, and explains a pure move", async ({
     testPage,
     apiClient,
@@ -21,6 +25,7 @@ test.describe("Review file status", () => {
     backend,
     prCapture,
   }) => {
+    await testPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await testPage.addInitScript(({ key, width }) => sessionStorage.setItem(key, width), {
       key: REVIEW_SIDEBAR_LIMITS.storageKey,
       width: String(REVIEW_SIDEBAR_LIMITS.minWidth),
@@ -95,26 +100,40 @@ test.describe("Review file status", () => {
     git.stageFile(ADDED_PATH);
     git.createFile(NESTED_PATH, "nested\n");
     git.stageFile(NESTED_PATH);
+    git.createFile(DOTTED_PATH, "dot-prefixed directory\n");
+    git.stageFile(DOTTED_PATH);
     git.modifyFile(MODIFIED_PATH, "after\n");
     git.deleteFile(DELETED_PATH);
 
     const changesTab = testPage.getByTestId("dockview-tab-changes");
     await expect(changesTab).toBeVisible();
     await changesTab.click();
-    for (const filePath of [ADDED_PATH, NESTED_PATH, MODIFIED_PATH, DELETED_PATH]) {
+    for (const filePath of [ADDED_PATH, DOTTED_PATH, NESTED_PATH, MODIFIED_PATH, DELETED_PATH]) {
       const rowTestId = `file-row-${filePath.replace(/[/\\]/g, "-")}`;
       await expect(testPage.getByTestId(rowTestId)).toBeVisible({ timeout: 20_000 });
     }
 
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible();
     const sidebar = dialog.getByTestId("review-dialog-sidebar");
     await expect(sidebar).toBeVisible();
+
+    const dottedHeader = dialog.locator(
+      `[data-testid="review-file-header"][data-file-path="${DOTTED_PATH}"]`,
+    );
+    await expect(dottedHeader).toBeVisible();
+    const dottedCollapseButton = dottedHeader.getByRole("button", {
+      name: `Collapse ${DOTTED_PATH}`,
+    });
+    const dottedDirectory = dottedCollapseButton.locator("[data-review-file-directory]");
+    await expect(dottedDirectory).toHaveText(path.dirname(DOTTED_PATH));
+    expect(await getSingleLineTextInVisualOrder(dottedDirectory)).toBe(path.dirname(DOTTED_PATH));
+    await expect(dottedHeader.locator("[data-review-file-name]")).toHaveText(
+      path.basename(DOTTED_PATH),
+    );
+    await expect(dottedCollapseButton).toBeVisible();
 
     const sidebarOrder = await sidebar
       .getByTestId("review-file-row")
@@ -182,7 +201,12 @@ test.describe("Review file status", () => {
     await expect
       .poll(() => reviewScroll.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
-    await testPage.waitForTimeout(600);
+    await dwell(
+      testPage,
+      600,
+      "negative-assertion",
+      "asserts that jumping to a file never marks it reviewed; the count staying at zero is the absence of an event, so a regression needs the auto-review window to elapse to have room to fire",
+    );
     await expect(reviewProgress).toHaveText(`0 of ${totalFiles} files reviewed`);
     await prCapture.screenshot("review-ordered-safe-jump", {
       caption: "Review keeps tree and diff order aligned without auto-reviewing a file jump",
@@ -199,9 +223,25 @@ test.describe("Review file status", () => {
       .toBeGreaterThan(0);
 
     await movedRow.click();
+    const movedHeader = dialog.locator(
+      `[data-testid="review-file-header"][data-file-path="${MOVED_PATH}"]`,
+    );
+    const movedSection = movedHeader.locator("..");
     await expect(
-      dialog.getByText(`Moved from ${MOVED_FROM_PATH}; no textual changes`),
+      movedSection.getByText(`Moved from ${MOVED_FROM_PATH}; no textual changes`),
     ).toBeVisible();
-    await expect(dialog.getByText("Loading diff...")).toHaveCount(0);
+    await expect(movedSection.getByText("Loading diff...")).toHaveCount(0);
+
+    const movedActions = movedHeader.getByTestId("review-file-actions");
+    await expect(movedActions.getByRole("button", { name: "Copy diff" })).toHaveCount(0);
+    const copyPath = movedActions.getByRole("button", { name: "Copy path" });
+    await expect(copyPath).toBeVisible();
+    await prCapture.screenshot("review-copy-path-desktop", {
+      caption: "Review diff toolbar offers Copy path for the current file.",
+    });
+    await copyPath.click();
+    await expect
+      .poll(() => testPage.evaluate(() => navigator.clipboard.readText()))
+      .toBe(MOVED_PATH);
   });
 });

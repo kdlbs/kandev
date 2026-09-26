@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/filescan"
 )
 
 var (
@@ -40,10 +41,12 @@ type QuarantineStore interface {
 
 // Config contains the provider's install-owned paths and persistence dependencies.
 type Config struct {
-	HomeDir  string
-	TrashDir string
-	Settings SettingsSource
-	Store    QuarantineStore
+	HomeDir    string
+	TrashDir   string
+	Settings   SettingsSource
+	Store      QuarantineStore
+	Scanner    *filescan.Limiter
+	OnProgress func(filescan.Progress)
 }
 
 // Provider manages the single Go cache selected by persisted settings.
@@ -53,17 +56,21 @@ type Provider struct {
 
 // Analysis describes the configured cache without changing it.
 type Analysis struct {
-	Path               string `json:"path"`
-	SizeBytes          int64  `json:"size_bytes"`
-	Owned              bool   `json:"owned"`
-	Enabled            bool   `json:"enabled"`
-	UnmanagedPath      string `json:"unmanaged_path,omitempty"`
-	UnmanagedSizeBytes int64  `json:"unmanaged_size_bytes,omitempty"`
+	Path          string `json:"path"`
+	SizeBytes     int64  `json:"size_bytes"`
+	Owned         bool   `json:"owned"`
+	Enabled       bool   `json:"enabled"`
+	UnmanagedPath string `json:"unmanaged_path,omitempty"`
+	// A nil size means that the distinct user cache was not measured. A pointer
+	// preserves an explicitly measured zero in the successful response.
+	UnmanagedSizeBytes *int64 `json:"unmanaged_size_bytes,omitempty"`
 }
 
 // CleanupResult describes one cache rotation.
 type CleanupResult struct {
 	Path            string                   `json:"path"`
+	Skipped         bool                     `json:"skipped"`
+	Reason          string                   `json:"reason,omitempty"`
 	BytesBefore     int64                    `json:"bytes_before"`
 	BytesAfter      int64                    `json:"bytes_after"`
 	ReclaimedBytes  int64                    `json:"reclaimed_bytes"`
@@ -116,22 +123,67 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 		return Analysis{}, err
 	}
 	owned := adopted || hasValidMarker(cachePath)
-	size, err := directorySize(cachePath)
-	if err != nil {
-		return Analysis{}, err
+	scanner := p.config.Scanner
+	if scanner == nil {
+		scanner = filescan.NewLimiter(4)
 	}
-	analysis := Analysis{Path: cachePath, SizeBytes: size, Owned: owned, Enabled: settings.GoCache.Enabled}
-	unmanagedPath, ok := defaultGoCachePath()
-	if !ok || unmanagedPath == cachePath {
+	measurementRoots := []filescan.Root{
+		{
+			Path: cachePath, MissingOK: true, SymlinkPolicy: filescan.RejectSymlinks,
+			Exclude: func(path string, _ fs.DirEntry) bool { return path == markerPath(cachePath) },
+		},
+	}
+	unmanagedPath, hasUnmanagedPath := defaultGoCachePath()
+	if hasUnmanagedPath && unmanagedPath != cachePath {
+		measurementRoots = append(measurementRoots, filescan.Root{
+			Path: unmanagedPath, MissingOK: true, SymlinkPolicy: filescan.SkipSymlinks,
+		})
+	}
+	measurements := scanner.Measure(ctx, measurementRoots, p.config.OnProgress)
+	if len(measurements) != len(measurementRoots) {
+		return Analysis{}, errors.New("go-cache scanner returned an invalid result")
+	}
+	if err := measurements[0].Err; err != nil {
+		return Analysis{}, fmt.Errorf("measure Go cache: %w", err)
+	}
+	analysis := Analysis{
+		Path: cachePath, SizeBytes: measurements[0].Bytes, Owned: owned, Enabled: settings.GoCache.Enabled,
+	}
+	if !hasUnmanagedPath || unmanagedPath == cachePath {
 		return analysis, nil
 	}
-	unmanagedSize, err := directorySizeNoFollow(unmanagedPath)
-	if err != nil {
-		return Analysis{}, err
+	if err := measurements[1].Err; err != nil {
+		return Analysis{}, fmt.Errorf("measure Go cache: %w", err)
 	}
 	analysis.UnmanagedPath = unmanagedPath
-	analysis.UnmanagedSizeBytes = unmanagedSize
+	unmanagedSizeBytes := measurements[1].Bytes
+	analysis.UnmanagedSizeBytes = &unmanagedSizeBytes
 	return analysis, nil
+}
+
+func (p *Provider) AnalyzeWithProgress(
+	ctx context.Context,
+	onProgress func(filescan.Progress),
+) (Analysis, error) {
+	copy := *p
+	copy.config.OnProgress = onProgress
+	return copy.Analyze(ctx)
+}
+
+// MeasurementRoots returns every filesystem root included by Analyze for the
+// supplied settings. Callers use these roots to avoid attributing one file to
+// multiple storage categories.
+func (p *Provider) MeasurementRoots(settings storage.StorageMaintenanceSettings) ([]string, error) {
+	cachePath, _, err := p.cachePath(settings)
+	if err != nil {
+		return nil, err
+	}
+	roots := []string{cachePath}
+	unmanagedPath, hasUnmanagedPath := defaultGoCachePath()
+	if hasUnmanagedPath && unmanagedPath != cachePath {
+		roots = append(roots, unmanagedPath)
+	}
+	return roots, nil
 }
 
 func defaultGoCachePath() (string, bool) {
@@ -187,6 +239,13 @@ func (p *Provider) cleanup(ctx context.Context, explicit bool) (CleanupResult, e
 	}
 	entry, err := p.rotate(ctx, cachePath, result.BytesBefore, settings.QuarantineRetentionHours, adopted)
 	if err != nil {
+		var activeErr *storage.ActiveQuarantineIntentError
+		if errors.As(err, &activeErr) {
+			result.BytesAfter = result.BytesBefore
+			result.Skipped = true
+			result.Reason = "active_quarantine"
+			return result, nil
+		}
 		return result, err
 	}
 	result.QuarantineEntry = entry

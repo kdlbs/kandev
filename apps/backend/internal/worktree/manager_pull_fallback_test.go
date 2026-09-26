@@ -1,0 +1,709 @@
+package worktree
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/kandev/kandev/internal/repoclone"
+)
+
+// initGitRepoWithOriginAheadLocal builds the shape that matters here: a normal
+// repository sitting on `main`, wired to a reachable bare `origin`, whose local
+// `main` carries a commit that was never pushed. origin/main is therefore a
+// strict ancestor of local main.
+//
+// Returns the working repository path and the local-only commit SHA.
+func initGitRepoWithOriginAheadLocal(t *testing.T) (string, string) {
+	t.Helper()
+
+	base := t.TempDir()
+	originPath := filepath.Join(base, "origin.git")
+	repoPath := filepath.Join(base, "repo")
+
+	runGit(t, base, "init", "--bare", "-b", "main", originPath)
+	runGit(t, base, "init", "-b", "main", repoPath)
+	runGit(t, repoPath, "config", "user.email", "test@example.com")
+	runGit(t, repoPath, "config", "user.name", "Test User")
+	runGit(t, repoPath, "config", "commit.gpgsign", "false")
+
+	writeRepoFile(t, repoPath, "README.md", "initial\n")
+	runGit(t, repoPath, "add", "README.md")
+	runGit(t, repoPath, "commit", "-m", "initial commit")
+	runGit(t, repoPath, "remote", "add", "origin", originPath)
+	runGit(t, repoPath, "push", "origin", "main")
+
+	// The commit that only exists locally — the equivalent of a user's unpushed
+	// work on their base branch.
+	writeRepoFile(t, repoPath, "local-only.txt", "unpushed\n")
+	runGit(t, repoPath, "add", "local-only.txt")
+	runGit(t, repoPath, "commit", "-m", "local-only commit")
+
+	localHead := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "main"))
+	return repoPath, localHead
+}
+
+func initGitRepoWithDivergedOrigin(t *testing.T) (string, string, string) {
+	t.Helper()
+
+	base := t.TempDir()
+	originPath := filepath.Join(base, "origin.git")
+	repoPath := filepath.Join(base, "repo")
+	otherPath := filepath.Join(base, "other")
+
+	runGit(t, base, "init", "--bare", "-b", "main", originPath)
+	runGit(t, base, "init", "-b", "main", repoPath)
+	runGit(t, repoPath, "config", "user.email", "test@example.com")
+	runGit(t, repoPath, "config", "user.name", "Test User")
+	runGit(t, repoPath, "config", "commit.gpgsign", "false")
+	writeRepoFile(t, repoPath, "README.md", "initial\n")
+	runGit(t, repoPath, "add", "README.md")
+	runGit(t, repoPath, "commit", "-m", "initial commit")
+	runGit(t, repoPath, "remote", "add", "origin", originPath)
+	runGit(t, repoPath, "push", "origin", "main")
+
+	writeRepoFile(t, repoPath, "local-only.txt", "local\n")
+	runGit(t, repoPath, "add", "local-only.txt")
+	runGit(t, repoPath, "commit", "-m", "local-only commit")
+	localHead := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "main"))
+
+	runGit(t, base, "clone", originPath, otherPath)
+	runGit(t, otherPath, "config", "user.email", "other@example.com")
+	runGit(t, otherPath, "config", "user.name", "Other User")
+	runGit(t, otherPath, "config", "commit.gpgsign", "false")
+	writeRepoFile(t, otherPath, "remote-only.txt", "remote\n")
+	runGit(t, otherPath, "add", "remote-only.txt")
+	runGit(t, otherPath, "commit", "-m", "remote-only commit")
+	runGit(t, otherPath, "push", "origin", "main")
+	runGit(t, repoPath, "fetch", "origin", "main")
+	remoteHead := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "origin/main"))
+
+	return repoPath, localHead, remoteHead
+}
+
+// captureSyncProgress records every SyncProgressEvent so a test can assert
+// which branch of the sync actually ran, not merely what it returned.
+func captureSyncProgress(events *[]SyncProgressEvent) SyncProgressCallback {
+	return func(event SyncProgressEvent) { *events = append(*events, event) }
+}
+
+// syncOutputs joins the captured progress output for assertion messages.
+func syncOutputs(events []SyncProgressEvent) string {
+	parts := make([]string, 0, len(events))
+	for _, e := range events {
+		parts = append(parts, e.Output)
+	}
+	return strings.Join(parts, " | ")
+}
+
+func TestCreateWorktree_PullEnabledUsesLocalOnlyBase(t *testing.T) {
+	repoPath, localHead := initGitRepoWithOriginAheadLocal(t)
+	// Keep the local branch usable while making the refresh itself fail. The
+	// warning assertions below ensure Git's credential-bearing failure output
+	// does not cross the sync-progress boundary.
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://user:super-secret@127.0.0.1:1/missing.git")
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	var events []SyncProgressEvent
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-local-base",
+		SessionID:          "session-local-base",
+		RepositoryID:       "repo-local-base",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "main",
+		PullBeforeWorktree: true,
+		TaskDirName:        "task-local-base",
+		RepoName:           "repo",
+		OnSyncProgress:     captureSyncProgress(&events),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if wt == nil {
+		t.Fatal("Create() returned a nil worktree")
+	}
+
+	gotHead := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
+	if gotHead != localHead {
+		t.Fatalf("worktree HEAD = %s, want local-only base %s", gotHead, localHead)
+	}
+	if len(events) != 2 || events[0].Status != SyncProgressRunning || events[1].Status != SyncProgressCompleted {
+		t.Fatalf("sync progress = %#v, want running then completed", events)
+	}
+	if events[1].Warning == "" || events[1].WarningDetail == "" {
+		t.Fatalf("sync progress = %#v, want bounded fallback warning and detail", events)
+	}
+	if strings.Contains(syncOutputs(events), "super-secret") {
+		t.Fatalf("sync progress exposed credential-bearing Git output: %#v", events)
+	}
+}
+
+func TestPullBaseBranch_MissingRemoteRefUsesLocalBase(t *testing.T) {
+	repoPath, localHead := initGitRepoWithOriginAheadLocal(t)
+	runGit(t, repoPath, "branch", "local-only-base")
+
+	mgr := newRecreateTestManager(t)
+	var events []SyncProgressEvent
+	resolved, err := mgr.pullBaseBranch(context.Background(), repoPath, "local-only-base", captureSyncProgress(&events))
+	if err != nil {
+		t.Fatalf("pullBaseBranch() error = %v", err)
+	}
+	if resolved != "local-only-base" {
+		t.Fatalf("resolved ref = %q, want local-only-base", resolved)
+	}
+	if got := strings.TrimSpace(runGit(t, repoPath, "rev-parse", resolved)); got != localHead {
+		t.Fatalf("resolved SHA = %q, want local-only commit %q", got, localHead)
+	}
+	if len(events) != 2 || events[1].Status != SyncProgressCompleted || events[1].Warning == "" {
+		t.Fatalf("sync progress = %#v, want completed warning", events)
+	}
+	if !strings.Contains(events[1].Output, "missing_remote_ref") {
+		t.Fatalf("sync output = %q, want missing_remote_ref classification", events[1].Output)
+	}
+}
+
+func TestPullBaseBranch_DivergedRefsUseLocalBaseWithWarning(t *testing.T) {
+	repoPath, localHead, remoteHead := initGitRepoWithDivergedOrigin(t)
+	mgr := newRecreateTestManager(t)
+
+	var events []SyncProgressEvent
+	resolved, err := mgr.pullBaseBranch(context.Background(), repoPath, "main", captureSyncProgress(&events))
+	if err != nil {
+		t.Fatalf("pullBaseBranch() error = %v", err)
+	}
+	if resolved != "main" {
+		t.Fatalf("resolved ref = %q, want local main", resolved)
+	}
+	if got := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "main")); got != localHead {
+		t.Fatalf("local main moved to %q, want %q", got, localHead)
+	}
+	if got := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "origin/main")); got != remoteHead {
+		t.Fatalf("origin/main moved to %q, want %q", got, remoteHead)
+	}
+	if len(events) != 2 || events[1].Status != SyncProgressCompleted || events[1].Warning == "" {
+		t.Fatalf("sync progress = %#v, want completed warning", events)
+	}
+	if !strings.Contains(events[1].Output, "diverged_refs") {
+		t.Fatalf("sync output = %q, want diverged_refs classification", events[1].Output)
+	}
+}
+
+func TestCreateWorktree_ManagedRefreshDivergenceUsesLocalBaseWarning(t *testing.T) {
+	repoPath, localHead, _ := initGitRepoWithDivergedOrigin(t)
+	mgr := newRecreateTestManager(t)
+
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-managed-divergence",
+		SessionID:          "session-managed-divergence",
+		RepositoryID:       "repo-managed-divergence",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "main",
+		PullBeforeWorktree: true,
+		RemoteSyncHandled:  true,
+		TaskDirName:        "task-managed-divergence",
+		RepoName:           "repo",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if wt.BaseBranchFallbackWarning == "" || wt.BaseBranchFallbackDetail == "" {
+		t.Fatalf("worktree fallback warning = %#v, want warning and detail", wt)
+	}
+	if strings.Contains(wt.BaseBranchFallbackWarning, "fatal") || strings.Contains(wt.BaseBranchFallbackDetail, "fatal") {
+		t.Fatalf("worktree fallback warning exposed raw Git output: %#v", wt)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != localHead {
+		t.Fatalf("managed-refresh worktree HEAD = %q, want local base %q", got, localHead)
+	}
+}
+
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13
+func TestCreateWorktree_ManagedRefreshMissingBaseUsesConfiguredFallback(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	runGit(t, repoPath, "branch", "feature/deleted-parent")
+	mgr := newRecreateTestManager(t)
+
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-managed-missing-base",
+		SessionID:          "session-managed-missing-base",
+		RepositoryID:       "repo-managed-missing-base",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "feature/deleted-parent",
+		FallbackBaseBranch: "main",
+		PullBeforeWorktree: true,
+		RemoteSyncHandled:  true,
+		TaskDirName:        "task-managed-missing-base",
+		RepoName:           "repo",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if wt.BaseBranch != "main" {
+		t.Fatalf("worktree BaseBranch = %q, want main", wt.BaseBranch)
+	}
+	if !strings.Contains(wt.BaseBranchFallbackWarning, "feature/deleted-parent") ||
+		!strings.Contains(wt.BaseBranchFallbackWarning, "main") {
+		t.Fatalf("fallback warning = %q, want old and new branches", wt.BaseBranchFallbackWarning)
+	}
+}
+
+func TestCreateWorktree_ManagedRefreshFailureUsesLocalBaseWarning(t *testing.T) {
+	repoPath, localHead := initGitRepoWithOriginAheadLocal(t)
+	mgr := newRecreateTestManager(t)
+	refreshCalls := 0
+	var events []SyncProgressEvent
+
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-managed-refresh-failure",
+		SessionID:          "session-managed-refresh-failure",
+		RepositoryID:       "repo-managed-refresh-failure",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "main",
+		PullBeforeWorktree: true,
+		RefreshRepositoryWithState: func(context.Context) (repoclone.RemoteRefState, error) {
+			refreshCalls++
+			return repoclone.RemoteRefStateUnknown, errors.New("authentication failed for https://user:super-secret@example.invalid/repo.git")
+		},
+		TaskDirName:    "task-managed-refresh-failure",
+		RepoName:       "repo",
+		OnSyncProgress: captureSyncProgress(&events),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if refreshCalls != 1 {
+		t.Fatalf("refresh calls = %d, want one attempted provider refresh", refreshCalls)
+	}
+	if wt.BaseBranchFallbackWarning == "" || wt.BaseBranchFallbackDetail == "" {
+		t.Fatalf("worktree fallback warning = %#v, want warning and detail", wt)
+	}
+	if strings.Contains(wt.BaseBranchFallbackWarning, "super-secret") || strings.Contains(wt.BaseBranchFallbackDetail, "super-secret") {
+		t.Fatalf("worktree fallback warning exposed provider credentials: %#v", wt)
+	}
+	if len(events) != 1 || events[0].Status != SyncProgressCompleted || events[0].Warning == "" {
+		t.Fatalf("provider refresh progress = %#v, want one completed warning", events)
+	}
+	if strings.Contains(syncOutputs(events), "super-secret") {
+		t.Fatalf("provider refresh progress exposed provider credentials: %#v", events)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != localHead {
+		t.Fatalf("managed-refresh fallback HEAD = %q, want local base %q", got, localHead)
+	}
+}
+
+func TestCreateWorktree_ManagedRefreshFailureKeepsMissingCheckoutBranchStrict(t *testing.T) {
+	repoPath, _ := initGitRepoWithOriginAheadLocal(t)
+	mgr := newRecreateTestManager(t)
+
+	_, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-managed-missing-checkout",
+		SessionID:          "session-managed-missing-checkout",
+		RepositoryID:       "repo-managed-missing-checkout",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "main",
+		CheckoutBranch:     "feature/remote-only",
+		PullBeforeWorktree: true,
+		RefreshRepository: func(context.Context) error {
+			return errors.New("provider refresh unavailable")
+		},
+		TaskDirName: "task-managed-missing-checkout",
+		RepoName:    "repo",
+	})
+	if !errors.Is(err, ErrInvalidBaseBranch) {
+		t.Fatalf("Create() error = %v, want missing checkout branch to remain strict", err)
+	}
+}
+
+func TestCreateWorktree_ManagedRefreshFailureUsesLocalCheckoutBranch(t *testing.T) {
+	repoPath, _ := initGitRepoWithOriginAheadLocal(t)
+	checkoutBranch := "feature/local-only"
+	runGit(t, repoPath, "checkout", "-b", checkoutBranch)
+	writeRepoFile(t, repoPath, "local-checkout-only.txt", "unpushed checkout work\n")
+	runGit(t, repoPath, "add", "local-checkout-only.txt")
+	runGit(t, repoPath, "commit", "-m", "local-only checkout commit")
+	localCheckoutHead := strings.TrimSpace(runGit(t, repoPath, "rev-parse", checkoutBranch))
+	runGit(t, repoPath, "checkout", "main")
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://user:super-secret@127.0.0.1:1/missing.git")
+
+	mgr := newRecreateTestManager(t)
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-managed-local-checkout",
+		SessionID:          "session-managed-local-checkout",
+		RepositoryID:       "repo-managed-local-checkout",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "main",
+		CheckoutBranch:     checkoutBranch,
+		PullBeforeWorktree: true,
+		RefreshRepository: func(context.Context) error {
+			return errors.New("provider refresh unavailable")
+		},
+		TaskDirName: "task-managed-local-checkout",
+		RepoName:    "repo",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v, want the existing local checkout branch", err)
+	}
+	if wt.Branch != checkoutBranch {
+		t.Fatalf("worktree branch = %q, want %q", wt.Branch, checkoutBranch)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != localCheckoutHead {
+		t.Fatalf("worktree HEAD = %q, want local checkout HEAD %q", got, localCheckoutHead)
+	}
+	if wt.FetchWarning == "" {
+		t.Fatal("local checkout fallback did not surface a fetch warning")
+	}
+	wantDetail := fmt.Sprintf("The local checkout branch %q was verified after refresh failed. Kandev did not change Git refs.", checkoutBranch)
+	if wt.FetchWarningDetail != wantDetail {
+		t.Fatalf("fetch warning detail = %q, want bounded detail %q", wt.FetchWarningDetail, wantDetail)
+	}
+	if strings.Contains(wt.FetchWarning, "super-secret") || strings.Contains(wt.FetchWarningDetail, "super-secret") {
+		t.Fatalf("checkout fallback warning exposed provider credentials: warning=%q detail=%q", wt.FetchWarning, wt.FetchWarningDetail)
+	}
+}
+
+func TestCreateWorktree_ManagedRefreshFailureKeepsRemoteOnlyStrict(t *testing.T) {
+	repoPath, _ := initGitRepoWithOriginAheadLocal(t)
+	mgr := newRecreateTestManager(t)
+	refreshErr := errors.New("authentication failed for https://user:super-secret@example.invalid/repo.git")
+
+	_, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-managed-remote-only",
+		SessionID:          "session-managed-remote-only",
+		RepositoryID:       "repo-managed-remote-only",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "origin/main",
+		PullBeforeWorktree: true,
+		RefreshRepository: func(context.Context) error {
+			return refreshErr
+		},
+		TaskDirName: "task-managed-remote-only",
+		RepoName:    "repo",
+	})
+	if !errors.Is(err, refreshErr) {
+		t.Fatalf("Create() error = %v, want the provider refresh error", err)
+	}
+}
+
+func TestPullBaseBranch_UncertainAncestryUsesLocalBaseWithWarning(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    exit 0
+    ;;
+  pull)
+    exit 1
+    ;;
+  rev-parse)
+    if [ "${2:-}" = "--abbrev-ref" ]; then
+      echo "main"
+    fi
+    exit 0
+    ;;
+  merge-base)
+    echo "fatal: unable to inspect ancestry" >&2
+    exit 128
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr := newRecreateTestManager(t)
+	var events []SyncProgressEvent
+	resolved, err := mgr.pullBaseBranch(context.Background(), t.TempDir(), "main", captureSyncProgress(&events))
+	if err != nil {
+		t.Fatalf("pullBaseBranch() error = %v", err)
+	}
+	if resolved != "main" {
+		t.Fatalf("resolved ref = %q, want local main", resolved)
+	}
+	if len(events) != 2 || events[1].Status != SyncProgressCompleted || events[1].Warning == "" {
+		t.Fatalf("sync progress = %#v, want completed warning", events)
+	}
+	if !strings.Contains(events[1].Output, "base_ref_unverified") {
+		t.Fatalf("sync output = %q, want base_ref_unverified classification", events[1].Output)
+	}
+	if strings.Contains(events[1].WarningDetail, "unable to inspect") {
+		t.Fatalf("warning detail exposed raw ancestry output: %q", events[1].WarningDetail)
+	}
+}
+
+func TestCreateWorktree_CancelledRefreshDoesNotCreateFallback(t *testing.T) {
+	repoPath, _ := initGitRepoWithOriginAheadLocal(t)
+	mgr := newRecreateTestManager(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	wt, err := mgr.Create(ctx, CreateRequest{
+		TaskID:             "task-cancelled-refresh",
+		SessionID:          "session-cancelled-refresh",
+		RepositoryID:       "repo-cancelled-refresh",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "main",
+		PullBeforeWorktree: true,
+		TaskDirName:        "task-cancelled-refresh",
+		RepoName:           "repo",
+	})
+	if wt != nil {
+		t.Fatalf("Create() returned a worktree after cancellation: %#v", wt)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Create() error = %v, want context.Canceled", err)
+	}
+	path, pathErr := mgr.config.TaskWorktreePath("task-cancelled-refresh", "repo", "")
+	if pathErr != nil {
+		t.Fatalf("TaskWorktreePath() error = %v", pathErr)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("cancelled Create() left fallback worktree path: %v", statErr)
+	}
+}
+
+// TestPullBaseBranch_PullFailureKeepsLocalCommits pins the behaviour that a
+// transient `git pull` failure must not silently rebase the worktree's starting
+// point onto origin/<branch>.
+//
+// When the pull fails for an environmental reason (throttle contention, a
+// timeout, a stale index.lock) origin/<branch> is not fresher than the local
+// branch — here it is a strict ancestor of it. Returning the remote ref
+// therefore discards the user's unpushed commits from the new worktree, and it
+// does so silently: creation still succeeds, so nothing surfaces the loss.
+//
+// The two sibling fallbacks in manager_git.go (handleFetchFallback, and the
+// non-current-branch path in resolveLocalBaseRef) already resolve to the local
+// branch on failure. This one must agree with them.
+func TestPullBaseBranch_PullFailureKeepsLocalCommits(t *testing.T) {
+	repoPath, localHead := initGitRepoWithOriginAheadLocal(t)
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	// Let the fetch succeed (so we reach the pull) but force the pull to fail
+	// the way contention makes it fail in a loaded run. A zero timeout yields
+	// an already-expired context, so the pull cannot accidentally succeed.
+	mgr.pullTimeout = 0
+
+	var events []SyncProgressEvent
+	resolved, err := mgr.pullBaseBranch(context.Background(), repoPath, "main", captureSyncProgress(&events))
+	if err != nil {
+		t.Fatalf("pullBaseBranch() error = %v", err)
+	}
+	if resolved == "" {
+		t.Fatal("pullBaseBranch returned an empty ref")
+	}
+
+	// Prove the failure path actually ran. Both the success and failure paths
+	// resolve to `main` here, so the SHA assertion below cannot distinguish
+	// them on its own — without this the test would pass vacuously if the pull
+	// ever succeeded. The failure path reports "Pull <reason>; using <ref>",
+	// the success path "Synced and using <ref>".
+	outputs := syncOutputs(events)
+	if !strings.Contains(outputs, "Pull ") {
+		t.Fatalf(
+			"pull was expected to fail and take the fallback path, but sync progress was %q;\n"+
+				"the assertion below would pass without exercising the fallback",
+			outputs,
+		)
+	}
+
+	// Assert on the commit the ref actually points at, not on the ref's name:
+	// the defect is that the worktree starts from the wrong commit, and a
+	// name-only assertion would still pass if the mapping changed.
+	resolvedSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", resolved))
+	if resolvedSHA != localHead {
+		t.Fatalf(
+			"pullBaseBranch resolved %q to %s, which drops the unpushed local commit %s;\n"+
+				"a failed pull must not move the worktree base backwards onto origin/main",
+			resolved, resolvedSHA, localHead,
+		)
+	}
+}
+
+func TestResolveBaseRefWithFallback_RefreshFailureUsesLocalBase(t *testing.T) {
+	repoPath, _ := initGitRepoWithOriginAheadLocal(t)
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: Authentication failed" >&2
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	req := CreateRequest{
+		RepositoryPath: repoPath, BaseBranch: "main", FallbackBaseBranch: "develop", PullBeforeWorktree: true,
+	}
+	var events []SyncProgressEvent
+	req.OnSyncProgress = captureSyncProgress(&events)
+	baseRef, _, _, err := mgr.resolveBaseRefWithFallback(context.Background(), &req)
+	if err != nil {
+		t.Fatalf("resolveBaseRefWithFallback() error = %v", err)
+	}
+	if baseRef != "main" {
+		t.Fatalf("resolved base ref = %q, want local main", baseRef)
+	}
+	if len(events) != 2 || events[0].Status != SyncProgressRunning || events[1].Status != SyncProgressCompleted {
+		t.Fatalf("refresh progress = %#v, want running then completed", events)
+	}
+	if events[1].Warning == "" || events[1].WarningDetail == "" {
+		t.Fatalf("refresh fallback warning = %#v, want warning and detail", events[1])
+	}
+	if strings.Contains(events[1].Warning, "Authentication") || strings.Contains(events[1].WarningDetail, "Authentication") {
+		t.Fatalf("refresh progress exposed unsafe error detail: %#v", events[1])
+	}
+}
+
+func TestPreferRefreshedRemoteRefSelectsSafeContainingRef(t *testing.T) {
+	t.Run("local contains remote", func(t *testing.T) {
+		repoPath, _ := initGitRepoWithOriginAheadLocal(t)
+		mgr := newRecreateTestManager(t)
+
+		resolved, err := mgr.preferRefreshedRemoteRef(context.Background(), repoPath, "main")
+		if err != nil {
+			t.Fatalf("preferRefreshedRemoteRef() error: %v", err)
+		}
+		if resolved != "main" {
+			t.Fatalf("resolved ref = %q, want local main", resolved)
+		}
+	})
+
+	t.Run("remote contains local", func(t *testing.T) {
+		repoPath := initGitRepoWithRemote(t)
+		otherPath := filepath.Join(t.TempDir(), "other")
+		originURL := strings.TrimSpace(runGit(t, repoPath, "remote", "get-url", "origin"))
+		runGit(t, filepath.Dir(otherPath), "clone", originURL, otherPath)
+		runGit(t, otherPath, "config", "user.email", "other@example.com")
+		runGit(t, otherPath, "config", "user.name", "Other User")
+		runGit(t, otherPath, "config", "commit.gpgsign", "false")
+		writeRepoFile(t, otherPath, "remote-only.txt", "pushed\n")
+		runGit(t, otherPath, "add", "remote-only.txt")
+		runGit(t, otherPath, "commit", "-m", "remote-only commit")
+		runGit(t, otherPath, "push", "origin", "main")
+		runGit(t, repoPath, "fetch", "origin", "main")
+
+		mgr := newRecreateTestManager(t)
+		resolved, err := mgr.preferRefreshedRemoteRef(context.Background(), repoPath, "main")
+		if err != nil {
+			t.Fatalf("preferRefreshedRemoteRef() error: %v", err)
+		}
+		if resolved != "origin/main" {
+			t.Fatalf("resolved ref = %q, want origin/main", resolved)
+		}
+	})
+}
+
+func TestPreferRefreshedRemoteRefRejectsDivergedRefs(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	writeRepoFile(t, repoPath, "local-only.txt", "local\n")
+	runGit(t, repoPath, "add", "local-only.txt")
+	runGit(t, repoPath, "commit", "-m", "local-only commit")
+
+	otherPath := filepath.Join(t.TempDir(), "other")
+	originURL := strings.TrimSpace(runGit(t, repoPath, "remote", "get-url", "origin"))
+	runGit(t, filepath.Dir(otherPath), "clone", originURL, otherPath)
+	runGit(t, otherPath, "config", "user.email", "other@example.com")
+	runGit(t, otherPath, "config", "user.name", "Other User")
+	runGit(t, otherPath, "config", "commit.gpgsign", "false")
+	writeRepoFile(t, otherPath, "remote-only.txt", "remote\n")
+	runGit(t, otherPath, "add", "remote-only.txt")
+	runGit(t, otherPath, "commit", "-m", "remote-only commit")
+	runGit(t, otherPath, "push", "origin", "main")
+	runGit(t, repoPath, "fetch", "origin", "main")
+
+	mgr := newRecreateTestManager(t)
+	if _, err := mgr.preferRefreshedRemoteRef(context.Background(), repoPath, "main"); err == nil {
+		t.Fatal("preferRefreshedRemoteRef() accepted diverged local and remote refs")
+	}
+}
+
+func TestPreferRefreshedRemoteRefRejectsUncertainAncestry(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  rev-parse)
+    exit 0
+    ;;
+  merge-base)
+    echo "fatal: unable to inspect repository" >&2
+    exit 128
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr := newRecreateTestManager(t)
+	if _, err := mgr.preferRefreshedRemoteRef(context.Background(), t.TempDir(), "main"); err == nil {
+		t.Fatal("preferRefreshedRemoteRef() accepted an ancestry probe failure")
+	}
+}
+
+// TestPullBaseBranch_SuccessfulPullStillAdoptsRemoteCommits guards the happy
+// path the fix must not regress: when the pull succeeds, the base branch is
+// fast-forwarded and the worktree starts from the updated local branch, which
+// now contains the remote commit.
+func TestPullBaseBranch_SuccessfulPullStillAdoptsRemoteCommits(t *testing.T) {
+	base := t.TempDir()
+	originPath := filepath.Join(base, "origin.git")
+	repoPath := filepath.Join(base, "repo")
+	otherPath := filepath.Join(base, "other")
+
+	runGit(t, base, "init", "--bare", "-b", "main", originPath)
+	runGit(t, base, "init", "-b", "main", repoPath)
+	runGit(t, repoPath, "config", "user.email", "test@example.com")
+	runGit(t, repoPath, "config", "user.name", "Test User")
+	runGit(t, repoPath, "config", "commit.gpgsign", "false")
+	writeRepoFile(t, repoPath, "README.md", "initial\n")
+	runGit(t, repoPath, "add", "README.md")
+	runGit(t, repoPath, "commit", "-m", "initial commit")
+	runGit(t, repoPath, "remote", "add", "origin", originPath)
+	runGit(t, repoPath, "push", "origin", "main")
+
+	// A second clone pushes a commit the working repo has not seen yet.
+	runGit(t, base, "clone", originPath, otherPath)
+	runGit(t, otherPath, "config", "user.email", "other@example.com")
+	runGit(t, otherPath, "config", "user.name", "Other User")
+	runGit(t, otherPath, "config", "commit.gpgsign", "false")
+	writeRepoFile(t, otherPath, "remote-only.txt", "pushed\n")
+	runGit(t, otherPath, "add", "remote-only.txt")
+	runGit(t, otherPath, "commit", "-m", "remote-only commit")
+	runGit(t, otherPath, "push", "origin", "main")
+	remoteHead := strings.TrimSpace(runGit(t, otherPath, "rev-parse", "HEAD"))
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	resolved, err := mgr.pullBaseBranch(context.Background(), repoPath, "main", nil)
+	if err != nil {
+		t.Fatalf("pullBaseBranch() error = %v", err)
+	}
+	resolvedSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", resolved))
+	if resolvedSHA != remoteHead {
+		t.Fatalf(
+			"pullBaseBranch resolved %q to %s, want the pulled remote commit %s",
+			resolved, resolvedSHA, remoteHead,
+		)
+	}
+}

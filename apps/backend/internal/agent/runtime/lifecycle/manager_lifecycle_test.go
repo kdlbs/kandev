@@ -2,11 +2,18 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -208,12 +215,88 @@ func TestManager_CleanupStaleExecution_SkipsStopWhenNoRuntime(t *testing.T) {
 	}
 }
 
+func TestManager_CleanupStaleExecution_ReleasesAgentctlLockBeforeRemove(t *testing.T) {
+	mgr := newTestManager(t)
+	modes := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/workspace/poll-mode" {
+			modes <- r.Method
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+	client := agentctl.NewClient("127.0.0.1", port, newTestLogger())
+	t.Cleanup(func() { client.Close() })
+	execution := &AgentExecution{
+		ID:            "exec-with-poll-client",
+		SessionID:     "session-with-poll-client",
+		WorkspacePath: "/tmp/workspace-with-poll-client",
+		agentctl:      client,
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	// Runtime interest makes RemoveExecution publish the transition to paused.
+	// The cleanup path must detach the client before that transition attempts to
+	// acquire the client read lock.
+	mgr.pollAggregator.HandleRuntimeInterest(execution.SessionID, true)
+	select {
+	case <-modes:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial poll-mode push")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- mgr.CleanupStaleExecutionBySessionID(context.Background(), execution.SessionID)
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("cleanup stale execution: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("cleanup stale execution blocked while removing execution")
+	}
+
+	if _, found := mgr.GetExecutionBySessionID(execution.SessionID); found {
+		t.Fatal("expected stale execution to be removed")
+	}
+}
+
+func TestManager_CleanupStaleExecution_PreservesTrackingOnStopError(t *testing.T) {
+	log := newTestRegistryLogger()
+	reg := newTestRegistry()
+	execRegistry := NewExecutorRegistry(log)
+	mock := &mockStopTracker{name: "standalone", stopErr: errors.New("runtime unavailable")}
+	execRegistry.Register(mock)
+	mgr := NewManager(reg, &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log)
+
+	execution := &AgentExecution{ID: "exec-error", SessionID: "session-error", RuntimeName: "standalone"}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("failed to seed execution: %v", err)
+	}
+
+	if err := mgr.CleanupStaleExecutionBySessionID(context.Background(), "session-error"); err == nil {
+		t.Fatal("cleanup must report a runtime stop failure")
+	}
+	if _, found := mgr.GetExecutionBySessionID("session-error"); !found {
+		t.Fatal("failed cleanup must retain execution tracking for a retry")
+	}
+}
+
 // mockStopTracker is a minimal ExecutorBackend that records StopInstance calls.
 type mockStopTracker struct {
 	name              executor.Name
 	stopCalled        bool
 	stoppedInstanceID string
+	stoppedSessionID  string
 	stopReason        string
+	stopForce         bool
+	stopErr           error
 }
 
 func (m *mockStopTracker) Name() executor.Name { return m.name }
@@ -226,8 +309,10 @@ func (m *mockStopTracker) CreateInstance(ctx context.Context, req *ExecutorCreat
 func (m *mockStopTracker) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	m.stopCalled = true
 	m.stoppedInstanceID = instance.InstanceID
+	m.stoppedSessionID = instance.SessionID
 	m.stopReason = instance.StopReason
-	return nil
+	m.stopForce = force
+	return m.stopErr
 }
 
 func TestManagerStopAllAgentsPassesBackendShutdownReason(t *testing.T) {
@@ -251,7 +336,7 @@ func TestManagerStopAllAgentsPassesBackendShutdownReason(t *testing.T) {
 		t.Fatalf("StopInstance reason = %q, want %q", mock.stopReason, StopReasonBackendShutdown)
 	}
 }
-func (m *mockStopTracker) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
+func (m *mockStopTracker) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	return nil, nil
 }
 func (m *mockStopTracker) GetInteractiveRunner() *process.InteractiveRunner {
@@ -276,5 +361,104 @@ func TestManager_StartStop(t *testing.T) {
 	err = mgr.Stop()
 	if err != nil {
 		t.Fatalf("unexpected error stopping manager: %v", err)
+	}
+}
+
+// TestManager_StartSeedsRecoveredExecution verifies the recovery path itself,
+// not only the readiness helper. A recovered agentctl never passes through
+// waitForAgentctlReady, so startup must seed its base-branch map before stream
+// reconnection begins.
+func TestManager_StartSeedsRecoveredExecution(t *testing.T) {
+	log := newTestRegistryLogger()
+	branchesCh := make(chan map[string]string, 1)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workspace/base-branches" {
+			http.NotFound(w, r)
+			return
+		}
+		var body struct {
+			BaseBranches map[string]string `json:"base_branches"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		branchesCh <- body.BaseBranches
+		w.WriteHeader(http.StatusOK)
+	})}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() {
+		_ = server.Close()
+	})
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	client := agentctl.NewClient("127.0.0.1", port, log)
+	execRegistry := NewExecutorRegistry(log)
+	execRegistry.Register(&MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID:     "exec-recovered",
+			TaskID:         "task-recovered",
+			AgentProfileID: "profile-1",
+			Client:         client,
+		}},
+	})
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log)
+	t.Cleanup(func() { _ = mgr.Stop() })
+	mgr.SetBaseBranchProvider(func(context.Context, string) (map[string]string, error) {
+		return map[string]string{"frontend": "develop"}, nil
+	})
+
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	select {
+	case got := <-branchesCh:
+		if got["frontend"] != "develop" {
+			t.Fatalf("recovered base branch = %q, want develop; map=%v", got["frontend"], got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for recovered execution base-branch seed")
+	}
+}
+
+// TestManagerStartRefusesRecoveredExecutionWithEmptyTaskID pins Review round
+// 3, finding 3: a recovered instance whose TaskID is empty (the
+// recovery-inventory record's declared source answered with nothing --
+// executor_standalone.go's buildRecoveredInstances no longer falls back to
+// the instance's own claim) is authoritatively missing a required value
+// (AC-EXECUTORS-SURVIVAL-002.4): it must never be published as a tracked
+// execution, and is instead stopped through the AC-EXECUTORS-SURVIVAL-002.6
+// stop path.
+func TestManagerStartRefusesRecoveredExecutionWithEmptyTaskID(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	mockExec := &MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID:  "exec-no-task",
+			TaskID:      "",
+			SessionID:   "session-no-task",
+			RuntimeName: executor.NameStandalone,
+		}},
+	}
+	execRegistry.Register(mockExec)
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log)
+	t.Cleanup(func() { _ = mgr.Stop() })
+
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if _, ok := mgr.GetExecution("exec-no-task"); ok {
+		t.Fatal("an execution with an empty TaskID must not be tracked")
+	}
+	if len(mockExec.stopInstanceCalls) != 1 || mockExec.stopInstanceCalls[0].InstanceID != "exec-no-task" {
+		t.Fatalf("stopInstanceCalls = %+v, want the unreconstructable instance stopped", mockExec.stopInstanceCalls)
 	}
 }

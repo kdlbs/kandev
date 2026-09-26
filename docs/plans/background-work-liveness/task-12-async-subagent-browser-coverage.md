@@ -5,7 +5,7 @@ status: done
 wave: 12
 depends_on: ["10-preserve-prompt-cycle-identity", "11-account-async-subagent-completion"]
 plan: "plan.md"
-spec: "../../specs/platform/background-work-liveness.md"
+spec: "../../specs/platform/requirements/background-work-liveness.md"
 ---
 
 # Task 12: Faithful async-subagent browser coverage

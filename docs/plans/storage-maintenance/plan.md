@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/system-page/storage-maintenance.md
+spec: docs/specs/system-page/requirements/storage-maintenance.md
 created: 2026-07-14
 status: done
 ---
@@ -23,6 +23,10 @@ inherit the Kandev service's `TMPDIR`, `TMP`, and `TEMP` unchanged so temp-deriv
 caches can be reused. The superseded marker, snapshot, Storage-provider, UI, and E2E work is removed;
 managed Go-cache defaults and injection remain unchanged. A separate test-harness task addresses
 the observed accumulation of `kandev-e2e-*` roots.
+
+The current [temporary storage visibility and cleanup package](../storage-temporary-folders/plan.md)
+extends this completed maintenance system with read-only system temporary-folder visibility and an
+opt-in policy for verified registered artifacts.
 
 ---
 

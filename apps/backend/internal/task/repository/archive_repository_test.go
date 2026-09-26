@@ -10,7 +10,7 @@ import (
 
 func TestSQLiteRepository_ArchiveTask(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})
@@ -198,6 +198,58 @@ func TestSQLiteRepository_ListTasksByWorkspace_IncludeArchived(t *testing.T) {
 	if total != 2 {
 		t.Errorf("expected 2 search results with archived, got %d", total)
 	}
+}
+
+func TestSQLiteRepository_ListTasksByWorkspace_OnlyArchived(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Test Workflow"}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	for _, task := range []*models.Task{
+		{ID: "task-active", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Active Task"},
+		{ID: "task-archived", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Archived Task"},
+		{ID: "task-ephemeral", WorkspaceID: "ws-1", WorkflowID: "", WorkflowStepID: "", Title: "Archived Ephemeral", IsEphemeral: true},
+	} {
+		if err := repo.CreateTask(ctx, task); err != nil {
+			t.Fatalf("create task %s: %v", task.ID, err)
+		}
+	}
+	if err := repo.ArchiveTask(ctx, "task-archived"); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+	if err := repo.ArchiveTask(ctx, "task-ephemeral"); err != nil {
+		t.Fatalf("archive ephemeral task: %v", err)
+	}
+
+	tasks, total, err := repo.ListTasksByWorkspaceWithArchiveMode(ctx, "ws-1", "", "", "", 1, 10, "", false, false, false, false, true)
+	if err != nil {
+		t.Fatalf("list only archived: %v", err)
+	}
+	if total != 1 || len(tasks) != 1 || tasks[0].ID != "task-archived" {
+		t.Fatalf("only archived result = total %d tasks %v, want task-archived only", total, taskIDs(tasks))
+	}
+
+	searchTasks, searchTotal, err := repo.ListTasksByWorkspaceWithArchiveMode(ctx, "ws-1", "", "", "Archived", 1, 10, "", false, false, false, false, true)
+	if err != nil {
+		t.Fatalf("search only archived: %v", err)
+	}
+	if searchTotal != 1 || len(searchTasks) != 1 || searchTasks[0].ID != "task-archived" {
+		t.Fatalf("only archived search = total %d tasks %v, want task-archived only", searchTotal, taskIDs(searchTasks))
+	}
+}
+
+func taskIDs(tasks []*models.Task) []string {
+	ids := make([]string, len(tasks))
+	for i, task := range tasks {
+		ids[i] = task.ID
+	}
+	return ids
 }
 
 func TestSQLiteRepository_ListTasksForAutoArchive(t *testing.T) {

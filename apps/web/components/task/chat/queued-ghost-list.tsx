@@ -1,30 +1,55 @@
+/* eslint-disable max-lines -- queue panel keeps its responsive controls and row composition together. */
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { IconLayoutList, IconPlayerPlay, IconTrash, IconX } from "@tabler/icons-react";
+import { IconLayoutList } from "@tabler/icons-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { toast } from "@/lib/toast/sonner";
 import { useTranslation } from "react-i18next";
-import { Button } from "@kandev/ui";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { stripSystemTags } from "@/lib/utils/system-tags";
-import { MergeReferenceOverflowError, QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
-import { useQueue } from "@/hooks/domains/session/use-queue";
 import {
-  canMergeWithAbove,
-  isWorkflowQueuedMessage,
-  QueuedGhostMessage,
-} from "./queued-ghost-message";
-import type { QueuedMessage } from "@/lib/state/slices/session/types";
+  MergeReferenceOverflowError,
+  QueueEditConflictError,
+  QueueEntryNotFoundError,
+  QueueReorderError,
+  QueueSendNowError,
+} from "@/lib/api/domains/queue-api";
+import { useQueue, type MessageAttachment } from "@/hooks/domains/session/use-queue";
+import { useQueueEditProtection } from "@/hooks/use-queue-edit-protection";
+import { useQueuePinned } from "@/hooks/use-queue-pinned";
+import { canMergeWithAbove, QueuedGhostMessage } from "./queued-ghost-message";
+import { useQueuePanelOpenState } from "./use-queue-panel-open-state";
+import { useQueuePanelEscape } from "./use-queue-panel-escape";
+import { QueuePanelHeader } from "./queued-ghost-panel-header";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import type { QueueEditLease } from "@/lib/api/domains/queue-api";
+import type { QueuedMessage } from "@/lib/state/slices/session/types";
+import { useComposerActivity } from "./composer-disclosure";
 
 const HEAD_PREVIEW_MAX = 80;
 
-/** Inter-task entries are dispatched with queued_by="agent" and stay read-only. */
+/** Only WebSocket-authored user rows use the editable `user` provenance. */
 function canUserEditEntry(entry: QueuedMessage): boolean {
-  return entry.queued_by !== "agent" && !isWorkflowQueuedMessage(entry);
+  return entry.queued_by === "user";
 }
 
 function headPreviewText(entries: QueuedMessage[]): string {
@@ -35,38 +60,9 @@ function headPreviewText(entries: QueuedMessage[]): string {
   return clean.slice(0, HEAD_PREVIEW_MAX).trimEnd() + "…";
 }
 
-function isEditableTarget(el: EventTarget | null): boolean {
-  if (!(el instanceof HTMLElement)) return false;
-  const tag = el.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
-  // contentEditable covers the TipTap chat editor and any rich-text surface.
-  // `el.isContentEditable` walks up the contenteditable inheritance chain.
-  return el.isContentEditable;
-}
-
-function useEscToClose(open: boolean, onClose: () => void): void {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      // Don't hijack Esc while the user is editing inside any input control on
-      // the page (queue textarea, TipTap chat editor, native input/select, or
-      // the clarification overlay).
-      if (isEditableTarget(e.target)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      onClose();
-    };
-    // Capture Escape before an enclosing Radix dialog handles it as a dismissal.
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [open, onClose]);
-}
-
 type QueueAffordanceProps = {
   sessionId: string | null;
   children: ReactNode;
-  canDrain?: boolean;
   /**
    * Optional render slot for placing the chip inside an external row (e.g. the
    * chat status bar). The callback receives the chip node (or `null` when no
@@ -78,23 +74,65 @@ type QueueAffordanceProps = {
 
 type QueuePanelHandlerArgs = {
   clearAll: () => Promise<void>;
-  drainNext: () => Promise<void>;
   editEntry: (
     entryId: string,
     content: string,
-    attachments?: undefined,
+    attachments?: MessageAttachment[],
     entityReferences?: EntityReference[],
+    lease?: QueueEditLease | null,
   ) => Promise<void>;
   removeEntry: (entryId: string) => Promise<void>;
   mergeEntry: (entryId: string) => Promise<void>;
+  reorderEntries: (orderedIds: string[]) => Promise<void>;
+  sendEntryNow: (entryId: string) => Promise<void>;
+  setAutoRun: (enabled: boolean) => Promise<void>;
+  setAutoMerge: (enabled: boolean) => Promise<void>;
 };
 
+function useSendNowPanelHandlers(sendEntryNow: (entryId: string) => Promise<void>) {
+  const { t } = useTranslation();
+  const sendNowErrorMessage = useCallback(
+    (err: unknown) => {
+      if (err instanceof QueueEntryNotFoundError) return t("chat:sendNowEntryAlreadySent");
+      if (err instanceof QueueEditConflictError) return t("chat:queueEditSaveFailed");
+      if (err instanceof QueueSendNowError) {
+        const messages: Record<string, string> = {
+          queue_empty: "chat:sendNowQueueEmpty",
+          queue_changed: "chat:sendNowQueueChanged",
+          send_now_conflict: "chat:sendNowConflict",
+          turn_changed: "chat:sendNowTurnChanged",
+          send_now_attachment_overflow: "chat:sendNowAttachmentOverflow",
+          send_now_reference_overflow: "chat:sendNowReferenceOverflow",
+        };
+        const key = messages[err.code];
+        if (key) return t(key);
+      }
+      return t("chat:failedToSendQueuedMessageNow");
+    },
+    [t],
+  );
+  const handleSendEntryNow = useCallback(
+    (entryId: string) => {
+      sendEntryNow(entryId).catch((err) => {
+        console.error("Failed to send queued message now:", err);
+        toast.error(sendNowErrorMessage(err));
+      });
+    },
+    [sendEntryNow, sendNowErrorMessage],
+  );
+  return { handleSendEntryNow };
+}
+
+// eslint-disable-next-line max-lines-per-function -- panel actions share queue error and admission handling.
 function useQueuePanelHandlers({
   clearAll,
-  drainNext,
   editEntry,
   removeEntry,
   mergeEntry,
+  reorderEntries,
+  sendEntryNow,
+  setAutoRun,
+  setAutoMerge,
 }: QueuePanelHandlerArgs) {
   // Tracks merge requests still in flight so a rapid second click on the same
   // row cannot fire a second request for an entry that is already gone — the
@@ -102,11 +140,22 @@ function useQueuePanelHandlers({
   // a spurious "not found" error.
   const pendingMerges = useRef(new Set<string>());
   const { t } = useTranslation();
+  const { handleSendEntryNow } = useSendNowPanelHandlers(sendEntryNow);
   const handleSave = useCallback(
-    async (entryId: string, content: string, entityReferences: EntityReference[]) => {
-      await editEntry(entryId, content, undefined, entityReferences);
+    async (
+      entryId: string,
+      content: string,
+      attachments: MessageAttachment[] | undefined,
+      entityReferences: EntityReference[],
+      lease?: QueueEditLease | null,
+    ) => {
+      if (!lease) {
+        toast.error(t("chat:queueEditSaveFailed"));
+        return;
+      }
+      await editEntry(entryId, content, attachments, entityReferences, lease);
     },
-    [editEntry],
+    [editEntry, t],
   );
   const handleRemove = useCallback(
     async (entryId: string) => {
@@ -114,10 +163,10 @@ function useQueuePanelHandlers({
         await removeEntry(entryId);
       } catch (err) {
         console.error("Failed to remove queued entry:", err);
-        toast.error("Failed to remove queued message.");
+        toast.error(t("chat:failedToRemoveQueuedMessage"));
       }
     },
-    [removeEntry],
+    [removeEntry, t],
   );
   const handleMerge = useCallback(
     async (entryId: string) => {
@@ -145,17 +194,158 @@ function useQueuePanelHandlers({
   const handleClear = useCallback(() => {
     clearAll().catch((err) => {
       console.error("Failed to clear queued messages:", err);
-      toast.error("Failed to clear queued messages.");
+      toast.error(t("chat:failedToClearQueuedMessages"));
     });
-  }, [clearAll]);
-  const handleDrain = useCallback(() => {
-    drainNext().catch((err) => {
-      console.error("Failed to run queued message:", err);
-      toast.error("Failed to run queued message.");
-    });
-  }, [drainNext]);
+  }, [clearAll, t]);
+  const handleAutoRunChange = useCallback(
+    (enabled: boolean) => {
+      setAutoRun(enabled).catch((err) => {
+        console.error("Failed to update queue Auto-run:", err);
+        toast.error(t("chat:failedToSetQueueAutoRun"));
+      });
+    },
+    [setAutoRun, t],
+  );
+  const handleAutoMergeChange = useCallback(
+    (enabled: boolean) => {
+      setAutoMerge(enabled).catch((err) => {
+        console.error("Failed to update queue Auto-merge:", err);
+        toast.error(t("chat:failedToSetQueueAutoMerge"));
+      });
+    },
+    [setAutoMerge, t],
+  );
+  const handleReorder = useCallback(
+    async (orderedIds: string[]) => {
+      try {
+        await reorderEntries(orderedIds);
+      } catch (err) {
+        // A queue_changed race already refetched and reconciled to the
+        // authoritative order, so it is a successful UI outcome — no toast.
+        if (err instanceof QueueReorderError) return;
+        console.error("Failed to reorder queued entries:", err);
+        toast.error(t("chat:failedToReorderQueuedMessages"));
+      }
+    },
+    [reorderEntries, t],
+  );
 
-  return { handleSave, handleRemove, handleMerge, handleClear, handleDrain };
+  return {
+    handleSave,
+    handleRemove,
+    handleMerge,
+    handleClear,
+    handleAutoRunChange,
+    handleAutoMergeChange,
+    handleReorder,
+    handleSendEntryNow,
+  };
+}
+
+type QueuePanelDisclosureProps = {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  entries: QueuedMessage[];
+  count: number;
+  max: number;
+  isFull: boolean;
+  autoRun: boolean;
+  autoMerge: boolean;
+  autoMergeAvailable: boolean;
+  isLoading: boolean;
+  cancellationPending: boolean;
+  mergeEnabled: boolean;
+  pinned: boolean;
+  editingEntryId: string | null;
+  editLeaseActive: boolean;
+  onClose: () => void;
+  onClear: () => void;
+  onAutoRunChange: (enabled: boolean) => void;
+  onAutoMergeChange: (enabled: boolean) => void;
+  onTogglePin: () => void;
+  onSave: (
+    entryId: string,
+    content: string,
+    refs: EntityReference[],
+    attachments?: MessageAttachment[],
+    lease?: QueueEditLease | null,
+  ) => Promise<void>;
+  onRemove: (entryId: string) => Promise<void>;
+  onMerge: (entryId: string) => Promise<void>;
+  onReorder: (orderedIds: string[]) => void;
+  onSendEntryNow: (entryId: string) => void;
+  onEditStart: (entryId: string) => Promise<string | false>;
+  onEditComplete: (entryId: string, editToken?: string, saved?: boolean) => Promise<void>;
+};
+
+/** Wraps QueuePanel in the collapsible open/close animation shell. */
+function QueuePanelDisclosure({
+  isOpen,
+  onOpenChange,
+  entries,
+  count,
+  max,
+  isFull,
+  autoRun,
+  autoMerge,
+  autoMergeAvailable,
+  isLoading,
+  cancellationPending,
+  mergeEnabled,
+  pinned,
+  editingEntryId,
+  editLeaseActive,
+  onClose,
+  onClear,
+  onAutoRunChange,
+  onAutoMergeChange,
+  onTogglePin,
+  onSave,
+  onRemove,
+  onMerge,
+  onReorder,
+  onSendEntryNow,
+  onEditStart,
+  onEditComplete,
+}: QueuePanelDisclosureProps) {
+  return (
+    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
+      <CollapsibleContent
+        className={cn(
+          "overflow-hidden",
+          "data-[state=open]:animate-queue-open data-[state=closed]:animate-queue-close",
+        )}
+      >
+        <QueuePanel
+          entries={entries}
+          count={count}
+          max={max}
+          isFull={isFull}
+          autoRun={autoRun}
+          autoMerge={autoMerge}
+          autoMergeAvailable={autoMergeAvailable}
+          isLoading={isLoading}
+          cancellationPending={cancellationPending}
+          editingEntryId={editingEntryId}
+          editLeaseActive={editLeaseActive}
+          mergeEnabled={mergeEnabled}
+          pinned={pinned}
+          onClose={onClose}
+          onClear={onClear}
+          onAutoRunChange={onAutoRunChange}
+          onAutoMergeChange={onAutoMergeChange}
+          onTogglePin={onTogglePin}
+          onSave={onSave}
+          onRemove={onRemove}
+          onMerge={onMerge}
+          onReorder={onReorder}
+          onSendEntryNow={onSendEntryNow}
+          onEditStart={onEditStart}
+          onEditComplete={onEditComplete}
+        />
+      </CollapsibleContent>
+    </Collapsible>
+  );
 }
 
 /**
@@ -166,56 +356,74 @@ function useQueuePanelHandlers({
  *   it expands a panel above the input. Drained or session-switched queues
  *   auto-collapse.
  */
-export function QueueAffordance({
-  sessionId,
-  children,
-  canDrain = false,
-  renderStatusBar,
-}: QueueAffordanceProps) {
+// eslint-disable-next-line max-lines-per-function -- coordinates the queue panel's responsive controls and mutations.
+export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueAffordanceProps) {
   const {
     entries,
     count,
     max,
     isFull,
+    mergeEnabled,
+    autoRun,
+    autoMerge,
+    autoMergeAvailable,
     isLoading,
     clearAll,
-    drainNext,
+    setAutoRun,
+    setAutoMerge,
     editEntry,
     removeEntry,
     mergeEntry,
+    reorderEntries,
+    sendEntryNow,
+    cancellationPending,
   } = useQueue(sessionId);
-  const [isOpen, setIsOpen] = useState(false);
-  const { handleSave, handleRemove, handleMerge, handleClear, handleDrain } = useQueuePanelHandlers(
-    {
-      clearAll,
-      drainNext,
-      editEntry,
-      removeEntry,
-      mergeEntry,
-    },
+  const { editingEntryId, editLease, beginEdit, completeEdit } = useQueueEditProtection({
+    sessionId,
+    entries,
+  });
+  const { value: pinned, toggle: togglePin } = useQueuePinned(sessionId);
+  const [isOpen, setIsOpen] = useQueuePanelOpenState(sessionId, entries.length, pinned);
+  useComposerActivity({ overlay: isOpen && !pinned, draft: editingEntryId !== null });
+  const {
+    handleSave: handlePanelSave,
+    handleRemove,
+    handleMerge,
+    handleClear,
+    handleAutoRunChange,
+    handleAutoMergeChange,
+    handleReorder,
+    handleSendEntryNow,
+  } = useQueuePanelHandlers({
+    clearAll,
+    editEntry,
+    removeEntry,
+    mergeEntry,
+    reorderEntries,
+    sendEntryNow,
+    setAutoRun,
+    setAutoMerge,
+  });
+
+  const handleSave = useCallback(
+    (
+      entryId: string,
+      content: string,
+      refs: EntityReference[],
+      attachments?: MessageAttachment[],
+    ) => handlePanelSave(entryId, content, attachments, refs, editLease),
+    [editLease, handlePanelSave],
   );
-
-  // Reset disclosure on session switch or full drain using render-phase state
-  // adjustment (React docs: "Adjusting some state when a prop changes"). This
-  // avoids the cascading-render anti-pattern of doing it inside useEffect.
-  const entryCount = entries.length;
-  const [lastSession, setLastSession] = useState(sessionId);
-  const [lastEntryCount, setLastEntryCount] = useState(entryCount);
-  if (sessionId !== lastSession) {
-    setLastSession(sessionId);
-    setIsOpen(false);
-  }
-  if (entryCount !== lastEntryCount) {
-    setLastEntryCount(entryCount);
-    if (entryCount === 0) setIsOpen(false);
-  }
-
+  const handleEditComplete = useCallback(
+    (entryId: string, editToken?: string, saved = false) =>
+      completeEdit(entryId, sessionId, editToken, saved),
+    [completeEdit, sessionId],
+  );
   const close = useCallback(() => setIsOpen(false), []);
-  useEscToClose(isOpen, close);
+  useQueuePanelEscape(isOpen, close);
 
-  const hasEntries = !!sessionId && entryCount > 0;
   const chipNode =
-    hasEntries && !isOpen ? (
+    !!sessionId && entries.length > 0 && !isOpen ? (
       <QueueChip
         count={count}
         isFull={isFull}
@@ -224,7 +432,7 @@ export function QueueAffordance({
       />
     ) : null;
 
-  if (!hasEntries) {
+  if (!sessionId || entries.length === 0) {
     return (
       <>
         {/* Call renderStatusBar even with null so the status bar stays mounted when the queue is empty. */}
@@ -237,29 +445,35 @@ export function QueueAffordance({
   return (
     <>
       {renderStatusBar?.(chipNode)}
-      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <CollapsibleContent
-          className={cn(
-            "overflow-hidden",
-            "data-[state=open]:animate-queue-open data-[state=closed]:animate-queue-close",
-          )}
-        >
-          <QueuePanel
-            entries={entries}
-            count={count}
-            max={max}
-            isFull={isFull}
-            canDrain={canDrain}
-            isLoading={isLoading}
-            onClose={close}
-            onClear={handleClear}
-            onDrain={handleDrain}
-            onSave={handleSave}
-            onRemove={handleRemove}
-            onMerge={handleMerge}
-          />
-        </CollapsibleContent>
-      </Collapsible>
+      <QueuePanelDisclosure
+        isOpen={isOpen}
+        onOpenChange={setIsOpen}
+        entries={entries}
+        count={count}
+        editingEntryId={editingEntryId}
+        max={max}
+        isFull={isFull}
+        autoRun={autoRun}
+        autoMerge={autoMerge}
+        autoMergeAvailable={autoMergeAvailable}
+        isLoading={isLoading}
+        cancellationPending={cancellationPending}
+        mergeEnabled={mergeEnabled}
+        pinned={pinned}
+        onClose={close}
+        editLeaseActive={editLease !== null}
+        onEditStart={beginEdit}
+        onEditComplete={handleEditComplete}
+        onClear={handleClear}
+        onAutoRunChange={handleAutoRunChange}
+        onAutoMergeChange={handleAutoMergeChange}
+        onTogglePin={togglePin}
+        onSave={handleSave}
+        onRemove={handleRemove}
+        onMerge={handleMerge}
+        onReorder={handleReorder}
+        onSendEntryNow={handleSendEntryNow}
+      />
       {!renderStatusBar && chipNode && (
         <div className="flex items-center px-1 pb-1 animate-in fade-in-0 slide-in-from-bottom-1 duration-150 motion-reduce:animate-none">
           {chipNode}
@@ -285,6 +499,7 @@ function chipPalette(isFull: boolean): string {
 }
 
 function QueueChip({ count, isFull, previewText, onToggle }: QueueChipProps) {
+  const { t } = useTranslation();
   // aria-expanded/aria-controls are intentionally omitted: the chip and the
   // expanded panel are mutually exclusive in the DOM (clicking the chip swaps
   // it for the panel header, which carries its own collapse controls). Pointing
@@ -295,17 +510,18 @@ function QueueChip({ count, isFull, previewText, onToggle }: QueueChipProps) {
       type="button"
       data-testid="queue-chip"
       data-full={isFull ? "true" : "false"}
-      aria-label={`${count} queued message${count === 1 ? "" : "s"}, click to expand`}
+      aria-label={t("chat:queueChipExpand", { count })}
       onClick={onToggle}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5",
         "text-[11px] font-medium cursor-pointer transition-colors",
+        "[@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:px-3",
         chipPalette(isFull),
       )}
     >
       <IconLayoutList className="h-3 w-3" />
-      <span>{count} queued</span>
-      {isFull && <span className="opacity-80">· full</span>}
+      <span>{t("chat:queuedCount", { count })}</span>
+      {isFull && <span className="opacity-80">{t("chat:queueFullSuffix")}</span>}
     </button>
   );
   if (!previewText) return button;
@@ -324,35 +540,184 @@ type QueuePanelProps = {
   count: number;
   max: number;
   isFull: boolean;
-  canDrain: boolean;
+  autoRun: boolean;
+  autoMerge: boolean;
+  autoMergeAvailable: boolean;
   isLoading: boolean;
+  cancellationPending: boolean;
+  mergeEnabled: boolean;
+  pinned: boolean;
+  editingEntryId: string | null;
+  editLeaseActive: boolean;
   onClose: () => void;
   onClear: () => void;
-  onDrain: () => void;
-  onSave: (entryId: string, content: string, entityReferences: EntityReference[]) => Promise<void>;
+  onAutoRunChange: (enabled: boolean) => void;
+  onAutoMergeChange: (enabled: boolean) => void;
+  onTogglePin: () => void;
+  onSave: (
+    entryId: string,
+    content: string,
+    refs: EntityReference[],
+    attachments?: MessageAttachment[],
+    lease?: QueueEditLease | null,
+  ) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
   onMerge: (entryId: string) => Promise<void>;
+  onReorder: (orderedIds: string[]) => void;
+  onSendEntryNow: (entryId: string) => void;
+  onEditStart: (entryId: string) => Promise<string | false>;
+  onEditComplete: (entryId: string, editToken?: string, saved?: boolean) => Promise<void>;
+};
+/** Renders the expanded queue list: header controls plus one QueuedGhostMessage
+ * row per pending entry, gating each row's merge control on `mergeEnabled`. */
+type QueueReorderArgs = {
+  entries: QueuedMessage[];
+  canReorder: boolean;
+  onReorder: (orderedIds: string[]) => void;
 };
 
+/** Sortable-list state for the queue panel: sensors, the id list, and the
+ * drag lifecycle handlers that translate a drop into the new ordered ids. */
+function useQueueReorder({ entries, canReorder, onReorder }: QueueReorderArgs) {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const ids = useMemo(() => entries.map((entry) => entry.id), [entries]);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveId(String(event.active.id));
+  }, []);
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      setActiveId(null);
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = entries.findIndex((entry) => entry.id === active.id);
+      const newIndex = entries.findIndex((entry) => entry.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+      onReorder(arrayMove(ids, oldIndex, newIndex));
+    },
+    [entries, ids, onReorder],
+  );
+
+  const handleDragCancel = useCallback(() => setActiveId(null), []);
+
+  return {
+    ids,
+    sensors,
+    activeId,
+    canReorder,
+    handleDragStart,
+    handleDragEnd,
+    handleDragCancel,
+  };
+}
+
+// Reordering is disabled while a queue mutation or backend cancellation is in flight.
+type QueuePanelEntryProps = {
+  entry: QueuedMessage;
+  index: number;
+  editLeaseActive: boolean;
+  canEdit: boolean;
+  canMerge: boolean;
+  canDrag: boolean;
+  showDragHandle: boolean;
+  isDragging: boolean;
+  sendNowDisabled: boolean;
+  onSave: QueuePanelProps["onSave"];
+  onRemove: () => Promise<void>;
+  onMerge: () => Promise<void>;
+  onSendNow: () => void;
+  onEditStart: () => Promise<string | false>;
+  onEditComplete: (editToken?: string, saved?: boolean) => Promise<void>;
+};
+
+function QueuePanelEntry({
+  entry,
+  index,
+  editLeaseActive,
+  canEdit,
+  canMerge,
+  canDrag,
+  showDragHandle,
+  isDragging,
+  sendNowDisabled,
+  onSave,
+  onRemove,
+  onMerge,
+  onSendNow,
+  onEditStart,
+  onEditComplete,
+}: QueuePanelEntryProps) {
+  return (
+    <QueuedGhostMessage
+      entry={entry}
+      index={index}
+      editLeaseActive={editLeaseActive}
+      canEdit={canEdit}
+      canRemove
+      canMerge={canMerge}
+      canDrag={canDrag}
+      showDragHandle={showDragHandle}
+      isDragging={isDragging}
+      onSave={(content, entityReferences, attachments) =>
+        onSave(entry.id, content, entityReferences, attachments)
+      }
+      onRemove={onRemove}
+      onMerge={onMerge}
+      onSendNow={onSendNow}
+      sendNowDisabled={sendNowDisabled}
+      onEditStart={onEditStart}
+      onEditComplete={onEditComplete}
+    />
+  );
+}
+
+// eslint-disable-next-line max-lines-per-function -- the panel keeps responsive drag, edit, and status composition together.
 function QueuePanel({
   entries,
   count,
   max,
   isFull,
-  canDrain,
+  autoRun,
+  autoMerge,
+  autoMergeAvailable,
   isLoading,
+  cancellationPending,
+  mergeEnabled,
+  pinned,
+  editingEntryId,
+  editLeaseActive,
   onClose,
   onClear,
-  onDrain,
+  onAutoRunChange,
+  onAutoMergeChange,
+  onTogglePin,
   onSave,
   onRemove,
   onMerge,
+  onReorder,
+  onSendEntryNow,
+  onEditStart,
+  onEditComplete,
 }: QueuePanelProps) {
+  const { t } = useTranslation();
+  // The server remains authoritative; drops reconcile through refetch.
+  const { ids, sensors, activeId, canReorder, handleDragStart, handleDragEnd, handleDragCancel } =
+    useQueueReorder({
+      entries,
+      canReorder: !isLoading && !cancellationPending,
+      onReorder,
+    });
+
   return (
     <div
       id="queue-panel"
       role="region"
-      aria-label="Queued messages"
+      aria-label={t("chat:queuedMessages")}
       data-testid="queued-ghost-list"
       className={cn(
         "flex max-h-[min(40dvh,32rem)] flex-shrink-0 flex-col px-3 pt-1.5 pb-1",
@@ -364,100 +729,57 @@ function QueuePanel({
         count={count}
         max={max}
         isFull={isFull}
-        canDrain={canDrain}
-        isLoading={isLoading}
+        autoRun={autoRun}
+        autoMerge={autoMerge}
+        autoMergeAvailable={autoMergeAvailable}
+        isLoading={isLoading || editingEntryId !== null}
+        cancellationPending={cancellationPending}
+        pinned={pinned}
         onClear={onClear}
-        onDrain={onDrain}
+        onAutoRunChange={onAutoRunChange}
+        onAutoMergeChange={onAutoMergeChange}
+        onTogglePin={onTogglePin}
         onClose={onClose}
       />
       <div
         data-testid="queue-scroll-region"
         className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-1"
       >
-        {entries.map((entry, index) => (
-          <QueuedGhostMessage
-            key={entry.id}
-            entry={entry}
-            index={index}
-            canEdit={canUserEditEntry(entry)}
-            canMerge={canMergeWithAbove(entry, entries[index - 1])}
-            onSave={(content, entityReferences) => onSave(entry.id, content, entityReferences)}
-            onRemove={() => onRemove(entry.id)}
-            onMerge={() => onMerge(entry.id)}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-type QueuePanelHeaderProps = {
-  count: number;
-  max: number;
-  isFull: boolean;
-  canDrain: boolean;
-  isLoading: boolean;
-  onClear: () => void;
-  onDrain: () => void;
-  onClose: () => void;
-};
-
-function QueuePanelHeader({
-  count,
-  max,
-  isFull,
-  canDrain,
-  isLoading,
-  onClear,
-  onDrain,
-  onClose,
-}: QueuePanelHeaderProps) {
-  const capacityText = max > 0 ? `${count} of ${max}` : `${count}`;
-  return (
-    <div className="flex shrink-0 items-center justify-between gap-3 py-1">
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <IconLayoutList className="h-3.5 w-3.5" />
-        <span className="uppercase tracking-wide">Queued</span>
-        <span className={cn(isFull && "text-amber-600 dark:text-amber-400")}>
-          {capacityText}
-          {isFull ? " · full" : ""}
-        </span>
-      </div>
-      <div className="flex items-center gap-1">
-        {canDrain && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-            onClick={onDrain}
-            disabled={isLoading}
-            title="Run next queued message"
-            data-testid="queue-drain-next"
-          >
-            <IconPlayerPlay className="mr-1 h-3 w-3" />
-            Run next
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-          onClick={onClear}
-          title="Clear all queued messages"
-          data-testid="queue-clear-all"
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
         >
-          <IconTrash className="mr-1 h-3 w-3" />
-          Clear all
-        </Button>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Collapse queued messages"
-          data-testid="queue-close"
-          className="text-muted-foreground hover:text-foreground cursor-pointer rounded p-1"
-        >
-          <IconX className="h-3.5 w-3.5" />
-        </button>
+          <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+            {entries.map((entry, index) => (
+              <QueuePanelEntry
+                key={entry.id}
+                entry={entry}
+                index={index}
+                editLeaseActive={editLeaseActive}
+                canEdit={
+                  !isLoading &&
+                  !cancellationPending &&
+                  canUserEditEntry(entry) &&
+                  (editingEntryId === null || editingEntryId === entry.id)
+                }
+                canMerge={mergeEnabled && canMergeWithAbove(entry, entries[index - 1])}
+                canDrag={canReorder}
+                showDragHandle={entries.length > 1}
+                isDragging={activeId === entry.id}
+                sendNowDisabled={isLoading || cancellationPending}
+                onSave={onSave}
+                onRemove={() => onRemove(entry.id)}
+                onMerge={() => onMerge(entry.id)}
+                onSendNow={() => onSendEntryNow(entry.id)}
+                onEditStart={() => onEditStart(entry.id)}
+                onEditComplete={(editToken, saved) => onEditComplete(entry.id, editToken, saved)}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
       </div>
     </div>
   );

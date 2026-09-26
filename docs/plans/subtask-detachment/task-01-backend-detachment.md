@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/subtask-detachment.md"
+spec: "../../specs/tasks/requirements/subtask-detachment.md"
 ---
 
 # Task 01: Backend detach contract

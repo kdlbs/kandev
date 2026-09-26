@@ -1,7 +1,6 @@
-import { classifyTask, type TaskBucket } from "@/components/task/task-classify";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import { getExecutorLabel } from "@/lib/executor-icons";
-import { formatTaskStateLabel } from "@/lib/ui/state-labels";
+import { t } from "@/lib/i18n";
 import type {
   FilterClause,
   FilterDimension,
@@ -12,6 +11,19 @@ import type {
   SortKey,
   SortSpec,
 } from "@/lib/state/slices/ui/sidebar-view-types";
+import {
+  getStateBucket,
+  getTaskStateGroup,
+  resolveEffectiveStateMap,
+  STATE_BUCKET_ORDER,
+  STATE_GROUP_ORDER,
+  type EffectiveTaskTreeState,
+} from "./effective-task-tree-state";
+import {
+  compareActivityTimestamps,
+  resolveTaskTreeActivity,
+  taskActivitySortValue,
+} from "./task-tree-activity";
 
 export type SidebarGroup = {
   key: string;
@@ -22,6 +34,13 @@ export type SidebarGroup = {
 export type GroupedSidebarList = {
   groups: SidebarGroup[];
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
+  /**
+   * Which dimension produced `groups`. Rows read it to decide whether their own
+   * repository label is redundant: grouped by repository, the section header
+   * already names it. Optional so a hand-built list (tests, fixtures) keeps
+   * meaning "unknown grouping" and falls back to showing the label.
+   */
+  groupKey?: GroupKey;
 };
 
 export type SidebarTaskPrefs = {
@@ -32,16 +51,6 @@ export type SidebarTaskPrefs = {
 
 type DimensionExtractor = (task: TaskSwitcherItem) => FilterValue | undefined;
 
-const STATE_BUCKET_ORDER: Record<TaskBucket, number> = {
-  review: 0,
-  in_progress: 1,
-  backlog: 2,
-};
-
-function getStateBucket(task: TaskSwitcherItem): TaskBucket {
-  return classifyTask(task.sessionState, task.state);
-}
-
 const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
   archived: (t) => t.isArchived === true,
   // State filters intentionally use the action buckets exposed by the filter UI.
@@ -49,7 +58,9 @@ const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
   workflow: (t) => t.workflowId,
   workflowStep: (t) => t.workflowStepId,
   executorType: (t) => t.remoteExecutorType,
-  repository: (t) => (t.repositories && t.repositories.length > 1 ? "__multi__" : t.repositoryPath),
+  // Repository filters keep the primary compatibility value. Grouping uses
+  // the complete combination separately in `groupExtractors` below.
+  repository: (t) => t.repositoryPath,
   hasDiff: (t) => {
     const ds = t.diffStats;
     return !!ds && (ds.additions > 0 || ds.deletions > 0);
@@ -59,6 +70,19 @@ const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
   isIssueWatch: (t) => t.isIssueWatch === true,
   titleMatch: (t) => t.title ?? "",
 };
+
+export function viewRequiresArchivedTasks(
+  view: Pick<SidebarView, "filters"> | null | undefined,
+): boolean {
+  return (
+    view?.filters.some(
+      (clause) =>
+        clause.dimension === "archived" &&
+        ((clause.op === "is" && clause.value === true) ||
+          (clause.op === "is_not" && clause.value === false)),
+    ) ?? false
+  );
+}
 
 function toStringArray(v: FilterValue): string[] {
   if (Array.isArray(v)) return v.map(String);
@@ -111,6 +135,8 @@ const SORT_COMPARATORS: Record<Exclude<SortKey, "custom">, SortComparator> = {
     return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
   },
   updatedAt: (a, b) => (a.updatedAt ?? "").localeCompare(b.updatedAt ?? ""),
+  lastActivityAt: (a, b) =>
+    compareActivityTimestamps(taskActivitySortValue(a), taskActivitySortValue(b)),
   createdAt: (a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""),
   title: (a, b) => (a.title ?? "").localeCompare(b.title ?? ""),
 };
@@ -134,25 +160,31 @@ export function applySort(
   spec: SortSpec,
   orderedTaskIds: string[] = [],
   subTasksByParentId?: Map<string, TaskSwitcherItem[]>,
+  effectiveStateByTaskId?: ReadonlyMap<string, EffectiveTaskTreeState>,
 ): TaskSwitcherItem[] {
   let cmp: SortComparator;
   if (spec.key === "state" && subTasksByParentId) {
+    const resolvedStates =
+      effectiveStateByTaskId ?? resolveEffectiveStateMap(tasks, subTasksByParentId);
     const effectiveOrder = new Map<string, number>();
     for (const t of tasks) {
-      let order = STATE_BUCKET_ORDER[getStateBucket(t)];
-      const subs = subTasksByParentId.get(t.id);
-      if (subs) {
-        for (const sub of subs) {
-          order = Math.min(order, STATE_BUCKET_ORDER[getStateBucket(sub)]);
-        }
-      }
-      effectiveOrder.set(t.id, order);
+      effectiveOrder.set(
+        t.id,
+        STATE_BUCKET_ORDER[resolvedStates.get(t.id)?.bucket ?? getStateBucket(t)],
+      );
     }
     cmp = (a, b) => {
       const bucket = effectiveOrder.get(a.id)! - effectiveOrder.get(b.id)!;
       if (bucket !== 0) return bucket;
       return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
     };
+  } else if (spec.key === "lastActivityAt" && subTasksByParentId) {
+    const latestActivityByTaskId = resolveTaskTreeActivity(tasks, subTasksByParentId);
+    cmp = (a, b) =>
+      compareActivityTimestamps(
+        latestActivityByTaskId.get(a.id) ?? taskActivitySortValue(a),
+        latestActivityByTaskId.get(b.id) ?? taskActivitySortValue(b),
+      );
   } else {
     cmp = spec.key === "custom" ? customComparator(orderedTaskIds) : SORT_COMPARATORS[spec.key];
   }
@@ -170,100 +202,80 @@ export function applySort(
   return withIndex.map((x) => x.t);
 }
 
-const UNASSIGNED_LABEL = "Unassigned";
-const MULTI_REPO_LABEL = "Multi-repo";
-const NOT_STARTED_STATE_GROUP_KEY = "__not_started__";
-
-const STATE_GROUP_ORDER: Record<string, number> = {
-  [NOT_STARTED_STATE_GROUP_KEY]: 0,
-  CREATED: 1,
-  SCHEDULING: 2,
-  TODO: 3,
-  IN_PROGRESS: 4,
-  WAITING_FOR_INPUT: 5,
-  REVIEW: 6,
-  BLOCKED: 7,
-  FAILED: 8,
-  COMPLETED: 9,
-  CANCELLED: 10,
-};
+/**
+ * Catalog keys, not resolved labels: a `t()` at module scope would freeze at the
+ * boot locale. `applyGroup` runs inside its callers' render, so it resolves
+ * through the module-level `t` at call time — both `useGroupedSidebarView` and
+ * the mobile task-switcher sheet already carry `i18n.language` in their memo
+ * deps for the same reason.
+ *
+ * Only `label` is copy. The group `key`s below (`__multi__`, the
+ * `__repo_combination__:<json>` keys, `__unassigned__`, `__all__`) are identity:
+ * they are compared in `mergeSingleRepoUnassigned` / `sortRepoGroups` and are
+ * persisted in the view's `collapsedGroups`. They are never translated.
+ */
+const UNASSIGNED_LABEL_KEY = "sidebar:groupUnassigned";
+const MULTI_REPO_LABEL_KEY = "sidebar:groupMultiRepo";
+const ALL_GROUP_LABEL_KEY = "sidebar:groupAll";
+const REPOSITORY_COMBINATION_PREFIX = "__repo_combination__:";
 
 type GroupExtractor = (task: TaskSwitcherItem) => { key: string; label: string };
 
-function getTaskStateGroup(task: TaskSwitcherItem): { key: string; label: string } {
-  if (!task.state)
-    return { key: NOT_STARTED_STATE_GROUP_KEY, label: formatTaskStateLabel(undefined) };
-  return { key: task.state, label: formatTaskStateLabel(task.state) };
+function repositoryLinkIds(task: TaskSwitcherItem): string[] {
+  const ids = new Set<string>();
+  for (const link of task.repositoryLinks ?? []) ids.add(String(link.repository_id));
+  return [...ids];
 }
 
-/**
- * Computes the effective state group for a parent task, considering its direct
- * subtasks. The task (or its "best" subtask) with the highest-priority bucket
- * (lowest STATE_BUCKET_ORDER) determines the group. This makes a parent with an
- * active subtask bubble up to the same section as genuinely-running top-level
- * tasks.
- *
- * Tie-break: when multiple candidates share the same bucket, prefer the one
- * with the lowest STATE_GROUP_ORDER (i.e. the earlier/more-active lifecycle
- * state). This is consistent with the existing top-level sort where review
- * (which includes COMPLETED/FAILED/CANCELLED) sorts above in_progress.
- */
-function getEffectiveStateGroup(
-  task: TaskSwitcherItem,
-  subMap: Map<string, TaskSwitcherItem[]>,
-): { key: string; label: string } {
-  let bestTask = task;
-  let bestBucketOrder = STATE_BUCKET_ORDER[getStateBucket(task)];
-  let bestStateOrder = STATE_GROUP_ORDER[task.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99;
+function isCompleteRepositoryCombination(task: TaskSwitcherItem): boolean {
+  const repositories = task.repositories ?? [];
+  const linkedRepositoryIds = repositoryLinkIds(task);
+  return repositories.length >= 2 && repositories.length === linkedRepositoryIds.length;
+}
 
-  const subs = subMap.get(task.id);
-  if (subs) {
-    for (const sub of subs) {
-      // Subtasks without an explicit persisted state can't provide a meaningful
-      // group heading (getTaskStateGroup would return "not started"), so skip
-      // them entirely. The parent still bubbles in applySort via bucket numbers.
-      if (!sub.state) continue;
-      const subBucketOrder = STATE_BUCKET_ORDER[getStateBucket(sub)];
-      if (subBucketOrder < bestBucketOrder) {
-        bestTask = sub;
-        bestBucketOrder = subBucketOrder;
-        bestStateOrder = STATE_GROUP_ORDER[sub.state] ?? 99;
-      } else if (subBucketOrder === bestBucketOrder) {
-        const subStateOrder = STATE_GROUP_ORDER[sub.state] ?? 99;
-        if (subStateOrder < bestStateOrder) {
-          bestTask = sub;
-          bestStateOrder = subStateOrder;
-        }
-      }
-    }
-  }
+function hasMultipleRepositoryLinks(task: TaskSwitcherItem): boolean {
+  return (task.repositories?.length ?? 0) > 1 || repositoryLinkIds(task).length > 1;
+}
 
-  return getTaskStateGroup(bestTask);
+function repositoryCombinationKey(repositories: string[]): string {
+  return `${REPOSITORY_COMBINATION_PREFIX}${JSON.stringify(repositories)}`;
 }
 
 const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
-  repository: (t) => {
-    if (t.repositories && t.repositories.length > 1) {
-      return { key: "__multi__", label: MULTI_REPO_LABEL };
+  // Parameter named `task`, not `t`: this file's other extractors and loops use
+  // `t` for a task, which shadows the imported translator. These four resolve
+  // copy, so they must not. Rename the parameter before adding a `t()` call to
+  // any of the others.
+  repository: (task) => {
+    if (isCompleteRepositoryCombination(task)) {
+      const repositories = task.repositories!;
+      return {
+        key: repositoryCombinationKey(repositories),
+        label: repositories.join(", "),
+      };
     }
-    if (t.repositoryPath) return { key: t.repositoryPath, label: t.repositoryPath };
-    return { key: "__unassigned__", label: UNASSIGNED_LABEL };
-  },
-  workflow: (t) => {
-    if (t.workflowId) return { key: t.workflowId, label: t.workflowName ?? t.workflowId };
-    return { key: "__unassigned__", label: UNASSIGNED_LABEL };
-  },
-  workflowStep: (t) => {
-    if (t.workflowStepId) {
-      return { key: t.workflowStepId, label: t.workflowStepTitle ?? t.workflowStepId };
+    if (hasMultipleRepositoryLinks(task)) {
+      return { key: "__multi__", label: t(MULTI_REPO_LABEL_KEY) };
     }
-    return { key: "__unassigned__", label: UNASSIGNED_LABEL };
+    if (task.repositoryPath) return { key: task.repositoryPath, label: task.repositoryPath };
+    return { key: "__unassigned__", label: t(UNASSIGNED_LABEL_KEY) };
   },
-  executorType: (t) => {
-    if (t.remoteExecutorType) {
-      return { key: t.remoteExecutorType, label: getExecutorLabel(t.remoteExecutorType) };
+  workflow: (task) => {
+    if (task.workflowId)
+      return { key: task.workflowId, label: task.workflowName ?? task.workflowId };
+    return { key: "__unassigned__", label: t(UNASSIGNED_LABEL_KEY) };
+  },
+  workflowStep: (task) => {
+    if (task.workflowStepId) {
+      return { key: task.workflowStepId, label: task.workflowStepTitle ?? task.workflowStepId };
     }
-    return { key: "__unassigned__", label: UNASSIGNED_LABEL };
+    return { key: "__unassigned__", label: t(UNASSIGNED_LABEL_KEY) };
+  },
+  executorType: (task) => {
+    if (task.remoteExecutorType) {
+      return { key: task.remoteExecutorType, label: getExecutorLabel(task.remoteExecutorType) };
+    }
+    return { key: "__unassigned__", label: t(UNASSIGNED_LABEL_KEY) };
   },
   // State groups use persisted task states so headings match task status labels.
   state: getTaskStateGroup,
@@ -292,23 +304,29 @@ export function applyGroup(
   tasks: TaskSwitcherItem[],
   groupKey: GroupKey,
   effectiveStateSubMap?: Map<string, TaskSwitcherItem[]>,
+  effectiveStateByTaskId?: ReadonlyMap<string, EffectiveTaskTreeState>,
 ): GroupedSidebarList {
   const { rootTasks, subTasksByParentId } = separateSubtasks(tasks);
 
   if (groupKey === "none") {
     return {
-      groups: [{ key: "__all__", label: "All", tasks: rootTasks }],
+      groups: [{ key: "__all__", label: t(ALL_GROUP_LABEL_KEY), tasks: rootTasks }],
       subTasksByParentId,
+      groupKey,
     };
   }
 
   const extract = groupExtractors[groupKey];
+  const resolvedStates =
+    groupKey === "state" && effectiveStateSubMap
+      ? (effectiveStateByTaskId ?? resolveEffectiveStateMap(tasks, effectiveStateSubMap))
+      : undefined;
   const buckets = new Map<string, SidebarGroup>();
   for (const task of rootTasks) {
-    const { key, label } =
-      groupKey === "state" && effectiveStateSubMap
-        ? getEffectiveStateGroup(task, effectiveStateSubMap)
-        : extract(task);
+    const resolved = resolvedStates?.get(task.id);
+    const { key, label } = resolved
+      ? { key: resolved.groupKey, label: resolved.label }
+      : extract(task);
     let group = buckets.get(key);
     if (!group) {
       group = { key, label, tasks: [] };
@@ -323,11 +341,16 @@ export function applyGroup(
     sortRepoGroups(groups);
   }
   if (groupKey === "state") sortStateGroups(groups);
-  return { groups, subTasksByParentId };
+  return { groups, subTasksByParentId, groupKey };
 }
 
 function mergeSingleRepoUnassigned(groups: SidebarGroup[]): void {
-  const repoGroups = groups.filter((g) => g.key !== "__multi__" && g.key !== "__unassigned__");
+  const repoGroups = groups.filter(
+    (g) =>
+      g.key !== "__multi__" &&
+      g.key !== "__unassigned__" &&
+      !g.key.startsWith(REPOSITORY_COMBINATION_PREFIX),
+  );
   if (repoGroups.length !== 1) return;
   const unassignedIdx = groups.findIndex((g) => g.key === "__unassigned__");
   if (unassignedIdx === -1) return;
@@ -340,6 +363,10 @@ function sortRepoGroups(groups: SidebarGroup[]): void {
   groups.sort((a, b) => {
     if (a.key === "__multi__") return -1;
     if (b.key === "__multi__") return 1;
+    const aIsCombination = a.key.startsWith(REPOSITORY_COMBINATION_PREFIX);
+    const bIsCombination = b.key.startsWith(REPOSITORY_COMBINATION_PREFIX);
+    if (aIsCombination && !bIsCombination && b.key !== "__unassigned__") return -1;
+    if (bIsCombination && !aIsCombination && a.key !== "__unassigned__") return 1;
     if (a.key === "__unassigned__") return 1;
     if (b.key === "__unassigned__") return -1;
     return a.label.localeCompare(b.label);
@@ -533,8 +560,18 @@ export function applyView(
 ): GroupedSidebarList {
   const filtered = applyFilters(tasks, view.filters);
   const { subTasksByParentId } = separateSubtasks(filtered);
-  const sorted = applySort(filtered, view.sort, prefs?.orderedTaskIds, subTasksByParentId);
-  const grouped = applyGroup(sorted, view.group, subTasksByParentId);
+  const effectiveStateByTaskId =
+    view.sort.key === "state" || view.group === "state"
+      ? resolveEffectiveStateMap(filtered, subTasksByParentId)
+      : undefined;
+  const sorted = applySort(
+    filtered,
+    view.sort,
+    prefs?.orderedTaskIds,
+    subTasksByParentId,
+    effectiveStateByTaskId,
+  );
+  const grouped = applyGroup(sorted, view.group, subTasksByParentId, effectiveStateByTaskId);
   const subOrderMap = prefs?.subtaskOrderByParentId;
   if (subOrderMap) {
     for (const [parentId, orderedIds] of Object.entries(subOrderMap)) {

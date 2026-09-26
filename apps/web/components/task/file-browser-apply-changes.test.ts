@@ -20,6 +20,8 @@ const SESSION_ID = "sess";
 const REFRESH_OP = "refresh";
 const THM_OLD = "thm/old.txt";
 const THM_NEW = "thm/new.txt";
+const SRC_PATH = "src";
+const SRC_COMPONENTS_PATH = `${SRC_PATH}/components`;
 
 beforeEach(async () => {
   vi.resetModules();
@@ -84,7 +86,7 @@ describe("applyFileChanges — refresh operation expands to all expanded folders
     applyFileChanges({
       client: client(),
       sessionId: SESSION_ID,
-      expandedPaths: new Set(["src", "src/components"]),
+      expandedPaths: new Set([SRC_PATH, SRC_COMPONENTS_PATH]),
       changes: [{ path: "", operation: REFRESH_OP }],
       setTree: vi.fn(),
       setLoadState: vi.fn(),
@@ -92,8 +94,8 @@ describe("applyFileChanges — refresh operation expands to all expanded folders
     await new Promise<void>((r) => setTimeout(r, 0));
     expect(requestFileTreeMock.mock.calls.map((c) => c[2]).sort()).toEqual([
       "",
-      "src",
-      "src/components",
+      SRC_PATH,
+      SRC_COMPONENTS_PATH,
     ]);
   });
 
@@ -110,6 +112,20 @@ describe("applyFileChanges — refresh operation expands to all expanded folders
     await new Promise<void>((r) => setTimeout(r, 0));
     // create event: parent "thm" is expanded, path itself is not — only "thm" refreshed.
     expect(requestFileTreeMock.mock.calls.map((c) => c[2]).sort()).toEqual(["thm"]);
+  });
+
+  it("refreshes the nearest loaded ancestor for a new nested path", async () => {
+    mockEmptyTree();
+    applyFileChanges({
+      client: client(),
+      sessionId: SESSION_ID,
+      expandedPaths: new Set<string>(),
+      changes: [{ path: "upload-bundle/nested/leaf.txt", operation: "create" }],
+      setTree: vi.fn(),
+      setLoadState: vi.fn(),
+    });
+    await new Promise<void>((r) => setTimeout(r, 0));
+    expect(requestFileTreeMock.mock.calls.map((c) => c[2])).toEqual([""]);
   });
 
   it("merges fresh children into the expanded subtree", async () => {
@@ -135,6 +151,52 @@ describe("applyFileChanges — refresh operation expands to all expanded folders
     const thmNode = next.children?.find((c) => c.path === "thm");
     expect(thmNode?.children?.map((c) => c.path).sort()).toEqual([THM_NEW, THM_OLD]);
   });
+});
+
+it("skips invalid expanded paths during a generic refresh", async () => {
+  mockEmptyTree();
+  applyFileChanges({
+    client: client(),
+    sessionId: SESSION_ID,
+    expandedPaths: new Set([SRC_PATH, SRC_COMPONENTS_PATH, "/home/jcfs/project/src"]),
+    changes: [{ path: "", operation: REFRESH_OP }],
+    setTree: vi.fn(),
+    setLoadState: vi.fn(),
+  });
+  await new Promise<void>((r) => setTimeout(r, 0));
+  expect(requestFileTreeMock.mock.calls.map((c) => c[2]).sort()).toEqual([
+    "",
+    SRC_PATH,
+    SRC_COMPONENTS_PATH,
+  ]);
+});
+
+it("refreshes an expanded path containing a literal colon", async () => {
+  mockEmptyTree();
+  applyFileChanges({
+    client: client(),
+    sessionId: SESSION_ID,
+    expandedPaths: new Set(["config:dev"]),
+    changes: [{ path: "", operation: REFRESH_OP }],
+    setTree: vi.fn(),
+    setLoadState: vi.fn(),
+  });
+  await new Promise<void>((r) => setTimeout(r, 0));
+  expect(requestFileTreeMock.mock.calls.map((c) => c[2]).sort()).toEqual(["", "config:dev"]);
+});
+
+it("ignores a specific change with an invalid path", async () => {
+  mockEmptyTree();
+  applyFileChanges({
+    client: client(),
+    sessionId: SESSION_ID,
+    expandedPaths: new Set([SRC_PATH]),
+    changes: [{ path: "/home/jcfs/project/src/app.ts", operation: "create" }],
+    setTree: vi.fn(),
+    setLoadState: vi.fn(),
+  });
+  await new Promise<void>((r) => setTimeout(r, 0));
+  expect(requestFileTreeMock).not.toHaveBeenCalled();
 });
 
 // Regression (#982): refresh scoped to one repo must not wipe sibling repos' loaded subtrees.

@@ -6,8 +6,6 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPaperclip } from "@tabler/icons-react";
 import { Combobox } from "./combobox";
-import { scoreBranch } from "@/lib/utils/branch-filter";
-import { BranchRefreshButton } from "./branch-refresh-button";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import {
   processFile,
@@ -29,15 +27,36 @@ import { ContextZone } from "@/components/task/chat/context-items/context-zone";
 import { MentionMenu } from "@/components/task/chat/mention-menu";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
+import type { RichTextInputHandle } from "@/components/task/chat/rich-text-input";
+import { TaskPromptReferenceEditor } from "@/components/task-prompt-reference-editor";
+import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
+import { composeLaunchPreviewPrompt } from "@/components/task-create-dialog-launch-preview";
+import {
+  TaskCreateLaunchPreviewContent,
+  TaskCreateLaunchPreviewToggle,
+} from "@/components/task-create-dialog-launch-preview-control";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { JiraImportBar } from "@/components/jira/jira-import-bar";
 import { LinearImportBar } from "@/components/linear/linear-import-bar";
-import { VoiceInputButton } from "@/components/task/chat/voice-input-button";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { useTaskCreatePromptMention } from "@/hooks/use-task-create-prompt-mention";
 import { cn } from "@/lib/utils";
-import { clampTaskTitleInput } from "@/lib/task-title";
+import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
+import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
+import { ApiError } from "@/lib/api/client";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
+import { PluginSlot } from "@/components/plugins/plugin-slot";
+import {
+  composerIdentity,
+  composerInsertionText,
+  useStablePluginComposerCapability,
+} from "@/lib/plugins/composer-capability";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+
+export { BranchSelector } from "./branch-selector";
+export type { BranchOption, BranchSelectorProps } from "./branch-selector";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -100,76 +119,10 @@ export const RepositorySelector = memo(function RepositorySelector({
       searchPlaceholder={searchPlaceholder}
       emptyMessage={emptyMessage}
       disabled={disabled}
-      dropdownLabel="Repository"
+      dropdownLabel={t("task:repository2")}
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={triggerClassName}
       testId="repository-selector"
-    />
-  );
-});
-
-type BranchOption = {
-  value: string;
-  label: string;
-  keywords?: string[];
-  renderLabel: () => React.ReactNode;
-};
-
-type BranchSelectorProps = {
-  options: BranchOption[];
-  value: string;
-  onValueChange: (value: string) => void;
-  disabled: boolean;
-  placeholder: string;
-  searchPlaceholder: string;
-  emptyMessage: string;
-  triggerClassName?: string;
-  onRefresh?: () => void;
-  refreshing?: boolean;
-  fetchedAt?: string;
-  fetchError?: string;
-  loading?: boolean;
-};
-
-export const BranchSelector = memo(function BranchSelector({
-  options,
-  value,
-  onValueChange,
-  disabled,
-  placeholder,
-  searchPlaceholder,
-  emptyMessage,
-  triggerClassName,
-  onRefresh,
-  refreshing,
-  fetchedAt,
-  fetchError,
-  loading,
-}: BranchSelectorProps) {
-  const headerAction = onRefresh ? (
-    <BranchRefreshButton
-      onRefresh={onRefresh}
-      refreshing={refreshing}
-      fetchedAt={fetchedAt}
-      fetchError={fetchError}
-    />
-  ) : undefined;
-  return (
-    <Combobox
-      options={options}
-      value={value}
-      onValueChange={onValueChange}
-      placeholder={placeholder}
-      searchPlaceholder={searchPlaceholder}
-      emptyMessage={emptyMessage}
-      disabled={disabled}
-      dropdownLabel="Base Branch"
-      className={disabled ? undefined : CURSOR_POINTER_CLASS}
-      triggerClassName={triggerClassName}
-      testId="branch-selector"
-      filter={scoreBranch}
-      headerAction={headerAction}
-      loading={loading}
     />
   );
 });
@@ -193,16 +146,17 @@ export const AgentSelector = memo(function AgentSelector({
   triggerClassName,
   popoverPortal,
 }: AgentSelectorProps) {
+  const { t } = useTranslation();
   return (
     <Combobox
       options={options}
       value={value}
       onValueChange={onValueChange}
       placeholder={placeholder}
-      searchPlaceholder="Search agents..."
-      emptyMessage="No agent found."
+      searchPlaceholder={t("task:searchAgents")}
+      emptyMessage={t("task:noAgentFound")}
       disabled={disabled}
-      dropdownLabel="Agent Profile"
+      dropdownLabel={t("task:agentProfile2")}
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={cn("min-w-0", triggerClassName)}
       popoverPortal={popoverPortal}
@@ -230,15 +184,16 @@ export const ExecutorSelector = memo(function ExecutorSelector({
   triggerClassName,
   popoverPortal,
 }: ExecutorSelectorProps) {
+  const { t } = useTranslation();
   return (
     <Combobox
       options={options}
       value={value}
       onValueChange={onValueChange}
       placeholder={placeholder}
-      emptyMessage="No executor found."
+      emptyMessage={t("task:noExecutorFound")}
       disabled={disabled}
-      dropdownLabel="Executor"
+      dropdownLabel={t("task:executor2")}
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={triggerClassName}
       popoverPortal={popoverPortal}
@@ -266,16 +221,17 @@ export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
   triggerClassName,
   popoverPortal,
 }: ExecutorProfileSelectorProps) {
+  const { t } = useTranslation();
   return (
     <Combobox
       options={options}
       value={value}
       onValueChange={onValueChange}
       placeholder={placeholder}
-      searchPlaceholder="Search profiles..."
-      emptyMessage="No profile found."
+      searchPlaceholder={t("task:searchProfiles")}
+      emptyMessage={t("task:noProfileFound")}
       disabled={disabled}
-      dropdownLabel="Executor Profile"
+      dropdownLabel={t("task:executorProfile2")}
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={cn("min-w-0", triggerClassName)}
       popoverPortal={popoverPortal}
@@ -295,7 +251,8 @@ export const InlineTaskName = memo(function InlineTaskName({
   onChange,
   autoFocus,
 }: InlineTaskNameProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const { t } = useTranslation();
+  const { inputRef, clampChange } = useTaskTitleSelectionRestore(value);
   const hasFocusedRef = useRef(false);
 
   useEffect(() => {
@@ -311,8 +268,8 @@ export const InlineTaskName = memo(function InlineTaskName({
       ref={inputRef}
       type="text"
       value={value}
-      onChange={(e) => onChange(clampTaskTitleInput(e.target.value))}
-      placeholder="Task name"
+      onChange={(e) => onChange(clampChange(e))}
+      placeholder={t("task:taskName")}
       data-testid="task-title-input"
       className="w-full min-w-0 max-w-full border border-input bg-input/20 dark:bg-input/30 text-sm font-medium rounded-md px-3 py-2 placeholder:text-muted-foreground/70 outline-none focus-visible:border-ring transition-colors"
     />
@@ -322,9 +279,13 @@ export const InlineTaskName = memo(function InlineTaskName({
 // Memoized description input to prevent re-rendering the entire dialog on every keystroke
 type TaskFormInputsProps = {
   isSessionMode: boolean;
+  promptReferencesEnabled?: boolean;
+  taskId?: string | null;
+  workspaceId?: string | null;
   autoFocus?: boolean;
   initialDescription: string;
   onDescriptionChange: (hasContent: boolean) => void;
+  onPendingAttachmentUploadsChange?: (pending: boolean) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
   disabled?: boolean;
@@ -332,6 +293,7 @@ type TaskFormInputsProps = {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
+  launchPreview?: TaskCreateLaunchPreview | null;
   jiraImport?: {
     workspaceId: string | null;
     disabled?: boolean;
@@ -343,21 +305,81 @@ type TaskFormInputsProps = {
     onImport: (issue: LinearIssue) => void;
   };
   /**
-   * Called after a non-empty voice transcript was inserted into the description
-   * when the user has voice auto-send enabled. The dialog wires this to a
-   * programmatic form submit so dictation can create the task hands-free.
+   * Submits the form the way the native submit control does, for a plugin
+   * composer action that finished producing text (dictation, for instance).
+   * The dialog wires this to its own submit handler, so validation, gating
+   * and error handling stay native.
    */
-  onVoiceAutoSend?: () => void;
+  onComposerSubmit?: () => boolean | Promise<boolean>;
 };
 
-function useFileAttachments() {
+// eslint-disable-next-line max-lines-per-function
+function useFileAttachments(
+  workspaceId: string | null | undefined,
+  onPendingAttachmentUploadsChange?: (pending: boolean) => void,
+) {
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const attachmentsRef = useRef<FileAttachment[]>([]);
+
+  const updateAttachment = useCallback((id: string, update: Partial<FileAttachment>) => {
+    setAttachments((prev) => {
+      const next = prev.map((attachment) =>
+        attachment.id === id ? { ...attachment, ...update } : attachment,
+      );
+      attachmentsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const uploadPendingAttachment = useCallback(
+    async (attachment: FileAttachment) => {
+      if (!workspaceId || !attachment.file || attachment.attachmentId) return;
+      updateAttachment(attachment.id, { uploadStatus: "uploading" });
+      try {
+        const uploaded = await uploadAttachment(attachment.file, {
+          workspaceId,
+          kind: attachment.isImage ? "image" : "resource",
+          deliveryMode: attachment.deliveryMode,
+        });
+        if (!attachmentsRef.current.some((current) => current.id === attachment.id)) {
+          void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
+          return;
+        }
+        updateAttachment(attachment.id, {
+          attachmentId: uploaded.attachment_id,
+          uploadStatus: "ready",
+          size: uploaded.size_bytes,
+        });
+      } catch (error) {
+        updateAttachment(attachment.id, {
+          uploadStatus: "failed",
+          uploadError: error instanceof ApiError ? error.message : t("task:uploadFailed"),
+        });
+      }
+    },
+    [updateAttachment, workspaceId],
+  );
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    for (const attachment of attachmentsRef.current) {
+      if (attachment.file && !attachment.attachmentId && attachment.uploadStatus !== "uploading") {
+        void uploadPendingAttachment(attachment);
+      }
+    }
+  }, [uploadPendingAttachment, workspaceId]);
+
   const [isDragging, setIsDragging] = useState(false);
   const warnAttachmentCountLimit = useAttachmentCountFeedback();
   const rejectOversizedFile = useAttachmentFileFeedback();
   const warnAttachmentTotalSizeLimit = useAttachmentTotalSizeFeedback();
   const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
+
+  useEffect(() => {
+    onPendingAttachmentUploadsChange?.(
+      attachments.some((attachment) => attachment.file && !attachment.attachmentId),
+    );
+  }, [attachments, onPendingAttachmentUploadsChange, workspaceId]);
 
   const addFiles = useCallback(
     async (files: File[], issue?: ImagePasteIssue) => {
@@ -387,22 +409,41 @@ function useFileAttachments() {
       const next = [...attachmentsRef.current, ...accepted];
       attachmentsRef.current = next;
       setAttachments(next);
+      for (const attachment of accepted) void uploadPendingAttachment(attachment);
     },
     [
       rejectOversizedFile,
       warnAttachmentCountLimit,
       warnAttachmentTotalSizeLimit,
       warnUnreadablePastedImage,
+      uploadPendingAttachment,
     ],
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {
+    const removed = attachmentsRef.current.find((attachment) => attachment.id === id);
     const next = attachmentsRef.current.filter((att) => att.id !== id);
     attachmentsRef.current = next;
     setAttachments(next);
+    if (removed?.attachmentId) void deleteAttachment(removed.attachmentId).catch(() => undefined);
   }, []);
 
-  return { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment };
+  const handleRetryAttachment = useCallback(
+    (id: string) => {
+      const attachment = attachmentsRef.current.find((item) => item.id === id);
+      if (attachment) void uploadPendingAttachment(attachment);
+    },
+    [uploadPendingAttachment],
+  );
+
+  return {
+    attachments,
+    isDragging,
+    setIsDragging,
+    addFiles,
+    handleRemoveAttachment,
+    handleRetryAttachment,
+  };
 }
 
 function useAttachmentHandlers(
@@ -411,7 +452,7 @@ function useAttachmentHandlers(
   setIsDragging: (v: boolean) => void,
 ) {
   const handlePaste = useCallback(
-    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    (e: React.ClipboardEvent<HTMLElement>) => {
       if (disabled) return;
       const { files, issue } = readClipboardAttachments(e.clipboardData);
       if (files.length > 0 || issue) {
@@ -470,15 +511,17 @@ function useAttachmentHandlers(
 function toContextItems(
   attachments: FileAttachment[],
   onRemove: (id: string) => void,
+  onRetry: (id: string) => void,
 ): ContextItem[] {
   return attachments.map((att) =>
     att.isImage
       ? ({
           kind: "image" as const,
           id: `image:${att.id}`,
-          label: `Image (${formatBytes(att.size)})`,
+          label: t("task:imageWithSize", { bytes: formatBytes(att.size) }),
           attachment: att,
           onRemove: () => onRemove(att.id),
+          onRetry: () => onRetry(att.id),
         } as ImageContextItem)
       : ({
           kind: "file-attachment" as const,
@@ -486,18 +529,20 @@ function toContextItems(
           label: att.fileName,
           attachment: att,
           onRemove: () => onRemove(att.id),
+          onRetry: () => onRetry(att.id),
         } as FileAttachmentContextItem),
   );
 }
 
 function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center px-1 pb-1">
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
-            aria-label="Attach files"
+            aria-label={t("task:attachFiles")}
             className={`h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
             onClick={onClick}
             disabled={disabled}
@@ -505,7 +550,7 @@ function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: b
             <IconPaperclip className="h-4 w-4" />
           </button>
         </TooltipTrigger>
-        <TooltipContent>Attach files</TooltipContent>
+        <TooltipContent>{t("task:attachFiles")}</TooltipContent>
       </Tooltip>
     </div>
   );
@@ -521,7 +566,7 @@ function useDescriptionInput(
   const [description, setDescription] = useState(initialDescription);
   const descriptionRef = useRef(initialDescription);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Caret offset to restore after a non-typed value mutation (e.g. voice
+  // Caret offset to restore after a non-typed value mutation (e.g. a plugin
   // transcript splice). Consumed inside useLayoutEffect so the cursor lands
   // before the next paint and the user sees no jump.
   const pendingCursorRef = useRef<number | null>(null);
@@ -575,22 +620,28 @@ function useDescriptionInput(
 
   const insertAtCursor = useCallback(
     (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
+      // Read the synchronous ref, not the render snapshot: a plugin can
+      // insert twice (or insert then submit) inside one callback, before React
+      // has re-rendered with the first insertion.
+      const current = descriptionRef.current;
       const textarea = textareaRef.current;
-      const start = textarea?.selectionStart ?? description.length;
-      const end = textarea?.selectionEnd ?? description.length;
-      const charBefore = start > 0 ? description.charAt(start - 1) : "";
-      const needsLeadingSpace = charBefore !== "" && !/\s/.test(charBefore);
-      const insert = needsLeadingSpace ? ` ${trimmed}` : trimmed;
-      const next = description.slice(0, start) + insert + description.slice(end);
+      // A caret we set but have not applied yet outranks the DOM's: after a
+      // programmatic insertion the textarea still reports the pre-insert
+      // selection until the layout effect below runs, so a second insertion in
+      // the same callback would splice at the old offset.
+      const pending = pendingCursorRef.current;
+      const start = pending ?? textarea?.selectionStart ?? current.length;
+      const end = pending ?? textarea?.selectionEnd ?? current.length;
+      const insert = composerInsertionText(text, start > 0 ? current.charAt(start - 1) : "");
+      if (!insert) return;
+      const next = current.slice(0, start) + insert + current.slice(end);
       pendingCursorRef.current = start + insert.length;
       setDescriptionValue(next);
     },
-    [description, setDescriptionValue],
+    [setDescriptionValue],
   );
 
-  return { description, textareaRef, setDescriptionValue, insertAtCursor };
+  return { description, descriptionRef, textareaRef, setDescriptionValue, insertAtCursor };
 }
 
 type FormInputsToolbarProps = {
@@ -599,12 +650,12 @@ type FormInputsToolbarProps = {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
+  launchPreview?: TaskCreateLaunchPreview | null;
+  isLaunchPromptPreview: boolean;
+  onToggleLaunchPromptPreview: () => void;
   jiraImport?: TaskFormInputsProps["jiraImport"];
   linearImport?: TaskFormInputsProps["linearImport"];
-  voice?: {
-    onTranscript: (text: string) => void;
-    onAutoSend?: () => void;
-  };
+  pluginActions?: React.ReactNode;
 };
 
 function FormInputsToolbar({
@@ -613,9 +664,12 @@ function FormInputsToolbar({
   onEnhancePrompt,
   isEnhancingPrompt,
   isUtilityConfigured,
+  launchPreview,
+  isLaunchPromptPreview,
+  onToggleLaunchPromptPreview,
   jiraImport,
   linearImport,
-  voice,
+  pluginActions,
 }: FormInputsToolbarProps) {
   return (
     <div className="flex items-center px-1 pb-1">
@@ -625,6 +679,14 @@ function FormInputsToolbar({
           onClick={onEnhancePrompt}
           isLoading={isEnhancingPrompt ?? false}
           isConfigured={isUtilityConfigured}
+        />
+      )}
+      {launchPreview?.stepPrompt.trim() && (
+        <TaskCreateLaunchPreviewToggle
+          active={isLaunchPromptPreview}
+          disabled={disabled}
+          stepName={launchPreview.stepName}
+          onToggle={onToggleLaunchPromptPreview}
         />
       )}
       {jiraImport && (
@@ -641,15 +703,7 @@ function FormInputsToolbar({
           onImport={linearImport.onImport}
         />
       )}
-      {voice && (
-        <div className="ml-auto flex items-center">
-          <VoiceInputButton
-            onTranscript={voice.onTranscript}
-            onAutoSend={voice.onAutoSend}
-            disabled={disabled}
-          />
-        </div>
-      )}
+      <div className="ml-auto flex items-center">{pluginActions}</div>
     </div>
   );
 }
@@ -674,24 +728,75 @@ function PromptMentionPopover({
   );
 }
 
+function useCreationComposerPluginActions(args: {
+  isSessionMode: boolean;
+  taskId: string | null;
+  disabled: boolean;
+  description: string;
+  descriptionRef: React.RefObject<string>;
+  focusComposer: () => boolean;
+  insertAtCursor: (text: string) => void;
+  submit?: () => boolean | Promise<boolean>;
+}) {
+  const { isMobile } = useResponsiveBreakpoint();
+  const surface = args.isSessionMode ? "new-session" : "task-create";
+  const composer = useStablePluginComposerCapability(
+    {
+      insertText: (text) => {
+        args.insertAtCursor(text);
+        return true;
+      },
+      focus: args.focusComposer,
+      // Gate on the synchronous ref for the same reason the chat composer
+      // reads its editor: insert-then-submit in one callback happens before
+      // React re-renders with the new description.
+      submit: async () => {
+        if (args.disabled || !args.descriptionRef.current.trim() || !args.submit) return false;
+        return await args.submit();
+      },
+    },
+    composerIdentity(surface, args.taskId, null),
+  );
+  return (
+    <PluginSlot
+      name={args.isSessionMode ? "new-session-input-actions" : "task-create-input-actions"}
+      slotProps={{
+        surface,
+        presentation: isMobile ? "mobile" : "desktop",
+        taskId: args.taskId,
+        activeSessionId: null,
+        sessionIds: [],
+        disabled: args.disabled,
+        submittable: !args.disabled && args.description.trim().length > 0,
+        composer,
+      }}
+      actionSurface={{ surface: "composer", presentation: isMobile ? "mobile" : "desktop" }}
+    />
+  );
+}
+
 function useTextareaHandlers(
   mention: ReturnType<typeof useTaskCreatePromptMention>,
   onKeyDown: TaskFormInputsProps["onKeyDown"],
 ) {
   const { handleChange: mentionHandleChange, handleKeyDown: mentionHandleKeyDown } = mention;
   const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => mentionHandleChange(e.target.value),
+    (e: React.ChangeEvent<HTMLTextAreaElement>) =>
+      mentionHandleChange(e.target.value, e.target.selectionStart),
     [mentionHandleChange],
+  );
+  const handleKeyDownCapture = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => mentionHandleKeyDown(e),
+    [mentionHandleKeyDown],
   );
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      mentionHandleKeyDown(e);
       if (e.defaultPrevented) return;
       onKeyDown?.(e);
     },
-    [mentionHandleKeyDown, onKeyDown],
+    [onKeyDown],
   );
-  return { handleChange, handleKeyDown };
+  return { handleChange, handleKeyDownCapture, handleKeyDown };
 }
 
 function useFileInputClick(addFiles: (files: File[]) => Promise<void> | void) {
@@ -728,19 +833,99 @@ function HiddenFileInput({
 }
 
 function DraggingOverlay({ isDragging }: { isDragging: boolean }) {
+  const { t } = useTranslation();
   if (!isDragging) return null;
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-md pointer-events-none">
-      <span className="text-sm text-primary font-medium">Drop files here</span>
+      <span className="text-sm text-primary font-medium">{t("task:dropFilesHere")}</span>
     </div>
   );
 }
 
-export const TaskFormInputs = memo(function TaskFormInputs({
+type TaskDescriptionInputProps = {
+  isLaunchPromptPreview: boolean;
+  launchPromptPreview: string;
+  promptReferencesEnabled: boolean;
+  referenceInputRef: React.RefObject<RichTextInputHandle | null>;
+  description: string;
+  onDescriptionChange: (value: string) => void;
+  descriptionPlaceholder: string;
+  isSessionMode: boolean;
+  autoFocus?: boolean;
+  disabled?: boolean;
+  onKeyDown: TaskFormInputsProps["onKeyDown"];
+  onPaste: React.ClipboardEventHandler<HTMLElement>;
+  handleChange: React.ChangeEventHandler<HTMLTextAreaElement>;
+  handleKeyDownCapture: React.KeyboardEventHandler<HTMLTextAreaElement>;
+  handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement>;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+};
+
+function TaskDescriptionInput({
+  isLaunchPromptPreview,
+  launchPromptPreview,
+  promptReferencesEnabled,
+  referenceInputRef,
+  description,
+  onDescriptionChange,
+  descriptionPlaceholder,
   isSessionMode,
+  autoFocus,
+  disabled,
+  onKeyDown,
+  onPaste,
+  handleChange,
+  handleKeyDownCapture,
+  handleKeyDown,
+  textareaRef,
+}: TaskDescriptionInputProps) {
+  if (isLaunchPromptPreview) {
+    return <TaskCreateLaunchPreviewContent content={launchPromptPreview} />;
+  }
+
+  if (promptReferencesEnabled) {
+    return (
+      <TaskPromptReferenceEditor
+        ref={referenceInputRef}
+        value={description}
+        onChange={onDescriptionChange}
+        placeholder={descriptionPlaceholder}
+        autoFocus={autoFocus}
+        disabled={disabled}
+        onKeyDown={onKeyDown}
+        onPaste={onPaste}
+      />
+    );
+  }
+
+  return (
+    <Textarea
+      ref={textareaRef}
+      placeholder={descriptionPlaceholder}
+      value={description}
+      onChange={handleChange}
+      onKeyDownCapture={handleKeyDownCapture}
+      onKeyDown={handleKeyDown}
+      onPaste={onPaste}
+      data-testid="task-description-input"
+      rows={2}
+      className={`min-w-0 max-w-full field-sizing-fixed wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 ${isSessionMode ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]" : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"}`}
+      required={isSessionMode}
+      disabled={disabled}
+    />
+  );
+}
+
+// The input coordinates existing attachment, mention and plugin controls in one field.
+// eslint-disable-next-line max-lines-per-function
+export const TaskFormInputs = memo(function TaskFormInputs({
+  workspaceId,
+  isSessionMode,
+  promptReferencesEnabled = false,
   autoFocus,
   initialDescription,
   onDescriptionChange,
+  onPendingAttachmentUploadsChange,
   onKeyDown,
   descriptionValueRef,
   disabled,
@@ -748,39 +933,109 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   onEnhancePrompt,
   isEnhancingPrompt,
   isUtilityConfigured,
+  launchPreview,
   jiraImport,
   linearImport,
-  onVoiceAutoSend,
+  onComposerSubmit,
+  taskId = null,
 }: TaskFormInputsProps) {
-  const { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment } =
-    useFileAttachments();
+  const { t } = useTranslation();
+  const [isLaunchPromptPreview, setIsLaunchPromptPreview] = useState(false);
+  const hasLaunchPromptPreview = Boolean(launchPreview?.stepPrompt.trim());
+  useEffect(() => {
+    if (!hasLaunchPromptPreview) setIsLaunchPromptPreview(false);
+  }, [hasLaunchPromptPreview]);
+  const {
+    attachments,
+    isDragging,
+    setIsDragging,
+    addFiles,
+    handleRemoveAttachment,
+    handleRetryAttachment,
+  } = useFileAttachments(workspaceId, onPendingAttachmentUploadsChange);
   const { handlePaste, handleDragOver, handleDragLeave, handleDrop } = useAttachmentHandlers(
     disabled,
     addFiles,
     setIsDragging,
   );
   const contextItems = useMemo(
-    () => toContextItems(attachments, handleRemoveAttachment),
-    [attachments, handleRemoveAttachment],
+    () => toContextItems(attachments, handleRemoveAttachment, handleRetryAttachment),
+    [attachments, handleRemoveAttachment, handleRetryAttachment],
   );
-  const { description, textareaRef, setDescriptionValue, insertAtCursor } = useDescriptionInput(
-    initialDescription,
-    autoFocus,
-    descriptionValueRef,
-    onDescriptionChange,
-    attachments,
-  );
+  const { description, descriptionRef, textareaRef, setDescriptionValue, insertAtCursor } =
+    useDescriptionInput(
+      initialDescription,
+      autoFocus,
+      descriptionValueRef,
+      onDescriptionChange,
+      attachments,
+    );
+  const referenceInputRef = useRef<RichTextInputHandle | null>(null);
   const mention = useTaskCreatePromptMention({
     textareaRef,
+    inputRef: promptReferencesEnabled ? referenceInputRef : undefined,
     value: description,
     onChange: setDescriptionValue,
+    promptInsertMode: promptReferencesEnabled ? "reference" : "inline",
   });
-  const { handleChange, handleKeyDown } = useTextareaHandlers(mention, onKeyDown);
-  const { fileInputRef, handleAttachClick, handleFileInputChange } = useFileInputClick(addFiles);
-  const voiceBinding = useMemo(
-    () => ({ onTranscript: insertAtCursor, onAutoSend: onVoiceAutoSend }),
-    [insertAtCursor, onVoiceAutoSend],
+  const { handleChange, handleKeyDownCapture, handleKeyDown } = useTextareaHandlers(
+    mention,
+    onKeyDown,
   );
+  const { fileInputRef, handleAttachClick, handleFileInputChange } = useFileInputClick(addFiles);
+  const descriptionPlaceholder =
+    placeholder ??
+    (isSessionMode ? t("task:describeWhatYouWantTheAgent") : t("task:writeAPromptForTheAgent"));
+  const insertComposerText = useCallback(
+    (text: string) => {
+      if (!promptReferencesEnabled) {
+        insertAtCursor(text);
+        return;
+      }
+      const input = referenceInputRef.current;
+      if (!input) return;
+      const current = descriptionRef.current;
+      const start = input.getSelectionStart();
+      const end = input.getSelectionEnd();
+      const insert = composerInsertionText(text, start > 0 ? current.charAt(start - 1) : "");
+      if (!insert) return;
+      input.insertText(insert, start, end);
+    },
+    [descriptionRef, insertAtCursor, promptReferencesEnabled],
+  );
+  const focusComposer = useCallback(() => {
+    if (promptReferencesEnabled) {
+      const input = referenceInputRef.current;
+      if (!input) return false;
+      input.focus();
+      return true;
+    }
+    if (!textareaRef.current) return false;
+    textareaRef.current.focus();
+    return true;
+  }, [promptReferencesEnabled, textareaRef]);
+  useEffect(() => {
+    if (!promptReferencesEnabled || !autoFocus) return;
+    const input = referenceInputRef.current;
+    if (!input) return;
+    const end = input.getValue().length;
+    input.focus();
+    input.setSelectionRange(end, end);
+  }, [autoFocus, promptReferencesEnabled]);
+  const pluginActions = useCreationComposerPluginActions({
+    isSessionMode,
+    taskId,
+    disabled: Boolean(disabled),
+    description,
+    descriptionRef,
+    focusComposer,
+    insertAtCursor: insertComposerText,
+    submit: onComposerSubmit,
+  });
+  const launchPromptPreview =
+    hasLaunchPromptPreview && launchPreview
+      ? composeLaunchPreviewPrompt(launchPreview.stepPrompt, description)
+      : "";
 
   return (
     <div
@@ -793,23 +1048,23 @@ export const TaskFormInputs = memo(function TaskFormInputs({
         className={`min-w-0 max-w-full rounded-md border border-input bg-transparent focus-within:ring-2 focus-within:ring-ring/30 ${contextItems.length > 0 ? "ring-0" : ""}`}
       >
         <ContextZone items={contextItems} />
-        <Textarea
-          ref={textareaRef}
-          placeholder={
-            placeholder ??
-            (isSessionMode
-              ? "Describe what you want the agent to do... (@ to insert a saved prompt)"
-              : "Write a prompt for the agent... (@ to insert a saved prompt)")
-          }
-          value={description}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          data-testid="task-description-input"
-          rows={2}
-          className={`min-w-0 max-w-full field-sizing-fixed wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 ${isSessionMode ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]" : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"}`}
-          required={isSessionMode}
+        <TaskDescriptionInput
+          isLaunchPromptPreview={isLaunchPromptPreview}
+          launchPromptPreview={launchPromptPreview}
+          promptReferencesEnabled={promptReferencesEnabled}
+          referenceInputRef={referenceInputRef}
+          description={description}
+          onDescriptionChange={setDescriptionValue}
+          descriptionPlaceholder={descriptionPlaceholder}
+          isSessionMode={isSessionMode}
+          autoFocus={autoFocus}
           disabled={disabled}
+          onKeyDown={onKeyDown}
+          onPaste={handlePaste}
+          handleChange={handleChange}
+          handleKeyDownCapture={handleKeyDownCapture}
+          handleKeyDown={handleKeyDown}
+          textareaRef={textareaRef}
         />
         <FormInputsToolbar
           onAttach={handleAttachClick}
@@ -817,13 +1072,16 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           onEnhancePrompt={onEnhancePrompt}
           isEnhancingPrompt={isEnhancingPrompt}
           isUtilityConfigured={isUtilityConfigured}
+          launchPreview={launchPreview}
+          isLaunchPromptPreview={isLaunchPromptPreview}
+          onToggleLaunchPromptPreview={() => setIsLaunchPromptPreview((active) => !active)}
           jiraImport={jiraImport}
           linearImport={linearImport}
-          voice={voiceBinding}
+          pluginActions={pluginActions}
         />
         <HiddenFileInput inputRef={fileInputRef} onChange={handleFileInputChange} />
       </div>
-      <PromptMentionPopover mention={mention} />
+      {!promptReferencesEnabled && <PromptMentionPopover mention={mention} />}
       <DraggingOverlay isDragging={isDragging} />
     </div>
   );

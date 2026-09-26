@@ -15,6 +15,8 @@ import type { CreateLinearIssueWatchInput, UpdateLinearIssueWatchInput } from "@
 
 // WORKSPACE_REQUIRED is thrown by per-row mutation callbacks when the
 // install-wide listing case forgets to forward the row's workspaceId.
+// i18n-exempt: precondition diagnostic for a programmer error; callers branch
+// on the error type, never render this message.
 const WORKSPACE_REQUIRED = "workspaceId required";
 
 /**

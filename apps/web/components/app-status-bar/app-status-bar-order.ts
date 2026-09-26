@@ -1,6 +1,7 @@
 import type { AppStatusBarOrderState } from "@/lib/state/slices/settings/types";
 
 export const APP_STATUS_CONNECTION_ID = "builtin:connection";
+export const APP_STATUS_LSP_ID = "builtin:lsp";
 export const APP_STATUS_METRICS_ID = "builtin:metrics";
 
 export type AppStatusBarSide = "left" | "right";

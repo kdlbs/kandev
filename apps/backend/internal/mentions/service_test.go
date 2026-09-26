@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type fakeProvider struct {
@@ -96,6 +99,50 @@ func TestServiceSearch_RegistryOwnsNamespacedProviderIdentity(t *testing.T) {
 	}
 }
 
+func TestServiceSearchLogsProviderFailureWithSafeIdentity(t *testing.T) {
+	core, observed := observer.New(zap.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	registry := NewRegistry()
+	if err := registry.Register(fakeProvider{
+		descriptor: ProviderDescriptor{
+			Source: "acme_issues", Provider: "acme", Kind: "issue",
+			DisplayName: "Acme issues", KindLabel: "Issue",
+		},
+		search: func(context.Context, SearchRequest) ([]Candidate, error) {
+			return nil, NewProviderError(StatusUnauthorized, errors.New("secret upstream detail"))
+		},
+	}); err != nil {
+		t.Fatalf("register provider: %v", err)
+	}
+
+	response, err := NewService(registry, WithLogger(log)).Search(context.Background(), SearchRequest{
+		WorkspaceID: "workspace-1",
+		Query:       "secret-query",
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if response.Groups[0].Status != StatusUnauthorized {
+		t.Fatalf("provider status = %q, want %q", response.Groups[0].Status, StatusUnauthorized)
+	}
+	entries := observed.All()
+	if len(entries) != 1 || entries[0].Level != zap.WarnLevel {
+		t.Fatalf("provider diagnostics = %#v", entries)
+	}
+	fields := entries[0].ContextMap()
+	if fields["source"] != "acme_issues" || fields["provider"] != "acme" ||
+		fields["kind"] != "issue" || fields["status"] != string(StatusUnauthorized) {
+		t.Fatalf("provider diagnostic fields = %#v", fields)
+	}
+	if strings.Contains(fmt.Sprint(fields), "secret-query") ||
+		strings.Contains(fmt.Sprint(fields), "secret upstream detail") {
+		t.Fatalf("provider diagnostic leaked sensitive detail: %#v", fields)
+	}
+}
+
 func TestRegistryRegister_RejectsUnsafeAndDuplicateSources(t *testing.T) {
 	provider := func(source string) fakeProvider {
 		return fakeProvider{
@@ -174,6 +221,45 @@ func TestRegistryRejectsProviderWithoutAuthorizer(t *testing.T) {
 	}})
 	if !errors.Is(err, ErrMissingAuthorizer) {
 		t.Fatalf("register error = %v, want missing authorizer", err)
+	}
+}
+
+func TestRegistryReplaceOwnerSwapsDynamicSourcesAndRevokesAuthorization(t *testing.T) {
+	type ownerReplacingRegistry interface {
+		ReplaceOwner(string, ...MentionProvider) error
+		UnregisterOwner(string) error
+	}
+
+	registry := NewRegistry()
+	owners, ok := any(registry).(ownerReplacingRegistry)
+	if !ok {
+		t.Fatal("registry does not support owner-aware source replacement")
+	}
+	provider := fakeProvider{
+		descriptor: ProviderDescriptor{
+			Source: "plugin:acme:pull-requests", Provider: "plugin:acme:bitbucket", Kind: "pull_request", Order: 90,
+		},
+		search: func(context.Context, SearchRequest) ([]Candidate, error) { return nil, nil },
+	}
+	if err := owners.ReplaceOwner("kandev-plugin-acme", provider); err != nil {
+		t.Fatalf("register owned source: %v", err)
+	}
+	if got := registry.snapshot(); len(got) != 1 || got[0].descriptor.Source != provider.descriptor.Source {
+		t.Fatalf("snapshot = %#v, want owned source", got)
+	}
+	if err := owners.UnregisterOwner("kandev-plugin-acme"); err != nil {
+		t.Fatalf("unregister owned source: %v", err)
+	}
+	if got := registry.snapshot(); len(got) != 0 {
+		t.Fatalf("snapshot after owner removal = %#v, want empty", got)
+	}
+	err := registry.AuthorizeReference(context.Background(), ReferenceAuthorizationRequest{
+		WorkspaceID: "workspace-1",
+		Purpose:     ReferencePurposeSubmission,
+		Reference:   apiv1.EntityReference{Provider: provider.descriptor.Provider, Kind: provider.descriptor.Kind},
+	})
+	if !errors.Is(err, ErrReferenceProviderUnavailable) {
+		t.Fatalf("authorization after owner removal = %v, want unavailable", err)
 	}
 }
 

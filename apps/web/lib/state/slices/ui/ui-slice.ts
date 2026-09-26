@@ -1,3 +1,4 @@
+import { buildChatMotionActions, loadChatMotionState } from "./chat-motion-actions";
 import type { StateCreator } from "zustand";
 import {
   getStoredCollapsedSubtaskParents,
@@ -12,23 +13,41 @@ import {
   buildAppSidebarActions,
   loadAppSidebarState,
 } from "./app-sidebar-actions";
+import { buildSettingsMenuActions, loadSettingsMenuState } from "./settings-menu-actions";
+import {
+  buildRichOutputMotionActions,
+  loadRichOutputMotionState,
+} from "./rich-output-motion-actions";
+import { DEFAULT_SETTINGS_MENU_MODE } from "@/lib/settings/settings-menu-mode";
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
 import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { buildSidebarViewActions } from "./sidebar-view-actions";
+import { buildThreadViewActions } from "./thread-view-actions";
 import { DEFAULT_VIEW } from "./sidebar-view-builtins";
-import type { SidebarView, SortSpec } from "./sidebar-view-types";
+import { DEFAULT_THREAD_VIEW, DEFAULT_THREAD_VIEW_ID } from "./thread-view-builtins";
+import type { SidebarView, SidebarViewDraft, SortSpec } from "./sidebar-view-types";
+import { cloneSidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
 import type { SystemHealthResponse } from "@/lib/types/health";
-import type { ActiveDocument, QuickChatSession, UISlice, UISliceState } from "./types";
-import { getQuickChatSetupSessionId } from "./quick-chat-session";
-import {
-  reconcileQuickChatSessions,
-  removeQuickChatSessionsForTask,
-  upsertQuickChatSession,
-} from "./quick-chat-sync";
+import type { ActiveDocument, UISlice, UISliceState } from "./types";
+import { buildQuickChatActions } from "./quick-chat-actions";
+import { buildQuickTerminalActions } from "./quick-terminal-actions";
 
 /** Default sidebar view state: the single built-in "All tasks" view, active, no draft. */
 function createDefaultSidebarState(): UISliceState["sidebarViews"] {
   return { views: [DEFAULT_VIEW], activeViewId: DEFAULT_VIEW.id, draft: null, syncError: null };
+}
+
+/** Default Threads view state: the canonical unbounded all-threads view. */
+function createDefaultThreadViewState(): UISliceState["threadViews"] {
+  return {
+    views: [DEFAULT_THREAD_VIEW],
+    activeViewId: DEFAULT_THREAD_VIEW_ID,
+    draft: null,
+    syncError: null,
+    syncPending: false,
+    deferredServerState: null,
+    orderResetGeneration: 0,
+  };
 }
 
 export const KNOWN_DIMENSIONS = new Set<string>([
@@ -48,6 +67,7 @@ export const KNOWN_DIMENSIONS = new Set<string>([
 export const KNOWN_SORT_KEYS = new Set<string>([
   "state",
   "updatedAt",
+  "lastActivityAt",
   "createdAt",
   "title",
   "custom",
@@ -66,6 +86,20 @@ export function migrateView(view: SidebarView): SidebarView {
     ...view,
     filters: view.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
     sort,
+    taskRow: cloneSidebarTaskRowPresentation(view.taskRow),
+  };
+}
+
+/** Drops removed filter dimensions from an in-flight saved-view draft. */
+export function migrateSidebarViewDraft(draft: SidebarViewDraft): SidebarViewDraft {
+  const sort: SortSpec = KNOWN_SORT_KEYS.has(draft.sort.key)
+    ? draft.sort
+    : { key: "state", direction: draft.sort.direction };
+  return {
+    ...draft,
+    filters: draft.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
+    sort,
+    taskRow: cloneSidebarTaskRowPresentation(draft.taskRow),
   };
 }
 
@@ -81,27 +115,55 @@ export const defaultUIState: UISliceState = {
   rightPanel: { activeTabBySessionId: {} },
   diffs: { files: [] },
   connection: { status: "disconnected", error: null, issueSeverity: "none" },
-  mobileKanban: { activeStepIdByWorkflowId: {}, isMenuOpen: false, isSearchOpen: false },
+  mobileKanban: {
+    activeStepIdByWorkflowId: {},
+    isMenuOpen: false,
+    isSearchOpen: false,
+    focusedWorkflowId: null,
+  },
   mobileSession: {
     activePanelBySessionId: {},
-    reviewMRKeyBySessionId: {},
+    reviewItemIdBySessionId: {},
     isTaskSwitcherOpen: false,
   },
   chatInput: { planModeBySessionId: {}, cancellingBySessionId: {} },
   transcriptAutoScroll: {
     enabledBySessionId: {},
     scrollTopBySessionId: {},
-    virtuosoStateBySessionId: {},
   },
   reviewPRSelection: { selectedKeyByTaskId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
   systemHealth: { issues: [], checks: [], healthy: true, loaded: false, loading: false },
-  quickChat: { isOpen: false, sessions: [], activeSessionId: null },
+  quickChat: {
+    isOpen: false,
+    sessions: [],
+    activeSessionId: null,
+    terminalTabs: [],
+    activeKind: "conversation",
+    activeTerminalTabId: null,
+    lastTerminalTabIdByWorkspace: {},
+    unseenIdleByWorkspace: {},
+    lastSettledAtBySession: {},
+    sessionOwnership: {},
+    syncRevisionByWorkspace: {},
+    tombstonedSessions: {},
+    tabOrderByWorkspace: {},
+    tabOrderSyncErrorByWorkspace: {},
+    tabOrderSyncPendingByWorkspace: {},
+    rememberedSelectionByWorkspace: {},
+    rememberedSelectionOrder: [],
+    selectionStorageIdentity: null,
+    selectionReadyByWorkspace: {},
+    selectionRevisionByWorkspace: {},
+    pendingOpen: null,
+  },
   sessionFailureNotification: null,
   taskDeletedNotification: null,
   updateAvailableNotification: null,
   bottomTerminal: { isOpen: false, pendingCommand: null },
   sidebarViews: createDefaultSidebarState(),
+  sidebarViewsByWorkspace: {},
+  threadViews: createDefaultThreadViewState(),
   collapsedSubtaskParents: [],
   kanbanPreviewedTaskId: null,
   sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
@@ -110,6 +172,18 @@ export const defaultUIState: UISliceState = {
     sectionExpanded: { ...DEFAULT_SECTION_EXPANDED },
     width: APP_SIDEBAR_EXPANDED_WIDTH,
     settingsMode: false,
+    improveDialogOpen: false,
+    workspacePickerOpen: false,
+  },
+  settingsMenu: {
+    mode: DEFAULT_SETTINGS_MENU_MODE,
+    savedMode: DEFAULT_SETTINGS_MENU_MODE,
+    expandedKeys: [],
+  },
+  chatMotion: { enabled: true, savedEnabled: true },
+  richOutputMotion: {
+    enabled: true,
+    savedEnabled: true,
   },
   acknowledgedAgentErrors: {},
   dismissedAgentErrors: {},
@@ -180,6 +254,10 @@ function buildMobileActions(set: ImmerSet) {
       set((draft) => {
         draft.mobileKanban.isSearchOpen = open;
       }),
+    setMobileKanbanFocusedWorkflow: (workflowId: string | null) =>
+      set((draft) => {
+        draft.mobileKanban.focusedWorkflowId = workflowId;
+      }),
     setMobileSessionPanel: (
       sessionId: string,
       panel: UISliceState["mobileSession"]["activePanelBySessionId"][string],
@@ -187,14 +265,14 @@ function buildMobileActions(set: ImmerSet) {
       set((draft) => {
         draft.mobileSession.activePanelBySessionId[sessionId] = panel;
       }),
-    setMobileSessionReview: (sessionId: string, mrKey: string | null) =>
+    setMobileSessionReview: (sessionId: string, reviewItemId: string | null) =>
       set((draft) => {
-        if (mrKey) {
-          draft.mobileSession.reviewMRKeyBySessionId[sessionId] = mrKey;
+        if (reviewItemId) {
+          draft.mobileSession.reviewItemIdBySessionId[sessionId] = reviewItemId;
           draft.mobileSession.activePanelBySessionId[sessionId] = "review";
           return;
         }
-        delete draft.mobileSession.reviewMRKeyBySessionId[sessionId];
+        delete draft.mobileSession.reviewItemIdBySessionId[sessionId];
         if (draft.mobileSession.activePanelBySessionId[sessionId] === "review") {
           draft.mobileSession.activePanelBySessionId[sessionId] = "chat";
         }
@@ -290,142 +368,6 @@ function buildNotificationActions(set: ImmerSet) {
   };
 }
 
-/** Finds this workspace's quick-chat "config" session, if one is already open. */
-function findWorkspaceConfigSession(
-  sessions: UISliceState["quickChat"]["sessions"],
-  workspaceId: string,
-) {
-  return sessions.find(
-    (session) => session.workspaceId === workspaceId && session.kind === "config",
-  );
-}
-
-/**
- * Builds the `openQuickChat` action: opens (creating if needed) a quick-chat
- * session, reusing an existing workspace config session for `kind: "config"`
- * rather than creating a duplicate.
- */
-function buildOpenQuickChatAction(set: ImmerSet) {
-  return (
-    sessionId: string,
-    workspaceId: string,
-    agentProfileId?: string,
-    kind: "chat" | "config" = "chat",
-    taskId?: string,
-  ) =>
-    set((draft) => {
-      if (!sessionId) {
-        const existingConfigSession =
-          kind === "config"
-            ? findWorkspaceConfigSession(draft.quickChat.sessions, workspaceId)
-            : undefined;
-        if (existingConfigSession) {
-          draft.quickChat.isOpen = true;
-          draft.quickChat.activeSessionId = existingConfigSession.sessionId;
-          return;
-        }
-        const setupSessionId = getQuickChatSetupSessionId(workspaceId, kind);
-        if (!draft.quickChat.sessions.some((session) => session.sessionId === setupSessionId)) {
-          draft.quickChat.sessions.push({ sessionId: setupSessionId, workspaceId, kind });
-        }
-        draft.quickChat.isOpen = true;
-        draft.quickChat.activeSessionId = setupSessionId;
-        return;
-      }
-      const existing = draft.quickChat.sessions.find((session) => session.sessionId === sessionId);
-      if (existing) {
-        if (existing.workspaceId !== workspaceId) return;
-        if (agentProfileId) existing.agentProfileId = agentProfileId;
-        if (taskId) existing.taskId = taskId;
-      } else {
-        draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind, taskId });
-      }
-      draft.quickChat.isOpen = true;
-      draft.quickChat.activeSessionId = sessionId;
-    });
-}
-
-/** Builds the remaining quick-chat session CRUD actions (add/remove/rename/close). */
-function buildQuickChatActions(set: ImmerSet) {
-  return {
-    addQuickChatSession: (
-      sessionId: string,
-      workspaceId: string,
-      agentProfileId?: string,
-      kind: "chat" | "config" = "chat",
-      taskId?: string,
-    ) =>
-      set((draft) => {
-        const activeWorkspaceId = draft.quickChat.sessions.find(
-          (session) => session.sessionId === draft.quickChat.activeSessionId,
-        )?.workspaceId;
-        const shouldActivate =
-          !draft.quickChat.isOpen || !activeWorkspaceId || activeWorkspaceId === workspaceId;
-        const existing = draft.quickChat.sessions.find(
-          (session) => session.sessionId === sessionId,
-        );
-        if (existing) {
-          if (existing.workspaceId !== workspaceId) return;
-          if (agentProfileId) existing.agentProfileId = agentProfileId;
-          if (taskId) existing.taskId = taskId;
-        } else {
-          draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind, taskId });
-        }
-        if (shouldActivate) draft.quickChat.activeSessionId = sessionId;
-      }),
-    openQuickChat: buildOpenQuickChatAction(set),
-    closeQuickChat: () =>
-      set((draft) => {
-        draft.quickChat.isOpen = false;
-      }),
-    closeQuickChatSession: (sessionId: string) =>
-      set((draft) => {
-        const closingSession = draft.quickChat.sessions.find(
-          (session) => session.sessionId === sessionId,
-        );
-        draft.quickChat.sessions = draft.quickChat.sessions.filter(
-          (session) => session.sessionId !== sessionId,
-        );
-        if (draft.quickChat.activeSessionId !== sessionId) return;
-        const nextSession = draft.quickChat.sessions.find(
-          (session) => session.workspaceId === closingSession?.workspaceId,
-        );
-        draft.quickChat.activeSessionId = nextSession?.sessionId ?? null;
-        if (!nextSession) draft.quickChat.isOpen = false;
-      }),
-    setActiveQuickChatSession: (sessionId: string, workspaceId: string) =>
-      set((draft) => {
-        const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);
-        if (!session || session.workspaceId !== workspaceId) return;
-        draft.quickChat.activeSessionId = sessionId;
-      }),
-    // Optimistic only. Persisting the name is `persistQuickChatRename`'s job,
-    // so the backing task title stays the shared source of truth.
-    renameQuickChatSession: (sessionId: string, name: string) =>
-      set((draft) => {
-        const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);
-        if (session) session.name = name;
-      }),
-    syncQuickChatSessions: (workspaceId: string, sessions: QuickChatSession[]) =>
-      set((draft) => {
-        draft.quickChat = reconcileQuickChatSessions(draft.quickChat, workspaceId, sessions);
-      }),
-    upsertQuickChatSessionFromEvent: (session: QuickChatSession) =>
-      set((draft) => {
-        draft.quickChat = upsertQuickChatSession(draft.quickChat, session);
-      }),
-    removeQuickChatSessionsForTask: (taskId: string) =>
-      set((draft) => {
-        draft.quickChat = removeQuickChatSessionsForTask(draft.quickChat, taskId);
-      }),
-    setQuickChatInitialPrompt: (sessionId: string, prompt?: string) =>
-      set((draft) => {
-        const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);
-        if (session) session.initialPrompt = prompt;
-      }),
-  };
-}
-
 export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], [], UISlice> = (
   set,
   get,
@@ -436,17 +378,25 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   collapsedSubtaskParents: getStoredCollapsedSubtaskParents(),
   sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
   appSidebar: loadAppSidebarState(),
+  settingsMenu: loadSettingsMenuState(),
+  richOutputMotion: loadRichOutputMotionState(),
+  chatMotion: loadChatMotionState(),
   ...buildAppSidebarActions(set),
+  ...buildSettingsMenuActions(set),
+  ...buildRichOutputMotionActions(set),
+  ...buildChatMotionActions(set),
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),
   ...buildSidebarViewActions(set, get),
+  ...buildThreadViewActions(set, get),
   ...buildSidebarTaskPrefsActions(set, get),
   ...buildCollapsedSubtaskActions(set, get),
   ...buildSystemHealthActions(set),
   ...buildDismissedAgentErrors(set),
   ...buildNotificationActions(set),
-  ...buildQuickChatActions(set),
+  ...buildQuickTerminalActions(set),
+  ...buildQuickChatActions(set, get),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {
       draft.rightPanel.activeTabBySessionId[sessionId] = tab;
@@ -481,10 +431,6 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
     set((draft) => {
       draft.transcriptAutoScroll.scrollTopBySessionId[sessionId] = scrollTop;
       setStoredAutoScrollTop(sessionId, scrollTop);
-    }),
-  setTranscriptVirtuosoState: (sessionId, state) =>
-    set((draft) => {
-      draft.transcriptAutoScroll.virtuosoStateBySessionId[sessionId] = state;
     }),
   setReviewPRSelection: (taskId, selectedKey) =>
     set((draft) => {

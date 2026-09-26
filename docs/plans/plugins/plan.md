@@ -1,6 +1,6 @@
 # Plan: Office Plugin System (Phase 1 + UI iframe proxy)
 
-**Spec:** `docs/specs/plugins/spec.md`
+**Spec:** `docs/specs/plugins/requirements/plugins.md`
 **Status:** in progress
 **Owner:** jcfs
 

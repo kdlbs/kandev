@@ -212,21 +212,7 @@ func TestLoadSuppression_PlanReemittedAfterLoad(t *testing.T) {
 	a.isLoadingSession = false
 	a.mu.Unlock()
 
-	if replayPlan != nil {
-		entries := make([]PlanEntry, len(replayPlan.Entries))
-		for i, e := range replayPlan.Entries {
-			entries[i] = PlanEntry{
-				Description: e.Content,
-				Status:      string(e.Status),
-				Priority:    string(e.Priority),
-			}
-		}
-		a.sendUpdate(AgentEvent{
-			Type:        streams.EventTypePlan,
-			SessionID:   "s1",
-			PlanEntries: entries,
-		})
-	}
+	a.emitReplayPlan("s1", replayPlan)
 
 	// Now we should see the re-emitted plan.
 	events = drainEvents(a)
@@ -252,6 +238,19 @@ func TestLoadSuppression_PlanReemittedAfterLoad(t *testing.T) {
 		t.Error("loadReplayPlan should be nil after re-emit")
 	}
 	a.mu.RUnlock()
+}
+
+func TestLoadSuppression_EmptyReplayPlanNotReemitted(t *testing.T) {
+	a := newTestAdapter()
+
+	// A replay that ends with an empty plan must not re-emit it: the event would
+	// clear the live todo indicator and persist an empty todo snapshot that hides
+	// the last real one.
+	a.emitReplayPlan("s1", &acp.SessionUpdatePlan{Entries: []acp.PlanEntry{}})
+
+	if events := drainEvents(a); len(events) != 0 {
+		t.Fatalf("expected no event for an empty replay plan, got %d: %+v", len(events), events)
+	}
 }
 
 func TestLoadSuppression_PostReplayEventsPassThrough(t *testing.T) {

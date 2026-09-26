@@ -1,36 +1,33 @@
 package plugins
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
+	"github.com/kandev/kandev/internal/plugins/instances"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/marketplace"
-	"github.com/kandev/kandev/internal/plugins/pkgtar"
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/store"
+	"github.com/kandev/kandev/internal/plugins/webapp"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
-// maxDownloadSize caps the response body InstallFromURL will read, per the
-// task's build instructions (100MB cap).
-const maxDownloadSize = 100 << 20
-
-// downloadTimeout bounds how long InstallFromURL waits for the whole
-// download.
-const downloadTimeout = 60 * time.Second
+type userStateCleanupStore interface {
+	DeleteAllForPlugin(context.Context, string) error
+}
 
 // Service is the core plugin service: install/uninstall, the in-memory
 // Registry, the lifecycle state machine, and the runtime.Manager wiring
@@ -53,7 +50,12 @@ const downloadTimeout = 60 * time.Second
 //     (e.g. proxies checking a plugin's manifest/capabilities without
 //     going through Service's error-wrapping Get).
 type Service struct {
-	mu sync.Mutex
+	automationRevoker func(string) error
+	mu                sync.Mutex
+	// ownershipMu makes cross-plugin provider/reference ownership checks and
+	// transitions into active one atomic reservation. Per-plugin lifecycle
+	// locks cannot protect two different IDs claiming the same identity.
+	ownershipMu sync.Mutex
 
 	// syncMu serializes Sync/bootScan calls (service_sync.go) so concurrent
 	// operator clicks — or a boot scan racing an operator-triggered sync —
@@ -70,17 +72,59 @@ type Service struct {
 	// holding a lifecycleLocks entry while calling into PluginRuntime
 	// cannot deadlock against it.
 	lifecycleLocks *keyedMutex
+	// dispatchLocks keep lifecycle replacement/disable boundaries from racing
+	// authenticated actions and reference RPCs. Dispatch holds a read lease for
+	// the full RPC; lifecycle mutation holds the write side.
+	dispatchLocks *keyedRWMutex
 
-	pluginsDir string
-	store      store.Store
-	registry   *Registry
-	state      *state.Store
-	eventBus   bus.EventBus
-	log        *logger.Logger
+	// agentToolInstallMu makes exposed-name collision validation and registry
+	// insertion one atomic catalog mutation across different plugin IDs.
+	agentToolInstallMu sync.Mutex
 
-	deliverer Deliverer
-	runtime   PluginRuntime
-	secrets   SecretVault
+	// extractingMu guards extractingPaths and, crucially, is held across the
+	// pkgtar extraction that registers into it: a version directory must never
+	// be observable on disk before it is marked in flight, or a concurrent
+	// prune could delete it in that gap. See extractPackage.
+	extractingMu sync.Mutex
+	// extractingPaths counts, per version directory, the installs that have
+	// extracted it but have not yet finished. Install extracts before it can
+	// know the plugin id (and therefore before it can take that id's lifecycle
+	// lock), so this is what tells a prune running under the lock that a
+	// directory belongs to an install still waiting for it.
+	extractingPaths map[string]int
+
+	pluginsDir         string
+	store              store.Store
+	approvals          *approvalLedger
+	registry           *Registry
+	state              *state.Store
+	userState          *state.UserStore
+	instances          *instances.Store
+	instanceState      *state.InstanceStore
+	webArtifacts       *webapp.ArtifactStore
+	webRuntime         *webapp.Runtime
+	eventHub           *webapp.EventHub
+	eventSubscription  bus.Subscription
+	userStateCleanup   userStateCleanupStore
+	agentConvs         AgentConversationService
+	eventBus           bus.EventBus
+	conversationTokens *conversationTokenManager
+	conversationEpoch  string
+	log                *logger.Logger
+
+	deliverer                Deliverer
+	agentToolCatalogListener AgentToolCatalogListener
+	agentToolGeneration      string
+	agentToolRevision        uint64
+	agentToolSnapshot        plugintools.Snapshot
+	agentToolSnapshotReady   bool
+	runtime                  PluginRuntime
+	secrets                  SecretVault
+
+	// revokeGitCredentialProvider invalidates leases for a repository provider
+	// when its owning plugin is no longer active. It is wired by backendapp to
+	// the provider-neutral broker after both subsystems are constructed.
+	revokeGitCredentialProvider func(string)
 
 	// Host data API (ADR 0043) service-layer dependencies, wired via
 	// SetDataSources and handed to every pluginHost hostForPlugin builds.
@@ -94,11 +138,16 @@ type Service struct {
 	agentProfiles    agentProfileDataSource
 	sessionCodeStats sessionCodeStatsSource
 	messageData      messageDataSource
-	taskWriter       taskWriter
+	interactionData  interactionDataSource
+	// taskPRs is guarded by mu and read through taskPRSourceDep, because hosts can
+	// outlive the late SetTaskPRSource wiring.
+	taskPRs    taskPRSource
+	taskWriter taskWriter
 
-	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
-	utilityAgents utilityAgentSource
-	utilityRunner utilityRunner
+	// Utility agent invocation dependencies, wired via SetUtilityAgent.
+	utilityDefaultProfile utilityDefaultProfileSource
+	utilityProfiles       agentProfileSource
+	utilityRunner         utilityRunner
 
 	// Host data API write dependencies wired late via SetWriteDeps (ADR
 	// 0043): the task-message delivery path and the orchestrator task-starter,
@@ -106,6 +155,12 @@ type Service struct {
 	// pluginHost). Mutex-guarded against the concurrent hostForPlugin reads.
 	messenger   taskMessenger
 	taskStarter taskStarter
+
+	// Interaction response path wired late via SetInteractionResponder (ADR
+	// 0052), for the same reason as messenger/taskStarter: the orchestrator
+	// and the clarification handler are constructed after boot-active plugins
+	// spawn. Mutex-guarded against the concurrent hostForPlugin reads.
+	interactionResponder interactionResponder
 
 	// authLogin establishes an authenticated browser session for an external
 	// identity an auth-capable plugin asserts via its webhook response
@@ -116,9 +171,9 @@ type Service struct {
 
 	// kandevVersion is the currently running kandev build version, used to
 	// enforce a package's manifest.min_kandev_version at Install (see
-	// SetKandevVersion / checkMinKandevVersion). Empty (the default) means
-	// no enforcement — no caller currently wires this in production; see
-	// SetKandevVersion's doc comment.
+	// SetKandevVersion / checkMinKandevVersion). Empty (the default, e.g. in
+	// tests that construct a Service directly) or the "dev" sentinel means no
+	// enforcement; backendapp wires the real ldflags-injected version.
 	kandevVersion string
 
 	httpClient *http.Client
@@ -131,19 +186,111 @@ type Service struct {
 	// default). nil until SetSettings is called by Provide; the auto-update
 	// accessors treat a nil store as "default off, no overrides possible".
 	settings *settingsStore
+
+	reservedReferenceSources       map[string]struct{}
+	reservedReferenceProviderKinds map[string]struct{}
+}
+
+// ReferenceIdentity reserves a host-owned composer source and its canonical
+// provider/kind pair so a plugin cannot shadow a built-in integration.
+type ReferenceIdentity struct {
+	Source   string
+	Provider string
+	Kind     string
 }
 
 // NewService wires a Service from its already-constructed dependencies.
 // Provide is the usual entry point in production; NewService is exposed
 // directly for tests that want a fake store.Store/PluginRuntime.
 func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventBus, log *logger.Logger) *Service {
-	return &Service{
-		store:          pluginStore,
-		registry:       registry,
-		eventBus:       eventBus,
-		log:            log,
-		httpClient:     &http.Client{},
-		lifecycleLocks: newKeyedMutex(),
+	service := &Service{
+		store:               pluginStore,
+		registry:            registry,
+		eventBus:            eventBus,
+		log:                 log,
+		httpClient:          &http.Client{},
+		lifecycleLocks:      newKeyedMutex(),
+		dispatchLocks:       newKeyedRWMutex(),
+		agentToolGeneration: uuid.NewString(),
+		eventHub:            webapp.NewEventHub(),
+		conversationTokens:  newConversationTokenManager(),
+		conversationEpoch:   uuid.NewString(),
+	}
+	return service
+}
+
+// ConversationEpoch identifies this backend process for Host-only source
+// reconciliation. A restart starts a new epoch, so a client cannot treat a
+// cursor or live batch from the previous process as current.
+func (s *Service) ConversationEpoch() string {
+	return s.conversationEpoch
+}
+
+// SetGitCredentialLeaseRevoker wires immediate provider-lease revocation for
+// plugin lifecycle changes. The callback receives manifest-declared provider
+// IDs, never a plugin ID, because broker leases are scoped by provider.
+func (s *Service) SetGitCredentialLeaseRevoker(revoker func(string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.revokeGitCredentialProvider = revoker
+}
+
+// SetReservedReferenceIdentities installs the host-owned mention vocabulary.
+// It runs during backend composition before active plugin processes start.
+// Persisted active records that now collide are demoted to error so the
+// dynamic mention bridge cannot make backend startup fail.
+func (s *Service) SetReservedReferenceIdentities(identities []ReferenceIdentity) {
+	sources := make(map[string]struct{}, len(identities))
+	providerKinds := make(map[string]struct{}, len(identities))
+	for _, identity := range identities {
+		source := strings.TrimSpace(identity.Source)
+		provider := strings.TrimSpace(identity.Provider)
+		kind := strings.TrimSpace(identity.Kind)
+		if source == "" || provider == "" || kind == "" {
+			continue
+		}
+		sources[source] = struct{}{}
+		providerKinds[provider+"\x00"+kind] = struct{}{}
+	}
+	s.mu.Lock()
+	s.reservedReferenceSources = sources
+	s.reservedReferenceProviderKinds = providerKinds
+	s.mu.Unlock()
+
+	for _, record := range s.List() {
+		if record.Status != StatusActive || !s.collidesWithReservedReference(record.ReferenceSources) {
+			continue
+		}
+		if err := s.setStatus(record.ID, StatusError); err != nil {
+			s.log.Warn("plugins: could not revoke host-owned reference collision",
+				zap.String("plugin_id", record.ID), zap.Error(err))
+		}
+	}
+}
+
+func (s *Service) collidesWithReservedReference(sources []manifest.ReferenceSource) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, source := range sources {
+		if _, reserved := s.reservedReferenceSources[source.Source]; reserved {
+			return true
+		}
+		if _, reserved := s.reservedReferenceProviderKinds[source.Provider+"\x00"+source.Kind]; reserved {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) revokeGitCredentialProviderLeases(providers []string) {
+	s.mu.Lock()
+	revoker := s.revokeGitCredentialProvider
+	s.mu.Unlock()
+	if revoker == nil {
+		return
+	}
+	for _, provider := range providers {
+		revoker(provider)
 	}
 }
 
@@ -154,6 +301,26 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 type keyedMutex struct {
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
+}
+
+type keyedRWMutex struct {
+	mu    sync.Mutex
+	locks map[string]*sync.RWMutex
+}
+
+func newKeyedRWMutex() *keyedRWMutex {
+	return &keyedRWMutex{locks: make(map[string]*sync.RWMutex)}
+}
+
+func (k *keyedRWMutex) lockFor(key string) *sync.RWMutex {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	lock, ok := k.locks[key]
+	if !ok {
+		lock = &sync.RWMutex{}
+		k.locks[key] = lock
+	}
+	return lock
 }
 
 func newKeyedMutex() *keyedMutex {
@@ -182,6 +349,22 @@ func (s *Service) SetDeliverer(d Deliverer) {
 	s.deliverer = d
 }
 
+// SetAgentToolCatalogListener attaches the dynamic MCP registry bridge.
+func (s *Service) SetAgentToolCatalogListener(listener AgentToolCatalogListener) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentToolCatalogListener = listener
+}
+
+func (s *Service) notifyAgentToolCatalogChanged() {
+	s.mu.Lock()
+	listener := s.agentToolCatalogListener
+	s.mu.Unlock()
+	if listener != nil {
+		listener.NotifyAgentToolCatalogChanged()
+	}
+}
+
 // Deliverer returns the currently attached event-delivery subsystem, or nil
 // if none has been attached yet.
 func (s *Service) Deliverer() Deliverer {
@@ -202,6 +385,109 @@ func (s *Service) SetState(st *state.Store) {
 // without re-initializing the schema.
 func (s *Service) StateStore() *state.Store {
 	return s.state
+}
+
+// SetUserState wires the already-constructed plugin_user_state store. Provide
+// calls this; also exposed for tests that build a Service without going
+// through Provide. See UserState's doc comment for how it differs from
+// StateStore.
+func (s *Service) SetUserState(st *state.UserStore) {
+	s.userState = st
+	s.userStateCleanup = st
+}
+
+// setUserStateCleanupStore replaces the narrow uninstall-cleanup seam. The
+// concrete UserStore remains the handler-facing store; this seam lets tests
+// exercise fail-closed uninstall behavior without weakening that accessor.
+func (s *Service) setUserStateCleanupStore(cleanup userStateCleanupStore) {
+	s.userStateCleanup = cleanup
+}
+
+// UserState returns the plugin_user_state store Provide constructed, for the
+// authenticated per-user storage HTTP routes (user_state_handlers.go).
+// Unlike StateStore (plugin_state, written only by a plugin's own
+// gRPC-connected backend via the Host RPC), this store is reachable directly
+// from an authenticated browser request — every read/write is scoped to the
+// calling user (Approach D1, docs/decisions/2026-08-01-per-user-plugin-storage.md).
+func (s *Service) UserState() *state.UserStore {
+	return s.userState
+}
+
+// SetWebAppStorage wires the durable instance metadata and immutable static
+// artifact stores used by isolated web applications. Native plugin lifecycle
+// remains independent of these stores.
+func (s *Service) SetWebAppStorage(instanceStore *instances.Store, artifactStore *webapp.ArtifactStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.instances = instanceStore
+	s.webArtifacts = artifactStore
+}
+
+// SetInstanceState wires revisioned state owned by isolated web-app
+// instances. It is separate from plugin_state, which belongs to a managed
+// plugin process and has no instance identity.
+func (s *Service) SetInstanceState(instanceState *state.InstanceStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.instanceState = instanceState
+}
+
+func (s *Service) InstanceState() *state.InstanceStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.instanceState
+}
+
+// Instances returns the scoped web-application instance store.
+func (s *Service) Instances() *instances.Store {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.instances
+}
+
+// WebArtifacts returns immutable static web-application artifact storage.
+func (s *Service) WebArtifacts() *webapp.ArtifactStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.webArtifacts
+}
+
+// SetWebRuntime attaches the capability-bound static web-app runtime. The
+// backend registers its route only when the canvas release gate is enabled.
+func (s *Service) SetWebRuntime(runtime *webapp.Runtime) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.webRuntime = runtime
+	if runtime != nil {
+		runtime.SetProtocolHandler(s.handleWebAppProtocol)
+	}
+}
+
+func (s *Service) WebRuntime() *webapp.Runtime {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.webRuntime
+}
+
+// SetWebAppEventHub replaces the in-process public event transport. It is
+// primarily useful for deterministic tests; production creates the hub in
+// NewService and forwards the shared Kandev event bus into it.
+func (s *Service) SetWebAppEventHub(hub *webapp.EventHub) {
+	s.mu.Lock()
+	previous := s.eventHub
+	s.eventHub = hub
+	s.mu.Unlock()
+	if previous != nil && previous != hub {
+		previous.Close()
+	}
+}
+
+// WebAppEventHub returns the bounded SSE transport for capability-bound web
+// applications.
+func (s *Service) WebAppEventHub() *webapp.EventHub {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.eventHub
 }
 
 // SetSecrets wires the secret vault Provide was constructed with.
@@ -230,6 +516,7 @@ func (s *Service) SetDataSources(
 	agentProfiles agentProfileDataSource,
 	sessionCodeStats sessionCodeStatsSource,
 	messages messageDataSource,
+	interactions interactionDataSource,
 	taskWrites taskWriter,
 ) {
 	s.taskData = tasks
@@ -238,7 +525,47 @@ func (s *Service) SetDataSources(
 	s.agentProfiles = agentProfiles
 	s.sessionCodeStats = sessionCodeStats
 	s.messageData = messages
+	s.interactionData = interactions
 	s.taskWriter = taskWrites
+}
+
+// SetInteractionResponder wires the interaction write path (ADR 0052): the
+// adapter that answers permissions through the orchestrator and clarification
+// bundles through the clarification handler. Wired LATE for the same reason as
+// SetWriteDeps — both first-party services are constructed after
+// StartActivePlugins has spawned boot-active plugins — so hosts read it live
+// via interactionResponderDep rather than snapshotting it. A nil responder
+// leaves the write RPCs returning Unimplemented; the reads are unaffected.
+// SetTaskPRSource wires the optional pull-request lookup behind
+// Task.PullRequests. It is separate from SetDataSources because GitHub is an
+// optional service; nil leaves tasks with no PullRequests rather than failing
+// the read.
+func (s *Service) SetTaskPRSource(src taskPRSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.taskPRs = src
+}
+
+// taskPRSourceDep returns the currently wired pull-request source. Hosts call
+// this accessor at read time so late wiring reaches already-running plugins.
+func (s *Service) taskPRSourceDep() taskPRSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.taskPRs
+}
+
+func (s *Service) SetInteractionResponder(responder interactionResponder) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.interactionResponder = responder
+}
+
+// interactionResponderDep returns the currently-wired interaction responder,
+// guarded by s.mu against the SetInteractionResponder write.
+func (s *Service) interactionResponderDep() interactionResponder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.interactionResponder
 }
 
 // SetWriteDeps wires the Host data API's late write dependencies (ADR 0043
@@ -257,6 +584,23 @@ func (s *Service) SetWriteDeps(messenger taskMessenger, starter taskStarter) {
 	s.taskStarter = starter
 }
 
+// SetAgentConversations wires the managed agent conversation service
+// (AgentConversationService). Wired by backendapp, guarded by s.mu against
+// concurrent reads.
+func (s *Service) SetAgentConversations(svc AgentConversationService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentConvs = svc
+}
+
+// agentConversationDeps returns the wired agent conversation service, read
+// live (not snapshotted at hostForPlugin time). Guarded by s.mu.
+func (s *Service) agentConversationDeps() AgentConversationService {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.agentConvs
+}
+
 // writeDependencies returns the currently-wired task messenger and task
 // starter. Read live (not snapshotted at hostForPlugin time) so a plugin
 // spawned before SetWriteDeps still resolves them once it is called. Guarded by
@@ -267,30 +611,26 @@ func (s *Service) writeDependencies() (taskMessenger, taskStarter) {
 	return s.messenger, s.taskStarter
 }
 
-// SetUtilityAgent wires the dependencies behind Host.InvokeUtilityAgent
-// (ADR 0048): the service that resolves the utility agent selected in plugin
-// configuration, and the sessionless runner that executes a one-shot
-// completion. Wired by backendapp (not Provide) for the same import-cycle
-// reason as SetDataSources. Unlike the data sources, this is wired LATE in boot
-// (hostUtilityMgr is only available after agentctl control is healthy, by which
-// point StartActivePlugins has already spawned boot-active plugins), so hosts
-// read these live via utilityAgentDeps rather than snapshotting them — the
-// write here is mutex-guarded against those concurrent reads.
-func (s *Service) SetUtilityAgent(agents utilityAgentSource, runner utilityRunner) {
+// SetUtilityAgent wires the default-profile source, profile validator, and
+// sessionless runner behind Host.InvokeUtilityAgent. Wired by backendapp (not
+// Provide) for the same import-cycle reason as SetDataSources. The runner is
+// wired late in boot, so hosts read these live via utilityAgentDeps instead of
+// snapshotting them.
+func (s *Service) SetUtilityAgent(defaultProfile utilityDefaultProfileSource, profiles agentProfileSource, runner utilityRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.utilityAgents = agents
+	s.utilityDefaultProfile = defaultProfile
+	s.utilityProfiles = profiles
 	s.utilityRunner = runner
 }
 
-// utilityAgentDeps returns the currently-wired utility-agent dependencies. Read
-// live (not snapshotted at hostForPlugin time) so a plugin spawned before
-// SetUtilityAgent still resolves them once it is called. Guarded by s.mu against
-// the SetUtilityAgent write.
-func (s *Service) utilityAgentDeps() (utilityAgentSource, utilityRunner) {
+// utilityAgentDeps returns the currently-wired utility invocation
+// dependencies. Read live so a plugin spawned before SetUtilityAgent still
+// resolves them once it is called. Guarded by s.mu against the write.
+func (s *Service) utilityAgentDeps() (utilityDefaultProfileSource, agentProfileSource, utilityRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.utilityAgents, s.utilityRunner
+	return s.utilityDefaultProfile, s.utilityProfiles, s.utilityRunner
 }
 
 // SetAuthLoginBridge wires the SSO login bridge auth-capable plugins use to
@@ -311,16 +651,34 @@ func (s *Service) authLoginBridge() AuthLoginBridge {
 	return s.authLogin
 }
 
+// sessionCookieName returns the name of Kandev's own session cookie via the
+// wired auth bridge, or "" when no bridge is wired (auth disabled entirely,
+// so no session cookie is ever minted). Used by the webhook relay to strip
+// that cookie before forwarding headers to a plugin subprocess.
+func (s *Service) sessionCookieName() string {
+	bridge := s.authLoginBridge()
+	if bridge == nil {
+		return ""
+	}
+	return bridge.SessionCookieName()
+}
+
 // SetKandevVersion wires the currently running kandev build version,
 // enabling Install to enforce a package's manifest.min_kandev_version
 // (checkMinKandevVersion): a package requiring a newer kandev is rejected
-// rather than installed and left to fail confusingly at spawn time. Not
-// currently called by Provide — the running build version needs to be
-// threaded down from internal/backendapp's ldflags-injected Version, which
-// is outside this package; until a caller wires it, min_kandev_version
-// remains parsed and stored but unenforced (the pre-existing behavior).
+// rather than installed and left to fail confusingly at spawn time.
+// Called once during startup wiring from internal/backendapp, which owns the
+// ldflags-injected Version. Passing DevKandevVersion (an un-stamped local
+// build) leaves the check a no-op — see checkMinKandevVersion.
 func (s *Service) SetKandevVersion(v string) {
 	s.kandevVersion = v
+}
+
+// KandevVersion returns the running build version wired via
+// SetKandevVersion, or "" when startup wiring never supplied one (in which
+// case min_kandev_version is not enforced).
+func (s *Service) KandevVersion() string {
+	return s.kandevVersion
 }
 
 // SetRuntime wires the runtime.Manager Provide constructed.
@@ -344,10 +702,52 @@ func (s *Service) Shutdown() {
 	}
 }
 
+// Close stops plugin runtimes after workers stop.
+func (s *Service) Close() error {
+	s.Shutdown()
+	return nil
+}
+
 // SetPluginsDir wires the root directory pkgtar.Install/pkgtar.Remove
-// operate under (the same directory store.FSStore persists records in).
-func (s *Service) SetPluginsDir(dir string) {
+// operate under and initializes the signing key for conversation bindings.
+func (s *Service) SetPluginsDir(dir string) error {
+	// Keep package installation rooted correctly even when binding setup fails
+	// and the caller continues in degraded mode.
 	s.pluginsDir = dir
+	s.approvals = newApprovalLedger(dir)
+	hostDir := filepath.Join(dir, ".host")
+	if err := removeLegacyConversationFiles(hostDir); err != nil {
+		return err
+	}
+	conversationTokens, err := loadOrCreateConversationTokenManager(
+		filepath.Join(hostDir, "conversation-token.key"),
+	)
+	if err != nil {
+		return err
+	}
+	s.pluginsDir = dir
+	s.conversationTokens = conversationTokens
+	return nil
+}
+
+func removeLegacyConversationFiles(hostDir string) error {
+	for _, name := range []string{"session-events.sqlite", "session-events.sqlite-wal", "session-events.sqlite-shm"} {
+		path := filepath.Join(hostDir, name)
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect legacy conversation file %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing to remove non-regular legacy conversation file %s", path)
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove legacy conversation file %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 // RevealSecret resolves the cleartext value of the secret reference ref via
@@ -396,22 +796,28 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		rec = &store.Record{} // every capability check below denies; should not happen in practice
 	}
 	return &pluginHost{
-		pluginID:         pluginID,
-		capabilities:     rec.Capabilities,
-		configSchema:     rec.ConfigSchema,
-		state:            s.state,
-		secrets:          s.secrets,
-		bus:              s.eventBus,
-		configs:          s.store,
-		taskData:         s.taskData,
-		workflows:        s.workflows,
-		workflowSteps:    s.workflowSteps,
-		agentProfiles:    s.agentProfiles,
-		sessionCodeStats: s.sessionCodeStats,
-		messageData:      s.messageData,
-		taskWriter:       s.taskWriter,
-		utilityDeps:      s.utilityAgentDeps,
-		writeDeps:        s.writeDependencies,
+		pluginID:            pluginID,
+		capabilities:        rec.Capabilities,
+		repositoryProviders: rec.RepositoryProviders,
+		configSchema:        rec.ConfigSchema,
+		state:               s.state,
+		secrets:             s.secrets,
+		bus:                 s.eventBus,
+		configs:             s.store,
+		taskData:            s.taskData,
+		workflows:           s.workflows,
+		workflowSteps:       s.workflowSteps,
+		agentProfiles:       s.agentProfiles,
+		sessionCodeStats:    s.sessionCodeStats,
+		messageData:         s.messageData,
+		interactionData:     s.interactionData,
+		taskPRsDep:          s.taskPRSourceDep,
+		taskWriter:          s.taskWriter,
+		utilityDeps:         s.utilityAgentDeps,
+		writeDeps:           s.writeDependencies,
+		interactionDeps:     s.interactionResponderDep,
+		agentConversations:  s.agentConversationDeps,
+		log:                 s.log,
 	}
 }
 
@@ -439,740 +845,4 @@ func (s *Service) Get(id string) (*store.Record, error) {
 		return nil, store.ErrNotFound
 	}
 	return rec, nil
-}
-
-// UpdateConfig replaces the operator-editable config for id. Incoming
-// secret fields carrying the mask placeholder keep their stored value
-// (mergeMaskedSecrets), the result is validated against the manifest's
-// config_schema (ErrConfigInvalid on mismatch, mapped to 400 by the HTTP
-// layer), secret fields are moved into the encrypted vault
-// (storeConfigSecrets — the config file persists only a vault reference),
-// and a currently-running plugin is restarted so the new config takes
-// effect — hostForPlugin rebuilds the Host per spawn, and plugins read
-// config at startup via the Host GetConfig RPC.
-func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string]any) error {
-	lock := s.lifecycleLocks.lockFor(id)
-	lock.Lock()
-	defer lock.Unlock()
-
-	rec, err := s.Get(id)
-	if err != nil {
-		return err
-	}
-	existing, err := s.store.GetConfig(id)
-	if err != nil {
-		return err
-	}
-	merged := mergeMaskedSecrets(config, existing, rec.ConfigSchema)
-	if err := validateConfigSchema(rec.ID, merged, rec.ConfigSchema); err != nil {
-		return err
-	}
-	stored, removedSecrets, rollbackVault, err := s.storeConfigSecrets(ctx, rec, merged)
-	if err != nil {
-		return err
-	}
-	if err := s.store.SetConfig(id, stored); err != nil {
-		// The config commit failed, so the still-current config file is
-		// unchanged — restore the vault to match it, otherwise a field's
-		// unchanged ref would resolve to the new (uncommitted) value and a
-		// request reported as failed would have changed effective config.
-		if rbErr := rollbackVault(); rbErr != nil {
-			return errors.Join(fmt.Errorf("plugins: persist config: %w", err),
-				fmt.Errorf("plugins: vault rollback failed, effective config may be inconsistent: %w", rbErr))
-		}
-		return err
-	}
-	// Vault entries for removed secret fields are deleted only AFTER the
-	// config commit succeeds: a failed SetConfig must never leave the old
-	// (still-current) config referencing an already-deleted vault entry. The
-	// delete runs on a context detached from the request (like the rollback
-	// path), so a client disconnect right after the commit cannot cancel it
-	// and orphan the now-unreferenced vault entries.
-	s.cleanupRemovedConfigSecrets(context.WithoutCancel(ctx), rec.ID, removedSecrets, existing)
-	return s.restartForConfigChange(rec)
-}
-
-// errSecretVaultRequired is returned by storeConfigSecrets when a plugin
-// declares secret config fields but no vault is wired. It fails closed
-// rather than silently persisting the secret in cleartext — production
-// always wires the vault (Provide), so this only guards a misconfigured or
-// test setup.
-var errSecretVaultRequired = errors.New("plugins: a secret vault is required to store secret config fields")
-
-// storeConfigSecrets moves each secret config field's cleartext value into
-// the encrypted vault (id pluginConfigSecretID) and replaces it with the
-// configVaultRef marker, so <id>.config.yml never persists a cleartext
-// secret (validateConfigSchema has already rejected non-string secret
-// values, so nothing can slip past the string path here). A field already
-// carrying its ref (the mask-merge round trip) is left alone. Secret fields
-// absent from merged are returned as removedSecrets for the caller to
-// delete from the vault AFTER the config commit — deleting here would leave
-// the still-current config pointing at a missing entry if SetConfig then
-// failed. When a plugin declares secret fields but no vault is wired, it
-// fails closed (errSecretVaultRequired) rather than writing cleartext.
-//
-// The returned rollback restores every vault entry this call overwrote to
-// its prior value (or deletes it if it did not exist before), so the whole
-// operation is failure-atomic: a vault.Set failure mid-loop rolls back the
-// earlier writes before returning, and the caller runs rollback if the
-// subsequent config commit fails — in both cases the vault ends up matching
-// the unchanged config file, so a failed request never changes the value a
-// still-current ref resolves to. Rollback writes run on a context detached
-// from the caller's (context.WithoutCancel), so a request cancelled mid-save
-// cannot abort the rollback and leave the vault inconsistent with the
-// unchanged config file.
-func (s *Service) storeConfigSecrets(
-	ctx context.Context, rec *store.Record, merged map[string]any,
-) (stored map[string]any, removedSecrets []string, rollback func() error, err error) {
-	noRollback := func() error { return nil }
-	secretFields := secretPropertyKeys(rec.ConfigSchema)
-	if len(secretFields) == 0 {
-		return merged, nil, noRollback, nil
-	}
-	if s.secrets == nil {
-		return nil, nil, noRollback, fmt.Errorf("%w (plugin %q)", errSecretVaultRequired, rec.ID)
-	}
-
-	out := make(map[string]any, len(merged))
-	for k, v := range merged {
-		out[k] = v
-	}
-	rollbackCtx := context.WithoutCancel(ctx)
-	var restores []func() error
-	runRollback := func() error {
-		var errs []error
-		for i := len(restores) - 1; i >= 0; i-- {
-			if e := restores[i](); e != nil {
-				errs = append(errs, e)
-			}
-		}
-		return errors.Join(errs...)
-	}
-	for field := range secretFields {
-		value, present := out[field]
-		if !present {
-			removedSecrets = append(removedSecrets, field)
-			continue
-		}
-		cleartext, ok := value.(string)
-		if !ok || cleartext == "" || isConfigVaultRef(rec.ID, field, value) {
-			continue
-		}
-		vaultID := pluginConfigSecretID(rec.ID, field)
-		restore, snapErr := s.vaultRestoreFunc(ctx, rollbackCtx, vaultID)
-		if snapErr != nil {
-			s.warnIfRollbackFailed(rec.ID, runRollback())
-			return nil, nil, noRollback, snapErr
-		}
-		if err := s.secrets.Set(ctx, vaultID, vaultID, cleartext); err != nil {
-			s.warnIfRollbackFailed(rec.ID, runRollback())
-			return nil, nil, noRollback, fmt.Errorf("plugins: store secret config field %q: %w", field, err)
-		}
-		restores = append(restores, restore)
-		out[field] = configVaultRef(rec.ID, field)
-	}
-	return out, removedSecrets, runRollback, nil
-}
-
-// warnIfRollbackFailed logs a mid-loop vault rollback failure. A double
-// fault (a vault write succeeded, then its rollback also failed) can leave
-// earlier fields' vault entries at their new values while the config file is
-// unchanged — making a failed request silently change effective config for
-// those fields. It is very unlikely (needs a transient vault failure on both
-// the write and the compensating write) and uninstall's namespace purge is a
-// backstop, but surfacing it makes the inconsistency observable rather than
-// silent.
-func (s *Service) warnIfRollbackFailed(pluginID string, err error) {
-	if err != nil {
-		s.log.Warn("plugins: vault rollback failed after a store error; config may be inconsistent",
-			zap.String("plugin_id", pluginID), zap.Error(err))
-	}
-}
-
-// vaultRestoreFunc snapshots vaultID's current value (read on readCtx) and
-// returns a closure that restores it (writes on restoreCtx): reset to the
-// prior cleartext if the entry existed, or delete it if it did not. Used to
-// undo a config-secret write when the config commit that would reference it
-// fails. A not-found snapshot means "absent" (rollback deletes what we
-// create); any other Reveal error is a genuine backend fault where the prior
-// value cannot be determined — it returns an error so the caller aborts
-// before writing rather than risk a rollback that deletes a real secret.
-// restoreCtx is detached from the request so a cancelled save cannot abort
-// the rollback.
-func (s *Service) vaultRestoreFunc(readCtx, restoreCtx context.Context, vaultID string) (func() error, error) {
-	prior, err := s.secrets.Reveal(readCtx, vaultID)
-	switch {
-	case err == nil:
-		return func() error { return s.secrets.Set(restoreCtx, vaultID, vaultID, prior) }, nil
-	case isSecretNotFound(err):
-		return func() error {
-			if delErr := s.secrets.Delete(restoreCtx, vaultID); delErr != nil && !isSecretNotFound(delErr) {
-				return delErr
-			}
-			return nil
-		}, nil
-	default:
-		return nil, fmt.Errorf("plugins: cannot snapshot secret config field %q for rollback: %w", vaultID, err)
-	}
-}
-
-// cleanupRemovedConfigSecrets best-effort deletes the vault entries backing
-// secret config fields that the just-committed config no longer contains,
-// when the previous config actually pointed at them. Runs only after a
-// successful SetConfig (see UpdateConfig); a deletion failure leaves an
-// orphaned vault entry, which uninstall's namespace purge also sweeps.
-func (s *Service) cleanupRemovedConfigSecrets(
-	ctx context.Context, pluginID string, removed []string, existing map[string]any,
-) {
-	for _, field := range removed {
-		if !isConfigVaultRef(pluginID, field, existing[field]) {
-			continue
-		}
-		if err := s.secrets.Delete(ctx, pluginConfigSecretID(pluginID, field)); err != nil {
-			s.log.Warn("plugins: failed to delete removed secret config field from vault",
-				zap.String("plugin_id", pluginID), zap.String("field", field), zap.Error(err))
-		}
-	}
-}
-
-// GetMaskedConfig returns id's stored config with secret values (per the
-// manifest's config_schema) replaced by the mask placeholder — the shape
-// the operator settings UI is allowed to see.
-func (s *Service) GetMaskedConfig(id string) (map[string]any, error) {
-	rec, err := s.Get(id)
-	if err != nil {
-		return nil, err
-	}
-	config, err := s.store.GetConfig(id)
-	if err != nil {
-		return nil, err
-	}
-	return maskSecrets(config, rec.ConfigSchema), nil
-}
-
-// restartForConfigChange bounces id's process after a config write so the
-// plugin re-reads its config on the fresh spawn. A plugin that is not
-// running (disabled, errored, or no runtime wired) is left alone — it will
-// pick the config up on its next spawn anyway. The config is already
-// persisted by the time this runs; a restart failure transitions the plugin
-// to StatusError and is returned so the operator sees that the save
-// succeeded but the plugin did not come back up.
-func (s *Service) restartForConfigChange(rec *store.Record) error {
-	if s.runtime == nil || !s.runtime.Running(rec.ID) {
-		return nil
-	}
-	s.runtime.Stop(rec.ID)
-	ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
-	defer cancel()
-	if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
-		if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
-			// The restart error stays the returned error (it is the primary
-			// signal), but a failed status write means the registry may show
-			// StatusActive with no process running — don't lose that.
-			s.log.Warn("plugins: could not transition to error status after restart failure",
-				zap.String("plugin_id", rec.ID), zap.Error(setErr))
-		}
-		s.notifyDeliverer()
-		return fmt.Errorf("plugins: config saved but restart of %q failed: %w", rec.ID, err)
-	}
-	return nil
-}
-
-// Install verifies and extracts r (a tar.gz plugin package) via pkgtar into
-// the plugins directory, persists a fresh store.Record (status
-// "registered"), adds it to the in-memory registry, and attempts to spawn
-// and activate it. A pkgtar error (e.g. pkgtar.ErrVersionExists) is
-// returned unchanged so callers can map it to the right HTTP status. If the
-// package is valid but the initial spawn fails, the record is still
-// persisted (status "error") and returned alongside the spawn error, so an
-// operator can fix the issue and retry via Enable.
-//
-// Installing a new version of a plugin id that is currently active/running
-// stops the old process first (activate's own "already running" idempotency
-// check would otherwise skip spawning entirely, leaving the live subprocess
-// running the OLD version's binary even though the record/install_path now
-// point at the new one). If persisting the fresh record then fails,
-// rollbackFailedInstall removes only the just-extracted version directory
-// (every other installed version, and the plugin's writable data directory,
-// survive) and restarts the previous version's process, so a failed upgrade
-// attempt never destroys a previously working install.
-func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, error) {
-	result, err := pkgtar.Install(r, s.pluginsDir)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.checkMinKandevVersion(result.Manifest.MinKandevVersion); err != nil {
-		_ = os.RemoveAll(result.InstallPath)
-		return nil, err
-	}
-
-	// The plugin id is only known once pkgtar.Install has parsed the
-	// package's manifest, so the per-plugin lock is acquired here rather
-	// than at the very top of the function — this still covers
-	// InstallFromURL, which calls through to Install. It serializes the
-	// rest of this method (the record/registry/activate mutation) against
-	// any other Enable/Disable/Install/Uninstall/UpdateConfig call for the
-	// same id.
-	lock := s.lifecycleLocks.lockFor(result.Manifest.ID)
-	lock.Lock()
-	defer lock.Unlock()
-
-	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
-	wasRunning := s.runtime != nil && s.runtime.Running(result.Manifest.ID)
-	if wasRunning {
-		s.runtime.Stop(result.Manifest.ID)
-	}
-
-	rec := &store.Record{
-		Manifest:    *result.Manifest,
-		Status:      StatusRegistered,
-		InstallPath: result.InstallPath,
-		Signed:      result.Signed,
-		InstalledAt: time.Now().UTC(),
-	}
-	// An in-place upgrade rebuilds the record from the new package's manifest,
-	// so the operator's per-plugin auto-update override (an operator choice,
-	// not a manifest fact) must be carried forward or an auto-update would
-	// silently reset the very toggle that triggered it.
-	if hadOldRec {
-		rec.AutoUpdate = oldRec.AutoUpdate
-	}
-	if err := s.store.Save(rec); err != nil {
-		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
-		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
-	}
-	s.registry.Add(rec)
-
-	activateErr := s.activate(rec)
-	s.notifyDeliverer()
-
-	installed, getErr := s.Get(rec.ID)
-	if getErr != nil {
-		return rec, activateErr
-	}
-	return installed, activateErr
-}
-
-// checkMinKandevVersion rejects a package whose manifest declares a
-// min_kandev_version newer than the currently running kandev build
-// (manifest.CompareVersions). A no-op (nil error) when either side is
-// unset: minVersion == "" (the manifest doesn't declare one, the common
-// case today) or s.kandevVersion == "" (no running version wired via
-// SetKandevVersion).
-func (s *Service) checkMinKandevVersion(minVersion string) error {
-	if minVersion == "" || s.kandevVersion == "" {
-		return nil
-	}
-	if manifest.CompareVersions(s.kandevVersion, minVersion) < 0 {
-		return fmt.Errorf("plugins: requires kandev >= %s, running %s", minVersion, s.kandevVersion)
-	}
-	return nil
-}
-
-// rollbackFailedInstall cleans up after a store.Save failure partway
-// through Install: it removes only freshInstallPath (the version directory
-// pkgtar.Install just extracted), never the whole destRoot/<id>/ tree —
-// other installed versions and the plugin's writable data directory
-// (destRoot/<id>/data) must survive. If restartOld is true (an existing
-// record was running and got stopped to make way for this install),
-// oldRec's process is best-effort restarted so the failed upgrade attempt
-// doesn't also take down the previously working version; a restart failure
-// is logged, not returned, since Install is already returning the original
-// Save error.
-func (s *Service) rollbackFailedInstall(freshInstallPath string, oldRec *store.Record, restartOld bool) {
-	if err := os.RemoveAll(freshInstallPath); err != nil {
-		s.log.Warn("plugins: failed to remove extracted package after a persist failure",
-			zap.String("install_path", freshInstallPath), zap.Error(err))
-	}
-	if !restartOld || s.runtime == nil || oldRec == nil {
-		return
-	}
-	startCtx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
-	defer cancel()
-	if err := s.runtime.Start(startCtx, oldRec, s.hostForPlugin); err != nil {
-		s.log.Warn("plugins: failed to restart previous version after a failed upgrade",
-			zap.String("plugin_id", oldRec.ID), zap.Error(err))
-	}
-}
-
-// InstallFromURL downloads url (capped at maxDownloadSize, bounded by
-// downloadTimeout) and installs it via Install. url is operator-provided
-// (an admin installing a plugin from a URL), so this does not attempt full
-// SSRF elimination, but validateInstallURL rejects non-http(s) schemes and
-// URLs with no host before any request is built.
-func (s *Service) InstallFromURL(ctx context.Context, url string) (*store.Record, error) {
-	if err := validateInstallURL(url); err != nil {
-		return nil, fmt.Errorf("plugins: %w", err)
-	}
-
-	reqCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("plugins: build download request: %w", err)
-	}
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("plugins: download package: %w", err)
-	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-	}()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("plugins: download package: server responded %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize+1))
-	if err != nil {
-		return nil, fmt.Errorf("plugins: read package: %w", err)
-	}
-	if int64(len(data)) > maxDownloadSize {
-		return nil, fmt.Errorf("plugins: package exceeds max download size of %d bytes", maxDownloadSize)
-	}
-
-	return s.Install(ctx, bytes.NewReader(data))
-}
-
-// validateInstallURL is the sink-level guard InstallFromURL applies before
-// building any outbound request: raw must parse as a URL with an http or
-// https scheme and a non-empty host. It rejects file://, gopher://, and
-// other schemes that would let an operator-supplied string reach something
-// other than a plain HTTP(S) fetch. This narrows, but does not eliminate,
-// the residual SSRF surface inherent to letting an operator point the
-// installer at an arbitrary http(s) URL (including internal hosts).
-func validateInstallURL(raw string) error {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("invalid install URL: %w", err)
-	}
-	switch parsed.Scheme {
-	case "http", "https":
-	default:
-		return fmt.Errorf("invalid install URL: unsupported scheme %q (must be http or https)", parsed.Scheme)
-	}
-	if parsed.Hostname() == "" {
-		return errors.New("invalid install URL: missing host")
-	}
-	return nil
-}
-
-// Uninstall stops id's process (if running), purges its vault namespace,
-// removes its extracted package tree from disk, deletes its record from both
-// the store and the in-memory registry, and deletes every plugin_state row
-// scoped to id (best-effort — a failure there is logged but does not fail
-// the overall Uninstall, since the package/record are already gone by that
-// point), then notifies the attached Deliverer. Clearing plugin_state and
-// the vault namespace matters so a plugin reinstalled under the same id (or
-// an id later reused by a different plugin) never silently inherits stale
-// state or secrets.
-//
-// Ordering is deliberate: the process is stopped FIRST so the plugin can no
-// longer race the cleanup by writing a fresh secret (SetSecret) between the
-// vault list and the deletes; then the vault namespace is purged and any
-// failure aborts the uninstall — nothing destructive (package/record
-// removal) has happened yet, so the operator simply retries (Stop and the
-// vault deletes are both idempotent). A failed uninstall therefore leaves
-// the plugin stopped-but-installed, resolved by a retry.
-func (s *Service) Uninstall(ctx context.Context, id string) error {
-	lock := s.lifecycleLocks.lockFor(id)
-	lock.Lock()
-	defer lock.Unlock()
-
-	if _, err := s.Get(id); err != nil {
-		return err
-	}
-	wasRunning := s.runtime != nil && s.runtime.Running(id)
-	if s.runtime != nil {
-		s.runtime.Stop(id)
-	}
-	if err := s.deletePluginSecrets(ctx, id); err != nil {
-		// The process is stopped but nothing else was removed. If it had been
-		// running, its persisted status still says active — reconcile it to
-		// error and notify observers so it isn't reported as running while no
-		// process is, before returning the retryable failure.
-		if wasRunning {
-			if setErr := s.SetStatus(id, StatusError); setErr != nil {
-				s.log.Warn("plugins: could not mark plugin errored after an aborted uninstall",
-					zap.String("plugin_id", id), zap.Error(setErr))
-			}
-			s.notifyDeliverer()
-		}
-		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin secrets: %w", err)
-	}
-	if err := pkgtar.Remove(s.pluginsDir, id); err != nil {
-		return fmt.Errorf("plugins: remove installed package: %w", err)
-	}
-	if err := s.store.Delete(id); err != nil {
-		return err
-	}
-	s.registry.Remove(id)
-	s.deletePluginState(id)
-	s.notifyDeliverer()
-	return nil
-}
-
-// deletePluginSecrets removes every vault entry in id's namespace
-// ("plugin:<id>:..." — both SetSecret-owned and config-backed entries), so
-// a reinstall under the same id never inherits stale secrets. Unlike
-// deletePluginState it is NOT best-effort: it runs before any destructive
-// uninstall step (after the process is stopped, so no concurrent writes can
-// re-populate the namespace), and a failure aborts the uninstall while it
-// can still be retried. Deletion is idempotent, so a partial failure that
-// deleted some entries is safely resumed by a retry. A nil vault (no
-// secrets possible) is a no-op.
-func (s *Service) deletePluginSecrets(ctx context.Context, id string) error {
-	if s.secrets == nil {
-		return nil
-	}
-	ids, err := s.secrets.ListIDs(ctx)
-	if err != nil {
-		return fmt.Errorf("list vault ids: %w", err)
-	}
-	var errs []error
-	for _, vaultID := range ids {
-		if !hasPluginVaultPrefix(vaultID, id) {
-			continue
-		}
-		if err := s.secrets.Delete(ctx, vaultID); err != nil {
-			errs = append(errs, fmt.Errorf("delete %s: %w", vaultID, err))
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// deletePluginState best-effort removes every plugin_state row for id. A
-// nil state store (e.g. a Service constructed without SetState in tests, or
-// before backendapp finishes wiring) is a silent no-op.
-func (s *Service) deletePluginState(id string) {
-	if s.state == nil {
-		return
-	}
-	if err := s.state.DeleteAll(context.Background(), id); err != nil {
-		s.log.Warn("plugins: failed to delete plugin_state on uninstall", zap.String("plugin_id", id), zap.Error(err))
-	}
-}
-
-// Enable transitions id to StatusActive, spawning its process first if it
-// is not already running. Idempotent: a no-op (nil error) if id is already
-// active.
-func (s *Service) Enable(id string) error {
-	lock := s.lifecycleLocks.lockFor(id)
-	lock.Lock()
-	defer lock.Unlock()
-
-	rec, err := s.Get(id)
-	if err != nil {
-		return err
-	}
-	if rec.Status == StatusActive {
-		return nil
-	}
-	if err := s.activate(rec); err != nil {
-		return err
-	}
-	s.notifyDeliverer()
-	return nil
-}
-
-// Disable stops id's process (if running) and transitions it to
-// StatusDisabled. Idempotent: a no-op (nil error) if id is already
-// disabled.
-func (s *Service) Disable(id string) error {
-	lock := s.lifecycleLocks.lockFor(id)
-	lock.Lock()
-	defer lock.Unlock()
-
-	rec, err := s.Get(id)
-	if err != nil {
-		return err
-	}
-	if rec.Status == StatusDisabled {
-		return nil
-	}
-	if s.runtime != nil {
-		s.runtime.Stop(id)
-	}
-	if err := s.SetStatus(id, StatusDisabled); err != nil {
-		return err
-	}
-	s.notifyDeliverer()
-	return nil
-}
-
-// activateStartTimeout bounds the context activate hands to runtime.Start,
-// so a hung plugin binary cannot block Enable/Install indefinitely. The
-// runtime.Manager itself also enforces a startTimeout on the underlying
-// go-plugin handshake (the actual blocking call is not context-aware); this
-// context bound is defense-in-depth and gives Start a chance to short-circuit
-// on ctx.Err() before ever spawning.
-const activateStartTimeout = 30 * time.Second
-
-// activate spawns rec's process (if not already running) and transitions it
-// to StatusActive. If the spawn fails, it records the failure and transitions
-// the record to StatusError before returning the spawn error.
-func (s *Service) activate(rec *store.Record) error {
-	if s.runtime != nil && !s.runtime.Running(rec.ID) {
-		ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
-		defer cancel()
-		if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
-			if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
-				s.log.Warn("plugins: could not persist activation failure",
-					zap.String("plugin_id", rec.ID), zap.Error(setErr))
-			}
-			return fmt.Errorf("plugins: start %q: %w", rec.ID, err)
-		}
-	}
-	return s.SetStatus(rec.ID, StatusActive)
-}
-
-// SetStatus applies a single-hop status transition for id, enforcing the
-// state machine (allowedTransitions in types.go). On success the change is
-// persisted to the store and applied to the in-memory registry. Returns
-// *ErrInvalidTransition without mutating anything if the transition is not
-// legal, and store.ErrNotFound if id is not installed. Callers that need
-// the attached Deliverer notified (most of them) call notifyDeliverer
-// separately — SetStatus itself does not, since activate/Disable call it
-// both for the runtime spawn/stop and the status transition, and only want
-// a single Refresh for the whole operation.
-func (s *Service) SetStatus(id string, status Status) error {
-	return s.setStatusAndDiagnostic(id, status, nil, false)
-}
-
-// setStatusAndDiagnostic applies a lifecycle transition together with its
-// persisted runtime diagnostic. allowSame is used only for repeated failure
-// reports (for example, a failed retry while the record is already in error);
-// public SetStatus keeps same-state transitions invalid.
-func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error, allowSame bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	rec, ok := s.registry.Get(id)
-	if !ok {
-		return store.ErrNotFound
-	}
-	if rec.Status == status {
-		if !allowSame {
-			return &ErrInvalidTransition{ID: id, From: rec.Status, To: status}
-		}
-	} else if !canTransition(rec.Status, status) {
-		return &ErrInvalidTransition{ID: id, From: rec.Status, To: status}
-	}
-
-	lastError := rec.LastError
-	lastErrorAt := rec.LastErrorAt
-	if status == StatusActive {
-		lastError = ""
-		lastErrorAt = nil
-	}
-	if failure != nil {
-		lastError = normalizePluginError(failure)
-		now := time.Now().UTC()
-		lastErrorAt = &now
-	}
-
-	updated, ok := s.registry.SetRuntimeState(id, status, lastError, lastErrorAt)
-	if !ok {
-		return store.ErrNotFound
-	}
-	if err := s.store.Save(updated); err != nil {
-		// Roll back the in-memory change so registry and disk stay in sync.
-		s.registry.Add(rec)
-		return err
-	}
-	return nil
-}
-
-// handleStatusChange is the runtime.Manager OnStatusChange callback (see
-// Provide, where it is bound as a Manager constructor argument): invoked
-// from the supervision loop's own goroutine whenever a running plugin's
-// health transitions. healthy=false drives active -> error; healthy=true
-// drives error -> active plus a Deliverer.Flush (the buffered-event
-// recovery replay). Restart count is persisted best-effort afterward.
-func (s *Service) handleStatusChange(id string, healthy bool, reason error) {
-	newStatus := StatusError
-	if healthy {
-		newStatus = StatusActive
-	}
-	if err := s.setStatusAndDiagnostic(id, newStatus, reason, !healthy); err != nil {
-		s.log.Warn("plugins: health transition failed",
-			zap.String("plugin_id", id), zap.Bool("healthy", healthy), zap.Error(err))
-	} else {
-		s.notifyDeliverer()
-		if healthy {
-			if d := s.Deliverer(); d != nil {
-				d.Flush(id)
-			}
-		}
-	}
-	s.recordRestartCount(id)
-}
-
-// recordRestartCount best-effort persists the runtime manager's current
-// restart count for id onto its store.Record.
-func (s *Service) recordRestartCount(id string) {
-	if s.runtime == nil {
-		return
-	}
-	// Serialize this metadata write with lifecycle/diagnostic persistence so a
-	// restart callback cannot save a stale record over a concurrent Enable or
-	// recovery that just cleared LastError.
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	updated, ok := s.registry.SetRestartCount(id, s.runtime.RestartCount(id))
-	if !ok {
-		return
-	}
-	if err := s.store.Save(updated); err != nil {
-		s.log.Warn("plugins: persist restart count failed", zap.String("plugin_id", id), zap.Error(err))
-	}
-}
-
-// StartActivePlugins runs the conservative boot filesystem scan (dir
-// sideloads registered disabled, missing-install detection — see
-// service_sync.go's bootScan) and then spawns every currently-StatusActive,
-// runtime-managed plugin's process. Called once at boot (backendapp's
-// startPluginsSubsystems) so plugins that were active before a restart
-// resume running. A spawn failure is logged and the plugin transitions to
-// StatusError rather than aborting the rest of the boot sequence.
-func (s *Service) StartActivePlugins(ctx context.Context) {
-	s.logBootScanResult(s.bootScan(ctx))
-
-	if s.runtime == nil {
-		return
-	}
-	for _, rec := range s.List() {
-		if rec.Status != StatusActive || !rec.IsManaged() || s.runtime.Running(rec.ID) {
-			continue
-		}
-		if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
-			s.log.Warn("plugins: failed to spawn active plugin at boot",
-				zap.String("plugin_id", rec.ID), zap.Error(err))
-			if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
-				s.log.Warn("plugins: could not persist boot activation failure",
-					zap.String("plugin_id", rec.ID), zap.Error(setErr))
-			} else {
-				// The deliverer was refreshed before boot activation began, so
-				// reconcile it after an active plugin fails to spawn. Otherwise
-				// its worker would continue treating the plugin as active.
-				s.notifyDeliverer()
-			}
-		}
-	}
-}
-
-// logBootScanResult logs what the boot filesystem scan found, if anything —
-// a silent no-op scan (the common case) logs nothing.
-func (s *Service) logBootScanResult(result *SyncResult) {
-	if result == nil || (len(result.Added) == 0 && len(result.Missing) == 0 && len(result.Errors) == 0) {
-		return
-	}
-	s.log.Info("plugins: boot filesystem scan found changes",
-		zap.Strings("sideloaded", result.Added),
-		zap.Strings("missing", result.Missing),
-		zap.Int("errors", len(result.Errors)))
-	for _, e := range result.Errors {
-		s.log.Warn("plugins: boot scan error", zap.String("path", e.Path), zap.String("reason", e.Reason))
-	}
 }

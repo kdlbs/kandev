@@ -1,10 +1,17 @@
 ---
-spec: docs/specs/ui/sidebar-view-creation.md
+spec: docs/specs/ui/requirements/sidebar-view-creation.md
 created: 2026-07-17
 status: completed
 ---
 
 # Implementation Plan: Direct Sidebar View Creation
+
+## Workspace-scope continuation
+
+This completed package records the original global preference implementation.
+[Workspace sidebar task views](../workspace-sidebar-task-views/plan.md) owns its
+scoped persistence successor and updated browser fixtures. Historical validation
+results below remain unchanged.
 
 ## Overview
 

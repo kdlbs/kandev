@@ -1,8 +1,8 @@
 "use client";
 
-import type { ReactNode, MouseEvent } from "react";
+import type { ReactNode, MouseEvent, RefObject } from "react";
 import type { Layout } from "react-resizable-panels";
-import { memo, useEffect, useCallback, useState, useMemo } from "react";
+import { memo, useEffect, useCallback, useState, useMemo, useRef } from "react";
 import { SessionPanel } from "@kandev/ui/pannel-session";
 import { Group, Panel } from "react-resizable-panels";
 import {
@@ -17,15 +17,17 @@ import { useDefaultLayout } from "@/lib/layout/use-default-layout";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
 import { useTerminals } from "@/hooks/domains/session/use-terminals";
-import { shouldConfirmTerminalClose } from "@/lib/terminal/terminal-busy-registry";
 import { ParkedTerminalsMenu } from "@/components/task/parked-terminals-menu";
-import { CloseTerminalConfirmDialog } from "@/components/task/close-terminal-confirm-dialog";
+import { CloseTerminalConfirmPopover } from "@/components/task/close-terminal-confirm-popover";
 import {
   CommandsTabContent,
   TerminalTabContents,
 } from "@/components/task/task-right-panel-tab-contents";
+import { TerminalTabMenu } from "@/components/task/terminal-tab";
+import { TabRenameInput } from "@/components/task/tab-rename-input";
 import type { RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
+import { useTranslation } from "react-i18next";
 
 type TaskRightPanelProps = {
   topPanel: ReactNode;
@@ -37,17 +39,15 @@ type TaskRightPanelProps = {
 
 const DEFAULT_RIGHT_LAYOUT: Record<string, number> = { top: 55, bottom: 45 };
 
-function pickCurrentRenameValue(terminal: Terminal): string {
-  if (terminal.customName && terminal.customName !== "") return terminal.customName;
-  if (terminal.seq) return `Terminal ${terminal.seq}`;
-  return terminal.label;
-}
-
 type TerminalTabsBuilderOpts = {
   terminals: Terminal[];
   handleCloseDevTab: (event: MouseEvent) => void;
   handleCloseTab: (event: MouseEvent, id: string) => void;
-  onContextMenu?: (event: MouseEvent, terminal: Terminal) => void;
+  renderContextMenu?: (
+    terminal: Terminal,
+    closeAnchorRef: RefObject<HTMLElement | null>,
+  ) => ReactNode;
+  renderContent?: (terminal: Terminal) => ReactNode;
   onDoubleClick?: (event: MouseEvent, terminal: Terminal) => void;
 };
 
@@ -62,7 +62,8 @@ function buildTerminalTabs({
   terminals,
   handleCloseDevTab,
   handleCloseTab,
-  onContextMenu,
+  renderContextMenu,
+  renderContent,
   onDoubleClick,
 }: TerminalTabsBuilderOpts): SessionTab[] {
   return terminals.map((terminal) => {
@@ -76,8 +77,11 @@ function buildTerminalTabs({
       className: terminal.closable ? "group flex items-center cursor-pointer" : "cursor-pointer",
       closable: terminal.closable,
       onClose: isDev ? handleCloseDevTab : (e: MouseEvent) => handleCloseTab(e, terminal.id),
-      onContextMenu:
-        isOrdinary && onContextMenu ? (e: MouseEvent) => onContextMenu(e, terminal) : undefined,
+      renderContextMenu:
+        isOrdinary && renderContextMenu
+          ? (closeAnchorRef) => renderContextMenu(terminal, closeAnchorRef)
+          : undefined,
+      content: isOrdinary ? renderContent?.(terminal) : undefined,
       onDoubleClick:
         isOrdinary && onDoubleClick ? (e: MouseEvent) => onDoubleClick(e, terminal) : undefined,
       testId: `terminal-tab-${terminal.id}`,
@@ -121,13 +125,25 @@ function useRightPanelPersistence({
   }, [isBottomCollapsed]);
 }
 
+function useRightPanelTabChange(
+  sessionId: string | null,
+  setRightPanelActiveTab: (sessionId: string, tabId: string) => void,
+) {
+  return useCallback(
+    (value: string) => {
+      if (sessionId) setRightPanelActiveTab(sessionId, value);
+    },
+    [sessionId, setRightPanelActiveTab],
+  );
+}
+
 function useRightPanelTabs({
   hasScripts,
   terminals,
   handleCloseDevTab,
   handleCloseTab,
   renameTerminal,
-  destroyTerminal,
+  requestCloseFromContext,
   sessionId,
   setRightPanelActiveTab,
 }: {
@@ -136,62 +152,92 @@ function useRightPanelTabs({
   handleCloseDevTab: (event: MouseEvent) => void;
   handleCloseTab: (event: MouseEvent, terminalId: string) => void;
   renameTerminal: (id: string, name: string | null) => Promise<void> | void;
-  destroyTerminal: (id: string) => Promise<void> | void;
+  requestCloseFromContext: (id: string, closeAnchor: HTMLElement | null) => void;
   sessionId: string | null;
   setRightPanelActiveTab: (sessionId: string, tabId: string) => void;
 }) {
-  const onContextMenu = useCallback(
-    (event: MouseEvent, terminal: Terminal) => {
-      event.preventDefault();
-      // Browser prompt() is intentionally low-tech; the next iteration
-      // promotes this to a real shadcn ContextMenu, but window.prompt
-      // ships the renameable-terminal requirement today.
-      const current = pickCurrentRenameValue(terminal);
-      const choice = window.prompt(
-        `Rename terminal (leave empty to reset, type "destroy" to remove and stop the PTY).`,
-        current,
-      );
-      if (choice === null) return;
-      const trimmed = choice.trim();
-      if (trimmed.toLowerCase() === "destroy") {
-        void destroyTerminal(terminal.id);
-        return;
-      }
-      void renameTerminal(terminal.id, trimmed === "" ? null : trimmed);
-    },
-    [renameTerminal, destroyTerminal],
-  );
+  const { t } = useTranslation();
+  const [renamingTerminalId, setRenamingTerminalId] = useState<string | null>(null);
 
+  const handleStartRename = useCallback((terminalId: string) => {
+    setRenamingTerminalId(terminalId);
+  }, []);
+  const handleRenameCommit = useCallback(
+    async (terminalId: string, next: string) => {
+      setRenamingTerminalId(null);
+      const trimmed = next.trim();
+      try {
+        await renameTerminal(terminalId, trimmed === "" ? null : trimmed);
+      } catch (error) {
+        console.error(error);
+      }
+    },
+    [renameTerminal],
+  );
+  const handleRenameCancel = useCallback(() => {
+    setRenamingTerminalId(null);
+  }, []);
+
+  const renderTerminalContextMenu = useCallback(
+    (terminal: Terminal, closeAnchorRef: RefObject<HTMLElement | null>) => (
+      <TerminalTabMenu
+        canMutate
+        onStartRename={() => handleStartRename(terminal.id)}
+        onClosePanel={() => undefined}
+        onTerminatePanel={() => requestCloseFromContext(terminal.id, closeAnchorRef.current)}
+      />
+    ),
+    [handleStartRename, requestCloseFromContext],
+  );
+  const renderTerminalContent = useCallback(
+    (terminal: Terminal) => {
+      if (renamingTerminalId !== terminal.id) return undefined;
+      let initial = terminal.label;
+      if (terminal.seq) initial = t("task:terminalWithSeq", { seq: terminal.seq });
+      if (terminal.customName && terminal.customName !== "") initial = terminal.customName;
+      return (
+        <TabRenameInput
+          initial={initial}
+          seqBadge={terminal.seq ?? null}
+          onCommit={(next) => void handleRenameCommit(terminal.id, next)}
+          onCancel={handleRenameCancel}
+          testId="terminal-tab-rename-input"
+        />
+      );
+    },
+    [handleRenameCancel, handleRenameCommit, renamingTerminalId, t],
+  );
   const tabs: SessionTab[] = useMemo(() => {
-    const commandsTabs: SessionTab[] = hasScripts ? [{ id: "commands", label: "Commands" }] : [];
+    const commandsTabs: SessionTab[] = hasScripts
+      ? [{ id: "commands", label: t("common:commandGroupCommands") }]
+      : [];
     return [
       ...commandsTabs,
       ...buildTerminalTabs({
         terminals,
         handleCloseDevTab,
         handleCloseTab,
-        onContextMenu,
-        onDoubleClick: onContextMenu,
+        renderContextMenu: renderTerminalContextMenu,
+        renderContent: renderTerminalContent,
+        onDoubleClick: (_event, terminal) => handleStartRename(terminal.id),
       }),
     ];
-  }, [hasScripts, terminals, handleCloseDevTab, handleCloseTab, onContextMenu]);
-
-  const handleTabChange = useCallback(
-    (value: string) => {
-      if (sessionId) setRightPanelActiveTab(sessionId, value);
-    },
-    [sessionId, setRightPanelActiveTab],
-  );
+  }, [
+    hasScripts,
+    terminals,
+    handleCloseDevTab,
+    handleCloseTab,
+    renderTerminalContextMenu,
+    renderTerminalContent,
+    handleStartRename,
+    t,
+  ]);
+  const handleTabChange = useRightPanelTabChange(sessionId, setRightPanelActiveTab);
 
   return { tabs, handleTabChange };
 }
 
-/**
- * Gate the X-button close behind a confirm when the terminal looks busy or is
- * a script terminal — mirrors the dockview tab and mobile picker so every
- * close path warns before it destroys a running shell. Idle shells still close
- * immediately via the underlying `handleCloseTab`.
- */
+/** Gate every destructive terminal close behind a control-anchored confirmation. */
 function useConfirmableTerminalClose({
   terminals,
   handleCloseTab,
@@ -199,37 +245,47 @@ function useConfirmableTerminalClose({
 }: {
   terminals: Terminal[];
   handleCloseTab: (event: MouseEvent, terminalId: string) => void;
-  destroyTerminal: (id: string) => Promise<void>;
+  destroyTerminal: (id: string) => Promise<boolean>;
 }) {
   const [pendingClose, setPendingClose] = useState<Terminal | null>(null);
+  const closeAnchorRef = useRef<HTMLElement>(null);
+
+  const requestClose = useCallback(
+    (terminalId: string, anchor: HTMLElement | null) => {
+      const terminal = terminals.find((t) => t.id === terminalId);
+      if (!terminal || !anchor) return false;
+      closeAnchorRef.current = anchor;
+      setPendingClose(terminal);
+      return true;
+    },
+    [terminals],
+  );
 
   const handleAskCloseTab = useCallback(
     (event: MouseEvent, terminalId: string) => {
-      const terminal = terminals.find((t) => t.id === terminalId);
-      const needsConfirm =
-        !!terminal &&
-        shouldConfirmTerminalClose(terminalId, {
-          type: terminal.type,
-          kind: terminal.kind,
-        });
-      if (needsConfirm) {
+      if (requestClose(terminalId, event.currentTarget as HTMLElement)) {
         event.preventDefault();
         event.stopPropagation();
-        setPendingClose(terminal);
         return;
       }
       handleCloseTab(event, terminalId);
     },
-    [terminals, handleCloseTab],
+    [requestClose, handleCloseTab],
   );
 
   const handleConfirmClose = useCallback(async () => {
     if (!pendingClose) return;
     await destroyTerminal(pendingClose.id);
-    setPendingClose(null);
   }, [pendingClose, destroyTerminal]);
 
-  return { pendingClose, setPendingClose, handleAskCloseTab, handleConfirmClose };
+  return {
+    pendingClose,
+    setPendingClose,
+    closeAnchorRef,
+    handleAskCloseTab,
+    requestClose,
+    handleConfirmClose,
+  };
 }
 
 type CollapsedRightPanelProps = {
@@ -288,7 +344,7 @@ type RightPanelContentProps = {
   terminals: Terminal[];
   parkedTerminals: Terminal[];
   resumeTerminal: (id: string) => Promise<void> | void;
-  destroyTerminal: (id: string) => Promise<void> | void;
+  destroyTerminal: (id: string) => Promise<boolean> | void;
   environmentId: string | null;
   devProcessId: string | null | undefined;
   devOutput: string | undefined;
@@ -358,7 +414,9 @@ function RightPanelContent({
                 <ParkedTerminalsMenu
                   parkedTerminals={parkedTerminals}
                   onResume={resumeTerminal}
-                  onDestroy={destroyTerminal}
+                  onDestroy={(terminalId) => {
+                    void destroyTerminal(terminalId);
+                  }}
                 />
               ) : undefined
             }
@@ -440,7 +498,7 @@ function useTaskRightPanel({
     handleCloseDevTab,
     handleCloseTab: closeConfirm.handleAskCloseTab,
     renameTerminal,
-    destroyTerminal,
+    requestCloseFromContext: closeConfirm.requestClose,
     sessionId,
     setRightPanelActiveTab,
   });
@@ -467,6 +525,7 @@ const TaskRightPanel = memo(function TaskRightPanel({
   initialScripts = [],
   initialTerminals,
 }: TaskRightPanelProps) {
+  const { t } = useTranslation();
   const {
     terminals,
     parkedTerminals,
@@ -489,7 +548,7 @@ const TaskRightPanel = memo(function TaskRightPanel({
     handleTabChange,
     closeConfirm,
   } = useTaskRightPanel({ sessionId, repositoryId, initialScripts, initialTerminals });
-  const { pendingClose, setPendingClose, handleConfirmClose } = closeConfirm;
+  const { pendingClose, setPendingClose, closeAnchorRef, handleConfirmClose } = closeConfirm;
   return (
     <>
       <RightPanelContent
@@ -514,9 +573,10 @@ const TaskRightPanel = memo(function TaskRightPanel({
         devOutput={devOutput}
         isStoppingDev={isStoppingDev}
       />
-      <CloseTerminalConfirmDialog
+      <CloseTerminalConfirmPopover
         open={pendingClose !== null}
-        terminalName={pendingClose?.label || "Terminal"}
+        terminalName={pendingClose?.label || t("task:terminal")}
+        anchorRef={closeAnchorRef}
         onOpenChange={(open) => {
           if (!open) setPendingClose(null);
         }}

@@ -1,6 +1,7 @@
 # ADR-2026-07-26-user-managed-agent-runtime-updates: User-Managed Agent Runtime Updates
 
-**Status:** accepted
+**Status:** superseded by
+[ADR-2026-08-12-validated-managed-runtime-version-selection](2026-08-12-validated-managed-runtime-version-selection.md)
 **Date:** 2026-07-26
 **Area:** backend, frontend, protocol
 
@@ -40,6 +41,12 @@ Settings action targets the Kandev host runtime only. Remote executors and
 containers use their own unversioned runtime resolution when they launch.
 Native-only distribution channels and separately distributed passthrough or
 authentication helper packages remain outside this boundary.
+
+When a managed package also provides a declared native executable, the host
+update path uses one runtime consistently. For OpenCode, a host `opencode`
+executable uses the selected global `opencode-ai` package version for update
+and the same executable for the capability probe. Executor launches keep their
+executor-safe managed command unless that executor selects a native binary.
 
 ## Consequences
 

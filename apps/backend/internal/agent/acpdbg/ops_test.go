@@ -33,9 +33,16 @@ func TestProbe_DefaultWorkdirReachesSessionNew(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	// os.Executable rather than os.Args[0]: the runner gives the child its own
+	// working directory, so a relative argv[0] — what you get running the binary
+	// as ./pkg.test after `go test -c` — would not resolve there.
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate test binary: %v", err)
+	}
 	runner, err := NewRunner(ctx, filepath.Join(t.TempDir(), "frames.jsonl"), RunConfig{
 		AgentID: "helper",
-		Command: []string{os.Args[0], "-test.run=^TestACPDBGHelperProcess$"},
+		Command: []string{self, "-test.run=^TestACPDBGHelperProcess$"},
 	})
 	if err != nil {
 		t.Fatalf("NewRunner() error = %v", err)

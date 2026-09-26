@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -19,7 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/scriptengine"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const dockerWorkspacePath = "/workspace"
@@ -82,6 +83,20 @@ type DockerExecutor struct {
 	newClientFunc   func(config.DockerConfig, *logger.Logger) (*docker.Client, error)
 	brokerPreflight func(context.Context, brokerAgentctlProcessClient, string, map[string]string) error
 
+	// endpoints resolves container ports for the reconnect path. Nil means
+	// the daemon shares the backend's network, so a published port is
+	// directly dialable. A remote daemon supplies a forwarding resolver;
+	// without it reconnect hands back the remote host's loopback, which the
+	// backend cannot reach.
+	endpoints containerEndpointResolver
+
+	// beforeContainerStart re-delivers container inputs into a preserved
+	// container about to be restarted for a reconnect. Nil when the inputs
+	// are bind-mounted, which is every daemon that shares the backend's
+	// filesystem. A remote daemon supplies one so a container preserved
+	// across a backend upgrade does not resume on a stale helper.
+	beforeContainerStart func(ctx context.Context, containerID string) error
+
 	// Lazy-initialized on first use via ensureClient().
 	// Uses mu + initialized instead of sync.Once so that transient Docker
 	// daemon failures can be retried on subsequent calls.
@@ -125,7 +140,7 @@ func (r *DockerExecutor) ensureClient() (*docker.Client, *ContainerManager, erro
 	cli.SetActivityCoordinator(r.activity)
 
 	r.docker = cli
-	r.containerMgr = NewContainerManager(cli, "", r.kandevHomeDir, r.logger)
+	r.containerMgr = NewContainerManager(cli, r.kandevHomeDir, r.logger)
 	r.initialized = true
 
 	return r.docker, r.containerMgr, nil
@@ -162,6 +177,19 @@ func (r *DockerExecutor) HealthCheck(_ context.Context) error {
 }
 
 func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (instance *ExecutorInstance, err error) {
+	baseCtx := preparationContext(ctx)
+	if err := validateAgentctlStartupConfig(req.AgentctlStartupConfig); err != nil {
+		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
+	}
+	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
+		return nil, err
+	}
+	if _, err := validateContributionDestinations(req.ContributionDestinations); err != nil {
+		return nil, err
+	}
+	if _, err := validateComparisonTargets(req.ComparisonTargets); err != nil {
+		return nil, err
+	}
 	dockerClient, containerMgr, err := r.ensureClient()
 	if err != nil {
 		return nil, fmt.Errorf("docker unavailable: %w", err)
@@ -171,19 +199,25 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		defer reportCreateInstanceProgress(req, &err)()
 	}
 
-	if reconnected, ok := r.tryReconnect(ctx, dockerClient, req); ok {
+	if reconnected, ok := r.tryReconnect(baseCtx, dockerClient, req); ok {
 		return reconnected, nil
 	}
+	if req.WorkspaceReuseRequired {
+		return nil, fmt.Errorf("%w: existing Docker workspace could not be attached", models.ErrWorkspaceReuseUnsafe)
+	}
 
-	r.seedSessionDir(ctx, req)
+	r.seedSessionDir(baseCtx, req)
 
-	containerCfg := r.buildContainerLaunchConfig(req)
+	containerCfg, err := r.buildContainerLaunchConfig(req)
+	if err != nil {
+		return nil, fmt.Errorf("build container launch config: %w", err)
+	}
 	result, err := containerMgr.LaunchContainer(ctx, containerCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to launch container: %w", err)
 	}
 
-	containerIP, _ := dockerClient.GetContainerIP(ctx, result.ContainerID)
+	containerIP, _ := dockerClient.GetContainerIP(baseCtx, result.ContainerID)
 	r.logger.Info("docker instance created",
 		zap.String("instance_id", req.InstanceID),
 		zap.String("container_id", result.ContainerID),
@@ -212,21 +246,21 @@ func reportCreateInstanceProgress(req *ExecutorCreateRequest, errPtr *error) fun
 // container that's healthy enough to resume; otherwise (nil, false) and the
 // caller falls back to provisioning a fresh container.
 func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.Client, req *ExecutorCreateRequest) (*ExecutorInstance, bool) {
-	if req.PreviousExecutionID == "" {
+	if req.PreviousExecutionID == "" && strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyContainerID)) == "" {
 		return nil, false
 	}
 	reconnected, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
 	if reconnectErr == nil {
 		return reconnected, true
 	}
-	r.logger.Info("could not reconnect to previous container, creating new one",
+	r.logger.Info("could not reconnect to existing container",
 		zap.String("previous_execution_id", req.PreviousExecutionID),
 		zap.Error(reconnectErr))
 	return nil, false
 }
 
-// seedSessionDir copies the agent's auth files (auth.json / config.toml /
-// etc.) into the per-container session dir. Replaces the older pattern of
+// seedSessionDir copies the agent's auth files and selected configuration
+// bundles into the per-container session dir. Replaces the older pattern of
 // bind-mounting the host's whole ~/.<agent>, which leaked absolute host
 // paths into agent state DBs and broke resume on codex.
 func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreateRequest) {
@@ -234,7 +268,17 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 		return
 	}
 	instanceRoot := InstanceSessionRoot(r.kandevHomeDir, req.InstanceID)
-	if err := SeedAgentSessionDir(ctx, req.AgentConfig, instanceRoot, r.logger); err != nil {
+	selectedBundles := selectedPortableConfigBundleIDs(req.Metadata)
+	if err := seedAgentSessionDir(
+		ctx,
+		req.AgentConfig,
+		instanceRoot,
+		r.logger,
+		selectedBundles,
+		func(warnings []PortableConfigWarning) {
+			reportPortableConfigWarnings(req.OnProgress, warnings)
+		},
+	); err != nil {
 		r.logger.Warn("failed to seed agent session dir (continuing)",
 			zap.String("instance_id", req.InstanceID),
 			zap.String("agent_id", req.AgentConfig.ID()),
@@ -242,25 +286,8 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 	}
 }
 
-func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) ContainerConfig {
-	return ContainerConfig{
-		AgentConfig:                    req.AgentConfig,
-		WorkspacePath:                  "", // Empty = no workspace mount; we clone inside container.
-		TaskID:                         req.TaskID,
-		TaskTitle:                      req.TaskTitle,
-		TaskEnvironmentID:              req.TaskEnvironmentID,
-		SessionID:                      req.SessionID,
-		ExecutorProfileID:              getMetadataString(req.Metadata, "executor_profile_id"),
-		InstanceID:                     req.InstanceID,
-		Credentials:                    req.Env,
-		AutoApprovePermissions:         req.AutoApprovePermissions,
-		AutoApprovePermissionsOverride: req.AutoApprovePermissionsOverride,
-		McpServers:                     req.McpServers,
-		PrepareScript:                  r.resolvePrepareScript(req),
-		ImageTagOverride:               getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
-		LocalClonePath:                 localCloneMountPath(req.Metadata),
-		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-	}
+func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) (ContainerConfig, error) {
+	return buildDockerContainerConfig(req, string(models.ExecutorTypeLocalDocker))
 }
 
 func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result *LaunchResult, containerIP string) *ExecutorInstance {
@@ -331,9 +358,9 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 		ContainerIP:   containerIP,
 		WorkspacePath: dockerWorkspacePath,
 		Metadata: map[string]interface{}{
-			MetadataKeyIsRemote:      true,
-			MetadataKeyContainerID:   info.ID,
-			"reuse_existing_process": conn.reusingProcess,
+			MetadataKeyIsRemote:             true,
+			MetadataKeyContainerID:          info.ID,
+			MetadataKeyReuseExistingProcess: conn.reusingProcess,
 		},
 		AuthToken: refreshedAuthToken,
 	}, nil
@@ -352,6 +379,11 @@ func (r *DockerExecutor) ensureContainerRunning(ctx context.Context, dockerClien
 		r.logger.Info("starting stopped docker container for reconnect",
 			zap.String("container_id", info.ID),
 			zap.String("state", info.State))
+		if r.beforeContainerStart != nil {
+			if err := r.beforeContainerStart(ctx, info.ID); err != nil {
+				return nil, "", fmt.Errorf("failed to prepare container %s for restart: %w", info.ID, err)
+			}
+		}
 		if err := dockerClient.StartContainer(ctx, info.ID); err != nil {
 			return nil, "", fmt.Errorf("failed to start container %s: %w", info.ID, err)
 		}
@@ -391,7 +423,10 @@ type reconnectControlClient interface {
 // the agent instance, transparently re-handshakes on a 401, and returns the
 // resolved instance endpoint for the user-facing client.
 func (r *DockerExecutor) bringupAgentctl(ctx context.Context, dockerClient *docker.Client, containerID, containerIP string, req *ExecutorCreateRequest) (reconnectAgentctlConn, error) {
-	controlHost, controlPort := resolveDockerEndpoint(ctx, dockerClient, containerID, AgentCtlPort, containerIP, r.logger)
+	controlHost, controlPort, err := r.resolveEndpoint(ctx, dockerClient, containerID, AgentCtlPort, containerIP)
+	if err != nil {
+		return reconnectAgentctlConn{}, err
+	}
 	ctl := agentctl.NewControlClient(controlHost, controlPort, r.logger,
 		agentctl.WithControlAuthToken(req.AuthToken))
 	if err := r.waitForAgentctlHealth(ctx, ctl); err != nil {
@@ -412,13 +447,40 @@ func (r *DockerExecutor) bringupAgentctl(ctx context.Context, dockerClient *dock
 	if err != nil {
 		return reconnectAgentctlConn{}, fmt.Errorf("failed to find instance in container %s: %w", containerID, err)
 	}
-	instanceHost, resolvedInstancePort := resolveDockerEndpoint(ctx, dockerClient, containerID, instancePort, containerIP, r.logger)
+	instanceHost, resolvedInstancePort, err := r.resolveEndpoint(ctx, dockerClient, containerID, instancePort, containerIP)
+	if err != nil {
+		return reconnectAgentctlConn{}, err
+	}
 	return reconnectAgentctlConn{
 		instanceHost:   instanceHost,
 		instancePort:   resolvedInstancePort,
 		authToken:      authToken,
 		reusingProcess: reusingProcess,
 	}, nil
+}
+
+var errContainerEndpointResolution = errors.New("container endpoint resolution failed")
+
+// resolveEndpoint routes reconnect endpoint lookups through the configured
+// resolver. Local Docker retains its container-IP fallback; a configured
+// remote resolver must surface failures because its container IP is not
+// reachable from the backend.
+func (r *DockerExecutor) resolveEndpoint(
+	ctx context.Context, dockerClient hostPortLookup, containerID string, containerPort int, containerIP string,
+) (string, int, error) {
+	if r.endpoints == nil {
+		host, port := resolveDockerEndpoint(ctx, dockerClient, containerID, containerPort, containerIP, r.logger)
+		return host, port, nil
+	}
+	host, port, err := r.endpoints.Resolve(ctx, containerID, containerPort, containerIP)
+	if err != nil {
+		r.logger.Warn("failed to resolve container endpoint on reconnect",
+			zap.String("container_id", containerID),
+			zap.Int("container_port", containerPort),
+			zap.Error(err))
+		return "", 0, fmt.Errorf("%w: %w", errContainerEndpointResolution, err)
+	}
+	return host, port, nil
 }
 
 func reconnectInstanceID(req *ExecutorCreateRequest, previousExecutionID string) string {
@@ -477,8 +539,11 @@ func (r *DockerExecutor) findExistingInstance(
 	instance, err := ctl.GetInstance(ctx, prevExecutionID)
 	if err == nil && instance != nil && instance.Port > 0 {
 		if hasManagedGitHubBrokerEnv(req.Env) {
-			instanceHost, instancePort := resolveDockerEndpoint(
-				ctx, dockerClient, containerID, instance.Port, containerIP, r.logger)
+			instanceHost, instancePort, resolveErr := r.resolveEndpoint(
+				ctx, dockerClient, containerID, instance.Port, containerIP)
+			if resolveErr != nil {
+				return 0, false, resolveErr
+			}
 			client := agentctl.NewClient(instanceHost, instancePort, r.logger,
 				agentctl.WithAuthToken(authToken))
 			defer client.Close()
@@ -491,7 +556,10 @@ func (r *DockerExecutor) findExistingInstance(
 			return createReconnectInstance(ctx, ctl, req, prevExecutionID)
 		}
 		// Instance exists, check if agent subprocess is running
-		instanceHost, instancePort := resolveDockerEndpoint(ctx, dockerClient, containerID, instance.Port, containerIP, r.logger)
+		instanceHost, instancePort, resolveErr := r.resolveEndpoint(ctx, dockerClient, containerID, instance.Port, containerIP)
+		if resolveErr != nil {
+			return 0, false, resolveErr
+		}
 		client := agentctl.NewClient(instanceHost, instancePort, r.logger,
 			agentctl.WithAuthToken(authToken))
 		status, statusErr := client.GetStatus(ctx)
@@ -529,7 +597,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 	var stripEnv []string
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
-		disableAskQuestion = agents.IsPassthroughOnly(req.AgentConfig)
+		disableAskQuestion = !agents.SupportsInteractiveMCPTools(req.AgentConfig)
 		if rt := req.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
 			assumeMcpHttp = rt.AssumeMcpHttp
@@ -541,22 +609,29 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		ID:            instanceID,
 		WorkspacePath: dockerWorkspacePath,
 		AgentType:     agentType,
-		Env:           cloneStringMap(req.Env),
+		Env:           selectedCheckoutAgentEnv(req.Env, req.Metadata),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
 		),
-		AutoStart:           false,
-		McpServers:          req.McpServers,
-		SessionID:           req.SessionID,
-		TaskID:              req.TaskID,
-		DisableAskQuestion:  disableAskQuestion,
-		AssumeMcpSse:        assumeMcpSse,
-		AssumeMcpHttp:       assumeMcpHttp,
-		McpMode:             req.McpMode,
-		RequiresProcessKill: requiresProcessKill,
-		StripEnv:            stripEnv,
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		AutoStart:                  false,
+		McpServers:                 req.McpServers,
+		McpProviders:               req.McpProviders,
+		McpProfile:                 req.McpProfile,
+		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
+		SessionID:                  req.SessionID,
+		TaskID:                     req.TaskID,
+		DisableAskQuestion:         disableAskQuestion,
+		AssumeMcpSse:               assumeMcpSse,
+		AssumeMcpHttp:              assumeMcpHttp,
+		McpMode:                    req.McpMode,
+		RequiresProcessKill:        requiresProcessKill,
+		StripEnv:                   stripEnv,
+		ProviderGatewayAuth:        req.ProviderGatewayAuth,
+		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:        req.RemoteContributions,
+		ContributionDestinations:   req.ContributionDestinations,
+		ComparisonTargets:          req.ComparisonTargets,
 	}
 }
 
@@ -641,10 +716,11 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 
 	// On destructive stop reasons (task/session deleted/archived), clean up
 	// the kandev-managed per-container session dir so we don't leak GBs of
-	// agent state on disk. Plain stops preserve the dir so resume re-attaches
-	// to the same agent state, mirroring the Sprites preserve-on-stop rule.
+	// agent state on disk. Plain stops and stale execution cleanup preserve the
+	// dir because a resume may re-attach to the same container and its bind
+	// mounts.
 	teardownContainer := shouldTeardownDockerContainer(instance.StopReason)
-	if teardownContainer && r.kandevHomeDir != "" && instance.InstanceID != "" {
+	if shouldRunExecutorCleanup(instance.StopReason) && r.kandevHomeDir != "" && instance.InstanceID != "" {
 		CleanupAgentSessionDir(InstanceSessionRoot(r.kandevHomeDir, instance.InstanceID), r.logger)
 	}
 
@@ -665,7 +741,7 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 		return nil
 	}
 
-	dockerClient, _, err := r.ensureClient()
+	dockerClient, containerMgr, err := r.ensureClient()
 	if err != nil {
 		return fmt.Errorf("docker unavailable: %w", err)
 	}
@@ -674,12 +750,29 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	defer cancel()
 
 	if force {
-		err = dockerClient.KillContainer(cleanupCtx, instance.ContainerID, "SIGKILL")
-	} else {
-		err = dockerClient.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout)
+		if killErr := dockerClient.KillContainer(cleanupCtx, instance.ContainerID, "SIGKILL"); killErr != nil {
+			r.logger.Warn("failed to kill docker container before forced removal",
+				zap.String("container_id", instance.ContainerID),
+				zap.Error(killErr))
+		}
+		if removeErr := dockerClient.RemoveContainer(cleanupCtx, instance.ContainerID, true); removeErr != nil {
+			return fmt.Errorf("failed to remove container after kill: %w", removeErr)
+		}
+		return nil
 	}
 
-	if err != nil {
+	if shouldRunExecutorCleanup(instance.StopReason) {
+		if err := containerMgr.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout); err != nil {
+			return fmt.Errorf("failed to stop and remove container: %w", err)
+		}
+		return nil
+	}
+
+	// Stale execution cleanup deliberately stops but preserves the container.
+	// A page refresh may still recover the durable task environment by starting
+	// that same container; only destructive task/session lifecycle reasons own
+	// removal. Failed-launch rollback uses the force branch above.
+	if err := dockerClient.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout); err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
@@ -687,10 +780,10 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 }
 
 // shouldTeardownDockerContainer extends terminal cleanup with stale execution
-// cleanup for Docker only. A stale Docker execution owns a local container and
-// per-instance session dir that become untracked before retry/resume launches a
-// replacement. Sprites intentionally keep stale sandboxes; see
-// shouldRunExecutorCleanup for that shared runtime policy.
+// cleanup for Docker only. Stale cleanup must stop the old container before a
+// retry/resume launch, but its per-instance session dir must remain available
+// because the stopped container still references its bind mounts. Destructive
+// task/session lifecycle reasons own removal; see shouldRunExecutorCleanup.
 func shouldTeardownDockerContainer(reason string) bool {
 	if shouldRunExecutorCleanup(reason) {
 		return true
@@ -705,7 +798,7 @@ func dockerCleanupContext(ctx context.Context, agentStopFailed bool) (context.Co
 	return ctx, func() {}
 }
 
-func (r *DockerExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, error) {
+func (r *DockerExecutor) RecoverInstances(_ context.Context, _ []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	// No-op: Docker client is initialized lazily on first use.
 	// If no session has used Docker yet, there's nothing to recover.
 	// Running containers from a previous backend process will be detected
@@ -746,44 +839,8 @@ func (r *DockerExecutor) IsAlwaysResumable() bool         { return true }
 // postlude — older profiles that snapshot a then-current default lacked it,
 // so simply updating DefaultPrepareScript wouldn't reach those users. The
 // postlude runs after the user's prepare script and is idempotent.
-func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string {
-	script := getMetadataString(req.Metadata, MetadataKeySetupScript)
-	if script == "" {
-		script = DefaultPrepareScript("local_docker")
-	}
-	if script == "" {
-		return ""
-	}
-	script += KandevBranchCheckoutPostlude()
-
-	resolver := scriptengine.NewResolver().
-		WithProvider(scriptengine.WorkspaceProvider(dockerWorkspacePath)).
-		WithProvider(scriptengine.GitIdentityProvider(req.Metadata)).
-		WithProvider(scriptengine.GitHubAuthProvider(req.Env)).
-		WithProvider(scriptengine.WorktreeProvider(
-			"",
-			dockerWorkspacePath,
-			getMetadataString(req.Metadata, MetadataKeyWorktreeID),
-			getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
-			getMetadataString(req.Metadata, MetadataKeyBaseBranch),
-		)).
-		WithProvider(scriptengine.RepositoryProvider(
-			req.Metadata,
-			req.Env,
-			getGitRemoteURL,
-			injectGitHubTokenIntoCloneURL,
-		)).
-		// Docker image has agents and agentctl pre-installed;
-		// resolve these to empty so stored scripts with these placeholders don't break.
-		// The entrypoint handles agentctl startup, so install/start must be no-ops.
-		WithProvider(scriptengine.AgentInstallProvider(nil)).
-		WithStatic(map[string]string{
-			"kandev.agentctl.port":    "9999",
-			"kandev.agentctl.install": "",
-			"kandev.agentctl.start":   "",
-		})
-
-	return resolver.Resolve(script)
+func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (string, error) {
+	return resolveDockerPrepareScript(req, string(models.ExecutorTypeLocalDocker))
 }
 
 func localCloneMountPath(metadata map[string]interface{}) string {

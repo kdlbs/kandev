@@ -1,22 +1,89 @@
+/* eslint-disable max-lines -- User-settings hydration cases share one contract test file. */
+
 import { describe, it, expect } from "vitest";
 import {
   buildCoreFields,
+  createDefaultUserSettings,
+  mapUserSettingsData,
   mapUserSettingsResponse,
   parseChangesPanelLayout,
+  parseLastSeenDisplay,
+  parseLspStatusLocation,
   parseStartupPage,
   parseSystemMetricsDisplay,
-  parseVoiceMode,
 } from "./user-settings";
+import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
+import type { SidebarTaskColorAutomation } from "@/lib/types/http-user-settings";
 
 const UPDATED_AT = "2026-01-01T00:00:00Z";
 const DEFAULT_USER_ID = "default-user";
 
+describe("user settings revision ordering", () => {
+  it("orders atomic revisions and hydrates the current revision", () => {
+    expect(compareUserSettingsRevisions(3, 2)).toBe(1);
+    expect(
+      mapUserSettingsResponse({
+        settings: {
+          user_id: DEFAULT_USER_ID,
+          workspace_id: toWorkspaceId(""),
+          repository_ids: [],
+          revision: 42,
+          updated_at: UPDATED_AT,
+        },
+      }).revision,
+    ).toBe(42);
+  });
+
+  it("does not assign a newer local revision to an unversioned HTTP response", () => {
+    const current = { ...mapUserSettingsResponse(null), revision: 3 };
+    const result = mapUserSettingsResponse(
+      {
+        settings: {
+          user_id: DEFAULT_USER_ID,
+          workspace_id: toWorkspaceId(""),
+          repository_ids: [],
+          updated_at: UPDATED_AT,
+        },
+      },
+      current,
+    );
+
+    expect(result.revision).toBeNull();
+  });
+
+  it("hydrates workspace sidebar layouts without dropping their revisions", () => {
+    const result = buildCoreFields({
+      sidebar_layouts_by_workspace: {
+        "workspace-a": {
+          version: 1,
+          revision: 3,
+          nodes: [],
+        },
+      },
+    } as never) as Record<string, unknown>;
+
+    expect(result.sidebarLayoutsByWorkspace).toEqual({
+      "workspace-a": { version: 1, revision: 3, nodes: [] },
+    });
+  });
+});
+
 describe("startup page user settings", () => {
   it("normalizes startup page preferences", () => {
+    expect(parseStartupPage("threads")).toBe("threads");
     expect(parseStartupPage("last_task")).toBe("last_task");
     expect(parseStartupPage(undefined)).toBe("task_overview");
     expect(parseStartupPage("future_value")).toBe("task_overview");
+  });
+
+  // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.3
+  it("maps Threads and preserves it when a later settings patch omits startup page", () => {
+    const current = mapUserSettingsData({ startup_page: "threads" });
+    expect(current.startupPage).toBe("threads");
+    expect(mapUserSettingsData({ tasks_list_show_details: true }, current).startupPage).toBe(
+      "threads",
+    );
   });
 
   it("defaults startup page and maps the last-task choice", () => {
@@ -36,6 +103,76 @@ describe("startup page user settings", () => {
   });
 });
 
+describe("Threads saved-view hydration", () => {
+  it("provides the canonical view when the backend omits Threads settings", () => {
+    const settings = createDefaultUserSettings();
+    expect(settings.threadViews).toHaveLength(1);
+    expect(settings.threadViews[0]).toMatchObject({
+      id: "view-all-threads",
+      name: "All threads",
+      taskScope: { mode: "all", taskIds: [] },
+      sort: { key: "attention", direction: "asc" },
+      maxColumns: 5,
+      layout: "columns",
+      autoHideComposer: false,
+    });
+    expect(settings.threadActiveViewId).toBe("view-all-threads");
+  });
+
+  it("maps Threads views and preserves independent current state for omitted fields", () => {
+    const current = createDefaultUserSettings();
+    current.threadActiveViewId = "current";
+    const result = buildCoreFields(
+      {
+        thread_views: [
+          {
+            id: "saved",
+            name: "Saved",
+            task_scope: { mode: "selected", task_ids: ["task-a"] },
+            filters: [],
+            sort: { key: "priority", direction: "desc" },
+            max_columns: 3,
+            layout: "grid",
+            auto_hide_composer: true,
+          },
+        ],
+      },
+      current,
+    );
+    expect(result.threadViews[0]).toMatchObject({
+      id: "saved",
+      taskScope: { mode: "selected", taskIds: ["task-a"] },
+      sort: { key: "priority", direction: "desc" },
+      maxColumns: 3,
+      layout: "grid",
+      autoHideComposer: true,
+    });
+    expect(result.threadActiveViewId).toBe("current");
+    expect(buildCoreFields({}, { ...current, ...result }).threadViews).toEqual(result.threadViews);
+  });
+});
+
+describe("LSP status location hydration", () => {
+  it("defaults to toolbar and maps status_bar", () => {
+    expect(parseLspStatusLocation(undefined)).toBe("toolbar");
+    expect(parseLspStatusLocation("unexpected")).toBe("toolbar");
+    expect(parseLspStatusLocation("status_bar")).toBe("status_bar");
+    expect(mapUserSettingsResponse(null).lspStatusLocation).toBe("toolbar");
+
+    const result = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        lsp_status_location: "status_bar",
+        updated_at: UPDATED_AT,
+      },
+    });
+
+    expect(result.lspStatusLocation).toBe("status_bar");
+  });
+});
+
 describe("agent-generated task title defaults", () => {
   it("defaults missing preference to enabled", () => {
     expect(buildCoreFields({}).agentGeneratedTaskTitles).toBe(true);
@@ -45,6 +182,68 @@ describe("agent-generated task title defaults", () => {
     expect(buildCoreFields({ agent_generated_task_titles: false }).agentGeneratedTaskTitles).toBe(
       false,
     );
+  });
+});
+
+describe("app status bar visibility hydration", () => {
+  it("defaults missing values to disabled and preserves explicit values", () => {
+    const defaults = buildCoreFields({}) as Record<string, unknown>;
+    const enabled = buildCoreFields({
+      app_status_bar_enabled: true,
+    } as unknown as Parameters<typeof buildCoreFields>[0]) as Record<string, unknown>;
+    const disabled = buildCoreFields({
+      app_status_bar_enabled: false,
+    } as unknown as Parameters<typeof buildCoreFields>[0]) as Record<string, unknown>;
+
+    expect(defaults.appStatusBarEnabled).toBe(false);
+    expect(enabled.appStatusBarEnabled).toBe(true);
+    expect(disabled.appStatusBarEnabled).toBe(false);
+  });
+
+  it("preserves the current value when a partial update omits the field", () => {
+    const current = {
+      ...mapUserSettingsResponse(null),
+      appStatusBarEnabled: false,
+    } as Parameters<typeof buildCoreFields>[1];
+
+    expect((buildCoreFields({}, current) as Record<string, unknown>).appStatusBarEnabled).toBe(
+      false,
+    );
+  });
+});
+
+describe("quick-chat tab order hydration", () => {
+  it("maps the per-workspace mixed-tab order and keeps omitted patches unchanged", () => {
+    const order = {
+      "workspace-a": ["conversation:one", "terminal:one"],
+    };
+    expect(
+      buildCoreFields({ quick_chat_tab_order_by_workspace: order }).quickChatTabOrderByWorkspace,
+    ).toEqual(order);
+
+    const current = {
+      ...mapUserSettingsResponse(null),
+      quickChatTabOrderByWorkspace: order,
+    };
+    expect(buildCoreFields({}, current).quickChatTabOrderByWorkspace).toEqual(order);
+  });
+});
+
+describe("session hostname resolution setting hydration", () => {
+  it("defaults to disabled, maps explicit values, and preserves omitted updates", () => {
+    const defaults = buildCoreFields({}) as Record<string, unknown>;
+    const enabled = buildCoreFields({ resolve_session_hostnames: true } as Parameters<
+      typeof buildCoreFields
+    >[0]) as Record<string, unknown>;
+    const current = {
+      ...mapUserSettingsResponse(null),
+      resolveSessionHostnames: true,
+    } as Parameters<typeof buildCoreFields>[1];
+    const omitted = buildCoreFields({}, current) as Record<string, unknown>;
+
+    expect(defaults.resolveSessionHostnames).toBe(false);
+    expect(enabled.resolveSessionHostnames).toBe(true);
+    expect(omitted.resolveSessionHostnames).toBe(true);
   });
 });
 
@@ -126,6 +325,20 @@ describe("buildCoreFields", () => {
     expect(result.terminalFontFamily).toBeNull();
   });
 
+  it("maps default_utility_agent_profile_id to defaultUtilityAgentProfileId", () => {
+    const settings = {
+      workspace_id: toWorkspaceId(""),
+      repository_ids: [],
+      default_utility_agent_profile_id: "profile-1",
+      updated_at: UPDATED_AT,
+    } as unknown as Parameters<typeof buildCoreFields>[0];
+
+    const result = buildCoreFields(settings);
+    expect(result.defaultUtilityAgentProfileId).toBe("profile-1");
+  });
+});
+
+describe("buildCoreFields task-create last-used mapping", () => {
   it("does not mark an empty task-create last-used object as synced", () => {
     const settings = {
       task_create_last_used: {},
@@ -137,6 +350,7 @@ describe("buildCoreFields", () => {
       branch: null,
       agentProfileId: null,
       executorProfileId: null,
+      workflowIdsByWorkspace: {},
       synced: false,
     });
   });
@@ -151,6 +365,29 @@ describe("buildCoreFields", () => {
     const result = buildCoreFields(settings);
     expect(result.taskCreateLastUsed).toMatchObject({
       repositoryId: "repo-1",
+      synced: true,
+    });
+  });
+
+  it("maps workspace-scoped workflow history and marks it as synced", () => {
+    const result = buildCoreFields({
+      task_create_last_used: {
+        workflow_ids_by_workspace: {
+          "workspace-1": "workflow-1",
+          "workspace-2": "workflow-2",
+        },
+      },
+    });
+
+    expect(result.taskCreateLastUsed).toEqual({
+      repositoryId: null,
+      branch: null,
+      agentProfileId: null,
+      executorProfileId: null,
+      workflowIdsByWorkspace: {
+        "workspace-1": "workflow-1",
+        "workspace-2": "workflow-2",
+      },
       synced: true,
     });
   });
@@ -210,6 +447,34 @@ describe("Azure DevOps browse preference mapping", () => {
     });
 
     expect(result.azureDevOpsBrowsePreferences).toEqual(preferences);
+  });
+});
+
+describe("automatic task-color hydration", () => {
+  it("maps the portable automatic task-color rules", () => {
+    const automation: SidebarTaskColorAutomation = {
+      enabled: true,
+      rules: [
+        {
+          id: "blocked",
+          enabled: true,
+          condition: { dimension: "task_state", value: "BLOCKED", label: "Blocked" },
+          output: { kind: "fixed", color: "red" },
+        },
+      ],
+    };
+
+    const result = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        sidebar_task_color_automation: automation,
+        updated_at: UPDATED_AT,
+      },
+    });
+
+    expect(result.sidebarTaskColorAutomation).toEqual(automation);
   });
 });
 
@@ -314,6 +579,12 @@ describe("mapUserSettingsResponse", () => {
       filters: [],
       sort: { key: "updatedAt", direction: "desc" },
       group: "workflow",
+      taskRow: {
+        detailsEnabled: true,
+        detailOrder: ["relative_time", "repository", "pull_request_number"],
+        visibleDetails: ["relative_time", "repository", "pull_request_number"],
+        trailing: "git_changes",
+      },
     });
   });
 });
@@ -367,6 +638,42 @@ describe("transcript navigation settings", () => {
   });
 });
 
+describe("todo list panel setting", () => {
+  it("defaults to hidden and preserves an explicit true", () => {
+    const fallback = mapUserSettingsResponse(null) as { showTodoListPanel?: boolean };
+    const enabled = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        show_todo_list_panel: true,
+        updated_at: UPDATED_AT,
+      } as unknown as NonNullable<Parameters<typeof mapUserSettingsResponse>[0]>["settings"],
+    }) as { showTodoListPanel?: boolean };
+
+    expect(fallback.showTodoListPanel).toBe(false);
+    expect(enabled.showTodoListPanel).toBe(true);
+  });
+
+  it("defaults the not-empty sub-option to false and preserves an explicit true", () => {
+    const fallback = mapUserSettingsResponse(null) as {
+      showTodoListPanelOnlyWhenNotEmpty?: boolean;
+    };
+    const enabled = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        show_todo_list_panel_only_when_not_empty: true,
+        updated_at: UPDATED_AT,
+      } as unknown as NonNullable<Parameters<typeof mapUserSettingsResponse>[0]>["settings"],
+    }) as { showTodoListPanelOnlyWhenNotEmpty?: boolean };
+
+    expect(fallback.showTodoListPanelOnlyWhenNotEmpty).toBe(false);
+    expect(enabled.showTodoListPanelOnlyWhenNotEmpty).toBe(true);
+  });
+});
+
 describe("parseChangesPanelLayout", () => {
   it('returns "tree" for "tree"', () => {
     expect(parseChangesPanelLayout("tree")).toBe("tree");
@@ -383,77 +690,117 @@ describe("parseChangesPanelLayout", () => {
   });
 });
 
-describe("parseVoiceMode", () => {
-  it("maps every field from the snake_case wire payload", () => {
-    expect(
-      parseVoiceMode({
-        enabled: false,
-        engine: "whisperWeb",
-        language: "pt-PT",
-        mode: "hold",
-        auto_send: true,
-        whisper_web_model: "small",
-      }),
-    ).toEqual({
-      enabled: false,
-      engine: "whisperWeb",
-      language: "pt-PT",
-      mode: "hold",
-      autoSend: true,
-      whisperWebModel: "small",
-    });
+describe("parseLastSeenDisplay", () => {
+  it('returns "relative" for "relative"', () => {
+    expect(parseLastSeenDisplay("relative")).toBe("relative");
   });
 
-  it("returns the defaults when the payload is undefined", () => {
-    expect(parseVoiceMode(undefined)).toEqual({
-      enabled: true,
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      autoSend: false,
-      whisperWebModel: "base",
-    });
+  it('returns "absolute" for "absolute"', () => {
+    expect(parseLastSeenDisplay("absolute")).toBe("absolute");
   });
 
-  it("defaults enabled to true when the wire payload omits the field (old rows)", () => {
-    const result = parseVoiceMode({
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      auto_send: false,
-      whisper_web_model: "base",
-    } as unknown as Parameters<typeof parseVoiceMode>[0]);
-    expect(result.enabled).toBe(true);
-  });
-
-  it("fills in defaults for missing string fields and coerces auto_send to false", () => {
-    const result = parseVoiceMode({
-      engine: "" as unknown as "auto",
-      language: "",
-      mode: "" as unknown as "toggle",
-      whisper_web_model: "" as unknown as "base",
-    } as unknown as Parameters<typeof parseVoiceMode>[0]);
-    expect(result).toEqual({
-      enabled: true,
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      autoSend: false,
-      whisperWebModel: "base",
-    });
+  it('returns "absolute" for undefined or unknown values', () => {
+    expect(parseLastSeenDisplay(undefined)).toBe("absolute");
+    expect(parseLastSeenDisplay("grid")).toBe("absolute");
+    expect(parseLastSeenDisplay("")).toBe("absolute");
   });
 });
 
-describe("mapUserSettingsResponse voice mode", () => {
-  it("defaults the whole voiceMode object when response is null", () => {
-    const result = mapUserSettingsResponse(null);
-    expect(result.voiceMode).toEqual({
-      enabled: true,
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      autoSend: false,
-      whisperWebModel: "base",
-    });
+describe("last seen display hydration", () => {
+  it("defaults to absolute", () => {
+    expect(createDefaultUserSettings().lastSeenDisplay).toBe("absolute");
+  });
+
+  it("maps a stored relative value", () => {
+    const mapped = mapUserSettingsData(
+      { last_seen_display: "relative" },
+      createDefaultUserSettings(),
+    );
+    expect(mapped.lastSeenDisplay).toBe("relative");
+  });
+
+  it("normalizes unknown stored values to absolute", () => {
+    const mapped = mapUserSettingsData(
+      { last_seen_display: "garbage" as "absolute" | "relative" },
+      createDefaultUserSettings(),
+    );
+    expect(mapped.lastSeenDisplay).toBe("absolute");
+  });
+
+  it("preserves the current value when omitted", () => {
+    const current = { ...createDefaultUserSettings(), lastSeenDisplay: "relative" as const };
+    const mapped = mapUserSettingsData({}, current);
+    expect(mapped.lastSeenDisplay).toBe("relative");
+  });
+});
+
+describe("auto-hide empty steps preference hydration", () => {
+  it("hydrates the canonical workflow-scoped key", () => {
+    const mapped = mapUserSettingsData(
+      { workflow_ids_with_auto_hide_empty_steps: ["wf-a"] },
+      createDefaultUserSettings(),
+    );
+
+    expect(mapped.workflowIdsWithAutoHideEmptySteps).toEqual(["wf-a"]);
+  });
+});
+
+describe("prevent auto-start on open preference", () => {
+  it("defaults the missing preference to false", () => {
+    expect(buildCoreFields({}).preventAutoStartAgentOnOpen).toBe(false);
+    expect(mapUserSettingsResponse(null).preventAutoStartAgentOnOpen).toBe(false);
+  });
+
+  it("preserves an explicit enabled preference", () => {
+    expect(
+      buildCoreFields({ prevent_auto_start_agent_on_open: true }).preventAutoStartAgentOnOpen,
+    ).toBe(true);
+    expect(
+      mapUserSettingsResponse({
+        settings: {
+          user_id: DEFAULT_USER_ID,
+          workspace_id: toWorkspaceId(""),
+          repository_ids: [],
+          prevent_auto_start_agent_on_open: true,
+          updated_at: UPDATED_AT,
+        },
+      }).preventAutoStartAgentOnOpen,
+    ).toBe(true);
+  });
+
+  it("preserves an explicit disabled preference", () => {
+    expect(
+      buildCoreFields({ prevent_auto_start_agent_on_open: false }).preventAutoStartAgentOnOpen,
+    ).toBe(false);
+  });
+});
+
+it("maps hover settings and retains false/zero through omitted updates", () => {
+  expect(createDefaultUserSettings()).toMatchObject({
+    sidebarHoverEnabled: true,
+    sidebarHoverDelayMs: 500,
+  });
+  const current = mapUserSettingsData({ sidebar_hover_enabled: false, sidebar_hover_delay_ms: 0 });
+  expect(current).toMatchObject({ sidebarHoverEnabled: false, sidebarHoverDelayMs: 0 });
+  expect(buildCoreFields({}, current)).toMatchObject({
+    sidebarHoverEnabled: false,
+    sidebarHoverDelayMs: 0,
+  });
+  expect(
+    mapUserSettingsData({ sidebar_hover_enabled: true, sidebar_hover_delay_ms: 1200 }),
+  ).toMatchObject({ sidebarHoverEnabled: true, sidebarHoverDelayMs: 1200 });
+});
+
+// @covers AC-TASKS-CREATION-AUTO-FOCUS-001.1, AC-TASKS-CREATION-AUTO-FOCUS-001.4
+describe("task creation auto-focus preference", () => {
+  it("defaults on and preserves explicit false across partial hydration", () => {
+    expect(createDefaultUserSettings()).toHaveProperty("autoFocusNewTasks", true);
+    expect(buildCoreFields({ auto_focus_new_tasks: false })).toHaveProperty(
+      "autoFocusNewTasks",
+      false,
+    );
+    expect(
+      buildCoreFields({}, { ...createDefaultUserSettings(), autoFocusNewTasks: false }),
+    ).toHaveProperty("autoFocusNewTasks", false);
   });
 });

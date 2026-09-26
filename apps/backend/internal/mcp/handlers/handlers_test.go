@@ -17,9 +17,12 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -38,6 +41,12 @@ import (
 
 // newTestTaskService creates a real task service with a temporary file-backed SQLite DB for integration tests.
 // Returns the service and the raw repo (for seeding data).
+type testWorkspacePolicyAttacher struct{}
+
+func (testWorkspacePolicyAttacher) AttachWorkspacePolicy(context.Context, string, string, service.WorkspacePolicy) error {
+	return nil
+}
+
 func newTestTaskService(t *testing.T) (*service.Service, *sqliterepo.Repository) {
 	svc, repo, _ := newTestTaskServiceWithEventBus(t)
 	return svc, repo
@@ -84,23 +93,50 @@ func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo
 	eventBus := bus.NewMemoryEventBus(log)
 	t.Cleanup(func() { eventBus.Close() })
 	svc := service.NewService(service.Repos{
-		Workspaces:   repo,
-		Tasks:        repo,
-		TaskRepos:    repo,
-		Workflows:    repo,
-		Messages:     repo,
-		Turns:        repo,
-		Sessions:     repo,
-		GitSnapshots: repo,
-		RepoEntities: repo,
-		Executors:    repo,
-		Environments: repo,
-		Reviews:      repo,
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		WorkspaceFolders: repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		TaskEnvironments: repo,
+		Reviews:          repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 	return svc, repo, eventBus
 }
 
 func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository) {
+	t.Helper()
+	svc, repo, workflowCtrl, workflowRepo, _ := newTestTaskServiceWithWorkflowDB(t)
+	return svc, repo, workflowCtrl, workflowRepo
+}
+
+// newTestTaskServiceWithWorkflowDB is newTestTaskServiceWithWorkflow plus the
+// underlying shared *sqlx.DB, for tests that need to break one table
+// (workflow_steps, say) directly to force a genuine repository-layer error
+// without disturbing the rest of the fixture's tables.
+func newTestTaskServiceWithWorkflowDB(t *testing.T) (
+	*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository, *sqlx.DB,
+) {
+	svc, repo, workflowCtrl, workflowRepo, sqlxDB, _ := newTestTaskServiceWithWorkflowDBAndEventBus(t)
+	return svc, repo, workflowCtrl, workflowRepo, sqlxDB
+}
+
+func newTestTaskServiceWithWorkflowDBAndEventBus(t *testing.T) (
+	*service.Service,
+	*sqliterepo.Repository,
+	*workflowcontroller.Controller,
+	*workflowrepo.Repository,
+	*sqlx.DB,
+	*bus.MemoryEventBus,
+) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
@@ -122,21 +158,60 @@ func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo
 	eventBus := bus.NewMemoryEventBus(log)
 	t.Cleanup(func() { eventBus.Close() })
 	svc := service.NewService(service.Repos{
-		Workspaces:   repo,
-		Tasks:        repo,
-		TaskRepos:    repo,
-		Workflows:    repo,
-		Messages:     repo,
-		Turns:        repo,
-		Sessions:     repo,
-		GitSnapshots: repo,
-		RepoEntities: repo,
-		Executors:    repo,
-		Environments: repo,
-		Reviews:      repo,
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		WorkspaceFolders: repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		Reviews:          repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
-	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo
+	t.Cleanup(func() { _ = workflowSvc.Close() })
+	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo, sqlxDB, eventBus
+}
+
+func TestHandleListWorkspacesAutomationIsScopedToPrincipalWorkspace(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID:        "ws-state-event",
+		Name:      "State Event",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}))
+	foreignWorkspace := &models.Workspace{
+		ID:        "ws-foreign",
+		Name:      "Foreign",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	require.NoError(t, repo.CreateWorkspace(ctx, foreignWorkspace))
+
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	ctx = mcpscope.WithPrincipal(ctx, mcpscope.Principal{
+		AutomationID:    "automation-1",
+		WorkspaceID:     "ws-state-event",
+		CallerTaskID:    "automation-task",
+		CallerSessionID: "automation-session",
+		Surface:         mcpprofile.SurfaceAutomation,
+	})
+	response, err := h.handleListWorkspaces(ctx, &ws.Message{ID: "1", Action: ws.ActionMCPListWorkspaces})
+	require.NoError(t, err)
+	require.NotNil(t, response)
+
+	var payload dto.ListWorkspacesResponse
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	require.Equal(t, 1, payload.Total)
+	require.Equal(t, "ws-state-event", payload.Workspaces[0].ID)
 }
 
 func seedMCPHandlerSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, state models.TaskSessionState) {
@@ -186,6 +261,162 @@ func (p *mcpUserSettingsProvider) GetUserSettings(context.Context) (*usermodels.
 	return p.settings, p.err
 }
 
+type recordingRemoteContributionService struct {
+	resolution   *models.RemoteContributionResolution
+	associateErr error
+	associateURL string
+	taskID       string
+	repositoryID string
+}
+
+func (s *recordingRemoteContributionService) Resolve(_ context.Context, _, _, rawURL string) (*models.RemoteContributionResolution, bool, error) {
+	s.associateURL = rawURL
+	return s.resolution, true, nil
+}
+
+func (s *recordingRemoteContributionService) Associate(_ context.Context, _, _, taskID, repositoryID string, _ *models.RemoteContributionResolution) error {
+	s.taskID = taskID
+	s.repositoryID = repositoryID
+	return s.associateErr
+}
+
+func testRemoteContributionResolution() *models.RemoteContributionResolution {
+	return &models.RemoteContributionResolution{
+		Binding: models.RemoteContribution{
+			Version:      models.RemoteContributionVersion,
+			Provider:     models.RemoteContributionProviderGitHub,
+			Kind:         models.RemoteContributionKindPullRequest,
+			CanonicalURL: "https://github.com/acme/widget/pull/7",
+			Number:       7,
+			State:        models.RemoteContributionStateOpen,
+			BaseBranch:   "main",
+			HeadBranch:   "feature/remote",
+			HeadSHA:      strings.Repeat("a", 40),
+			SourceRepository: models.RemoteContributionRepository{
+				Host: "github.com", Path: "contributor/widget", ProviderID: "R_kgDOFork123", RemoteURL: "https://github.com/contributor/widget.git",
+			},
+			CollaborationAllowed: true,
+		},
+		TargetProvider:      models.RemoteContributionProviderGitHub,
+		TargetHost:          "https://github.com",
+		TargetPath:          "acme/widget",
+		TargetProviderID:    "99",
+		TargetRemoteURL:     "https://github.com/acme/widget.git",
+		TargetDefaultBranch: "main",
+	}
+}
+
+func TestHandleCreateTask_AssociatesExistingRemoteContribution(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	remote := &recordingRemoteContributionService{resolution: testRemoteContributionResolution()}
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	h.SetRemoteContributionService(remote)
+
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":     workspaces[0].ID,
+		"workflow_id":      workflows[0].ID,
+		"title":            "Remote contribution",
+		"description":      "Work on the existing contribution",
+		"agent_profile_id": "profile-remote",
+		"start_agent":      false,
+		"repositories": []map[string]interface{}{{
+			"github_url":  "https://github.com/acme/widget/pull/7",
+			"base_branch": "main",
+		}},
+	}))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	if resp.Type == ws.MessageTypeError {
+		t.Fatalf("create task returned error: %s", string(resp.Payload))
+	}
+	if remote.associateURL != "https://github.com/acme/widget/pull/7" || remote.taskID == "" || remote.repositoryID == "" {
+		t.Fatalf("remote association = URL %q, task %q, repository %q", remote.associateURL, remote.taskID, remote.repositoryID)
+	}
+	task, err := svc.GetTask(ctx, remote.taskID)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	taskRepos, err := repo.ListTaskRepositories(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, taskRepos, 1)
+	if remote.repositoryID != taskRepos[0].RepositoryID {
+		t.Fatalf("Associate received repositoryID %q, want task_repositories.repository_id %q",
+			remote.repositoryID, taskRepos[0].RepositoryID)
+	}
+	if remote.repositoryID == taskRepos[0].ID {
+		t.Fatalf("Associate received task_repositories row id %q instead of repository_id",
+			remote.repositoryID)
+	}
+	binding, found, err := models.LoadRemoteContribution(taskRepos[0].Metadata)
+	require.NoError(t, err)
+	if !found || binding.SourceRepository.Path != "contributor/widget" {
+		t.Fatalf("persisted remote contribution = (%+v, found=%v)", binding, found)
+	}
+}
+
+func TestResolveMCPRemoteContributionsPreservesExistingDefaultBranch(t *testing.T) {
+	resolution := testRemoteContributionResolution()
+	resolution.TargetDefaultBranch = ""
+	remote := &recordingRemoteContributionService{resolution: resolution}
+	h := &Handlers{remoteContributionSvc: remote, logger: testLogger(t)}
+	repos := []service.TaskRepositoryInput{{
+		RemoteURL:     "https://github.com/acme/widget/pull/7",
+		DefaultBranch: "trunk",
+	}}
+	resolutions, err := h.resolveMCPRemoteContributions(context.Background(), "workspace-1", "user-1", repos)
+	if err != nil {
+		t.Fatalf("resolveMCPRemoteContributions() error = %v", err)
+	}
+	if len(resolutions) != 1 || resolutions[0] == nil {
+		t.Fatalf("resolutions = %#v, want one resolution", resolutions)
+	}
+	if repos[0].DefaultBranch != "trunk" {
+		t.Fatalf("default branch = %q, want existing branch trunk", repos[0].DefaultBranch)
+	}
+}
+
+func TestHandleCreateTask_RollsBackWhenRemoteContributionAssociationFails(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	remote := &recordingRemoteContributionService{
+		resolution:   testRemoteContributionResolution(),
+		associateErr: errors.New("association failed"),
+	}
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	h.SetRemoteContributionService(remote)
+
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":     workspaces[0].ID,
+		"workflow_id":      workflows[0].ID,
+		"title":            "Rollback contribution",
+		"description":      "This association will fail",
+		"agent_profile_id": "profile-remote",
+		"start_agent":      false,
+		"repositories": []map[string]interface{}{{
+			"github_url":  "https://github.com/acme/widget/pull/7",
+			"base_branch": "main",
+		}},
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	if remote.taskID == "" || remote.repositoryID == "" {
+		t.Fatalf("association was not attempted: task %q repository %q", remote.taskID, remote.repositoryID)
+	}
+	tasks, err := svc.ListTasks(ctx, workflows[0].ID)
+	require.NoError(t, err)
+	if len(tasks) != 0 {
+		t.Fatalf("tasks after association rollback = %d, want 0", len(tasks))
+	}
+}
+
 // TestClassifyAddBranchError_UnresolvedBaseBranchIsValidation pins the
 // classifier's handling of the new "cannot resolve base_branch" sentinel
 // emitted by AddBranchToTask when neither base_branch nor a probed
@@ -211,6 +442,18 @@ func TestClassifyCreateTaskErrorMapsOverlongTitleToValidation(t *testing.T) {
 	}
 }
 
+// TestClassifyCreateTaskErrorMapsInvalidExternalIDToValidation pins that a
+// malformed external_id (control character, or over the byte limit) is
+// classified as a validation error, not an internal error. Without this
+// case, handleCreateTask's error path (code != ws.ErrorCodeInternalError
+// gates whether the real message is shown) replaces the actual validation
+// reason with a generic "Failed to create task" message.
+func TestClassifyCreateTaskErrorMapsInvalidExternalIDToValidation(t *testing.T) {
+	if got := classifyCreateTaskError(service.ErrExternalIDInvalid); got != ws.ErrorCodeValidation {
+		t.Fatalf("expected ErrorCodeValidation, got %q", got)
+	}
+}
+
 func TestHandleCreateTask_RejectsOverlongTitle(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
@@ -221,11 +464,12 @@ func TestHandleCreateTask_RejectsOverlongTitle(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, workflows, 1)
 
-	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		WorkflowID:  workflows[0].ID,
 		Title:       "Source task",
 	})
+	source := sourceResult.Task
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:                "source-title-session",
@@ -237,7 +481,7 @@ func TestHandleCreateTask_RejectsOverlongTitle(t *testing.T) {
 	}))
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
-	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "source-title-session"), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"source_task_id": source.ID,
 		"workspace_id":   workspaces[0].ID,
 		"workflow_id":    workflows[0].ID,
@@ -272,7 +516,12 @@ func TestHandleAddBranchToTask_RejectsMultipleLocators(t *testing.T) {
 
 type pathBranchMaterializer struct{}
 
-func (pathBranchMaterializer) MaterializeBranch(context.Context, string, string) (*service.BranchMaterializationResult, error) {
+func (pathBranchMaterializer) MaterializeBranch(
+	context.Context,
+	string,
+	string,
+	service.BranchMaterializationTarget,
+) (*service.BranchMaterializationResult, error) {
 	return &service.BranchMaterializationResult{WorktreePath: "/task/kandev-feature-source", TaskWorkspacePath: "/task"}, nil
 }
 
@@ -285,7 +534,8 @@ func TestHandleAddBranchToTask_ReturnsMaterializedPaths(t *testing.T) {
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-branch-path", Name: "Workspace"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-branch-path", WorkspaceID: "ws-branch-path", Name: "Workflow"}))
 	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{ID: "repo-branch-path", WorkspaceID: "ws-branch-path", Name: "app", DefaultBranch: "main"}))
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{WorkspaceID: "ws-branch-path", WorkflowID: "wf-branch-path", WorkflowStepID: "step", Title: "Task", Repositories: []service.TaskRepositoryInput{{RepositoryID: "repo-branch-path", BaseBranch: "main"}}})
+	taskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{WorkspaceID: "ws-branch-path", WorkflowID: "wf-branch-path", WorkflowStepID: "step", Title: "Task", Repositories: []service.TaskRepositoryInput{{RepositoryID: "repo-branch-path", BaseBranch: "main"}}})
+	task := taskResult.Task
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-branch-path", TaskID: task.ID}))
 	_, err = svc.StartTurn(ctx, "session-branch-path")
@@ -306,15 +556,24 @@ func TestHandleAddBranchToTask_ReturnsMaterializedPaths(t *testing.T) {
 }
 
 func TestHandleAddWorkspaceSourcesRejectsUnknownKind(t *testing.T) {
-	h := &Handlers{}
+	ctx := context.Background()
+	svc, repo, parent, child := newWorkspaceSourceAuthorizationFixture(t)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "parent-session", TaskID: parent.ID}))
+	h := &Handlers{taskSvc: svc, sessionRepo: repo, logger: testLogger(t).WithFields()}
 	msg := makeWSMessage(t, ws.ActionMCPAddWorkspaceSources, map[string]interface{}{
-		"task_id": "task-1",
+		"task_id": child.ID, "caller_task_id": parent.ID, "caller_session_id": "parent-session",
 		"sources": []interface{}{map[string]interface{}{"kind": "unknown"}},
 	})
 
-	resp, err := h.handleAddWorkspaceSources(context.Background(), msg)
+	resp, err := h.handleAddWorkspaceSources(ctx, msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
+	folders, err := repo.ListTaskWorkspaceFolders(ctx, child.ID)
+	require.NoError(t, err)
+	require.Empty(t, folders)
+	repositories, err := repo.ListTaskRepositories(ctx, child.ID)
+	require.NoError(t, err)
+	require.Len(t, repositories, 1)
 }
 
 func TestClassifyWorkspaceSourceErrorMapsRepositoryNotFound(t *testing.T) {
@@ -352,7 +611,7 @@ func TestHandleCreateTask_RejectsAssigneeAgentProfileID(t *testing.T) {
 		"start_agent":               false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
@@ -442,6 +701,50 @@ func TestSetSessionRunning_PublishesTaskStateBeforeSession(t *testing.T) {
 	task, err := repo.GetTask(context.Background(), taskID)
 	require.NoError(t, err)
 	assert.Equal(t, v1.TaskStateInProgress, task.State)
+}
+
+func TestSetSessionWaitingForInput_PublishesPendingActionBeforeSession(t *testing.T) {
+	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
+	const taskID = "task-clarification-waiting-order"
+	const sessionID = "session-clarification-waiting-order"
+	seedMCPHandlerSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+
+	_, err := svc.CreateMessage(context.Background(), &service.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		Content:       "Need a parent decision",
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeClarificationRequest),
+		Metadata:      map[string]interface{}{"status": "pending"},
+		RequestsInput: true,
+	})
+	require.NoError(t, err)
+
+	var published []*bus.Event
+	sub, err := eventBus.Subscribe(">", func(_ context.Context, event *bus.Event) error {
+		if event.Type == events.TaskStateChanged || event.Type == events.TaskSessionStateChanged {
+			published = append(published, event)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	h := &Handlers{
+		taskSvc:     svc,
+		sessionRepo: repo,
+		taskRepo:    repo,
+		eventBus:    eventBus,
+		logger:      testLogger(t).WithFields(),
+	}
+	h.setSessionWaitingForInput(context.Background(), taskID, sessionID)
+
+	require.Len(t, published, 2)
+	assert.Equal(t, events.TaskStateChanged, published[0].Type)
+	data, ok := published[0].Data.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, string(models.TaskPendingActionClarification), data["task_pending_action"])
+	assert.Equal(t, events.TaskSessionStateChanged, published[1].Type)
 }
 
 type failingClarificationTaskRepository struct {
@@ -622,7 +925,7 @@ func TestHandleCreateTask_TopLevel_MissingWorkspaceID(t *testing.T) {
 
 	resp, err := h.handleCreateTask(context.Background(), msg)
 	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeValidation)
+	assertWSError(t, resp, ws.ErrorCodeUnauthorized)
 }
 
 func TestHandleCreateTask_TopLevel_MissingWorkflowID(t *testing.T) {
@@ -634,7 +937,7 @@ func TestHandleCreateTask_TopLevel_MissingWorkflowID(t *testing.T) {
 
 	resp, err := h.handleCreateTask(context.Background(), msg)
 	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeValidation)
+	assertWSError(t, resp, ws.ErrorCodeUnauthorized)
 }
 
 func TestHandleCreateTask_StartAgentRequiresResolvableAgentProfile(t *testing.T) {
@@ -659,7 +962,7 @@ func TestHandleCreateTask_StartAgentRequiresResolvableAgentProfile(t *testing.T)
 		"description":  "This should not be persisted without a profile.",
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 
@@ -690,7 +993,7 @@ func TestHandleCreateTask_StartAgentFalseRequiresResolvableAgentProfile(t *testi
 		"start_agent":  false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 
@@ -709,11 +1012,12 @@ func TestHandleCreateTask_StartAgentFalsePersistsInheritedAgentProfile(t *testin
 	require.NoError(t, err)
 	require.Len(t, workflows, 1)
 
-	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		WorkflowID:  workflows[0].ID,
 		Title:       "Source task",
 	})
+	source := sourceResult.Task
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:                "source-session",
@@ -737,7 +1041,7 @@ func TestHandleCreateTask_StartAgentFalsePersistsInheritedAgentProfile(t *testin
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "source-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -764,11 +1068,12 @@ func TestHandleCreateTask_StartAgentFalsePersistsInheritedExecutorID(t *testing.
 	require.NoError(t, err)
 	require.Len(t, workflows, 1)
 
-	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		WorkflowID:  workflows[0].ID,
 		Title:       "Source task",
 	})
+	source := sourceResult.Task
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:             "source-session",
@@ -792,7 +1097,7 @@ func TestHandleCreateTask_StartAgentFalsePersistsInheritedExecutorID(t *testing.
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "source-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -811,7 +1116,7 @@ func TestHandleCreateTask_StartAgentFalsePersistsInheritedExecutorID(t *testing.
 }
 
 func TestHandleCreateTask_InheritsDeferredSourceTaskMetadata(t *testing.T) {
-	svc, _ := newTestTaskService(t)
+	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
 	workspaces, err := svc.ListWorkspaces(ctx)
 	require.NoError(t, err)
@@ -820,7 +1125,7 @@ func TestHandleCreateTask_InheritsDeferredSourceTaskMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, workflows, 1)
 
-	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		WorkflowID:  workflows[0].ID,
 		Title:       "Deferred source",
@@ -829,7 +1134,12 @@ func TestHandleCreateTask_InheritsDeferredSourceTaskMetadata(t *testing.T) {
 			models.MetaKeyExecutorID:     "metadata-executor",
 		},
 	})
+	source := sourceResult.Task
 	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "deferred-source-session", TaskID: source.ID,
+		State: models.TaskSessionStateWaitingForInput, IsPrimary: true,
+	}))
 
 	h := &Handlers{
 		taskSvc: svc,
@@ -844,7 +1154,7 @@ func TestHandleCreateTask_InheritsDeferredSourceTaskMetadata(t *testing.T) {
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "deferred-source-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -861,7 +1171,7 @@ func TestHandleCreateTask_InheritsDeferredSourceTaskMetadata(t *testing.T) {
 	assert.Equal(t, "metadata-executor", task.Metadata[models.MetaKeyExecutorID])
 }
 
-func TestHandleCreateTask_SourceTaskMetadataWinsOverSessionAndDefaults(t *testing.T) {
+func TestHandleCreateTask_VerifiedCreatorSessionProfileWinsOverSourceMetadataAndDefaults(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
 	workspaces, err := svc.ListWorkspaces(ctx)
@@ -882,7 +1192,7 @@ func TestHandleCreateTask_SourceTaskMetadataWinsOverSessionAndDefaults(t *testin
 	})
 	require.NoError(t, err)
 
-	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		WorkflowID:  workflows[0].ID,
 		Title:       "Current task",
@@ -891,6 +1201,7 @@ func TestHandleCreateTask_SourceTaskMetadataWinsOverSessionAndDefaults(t *testin
 			models.MetaKeyExecutorProfileID: "source-metadata-executor",
 		},
 	})
+	source := sourceResult.Task
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:                "source-primary-session",
@@ -914,7 +1225,7 @@ func TestHandleCreateTask_SourceTaskMetadataWinsOverSessionAndDefaults(t *testin
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "source-primary-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -927,11 +1238,11 @@ func TestHandleCreateTask_SourceTaskMetadataWinsOverSessionAndDefaults(t *testin
 	task, err := svc.GetTask(ctx, created.ID)
 	require.NoError(t, err)
 	require.NotNil(t, task.Metadata)
-	assert.Equal(t, "source-metadata-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, workspaceDefaultProfileID, task.Metadata[models.MetaKeyAgentProfileID])
 	assert.Equal(t, "source-metadata-executor", task.Metadata[models.MetaKeyExecutorProfileID])
 }
 
-func TestHandleCreateTask_InheritsSourceTaskProfileAndSessionExecutor(t *testing.T) {
+func TestHandleCreateTask_VerifiedCreatorSessionProfileAndExecutorWinOverSourceMetadata(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
 	workspaces, err := svc.ListWorkspaces(ctx)
@@ -941,7 +1252,7 @@ func TestHandleCreateTask_InheritsSourceTaskProfileAndSessionExecutor(t *testing
 	require.NoError(t, err)
 	require.Len(t, workflows, 1)
 
-	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		WorkflowID:  workflows[0].ID,
 		Title:       "Current task",
@@ -949,6 +1260,7 @@ func TestHandleCreateTask_InheritsSourceTaskProfileAndSessionExecutor(t *testing
 			models.MetaKeyAgentProfileID: "source-metadata-profile",
 		},
 	})
+	source := sourceResult.Task
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:                "source-session-executor",
@@ -972,7 +1284,7 @@ func TestHandleCreateTask_InheritsSourceTaskProfileAndSessionExecutor(t *testing
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "source-session-executor"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -985,7 +1297,7 @@ func TestHandleCreateTask_InheritsSourceTaskProfileAndSessionExecutor(t *testing
 	task, err := svc.GetTask(ctx, created.ID)
 	require.NoError(t, err)
 	require.NotNil(t, task.Metadata)
-	assert.Equal(t, "source-metadata-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, "session-profile", task.Metadata[models.MetaKeyAgentProfileID])
 	assert.Equal(t, "session-executor-profile", task.Metadata[models.MetaKeyExecutorProfileID])
 }
 
@@ -999,7 +1311,7 @@ func TestHandleCreateTask_WorkflowSwitchedSessionProfileWinsOverStaleMetadata(t 
 	require.NoError(t, err)
 	require.Len(t, workflows, 1)
 
-	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		WorkflowID:  workflows[0].ID,
 		Title:       "Workflow-routed task",
@@ -1008,6 +1320,7 @@ func TestHandleCreateTask_WorkflowSwitchedSessionProfileWinsOverStaleMetadata(t 
 			models.MetaKeyExecutorProfileID: "stale-executor-profile",
 		},
 	})
+	source := sourceResult.Task
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:                "workflow-switched-session",
@@ -1034,7 +1347,7 @@ func TestHandleCreateTask_WorkflowSwitchedSessionProfileWinsOverStaleMetadata(t 
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "workflow-switched-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1061,7 +1374,7 @@ func TestHandleCreateTask_ExplicitAgentStillInheritsRoutedSessionExecutor(t *tes
 	require.NoError(t, err)
 	require.Len(t, workflows, 1)
 
-	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		WorkflowID:  workflows[0].ID,
 		Title:       "Workflow-routed task",
@@ -1070,6 +1383,7 @@ func TestHandleCreateTask_ExplicitAgentStillInheritsRoutedSessionExecutor(t *tes
 			models.MetaKeyExecutorProfileID: "stale-executor-profile",
 		},
 	})
+	source := sourceResult.Task
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:                "workflow-switched-session-explicit-agent",
@@ -1097,7 +1411,7 @@ func TestHandleCreateTask_ExplicitAgentStillInheritsRoutedSessionExecutor(t *tes
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "workflow-switched-session-explicit-agent"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1160,7 +1474,7 @@ func TestResolveMCPAutoStartConfig_WorkspaceDefaultSkipsTaskProfilesButPreserves
 				require.NoError(t, err)
 			}
 
-			source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+			sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 				WorkspaceID: workspaces[0].ID,
 				WorkflowID:  workflows[0].ID,
 				Title:       "Source task",
@@ -1169,6 +1483,7 @@ func TestResolveMCPAutoStartConfig_WorkspaceDefaultSkipsTaskProfilesButPreserves
 					models.MetaKeyExecutorProfileID: "source-executor-profile",
 				},
 			})
+			source := sourceResult.Task
 			require.NoError(t, err)
 
 			task := &models.Task{
@@ -1212,7 +1527,7 @@ func TestResolveMCPAutoStartConfig_WorkspaceDefaultUsesTargetWorkspace(t *testin
 	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
 	require.NoError(t, err)
 
-	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		WorkflowID:  workflows[0].ID,
 		Title:       "Source task",
@@ -1220,6 +1535,7 @@ func TestResolveMCPAutoStartConfig_WorkspaceDefaultUsesTargetWorkspace(t *testin
 			models.MetaKeyAgentProfileID: "source-profile",
 		},
 	})
+	source := sourceResult.Task
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "target-workspace", Name: "Target"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{
@@ -1247,7 +1563,7 @@ func TestResolveMCPAutoStartConfig_WorkspaceDefaultUsesTargetWorkspace(t *testin
 }
 
 func TestHandleCreateTask_WorkspaceDefaultPersistsTargetProfileAndInheritedExecutor(t *testing.T) {
-	svc, _ := newTestTaskService(t)
+	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
 	workspaces, err := svc.ListWorkspaces(ctx)
 	require.NoError(t, err)
@@ -1261,7 +1577,7 @@ func TestHandleCreateTask_WorkspaceDefaultPersistsTargetProfileAndInheritedExecu
 		DefaultAgentProfileID: &workspaceProfile,
 	})
 	require.NoError(t, err)
-	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		WorkflowID:  workflows[0].ID,
 		Title:       "Source task",
@@ -1270,7 +1586,12 @@ func TestHandleCreateTask_WorkspaceDefaultPersistsTargetProfileAndInheritedExecu
 			models.MetaKeyExecutorID:     "source-executor",
 		},
 	})
+	source := sourceResult.Task
 	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "workspace-default-session", TaskID: source.ID,
+		State: models.TaskSessionStateWaitingForInput, IsPrimary: true,
+	}))
 
 	h := &Handlers{
 		taskSvc: svc,
@@ -1287,7 +1608,7 @@ func TestHandleCreateTask_WorkspaceDefaultPersistsTargetProfileAndInheritedExecu
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "workspace-default-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 	var created struct {
@@ -1336,7 +1657,7 @@ func TestHandleCreateTask_OmittedProfileFailuresCreateNoTask(t *testing.T) {
 				"start_agent":  false,
 			})
 
-			resp, err := h.handleCreateTask(ctx, msg)
+			resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 			require.NoError(t, err)
 			assertWSError(t, resp, tt.wantCode)
 			tasks, err := svc.ListTasks(ctx, workflows[0].ID)
@@ -1372,7 +1693,7 @@ func TestHandleCreateTask_InheritsDeferredParentTaskMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, workflows, 1)
 
-	parent, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	parentResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		WorkflowID:  workflows[0].ID,
 		Title:       "Deferred parent",
@@ -1381,6 +1702,7 @@ func TestHandleCreateTask_InheritsDeferredParentTaskMetadata(t *testing.T) {
 			models.MetaKeyExecutorID:     "parent-executor",
 		},
 	})
+	parent := parentResult.Task
 	require.NoError(t, err)
 
 	h := &Handlers{
@@ -1393,7 +1715,7 @@ func TestHandleCreateTask_InheritsDeferredParentTaskMetadata(t *testing.T) {
 		"start_agent": false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1420,7 +1742,7 @@ func TestHandleCreateTask_MetadataExecutorProfileClearsSessionExecutorID(t *test
 	require.NoError(t, err)
 	require.Len(t, workflows, 1)
 
-	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		WorkflowID:  workflows[0].ID,
 		Title:       "Source with mixed launch metadata",
@@ -1428,6 +1750,7 @@ func TestHandleCreateTask_MetadataExecutorProfileClearsSessionExecutorID(t *test
 			models.MetaKeyExecutorProfileID: "metadata-executor-profile",
 		},
 	})
+	source := sourceResult.Task
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:             "mixed-source-session",
@@ -1450,7 +1773,7 @@ func TestHandleCreateTask_MetadataExecutorProfileClearsSessionExecutorID(t *test
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "mixed-source-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1486,7 +1809,7 @@ func TestHandleCreateTask_InvalidWorkflowReturnsValidationError(t *testing.T) {
 		"start_agent":  false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 
@@ -1524,7 +1847,7 @@ func TestHandleCreateTask_StepOutsideWorkflowReturnsValidationError(t *testing.T
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
@@ -1562,7 +1885,7 @@ func TestHandleCreateTask_StartAgentUsesWorkspaceDefaultAgentProfile(t *testing.
 		"description":  "This should launch with the workspace default profile.",
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1689,6 +2012,118 @@ func TestResolveMCPAutoStartConfig_FallsBackToWorkflowAgentProfile(t *testing.T)
 	assert.Equal(t, workflowProfileID, config.AgentProfileID)
 }
 
+// The reported bug: a task pinned to an unpinned step still launches with the
+// workflow default (resolveEffectiveAgentProfile -> resolveStepAgentProfile
+// falls back to the workflow default and overrides the caller). MCP must report
+// that same profile, not the caller's explicit one, or the stored metadata
+// disagrees with the launched profile.
+func TestResolveMCPAutoStartConfig_WorkflowDefaultOutranksExplicitOnUnpinnedStep(t *testing.T) {
+	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	workflowProfileID := "workflow-profile"
+	_, err := svc.UpdateWorkflow(ctx, workflow.ID, &service.UpdateWorkflowRequest{
+		AgentProfileID: &workflowProfileID,
+	})
+	require.NoError(t, err)
+	step := seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Unassigned",
+		Position:        1,
+		AllowManualMove: true,
+	})
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID:    workspace.ID,
+		WorkflowID:     workflow.ID,
+		WorkflowStepID: step.ID,
+	}, "explicit-profile", "", "")
+
+	assert.Equal(t, workflowProfileID, config.AgentProfileID)
+}
+
+// A task on a stepless workflow keeps the caller's explicit profile even when the
+// workflow has a default: with no steps CreateTask assigns no start step, so the
+// task launches stepless and resolveEffectiveAgentProfile keeps the caller
+// profile. The workflow default must not leak in when the task will not be on a
+// step at launch.
+func TestResolveMCPAutoStartConfig_WorkflowDefaultDoesNotOverrideExplicitOnSteplessWorkflow(t *testing.T) {
+	svc, _, workflowCtrl, _ := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	workflowProfileID := "workflow-profile"
+	_, err := svc.UpdateWorkflow(ctx, workflow.ID, &service.UpdateWorkflowRequest{
+		AgentProfileID: &workflowProfileID,
+	})
+	require.NoError(t, err)
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+	}, "explicit-profile", "", "")
+
+	assert.Equal(t, "explicit-profile", config.AgentProfileID)
+}
+
+// A task created with an explicit profile but no step, on a workflow that has a
+// start step, lands on that start step at CreateTask time. The orchestrator then
+// launches it with the start step's pinned profile, overriding the caller. The
+// reported/stored profile must match, or task metadata disagrees with the
+// launched profile. This covers the stepless-at-resolve-time gap: the step is
+// omitted here but the persisted task will sit on the start step at launch.
+func TestResolveMCPAutoStartConfig_StartStepPinnedOutranksExplicitWhenStepOmitted(t *testing.T) {
+	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Start",
+		Position:        1,
+		IsStartStep:     true,
+		AgentProfileID:  "start-profile",
+		AllowManualMove: true,
+	})
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+	}, "explicit-profile", "", "")
+
+	assert.Equal(t, "start-profile", config.AgentProfileID)
+}
+
+// Same stepless-at-resolve-time gap as above, but the start step is unpinned and
+// the workflow supplies a default: the launcher applies the workflow default over
+// the caller, so the reported profile must be the workflow default.
+func TestResolveMCPAutoStartConfig_WorkflowDefaultOutranksExplicitWhenStepOmitted(t *testing.T) {
+	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	workflowProfileID := "workflow-profile"
+	_, err := svc.UpdateWorkflow(ctx, workflow.ID, &service.UpdateWorkflowRequest{
+		AgentProfileID: &workflowProfileID,
+	})
+	require.NoError(t, err)
+	seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Start",
+		Position:        1,
+		IsStartStep:     true,
+		AllowManualMove: true,
+	})
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+	}, "explicit-profile", "", "")
+
+	assert.Equal(t, workflowProfileID, config.AgentProfileID)
+}
+
 func TestResolveMCPAutoStartConfig_ExplicitAgentProfileWinsOverSourceTask(t *testing.T) {
 	svc, _ := newTestTaskService(t)
 	ctx := context.Background()
@@ -1699,7 +2134,7 @@ func TestResolveMCPAutoStartConfig_ExplicitAgentProfileWinsOverSourceTask(t *tes
 	require.NoError(t, err)
 	require.Len(t, workflows, 1)
 
-	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		WorkflowID:  workflows[0].ID,
 		Title:       "Current task",
@@ -1707,6 +2142,7 @@ func TestResolveMCPAutoStartConfig_ExplicitAgentProfileWinsOverSourceTask(t *tes
 			models.MetaKeyAgentProfileID: "source-profile",
 		},
 	})
+	source := sourceResult.Task
 	require.NoError(t, err)
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
 
@@ -1739,10 +2175,13 @@ func seedWorkflowStep(t *testing.T, ctx context.Context, repo *workflowrepo.Repo
 
 // mockSessionLauncher captures LaunchSession calls for testing autoStartTask.
 type mockSessionLauncher struct {
-	mu      sync.Mutex
-	req     *orchestrator.LaunchSessionRequest
-	called  chan struct{}
-	inspect func(context.Context)
+	mu         sync.Mutex
+	req        *orchestrator.LaunchSessionRequest
+	requests   []*orchestrator.LaunchSessionRequest
+	called     chan struct{}
+	calls      chan struct{}
+	calledOnce sync.Once
+	inspect    func(context.Context)
 }
 
 func newMockSessionLauncher() *mockSessionLauncher {
@@ -1752,11 +2191,15 @@ func newMockSessionLauncher() *mockSessionLauncher {
 func (m *mockSessionLauncher) LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
 	m.mu.Lock()
 	m.req = req
+	m.requests = append(m.requests, req)
 	m.mu.Unlock()
 	if m.inspect != nil {
 		m.inspect(ctx)
 	}
-	close(m.called)
+	m.calledOnce.Do(func() { close(m.called) })
+	if m.calls != nil {
+		m.calls <- struct{}{}
+	}
 	return &orchestrator.LaunchSessionResponse{
 		Success:   true,
 		TaskID:    req.TaskID,
@@ -1782,16 +2225,22 @@ func (m *mockSessionLauncher) StartCreatedSession(context.Context, string, strin
 func (m *mockSessionLauncher) ResumeTaskSession(context.Context, string, string) (*executor.TaskExecution, error) {
 	return nil, nil
 }
-func (m *mockSessionLauncher) ProcessOnTurnStart(context.Context, string, string) error {
+func (m *mockSessionLauncher) ProcessOnTurnStart(context.Context, string, string) (orchestrator.ProcessOnTurnStartResult, error) {
+	return orchestrator.ProcessOnTurnStartResult{}, nil
+}
+func (m *mockSessionLauncher) QueueUserPrompt(context.Context, string, string, string, string, bool, []v1.MessageAttachment, map[string]interface{}, bool) error {
 	return nil
 }
 func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service { return nil }
+
+func (m *mockSessionLauncher) CheckQueueAdmissionReadiness(context.Context, messagequeue.QueueSessionIdentity) {
+}
 
 // QueueAndInterruptForPeerMessage always reports a successful immediate
 // dispatch with a fake queued entry; tests exercising other outcomes
 // (failure, not-dispatched) use fakeOrchestrator in message_task_test.go
 // instead of this generic stub.
-func (m *mockSessionLauncher) QueueAndInterruptForPeerMessage(context.Context, string, string, string, map[string]interface{}) (*messagequeue.QueuedMessage, bool, error) {
+func (m *mockSessionLauncher) QueueAndInterruptForPeerMessage(context.Context, messagequeue.QueueSessionIdentity, string, map[string]interface{}) (*messagequeue.QueuedMessage, bool, error) {
 	return &messagequeue.QueuedMessage{ID: "mock-entry"}, true, nil
 }
 
@@ -1852,6 +2301,41 @@ func TestAutoStartTask_ExplicitExecutorProfilePreserved(t *testing.T) {
 	req := launcher.getRequest()
 	assert.Equal(t, "exec-profile-docker", req.ExecutorProfileID, "explicit executor profile should be preserved")
 	assert.Equal(t, "", req.ExecutorID, "executorID should be empty when profile is set")
+}
+
+func TestLaunchAutoStartTask_ExplicitCreatePromptUsesPreparedStart(t *testing.T) {
+	launcher := newMockSessionLauncher()
+	launcher.calls = make(chan struct{}, 2)
+	h := &Handlers{
+		sessionLauncher: launcher,
+		logger:          testLogger(t),
+	}
+
+	h.launchAutoStartTask(context.Background(), &models.Task{
+		ID: "task-1", WorkflowStepID: "step-explicit", Description: "initial request",
+	}, mcpAutoStartConfig{
+		AgentProfileID:      "agent-profile-1",
+		ExecutorID:          models.ExecutorIDWorktree,
+		InitialCreatePrompt: true,
+	})
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-launcher.calls:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("LaunchSession call %d did not complete", i+1)
+		}
+	}
+
+	launcher.mu.Lock()
+	requests := append([]*orchestrator.LaunchSessionRequest(nil), launcher.requests...)
+	launcher.mu.Unlock()
+	require.Len(t, requests, 2)
+	assert.Equal(t, orchestrator.IntentPrepare, requests[0].Intent)
+	assert.True(t, requests[0].DeferredStart)
+	assert.Equal(t, orchestrator.IntentStartCreated, requests[1].Intent)
+	assert.Equal(t, "session-1", requests[1].SessionID)
+	assert.True(t, requests[1].InitialCreatePrompt)
 }
 
 func TestLaunchAutoStartTask_PreservesContextValuesWithoutCallerCancellation(t *testing.T) {
@@ -1950,7 +2434,7 @@ func seedParentWithRepo(t *testing.T, svc *service.Service, repo *sqliterepo.Rep
 	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
 		ID: "repo-parent", WorkspaceID: "ws-1", Name: "Parent Repo", DefaultBranch: "main",
 	}))
-	parent, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	parentResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Parent task",
@@ -1958,6 +2442,7 @@ func seedParentWithRepo(t *testing.T, svc *service.Service, repo *sqliterepo.Rep
 			{RepositoryID: "repo-parent", BaseBranch: "pr-metrics"},
 		},
 	})
+	parent := parentResult.Task
 	require.NoError(t, err)
 	return parent.ID
 }
@@ -2002,7 +2487,7 @@ func TestCreateSubtaskFromParent_SameRepoInheritsParentBaseBranch(t *testing.T) 
 	resolved, err := h.resolveTaskRepositories(ctx, parentID, "", nil)
 	require.NoError(t, err)
 
-	subtask, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	subtaskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:  resolved.WorkspaceID,
 		WorkflowID:   resolved.WorkflowID,
 		ParentID:     parentID,
@@ -2010,6 +2495,7 @@ func TestCreateSubtaskFromParent_SameRepoInheritsParentBaseBranch(t *testing.T) 
 		Description:  "do the thing",
 		Repositories: resolved.Repos,
 	})
+	subtask := subtaskResult.Task
 	require.NoError(t, err)
 	require.Len(t, subtask.Repositories, 1)
 	assert.Equal(t, "repo-parent", subtask.Repositories[0].RepositoryID)
@@ -2037,7 +2523,7 @@ func TestCreateSubtaskFromParent_DifferentRepoUsesNewRepoDefault(t *testing.T) {
 	resolved, err := h.resolveTaskRepositories(ctx, parentID, "", explicit)
 	require.NoError(t, err)
 
-	subtask, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	subtaskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:  resolved.WorkspaceID,
 		WorkflowID:   resolved.WorkflowID,
 		ParentID:     parentID,
@@ -2045,6 +2531,7 @@ func TestCreateSubtaskFromParent_DifferentRepoUsesNewRepoDefault(t *testing.T) {
 		Description:  "do the thing",
 		Repositories: resolved.Repos,
 	})
+	subtask := subtaskResult.Task
 	require.NoError(t, err)
 	require.Len(t, subtask.Repositories, 1)
 	assert.Equal(t, "repo-sibling", subtask.Repositories[0].RepositoryID)
@@ -2075,7 +2562,7 @@ func TestHandleCreateTask_SubtaskBaseBranchOverride(t *testing.T) {
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -2124,7 +2611,7 @@ func TestHandleCreateTask_SubtaskBaseBranchOverride_ExplicitReposWin(t *testing.
 		"start_agent": false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -2139,6 +2626,89 @@ func TestHandleCreateTask_SubtaskBaseBranchOverride_ExplicitReposWin(t *testing.
 	assert.Equal(t, "repo-sibling", subtask.Repositories[0].RepositoryID)
 	assert.Equal(t, "develop", subtask.Repositories[0].BaseBranch,
 		"explicit per-repo base_branch must win over the top-level override")
+}
+
+// @covers AC-TASKS-MCP-WORKSPACE-MODE-004.5
+func TestHandleCreateTask_InheritParentRejectsUnmatchedMaterializedRepository(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	parentEnv := &models.TaskEnvironment{
+		ID:            "env-parent-admission",
+		TaskID:        parentID,
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		Status:        models.TaskEnvironmentStatusCreating,
+		WorkspacePath: "/tmp/parent-admission",
+	}
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, parentEnv))
+	require.NoError(t, repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		TaskEnvironmentID: parentEnv.ID,
+		RepositoryID:      "repo-parent",
+		BranchSlug:        "feature-parent",
+		Status:            "active",
+	}))
+	parentEnv.Status = models.TaskEnvironmentStatusReady
+	require.NoError(t, repo.UpdateTaskEnvironment(ctx, parentEnv))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"repositories":     []map[string]interface{}{{"repository_id": "repo-parent", "base_branch": "main"}},
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	require.Contains(t, string(resp.Payload), "workspace_mode=new_workspace")
+
+	children, err := repo.ListChildren(ctx, parentID)
+	require.NoError(t, err)
+	assert.Empty(t, children, "rejected admission must not create a child task")
+}
+
+func TestHandleCreateTask_InheritParentRejectsUnmatchedBaseBranchOverride(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	parentEnv := &models.TaskEnvironment{
+		ID:            "env-parent-base-override",
+		TaskID:        parentID,
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		Status:        models.TaskEnvironmentStatusCreating,
+		WorkspacePath: "/tmp/parent-base-override",
+	}
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, parentEnv))
+	require.NoError(t, repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		TaskEnvironmentID: parentEnv.ID,
+		RepositoryID:      "repo-parent",
+		BranchSlug:        "feature-parent",
+		Status:            "active",
+	}))
+	parentEnv.Status = models.TaskEnvironmentStatusReady
+	require.NoError(t, repo.UpdateTaskEnvironment(ctx, parentEnv))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"base_branch":      "main",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	require.Contains(t, string(resp.Payload), "workspace_mode=new_workspace")
+
+	children, err := repo.ListChildren(ctx, parentID)
+	require.NoError(t, err)
+	assert.Empty(t, children, "rejected branch override must not create a child task")
 }
 
 func TestHandleCreateTask_SubtaskDefaultsToParentWorkspaceAndWorkflow(t *testing.T) {
@@ -2160,7 +2730,7 @@ func TestHandleCreateTask_SubtaskDefaultsToParentWorkspaceAndWorkflow(t *testing
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -2197,7 +2767,7 @@ func TestHandleCreateTask_SubtaskCanRequestNewWorkspaceMode(t *testing.T) {
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -2245,22 +2815,12 @@ func TestHandleCreateTask_SubtaskHonorsExplicitWorkspaceAndWorkflow(t *testing.T
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
-	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
-
-	var created struct {
-		ID string `json:"id"`
-	}
-	require.NoError(t, json.Unmarshal(resp.Payload, &created))
-
-	subtask, err := svc.GetTask(ctx, created.ID)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	tasks, err := svc.ListTasks(ctx, "wf-1")
 	require.NoError(t, err)
-	assert.Equal(t, "ws-2", subtask.WorkspaceID, "explicit workspace should win over parent default")
-	assert.Equal(t, "wf-2", subtask.WorkflowID, "explicit workflow should win over parent default")
-	assert.Equal(t, "step-other", subtask.WorkflowStepID, "explicit step should be preserved with explicit workflow")
-	require.Len(t, subtask.Repositories, 1)
-	assert.Equal(t, "repo-other", subtask.Repositories[0].RepositoryID)
+	assert.Len(t, tasks, 1, "cross-workspace parent must not create a task")
 }
 
 func TestHandleCreateTask_SubtaskExplicitWorkspaceAutoResolvesWorkflow(t *testing.T) {
@@ -2288,19 +2848,12 @@ func TestHandleCreateTask_SubtaskExplicitWorkspaceAutoResolvesWorkflow(t *testin
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
-	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
-
-	var created struct {
-		ID string `json:"id"`
-	}
-	require.NoError(t, json.Unmarshal(resp.Payload, &created))
-
-	subtask, err := svc.GetTask(ctx, created.ID)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	tasks, err := svc.ListTasks(ctx, "wf-1")
 	require.NoError(t, err)
-	assert.Equal(t, "ws-2", subtask.WorkspaceID)
-	assert.Equal(t, "wf-2", subtask.WorkflowID, "workflow should auto-resolve inside the explicitly chosen workspace")
+	assert.Len(t, tasks, 1, "cross-workspace parent must not create a task")
 }
 
 func TestHandleCreateTask_SubtaskRejectsWorkflowFromDifferentWorkspace(t *testing.T) {
@@ -2322,13 +2875,13 @@ func TestHandleCreateTask_SubtaskRejectsWorkflowFromDifferentWorkspace(t *testin
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 
 	var ep ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
-	assert.Contains(t, ep.Message, "belongs to workspace_id \"ws-2\", not \"ws-1\"")
+	assert.Contains(t, ep.Message, "workflow_id and workspace_id must refer to the same workspace")
 }
 
 func TestResolveTaskRepositories_ParentWithExplicitRepos_OverridesRepoButInheritsWorkspace(t *testing.T) {
@@ -2357,11 +2910,12 @@ func TestResolveTaskRepositories_EphemeralParent_Rejected(t *testing.T) {
 
 	// Seed workspace and ephemeral task
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		Title:       "Quick Chat",
 		IsEphemeral: true,
 	})
+	task := taskResult.Task
 	require.NoError(t, err)
 
 	log := testLogger(t)
@@ -2379,18 +2933,20 @@ func TestResolveTaskRepositories_SubtaskParent_Rejected(t *testing.T) {
 	// Seed workspace, non-office workflow, root task, and a subtask
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	root, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	rootResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Root task",
 	})
+	root := rootResult.Task
 	require.NoError(t, err)
-	child, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	childResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		ParentID:    root.ID,
 		Title:       "Subtask",
 	})
+	child := childResult.Task
 	require.NoError(t, err)
 
 	log := testLogger(t)
@@ -2410,18 +2966,20 @@ func TestResolveTaskRepositories_OfficeSubtaskParent_Allowed(t *testing.T) {
 	_, err := repo.EnsureOfficeWorkflow(ctx, "ws-office")
 	require.NoError(t, err)
 
-	root, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	rootResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-office",
 		Title:       "Root office task",
 		ProjectID:   "proj-1",
 	})
+	root := rootResult.Task
 	require.NoError(t, err)
-	child, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	childResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-office",
 		ParentID:    root.ID,
 		Title:       "Office subtask",
 		ProjectID:   "proj-1",
 	})
+	child := childResult.Task
 	require.NoError(t, err)
 
 	log := testLogger(t)
@@ -2514,7 +3072,7 @@ func TestHandleCreateTask_AutoResolvesWorkspaceAndWorkflow(t *testing.T) {
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	if resp.Type == ws.MessageTypeError {
@@ -2541,7 +3099,7 @@ func TestCreateTask_GitHubURLOnly_LeavesDefaultBranchEmpty(t *testing.T) {
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
 
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "subtask via bare github url",
@@ -2549,6 +3107,7 @@ func TestCreateTask_GitHubURLOnly_LeavesDefaultBranchEmpty(t *testing.T) {
 			{GitHubURL: "https://github.com/acme/never-seen"},
 		},
 	})
+	task := taskResult.Task
 	require.NoError(t, err)
 	require.Len(t, task.Repositories, 1)
 	assert.Empty(t, task.Repositories[0].BaseBranch,
@@ -2581,7 +3140,7 @@ func TestHandleCreateTask_AutoResolveFailsWithMultipleWorkflows(t *testing.T) {
 		"start_agent": false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
@@ -2598,13 +3157,9 @@ func TestHandleCreateTask_NewFields_Unmarshalled(t *testing.T) {
 		"execution_policy": `{"stages":[]}`,
 	})
 
-	// taskSvc is nil so CreateTask will panic before we reach it; the payload
-	// must at least parse cleanly. The handler returns a validation error about
-	// workspace_id being absent (not a parse error) only when those fields are
-	// missing — here all required fields are present so it will reach taskSvc.
-	// To avoid a nil-pointer panic we just verify the unmarshal path by sending
-	// a payload that fails a post-unmarshal check (missing workspace) which
-	// exercised the request struct fields.
+	// taskSvc is nil, so use a payload that fails the trusted-caller admission
+	// after JSON decoding. This exercises the request struct fields without
+	// reaching task creation.
 	msgMissingWs := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"title":            "My task",
 		"execution_policy": `{"stages":[]}`,
@@ -2612,8 +3167,8 @@ func TestHandleCreateTask_NewFields_Unmarshalled(t *testing.T) {
 
 	resp, err := h.handleCreateTask(context.Background(), msgMissingWs)
 	require.NoError(t, err)
-	// Should fail on workspace_id validation, not on JSON unmarshal
-	assertWSError(t, resp, ws.ErrorCodeValidation)
+	// The payload parsed before the trusted-caller admission rejection.
+	assertWSError(t, resp, ws.ErrorCodeUnauthorized)
 	_ = msg // payload with all fields — tested implicitly through struct definition
 }
 
@@ -2626,21 +3181,22 @@ func TestHandleCreateTask_BlockedBy_Accepted(t *testing.T) {
 
 	resp, err := h.handleCreateTask(context.Background(), msg)
 	require.NoError(t, err)
-	// Fails on workspace_id, not on blocked_by parsing
-	assertWSError(t, resp, ws.ErrorCodeValidation)
+	// The trusted-caller admission rejects before blocked_by is resolved.
+	assertWSError(t, resp, ws.ErrorCodeUnauthorized)
 }
 
 func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
-	svc, repo := newTestTaskService(t)
+	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
 	ctx := context.Background()
 
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Task",
 	})
+	task := taskResult.Task
 	require.NoError(t, err)
 
 	sess := &models.TaskSession{
@@ -2654,9 +3210,7 @@ func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
 	require.NoError(t, repo.CreateTurn(ctx, turn))
 
 	store := clarification.NewStore(time.Minute)
-	eventBus := bus.NewMemoryEventBus(testLogger(t))
-	t.Cleanup(func() { eventBus.Close() })
-	canceller := clarification.NewCanceller(store, repo, eventBus, testLogger(t))
+	canceller := clarification.NewCanceller(store, repo, svc, testLogger(t))
 
 	pendingID := "test-pending-id"
 	require.NoError(t, repo.CreateMessage(ctx, &models.Message{
@@ -2672,6 +3226,13 @@ func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
 			"status":      "pending",
 		},
 	}))
+	var messageUpdated *bus.Event
+	subscription, err := eventBus.Subscribe(events.MessageUpdated, func(_ context.Context, event *bus.Event) error {
+		messageUpdated = event
+		return nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = subscription.Unsubscribe() })
 
 	// Drain the in-memory store so the handler must fall back to DB-driven cleanup
 	store.CancelSession(sess.ID)
@@ -2682,10 +3243,26 @@ func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 
-	msgs, err := repo.FindPendingClarificationMessagesBySessionID(ctx, sess.ID)
+	msgs, err := repo.FindActiveClarificationMessagesBySessionID(ctx, sess.ID)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1, "clarification should stay pending for deferred answer")
 	require.Equal(t, true, msgs[0].Metadata["agent_disconnected"])
+	require.NotNil(t, messageUpdated)
+	eventData, ok := messageUpdated.Data.(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, string(models.TaskPendingActionClarification), eventData["pending_action"])
+	require.IsType(t, models.PendingActionRevision{}, eventData["pending_action_revision"])
+
+	messageUpdated = nil
+	expired, err := canceller.ExpireSessionAndNotify(ctx, sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, expired)
+	require.NotNil(t, messageUpdated)
+	eventData, ok = messageUpdated.Data.(map[string]interface{})
+	require.True(t, ok)
+	require.Contains(t, eventData, "pending_action")
+	require.Nil(t, eventData["pending_action"])
+	require.IsType(t, models.PendingActionRevision{}, eventData["pending_action_revision"])
 }
 
 func TestHandleClarificationTimeout_WithoutCanceller_ReturnsError(t *testing.T) {
@@ -2702,11 +3279,12 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Task",
 	})
+	task := taskResult.Task
 	require.NoError(t, err)
 
 	sess := &models.TaskSession{

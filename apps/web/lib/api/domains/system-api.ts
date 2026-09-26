@@ -17,11 +17,15 @@ import type {
   StorageAdoptionResponse,
   StorageMaintenanceRun,
   StorageMaintenanceSettings,
+  StorageDiskCapacityResponse,
   StorageOverviewResponse,
   StoragePolicyResponse,
   StorageQuarantineEntry,
   StorageQuarantinePurgeScope,
   StorageSettingsResponse,
+  UpdatesChannel,
+  RetentionSettings,
+  RetentionStatus,
 } from "@/lib/types/system";
 
 const SYSTEM_BASE = "/api/v1/system";
@@ -217,14 +221,33 @@ export function checkUpdates(options?: ApiRequestOptions): Promise<UpdatesRespon
   });
 }
 
+export function saveUpdatesChannel(
+  channel: UpdatesChannel,
+  options?: ApiRequestOptions,
+): Promise<UpdatesResponse> {
+  return fetchJson<UpdatesResponse>(`${SYSTEM_BASE}/updates/channel`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "PATCH",
+      body: JSON.stringify({ channel }),
+    },
+  });
+}
+
 export function applyUpdate(
-  confirm = "UPDATE",
+  confirm: string,
+  targetVersion: string,
   options?: ApiRequestOptions,
 ): Promise<JobAcceptResponse> {
   return fetchJson<JobAcceptResponse>(`${SYSTEM_BASE}/updates/apply`, {
     ...options,
     // Spread caller init first so the required method/body can't be overridden.
-    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ confirm }) },
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify({ confirm, target_version: targetVersion }),
+    },
   });
 }
 
@@ -250,6 +273,15 @@ export function fetchStorageOverview(
   options?: ApiRequestOptions,
 ): Promise<StorageOverviewResponse> {
   return fetchJson<StorageOverviewResponse>(`${SYSTEM_BASE}/storage`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export function fetchStorageDisk(
+  options?: ApiRequestOptions,
+): Promise<StorageDiskCapacityResponse> {
+  return fetchJson<StorageDiskCapacityResponse>(`${SYSTEM_BASE}/storage/disk`, {
     ...options,
     cache: "no-store",
   });
@@ -383,6 +415,29 @@ export function purgeStorageQuarantine(
         scope,
         confirm: scope === "eligible" ? "DELETE ELIGIBLE" : "DELETE ALL NOW",
       }),
+    },
+  });
+}
+
+// --- Office run history retention ----------------------------------------
+
+export function fetchRetentionStatus(options?: ApiRequestOptions): Promise<RetentionStatus> {
+  return fetchJson<RetentionStatus>(`${SYSTEM_BASE}/retention`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export function saveRetentionSettings(
+  settings: RetentionSettings,
+  options?: ApiRequestOptions,
+): Promise<RetentionSettings> {
+  return fetchJson<RetentionSettings>(`${SYSTEM_BASE}/retention`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "PUT",
+      body: JSON.stringify(settings),
     },
   });
 }

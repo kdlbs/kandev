@@ -5,6 +5,10 @@ import type { Icon } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { MR_PRESETS, ISSUE_PRESETS, type PresetOption, type PresetGroup } from "./presets";
 import type { SavedPreset } from "./use-saved-presets";
+import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { SavedTaskViewDeleteConfirmation } from "@/components/confirmation/saved-task-view-delete-confirmation";
+import { useSavedTaskViewDeleteConfirmation } from "@/components/confirmation/use-saved-task-view-delete-confirmation";
 
 export type SidebarSelection = {
   kind: "mr" | "issue";
@@ -30,6 +34,7 @@ function KindToggle({
   kind: "mr" | "issue";
   onChange: (k: "mr" | "issue") => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       className="mx-2 mb-3 grid grid-cols-2 rounded-md border p-0.5 text-xs"
@@ -48,18 +53,26 @@ function KindToggle({
           )}
           data-testid={`gitlab-kind-${value}`}
         >
-          {value === "mr" ? "Merge requests" : "Issues"}
+          {value === "mr" ? t("gitlab:mergeRequests") : t("gitlab:issues")}
         </button>
       ))}
     </div>
   );
 }
 
-function SectionHeader({ title }: { title: string }) {
+/**
+ * `id` is a stable section identifier and `title` is the visible label. They
+ * were one value: the testid was built as `gitlab-section-${title.toLowerCase()}`,
+ * so translating the title moved the selector with it — under pseudo the inbox
+ * section became `gitlab-section-ĩńƀōx`. apps/web/AGENTS.md is explicit that a
+ * `data-testid` is never translated; deriving one from copy translates it by
+ * the back door.
+ */
+function SectionHeader({ id, title }: { id: string; title: string }) {
   return (
     <div
       className="px-2 mt-3 mb-1 text-[11px] uppercase tracking-wider text-muted-foreground font-medium"
-      data-testid={`gitlab-section-${title.toLowerCase()}`}
+      data-testid={`gitlab-section-${id}`}
     >
       {title}
     </div>
@@ -121,15 +134,19 @@ function PresetGroupList({
   onSelect: (s: SidebarSelection) => void;
   kind: "mr" | "issue";
 }) {
+  const { t } = useTranslation();
   const items = presets.filter((p) => p.group === group);
   if (items.length === 0) return null;
   return (
     <>
-      <SectionHeader title={group === "inbox" ? "Inbox" : "Created"} />
+      <SectionHeader
+        id={group}
+        title={group === "inbox" ? t("gitlab:inbox") : t("gitlab:created")}
+      />
       {items.map((p) => (
         <PresetItem
           key={`${kind}-${p.value}`}
-          label={p.label}
+          label={t(p.labelKey)}
           Icon={p.icon}
           active={selected.source === "preset" && selected.id === p.value}
           onClick={() => onSelect({ kind, source: "preset", id: p.value })}
@@ -156,55 +173,99 @@ function SavedSection({
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
 }) {
+  const { t } = useTranslation();
+  const deletion = useSavedTaskViewDeleteConfirmation<HTMLButtonElement>(saved);
+  const { isMobile } = useResponsiveBreakpoint();
   return (
     <>
-      <SectionHeader title="Saved" />
+      <SectionHeader id="saved" title={t("gitlab:saved")} />
       {saved.length === 0 && (
         <div className="mx-2 px-2 py-1 text-xs text-muted-foreground/80 italic">
-          No saved queries yet.
+          {t("gitlab:noSavedQueriesYet")}
         </div>
       )}
-      {saved.map((s) => (
-        <PresetItem
-          key={s.id}
-          label={s.label}
-          Icon={IconBookmark}
-          active={selected.source === "saved" && selected.id === s.id}
-          onClick={() => onSelect({ kind, source: "saved", id: s.id })}
-          trailing={
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(s.id);
-              }}
-              className="opacity-0 group-hover/item:opacity-100 transition-opacity text-muted-foreground hover:text-foreground cursor-pointer"
-              title="Delete saved query"
-              aria-label={`Delete saved query ${s.label}`}
-              data-testid={`gitlab-saved-delete-${s.id}`}
-            >
-              <IconX className="h-3.5 w-3.5" />
-            </button>
-          }
+      {saved.map((s) => {
+        if (!isMobile && deletion.target?.id === s.id) {
+          return (
+            <div key={s.id} className="mx-1 min-w-0 p-1">
+              <SavedTaskViewDeleteConfirmation
+                target={deletion.target}
+                presentation="inline"
+                open
+                anchorRef={deletion.anchorRef}
+                onOpenChange={(open) => {
+                  if (!open) deletion.close();
+                }}
+                onConfirm={onDelete}
+              />
+            </div>
+          );
+        }
+        const deleteLabel = t("integrations:deleteSavedQueryNamed", { label: s.label });
+        return (
+          <PresetItem
+            key={s.id}
+            label={s.label}
+            Icon={IconBookmark}
+            active={selected.source === "saved" && selected.id === s.id}
+            onClick={() => onSelect({ kind, source: "saved", id: s.id })}
+            trailing={
+              <button
+                ref={(element) => {
+                  deletion.registerAnchor(s.id, element);
+                }}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  deletion.request({ id: s.id, label: s.label });
+                }}
+                className="flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title={deleteLabel}
+                aria-label={deleteLabel}
+                data-testid={`gitlab-saved-delete-${s.id}`}
+              >
+                <IconX className="h-4 w-4" />
+              </button>
+            }
+          />
+        );
+      })}
+      {isMobile && deletion.target && (
+        <SavedTaskViewDeleteConfirmation
+          target={deletion.target}
+          presentation="inline"
+          open
+          anchorRef={deletion.anchorRef}
+          onOpenChange={(open) => {
+            if (!open) deletion.close();
+          }}
+          onConfirm={onDelete}
         />
-      ))}
-      <button
-        type="button"
-        onClick={onSaveCurrent}
-        disabled={!canSaveCurrent}
-        className={cn(
-          "mx-1 mt-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
-          canSaveCurrent
-            ? "text-muted-foreground hover:bg-muted/50 hover:text-foreground cursor-pointer"
-            : "text-muted-foreground/50 cursor-not-allowed",
-        )}
-        title={canSaveCurrent ? "Save current query" : "Type a custom query first"}
-        data-testid="gitlab-save-current-query"
-      >
-        <IconDeviceFloppy className="h-4 w-4 shrink-0" />
-        <span>Save current query</span>
-      </button>
+      )}
+      <SaveQueryButton enabled={canSaveCurrent} onClick={onSaveCurrent} />
     </>
+  );
+}
+
+function SaveQueryButton({ enabled, onClick }: { enabled: boolean; onClick: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!enabled}
+      className={cn(
+        "mx-1 mt-1 flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
+        enabled
+          ? "text-muted-foreground hover:bg-muted/50 hover:text-foreground cursor-pointer"
+          : "text-muted-foreground/50 cursor-not-allowed",
+      )}
+      title={enabled ? t("gitlab:saveCurrentQuery") : t("gitlab:typeACustomQueryFirst")}
+      data-testid="gitlab-save-current-query"
+    >
+      <IconDeviceFloppy className="h-4 w-4 shrink-0" />
+      <span>{t("gitlab:saveCurrentQuery")}</span>
+    </button>
   );
 }
 
@@ -225,7 +286,7 @@ export function PresetsSidebar({
     onSelect({ kind, source: "preset", id: fallback });
   };
   return (
-    <nav className="flex flex-col py-3">
+    <nav className="flex w-full min-w-0 flex-col overflow-x-hidden py-3">
       <KindToggle kind={selected.kind} onChange={onKindChange} />
       <PresetGroupList
         presets={presets}

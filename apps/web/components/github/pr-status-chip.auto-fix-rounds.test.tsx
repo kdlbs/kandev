@@ -64,6 +64,7 @@ function renderWithStore(initialState: Partial<AppState>, ui: ReactNode) {
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-id",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "acme",
     repo: "demo",
@@ -94,8 +95,11 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   };
 }
 
+// auto_fix_enabled is per-PR; pr_options defaults to one entry matching
+// makePR()'s identity (task-1 / repository_id "" / #42) so overrides like
+// `makeCIOptions({ auto_fix_enabled: true })` still drive the rendered chip.
 function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
-  return {
+  const base = {
     task_id: "task-1",
     auto_fix_enabled: false,
     auto_merge_enabled: false,
@@ -106,6 +110,23 @@ function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCI
     auto_fix_max_rounds: 10,
     pr_states: [],
     ...overrides,
+  };
+  return {
+    ...base,
+    pr_options: overrides.pr_options ?? [
+      {
+        task_id: base.task_id,
+        repository_id: "",
+        pr_number: 42,
+        auto_fix_enabled: base.auto_fix_enabled,
+        auto_merge_enabled: base.auto_merge_enabled,
+        prompt_on_review_requested: false,
+        prompt_on_merged: false,
+        prompt_on_closed: false,
+        created_at: "",
+        updated_at: "",
+      },
+    ],
   };
 }
 
@@ -122,7 +143,9 @@ function makeCIPrState(roundCount: number, exhausted = false) {
     auto_fix_exhausted_at: exhausted ? "2026-06-18T11:00:00Z" : null,
     last_merge_signature: "",
     last_merge_attempt_at: null,
+    last_merge_result: "" as const,
     last_error: exhausted ? "CI auto-fix paused after 10 rounds for this PR" : null,
+    last_error_kind: "",
     created_at: "2026-06-18T10:00:00Z",
     updated_at: "2026-06-18T10:00:00Z",
   };
@@ -170,7 +193,7 @@ describe("PRStatusChip auto-fix round display", () => {
     renderWithStore(stateWithAutoFix(10, true), <PRStatusChip taskId="task-1" />);
 
     const chip = screen.getByTestId(AUTO_FIX_BADGE_TESTID);
-    expect(chip.textContent).toBe("Auto-fix 10/10");
+    expect(chip.textContent).toBe("Auto-fix paused 10/10");
     expect(chip.getAttribute("data-auto-fix-exhausted")).toBe("true");
   });
 
@@ -209,6 +232,15 @@ describe("PRStatusChip auto-fix round display", () => {
     expect(explanation.textContent).toContain(
       "pauses auto-fix for this PR so it cannot loop forever",
     );
+    expect(explanation.textContent).toContain(
+      "If a turn ends without a recorded outcome, Kandev can retry the same settled feedback",
+    );
+    expect(explanation.textContent).toContain(
+      "After an action-taken outcome, Kandev waits for provider progress before retrying",
+    );
+    expect(explanation.textContent).toContain(
+      "A non-actionable or blocked outcome acknowledges unchanged feedback and does not retry it",
+    );
   });
 
   it("opens the auto-fix round explanation from the mobile drawer help icon", async () => {
@@ -227,6 +259,9 @@ describe("PRStatusChip auto-fix round display", () => {
     expect(explanation.textContent).toContain("Auto-fix has used 2 of 10 rounds");
     expect(explanation.textContent).toContain(
       "Kandev waits for all PR checks to finish before starting a new CI auto-fix turn",
+    );
+    expect(explanation.textContent).toContain(
+      "If a turn ends without a recorded outcome, Kandev can retry the same settled feedback",
     );
   });
 });

@@ -3,8 +3,9 @@
 class Kandev < Formula
   desc "Manage tasks, orchestrate agents, review changes, and ship value"
   homepage "https://github.com/kdlbs/kandev"
-  license "AGPL-3.0-only"
+  # Conditional asset names end in x64/arm64; without this, Homebrew uses version 64.
   version "__VERSION__"
+  license "AGPL-3.0-only"
 
   on_macos do
     if Hardware::CPU.arm?
@@ -37,6 +38,24 @@ class Kandev < Formula
   end
 
   test do
-    assert_match "kandev launcher", shell_output("#{bin}/kandev --help")
+    assert_equal "v#{version}", shell_output("#{bin}/kandev --version").strip
+
+    ENV["KANDEV_HOME_DIR"] = testpath.to_s
+    ENV["KANDEV_DATABASE_PATH"] = (testpath/"kandev.db").to_s
+    ENV["KANDEV_SERVER_HOST"] = "127.0.0.1"
+    port = free_port
+    pid = spawn bin/"kandev", "--headless", "--port", port.to_s
+    # /health flips to 200 as soon as the listener binds, before startup
+    # recovery finishes, so curl's --retry (which only retries on
+    # connection-refused/5xx, never on 200) would stop waiting immediately.
+    # /ready holds at 503 until the app is actually usable.
+    ready_url = "http://127.0.0.1:#{port}/ready"
+    curl = "curl --silent --show-error --fail --retry 30 --retry-connrefused --retry-delay 1"
+    ready = shell_output("#{curl} #{ready_url}")
+    assert_match '"status":"ok"', ready
+    assert_match "<title>Kandev</title>", shell_output("#{curl} http://127.0.0.1:#{port}/")
+  ensure
+    Process.kill("TERM", pid) if pid
+    Process.wait(pid) if pid
   end
 end

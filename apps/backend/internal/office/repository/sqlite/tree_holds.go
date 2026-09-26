@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/office/models"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
 func (r *Repository) createTreeHoldTables() error {
@@ -207,23 +208,23 @@ func (r *Repository) CountActiveRunsForTasks(ctx context.Context, taskIDs []stri
 	return count, err
 }
 
-func (r *Repository) CancelRunsForTasks(ctx context.Context, taskIDs []string, reason string) (int, error) {
+// CancelRunsForTasks cancels the queued or claimed runs belonging to the
+// given tasks and returns the rows actually cancelled, so a caller can
+// classify and count each one's loop-liveness terminal shape.
+//
+// The terminal write itself lives in the runs repository's CancelRunsWhere,
+// which applies the queued/claimed guard; only the by-task-id selector stays
+// here. json_extract is SQLite-flavoured — Postgres is a supported driver
+// (internal/persistence/provider.go) and would need dialect.JSONExtract — so
+// keeping it local avoids baking dialect-specific SQL into the shared writer.
+func (r *Repository) CancelRunsForTasks(
+	ctx context.Context, taskIDs []string, reason string,
+) ([]runssqlite.CancelledRun, error) {
 	if len(taskIDs) == 0 {
-		return 0, nil
+		return nil, nil
 	}
-	query, args := taskIDInQuery(`
-		UPDATE runs
-		SET status = 'cancelled', cancel_reason = ?, finished_at = ?
-		WHERE status IN ('queued', 'claimed')
-		  AND json_extract(payload, '$.task_id') IN (%s)
-	`, taskIDs)
-	args = append([]interface{}{reason, time.Now().UTC()}, args...)
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
-	if err != nil {
-		return 0, err
-	}
-	rows, _ := res.RowsAffected()
-	return int(rows), nil
+	selector, args := taskIDInQuery(`json_extract(payload, '$.task_id') IN (%s)`, taskIDs)
+	return r.CancelRunsWhere(ctx, reason, selector, args...)
 }
 
 func (r *Repository) BulkUpdateTaskState(ctx context.Context, taskIDs []string, state string) error {
@@ -241,7 +242,7 @@ func (r *Repository) BulkReleaseTaskCheckout(ctx context.Context, taskIDs []stri
 		return nil
 	}
 	query, args := taskIDInQuery(`
-		UPDATE tasks SET checkout_agent_id = '', checkout_at = NULL, updated_at = CURRENT_TIMESTAMP
+		UPDATE tasks SET checkout_agent_id = '', checkout_at = NULL, checkout_run_id = NULL, updated_at = CURRENT_TIMESTAMP
 		WHERE id IN (%s)
 	`, taskIDs)
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)

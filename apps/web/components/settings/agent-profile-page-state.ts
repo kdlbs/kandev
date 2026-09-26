@@ -9,37 +9,72 @@
  * its toast copy is guarded only by the pseudo-locale.
  */
 
-import { useMemo, useState } from "react";
-import { areCLIFlagsEqual } from "@/lib/cli-flags";
-import { areConfigOptionsEqual } from "@/lib/config-options";
-import { arePermissionsDirty, permissionsToProfilePatch } from "@/lib/agent-permissions";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { permissionsToProfilePatch } from "@/lib/agent-permissions";
 import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { isProfileDirty } from "@/components/settings/agent-profile-dirty";
 import type { useToast } from "@/components/toast-provider";
 import type { AgentProfileDeleteConflict } from "@/components/settings/agent-profile-delete-dialog";
-import { areEnvVarsEqual } from "@/components/settings/profile-edit/profile-env-vars-section";
 import { t as translate } from "@/lib/i18n";
+import {
+  mergeOptionsByNewest,
+  toAgentProfileOption,
+  type AgentProfileOption,
+} from "@/lib/state/slices/settings/types";
+import { ApiError, isHandledApiError } from "@/lib/api/client";
 import type { Agent, AgentProfile, PermissionSetting } from "@/lib/types/http";
+import {
+  isProfileRevisionNewer,
+  reconcileAgentProfileSnapshot,
+  sameEditableProfile,
+} from "@/components/settings/agent-profile-reconciliation";
 
 export type SaveStatus = "idle" | "loading" | "success" | "error";
+
+/**
+ * Reconcile the options slice with the next agent list by ID: options the
+ * rebuild does not represent (e.g. profiles the WS handler delivered for
+ * agents temporarily absent from `settingsAgents`) are preserved, and rebuilt
+ * options replace any stale versions. Same rule as
+ * `applyProfileDuplicated` in the duplicate hook — a save must never wipe
+ * orphan options.
+ */
+export function reconcileAgentProfileOptions(
+  previousOptions: AgentProfileOption[],
+  nextAgents: Agent[],
+): AgentProfileOption[] {
+  const rebuiltOptions = nextAgents.flatMap((agentItem) =>
+    agentItem.profiles.map((agentProfile) => toAgentProfileOption(agentItem, agentProfile)),
+  );
+  return mergeOptionsByNewest(previousOptions, rebuiltOptions);
+}
 
 export function useSyncAgentsToStore() {
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  const storeApi = useAppStoreApi();
   return (nextAgents: Agent[]) => {
     setSettingsAgents(nextAgents);
     setAgentProfiles(
-      nextAgents.flatMap((agentItem) =>
-        agentItem.profiles.map((agentProfile) => ({
-          id: agentProfile.id,
-          label: `${agentProfile.agentDisplayName ?? ""} • ${agentProfile.name}`,
-          agent_id: agentItem.id,
-          agent_name: agentItem.name,
-          cli_passthrough: agentProfile.cliPassthrough ?? false,
-        })),
-      ),
+      reconcileAgentProfileOptions(storeApi.getState().agentProfiles.items, nextAgents),
     );
   };
+}
+
+export function shouldSyncProfileSaveResponse(
+  response: AgentProfile,
+  currentSaved: AgentProfile,
+): boolean {
+  return isProfileRevisionNewer(response, currentSaved);
+}
+
+function changedCursorMcpAuthPreference(
+  draft: AgentProfile,
+  savedProfile: AgentProfile,
+): boolean | undefined {
+  const draftValue = draft.cursorMcpAuthEnabled ?? true;
+  return draftValue === (savedProfile.cursorMcpAuthEnabled ?? true) ? undefined : draftValue;
 }
 
 export function useProfileEditorState(
@@ -49,22 +84,85 @@ export function useProfileEditorState(
   const [draft, setDraft] = useState<AgentProfile>({ ...profile });
   const [savedProfile, setSavedProfile] = useState<AgentProfile>(profile);
   const [saveStatus, setSaveStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [hasExternalConflict, setHasExternalConflict] = useState(false);
+  const previousProfileRef = useRef(profile);
+  const submittedProfileRef = useRef<AgentProfile | null>(null);
+  const draftRef = useRef(draft);
+  const savedProfileRef = useRef(savedProfile);
+  draftRef.current = draft;
+  savedProfileRef.current = savedProfile;
+
+  useEffect(() => {
+    const previous = previousProfileRef.current;
+    previousProfileRef.current = profile;
+    if (profile.id !== previous.id) {
+      submittedProfileRef.current = null;
+      setDraft(profile);
+      setSavedProfile(profile);
+      setHasExternalConflict(false);
+      setSaveStatus("idle");
+      return;
+    }
+
+    const result = reconcileAgentProfileSnapshot({
+      previous,
+      incoming: profile,
+      draft: draftRef.current,
+      saved: savedProfileRef.current,
+      submitted: submittedProfileRef.current,
+      conflicted: hasExternalConflict,
+    });
+    if (result.kind === "ignored") return;
+    setSavedProfile(result.saved);
+    setDraft(result.draft);
+    setHasExternalConflict(result.conflicted);
+    if (result.kind === "own-acknowledgement") submittedProfileRef.current = null;
+  }, [hasExternalConflict, profile]);
+
+  const markProfileSubmitted = useCallback((submitted: AgentProfile | null) => {
+    submittedProfileRef.current = submitted;
+  }, []);
+
+  const acceptProfileSaveResponse = useCallback(
+    (response: AgentProfile, submitted: AgentProfile): boolean => {
+      const currentSaved = savedProfileRef.current;
+      if (!shouldSyncProfileSaveResponse(response, currentSaved)) {
+        submittedProfileRef.current = null;
+        return false;
+      }
+      setSavedProfile(response);
+      if (sameEditableProfile(draftRef.current, submitted)) setDraft(response);
+      setHasExternalConflict(false);
+      submittedProfileRef.current = null;
+      return true;
+    },
+    [],
+  );
+
+  const discardProfileDraft = useCallback(() => {
+    setDraft(savedProfileRef.current);
+    setHasExternalConflict(false);
+    submittedProfileRef.current = null;
+  }, []);
 
   const isDirty = useMemo(
-    () =>
-      draft.name !== savedProfile.name ||
-      draft.model !== savedProfile.model ||
-      (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
-      !areConfigOptionsEqual(draft.configOptions, savedProfile.configOptions) ||
-      arePermissionsDirty(draft, savedProfile, permissionSettings) ||
-      draft.cliPassthrough !== savedProfile.cliPassthrough ||
-      !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []) ||
-      (draft.commandPrefix ?? "") !== (savedProfile.commandPrefix ?? "") ||
-      !areEnvVarsEqual(draft.envVars, savedProfile.envVars),
+    () => isProfileDirty(draft, savedProfile, permissionSettings),
     [draft, savedProfile, permissionSettings],
   );
 
-  return { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty };
+  return {
+    draft,
+    setDraft,
+    savedProfile,
+    setSavedProfile,
+    saveStatus,
+    setSaveStatus,
+    isDirty,
+    hasExternalConflict,
+    markProfileSubmitted,
+    acceptProfileSaveResponse,
+    discardProfileDraft,
+  };
 }
 
 export function errorMessage(error: unknown): string {
@@ -74,25 +172,30 @@ export function errorMessage(error: unknown): string {
 type ProfileEditorActionsOptions = {
   agent: Agent;
   draft: AgentProfile;
-  setSavedProfile: (p: AgentProfile) => void;
-  setDraft: React.Dispatch<React.SetStateAction<AgentProfile>>;
+  savedProfile: AgentProfile;
   setSaveStatus: (s: SaveStatus) => void;
+  markProfileSubmitted: (profile: AgentProfile | null) => void;
+  acceptProfileSaveResponse: (response: AgentProfile, submitted: AgentProfile) => boolean;
   settingsAgents: Agent[];
   syncAgentsToStore: (agents: Agent[]) => void;
   toast: ReturnType<typeof useToast>["toast"];
+  onUtilityConflict?: (agents: Array<{ id: string; name: string }>) => void;
 };
 
 export function useProfileSave({
   agent,
   draft,
-  setSavedProfile,
-  setDraft,
+  savedProfile,
   setSaveStatus,
+  markProfileSubmitted,
+  acceptProfileSaveResponse,
   settingsAgents,
   syncAgentsToStore,
   toast,
+  onUtilityConflict,
 }: ProfileEditorActionsOptions) {
-  return async () => {
+  // eslint-disable-next-line complexity
+  return async (force = false) => {
     if (!draft.name.trim()) {
       toast({
         title: translate("agents:profileNameRequiredTitle"),
@@ -101,42 +204,85 @@ export function useProfileSave({
       });
       return;
     }
+    if (draft.requireExactModel && !draft.model.trim()) {
+      toast({
+        title: translate("settings:requireExactModelValidationTitle"),
+        description: translate("settings:requireExactModelValidation"),
+        variant: "error",
+      });
+      return;
+    }
     // Model is optional — an empty profile model means "use the agent's
     // default", which is applied through ACP session model selection at session start.
     setSaveStatus("loading");
+    const submitted = draft;
+    markProfileSubmitted(submitted);
     try {
-      const updated = await updateAgentProfileAction(draft.id, {
-        name: draft.name,
-        model: draft.model,
-        mode: draft.mode,
-        config_options: draft.configOptions ?? {},
-        ...permissionsToProfilePatch(draft),
-        cli_passthrough: draft.cliPassthrough,
-        cli_flags: draft.cliFlags,
-        command_prefix: draft.commandPrefix ?? "",
-        env_vars: draft.envVars ?? [],
-      });
-      setSavedProfile(updated);
-      setDraft((current) => preserveNewerProfileDraft(current, draft, updated));
-      const nextAgents = settingsAgents.map((agentItem: Agent) =>
-        agentItem.id === agent.id
-          ? {
-              ...agentItem,
-              profiles: agentItem.profiles.map((p: AgentProfile) =>
-                p.id === updated.id ? updated : p,
-              ),
-            }
-          : agentItem,
+      const updated = await updateAgentProfileAction(
+        draft.id,
+        {
+          name: draft.name,
+          model: draft.model,
+          fallback_model: draft.fallbackModel ?? "",
+          auto_fallback: draft.autoFallback ?? false,
+          require_exact_model: draft.requireExactModel ?? false,
+          mode: draft.mode,
+          config_options: draft.configOptions ?? {},
+          ...permissionsToProfilePatch(draft),
+          cli_passthrough: draft.cliPassthrough,
+          cursor_mcp_auth_enabled: changedCursorMcpAuthPreference(draft, savedProfile),
+          // Omit an unchanged enabled value so a profile editor save cannot
+          // resurrect a concurrent list-toggle response from its stale draft.
+          enabled:
+            (draft.enabled ?? true) !== (savedProfile.enabled ?? true)
+              ? (draft.enabled ?? true)
+              : undefined,
+          cli_flags: draft.cliFlags,
+          command_prefix: draft.commandPrefix ?? "",
+          provider_kind: draft.providerKind ?? "",
+          provider_base_url:
+            (draft.providerKind ?? "") === "openai_compatible" ? (draft.providerBaseUrl ?? "") : "",
+          provider_api_key_secret_id:
+            (draft.providerKind ?? "") === "openai_compatible"
+              ? (draft.providerApiKeySecretId ?? "")
+              : "",
+          env_vars: draft.envVars ?? [],
+        },
+        force,
       );
-      syncAgentsToStore(nextAgents);
+      if (acceptProfileSaveResponse(updated, submitted)) {
+        const nextAgents = settingsAgents.map((agentItem: Agent) =>
+          agentItem.id === agent.id
+            ? {
+                ...agentItem,
+                profiles: agentItem.profiles.map((p: AgentProfile) =>
+                  p.id === updated.id ? updated : p,
+                ),
+              }
+            : agentItem,
+        );
+        syncAgentsToStore(nextAgents);
+      }
       setSaveStatus("success");
     } catch (error) {
+      markProfileSubmitted(null);
+      if (
+        error instanceof ApiError &&
+        error.status === 409 &&
+        Array.isArray((error.body as { utility_agents?: unknown[] } | null)?.utility_agents)
+      ) {
+        onUtilityConflict?.(
+          (error.body as { utility_agents: Array<{ id: string; name: string }> }).utility_agents,
+        );
+      }
       setSaveStatus("error");
-      toast({
-        title: translate("agents:failedToSaveProfile"),
-        description: errorMessage(error),
-        variant: "error",
-      });
+      if (!isHandledApiError(error)) {
+        toast({
+          title: translate("agents:failedToSaveProfile"),
+          description: errorMessage(error),
+          variant: "error",
+        });
+      }
       throw error;
     }
   };
@@ -187,8 +333,10 @@ export function useProfileDelete(
         activeSessions: result.activeSessions,
         watchers: result.watchers,
         routingTiers: result.routingTiers,
+        automations: result.automations,
+        utilityAgents: result.utilityAgents,
       });
-    } else {
+    } else if (!result.handled) {
       toast({
         title: translate("agents:failedToDeleteProfile"),
         description: result.message,
@@ -207,8 +355,10 @@ export function useProfileDelete(
         activeSessions: result.activeSessions,
         watchers: result.watchers,
         routingTiers: result.routingTiers,
+        automations: result.automations,
+        utilityAgents: result.utilityAgents,
       });
-    } else if (result.status === "error") {
+    } else if (result.status === "error" && !result.handled) {
       toast({
         title: translate("agents:failedToDeleteProfile"),
         description: result.message,

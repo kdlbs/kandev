@@ -1,10 +1,13 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
-import type { Task } from "@/lib/types/http";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
-import { TaskCreateDialogFooter } from "@/components/task-create-dialog-footer";
+import {
+  isNativeSubmitDisabled,
+  TaskCreateDialogFooter,
+} from "@/components/task-create-dialog-footer";
 import { DiscardLocalChangesDialog } from "@/components/discard-local-changes-dialog";
 import { DialogHeaderContent } from "@/components/task-create-dialog-header";
 import {
@@ -12,15 +15,19 @@ import {
   WorkflowSection,
   DialogPromptSection,
 } from "@/components/task-create-dialog-form-body";
+import { CreateModeSelectors } from "@/components/task-create-dialog-create-mode-selectors";
 import {
   AgentSelector,
   ExecutorProfileSelector,
   InlineTaskName,
 } from "@/components/task-create-dialog-selectors";
-import { CreateModeSelectors } from "@/components/task-create-dialog-create-mode-selectors";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
-import type { TaskCreateDialogInitialValues } from "@/components/task-create-dialog-state";
-import type { DialogFormBodyProps } from "@/components/task-create-dialog-types";
+import { TaskCreateAdvancedSettings } from "@/components/task-create-dialog-advanced-settings";
+import { TaskEditDialogDependencies } from "@/components/task-edit-dialog-dependencies";
+import type {
+  DialogFormBodyProps,
+  TaskCreateDialogProps,
+} from "@/components/task-create-dialog-types";
 import {
   buildDialogFooterProps,
   buildDialogFormBodyProps,
@@ -31,63 +38,7 @@ import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-creat
 import { shouldShowTaskTitleField } from "@/components/task-create-dialog-helpers";
 import { useTaskCreateDialogSetup } from "@/components/task-create-dialog-setup";
 
-export interface TaskCreateDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  mode?: "create" | "edit" | "session";
-  workspaceId: string | null;
-  workflowId: string | null;
-  defaultStepId: string | null;
-  steps: Array<{
-    id: string;
-    title: string;
-    events?: {
-      on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
-      on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
-    };
-  }>;
-  editingTask?: {
-    id: string;
-    title: string;
-    description?: string;
-    workflowStepId: string;
-    state?: Task["state"];
-    repositoryId?: string;
-  } | null;
-  onSuccess?: (
-    task: Task,
-    mode: "create" | "edit",
-    meta?: { taskSessionId?: string | null; willNavigate?: boolean },
-  ) => void;
-  onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
-  initialValues?: TaskCreateDialogInitialValues;
-  taskId?: string | null;
-  parentTaskId?: string;
-  /**
-   * Pin specific form fields to their initial values (used by feature wrappers
-   * like Improve Kandev that fix the repo + branch + workflow). The current
-   * implementation just passes the locks through; the chip row's first repo
-   * is overwritten on each open. The flags are kept for forward compat with
-   * locking the editor UI itself in a future pass.
-   */
-  lockedFields?: { repository?: boolean; branch?: boolean; workflow?: boolean };
-  /** Optional submit hook used by Improve Kandev to wrap the description. */
-  transformDescriptionBeforeSubmit?: (description: string) => Promise<string> | string;
-  /** Optional override for the description placeholder. */
-  descriptionPlaceholder?: string;
-  /** Optional render slot above the description editor. */
-  aboveDescriptionSlot?: React.ReactNode;
-  /** Optional render slot inside the dialog (between body and footer). */
-  extraFormSlot?: React.ReactNode;
-  /** Optional render slot at the bottom of the dialog footer area. */
-  bottomSlot?: React.ReactNode;
-  /**
-   * When set, every submit button is disabled and the tooltip surfaces this
-   * exact reason (e.g. an async bootstrap step from a feature wrapper hasn't
-   * completed yet). Takes precedence over the usual missing-field reasons.
-   */
-  submitBlockedReason?: string | null;
-}
+export type { TaskCreateDialogProps } from "@/components/task-create-dialog-types";
 
 function CreateModeBody(props: DialogFormBodyProps) {
   const {
@@ -98,21 +49,13 @@ function CreateModeBody(props: DialogFormBodyProps) {
     workspaceId,
     onJiraImport,
     onLinearImport,
-    agentProfileOptions,
-    executorProfileOptions,
-    agentProfiles,
-    agentProfilesLoading,
-    executorsLoading,
-    isCreatingSession,
     fs,
     onTaskNameChange,
     onRowRepositoryChange,
     onRowBranchChange,
-    onAgentProfileChange,
-    onExecutorProfileChange,
+    onRowPolicyChange,
     onToggleRemote,
     onToggleFreshBranch,
-    workflowAgentLocked,
     repositories,
     onRefreshRepositories,
     repositoriesRefreshing,
@@ -132,6 +75,10 @@ function CreateModeBody(props: DialogFormBodyProps) {
         workspaceId={workspaceId}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
+        onRowPolicyChange={onRowPolicyChange}
+        onPolicySelected={
+          isLocalExecutor && freshBranchAvailable ? () => onToggleFreshBranch(true) : undefined
+        }
         onToggleRemote={onToggleRemote}
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={fs.freshBranchEnabled}
@@ -144,6 +91,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         localRepositoryCreation={localRepositoryCreation}
         onRefreshRepositories={onRefreshRepositories}
         repositoriesRefreshing={repositoriesRefreshing}
+        repositorySets={props.repositorySets}
       />
       {showTaskName && (
         <InlineTaskName
@@ -154,11 +102,14 @@ function CreateModeBody(props: DialogFormBodyProps) {
       )}
       <DialogPromptSection
         isSessionMode={false}
+        promptReferencesEnabled={isCreateMode}
         isTaskStarted={isTaskStarted}
         initialDescription={props.initialDescription}
         fs={fs}
+        onPendingAttachmentUploadsChange={fs.setHasPendingAttachmentUploads}
         handleKeyDown={props.handleKeyDown}
         enhance={props.enhance}
+        launchPreview={props.launchPreview}
         workspaceId={workspaceId}
         onJiraImport={onJiraImport}
         onLinearImport={onLinearImport}
@@ -166,25 +117,35 @@ function CreateModeBody(props: DialogFormBodyProps) {
         aboveDescriptionSlot={props.aboveDescriptionSlot}
         extraFormSlot={props.extraFormSlot}
         autoFocusDescription={!isTaskStarted && !(showTaskName && taskNameAutoFocus)}
-        onVoiceAutoSend={props.onVoiceAutoSend}
+        onComposerSubmit={props.onComposerSubmit}
       />
-      <CreateModeSelectors
-        isTaskStarted={isTaskStarted}
-        agentProfileOptions={agentProfileOptions}
-        executorProfileOptions={executorProfileOptions}
-        agentProfiles={agentProfiles}
-        agentProfilesLoading={agentProfilesLoading}
-        executorsLoading={executorsLoading}
-        isCreatingSession={isCreatingSession}
-        fs={fs}
-        onAgentProfileChange={onAgentProfileChange}
-        onExecutorProfileChange={onExecutorProfileChange}
-        workflowAgentLocked={workflowAgentLocked}
-        noCompatibleAgent={props.noCompatibleAgent}
-        executorProfileName={props.executorProfileName}
-      />
+      <CreateModeAgentSelectors {...props} />
       {props.bottomSlot}
     </>
+  );
+}
+
+function CreateModeAgentSelectors(props: DialogFormBodyProps) {
+  return (
+    <CreateModeSelectors
+      isTaskStarted={props.isTaskStarted}
+      agentProfileOptions={props.agentProfileOptions}
+      executorProfileOptions={props.executorProfileOptions}
+      agentProfiles={props.agentProfiles}
+      agentProfilesLoading={props.agentProfilesLoading}
+      executorsLoading={props.executorsLoading}
+      isCreatingSession={props.isCreatingSession}
+      fs={props.fs}
+      onAgentProfileChange={props.onAgentProfileChange}
+      onExecutorProfileChange={props.onExecutorProfileChange}
+      workflowAgentLocked={props.workflowAgentLocked}
+      agentCompatState={props.agentCompatState}
+      selectedAgentProfileName={props.selectedAgentProfileName}
+      effectiveWorkflowName={props.effectiveWorkflowName}
+      executorProfileName={props.executorProfileName}
+      runnerEditable={props.runnerEditable}
+      runnerIneligibleReason={props.runnerIneligibleReason}
+    />
   );
 }
 
@@ -196,11 +157,12 @@ function SessionModeBody(props: DialogFormBodyProps) {
         isTaskStarted={props.isTaskStarted}
         initialDescription={props.initialDescription}
         fs={props.fs}
+        onPendingAttachmentUploadsChange={props.fs.setHasPendingAttachmentUploads}
         handleKeyDown={props.handleKeyDown}
         enhance={props.enhance}
         workspaceId={props.workspaceId}
         onJiraImport={props.onJiraImport}
-        onVoiceAutoSend={props.onVoiceAutoSend}
+        onComposerSubmit={props.onComposerSubmit}
       />
       <SessionSelectors
         agentProfileOptions={props.agentProfileOptions}
@@ -222,7 +184,7 @@ function SessionModeBody(props: DialogFormBodyProps) {
 function DialogFormBody(props: DialogFormBodyProps) {
   const { isSessionMode, isCreateMode, isTaskStarted, workflows, snapshots } = props;
   return (
-    <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+    <div className="flex-1 space-y-4 overflow-y-auto pr-1" data-testid="task-create-form-body">
       {isSessionMode ? <SessionModeBody {...props} /> : <CreateModeBody {...props} />}
       <WorkflowSection
         isCreateMode={isCreateMode}
@@ -232,20 +194,72 @@ function DialogFormBody(props: DialogFormBodyProps) {
         effectiveWorkflowId={props.effectiveWorkflowId}
         onWorkflowChange={props.onWorkflowChange}
         agentProfiles={props.agentProfiles}
+        launchPreview={props.launchPreview}
         workflowLocked={props.workflowLocked}
       />
+      <TaskCreateAdvancedSettings
+        isCreateMode={isCreateMode}
+        isTaskStarted={isTaskStarted}
+        blockedBy={props.fs.blockedBy}
+        onBlockedByChange={props.fs.setBlockedBy}
+        priority={props.fs.priority}
+        onPriorityChange={props.fs.setPriority}
+        dependenciesDisabled={props.isCreatingSession || props.isCreatingTask}
+        workflowAgentOverrideRows={props.workflowAgentOverrideRows}
+        workflowAgentOverrideOptions={props.workflowAgentOverrideOptions}
+        workflowAgentOverridesLoading={props.workflowAgentOverridesLoading}
+        workflowAgentOverridesInvalid={props.workflowAgentOverridesInvalid}
+        workflowAgentOverridesError={props.workflowAgentOverridesError}
+        onWorkflowAgentOverrideChange={props.onWorkflowAgentOverrideChange}
+        onResetWorkflowAgentOverrides={props.onResetWorkflowAgentOverrides}
+        onRetryWorkflowAgentOverrides={props.onRetryWorkflowAgentOverrides}
+      />
+      {props.isEditMode && (
+        <TaskEditDialogDependencies
+          state={props.editDependencies}
+          disabled={props.isCreatingSession || props.isCreatingTask}
+        />
+      )}
     </div>
   );
 }
 
-// Synthetic submit event used by the voice auto-send path. Calling the form
+// Synthetic submit event used by a plugin composer action's submit. Calling the form
 // handler directly (instead of `form.requestSubmit()`) matches the chat
 // composer's pattern and avoids the Safari < 16 gap where `requestSubmit` is
 // missing on `HTMLFormElement`. `guardedHandleSubmit` only reads
 // `preventDefault` off the event, so a stubbed shape is sufficient.
-const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
+const PROGRAMMATIC_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
+
+function useTaskCreateFocusReturn(props: TaskCreateDialogProps, isCreateMode: boolean) {
+  const autoFocusNewTasks = useAppStore((state) => state.userSettings.autoFocusNewTasks) !== false;
+  const activeElement = () =>
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const [openingFocus, setOpeningFocus] = useState(() => ({
+    open: props.open,
+    target: activeElement(),
+  }));
+  // Capture the opener before descendants run their input-focus effects.
+  if (openingFocus.open !== props.open) {
+    setOpeningFocus({
+      open: props.open,
+      target: props.open ? activeElement() : openingFocus.target,
+    });
+  }
+  return {
+    onCloseAutoFocus: (event: Event) => {
+      const target =
+        props.focusReturnRef?.current ??
+        (isCreateMode && !autoFocusNewTasks ? openingFocus.target : null);
+      if (!target || !document.contains(target)) return;
+      event.preventDefault();
+      target.focus();
+    },
+  };
+}
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
+  const { t } = useTranslation("chat");
   const syncedTaskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
   const preserveQueuedLastUsedOnCloseRef = useRef<{
     syncedSettings: TaskCreateLastUsedState | null | undefined;
@@ -265,6 +279,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   }, []);
   const setup = useTaskCreateDialogSetup(props, { preserveQueuedLastUsedOnClose });
   const { guardedHandleSubmit } = setup;
+  const focusReturn = useTaskCreateFocusReturn(props, setup.isCreateMode);
   const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (props.open) {
@@ -278,18 +293,27 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
     }
     resetQueuedLastUsedOnClose();
   }, [props.open, resetQueuedLastUsedOnClose]);
-  // Voice auto-send invokes the same submit handler as the in-form Submit
-  // button. Every existing validation gate (missing title/repo/branch/agent,
-  // `submitBlockedReason`, in-flight create) still applies because they live
-  // inside `handleSubmit` itself, so a dictation with incomplete fields
-  // silently no-ops rather than creating a malformed task.
-  const handleVoiceAutoSend = useCallback(() => {
-    guardedHandleSubmit(VOICE_SUBMIT_EVENT);
-  }, [guardedHandleSubmit]);
+  // Programmatic submissions use the native control's preflight before
+  // entering the same guarded submit handler as the form button.
+  const pendingAttachmentReason = setup.fs.hasPendingAttachmentUploads
+    ? t("chat:attachmentUploadPendingSubmit")
+    : null;
+  const nativeSubmitDisabled = isNativeSubmitDisabled(
+    buildDialogFooterProps(setup, props, pendingAttachmentReason),
+  );
+  const handleComposerSubmit = useCallback(() => {
+    if (nativeSubmitDisabled) return false;
+    guardedHandleSubmit(PROGRAMMATIC_SUBMIT_EVENT);
+    return true;
+  }, [guardedHandleSubmit, nativeSubmitDisabled]);
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
         ref={setPopoverContainer}
+        onEscapeKeyDown={(event) => {
+          if (setup.isCreateMode) event.preventDefault();
+        }}
+        {...focusReturn}
         data-testid="create-task-dialog"
         data-webkit-safe-motion="true"
         showCloseButton={false}
@@ -311,10 +335,15 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
           >
             <DialogFormBody
               {...buildDialogFormBodyProps(setup, props)}
-              onVoiceAutoSend={handleVoiceAutoSend}
+              onComposerSubmit={handleComposerSubmit}
             />
-            <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
-              <TaskCreateDialogFooter {...buildDialogFooterProps(setup, props)} />
+            <DialogFooter
+              className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2"
+              data-testid="task-create-dialog-footer"
+            >
+              <TaskCreateDialogFooter
+                {...buildDialogFooterProps(setup, props, pendingAttachmentReason)}
+              />
             </DialogFooter>
           </form>
           <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />

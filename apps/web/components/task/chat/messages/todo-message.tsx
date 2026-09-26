@@ -4,9 +4,10 @@ import { useState } from "react";
 import { IconChevronDown, IconChevronRight, IconListCheck } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
-import type { RichMetadata, TodoMetadata, TodoSnapshot } from "@/components/task/chat/types";
+import type { TodoSnapshot } from "@/components/task/chat/types";
 import { ExpandableRow } from "./expandable-row";
 import { StatusIcon, resolveStatus } from "../todo-indicator";
+import { useTranslation } from "react-i18next";
 
 type TodoItem = {
   text: string;
@@ -14,27 +15,59 @@ type TodoItem = {
   status?: "pending" | "in_progress" | "completed" | "failed";
 };
 
-function normalizeTodos(raw: TodoMetadata[]): TodoItem[] {
+/** Normalizes persisted todo entries, dropping malformed or empty-text
+ *  entries. Total by construction: never throws. */
+function normalizeTodos(raw: unknown): TodoItem[] {
+  // Total by construction: malformed persisted metadata (non-array `todos`,
+  // null/primitive entries, empty text) must yield an empty list, never
+  // throw, matching buildTodoItems' hardening in use-processed-messages.ts.
+  if (!Array.isArray(raw)) return [];
   return raw
     .map((item) => (typeof item === "string" ? { text: item, done: false } : item))
-    .filter((item) => item.text);
+    .filter(
+      (item): item is TodoItem =>
+        typeof item === "object" &&
+        item !== null &&
+        typeof item.text === "string" &&
+        item.text.length > 0,
+    );
 }
 
+/** Extracts the message's current todo items via normalizeTodos. */
 function parseTodos(comment: Message): TodoItem[] {
-  const metadata = comment.metadata as RichMetadata | undefined;
-  return normalizeTodos(metadata?.todos ?? []);
+  const metadata = comment.metadata;
+  const todos =
+    metadata !== null && typeof metadata === "object" && "todos" in metadata
+      ? metadata.todos
+      : undefined;
+  return normalizeTodos(todos ?? []);
 }
 
+/** Extracts the message's earlier-updates snapshot history, dropping
+ *  malformed entries. */
 function parseSnapshots(comment: Message): TodoSnapshot[] {
-  const metadata = comment.metadata as RichMetadata | undefined;
-  return metadata?.previous_todo_snapshots ?? [];
+  const metadata = comment.metadata;
+  const snapshots =
+    metadata !== null && typeof metadata === "object" && "previous_todo_snapshots" in metadata
+      ? metadata.previous_todo_snapshots
+      : undefined;
+  if (!Array.isArray(snapshots)) return [];
+  // Total by construction: drop null/primitive snapshot entries (SnapshotHistory
+  // would dereference their `todos`); malformed `snapshot.todos` is already
+  // neutralized by the unknown-safe normalizeTodos.
+  return snapshots.filter(
+    (snapshot): snapshot is TodoSnapshot => typeof snapshot === "object" && snapshot !== null,
+  );
 }
 
+/** Number of todo items in the completed state. */
 function countCompleted(items: TodoItem[]): number {
   return items.filter((t) => resolveStatus(t) === "completed").length;
 }
 
+/** Collapsible history of earlier todo snapshots for one message. */
 function SnapshotHistory({ snapshots }: { snapshots: TodoSnapshot[] }) {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   return (
     <div className="mt-3 pt-2 border-t border-border/30">
@@ -49,7 +82,7 @@ function SnapshotHistory({ snapshots }: { snapshots: TodoSnapshot[] }) {
         ) : (
           <IconChevronRight className="h-3 w-3" />
         )}
-        Earlier updates ({snapshots.length})
+        {t("task:earlierUpdates", { count: snapshots.length })}
       </button>
       {isOpen && (
         <div className="mt-1.5 space-y-1 text-[11px] text-muted-foreground/80">
@@ -77,6 +110,8 @@ function SnapshotHistory({ snapshots }: { snapshots: TodoSnapshot[] }) {
   );
 }
 
+/** Renders a `todo`-type chat message: its current checklist plus an
+ *  expandable earlier-updates history. */
 export function TodoMessage({
   comment,
   defaultExpanded = false,
@@ -84,6 +119,7 @@ export function TodoMessage({
   comment: Message;
   defaultExpanded?: boolean;
 }) {
+  const { t } = useTranslation();
   const todoItems = parseTodos(comment);
   const snapshots = parseSnapshots(comment);
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
@@ -100,7 +136,7 @@ export function TodoMessage({
       header={
         <div className="flex items-center gap-2 text-xs min-w-0">
           <span className="text-muted-foreground text-[11px] uppercase tracking-wide shrink-0">
-            Updated Todos
+            {t("task:updatedTodos")}
           </span>
           <span className="text-muted-foreground text-[11px] shrink-0">
             ({completed}/{todoItems.length})

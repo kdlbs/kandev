@@ -65,6 +65,11 @@ type Client interface {
 	// ListPipelines lists pipelines for a given git ref (branch or SHA).
 	ListPipelines(ctx context.Context, projectPath, ref string) ([]Pipeline, error)
 
+	// ListPipelineJobs lists the jobs belonging to a single pipeline run.
+	// Used to compute job pass-rate counts and to surface failing job
+	// names/URLs for MR auto-fix.
+	ListPipelineJobs(ctx context.Context, projectPath string, pipelineID int64) ([]PipelineJob, error)
+
 	// GetMRFeedback fetches aggregated feedback (approvals, discussions,
 	// pipelines) for an MR.
 	GetMRFeedback(ctx context.Context, projectPath string, iid int) (*MRFeedback, error)
@@ -91,10 +96,20 @@ type Client interface {
 	// ListProjectBranches lists branches for a project.
 	ListProjectBranches(ctx context.Context, projectPath string) ([]RepoBranch, error)
 
+	// ListRepoTree lists one repository directory at the given ref,
+	// non-recursively. An empty path lists the repository root.
+	ListRepoTree(ctx context.Context, projectPath, path, ref string) ([]RepoTreeEntry, error)
+
+	// GetRepoFileContent returns the raw bytes of a repository file at the
+	// given ref.
+	GetRepoFileContent(ctx context.Context, projectPath, path, ref string) ([]byte, error)
+
 	// ListIssues searches for open issues. filter is an optional
 	// additional API filter; customQuery, when non-empty, replaces the
-	// entire generated query.
-	ListIssues(ctx context.Context, filter, customQuery string) ([]*Issue, error)
+	// entire generated query. milestone, when non-empty, restricts results
+	// to that exact milestone title (folded into customQuery when both are
+	// set and customQuery doesn't already name a milestone).
+	ListIssues(ctx context.Context, filter, customQuery, milestone string) ([]*Issue, error)
 
 	// SearchMRs searches for MRs matching the given query.
 	SearchMRs(ctx context.Context, filter, customQuery string) ([]*MR, error)
@@ -104,7 +119,7 @@ type Client interface {
 	SearchMRsPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*MRSearchPage, error)
 
 	// ListIssuesPaged is the paginated variant of ListIssues.
-	ListIssuesPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*IssueSearchPage, error)
+	ListIssuesPaged(ctx context.Context, filter, customQuery, milestone string, page, perPage int) (*IssueSearchPage, error)
 
 	// GetIssueState returns the state of a single issue ("opened" or "closed").
 	GetIssueState(ctx context.Context, projectPath string, iid int) (string, error)

@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +25,8 @@ import (
 // sync.
 const ghSearchReposPath = "search/repositories"
 
+const ghMergeableState = "MERGEABLE"
+
 // ghAccessibleReposPath is the GET /user/repos endpoint (with affiliation +
 // sort + per_page baked in) that backs ListAccessibleRepos. It returns a flat
 // JSON array on the core REST quota, replacing the per-org search fan-out.
@@ -30,7 +34,8 @@ const ghAccessibleReposPathFmt = "/user/repos?affiliation=%s&sort=pushed&per_pag
 
 // GHClient implements Client using the gh CLI.
 type GHClient struct {
-	rateTracker *RateTracker
+	rateTracker   *RateTracker
+	mergePollWait func(context.Context, time.Duration) error
 }
 
 // NewGHClient creates a new gh CLI-based client.
@@ -46,10 +51,16 @@ func (c *GHClient) WithRateTracker(t *RateTracker) *GHClient {
 	return c
 }
 
+// RateResource reports the bucket used by gh subcommands such as `gh pr view`
+// and `gh issue view`. The CLI implements these reads through GraphQL.
+func (c *GHClient) RateResource() Resource {
+	return ResourceGraphQL
+}
+
 // reGHRateLimit matches the prose gh prints when a request hit a primary or
 // secondary rate limit. The exact text varies by gh version and locale, but
 // "rate limit" / "API rate limit" appear consistently.
-var ghRateLimitMarkers = []string{"rate limit", "abuse detection"}
+var ghRateLimitMarkers = []string{"rate limit", "abuse detection", "too many requests", "secondary limit"}
 
 func ghStderrIndicatesRateLimit(stderr string) bool {
 	if stderr == "" {
@@ -183,27 +194,60 @@ type ghRequestedReviewer struct {
 
 // ghPR is the JSON shape returned by gh pr list/view.
 type ghPR struct {
-	Number           int                   `json:"number"`
-	Title            string                `json:"title"`
-	URL              string                `json:"url"`
-	State            string                `json:"state"`
-	Body             string                `json:"body"`
-	HeadRefName      string                `json:"headRefName"`
-	HeadRefOid       string                `json:"headRefOid"`
-	BaseRefName      string                `json:"baseRefName"`
-	IsDraft          bool                  `json:"isDraft"`
-	Mergeable        string                `json:"mergeable"`
-	MergeStateStatus string                `json:"mergeStateStatus"`
-	Additions        int                   `json:"additions"`
-	Deletions        int                   `json:"deletions"`
-	CreatedAt        time.Time             `json:"createdAt"`
-	UpdatedAt        time.Time             `json:"updatedAt"`
-	MergedAt         string                `json:"mergedAt"`
-	ClosedAt         string                `json:"closedAt"`
-	ReviewRequests   []ghRequestedReviewer `json:"reviewRequests"`
-	Author           struct {
+	Number      int    `json:"number"`
+	Title       string `json:"title"`
+	URL         string `json:"url"`
+	State       string `json:"state"`
+	Body        string `json:"body"`
+	HeadRefName string `json:"headRefName"`
+	HeadRefOid  string `json:"headRefOid"`
+	BaseRefName string `json:"baseRefName"`
+	// IsDraft is a pointer: AC-12a requires distinguishing an omitted or
+	// null isDraft from a genuine false, which a plain bool can't after decode.
+	IsDraft          *bool  `json:"isDraft"`
+	Mergeable        string `json:"mergeable"`
+	MergeStateStatus string `json:"mergeStateStatus"`
+	Additions        int    `json:"additions"`
+	Deletions        int    `json:"deletions"`
+	// ChangedFiles is a pointer for the same reason as IsDraft (AC-12a): 0 is
+	// a legitimate observation and must stay distinguishable from absent/null.
+	ChangedFiles        *int                  `json:"changedFiles"`
+	CreatedAt           time.Time             `json:"createdAt"`
+	UpdatedAt           time.Time             `json:"updatedAt"`
+	MergedAt            string                `json:"mergedAt"`
+	ClosedAt            string                `json:"closedAt"`
+	ReviewRequests      []ghRequestedReviewer `json:"reviewRequests"`
+	MaintainerCanModify bool                  `json:"maintainerCanModify"`
+	HeadRepository      ghRepository          `json:"headRepository"`
+	HeadRepositoryOwner ghRepositoryOwner     `json:"headRepositoryOwner"`
+	Author              struct {
 		Login string `json:"login"`
 	} `json:"author"`
+	// MergedBy decodes to a zero-value Login on gh's `null` for an unmerged
+	// PR — never a placeholder value.
+	MergedBy struct {
+		Login string `json:"login"`
+	} `json:"mergedBy"`
+	// AutoMergeRequest is a pointer: gh returns null when auto-merge was
+	// never armed. Any non-nil value means "armed at fetch time" — never
+	// "merged by auto-merge" (auto_merge is cleared once it fires).
+	AutoMergeRequest *struct {
+		EnabledAt string `json:"enabledAt"`
+	} `json:"autoMergeRequest"`
+}
+
+type ghRepository struct {
+	DefaultBranch string `json:"defaultBranch"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	NameWithOwner string `json:"nameWithOwner"`
+	URL           string `json:"url"`
+	CloneURL      string `json:"cloneUrl"`
+	HTTPSURL      string `json:"httpsUrl"`
+}
+
+type ghRepositoryOwner struct {
+	Login string `json:"login"`
 }
 
 type ghIssue struct {
@@ -227,10 +271,22 @@ type ghIssue struct {
 	} `json:"assignees"`
 }
 
+type ghPRBase struct {
+	SHA  string `json:"sha"`
+	Ref  string `json:"ref"`
+	Repo struct {
+		ID    int64  `json:"id"`
+		Name  string `json:"name"`
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+	} `json:"repo"`
+}
+
 func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	out, err := c.run(ctx, "pr", "view", fmt.Sprintf("%d", number),
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
-		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests")
+		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,changedFiles,mergedBy,autoMergeRequest,createdAt,updatedAt,mergedAt,closedAt,reviewRequests,maintainerCanModify,headRepository,headRepositoryOwner")
 	if err != nil {
 		if isNotFoundErr(err) {
 			return nil, &GitHubAPIError{
@@ -245,7 +301,33 @@ func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*
 	if err := json.Unmarshal([]byte(out), &raw); err != nil {
 		return nil, fmt.Errorf("parse PR response: %w", err)
 	}
-	return convertGHPR(&raw, owner, repo), nil
+	pr := convertGHPR(&raw, owner, repo)
+	baseJSON, err := c.run(ctx, "api", fmt.Sprintf("repos/%s/%s/pulls/%d", owner, repo, number), "--jq",
+		"{sha: .base.sha, ref: .base.ref, repo: {id: .base.repo.id, name: .base.repo.name, owner: .base.repo.owner}}")
+	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("get PR #%d base SHA: %w", number, err)
+		}
+		clearPRBaseRepository(pr)
+		return pr, nil
+	}
+	var base ghPRBase
+	if err := json.Unmarshal([]byte(baseJSON), &base); err != nil {
+		clearPRBaseRepository(pr)
+		return pr, nil
+	}
+	pr.BaseSHA = strings.TrimSpace(base.SHA)
+	pr.BaseBranch = strings.TrimSpace(base.Ref)
+	pr.BaseRepoID = base.Repo.ID
+	pr.BaseRepoOwner = strings.TrimSpace(base.Repo.Owner.Login)
+	pr.BaseRepoName = strings.TrimSpace(base.Repo.Name)
+	return pr, nil
+}
+
+func clearPRBaseRepository(pr *PR) {
+	pr.BaseRepoID = 0
+	pr.BaseRepoOwner = ""
+	pr.BaseRepoName = ""
 }
 
 func (c *GHClient) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
@@ -270,23 +352,41 @@ func (c *GHClient) GetIssue(ctx context.Context, owner, repo string, number int)
 }
 
 func (c *GHClient) FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error) {
+	return c.findPRByHead(ctx, owner, repo, branch, branch, "", "")
+}
+
+func (c *GHClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, headRepo, branch string) (*PR, error) {
+	return c.findPRByHead(ctx, owner, repo, branch, branch, headOwner, headRepo)
+}
+
+func (c *GHClient) findPRByHead(ctx context.Context, owner, repo, head, branchForError, headOwner, headRepo string) (*PR, error) {
+	limit := "1"
+	if headOwner != "" {
+		// --head accepts only a branch name. Fetch enough matches to select the
+		// requested fork after gh returns PRs from the whole fork network.
+		limit = "100"
+	}
 	out, err := c.run(ctx, "pr", "list",
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
-		"--head", branch,
+		"--head", head,
 		"--state", "open",
-		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt",
-		"--limit", "1")
+		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,headRepository,headRepositoryOwner",
+		"--limit", limit)
 	if err != nil {
-		return nil, fmt.Errorf("find PR by branch %q: %w", branch, err)
+		return nil, fmt.Errorf("find PR by branch %q: %w", branchForError, err)
 	}
 	var prs []ghPR
 	if err := json.Unmarshal([]byte(out), &prs); err != nil {
 		return nil, fmt.Errorf("parse PR list: %w", err)
 	}
-	if len(prs) == 0 {
-		return nil, nil
+	for i := range prs {
+		pr := convertGHPR(&prs[i], owner, repo)
+		if (headOwner == "" && headRepo == "") ||
+			sameRepositoryIdentity(pr.HeadRepoOwner, pr.HeadRepoName, headOwner, headRepo) {
+			return pr, nil
+		}
 	}
-	return convertGHPR(&prs[0], owner, repo), nil
+	return nil, nil
 }
 
 func (c *GHClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*PR, error) {
@@ -492,6 +592,63 @@ func (c *GHClient) HasRepositoryAccess(ctx context.Context, owner, repo string) 
 	return strings.TrimSpace(out) != "", nil
 }
 
+// GetRepository returns the selected gh account's repository identity and
+// permissions for managed contribution-destination preparation.
+func (c *GHClient) GetRepository(ctx context.Context, owner, repo string) (*GitHubRepository, error) {
+	out, err := c.run(ctx, "api", fmt.Sprintf("/repos/%s/%s", owner, repo))
+	if err != nil {
+		if isNotFoundErr(err) {
+			return nil, fmt.Errorf("get repository %s/%s: %w", owner, repo, &GitHubAPIError{
+				StatusCode: http.StatusNotFound,
+				Endpoint:   fmt.Sprintf("/repos/%s/%s", owner, repo),
+				Body:       err.Error(),
+			})
+		}
+		return nil, fmt.Errorf("get repository %s/%s: %w", owner, repo, err)
+	}
+	var raw githubRepositoryResponse
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return nil, fmt.Errorf("decode repository %s/%s: %w", owner, repo, err)
+	}
+	return projectGitHubRepository(raw), nil
+}
+
+// ListRepositoryForks lists the canonical repository's fork network. The
+// network is authoritative for finding an existing fork whose name changed
+// after creation, so callers must not assume the canonical repository name.
+func (c *GHClient) ListRepositoryForks(ctx context.Context, owner, repo string) ([]*GitHubRepository, error) {
+	out, err := c.run(ctx, "api", fmt.Sprintf("repos/%s/%s/forks?per_page=100", owner, repo), "--paginate", "--slurp")
+	if err != nil {
+		return nil, fmt.Errorf("list repository forks for %s/%s: %w", owner, repo, err)
+	}
+	var pages [][]githubRepositoryResponse
+	if err := json.Unmarshal([]byte(out), &pages); err != nil {
+		return nil, fmt.Errorf("decode repository forks for %s/%s: %w", owner, repo, err)
+	}
+	forks := make([]*GitHubRepository, 0)
+	for _, page := range pages {
+		for _, raw := range page {
+			forks = append(forks, projectGitHubRepository(raw))
+		}
+	}
+	return forks, nil
+}
+
+// CreateFork creates a fork for the selected named gh account. The service
+// resolver verifies the returned identity after GitHub finishes provisioning.
+func (c *GHClient) CreateFork(ctx context.Context, owner, repo string) (*GitHubRepository, error) {
+	args := []string{"api", fmt.Sprintf("/repos/%s/%s/forks", owner, repo), "-X", "POST", "--input", "-"}
+	out, err := c.runWithStdin(ctx, []byte(`{}`), args...)
+	if err != nil {
+		return nil, fmt.Errorf("create fork for %s/%s: %w", owner, repo, err)
+	}
+	var raw githubRepositoryResponse
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return nil, fmt.Errorf("decode created fork for %s/%s: %w", owner, repo, err)
+	}
+	return projectGitHubRepository(raw), nil
+}
+
 // buildAccessibleReposGHArgs constructs the `gh api /user/repos?...` argv for
 // ListAccessibleRepos. Keeping it pure makes the endpoint/query construction
 // unit-testable without spawning gh. Callers must clamp `limit` via
@@ -583,6 +740,7 @@ func (c *GHClient) ListPRReviews(ctx context.Context, owner, repo string, number
 // ghComment is the JSON shape for review comments from the GitHub API.
 type ghComment struct {
 	ID        int64     `json:"id"`
+	HTMLURL   string    `json:"html_url"`
 	Path      string    `json:"path"`
 	Line      int       `json:"line"`
 	Side      string    `json:"side"`
@@ -656,6 +814,40 @@ func (c *GHClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) (
 		return nil, fmt.Errorf("parse status contexts: %w", err)
 	}
 	return mergeChecks(convertRawCheckRuns(checkRunsRaw), convertRawStatusContexts(statusRaw)), nil
+}
+
+func (c *GHClient) ListWorkflowRuns(ctx context.Context, owner, repo, headSHA string) ([]WorkflowRun, error) {
+	runsOut, err := c.run(ctx, "api", "--paginate",
+		fmt.Sprintf("repos/%s/%s/actions/runs?head_sha=%s&per_page=100", owner, repo, url.QueryEscape(headSHA)),
+		"--jq", ".workflow_runs[]")
+	if err != nil {
+		return nil, fmt.Errorf("list workflow runs: %w", err)
+	}
+	runsRaw, err := decodeGHWorkflowRuns(runsOut)
+	if err != nil {
+		return nil, fmt.Errorf("parse workflow runs: %w", err)
+	}
+	runs := make([]WorkflowRun, 0, len(runsRaw))
+	for _, raw := range runsRaw {
+		runs = append(runs, convertRawWorkflowRun(raw))
+	}
+	return runs, nil
+}
+
+func (c *GHClient) ListWorkflowRunJobs(ctx context.Context, owner, repo string, runID int64, attempt int) ([]WorkflowJob, error) {
+	endpoint := fmt.Sprintf("repos/%s/%s/actions/runs/%d/jobs?per_page=100", owner, repo, runID)
+	if attempt > 0 {
+		endpoint = fmt.Sprintf("repos/%s/%s/actions/runs/%d/attempts/%d/jobs?per_page=100", owner, repo, runID, attempt)
+	}
+	jobsOut, err := c.run(ctx, "api", "--paginate", endpoint, "--jq", ".jobs[]")
+	if err != nil {
+		return nil, fmt.Errorf("list workflow jobs: %w", err)
+	}
+	jobsRaw, err := decodeGHWorkflowJobs(jobsOut)
+	if err != nil {
+		return nil, fmt.Errorf("parse workflow jobs: %w", err)
+	}
+	return convertRawWorkflowJobs(jobsRaw), nil
 }
 
 // decodeGHCheckRuns decodes whitespace-separated JSON check-run objects
@@ -745,6 +937,75 @@ func isForbiddenErr(err error) bool {
 		strings.Contains(s, "status: 403")
 }
 
+// isUnauthorizedErr matches the formats the `gh` CLI uses to report a 401
+// (expired or revoked credential).
+func isUnauthorizedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "HTTP 401") ||
+		strings.Contains(s, "401 Unauthorized") ||
+		strings.Contains(s, "status: 401")
+}
+
+// isRateLimitedErr matches the formats the `gh` CLI uses to report a 429.
+func isRateLimitedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "HTTP 429") ||
+		strings.Contains(s, "429 Too Many Requests") ||
+		strings.Contains(s, "status: 429")
+}
+
+// ghServerErrPattern extracts a 5xx status from gh CLI stderr. Unlike the
+// single-status matchers above, a server error can be any code in the range,
+// so this is a pattern rather than an enumeration; every 5xx classifies the
+// same way (config sync's ErrUnavailable), so the exact code only matters for
+// diagnostics.
+var ghServerErrPattern = regexp.MustCompile(`(?:HTTP |status: )(5\d\d)\b`)
+
+func ghServerErrStatusCode(err error) (int, bool) {
+	if err == nil {
+		return 0, false
+	}
+	m := ghServerErrPattern.FindStringSubmatch(err.Error())
+	if m == nil {
+		return 0, false
+	}
+	code, convErr := strconv.Atoi(m[1])
+	if convErr != nil {
+		return 0, false
+	}
+	return code, true
+}
+
+// ghClassifyContentsErr promotes a gh CLI repo-contents failure to a
+// *GitHubAPIError for every status config sync's fetch-error classification
+// needs to see: 404 (existing, unchanged), 401, 403, 429, and any 5xx.
+// Returns nil when the error matches none of those, so the caller falls back
+// to a bare wrapped error — which is exactly right, since an unclassified
+// status belongs in the residue class by exclusion, not by a guess here.
+func ghClassifyContentsErr(err error, endpoint string) *GitHubAPIError {
+	switch {
+	case isNotFoundErr(err):
+		return &GitHubAPIError{StatusCode: http.StatusNotFound, Endpoint: endpoint, Body: err.Error()}
+	case isUnauthorizedErr(err):
+		return &GitHubAPIError{StatusCode: http.StatusUnauthorized, Endpoint: endpoint, Body: err.Error()}
+	case isForbiddenErr(err):
+		return &GitHubAPIError{StatusCode: http.StatusForbidden, Endpoint: endpoint, Body: err.Error()}
+	case isRateLimitedErr(err):
+		return &GitHubAPIError{StatusCode: http.StatusTooManyRequests, Endpoint: endpoint, Body: err.Error()}
+	default:
+		if code, ok := ghServerErrStatusCode(err); ok {
+			return &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: err.Error()}
+		}
+		return nil
+	}
+}
+
 func (c *GHClient) ListPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error) {
 	out, err := c.run(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/pulls/%d/files", owner, repo, number),
@@ -763,6 +1024,23 @@ func (c *GHClient) ListPRCommits(ctx context.Context, owner, repo string, number
 		return nil, fmt.Errorf("list PR commits: %w", err)
 	}
 	return parsePRCommitsJSON(out)
+}
+
+func (c *GHClient) GetPRCommitDetail(ctx context.Context, owner, repo, sha string) (PRCommitDetail, error) {
+	if err := validateGitHubCommitSHA(sha); err != nil {
+		return PRCommitDetail{}, err
+	}
+	out, err := c.run(ctx, "api",
+		fmt.Sprintf("repos/%s/%s/commits/%s?per_page=100", owner, repo, sha),
+		"--paginate", "--slurp")
+	if err != nil {
+		return PRCommitDetail{}, fmt.Errorf("get PR commit detail: %w", err)
+	}
+	detail, err := parsePRCommitDetailJSON(out)
+	if err != nil {
+		return PRCommitDetail{}, err
+	}
+	return detail, nil
 }
 
 func (c *GHClient) SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error {
@@ -792,23 +1070,86 @@ func (c *GHClient) RequestReviewers(ctx context.Context, owner, repo string, num
 	return nil
 }
 
-func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
-	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/merge", owner, repo, number)
-	args := []string{"api", endpoint, "-X", "PUT"}
-	if mergeMethod != "" {
-		args = append(args, "-f", "merge_method="+mergeMethod)
+func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, request MergePRRequest) (MergeOutcome, error) {
+	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
+	args := []string{"api", endpoint, "-X", "PUT", "-f", "merge_action=default"}
+	if request.MergeMethod != "" {
+		args = append(args, "-f", "merge_method="+request.MergeMethod)
 	}
-	_, err := c.run(ctx, args...)
+	if request.ExpectedHeadSHA != "" {
+		args = append(args, "-f", "sha="+request.ExpectedHeadSHA)
+	}
+	out, err := c.run(ctx, args...)
+	response, err := decodeInitialMergeAsyncResponse(endpoint, number, out, err)
 	if err != nil {
-		// Surface status-based errors as GitHubAPIError so httpMergePR can
-		// translate 405 (not mergeable) / 409 (conflict) to HTTP 409 for
-		// gh CLI users too, matching the PAT path.
-		if code, ok := ghMergeStatusCode(err); ok {
-			return &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: err.Error()}
-		}
-		return fmt.Errorf("merge PR #%d: %w", number, err)
+		return "", err
 	}
-	return nil
+	response, err = c.pollMergeAsyncResponse(ctx, endpoint, number, response)
+	if err != nil {
+		return "", err
+	}
+	if response.Status == mergeStatusFailed {
+		return "", newMergeFailureError(response.Details)
+	}
+	return normalizeMergeOutcome(response.Status)
+}
+
+func decodeInitialMergeAsyncResponse(endpoint string, number int, out string, runErr error) (mergeAsyncResponse, error) {
+	conflictBody := false
+	if runErr != nil {
+		// Surface status-based errors as GitHubAPIError so httpMergePR can
+		// translate merge rejections for gh CLI users, matching the PAT path.
+		if code, ok := ghMergeStatusCode(runErr); ok {
+			if code != http.StatusConflict {
+				return mergeAsyncResponse{}, &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: runErr.Error()}
+			}
+			out = runErr.Error()
+			conflictBody = true
+		} else {
+			return mergeAsyncResponse{}, fmt.Errorf("merge PR #%d: %w", number, runErr)
+		}
+	}
+	jsonBody := out
+	if start := strings.Index(jsonBody, "{"); start >= 0 {
+		if end := strings.LastIndex(jsonBody, "}"); end >= start {
+			jsonBody = jsonBody[start : end+1]
+		}
+	} else if conflictBody {
+		return mergeAsyncResponse{}, &GitHubAPIError{StatusCode: http.StatusConflict, Endpoint: endpoint, Body: out}
+	}
+	var response mergeAsyncResponse
+	if unmarshalErr := json.Unmarshal([]byte(jsonBody), &response); unmarshalErr != nil {
+		return mergeAsyncResponse{}, fmt.Errorf("decode GitHub merge response: %w", unmarshalErr)
+	}
+	return response, nil
+}
+
+func (c *GHClient) pollMergeAsyncResponse(
+	ctx context.Context,
+	endpoint string,
+	number int,
+	response mergeAsyncResponse,
+) (mergeAsyncResponse, error) {
+	for response.Status == "pending" {
+		if response.Details.UUID == "" {
+			return mergeAsyncResponse{}, fmt.Errorf("GitHub merge response is pending without a UUID")
+		}
+		wait := c.mergePollWait
+		if wait == nil {
+			wait = waitForMergePoll
+		}
+		if waitErr := wait(ctx, mergePollInterval); waitErr != nil {
+			return mergeAsyncResponse{}, fmt.Errorf("wait to poll merge PR #%d: %w", number, waitErr)
+		}
+		result, runErr := c.run(ctx, "api", endpoint+"/"+response.Details.UUID)
+		if runErr != nil {
+			return mergeAsyncResponse{}, fmt.Errorf("poll merge PR #%d: %w", number, runErr)
+		}
+		if unmarshalErr := json.Unmarshal([]byte(result), &response); unmarshalErr != nil {
+			return mergeAsyncResponse{}, fmt.Errorf("decode GitHub merge response: %w", unmarshalErr)
+		}
+	}
+	return response, nil
 }
 
 // ghMergeStatusCode extracts the HTTP status code from a gh CLI merge error.
@@ -826,6 +1167,10 @@ func ghMergeStatusCode(err error) (int, bool) {
 		return http.StatusForbidden, true
 	}
 	s := err.Error()
+	if strings.Contains(s, "HTTP 400") || strings.Contains(s, "status: 400") ||
+		strings.Contains(s, "400 Bad Request") {
+		return http.StatusBadRequest, true
+	}
 	if strings.Contains(s, "HTTP 405") || strings.Contains(s, "status: 405") ||
 		strings.Contains(s, "405 Method Not Allowed") {
 		return http.StatusMethodNotAllowed, true
@@ -943,18 +1288,16 @@ func (c *GHClient) DeleteGist(ctx context.Context, gistID string) error {
 }
 
 // ListRepoDirectory lists the entries of a directory in a repository at the
-// given ref via `gh api repos/{owner}/{repo}/contents/{path}`. A 404 (missing
-// directory) is promoted to a *GitHubAPIError, mirroring PATClient.
+// given ref via `gh api repos/{owner}/{repo}/contents/{path}`. 404 (missing
+// directory), 401, 403, 429, and any 5xx are promoted to a *GitHubAPIError,
+// mirroring PATClient.
 func (c *GHClient) ListRepoDirectory(ctx context.Context, owner, repo, dir, ref string) ([]RepoContentEntry, error) {
 	args := ghContentsArgs(owner, repo, dir, ref)
 	out, err := c.run(ctx, args...)
 	if err != nil {
-		if isNotFoundErr(err) {
-			return nil, &GitHubAPIError{
-				StatusCode: http.StatusNotFound,
-				Endpoint:   fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(dir)),
-				Body:       err.Error(),
-			}
+		endpoint := fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(dir))
+		if apiErr := ghClassifyContentsErr(err, endpoint); apiErr != nil {
+			return nil, apiErr
 		}
 		return nil, fmt.Errorf("list repo directory: %w", err)
 	}
@@ -966,18 +1309,16 @@ func (c *GHClient) ListRepoDirectory(ctx context.Context, owner, repo, dir, ref 
 }
 
 // GetRepoFileContent fetches the raw decoded content of a single file via
-// `gh api repos/{owner}/{repo}/contents/{path}`. A 404 (missing file) is
-// promoted to a *GitHubAPIError, mirroring PATClient.
+// `gh api repos/{owner}/{repo}/contents/{path}`. 404 (missing file), 401,
+// 403, 429, and any 5xx are promoted to a *GitHubAPIError, mirroring
+// PATClient.
 func (c *GHClient) GetRepoFileContent(ctx context.Context, owner, repo, path, ref string) ([]byte, error) {
 	args := ghContentsArgs(owner, repo, path, ref)
 	out, err := c.run(ctx, args...)
 	if err != nil {
-		if isNotFoundErr(err) {
-			return nil, &GitHubAPIError{
-				StatusCode: http.StatusNotFound,
-				Endpoint:   fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(path)),
-				Body:       err.Error(),
-			}
+		endpoint := fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(path))
+		if apiErr := ghClassifyContentsErr(err, endpoint); apiErr != nil {
+			return nil, apiErr
 		}
 		return nil, fmt.Errorf("get repo file content: %w", err)
 	}
@@ -1073,6 +1414,13 @@ func (c *GHClient) runGH(ctx context.Context, stdin []byte, args ...string) (str
 			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), execCtxErr)
 		}
 		c.inspectRateStderr(args, stderr.String())
+		if ghStderrIndicatesRateLimit(stderr.String()) {
+			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), &GitHubAPIError{
+				StatusCode: http.StatusTooManyRequests,
+				Endpoint:   "gh " + strings.Join(args, " "),
+				Body:       strings.TrimSpace(stderr.String()),
+			})
+		}
 		return stdout.String(), fmt.Errorf("gh %s: %w: %s", firstArg(args), runErr, stderr.String())
 	}
 	return stdout.String(), nil
@@ -1087,22 +1435,6 @@ func firstArg(args []string) string {
 	return args[0]
 }
 
-// ghRateLimitResponse mirrors the GET /rate_limit JSON shape so we can seed
-// the tracker on startup and after CLI failures without parsing prose.
-type ghRateLimitResponse struct {
-	Resources struct {
-		Core    ghRateLimitBucket `json:"core"`
-		GraphQL ghRateLimitBucket `json:"graphql"`
-		Search  ghRateLimitBucket `json:"search"`
-	} `json:"resources"`
-}
-
-type ghRateLimitBucket struct {
-	Limit     int   `json:"limit"`
-	Remaining int   `json:"remaining"`
-	Reset     int64 `json:"reset"`
-}
-
 // FetchRateLimit calls `gh api rate_limit` and seeds the tracker with the
 // returned snapshots. Best-effort: a failure (e.g. CLI absent, network) is
 // logged and ignored.
@@ -1114,26 +1446,11 @@ func (c *GHClient) FetchRateLimit(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("fetch rate limit: %w", err)
 	}
-	var raw ghRateLimitResponse
-	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+	raw, err := decodeRateLimitResponse([]byte(out))
+	if err != nil {
 		return fmt.Errorf("parse rate_limit response: %w", err)
 	}
-	now := time.Now().UTC()
-	record := func(resource Resource, b ghRateLimitBucket) {
-		if b.Limit == 0 && b.Remaining == 0 && b.Reset == 0 {
-			return
-		}
-		c.rateTracker.Record(RateSnapshot{
-			Resource:  resource,
-			Limit:     b.Limit,
-			Remaining: b.Remaining,
-			ResetAt:   time.Unix(b.Reset, 0).UTC(),
-			UpdatedAt: now,
-		})
-	}
-	record(ResourceCore, raw.Resources.Core)
-	record(ResourceGraphQL, raw.Resources.GraphQL)
-	record(ResourceSearch, raw.Resources.Search)
+	recordRateLimitResources(c.rateTracker, raw.Resources)
 	return nil
 }
 
@@ -1192,30 +1509,63 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 	if raw.MergedAt != "" {
 		state = prStateMerged
 	}
-	pr := &PR{
-		Number:             raw.Number,
-		Title:              raw.Title,
-		URL:                raw.URL,
-		HTMLURL:            raw.URL,
-		State:              state,
-		Body:               raw.Body,
-		HeadBranch:         raw.HeadRefName,
-		HeadSHA:            raw.HeadRefOid,
-		BaseBranch:         raw.BaseRefName,
-		AuthorLogin:        raw.Author.Login,
-		RepoOwner:          owner,
-		RepoName:           repo,
-		Draft:              raw.IsDraft,
-		Mergeable:          raw.Mergeable == "MERGEABLE",
-		MergeableState:     strings.ToLower(raw.MergeStateStatus),
-		Additions:          raw.Additions,
-		Deletions:          raw.Deletions,
-		RequestedReviewers: convertGHRequestedReviewers(raw.ReviewRequests),
-		CreatedAt:          raw.CreatedAt,
-		UpdatedAt:          raw.UpdatedAt,
-		MergedAt:           parseTimePtr(raw.MergedAt),
-		ClosedAt:           parseTimePtr(raw.ClosedAt),
+	draft, changedFiles := false, 0
+	if raw.IsDraft != nil {
+		draft = *raw.IsDraft
 	}
+	if raw.ChangedFiles != nil {
+		changedFiles = *raw.ChangedFiles
+	}
+	pr := &PR{
+		Number:               raw.Number,
+		Title:                raw.Title,
+		URL:                  raw.URL,
+		HTMLURL:              raw.URL,
+		State:                state,
+		Body:                 raw.Body,
+		HeadBranch:           raw.HeadRefName,
+		HeadSHA:              raw.HeadRefOid,
+		BaseBranch:           raw.BaseRefName,
+		AuthorLogin:          raw.Author.Login,
+		RepoOwner:            owner,
+		RepoName:             repo,
+		MaintainerCanModify:  raw.MaintainerCanModify,
+		Draft:                draft,
+		IsDraftObserved:      raw.IsDraft != nil,
+		Mergeable:            raw.Mergeable == ghMergeableState,
+		MergeableState:       strings.ToLower(raw.MergeStateStatus),
+		Additions:            raw.Additions,
+		Deletions:            raw.Deletions,
+		ChangedFiles:         changedFiles,
+		ChangedFilesObserved: raw.ChangedFiles != nil,
+		MergedByLogin:        raw.MergedBy.Login,
+		AutoMergeEnabled:     raw.AutoMergeRequest != nil,
+		RequestedReviewers:   convertGHRequestedReviewers(raw.ReviewRequests),
+		CreatedAt:            raw.CreatedAt,
+		UpdatedAt:            raw.UpdatedAt,
+		MergedAt:             parseTimePtr(raw.MergedAt),
+		ClosedAt:             parseTimePtr(raw.ClosedAt),
+	}
+	pr.HeadRepoNodeID = raw.HeadRepository.ID
+	pr.HeadRepoOwner = raw.HeadRepositoryOwner.Login
+	pr.HeadRepoName = raw.HeadRepository.Name
+	if parts := strings.SplitN(raw.HeadRepository.NameWithOwner, "/", 2); len(parts) == 2 {
+		if pr.HeadRepoOwner == "" {
+			pr.HeadRepoOwner = parts[0]
+		}
+		if pr.HeadRepoName == "" {
+			pr.HeadRepoName = parts[1]
+		}
+	}
+	pr.HeadRepoCloneURL = raw.HeadRepository.CloneURL
+	if pr.HeadRepoCloneURL == "" {
+		pr.HeadRepoCloneURL = raw.HeadRepository.HTTPSURL
+	}
+	// gh pr view does not expose baseRepository. The --repo arguments are the
+	// trusted target identity. Do not treat the PR base ref as the repository's
+	// default branch; they can differ for a PR that targets a release branch.
+	pr.BaseRepoOwner = owner
+	pr.BaseRepoName = repo
 	return pr
 }
 

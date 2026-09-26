@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildContextItems } from "./chat-context-items";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
+import type { FileContextItem } from "@/lib/types/context";
 
 const comment: AgentMessageComment = {
   id: "message-comment-1",
@@ -53,4 +54,180 @@ describe("buildContextItems agent-message comments", () => {
       label: "1 message comment",
     });
   });
+});
+
+describe("buildContextItems task plan comments", () => {
+  it("opens the Plan but cannot remove shared comments from a session composer", () => {
+    const addPlan = vi.fn();
+    const clear = vi.fn();
+    const items = buildContextItems({
+      planContextEnabled: false,
+      contextFiles: [],
+      resolvedSessionId: "session-secondary",
+      removeContextFile: vi.fn(),
+      unpinFile: vi.fn(),
+      addPlan,
+      promptsMap: new Map(),
+      pendingCommentsByFile: {},
+      handleRemoveCommentFile: vi.fn(),
+      handleRemoveComment: vi.fn(),
+      planComments: [{ id: "comment-1", version: 1 }],
+      handleClearPlanComments: clear,
+      pendingPRFeedback: [],
+      handleRemovePRFeedback: vi.fn(),
+      handleClearPRFeedback: vi.fn(),
+      walkthroughComments: [],
+      handleRemoveWalkthroughComment: vi.fn(),
+      handleClearWalkthroughComments: vi.fn(),
+      messageComments: [],
+      handleClearMessageComments: vi.fn(),
+      taskId: "task-1",
+    } as never);
+
+    const item = items.find((candidate) => candidate.kind === "plan-comment");
+    expect(item).toMatchObject({ kind: "plan-comment", label: "1 plan comment", onOpen: addPlan });
+    expect(item?.onRemove).toBeUndefined();
+    expect(clear).not.toHaveBeenCalled();
+  });
+});
+
+describe("buildContextItems task preview feedback", () => {
+  it("opens the task-scoped collection from the context chip", () => {
+    const open = vi.fn();
+    const items = buildContextItems({
+      planContextEnabled: false,
+      contextFiles: [],
+      resolvedSessionId: "session-secondary",
+      removeContextFile: vi.fn(),
+      unpinFile: vi.fn(),
+      addPlan: vi.fn(),
+      promptsMap: new Map(),
+      pendingCommentsByFile: {},
+      handleRemoveCommentFile: vi.fn(),
+      handleRemoveComment: vi.fn(),
+      planComments: [],
+      handleClearPlanComments: vi.fn(),
+      previewFeedback: [
+        {
+          id: "preview-1",
+          version: 2,
+          comment: "Increase contrast",
+          kind: "element",
+          source_label: "Checkout preview",
+          page_route: "/cart",
+        },
+      ],
+      pendingPRFeedback: [],
+      handleRemovePRFeedback: vi.fn(),
+      handleClearPRFeedback: vi.fn(),
+      walkthroughComments: [],
+      handleRemoveWalkthroughComment: vi.fn(),
+      handleClearWalkthroughComments: vi.fn(),
+      messageComments: [],
+      handleClearMessageComments: vi.fn(),
+      taskId: "task-1",
+      onOpenPreviewFeedback: open,
+    } as never);
+
+    const item = items.find((candidate) => candidate.kind === "preview-feedback");
+    expect(item).toMatchObject({
+      kind: "preview-feedback",
+      label: "1 preview feedback item",
+      onOpen: open,
+    });
+    expect(item?.onRemove).toBeUndefined();
+  });
+});
+
+describe("buildContextItems file and directory context", () => {
+  function buildItems(contextFiles: never[]) {
+    return buildContextItems({
+      planContextEnabled: false,
+      contextFiles,
+      resolvedSessionId: "session-1",
+      removeContextFile: vi.fn(),
+      unpinFile: vi.fn(),
+      addPlan: vi.fn(),
+      promptsMap: new Map(),
+      onOpenFile: vi.fn(),
+      pendingCommentsByFile: {},
+      handleRemoveCommentFile: vi.fn(),
+      handleRemoveComment: vi.fn(),
+      planComments: [],
+      handleClearPlanComments: vi.fn(),
+      pendingPRFeedback: [],
+      handleRemovePRFeedback: vi.fn(),
+      handleClearPRFeedback: vi.fn(),
+      walkthroughComments: [],
+      handleRemoveWalkthroughComment: vi.fn(),
+      handleClearWalkthroughComments: vi.fn(),
+      messageComments: [],
+      handleClearMessageComments: vi.fn(),
+      taskId: "task-1",
+    });
+  }
+
+  it("marks directory items and does not expose file-open behavior", () => {
+    const items = buildItems([
+      { path: "src", name: "src", isDirectory: true },
+      { path: "src/index.ts", name: "index.ts" },
+    ] as never[]);
+
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "file", path: "src", isDirectory: true }),
+        expect.objectContaining({ kind: "file", path: "src/index.ts", isDirectory: false }),
+      ]),
+    );
+    const fileItems = items.filter((item): item is FileContextItem => item.kind === "file");
+    const directoryItem = fileItems.find((item) => item.id === "src");
+    const fileItem = fileItems.find((item) => item.id === "src/index.ts");
+    expect(directoryItem?.onOpen).toBeUndefined();
+    expect(fileItem?.onOpen).toEqual(expect.any(Function));
+  });
+});
+
+it.each(["api", ""])("opens whole-file composer context in repository %j", (repositoryName) => {
+  const onOpenFileAtLine = vi.fn();
+  const items = buildContextItems({
+    planContextEnabled: false,
+    contextFiles: [],
+    resolvedSessionId: "session-1",
+    removeContextFile: vi.fn(),
+    unpinFile: vi.fn(),
+    addPlan: vi.fn(),
+    promptsMap: new Map(),
+    pendingCommentsByFile: {
+      file: [
+        {
+          source: "review-file",
+          id: "whole",
+          sessionId: "session-1",
+          repositoryName,
+          filePath: "README.md",
+          text: "Feedback",
+          status: "pending",
+          createdAt: "now",
+        },
+      ],
+    },
+    handleRemoveCommentFile: vi.fn(),
+    handleRemoveComment: vi.fn(),
+    onOpenFileAtLine,
+    planComments: [],
+    handleClearPlanComments: vi.fn(),
+    pendingPRFeedback: [],
+    handleRemovePRFeedback: vi.fn(),
+    handleClearPRFeedback: vi.fn(),
+    walkthroughComments: [],
+    handleRemoveWalkthroughComment: vi.fn(),
+    handleClearWalkthroughComments: vi.fn(),
+    messageComments: [],
+    handleClearMessageComments: vi.fn(),
+    taskId: "task-1",
+  });
+  const item = items.find((candidate) => candidate.kind === "comment");
+  item?.onOpen?.();
+  expect(onOpenFileAtLine).toHaveBeenCalledWith("README.md", repositoryName);
+  expect(item).toHaveProperty("repositoryName", repositoryName);
 });

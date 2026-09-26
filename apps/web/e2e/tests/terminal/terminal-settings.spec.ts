@@ -4,7 +4,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
-const TERMINAL_SETTINGS_PATH = "/settings/general/terminal";
+const TERMINAL_SETTINGS_PATH = "/settings/preferences/terminal-editors";
 
 // The full font stack value for "JetBrains Mono" preset
 const JB_MONO_STACK = '"JetBrains Mono", "Fira Code", Menlo, Consolas, monospace';

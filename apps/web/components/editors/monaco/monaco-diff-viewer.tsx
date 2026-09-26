@@ -17,6 +17,7 @@ import { useDiffViewerComments } from "./use-diff-viewer-comments";
 import { useGlobalFolding } from "./use-global-folding";
 import { resolveDiffContent, buildDiffEditorOptions } from "./diff-viewer-helpers";
 import { initMonacoThemes } from "./monaco-init";
+import { useTranslation } from "react-i18next";
 
 initMonacoThemes();
 
@@ -75,6 +76,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
   const commentState = useDiffViewerComments({
     data,
     sessionId,
+    repositoryName: props.repo,
     compact,
     onCommentAdd,
     onCommentDelete,
@@ -145,6 +147,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
 }
 
 export function MonacoDiffViewer(props: MonacoDiffViewerProps) {
+  const { t } = useTranslation();
   const { className, compact = false, hideHeader = false, onOpenFile, onRevert } = props;
   const state = useMonacoDiffViewerState(props);
   const { wrapperRef, hasDiff, contextMenu, setContextMenu } = state;
@@ -159,7 +162,7 @@ export function MonacoDiffViewer(props: MonacoDiffViewerProps) {
           className,
         )}
       >
-        No diff available
+        {t("editors:noDiffAvailable")}
       </div>
     );
   }
@@ -205,7 +208,7 @@ export function MonacoDiffViewer(props: MonacoDiffViewerProps) {
           options={state.options}
           loading={
             <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-              Loading diff...
+              {t("editors:loadingDiff")}
             </div>
           }
         />

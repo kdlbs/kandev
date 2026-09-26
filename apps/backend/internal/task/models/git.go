@@ -22,19 +22,30 @@ const (
 
 // GitSnapshot represents a git status snapshot at a specific point in time
 type GitSnapshot struct {
-	ID           string                 `json:"id"`
-	SessionID    string                 `json:"session_id"`
-	SnapshotType SnapshotType           `json:"snapshot_type"`
-	Branch       string                 `json:"branch"`
-	RemoteBranch string                 `json:"remote_branch"`
-	HeadCommit   string                 `json:"head_commit"`
-	BaseCommit   string                 `json:"base_commit"`
-	Ahead        int                    `json:"ahead"`
-	Behind       int                    `json:"behind"`
-	Files        map[string]interface{} `json:"files"` // FileInfo objects with diff content
-	TriggeredBy  string                 `json:"triggered_by"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
+	ID                string                 `json:"id"`
+	TaskEnvironmentID string                 `json:"task_environment_id"`
+	SessionID         string                 `json:"session_id"`
+	SnapshotType      SnapshotType           `json:"snapshot_type"`
+	Branch            string                 `json:"branch"`
+	RemoteBranch      string                 `json:"remote_branch"`
+	HeadCommit        string                 `json:"head_commit"`
+	BaseCommit        string                 `json:"base_commit"`
+	Ahead             int                    `json:"ahead"`
+	Behind            int                    `json:"behind"`
+	Files             map[string]interface{} `json:"files"` // FileInfo objects with diff content
+	TriggeredBy       string                 `json:"triggered_by"`
+	Metadata          map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+	// ContentDigest is a SHA-256 digest over the fields that define two
+	// snapshots as equivalent (branch, remote branch, head/base commit,
+	// ahead/behind counts, and the serialized files diff), independent of
+	// session/triggered_by/created_at. CreateGitSnapshot uses it to skip
+	// inserting a duplicate of the immediately preceding snapshot for the
+	// same session (repeated no-op polling), and it identifies historical
+	// duplicate rows as retention candidates for the maintenance command.
+	// Internal repository bookkeeping only - not serialized to API/WS
+	// clients.
+	ContentDigest string `json:"-"`
 }
 
 // SessionCommit represents a commit made during a task session

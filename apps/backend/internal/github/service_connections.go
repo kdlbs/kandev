@@ -37,6 +37,29 @@ func (s *Service) GetWorkspaceConnectionHealth(ctx context.Context) (WorkspaceCo
 	return s.store.GetWorkspaceConnectionHealth(ctx)
 }
 
+// WorkspaceConnectionFingerprint returns an opaque, non-secret string that
+// changes whenever the workspace's automation connection is replaced,
+// reconnected, or has its credential rotated/revoked (status or credential
+// generation changes). Callers (e.g. workflow-sync's and the PR-watch
+// poller's auth circuit breakers) use this to detect "the credential
+// changed" and reset an open backoff circuit promptly instead of waiting out
+// the schedule. Returns "" when no connection exists — an empty fingerprint
+// must never be treated as "changed" by callers, since there was nothing to
+// compare against.
+func (s *Service) WorkspaceConnectionFingerprint(ctx context.Context, workspaceID string) (string, error) {
+	if s == nil || s.store == nil {
+		return "", nil
+	}
+	connection, err := s.store.GetWorkspaceConnection(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if connection == nil {
+		return "", nil
+	}
+	return fmt.Sprintf("%s:%d", connection.Status, connection.CredentialGeneration), nil
+}
+
 func (s *Service) SetWorkspaceConnection(
 	ctx context.Context,
 	workspaceID string,
@@ -386,6 +409,10 @@ func (s *Service) invalidateWorkspaceCredential(workspaceID string) {
 	if s.resolver != nil {
 		s.resolver.InvalidateWorkspace(workspaceID)
 	}
+	if s.prDiscoveryHealth != nil {
+		s.prDiscoveryHealth.clearWorkspace(workspaceID)
+		s.invalidateAllPRDiscoveryAttempts(workspaceID)
+	}
 	// Existing caches are still global during the compatibility phase. Clear
 	// them on replacement until Task 05 prefixes every key by principal.
 	s.clearAuthCaches()
@@ -394,7 +421,7 @@ func (s *Service) invalidateWorkspaceCredential(workspaceID string) {
 func (s *Service) clearAuthCaches() {
 	for _, cache := range []*ttlCache{
 		s.searchCache, s.prStatusCache, s.prFeedbackCache, s.mergeMethodsCache,
-		s.accessibleReposCache, s.repoErrorCache,
+		s.accessibleReposCache, s.repoErrorCache, s.workflowRunsCache, s.workflowJobsCache,
 	} {
 		if cache != nil {
 			cache.clear()
@@ -403,4 +430,51 @@ func (s *Service) clearAuthCaches() {
 	if s.protectionCache != nil {
 		s.protectionCache.clear()
 	}
+}
+
+// CopyWorkspaceConnectionToWorkspace duplicates the source workspace's GitHub
+// connection onto the destination workspace, including the PAT secret for
+// `pat` sources. No-op when the source workspace has no connection or the two
+// workspaces are the same. Used by the improve-kandev bootstrap when it
+// creates the dedicated workspace so improve tasks inherit the user's GitHub
+// access without re-authenticating.
+func (s *Service) CopyWorkspaceConnectionToWorkspace(ctx context.Context, srcWorkspaceID, dstWorkspaceID string) error {
+	if srcWorkspaceID == "" || dstWorkspaceID == "" || srcWorkspaceID == dstWorkspaceID {
+		return nil
+	}
+	src, err := s.store.GetWorkspaceConnection(ctx, srcWorkspaceID)
+	if err != nil {
+		return fmt.Errorf("load source workspace connection: %w", err)
+	}
+	if src == nil {
+		return nil
+	}
+	connection := &WorkspaceConnection{
+		WorkspaceID:              dstWorkspaceID,
+		Source:                   src.Source,
+		GitHubHost:               src.GitHubHost,
+		Login:                    src.Login,
+		InstallationID:           src.InstallationID,
+		InstallationAccountLogin: src.InstallationAccountLogin,
+		InstallationAccountType:  src.InstallationAccountType,
+		AppRegistrationID:        src.AppRegistrationID,
+		Status:                   src.Status,
+		CredentialGeneration:     nextCredentialGeneration(nil),
+		CreatedAt:                time.Now().UTC(),
+		UpdatedAt:                time.Now().UTC(),
+	}
+	if err := s.store.UpsertWorkspaceConnection(ctx, connection); err != nil {
+		return fmt.Errorf("store destination workspace connection: %w", err)
+	}
+	if src.Source == ConnectionSourcePAT {
+		token, err := s.connectionSecrets.Reveal(ctx, WorkspacePATSecretKey(srcWorkspaceID))
+		if err != nil {
+			return fmt.Errorf("reveal source workspace PAT: %w", err)
+		}
+		if err := s.connectionSecrets.Set(ctx, WorkspacePATSecretKey(dstWorkspaceID), workspacePATSecretName, token); err != nil {
+			return fmt.Errorf("store destination workspace PAT: %w", err)
+		}
+	}
+	s.invalidateWorkspaceCredential(dstWorkspaceID)
+	return nil
 }

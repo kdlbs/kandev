@@ -1,8 +1,8 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StorageMaintenanceSettings } from "@/lib/types/system";
-import { StoragePolicyCard } from "./storage-policy-card";
+import { StoragePolicyCard } from "./storage-policy-card-root";
 
 const settings: StorageMaintenanceSettings = {
   enabled: false,
@@ -10,7 +10,7 @@ const settings: StorageMaintenanceSettings = {
   idle_for_minutes: 10,
   orphan_grace_hours: 168,
   quarantine_retention_hours: 168,
-  workspaces: { enabled: true },
+  workspaces: { enabled: true, dependency_cleanup_enabled: false },
   kandev_containers: { enabled: true },
   go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
   docker: {
@@ -26,6 +26,7 @@ const settings: StorageMaintenanceSettings = {
 const capabilities = {
   managed_go_cache_path: "/data/cache/go-build",
   go_cache_adoption_available: true,
+  temporary_artifacts_available: true,
   docker_available: true,
   docker_host: "",
   host_global_docker_cleanup_allowed: true,
@@ -37,6 +38,7 @@ const testIds = {
   dockerBuildCacheUnused: "storage-docker-build-cache-unused-hours",
   dockerImagesUnused: "storage-docker-unused-images-hours",
 };
+const dirtyAttribute = "data-settings-dirty";
 const ADOPTION_PATH_TEST_ID = "storage-go-cache-adopt-path";
 const ADOPT_BUTTON_TEST_ID = "storage-go-cache-adopt";
 
@@ -47,6 +49,7 @@ function renderCard(
   onChange = vi.fn(),
   currentSettings: StorageMaintenanceSettings = settings,
   savedSettings: StorageMaintenanceSettings = settings,
+  onCleanDependencies?: () => void,
 ) {
   render(
     <TooltipProvider>
@@ -57,6 +60,7 @@ function renderCard(
         pending={pending}
         onChange={onChange}
         onAdopt={vi.fn()}
+        onCleanDependencies={onCleanDependencies}
       />
     </TooltipProvider>,
   );
@@ -160,7 +164,112 @@ describe("External Go cache path", () => {
   });
 });
 
+describe("Temporary artifact policy", () => {
+  it("stages the opt-in scheduled cleanup setting", () => {
+    const onChange = vi.fn();
+    renderCard(false, onChange);
+
+    fireEvent.click(screen.getByTestId("storage-temporary-artifacts-enabled"));
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...settings,
+      temporary_artifacts: { enabled: true },
+    });
+    expect(
+      screen.getAllByText(
+        "Registered diagnostic bundles and utility working folders. Inactive for at least 24 hours.",
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("keeps the manual cleanup action reachable when scheduled cleanup is off", () => {
+    const clean = vi.fn();
+    render(
+      <TooltipProvider>
+        <StoragePolicyCard
+          settings={settings}
+          savedSettings={settings}
+          capabilities={capabilities}
+          pending={false}
+          onChange={vi.fn()}
+          onAdopt={vi.fn()}
+          onCleanTemporaryArtifacts={clean}
+        />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId("storage-policy-temporary-artifacts-clean"));
+    expect(clean).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("StoragePolicyCard", () => {
+  it("shows the dependency allowlist and keeps cleanup opt-in", () => {
+    const onChange = renderCard();
+    const allowlist = screen.getByTestId("storage-dependency-allowlist");
+    const expectedDirectories = [
+      "node_modules",
+      "bower_components",
+      ".pnpm-store",
+      ".yarn/cache",
+      ".yarn/unplugged",
+      ".venv",
+      "venv",
+      ".tox",
+      ".nox",
+      "__pypackages__",
+      "Pods",
+      ".gradle",
+    ];
+
+    expect(
+      within(allowlist)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent?.trim()),
+    ).toEqual(expectedDirectories);
+    expect(allowlist.textContent).not.toContain("vendor");
+
+    const toggle = screen.getByTestId(
+      "storage-workspace-dependencies-enabled",
+    ) as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...settings,
+      workspaces: { ...settings.workspaces, dependency_cleanup_enabled: true },
+    });
+  });
+
+  it("keeps dependency cleanup enabled when orphan cleanup is toggled", () => {
+    const currentSettings = {
+      ...settings,
+      workspaces: { enabled: true, dependency_cleanup_enabled: true },
+    };
+    const onChange = renderCard(false, vi.fn(), currentSettings, currentSettings);
+
+    fireEvent.click(screen.getByLabelText("Clean orphan task workspaces"));
+
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...currentSettings,
+      workspaces: { ...currentSettings.workspaces, enabled: false },
+    });
+  });
+
+  it("marks dependency cleanup changes on the workspace policy card", () => {
+    const currentSettings = {
+      ...settings,
+      workspaces: { enabled: true, dependency_cleanup_enabled: true },
+    };
+    renderCard(false, vi.fn(), currentSettings, settings);
+
+    expect(
+      screen.getByTestId("storage-policy-section-workspaces").getAttribute(dirtyAttribute),
+    ).toBe("true");
+    expect(
+      screen.getByTestId("storage-workspace-dependencies-enabled").getAttribute(dirtyAttribute),
+    ).toBe("true");
+  });
+
   it("edits every Docker cleanup threshold", () => {
     const onChange = renderCard();
 
@@ -201,7 +310,42 @@ describe("StoragePolicyCard", () => {
   });
 });
 
-describe("StoragePolicyCard interactions", () => {
+describe("StoragePolicyCard dependency action", () => {
+  it("runs dependency cleanup only when the saved opt-in is enabled", () => {
+    const onCleanDependencies = vi.fn();
+    const enabledSettings = {
+      ...settings,
+      workspaces: { enabled: true, dependency_cleanup_enabled: true },
+    };
+    renderCard(false, vi.fn(), enabledSettings, enabledSettings, onCleanDependencies);
+
+    const button = screen.getByTestId("storage-clean-workspace-dependencies") as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+    expect(onCleanDependencies).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables dependency cleanup while opt-in changes are unsaved or pending", () => {
+    const onCleanDependencies = vi.fn();
+    const enabledSettings = {
+      ...settings,
+      workspaces: { enabled: true, dependency_cleanup_enabled: true },
+    };
+    renderCard(false, vi.fn(), enabledSettings, settings, onCleanDependencies);
+    expect(
+      (screen.getByTestId("storage-clean-workspace-dependencies") as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    cleanup();
+    renderCard(true, vi.fn(), enabledSettings, enabledSettings, onCleanDependencies);
+    expect(
+      (screen.getByTestId("storage-clean-workspace-dependencies") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(onCleanDependencies).not.toHaveBeenCalled();
+  });
+});
+
+describe("StoragePolicyCard pending interactions", () => {
   it("disables policy controls while an action is pending", () => {
     renderCard(true);
 
@@ -234,12 +378,14 @@ describe("StoragePolicyCard interactions", () => {
       true,
     );
   });
+});
 
+describe("StoragePolicyCard interactions", () => {
   it("disables child fields when their cleanup option is off", () => {
     renderCard(false, vi.fn(), {
       ...settings,
       enabled: false,
-      workspaces: { enabled: false },
+      workspaces: { ...settings.workspaces, enabled: false },
       go_cache: { ...settings.go_cache, enabled: false },
       docker: {
         ...settings.docker,
@@ -271,7 +417,14 @@ describe("StoragePolicyCard interactions", () => {
   it("renders each maintenance group as a separate card", () => {
     renderCard();
 
-    for (const section of ["schedule", "workspaces", "go-cache", "docker", "quarantine"]) {
+    for (const section of [
+      "schedule",
+      "workspaces",
+      "go-cache",
+      "docker",
+      "quarantine",
+      "temporary-artifacts",
+    ]) {
       expect(
         screen.getByTestId(`storage-policy-section-${section}`).getAttribute("data-slot"),
       ).toBe("card");
@@ -281,15 +434,13 @@ describe("StoragePolicyCard interactions", () => {
   it("marks the changed field and owning policy card as dirty", () => {
     renderCard(false, vi.fn(), { ...settings, idle_for_minutes: 31 });
 
-    expect(screen.getByTestId("storage-idle-period").getAttribute("data-settings-dirty")).toBe(
+    expect(screen.getByTestId("storage-idle-period").getAttribute(dirtyAttribute)).toBe("true");
+    expect(screen.getByTestId("storage-policy-section-schedule").getAttribute(dirtyAttribute)).toBe(
       "true",
     );
-    expect(
-      screen.getByTestId("storage-policy-section-schedule").getAttribute("data-settings-dirty"),
-    ).toBe("true");
-    expect(
-      screen.getByTestId("storage-policy-section-docker").getAttribute("data-settings-dirty"),
-    ).toBe("false");
+    expect(screen.getByTestId("storage-policy-section-docker").getAttribute(dirtyAttribute)).toBe(
+      "false",
+    );
   });
 
   it("groups related settings and provides help for every policy option", () => {
@@ -301,10 +452,11 @@ describe("StoragePolicyCard interactions", () => {
       "Go build cache",
       "Docker cleanup",
       "Quarantine safety",
+      "Temporary Kandev files",
     ]) {
       expect(screen.getByText(heading)).toBeTruthy();
     }
-    expect(screen.getAllByLabelText(/^More information about /)).toHaveLength(16);
+    expect(screen.getAllByLabelText(/^More information about /)).toHaveLength(19);
   });
 });
 

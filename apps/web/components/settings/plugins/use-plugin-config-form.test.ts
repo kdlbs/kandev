@@ -22,6 +22,9 @@ vi.mock("sonner", () => ({
 
 import { SECRET_MASK } from "@/lib/plugins/config-schema";
 import { usePluginConfigForm } from "./use-plugin-config-form";
+
+/** Schema default used by the unsaved-required-default cases. */
+const ENDPOINT_DEFAULT = "https://example.test";
 import type { PluginRecord } from "@/lib/types/plugins";
 
 function testPlugin(): PluginRecord {
@@ -71,7 +74,65 @@ describe("usePluginConfigForm", () => {
     expect(result.current.values.org).toBe("kdlbs");
     expect(result.current.isDirty).toBe(false);
   });
+});
 
+describe("usePluginConfigForm unsaved required defaults", () => {
+  it("lets an operator persist a required schema default that was never stored", async () => {
+    // Otherwise the displayed default is its own baseline: Save never enables,
+    // and the list's "Setup required" badge has no way to clear.
+    const plugin = testPlugin();
+    plugin.config_schema = {
+      type: "object",
+      required: ["endpoint"],
+      properties: { endpoint: { type: "string", default: ENDPOINT_DEFAULT } },
+    };
+    getPluginConfig.mockResolvedValue({});
+    const { result } = renderHook(() => usePluginConfigForm(plugin));
+
+    await waitFor(() => expect(result.current.values.endpoint).toBe(ENDPOINT_DEFAULT));
+    expect(result.current.isDirty).toBe(true);
+    expect(result.current.canSave).toBe(true);
+  });
+
+  it("lets an operator persist a required boolean that was never stored", async () => {
+    const plugin = testPlugin();
+    plugin.config_schema = {
+      type: "object",
+      required: ["verbose"],
+      properties: { verbose: { type: "boolean" } },
+    };
+    getPluginConfig.mockResolvedValue({});
+    const { result } = renderHook(() => usePluginConfigForm(plugin));
+
+    await waitFor(() => expect(result.current.values.verbose).toBe(false));
+    expect(result.current.isDirty).toBe(true);
+  });
+
+  it("settles clean once the required key is stored", async () => {
+    const plugin = testPlugin();
+    plugin.config_schema = {
+      type: "object",
+      required: ["endpoint"],
+      properties: { endpoint: { type: "string", default: ENDPOINT_DEFAULT } },
+    };
+    getPluginConfig.mockResolvedValue({ endpoint: ENDPOINT_DEFAULT });
+    const { result } = renderHook(() => usePluginConfigForm(plugin));
+
+    await waitFor(() => expect(result.current.values.endpoint).toBe(ENDPOINT_DEFAULT));
+    expect(result.current.isDirty).toBe(false);
+  });
+
+  it("leaves a blank required field clean: there is nothing to persist yet", async () => {
+    getPluginConfig.mockResolvedValue({});
+    const { result } = renderHook(() => usePluginConfigForm(testPlugin()));
+
+    await waitFor(() => expect(result.current.values.github_token).toBe(""));
+    expect(result.current.isDirty).toBe(false);
+    expect(result.current.canSave).toBe(false);
+  });
+});
+
+describe("usePluginConfigForm", () => {
   it("does not fetch for a null plugin or an empty schema", () => {
     renderHook(() => usePluginConfigForm(null));
     renderHook(() => usePluginConfigForm({ ...testPlugin(), config_schema: undefined }));

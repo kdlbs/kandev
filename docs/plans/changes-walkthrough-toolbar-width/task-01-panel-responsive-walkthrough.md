@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/changes-walkthrough-toolbar-width/spec.md"
+spec: "../../specs/ui/requirements/changes-walkthrough-toolbar-width.md"
 ---
 
 # Task 01: Make the Walkthrough Action Panel-Responsive
@@ -63,7 +63,7 @@ contract and should be completed through one Red-Green-Refactor cycle.
 ## Inputs
 
 - Spec scenarios in
-  `docs/specs/changes-walkthrough-toolbar-width/spec.md`.
+  `docs/specs/ui/requirements/changes-walkthrough-toolbar-width.md`.
 - Frontend and mobile contract in `plan.md`.
 - Existing responsive toolbar implementation in
   `apps/web/components/task/changes-panel-header.tsx`.

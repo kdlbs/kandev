@@ -1,6 +1,26 @@
 package runtimeflags
 
-import "github.com/kandev/kandev/internal/common/config"
+import (
+	"runtime"
+
+	"github.com/kandev/kandev/internal/common/config"
+)
+
+// ReasonPlatformUnsupported is the stable, machine-readable reason code for a
+// flag that requires a host platform this install does not run on. The
+// frontend translates it; it is never shown to the operator as raw text.
+const ReasonPlatformUnsupported = "platform_unsupported"
+
+// agentSurvivalAvailability implements the platform scope decision in
+// system-design/agent-survival-across-restart-02.md: survival is supported on
+// macOS and Linux, and unavailable on Windows, where it would trade the
+// platform's kill-on-job-close safeguard for an untested adoption handshake.
+func agentSurvivalAvailability() (bool, string) {
+	if runtime.GOOS == "windows" {
+		return false, ReasonPlatformUnsupported
+	}
+	return true, ""
+}
 
 // runtimeFlagRegistration keeps the public metadata and the typed config
 // binding for a flag together. The function fields stay internal so the HTTP
@@ -16,15 +36,40 @@ type runtimeFlagIdentity struct {
 	envVar string
 }
 
+const (
+	retiredAppStatusBarKey             = "features.appStatusBar"
+	retiredAppStatusBarEnvVar          = "KANDEV_FEATURES_APP_STATUS_BAR"
+	retiredOfficeSessionIdentityKey    = "features.officeSessionIdentity"
+	retiredOfficeSessionIdentityEnvVar = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
+)
+
 // retiredRuntimeFlagIdentities is append-only. When a flag graduates, remove
 // its active registration and move its identity here. Persisted overrides for
 // unknown keys are intentionally retained, so neither the key nor environment
 // variable may ever be reused for a different flag.
 var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: "features.plugins", envVar: "KANDEV_FEATURES_PLUGINS"},
+	{key: retiredAppStatusBarKey, envVar: retiredAppStatusBarEnvVar},
+	{key: retiredOfficeSessionIdentityKey, envVar: retiredOfficeSessionIdentityEnvVar},
 }
 
 var registrations = []runtimeFlagRegistration{
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.lspBrowserContinuity",
+			EnvVar:          "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY",
+			Kind:            KindFeature,
+			Label:           "LSP browser continuity",
+			Description:     "Keeps supported task-host language-server processes available across browser disconnects.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "Retains the task host and language-server process while an editor is detached; enable only with the bounded lease and idle-release behavior in place.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.LSPBrowserContinuity },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.LSPBrowserContinuity = value },
+	},
 	{
 		definition: RuntimeFlagDefinition{
 			Key:         "features.office",
@@ -44,20 +89,20 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
-			Key:         "features.appStatusBar",
-			EnvVar:      "KANDEV_FEATURES_APP_STATUS_BAR",
+			Key:         "features.needsYouInbox",
+			EnvVar:      "KANDEV_FEATURES_NEEDS_YOU_INBOX",
 			Kind:        KindFeature,
-			Label:       "App status bar",
-			Description: "Adds the global connection, optional host metrics, and plugin status surface.",
-			Stability:   StabilityStable,
+			Label:       "Inbox",
+			Description: "Enables a workspace-scoped sidebar destination listing exactly the answerable clarification bundles for the active workspace, independent of Office mode.",
+			Stability:   StabilityExperimental,
 			RiskLevel:   RiskLow,
-			RiskDescription: "Changing this adds or removes the desktop and tablet status bar and the phone Status drawer entry " +
-				"after restart. It does not stop connections, metrics collection requested by other clients, or plugins.",
+			RiskDescription: "The Inbox is a new read surface plus a per-user dismiss/snooze sidecar; it never mutates " +
+				"the underlying clarification record. Still evolving and should be reviewed before relying on it.",
 			RestartRequired: true,
 			Mutable:         true,
 		},
-		read:  func(cfg *config.Config) bool { return cfg.Features.AppStatusBar },
-		apply: func(cfg *config.Config, value bool) { cfg.Features.AppStatusBar = value },
+		read:  func(cfg *config.Config) bool { return cfg.Features.NeedsYouInbox },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.NeedsYouInbox = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
@@ -80,6 +125,61 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.canvases",
+			EnvVar:      "KANDEV_FEATURES_CANVASES",
+			Kind:        KindFeature,
+			Label:       "Agent-authored canvases",
+			Description: "Enables isolated agent-authored web application canvases for tasks and workspaces.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Canvas applications execute arbitrary packaged browser code in a sandboxed runtime and " +
+				"can access only explicitly granted Kandev data. Enable this only while reviewing the isolation, " +
+				"storage, and permission behavior of the experimental feature.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.Canvases },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.Canvases = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.multiTenancy",
+			EnvVar:      "KANDEV_FEATURES_MULTI_TENANCY",
+			Kind:        KindFeature,
+			Label:       "Organizations",
+			Description: "Adds organizations above users: every account belongs to exactly one org, and orgs cannot see each other's workspaces, tasks, or secrets. Requires Authentication & users.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Turning this ON puts every existing user, workspace and secret into a single default " +
+				"organization after restart, and adds an instance operator tier that manages organizations. " +
+				"It requires Authentication & users: with authentication off the instance refuses to start. " +
+				"Filesystem paths and agent CLI credentials are still shared across organizations, so this is " +
+				"an application-layer boundary, not a sandbox.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.MultiTenancy },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.MultiTenancy = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.dynamicAgentRouting",
+			EnvVar:      "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING",
+			Kind:        KindFeature,
+			Label:       "Dynamic agent routing",
+			Description: "Enables reusable dynamic agent profiles and provider-error routing across task, utility, and Office execution.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Dynamic routing can change the concrete provider used by a logical session and is still experimental. " +
+				"Enable it only on a controlled installation and review route recovery behavior before using it for unattended work.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicAgentRouting },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicAgentRouting = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.claudeBackgroundPromptHandoff",
 			EnvVar:      "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF",
 			Kind:        KindFeature,
@@ -95,6 +195,43 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.ClaudeBackgroundPromptHandoff },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.ClaudeBackgroundPromptHandoff = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.claudeMidTurnSteering",
+			EnvVar:      "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING",
+			Kind:        KindFeature,
+			Label:       "Claude mid-turn steering",
+			Description: "Delivers a new prompt into a Claude turn that is still generating, instead of holding it until the turn ends.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Whether the agent folds the delivered prompt into the running turn is decided by the agent CLI and is not advertised over the protocol, " +
+				"so the message may instead run as the next turn. Enabling this also lets two prompts overlap on one session, which can misattribute a turn's " +
+				"completion, usage, or tool state. Use it for controlled testing and disable it if a session behaves unexpectedly.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ClaudeMidTurnSteering },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ClaudeMidTurnSteering = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.agentSurvival",
+			EnvVar:      "KANDEV_FEATURES_AGENT_SURVIVAL",
+			Kind:        KindFeature,
+			Label:       "Agent survival across backend restart",
+			Description: "Lets a worktree or local-executor agent session survive a backend restart by adopting its still-running standalone control server instead of killing it.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Replaces the standalone control server's kill-on-restart safeguard with an adoption handshake. " +
+				"Enable it only after reviewing the recovery and ownership guarantees, since it changes what happens to an agent " +
+				"process when the backend restarts unexpectedly. Unavailable on Windows, where the removed safeguard is depended on.",
+			RestartRequired: true,
+			Mutable:         true,
+			Available:       agentSurvivalAvailability,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.AgentSurvival },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentSurvival = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

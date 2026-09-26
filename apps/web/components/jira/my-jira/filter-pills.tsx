@@ -8,8 +8,18 @@ import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { JiraProject, JiraStatus } from "@/lib/types/jira";
 import { type AssigneeFilter } from "./filter-model";
+import { useTranslation } from "react-i18next";
 
 type PillShellProps = {
+  /**
+   * Stable pill identifier, never display copy. The `data-testid` was built as
+   * `jira-filter-pill-${label.toLowerCase()}`, so translating the label moved
+   * the selector with it — and `e2e/tests/integrations/jira-default-project.spec.ts`
+   * selects `jira-filter-pill-project` and `-status` by name, so this was a live
+   * break, not a hypothetical one. apps/web/AGENTS.md: a `data-testid` is never
+   * translated, and deriving one from copy translates it by the back door.
+   */
+  id: string;
   label: string;
   summary: string | null;
   active: boolean;
@@ -23,21 +33,23 @@ type PillShellProps = {
 };
 
 function DisabledPill({
+  id,
   label,
   summary,
   disabledHint,
-}: Pick<PillShellProps, "label" | "summary" | "disabledHint">) {
+}: Pick<PillShellProps, "id" | "label" | "summary" | "disabledHint">) {
+  const { t } = useTranslation();
   // Radix Tooltip on a focusable wrapper (per apps/web/AGENTS.md) so keyboard
   // and screen-reader users reach the disabled pill and learn why it's off,
   // instead of the reason being mouse-hover-only via a raw title attribute.
   const pill = (
     <div
-      data-testid={`jira-filter-pill-${label.toLowerCase()}`}
+      data-testid={`jira-filter-pill-${id}`}
       data-disabled="true"
       tabIndex={0}
       role="button"
       aria-disabled="true"
-      aria-label={disabledHint ?? `${label} filter disabled`}
+      aria-label={disabledHint ?? t("jira:filterDisabled", { label })}
       className="inline-flex items-stretch rounded-md border text-xs overflow-hidden bg-background opacity-50"
     >
       <span className="px-2.5 py-1.5 flex items-center gap-1.5 cursor-not-allowed">
@@ -57,6 +69,7 @@ function DisabledPill({
 }
 
 function PillShell({
+  id,
   label,
   summary,
   active,
@@ -65,9 +78,10 @@ function PillShell({
   disabledHint,
   children,
 }: PillShellProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   if (disabled) {
-    return <DisabledPill label={label} summary={summary} disabledHint={disabledHint} />;
+    return <DisabledPill id={id} label={label} summary={summary} disabledHint={disabledHint} />;
   }
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -79,7 +93,7 @@ function PillShell({
         <PopoverTrigger asChild>
           <button
             type="button"
-            data-testid={`jira-filter-pill-${label.toLowerCase()}`}
+            data-testid={`jira-filter-pill-${id}`}
             className="cursor-pointer px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-muted/50 transition-colors"
           >
             <span className="text-muted-foreground">{label}</span>
@@ -92,7 +106,7 @@ function PillShell({
             type="button"
             onClick={onClear}
             className="cursor-pointer px-1.5 border-l hover:bg-muted flex items-center"
-            title={`Clear ${label.toLowerCase()}`}
+            title={t("jira:clear", { lowerCase: label.toLowerCase() })}
           >
             <IconX className="h-3 w-3 text-muted-foreground" />
           </button>
@@ -117,6 +131,7 @@ type ProjectPillProps = {
 };
 
 export function ProjectPill({ projects, value, onChange }: ProjectPillProps) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -134,7 +149,8 @@ export function ProjectPill({ projects, value, onChange }: ProjectPillProps) {
 
   return (
     <PillShell
-      label="Project"
+      id="project"
+      label={t("jira:project")}
       summary={value.length > 0 ? joinSummary(value, 2) : null}
       active={value.length > 0}
       onClear={() => onChange([])}
@@ -143,13 +159,13 @@ export function ProjectPill({ projects, value, onChange }: ProjectPillProps) {
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search projects…"
+          placeholder={t("jira:searchProjects")}
           className="h-7 text-xs"
         />
       </div>
       <div className="max-h-64 overflow-y-auto py-1">
         {filtered.length === 0 && (
-          <div className="px-3 py-2 text-xs text-muted-foreground">No projects match.</div>
+          <div className="px-3 py-2 text-xs text-muted-foreground">{t("jira:noProjectsMatch")}</div>
         )}
         {filtered.map((p) => (
           <label
@@ -180,10 +196,8 @@ type StatusPillProps = {
   hasProjectSelected: boolean;
 };
 
-const NO_PROJECT_HINT = "Select a project to filter by status";
-const NO_STATUSES_HINT = "No statuses available for the selected project";
-
 export function StatusPill({ options, value, onChange, hasProjectSelected }: StatusPillProps) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -200,24 +214,27 @@ export function StatusPill({ options, value, onChange, hasProjectSelected }: Sta
 
   return (
     <PillShell
-      label="Status"
+      id="status"
+      label={t("common:status")}
       summary={summary}
       active={value.length > 0}
       onClear={() => onChange([])}
       disabled={options.length === 0}
-      disabledHint={hasProjectSelected ? NO_STATUSES_HINT : NO_PROJECT_HINT}
+      disabledHint={
+        hasProjectSelected ? t("jira:noStatusesForProject") : t("jira:selectProjectToFilterStatus")
+      }
     >
       <div className="p-2 border-b">
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search statuses…"
+          placeholder={t("jira:searchStatuses")}
           className="h-7 text-xs"
         />
       </div>
       <div className="max-h-64 overflow-y-auto py-1">
         {filtered.length === 0 && (
-          <div className="px-3 py-2 text-xs text-muted-foreground">No statuses match.</div>
+          <div className="px-3 py-2 text-xs text-muted-foreground">{t("jira:noStatusesMatch")}</div>
         )}
         {filtered.map((o) => (
           <label
@@ -239,18 +256,22 @@ type AssigneePillProps = {
   onChange: (a: AssigneeFilter) => void;
 };
 
-const ASSIGNEE_OPTIONS: { value: AssigneeFilter; label: string }[] = [
-  { value: "anyone", label: "Anyone" },
-  { value: "me", label: "Me" },
-  { value: "unassigned", label: "Unassigned" },
+/** `value` is the persisted AssigneeFilter; only the catalog key is copy. */
+const ASSIGNEE_OPTIONS: { value: AssigneeFilter; labelKey: string }[] = [
+  { value: "anyone", labelKey: "jira:assigneeAnyone" },
+  { value: "me", labelKey: "jira:assigneeMe" },
+  { value: "unassigned", labelKey: "jira:assigneeUnassigned" },
 ];
 
 export function AssigneePill({ value, onChange }: AssigneePillProps) {
+  const { t } = useTranslation();
   const active = value !== "anyone";
-  const summary = active ? (ASSIGNEE_OPTIONS.find((o) => o.value === value)?.label ?? null) : null;
+  const activeOption = active ? ASSIGNEE_OPTIONS.find((o) => o.value === value) : undefined;
+  const summary = activeOption ? t(activeOption.labelKey) : null;
   return (
     <PillShell
-      label="Assignee"
+      id="assignee"
+      label={t("jira:assignee")}
       summary={summary}
       active={active}
       onClear={() => onChange("anyone")}
@@ -265,7 +286,7 @@ export function AssigneePill({ value, onChange }: AssigneePillProps) {
               value === o.value ? "font-medium" : ""
             }`}
           >
-            {o.label}
+            {t(o.labelKey)}
           </button>
         ))}
       </div>

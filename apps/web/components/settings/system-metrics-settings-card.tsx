@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { Checkbox } from "@kandev/ui/checkbox";
-import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { fetchSystemMetricsSettings, updateSystemMetricsSettings } from "@/lib/api";
 import type { SystemMetricId, SystemMetricsGlobalSettings } from "@/lib/types/system";
 import { useSettingsSaveContributor } from "./settings-save-provider";
-import { SettingsCard } from "./settings-card";
+import { useSettingsTargetRegistration } from "./settings-target-provider";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useTranslation } from "react-i18next";
 
 const METRIC_OPTIONS: Array<{ id: SystemMetricId; labelKey: string }> = [
@@ -43,6 +43,7 @@ export function SystemMetricsSettingsCard({
   onSimplifiedChange: (checked: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const registerTarget = useSettingsTargetRegistration(GENERAL_SETTINGS_TARGETS.resourceMetrics);
   const [settings, setSettings] = useState<SystemMetricsGlobalSettings>(DEFAULT_METRICS_SETTINGS);
   const [savedSettings, setSavedSettings] =
     useState<SystemMetricsGlobalSettings>(DEFAULT_METRICS_SETTINGS);
@@ -90,40 +91,40 @@ export function SystemMetricsSettingsCard({
   };
 
   return (
-    <SettingsCard isDirty={isDirty || Boolean(isShowInTopbarDirty) || Boolean(isSimplifiedDirty)}>
-      <CardHeader>
-        <CardTitle className="text-base">{t("settings:resourceMetrics")}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <p className="max-w-3xl text-sm text-muted-foreground">
-          {t("settings:usefulWhenKandevIsSelfHosted")}
-        </p>
-        <MetricsDisplayToggle
-          checked={showInTopbar}
-          isDirty={Boolean(isShowInTopbarDirty)}
-          onCheckedChange={onShowInTopbarChange}
-        />
-        <SimplifiedMetricsToggle
-          checked={simplified}
-          isDirty={Boolean(isSimplifiedDirty)}
-          onCheckedChange={onSimplifiedChange}
-        />
-        <MetricsSamplerControls
-          settings={settings}
-          savedSettings={savedSettings}
-          isSaving={!loaded}
-          onToggleMetric={toggleMetric}
-          onChangeSettings={setSettings}
-          onDraftSettings={setSettings}
-        />
-        <ExecutionMetricsToggle
-          checked={settings.collect_execution}
-          isDirty={settings.collect_execution !== savedSettings.collect_execution}
-          disabled={!loaded}
-          onCheckedChange={(checked) => setSettings({ ...settings, collect_execution: checked })}
-        />
-      </CardContent>
-    </SettingsCard>
+    <div
+      ref={registerTarget}
+      className="space-y-5 py-3"
+      data-testid="system-metrics-settings-card"
+      data-settings-dirty={isDirty || Boolean(isShowInTopbarDirty) || Boolean(isSimplifiedDirty)}
+    >
+      <p className="max-w-3xl text-sm text-muted-foreground">
+        {t("settings:usefulWhenKandevIsSelfHosted")}
+      </p>
+      <MetricsDisplayToggle
+        checked={showInTopbar}
+        isDirty={Boolean(isShowInTopbarDirty)}
+        onCheckedChange={onShowInTopbarChange}
+      />
+      <SimplifiedMetricsToggle
+        checked={simplified}
+        isDirty={Boolean(isSimplifiedDirty)}
+        onCheckedChange={onSimplifiedChange}
+      />
+      <MetricsSamplerControls
+        settings={settings}
+        savedSettings={savedSettings}
+        isSaving={!loaded}
+        onToggleMetric={toggleMetric}
+        onChangeSettings={setSettings}
+        onDraftSettings={setSettings}
+      />
+      <ExecutionMetricsToggle
+        checked={settings.collect_execution}
+        isDirty={settings.collect_execution !== savedSettings.collect_execution}
+        disabled={!loaded}
+        onCheckedChange={(checked) => setSettings({ ...settings, collect_execution: checked })}
+      />
+    </div>
   );
 }
 

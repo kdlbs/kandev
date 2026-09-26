@@ -10,16 +10,17 @@ export type SoundNote = {
 
 export type SoundPresetId = "plim" | "chime" | "ding" | "pop";
 
+// No `label`: the picker resolves `SOUND_PRESET_LABEL_KEYS` by id
+// (`notification-sound-section.tsx`). The field that used to sit here held a
+// second, untranslated copy of the same names that nothing rendered.
 export type SoundPreset = {
   id: SoundPresetId;
-  label: string;
   notes: SoundNote[];
 };
 
 export const SOUND_PRESETS: SoundPreset[] = [
   {
     id: "plim",
-    label: "Plim",
     notes: [
       { frequency: 880, startMs: 0, durationMs: 220 },
       { frequency: 1318.51, startMs: 90, durationMs: 420 },
@@ -27,7 +28,6 @@ export const SOUND_PRESETS: SoundPreset[] = [
   },
   {
     id: "chime",
-    label: "Chime",
     notes: [
       { frequency: 523.25, startMs: 0, durationMs: 260 },
       { frequency: 659.25, startMs: 110, durationMs: 260 },
@@ -36,12 +36,10 @@ export const SOUND_PRESETS: SoundPreset[] = [
   },
   {
     id: "ding",
-    label: "Ding",
     notes: [{ frequency: 987.77, startMs: 0, durationMs: 600 }],
   },
   {
     id: "pop",
-    label: "Pop",
     notes: [{ frequency: 329.63, startMs: 0, durationMs: 140 }],
   },
 ];

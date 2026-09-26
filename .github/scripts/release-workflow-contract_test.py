@@ -12,12 +12,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "release.yml"
 DIAGNOSTICS_PATH = REPO_ROOT / ".github" / "scripts" / "collect-macos-desktop-diagnostics.sh"
 PUBLISH_NPM_PATH = REPO_ROOT / "scripts" / "release" / "publish-npm.sh"
+UPDATE_SCOOP_BUCKET_PATH = REPO_ROOT / "scripts" / "release" / "update-scoop-bucket.sh"
+NPM_PACKAGES_PATH = REPO_ROOT / "scripts" / "release" / "npm-packages.sh"
 PUBLIC_KEY_PATH = REPO_ROOT / ".github" / "release-signing-key.asc"
 RELEASE_PROCESS_PATH = REPO_ROOT / "docs" / "public" / "release-process.md"
 LINT_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
 WORKFLOW = WORKFLOW_PATH.read_text()
 DIAGNOSTICS = DIAGNOSTICS_PATH.read_text()
 PUBLISH_NPM = PUBLISH_NPM_PATH.read_text()
+UPDATE_SCOOP_BUCKET = UPDATE_SCOOP_BUCKET_PATH.read_text()
+NPM_PACKAGES = NPM_PACKAGES_PATH.read_text()
 RELEASE_PROCESS = RELEASE_PROCESS_PATH.read_text()
 LINT_WORKFLOW = LINT_WORKFLOW_PATH.read_text()
 NORMAL_RELEASE_IF = (
@@ -46,7 +50,313 @@ def job_block(name: str) -> str:
     return WORKFLOW[start:end]
 
 
+def job_condition(name: str) -> str:
+    match = re.search(r"(?m)^    if: [^\n]*(?:\n {6,}[^\n]*)*", job_block(name))
+    if match is None:
+        raise AssertionError(f"job condition not found: {name}")
+    return " ".join(match.group().split())
+
+
 class ReleaseWorkflowContractTest(unittest.TestCase):
+    def test_nightly_runs_on_schedule_or_manual_channel_and_delegates_metadata_resolution(
+        self,
+    ) -> None:
+        self.assertIn('schedule:\n    - cron: "0 12 * * *"', WORKFLOW)
+        self.assertRegex(
+            WORKFLOW,
+            r"(?ms)      channel:\n"
+            r"        description: \"Release channel\"\n"
+            r"        required: true\n"
+            r"        type: choice\n"
+            r"        default: stable\n"
+            r"        options:\n"
+            r"          - stable\n"
+            r"          - nightly",
+        )
+
+        nightly = job_block("nightly-prepare")
+        self.assertIn("github.event_name == 'schedule'", nightly)
+        self.assertIn(
+            "github.event_name == 'workflow_dispatch' && inputs.channel == 'nightly'",
+            nightly,
+        )
+        self.assertIn("ref: ${{ github.sha }}", nightly)
+        validation = step_block("Validate manual Nightly request")
+        self.assertIn("refs/heads/main", validation)
+        self.assertIn("DESKTOP_VALIDATION_ONLY", validation)
+        self.assertIn("BACKFILL_TAG", validation)
+        metadata = step_block("Resolve nightly metadata")
+        self.assertIn("id: metadata", metadata)
+        self.assertIn("bash scripts/release/nightly-release.sh prepare", metadata)
+        self.assertIn('--scheduled-sha "${{ github.sha }}"', metadata)
+        self.assertIn('--output "$GITHUB_OUTPUT"', metadata)
+        self.assertNotIn("npm-view-version.sh", metadata)
+        self.assertIn(
+            "nightly_tags_at_start: ${{ steps.metadata.outputs.nightly_tags_at_start }}",
+            nightly,
+        )
+
+    def test_manual_nightly_dry_run_stops_after_preflight(self) -> None:
+        summary = step_block("Nightly dry-run summary")
+        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.dry_run", summary)
+        self.assertIn("steps.metadata.outputs.should_publish", summary)
+        self.assertIn("steps.metadata.outputs.version", summary)
+
+        for name in ("build-web", "build-bundles", "publish-npm-nightly"):
+            condition = job_condition(name)
+            self.assertIn("inputs.channel == 'nightly'", condition)
+            self.assertIn("!inputs.dry_run", condition)
+
+        for name in ("build-web", "build-bundles"):
+            block = job_block(name)
+            self.assertIn(
+                "needs.nightly-prepare.result == 'success' && "
+                "needs.nightly-prepare.outputs.ref || needs.prepare.outputs.ref",
+                block,
+            )
+            self.assertIn(
+                "needs.nightly-prepare.result == 'success' && "
+                "needs.nightly-prepare.outputs.tag || needs.prepare.outputs.tag",
+                block,
+            )
+
+    def test_nightly_package_inventory_remains_shared(self) -> None:
+        for package in (
+            "kandev",
+            "@kdlbs/runtime-linux-x64",
+            "@kdlbs/runtime-linux-arm64",
+            "@kdlbs/runtime-darwin-x64",
+            "@kdlbs/runtime-darwin-arm64",
+            "@kdlbs/runtime-win32-x64",
+        ):
+            self.assertIn(package, NPM_PACKAGES)
+
+        self.assertIn('NIGHTLY_PACKAGES=("kandev" "${RUNTIME_PACKAGES[@]}")', NPM_PACKAGES)
+
+    def test_only_shared_runtime_builds_run_for_a_scheduled_nightly(self) -> None:
+        for name in ("build-web", "build-bundles"):
+            block = job_block(name)
+            self.assertIn("needs: [prepare, nightly-prepare", block)
+            self.assertIn("github.event_name == 'workflow_dispatch'", block)
+            self.assertIn("github.event_name == 'schedule'", block)
+            self.assertIn("inputs.channel == 'nightly'", block)
+            self.assertIn("needs.nightly-prepare.outputs.should_publish == 'true'", block)
+
+        for name in (
+            "prepare",
+            "build-desktop",
+            "docker-amd64",
+            "docker-arm64",
+            "docker-manifest",
+            "docker-universal-amd64",
+            "docker-universal-arm64",
+            "docker-universal-manifest",
+            "publish-release",
+            "publish-npm",
+            "update-homebrew-tap",
+            "update-scoop-bucket",
+        ):
+            block = job_block(name)
+            self.assertIn("github.event_name == 'workflow_dispatch'", block)
+            self.assertIn("inputs.channel == 'stable'", block)
+            self.assertNotIn("github.event_name == 'schedule'", block)
+
+    def test_platform_archives_are_validated_before_tap_consumers_receive_them(
+        self,
+    ) -> None:
+        package = step_block("Package bundle")
+        validation = "bash scripts/release/package-bundle.sh --bundle-dir dist/kandev"
+        archive = 'tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev'
+
+        self.assertIn(validation, package)
+        self.assertIn(archive, package)
+        self.assertLess(package.index(validation), package.index(archive))
+
+    def assert_required_artifact_upload_retries(
+        self, job_name: str, step_prefix: str
+    ) -> None:
+        block = job_block(job_name)
+        for attempt in (1, 2, 3):
+            step_id = f"{step_prefix}_{attempt}"
+            self.assertEqual(block.count(f"id: {step_id}"), 1)
+            if attempt > 1:
+                self.assertIn(
+                    f"if: steps.{step_prefix}_{attempt - 1}.outcome == 'failure'",
+                    block,
+                )
+
+        self.assertEqual(block.count("if-no-files-found: error"), 3)
+        self.assertEqual(block.count("overwrite: true"), 2)
+        self.assertIn("sleep 30", block)
+        self.assertIn("sleep 60", block)
+        self.assertIn("attempt 1/3 failed; retrying in 30 seconds.", block)
+        self.assertIn("attempt 2/3 failed; retrying in 60 seconds.", block)
+        normalized = " ".join(block.split())
+        self.assertIn(
+            f"if: >- steps.{step_prefix}_1.outcome == 'failure' && "
+            f"steps.{step_prefix}_2.outcome == 'failure' && "
+            f"steps.{step_prefix}_3.outcome == 'failure'",
+            normalized,
+        )
+
+    def test_required_artifact_uploads_retry_and_desktop_matrix_isolated(self) -> None:
+        self.assert_required_artifact_upload_retries("build-web", "upload_web_bundle")
+        self.assert_required_artifact_upload_retries(
+            "build-bundles", "upload_runtime_bundle"
+        )
+        self.assert_required_artifact_upload_retries(
+            "build-desktop", "upload_desktop_artifacts"
+        )
+
+        desktop = job_block("build-desktop")
+        self.assertIn("fail-fast: false", desktop)
+        self.assertIn(
+            "needs.build-desktop.result == 'success'", job_block("publish-release")
+        )
+
+    def test_stable_jobs_continue_past_skipped_nightly_branch_only_after_successful_needs(
+        self,
+    ) -> None:
+        direct_dependencies = {
+            "build-desktop": ("prepare", "build-bundles"),
+            "docker-amd64": ("prepare", "build-bundles"),
+            "docker-arm64": ("prepare", "build-bundles", "docker-amd64"),
+            "docker-manifest": ("prepare", "docker-amd64", "docker-arm64"),
+            "docker-universal-amd64": ("prepare", "docker-manifest"),
+            "docker-universal-arm64": (
+                "prepare",
+                "docker-manifest",
+                "docker-universal-amd64",
+            ),
+            "docker-universal-manifest": (
+                "prepare",
+                "docker-universal-amd64",
+                "docker-universal-arm64",
+            ),
+            "publish-release": (
+                "prepare",
+                "build-bundles",
+                "build-desktop",
+                "docker-universal-manifest",
+            ),
+            "publish-npm": ("prepare", "publish-release"),
+            "update-homebrew-tap": ("prepare", "publish-release"),
+            "update-scoop-bucket": ("prepare", "publish-release"),
+        }
+
+        for name, dependencies in direct_dependencies.items():
+            with self.subTest(job=name):
+                condition = job_condition(name)
+                self.assertIn("!cancelled()", condition)
+                for dependency in dependencies:
+                    self.assertIn(
+                        f"needs.{dependency}.result == 'success'",
+                        condition,
+                    )
+
+    def test_nightly_publish_uses_exact_sha_local_assets_and_release_serialization(self) -> None:
+        stable = job_block("publish-npm")
+        nightly = job_block("publish-npm-nightly")
+
+        workflow_preamble = WORKFLOW.split("\njobs:", 1)[0]
+        self.assertIn("group: release-npm-publication", workflow_preamble)
+        self.assertIn("cancel-in-progress: false", workflow_preamble)
+        self.assertIn("queue: max", workflow_preamble)
+
+        for block in (stable, nightly):
+            self.assertNotIn("\n    concurrency:", block)
+            self.assertIn("id-token: write", block)
+
+        self.assertIn("needs: [nightly-prepare, build-bundles]", nightly)
+        self.assertIn("needs.build-bundles.result == 'success'", nightly)
+        self.assertIn("needs.build-web.result == 'success'", job_block("build-bundles"))
+        self.assertIn("ref: ${{ needs.nightly-prepare.outputs.ref }}", nightly)
+        self.assertIn("fetch-depth: 0", nightly)
+        self.assertIn("pattern: bundle-*", nightly)
+        self.assertIn("merge-multiple: true", nightly)
+        self.assertIn('--version "${{ needs.nightly-prepare.outputs.version }}"', nightly)
+        self.assertIn('--assets-dir dist/nightly-assets', nightly)
+        publish = step_block("Publish npm nightly packages")
+        self.assertIn("bash scripts/release/nightly-release.sh publish", publish)
+        self.assertIn('--stable-at-start "$NIGHTLY_BASELINE"', publish)
+        self.assertIn('--nightly-at-start "$NIGHTLY_AT_START"', publish)
+        self.assertIn('--tags-at-start "$NIGHTLY_TAGS_AT_START"', publish)
+        self.assertIn(
+            "NIGHTLY_TAGS_AT_START: ${{ needs.nightly-prepare.outputs.nightly_tags_at_start }}",
+            nightly,
+        )
+        self.assertNotIn("npm-view-version.sh", publish)
+        self.assertNotIn("publish-npm.sh", publish)
+
+        self.assertIn('--version "${{ needs.prepare.outputs.version }}"', stable)
+        self.assertIn('--dist-tag latest', stable)
+        self.assertIn('--release-tag "${{ needs.prepare.outputs.tag }}"', stable)
+
+        self.assertIn('elif [[ "$DIST_TAG" == "latest" && -z "$RELEASE_TAG" ]]', PUBLISH_NPM)
+        self.assertIn(
+            'elif [[ "$DIST_TAG" == "nightly" && -z "$SOURCE_ASSETS_DIR" ]]',
+            PUBLISH_NPM,
+        )
+        self.assertIn('bash "$ROOT_DIR/scripts/release/npm-view-version.sh"', PUBLISH_NPM)
+        self.assertIn('CLI_PACKAGE_BACKUP="$WORK_DIR/cli-package.json"', PUBLISH_NPM)
+        self.assertIn('cp "$CLI_PACKAGE_BACKUP" "$CLI_PACKAGE_JSON"', PUBLISH_NPM)
+
+    def test_scoop_publication_uses_current_control_revision_and_deploy_key(self) -> None:
+        scoop = job_block("update-scoop-bucket")
+        self.assertIn("needs: [prepare, publish-release]", scoop)
+        self.assertIn("ref: ${{ github.workflow_sha }}", scoop)
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", scoop)
+        self.assertIn(
+            "SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}",
+            scoop,
+        )
+        self.assertIn("bash scripts/release/update-scoop-bucket.sh", scoop)
+        self.assertIn('"${{ needs.prepare.outputs.version }}"', scoop)
+        self.assertIn('"${{ needs.prepare.outputs.tag }}"', scoop)
+        self.assertIn("!inputs.dry_run", scoop)
+        self.assertIn("!inputs.desktop_validation_only", scoop)
+        self.assertNotIn("inputs.backfill_tag == ''", scoop)
+
+        preflight = step_block("Require Scoop bucket deploy key")
+        self.assertIn('if [ -z "$SCOOP_BUCKET_DEPLOY_KEY" ]', preflight)
+        self.assertIn("SCOOP_BUCKET_DEPLOY_KEY is required", preflight)
+
+        self.assertIn("SCOOP_BUCKET_DEPLOY_KEY", UPDATE_SCOOP_BUCKET)
+        self.assertIn("git push origin HEAD:main", UPDATE_SCOOP_BUCKET)
+        self.assertIn('CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"', UPDATE_SCOOP_BUCKET)
+
+    def test_publish_npm_rejects_version_dist_tag_mismatches(self) -> None:
+        cases = (
+            (
+                "1.2.3-nightly.shaabcdef123456",
+                "latest",
+                "--version must be stable X.Y.Z for --dist-tag latest",
+            ),
+            (
+                "1.2.3",
+                "nightly",
+                "--version must be X.Y.Z-nightly.sha<12-hex> for --dist-tag nightly",
+            ),
+        )
+        for version, dist_tag, expected in cases:
+            with self.subTest(dist_tag=dist_tag):
+                result = subprocess.run(
+                    [
+                        "bash",
+                        str(PUBLISH_NPM_PATH),
+                        "--version",
+                        version,
+                        "--dist-tag",
+                        dist_tag,
+                    ],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
+
     def test_normal_release_uses_release_environment_and_requires_main(self) -> None:
         prepare = job_block("prepare")
         self.assertIn(
@@ -60,12 +370,54 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("CURRENT_REF: ${{ github.ref }}", guard)
         self.assertIn('if [ "$CURRENT_REF" != "refs/heads/main" ]', guard)
 
+    def test_normal_release_uses_admin_token_only_for_exact_head_merge(self) -> None:
+        create = step_block("Create release PR")
+        merge = step_block("Merge release PR with administrator token")
+        select = step_block("Select merged release commit")
+
+        for step in (create, merge, select):
+            self.assertIn(NORMAL_RELEASE_IF, step)
+
+        self.assertIn("id: release_pr", create)
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", create)
+        self.assertIn('MSG="release: publish $NEXT"', create)
+        self.assertIn('HEAD_SHA="$(git rev-parse HEAD)"', create)
+        self.assertIn('echo "url=$PR_URL" >> "$GITHUB_OUTPUT"', create)
+        self.assertIn('echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"', create)
+        self.assertNotIn("RELEASE_PR_BYPASS_TOKEN", create)
+
+        self.assertIn(
+            "GH_TOKEN: ${{ secrets.RELEASE_PR_BYPASS_TOKEN }}",
+            merge,
+        )
+        self.assertIn("PR_URL: ${{ steps.release_pr.outputs.url }}", merge)
+        self.assertIn("EXPECTED_HEAD: ${{ steps.release_pr.outputs.head }}", merge)
+        self.assertIn('if [ -z "$GH_TOKEN" ]', merge)
+        self.assertIn("RELEASE_PR_BYPASS_TOKEN is required", merge)
+        self.assertIn('gh pr merge "$PR_URL"', merge)
+        self.assertIn("--admin", merge)
+        self.assertIn("--squash", merge)
+        self.assertIn('--match-head-commit "$EXPECTED_HEAD"', merge)
+        self.assertNotIn("--delete-branch", merge)
+        self.assertNotIn("--auto", merge)
+
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", select)
+        self.assertNotIn("RELEASE_PR_BYPASS_TOKEN", select)
+        self.assertIn("--json state,mergedAt,mergeCommit,headRefOid", select)
+        self.assertIn('if [ "$PR_STATE" != "MERGED" ]', select)
+        self.assertIn('if [ "$PR_HEAD" != "$EXPECTED_HEAD" ]', select)
+        self.assertIn('[[ "$MERGE_COMMIT" =~ ^[0-9a-f]{40}$ ]]', select)
+        self.assertIn('git merge-base --is-ancestor "$MERGE_COMMIT" origin/main', select)
+        self.assertIn('git checkout --detach "$MERGE_COMMIT"', select)
+
     def test_normal_release_preflights_and_revalidates_signing_key_around_merge(
         self,
     ) -> None:
         prepare = job_block("prepare")
         bump = step_block("Bump version + generate CHANGELOG (in working tree)")
-        merge = step_block("Create release PR + squash-merge")
+        create_pr = step_block("Create release PR")
+        merge = step_block("Merge release PR with administrator token")
+        select = step_block("Select merged release commit")
         preflight_public_key = step_block("Validate committed release signing public key")
         preflight = step_block("Preflight release tag signing fingerprint")
         merged_public_key = step_block("Validate merged release signing public key")
@@ -151,8 +503,10 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         self.assertLess(prepare.index(preflight_public_key), prepare.index(preflight))
         self.assertLess(prepare.index(preflight), prepare.index(bump))
-        self.assertLess(prepare.index(bump), prepare.index(merge))
-        self.assertLess(prepare.index(merge), prepare.index(merged_public_key))
+        self.assertLess(prepare.index(bump), prepare.index(create_pr))
+        self.assertLess(prepare.index(create_pr), prepare.index(merge))
+        self.assertLess(prepare.index(merge), prepare.index(select))
+        self.assertLess(prepare.index(select), prepare.index(merged_public_key))
         self.assertLess(prepare.index(merged_public_key), prepare.index(signing))
         self.assertLess(prepare.index(merge), prepare.index(signing))
         self.assertLess(prepare.index(signing), prepare.index(validate))
@@ -201,16 +555,72 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIsNotNone(documented_fingerprint)
         self.assertEqual(primary_fingerprints[0], documented_fingerprint.group(1))
 
+    def test_release_documentation_declares_the_pr_bypass_token_contract(self) -> None:
+        for requirement in (
+            "RELEASE_PR_BYPASS_TOKEN",
+            "fine-grained personal access token",
+            "Contents: Read and write",
+            "organization administrator",
+            "Only select repositories",
+            "expiration date",
+        ):
+            self.assertIn(requirement, RELEASE_PROCESS)
+
     def test_release_contract_ci_runs_when_key_or_release_documentation_changes(self) -> None:
-        for trigger in ("push", "pull_request"):
+        """This contract must run on every change, not a listed subset.
+
+        `lint-action-pinning.yml` used to name each subject of this file --
+        the signing key, the release docs, every `scripts/release/` helper --
+        in a hand-maintained `paths:` list, so that changing one brought the
+        job up. That list is gone: the workflow now triggers on every push and
+        every pull request, which covers every subject here and every one added
+        later without anybody remembering to extend a list.
+
+        The change was forced by the merge queue. A workflow skipped by a
+        `paths:` filter reports no conclusion at all, and a required check that
+        never reports blocks a pull request from entering the queue.
+        """
+        for trigger in ("push", "pull_request", "merge_group"):
             trigger_block = re.search(
                 rf"  {trigger}:\n.*?(?=\n  [a-z_]+:|\nconcurrency:)",
                 LINT_WORKFLOW,
                 re.DOTALL,
             )
             self.assertIsNotNone(trigger_block)
-            self.assertIn('".github/release-signing-key.asc"', trigger_block.group(0))
-            self.assertIn('"docs/public/release-process.md"', trigger_block.group(0))
+            self.assertNotIn(
+                "    paths:",
+                trigger_block.group(0),
+                f"lint-action-pinning.yml's {trigger} trigger must stay "
+                "unfiltered. A `paths:` list there both un-guards every "
+                "subject it omits and makes the check unreportable in a merge "
+                "queue.",
+            )
+
+        setup_node = (
+            "uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6"
+        )
+        self.assertIn(setup_node, LINT_WORKFLOW)
+        self.assertIn('node-version: "24"', LINT_WORKFLOW)
+        self.assertIn(
+            "run: bash scripts/release/runtime-bundle.test.sh",
+            LINT_WORKFLOW,
+        )
+        self.assertLess(
+            LINT_WORKFLOW.index(setup_node),
+            LINT_WORKFLOW.index("- name: Test runtime bundle contract"),
+        )
+        self.assertLess(
+            LINT_WORKFLOW.index(setup_node),
+            LINT_WORKFLOW.index("- name: Test npm release helpers"),
+        )
+        self.assertIn(
+            "node --test scripts/release/nightly-version.test.mjs "
+            "scripts/release/nightly-release.test.mjs "
+            "scripts/release/npm-view-version.test.mjs "
+            "scripts/release/publish-npm.test.mjs "
+            "scripts/release/update-scoop-bucket.test.mjs",
+            LINT_WORKFLOW,
+        )
 
     def test_tag_push_recovery_recreates_tag_at_logged_merge_commit(self) -> None:
         tag = step_block("Create and push signed release tag")
@@ -235,7 +645,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "@kdlbs/runtime-darwin-arm64",
             "@kdlbs/runtime-win32-x64",
         ):
-            self.assertIn(f'"{package}"', PUBLISH_NPM)
+            self.assertIn(f'"{package}"', NPM_PACKAGES)
 
     def test_backfill_tag_input_uses_existing_tag_without_recreating_it(self) -> None:
         self.assertIn("backfill_tag:", WORKFLOW)
@@ -261,7 +671,9 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         for name in (
             "Bump version + generate CHANGELOG (in working tree)",
-            "Create release PR + squash-merge",
+            "Create release PR",
+            "Merge release PR with administrator token",
+            "Select merged release commit",
             "Import release tag signing key",
             "Validate release tag signing identity",
             "Create and push signed release tag",
@@ -282,9 +694,13 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "publish-release",
             "publish-npm",
             "update-homebrew-tap",
+            "update-scoop-bucket",
         ):
             block = job_block(name)
-            self.assertIn("if: ${{ !inputs.dry_run", block)
+            self.assertRegex(
+                job_condition(name),
+                r"github\.event_name == 'workflow_dispatch'.*!inputs\.dry_run",
+            )
             self.assertNotIn("inputs.backfill_tag == ''", block)
 
     def test_updater_signing_validation_uses_workflow_control_revision(self) -> None:
@@ -352,6 +768,26 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn('"${UPDATER_SIGNING_ENABLED:-false}" = "true"', collect)
         self.assertIn('"$DESKTOP_ASSET_VERIFIER" --require-updaters', collect)
 
+    def test_unsigned_macos_warning_includes_launch_recovery_command(self) -> None:
+        warning = step_block("Add unsigned desktop warning to release notes")
+
+        self.assertIn("macos_unsigned=false", warning)
+        self.assertIn("macos_unsigned=true", warning)
+        branch_if = 'if [ "$macos_unsigned" = "true" ]; then'
+        command = "xattr -d com.apple.quarantine /Applications/Kandev.app"
+
+        self.assertIn(branch_if, warning)
+        self.assertIn("verify the checksum", warning)
+        self.assertIn(command, warning)
+        self.assertLess(
+            warning.index("verify the checksum"),
+            warning.index(command),
+        )
+        branch_start = warning.index(branch_if)
+        branch_end = warning.index("\n            fi", branch_start)
+        branch_body = warning[branch_start:branch_end]
+        self.assertIn(command, branch_body)
+
     def test_release_asset_globs_are_disjoint_and_upload_sequentially(self) -> None:
         publish = step_block("Publish release")
         files = re.search(r"\n          files: \|\n((?:            \S+\n)+)", publish)
@@ -408,6 +844,63 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("bundle_dmg.sh", DIAGNOSTICS)
         self.assertIn('cp "$bundle_root/dmg/bundle_dmg.sh"', DIAGNOSTICS)
         self.assertIn("|| true", DIAGNOSTICS)
+
+    def test_ghcr_builds_retry_transient_failures_and_publish_digests(self) -> None:
+        for job, name in (
+            ("docker-amd64", "Build and push (amd64 staging tag)"),
+            ("docker-arm64", "Build and push (arm64 staging tag)"),
+            (
+                "docker-universal-amd64",
+                "Build and push (universal amd64 staging tag)",
+            ),
+            (
+                "docker-universal-arm64",
+                "Build and push (universal arm64 staging tag)",
+            ),
+        ):
+            build = step_block(name)
+            job_text = job_block(job)
+            with self.subTest(step=name):
+                runtime_setup = "crazy-max/ghaction-github-runtime@"
+                self.assertIn(runtime_setup, job_text)
+                self.assertLess(
+                    job_text.index(runtime_setup),
+                    job_text.index(f"- name: {name}"),
+                )
+                self.assertIn("bash scripts/release/retry-ghcr-command.sh", build)
+                self.assertIn("docker buildx build", build)
+                self.assertIn("--metadata-file", build)
+                self.assertIn("containerimage.digest", build)
+                self.assertIn('echo "digest=$digest" >> "$GITHUB_OUTPUT"', build)
+                self.assertNotIn("docker/build-push-action@", build)
+
+    def test_ghcr_manifest_mutations_retry_and_can_load_shared_helper(self) -> None:
+        for job, step in (
+            ("docker-manifest", "Combine arch images into multi-arch tags"),
+            ("docker-universal-manifest", "Promote staging to final tags"),
+        ):
+            block = job_block(job)
+            mutation = step_block(step)
+            with self.subTest(job=job):
+                self.assertIn("actions/checkout@", block)
+                self.assertIn("ref: ${{ needs.prepare.outputs.ref }}", block)
+                self.assertIn("bash scripts/release/retry-ghcr-command.sh", mutation)
+                self.assertIn("docker buildx imagetools create", mutation)
+
+    def test_ghcr_architecture_jobs_are_serialized(self) -> None:
+        self.assertIn(
+            "needs: [prepare, build-bundles, docker-amd64]",
+            job_block("docker-arm64"),
+        )
+        self.assertIn(
+            "needs: [prepare, docker-manifest, docker-universal-amd64]",
+            job_block("docker-universal-arm64"),
+        )
+
+    def test_release_validation_runs_ghcr_retry_regression(self) -> None:
+        self.assertIn("scripts/release/retry-ghcr-command.test.sh", LINT_WORKFLOW)
+        makefile = (REPO_ROOT / "Makefile").read_text()
+        self.assertIn("bash scripts/release/retry-ghcr-command.test.sh", makefile)
 
 
 if __name__ == "__main__":

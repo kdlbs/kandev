@@ -26,6 +26,7 @@ import { useSettingsSaveContributor } from "@/components/settings/settings-save-
 import type { Executor, ExecutorType } from "@/lib/types/http";
 import { EXECUTOR_ICON_MAP } from "@/lib/executor-icons";
 import { useTranslation } from "react-i18next";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 // The word the user must type to arm the delete button. It is compared with
@@ -67,6 +68,7 @@ function executorDescriptionKey(type: ExecutorType): string {
   if (type === "local_docker") return "executors:descriptionLocalDocker";
   if (type === "remote_docker") return "executors:descriptionRemoteDocker";
   if (type === "sprites") return "executors:descriptionSprites";
+  if (type === "k8s") return "executors:descriptionKubernetes";
   return "executors:descriptionCustom";
 }
 
@@ -328,11 +330,11 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <ExecutorIcon className="h-5 w-5 text-muted-foreground" />
-            <h2 className="text-2xl font-bold">{executor.name}</h2>
+            <h2 className="min-w-0 break-words text-2xl font-bold">{executor.name}</h2>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
             {t(executorDescriptionKey(executor.type))}
@@ -340,9 +342,8 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
         </div>
         <Button
           variant="outline"
-          size="sm"
           onClick={() => router.push(EXECUTORS_ROUTE)}
-          className="cursor-pointer"
+          className={settingsActionClassName("w-full cursor-pointer text-sm md:w-auto md:text-xs")}
         >
           {t("executors:backToExecutors")}
         </Button>

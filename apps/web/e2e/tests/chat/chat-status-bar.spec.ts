@@ -454,17 +454,23 @@ test.describe("Chat status bar", () => {
 
     const urlBeforeArchive = testPage.url();
 
-    // Cancelling the confirmation dialog must not archive anything
+    // A simple task stays on the banner's local confirmation surface. Cancelling
+    // it must not archive anything.
     await session.prMergedArchiveButton().click();
     await expect(session.prMergedArchiveConfirmButton()).toBeVisible({ timeout: 10_000 });
-    await testPage.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(session.prMergedArchiveConfirmButton()).toBeEnabled({ timeout: 10_000 });
+    const localConfirmation = testPage.getByTestId("task-archive-confirm-popover");
+    await expect(localConfirmation).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).not.toBeVisible();
+    await localConfirmation.getByRole("button", { name: "Cancel" }).click();
     await expect(session.prMergedArchiveConfirmButton()).not.toBeVisible();
     await expect(session.prMergedBanner()).toBeVisible();
     expect(testPage.url()).toBe(urlBeforeArchive);
 
-    // Click archive in the PR merged banner, then confirm in the dialog
+    // Click archive in the PR merged banner, then confirm locally.
     await session.prMergedArchiveButton().click();
     await expect(session.prMergedArchiveConfirmButton()).toBeVisible({ timeout: 10_000 });
+    await expect(session.prMergedArchiveConfirmButton()).toBeEnabled({ timeout: 10_000 });
     await session.prMergedArchiveConfirmButton().click();
 
     // Should switch to task B

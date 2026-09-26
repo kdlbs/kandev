@@ -15,8 +15,15 @@ import { describe, expect, it } from "vitest";
  * This was raised in review on the grounds that i18next's `initAsync` defaults
  * to `true`. That option governs when a BACKEND's resource loading is scheduled;
  * with resources passed inline there is nothing to load. These tests pin the
- * behaviour we actually depend on, so a dependency bump or a future switch to
- * lazily-loaded catalogs fails here instead of shipping a blank app.
+ * behaviour we actually depend on, so a dependency bump fails here instead of
+ * shipping a blank app.
+ *
+ * Catalogs ARE lazy now — every locale but `en` is a fetched chunk — and this
+ * guarantee survives it precisely because that move kept `en` inline and added
+ * the rest through `addResourceBundle`. `resources` is still populated and there
+ * is still no backend, which is the shape asserted below. Registering a locale
+ * later does not make init asynchronous; passing catalogs through an i18next
+ * BACKEND would, and that is the change these tests exist to stop.
  *
  * A fresh instance is used deliberately: `vitest.setup.ts` pre-initializes the
  * shared one, so asserting against it would be vacuous.

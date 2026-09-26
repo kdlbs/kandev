@@ -27,33 +27,36 @@ const userConnectionSelect = `
 		created_at, updated_at
 	FROM github_user_connections`
 
-// WorkspaceConnectionHealth summarizes persisted connection state across all
-// workspaces, including workspaces with no connection row.
+// WorkspaceConnectionHealth counts persisted connections by status. A
+// workspace with no connection row is absent from every field by design: its
+// status is not "disconnected", it simply does not use GitHub, and there is
+// nothing there for a user to reconnect. `status` only ever holds
+// active/invalid/suspended/revoked (see ConnectionStatus), so every count here
+// corresponds to a real row.
 type WorkspaceConnectionHealth struct {
-	WorkspaceCount int
-	Active         int
-	Disconnected   int
-	Invalid        int
-	Suspended      int
-	Revoked        int
+	Active    int
+	Invalid   int
+	Suspended int
+	Revoked   int
 }
 
 // GetWorkspaceConnectionHealth returns aggregate workspace-owned GitHub
 // health without consulting ambient process credentials.
+//
+// The join to workspaces is an existence filter, not a source of rows:
+// connections have no database-level cascade, so a workspace deletion that
+// missed its cleanup handler would otherwise leave an orphan counted forever.
 func (s *Store) GetWorkspaceConnectionHealth(ctx context.Context) (WorkspaceConnectionHealth, error) {
 	var health WorkspaceConnectionHealth
 	err := s.ro.QueryRowxContext(ctx, `
-		SELECT COUNT(w.id),
+		SELECT
 			COALESCE(SUM(CASE WHEN c.status = 'active' THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN c.workspace_id IS NULL THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN c.status = 'invalid' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN c.status = 'suspended' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN c.status = 'revoked' THEN 1 ELSE 0 END), 0)
-		FROM workspaces w
-		LEFT JOIN github_workspace_connections c ON c.workspace_id = w.id`).Scan(
-		&health.WorkspaceCount,
+		FROM github_workspace_connections c
+		JOIN workspaces w ON w.id = c.workspace_id`).Scan(
 		&health.Active,
-		&health.Disconnected,
 		&health.Invalid,
 		&health.Suspended,
 		&health.Revoked,
@@ -282,7 +285,11 @@ func (s *Store) UpsertUserConnection(ctx context.Context, connection *UserConnec
 		INSERT INTO github_user_connection_versions (workspace_id, user_id, credential_generation, updated_at)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(workspace_id, user_id) DO UPDATE SET
-			credential_generation = MAX(github_user_connection_versions.credential_generation, excluded.credential_generation),
+			credential_generation = CASE
+				WHEN github_user_connection_versions.credential_generation > excluded.credential_generation
+				THEN github_user_connection_versions.credential_generation
+				ELSE excluded.credential_generation
+			END,
 			updated_at = excluded.updated_at`),
 		connection.WorkspaceID, connection.UserID, connection.CredentialGeneration, connection.UpdatedAt); err != nil {
 		return err
@@ -302,10 +309,11 @@ func (s *Store) DeleteUserConnection(ctx context.Context, workspaceID, userID st
 		VALUES (?, ?, COALESCE((SELECT credential_generation + 1 FROM github_user_connections
 			WHERE workspace_id = ? AND user_id = ?), 1), ?)
 		ON CONFLICT(workspace_id, user_id) DO UPDATE SET
-			credential_generation = MAX(
-				github_user_connection_versions.credential_generation + 1,
-				excluded.credential_generation
-			), updated_at = excluded.updated_at`),
+			credential_generation = CASE
+				WHEN github_user_connection_versions.credential_generation + 1 > excluded.credential_generation
+				THEN github_user_connection_versions.credential_generation + 1
+				ELSE excluded.credential_generation
+			END, updated_at = excluded.updated_at`),
 		workspaceID, userID, workspaceID, userID, time.Now().UTC()); err != nil {
 		return err
 	}
@@ -328,10 +336,11 @@ func (s *Store) DeleteUserConnectionsByWorkspace(ctx context.Context, workspaceI
 		SELECT workspace_id, user_id, credential_generation + 1, ?
 		FROM github_user_connections WHERE workspace_id = ?
 		ON CONFLICT(workspace_id, user_id) DO UPDATE SET
-			credential_generation = MAX(
-				github_user_connection_versions.credential_generation + 1,
-				excluded.credential_generation
-			), updated_at = excluded.updated_at`), time.Now().UTC(), workspaceID); err != nil {
+			credential_generation = CASE
+				WHEN github_user_connection_versions.credential_generation + 1 > excluded.credential_generation
+				THEN github_user_connection_versions.credential_generation + 1
+				ELSE excluded.credential_generation
+			END, updated_at = excluded.updated_at`), time.Now().UTC(), workspaceID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(

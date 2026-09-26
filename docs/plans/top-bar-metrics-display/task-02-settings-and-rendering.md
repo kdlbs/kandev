@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-persist-preference"]
 plan: "plan.md"
-spec: "../../specs/ui/app-status-bar.md"
+spec: "../../specs/ui/requirements/app-status-bar.md"
 ---
 
 # Task 02: Add simplified settings and rendering

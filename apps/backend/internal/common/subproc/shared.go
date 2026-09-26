@@ -44,9 +44,22 @@ var (
 	// subproc_acquire_total, subproc_acquire_wait_millis_total). Unit
 	// tests that swap the pool via SetCapForTest reuse the same names
 	// so the published gauges stay coherent across cap changes.
-	ghThrottle  = NewNamedThrottle("gh", resolveCap(ghMaxConcurrentEnv, defaultGHMaxConcurrent))
-	gitThrottle = NewNamedClassThrottle("git", resolveCap(gitMaxConcurrentEnv, defaultGitMaxConcurrent))
+	ghThrottle  = NewNamedThrottle("gh", defaultGHMaxConcurrent)
+	gitThrottle = NewNamedClassThrottle("git", defaultGitMaxConcurrent)
 )
+
+// ConfigureCaps applies the typed startup capacities to the process-wide
+// throttles. Invalid values are reduced to the existing safe defaults.
+func ConfigureCaps(ghMax, gitMax int) {
+	if ghMax <= 0 {
+		ghMax = defaultGHMaxConcurrent
+	}
+	if gitMax <= 0 {
+		gitMax = defaultGitMaxConcurrent
+	}
+	ghThrottle.SetCap(ghMax)
+	gitThrottle.SetCap(gitMax)
+}
 
 // GH returns the process-wide throttle gating gh subprocess execs.
 // All gh callers across the codebase share this single semaphore so the
@@ -89,7 +102,7 @@ func RunGitClass(ctx context.Context, class GitWorkClass, cmd *exec.Cmd) error {
 		return err
 	}
 	defer release()
-	return cmd.Run()
+	return runManagedGit(ctx, cmd)
 }
 
 // RunGitCombinedOutputClass is RunGitClass's CombinedOutput sibling.
@@ -99,7 +112,7 @@ func RunGitCombinedOutputClass(ctx context.Context, class GitWorkClass, cmd *exe
 		return nil, err
 	}
 	defer release()
-	return cmd.CombinedOutput()
+	return runManagedGitCombinedOutput(ctx, cmd)
 }
 
 // RunGitOutputClass is RunGitClass's Output sibling. Stderr is captured in
@@ -111,7 +124,7 @@ func RunGitOutputClass(ctx context.Context, class GitWorkClass, cmd *exec.Cmd) (
 		return nil, err
 	}
 	defer release()
-	return cmd.Output()
+	return runManagedGitOutput(ctx, cmd)
 }
 
 // RunGitCombinedAfterAcquire starts the execution timeout only after the
@@ -128,9 +141,10 @@ func RunGitCombinedAfterAcquire(
 		return nil, wrapAdmissionError(err), nil
 	}
 	defer release()
-	execCtx, cancel := withExecTimeout(ctx, execTimeout)
+	execCtx, cancel := withGitExecTimeout(ctx, execTimeout)
 	defer cancel()
-	out, runErr := build(execCtx).CombinedOutput()
+	cmd := build(execCtx)
+	out, runErr := runManagedGitCombinedOutput(execCtx, cmd)
 	return out, runErr, execCtx.Err()
 }
 
@@ -164,9 +178,10 @@ func RunGitOutputAfterAcquireWithExecutionContext(
 		return nil, wrapAdmissionError(err), nil
 	}
 	defer release()
-	execCtx, cancel := withExecTimeout(execBaseCtx, execTimeout)
+	execCtx, cancel := withGitExecTimeout(execBaseCtx, execTimeout)
 	defer cancel()
-	out, runErr := build(execCtx).Output()
+	cmd := build(execCtx)
+	out, runErr := runManagedGitOutput(execCtx, cmd)
 	return out, runErr, execCtx.Err()
 }
 
@@ -182,9 +197,10 @@ func RunGitAfterAcquire(
 		return wrapAdmissionError(err), nil
 	}
 	defer release()
-	execCtx, cancel := withExecTimeout(ctx, execTimeout)
+	execCtx, cancel := withGitExecTimeout(ctx, execTimeout)
 	defer cancel()
-	runErr := build(execCtx).Run()
+	cmd := build(execCtx)
+	runErr := runManagedGit(execCtx, cmd)
 	return runErr, execCtx.Err()
 }
 
@@ -277,5 +293,13 @@ func withExecTimeout(ctx context.Context, execTimeout time.Duration) (context.Co
 	if execTimeout <= 0 {
 		execTimeout = defaultGHExecTimeout
 	}
+	return context.WithTimeout(ctx, execTimeout)
+}
+
+// withGitExecTimeout preserves a caller's explicit Git budget. A non-positive
+// budget intentionally creates an already-expired context so required probes
+// fail closed; network callers must choose a positive budget before invoking
+// an AfterAcquire helper.
+func withGitExecTimeout(ctx context.Context, execTimeout time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, execTimeout)
 }

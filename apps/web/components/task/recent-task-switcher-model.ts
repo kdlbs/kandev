@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import type { RecentTaskEntry } from "@/lib/recent-tasks";
 import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { Repository, TaskSession, TaskSessionState, TaskState } from "@/lib/types/http";
@@ -28,7 +29,14 @@ export type RecentTaskBuildContext = {
 };
 
 export type RecentTaskBadge = {
-  label: string;
+  /**
+   * Catalog key, resolved by `TaskBadges` in `recent-task-switcher.tsx`.
+   *
+   * Held as a key rather than a resolved string because these tables are
+   * module-scope: a `t()` here would run once at import and pin the badge copy
+   * to the boot locale.
+   */
+  labelKey: string;
   variant: "default" | "secondary" | "outline" | "destructive";
 };
 
@@ -64,8 +72,6 @@ type DisplayResolution = {
   sessionState: TaskSessionState | undefined;
   workflowId: string | undefined;
 };
-
-const UNTITLED_TASK = "Untitled task";
 
 function getWorkflowName(workflowId: string | undefined, ctx: RecentTaskBuildContext) {
   if (!workflowId) return undefined;
@@ -139,20 +145,20 @@ function getResolvedSessionState(
 }
 
 const TASK_STATUS_BADGES: Partial<Record<TaskState, RecentTaskBadge>> = {
-  REVIEW: { label: "Review", variant: "secondary" },
-  COMPLETED: { label: "Done", variant: "secondary" },
-  IN_PROGRESS: { label: "In Progress", variant: "default" },
-  SCHEDULING: { label: "In Progress", variant: "default" },
-  BLOCKED: { label: "Blocked", variant: "destructive" },
-  TODO: { label: "Todo", variant: "outline" },
-  CREATED: { label: "New", variant: "outline" },
+  REVIEW: { labelKey: "task:review", variant: "secondary" },
+  COMPLETED: { labelKey: "task:statusDone", variant: "secondary" },
+  IN_PROGRESS: { labelKey: "task:statusInProgress", variant: "default" },
+  SCHEDULING: { labelKey: "task:statusInProgress", variant: "default" },
+  BLOCKED: { labelKey: "task:statusBlocked", variant: "destructive" },
+  TODO: { labelKey: "task:statusTodo", variant: "outline" },
+  CREATED: { labelKey: "task:new", variant: "outline" },
 };
 
 const SESSION_STATUS_BADGES: Partial<Record<TaskSessionState, RecentTaskBadge>> = {
-  RUNNING: { label: "Running", variant: "default" },
-  STARTING: { label: "Starting", variant: "default" },
-  WAITING_FOR_INPUT: { label: "Turn Finished", variant: "secondary" },
-  COMPLETED: { label: "Done", variant: "secondary" },
+  RUNNING: { labelKey: "task:sessionStatusRunning", variant: "default" },
+  STARTING: { labelKey: "task:sessionStatusStarting", variant: "default" },
+  WAITING_FOR_INPUT: { labelKey: "task:sessionStatusTurnFinished", variant: "secondary" },
+  COMPLETED: { labelKey: "task:statusDone", variant: "secondary" },
 };
 
 export function getTaskStatusBadge(
@@ -160,16 +166,16 @@ export function getTaskStatusBadge(
   sessionState?: TaskSessionState | null,
 ): RecentTaskBadge {
   if (sessionState === "FAILED" || taskState === "FAILED") {
-    return { label: "Failed", variant: "destructive" };
+    return { labelKey: "task:sessionStatusFailed", variant: "destructive" };
   }
   if (sessionState === "CANCELLED" || taskState === "CANCELLED") {
-    return { label: "Cancelled", variant: "outline" };
+    return { labelKey: "task:sessionStatusCancelled", variant: "outline" };
   }
   const sessionBadge = sessionState ? SESSION_STATUS_BADGES[sessionState] : undefined;
   if (sessionBadge) return sessionBadge;
   const taskBadge = taskState ? TASK_STATUS_BADGES[taskState] : undefined;
   if (taskBadge) return taskBadge;
-  return { label: "Backlog", variant: "outline" };
+  return { labelKey: "task:statusBacklog", variant: "outline" };
 }
 
 function resolveDisplay(entry: RecentTaskEntry, ctx: RecentTaskBuildContext): DisplayResolution {
@@ -255,7 +261,7 @@ function fallbackRecentEntry(
   previous: RecentTaskEntry | undefined,
   visitedAt: string | undefined,
 ): RecentTaskEntry {
-  return previous ?? { taskId, title: UNTITLED_TASK, visitedAt: visitedAt ?? nowIso() };
+  return previous ?? { taskId, title: t("common:untitledTask"), visitedAt: visitedAt ?? nowIso() };
 }
 
 function nowIso(): string {
@@ -303,7 +309,7 @@ function buildEntryCore(
 ) {
   return {
     taskId,
-    title: displayItem?.title ?? previous?.title ?? UNTITLED_TASK,
+    title: displayItem?.title ?? previous?.title ?? t("common:untitledTask"),
     visitedAt: visitedAt ?? previous?.visitedAt ?? nowIso(),
   };
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -21,13 +20,13 @@ type TunnelController interface {
 
 // PortHandlers provides WebSocket handlers for port listing and tunnel operations.
 type PortHandlers struct {
-	lifecycleMgr *lifecycle.Manager
+	lifecycleMgr ExecutionLookup
 	tunnelCtrl   TunnelController
 	logger       *logger.Logger
 }
 
 // NewPortHandlers creates a new PortHandlers instance.
-func NewPortHandlers(lifecycleMgr *lifecycle.Manager, tunnelCtrl TunnelController, log *logger.Logger) *PortHandlers {
+func NewPortHandlers(lifecycleMgr ExecutionLookup, tunnelCtrl TunnelController, log *logger.Logger) *PortHandlers {
 	return &PortHandlers{
 		lifecycleMgr: lifecycleMgr,
 		tunnelCtrl:   tunnelCtrl,
@@ -66,7 +65,8 @@ func (h *PortHandlers) wsPortList(ctx context.Context, msg *ws.Message) (*ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found or no active execution: "+err.Error(), nil)
 	}
 
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agentctl client not available", nil)
 	}

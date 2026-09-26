@@ -14,6 +14,7 @@ import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-sta
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
+import { t } from "@/lib/i18n";
 
 // Panel components (rendered via portals, not directly by dockview)
 import { TaskChatPanel } from "./task-chat-panel";
@@ -34,14 +35,19 @@ import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
-import type { OpenDiffOptions } from "./changes-diff-target";
+import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
+import { PluginTaskPanel } from "./plugin-task-panel";
+import { PluginPanelTab } from "./plugin-panel-tab";
+import { PromptHistoryContent } from "./prompt-history-panel-host";
+import { TodosContent } from "./todos-panel-content";
 
-import { setPanelTitle, panelPortalManager } from "@/lib/layout/panel-portal-manager";
+import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
+import { useTranslation } from "react-i18next";
 
 // ---------------------------------------------------------------------------
 // PORTAL SLOT — generic dockview component that adopts a persistent portal
@@ -114,14 +120,23 @@ export const dockviewComponents: Record<string, React.FunctionComponent<IDockvie
   browser: PortalSlot,
   vscode: PortalSlot,
   plan: PortalSlot,
+  todos: PortalSlot,
+  "prompt-history": PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
+  "review-detail": PortalSlot,
+  // Generic component every plugin-contributed task panel shares (Approach
+  // A1) — panel identity lives in params.pluginId/params.panelKey, resolved
+  // by PluginTaskPanel. See lib/state/layout-manager/plugin-panels.ts.
+  "plugin-panel": PortalSlot,
   // Backwards compat aliases for saved layouts
   "diff-files": PortalSlot,
   "all-files": PortalSlot,
 };
 
 // --- TAB COMPONENTS ---
+/** Tab header for permanent panels: the default dockview tab with the close
+ *  button hidden. */
 function PermanentTab(props: IDockviewPanelHeaderProps) {
   return <DockviewDefaultTab {...props} hideClose />;
 }
@@ -139,6 +154,7 @@ export const dockviewTabComponents: Record<
   previewDiffTab: PreviewDiffTab,
   previewCommitTab: PreviewCommitTab,
   pinnedDefaultTab: PinnedDefaultTab,
+  pluginPanelTab: PluginPanelTab,
 };
 
 export { ContextMenuTab };
@@ -150,6 +166,8 @@ export { ContextMenuTab };
 // Each content component renders the real panel UI.  They live permanently
 // in the PanelPortalHost and survive dockview layout switches.
 
+/** Push the session's agent label (or "Agent" fallback) as the panel title;
+ *  the label is only applied when `isSessionTab` is set. */
 function useChatSessionTitle(panelId: string, sessionId: string | null, isSessionTab: boolean) {
   const agentLabel = useAppStore((state) => {
     if (!sessionId) return null;
@@ -174,6 +192,8 @@ function useChatSessionTitle(panelId: string, sessionId: string | null, isSessio
   }, [panelId, isSessionTab, agentLabel]);
 }
 
+/** Render the chat panel for the session from `params` or the active session
+ *  (or a passthrough toolbar), keeping the tab title in sync. */
 function ChatContent({ panelId, params }: { panelId: string; params: Record<string, unknown> }) {
   const paramSessionId = params?.sessionId as string | undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -204,17 +224,18 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
     <TaskChatPanel
       sessionId={sessionId}
       taskId={sessionId ? taskId : null}
+      statusTaskId={taskId}
       onOpenFile={openFile}
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
       isVisible={isVisible}
+      panelId={panelId}
     />
   );
 }
 
 /**
- * Force a fresh git-status push whenever the diff panel becomes the active
- * dockview tab.
+ * Force a fresh git-status push whenever the diff panel becomes visible.
  *
  * Background: the diff panel's content is derived from `gitStatus` (the
  * per-file `.diff` string), which only refreshes when a `session.git.event`
@@ -229,28 +250,25 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  * signal, so we ask the backend for a fresh git-status snapshot via the
  * explicit `session.git.refresh` request. Focus itself remains an ACK-only
  * control signal, avoiding replay on ordinary task switching. No-op when the
- * session isn't focused.
+ * session isn't focused. Visibility is used instead of active state because
+ * a right-column group can remain visible while another dockview group owns
+ * global focus.
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
+  const isVisible = usePanelActive(panelId);
+
   useEffect(() => {
-    if (!sessionId) return;
-    const entry = panelPortalManager.get(panelId);
-    if (!entry?.api) return;
-    const refreshNow = () => {
-      const client = getWebSocketClient();
-      client?.refreshSessionData(sessionId);
-    };
-    // If the panel is already active when this effect first runs,
-    // onDidActiveChange won't fire (no transition) — refresh immediately so the
-    // initial open benefits from the same WS-event-miss recovery.
-    if (entry.api.isActive) refreshNow();
-    const disposable = entry.api.onDidActiveChange((event) => {
-      if (event.isActive) refreshNow();
-    });
-    return () => disposable.dispose();
-  }, [panelId, sessionId]);
+    if (!sessionId || !isVisible) return;
+    // Visibility is synchronized by usePanelActive, including the initial
+    // portal-registration race. Ask for a fresh snapshot whenever the panel
+    // becomes visible or its session changes.
+    getWebSocketClient()?.refreshSessionData(sessionId);
+  }, [sessionId, isVisible]);
 }
 
+/** Render the changes/diff viewer for the panel's params (`kind` "all" or
+ *  "file"), resyncing git status when the panel becomes the active tab and
+ *  closing the panel when it becomes empty. */
 function DiffViewerContent({
   panelId,
   params,
@@ -267,6 +285,8 @@ function DiffViewerContent({
   const selectedRepositoryName =
     panelKind === "file" ? (params?.repositoryName as string | undefined) : undefined;
   const selectedPRKey = panelKind === "file" ? (params?.prKey as string | undefined) : undefined;
+  const selectedChangeLayer =
+    panelKind === "file" ? (params?.changeLayer as OpenDiffOptions["changeLayer"]) : undefined;
   const sourceFilter = ((params?.source as string) || "all") as "all" | ReviewSource;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
   useResyncGitStatusOnTabActivate(panelId, activeSessionId);
@@ -282,6 +302,7 @@ function DiffViewerContent({
       filePath={selectedPath}
       fileRepositoryName={selectedRepositoryName}
       prKey={selectedPRKey}
+      changeLayer={selectedChangeLayer}
       sourceFilter={sourceFilter}
       selectedDiff={panelSelectedDiff}
       onClearSelected={() => setSelectedDiff(null)}
@@ -291,7 +312,11 @@ function DiffViewerContent({
   );
 }
 
+/** Render the changes list panel with a tab title showing the pending change
+ *  count (git status files + commits), wiring up diff/file/commit/review
+ *  handlers. */
 function ChangesContent({ panelId }: { panelId: string }) {
+  const { t } = useTranslation();
   const addDiffViewerPanel = useDockviewStore((s) => s.addDiffViewerPanel);
   const addFileDiffPanel = useDockviewStore((s) => s.addFileDiffPanel);
   const addCommitDetailPanel = useDockviewStore((s) => s.addCommitDetailPanel);
@@ -300,15 +325,17 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // Dynamic title with file count — use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { commits } = useSessionCommits(activeSessionId);
   const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
   const totalCount = fileCount + commits.length;
 
   useEffect(() => {
-    const title = totalCount > 0 ? `Changes (${totalCount})` : "Changes";
+    const title =
+      totalCount > 0 ? `${t("task:panelChanges")} (${totalCount})` : t("task:panelChanges");
     setPanelTitle(panelId, title);
-  }, [totalCount, panelId]);
+  }, [totalCount, panelId, t]);
 
   const handleEditFile = useCallback(
     (path: string, repo?: string) => openFile(path, repo),
@@ -320,11 +347,12 @@ function ChangesContent({ panelId }: { panelId: string }) {
         source: options?.source,
         repositoryName: options?.repositoryName,
         prKey: options?.prKey,
+        changeLayer: options?.changeLayer,
       }),
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(
-    (sha: string, repo?: string) => addCommitDetailPanel(sha, { repo }),
+    (target: CommitDetailTarget) => addCommitDetailPanel(target),
     [addCommitDetailPanel],
   );
   const handleOpenDiffAll = useCallback(() => addDiffViewerPanel(), [addDiffViewerPanel]);
@@ -343,6 +371,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   );
 }
 
+/** Render the workspace files panel, opening the selected file in the editor. */
 function FilesContent() {
   const { openFile } = useFileEditors();
   const handleOpenFile = useCallback(
@@ -352,6 +381,7 @@ function FilesContent() {
   return <FilesPanel onOpenFile={handleOpenFile} />;
 }
 
+/** Render the plan panel for the active task. */
 function PlanContent() {
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   return <TaskPlanPanel taskId={taskId} visible />;
@@ -367,52 +397,65 @@ const COMPONENT_ALIASES: Record<string, string> = {
   "all-files": "files",
 };
 
+/** Resolve a legacy component alias to its current name, passing through
+ *  unknown names unchanged. */
 function resolveComponent(component: string): string {
   return COMPONENT_ALIASES[component] ?? component;
 }
 
+/**
+ * One renderer per component name — a lookup table rather than a growing
+ * switch, so adding a panel type (like "plugin-panel") never trips the
+ * function-complexity lint ceiling (R3, docs/plans/plugins).
+ */
+type PanelRenderer = (panelId: string, params: Record<string, unknown>) => React.ReactNode;
+
+const PANEL_RENDERERS: Record<string, PanelRenderer> = {
+  sidebar: () => null,
+  chat: (panelId, params) => <ChatContent panelId={panelId} params={params} />,
+  "diff-viewer": (panelId, params) => <DiffViewerContent panelId={panelId} params={params} />,
+  "file-editor": (panelId, params) => <FileEditorPanel panelId={panelId} params={params} />,
+  "commit-detail": (panelId, params) => <CommitDetailPanel panelId={panelId} params={params} />,
+  changes: (panelId) => <ChangesContent panelId={panelId} />,
+  files: () => <FilesContent />,
+  terminal: (panelId, params) => <TerminalPanel panelId={panelId} params={params} />,
+  browser: (panelId, params) => <BrowserPanel panelId={panelId} params={params} />,
+  vscode: (panelId) => <VscodePanel panelId={panelId} />,
+  plan: () => <PlanContent />,
+  todos: () => <TodosContent />,
+  "prompt-history": () => <PromptHistoryContent />,
+  "pr-detail": (panelId, params) => (
+    <ReviewDetailPanelComponent panelId={panelId} params={params} />
+  ),
+  "review-detail": (panelId, params) => (
+    <ReviewDetailPanelComponent panelId={panelId} params={params} />
+  ),
+  "mr-detail": (panelId, params) => (
+    <MRDetailPanelComponent
+      panelId={panelId}
+      params={{ mrKey: typeof params.mrKey === "string" ? params.mrKey : undefined }}
+    />
+  ),
+  "plugin-panel": (panelId, params) => (
+    <PluginTaskPanel
+      pluginId={typeof params.pluginId === "string" ? params.pluginId : ""}
+      panelKey={typeof params.panelKey === "string" ? params.panelKey : ""}
+      panelId={panelId}
+      presentation="desktop"
+    />
+  ),
+};
+
+/** Render a dockview panel's portal content by looking up its (alias-resolved)
+ *  component renderer; falls back to an "unknown panel" placeholder. */
 export function renderPanel(
   panelId: string,
   component: string,
   params: Record<string, unknown>,
 ): React.ReactNode {
-  const resolved = resolveComponent(component);
-
-  switch (resolved) {
-    case "sidebar":
-      return null;
-    case "chat":
-      return <ChatContent panelId={panelId} params={params} />;
-    case "diff-viewer":
-      return <DiffViewerContent panelId={panelId} params={params} />;
-    case "file-editor":
-      return <FileEditorPanel panelId={panelId} params={params} />;
-    case "commit-detail":
-      return <CommitDetailPanel panelId={panelId} params={params} />;
-    case "changes":
-      return <ChangesContent panelId={panelId} />;
-    case "files":
-      return <FilesContent />;
-    case "terminal":
-      return <TerminalPanel panelId={panelId} params={params} />;
-    case "browser":
-      return <BrowserPanel panelId={panelId} params={params} />;
-    case "vscode":
-      return <VscodePanel panelId={panelId} />;
-    case "plan":
-      return <PlanContent />;
-    case "pr-detail":
-      return <ReviewDetailPanelComponent panelId={panelId} params={params} />;
-    case "mr-detail":
-      return (
-        <MRDetailPanelComponent
-          panelId={panelId}
-          params={{ mrKey: typeof params.mrKey === "string" ? params.mrKey : undefined }}
-        />
-      );
-    default:
-      return <div className="p-4 text-muted-foreground">Unknown panel: {component}</div>;
-  }
+  const renderer = PANEL_RENDERERS[resolveComponent(component)];
+  if (renderer) return renderer(panelId, params);
+  return <div className="p-4 text-muted-foreground">{t("common:unknownPanel", { component })}</div>;
 }
 
 export const VALID_COMPONENTS = new Set(Object.keys(dockviewComponents));

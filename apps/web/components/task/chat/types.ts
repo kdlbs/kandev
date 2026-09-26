@@ -1,5 +1,9 @@
 "use client";
 
+import type { ClarificationRequestMetadata, Message, TaskPendingAction } from "@/lib/types/http";
+import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
+import { extractKandevStem } from "./messages/kandev/parse";
+
 export type SubagentTaskPayload = {
   description?: string;
   prompt?: string;
@@ -103,6 +107,42 @@ export type ShellExecOutputSummary = {
   truncated?: boolean;
 };
 
+export function hasProjectedShellOutput(output: ShellExecOutputSummary | undefined): boolean {
+  return (
+    Boolean(output?.has_output) ||
+    (output?.stdout_bytes ?? 0) > 0 ||
+    (output?.stderr_bytes ?? 0) > 0
+  );
+}
+
+/** Shared composer eligibility predicates belong to the chat domain, not a rendering surface. */
+export function shouldShowProceed(
+  nextStepName: string | null,
+  isAgentBusy: boolean,
+  hasPendingClarification: boolean,
+): boolean {
+  return !!nextStepName && !isAgentBusy && !hasPendingClarification;
+}
+
+/** Uses the durable session projection until message hydration can supply its fallback. */
+export function hasPendingClarification(
+  hasPendingClarificationMessage: boolean,
+  pendingAction: TaskPendingAction | null | undefined,
+): boolean {
+  return hasPendingClarificationMessage || pendingAction === "clarification";
+}
+
+export function shouldShowCancelAgent(
+  isWorking: boolean,
+  pendingClarification: Message | null | undefined,
+  sessionId: string | null,
+): boolean {
+  if (!sessionId) return false;
+  if (!pendingClarification) return isWorking;
+  return !(pendingClarification.metadata as ClarificationRequestMetadata | undefined)
+    ?.agent_disconnected;
+}
+
 export type ShellExecPayload = {
   command?: string;
   work_dir?: string;
@@ -150,6 +190,108 @@ export type ToolCallMetadata = {
   normalized?: NormalizedPayload;
 };
 
+// Tool names are duplicated across transport fields. Keep one scanner so
+// renderer dispatch and transcript grouping cannot disagree.
+function hasForeignKandevProvider(input: unknown): boolean {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return false;
+  const rawInput = (input as Record<string, unknown>).raw_input;
+  if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) return false;
+  const rawInputRecord = rawInput as Record<string, unknown>;
+  if (!Object.hasOwn(rawInputRecord, "providerIdentifier")) return false;
+  const provider = rawInputRecord.providerIdentifier;
+  return typeof provider !== "string" || provider.trim() !== "kandev";
+}
+
+function legacyKandevToolCandidates(
+  metadata: ToolCallMetadata | undefined,
+  message: Message,
+): Array<string | undefined> {
+  if (hasForeignKandevProvider(metadata?.normalized?.generic?.input)) return [];
+  return [metadata?.tool_name, metadata?.title, message.content || undefined];
+}
+
+export function kandevToolStemOf(message: Message): string | null {
+  const metadata = message.metadata as ToolCallMetadata | undefined;
+  const normalizedName = metadata?.normalized?.generic?.name;
+  const normalizedStem = extractKandevStem(normalizedName);
+  if (normalizedStem) return normalizedStem;
+  if (normalizedName && /\/|__|\./.test(normalizedName)) return null;
+  const candidates = legacyKandevToolCandidates(metadata, message);
+  for (const candidate of candidates) {
+    const stem = extractKandevStem(candidate);
+    if (stem) return stem;
+  }
+  return null;
+}
+
+export function isRichOutputMessage(message: Message): boolean {
+  return message.type === "tool_call" && kandevToolStemOf(message) === "show_rich_output";
+}
+
+/** A subagent is another agent's turn, so it remains standalone in the transcript. */
+export function isSubagentMessage(message: Message): boolean {
+  const metadata = message.metadata as ToolCallMetadata | undefined;
+  return metadata?.normalized?.kind === "subagent_task";
+}
+
+export type TaskLaunchErrorIdentity = Pick<TaskStatusSummaryActiveError, "session_id" | "stamp">;
+
+export function shouldRenderStoppedSessionBanner(input: {
+  isFailed: boolean;
+  isCompleted: boolean;
+  executorUnavailable: boolean;
+  launchErrorOwned?: boolean;
+}): boolean {
+  return (
+    !input.launchErrorOwned && (input.isFailed || input.isCompleted || input.executorUnavailable)
+  );
+}
+
+export function shouldHideChatInputForLaunchError(input: {
+  isFailed: boolean;
+  launchErrorOwned?: boolean;
+}): boolean {
+  return input.launchErrorOwned === true && input.isFailed;
+}
+
+/** Matches one rendered error surface to the task-owned launch error. */
+export function isMatchingTaskLaunchError(
+  activeError: TaskLaunchErrorIdentity | null | undefined,
+  candidate: { sessionId?: string | null; errorStamp?: string | null },
+): boolean {
+  if (!activeError?.stamp || !candidate.errorStamp) return false;
+  return (
+    (activeError.session_id ?? null) === (candidate.sessionId ?? null) &&
+    activeError.stamp === candidate.errorStamp
+  );
+}
+
+/** A task-wide launch error stays visible while any prior session is selected. */
+export function isTaskLaunchErrorVisibleForSession(
+  activeError: TaskLaunchErrorIdentity | null | undefined,
+  sessionId: string | null | undefined,
+): boolean {
+  if (!activeError?.stamp) return false;
+  if (sessionId === undefined || activeError.session_id == null) return true;
+  return activeError.session_id === sessionId;
+}
+
+/** Whether the active launch error owns the selected session's surfaces. */
+export function isTaskLaunchErrorOwnedBySession(
+  activeError: TaskLaunchErrorIdentity | null | undefined,
+  sessionId: string | null | undefined,
+): boolean {
+  if (!activeError?.stamp) return false;
+  if (activeError.session_id == null) return sessionId == null;
+  return sessionId != null && activeError.session_id === sessionId;
+}
+
+/** Messages that are only useful while a launch failure has no typed owner. */
+export function isLaunchErrorSurfaceMessage(message: Message): boolean {
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  return metadata?.empty_turn === true || metadata?.failure_kind === "missing_pr_branch";
+}
+
 export type StatusMetadata = {
   progress?: number;
   status?: string;
@@ -157,12 +299,14 @@ export type StatusMetadata = {
   message?: string;
   variant?: "default" | "warning" | "error";
   cancelled?: boolean;
-  // Transient provider-error (529 Overloaded) retry state. Present on the
-  // yellow "retrying" status message the orchestrator emits during backoff.
+  // Transient provider-error retry state. Present on the yellow "retrying"
+  // status message the orchestrator emits during backoff.
   retrying?: boolean;
   attempt?: number;
   max_attempts?: number;
   retry_in_seconds?: number;
+  retry_at?: string;
+  failure_code?: string;
   // Running-only action notices are hidden once the session settles. They use
   // compact neutral presentation instead of the normal recovery/error card.
   action_visibility?: "running";
@@ -188,6 +332,8 @@ export type RecoveryMetadata = StatusMetadata & {
   model_id?: string;
   reset_at?: string;
   error_output?: string;
+  failure_code?: string;
+  failure_details?: string;
 };
 
 export type MessageAction = {

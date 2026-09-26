@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import {
   IconArrowBackUp,
   IconPlus,
@@ -7,6 +9,7 @@ import {
   IconCheck,
   IconLoader2,
   IconPencil,
+  IconCopy,
 } from "@tabler/icons-react";
 
 import { Button } from "@kandev/ui/button";
@@ -16,8 +19,12 @@ import { LineStat } from "@/components/diff-stat";
 import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import { FileIcon } from "@/components/ui/file-icon";
 import { getFileCategory } from "@/lib/utils/file-types";
+import { useCopyRepositoryPath } from "@/hooks/use-copy-repository-path";
 import type { ChangedFile } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
+import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { TouchFileRowContent } from "./changes-panel-touch-file-row";
 
 const splitPath = (path: string) => {
   const lastSlash = path.lastIndexOf("/");
@@ -28,7 +35,7 @@ const splitPath = (path: string) => {
   };
 };
 
-type FileRowProps = {
+export type FileRowProps = {
   file: ChangedFile;
   isPending: boolean;
   isSelected?: boolean;
@@ -41,7 +48,7 @@ type FileRowProps = {
   // in two repos) cannot be disambiguated by path alone.
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
-  onDiscard: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   onEditFile: (path: string, repo?: string) => void;
   /**
    * Tree mode: skip the folder prefix, swap the left-side stage button for a
@@ -54,22 +61,18 @@ type FileRowProps = {
   indentPx?: number;
 };
 
-export function FileRow({
-  file,
-  isPending,
-  isSelected,
-  isActive,
-  onSelect,
-  onOpenDiff,
-  onStage,
-  onUnstage,
-  onDiscard,
-  onEditFile,
-  treeMode,
-  indentPx,
-}: FileRowProps) {
+export type FileRowContentProps = FileRowProps & {
+  folder: string;
+  name: string;
+  onCopyPath: () => void;
+};
+
+export function FileRow(props: FileRowProps) {
+  const { file, isSelected, isActive, onSelect, onEditFile, onOpenDiff } = props;
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const copyRepositoryPath = useCopyRepositoryPath();
+  const touchMode = isMobile || !isFinePointer;
   const { folder, file: name } = splitPath(file.path);
-  const showFolder = !treeMode && folder;
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button === 2) return;
@@ -82,8 +85,13 @@ export function FileRow({
       onOpenDiff(file.path, {
         source: "uncommitted",
         repositoryName: file.repositoryName,
+        ...(file.changeLayer ? { changeLayer: file.changeLayer } : {}),
       });
     }
+  };
+
+  const handleCopyPath = () => {
+    void copyRepositoryPath(file.path);
   };
 
   return (
@@ -93,14 +101,39 @@ export function FileRow({
       data-selected={isSelected ? "true" : "false"}
       data-active={isActive ? "true" : "false"}
       className={cn(
-        "group flex items-center justify-between gap-2 rounded-md border border-transparent px-2 py-1.5 -mx-1 text-sm cursor-pointer",
-        "md:px-1 md:py-0.5",
+        "group flex items-center justify-between rounded-md border border-transparent -mx-1 text-sm cursor-pointer",
+        touchMode ? "gap-1 px-1 py-0.5" : "gap-2 px-2 py-1.5 md:px-1 md:py-0.5",
         isSelected || isActive
           ? "border-primary/50 bg-card text-foreground hover:bg-muted/70"
           : "hover:bg-muted/60",
       )}
       onClick={handleClick}
     >
+      {touchMode ? (
+        <TouchFileRowContent {...props} folder={folder} name={name} onCopyPath={handleCopyPath} />
+      ) : (
+        <DesktopFileRowContent {...props} folder={folder} name={name} onCopyPath={handleCopyPath} />
+      )}
+    </li>
+  );
+}
+
+function DesktopFileRowContent({
+  file,
+  isPending,
+  onStage,
+  onUnstage,
+  onDiscard,
+  onEditFile,
+  treeMode,
+  indentPx,
+  folder,
+  name,
+  onCopyPath,
+}: FileRowContentProps) {
+  const showFolder = !treeMode && folder;
+  return (
+    <>
       <div
         className="flex items-center gap-2 min-w-0"
         style={indentPx ? { paddingLeft: indentPx } : undefined}
@@ -125,6 +158,7 @@ export function FileRow({
             onUnstage={onUnstage}
           />
         )}
+        <SymlinkIndicator isSymlink={file.isSymlink} />
         <button type="button" className="min-w-0 text-left cursor-pointer" title={file.path}>
           <p className="flex text-foreground text-xs min-w-0">
             {showFolder && (
@@ -137,18 +171,25 @@ export function FileRow({
         </button>
       </div>
       <div className="grid items-center shrink-0 [&>*]:col-start-1 [&>*]:row-start-1">
-        <div className="flex items-center gap-2 justify-end transition-opacity group-hover:opacity-0 pointer-events-none">
-          <LineStat added={file.plus} removed={file.minus} />
-          <FileStatusIcon status={file.status} oldPath={file.oldPath} />
-        </div>
+        <FileRowStats file={file} />
         <FileRowActions
           path={file.path}
           repo={file.repositoryName}
+          onCopyPath={onCopyPath}
           onDiscard={onDiscard}
           onEditFile={onEditFile}
         />
       </div>
-    </li>
+    </>
+  );
+}
+
+function FileRowStats({ file }: { file: ChangedFile }) {
+  return (
+    <div className="flex items-center gap-2 justify-end transition-opacity pointer-events-none group-hover:opacity-0 group-focus-within:opacity-0">
+      <LineStat added={file.plus} removed={file.minus} />
+      <FileStatusIcon status={file.status} oldPath={file.oldPath} />
+    </div>
   );
 }
 
@@ -176,9 +217,17 @@ function TreeModeFileActionSlot({
     >
       <FileIcon
         fileName={name}
-        className="size-4 transition-opacity group-hover:opacity-0 pointer-events-none"
+        className={cn(
+          "size-4 transition-opacity pointer-events-none",
+          isPending ? "opacity-0" : "group-hover:opacity-0",
+        )}
       />
-      <div className="opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto">
+      <div
+        className={cn(
+          !isPending &&
+            "opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto",
+        )}
+      >
         <StageButton
           isPending={isPending}
           staged={staged}
@@ -207,6 +256,7 @@ function StageButton({
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
 }) {
+  const { t } = useTranslation();
   if (isPending) {
     return (
       <div className="flex-shrink-0 flex items-center justify-center size-4">
@@ -218,7 +268,7 @@ function StageButton({
     return (
       <button
         type="button"
-        title="Unstage file"
+        title={t("task:unstageFile")}
         className="group/unstage flex-shrink-0 flex items-center justify-center size-4 rounded bg-emerald-500/20 text-emerald-600 hover:bg-rose-500/20 hover:text-rose-600 cursor-pointer"
         onClick={(e) => {
           e.stopPropagation();
@@ -233,7 +283,7 @@ function StageButton({
   return (
     <button
       type="button"
-      title="Stage file"
+      title={t("task:stageFile")}
       className="flex-shrink-0 flex items-center justify-center size-4 rounded border border-dashed border-muted-foreground/50 text-muted-foreground hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
       onClick={(e) => {
         e.stopPropagation();
@@ -248,38 +298,43 @@ function StageButton({
 function FileRowActions({
   path,
   repo,
+  onCopyPath,
   onDiscard,
   onEditFile,
 }: {
   path: string;
   repo?: string;
-  onDiscard: (path: string, repo?: string) => void;
+  onCopyPath: () => void;
+  onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   onEditFile: (path: string, repo?: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="file-row-hover-actions"
-      className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto"
+      className="flex items-center gap-1 justify-end transition-opacity opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
     >
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
+            aria-label={t("task:discardChanges2")}
             className="text-muted-foreground hover:text-foreground cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
-              onDiscard(path, repo);
+              onDiscard(path, repo, e.currentTarget);
             }}
           >
             <IconArrowBackUp className="h-3.5 w-3.5" />
           </button>
         </TooltipTrigger>
-        <TooltipContent>Discard changes</TooltipContent>
+        <TooltipContent>{t("task:discardChanges2")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
+            aria-label={t("common:edit")}
             className="text-muted-foreground hover:text-foreground cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
@@ -289,7 +344,23 @@ function FileRowActions({
             <IconPencil className="h-3.5 w-3.5" />
           </button>
         </TooltipTrigger>
-        <TooltipContent>Edit</TooltipContent>
+        <TooltipContent>{t("common:edit")}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={t("task:copyPath")}
+            className="text-muted-foreground hover:text-foreground cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCopyPath();
+            }}
+          >
+            <IconCopy className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{t("task:copyPath")}</TooltipContent>
       </Tooltip>
     </div>
   );
@@ -353,8 +424,9 @@ export function BulkActionBar({
   selectedPaths: Set<string>;
   onBulkStage?: (paths: string[]) => void;
   onBulkUnstage?: (paths: string[]) => void;
-  onBulkDiscard?: (paths: string[]) => void;
+  onBulkDiscard?: (paths: string[], anchor?: HTMLElement) => void;
 }) {
+  const { t } = useTranslation();
   const paths = [...selectedPaths];
 
   return (
@@ -368,7 +440,7 @@ export function BulkActionBar({
           className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
           onClick={() => onBulkStage(paths)}
         >
-          Stage {selectionCount}
+          {t("task:stageCount", { selectionCount })}
         </Button>
       )}
       {variant === "staged" && onBulkUnstage && (
@@ -379,7 +451,7 @@ export function BulkActionBar({
           className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
           onClick={() => onBulkUnstage(paths)}
         >
-          Unstage {selectionCount}
+          {t("task:unstageCount", { selectionCount })}
         </Button>
       )}
       {onBulkDiscard && (
@@ -388,9 +460,9 @@ export function BulkActionBar({
           size="sm"
           variant="outline"
           className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer text-destructive hover:text-destructive"
-          onClick={() => onBulkDiscard(paths)}
+          onClick={(e) => onBulkDiscard(paths, e.currentTarget)}
         >
-          Discard {selectionCount}
+          {t("task:discardCount", { selectionCount })}
         </Button>
       )}
     </div>

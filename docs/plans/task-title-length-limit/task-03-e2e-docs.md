@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-mcp-contract", "02-frontend-title-limit"]
 plan: "plan.md"
-spec: "../../specs/tasks/title-length-limit.md"
+spec: "../../specs/tasks/requirements/title-length-limit.md"
 ---
 
 # Task 03: E2E coverage and public documentation

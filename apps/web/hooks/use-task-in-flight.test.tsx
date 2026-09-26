@@ -11,6 +11,7 @@ type Task = KanbanState["tasks"][number];
 function task(id: string, foregroundActivity?: ForegroundActivity | null): Task {
   return {
     id,
+    workflowId: "wf-1",
     workflowStepId: "step-1",
     title: id,
     position: 0,
@@ -42,6 +43,9 @@ function snapshotWrapper(tasks: Task[]) {
               "wf-1": { workflowId: "wf-1", workflowName: "wf", steps: [], tasks },
             },
             isLoading: false,
+            orderRevisionByStepId: {},
+            pendingReorderBandKeys: {},
+            withheldReorderByBandKey: {},
           },
         }}
       >

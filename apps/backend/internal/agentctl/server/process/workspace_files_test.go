@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/workspacepath"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"go.uber.org/zap"
 )
@@ -133,6 +135,32 @@ func TestResolveNonExistentPath(t *testing.T) {
 	})
 }
 
+func TestReadFileContent_PermissionErrorIsNotMissing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0o000 does not block filesystem checks on Windows")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test: root bypasses filesystem permission checks")
+	}
+
+	restrictedDir := t.TempDir()
+	if err := os.Chmod(restrictedDir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(restrictedDir, 0o755) })
+
+	_, _, _, err := readFileContent(filepath.Join(restrictedDir, "missing.txt"))
+	if err == nil {
+		t.Fatal("expected permission error, got nil")
+	}
+	if errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("error = %v, want permission error, not ErrFileNotFound", err)
+	}
+	if strings.Contains(err.Error(), "file not found") {
+		t.Fatalf("error = %v, want no missing-file classification", err)
+	}
+}
+
 func TestWorkspaceFileOperationsAllowRegisteredLinkedSource(t *testing.T) {
 	workspace := t.TempDir()
 	source := t.TempDir()
@@ -183,6 +211,43 @@ func TestWorkspaceFileOperationsAllowRegisteredLinkedSource(t *testing.T) {
 	}
 	if err := wt.CreateFile(filepath.Join("linked", "escape.txt")); err == nil {
 		t.Fatal("CreateFile through mutated link unexpectedly succeeded")
+	}
+}
+
+// TestWorkspaceFileOperationsWithNoAllowedSourceRootsFailClosed pins the
+// AC-EXECUTORS-SURVIVAL-002.14 recovery contract: when the adopted instance
+// reports zero workspace source roots (nil/empty), the tracker must reject
+// every durable-source symlink escape rather than treating "no roots
+// configured" as "no restriction". Ordinary in-workspace file operations are
+// unaffected, since they never need the allowlist.
+func TestWorkspaceFileOperationsWithNoAllowedSourceRootsFailClosed(t *testing.T) {
+	workspace := t.TempDir()
+	source := t.TempDir()
+	if err := os.Symlink(source, filepath.Join(workspace, "linked")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt := &WorkspaceTracker{workDir: workspace, logger: log}
+	// Deliberately never call SetAllowedSourceRoots, reproducing the
+	// zero-value state a freshly recovered tracker has before any roots are
+	// (re)applied from the adopted instance.
+
+	if err := wt.CreateFile(filepath.Join("linked", "escape.txt")); err == nil {
+		t.Fatal("CreateFile through an unregistered symlink unexpectedly succeeded with no allowed source roots")
+	}
+	if _, err := os.Stat(filepath.Join(source, "escape.txt")); !os.IsNotExist(err) {
+		t.Fatalf("file leaked into the symlink target despite no allowed source roots: %v", err)
+	}
+
+	if err := wt.CreateFile("plain.txt"); err != nil {
+		t.Fatalf("CreateFile for an ordinary in-workspace path: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "plain.txt")); err != nil {
+		t.Fatalf("in-workspace file was not created: %v", err)
 	}
 }
 
@@ -445,6 +510,45 @@ func TestGetFileTree_HidesOnlyRootOwnershipMarker(t *testing.T) {
 	}
 }
 
+func TestGetFileTree_RejectsAbsolutePathBeforeFilesystemAccess(t *testing.T) {
+	workspace := t.TempDir()
+	external := t.TempDir()
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = (&WorkspaceTracker{workDir: workspace, logger: log}).GetFileTree(external, 1)
+	if !errors.Is(err, workspacepath.ErrTreePathNotRelative) {
+		t.Fatalf("GetFileTree error = %v, want %v", err, workspacepath.ErrTreePathNotRelative)
+	}
+}
+
+func TestGetFileTree_AllowsLiteralColonInRelativePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not permit literal colons in path components")
+	}
+	workspace := t.TempDir()
+	directory := filepath.Join(workspace, "config:dev")
+	if err := os.Mkdir(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "settings.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := (&WorkspaceTracker{workDir: workspace}).GetFileTree("config:dev", 1)
+	if err != nil {
+		t.Fatalf("GetFileTree failed: %v", err)
+	}
+	if tree.Path != "config:dev" {
+		t.Fatalf("GetFileTree root path = %q, want %q", tree.Path, "config:dev")
+	}
+	if findChild(tree, "settings.json") == nil {
+		t.Fatal("file beneath colon-containing directory should be visible")
+	}
+}
+
 func TestGetFileList_HidesOnlyRootOwnershipMarker(t *testing.T) {
 	taskRoot := createOwnershipMarkerFixture(t)
 	initGitRepoAt(t, taskRoot)
@@ -538,6 +642,27 @@ func TestSearchFileCandidatesClampsCallerSuppliedLimit(t *testing.T) {
 	}
 	if cap(results) > fileSearchMaxLimit {
 		t.Fatalf("cap(results) = %d, want no more than the clamped %d", cap(results), fileSearchMaxLimit)
+	}
+}
+
+// The result slice must be sized from the matches we collected, never from the
+// caller-supplied limit, so a workspace with a handful of files cannot be made
+// to reserve a large slice by a single request.
+func TestSearchFileCandidatesSizesResultFromMatchCount(t *testing.T) {
+	candidates := []fileSearchCandidate{
+		{path: "src/query-a.go", matchPath: "src/query-a.go"},
+		{path: "src/query-b.go", matchPath: "src/query-b.go"},
+		{path: "src/unrelated.go", matchPath: "src/unrelated.go"},
+	}
+
+	results := searchFileCandidates(candidates, "query", math.MaxInt32)
+
+	if len(results) != 2 {
+		t.Fatalf("len(results) = %d, want the 2 matching candidates", len(results))
+	}
+	if cap(results) > len(candidates) {
+		t.Fatalf("cap(results) = %d, want no more than the %d candidates searched",
+			cap(results), len(candidates))
 	}
 }
 

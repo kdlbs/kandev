@@ -8,7 +8,7 @@ import AgentMemoryPage from "@/app/office/agents/[id]/memory/page";
 import AgentPermissionsPage from "@/app/office/agents/[id]/permissions/page";
 import AgentSkillsPage from "@/app/office/agents/[id]/skills/page";
 import { AgentsPageClient } from "@/app/office/agents/agents-page-client";
-import { OfficeTopbar } from "@/app/office/components/office-topbar";
+import { OfficeShell } from "@/app/office/components/office-shell";
 import { InboxPageClient } from "@/app/office/inbox/inbox-page-client";
 import { OfficePageClient } from "@/app/office/page-client";
 import { ProjectsPageClient } from "@/app/office/projects/projects-page-client";
@@ -18,6 +18,7 @@ import type { SetupWizardRouteProps } from "@/app/office/setup/setup-route-data"
 import ProviderRoutingPage from "@/app/office/workspace/routing/page";
 import { RoutinesPageClient } from "@/app/office/routines/routines-page-client";
 import SettingsPage from "@/app/office/workspace/settings/page";
+import ExportPage from "@/app/office/workspace/settings/export/page";
 import SyncPage from "@/app/office/workspace/settings/sync/page";
 import OrgPage from "@/app/office/workspace/org/page";
 import IssueDetailPage from "@/app/office/tasks/[id]/page";
@@ -26,20 +27,17 @@ import { ActivityPageClient } from "@/app/office/workspace/activity/activity-pag
 import { CostsPageClient } from "@/app/office/workspace/costs/costs-page-client";
 import { SkillsPageClient } from "@/app/office/workspace/skills/skills-page-client";
 import { fetchUserSettings, listWorkspaces } from "@/lib/api";
-import {
-  getInbox,
-  getMeta,
-  getOnboardingState,
-  listAgentProfiles,
-  listProjects,
-} from "@/lib/api/domains/office-api";
+import { getOnboardingState } from "@/lib/api/domains/office-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import {
   LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE,
   mapWorkspaceItem,
+  promoteLegacyWorkspaceSelection,
   readActiveWorkspaceCookie,
-  readCookie,
+  readScopedCookie,
+  resolveOfficeWorkspaceId,
+  type OfficeWorkspaceItem,
 } from "@/lib/routing/route-bootstrap";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
@@ -50,6 +48,8 @@ import {
 } from "./office-agent-client-routes";
 import { RoutineDetailRoute } from "./office-routine-client-routes";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { Trans, useTranslation } from "react-i18next";
+import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 
 type RouteRenderer = () => React.ReactNode;
 
@@ -64,7 +64,12 @@ const OFFICE_ROUTES: Record<string, RouteRenderer> = {
   "/office/workspace/costs": () => <CostsPageClient initialCostSummary={null} />,
   "/office/workspace/skills": () => <SkillsPageClient initialSkills={[]} />,
   "/office/workspace/routing": () => <ProviderRoutingPage />,
-  "/office/workspace/settings": () => <SettingsPage />,
+  "/office/workspace/settings": () => (
+    <SettingsSaveProvider placement="content">
+      <SettingsPage />
+    </SettingsSaveProvider>
+  ),
+  "/office/workspace/settings/export": () => <ExportPage />,
   "/office/workspace/settings/sync": () => <SyncPage />,
   "/office/workspace/org": () => <OrgPage />,
 };
@@ -105,11 +110,10 @@ export function OfficeRoutes({ pathname }: { pathname: string }) {
 
   return (
     <TooltipProvider>
-      <div className="flex h-full min-h-0 flex-col">
-        <OfficeTopbar />
-        <main className="flex-1 min-h-0 overflow-y-auto">
+      <div className="relative flex h-full min-h-0 flex-col">
+        <OfficeShell routePath={normalizedPathname}>
           {renderOfficeRoute(normalizedPathname)}
-        </main>
+        </OfficeShell>
       </div>
     </TooltipProvider>
   );
@@ -191,7 +195,7 @@ type OfficeBootstrapState = {
   onboardingComplete: boolean | null;
 };
 
-function useOfficeRouteBootstrap(
+export function useOfficeRouteBootstrap(
   officeEnabled: boolean,
   routeWorkspaceId: string | null,
 ): OfficeBootstrapState {
@@ -210,13 +214,11 @@ function useOfficeRouteBootstrap(
     setBootstrap({ complete: false, onboardingComplete: null });
 
     async function loadBootstrapState() {
-      const [onboardingResponse, workspacesResponse, userSettingsResponse, metaResponse] =
-        await Promise.all([
-          getOnboardingState({ cache: "no-store" }).catch(() => ({ completed: true })),
-          listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-          fetchUserSettings({ cache: "no-store" }).catch(() => null),
-          getMeta({ cache: "no-store" }).catch(() => null),
-        ]);
+      const [onboardingResponse, workspacesResponse, userSettingsResponse] = await Promise.all([
+        getOnboardingState({ cache: "no-store" }).catch(() => ({ completed: true })),
+        listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+        fetchUserSettings({ cache: "no-store" }).catch(() => null),
+      ]);
       if (cancelled) return;
 
       const onboardingComplete = onboardingResponse.completed;
@@ -226,49 +228,40 @@ function useOfficeRouteBootstrap(
       }
 
       const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
+      promoteLegacyWorkspaceSelection(workspaceItems);
       const officeWorkspaceItems = workspaceItems.filter(
         (workspace) => workspace.office_workflow_id,
       );
-      const activeWorkspaceId = resolveActiveOfficeWorkspaceId(
+      // Same one-time promotion as the generic boot, for the office family:
+      // a validated legacy office selection is copied into its scoped name so
+      // a ported instance stops falling back to the shared jar on every boot
+      // (legacy name stays untouched — default-port instances' live cookie).
+      promoteLegacyWorkspaceSelection(officeWorkspaceItems, LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE);
+      const activeWorkspaceId = resolveOfficeBootstrapWorkspaceId(
         officeWorkspaceItems,
         routeWorkspaceId,
-        readActiveWorkspaceCookie(),
-        readCookie(LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE),
         userSettingsResponse?.settings?.workspace_id ?? null,
       );
 
+      const workspaceBeforeHydration = store.getState().workspaces.activeId;
       store.getState().hydrate({
-        workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
+        workspaces: { items: workspaceItems, activeId: workspaceBeforeHydration },
         userSettings: {
           ...mapUserSettingsResponse(userSettingsResponse),
           workspaceId: activeWorkspaceId,
         },
       });
-      store.getState().setMeta(metaResponse);
-
-      if (!activeWorkspaceId) {
-        store.getState().setOfficeAgentProfiles([]);
-        store.getState().setProjects([]);
-        store.getState().setInboxItems([]);
-        store.getState().setInboxCount(0);
-        setBootstrap({ complete: true, onboardingComplete });
-        return;
+      // Routing the actual switch through `setActiveWorkspace` (rather than
+      // letting `hydrate` overwrite `activeId` directly) keeps
+      // `activeIdRevision` accurate for consumers that key staleness off it,
+      // such as the Failed-inbox cache.
+      if (activeWorkspaceId !== workspaceBeforeHydration) {
+        store.getState().setActiveWorkspace(activeWorkspaceId);
       }
-
-      const [agentsResponse, projectsResponse, inboxResponse] = await Promise.all([
-        listAgentProfiles(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ agents: [] })),
-        listProjects(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ projects: [] })),
-        getInbox(activeWorkspaceId, { cache: "no-store" }).catch(() => ({
-          items: [],
-          total_count: 0,
-        })),
-      ]);
-      if (cancelled) return;
-
-      store.getState().setOfficeAgentProfiles(agentsResponse.agents);
-      store.getState().setProjects(projectsResponse.projects);
-      store.getState().setInboxItems(inboxResponse.items);
-      store.getState().setInboxCount(inboxResponse.total_count);
+      // Data loading is not this bootstrap's job: agents, projects, inbox and
+      // meta follow the active workspace via `useOfficeWorkspaceData`, mounted
+      // in the always-present `AppSidebar`. Setting the active workspace above
+      // is what triggers that load.
       setBootstrap({ complete: true, onboardingComplete });
     }
 
@@ -283,21 +276,24 @@ function useOfficeRouteBootstrap(
   return bootstrap;
 }
 
-export function resolveActiveOfficeWorkspaceId(
-  workspaceItems: { id: string; office_workflow_id?: string | null }[],
+/**
+ * Resolves the office active workspace for the client bootstrap effect from
+ * the live cookie jar: general family (scoped, then legacy) and office family
+ * (scoped, then legacy), with the route override and settings as the other
+ * candidates. Kept as one exported function so the effect's cookie reads are
+ * unit-testable without rendering the hook.
+ */
+export function resolveOfficeBootstrapWorkspaceId(
+  officeWorkspaceItems: OfficeWorkspaceItem[],
   routeWorkspaceId: string | null,
-  activeCookieWorkspaceId: string | null,
-  officeCookieWorkspaceId: string | null,
   settingsWorkspaceId: string | null,
 ): string | null {
-  return (
-    workspaceItems.find((workspace) => workspace.id === routeWorkspaceId)?.id ??
-    workspaceItems.find((workspace) => workspace.id === activeCookieWorkspaceId)?.id ??
-    workspaceItems.find((workspace) => workspace.id === officeCookieWorkspaceId)?.id ??
-    workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
-    workspaceItems[0]?.id ??
-    null
-  );
+  return resolveOfficeWorkspaceId(officeWorkspaceItems, {
+    routeWorkspaceId,
+    generalWorkspaceId: readActiveWorkspaceCookie(),
+    officeWorkspaceId: readScopedCookie(LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE),
+    settingsWorkspaceId,
+  });
 }
 
 type AgentRouteMatch = {
@@ -369,17 +365,19 @@ function matchAgentRoute(pathname: string): AgentRouteMatch | null {
 }
 
 function OfficeUnavailable() {
+  const { t } = useTranslation();
   return (
     <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
-      Office is not enabled for this runtime.
+      {t("common:officeIsNotEnabledForThis")}
     </div>
   );
 }
 
 function OfficeRouteLoading() {
+  const { t } = useTranslation();
   return (
     <div className="flex h-full items-center justify-center">
-      <span className="text-sm text-muted-foreground">Loading...</span>
+      <span className="text-sm text-muted-foreground">{t("common:loadingEllipsis")}</span>
     </div>
   );
 }
@@ -406,6 +404,7 @@ type OfficeSetupState =
   | { status: "error"; message: string };
 
 function OfficeSetupRoute() {
+  const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
   const mode = searchParams.get("mode") ?? undefined;
@@ -428,7 +427,7 @@ function OfficeSetupRoute() {
         if (cancelled) return;
         setState({
           status: "error",
-          message: error instanceof Error ? error.message : "Failed to load setup",
+          message: error instanceof Error ? error.message : t("common:failedToLoadSetup"),
         });
       }
     }
@@ -457,8 +456,10 @@ function OfficeSetupRoute() {
 function OfficeRouteFallback({ pathname }: { pathname: string }) {
   return (
     <div className="p-6 text-sm text-muted-foreground">
-      This Office route is handled by the SPA shell, but its dedicated client page is still being
-      ported: <span className="font-mono">{pathname}</span>
+      <Trans i18nKey="common:officeRouteNotPortedYet" values={{ pathname }}>
+        This Office route is handled by the SPA shell, but its dedicated client page is still being
+        ported: <span className="font-mono">{pathname}</span>
+      </Trans>
     </div>
   );
 }

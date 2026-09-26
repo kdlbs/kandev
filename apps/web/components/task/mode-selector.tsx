@@ -16,7 +16,9 @@ import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agent
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionMode } from "@/lib/api/domains/session-api";
 import { cn } from "@/lib/utils";
+import { prioritizeSelectedOption } from "@/lib/utils/selector-options";
 import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type ModeOption = {
   id: string;
@@ -83,7 +85,10 @@ function buildModeState(
   }
   if (availableModes.length <= 1) return undefined;
   if (availableModes.some((m) => m.id === currentModeId)) {
-    return { currentModeId, availableModes };
+    return {
+      currentModeId,
+      availableModes: prioritizeSelectedOption(availableModes, currentModeId, (mode) => mode.id),
+    };
   }
   return {
     currentModeId,
@@ -127,6 +132,7 @@ export const ModeSelector = memo(function ModeSelector({
   sessionId,
   triggerClassName,
 }: ModeSelectorProps) {
+  const { t } = useTranslation();
   const modeState = useModeSelectorState(sessionId);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
@@ -168,7 +174,7 @@ export const ModeSelector = memo(function ModeSelector({
   }
 
   const currentMode = modeState.availableModes.find((m) => m.id === modeState.currentModeId);
-  const displayName = currentMode?.name || modeState.currentModeId || "Mode";
+  const displayName = currentMode?.name || modeState.currentModeId || t("common:mode");
 
   return (
     <DropdownMenu open={dropdownOpen} onOpenChange={handleDropdownOpenChange}>
@@ -180,7 +186,7 @@ export const ModeSelector = memo(function ModeSelector({
               size="sm"
               data-testid="session-mode-selector"
               className={cn(
-                "h-7 min-w-0 gap-1 overflow-hidden px-2 cursor-pointer hover:bg-muted/40 whitespace-nowrap",
+                "h-7 min-w-0 gap-1 overflow-hidden px-2 cursor-pointer whitespace-nowrap hover:bg-muted/40 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11",
                 triggerClassName,
               )}
             >
@@ -189,15 +195,19 @@ export const ModeSelector = memo(function ModeSelector({
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent side="top">Agent permission mode</TooltipContent>
+        <TooltipContent side="top">{t("task:agentPermissionMode")}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="start" side="top" className="min-w-[280px]">
-        <DropdownMenuLabel>Available Modes</DropdownMenuLabel>
+        <DropdownMenuLabel>{t("task:availableModes")}</DropdownMenuLabel>
         {modeState.availableModes.map((mode) => (
           <DropdownMenuItem
             key={mode.id}
             onClick={() => handleModeChange(mode.id)}
-            className={`cursor-pointer relative pr-7 ${mode.id === modeState.currentModeId ? "bg-muted" : ""}`}
+            className={cn(
+              "relative min-h-11 cursor-pointer border border-transparent pr-7 sm:min-h-8",
+              mode.id === modeState.currentModeId &&
+                "border-primary/50 bg-card font-medium hover:bg-card",
+            )}
           >
             <div className="min-w-0 flex-1">
               <div>{mode.name}</div>

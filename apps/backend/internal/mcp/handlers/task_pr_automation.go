@@ -3,10 +3,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -19,8 +22,21 @@ type TaskPRAutomationService interface {
 	UpdateTaskCIOptions(ctx context.Context, taskID string, patch github.TaskCIOptionsPatch) (*github.TaskCIOptionsResponse, error)
 }
 
+// TaskPRAutoFixOutcomeService accepts the server-resolved disposition of the
+// current GitHub PR auto-fix turn. The MCP server supplies task and session
+// identity from its bound execution, not from tool arguments.
+type TaskPRAutoFixOutcomeService interface {
+	ReportTaskPRAutoFixOutcome(ctx context.Context, taskID, sessionID, outcome, summary string) error
+}
+
+const taskPRAutoFixOutcomeUnmatchedMessage = "No matching unresolved GitHub PR auto-fix attempt exists for this turn. Finish ordinary work without retrying this report or enabling auto-fix."
+
 func (h *Handlers) SetTaskPRAutomationService(automation TaskPRAutomationService) {
 	h.taskPRAutomation = automation
+}
+
+func (h *Handlers) SetTaskPRAutoFixOutcomeService(outcomes TaskPRAutoFixOutcomeService) {
+	h.taskPRAutoFixOutcome = outcomes
 }
 
 func (h *Handlers) handleGetTaskPRAutomation(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -53,6 +69,8 @@ func (h *Handlers) handleUpdateTaskPRAutomation(ctx context.Context, msg *ws.Mes
 	}
 	var req struct {
 		TaskID                  string  `json:"task_id"`
+		RepositoryID            *string `json:"repository_id"`
+		PRNumber                *int    `json:"pr_number"`
 		AutoFixEnabled          *bool   `json:"auto_fix_enabled"`
 		AutoMergeEnabled        *bool   `json:"auto_merge_enabled"`
 		AutoFixPromptOverride   *string `json:"auto_fix_prompt_override"`
@@ -67,6 +85,8 @@ func (h *Handlers) handleUpdateTaskPRAutomation(ctx context.Context, msg *ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 	patch := github.TaskCIOptionsPatch{
+		RepositoryID:            req.RepositoryID,
+		PRNumber:                req.PRNumber,
 		AutoFixEnabled:          req.AutoFixEnabled,
 		AutoMergeEnabled:        req.AutoMergeEnabled,
 		AutoFixPromptOverride:   req.AutoFixPromptOverride,
@@ -82,6 +102,9 @@ func (h *Handlers) handleUpdateTaskPRAutomation(ctx context.Context, msg *ws.Mes
 	}
 	options, err := h.taskPRAutomation.UpdateTaskCIOptions(ctx, req.TaskID, patch)
 	if err != nil {
+		if errors.Is(err, github.ErrTaskPRNotLinked) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update PR automation options: "+err.Error(), nil)
 	}
 	if h.eventBus != nil {
@@ -91,6 +114,110 @@ func (h *Handlers) handleUpdateTaskPRAutomation(ctx context.Context, msg *ws.Mes
 		}
 	}
 	return ws.NewResponse(msg.ID, msg.Action, options)
+}
+
+func (h *Handlers) handleReportTaskPRAutoFixOutcome(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+		Outcome   string `json:"outcome"`
+		Summary   string `json:"summary"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	req.TaskID = strings.TrimSpace(req.TaskID)
+	req.SessionID = strings.TrimSpace(req.SessionID)
+	req.Outcome = strings.TrimSpace(req.Outcome)
+	req.Summary = strings.TrimSpace(req.Summary)
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "MCP caller identity is unavailable", nil)
+	}
+	if (req.TaskID != "" && req.TaskID != principal.CallerTaskID) ||
+		(req.SessionID != "" && req.SessionID != principal.CallerSessionID) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task_id and session_id must match the current MCP caller", nil)
+	}
+	req.TaskID = principal.CallerTaskID
+	req.SessionID = principal.CallerSessionID
+	if req.Outcome != string(github.TaskCIAutoFixOutcomeActionTaken) &&
+		req.Outcome != string(github.TaskCIAutoFixOutcomeNonActionable) &&
+		req.Outcome != string(github.TaskCIAutoFixOutcomeBlocked) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "outcome must be action_taken, non_actionable, or blocked", nil)
+	}
+	if req.Summary == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "summary is required", nil)
+	}
+	return h.reportTaskPRAutoFixOutcome(ctx, msg, req.TaskID, req.SessionID, req.Outcome, req.Summary)
+}
+
+// handleReportTaskChangeRequestAutoFixOutcome is the neutral transport
+// boundary. The MCP server supplies the current task and session internally;
+// the public tool accepts only the outcome and summary.
+func (h *Handlers) handleReportTaskChangeRequestAutoFixOutcome(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(msg.Payload, &fields); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	for field := range fields {
+		switch field {
+		case "task_id", "session_id", "outcome", "summary":
+		default:
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "unknown field: "+field, nil)
+		}
+	}
+	var req struct {
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+		Outcome   string `json:"outcome"`
+		Summary   string `json:"summary"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "MCP caller identity is unavailable", nil)
+	}
+	if strings.TrimSpace(req.TaskID) != principal.CallerTaskID ||
+		strings.TrimSpace(req.SessionID) != principal.CallerSessionID {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task_id and session_id must match the current MCP caller", nil)
+	}
+	req.TaskID = principal.CallerTaskID
+	req.SessionID = principal.CallerSessionID
+	req.Outcome = strings.TrimSpace(req.Outcome)
+	req.Summary = strings.TrimSpace(req.Summary)
+	if req.Outcome != string(github.TaskCIAutoFixOutcomeActionTaken) &&
+		req.Outcome != string(github.TaskCIAutoFixOutcomeNonActionable) &&
+		req.Outcome != string(github.TaskCIAutoFixOutcomeBlocked) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "outcome must be action_taken, non_actionable, or blocked", nil)
+	}
+	if req.Summary == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "summary is required", nil)
+	}
+	return h.reportTaskPRAutoFixOutcome(ctx, msg, req.TaskID, req.SessionID, req.Outcome, req.Summary)
+}
+
+func (h *Handlers) reportTaskPRAutoFixOutcome(ctx context.Context, msg *ws.Message, taskID, sessionID, outcome, summary string) (*ws.Message, error) {
+	if h.taskPRAutoFixOutcome == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "GitHub PR auto-fix outcome reporting is not available", nil)
+	}
+	if err := h.taskPRAutoFixOutcome.ReportTaskPRAutoFixOutcome(
+		ctx, taskID, sessionID, outcome, summary,
+	); err != nil {
+		switch {
+		case errors.Is(err, github.ErrTaskCIAutoFixAttemptNotFound):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, taskPRAutoFixOutcomeUnmatchedMessage, nil)
+		case errors.Is(err, github.ErrTaskCIAutoFixOutcomeInvalid):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		default:
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to record PR auto-fix outcome: "+err.Error(), nil)
+		}
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]string{
+		"status":  "recorded",
+		"outcome": outcome,
+	})
 }
 
 func hasLifecyclePromptOverride(fields map[string]json.RawMessage) bool {

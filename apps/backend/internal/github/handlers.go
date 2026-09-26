@@ -53,6 +53,7 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionGitHubPRWatchDelete, wsDeletePRWatch(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubPRFilesGet, wsGetPRFiles(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubPRCommitsGet, wsGetPRCommits(svc, log))
+	dispatcher.RegisterFunc(ws.ActionGitHubPRCommitGet, wsGetPRCommitDetail(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubTaskPRSync, wsSyncTaskPR(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubStats, wsGetStats(svc, log))
 
@@ -274,12 +275,25 @@ func wsGetTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *
 // dead repos every 5s for the lifetime of the task, which was the
 // dominant signal in the production SyncWatchesBatched storm.
 func wsSyncTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	return wsWithField("task_id", func(ctx context.Context, taskID string) (interface{}, error) {
-		prs, permanent, err := svc.TriggerPRSyncAllPermanent(ctx, taskID)
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		var payload struct {
+			TaskID          string `json:"task_id"`
+			ExplicitRefresh bool   `json:"explicit_refresh"`
+		}
+		if err := msg.ParsePayload(&payload); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
+		}
+		if payload.TaskID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "task_id required", nil)
+		}
+		prs, permanent, err := svc.TriggerPRSyncAllPermanentWithOptions(ctx, payload.TaskID, payload.ExplicitRefresh)
 		if err != nil {
+			if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "workspace not found", nil)
+			}
 			var partial *PartialPRSyncError
 			if !permanent && (!errors.As(err, &partial) || len(prs) == 0) {
-				return nil, err
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 			}
 		}
 		// Return an envelope so the frontend always gets a deterministic
@@ -289,8 +303,8 @@ func wsSyncTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg 
 		if prs == nil {
 			prs = []*TaskPR{}
 		}
-		return map[string]interface{}{"prs": prs, "permanent": permanent}, nil
-	})
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"prs": prs, "permanent": permanent})
+	}
 }
 
 func wsGetPRFeedback(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -460,7 +474,36 @@ func wsGetPRCommits(svc *Service, _ *logger.Logger) func(ctx context.Context, ms
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"commits": commits})
+		return ws.NewResponse(msg.ID, msg.Action, commits)
+	}
+}
+
+func wsGetPRCommitDetail(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		payload, parseErr := parseMap(msg)
+		if parseErr != nil {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgInvalidPayload, nil)
+			return resp, nil
+		}
+		workspaceID, _ := payload["workspace_id"].(string)
+		owner, _ := payload["owner"].(string)
+		repo, _ := payload["repo"].(string)
+		sha, _ := payload["sha"].(string)
+		if workspaceID == "" || owner == "" || repo == "" || sha == "" {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id, owner, repo, sha required", nil)
+			return resp, nil
+		}
+		if err := validateGitHubCommitSHA(sha); err != nil {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, err.Error(), nil)
+			return resp, nil
+		}
+		detail, err := svc.GetPRCommitDetailForWorkspace(
+			ctx, workspaceID, githubUserID(ctx), owner, repo, sha,
+		)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"commit": detail})
 	}
 }
 

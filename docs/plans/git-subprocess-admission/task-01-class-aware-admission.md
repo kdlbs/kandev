@@ -4,7 +4,7 @@ title: "Class-aware admission controller"
 status: done
 wave: 1
 plan: "plan.md"
-spec: "../../specs/platform/git-subprocess-admission.md"
+spec: "../../specs/platform/requirements/git-subprocess-admission.md"
 depends_on: []
 ---
 

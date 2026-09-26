@@ -1,0 +1,196 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildRunErrorsFromSessions,
+  hasMatchingSessionLaunchError,
+  liveSessionMetadataFromStore,
+  mergeLiveSessionMetadata,
+} from "./chat-entries";
+import type { TaskSession } from "@/app/office/tasks/[id]/types";
+
+const URL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go";
+const SESSION_STARTED_AT = "2026-08-02T15:00:00Z";
+
+function session(overrides: Partial<TaskSession>): TaskSession {
+  return {
+    id: "s1",
+    agentName: "CEO",
+    agentRole: "agent",
+    state: "FAILED",
+    isPrimary: false,
+    startedAt: SESSION_STARTED_AT,
+    errorMessage: "usage limit reached",
+    ...overrides,
+  };
+}
+
+describe("buildRunErrorsFromSessions", () => {
+  it("preserves structured managed runtime failure metadata", () => {
+    const errors = buildRunErrorsFromSessions([
+      session({
+        metadata: {
+          last_agent_error: {
+            message: "managed npm runtime failed to prepare",
+            failure_code: "managed_runtime_npm_resolution",
+            failure_details: "npm error code ETARGET",
+          },
+        },
+      }),
+    ]);
+    expect(errors[0].failureCode).toBe("managed_runtime_npm_resolution");
+    expect(errors[0].failureDetails).toBe("npm error code ETARGET");
+  });
+
+  it("preserves the remediation URL from last_agent_error metadata", () => {
+    const errors = buildRunErrorsFromSessions([
+      session({
+        metadata: {
+          last_agent_error: {
+            message: "usage limit reached",
+            remediation_url: URL,
+          },
+        },
+      }),
+    ]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].remediationUrl).toBe(URL);
+    expect(errors[0].rawPayload).toBe("usage limit reached");
+  });
+
+  it("reads the camelCase form after a store round trip", () => {
+    const errors = buildRunErrorsFromSessions([
+      session({ metadata: { last_agent_error: { message: "boom", remediationUrl: URL } } }),
+    ]);
+    expect(errors[0].remediationUrl).toBe(URL);
+  });
+
+  it("omits the URL when metadata or the field is absent", () => {
+    const legacyError = buildRunErrorsFromSessions([session({ errorMessage: "boom" })]);
+    expect(legacyError).toHaveLength(1);
+    expect(legacyError[0].remediationUrl).toBeUndefined();
+    expect(legacyError[0].isActive).toBe(true);
+    for (const s of [
+      session({ metadata: { last_agent_error: { message: "boom" } } }),
+      session({ metadata: { last_agent_error: { message: "boom", remediation_url: "" } } }),
+    ]) {
+      const errors = buildRunErrorsFromSessions([s]);
+      expect(errors).toHaveLength(1);
+      expect(errors[0].remediationUrl).toBeUndefined();
+    }
+  });
+
+  it("drops an unvalidated URL before it reaches RunError", () => {
+    const errors = buildRunErrorsFromSessions([
+      session({
+        metadata: {
+          last_agent_error: {
+            message: "boom",
+            remediation_url: "https://evil.example.com/workspace/wrk_123/go",
+          },
+        },
+      }),
+    ]);
+    expect(errors[0].remediationUrl).toBeUndefined();
+  });
+
+  it("preserves an active error on a non-FAILED session", () => {
+    const errors = buildRunErrorsFromSessions([
+      session({
+        state: "RUNNING",
+        metadata: { last_agent_error: { message: "still starting", stamp: "failure-1" } },
+      }),
+    ]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].isActive).toBe(true);
+  });
+
+  it("preserves a dismissed error as history after the session resumes", () => {
+    const errors = buildRunErrorsFromSessions([
+      session({
+        state: "IDLE",
+        metadata: {
+          last_agent_error: {
+            message: "The agent could not start.",
+            occurred_at: SESSION_STARTED_AT,
+            dismissed_at: "2026-08-02T15:05:00Z",
+            stamp: "failure-1",
+            recovery_actions: ["retry_default"],
+          },
+        },
+      }),
+    ]);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].failedAt).toBe(SESSION_STARTED_AT);
+    expect(errors[0].errorStamp).toBe("failure-1");
+    expect(errors[0].isActive).toBe(false);
+    expect(errors[0].recoveryActions).toBeUndefined();
+  });
+});
+
+describe("mergeLiveSessionMetadata", () => {
+  const initial = { last_agent_error: { message: "boom", remediation_url: URL } };
+
+  it("keeps the initial fetch when the store has no metadata update", () => {
+    expect(mergeLiveSessionMetadata(initial, undefined)).toBe(initial);
+    expect(mergeLiveSessionMetadata(null, undefined)).toBeNull();
+  });
+
+  it("preserves an explicit server-side null so cleared metadata is not resurrected", () => {
+    expect(mergeLiveSessionMetadata(initial, null)).toBeNull();
+  });
+
+  it("prefers live metadata over the initial fetch", () => {
+    const live = { last_agent_error: { message: "newer" } };
+    expect(mergeLiveSessionMetadata(initial, live)).toBe(live);
+  });
+});
+
+describe("hasMatchingSessionLaunchError", () => {
+  it("does not match an unstamped run error to a stamped summary", () => {
+    expect(
+      hasMatchingSessionLaunchError("s1", "new-stamp", [
+        { id: "e1", sessionId: "s1", rawPayload: "boom", failedAt: SESSION_STARTED_AT },
+      ]),
+    ).toBe(false);
+  });
+
+  it("matches only the same explicit stamp", () => {
+    expect(
+      hasMatchingSessionLaunchError("s1", "new-stamp", [
+        {
+          id: "e1",
+          sessionId: "s1",
+          rawPayload: "boom",
+          failedAt: SESSION_STARTED_AT,
+          errorStamp: "new-stamp",
+        },
+      ]),
+    ).toBe(true);
+  });
+});
+
+describe("liveSessionMetadataFromStore", () => {
+  const metadata = { last_agent_error: { message: "boom", remediation_url: URL } };
+
+  it("returns undefined when no store row exists", () => {
+    expect(liveSessionMetadataFromStore({}, "s1")).toBeUndefined();
+  });
+
+  it("treats a partial row without a metadata field as metadata-absent", () => {
+    // Regression: a store row without `metadata` (e.g. a summary projection)
+    // must NOT become explicit null, which would erase the initial fetch's
+    // metadata and hide the remediation link.
+    expect(liveSessionMetadataFromStore({ s1: {} }, "s1")).toBeUndefined();
+    expect(mergeLiveSessionMetadata(metadata, liveSessionMetadataFromStore({ s1: {} }, "s1"))).toBe(
+      metadata,
+    );
+  });
+
+  it("preserves an explicit null metadata field", () => {
+    expect(liveSessionMetadataFromStore({ s1: { metadata: null } }, "s1")).toBeNull();
+  });
+
+  it("returns the live metadata object when present", () => {
+    expect(liveSessionMetadataFromStore({ s1: { metadata } }, "s1")).toBe(metadata);
+  });
+});

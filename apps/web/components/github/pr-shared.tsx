@@ -5,23 +5,30 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { IconMessagePlus, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
+import {
+  markdownComponents,
+  rehypePlugins,
+  remarkPlugins,
+} from "@/components/shared/markdown-components";
+import { withMarkdownMathSanitizeSchema } from "@/lib/markdown/math-sanitize-schema";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 export function formatTimeAgo(dateStr: string): string {
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) return "";
   const diff = Date.now() - date.getTime();
-  if (diff < 0) return "just now";
+  if (diff < 0) return t("github:timeAgoJustNow");
   const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 1) return t("github:timeAgoJustNow");
+  if (minutes < 60) return t("github:timeAgoMinutes", { count: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t("github:timeAgoHours", { count: hours });
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  if (days < 30) return `${Math.floor(days / 7)}w ago`;
-  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
-  return `${Math.floor(days / 365)}y ago`;
+  if (days < 7) return t("github:timeAgoDays", { count: days });
+  if (days < 30) return t("github:timeAgoWeeks", { count: Math.floor(days / 7) });
+  if (days < 365) return t("github:timeAgoMonths", { count: Math.floor(days / 30) });
+  return t("github:timeAgoYears", { count: Math.floor(days / 365) });
 }
 
 function formatMs(ms: number): string {
@@ -92,6 +99,7 @@ export function CollapsibleSection({
   addAllLabel?: string;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(defaultOpen ?? true);
 
   return (
@@ -120,10 +128,10 @@ export function CollapsibleSection({
                 onClick={onAddAll}
               >
                 <IconMessagePlus className="h-3 w-3" />
-                Add all
+                {t("github:addAll")}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{addAllLabel ?? "Add all to chat context"}</TooltipContent>
+            <TooltipContent>{addAllLabel ?? t("github:addAllToChatContext")}</TooltipContent>
           </Tooltip>
         )}
       </div>
@@ -140,6 +148,7 @@ export function AddToContextButton({
   onClick: () => void;
   tooltip?: string;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -155,23 +164,23 @@ export function AddToContextButton({
           <IconMessagePlus className="h-3 w-3" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{tooltip ?? "Add to chat context"}</TooltipContent>
+      <TooltipContent>{tooltip ?? t("github:addToChatContext")}</TooltipContent>
     </Tooltip>
   );
 }
 
 /** Sanitization schema: default safe tags + details/summary for collapsible sections. */
-const sanitizeSchema = {
+const sanitizeSchema = withMarkdownMathSanitizeSchema({
   ...defaultSchema,
   tagNames: [...(defaultSchema.tagNames ?? []), "details", "summary"],
-};
+});
 
 export function PRMarkdownBody({ body }: { body: string }) {
   return (
     <div className="markdown-body max-w-none text-sm">
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], ...rehypePlugins]}
         components={markdownComponents}
       >
         {body}
@@ -189,6 +198,7 @@ export function getTimeAgoColor(dateStr: string): string {
 }
 
 export function ExpandableBody({ body, className }: { body: string; className?: string }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -204,7 +214,7 @@ export function ExpandableBody({ body, className }: { body: string; className?: 
         }}
         className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline mt-0.5 cursor-pointer"
       >
-        {expanded ? "Show less" : "Show more"}
+        {expanded ? t("github:showLess") : t("github:showMore")}
       </button>
     </div>
   );

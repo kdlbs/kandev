@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -12,9 +13,10 @@ import (
 // stubGraphQLExecutor lets tests inspect/return canned responses without
 // touching HTTP or the gh CLI.
 type stubGraphQLExecutor struct {
-	queries  []string
-	response string
-	err      error
+	queries   []string
+	response  string
+	responses []string
+	err       error
 }
 
 func (s *stubGraphQLExecutor) ExecuteGraphQL(_ context.Context, query string, _ map[string]any, out any) error {
@@ -22,7 +24,123 @@ func (s *stubGraphQLExecutor) ExecuteGraphQL(_ context.Context, query string, _ 
 	if s.err != nil {
 		return s.err
 	}
-	return json.Unmarshal([]byte(s.response), out)
+	response := s.response
+	if len(s.responses) > 0 {
+		response = s.responses[0]
+		s.responses = s.responses[1:]
+	}
+	return json.Unmarshal([]byte(response), out)
+}
+
+func resolvedReviewThreadNodes(count int) []map[string]bool {
+	nodes := make([]map[string]bool, count)
+	for i := range nodes {
+		nodes[i] = map[string]bool{"isResolved": true}
+	}
+	return nodes
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal GraphQL fixture: %v", err)
+	}
+	return string(data)
+}
+
+func reviewThreadsFixture(
+	totalCount int,
+	nodes []map[string]bool,
+	hasNextPage bool,
+	endCursor string,
+) map[string]any {
+	return map[string]any{
+		"totalCount": totalCount,
+		"nodes":      nodes,
+		"pageInfo":   map[string]any{"hasNextPage": hasNextPage, "endCursor": endCursor},
+	}
+}
+
+func batchedPRFixture(
+	title string,
+	url string,
+	totalCount int,
+	nodes []map[string]bool,
+	hasNextPage bool,
+	endCursor string,
+) map[string]any {
+	return map[string]any{
+		"state": "OPEN", "title": title, "url": url,
+		"headRefName": "feat", "baseRefName": "main", "headRefOid": "abc",
+		"author":    map[string]any{"login": "alice"},
+		"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+		"reviews":        map[string]any{"nodes": []any{}},
+		"reviewRequests": map[string]any{"totalCount": 0},
+		"reviewThreads":  reviewThreadsFixture(totalCount, nodes, hasNextPage, endCursor),
+		"commits":        map[string]any{"nodes": []any{}},
+	}
+}
+
+func batchedPRReviewThreadsResponse(
+	t *testing.T,
+	totalCount int,
+	nodes []map[string]bool,
+	hasNextPage bool,
+	endCursor string,
+) string {
+	t.Helper()
+	return mustJSON(t, map[string]any{
+		"data": map[string]any{
+			"repo0": map[string]any{
+				"pr0": batchedPRFixture("Busy PR", "https://x/42", totalCount, nodes, hasNextPage, endCursor),
+			},
+		},
+	})
+}
+
+func reviewThreadPageResponse(
+	t *testing.T,
+	nodes []map[string]bool,
+	hasNextPage bool,
+	endCursor string,
+) string {
+	t.Helper()
+	return reviewThreadPagesResponse(t, reviewThreadsFixture(len(nodes), nodes, hasNextPage, endCursor))
+}
+
+func reviewThreadPagesResponse(t *testing.T, pages ...map[string]any) string {
+	t.Helper()
+	data := make(map[string]any, len(pages))
+	for i, page := range pages {
+		data[fmt.Sprintf("repo%d", i)] = map[string]any{
+			"pr0": map[string]any{"reviewThreads": page},
+		}
+	}
+	return mustJSON(t, map[string]any{
+		"data": data,
+	})
+}
+
+func batchedBranchReviewThreadsResponse(
+	t *testing.T,
+	totalCount int,
+	nodes []map[string]bool,
+	hasNextPage bool,
+	endCursor string,
+) string {
+	t.Helper()
+	node := batchedPRFixture("Busy branch PR", "https://x/7", totalCount, nodes, hasNextPage, endCursor)
+	node["number"] = 7
+	return mustJSON(t, map[string]any{
+		"data": map[string]any{
+			"b0": map[string]any{
+				"pullRequests": map[string]any{
+					"nodes": []any{node},
+				},
+			},
+		},
+	})
 }
 
 func TestBuildBatchedPRQuery_GroupsByRepo(t *testing.T) {
@@ -46,6 +164,49 @@ func TestBuildBatchedPRQuery_GroupsByRepo(t *testing.T) {
 	}
 }
 
+// TestPRFieldsBlock_RequestsOutcomeFields covers AC-08: the shared field
+// block requests changedFiles, mergedBy, autoMergeRequest, and a
+// CLOSED_EVENT timeline selection, so both the batched PR query and the
+// batched branch query return the same fields.
+func TestPRFieldsBlock_RequestsOutcomeFields(t *testing.T) {
+	block := prFieldsBlock()
+	for _, want := range []string{"changedFiles", "mergedBy { login }", "autoMergeRequest", "headRepository {", "headRepositoryOwner { login }", "CLOSED_EVENT"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("prFieldsBlock() missing %q: %s", want, block)
+		}
+	}
+	if strings.Contains(block, "closedBy") {
+		t.Errorf("prFieldsBlock() must not request closedBy (absent from PullRequest type): %s", block)
+	}
+
+	prQuery, _ := buildBatchedPRQuery([]graphQLPRRef{{Owner: "o", Repo: "r", Number: 1}})
+	if !strings.Contains(prQuery, "changedFiles") || !strings.Contains(prQuery, "CLOSED_EVENT") {
+		t.Errorf("buildBatchedPRQuery must include the outcome fields: %s", prQuery)
+	}
+	branchQuery, _ := buildBatchedBranchQuery([]graphQLBranchRef{{Owner: "o", Repo: "r", Branch: "feat"}})
+	if !strings.Contains(branchQuery, "changedFiles") || !strings.Contains(branchQuery, "CLOSED_EVENT") {
+		t.Errorf("buildBatchedBranchQuery must include the outcome fields: %s", branchQuery)
+	}
+}
+
+// TestPRFieldsBlock_PinsLastOneForClosedEventOrdering is the AC-08a
+// regression: closedEventActor (below) trusts the query to hand it at most
+// one timelineItems node and unconditionally reads nodes[0], so "most
+// recent closure" is guaranteed entirely by the GraphQL connection argument,
+// not by any Go-side ordering logic. TestPRFieldsBlock_RequestsOutcomeFields
+// only substring-matches "CLOSED_EVENT", which stays green if `last: 1` were
+// changed to `first: N` — GitHub connection ordering is oldest-first, so
+// `first: N` would silently attribute closure to the PR's FIRST close
+// instead of its latest one across a reopen cycle, with every existing
+// single-node test still passing. Pin the exact argument.
+func TestPRFieldsBlock_PinsLastOneForClosedEventOrdering(t *testing.T) {
+	block := prFieldsBlock()
+	const want = "timelineItems(last: 1, itemTypes: CLOSED_EVENT)"
+	if !strings.Contains(block, want) {
+		t.Errorf("prFieldsBlock() = %s, want it to contain %q", block, want)
+	}
+}
+
 func TestBuildBatchedBranchQuery_AliasesAllBranches(t *testing.T) {
 	q, _ := buildBatchedBranchQuery([]graphQLBranchRef{
 		{Owner: "o", Repo: "r", Branch: "feat-1"},
@@ -59,6 +220,144 @@ func TestBuildBatchedBranchQuery_AliasesAllBranches(t *testing.T) {
 	}
 	if strings.Contains(q, `ref(qualifiedName:`) {
 		t.Errorf("branch lookup should not require a base-repo ref: %s", q)
+	}
+}
+
+// TestConvertBatchedPRResult_SetsOutcomeFieldsPopulatedUnconditionally
+// covers AC-10: the batched GraphQL path always marks the outcome-field
+// group populated, since it always fetches a full pull request.
+func TestConvertBatchedPRResult_SetsOutcomeFieldsPopulatedUnconditionally(t *testing.T) {
+	status := convertBatchedPRResult(&batchedPRResult{State: "OPEN"}, "o", "r", 1)
+	if !status.OutcomeFieldsPopulated {
+		t.Error("OutcomeFieldsPopulated = false, want true")
+	}
+}
+
+// TestConvertBatchedPRResult_MergedByAndChangedFiles covers AC-12's upstream
+// half: a merged PR with a non-null mergedBy and a real changedFiles count
+// converts onto PR, not just PRStatus.
+func TestConvertBatchedPRResult_MergedByAndChangedFiles(t *testing.T) {
+	raw := &batchedPRResult{
+		State:        "MERGED",
+		MergedAt:     "2026-08-12T00:00:00Z",
+		ChangedFiles: intPtr(8),
+	}
+	raw.MergedBy.Login = "carlosflorencio"
+	status := convertBatchedPRResult(raw, "kdlbs", "kandev", 2554)
+	if status.PR.ChangedFiles != 8 {
+		t.Errorf("ChangedFiles = %d, want 8", status.PR.ChangedFiles)
+	}
+	if !status.PR.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = false, want true for an explicit changedFiles=8")
+	}
+	if status.PR.MergedByLogin != "carlosflorencio" {
+		t.Errorf("MergedByLogin = %q, want carlosflorencio", status.PR.MergedByLogin)
+	}
+}
+
+// TestConvertBatchedPRResult_MissingIsDraftAndChangedFilesLeavesUnobserved
+// covers AC-12a: a batched GraphQL result that omits isDraft and
+// changedFiles must decode to unobserved (Observed=false), so
+// resolveTaskPROutcomeFields writes NULL for those columns instead of a
+// fabricated false/0 that would masquerade as a real observation.
+// TestConvertBatchedPRResult_SetsOutcomeFieldsPopulatedUnconditionally
+// above proves the *group* flag stays true for this exact input — this test
+// proves the two field-level flags do NOT, which is what AC-12a actually
+// requires ("each field is judged on its own presence").
+func TestConvertBatchedPRResult_MissingIsDraftAndChangedFilesLeavesUnobserved(t *testing.T) {
+	status := convertBatchedPRResult(&batchedPRResult{State: "OPEN"}, "o", "r", 1)
+	if status.PR.IsDraftObserved {
+		t.Error("IsDraftObserved = true, want false when isDraft is absent from the response")
+	}
+	if status.PR.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = true, want false when changedFiles is absent from the response")
+	}
+}
+
+// TestConvertBatchedPRResult_ExplicitFalseAndZeroAreObserved covers AC-12a's
+// other half: a response that genuinely reports isDraft=false and
+// changedFiles=0 must be distinguishable from one that omits them — both
+// mark Observed=true.
+func TestConvertBatchedPRResult_ExplicitFalseAndZeroAreObserved(t *testing.T) {
+	status := convertBatchedPRResult(
+		&batchedPRResult{State: "OPEN", IsDraft: boolPtr(false), ChangedFiles: intPtr(0)}, "o", "r", 1,
+	)
+	if !status.PR.IsDraftObserved {
+		t.Error("IsDraftObserved = false, want true for an explicit isDraft=false")
+	}
+	if status.PR.Draft {
+		t.Error("Draft = true, want false")
+	}
+	if !status.PR.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = false, want true for an explicit changedFiles=0")
+	}
+	if status.PR.ChangedFiles != 0 {
+		t.Errorf("ChangedFiles = %d, want 0", status.PR.ChangedFiles)
+	}
+}
+
+// TestConvertBatchedPRResult_ClosedEventActorPopulatesAttribution covers
+// AC-14: a closed PR carrying a ClosedEvent timeline node with a non-empty
+// actor login marks closure attribution populated and copies the login.
+func TestConvertBatchedPRResult_ClosedEventActorPopulatesAttribution(t *testing.T) {
+	raw := &batchedPRResult{State: "CLOSED"}
+	raw.TimelineItems.Nodes = []timelineClosedEventNode{{}}
+	raw.TimelineItems.Nodes[0].Actor = &timelineActor{Login: "nova28"}
+	status := convertBatchedPRResult(raw, "kdlbs", "kandev", 2476)
+	if !status.ClosureAttributionPopulated {
+		t.Fatal("ClosureAttributionPopulated = false, want true")
+	}
+	if status.ClosedByLogin != "nova28" {
+		t.Errorf("ClosedByLogin = %q, want nova28", status.ClosedByLogin)
+	}
+}
+
+// TestConvertBatchedPRResult_NullActorLeavesAttributionUnpopulated covers
+// AC-15's decode half: no timeline node, or a node with a null actor, must
+// not mark closure attribution populated.
+func TestConvertBatchedPRResult_NullActorLeavesAttributionUnpopulated(t *testing.T) {
+	t.Run("no timeline nodes", func(t *testing.T) {
+		status := convertBatchedPRResult(&batchedPRResult{State: "CLOSED"}, "o", "r", 1)
+		if status.ClosureAttributionPopulated {
+			t.Error("ClosureAttributionPopulated = true, want false")
+		}
+		if status.ClosedByLogin != "" {
+			t.Errorf("ClosedByLogin = %q, want empty", status.ClosedByLogin)
+		}
+	})
+	t.Run("null actor", func(t *testing.T) {
+		raw := &batchedPRResult{State: "CLOSED"}
+		raw.TimelineItems.Nodes = []timelineClosedEventNode{{}}
+		status := convertBatchedPRResult(raw, "o", "r", 1)
+		if status.ClosureAttributionPopulated {
+			t.Error("ClosureAttributionPopulated = true, want false")
+		}
+	})
+}
+
+// TestConvertBatchedPRResult_ClosedEventActorReflectsLatestClosureAfterReopen
+// is the AC-08a close-reopen-close regression. A PR closed by "alice",
+// reopened, then closed again by "bob" must attribute closure to "bob" — the
+// PR's CURRENT closure, not its first one ever. `timelineItems(last: 1, ...)`
+// is what makes this true: GitHub only ever sends the single most-recent
+// CLOSED_EVENT node in the slice this test constructs, so decoding it and
+// reading nodes[0] (closedEventActor's actual logic) yields "bob". This
+// documents the semantic the pinned `last: 1` argument
+// (TestPRFieldsBlock_PinsLastOneForClosedEventOrdering) exists to guarantee.
+func TestConvertBatchedPRResult_ClosedEventActorReflectsLatestClosureAfterReopen(t *testing.T) {
+	raw := &batchedPRResult{State: "CLOSED"}
+	// What GitHub returns for timelineItems(last: 1, itemTypes: CLOSED_EVENT)
+	// after alice's close, a reopen, then bob's close: only bob's event.
+	raw.TimelineItems.Nodes = []timelineClosedEventNode{
+		{Actor: &timelineActor{Login: "bob"}},
+	}
+	status := convertBatchedPRResult(raw, "kdlbs", "kandev", 3001)
+	if !status.ClosureAttributionPopulated {
+		t.Fatal("ClosureAttributionPopulated = false, want true")
+	}
+	if status.ClosedByLogin != "bob" {
+		t.Errorf("ClosedByLogin = %q, want %q (the reopen cycle's later closer, not alice's earlier close)",
+			status.ClosedByLogin, "bob")
 	}
 }
 
@@ -102,11 +401,304 @@ func TestRunBatchedPRQuery_DecodesAliasesBackToRefs(t *testing.T) {
 	}
 }
 
+func TestNormalizeGraphQLCheckRollupState_CheckRollup(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "success", raw: "SUCCESS", want: checkStatusSuccess},
+		{name: "failure", raw: "FAILURE", want: checkConclusionFail},
+		{name: "error", raw: "ERROR", want: checkConclusionFail},
+		{name: "pending", raw: "PENDING", want: checkStatusPending},
+		{name: "expected", raw: "EXPECTED", want: checkStatusPending},
+		{name: "empty", raw: "", want: ""},
+		{name: "unknown", raw: "NEUTRAL", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeGraphQLCheckRollupState(tt.raw); got != tt.want {
+				t.Fatalf("normalizeGraphQLCheckRollupState(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunBatchedPRQuery_PaginatesResolvedReviewThreads(t *testing.T) {
+	exec := &stubGraphQLExecutor{responses: []string{
+		batchedPRReviewThreadsResponse(t, 102, resolvedReviewThreadNodes(100), true, "cursor-1"),
+		reviewThreadPageResponse(t, resolvedReviewThreadNodes(2), false, "cursor-2"),
+	}}
+
+	got, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+		{Owner: "o", Repo: "r", Number: 42},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	status := got[prStatusCacheKey("o", "r", 42)]
+	if status.UnresolvedReviewThreads != 0 {
+		t.Fatalf("UnresolvedReviewThreads = %d, want 0", status.UnresolvedReviewThreads)
+	}
+}
+
+func TestRunBatchedPRQuery_BatchesReviewThreadContinuations(t *testing.T) {
+	exec := &stubGraphQLExecutor{responses: []string{
+		mustJSON(t, map[string]any{
+			"data": map[string]any{
+				"repo0": map[string]any{
+					"pr0": batchedPRFixture("PR A", "https://x/a/1", 101, resolvedReviewThreadNodes(100), true, "cursor-a"),
+				},
+				"repo1": map[string]any{
+					"pr0": batchedPRFixture("PR B", "https://x/b/2", 101, resolvedReviewThreadNodes(100), true, "cursor-b"),
+				},
+			},
+		}),
+		reviewThreadPagesResponse(t,
+			reviewThreadsFixture(1, []map[string]bool{{"isResolved": false}}, false, "cursor-a2"),
+			reviewThreadsFixture(1, resolvedReviewThreadNodes(1), false, "cursor-b2"),
+		),
+	}}
+
+	got, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+		{Owner: "o", Repo: "a", Number: 1},
+		{Owner: "o", Repo: "b", Number: 2},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(exec.queries) != 2 {
+		t.Fatalf("GraphQL query count = %d, want 2", len(exec.queries))
+	}
+	if !strings.Contains(exec.queries[0], `pageInfo { hasNextPage endCursor }`) {
+		t.Errorf("initial query does not request review-thread pageInfo: %s", exec.queries[0])
+	}
+	if !strings.Contains(exec.queries[1], `query ReviewThreadPages`) ||
+		!strings.Contains(exec.queries[1], `after: "cursor-a"`) ||
+		!strings.Contains(exec.queries[1], `after: "cursor-b"`) {
+		t.Errorf("follow-up query does not batch both cursors: %s", exec.queries[1])
+	}
+	if got[prStatusCacheKey("o", "a", 1)].UnresolvedReviewThreads != 1 {
+		t.Errorf("o/a#1 unresolved count = %d, want 1", got[prStatusCacheKey("o", "a", 1)].UnresolvedReviewThreads)
+	}
+	if got[prStatusCacheKey("o", "b", 2)].UnresolvedReviewThreads != 0 {
+		t.Errorf("o/b#2 unresolved count = %d, want 0", got[prStatusCacheKey("o", "b", 2)].UnresolvedReviewThreads)
+	}
+}
+
+func TestRunBatchedPRQuery_BoundsReviewThreadContinuationBatchSize(t *testing.T) {
+	initialData := make(map[string]any, 6)
+	refs := make([]graphQLPRRef, 6)
+	pages := make([]map[string]any, 6)
+	for i := range refs {
+		repo := fmt.Sprintf("repo-%d", i)
+		initialData[fmt.Sprintf("repo%d", i)] = map[string]any{
+			"pr0": batchedPRFixture(
+				fmt.Sprintf("PR %d", i), fmt.Sprintf("https://x/%d", i),
+				101, resolvedReviewThreadNodes(100), true, fmt.Sprintf("cursor-%d", i),
+			),
+		}
+		refs[i] = graphQLPRRef{Owner: "o", Repo: repo, Number: i + 1}
+		pages[i] = reviewThreadsFixture(1, resolvedReviewThreadNodes(1), false, "done")
+	}
+
+	exec := &stubGraphQLExecutor{responses: []string{
+		mustJSON(t, map[string]any{"data": initialData}),
+		reviewThreadPagesResponse(t, pages...),
+		reviewThreadPageResponse(t, resolvedReviewThreadNodes(1), false, "done"),
+	}}
+
+	if _, err := runBatchedPRQuery(context.Background(), exec, refs); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(exec.queries) != 3 {
+		t.Fatalf("GraphQL query count = %d, want 3", len(exec.queries))
+	}
+}
+
+func TestRunBatchedPRQuery_OneReviewThreadPageSkipsContinuation(t *testing.T) {
+	exec := &stubGraphQLExecutor{
+		response: batchedPRReviewThreadsResponse(
+			t, 2, []map[string]bool{{"isResolved": true}, {"isResolved": false}}, false, "cursor-1",
+		),
+	}
+
+	got, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+		{Owner: "o", Repo: "r", Number: 42},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(exec.queries) != 1 {
+		t.Fatalf("GraphQL query count = %d, want 1", len(exec.queries))
+	}
+	if got[prStatusCacheKey("o", "r", 42)].UnresolvedReviewThreads != 1 {
+		t.Fatalf("UnresolvedReviewThreads = %d, want 1", got[prStatusCacheKey("o", "r", 42)].UnresolvedReviewThreads)
+	}
+}
+
+func TestRunBatchedPRQuery_RejectsRepeatedReviewThreadCursor(t *testing.T) {
+	exec := &stubGraphQLExecutor{responses: []string{
+		batchedPRReviewThreadsResponse(t, 201, resolvedReviewThreadNodes(100), true, "cursor-1"),
+		reviewThreadPageResponse(t, resolvedReviewThreadNodes(1), true, "cursor-1"),
+		reviewThreadPageResponse(t, resolvedReviewThreadNodes(1), false, "cursor-2"),
+	}}
+
+	_, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+		{Owner: "o", Repo: "r", Number: 42},
+	})
+	if err == nil {
+		t.Fatal("expected repeated review-thread cursor to fail")
+	}
+	if !strings.Contains(err.Error(), "repeated cursor") {
+		t.Fatalf("error = %q, want repeated-cursor failure", err)
+	}
+}
+
+func TestRunBatchedPRQuery_RejectsPagesBeyondInitialTotalCount(t *testing.T) {
+	exec := &stubGraphQLExecutor{responses: []string{
+		batchedPRReviewThreadsResponse(t, 101, resolvedReviewThreadNodes(100), true, "cursor-1"),
+		reviewThreadPageResponse(t, resolvedReviewThreadNodes(1), true, "cursor-2"),
+		reviewThreadPageResponse(t, resolvedReviewThreadNodes(1), false, "cursor-3"),
+	}}
+
+	_, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+		{Owner: "o", Repo: "r", Number: 42},
+	})
+	if err == nil {
+		t.Fatal("expected review-thread pages beyond initial totalCount to fail")
+	}
+	if !strings.Contains(err.Error(), "page limit") {
+		t.Fatalf("error = %q, want page-limit failure", err)
+	}
+}
+
+func TestRunBatchedPRQuery_PreservesMissingReposOnReviewThreadPaginationFailure(t *testing.T) {
+	exec := &stubGraphQLExecutor{responses: []string{
+		mustJSON(t, map[string]any{
+			"data": map[string]any{
+				"repo1": map[string]any{
+					"pr0": batchedPRFixture(
+						"Busy PR", "https://x/live/42", 101,
+						resolvedReviewThreadNodes(100), true, "cursor-1",
+					),
+				},
+			},
+			"errors": []map[string]any{{
+				"message": "Could not resolve to a Repository with the name 'o/dead'.",
+				"type":    "NOT_FOUND",
+				"path":    []string{"repo0"},
+			}},
+		}),
+		`{"data": {}}`,
+	}}
+
+	got, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+		{Owner: "o", Repo: "dead", Number: 1},
+		{Owner: "o", Repo: "live", Number: 42},
+	})
+	if got != nil {
+		t.Fatalf("status map = %#v, want nil after incomplete pagination", got)
+	}
+	var missingErr *batchedMissingReposErr
+	if !errors.As(err, &missingErr) {
+		t.Fatalf("error = %v, want batchedMissingReposErr", err)
+	}
+	if len(missingErr.Repos) != 1 || missingErr.Repos[0] != (repoRef{Owner: "o", Repo: "dead"}) {
+		t.Fatalf("missing repos = %#v, want o/dead", missingErr.Repos)
+	}
+	if missingErr.Inner == nil || !strings.Contains(missingErr.Inner.Error(), "missing repository alias") {
+		t.Fatalf("inner error = %v, want pagination failure", missingErr.Inner)
+	}
+}
+
+func TestRunBatchedPRQuery_RejectsEmptyReviewThreadCursor(t *testing.T) {
+	tests := []struct {
+		name      string
+		responses []string
+	}{
+		{
+			name: "initial page",
+			responses: []string{
+				batchedPRReviewThreadsResponse(t, 101, resolvedReviewThreadNodes(100), true, ""),
+			},
+		},
+		{
+			name: "continuation page",
+			responses: []string{
+				batchedPRReviewThreadsResponse(t, 201, resolvedReviewThreadNodes(100), true, "cursor-1"),
+				reviewThreadPageResponse(t, resolvedReviewThreadNodes(100), true, ""),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := &stubGraphQLExecutor{responses: tt.responses}
+			got, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+				{Owner: "o", Repo: "r", Number: 42},
+			})
+			if err == nil || got != nil {
+				t.Fatalf("got (%v, %v), want (nil, error)", got, err)
+			}
+			if !strings.Contains(err.Error(), "empty cursor") {
+				t.Fatalf("error = %q, want empty-cursor failure", err)
+			}
+		})
+	}
+}
+
+func TestRunBatchedPRQuery_PaginatesMultipleReviewThreadRounds(t *testing.T) {
+	secondPage := append(
+		[]map[string]bool{{"isResolved": false}},
+		resolvedReviewThreadNodes(99)...,
+	)
+	exec := &stubGraphQLExecutor{responses: []string{
+		batchedPRReviewThreadsResponse(t, 202, resolvedReviewThreadNodes(100), true, "cursor-1"),
+		reviewThreadPageResponse(t, secondPage, true, "cursor-2"),
+		reviewThreadPageResponse(t, []map[string]bool{
+			{"isResolved": false},
+			{"isResolved": true},
+		}, false, "cursor-3"),
+	}}
+
+	got, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+		{Owner: "o", Repo: "r", Number: 42},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(exec.queries) != 3 {
+		t.Fatalf("GraphQL query count = %d, want 3", len(exec.queries))
+	}
+	if got[prStatusCacheKey("o", "r", 42)].UnresolvedReviewThreads != 2 {
+		t.Fatalf("UnresolvedReviewThreads = %d, want 2", got[prStatusCacheKey("o", "r", 42)].UnresolvedReviewThreads)
+	}
+}
+
+func TestRunBatchedPRQuery_RejectsNullReviewThreadPage(t *testing.T) {
+	exec := &stubGraphQLExecutor{responses: []string{
+		batchedPRReviewThreadsResponse(t, 101, resolvedReviewThreadNodes(100), true, "cursor-1"),
+		mustJSON(t, map[string]any{
+			"data": map[string]any{
+				"repo0": map[string]any{
+					"pr0": map[string]any{"reviewThreads": nil},
+				},
+			},
+		}),
+	}}
+
+	_, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+		{Owner: "o", Repo: "r", Number: 42},
+	})
+	if err == nil {
+		t.Fatal("expected null review-thread page to fail")
+	}
+}
+
 func TestRunBatchedPRQuery_DecodesMultipleReposIntoCorrectKeys(t *testing.T) {
-	// Two repos in one batch: octo/alpha#1 and octo/beta#9. The decoder sorts
-	// repo group keys; this test guards against future drift between
-	// buildBatchedPRQuery's sort and decodeBatchedPRChunk's sort by checking
-	// each PR lands in its correct key slot.
+	// Two repos in one batch: check each aliased PR lands in its correct key.
 	exec := &stubGraphQLExecutor{
 		response: `{
 			"data": {
@@ -222,12 +814,31 @@ func TestRunBatchedBranchQuery_DecodesPRNode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	status, ok := got[graphqlBranchKey("o", "r", "feat")]
+	status, ok := got.Statuses[graphqlBranchKey("o", "r", "feat")]
 	if !ok {
-		t.Fatalf("expected branch result, got keys: %v", keysOf(got))
+		t.Fatalf("expected branch result, got keys: %v", keysOf(got.Statuses))
 	}
 	if status.PR == nil || status.PR.Number != 7 {
 		t.Errorf("expected PR number 7, got %#v", status.PR)
+	}
+}
+
+func TestRunBatchedBranchQuery_SkipsUnusedReviewThreadPagination(t *testing.T) {
+	exec := &stubGraphQLExecutor{response: batchedBranchReviewThreadsResponse(t, 101, resolvedReviewThreadNodes(100), true, "cursor-1")}
+
+	got, err := runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{
+		{Owner: "o", Repo: "r", Branch: "feat"},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	status := got.Statuses[graphqlBranchKey("o", "r", "feat")]
+	if status == nil || status.PR == nil || status.PR.Number != 7 {
+		t.Fatalf("branch status = %#v, want discovered PR #7", status)
+	}
+	if len(exec.queries) != 1 {
+		t.Fatalf("GraphQL query count = %d, want 1", len(exec.queries))
 	}
 }
 
@@ -249,8 +860,13 @@ func TestRunBatchedBranchQuery_EmptyNodesReturnsNoResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("expected no branch result, got %#v", got)
+	if len(got.Statuses) != 0 {
+		t.Fatalf("expected no branch result, got %#v", got.Statuses)
+	}
+	// Zero nodes is a definitive "no open PR on this branch"; callers rely on
+	// it to skip a redundant per-watch lookup.
+	if _, ok := got.ResolvedEmpty[graphqlBranchKey("o", "r", "feat")]; !ok {
+		t.Fatalf("expected branch to be recorded as definitively empty, got %#v", got.ResolvedEmpty)
 	}
 }
 
@@ -290,8 +906,13 @@ func TestRunBatchedBranchQuery_SkipsAmbiguousForkHeads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("expected ambiguous fork heads to be skipped, got %#v", got)
+	if len(got.Statuses) != 0 {
+		t.Fatalf("expected ambiguous fork heads to be skipped, got %#v", got.Statuses)
+	}
+	// Ambiguity is not a definitive negative — the caller must keep its
+	// per-watch fallback rather than conclude there is no PR.
+	if _, ok := got.ResolvedEmpty[graphqlBranchKey("o", "r", "feat")]; ok {
+		t.Fatal("ambiguous branch must not be recorded as definitively empty")
 	}
 }
 
@@ -331,8 +952,11 @@ func TestRunBatchedBranchQuery_SkipsMultipleBranchMatchesEvenWithOwnerMatch(t *t
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("expected duplicate branch matches to be skipped, got %#v", got)
+	if len(got.Statuses) != 0 {
+		t.Fatalf("expected duplicate branch matches to be skipped, got %#v", got.Statuses)
+	}
+	if _, ok := got.ResolvedEmpty[graphqlBranchKey("o", "r", "feat")]; ok {
+		t.Fatal("ambiguous branch must not be recorded as definitively empty")
 	}
 }
 

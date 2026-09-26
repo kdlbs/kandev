@@ -1,9 +1,12 @@
 "use client";
 
 import { IconLoader2 } from "@tabler/icons-react";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
+import { useChatMotion } from "@/hooks/use-chat-motion";
 import { useAppStore } from "@/components/state-provider";
 import { selectLiveSessionForTask } from "@/lib/state/slices/session/selectors";
 import { useActiveSessionRef } from "./active-session-ref-context";
+import { useTranslation } from "react-i18next";
 
 type TopbarWorkingIndicatorProps = {
   taskId: string;
@@ -17,6 +20,8 @@ type TopbarWorkingIndicatorProps = {
  * Click scrolls the active session's timeline entry into view.
  */
 export function TopbarWorkingIndicator({ taskId }: TopbarWorkingIndicatorProps) {
+  const { t } = useTranslation();
+  const motionEnabled = useChatMotion();
   const liveSession = useAppStore((s) => selectLiveSessionForTask(s, taskId));
   const { getActiveNode } = useActiveSessionRef();
 
@@ -25,7 +30,7 @@ export function TopbarWorkingIndicator({ taskId }: TopbarWorkingIndicatorProps) 
   const handleClick = () => {
     const node = getActiveNode();
     if (!node) return;
-    node.scrollIntoView({ block: "end", behavior: "smooth" });
+    node.scrollIntoView({ block: "end", behavior: motionEnabled ? "smooth" : "auto" });
   };
 
   return (
@@ -33,11 +38,13 @@ export function TopbarWorkingIndicator({ taskId }: TopbarWorkingIndicatorProps) 
       type="button"
       onClick={handleClick}
       className="inline-flex items-center gap-1 text-xs text-primary cursor-pointer hover:opacity-80 transition-opacity"
-      aria-label="Scroll to active session"
+      aria-label={t("task:scrollToActiveSession")}
       data-testid="topbar-working-indicator"
     >
-      <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-      <span data-testid="topbar-working-active">Working</span>
+      <CompositorSpin className="h-3.5 w-3.5">
+        <IconLoader2 className="size-full" />
+      </CompositorSpin>
+      <span data-testid="topbar-working-active">{t("task:working3")}</span>
     </button>
   );
 }

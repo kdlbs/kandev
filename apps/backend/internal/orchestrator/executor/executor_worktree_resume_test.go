@@ -75,11 +75,74 @@ func TestLaunchPreparedSession_SingleRepoWorktree_PersistsSubdirAsWorkspacePath(
 	for _, e := range repo.taskEnvironments {
 		env = e
 	}
-	if env.WorktreePath != subdir {
-		t.Errorf("worktree_path = %q, want %q", env.WorktreePath, subdir)
+	envRepos := env.Repos
+	if len(envRepos) != 1 || envRepos[0].WorktreePath != subdir {
+		t.Errorf("env repo worktree_path = %+v, want %q", envRepos, subdir)
 	}
 	if env.WorkspacePath != subdir {
 		t.Errorf("workspace_path = %q, want %q (== worktree_path so process cwd matches between hot and cold start)",
 			env.WorkspacePath, subdir)
+	}
+}
+
+// @covers AC-TASKS-MANAGED-BRANCH-COMPACTION-001.1
+func TestLaunchPreparedSession_SingleRepoWorktreePersistsBaseIntegrationRefForCompaction(t *testing.T) {
+	repo := newMockRepository()
+	const (
+		taskID    = "task-wt-integration-ref"
+		sessionID = "session-wt-integration-ref"
+	)
+	repo.repositories["repo-only"] = &models.Repository{
+		ID: "repo-only", Name: "only", LocalPath: "/repos/only", DefaultBranch: "main",
+	}
+	repo.taskRepositories["tr-only"] = &models.TaskRepository{
+		ID: "tr-only", TaskID: taskID, RepositoryID: "repo-only", Position: 0, BaseBranch: "main",
+	}
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID: sessionID, TaskID: taskID, AgentProfileID: "profile-123",
+		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+
+	var launchedIntegrationRef string
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			launchedIntegrationRef = req.IntegrationRef
+			return &LaunchAgentResponse{
+				AgentExecutionID:       "exec-integration-ref",
+				WorktreeID:             "wt-integration-ref",
+				WorktreePath:           "/tasks/integration-ref/only",
+				WorktreeBranch:         "feature/integration-ref",
+				WorktreeBranchOwner:    "kandev",
+				WorktreeIntegrationRef: req.IntegrationRef,
+				PrepareResult: &lifecycle.EnvPrepareResult{
+					Success: true, WorktreeID: "wt-integration-ref",
+				},
+			}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+
+	task := &v1.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Integration ref"}
+	if _, err := exec.LaunchPreparedSession(context.Background(), task, sessionID, LaunchOptions{
+		AgentProfileID: "profile-123",
+		StartAgent:     false,
+	}); err != nil {
+		t.Fatalf("LaunchPreparedSession: %v", err)
+	}
+	if launchedIntegrationRef != "main" {
+		t.Fatalf("launch IntegrationRef = %q, want task repository base", launchedIntegrationRef)
+	}
+
+	var envID string
+	for id := range repo.taskEnvironments {
+		envID = id
+	}
+	rows := repo.taskEnvironmentRepos[envID]
+	if len(rows) != 1 {
+		t.Fatalf("persisted environment repositories = %d, want 1", len(rows))
+	}
+	if rows[0].WorktreeBranchOwner != "kandev" || rows[0].WorktreeIntegrationRef != "main" {
+		t.Fatalf("persisted compaction metadata = owner %q, integration ref %q; want kandev/main",
+			rows[0].WorktreeBranchOwner, rows[0].WorktreeIntegrationRef)
 	}
 }

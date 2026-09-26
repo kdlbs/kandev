@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { CompositorPulse } from "@kandev/ui/compositor-pulse";
 import { cn } from "@/lib/utils";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TipTapInput } from "./tiptap-input";
 import { ChatInputFocusHint } from "./chat-input-focus-hint";
 import { ResizeHandle } from "./resize-handle";
@@ -12,6 +15,13 @@ import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { ImagePasteIssue } from "./clipboard-attachments";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
+import {
+  composerIdentity,
+  composerInsertionText,
+  useStablePluginComposerCapability,
+} from "@/lib/plugins/composer-capability";
+import type { PluginComposerCapability } from "@/lib/plugins/types";
+import { useComposerActivity, useComposerFocus } from "./composer-disclosure";
 
 export type ChatInputEditorAreaProps = {
   inputRef: React.RefObject<import("./tiptap-input").TipTapInputHandle | null>;
@@ -22,6 +32,7 @@ export type ChatInputEditorAreaProps = {
   isDisabled: boolean;
   submitDisabled: boolean;
   submitDisabledReason?: string;
+  hasPendingAttachmentUploads: boolean;
   planModeEnabled: boolean;
   planModeAvailable: boolean;
   mcpServers: string[];
@@ -58,10 +69,6 @@ export type ChatInputEditorAreaProps = {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
-  /** Inserts a voice transcript into the editor at the current cursor. */
-  onVoiceTranscript?: (text: string) => void;
-  /** Submit the message after a voice transcript is inserted (when auto-send is on). */
-  onVoiceAutoSend?: () => void;
 };
 
 function EditorWithTooltip({
@@ -75,6 +82,7 @@ function EditorWithTooltip({
   className?: string;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip open={showTooltip}>
       <TooltipTrigger asChild>
@@ -89,7 +97,7 @@ function EditorWithTooltip({
         </div>
       </TooltipTrigger>
       <TooltipContent side="top" className="bg-orange-600 text-white border-orange-700">
-        <p className="font-medium">Write your changes here</p>
+        <p className="font-medium">{t("task:writeYourChangesHere")}</p>
       </TooltipContent>
     </Tooltip>
   );
@@ -126,7 +134,55 @@ function FileInput({
   );
 }
 
+function useChatPluginComposer(p: {
+  inputRef: ChatInputEditorAreaProps["inputRef"];
+  submitDisabled: boolean;
+  isEnhancingPrompt: boolean;
+  hasContent: boolean;
+  identity: string;
+  onSubmit: () => void;
+}): PluginComposerCapability {
+  const focus = useComposerFocus(p.inputRef);
+  return useStablePluginComposerCapability(
+    {
+      insertText: (text) => {
+        const editor = p.inputRef.current;
+        if (!editor) return false;
+        const insertion = composerInsertionText(text, editor.getCharBefore());
+        if (!insertion) return false;
+        focus();
+        editor.insertText(insertion, editor.getSelectionStart(), editor.getSelectionEnd());
+        return true;
+      },
+      focus: () => {
+        if (!p.inputRef.current) return false;
+        focus();
+        return true;
+      },
+      // Revalidated at call time against the same gate the slot advertises as
+      // `submittable`, so a capability never submits an empty draft it just
+      // told the plugin was not submittable.
+      //
+      // The draft is read from the editor, not from `hasContent`. A plugin may
+      // insert a transcript and submit in one callback, and React has not
+      // re-rendered by then, so the render snapshot still says "empty" while
+      // the editor already holds the text. `submitDraft` reads its own
+      // synchronous `valueRef` for the same reason.
+      submit: async () => {
+        if (p.isEnhancingPrompt || p.submitDisabled) return false;
+        const liveDraft = p.inputRef.current?.getValue() ?? "";
+        if (liveDraft.trim().length === 0 && !p.hasContent) return false;
+        p.onSubmit();
+        return true;
+      },
+    },
+    p.identity,
+  );
+}
+
 export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
+  useComposerActivity({ busy: Boolean(p.isEnhancingPrompt) });
+  const { t } = useTranslation("chat");
   const { inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder } = p;
   const { isDisabled, planModeEnabled, planModeAvailable, mcpServers } = p;
   const { submitKey, setIsInputFocused, sessionId, taskId, planContextEnabled } = p;
@@ -137,13 +193,26 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const { contextFiles, onImplementPlan, onEnhancePrompt, isEnhancingPrompt } = p;
   const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar, hideAgentControls } = p;
   const { hidePlanMode } = p;
-  const { onVoiceTranscript, onVoiceAutoSend } = p;
   // Exclude auto-added plan context from the count — it's always present in plan mode
   // and shouldn't by itself enable the send button.
   const userContextCount = planContextEnabled ? Math.max(0, contextCount - 1) : contextCount;
   const hasContent = value.trim().length > 0 || userContextCount > 0;
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
   const wrappedSubmit = isEnhancingPrompt || p.submitDisabled ? () => {} : handleSubmitWithReset;
+
+  const composerCapability = useChatPluginComposer({
+    inputRef,
+    submitDisabled: p.submitDisabled,
+    isEnhancingPrompt: Boolean(isEnhancingPrompt),
+    hasContent,
+    // The container is not remounted when the user switches task or session,
+    // so this is what tells a captured plugin handle it has been superseded.
+    identity: composerIdentity(taskId ? "task-chat" : "quick-chat", taskId, sessionId),
+    onSubmit: handleSubmitWithReset,
+  });
+  const submitDisabledReason = p.hasPendingAttachmentUploads
+    ? t("chat:attachmentUploadPendingSubmit")
+    : p.submitDisabledReason;
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -189,10 +258,12 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         canCancelAgent={p.canCancelAgent}
         hasContent={hasContent}
         isDisabled={p.submitDisabled}
-        submitDisabledReason={p.submitDisabledReason}
+        submitDisabledReason={submitDisabledReason}
         isSending={isSending}
         onCancel={onCancel}
         onSubmit={wrappedSubmit}
+        composerCapability={composerCapability}
+        composerSurface={taskId ? "task-chat" : "quick-chat"}
         submitKey={submitKey}
         contextCount={contextCount}
         contextPopoverOpen={contextPopoverOpen}
@@ -205,8 +276,6 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         isEnhancingPrompt={isEnhancingPrompt}
         isUtilityConfigured={isUtilityConfigured}
         onAttachFiles={handleAttachFiles}
-        onVoiceTranscript={onVoiceTranscript}
-        onVoiceAutoSend={onVoiceAutoSend}
         hideSessionsDropdown={hideSessionsDropdown}
         minimalToolbar={minimalToolbar}
         hideAgentControls={hideAgentControls}
@@ -254,13 +323,69 @@ function PromptResultRecoveryArea({ children }: { children?: React.ReactNode }) 
   return <div className="mt-2">{children}</div>;
 }
 
-/** Glow class for the outer wrapper. The pulsing glow lives on the wrapper
- * (not the inner box) because the inner box has `overflow-hidden`, which would
- * clip a child pseudo-element's outer box-shadow. */
+/** Glow class for the absolute pulse target outside the overflow-hidden box. */
 function chatInputGlowClass(isAgentBusy: boolean, isStarting: boolean): string {
   if (isAgentBusy) return "chat-input-glow-running";
   if (isStarting) return "chat-input-glow-starting";
   return "";
+}
+
+function ChatInputGlow({ className }: { className: string }) {
+  if (!className) return null;
+  return (
+    <CompositorPulse
+      aria-hidden
+      data-testid="chat-input-glow"
+      className={className}
+      minimumOpacity={0.4}
+      minimumAtEndpoints
+    />
+  );
+}
+
+function useChatInputDrop(addFiles: (files: File[]) => Promise<void>) {
+  const [isDragging, setIsDragging] = useState(false);
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+  const handleDragEnter = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer.types.includes("Files")) setIsDragging(true);
+  }, []);
+  const handleDragLeave = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const { clientX, clientY } = event;
+    if (
+      clientX <= rect.left ||
+      clientX >= rect.right ||
+      clientY <= rect.top ||
+      clientY >= rect.bottom
+    ) {
+      setIsDragging(false);
+    }
+  }, []);
+  const handleDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setIsDragging(false);
+      const files = Array.from(event.dataTransfer.files).filter(
+        (file) => file.size > 0 || file.type !== "",
+      );
+      if (files.length > 0) void addFiles(files);
+    },
+    [addFiles],
+  );
+  return { handleDragEnter, handleDragLeave, handleDragOver, handleDrop, isDragging };
+}
+
+function useChatFocusHintVisibility(showFocusHint: boolean): boolean {
+  const { isMobile } = useResponsiveBreakpoint();
+  return showFocusHint && !isMobile;
 }
 
 export function ChatInputBody({
@@ -280,52 +405,14 @@ export function ChatInputBody({
   editorAreaProps,
   promptResultRecovery,
 }: ChatInputBodyProps) {
-  const [isDragging, setIsDragging] = useState(false);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  }, []);
-
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.dataTransfer.types.includes("Files")) {
-      setIsDragging(true);
-    }
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // Only set false when leaving the container (not entering a child)
-    const rect = e.currentTarget.getBoundingClientRect();
-    const { clientX, clientY } = e;
-    if (
-      clientX <= rect.left ||
-      clientX >= rect.right ||
-      clientY <= rect.top ||
-      clientY >= rect.bottom
-    ) {
-      setIsDragging(false);
-    }
-  }, []);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDragging(false);
-      const files = Array.from(e.dataTransfer.files).filter((f) => f.size > 0 || f.type !== "");
-      if (files.length > 0) {
-        void addFiles(files);
-      }
-    },
-    [addFiles],
-  );
+  const focusHintVisible = useChatFocusHintVisibility(showFocusHint);
+  const glowClass = chatInputGlowClass(isAgentBusy, isStarting);
+  const hasGlow = Boolean(glowClass);
+  const drop = useChatInputDrop(addFiles);
 
   return (
-    <div className={cn("relative", chatInputGlowClass(isAgentBusy, isStarting))}>
+    <div className={cn("relative", { isolate: hasGlow })}>
+      <ChatInputGlow className={glowClass} />
       <ResizeHandle
         planModeEnabled={planModeEnabled}
         isAgentBusy={isAgentBusy}
@@ -344,14 +431,14 @@ export function ChatInputBody({
           hasClarification && "border-sky-400/50",
           showRequestChangesTooltip && "animate-pulse border-orange-500",
           hasPendingComments && "border-amber-500/50",
-          isDragging && "border-primary ring-1 ring-primary/30",
+          drop.isDragging && "border-primary ring-1 ring-primary/30",
         )}
-        onDragOver={handleDragOver}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+        onDragOver={drop.handleDragOver}
+        onDragEnter={drop.handleDragEnter}
+        onDragLeave={drop.handleDragLeave}
+        onDrop={drop.handleDrop}
       >
-        <ChatInputFocusHint visible={showFocusHint} />
+        <ChatInputFocusHint visible={focusHintVisible} />
         <ChatInputContextArea {...contextAreaProps} />
         <div
           ref={containerRef}
@@ -361,7 +448,7 @@ export function ChatInputBody({
         >
           <ChatInputEditorArea
             {...editorAreaProps}
-            editorClassName={cn(editorAreaProps.editorClassName, showFocusHint && "pr-28")}
+            editorClassName={cn(editorAreaProps.editorClassName, focusHintVisible && "pr-28")}
           />
         </div>
       </div>

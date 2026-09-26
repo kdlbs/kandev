@@ -3,10 +3,14 @@
 import { useCallback } from "react";
 import { KEY_SEQUENCES } from "@/lib/terminal/key-sequences";
 import { useShellKeySender } from "@/hooks/domains/session/use-shell-key-sender";
-import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
+import {
+  resolveVisualViewportPosition,
+  useVisualViewportOffset,
+} from "@/hooks/use-visual-viewport-offset";
 import { refocusXtermTextarea } from "@/lib/terminal/refocus-xterm";
 import { useShellModifiersStore } from "@/lib/terminal/shell-modifiers";
 import { KEYS, KeybarButton, ModifierButton } from "./mobile-terminal-keybar-helpers";
+import { useTranslation } from "react-i18next";
 
 export type MobileTerminalKeybarProps = {
   sessionId: string | null | undefined;
@@ -23,6 +27,7 @@ export function MobileTerminalKeybar({
   visible,
   baseBottomOffset,
 }: MobileTerminalKeybarProps) {
+  const { t } = useTranslation();
   const send = useShellKeySender(sessionId);
   const { keyboardOpen, viewportBottom } = useVisualViewportOffset();
   const ctrl = useShellModifiersStore((s) => s.ctrl);
@@ -50,7 +55,12 @@ export function MobileTerminalKeybar({
 
   if (!visible || !sessionId) return null;
 
-  const position = resolvePosition({ keyboardOpen, viewportBottom, baseBottomOffset });
+  const position = resolveVisualViewportPosition({
+    keyboardOpen,
+    viewportBottom,
+    barHeight: KEYBAR_HEIGHT_PX,
+    baseBottomOffset,
+  });
 
   return (
     <div
@@ -59,30 +69,40 @@ export function MobileTerminalKeybar({
       style={{ ...position, height: `${KEYBAR_HEIGHT_PX}px` }}
     >
       <div className="flex w-full gap-1 overflow-x-auto px-2 py-1.5">
-        <ModifierButton id="ctrl" label="Ctrl" ariaLabel="Control" state={ctrl} onTap={onCtrlTap} />
+        <ModifierButton
+          id="ctrl"
+          label={t("task:ctrl")}
+          ariaLabel={t("task:control")}
+          state={ctrl}
+          onTap={onCtrlTap}
+        />
         <ModifierButton
           id="shift"
-          label="Shift"
-          ariaLabel="Shift"
+          label={t("task:shift")}
+          ariaLabel={t("task:shift")}
           state={shift}
           onTap={onShiftTap}
         />
         <KeybarButton
           id="ctrl-c"
-          ariaLabel="Control C"
+          ariaLabel={t("task:controlC")}
           onTap={() => tapSend(KEY_SEQUENCES.ctrlC)}
           variant="destructive"
         >
           ^C
         </KeybarButton>
-        <KeybarButton id="ctrl-d" ariaLabel="Control D" onTap={() => tapSend(KEY_SEQUENCES.ctrlD)}>
+        <KeybarButton
+          id="ctrl-d"
+          ariaLabel={t("task:controlD")}
+          onTap={() => tapSend(KEY_SEQUENCES.ctrlD)}
+        >
           ^D
         </KeybarButton>
         {KEYS.map((key) => (
           <KeybarButton
             key={key.id}
             id={key.id}
-            ariaLabel={key.ariaLabel}
+            ariaLabel={t(key.ariaLabelKey)}
             onTap={() => tapSend(key.seq)}
           >
             {key.label}
@@ -91,25 +111,4 @@ export function MobileTerminalKeybar({
       </div>
     </div>
   );
-}
-
-function resolvePosition({
-  keyboardOpen,
-  viewportBottom,
-  baseBottomOffset,
-}: {
-  keyboardOpen: boolean;
-  viewportBottom: number;
-  baseBottomOffset: string | undefined;
-}): React.CSSProperties {
-  // iOS Safari drifts fixed elements positioned via `bottom` while the visual
-  // viewport scrolls with the keyboard up. Anchoring via `top` tied to the
-  // visual viewport's bottom edge stays glued to the keyboard.
-  if (keyboardOpen) {
-    return { top: `${viewportBottom - KEYBAR_HEIGHT_PX}px`, bottom: "auto" };
-  }
-  const base = baseBottomOffset
-    ? `calc(${baseBottomOffset} + env(safe-area-inset-bottom, 0px))`
-    : "env(safe-area-inset-bottom, 0px)";
-  return { bottom: base };
 }

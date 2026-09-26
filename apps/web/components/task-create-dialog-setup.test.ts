@@ -1,16 +1,30 @@
 import { renderHook } from "@testing-library/react";
+import type { FormEvent } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskCreateDialogProps } from "./task-create-dialog";
+import type { RepositoryBranchesState } from "@/lib/state/slices/workspace/types";
 
 const mocks = vi.hoisted(() => ({
   agentGeneratedTaskTitles: false,
   submit: vi.fn(),
+  compatibilityBlocked: false,
+  agentCompatState: "compatible" as
+    | "compatible"
+    | "selected-incompatible"
+    | "selected-unavailable"
+    | "none-compatible",
+  shortcutHandler: null as ((event: unknown) => void) | null,
+  submitDeps: {} as Record<string, unknown>,
+  workflowAgentOverridesBlockedReason: undefined as string | undefined,
 }));
 
 vi.mock("@/lib/keyboard/constants", () => ({ SHORTCUTS: { SUBMIT: "submit" } }));
 vi.mock("@/hooks/use-is-utility-configured", () => ({ useIsUtilityConfigured: () => false }));
 vi.mock("@/hooks/use-keyboard-shortcut", () => ({
-  useKeyboardShortcutHandler: () => vi.fn(),
+  useKeyboardShortcutHandler: (_shortcut: string, handler: (event: unknown) => void) => {
+    mocks.shortcutHandler = handler;
+    return vi.fn();
+  },
 }));
 vi.mock("@/hooks/use-utility-agent-generator", () => ({
   useUtilityAgentGenerator: () => ({ enhancePrompt: vi.fn(), isEnhancingPrompt: false }),
@@ -26,17 +40,45 @@ vi.mock("@/hooks/use-prompt-result-delivery", () => ({
 }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({
+    getState: () => ({
+      repositoryBranchPolicies: { revisionByRepositoryId: {} },
+    }),
+  }),
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       userSettings: { agentGeneratedTaskTitles: mocks.agentGeneratedTaskTitles },
       upsertRepository: vi.fn(),
+      setRepositoryBranchPolicies: vi.fn(),
+      setRepositoryBranchPoliciesLoading: vi.fn(),
+      repositorySets: {
+        itemsByWorkspaceId: {},
+        loadingByWorkspaceId: {},
+        loadedByWorkspaceId: {},
+        revisionByWorkspaceId: {},
+      },
+      setRepositorySets: vi.fn(),
+      setRepositorySetsLoading: vi.fn(),
     }),
 }));
 vi.mock("@/components/task-create-dialog-submit", () => ({
-  useTaskSubmitHandlers: () => ({ handleSubmit: mocks.submit, pendingDiscard: null }),
+  useTaskSubmitHandlers: (deps: Record<string, unknown>) => {
+    mocks.submitDeps = deps;
+    return { handleSubmit: mocks.submit, pendingDiscard: null };
+  },
 }));
 vi.mock("@/components/task-create-dialog-workflow-context", () => ({
   useResolvedTaskCreateWorkflowContext: (props: TaskCreateDialogProps) => props,
+}));
+vi.mock("@/components/task-create-dialog-workflow-agent-override-validation", () => ({
+  buildWorkflowAgentOverrideValidation: () => ({
+    rows: [],
+    options: [],
+    loading: false,
+    error: false,
+    invalid: Boolean(mocks.workflowAgentOverridesBlockedReason),
+    blockedReason: mocks.workflowAgentOverridesBlockedReason,
+  }),
 }));
 vi.mock("@/components/task-create-dialog-state", () => ({
   computeIsTaskStarted: () => false,
@@ -58,6 +100,8 @@ vi.mock("@/components/task-create-dialog-state", () => ({
     executorProfileId: "",
     freshBranchEnabled: false,
     noRepository: false,
+    blockedBy: ["dep-1"],
+    setBlockedBy: vi.fn(),
     workspacePath: "",
     isCreatingSession: false,
     isCreatingTask: false,
@@ -76,7 +120,8 @@ vi.mock("@/components/task-create-dialog-state", () => ({
     workflows: [],
     agentProfiles: [],
     executors: [],
-    snapshots: [],
+    snapshots: {},
+    workspaceSnapshotRead: {},
     repositories: [],
     repositoriesLoading: false,
     refreshRepositories: vi.fn(),
@@ -101,7 +146,8 @@ vi.mock("@/components/task-create-dialog-state", () => ({
       agentProfilesLoading: false,
       executorsLoading: false,
       workflowAgentLocked: false,
-      noCompatibleAgent: false,
+      noCompatibleAgent: mocks.compatibilityBlocked,
+      agentCompatState: mocks.agentCompatState,
       selectedExecutorProfileName: "",
       executorHint: "",
       hasRepositorySelection: false,
@@ -113,7 +159,7 @@ vi.mock("@/components/task-create-dialog-state", () => ({
   useSessionRepoName: () => null,
 }));
 
-import { useTaskCreateDialogSetup } from "./task-create-dialog-setup";
+import { hasUnavailableSavedBase, useTaskCreateDialogSetup } from "./task-create-dialog-setup";
 
 const props: TaskCreateDialogProps = {
   open: true,
@@ -127,7 +173,11 @@ const props: TaskCreateDialogProps = {
 describe("useTaskCreateDialogSetup auto-title mode", () => {
   beforeEach(() => {
     mocks.agentGeneratedTaskTitles = false;
+    mocks.compatibilityBlocked = false;
+    mocks.agentCompatState = "compatible";
+    mocks.shortcutHandler = null;
     mocks.submit.mockReset();
+    mocks.workflowAgentOverridesBlockedReason = undefined;
   });
 
   it.each([
@@ -141,4 +191,74 @@ describe("useTaskCreateDialogSetup auto-title mode", () => {
 
     expect(result.current.autoTitle).toBe(expected);
   });
+});
+
+it("forwards the selected dependencies to the submit handlers", () => {
+  // The payload builder handled blocked_by correctly all along; the break was
+  // this hop — useSubmitHandlersWiring never passed blockedBy through, so the
+  // create dialog's selection silently never reached the request. Assert the
+  // hop itself, not just the leaf.
+  renderHook(() => useTaskCreateDialogSetup({ ...props, mode: "create" }));
+  expect(mocks.submitDeps.blockedBy).toEqual(["dep-1"]);
+});
+
+describe("compatibility submit guard", () => {
+  it.each(["selected-incompatible", "none-compatible"] as const)(
+    "blocks the form and keyboard submit for %s",
+    (agentCompatState) => {
+      mocks.compatibilityBlocked = true;
+      mocks.agentCompatState = agentCompatState;
+      const { result } = renderHook(() => useTaskCreateDialogSetup({ ...props, mode: "create" }));
+      const event = { preventDefault: vi.fn() } as unknown as FormEvent;
+      const shortcutEvent = { preventDefault: vi.fn() } as unknown as FormEvent;
+
+      result.current.guardedHandleSubmit(event);
+      mocks.shortcutHandler?.(shortcutEvent);
+
+      expect(event.preventDefault).toHaveBeenCalledTimes(1);
+      expect(shortcutEvent.preventDefault).toHaveBeenCalledTimes(1);
+      expect(mocks.submit).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("workflow override keyboard submit guard", () => {
+  it.each(["replacement profile is unavailable", "workflow agents could not be loaded"])(
+    "blocks create submission when validation fails: %s",
+    (blockedReason) => {
+      mocks.workflowAgentOverridesBlockedReason = blockedReason;
+      const { result } = renderHook(() => useTaskCreateDialogSetup({ ...props, mode: "create" }));
+      const formEvent = { preventDefault: vi.fn() } as unknown as FormEvent;
+      const shortcutEvent = { preventDefault: vi.fn() } as unknown as FormEvent;
+
+      result.current.guardedHandleSubmit(formEvent);
+      mocks.shortcutHandler?.(shortcutEvent);
+
+      expect(formEvent.preventDefault).toHaveBeenCalledTimes(1);
+      expect(shortcutEvent.preventDefault).toHaveBeenCalledTimes(1);
+      expect(mocks.submit).not.toHaveBeenCalled();
+    },
+  );
+});
+
+it("validates saved bases against qualified branch option values", () => {
+  const repositoryBranches = {
+    itemsByRepositoryId: {
+      "repo-1": [{ name: "main", type: "remote", remote: "origin" }],
+    },
+    loadedByRepositoryId: { "repo-1": true },
+  } as unknown as RepositoryBranchesState;
+
+  expect(
+    hasUnavailableSavedBase(
+      [{ key: "r0", repositoryId: "repo-1", branch: "", baseBranch: "main" }],
+      repositoryBranches,
+    ),
+  ).toBe(true);
+  expect(
+    hasUnavailableSavedBase(
+      [{ key: "r0", repositoryId: "repo-1", branch: "", baseBranch: "origin/main" }],
+      repositoryBranches,
+    ),
+  ).toBe(false);
 });

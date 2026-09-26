@@ -15,7 +15,7 @@ func terminateProcess(p *os.Process) error {
 
 // waitPtyProcess waits for the PTY process to exit and returns exit info.
 // On Unix, uses cmd.Wait() which inspects WaitStatus for signal information.
-func waitPtyProcess(cmd *exec.Cmd, _ PtyHandle) (exitCode int, signalName string, err error) {
+func waitPtyProcess(cmd *exec.Cmd) (exitCode int, signalName string, err error) {
 	err = cmd.Wait()
 	if err == nil {
 		return 0, "", nil

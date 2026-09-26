@@ -1,5 +1,8 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { t } from "@/lib/i18n";
+export { generateUUID } from "./uuid";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -9,7 +12,7 @@ export function cn(...inputs: ClassValue[]) {
  * Format a cost stored in subcents (hundredths of a cent) as a USD
  * dollar string. The backend persists every cost figure as int64
  * subcents so token-rate math stays integer-only;
- * docs/specs/office-costs/spec.md. UI consumers should never multiply
+ * docs/specs/office/requirements/costs.md. UI consumers should never multiply
  * or divide the raw value themselves — call this helper so the unit
  * boundary lives in one place.
  */
@@ -18,58 +21,6 @@ export function formatDollars(subcents: number | null | undefined): string {
     return "$0.00";
   }
   return `$${(subcents / 10000).toFixed(2)}`;
-}
-
-let uuidFallbackCounter = 0;
-let uuidFallbackContextCounter = 0;
-
-function createUuidFallbackContext(): string {
-  const entropy = new Uint32Array(2);
-  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-    try {
-      crypto.getRandomValues(entropy);
-      return entropy[0].toString(16).padStart(8, "0");
-    } catch {
-      // Fall through to the non-cryptographic legacy-environment fallback.
-    }
-  }
-
-  const monotonic = typeof performance !== "undefined" ? Math.floor(performance.now() * 1000) : 0;
-  const counter = uuidFallbackContextCounter++;
-  return ((Date.now() ^ monotonic ^ counter) >>> 0).toString(16).padStart(8, "0");
-}
-
-// Keep a per-module component so two tabs generating IDs in the same
-// millisecond do not share the timestamp/counter prefix. Prefer Web Crypto
-// entropy when available; old environments get a monotonic best-effort ID.
-const uuidFallbackContext = createUuidFallbackContext();
-
-/**
- * Generate a UUID. Falls back to crypto.getRandomValues when randomUUID is
- * unavailable (e.g., HTTP on non-localhost), then to a UUID-shaped fallback
- * with a per-context component for legacy environments without any Web Crypto API.
- */
-export function generateUUID(): string {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-
-  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-    const bytes = crypto.getRandomValues(new Uint8Array(16));
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-  }
-
-  const context = uuidFallbackContext;
-  const timestamp = Date.now().toString(16).padStart(12, "0").slice(-12);
-  const counter = (uuidFallbackCounter++ >>> 0).toString(16).padStart(8, "0");
-  const chars = `${context}${timestamp}${counter}`.padEnd(32, "0").slice(0, 32).split("");
-  chars[12] = "4";
-  chars[16] = "8";
-  const hex = chars.join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /**
@@ -204,6 +155,7 @@ export const DEFAULT_LOCAL_EXECUTOR_TYPE = "worktree";
  * @returns Formatted relative time string
  */
 export function formatRelativeTime(dateString: string): string {
+  if (parseStrictRfc3339Timestamp(dateString) === null) return "";
   const date = new Date(dateString);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -212,12 +164,15 @@ export function formatRelativeTime(dateString: string): string {
   const diffHour = Math.floor(diffMin / 60);
   const diffDay = Math.floor(diffHour / 24);
 
-  if (diffSec < 10) return "just now";
-  if (diffSec < 60) return `${diffSec}s ago`;
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHour < 24) return `${diffHour}h ago`;
-  if (diffDay === 1) return "yesterday";
-  if (diffDay < 7) return `${diffDay}d ago`;
+  // Every branch, not just the first. Localizing only "just now" would show a
+  // translated string for ten seconds and then flip to English `10s ago`, which
+  // is worse than leaving the whole ladder in English.
+  if (diffSec < 10) return t("common:justNow");
+  if (diffSec < 60) return t("common:relativeSecondsAgo", { count: diffSec });
+  if (diffMin < 60) return t("common:relativeMinutesAgo", { count: diffMin });
+  if (diffHour < 24) return t("common:relativeHoursAgo", { count: diffHour });
+  if (diffDay === 1) return t("common:relativeYesterday");
+  if (diffDay < 7) return t("common:relativeDaysAgo", { count: diffDay });
   return date.toLocaleDateString();
 }
 
@@ -233,16 +188,16 @@ export function formatPreciseTime(dateString: string): string {
   const diffSec = Math.floor(diffMs / 1000);
   const diffMin = Math.floor(diffSec / 60);
 
-  if (diffSec < 10) return "just now";
-  if (diffSec < 60) return `${diffSec}s ago`;
-  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffSec < 10) return t("common:justNow");
+  if (diffSec < 60) return t("common:relativeSecondsAgo", { count: diffSec });
+  if (diffMin < 60) return t("common:relativeMinutesAgo", { count: diffMin });
 
   const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   const sameDay =
     date.getFullYear() === now.getFullYear() &&
     date.getMonth() === now.getMonth() &&
     date.getDate() === now.getDate();
-  if (sameDay) return `Today, ${time}`;
+  if (sameDay) return t("common:preciseToday", { time });
 
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
@@ -250,7 +205,7 @@ export function formatPreciseTime(dateString: string): string {
     date.getFullYear() === yesterday.getFullYear() &&
     date.getMonth() === yesterday.getMonth() &&
     date.getDate() === yesterday.getDate();
-  if (isYesterday) return `Yesterday, ${time}`;
+  if (isYesterday) return t("common:preciseYesterday", { time });
 
   const sameYear = date.getFullYear() === now.getFullYear();
   const dateLabel = date.toLocaleDateString(undefined, {
@@ -258,7 +213,7 @@ export function formatPreciseTime(dateString: string): string {
     day: "numeric",
     year: sameYear ? undefined : "numeric",
   });
-  return `${dateLabel}, ${time}`;
+  return t("common:preciseDated", { date: dateLabel, time });
 }
 
 /**

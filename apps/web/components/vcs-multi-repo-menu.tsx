@@ -11,6 +11,7 @@ import {
   IconGitPullRequest,
   IconLoader2,
 } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
@@ -24,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { RemoteContributionActionItems } from "@/components/task/remote-contribution-action-items";
 import type { ReactNode } from "react";
 
 export type PerRepoStatus = {
@@ -31,6 +33,8 @@ export type PerRepoStatus = {
   branch: string | null;
   ahead: number;
   behind: number;
+  pushAhead: number;
+  pullBehind: number;
   hasStaged: boolean;
   hasUnstaged: boolean;
 };
@@ -42,6 +46,10 @@ export type PerRepoCallbacks = {
   onPush: (force: boolean, repo: string) => void;
   onRebase: (repo: string) => void;
   onMerge: (repo: string) => void;
+  onReplaceContribution: (repo: string) => void;
+  onUseContribution: (repo: string) => void;
+  onViewContribution: (repo: string) => void;
+  onCompareContribution: (repo: string) => void;
 };
 
 export type PrimaryButtonConfig = {
@@ -51,68 +59,170 @@ export type PrimaryButtonConfig = {
   tooltip: string;
 };
 
+/**
+ * One complete sentence per action rather than a single frame with the action
+ * name interpolated. `primaryButtonConfig.label` is itself already translated,
+ * and a translated value dropped into a translated frame cannot be declined to
+ * agree with the surrounding grammar (genitive in German/Russian, and so on) —
+ * nor can the frame be reordered around it. Keyed off `primaryAction`, which is
+ * an untranslated discriminant.
+ */
+const PICK_REPOSITORY_KEYS: Record<"commit" | "push" | "pr" | "rebase", string> = {
+  commit: "integrations:pickARepositoryForCommit",
+  push: "integrations:pickARepositoryForPush",
+  pr: "integrations:pickARepositoryForCreatePr",
+  rebase: "integrations:pickARepositoryForRebase",
+};
+
 const ITEM_CLASS = "cursor-pointer gap-3";
 const ICON_CLASS = "h-4 w-4 text-muted-foreground";
+const PUSH_ACTIONS: VcsActionKey[] = ["push", "force-push"];
 
-type ActionKey = "commit" | "push" | "pr" | "pull" | "rebase" | "merge" | "force-push";
+export type VcsActionKey = "commit" | "push" | "pr" | "pull" | "rebase" | "merge" | "force-push";
+
+export function isRemoteActionBlockedForRepository(
+  action: VcsActionKey,
+  repositoryName: string,
+  blockedRepositoryName: string | undefined,
+  pushDisabled: boolean,
+  pullDisabled: boolean,
+): boolean {
+  const actionBlocked =
+    (PUSH_ACTIONS.includes(action) ? pushDisabled : false) ||
+    (action === "pull" ? pullDisabled : false);
+  return actionBlocked && (!blockedRepositoryName || repositoryName === blockedRepositoryName);
+}
+
+function shouldHideContributionAction(
+  action: ActionDef,
+  repo: string,
+  hideBlockedContribution: boolean,
+  blockedRepositoryName: string | undefined,
+) {
+  return (
+    hideBlockedContribution &&
+    PUSH_ACTIONS.includes(action.key) &&
+    blockedRepositoryName !== undefined &&
+    repo === blockedRepositoryName
+  );
+}
 
 type ActionDef = {
-  key: ActionKey;
-  label: string;
+  key: VcsActionKey;
+  /** Catalog key, resolved at render: `t()` here would freeze at the boot locale. */
+  labelKey: string;
   icon: ReactNode;
   /** Returns true when this action should be disabled for a given repo. */
   disabledFor: (status: PerRepoStatus | undefined) => boolean;
   invoke: (repo: string, callbacks: PerRepoCallbacks) => void;
 };
 
+function PerRepoActionItem({
+  action,
+  repo,
+  status,
+  disabled,
+  pushDisabled,
+  pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
+  blockedRepositoryName,
+  repoDisplayName,
+  callbacks,
+}: {
+  action: ActionDef;
+  repo: string;
+  status: PerRepoStatus | undefined;
+  disabled: boolean;
+  pushDisabled: boolean;
+  pullDisabled: boolean;
+  pushDisabledReason: string | undefined;
+  pullDisabledReason: string | undefined;
+  blockedRepositoryName: string | undefined;
+  repoDisplayName: (repositoryName: string) => string | undefined;
+  callbacks: PerRepoCallbacks;
+}) {
+  const { t } = useTranslation();
+  const ahead = status?.pushAhead ?? 0;
+  const behind = status?.pullBehind ?? 0;
+  const label = repoDisplayName(repo) || repo || t("integrations:repository");
+  const actionBlocked = isRemoteActionBlockedForRepository(
+    action.key,
+    repo,
+    blockedRepositoryName,
+    pushDisabled,
+    pullDisabled,
+  );
+  let actionDisabledReason: string | undefined;
+  if (actionBlocked) {
+    actionDisabledReason = PUSH_ACTIONS.includes(action.key)
+      ? (pushDisabledReason ?? t("task:divergedActionsUnavailable"))
+      : (pullDisabledReason ?? t("task:divergedActionsUnavailable"));
+  }
+  return (
+    <DropdownMenuItem
+      className={ITEM_CLASS}
+      onClick={() => action.invoke(repo, callbacks)}
+      disabled={disabled || actionBlocked || action.disabledFor(status)}
+      title={actionDisabledReason}
+    >
+      <span className="flex-1 truncate">{label}</span>
+      <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+        {ahead > 0 && <span>↑{ahead}</span>}
+        {behind > 0 && <span className="text-yellow-500">↓{behind}</span>}
+      </span>
+    </DropdownMenuItem>
+  );
+}
+
 const ACTION_DEFS: ActionDef[] = [
   {
     key: "commit",
-    label: "Commit",
+    labelKey: "integrations:commit",
     icon: <IconGitCommit className={ICON_CLASS} />,
     disabledFor: (s) => !((s?.hasStaged ?? false) || (s?.hasUnstaged ?? false)),
     invoke: (repo, cb) => cb.onCommit(repo),
   },
   {
     key: "push",
-    label: "Push",
+    labelKey: "integrations:push",
     icon: <IconCloudUpload className={ICON_CLASS} />,
-    disabledFor: (s) => (s?.ahead ?? 0) === 0,
+    disabledFor: (s) => (s?.pushAhead ?? 0) === 0,
     invoke: (repo, cb) => cb.onPush(false, repo),
   },
   {
     key: "pr",
-    label: "Create PR",
+    labelKey: "integrations:createPr",
     icon: <IconGitPullRequest className={ICON_CLASS} />,
     disabledFor: () => false,
     invoke: (repo, cb) => cb.onPR(repo),
   },
   {
     key: "pull",
-    label: "Pull",
+    labelKey: "integrations:pull",
     icon: <IconCloudDownload className={ICON_CLASS} />,
     disabledFor: () => false,
     invoke: (repo, cb) => cb.onPull(repo),
   },
   {
     key: "rebase",
-    label: "Rebase",
+    labelKey: "integrations:rebase",
     icon: <IconGitCherryPick className={ICON_CLASS} />,
     disabledFor: () => false,
     invoke: (repo, cb) => cb.onRebase(repo),
   },
   {
     key: "merge",
-    label: "Merge",
+    labelKey: "integrations:merge",
     icon: <IconGitMerge className={ICON_CLASS} />,
     disabledFor: () => false,
     invoke: (repo, cb) => cb.onMerge(repo),
   },
   {
     key: "force-push",
-    label: "Force Push",
+    labelKey: "integrations:forcePush",
     icon: <IconAlertTriangle className={ICON_CLASS} />,
-    disabledFor: (s) => (s?.ahead ?? 0) === 0,
+    disabledFor: (s) => (s?.pushAhead ?? 0) === 0,
     invoke: (repo, cb) => cb.onPush(true, repo),
   },
 ];
@@ -126,6 +236,12 @@ const ACTION_DEFS: ActionDef[] = [
 function PerRepoActionSub({
   action,
   disabled,
+  pushDisabled,
+  pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
+  blockedRepositoryName,
+  hideBlockedContribution,
   repoNames,
   perRepoStatus,
   repoDisplayName,
@@ -133,37 +249,52 @@ function PerRepoActionSub({
 }: {
   action: ActionDef;
   disabled: boolean;
+  pushDisabled: boolean;
+  pullDisabled: boolean;
+  pushDisabledReason?: string;
+  pullDisabledReason?: string;
+  blockedRepositoryName: string | undefined;
+  hideBlockedContribution: boolean;
   repoNames: string[];
   perRepoStatus: PerRepoStatus[];
   repoDisplayName: (repositoryName: string) => string | undefined;
   callbacks: PerRepoCallbacks;
 }) {
+  const { t } = useTranslation();
   const statusByName = new Map(perRepoStatus.map((s) => [s.repository_name, s]));
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger className={ITEM_CLASS} disabled={disabled}>
         {action.icon}
-        <span className="flex-1">{action.label}</span>
+        <span className="flex-1">{t(action.labelKey)}</span>
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-52">
         {repoNames.map((repo) => {
-          const status = statusByName.get(repo);
-          const ahead = status?.ahead ?? 0;
-          const behind = status?.behind ?? 0;
-          const label = repoDisplayName(repo) || repo || "Repository";
+          if (
+            shouldHideContributionAction(
+              action,
+              repo,
+              hideBlockedContribution,
+              blockedRepositoryName,
+            )
+          ) {
+            return null;
+          }
           return (
-            <DropdownMenuItem
+            <PerRepoActionItem
               key={repo || "__no_repo__"}
-              className={ITEM_CLASS}
-              onClick={() => action.invoke(repo, callbacks)}
-              disabled={disabled || action.disabledFor(status)}
-            >
-              <span className="flex-1 truncate">{label}</span>
-              <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                {ahead > 0 && <span>↑{ahead}</span>}
-                {behind > 0 && <span className="text-yellow-500">↓{behind}</span>}
-              </span>
-            </DropdownMenuItem>
+              action={action}
+              repo={repo}
+              status={statusByName.get(repo)}
+              disabled={disabled}
+              pushDisabled={pushDisabled}
+              pullDisabled={pullDisabled}
+              pushDisabledReason={pushDisabledReason}
+              pullDisabledReason={pullDisabledReason}
+              blockedRepositoryName={blockedRepositoryName}
+              repoDisplayName={repoDisplayName}
+              callbacks={callbacks}
+            />
           );
         })}
       </DropdownMenuSubContent>
@@ -184,20 +315,39 @@ function MultiRepoVcsDropdown({
   baseBranch,
   repoNames,
   perRepoStatus,
+  pushDisabled,
+  pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
+  showContributionResolution,
+  replaceDisabled,
+  useDisabled,
+  blockedRepositoryName,
   repoDisplayName,
   callbacks,
+  prNumber,
 }: {
   disabled: boolean;
   baseBranch: string;
   repoNames: string[];
   perRepoStatus: PerRepoStatus[];
+  pushDisabled: boolean;
+  pullDisabled: boolean;
+  pushDisabledReason?: string;
+  pullDisabledReason?: string;
+  showContributionResolution: boolean;
+  replaceDisabled: boolean;
+  useDisabled: boolean;
+  blockedRepositoryName: string | undefined;
   repoDisplayName: (repositoryName: string) => string | undefined;
   callbacks: PerRepoCallbacks;
+  prNumber?: number;
 }) {
+  const { t } = useTranslation();
   return (
     <DropdownMenuContent align="end" className="w-56">
       <DropdownMenuLabel className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">
-        Pick action, then repo
+        {t("integrations:pickActionThenRepo")}
       </DropdownMenuLabel>
       {ACTION_DEFS.map((action, idx) => (
         <div key={action.key}>
@@ -207,6 +357,12 @@ function MultiRepoVcsDropdown({
           <PerRepoActionSub
             action={action}
             disabled={disabled}
+            pushDisabled={pushDisabled}
+            pullDisabled={pullDisabled}
+            pushDisabledReason={pushDisabledReason}
+            pullDisabledReason={pullDisabledReason}
+            blockedRepositoryName={blockedRepositoryName}
+            hideBlockedContribution={showContributionResolution}
             repoNames={repoNames}
             perRepoStatus={perRepoStatus}
             repoDisplayName={repoDisplayName}
@@ -216,15 +372,42 @@ function MultiRepoVcsDropdown({
           {action.key === "merge" && <RebaseMergeFootnote target={baseBranch} type="from" />}
         </div>
       ))}
+      {showContributionResolution && blockedRepositoryName !== undefined && (
+        <>
+          <DropdownMenuSeparator />
+          <RemoteContributionActionItems
+            disabled={disabled}
+            replaceDisabled={replaceDisabled}
+            useDisabled={useDisabled}
+            itemClassName={ITEM_CLASS}
+            onReplaceContribution={() => callbacks.onReplaceContribution(blockedRepositoryName)}
+            onUseContribution={() => callbacks.onUseContribution(blockedRepositoryName)}
+            onViewPRVersion={() => callbacks.onViewContribution(blockedRepositoryName)}
+            onCompareVersions={() => callbacks.onCompareContribution(blockedRepositoryName)}
+            prNumber={prNumber}
+            replaceLabelKey="task:publishTaskVersion"
+            useLabelKey="task:restorePublishedPRVersion"
+            viewLabelKey="task:openPROnGitHub"
+            replaceDescriptionKey="task:remoteContributionPublishDescription"
+            useDescriptionKey="task:remoteContributionRestoreDescription"
+          />
+        </>
+      )}
     </DropdownMenuContent>
   );
 }
 
 /** Inline footnote under Rebase/Merge showing the target branch. */
+// `type` stays a discriminant and never reaches the screen: rendering the union
+// member directly would make "onto"/"from" untranslatable and couple the copy to
+// the logic. Each branch resolves a whole message with the ref interpolated.
 function RebaseMergeFootnote({ target, type }: { target: string; type: "onto" | "from" }) {
+  const { t } = useTranslation();
   return (
     <div className="px-3 py-0.5 text-[10px] text-muted-foreground/60">
-      {type} {target}
+      {type === "onto"
+        ? t("integrations:ontoBranch", { branch: target })
+        : t("integrations:fromBranch", { branch: target })}
     </div>
   );
 }
@@ -243,8 +426,17 @@ export function MultiRepoVcsButton({
   baseBranch,
   repoNames,
   perRepoStatus,
+  pushDisabled,
+  pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
+  showContributionResolution,
+  replaceDisabled,
+  useDisabled,
+  blockedRepositoryName,
   repoDisplayName,
   callbacks,
+  prNumber,
 }: {
   primaryButtonConfig: PrimaryButtonConfig;
   primaryAction: "commit" | "push" | "pr" | "rebase";
@@ -253,9 +445,19 @@ export function MultiRepoVcsButton({
   baseBranch: string;
   repoNames: string[];
   perRepoStatus: PerRepoStatus[];
+  pushDisabled: boolean;
+  pullDisabled: boolean;
+  pushDisabledReason?: string;
+  pullDisabledReason?: string;
+  showContributionResolution: boolean;
+  replaceDisabled: boolean;
+  useDisabled: boolean;
+  blockedRepositoryName?: string;
   repoDisplayName: (repositoryName: string) => string | undefined;
   callbacks: PerRepoCallbacks;
+  prNumber?: number;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -288,13 +490,22 @@ export function MultiRepoVcsButton({
               baseBranch={baseBranch}
               repoNames={repoNames}
               perRepoStatus={perRepoStatus}
+              pushDisabled={pushDisabled}
+              pullDisabled={pullDisabled}
+              pushDisabledReason={pushDisabledReason}
+              pullDisabledReason={pullDisabledReason}
+              showContributionResolution={showContributionResolution}
+              replaceDisabled={replaceDisabled}
+              useDisabled={useDisabled}
+              blockedRepositoryName={blockedRepositoryName}
               repoDisplayName={repoDisplayName}
               callbacks={callbacks}
+              prNumber={prNumber}
             />
           </DropdownMenu>
         </span>
       </TooltipTrigger>
-      <TooltipContent>Pick a repository for {primaryButtonConfig.label}</TooltipContent>
+      <TooltipContent>{t(PICK_REPOSITORY_KEYS[primaryAction])}</TooltipContent>
     </Tooltip>
   );
 }

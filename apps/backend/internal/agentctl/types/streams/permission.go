@@ -2,6 +2,18 @@ package streams
 
 import "time"
 
+const (
+	PermissionStatusPending   = "pending"
+	PermissionStatusResolving = "resolving"
+
+	PermissionErrorNotFound         = "permission_not_found"
+	PermissionErrorStale            = "permission_stale"
+	PermissionErrorAlreadyResolved  = "permission_already_resolved"
+	PermissionErrorInProgress       = "permission_resolution_in_progress"
+	PermissionErrorOptionNotOffered = "permission_option_not_offered"
+	PermissionErrorDeliveryFailed   = "permission_delivery_failed"
+)
+
 // PermissionActionType categorizes the kind of action requiring approval.
 // Values are stable wire-format strings shared across agentctl, the backend
 // orchestrator, and the frontend.
@@ -128,4 +140,69 @@ type PermissionRespondResponse struct {
 
 	// Error contains error message if Success is false.
 	Error string `json:"error,omitempty"`
+}
+
+// PermissionChoice is the immutable public identity of one provider-offered
+// option. Provider metadata is intentionally excluded.
+type PermissionChoice struct {
+	OptionID string               `json:"option_id"`
+	Name     string               `json:"name"`
+	Kind     PermissionOptionKind `json:"kind"`
+}
+
+// PermissionAction is an allowlisted presentation of the requested action.
+type PermissionAction struct {
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+	Command     string `json:"command,omitempty"`
+	CWD         string `json:"cwd,omitempty"`
+	Path        string `json:"path,omitempty"`
+	Destination string `json:"destination,omitempty"`
+	Server      string `json:"server,omitempty"`
+	Tool        string `json:"tool,omitempty"`
+	Redacted    bool   `json:"redacted"`
+}
+
+// PendingAgentPermission is the safe immutable snapshot of one live request.
+type PendingAgentPermission struct {
+	TaskID     string             `json:"task_id"`
+	SessionID  string             `json:"session_id"`
+	RequestID  string             `json:"request_id"`
+	PendingID  string             `json:"pending_id"`
+	ToolCallID string             `json:"tool_call_id,omitempty"`
+	Title      string             `json:"title"`
+	Action     PermissionAction   `json:"action"`
+	Options    []PermissionChoice `json:"options"`
+	CreatedAt  time.Time          `json:"created_at"`
+	Status     string             `json:"status"`
+}
+
+type PermissionListResponse struct {
+	Permissions []PendingAgentPermission `json:"permissions"`
+	Total       int                      `json:"total"`
+}
+
+type PermissionResolveRequest struct {
+	RequestID string `json:"request_id"`
+	PendingID string `json:"pending_id"`
+	OptionID  string `json:"option_id"`
+}
+
+type PermissionResolveResponse struct {
+	RequestID  string               `json:"request_id"`
+	PendingID  string               `json:"pending_id"`
+	OptionID   string               `json:"option_id"`
+	OptionKind PermissionOptionKind `json:"option_kind"`
+	Status     string               `json:"status"`
+}
+
+type PermissionCancelRequest struct {
+	RequestID string `json:"request_id"`
+	PendingID string `json:"pending_id"`
+}
+
+type PermissionCancelResponse struct {
+	RequestID string `json:"request_id"`
+	PendingID string `json:"pending_id"`
+	Status    string `json:"status"`
 }

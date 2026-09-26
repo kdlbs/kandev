@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 01: Make Shared-Environment Session Handoff Atomic
@@ -47,7 +47,7 @@ None.
 
 ## Inputs
 
-- `docs/specs/ui/task-layout-profiles.md`, especially `Persistence guarantees` and the shared-environment task-switch scenario.
+- `docs/specs/ui/requirements/task-layout-profiles.md`, especially `Persistence guarantees` and the shared-environment task-switch scenario.
 - The atomic stale-session replacement in `apps/web/lib/state/dockview-env-switch.ts`.
 - The existing same-environment early return in `apps/web/lib/state/dockview-store.ts`.
 

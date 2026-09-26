@@ -87,12 +87,47 @@ describe("resolveDesiredWorkflowId", () => {
     });
     expect(result).toBeNull();
   });
+});
 
-  it("does not fall back to a hidden settings workflow", () => {
+// The board dropdown offers every workflow in the store — hidden ones included
+// (e.g. Improve Kandev) — so an explicitly persisted selection must survive
+// reloads instead of silently reverting to All Workflows.
+describe("resolveDesiredWorkflowId — hidden workflow selection", () => {
+  const HIDDEN_WORKFLOW_ID = "wf-hidden";
+  const VISIBLE_WORKFLOW_ID = "wf-visible";
+
+  it("honors an explicitly persisted hidden workflow filter", () => {
     const result = resolveDesiredWorkflowId({
       activeWorkflowId: null,
-      settingsWorkflowId: "wf-hidden",
-      workspaceWorkflows: [workflow("wf-hidden", { hidden: true }), workflow("wf-visible")],
+      settingsWorkflowId: HIDDEN_WORKFLOW_ID,
+      workspaceWorkflows: [
+        workflow(HIDDEN_WORKFLOW_ID, { hidden: true }),
+        workflow(VISIBLE_WORKFLOW_ID),
+      ],
+    });
+    expect(result).toBe(HIDDEN_WORKFLOW_ID);
+  });
+
+  it("honors a hidden workflow id from the URL over the persisted filter", () => {
+    const result = resolveDesiredWorkflowId({
+      activeWorkflowId: HIDDEN_WORKFLOW_ID,
+      settingsWorkflowId: VISIBLE_WORKFLOW_ID,
+      workspaceWorkflows: [
+        workflow(HIDDEN_WORKFLOW_ID, { hidden: true }),
+        workflow(VISIBLE_WORKFLOW_ID),
+      ],
+    });
+    expect(result).toBe(HIDDEN_WORKFLOW_ID);
+  });
+
+  it("does not auto-select a hidden workflow the user never chose", () => {
+    const result = resolveDesiredWorkflowId({
+      activeWorkflowId: null,
+      settingsWorkflowId: null,
+      workspaceWorkflows: [
+        workflow(HIDDEN_WORKFLOW_ID, { hidden: true }),
+        workflow(VISIBLE_WORKFLOW_ID),
+      ],
     });
     expect(result).toBeNull();
   });

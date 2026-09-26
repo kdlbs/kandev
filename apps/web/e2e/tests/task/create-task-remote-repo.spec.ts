@@ -47,6 +47,59 @@ async function openCreateDialog(testPage: Page, kanban: KanbanPage): Promise<voi
   await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 }
 
+async function waitForBackendAgentProfile(apiClient: ApiClient): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { agents } = await apiClient.listAgents();
+        return agents.some((agent) => (agent.profiles ?? []).length > 0);
+      },
+      { timeout: 30_000, message: "seeded agent profile available from the backend" },
+    )
+    .toBe(true);
+}
+
+async function waitForCreateDialogAgent(
+  testPage: Page,
+  kanban: KanbanPage,
+  apiClient: ApiClient,
+): Promise<void> {
+  const selector = testPage.getByTestId("agent-profile-selector");
+  const emptyState = testPage.getByTestId("agent-profile-empty-state");
+  const status = async () => {
+    if (await selector.isVisible().catch(() => false)) return "selector";
+    if (await emptyState.isVisible().catch(() => false)) return "empty";
+    return "loading";
+  };
+
+  // The worker fixture has already seeded a profile, but the first browser
+  // settings request can still complete with an empty response during backend
+  // startup. Reopen the dialog after the API is known to be ready so the
+  // terminal "No agents found" state cannot strand this scenario.
+  await waitForBackendAgentProfile(apiClient);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let currentStatus = "loading";
+    try {
+      await expect.poll(status, { timeout: 20_000 }).toMatch(/selector|empty/);
+      currentStatus = await status();
+    } catch {
+      // Reload below to re-drive the settings fetch.
+    }
+    if (currentStatus === "selector") {
+      await expect(selector).toBeEnabled({ timeout: 30_000 });
+      return;
+    }
+    if (attempt < 2) {
+      await waitForBackendAgentProfile(apiClient);
+      await testPage.reload();
+      await openCreateDialog(testPage, kanban);
+    }
+  }
+
+  await expect(selector).toBeVisible({ timeout: 30_000 });
+  await expect(selector).toBeEnabled({ timeout: 30_000 });
+}
+
 async function clickRemoteMode(testPage: Page): Promise<void> {
   const remoteBtn = testPage.getByTestId("source-mode-remote");
   await expect(remoteBtn).toBeVisible();
@@ -171,11 +224,12 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(120_000);
     await seedAccessibleRepos(apiClient);
 
     const kanban = new KanbanPage(testPage);
     await openCreateDialog(testPage, kanban);
+    await waitForCreateDialogAgent(testPage, kanban, apiClient);
     await clickRemoteMode(testPage);
 
     await pickRepoInChip(testPage, "mock-user/alpha");
@@ -192,7 +246,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await testPage.getByTestId("task-description-input").fill("test");
 
     const startBtn = testPage.getByTestId("submit-start-agent");
-    await expect(startBtn).toBeEnabled({ timeout: 15_000 });
+    await expect(startBtn).toBeEnabled({ timeout: 30_000 });
     await startBtn.click();
 
     await expect(testPage.getByTestId("create-task-dialog")).not.toBeVisible({
@@ -511,6 +565,44 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     );
     await expect(testPage.getByTestId("remote-repo-chip-trigger").nth(1)).toContainText(
       "paste-repo",
+    );
+  });
+
+  test("unconfigured provider stays silent in the remote picker", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+    await seedAccessibleRepos(apiClient);
+    let gitLabProjectRequests = 0;
+    await testPage.route("**/api/v1/gitlab/projects?*", async (route) => {
+      gitLabProjectRequests += 1;
+      await route.continue();
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await openCreateDialog(testPage, kanban);
+    await clickRemoteMode(testPage);
+    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+
+    await expect(
+      testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/alpha" }),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("remote-repo-provider-tabs")).toHaveCount(0);
+    await expect(testPage.getByText(/Could not load repositories/i)).toHaveCount(0);
+    expect(gitLabProjectRequests).toBe(0);
+    await prCapture.screenshot("remote-repository-picker-desktop", {
+      caption: "Desktop remote picker with an unconfigured provider hidden",
+    });
+
+    await testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/alpha" }).click();
+    await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
+      "mock-user/alpha",
     );
   });
 

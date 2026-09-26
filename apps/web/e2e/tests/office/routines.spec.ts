@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Routines", () => {
   test("create routine", async ({ officeApi, officeSeed }) => {
@@ -37,7 +38,7 @@ test.describe("Routines", () => {
 
   test("routines page renders", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office/routines");
-    await expect(testPage.getByRole("heading", { name: /Routines/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Routines/i, {
       timeout: 10_000,
     });
   });

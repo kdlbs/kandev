@@ -20,6 +20,7 @@ import { openContentSearchResult } from "./content-search-selection";
 
 const FILE_PATH = "src/components/search.tsx";
 const FILE_NAME = "search.tsx";
+const SESSION_ID = "session-1";
 
 const result: WorkspaceContentSearchResult = {
   repository_name: "frontend",
@@ -38,25 +39,37 @@ describe("openContentSearchResult", () => {
   });
 
   it("opens the matching repository file at its exact cursor position", () => {
-    openContentSearchResult(result, "/tasks/task-1");
+    openContentSearchResult(result, "/tasks/task-1", SESSION_ID);
 
-    expect(mockSetPendingCursorPosition).toHaveBeenCalledWith(FILE_PATH, 42, 7, "frontend");
-    expect(mockScrollEditorIfMounted).toHaveBeenCalledWith(
-      FILE_PATH,
-      "/tasks/task-1",
-      42,
-      7,
-      "frontend",
-    );
+    expect(mockSetPendingCursorPosition).toHaveBeenCalledWith(FILE_PATH, 42, 7, "frontend", {
+      sessionId: SESSION_ID,
+      flashLine: true,
+    });
+    expect(mockScrollEditorIfMounted).toHaveBeenCalledWith(FILE_PATH, "/tasks/task-1", 42, 7, {
+      repo: "frontend",
+      sessionId: SESSION_ID,
+      flashLine: true,
+    });
     expect(mockAddFileEditorPanel).toHaveBeenCalledWith(FILE_PATH, FILE_NAME, {
       repo: "frontend",
     });
+    expect(mockAddFileEditorPanel.mock.invocationCallOrder[0]).toBeLessThan(
+      mockScrollEditorIfMounted.mock.invocationCallOrder[0],
+    );
   });
 
   it("omits an empty repository key for a single-repo workspace", () => {
-    openContentSearchResult({ ...result, repository_name: "" }, null);
+    openContentSearchResult({ ...result, repository_name: "" }, null, SESSION_ID);
 
-    expect(mockSetPendingCursorPosition).toHaveBeenCalledWith(FILE_PATH, 42, 7, undefined);
+    expect(mockSetPendingCursorPosition).toHaveBeenCalledWith(FILE_PATH, 42, 7, undefined, {
+      sessionId: SESSION_ID,
+      flashLine: true,
+    });
+    expect(mockScrollEditorIfMounted).toHaveBeenCalledWith(FILE_PATH, null, 42, 7, {
+      repo: undefined,
+      sessionId: SESSION_ID,
+      flashLine: true,
+    });
     expect(mockAddFileEditorPanel).toHaveBeenCalledWith(FILE_PATH, FILE_NAME, {
       repo: undefined,
     });

@@ -17,6 +17,16 @@ import (
 func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 	t.Helper()
 	repo := newTestRepo(t)
+	createSearchTestSchema(t, repo)
+	return repo
+}
+
+// createSearchTestSchema applies the same minimal search-test schema to a
+// repo built on a caller-supplied *sqlx.DB (e.g. one wrapping a custom
+// counting driver), so tests needing driver-level introspection don't need
+// their own copy of this schema.
+func createSearchTestSchema(t *testing.T, repo *sqlite.Repository) {
+	t.Helper()
 	ctx := context.Background()
 
 	if _, err := repo.ExecRaw(ctx, `
@@ -35,6 +45,8 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 			workflow_id TEXT NOT NULL DEFAULT '',
 			workflow_step_id TEXT NOT NULL DEFAULT '',
 			title TEXT NOT NULL DEFAULT '',
+			assignee_user_id TEXT NOT NULL DEFAULT '',
+			assignment_generation INTEGER NOT NULL DEFAULT 0,
 			description TEXT DEFAULT '',
 			state TEXT DEFAULT 'TODO',
 			priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('critical','high','medium','low')),
@@ -43,6 +55,11 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 			labels TEXT DEFAULT '[]',
 			identifier TEXT DEFAULT '',
 			is_ephemeral INTEGER DEFAULT 0,
+			origin TEXT DEFAULT 'manual',
+			metadata TEXT DEFAULT '{}',
+			checkout_agent_id TEXT,
+			checkout_at TIMESTAMP,
+			checkout_run_id TEXT,
 			archived_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -67,7 +84,10 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 	if _, err := repo.ExecRaw(ctx, `
 		CREATE TABLE IF NOT EXISTS workflow_steps (
 			id TEXT PRIMARY KEY,
-			agent_profile_id TEXT NOT NULL DEFAULT ''
+			agent_profile_id TEXT NOT NULL DEFAULT '',
+			workflow_id TEXT NOT NULL DEFAULT '',
+			position INTEGER NOT NULL DEFAULT 0,
+			name TEXT NOT NULL DEFAULT ''
 		)
 	`); err != nil {
 		t.Fatalf("create workflow_steps table: %v", err)
@@ -80,12 +100,29 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 			role TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			decision_required INTEGER NOT NULL DEFAULT 0,
-			position INTEGER NOT NULL DEFAULT 0
+			position INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00',
+			provenance TEXT NOT NULL DEFAULT 'manual'
 		)
 	`); err != nil {
 		t.Fatalf("create workflow_step_participants table: %v", err)
 	}
-	return repo
+	// AddTaskParticipant checks for a claimable auto-cast seat by joining
+	// against workflow_step_decisions (see findClaimableAutoSeat) — stub it
+	// out here so callers of AddTaskParticipant don't need their own copy.
+	if _, err := repo.ExecRaw(ctx, `
+		CREATE TABLE IF NOT EXISTS workflow_step_decisions (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL DEFAULT '',
+			step_id TEXT NOT NULL DEFAULT '',
+			participant_id TEXT NOT NULL DEFAULT '',
+			decision TEXT NOT NULL DEFAULT '',
+			decided_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00',
+			superseded_at TIMESTAMP NULL
+		)
+	`); err != nil {
+		t.Fatalf("create workflow_step_decisions table: %v", err)
+	}
 }
 
 func insertTask(t *testing.T, repo *sqlite.Repository, ctx context.Context, id, wsID, title, desc, identifier string) {
@@ -748,5 +785,115 @@ func TestCountActionableTasksForAgent_AgentIsolation(t *testing.T) {
 	}
 	if countB != 2 {
 		t.Errorf("agent-b: expected 2, got %d", countB)
+	}
+}
+
+// Automation runs are hidden from the task list by their origin, not by
+// is_ephemeral: they are ordinary persistent tasks with their own destination
+// (docs/specs/office/requirements/automations-settings.md). The quick chat alongside them
+// still behaves exactly as it did.
+func TestOfficeTaskListsExcludeAutomationOriginTasks(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	insertTask(t, repo, ctx, "human", "ws-auto", "Nightly sweep report", "", "KAN-1")
+	now := "2025-01-01 00:00:00"
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO tasks
+			(id, workspace_id, title, identifier, origin, created_at, updated_at)
+		VALUES ('auto', 'ws-auto', 'Nightly sweep run', 'KAN-2', 'automation_run', ?, ?)
+	`, now, now); err != nil {
+		t.Fatalf("insert automation task: %v", err)
+	}
+
+	listed, err := repo.ListTasksByWorkspace(ctx, "ws-auto", true)
+	if err != nil {
+		t.Fatalf("ListTasksByWorkspace: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "human" {
+		t.Fatalf("expected only the human task, got %+v", listed)
+	}
+
+	found, err := repo.SearchTasks(ctx, "ws-auto", "Nightly sweep", 10)
+	if err != nil {
+		t.Fatalf("SearchTasks: %v", err)
+	}
+	for _, task := range found {
+		if task.ID == "auto" {
+			t.Fatalf("automation-origin task must not be searchable in the task list, got %+v", found)
+		}
+	}
+
+	count, err := repo.CountTasksByWorkspace(ctx, "ws-auto")
+	if err != nil {
+		t.Fatalf("CountTasksByWorkspace: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("CountTasksByWorkspace = %d, want 1", count)
+	}
+}
+
+// An automation configured against a workflow step resolves to that step's
+// runner. Its run is long-lived and never leaves IN_PROGRESS on its own, so
+// counting it would inflate the agent's load permanently and starve it of the
+// real work the count exists to balance.
+func TestCountActionableTasksForAgent_ExcludesAutomationRuns(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	agentID := "agent-automation"
+	insertAssignedTask(t, repo, ctx, "task-human", "ws1", agentID, "IN_PROGRESS", "")
+	insertAssignedTask(t, repo, ctx, "task-automation", "ws1", agentID, "IN_PROGRESS", "")
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET origin = 'automation_run' WHERE id = ?`, "task-automation",
+	); err != nil {
+		t.Fatalf("tag automation origin: %v", err)
+	}
+
+	count, err := repo.CountActionableTasksForAgent(ctx, agentID)
+	if err != nil {
+		t.Fatalf("CountActionableTasksForAgent: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 actionable task (automation run excluded), got %d", count)
+	}
+}
+
+// Scheduler recovery launches whatever this returns. An automation run is
+// started once, explicitly, at trigger time; recovery picking it up would
+// start it a second time through a path that knows nothing about the run row
+// or the automation's concurrency cap.
+func TestListUnstartedTasks_ExcludesAutomationRuns(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	insertAssignedTask(t, repo, ctx, "unstarted-human", "ws1", "agent-recovery", "TODO", "")
+	insertAssignedTask(t, repo, ctx, "unstarted-automation", "ws1", "agent-recovery", "TODO", "")
+	// ListUnstartedTasks only considers office tasks, so both rows need a
+	// project before origin can be what separates them — otherwise the query
+	// returns nothing and the test passes for the wrong reason.
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET project_id = 'project-recovery' WHERE id IN (?, ?)`,
+		"unstarted-human", "unstarted-automation",
+	); err != nil {
+		t.Fatalf("scope tasks to a project: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET origin = 'automation_run' WHERE id = ?`, "unstarted-automation",
+	); err != nil {
+		t.Fatalf("tag automation origin: %v", err)
+	}
+
+	rows, err := repo.ListUnstartedTasks(ctx, 24, 50)
+	if err != nil {
+		t.Fatalf("ListUnstartedTasks: %v", err)
+	}
+	for _, row := range rows {
+		if row.ID == "unstarted-automation" {
+			t.Fatalf("scheduler recovery must not pick up an automation run, got %+v", rows)
+		}
+	}
+	if len(rows) != 1 || rows[0].ID != "unstarted-human" {
+		t.Fatalf("expected only the human task, got %+v", rows)
 	}
 }

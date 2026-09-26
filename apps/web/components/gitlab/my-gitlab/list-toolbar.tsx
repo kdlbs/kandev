@@ -1,10 +1,9 @@
 "use client";
 
-import { IconRefresh } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
-import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { Input } from "@kandev/ui/input";
+import { useTranslation } from "react-i18next";
+import { IntegrationListToolbar } from "@/components/integrations/integration-list-toolbar";
 
 const ALL_PROJECTS = "__all__";
 
@@ -21,39 +20,73 @@ type ListToolbarProps = {
   onProjectFilterChange: (value: string) => void;
   projectOptions: string[];
   onRefresh: () => void;
+  showMilestoneFilter: boolean;
+  milestone: string;
+  committedMilestone: string;
+  onMilestoneChange: (value: string) => void;
+  onCommitMilestone: () => void;
 };
 
-function RefreshControls({
-  loading,
-  lastFetchedAt,
-  onRefresh,
-  showUpdatedPrefix,
-}: {
-  loading: boolean;
-  lastFetchedAt: Date | null;
-  onRefresh: () => void;
-  showUpdatedPrefix: boolean;
-}) {
+function ProjectFilterSelect({
+  projectFilter,
+  onProjectFilterChange,
+  projectOptions,
+}: Pick<ListToolbarProps, "projectFilter" | "onProjectFilterChange" | "projectOptions">) {
+  const { t } = useTranslation();
+  const selectValue = projectFilter || ALL_PROJECTS;
   return (
-    <>
-      {lastFetchedAt && !loading && (
-        <span className="text-xs text-muted-foreground whitespace-nowrap">
-          {showUpdatedPrefix ? "Updated " : ""}
-          {formatRelativeTime(lastFetchedAt.toISOString())}
-        </span>
-      )}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 cursor-pointer"
-        onClick={onRefresh}
-        disabled={loading}
-        title="Refresh"
-        data-testid="gitlab-list-toolbar-refresh"
+    <Select
+      value={selectValue}
+      onValueChange={(value) => onProjectFilterChange(value === ALL_PROJECTS ? "" : value)}
+    >
+      <SelectTrigger
+        className="h-8 w-full cursor-pointer md:w-[220px]"
+        data-testid="gitlab-project-filter-trigger"
       >
-        <IconRefresh className={cn("h-4 w-4", loading && "animate-spin")} />
-      </Button>
-    </>
+        <SelectValue placeholder={t("gitlab:allProjects")} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL_PROJECTS} className="cursor-pointer">
+          {t("gitlab:allProjects")}
+        </SelectItem>
+        {projectOptions.map((key) => (
+          <SelectItem key={key} value={key} className="cursor-pointer">
+            {key}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function MilestoneFilterInput({
+  milestone,
+  committedMilestone,
+  onMilestoneChange,
+  onCommitMilestone,
+}: Pick<
+  ListToolbarProps,
+  "milestone" | "committedMilestone" | "onMilestoneChange" | "onCommitMilestone"
+>) {
+  const { t } = useTranslation();
+  return (
+    <Input
+      value={milestone}
+      onChange={(event) => onMilestoneChange(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+          event.preventDefault();
+          onCommitMilestone();
+        }
+      }}
+      onBlur={() => {
+        if (milestone !== committedMilestone) onCommitMilestone();
+      }}
+      placeholder={t("gitlab:eGSprint42")}
+      aria-label={t("gitlab:milestoneFilterLabel")}
+      className="w-full md:w-[180px]"
+      data-testid="gitlab-milestone-filter"
+    />
   );
 }
 
@@ -70,81 +103,45 @@ export function ListToolbar({
   onProjectFilterChange,
   projectOptions,
   onRefresh,
+  showMilestoneFilter,
+  milestone,
+  committedMilestone,
+  onMilestoneChange,
+  onCommitMilestone,
 }: ListToolbarProps) {
-  const selectValue = projectFilter || ALL_PROJECTS;
-  const dirty = customQuery !== committedQuery;
+  const { t } = useTranslation();
   return (
-    <div className="px-4 sm:px-6 py-2.5 border-b shrink-0 flex flex-col md:flex-row md:items-center md:flex-wrap gap-2 md:gap-3">
-      <div className="flex items-center gap-2 min-w-0">
-        <div className="flex items-baseline gap-2 min-w-0 flex-1 md:flex-initial">
-          <h2 className="text-sm font-semibold truncate" data-testid="gitlab-list-toolbar-title">
-            {title}
-          </h2>
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {loading ? "…" : count}
-          </span>
-        </div>
-        <div className="flex items-center gap-2 md:hidden">
-          <RefreshControls
-            loading={loading}
-            lastFetchedAt={lastFetchedAt}
-            onRefresh={onRefresh}
-            showUpdatedPrefix={false}
+    <IntegrationListToolbar
+      title={title}
+      count={count}
+      loading={loading}
+      lastFetchedAt={lastFetchedAt}
+      customQuery={customQuery}
+      committedQuery={committedQuery}
+      onCustomQueryChange={onCustomQueryChange}
+      onCommitCustomQuery={onCommitCustomQuery}
+      onRefresh={onRefresh}
+      filter={
+        <>
+          <ProjectFilterSelect
+            projectFilter={projectFilter}
+            onProjectFilterChange={onProjectFilterChange}
+            projectOptions={projectOptions}
           />
-        </div>
-      </div>
-      <Select
-        value={selectValue}
-        onValueChange={(v) => onProjectFilterChange(v === ALL_PROJECTS ? "" : v)}
-      >
-        <SelectTrigger
-          className="w-full md:w-[220px] h-8 cursor-pointer"
-          data-testid="gitlab-project-filter-trigger"
-        >
-          <SelectValue placeholder="All projects" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ALL_PROJECTS} className="cursor-pointer">
-            All projects
-          </SelectItem>
-          {projectOptions.map((key) => (
-            <SelectItem key={key} value={key} className="cursor-pointer">
-              {key}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <div className="w-full md:flex-1 md:min-w-[240px] relative">
-        <Input
-          value={customQuery}
-          onChange={(e) => onCustomQueryChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              onCommitCustomQuery();
-            }
-          }}
-          onBlur={() => {
-            if (dirty) onCommitCustomQuery();
-          }}
-          placeholder='Custom query — press Enter. e.g. "labels=bug&state=opened"'
-          className="h-8 pr-20"
-          data-testid="gitlab-list-toolbar-custom-query"
-        />
-        {dirty && (
-          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-wider text-muted-foreground hidden sm:inline">
-            Press Enter
-          </span>
-        )}
-      </div>
-      <div className="hidden md:flex items-center gap-2 md:ml-auto">
-        <RefreshControls
-          loading={loading}
-          lastFetchedAt={lastFetchedAt}
-          onRefresh={onRefresh}
-          showUpdatedPrefix
-        />
-      </div>
-    </div>
+          {showMilestoneFilter ? (
+            <MilestoneFilterInput
+              milestone={milestone}
+              committedMilestone={committedMilestone}
+              onMilestoneChange={onMilestoneChange}
+              onCommitMilestone={onCommitMilestone}
+            />
+          ) : null}
+        </>
+      }
+      queryPlaceholder={t("gitlab:customQueryPressEnterEG")}
+      titleTestId="gitlab-list-toolbar-title"
+      queryTestId="gitlab-list-toolbar-custom-query"
+      refreshTestId="gitlab-list-toolbar-refresh"
+    />
   );
 }

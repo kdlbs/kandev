@@ -121,6 +121,12 @@ func (m *MockClient) SearchTickets(_ context.Context, jql, _ string, maxResults 
 	return &SearchResult{Tickets: out, MaxResults: maxResults, IsLast: true}, nil
 }
 
+// SearchTicketsForWatch returns the same seeded issues as SearchTickets. The
+// mock already includes every JiraTicket field, including descriptions.
+func (m *MockClient) SearchTicketsForWatch(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+	return m.SearchTickets(ctx, jql, pageToken, maxResults)
+}
+
 // filterByJQL is a stand-in for real JQL parsing. An empty query passes every
 // hit through; a `project in (...)` clause narrows to hits in those projects;
 // a `status in (...)` clause narrows to hits whose StatusName is listed; a

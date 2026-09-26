@@ -141,20 +141,30 @@ func (p *process) start() error {
 	return nil
 }
 
-// stop signals the supervision loop to exit, waits for it to drain, and
-// kills any still-running process. Idempotent-safe to call at most once per
-// process (Manager.Stop removes the process from its map before calling
-// this, so a second Stop(id) for the same id is a no-op at the Manager
+// stop signals the supervision loop to exit and kills the current process
+// before waiting for the loop to drain. The kill must happen first because a
+// health ping can be blocked in the plugin protocol; terminating the process
+// releases that call and lets the supervisor exit. Idempotent-safe to call at
+// most once per process (Manager.Stop removes the process from its map before
+// calling this, so a second Stop(id) for the same id is a no-op at the Manager
 // level).
 func (p *process) stop() {
 	close(p.stopCh)
+	p.mu.Lock()
+	current := p.current
+	p.current = nil
+	p.mu.Unlock()
+	if current != nil {
+		current.Kill()
+	}
 	p.wg.Wait()
 	p.mu.Lock()
-	if p.current != nil {
-		p.current.Kill()
-		p.current = nil
-	}
+	current = p.current
+	p.current = nil
 	p.mu.Unlock()
+	if current != nil {
+		current.Kill()
+	}
 }
 
 // remote returns the current live RemotePlugin, if any.

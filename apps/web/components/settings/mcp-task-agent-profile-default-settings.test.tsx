@@ -8,7 +8,7 @@ import { SettingsSaveProvider } from "./settings-save-provider";
 
 const updateUserSettings = vi.fn();
 const ARIA_CHECKED = "aria-checked";
-const CURRENT_TASK_LABEL = "Current task profile";
+const CURRENT_TASK_LABEL = "Creating session profile";
 const WORKSPACE_DEFAULT_LABEL = "Workspace default profile";
 
 vi.mock("@/lib/api", () => ({
@@ -48,35 +48,28 @@ describe("MCPTaskAgentProfileDefaultSettings", () => {
     renderSettings();
 
     screen.getByRole("heading", { name: "Profile for Tasks Created by Agents" });
-    screen.getByText(/when an agent calls a Kandev MCP tool that creates a task/i);
-    screen.getByText(/Kandev must assign an agent profile/i);
-    screen.getByText("create_task_kandev");
-    screen.getByText(/creates new tasks and subtasks/i);
-    screen.getByText(/applies only when the call omits/i);
-    screen.getByText("agent_profile_id");
-    screen.getByText("spawn_session_kandev");
-    screen.getByText(/tasks you create yourself are not affected/i);
-    screen.getByRole("button", { name: "About affected Kandev MCP tools" });
+    expect(screen.queryByText("create_task_kandev")).toBeNull();
+    screen.getByRole("button", { name: "About Profile for Tasks Created by Agents" });
     expect(screen.getByRole("radio", { name: CURRENT_TASK_LABEL }).getAttribute(ARIA_CHECKED)).toBe(
       "true",
     );
     expect(
       screen.getByRole("radio", { name: WORKSPACE_DEFAULT_LABEL }).getAttribute(ARIA_CHECKED),
     ).toBe("false");
-    screen.getByText(/follow-up work needs the same model and agent setup/i);
-    screen.getByText(/may reuse a more expensive profile/i);
-    screen.getByText(/workflow profile when one is set/i);
-    screen.getByText(/keep agent-created tasks on your standard workspace model/i);
   });
 
   it("explains why session creation does not use this preference", async () => {
     renderSettings();
 
-    fireEvent.focus(screen.getByRole("button", { name: "About affected Kandev MCP tools" }));
+    fireEvent.focus(
+      screen.getByRole("button", { name: "About Profile for Tasks Created by Agents" }),
+    );
 
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip.textContent).toMatch(/create_task_kandev creates a separate task/i);
-    expect(tooltip.textContent).toMatch(/spawn_session_kandev adds a session to the current task/i);
+    expect(tooltip.textContent).toMatch(/create_task_kandev creates new tasks and subtasks/i);
+    expect(tooltip.textContent).toMatch(
+      /spawn_session_kandev and tasks you create yourself are not affected/i,
+    );
   });
 
   it("keeps the choice local until Save changes is pressed", async () => {

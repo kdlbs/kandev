@@ -5,6 +5,7 @@
 
 import type { editor as monacoEditor, IDisposable, languages } from "monaco-editor";
 import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
+import { getLspProviderSupport } from "./lsp-provider-capabilities";
 
 type MonacoModule = typeof import("monaco-editor");
 
@@ -17,12 +18,17 @@ type LspRange = {
   end: { line: number; character: number };
 };
 
+type LspLocation = { uri: string; range: LspRange };
+type LspLocationLink = { targetUri: string; targetSelectionRange: LspRange };
+type LspDefinition = LspLocation | LspLocationLink;
+
 type JsonRpcConnection = {
   sendRequest(method: string, params: unknown): Promise<unknown>;
 };
 
 type GetDocumentUri = (model: monacoEditor.ITextModel) => string | null;
-type EnsureModelsExist = (uris: string[], connectionKey: string) => void;
+type GetModelUri = (documentUri: string) => string | null;
+type EnsureModelsExist = (uris: string[]) => void;
 
 /** Shared context for all provider registration functions. */
 type ProviderCtx = {
@@ -30,8 +36,8 @@ type ProviderCtx = {
   lang: string;
   rpc: JsonRpcConnection;
   getDocumentUri: GetDocumentUri;
+  getModelUri: GetModelUri;
   ensureModelsExist: EnsureModelsExist;
-  connectionKey: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -51,35 +57,54 @@ function toLspPosition(lineNumber: number, column: number) {
   return { line: lineNumber - 1, character: column - 1 };
 }
 
-function toMonacoCompletionKind(lspKind: number | undefined): number {
-  const map: Record<number, number> = {
-    1: 14,
-    2: 1,
-    3: 0,
-    4: 8,
-    5: 4,
-    6: 5,
-    7: 7,
-    8: 7,
-    9: 8,
-    10: 9,
-    11: 12,
-    12: 14,
-    13: 15,
-    14: 17,
-    15: 27,
-    16: 19,
-    17: 20,
-    18: 21,
-    19: 23,
-    20: 16,
-    21: 14,
-    22: 6,
-    23: 24,
-    24: 25,
-    25: 26,
+function toLspCompletionContext(context: languages.CompletionContext) {
+  if (context.triggerKind === 1 && context.triggerCharacter) {
+    return { triggerKind: 2, triggerCharacter: context.triggerCharacter };
+  }
+  if (context.triggerKind === 2) return { triggerKind: 3 };
+  return { triggerKind: 1 };
+}
+
+function normalizeDefinitionLocation(definition: LspDefinition): LspLocation {
+  if ("targetUri" in definition) {
+    return { uri: definition.targetUri, range: definition.targetSelectionRange };
+  }
+  return definition;
+}
+
+function toMonacoCompletionKind(
+  monaco: MonacoModule,
+  lspKind: number | undefined,
+): languages.CompletionItemKind {
+  const kind = monaco.languages.CompletionItemKind;
+  const map: Record<number, languages.CompletionItemKind> = {
+    1: kind.Text,
+    2: kind.Method,
+    3: kind.Function,
+    4: kind.Constructor,
+    5: kind.Field,
+    6: kind.Variable,
+    7: kind.Class,
+    8: kind.Interface,
+    9: kind.Module,
+    10: kind.Property,
+    11: kind.Unit,
+    12: kind.Value,
+    13: kind.Enum,
+    14: kind.Keyword,
+    15: kind.Snippet,
+    16: kind.Color,
+    17: kind.File,
+    18: kind.Reference,
+    19: kind.Folder,
+    20: kind.EnumMember,
+    21: kind.Constant,
+    22: kind.Struct,
+    23: kind.Event,
+    24: kind.Operator,
+    25: kind.TypeParameter,
   };
-  return map[lspKind ?? 1] ?? 14;
+  return map[lspKind ?? 1] ?? kind.Text;
 }
 
 function extractDocumentation(doc: unknown): string | { value: string } | undefined {
@@ -117,24 +142,45 @@ type LspCompletionItem = {
   documentation?: unknown;
   insertText?: string;
   insertTextFormat?: number;
-  textEdit?: { range: LspRange; newText: string };
+  textEdit?:
+    | { range: LspRange; newText: string }
+    | { insert: LspRange; replace: LspRange; newText: string };
   additionalTextEdits?: Array<{ range: LspRange; newText: string }>;
   sortText?: string;
   filterText?: string;
 };
 
-function mapCompletionItem(item: LspCompletionItem): languages.CompletionItem {
+type MonacoRange = ReturnType<typeof toMonacoRange>;
+type MonacoCompletionRange = MonacoRange | { insert: MonacoRange; replace: MonacoRange };
+
+function completionRange(
+  textEdit: LspCompletionItem["textEdit"],
+  defaultRange: MonacoRange,
+): MonacoCompletionRange {
+  if (!textEdit) return defaultRange;
+  if ("range" in textEdit) return toMonacoRange(textEdit.range);
+  return {
+    insert: toMonacoRange(textEdit.insert),
+    replace: toMonacoRange(textEdit.replace),
+  };
+}
+
+function mapCompletionItem(
+  monaco: MonacoModule,
+  item: LspCompletionItem,
+  defaultRange: MonacoRange,
+): languages.CompletionItem {
   const label = typeof item.label === "string" ? item.label : item.label.label;
   const insertText = item.textEdit?.newText ?? item.insertText ?? label;
   const isSnippet = item.insertTextFormat === 2;
   return {
     label,
-    kind: toMonacoCompletionKind(item.kind),
+    kind: toMonacoCompletionKind(monaco, item.kind),
     detail: item.detail,
     documentation: extractDocumentation(item.documentation),
     insertText,
     insertTextRules: isSnippet ? 4 /* InsertAsSnippet */ : undefined,
-    range: item.textEdit?.range ? toMonacoRange(item.textEdit.range) : undefined,
+    range: completionRange(item.textEdit, defaultRange),
     sortText: item.sortText,
     filterText: item.filterText,
     additionalTextEdits: item.additionalTextEdits?.map((e) => ({
@@ -148,23 +194,43 @@ function mapCompletionItem(item: LspCompletionItem): languages.CompletionItem {
 // Provider registration
 // ---------------------------------------------------------------------------
 
-function registerCompletionProvider(ctx: ProviderCtx): IDisposable {
+function registerCompletionProvider(
+  ctx: ProviderCtx,
+  triggerCharacters: string[] | undefined,
+): IDisposable {
   const { monaco, lang, rpc, getDocumentUri } = ctx;
   return monaco.languages.registerCompletionItemProvider(lang, {
-    triggerCharacters: [".", ":", "<", '"', "'", "/", "@", "#", " "],
-    provideCompletionItems: async (model, position, _context, token) => {
+    ...(triggerCharacters === undefined ? {} : { triggerCharacters }),
+    provideCompletionItems: async (model, position, context, token) => {
       const uri = getDocumentUri(model);
       if (!uri) return { suggestions: [] };
+      const word = model.getWordUntilPosition(position);
+      const defaultRange = {
+        startLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endLineNumber: position.lineNumber,
+        endColumn: word.endColumn,
+      };
       try {
         const result = await rpc.sendRequest("textDocument/completion", {
           textDocument: { uri },
           position: toLspPosition(position.lineNumber, position.column),
+          context: toLspCompletionContext(context),
         });
         if (token.isCancellationRequested) return { suggestions: [] };
-        const items = Array.isArray(result)
-          ? result
-          : ((result as { items?: unknown[] })?.items ?? []);
-        return { suggestions: (items as LspCompletionItem[]).map(mapCompletionItem) };
+        const completionList =
+          result && typeof result === "object" && !Array.isArray(result)
+            ? (result as { items?: unknown[]; isIncomplete?: unknown })
+            : null;
+        const items = Array.isArray(result) ? result : (completionList?.items ?? []);
+        return {
+          suggestions: (items as LspCompletionItem[]).map((item) =>
+            mapCompletionItem(monaco, item, defaultRange),
+          ),
+          ...(typeof completionList?.isIncomplete === "boolean"
+            ? { incomplete: completionList.isIncomplete }
+            : {}),
+        };
       } catch {
         return { suggestions: [] };
       }
@@ -196,7 +262,7 @@ function registerHoverProvider(ctx: ProviderCtx): IDisposable {
 }
 
 function registerDefinitionProvider(ctx: ProviderCtx): IDisposable {
-  const { monaco, lang, rpc, getDocumentUri, ensureModelsExist, connectionKey } = ctx;
+  const { monaco, lang, rpc, getDocumentUri, getModelUri, ensureModelsExist } = ctx;
   return monaco.languages.registerDefinitionProvider(lang, {
     provideDefinition: async (model, position, token) => {
       const uri = getDocumentUri(model);
@@ -207,15 +273,15 @@ function registerDefinitionProvider(ctx: ProviderCtx): IDisposable {
           position: toLspPosition(position.lineNumber, position.column),
         });
         if (token.isCancellationRequested || !result) return null;
-        const defs = Array.isArray(result) ? result : [result];
-        ensureModelsExist(
-          defs.map((d: { uri: string }) => d.uri),
-          connectionKey,
-        );
-        return defs.map((d: { uri: string; range: LspRange }) => ({
-          uri: monaco.Uri.parse(d.uri),
-          range: toMonacoRange(d.range),
-        }));
+        const definitions = (Array.isArray(result) ? result : [result]) as LspDefinition[];
+        const locations = definitions.map(normalizeDefinitionLocation);
+        ensureModelsExist(locations.map((location) => location.uri));
+        return locations.flatMap((location) => {
+          const modelUri = getModelUri(location.uri);
+          return modelUri
+            ? [{ uri: monaco.Uri.parse(modelUri), range: toMonacoRange(location.range) }]
+            : [];
+        });
       } catch {
         return null;
       }
@@ -224,7 +290,7 @@ function registerDefinitionProvider(ctx: ProviderCtx): IDisposable {
 }
 
 function registerReferenceProvider(ctx: ProviderCtx): IDisposable {
-  const { monaco, lang, rpc, getDocumentUri, ensureModelsExist, connectionKey } = ctx;
+  const { monaco, lang, rpc, getDocumentUri, getModelUri, ensureModelsExist } = ctx;
   return monaco.languages.registerReferenceProvider(lang, {
     provideReferences: async (model, position, context, token) => {
       const uri = getDocumentUri(model);
@@ -237,14 +303,13 @@ function registerReferenceProvider(ctx: ProviderCtx): IDisposable {
         });
         if (token.isCancellationRequested || !result) return null;
         const refs = Array.isArray(result) ? result : [];
-        ensureModelsExist(
-          refs.map((r: { uri: string }) => r.uri),
-          connectionKey,
-        );
-        return refs.map((r: { uri: string; range: LspRange }) => ({
-          uri: monaco.Uri.parse(r.uri),
-          range: toMonacoRange(r.range),
-        }));
+        ensureModelsExist(refs.map((r: { uri: string }) => r.uri));
+        return refs.flatMap((r: { uri: string; range: LspRange }) => {
+          const modelUri = getModelUri(r.uri);
+          return modelUri
+            ? [{ uri: monaco.Uri.parse(modelUri), range: toMonacoRange(r.range) }]
+            : [];
+        });
       } catch {
         return null;
       }
@@ -252,10 +317,30 @@ function registerReferenceProvider(ctx: ProviderCtx): IDisposable {
   });
 }
 
-function registerSignatureHelpProvider(ctx: ProviderCtx): IDisposable {
+type SignatureHelpCapability = {
+  triggerCharacters?: unknown;
+  retriggerCharacters?: unknown;
+};
+
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function registerSignatureHelpProvider(
+  ctx: ProviderCtx,
+  capability: SignatureHelpCapability,
+): IDisposable {
   const { monaco, lang, rpc, getDocumentUri } = ctx;
+  const triggerCharacters = stringArray(capability.triggerCharacters);
+  const retriggerCharacters = stringArray(capability.retriggerCharacters);
   return monaco.languages.registerSignatureHelpProvider(lang, {
-    signatureHelpTriggerCharacters: ["(", ","],
+    ...(triggerCharacters === undefined
+      ? {}
+      : { signatureHelpTriggerCharacters: triggerCharacters }),
+    ...(retriggerCharacters === undefined
+      ? {}
+      : { signatureHelpRetriggerCharacters: retriggerCharacters }),
     provideSignatureHelp: async (model, position) => {
       const uri = getDocumentUri(model);
       if (!uri) return null;
@@ -319,8 +404,6 @@ function registerSemanticTokensProvider(
     for (const l of listeners) l();
   });
 
-  const retryTimers = new Set<ReturnType<typeof setTimeout>>();
-
   disposables.push(
     monaco.languages.registerDocumentSemanticTokensProvider(lang, {
       onDidChange,
@@ -335,14 +418,7 @@ function registerSemanticTokensProvider(
             textDocument: { uri },
           })) as { resultId?: string; data: number[] } | null;
           if (token.isCancellationRequested) return null;
-          if (!result?.data?.length) {
-            const timer = setTimeout(() => {
-              retryTimers.delete(timer);
-              for (const l of listeners) l();
-            }, 5000);
-            retryTimers.add(timer);
-            return null;
-          }
+          if (!result) return null;
           return { resultId: result.resultId, data: new Uint32Array(result.data) };
         } catch {
           return null;
@@ -351,13 +427,6 @@ function registerSemanticTokensProvider(
       releaseDocumentSemanticTokens() {},
     }),
   );
-  disposables.push({
-    dispose: () => {
-      for (const t of retryTimers) clearTimeout(t);
-      retryTimers.clear();
-    },
-  });
-
   return disposables;
 }
 
@@ -368,11 +437,29 @@ function registerSemanticTokensProvider(
 export interface RegisterLspProvidersOptions {
   rpc: JsonRpcConnection;
   lspLanguage: string;
-  connectionKey: string;
   serverCapabilities: Record<string, unknown> | null;
   semanticRefreshCallbacks: (() => void)[];
   getDocumentUri: GetDocumentUri;
+  getModelUri: GetModelUri;
   ensureModelsExist: EnsureModelsExist;
+}
+
+function completionTriggerCharacters(
+  serverCapabilities: Record<string, unknown> | null,
+): string[] | undefined {
+  const completionProvider = serverCapabilities?.completionProvider;
+  if (!completionProvider || typeof completionProvider !== "object") return undefined;
+  const triggerCharacters = (completionProvider as { triggerCharacters?: unknown })
+    .triggerCharacters;
+  return stringArray(triggerCharacters);
+}
+
+function signatureHelpCapability(
+  serverCapabilities: Record<string, unknown> | null,
+): SignatureHelpCapability | null {
+  const capability = serverCapabilities?.signatureHelpProvider;
+  if (!capability || typeof capability !== "object" || Array.isArray(capability)) return null;
+  return capability as SignatureHelpCapability;
 }
 
 export function registerLspProviders(opts: RegisterLspProvidersOptions): IDisposable[] {
@@ -381,6 +468,7 @@ export function registerLspProviders(opts: RegisterLspProvidersOptions): IDispos
 
   const monacoLanguages = getMonacoLanguagesForLsp(opts.lspLanguage);
   const disposables: IDisposable[] = [];
+  const providerSupport = getLspProviderSupport(opts.serverCapabilities);
 
   for (const lang of monacoLanguages) {
     const ctx: ProviderCtx = {
@@ -388,14 +476,19 @@ export function registerLspProviders(opts: RegisterLspProvidersOptions): IDispos
       lang,
       rpc: opts.rpc,
       getDocumentUri: opts.getDocumentUri,
+      getModelUri: opts.getModelUri,
       ensureModelsExist: opts.ensureModelsExist,
-      connectionKey: opts.connectionKey,
     };
-    disposables.push(registerCompletionProvider(ctx));
-    disposables.push(registerHoverProvider(ctx));
-    disposables.push(registerDefinitionProvider(ctx));
-    disposables.push(registerReferenceProvider(ctx));
-    disposables.push(registerSignatureHelpProvider(ctx));
+    if (providerSupport.completion) {
+      disposables.push(
+        registerCompletionProvider(ctx, completionTriggerCharacters(opts.serverCapabilities)),
+      );
+    }
+    if (providerSupport.hover) disposables.push(registerHoverProvider(ctx));
+    if (providerSupport.definition) disposables.push(registerDefinitionProvider(ctx));
+    if (providerSupport.references) disposables.push(registerReferenceProvider(ctx));
+    const signatureHelp = signatureHelpCapability(opts.serverCapabilities);
+    if (signatureHelp) disposables.push(registerSignatureHelpProvider(ctx, signatureHelp));
     disposables.push(
       ...registerSemanticTokensProvider(
         ctx,
@@ -412,7 +505,7 @@ export function registerLspProviders(opts: RegisterLspProvidersOptions): IDispos
 // Language mapping
 // ---------------------------------------------------------------------------
 
-function getMonacoLanguagesForLsp(lspLanguage: string): string[] {
+export function getMonacoLanguagesForLsp(lspLanguage: string): string[] {
   switch (lspLanguage) {
     case "typescript":
       return ["typescript", "javascript", "typescriptreact", "javascriptreact"];
@@ -422,6 +515,8 @@ function getMonacoLanguagesForLsp(lspLanguage: string): string[] {
       return ["rust"];
     case "python":
       return ["python"];
+    case "kotlin":
+      return ["kotlin"];
     default:
       return [];
   }

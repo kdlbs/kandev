@@ -1,28 +1,37 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const lspMocks = vi.hoisted(() => ({
-  sessionId: "session-1",
-  taskRoot: "/task-root",
-  state: {
-    tasks: { activeSessionId: "session-1" },
-    taskSessions: {
-      items: {
-        "session-1": {
-          workspace_path: "/task-root",
-          worktree_path: "/task-root/kandev",
+const lspMocks = vi.hoisted(() => {
+  const attachedRepository = "second-repository-main";
+  return {
+    attachedRepository,
+    sessionId: "session-1",
+    taskRoot: "/task-root",
+    state: {
+      tasks: { activeSessionId: "session-1" },
+      taskSessions: {
+        items: {
+          "session-1": {
+            workspace_path: "/task-root",
+            worktree_path: "/task-root/kandev",
+          },
         },
       },
     },
-  },
-  openFile: vi.fn(),
-  setPendingCursorPosition: vi.fn(),
-  scrollEditorIfMounted: vi.fn(),
-  disposePlaceholderModel: vi.fn(),
-  setFileOpener: vi.fn(),
-  getFileOpener: vi.fn(),
-  currentOpener: null as ((uri: string, line?: number, column?: number) => void) | null,
-}));
+    openFile: vi.fn(),
+    setPendingCursorPosition: vi.fn(),
+    scrollEditorIfMounted: vi.fn(),
+    disposePlaceholderModel: vi.fn(),
+    setFileOpener: vi.fn(),
+    getFileOpener: vi.fn(),
+    getWorkspaceUriForSession: vi.fn(() => null),
+    getRepositorySubpaths: vi.fn(() => [attachedRepository]),
+    openFiles: new Map<string, { path: string; repo?: string }>(),
+    currentOpener: null as
+      | ((uri: string, line?: number, column?: number) => boolean | Promise<boolean>)
+      | null,
+  };
+});
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof lspMocks.state) => unknown) => selector(lspMocks.state),
@@ -34,24 +43,36 @@ vi.mock("@/hooks/use-file-editors", () => ({
   scrollEditorIfMounted: lspMocks.scrollEditorIfMounted,
 }));
 
+vi.mock("@/lib/state/dockview-store", () => ({
+  useDockviewStore: {
+    getState: () => ({ openFiles: lspMocks.openFiles }),
+  },
+}));
+
 vi.mock("@/lib/lsp/lsp-client-manager", () => ({
   lspClientManager: {
     disposePlaceholderModel: lspMocks.disposePlaceholderModel,
     setFileOpener: lspMocks.setFileOpener,
     getFileOpener: lspMocks.getFileOpener,
+    getWorkspaceUriForSession: lspMocks.getWorkspaceUriForSession,
+    getRepositorySubpaths: lspMocks.getRepositorySubpaths,
   },
 }));
 
+import { modelUriForDocument } from "@/lib/lsp/file-uri";
 import { toWorkspaceRelativePath, useLspFileOpener } from "./use-lsp-file-opener";
 
-const ATTACHED_FILE_PATH = "second-repository-main/src/index.ts";
+const SOURCE_FILE_PATH = "src/index.ts";
+const ATTACHED_FILE_PATH = `${lspMocks.attachedRepository}/${SOURCE_FILE_PATH}`;
 const ATTACHED_FILE_URI = `file:///task-root/${ATTACHED_FILE_PATH}`;
+const ATTACHED_MODEL_URI = modelUriForDocument(ATTACHED_FILE_URI, lspMocks.sessionId);
 const NEXT_TASK_ROOT = "/next-task-root";
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   lspMocks.currentOpener = null;
+  lspMocks.openFiles.clear();
   lspMocks.state.taskSessions.items["session-1"].workspace_path = lspMocks.taskRoot;
 });
 
@@ -67,7 +88,7 @@ describe("toWorkspaceRelativePath", () => {
       "/task-root-old/src/index.ts",
     );
     expect(toWorkspaceRelativePath("/task-root/src/index.ts", `${lspMocks.taskRoot}/`)).toBe(
-      "src/index.ts",
+      SOURCE_FILE_PATH,
     );
   });
 
@@ -90,18 +111,57 @@ describe("useLspFileOpener", () => {
     expect(opener).not.toBeNull();
 
     await act(async () => {
-      await opener?.(ATTACHED_FILE_URI, 12, 3);
+      await opener?.(ATTACHED_MODEL_URI, 12, 3);
     });
 
-    expect(lspMocks.disposePlaceholderModel).toHaveBeenCalledWith(ATTACHED_FILE_URI);
-    expect(lspMocks.openFile).toHaveBeenCalledWith(ATTACHED_FILE_PATH);
-    expect(lspMocks.setPendingCursorPosition).toHaveBeenCalledWith(ATTACHED_FILE_PATH, 12, 3);
-    expect(lspMocks.scrollEditorIfMounted).toHaveBeenCalledWith(
-      ATTACHED_FILE_PATH,
-      lspMocks.taskRoot,
+    expect(lspMocks.disposePlaceholderModel).toHaveBeenCalledWith(ATTACHED_MODEL_URI);
+    expect(lspMocks.openFile).toHaveBeenCalledWith(SOURCE_FILE_PATH, lspMocks.attachedRepository);
+    expect(lspMocks.setPendingCursorPosition).toHaveBeenCalledWith(
+      SOURCE_FILE_PATH,
       12,
       3,
+      lspMocks.attachedRepository,
+      lspMocks.sessionId,
     );
+    expect(lspMocks.scrollEditorIfMounted).toHaveBeenCalledWith(
+      SOURCE_FILE_PATH,
+      "file:///task-root",
+      12,
+      3,
+      { repo: lspMocks.attachedRepository, sessionId: lspMocks.sessionId },
+    );
+  });
+
+  it("opens plain Monaco file URIs inside the active workspace", async () => {
+    lspMocks.setFileOpener.mockImplementation((opener) => {
+      lspMocks.currentOpener = opener;
+    });
+    lspMocks.getFileOpener.mockImplementation(() => lspMocks.currentOpener);
+
+    renderHook(() => useLspFileOpener());
+    let handled: boolean | undefined;
+    await act(async () => {
+      handled = await lspMocks.currentOpener?.(ATTACHED_FILE_URI, 8, 2);
+    });
+
+    expect(handled).toBe(true);
+    expect(lspMocks.openFile).toHaveBeenCalledWith(SOURCE_FILE_PATH, lspMocks.attachedRepository);
+  });
+
+  it("declines plain Monaco file URIs outside the active workspace", async () => {
+    lspMocks.setFileOpener.mockImplementation((opener) => {
+      lspMocks.currentOpener = opener;
+    });
+    lspMocks.getFileOpener.mockImplementation(() => lspMocks.currentOpener);
+
+    renderHook(() => useLspFileOpener());
+    let handled: boolean | undefined;
+    await act(async () => {
+      handled = await lspMocks.currentOpener?.("file:///another-workspace/src/index.ts");
+    });
+
+    expect(handled).toBe(false);
+    expect(lspMocks.openFile).not.toHaveBeenCalled();
   });
 
   it("refreshes the registered opener when the workspace root changes", async () => {
@@ -118,8 +178,39 @@ describe("useLspFileOpener", () => {
 
     expect(secondOpener).not.toBe(firstOpener);
     await act(async () => {
-      await secondOpener?.(`file://${NEXT_TASK_ROOT}/src/index.ts`);
+      await secondOpener?.(
+        modelUriForDocument(`file://${NEXT_TASK_ROOT}/${SOURCE_FILE_PATH}`, lspMocks.sessionId),
+      );
     });
-    expect(lspMocks.openFile).toHaveBeenCalledWith("src/index.ts");
+    expect(lspMocks.openFile).toHaveBeenCalledWith(SOURCE_FILE_PATH, undefined);
+  });
+
+  it("reuses an attached-repository file already opened from the task-root tree", async () => {
+    lspMocks.setFileOpener.mockImplementation((opener) => {
+      lspMocks.currentOpener = opener;
+    });
+    lspMocks.getFileOpener.mockImplementation(() => lspMocks.currentOpener);
+    lspMocks.openFiles.set(ATTACHED_FILE_PATH, { path: ATTACHED_FILE_PATH });
+
+    renderHook(() => useLspFileOpener());
+    await act(async () => {
+      await lspMocks.currentOpener?.(ATTACHED_MODEL_URI, 19, 5);
+    });
+
+    expect(lspMocks.openFile).toHaveBeenCalledWith(ATTACHED_FILE_PATH, undefined);
+    expect(lspMocks.setPendingCursorPosition).toHaveBeenCalledWith(
+      ATTACHED_FILE_PATH,
+      19,
+      5,
+      undefined,
+      lspMocks.sessionId,
+    );
+    expect(lspMocks.scrollEditorIfMounted).toHaveBeenCalledWith(
+      ATTACHED_FILE_PATH,
+      "file:///task-root",
+      19,
+      5,
+      { repo: undefined, sessionId: lspMocks.sessionId },
+    );
   });
 });

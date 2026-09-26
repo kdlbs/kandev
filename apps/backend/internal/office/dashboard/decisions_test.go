@@ -165,6 +165,9 @@ func TestRequestTaskChanges_QueuesAssigneeRun(t *testing.T) {
 	if got.DecisionComment != "tighten the diff" {
 		t.Errorf("comment lost: %q", got.DecisionComment)
 	}
+	if got.IdempotencyKey == "" || !strings.HasPrefix(got.IdempotencyKey, "decision:") {
+		t.Errorf("idempotency key = %q, want a decision-scoped key", got.IdempotencyKey)
+	}
 }
 
 // TestApproveTask_QueuesReadyToCloseOnFinalApproval — when the last
@@ -423,6 +426,34 @@ func TestUpdateTaskEndpoint_409OnApprovalGate(t *testing.T) {
 	if body["status"] != "in_review" {
 		t.Errorf("response status = %v, want in_review", body["status"])
 	}
+	if body["reason"] != dashboard.ApprovalGateReasonApprovals {
+		t.Errorf("response reason = %v, want %s", body["reason"], dashboard.ApprovalGateReasonApprovals)
+	}
+}
+
+func TestUpdateTaskEndpoint_409OnWorkflowStepGate(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTaskAtNonTerminalStep(t, deps.db, "ep-step-gate", "ws-step-gate", "Step gate", "in_progress", "Review")
+
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/office/tasks/ep-step-gate",
+		strings.NewReader(`{"status":"done"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d body = %s", w.Code, w.Body.String())
+	}
+	var body map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["reason"] != dashboard.ApprovalGateReasonWorkflowStep {
+		t.Errorf("response reason = %v, want %s", body["reason"], dashboard.ApprovalGateReasonWorkflowStep)
+	}
+	if body["status"] != "in_review" {
+		t.Errorf("response status = %v, want in_review", body["status"])
+	}
 }
 
 // TestUpdateTaskEndpoint_409PendingApproversIncludesNames verifies that the
@@ -543,7 +574,7 @@ func TestInbox_TaskReviewRequest_IgnoresRunnerOnlyTask(t *testing.T) {
 // mustAddParticipant inserts a participant row directly via the repo.
 func mustAddParticipant(t *testing.T, deps *testDeps, taskID, agentID, role string) {
 	t.Helper()
-	if err := deps.repo.AddTaskParticipant(context.Background(), taskID, agentID, role); err != nil {
+	if _, err := deps.repo.AddTaskParticipant(context.Background(), taskID, agentID, role); err != nil {
 		t.Fatalf("AddTaskParticipant: %v", err)
 	}
 }
@@ -584,4 +615,52 @@ func readTaskState(t *testing.T, deps *testDeps, taskID string) string {
 		t.Fatalf("read state: %v", err)
 	}
 	return state
+}
+
+// TestApproveTask_RejectsWhenEngineDispatcherNotWired is AC-57c: when the
+// engine decision entry point isn't wired, recordTaskDecision must reject
+// the call and write no row — never fall back to a second, office-side
+// implementation of the decision write.
+func TestApproveTask_RejectsWhenEngineDispatcherNotWired(t *testing.T) {
+	deps := newTestDeps(t)
+	deps.svc.SetWorkflowEngineDispatcher(nil)
+	insertTestTask(t, deps.db, "nw1", "ws-d", "NW", "in_review", 2)
+	mustAddParticipant(t, deps, "nw1", "agent-1", models.ParticipantRoleApprover)
+
+	_, err := deps.svc.ApproveTask(context.Background(),
+		models.DeciderTypeAgent, "agent-1", "nw1", "lgtm")
+	if err == nil {
+		t.Fatal("expected error when engine dispatcher is not wired")
+	}
+
+	rows, err := deps.svc.ListTaskDecisions(context.Background(), "nw1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("active decisions = %d, want 0 (no row written)", len(rows))
+	}
+}
+
+// TestRequestTaskChanges_RejectsWhenEngineDispatcherNotWired is the
+// RequestTaskChanges half of AC-57c, mirroring the ApproveTask case above.
+func TestRequestTaskChanges_RejectsWhenEngineDispatcherNotWired(t *testing.T) {
+	deps := newTestDeps(t)
+	deps.svc.SetWorkflowEngineDispatcher(nil)
+	insertTestTask(t, deps.db, "nw2", "ws-d", "NW2", "in_review", 2)
+	mustAddParticipant(t, deps, "nw2", "agent-1", models.ParticipantRoleApprover)
+
+	_, err := deps.svc.RequestTaskChanges(context.Background(),
+		models.DeciderTypeAgent, "agent-1", "nw2", "fix it")
+	if err == nil {
+		t.Fatal("expected error when engine dispatcher is not wired")
+	}
+
+	rows, err := deps.svc.ListTaskDecisions(context.Background(), "nw2")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("active decisions = %d, want 0 (no row written)", len(rows))
+	}
 }

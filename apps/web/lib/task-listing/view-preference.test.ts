@@ -3,9 +3,9 @@ import {
   getEffectiveTaskListingView,
   getStoredTaskListingView,
   parseTaskListingView,
+  resolveHomeTaskListingRedirect,
   resolveTaskListingView,
   setStoredTaskListingView,
-  shouldRestoreHomeTaskListingView,
   TASK_LISTING_VIEW_CHANGE_EVENT,
   TASK_LISTING_VIEW_STORAGE_KEY,
 } from "./view-preference";
@@ -84,9 +84,23 @@ describe("task listing view preference", () => {
     expect(getStoredTaskListingView()).toBe("pipeline");
   });
 
-  it("restores List only for the top-level Home listing", () => {
-    expect(shouldRestoreHomeTaskListingView("list", undefined, undefined)).toBe(true);
-    expect(shouldRestoreHomeTaskListingView("list", "task-1", undefined)).toBe(false);
-    expect(shouldRestoreHomeTaskListingView("list", undefined, "session-1")).toBe(false);
+  it("accepts the versioned Threads preference", () => {
+    expect(parseTaskListingView('"threads"')).toBe("threads");
+  });
+
+  it("keeps Threads on phone because its columns page one at a time", () => {
+    expect(getEffectiveTaskListingView("threads", true)).toBe("threads");
+  });
+
+  it("routes Home to the view that owns its own page", () => {
+    expect(resolveHomeTaskListingRedirect("list", undefined, undefined)).toBe("list");
+    expect(resolveHomeTaskListingRedirect("threads", undefined, undefined)).toBe("threads");
+    expect(resolveHomeTaskListingRedirect("kanban", undefined, undefined)).toBeNull();
+    expect(resolveHomeTaskListingRedirect("pipeline", undefined, undefined)).toBeNull();
+  });
+
+  it("never redirects Home away from an explicitly opened task or session", () => {
+    expect(resolveHomeTaskListingRedirect("threads", "task-1", undefined)).toBeNull();
+    expect(resolveHomeTaskListingRedirect("threads", undefined, "session-1")).toBeNull();
   });
 });

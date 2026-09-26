@@ -176,6 +176,7 @@ func TestBackgroundCompletion_EnabledClaudeSettledSessionPublishesBackground(t *
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	enableClaudeBackgroundPromptHandoffForTest(t, svc)
 	setSessionAgentNameForTest(t, svc, sessionID, "claude-acp")
+	advertisePromptQueueingForTest(t, svc, sessionID)
 	recorded := &recordingEventBus{}
 	svc.eventBus = recorded
 	svc.registerBackgroundWorkKind(
@@ -1220,6 +1221,7 @@ func countActivityClears(recorded *recordingEventBus) int {
 func TestTransientFailurePreservesBackgroundRegistration(t *testing.T) {
 	svc, _ := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)
+	svc.beginPromptAttempt("s1", "exec-transient", 7, false)
 	recorded := &recordingEventBus{}
 	svc.eventBus = recorded
 	taskEvents := &recordingTaskEvents{}
@@ -1228,7 +1230,11 @@ func TestTransientFailurePreservesBackgroundRegistration(t *testing.T) {
 	svc.markForegroundIdle("s1")
 
 	svc.handleAgentFailed(t.Context(), watcher.AgentEventData{
-		TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-transient", ErrorMessage: overloaded529,
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "exec-transient",
+		PromptGeneration: 7,
+		ErrorMessage:     overloaded529,
 	})
 
 	if !svc.hasBackgroundTask("s1", "tool-transient") {

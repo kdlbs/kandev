@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/run-scheduling.md
+spec: docs/specs/tasks/requirements/run-scheduling.md
 created: 2026-08-01
 status: done
 ---

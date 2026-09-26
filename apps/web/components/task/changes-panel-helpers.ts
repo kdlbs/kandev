@@ -10,8 +10,11 @@ import type { FileInfo } from "@/lib/state/store";
 import type { PRDiffFile } from "@/lib/types/github";
 import { normalizeFileChangeStatus, type FileChangeStatus } from "@/lib/utils/file-change-status";
 import type { PRChangedFile } from "./changes-panel-timeline";
+import type { ChangeLayer, CommitDetailTarget } from "./changes-diff-target";
+import type { CommitPresentation } from "./commit-row";
 
 export type ChangedFile = {
+  isSymlink?: boolean;
   path: string;
   status: FileChangeStatus;
   staged: boolean;
@@ -20,6 +23,7 @@ export type ChangedFile = {
   oldPath: string | undefined;
   /** Repository this file belongs to in multi-repo workspaces; empty for single-repo. */
   repositoryName?: string;
+  changeLayer?: ChangeLayer;
 };
 
 /**
@@ -60,6 +64,8 @@ export function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
     minus: file.deletions,
     oldPath: file.old_path,
     repositoryName: file.repository_name,
+    changeLayer: file.change_layer,
+    isSymlink: file.is_symlink,
   }));
 }
 
@@ -120,12 +126,13 @@ function addReviewSource(
     diff?: string;
   },
 ): void {
-  const collidesWithHigherPriority = source.repositoryName
-    ? winningDiffs.has(source.path)
+  const isScoped = source.repositoryName !== undefined;
+  const collidesWithHigherPriority = isScoped
+    ? source.repositoryName !== "" && winningDiffs.has(source.path)
     : paths.has(source.path);
   if (winningDiffs.has(source.key) || collidesWithHigherPriority) return;
   winningDiffs.set(source.key, source.diff);
-  paths.add(source.path);
+  if (!isScoped) paths.add(source.path);
 }
 
 function buildReviewProgressIndex(
@@ -266,16 +273,217 @@ export function firstVisibleSection(flags: {
   return null;
 }
 
-type MergedCommit = {
+export type MergedCommit = {
   commit_sha: string;
   commit_message: string;
   insertions: number;
   deletions: number;
   pushed: boolean;
+  statsAvailable: boolean;
+  detailTarget: CommitDetailTarget;
   /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
   repository_name?: string;
   committed_at?: string;
+  presentation?: CommitPresentation;
 };
+
+export type PRCommitForMerge = {
+  sha: string;
+  message: string;
+  additions: number;
+  deletions: number;
+  author_date?: string;
+  stats_available?: boolean;
+  workspace_id: string;
+  owner: string;
+  repo: string;
+  repository_name?: string;
+};
+
+function localCommitTarget(commit: {
+  commit_sha: string;
+  repository_name?: string;
+}): CommitDetailTarget {
+  return {
+    source: "local",
+    sha: commit.commit_sha,
+    ...(commit.repository_name ? { repo: commit.repository_name } : {}),
+  };
+}
+
+function githubCommitTarget(commit: PRCommitForMerge): CommitDetailTarget | null {
+  if (!commit.workspace_id.trim() || !commit.owner.trim() || !commit.repo.trim()) return null;
+  return {
+    source: "github",
+    sha: commit.sha,
+    workspaceId: commit.workspace_id,
+    owner: commit.owner,
+    repo: commit.repo,
+    ...(commit.repository_name ? { repositoryName: commit.repository_name } : {}),
+  };
+}
+
+function prCommitKey(pr: PRCommitForMerge): string {
+  return `${pr.repository_name ?? ""}\0${pr.sha}`;
+}
+
+function appendPROnlyCommits(
+  prCommits: PRCommitForMerge[],
+  matchedPRKeys: Set<string>,
+  pushed: MergedCommit[],
+): void {
+  // The provider endpoint returns its complete history oldest-first. The
+  // Changes timeline is newest-first, so provider-only rows must be reversed
+  // before they are placed ahead of shared checkout history.
+  for (let index = prCommits.length - 1; index >= 0; index--) {
+    const pr = prCommits[index];
+    if (matchedPRKeys.has(prCommitKey(pr))) continue;
+    const mapped = mapCurrentPRCommit(pr);
+    if (mapped) pushed.push(mapped);
+  }
+}
+
+type LocalCommitForMerge = {
+  commit_sha: string;
+  commit_message: string;
+  insertions: number;
+  deletions: number;
+  repository_name?: string;
+  pushed?: boolean;
+  committed_at?: string;
+};
+
+type LocalMergeBuckets = {
+  unpushed: MergedCommit[];
+  pushed: MergedCommit[];
+  matchedPRKeys: Set<string>;
+  localPushedByPRKey: Map<string, MergedCommit>;
+};
+
+function commitsMatch(
+  local: Pick<LocalCommitForMerge, "commit_sha" | "repository_name">,
+  pr: PRCommitForMerge,
+): boolean {
+  if (!local.commit_sha || !pr.sha) return false;
+  const shaMatches = pr.sha.startsWith(local.commit_sha) || local.commit_sha.startsWith(pr.sha);
+  return shaMatches && (local.repository_name ?? "") === (pr.repository_name ?? "");
+}
+
+function collectLocalCommits(
+  localCommits: LocalCommitForMerge[],
+  prCommits: PRCommitForMerge[],
+): LocalMergeBuckets {
+  const buckets: LocalMergeBuckets = {
+    unpushed: [],
+    pushed: [],
+    matchedPRKeys: new Set(),
+    localPushedByPRKey: new Map(),
+  };
+  for (const commit of localCommits) {
+    const matchingPRs = prCommits.filter((pr) => commitsMatch(commit, pr));
+    const isPushed = commit.pushed === true || matchingPRs.length > 0;
+    const merged: MergedCommit = {
+      ...commit,
+      pushed: isPushed,
+      statsAvailable: true,
+      detailTarget: localCommitTarget(commit),
+    };
+    (isPushed ? buckets.pushed : buckets.unpushed).push(merged);
+    for (const pr of matchingPRs) {
+      const key = prCommitKey(pr);
+      buckets.matchedPRKeys.add(key);
+      if (isPushed) buckets.localPushedByPRKey.set(key, merged);
+    }
+  }
+  return buckets;
+}
+
+function orderSingleRepoPushedCommits(
+  prCommits: PRCommitForMerge[],
+  providerOnly: MergedCommit[],
+  pushed: MergedCommit[],
+  localPushedByPRKey: Map<string, MergedCommit>,
+): MergedCommit[] {
+  const ordered: MergedCommit[] = [];
+  const added = new Set<MergedCommit>();
+  const providerOnlyBySHA = new Map(providerOnly.map((commit) => [commit.commit_sha, commit]));
+  for (const pr of [...prCommits].reverse()) {
+    const local = localPushedByPRKey.get(prCommitKey(pr));
+    if (local && !added.has(local)) {
+      ordered.push(local);
+      added.add(local);
+      continue;
+    }
+    const provider = providerOnlyBySHA.get(pr.sha);
+    if (provider && !added.has(provider)) {
+      ordered.push(provider);
+      added.add(provider);
+    }
+  }
+  ordered.push(...pushed.filter((commit) => !added.has(commit)));
+  return ordered;
+}
+
+function repositoryKey(repositoryName: string | undefined): string {
+  return repositoryName ?? "";
+}
+
+function orderPushedCommitsByRepository(
+  prCommits: PRCommitForMerge[],
+  providerOnly: MergedCommit[],
+  pushed: MergedCommit[],
+  localPushedByPRKey: Map<string, MergedCommit>,
+): MergedCommit[] {
+  const repositoryOrder: string[] = [];
+  const seenRepositories = new Set<string>();
+  const pushedByRepository = new Map<string, MergedCommit[]>();
+  const providerOnlyByRepository = new Map<string, MergedCommit[]>();
+  const prByRepository = new Map<string, PRCommitForMerge[]>();
+
+  const addRepository = (key: string) => {
+    if (seenRepositories.has(key)) return;
+    seenRepositories.add(key);
+    repositoryOrder.push(key);
+  };
+  const addCommit = (map: Map<string, MergedCommit[]>, commit: MergedCommit) => {
+    const key = repositoryKey(commit.repository_name);
+    addRepository(key);
+    const commits = map.get(key) ?? [];
+    commits.push(commit);
+    map.set(key, commits);
+  };
+
+  for (const commit of pushed) addCommit(pushedByRepository, commit);
+  for (const commit of providerOnly) addCommit(providerOnlyByRepository, commit);
+  for (const pr of prCommits) {
+    const key = repositoryKey(pr.repository_name);
+    addRepository(key);
+    const commits = prByRepository.get(key) ?? [];
+    commits.push(pr);
+    prByRepository.set(key, commits);
+  }
+
+  const ordered: MergedCommit[] = [];
+  for (const key of repositoryOrder) {
+    const repoPRCommits = prByRepository.get(key) ?? [];
+    const repoProviderOnly = providerOnlyByRepository.get(key) ?? [];
+    const repoPushed = pushedByRepository.get(key) ?? [];
+    const hasLocalAnchor = repoPRCommits.some((pr) => localPushedByPRKey.has(prCommitKey(pr)));
+    if (!hasLocalAnchor) {
+      ordered.push(...repoPushed, ...repoProviderOnly);
+      continue;
+    }
+    ordered.push(
+      ...orderSingleRepoPushedCommits(
+        repoPRCommits,
+        repoProviderOnly,
+        repoPushed,
+        localPushedByPRKey,
+      ),
+    );
+  }
+  return ordered;
+}
 
 /**
  * Merge local session commits and PR commits into a single list. A commit is
@@ -289,57 +497,93 @@ type MergedCommit = {
  * as pushed. Order: unpushed first, then pushed.
  */
 export function mergeCommits(
+  localCommits: LocalCommitForMerge[],
+  prCommits: PRCommitForMerge[],
+): MergedCommit[] {
+  const { unpushed, pushed, matchedPRKeys, localPushedByPRKey } = collectLocalCommits(
+    localCommits,
+    prCommits,
+  );
+  const providerOnly: MergedCommit[] = [];
+  appendPROnlyCommits(prCommits, matchedPRKeys, providerOnly);
+  return [
+    ...unpushed,
+    ...orderPushedCommitsByRepository(prCommits, providerOnly, pushed, localPushedByPRKey),
+  ];
+}
+
+function mapLocalCheckoutCommit(commit: {
+  commit_sha: string;
+  commit_message: string;
+  insertions: number;
+  deletions: number;
+  repository_name?: string;
+  committed_at?: string;
+}): MergedCommit {
+  return {
+    ...commit,
+    pushed: false,
+    statsAvailable: true,
+    detailTarget: localCommitTarget(commit),
+    presentation: "local_checkout",
+  };
+}
+
+function mapCurrentPRCommit(commit: PRCommitForMerge): MergedCommit | null {
+  const detailTarget = githubCommitTarget(commit);
+  if (!detailTarget) return null;
+  return {
+    commit_sha: commit.sha,
+    commit_message: commit.message,
+    insertions: commit.additions,
+    deletions: commit.deletions,
+    pushed: true,
+    statsAvailable: commit.stats_available === true,
+    detailTarget,
+    presentation: "current_pr",
+    ...(commit.repository_name ? { repository_name: commit.repository_name } : {}),
+    committed_at: commit.author_date,
+  };
+}
+
+function reverseCommitsByRepository(commits: PRCommitForMerge[]): PRCommitForMerge[] {
+  const repositoryOrder: string[] = [];
+  const commitsByRepository = new Map<string, PRCommitForMerge[]>();
+  for (const commit of commits) {
+    const key = `${commit.owner}/${commit.repo}`;
+    const repositoryCommits = commitsByRepository.get(key);
+    if (repositoryCommits) {
+      repositoryCommits.push(commit);
+      continue;
+    }
+    commitsByRepository.set(key, [commit]);
+    repositoryOrder.push(key);
+  }
+  return repositoryOrder.flatMap((key) => [...(commitsByRepository.get(key) ?? [])].reverse());
+}
+
+/**
+ * Keeps provider and checkout rows independent after a proven history drift.
+ * No SHA, message, or metadata matching occurs in this mode.
+ */
+export function separateCommitHistories(
   localCommits: {
     commit_sha: string;
     commit_message: string;
     insertions: number;
     deletions: number;
-    /** Multi-repo: name of the repo this commit was made in. */
     repository_name?: string;
-    pushed?: boolean;
     committed_at?: string;
   }[],
-  prCommits: {
-    sha: string;
-    message: string;
-    additions: number;
-    deletions: number;
-    author_date?: string;
-  }[],
-): MergedCommit[] {
-  const shaMatches = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
-  const unpushed: MergedCommit[] = [];
-  const pushed: MergedCommit[] = [];
-  const matchedPRShas = new Set<string>();
-  for (const c of localCommits) {
-    const matchesPR = prCommits.some((pr) => shaMatches(pr.sha, c.commit_sha));
-    const isPushed = c.pushed === true || matchesPR;
-    if (isPushed) {
-      pushed.push({ ...c, pushed: true });
-    } else {
-      unpushed.push({ ...c, pushed: false });
-    }
-    if (matchesPR) {
-      for (const pr of prCommits) {
-        if (shaMatches(pr.sha, c.commit_sha)) {
-          matchedPRShas.add(pr.sha);
-        }
-      }
-    }
-  }
-  for (const pr of prCommits) {
-    if (!matchedPRShas.has(pr.sha)) {
-      pushed.push({
-        commit_sha: pr.sha,
-        commit_message: pr.message,
-        insertions: pr.additions,
-        deletions: pr.deletions,
-        pushed: true,
-        committed_at: pr.author_date,
-      });
-    }
-  }
-  return [...unpushed, ...pushed];
+  prCommits: PRCommitForMerge[],
+): { providerCommits: MergedCommit[]; localCommits: MergedCommit[] } {
+  return {
+    providerCommits: reverseCommitsByRepository(prCommits).flatMap((commit) => {
+      const mapped = mapCurrentPRCommit(commit);
+      return mapped ? [mapped] : [];
+    }),
+    localCommits: localCommits.map(mapLocalCheckoutCommit),
+  };
 }
 
 export function getBaseBranchDisplay(baseBranch: string | undefined): string {

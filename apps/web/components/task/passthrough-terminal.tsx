@@ -9,7 +9,8 @@ import "@xterm/xterm/css/xterm.css";
 import { PanelLoadingState } from "@/components/panel-loading-state";
 import { useAppStore } from "@/components/state-provider";
 import { useSession } from "@/hooks/domains/session/use-session";
-import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
+import { useTheme } from "@/components/theme/app-theme";
+import type { TaskSessionState } from "@/app/office/tasks/[id]/types";
 import { getBackendConfig } from "@/lib/config";
 import { useTerminalLinkHandler } from "@/hooks/use-terminal-link-handler";
 import { buildTerminalFontFamily } from "@/lib/terminal/terminal-font";
@@ -28,6 +29,15 @@ import { useTerminalSearch } from "./use-terminal-search";
 import { TerminalSearchBar } from "./terminal-search-bar";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useTerminalBusyTracking } from "./use-terminal-busy-tracking";
+import { useTerminalTheme } from "./use-terminal-theme";
+import { useTranslation } from "react-i18next";
+import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import {
+  useWorkspaceRestoration,
+  type WorkspaceRestorationResult,
+} from "@/hooks/domains/session/use-workspace-restoration";
+import { WorkspaceUnavailable } from "./workspace-unavailable";
 
 type BaseProps = {
   autoFocus?: boolean;
@@ -50,9 +60,9 @@ type BaseProps = {
    * Mobile uses this to register a key-bar sender that writes raw bytes
    * directly to this terminal's socket. */
   onWsReady?: (ws: WebSocket) => void;
-  /** Translate single-finger touch swipes on the terminal area into xterm
-   * scrollback navigation. Mobile callers set this so the xterm canvas no
-   * longer silently absorbs touch gestures. */
+  /** Optional touch-scroll override. Coarse-pointer shell terminals enable
+   * touch scrolling by default, while fine pointers never install the custom
+   * handler. */
   enableTouchScroll?: boolean;
 };
 type AgentTerminalProps = BaseProps & { mode: "agent"; sessionId?: string | null; label?: string };
@@ -122,54 +132,145 @@ function useWsBaseUrl() {
 /**
  * Decide whether the WS effect should attempt to open a terminal connection.
  *
- * Agent terminals require agentctl readiness — the agent process must be
- * subscribed before passthrough I/O is meaningful.
+ * Agent terminals connect as soon as the session identity is known. The
+ * backend owns workspace readiness and passthrough process recovery; gating
+ * on the client's one-shot agentctl status can strand cold subscribers.
  *
  * Shell terminals route by env on the backend; the env handler lazy-creates
  * the execution and waits for remote readiness server-side, so the client
  * only needs the env id. No session involvement.
  */
-function computeCanConnect(
+export function computeCanConnect(
   mode: "agent" | "shell",
   connectionID: string | null | undefined,
   sessionId: string | null | undefined,
-  isAgentctlReady: boolean,
+  environmentEnded = false,
+  workspaceReady = false,
 ): boolean {
   if (!connectionID) return false;
-  if (mode === "agent") return Boolean(sessionId) && isAgentctlReady;
-  return true;
+  if (mode === "agent") return Boolean(sessionId);
+  // The env handler refuses a shell for a dead environment until the workspace
+  // admission flow has recreated or reattached its retained execution.
+  return workspaceReady || !environmentEnded;
 }
 
-// eslint-disable-next-line max-lines-per-function -- wires many hooks + refs; each block is already its own hook
-export function PassthroughTerminal(props: PassthroughTerminalProps) {
-  const {
-    mode,
-    label,
-    autoFocus,
-    pendingCommand,
-    onCommandSent,
-    onXtermReady,
-    disableWebgl,
-    manualInputRouting,
-    onWsReady,
-    enableTouchScroll,
-  } = props;
-  const terminalId = mode === "shell" ? props.terminalId : undefined;
-  const environmentId = mode === "shell" ? props.environmentId : undefined;
-  const refs = useTerminalRefs();
-  const { terminalRef, xtermRef, fitAddonRef, wsRef, attachAddonRef } = refs;
+export function resolveTouchScrollEnabled(
+  mode: "agent" | "shell",
+  isFinePointer: boolean,
+  requested?: boolean,
+): boolean {
+  if (isFinePointer) return false;
+  return requested ?? mode === "shell";
+}
 
-  const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const environmentSessionId = useEnvironmentSessionId();
-  const sessionId = mode === "agent" ? (props.sessionId ?? storeSessionId) : environmentSessionId;
+const SESSION_TERMINAL_STATES = new Set<TaskSessionState>(["COMPLETED", "FAILED", "CANCELLED"]);
 
-  const { session } = useSession(sessionId);
-  const agentctlStatus = useSessionAgentctl(sessionId);
-  const taskId = session?.task_id ?? null;
-  const connectionID = mode === "agent" ? sessionId : environmentId;
-  const canConnect = computeCanConnect(mode, connectionID, sessionId, agentctlStatus.isReady);
-  const wsBaseUrl = useWsBaseUrl();
+export function isSessionEnded(state: TaskSessionState | null | undefined): boolean {
+  return state != null && SESSION_TERMINAL_STATES.has(state);
+}
 
+export function shouldGuardPassthroughEscape(
+  event: KeyboardEvent,
+  textarea: HTMLTextAreaElement | undefined,
+  isConnected = true,
+): boolean {
+  if (
+    !isConnected ||
+    event.key !== "Escape" ||
+    event.altKey ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.shiftKey
+  ) {
+    return false;
+  }
+  const activeElement = typeof document === "undefined" ? null : document.activeElement;
+  // The activeElement fallback covers synthetic events whose target and focus diverge.
+  return event.target === textarea || activeElement === textarea;
+}
+
+/**
+ * Whether every session sharing this environment has ended.
+ *
+ * Shell terminals are environment-scoped, but the session handle this component
+ * holds is not a proxy for one: `useEnvironmentSessionId` deliberately caches
+ * the first session seen for an environment, so once session A ends and session
+ * B reuses that environment, the handle still resolves to A. Gating on A's
+ * state alone would refuse a shell on a live environment — worse than the loop
+ * this exists to stop.
+ *
+ * So refuse only on positive knowledge: sessions for this environment are
+ * known, and every one of them is terminal. Anything unknown connects.
+ */
+export function isEnvironmentEnded(
+  environmentId: string | null | undefined,
+  sessionStateById: Record<string, TaskSessionState | undefined>,
+  environmentIdBySessionId: Record<string, string>,
+): boolean {
+  if (!environmentId) return false;
+  const sessionIds = Object.keys(environmentIdBySessionId).filter(
+    (id) => environmentIdBySessionId[id] === environmentId,
+  );
+  if (sessionIds.length === 0) return false;
+  return sessionIds.every((id) => isSessionEnded(sessionStateById[id]));
+}
+
+/**
+ * What the pane should render. Exported so every state can be asserted without
+ * mounting xterm.
+ *
+ * This is a named function rather than two inline conditions because the
+ * loading overlay is opaque and full-bleed: any state that leaves
+ * `isConnected` false while the terminal will never connect renders a
+ * "connecting…" spinner that is actively false. Deciding it in one place makes
+ * "ended outranks connecting" something a test can pin down.
+ */
+export function computeTerminalPaneState(
+  mode: "agent" | "shell",
+  environmentEnded: boolean,
+  isConnected: boolean,
+  workspaceReady = false,
+): "connected" | "connecting" | "ended" {
+  if (mode === "shell" && environmentEnded && !workspaceReady) return "ended";
+  return isConnected ? "connected" : "connecting";
+}
+
+/** Reads the two store slices `isEnvironmentEnded` needs. */
+function useEnvironmentEnded(environmentId: string | null | undefined): boolean {
+  return useAppStore((state) =>
+    isEnvironmentEnded(
+      environmentId,
+      Object.fromEntries(Object.entries(state.taskSessions.items).map(([id, s]) => [id, s?.state])),
+      state.environmentIdBySessionId,
+    ),
+  );
+}
+
+type PassthroughConnectionOptions = {
+  connectionID: string | null | undefined;
+  autoFocus?: boolean;
+  onXtermReady?: (xterm: Terminal) => void;
+  xtermRef: React.MutableRefObject<Terminal | null>;
+  attachAddonRef: React.MutableRefObject<AttachAddon | null>;
+  wsRef: React.MutableRefObject<WebSocket | null>;
+};
+
+type PassthroughConnectionState = {
+  isTerminalReady: boolean;
+  isConnected: boolean;
+  onTerminalReady: () => void;
+  onConnected: () => void;
+  onDisconnected: () => void;
+};
+
+function usePassthroughConnection({
+  connectionID,
+  autoFocus,
+  onXtermReady,
+  xtermRef,
+  attachAddonRef,
+  wsRef,
+}: PassthroughConnectionOptions): PassthroughConnectionState {
   const [isTerminalReady, setIsTerminalReady] = useState(false);
   const onTerminalReady = useCallback(() => {
     setIsTerminalReady(true);
@@ -180,27 +281,79 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   // overlay resets on target switches without needing a separate setState effect.
   const [connectedTargetId, setConnectedTargetId] = useState<string | null>(null);
   const isConnected = connectionID != null && connectedTargetId === connectionID;
+  const passthroughEscapeGuard = useCallback(
+    (event: KeyboardEvent) =>
+      shouldGuardPassthroughEscape(
+        event,
+        xtermRef.current?.textarea,
+        isConnected &&
+          attachAddonRef.current !== null &&
+          wsRef.current?.readyState === WebSocket.OPEN,
+      ),
+    [attachAddonRef, isConnected, wsRef, xtermRef],
+  );
+  useClarificationEscapeGuard(passthroughEscapeGuard);
+
   const onConnected = useCallback(() => {
     setConnectedTargetId(connectionID ?? null);
-    if (autoFocus) refs.xtermRef.current?.textarea?.focus({ preventScroll: true });
-  }, [connectionID, autoFocus, refs.xtermRef]);
+    if (autoFocus) xtermRef.current?.textarea?.focus({ preventScroll: true });
+  }, [connectionID, autoFocus, xtermRef]);
   const onDisconnected = useCallback(() => {
     const disconnectedTargetId = connectionID ?? null;
     setConnectedTargetId((current) => (current === disconnectedTargetId ? null : current));
   }, [connectionID]);
 
+  return { isTerminalReady, isConnected, onTerminalReady, onConnected, onDisconnected };
+}
+
+type PassthroughEffectsOptions = {
+  props: PassthroughTerminalProps;
+  refs: ReturnType<typeof useTerminalRefs>;
+  terminalId: string | undefined;
+  environmentId: string | null | undefined;
+  taskId: string | null;
+  sessionId: string | null | undefined;
+  canConnect: boolean;
+  wsBaseUrl: string;
+  resolvedTheme: ReturnType<typeof useTheme>["resolvedTheme"];
+  connection: PassthroughConnectionState;
+};
+
+function usePassthroughEffects({
+  props,
+  refs,
+  terminalId,
+  environmentId,
+  taskId,
+  sessionId,
+  canConnect,
+  wsBaseUrl,
+  resolvedTheme,
+  connection,
+}: PassthroughEffectsOptions) {
+  const {
+    mode,
+    label,
+    pendingCommand,
+    onCommandSent,
+    disableWebgl,
+    manualInputRouting,
+    onWsReady,
+    enableTouchScroll,
+  } = props;
+  const { terminalRef, xtermRef, fitAddonRef, wsRef, attachAddonRef } = refs;
+  const { isTerminalReady, isConnected, onTerminalReady, onConnected, onDisconnected } = connection;
   const linkHandler = useTerminalLinkHandler();
   const terminalFontFamily = useAppStore((s) => s.userSettings.terminalFontFamily);
   const terminalFontSize = useAppStore((s) => s.userSettings.terminalFontSize);
   const sendResize = useSendResize(wsRef);
   const fitAndResize = useFitAndResize({
-    xtermRef: refs.xtermRef,
-    fitAddonRef: refs.fitAddonRef,
-    terminalRef: refs.terminalRef,
+    xtermRef,
+    fitAddonRef,
+    terminalRef,
     lastDimensionsRef: refs.lastDimensionsRef,
     sendResize,
   });
-
   const sendInput = useSendInput(wsRef);
   const toggleBottomTerminal = useAppStore((s) => s.toggleBottomTerminal);
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
@@ -215,9 +368,9 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     containerRef,
   );
   useTerminalInit({
-    terminalRef: refs.terminalRef,
-    xtermRef: refs.xtermRef,
-    fitAddonRef: refs.fitAddonRef,
+    terminalRef,
+    xtermRef,
+    fitAddonRef,
     isInitializedRef: refs.isInitializedRef,
     lastDimensionsRef: refs.lastDimensionsRef,
     resizeTimeoutRef: refs.resizeTimeoutRef,
@@ -228,20 +381,20 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     fontFamily: buildTerminalFontFamily(terminalFontFamily),
     fontSize: terminalFontSize ?? undefined,
     disableWebgl,
+    resolvedTheme,
     onToggleBottomTerminal: toggleBottomTerminal,
     sendInput,
     keyboardShortcutsRef,
     onFindInPanelRef,
   });
-  useTerminalBusyTracking(terminalId, xtermRef, mode === "shell", isTerminalReady);
-
-  useTouchScroll({
-    terminalRef: refs.terminalRef,
-    xtermRef: refs.xtermRef,
-    enabled: !!enableTouchScroll,
+  useTerminalTheme({
+    terminalRef: xtermRef,
+    containerRef: terminalRef,
     isTerminalReady,
+    resolvedTheme,
   });
-
+  useTerminalBusyTracking(terminalId, xtermRef, mode === "shell", isTerminalReady);
+  useTouchScroll({ terminalRef, xtermRef, enabled: !!enableTouchScroll, isTerminalReady });
   useWebSocketConnection({
     taskId,
     sessionId,
@@ -262,8 +415,65 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     manualInputRouting,
     onWsReady,
   });
-
   usePendingCommand(pendingCommand, isConnected, wsRef, onCommandSent);
+  return { containerRef, search, isConnected };
+}
+
+export function PassthroughTerminal(props: PassthroughTerminalProps) {
+  const { mode, autoFocus, onXtermReady } = props;
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const { resolvedTheme } = useTheme();
+  const terminalId = mode === "shell" ? props.terminalId : undefined;
+  const environmentId = mode === "shell" ? props.environmentId : undefined;
+  const refs = useTerminalRefs();
+  const { terminalRef, xtermRef, wsRef, attachAddonRef } = refs;
+  const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const environmentSessionId = useEnvironmentSessionId();
+  const sessionId = mode === "agent" ? (props.sessionId ?? storeSessionId) : environmentSessionId;
+  const { session } = useSession(sessionId);
+  const taskId = session?.task_id ?? null;
+  const workspaceRestoration = useWorkspaceRestoration(
+    mode === "shell" ? taskId : null,
+    mode === "shell" ? sessionId : null,
+    environmentId,
+  );
+  const workspaceReady = mode === "shell" && workspaceRestoration.status === "ready";
+  const connectionID = mode === "agent" ? sessionId : environmentId;
+  const environmentEnded = useEnvironmentEnded(environmentId);
+  const canConnect =
+    computeCanConnect(mode, connectionID, sessionId, environmentEnded, workspaceReady) &&
+    (mode !== "shell" || !workspaceRestoration.status || workspaceRestoration.status === "ready");
+  const wsBaseUrl = useWsBaseUrl();
+  const connection = usePassthroughConnection({
+    connectionID,
+    autoFocus,
+    onXtermReady,
+    xtermRef,
+    attachAddonRef,
+    wsRef,
+  });
+  const paneState = computeTerminalPaneState(
+    mode,
+    environmentEnded,
+    connection.isConnected,
+    workspaceReady,
+  );
+  const effectiveProps: PassthroughTerminalProps = {
+    ...props,
+    enableTouchScroll: resolveTouchScrollEnabled(mode, isFinePointer, props.enableTouchScroll),
+  };
+  const { containerRef, search } = usePassthroughEffects({
+    props: effectiveProps,
+    refs,
+    terminalId,
+    environmentId,
+    taskId,
+    sessionId,
+    canConnect,
+    wsBaseUrl,
+    resolvedTheme,
+    connection,
+  });
 
   return (
     <div
@@ -278,14 +488,57 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
         <div ref={terminalRef} data-testid="terminal-xterm-host" className="h-full w-full" />
       </div>
       <TerminalSearchBar search={search} />
-      {!isConnected && (
-        <PanelLoadingState
-          testId="passthrough-loading"
-          className="absolute inset-0 bg-background"
-          label={mode === "agent" ? "Preparing workspace..." : "Connecting terminal..."}
-        />
-      )}
+      <TerminalPaneOverlay
+        paneState={paneState}
+        mode={mode}
+        workspaceRestoration={workspaceRestoration}
+      />
     </div>
+  );
+}
+
+/**
+ * Covers the pane while it is not usable. Both branches are opaque and
+ * full-bleed, so which one renders is the only thing the user ever sees here.
+ */
+function TerminalPaneOverlay({
+  paneState,
+  mode,
+  workspaceRestoration,
+}: {
+  paneState: ReturnType<typeof computeTerminalPaneState>;
+  mode: "agent" | "shell";
+  workspaceRestoration?: WorkspaceRestorationResult;
+}) {
+  const { t } = useTranslation();
+  if (mode === "shell" && workspaceRestoration?.status && workspaceRestoration.status !== "ready") {
+    return (
+      <div className="absolute inset-0 z-10 bg-background">
+        <WorkspaceUnavailable
+          restoration={workspaceRestoration.attempt}
+          onRetry={() => void workspaceRestoration.restore()}
+          retryDisabled={workspaceRestoration.status === "pending"}
+        />
+      </div>
+    );
+  }
+  if (paneState === "connected") return null;
+  if (paneState === "ended") {
+    return (
+      <div
+        data-testid="passthrough-session-ended"
+        className="absolute inset-0 bg-background flex items-center justify-center p-4 text-center text-xs text-muted-foreground"
+      >
+        {t("task:terminalSessionEnded")}
+      </div>
+    );
+  }
+  return (
+    <PanelLoadingState
+      testId="passthrough-loading"
+      className="absolute inset-0 bg-background"
+      label={mode === "agent" ? t("task:preparingWorkspace") : t("task:connectingTerminal")}
+    />
   );
 }
 

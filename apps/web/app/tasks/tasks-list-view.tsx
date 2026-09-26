@@ -1,14 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { PaginationState } from "@tanstack/react-table";
 import { Button } from "@kandev/ui/button";
-import { Checkbox } from "@kandev/ui/checkbox";
-import { Label } from "@kandev/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconArchive, IconArchiveOff, IconLoader, IconTrash } from "@tabler/icons-react";
-import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
+import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
+import { cleanupSharesParentWorkspace } from "@/components/task/task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { primaryTaskRepository, type Repository, type Task, type Workflow } from "@/lib/types/http";
 import { formatTaskStateLabel } from "@/lib/ui/state-labels";
@@ -17,22 +15,24 @@ import { formatRelativeTime } from "@/lib/utils";
 import { TasksPagination } from "./tasks-pagination";
 import { TaskListRowPrimaryContent } from "./rich-task-list-row";
 import { PullToRefresh } from "@/components/mobile/pull-to-refresh";
-import {
-  TASKS_LIST_GROUP_OPTIONS,
-  TASKS_LIST_SORT_OPTIONS,
-  TASK_STATE_ORDER,
-  type TasksListGroup,
-  type TasksListSort,
-} from "@/lib/tasks/tasks-list-options";
+import { TasksListControls } from "./tasks-list-controls";
+import { TASK_STATE_ORDER } from "@/lib/tasks/tasks-list-options";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import type { TaskListFacetValue } from "@/lib/plugins/types";
+import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 
 export type TasksListViewProps = {
   total: number;
   showArchived: boolean;
   setShowArchived: (show: boolean) => void;
-  tasksListSort: TasksListSort;
-  onTasksListSortChange: (sort: TasksListSort) => void;
-  tasksListGroup: TasksListGroup;
-  onTasksListGroupChange: (group: TasksListGroup) => void;
+  tasksListSort: string;
+  onTasksListSortChange: (sort: string) => void;
+  tasksListGroup: string;
+  onTasksListGroupChange: (group: string) => void;
+  facetOptions?: ReadonlyArray<{ value: string; label: string }>;
+  facetValues?: Record<string, readonly TaskListFacetValue[]>;
   tasks: Task[];
   workflows: Workflow[];
   repositories: Repository[];
@@ -45,7 +45,10 @@ export type TasksListViewProps = {
   deletingTaskId: string | null;
   handleArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   handleUnarchive: (taskId: string) => Promise<void>;
-  handleDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  handleDelete: (
+    taskId: string,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => Promise<void>;
   onRefresh?: () => void | Promise<void>;
 };
 
@@ -71,9 +74,12 @@ export function TasksListView({
   handleUnarchive,
   handleDelete,
   onRefresh,
+  facetOptions,
+  facetValues,
 }: TasksListViewProps) {
+  // Not a <main>: AppShell owns that landmark, one per page.
   const content = (
-    <main className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
+    <div className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
       <div className="space-y-4">
         <TasksListControls
           showArchived={showArchived}
@@ -82,6 +88,7 @@ export function TasksListView({
           onTasksListSortChange={onTasksListSortChange}
           tasksListGroup={tasksListGroup}
           onTasksListGroupChange={onTasksListGroupChange}
+          facetOptions={facetOptions}
         />
         <TaskRows
           tasks={tasks}
@@ -95,6 +102,7 @@ export function TasksListView({
           onUnarchive={handleUnarchive}
           onDelete={handleDelete}
           onRowClick={handleRowClick}
+          facetValues={facetValues}
         />
         <TasksPagination
           total={total}
@@ -103,84 +111,9 @@ export function TasksListView({
           onPaginationChange={setPagination}
         />
       </div>
-    </main>
+    </div>
   );
   return onRefresh ? <PullToRefresh onRefresh={onRefresh}>{content}</PullToRefresh> : content;
-}
-
-function TasksListControls({
-  showArchived,
-  onShowArchivedChange,
-  tasksListSort,
-  onTasksListSortChange,
-  tasksListGroup,
-  onTasksListGroupChange,
-}: {
-  showArchived: boolean;
-  onShowArchivedChange: (show: boolean) => void;
-  tasksListSort: TasksListSort;
-  onTasksListSortChange: (sort: TasksListSort) => void;
-  tasksListGroup: TasksListGroup;
-  onTasksListGroupChange: (group: TasksListGroup) => void;
-}) {
-  return (
-    <div className="hidden min-h-9 flex-wrap items-center justify-end gap-3 sm:flex">
-      <ListOptionSelect
-        label="Sort"
-        value={tasksListSort}
-        options={TASKS_LIST_SORT_OPTIONS}
-        onChange={(value) => onTasksListSortChange(value as TasksListSort)}
-        testId="tasks-list-sort"
-      />
-      <ListOptionSelect
-        label="Group"
-        value={tasksListGroup}
-        options={TASKS_LIST_GROUP_OPTIONS}
-        onChange={(value) => onTasksListGroupChange(value as TasksListGroup)}
-        testId="tasks-list-group"
-      />
-      <Label className="flex h-11 items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none lg:h-9">
-        <Checkbox
-          checked={showArchived}
-          onCheckedChange={(checked) => onShowArchivedChange(checked === true)}
-          className="cursor-pointer"
-        />
-        Show archived
-      </Label>
-    </div>
-  );
-}
-
-function ListOptionSelect<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-  testId,
-}: {
-  label: string;
-  value: T;
-  options: ReadonlyArray<{ readonly value: T; readonly label: string }>;
-  onChange: (value: T) => void;
-  testId: string;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <Select value={value} onValueChange={(next) => onChange(next as T)}>
-        <SelectTrigger data-testid={testId} className="h-10 w-[150px] cursor-pointer lg:h-9">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((option) => (
-            <SelectItem key={option.value} value={option.value} className="cursor-pointer">
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
 }
 
 type TaskTreeNode = {
@@ -192,8 +125,15 @@ type TaskTreeNode = {
 type TaskListSection = {
   key: string;
   title: string | null;
+  color?: string;
   nodes: TaskTreeNode[];
 };
+
+const UNGROUPED_FACET_SECTION_KEY = "facet:host:ungrouped";
+
+function facetValueSectionKey(value: string): string {
+  return `facet:value:${value}`;
+}
 
 function TaskRows({
   tasks,
@@ -207,37 +147,47 @@ function TaskRows({
   onUnarchive,
   onDelete,
   onRowClick,
+  facetValues = {},
 }: {
   tasks: Task[];
   workflows: Workflow[];
   repositories: Repository[];
   showTaskDetails: boolean;
-  tasksListGroup: TasksListGroup;
+  tasksListGroup: string;
   isLoading: boolean;
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onDelete: (
+    taskId: string,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => Promise<void>;
   onRowClick: (task: Task) => void;
+  facetValues?: Record<string, readonly TaskListFacetValue[]>;
 }) {
+  const { t, i18n } = useTranslation();
   const workflowMap = useMemo(() => new Map(workflows.map((w) => [w.id, w.name])), [workflows]);
   const repoMap = useMemo(() => new Map(repositories.map((r) => [r.id, r.name])), [repositories]);
+  // `groupForTask` resolves its headings from the catalog (the no-workflow /
+  // no-repository fallbacks, and now the task-state vocabulary). Without the
+  // language in the deps a section header keeps the previous locale until the
+  // task list itself changes.
   const sections = useMemo(
-    () => buildTaskSections(tasks, { groupBy: tasksListGroup, workflowMap, repoMap }),
-    [repoMap, tasks, tasksListGroup, workflowMap],
+    () => buildTaskSections(tasks, { groupBy: tasksListGroup, workflowMap, repoMap, facetValues }),
+    [facetValues, repoMap, tasks, tasksListGroup, workflowMap, i18n.language],
   );
 
   if (isLoading) {
     return (
       <div className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground">
-        Loading tasks...
+        {t("tasks:loadingTasks")}
       </div>
     );
   }
   if (tasks.length === 0) {
     return (
       <div className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground">
-        No tasks found.
+        {t("tasks:noTasksFound")}
       </div>
     );
   }
@@ -268,13 +218,38 @@ function buildTaskSections(
     groupBy,
     workflowMap,
     repoMap,
+    facetValues,
   }: {
-    groupBy: TasksListGroup;
+    groupBy: string;
     workflowMap: Map<string, string>;
     repoMap: Map<string, string>;
+    facetValues: Record<string, readonly TaskListFacetValue[]>;
   },
 ): TaskListSection[] {
   const roots = buildTaskTree(tasks);
+  if (groupBy.startsWith("facet:")) {
+    const grouped = new Map<string, { title: string; color?: string; tasks: Task[] }>();
+    for (const task of tasks) {
+      const values = facetValues[`${groupBy}:${task.id}`] ?? [];
+      const entries = values.length ? values : [{ value: "untagged", label: t("tasks:ungrouped") }];
+      for (const value of entries) {
+        const key = values.length ? facetValueSectionKey(value.value) : UNGROUPED_FACET_SECTION_KEY;
+        const section = grouped.get(key) ?? { title: value.label, color: value.color, tasks: [] };
+        section.tasks.push(task);
+        grouped.set(key, section);
+      }
+    }
+    return Array.from(grouped.entries())
+      .map(([key, section]) => ({
+        key,
+        title: section.title,
+        color: section.color,
+        nodes: buildTaskTree(section.tasks),
+      }))
+      .sort((a, b) =>
+        (a.title ?? "").localeCompare(b.title ?? "", undefined, { sensitivity: "base" }),
+      );
+  }
   if (groupBy === "none") {
     return [{ key: "all", title: null, nodes: roots }];
   }
@@ -332,28 +307,28 @@ function buildTaskTree(tasks: Task[]): TaskTreeNode[] {
 
 function groupForTask(
   task: Task,
-  groupBy: TasksListGroup,
+  groupBy: string,
   workflowMap: Map<string, string>,
   repoMap: Map<string, string>,
 ) {
   if (groupBy === "workflow") {
     const title = workflowMap.get(task.workflow_id);
-    if (!title) return { key: "workflow:none", title: "No workflow" };
+    if (!title) return { key: "workflow:none", title: t("tasks:noWorkflow") };
     return { key: `workflow:${task.workflow_id || "none"}`, title };
   }
   if (groupBy === "repository") {
     const primaryRepo = primaryTaskRepository(task.repositories);
-    if (!primaryRepo) return { key: "repository:none", title: "No repository" };
+    if (!primaryRepo) return { key: "repository:none", title: t("tasks:noRepository") };
     const repoId = primaryRepo?.repository_id ?? "none";
     const title = repoMap.get(repoId);
-    if (!title) return { key: "repository:none", title: "No repository" };
+    if (!title) return { key: "repository:none", title: t("tasks:noRepository") };
     return { key: `repository:${repoId}`, title };
   }
   const title = formatTaskStateLabel(task.state);
   return { key: `state:${task.state}`, title };
 }
 
-function compareSection(a: TaskListSection, b: TaskListSection, groupBy: TasksListGroup): number {
+function compareSection(a: TaskListSection, b: TaskListSection, groupBy: string): number {
   if (groupBy === "state") {
     const aIndex = TASK_STATE_ORDER.indexOf(a.key.replace("state:", "") as Task["state"]);
     const bIndex = TASK_STATE_ORDER.indexOf(b.key.replace("state:", "") as Task["state"]);
@@ -389,7 +364,10 @@ function TaskListRow({
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onDelete: (
+    taskId: string,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -459,7 +437,10 @@ function TaskListSectionView({
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onDelete: (
+    taskId: string,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
   const rows = flattenTaskTree(section.nodes);
@@ -467,6 +448,12 @@ function TaskListSectionView({
     <section className="space-y-2" data-testid="tasks-list-section">
       {section.title && (
         <div className="flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-normal text-muted-foreground">
+          {section.color && (
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: section.color }}
+            />
+          )}
           <span>{section.title}</span>
           <span className="text-muted-foreground/70">{rows.length}</span>
         </div>
@@ -501,6 +488,7 @@ function UnarchiveRowAction({
   taskId: string;
   onUnarchive: (taskId: string) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [isPending, setIsPending] = useState(false);
   return (
     <Tooltip>
@@ -509,7 +497,7 @@ function UnarchiveRowAction({
           <Button
             variant="ghost"
             size="icon"
-            className="h-9 w-9 cursor-pointer"
+            className="cursor-pointer"
             data-testid="tasks-list-unarchive"
             disabled={isPending}
             onClick={async () => {
@@ -526,11 +514,11 @@ function UnarchiveRowAction({
             ) : (
               <IconArchiveOff className="h-4 w-4 text-muted-foreground" />
             )}
-            <span className="sr-only">Unarchive task</span>
+            <span className="sr-only">{t("tasks:unarchiveTask")}</span>
           </Button>
         </span>
       </TooltipTrigger>
-      <TooltipContent>Unarchive</TooltipContent>
+      <TooltipContent>{t("tasks:unarchive")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -556,24 +544,35 @@ function TaskRowActions({
   onArchiveOpenChange: (open: boolean) => void;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onDelete: (
+    taskId: string,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => Promise<void>;
 }) {
+  const { t } = useTranslation();
+  const workspaceMode = workspaceModeFromMetadata(task.metadata);
+  const archiveAnchorRef = useRef<HTMLButtonElement>(null);
+  const { isFinePointer } = useResponsiveBreakpoint();
   return (
-    <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
-      {!isArchived && (
+    <div
+      className={`flex items-center gap-1 ${showArchiveConfirm && !isFinePointer ? "flex-wrap" : ""}`}
+      onClick={(event) => event.stopPropagation()}
+    >
+      {!isArchived && (!showArchiveConfirm || isFinePointer) && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
+              ref={archiveAnchorRef}
               variant="ghost"
               size="icon"
-              className="h-9 w-9 cursor-pointer"
+              className="cursor-pointer"
               onClick={() => onArchiveOpenChange(true)}
             >
               <IconArchive className="h-4 w-4 text-muted-foreground" />
-              <span className="sr-only">Archive task</span>
+              <span className="sr-only">{t("tasks:archiveTask")}</span>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Archive</TooltipContent>
+          <TooltipContent>{t("tasks:archive")}</TooltipContent>
         </Tooltip>
       )}
       {isArchived && <UnarchiveRowAction taskId={task.id} onUnarchive={onUnarchive} />}
@@ -583,7 +582,7 @@ function TaskRowActions({
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 cursor-pointer"
+              className="cursor-pointer"
               disabled={isDeleting}
               onClick={() => onDeleteOpenChange(true)}
             >
@@ -592,11 +591,11 @@ function TaskRowActions({
               ) : (
                 <IconTrash className="h-4 w-4 text-destructive" />
               )}
-              <span className="sr-only">Delete task</span>
+              <span className="sr-only">{t("tasks:deleteTask")}</span>
             </Button>
           </span>
         </TooltipTrigger>
-        <TooltipContent>Delete</TooltipContent>
+        <TooltipContent>{t("tasks:delete")}</TooltipContent>
       </Tooltip>
       <TaskDeleteConfirmDialog
         open={showDeleteConfirm}
@@ -605,11 +604,15 @@ function TaskRowActions({
         taskId={task.id}
         isInFlight={isTaskInFlight(task.foreground_activity)}
         executorType={task.primary_executor_type}
+        sharesParentWorkspace={cleanupSharesParentWorkspace(workspaceMode)}
         isDeleting={isDeleting}
-        onConfirm={({ cascade }) => onDelete(task.id, { cascade })}
+        onConfirm={({ cascade, discardWorktreeChanges }) =>
+          onDelete(task.id, { cascade, discardWorktreeChanges })
+        }
       />
-      <TaskArchiveConfirmDialog
+      <TaskArchiveConfirmation
         open={showArchiveConfirm}
+        anchorRef={archiveAnchorRef}
         onOpenChange={onArchiveOpenChange}
         taskTitle={task.title}
         taskId={task.id}

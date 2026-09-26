@@ -1,0 +1,154 @@
+---
+created: 2026-09-10
+updated: 2026-09-21
+status: done
+requirements:
+  - REQ-CI-PR-DOCS-001
+  - REQ-CI-PR-DOCS-002
+  - REQ-CI-PR-DOCS-003
+system_design:
+  - ../../specs/ci/system-design/pull-request-documentation-coverage.md
+legacy_specs: []
+---
+
+# Implementation plan: PR documentation coverage
+
+## Overview
+
+Build a deterministic coverage validator, integrate PR status reporting, add merge-queue evaluation and contributor guidance, then refine narrow path exemptions from observed repository-maintenance cases.
+The CI system owns this package because it controls repository checks and label exceptions.
+
+## Scope
+
+In scope: narrow exemptions including the canonical plugin registry source, linked artifact validation, the exact `no-docs-allow` override, current-revision statuses, queue compatibility, and actionable summaries.
+
+Out of scope: AI classification, application UI, automatic label management, publishing a PR, and live ruleset mutations.
+Public user documentation remains governed by the existing contribution checklist.
+
+## Technical approach
+
+Use the proposed `.github/scripts/pr-docs.cjs` module for pure policy functions and bounded GitHub reads.
+Use `.github/workflows/pr-docs.yml` for base-controlled execution and the `PR documentation coverage` commit status.
+Reuse the existing Node runtime from GitHub-hosted runners and the built-in test runner; no pnpm dependency installation is needed.
+Register Node and workflow contract tests in `.github/workflows/lint-action-pinning.yml`.
+Keep `plugin-registry/plugins.yaml` as an exact path exemption in the classifier; do not broaden the rule to the full registry tree.
+
+Existing patterns: `.github/workflows/pr-size-label.yml` for metadata pagination,
+`.github/scripts/pr-size-label-workflow-contract_test.py` for workflow checks, and
+`docs/ci-merge-queue.md` for required-check rollout constraints.
+
+## Tests
+
+All named test suites below are proposed files.
+
+| Criteria | Evidence |
+| --- | --- |
+| AC-CI-PR-DOCS-001.2 through .6 | `pr-docs.test.cjs`: classification and artifact graph fixtures |
+| AC-CI-PR-DOCS-001.7 | `pr-docs.test.cjs`: exact registry-source exemption and mixed-path trigger fixture |
+| AC-CI-PR-DOCS-001.1; AC-CI-PR-DOCS-002.1 through .4 | Fake GitHub adapter exercises draft/fork events and label transitions |
+| AC-CI-PR-DOCS-003.1 through .3 | API failures, pagination caps, stale head/label reads, path and content restrictions |
+| AC-CI-PR-DOCS-003.4 through .5 | Per-member queue evaluation, active prefix reevaluation, mismatched queue boundaries, override removal, and rollout checklist |
+
+Use a representative #3137 fixture: `fix(worktree)` with runtime recovery paths and no artifacts fails.
+Do not fetch the live PR in unit tests.
+
+## End-to-end evidence
+
+No application browser flow changes. The workflow contract and mocked API tests run locally.
+After deployment, record real GitHub run URLs for an uncovered PR, a covered PR, an exempt PR, a fork, override addition/removal without pushes, and a merge group.
+Verify one member's documents or override cannot satisfy another member.
+Live smoke tests and required-check activation are deployment steps, not completed local evidence.
+
+## Work orders
+
+- [x] [Task 01: Validate documentation coverage](task-01-coverage-validator.md)
+- [x] [Task 02: Report pull request coverage](task-02-pr-workflow.md)
+- [x] [Task 03: Support merge queue coverage](task-03-queue-coverage.md)
+- [x] [Task 04: Exempt the canonical plugin registry source](task-04-exempt-plugin-registry-source.md)
+- [x] [Task 05: Exempt CI infrastructure paths](task-05-exempt-ci-paths.md)
+
+Execute sequentially. No subagents are authorized.
+
+## Verification results
+
+Task 01's 2026-09-13 regression fix reuses requirement searches and directory
+listings within each exact-head snapshot. Its deterministic quota regression
+now uses three searches for six work orders. All 50 Node tests, five workflow
+contract tests, documentation catalog/specification checks, and whitespace
+checks pass. A GET-only evaluation of exact PR #3626 head `93abff34efe8c9ab2bec68acb8e6aba1eb2a23d4`
+returned covered with three searches and no failed requests. See Task 01 for
+red/green evidence and limits. Consumption by trusted `main` and the new PR's
+CI/review gates remain delivery work; no status override or merge is claimed.
+
+Design validation on 2026-09-10:
+
+- `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
+- `python3 scripts/lint-spec-files.py --all`: passed.
+- `git diff --check -- docs/specs docs/decisions docs/plans/pr-documentation-coverage`: passed.
+- `git status --short -- docs/plans/pr-documentation-coverage`: confirmed the new package is present and untracked.
+
+Implementation is complete. Live GitHub smoke-test evidence and required-check
+activation remain deployment steps and are not claimed by this change.
+
+Implementation verification on 2026-09-10:
+
+- `node --test .github/scripts/pr-docs.test.cjs`: 35 tests passed.
+- `python3 .github/scripts/pr-docs-workflow-contract_test.py`: 5 tests passed.
+- `python3 .github/scripts/lint-action-pinning_test.py`: 9 tests passed.
+- `python3 .github/scripts/lint-action-pinning.py`: 24 workflows passed.
+- `python3 scripts/lint-spec-files.py --all`: passed.
+- `zizmor .github/workflows/pr-docs.yml`: no findings.
+- `git diff --check`: passed.
+
+Repository-wide `zizmor .github/workflows` still reports existing findings in
+unrelated workflows; the new workflow has no reported findings.
+
+## Amendment: canonical plugin registry source
+
+The original three work orders remain complete. This amendment adds one exact
+path exemption for the curated `plugin-registry/plugins.yaml` pointer source.
+The implementation preserves normal coverage for every other registry path and
+for any pull request that combines the exempt source with a non-exempt path.
+
+Task 04 verification completed on 2026-09-16:
+
+- 77 validator tests, 7 workflow contract tests, and 9 action-pinning tests passed.
+- All 24 workflow files passed action-pinning lint.
+- `zizmor .github/workflows/pr-docs.yml` reported no findings.
+- The specification catalog and linter passed; `git diff --check` passed.
+
+## Amendment: CI infrastructure paths
+
+The original four work orders remain complete. This amendment exempts the CI
+infrastructure paths `.github/workflows/**`, `.github/scripts/**`, and
+`.github/actions/**` from requiring a delivery package. CI pipeline changes do
+not ship product behavior and are already covered by workflow contract tests,
+so requiring delivery context for them adds process without design value. The
+exemption is directory-scoped; workflows, scripts, or actions outside `.github/`
+still require coverage.
+
+Task 05 implements the exemption and updates the path classifier tests,
+requirement, system design, decision record, and plan.
+
+Task 05 verification completed on 2026-09-21:
+
+- 80 validator tests, 7 workflow contract tests, and 9 action-pinning tests passed.
+- All 24 workflow files passed action-pinning lint.
+- `zizmor .github/workflows/pr-docs.yml` reported no findings.
+- The specification catalog and linter passed; `git diff --check` passed.
+
+## Risks
+
+- Conservative defaults require labels for some small fixes, refactors, and dependency manifest changes.
+- An overly broad registry match could allow schema, generator, or generated-catalog changes to bypass delivery context; exact-path tests constrain this risk.
+- The target-branch event queue retains up to 100 pending runs; higher bursts can still cancel new runs.
+- Structural validation cannot establish semantic relevance or planning chronology.
+- Merge queue boundary resolution needs real payload validation before mandatory rollout.
+- GitHub label/status publication is eventually consistent.
+- Adding a required status is an administrator operation separate from merging workflow files.
+
+## References
+
+- [Requirements](../../specs/ci/requirements/pull-request-documentation-coverage.md)
+- [System design](../../specs/ci/system-design/pull-request-documentation-coverage.md)
+- [Decision](../../decisions/2026-09-10-pr-documentation-coverage.md)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import {
   IconBrandAzure,
@@ -14,22 +14,28 @@ import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
+import { settingsCredentialClassName } from "@/components/settings/settings-control";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
+import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { AzureDevOpsDefaultQueriesSection } from "@/components/azure-devops/azure-devops-default-queries";
+import { AzureDevOpsEnabledControl } from "@/components/azure-devops/azure-devops-enabled-control";
 import { AzureDevOpsQuickActionsSection } from "@/components/azure-devops/azure-devops-quick-actions";
 import { AzureDevOpsWatchSettings } from "@/components/azure-devops/azure-devops-watch-settings";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useToast } from "@/components/toast-provider";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import { useAzureDevOpsProjects } from "@/hooks/domains/azure-devops/use-azure-devops-projects";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
   deleteAzureDevOpsConfig,
   getAzureDevOpsConfig,
@@ -41,6 +47,7 @@ import type {
   SetAzureDevOpsConfigRequest,
   TestAzureDevOpsConnectionResult,
 } from "@/lib/types/azure-devops";
+import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 type FormState = {
   organizationUrl: string;
@@ -215,7 +222,6 @@ function useAzureDevOpsSettings(workspaceId: string) {
   }, [config, form, t, toast, workspaceId]);
 
   const remove = useCallback(async () => {
-    if (!confirm(t("azuredevops:removeConfigurationConfirm"))) return;
     try {
       await deleteAzureDevOpsConfig(workspaceId);
       setConfig(null);
@@ -273,7 +279,9 @@ type ProjectsState = ReturnType<typeof useAzureDevOpsProjects>;
 // Azure DevOps names these two PAT scope groups in its own token UI. They are
 // pointers into that screen, not copy, so they are interpolated as values — the
 // pseudo-locale must not transliterate a label the user has to find verbatim.
+// i18n-exempt: Azure DevOps' own PAT scope names; the user picks these exact entries in Azure's UI.
 const PAT_SCOPE_WORK_ITEMS = "Work Items";
+// i18n-exempt: Azure DevOps' own PAT scope names; the user picks these exact entries in Azure's UI.
 const PAT_SCOPE_CODE = "Code";
 
 function PATSetupHelp({ organizationUrl }: { organizationUrl: string }) {
@@ -414,6 +422,7 @@ function ConnectionFields({
             autoComplete="new-password"
             aria-describedby="azure-devops-pat-help"
             data-testid="azure-devops-pat"
+            className={settingsCredentialClassName()}
           />
         </div>
       </div>
@@ -433,6 +442,16 @@ function saveButtonLabel(t: (key: string) => string, state: SettingsState): stri
 
 function ConnectionActions({ state, disabled }: { state: SettingsState; disabled: boolean }) {
   const { t } = useTranslation();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const removeAnchorRef = useRef<HTMLButtonElement>(null);
+  const removeConfirmation = t("azuredevops:removeConfigurationConfirm");
+  const removeLabel = t("azuredevops:remove");
+
+  useEffect(() => {
+    if (!state.config && confirmingRemove) setConfirmingRemove(false);
+  }, [confirmingRemove, state.config]);
+
   return (
     <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-center">
       <Button
@@ -456,22 +475,68 @@ function ConnectionActions({ state, disabled }: { state: SettingsState; disabled
         <IconDeviceFloppy className="h-4 w-4" />
         {saveButtonLabel(t, state)}
       </Button>
-      {state.config && (
+      {state.config && (isMobile || isFinePointer || !confirmingRemove) && (
         <Button
+          ref={removeAnchorRef}
           type="button"
           variant="destructive"
-          onClick={() => void state.remove()}
+          onClick={() => setConfirmingRemove(true)}
           className="w-full cursor-pointer sm:ml-auto sm:w-auto"
           data-testid="azure-devops-delete-button"
         >
           <IconTrash className="h-4 w-4" />
-          {t("azuredevops:remove")}
+          {removeLabel}
         </Button>
       )}
+      <MobileActionConfirmation
+        open={!!state.config && confirmingRemove}
+        targetKey={`${state.config?.workspaceId}:${state.config?.organizationUrl}`}
+        title={removeConfirmation}
+        subject={state.config?.organizationUrl}
+        cancelLabel={t("common:cancel")}
+        confirmLabel={removeLabel}
+        confirmAriaLabel={removeConfirmation}
+        confirmTestId="azure-devops-remove-confirm"
+        onOpenChange={setConfirmingRemove}
+        focusReturnRef={removeAnchorRef}
+        onConfirm={() => void state.remove()}
+        fallback={
+          !isFinePointer ? (
+            <InlineConfirmActions
+              density="touch"
+              testId="azure-devops-remove-inline-confirmation"
+              ariaLabel={removeConfirmation}
+              description={removeConfirmation}
+              cancelLabel={t("common:cancel")}
+              confirmLabel={removeLabel}
+              confirmAriaLabel={removeConfirmation}
+              confirmTestId="azure-devops-remove-confirm"
+              onCancel={() => setConfirmingRemove(false)}
+              onClose={() => setConfirmingRemove(false)}
+              onConfirm={() => void state.remove()}
+            />
+          ) : (
+            <ActionConfirmPopover
+              open={confirmingRemove}
+              anchorRef={removeAnchorRef}
+              title={removeConfirmation}
+              cancelLabel={t("common:cancel")}
+              confirmLabel={removeLabel}
+              confirmAriaLabel={removeConfirmation}
+              confirmTestId="azure-devops-remove-confirm"
+              testId="azure-devops-remove-confirm-popover"
+              onOpenChange={setConfirmingRemove}
+              onCancel={() => setConfirmingRemove(false)}
+              onConfirm={() => void state.remove()}
+            />
+          )
+        }
+      />
     </div>
   );
 }
 
+/** Azure DevOps connection card: title/enable toggle, credential form, and test-connection actions. */
 export function AzureDevOpsConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const state = useAzureDevOpsSettings(workspaceId);
@@ -486,9 +551,11 @@ export function AzureDevOpsConnectionSection({ workspaceId }: { workspaceId: str
 
   return (
     <SettingsSection
+      discoveryTargetId={INTEGRATION_SETTINGS_TARGETS["azure-devops"]}
       icon={<IconBrandAzure className="h-5 w-5" />}
       title={t("azuredevops:integrationTitle")}
       description={t("azuredevops:integrationDescription")}
+      action={<AzureDevOpsEnabledControl workspaceId={workspaceId} />}
     >
       <Card>
         <CardContent className="space-y-4 pt-6">
@@ -508,6 +575,7 @@ export function AzureDevOpsConnectionSection({ workspaceId }: { workspaceId: str
   );
 }
 
+/** Azure DevOps's own settings page: connection, watch settings, quick actions, and default queries. */
 export function AzureDevOpsIntegrationPage({ workspaceId }: { workspaceId?: string } = {}) {
   return (
     <WorkspaceScopedSection workspaceId={workspaceId}>

@@ -38,8 +38,8 @@ func TestDeploymentAppManifestExactPolicyAndURLs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildDeploymentAppManifest() error = %v", err)
 	}
-	if submission.Revision != DeploymentAppManifestRevision {
-		t.Fatalf("Revision = %d, want %d", submission.Revision, DeploymentAppManifestRevision)
+	if submission.Revision != 2 {
+		t.Fatalf("Revision = %d, want 2", submission.Revision)
 	}
 	if submission.RegistrationURL != "https://github.com/settings/apps/new" {
 		t.Fatalf("RegistrationURL = %q", submission.RegistrationURL)
@@ -51,9 +51,10 @@ func TestDeploymentAppManifestExactPolicyAndURLs(t *testing.T) {
 	if manifest.URL != "https://kandev.example" ||
 		manifest.RedirectURL != "https://kandev.example/api/v1/github/app/registration/callback" ||
 		!reflect.DeepEqual(manifest.CallbackURLs, []string{
+			"https://kandev.example/api/v1/github/app/install/callback",
 			"https://kandev.example/api/v1/github/personal-connection/callback",
 		}) ||
-		manifest.SetupURL != "https://kandev.example/api/v1/github/app/install/callback" ||
+		manifest.SetupURL != "" ||
 		manifest.HookAttributes.URL != "https://kandev.example/api/v1/github/app/webhook" ||
 		!manifest.HookAttributes.Active {
 		t.Fatalf("manifest URLs = %+v", manifest)
@@ -77,9 +78,7 @@ func TestDeploymentAppManifestExactPolicyAndURLs(t *testing.T) {
 	if !reflect.DeepEqual(manifest.DefaultPermissions, wantPermissions) {
 		t.Fatalf("DefaultPermissions = %#v, want %#v", manifest.DefaultPermissions, wantPermissions)
 	}
-	wantEvents := []string{
-		"installation", "installation_repositories", "github_app_authorization", "push", "check_run",
-	}
+	wantEvents := []string{"push", "check_run"}
 	if !reflect.DeepEqual(manifest.DefaultEvents, wantEvents) {
 		t.Fatalf("DefaultEvents = %#v, want %#v", manifest.DefaultEvents, wantEvents)
 	}
@@ -98,9 +97,12 @@ func TestDeploymentAppManifestUsesPreallocatedRegistrationRoutes(t *testing.T) {
 	wantPrefix := "https://kandev.example/api/v1/github/app/registrations/" + registrationID
 	manifest := submission.Manifest
 	if manifest.RedirectURL != wantPrefix+"/manifest/callback" ||
-		manifest.SetupURL != wantPrefix+"/install/callback" ||
+		manifest.SetupURL != "" ||
 		manifest.HookAttributes.URL != wantPrefix+"/webhook" ||
-		!reflect.DeepEqual(manifest.CallbackURLs, []string{wantPrefix + "/personal/callback"}) {
+		!reflect.DeepEqual(manifest.CallbackURLs, []string{
+			wantPrefix + "/install/callback",
+			wantPrefix + "/personal/callback",
+		}) {
 		t.Fatalf("registration-specific manifest URLs = %+v", manifest)
 	}
 	if manifest.Public {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // fakePassthroughRunner is a minimal stub of the passthroughRunner seam used
@@ -62,40 +63,78 @@ func newAutoInjectExecution(description string) *AgentExecution {
 		SessionID:            "sess-1",
 		PassthroughProcessID: "proc-abc",
 	}
+	exec.passthroughInitialPromptProcessID = exec.PassthroughProcessID
 	if description != "" {
-		exec.Metadata = map[string]interface{}{
-			"task_description": description,
-		}
+		exec.setMetadataValue("task_description", description)
 	}
 	return exec
 }
 
+// TestAutoInject_disabled_does_nothing covers the only remaining no-write
+// case under the new gating: a generic passthrough tool with no PromptFlag and
+// no task description must not receive spurious stdin. (A non-LLM TUI like k9s
+// launched without a task lands here.) AutoInjectPrompt is irrelevant now —
+// delivery is keyed on the absence of a PromptFlag, and a description is what
+// makes stdin delivery fire.
 func TestAutoInject_disabled_does_nothing(t *testing.T) {
+	mgr := newTestManager(t)
+	runner := &fakePassthroughRunner{}
+
+	mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution(""), agents.PassthroughConfig{
+		AutoInjectPrompt: false,
+		SubmitSequence:   "\r",
+	}, "proc-abc")
+
+	if runner.writeCalled {
+		t.Fatalf("expected no stdin write when task description is empty, got data=%q", runner.writtenData)
+	}
+}
+
+// TestAutoInject_writes_without_auto_inject_flag is the custom-TUI regression:
+// an agent with neither AutoInjectPrompt nor a PromptFlag (the default for
+// agents built from a tui_config, e.g. fuelclaude-opus) must still receive its
+// task description via PTY stdin. Before the fix the prompt was appended as a
+// positional arg that zsh -ic dropped, so the agent started at an empty prompt.
+func TestAutoInject_writes_without_auto_inject_flag(t *testing.T) {
 	mgr := newTestManager(t)
 	runner := &fakePassthroughRunner{}
 
 	mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution("do a thing"), agents.PassthroughConfig{
 		AutoInjectPrompt: false,
 		SubmitSequence:   "\r",
-	})
+	}, "proc-abc")
 
-	if runner.writeCalled {
-		t.Fatalf("expected no stdin write when AutoInjectPrompt is false, got data=%q", runner.writtenData)
+	if !runner.writeCalled {
+		t.Fatalf("expected WriteStdin to be called for a no-flag custom TUI agent")
+	}
+	if runner.writtenData != "do a thing\r" {
+		t.Errorf("WriteStdin data = %q, want %q", runner.writtenData, "do a thing\r")
 	}
 }
 
 func TestAutoInject_skipped_when_PromptFlag_set(t *testing.T) {
 	mgr := newTestManager(t)
 	runner := &fakePassthroughRunner{}
+	execution := newAutoInjectExecution("do a thing")
+	execution.Status = v1.AgentStatusRunning
+	execution.passthroughInitialPromptProcessID = ""
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
 
-	mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution("do a thing"), agents.PassthroughConfig{
+	mgr.autoInjectInitialPromptWith(runner, execution, agents.PassthroughConfig{
 		AutoInjectPrompt: true,
 		SubmitSequence:   "\r",
 		PromptFlag:       agents.NewParam("--prompt", "{prompt}"),
-	})
+	}, execution.PassthroughProcessID)
 
 	if runner.writeCalled {
 		t.Fatalf("expected no stdin write when PromptFlag is set, got data=%q", runner.writtenData)
+	}
+
+	mgr.handlePassthroughTurnComplete(execution.SessionID, execution.PassthroughProcessID)
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("prompt-flag completion left status %q, want READY", execution.Status)
 	}
 }
 
@@ -106,7 +145,7 @@ func TestAutoInject_skipped_when_description_empty(t *testing.T) {
 	mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution(""), agents.PassthroughConfig{
 		AutoInjectPrompt: true,
 		SubmitSequence:   "\r",
-	})
+	}, "proc-abc")
 
 	if runner.writeCalled {
 		t.Fatalf("expected no stdin write when task description is empty, got data=%q", runner.writtenData)
@@ -120,7 +159,7 @@ func TestAutoInject_writes_description_plus_submit(t *testing.T) {
 	mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution("hello world"), agents.PassthroughConfig{
 		AutoInjectPrompt: true,
 		SubmitSequence:   "\r",
-	})
+	}, "proc-abc")
 
 	if !runner.writeCalled {
 		t.Fatalf("expected WriteStdin to be called")
@@ -139,14 +178,19 @@ func TestAutoInject_writes_description_plus_submit(t *testing.T) {
 func TestAutoInject_returns_when_wait_errors(t *testing.T) {
 	mgr := newTestManager(t)
 	runner := &fakePassthroughRunner{waitErr: context.DeadlineExceeded}
+	execution := newAutoInjectExecution("hello")
+	execution.Status = v1.AgentStatusRunning
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution("hello"), agents.PassthroughConfig{
+		mgr.autoInjectInitialPromptWith(runner, execution, agents.PassthroughConfig{
 			AutoInjectPrompt: true,
 			SubmitSequence:   "\r",
-		})
+		}, execution.PassthroughProcessID)
 	}()
 
 	select {
@@ -157,6 +201,11 @@ func TestAutoInject_returns_when_wait_errors(t *testing.T) {
 
 	if runner.writeCalled {
 		t.Fatalf("expected no stdin write on wait timeout, got data=%q", runner.writtenData)
+	}
+
+	mgr.handlePassthroughTurnComplete(execution.SessionID, execution.PassthroughProcessID)
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("completion after aborted injection left status %q, want READY", execution.Status)
 	}
 }
 
@@ -175,7 +224,7 @@ func TestAutoInject_SubmitDelay_splits_writes_with_pause(t *testing.T) {
 		SubmitSequence:        "\r",
 		DisableBracketedPaste: true,
 		SubmitDelay:           delay,
-	})
+	}, "proc-abc")
 
 	if got := len(runner.writes); got != 2 {
 		t.Fatalf("expected 2 writes (body, submit), got %d: %#v", got, runner.writes)
@@ -205,7 +254,7 @@ func TestAutoInject_skipped_when_process_id_missing(t *testing.T) {
 	mgr.autoInjectInitialPromptWith(runner, exec, agents.PassthroughConfig{
 		AutoInjectPrompt: true,
 		SubmitSequence:   "\r",
-	})
+	}, exec.PassthroughProcessID)
 
 	if runner.writeCalled {
 		t.Fatalf("expected no stdin write when PassthroughProcessID empty, got data=%q", runner.writtenData)

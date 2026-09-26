@@ -46,10 +46,7 @@ describe("getFeatureFlagsAction", () => {
   it("fails closed for missing and non-boolean backend values", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ office: "true", appStatusBar: true }));
 
-    await expect(getFeatureFlagsAction()).resolves.toEqual({
-      ...flagsWith(false),
-      appStatusBar: true,
-    });
+    await expect(getFeatureFlagsAction()).resolves.toEqual(flagsWith(false));
   });
 
   it("falls back to all-off defaults when the backend is unavailable", async () => {

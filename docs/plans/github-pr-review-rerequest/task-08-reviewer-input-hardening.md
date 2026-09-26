@@ -6,7 +6,7 @@ wave: 4
 depends_on:
   - "01-backend-review-request"
 plan: "plan.md"
-spec: "../../specs/ui/github-pr-review-actions.md"
+spec: "../../specs/ui/requirements/github-pr-review-actions.md"
 ---
 
 # Task 08: Reviewer input hardening

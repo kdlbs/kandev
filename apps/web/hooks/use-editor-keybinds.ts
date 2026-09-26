@@ -8,6 +8,7 @@ import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { matchesShortcut } from "@/lib/keyboard/utils";
 import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import type { DockviewApi } from "dockview-react";
+import { t } from "@/lib/i18n";
 
 function handleTabNavigation(e: KeyboardEvent, api: DockviewApi) {
   const activePanel = api.activePanel;
@@ -66,7 +67,7 @@ function handleTerminalToggle(
 
   createUserShell(environmentId, { taskId: taskID ?? undefined })
     .then((result) => {
-      const title = result.displayName ?? result.label ?? "Terminal";
+      const title = result.displayName ?? result.label ?? t("common:terminal");
       useDockviewStore
         .getState()
         .addTerminalPanel(result.terminalId, undefined, environmentId, taskID ?? undefined, title);

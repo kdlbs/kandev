@@ -53,10 +53,40 @@ type GitPullRequest struct {
 }
 
 // GitPushRequest for POST /api/v1/git/push
+//
+// Remote and ExpectedBranch are optional. Remote is a configured remote name or
+// a remote URL that must resolve to one; ExpectedBranch is the branch the
+// caller believes it is publishing. Both are passed through untouched: this
+// surface performs no destination logic of its own.
 type GitPushRequest struct {
-	Force       bool   `json:"force"`
-	SetUpstream bool   `json:"set_upstream"`
-	Repo        string `json:"repo,omitempty"`
+	Force          bool   `json:"force"`
+	SetUpstream    bool   `json:"set_upstream"`
+	Repo           string `json:"repo,omitempty"`
+	Remote         string `json:"remote,omitempty"`
+	ExpectedBranch string `json:"expected_branch,omitempty"`
+}
+
+// GitPushPreflightRequest for POST /api/v1/git/push-preflight.
+type GitPushPreflightRequest struct {
+	Repo           string `json:"repo,omitempty"`
+	Remote         string `json:"remote,omitempty"`
+	ExpectedBranch string `json:"expected_branch,omitempty"`
+}
+
+// GitContributionRequest is shared by the managed contribution replacement
+// and provider-adoption endpoints.
+type GitContributionRequest struct {
+	ExpectedRemoteHead string `json:"expected_remote_head"`
+	Repo               string `json:"repo,omitempty"`
+}
+
+// GitContributionHistoryExplanationRequest describes the selected local and
+// published heads for a read-only history observation.
+type GitContributionHistoryExplanationRequest struct {
+	Branch             string `json:"branch"`
+	ExpectedLocalHead  string `json:"expected_local_head"`
+	ExpectedRemoteHead string `json:"expected_remote_head"`
+	Repo               string `json:"repo,omitempty"`
 }
 
 // GitRebaseRequest for POST /api/v1/git/rebase
@@ -208,12 +238,116 @@ func (s *Server) handleGitPush(c *gin.Context) {
 	if gitOp == nil {
 		return
 	}
-	result, err := gitOp.Push(c.Request.Context(), req.Force, req.SetUpstream)
+	result, err := gitOp.Push(c.Request.Context(), process.PushOptions{
+		Force:          req.Force,
+		SetUpstream:    req.SetUpstream,
+		Remote:         req.Remote,
+		ExpectedBranch: req.ExpectedBranch,
+	})
 	if err != nil {
 		s.handleGitError(c, "push", err)
 		return
 	}
 
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) handleGitPushPreflight(c *gin.Context) {
+	var req GitPushPreflightRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success: false, Operation: "push_preflight", Error: "invalid request: " + err.Error(),
+		})
+		return
+	}
+	gitOp := s.gitOpForRepo(c, "push preflight", req.Repo)
+	if gitOp == nil {
+		return
+	}
+	result, err := gitOp.PushPreflight(c.Request.Context(), process.PushOptions{
+		Remote:         req.Remote,
+		ExpectedBranch: req.ExpectedBranch,
+	})
+	if err != nil {
+		s.handleGitError(c, "push preflight", err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) handleGitReplaceContribution(c *gin.Context) {
+	s.handleGitContribution(c, "replace_remote_contribution", func(gitOp *process.GitOperator, expected string) (*process.GitOperationResult, error) {
+		return gitOp.ReplaceRemoteContribution(c.Request.Context(), expected)
+	})
+}
+
+func (s *Server) handleGitUseContribution(c *gin.Context) {
+	s.handleGitContribution(c, "use_remote_contribution", func(gitOp *process.GitOperator, expected string) (*process.GitOperationResult, error) {
+		return gitOp.UseRemoteContribution(c.Request.Context(), expected)
+	})
+}
+
+func (s *Server) handleGitContributionHistoryExplanation(c *gin.Context) {
+	var req GitContributionHistoryExplanationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success: false, Operation: "contribution_history_explanation", Error: "invalid request: " + err.Error(),
+		})
+		return
+	}
+	for _, required := range []struct {
+		name  string
+		value string
+	}{
+		{name: "branch", value: req.Branch},
+		{name: "expected_local_head", value: req.ExpectedLocalHead},
+		{name: "expected_remote_head", value: req.ExpectedRemoteHead},
+	} {
+		if required.value == "" {
+			c.JSON(http.StatusBadRequest, process.GitOperationResult{
+				Success: false, Operation: "contribution_history_explanation", Error: required.name + " is required",
+			})
+			return
+		}
+	}
+
+	gitOp := s.gitOpForRepo(c, "contribution_history_explanation", req.Repo)
+	if gitOp == nil {
+		return
+	}
+	result, err := gitOp.ExplainContributionHistory(
+		c.Request.Context(), req.Branch, req.ExpectedLocalHead, req.ExpectedRemoteHead)
+	if err != nil {
+		s.handleGitError(c, "contribution_history_explanation", err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) handleGitContribution(c *gin.Context, operation string, action func(*process.GitOperator, string) (*process.GitOperationResult, error)) {
+	var req GitContributionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success: false, Operation: operation, Error: "invalid request: " + err.Error(),
+		})
+		return
+	}
+	if req.ExpectedRemoteHead == "" {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success: false, Operation: operation, Error: "expected_remote_head is required",
+		})
+		return
+	}
+
+	gitOp := s.gitOpForRepo(c, operation, req.Repo)
+	if gitOp == nil {
+		return
+	}
+	result, err := action(gitOp, req.ExpectedRemoteHead)
+	if err != nil {
+		s.handleGitError(c, operation, err)
+		return
+	}
 	c.JSON(http.StatusOK, result)
 }
 
@@ -668,8 +802,8 @@ func (s *Server) handleGitLog(c *gin.Context) {
 	}
 
 	if req.Repo == "" {
-		if subs := s.procMgr.RepoSubpaths(); len(subs) > 0 {
-			s.handleGitLogMultiRepo(c, req, subs, limit)
+		if scopes := s.procMgr.RepositoryScopes(); shouldFanOutRepositoryScopes(scopes) {
+			s.handleGitLogMultiRepo(c, req, scopes, limit)
 			return
 		}
 	}
@@ -702,6 +836,32 @@ func (s *Server) computeMergeBase(
 	return gitOp.GetMergeBase(ctx, "HEAD", targetBranch)
 }
 
+func (s *Server) comparisonResolutionFor(repo string) (process.ComparisonResolution, error) {
+	tracker, err := s.procMgr.GetWorkspaceTrackerFor(repo)
+	if err != nil {
+		return process.ComparisonResolution{}, err
+	}
+	return tracker.ComparisonResolution(), nil
+}
+
+func comparisonUnavailableLogResult(code string) *process.GitLogResult {
+	return &process.GitLogResult{
+		Success:   false,
+		Commits:   []*process.GitCommitInfo{},
+		Error:     "comparison target unavailable",
+		ErrorCode: code,
+	}
+}
+
+func comparisonUnavailableDiffResult(code string) *process.CumulativeDiffResult {
+	return &process.CumulativeDiffResult{
+		Success:   false,
+		Files:     map[string]interface{}{},
+		Error:     "comparison target unavailable",
+		ErrorCode: code,
+	}
+}
+
 // runGitLogForRepo runs git log against a single repo subpath. Returns a
 // result-with-error or a non-nil error for transport failures.
 func (s *Server) runGitLogForRepo(
@@ -713,6 +873,20 @@ func (s *Server) runGitLogForRepo(
 	gitOp, gitOpErr := s.procMgr.GitOperatorFor(repo)
 	if gitOpErr != nil {
 		return nil, gitOpErr
+	}
+	comparison, comparisonErr := s.comparisonResolutionFor(repo)
+	if comparisonErr != nil {
+		return nil, comparisonErr
+	}
+	if comparison.Explicit {
+		if comparison.Status != lspStatusReady || comparison.Ref == "" {
+			return comparisonUnavailableLogResult(comparison.ErrorCode), nil
+		}
+		mergeBase, err := gitOp.GetMergeBase(ctx, "HEAD", comparison.Ref)
+		if err != nil || mergeBase == "" {
+			return comparisonUnavailableLogResult("comparison_merge_base_unavailable"), nil
+		}
+		return gitOp.GetLog(ctx, mergeBase, limit)
 	}
 
 	baseCommit := req.Since
@@ -801,12 +975,15 @@ func mergeGitLogResults(outcomes []perRepoLogOutcome, limit int) process.GitLogR
 		}
 		if o.result == nil || !o.result.Success {
 			errMsg := ""
+			errorCode := ""
 			if o.result != nil {
 				errMsg = o.result.Error
+				errorCode = o.result.ErrorCode
 			}
 			perRepoErrors = append(perRepoErrors, process.GitLogRepoError{
 				RepositoryName: o.subpath,
 				Error:          errMsg,
+				ErrorCode:      errorCode,
 			})
 			continue
 		}
@@ -826,6 +1003,12 @@ func mergeGitLogResults(outcomes []perRepoLogOutcome, limit int) process.GitLogR
 	resp := process.GitLogResult{Commits: merged}
 	if len(perRepoErrors) > 0 {
 		resp.PerRepoErrors = perRepoErrors
+		for _, repoErr := range perRepoErrors {
+			if repoErr.ErrorCode != "" {
+				resp.ErrorCode = repoErr.ErrorCode
+				break
+			}
+		}
 	}
 	// Success iff at least one repo succeeded. When every repo failed we mark
 	// the response failed and put a one-line summary in Error so callers that
@@ -936,8 +1119,8 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 	}
 
 	if req.Repo == "" {
-		if subs := s.procMgr.RepoSubpaths(); len(subs) > 0 {
-			s.handleGitCumulativeDiffMultiRepo(c, req, subs)
+		if scopes := s.procMgr.RepositoryScopes(); shouldFanOutRepositoryScopes(scopes) {
+			s.handleGitCumulativeDiffMultiRepo(c, req, scopes)
 			return
 		}
 	}
@@ -969,6 +1152,30 @@ func (s *Server) runGitCumulativeDiffForRepo(
 	gitOp, gitOpErr := s.procMgr.GitOperatorFor(repo)
 	if gitOpErr != nil {
 		return nil, http.StatusBadRequest, gitOpErr
+	}
+	comparison, comparisonErr := s.comparisonResolutionFor(repo)
+	if comparisonErr != nil {
+		return nil, http.StatusBadRequest, comparisonErr
+	}
+	return s.runGitCumulativeDiffForRepoResolved(ctx, gitOp, base, targetBranch, repo, comparison)
+}
+
+func (s *Server) runGitCumulativeDiffForRepoResolved(
+	ctx context.Context,
+	gitOp *process.GitOperator,
+	base, targetBranch, repo string,
+	comparison process.ComparisonResolution,
+) (*process.CumulativeDiffResult, int, error) {
+	if comparison.Explicit {
+		if comparison.Status != lspStatusReady || comparison.Ref == "" {
+			return comparisonUnavailableDiffResult(comparison.ErrorCode), http.StatusOK, nil
+		}
+		mergeBase, err := gitOp.GetMergeBase(ctx, "HEAD", comparison.Ref)
+		if err != nil || mergeBase == "" {
+			return comparisonUnavailableDiffResult("comparison_merge_base_unavailable"), http.StatusOK, nil
+		}
+		result, err := gitOp.GetCumulativeDiff(ctx, mergeBase)
+		return result, http.StatusOK, err
 	}
 	if targetBranch != "" {
 		switch mb, err := s.computeMergeBase(ctx, gitOp, targetBranch); {
@@ -1033,6 +1240,7 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 		Success: true,
 	}
 	anyOK := false
+	comparisonErrorCode := ""
 	for _, outcome := range outcomes {
 		// A hard failure still aborts the whole request, as it did serially.
 		// Reporting the first one in subpath order rather than the first to
@@ -1051,15 +1259,25 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 			s.logger.Warn("cumulative diff for repo returned failure",
 				zap.String("repo", outcome.subpath),
 				zap.String("error", outcome.result.Error))
+			if comparisonErrorCode == "" {
+				comparisonErrorCode = outcome.result.ErrorCode
+			}
 			continue
 		}
 		anyOK = true
 		merged.TotalCommits += outcome.result.TotalCommits
-		mergeCumulativeFiles(merged.Files, outcome.result.Files, outcome.subpath, outcome.result.BaseCommit)
+		mergeCumulativeFiles(
+			merged.Files,
+			outcome.result.Files,
+			outcome.subpath,
+			outcome.result.BaseCommit,
+			outcome.isSubmodule,
+		)
 	}
 	if !anyOK {
 		merged.Success = false
 		merged.Error = fmt.Sprintf("cumulative diff failed for all %d repositories", len(subpaths))
+		merged.ErrorCode = comparisonErrorCode
 	}
 	c.JSON(http.StatusOK, merged)
 }
@@ -1069,26 +1287,49 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 // and was skipped; a non-nil error is a hard failure that aborts the request,
 // with status holding the code the serial version would have written.
 type perRepoDiffOutcome struct {
-	subpath string
-	result  *process.CumulativeDiffResult
-	status  int
-	err     error
+	subpath     string
+	result      *process.CumulativeDiffResult
+	status      int
+	err         error
+	isSubmodule bool
 }
 
 // collectCumulativeDiffForRepo runs the cumulative diff for one repository of a
 // multi-repo fan-out. Like collectLogForRepo it takes a plain context and never
 // writes to the gin context, so it is safe to run concurrently.
 func (s *Server) collectCumulativeDiffForRepo(ctx context.Context, sub string) perRepoDiffOutcome {
-	base := s.resolvePerRepoBase(ctx, sub)
+	comparison, comparisonErr := s.comparisonResolutionFor(sub)
+	if comparisonErr != nil {
+		return perRepoDiffOutcome{subpath: sub, status: http.StatusBadRequest, err: comparisonErr}
+	}
+	if comparison.Explicit {
+		gitOp, gitOpErr := s.procMgr.GitOperatorFor(sub)
+		if gitOpErr != nil {
+			return perRepoDiffOutcome{subpath: sub, status: http.StatusBadRequest, err: gitOpErr}
+		}
+		result, status, err := s.runGitCumulativeDiffForRepoResolved(ctx, gitOp, "", "", sub, comparison)
+		return perRepoDiffOutcome{subpath: sub, result: result, status: status, err: err}
+	}
+	base, isSubmodule := s.resolvePerRepoBaseAndScope(ctx, sub)
 	if base == "" {
 		s.logger.Warn("cumulative diff: no per-repo base, skipping",
 			zap.String("repo", sub))
-		return perRepoDiffOutcome{subpath: sub}
+		return perRepoDiffOutcome{subpath: sub, isSubmodule: isSubmodule}
 	}
 	// Multi-repo: base is already resolved per-repo via resolvePerRepoBase,
 	// so we pass empty target_branch to skip the second merge-base attempt.
-	result, status, err := s.runGitCumulativeDiffForRepo(ctx, base, "", sub)
-	return perRepoDiffOutcome{subpath: sub, result: result, status: status, err: err}
+	gitOp, gitOpErr := s.procMgr.GitOperatorFor(sub)
+	if gitOpErr != nil {
+		return perRepoDiffOutcome{subpath: sub, status: http.StatusBadRequest, err: gitOpErr, isSubmodule: isSubmodule}
+	}
+	result, status, err := s.runGitCumulativeDiffForRepoResolved(ctx, gitOp, base, "", sub, comparison)
+	return perRepoDiffOutcome{
+		subpath:     sub,
+		result:      result,
+		status:      status,
+		err:         err,
+		isSubmodule: isSubmodule,
+	}
 }
 
 // fanOutRepos runs collect once per repository, concurrently, and returns the
@@ -1138,31 +1379,45 @@ func fanOutRepos[T any](ctx context.Context, subpaths []string, collect func(con
 // Without this, a repo whose base branch is a merged/deleted stacked parent
 // lingering only as a local ref keeps inflating the commit count and diff.
 func (s *Server) resolvePerRepoBase(ctx context.Context, repo string) string {
+	base, _ := s.resolvePerRepoBaseAndScope(ctx, repo)
+	return base
+}
+
+// resolvePerRepoBaseAndScope returns the repository's comparison anchor and
+// whether its workspace is a submodule. The metadata travels with cumulative
+// diff results so the frontend can distinguish nested repository scopes from
+// ordinary sibling repositories that merely happen to have a named path.
+func (s *Server) resolvePerRepoBaseAndScope(ctx context.Context, repo string) (string, bool) {
 	tracker, err := s.procMgr.GetWorkspaceTrackerFor(repo)
 	if err != nil {
-		return ""
+		return "", false
 	}
+	isSubmodule := tracker.IsSubmodule()
 	base, baseBranch := tracker.ResolveBaseAnchor(ctx)
 	if base == "" || baseBranch == "" {
-		return base
+		return base, isSubmodule
+	}
+	if isSubmodule {
+		return base, true
 	}
 	gitOp, gitOpErr := s.procMgr.GitOperatorFor(repo)
 	if gitOpErr != nil {
-		return base
+		return base, false
 	}
-	return gitOp.CorrectStaleComparisonBase(ctx, base, baseBranch)
+	return gitOp.CorrectStaleComparisonBase(ctx, base, baseBranch), false
 }
 
 // mergeCumulativeFiles copies per-repo files into the merged map under a
 // `<repo> <path>` key (NUL-separated) and decorates each file payload
-// with `repository_name`, the repo-relative `path`, and the exact old-side
-// `base_ref` used to produce its cumulative diff.
+// with `repository_name`, the repo-relative `path`, the exact old-side
+// `base_ref` used to produce its cumulative diff, and (for nested repository
+// scopes) `is_submodule`.
 // The composite key keeps `README.md` in two repos from clashing in the map;
 // the frontend reads `path` and `repository_name` off the payload so the
 // file tree groups under the repo header without the prefix bleeding into
 // the displayed path. NUL is impossible in real paths, so the key is
 // always uniquely splittable and the displayed path is unaffected.
-func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string) {
+func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string, isSubmodule bool) {
 	for path, payload := range src {
 		m, ok := payload.(map[string]interface{})
 		if !ok {
@@ -1176,7 +1431,7 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string)
 		// path, and base_ref so the caller's source map isn't mutated. Earlier
 		// code wrote directly to `m`, which permanently rewrote the per-repo result
 		// before it could be reused (e.g. emitted to a second consumer).
-		copied := make(map[string]interface{}, len(m)+3)
+		copied := make(map[string]interface{}, len(m)+4)
 		for k, v := range m {
 			copied[k] = v
 		}
@@ -1185,29 +1440,40 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string)
 		if baseRef != "" {
 			copied["base_ref"] = baseRef
 		}
+		if isSubmodule {
+			copied["is_submodule"] = true
+		}
 		dst[fmt.Sprintf("%s\x00%s", repo, path)] = copied
 	}
 }
 
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
-	Success         bool                   `json:"success"`
-	Branch          string                 `json:"branch"`
-	RemoteBranch    string                 `json:"remote_branch"`
-	HeadCommit      string                 `json:"head_commit"`
-	BaseCommit      string                 `json:"base_commit"` // Merge-base with origin branch
-	Ahead           int                    `json:"ahead"`
-	Behind          int                    `json:"behind"`
-	Modified        []string               `json:"modified"`
-	Added           []string               `json:"added"`
-	Deleted         []string               `json:"deleted"`
-	Untracked       []string               `json:"untracked"`
-	Renamed         []string               `json:"renamed"`
-	Files           map[string]interface{} `json:"files"`
-	Timestamp       string                 `json:"timestamp"`
-	BranchAdditions int                    `json:"branch_additions,omitempty"`
-	BranchDeletions int                    `json:"branch_deletions,omitempty"`
-	Error           string                 `json:"error,omitempty"`
+	Success             bool                   `json:"success"`
+	RepositoryName      string                 `json:"repository_name,omitempty"`
+	IsSubmodule         bool                   `json:"is_submodule,omitempty"`
+	Branch              string                 `json:"branch"`
+	RemoteBranch        string                 `json:"remote_branch"`
+	HeadCommit          string                 `json:"head_commit"`
+	BaseCommit          string                 `json:"base_commit"` // Merge-base with origin branch
+	ComparisonTarget    string                 `json:"comparison_target,omitempty"`
+	ComparisonStatus    string                 `json:"comparison_status,omitempty"`
+	ComparisonErrorCode string                 `json:"comparison_error_code,omitempty"`
+	Ahead               int                    `json:"ahead"`
+	Behind              int                    `json:"behind"`
+	RemoteAhead         int                    `json:"remote_ahead"`
+	RemoteBehind        int                    `json:"remote_behind"`
+	RemoteHeadCommit    string                 `json:"remote_head_commit,omitempty"`
+	Modified            []string               `json:"modified"`
+	Added               []string               `json:"added"`
+	Deleted             []string               `json:"deleted"`
+	Untracked           []string               `json:"untracked"`
+	Renamed             []string               `json:"renamed"`
+	Files               map[string]interface{} `json:"files"`
+	Timestamp           string                 `json:"timestamp"`
+	BranchAdditions     int                    `json:"branch_additions,omitempty"`
+	BranchDeletions     int                    `json:"branch_deletions,omitempty"`
+	Error               string                 `json:"error,omitempty"`
 }
 
 // PerRepoGitStatus pairs a repository_name with its current status. Used by
@@ -1230,6 +1496,17 @@ type MultiRepoGitStatusResult struct {
 	Error   string             `json:"error,omitempty"`
 }
 
+func shouldFanOutRepositoryScopes(scopes []string) bool {
+	if len(scopes) == 0 {
+		return false
+	}
+	return len(scopes) > 1 || scopes[0] != ""
+}
+
+func requiresExplicitRepositoryScope(scopes []string) bool {
+	return len(scopes) > 0 && scopes[0] != ""
+}
+
 // handleGitStatusMulti returns one git status entry per repo for multi-repo
 // task workspaces (or one untagged entry for single-repo). Used by the
 // session-subscribe handler in the main backend to seed per-repo state on
@@ -1239,13 +1516,16 @@ type MultiRepoGitStatusResult struct {
 // status and run a fresh git query — used on WS subscribe so a new observer
 // always validates the cache against the live worktree.
 func (s *Server) handleGitStatusMulti(c *gin.Context) {
-	subpaths := s.procMgr.RepoSubpaths()
+	subpaths := s.procMgr.RepositoryScopes()
 	// Single-repo: fall back to the workspace-root status with an empty repo
 	// name so the response shape stays uniform.
 	if len(subpaths) == 0 {
 		subpaths = []string{""}
 	}
 	fresh := c.Query("fresh") == queryParamTrue
+	if fresh {
+		s.procMgr.RetryUnavailableComparisonTargets()
+	}
 	// Parallel fan-out: fresh=true skips the cache, so serial scales linearly and would blow the 2s subscribe timeout for multi-repo workspaces.
 	result := MultiRepoGitStatusResult{Success: true, Repos: make([]PerRepoGitStatus, len(subpaths))}
 	ctx := c.Request.Context()
@@ -1290,22 +1570,30 @@ func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh boo
 	return PerRepoGitStatus{
 		RepositoryName: sub,
 		Status: GitStatusResult{
-			Success:         true,
-			Branch:          status.Branch,
-			RemoteBranch:    status.RemoteBranch,
-			HeadCommit:      status.HeadCommit,
-			BaseCommit:      status.BaseCommit,
-			Ahead:           status.Ahead,
-			Behind:          status.Behind,
-			Modified:        status.Modified,
-			Added:           status.Added,
-			Deleted:         status.Deleted,
-			Untracked:       status.Untracked,
-			Renamed:         status.Renamed,
-			Files:           filesMap,
-			Timestamp:       status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
-			BranchAdditions: status.BranchAdditions,
-			BranchDeletions: status.BranchDeletions,
+			Success:             true,
+			RepositoryName:      sub,
+			IsSubmodule:         status.IsSubmodule,
+			Branch:              status.Branch,
+			RemoteBranch:        status.RemoteBranch,
+			HeadCommit:          status.HeadCommit,
+			BaseCommit:          status.BaseCommit,
+			ComparisonTarget:    status.ComparisonTarget,
+			ComparisonStatus:    status.ComparisonStatus,
+			ComparisonErrorCode: status.ComparisonErrorCode,
+			Ahead:               status.Ahead,
+			Behind:              status.Behind,
+			RemoteAhead:         status.RemoteAhead,
+			RemoteBehind:        status.RemoteBehind,
+			RemoteHeadCommit:    status.RemoteHeadCommit,
+			Modified:            status.Modified,
+			Added:               status.Added,
+			Deleted:             status.Deleted,
+			Untracked:           status.Untracked,
+			Renamed:             status.Renamed,
+			Files:               filesMap,
+			Timestamp:           status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+			BranchAdditions:     status.BranchAdditions,
+			BranchDeletions:     status.BranchDeletions,
 		},
 	}
 }
@@ -1331,7 +1619,11 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 		return
 	}
 
-	status, err := wt.GetGitStatus(c.Request.Context(), c.Query("fresh") == queryParamTrue)
+	fresh := c.Query("fresh") == queryParamTrue
+	if fresh {
+		s.procMgr.RetryUnavailableComparisonTargets()
+	}
+	status, err := wt.GetGitStatus(c.Request.Context(), fresh)
 	if err != nil {
 		s.logger.Error("git status failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, GitStatusResult{
@@ -1348,22 +1640,30 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, GitStatusResult{
-		Success:         true,
-		Branch:          status.Branch,
-		RemoteBranch:    status.RemoteBranch,
-		HeadCommit:      status.HeadCommit,
-		BaseCommit:      status.BaseCommit,
-		Ahead:           status.Ahead,
-		Behind:          status.Behind,
-		Modified:        status.Modified,
-		Added:           status.Added,
-		Deleted:         status.Deleted,
-		Untracked:       status.Untracked,
-		Renamed:         status.Renamed,
-		Files:           filesMap,
-		Timestamp:       status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
-		BranchAdditions: status.BranchAdditions,
-		BranchDeletions: status.BranchDeletions,
+		Success:             true,
+		RepositoryName:      c.Query("repo"),
+		IsSubmodule:         status.IsSubmodule,
+		Branch:              status.Branch,
+		RemoteBranch:        status.RemoteBranch,
+		HeadCommit:          status.HeadCommit,
+		BaseCommit:          status.BaseCommit,
+		ComparisonTarget:    status.ComparisonTarget,
+		ComparisonStatus:    status.ComparisonStatus,
+		ComparisonErrorCode: status.ComparisonErrorCode,
+		Ahead:               status.Ahead,
+		Behind:              status.Behind,
+		RemoteAhead:         status.RemoteAhead,
+		RemoteBehind:        status.RemoteBehind,
+		RemoteHeadCommit:    status.RemoteHeadCommit,
+		Modified:            status.Modified,
+		Added:               status.Added,
+		Deleted:             status.Deleted,
+		Untracked:           status.Untracked,
+		Renamed:             status.Renamed,
+		Files:               filesMap,
+		Timestamp:           status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+		BranchAdditions:     status.BranchAdditions,
+		BranchDeletions:     status.BranchDeletions,
 	})
 }
 

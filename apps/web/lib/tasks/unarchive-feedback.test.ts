@@ -39,6 +39,15 @@ describe("unarchiveToastPayload", () => {
     expect(payload.description).not.toContain("feat/ok");
   });
 
+  it("uses the singular form for exactly one unrecoverable branch", () => {
+    const payload = unarchiveToastPayload(
+      response([{ task_id: "t1", repository_id: "r1", branch: "feat/gone", status: "missing" }]),
+    );
+    // Singular and plural now come from `_one`/`_other` rather than from two
+    // ternaries at the call site, so both forms have to keep resolving.
+    expect(payload.description).toContain("Branch feat/gone no longer exists");
+  });
+
   it("pluralizes when multiple branches are unrecoverable", () => {
     const payload = unarchiveToastPayload(
       response([

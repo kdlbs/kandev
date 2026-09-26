@@ -18,12 +18,81 @@ import (
 
 const kandevMCPServerName = "kandev"
 
+const sessionTransitionPollInterval = 10 * time.Millisecond
+
 // PublishesMCPAttachmentResults reports that this adapter emits attachment
 // results for the servers that survive its own capability filtering.
 func (a *Adapter) PublishesMCPAttachmentResults() bool { return true }
 
+// lockSessionTransition waits for the previous reset's cleanup to finish before
+// allowing another session transition. The reset response remains independent
+// from session/close, while this gate keeps a later load/reset from overtaking
+// the cleanup that still owns the superseded session.
+func (a *Adapter) lockSessionTransition(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		if a.sessionTransitionMu.TryLock() {
+			a.mu.RLock()
+			closed := a.closed
+			a.mu.RUnlock()
+			if closed {
+				a.sessionTransitionMu.Unlock()
+				return errors.New("adapter is closed")
+			}
+			if a.sessionCleanupDone == nil {
+				return nil
+			}
+			if err := ctx.Err(); err != nil {
+				a.sessionTransitionMu.Unlock()
+				return err
+			}
+			done := a.sessionCleanupDone
+			a.sessionTransitionMu.Unlock()
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		timer := time.NewTimer(sessionTransitionPollInterval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (a *Adapter) waitForSessionCleanup() {
+	a.sessionTransitionMu.Lock()
+	cleanupInFlight := a.sessionCleanupDone != nil
+	a.sessionTransitionMu.Unlock()
+	if !cleanupInFlight {
+		return
+	}
+	a.sessionCleanupWg.Wait()
+}
+
 // NewSession creates a new agent session.
 func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+	if err := a.lockSessionTransition(ctx); err != nil {
+		return "", err
+	}
+	defer a.sessionTransitionMu.Unlock()
+	return a.newSession(ctx, mcpServers)
+}
+
+//nolint:funlen // pre-existing session creation flow retained for transition ordering
+func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
 	a.mu.Lock()
 	conn := a.acpConn
 	a.mu.Unlock()
@@ -40,6 +109,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.mu.Lock()
 	a.pendingWakeups = make(map[string]*pendingWakeup)
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearCursorTaskMetaLocked("")
 	a.clearPromptHandoffToolTrackingLocked()
 	clear(a.usageBySession)
 	a.wakeup.cancel()
@@ -369,24 +439,28 @@ func mapToHTTPHeaders(headers map[string]string) []acp.HttpHeader {
 	return hdrs
 }
 
-// LoadSession resumes an existing session.
-// Returns an error if the agent does not support session loading (LoadSession capability).
+// LoadSession restores an existing session, preferring advertised session/resume
+// without history replay and otherwise using session/load.
 // mcpServers are passed to the agent so it can reconnect to MCP servers on the new
 // agentctl instance (critical for agents that receive MCP configs via the protocol).
 //
 //nolint:funlen // pre-existing length preserved from adapter.go file split
 func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
+	if err := a.lockSessionTransition(ctx); err != nil {
+		return err
+	}
+	defer a.sessionTransitionMu.Unlock()
+
 	a.mu.Lock()
 	conn := a.acpConn
-	supportsLoad := a.capabilities.LoadSession
+	capabilities := a.capabilities
 	a.mu.Unlock()
 
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
 	}
 
-	// Check if the agent supports session loading
-	if !supportsLoad {
+	if !capabilities.LoadSession && capabilities.SessionCapabilities.Resume == nil {
 		a.logger.Debug("session/load rejected: agent does not advertise LoadSession capability",
 			zap.String("session_id", sessionID))
 		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
@@ -400,12 +474,13 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Lock()
 	a.pendingWakeups = make(map[string]*pendingWakeup)
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearCursorTaskMetaLocked("")
 	a.clearPromptHandoffToolTrackingLocked()
 	a.wakeup.cancel()
 	a.mu.Unlock()
 	a.cancelAllAsyncTurnCompletes()
 
-	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.load")
+	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.restore")
 	defer span.End()
 
 	// Filter MCP servers by agent capabilities (same logic as NewSession).
@@ -429,7 +504,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	delete(a.usageBySession, sessionID)
 	a.mu.Unlock()
 
-	resp, err := conn.LoadSession(ctx, acp.LoadSessionRequest{
+	resp, err := a.restoreSessionState(ctx, conn, capabilities, acp.LoadSessionRequest{
 		SessionId:  acp.SessionId(sessionID),
 		Cwd:        a.cfg.WorkDir,
 		McpServers: toACPMcpServers(filteredServers),
@@ -506,21 +581,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// the frontend doesn't render a stuck "watching" card.
 	a.sweepMonitorsOnReplayEnd(sessionID)
 
-	if replayPlan != nil {
-		entries := make([]PlanEntry, len(replayPlan.Entries))
-		for i, e := range replayPlan.Entries {
-			entries[i] = PlanEntry{
-				Description: e.Content,
-				Status:      string(e.Status),
-				Priority:    string(e.Priority),
-			}
-		}
-		a.sendUpdate(AgentEvent{
-			Type:        streams.EventTypePlan,
-			SessionID:   sessionID,
-			PlanEntries: entries,
-		})
-	}
+	a.emitReplayPlan(sessionID, replayPlan)
 
 	// Emit session status event to normalize with other adapters.
 	// This eliminates the need for ReportsStatusViaStream flag.
@@ -540,8 +601,122 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 // ResetSession creates a new session on the existing connection, effectively resetting
 // the agent's conversation context without restarting the subprocess. This is much faster
 // than a full process restart since the ACP protocol supports multiple sessions per connection.
+//
+// The session/new call spawns a fresh agent-side child process without releasing the
+// superseded one, so a successful reset closes the outgoing session to release its
+// resources. The old session is captured before NewSession overwrites a.sessionID.
 func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
-	return a.NewSession(ctx, mcpServers)
+	if err := a.lockSessionTransition(ctx); err != nil {
+		return "", err
+	}
+
+	a.mu.RLock()
+	previous, conn := a.sessionID, a.acpConn
+	a.mu.RUnlock()
+
+	newID, err := a.newSession(ctx, mcpServers)
+	if err != nil {
+		a.sessionTransitionMu.Unlock()
+		return "", err
+	}
+	// session/new has committed the replacement session. Superseded-session
+	// cleanup is best effort and has its own bounded context, so it must not
+	// hold the reset request open while a provider ignores session/close. The
+	// cleanup remains queued behind the transition mutex so another session
+	// transition cannot make the still-current check stale.
+	if previous != "" && previous != newID && conn != nil {
+		done := make(chan struct{})
+		a.sessionCleanupDone = done
+		a.sessionCleanupWg.Add(1)
+		go a.runSupersededSessionCleanup(done, conn, previous, newID)
+	}
+	a.sessionTransitionMu.Unlock()
+	return newID, nil
+}
+
+func (a *Adapter) runSupersededSessionCleanup(
+	done chan struct{}, conn *acp.ClientSideConnection, previous, newID string,
+) {
+	defer a.sessionCleanupWg.Done()
+	a.sessionTransitionMu.Lock()
+	defer a.sessionTransitionMu.Unlock()
+	a.closeSupersededSessionLocked(context.Background(), conn, previous, newID)
+	close(done)
+	a.sessionCleanupDone = nil
+}
+
+// closeSupersededSessionTimeout bounds session/close after a reset so cleanup
+// can't hang the caller when the agent doesn't respond.
+const closeSupersededSessionTimeout = 10 * time.Second
+
+// closeSupersededSession releases the session a successful reset just replaced.
+// It fails closed: absent capability, an empty or unchanged previous id, a nil
+// connection, or a.sessionID no longer matching newID all skip the close
+// silently rather than risk closing the live session. The last case guards a
+// concurrent session transition: WS requests are dispatched to the adapter
+// without serialization, so a LoadSession or another ResetSession can replace
+// newID with a different session between NewSession returning and this check
+// running. A close error is logged and never surfaces to the caller, since the
+// reset itself already succeeded.
+func (a *Adapter) closeSupersededSession(ctx context.Context, conn *acp.ClientSideConnection, previous, newID string) {
+	if err := a.lockSessionTransition(ctx); err != nil {
+		return
+	}
+	defer a.sessionTransitionMu.Unlock()
+	a.closeSupersededSessionLocked(ctx, conn, previous, newID)
+}
+
+// closeSupersededSessionLocked requires sessionTransitionMu to be held so the
+// still-current check and session/close request form one transition.
+func (a *Adapter) closeSupersededSessionLocked(_ context.Context, conn *acp.ClientSideConnection, previous, newID string) {
+	if previous == "" || previous == newID || conn == nil {
+		return
+	}
+	a.mu.RLock()
+	supportsClose := a.capabilities.SessionCapabilities.Close != nil
+	stillCurrent := a.sessionID == newID
+	a.mu.RUnlock()
+	if !supportsClose || !stillCurrent {
+		return
+	}
+
+	cleanupBase := a.lifetimeCtx
+	if cleanupBase == nil {
+		cleanupBase = context.Background()
+	}
+	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(cleanupBase), closeSupersededSessionTimeout)
+	defer cancel()
+	if _, err := conn.CloseSession(closeCtx, acp.CloseSessionRequest{
+		SessionId: acp.SessionId(previous),
+	}); err != nil {
+		a.logger.Warn("failed to close superseded session after reset",
+			zap.String("session_id", previous), zap.Error(err))
+	}
+}
+
+// emitReplayPlan re-emits the plan captured during session/load replay so the todo
+// indicator survives a resume. An empty plan is dropped: on the ACP ingest path an
+// empty entry list carries no information (same reasoning as extractTodoItems), and
+// re-emitting it would both wipe the live indicator and persist an empty todo snapshot
+// that shadows the last real one in the chat timeline. A genuine "agent cleared the
+// todos" still arrives as a live plan update and keeps its persisted empty snapshot.
+func (a *Adapter) emitReplayPlan(sessionID string, replayPlan *acp.SessionUpdatePlan) {
+	if replayPlan == nil || len(replayPlan.Entries) == 0 {
+		return
+	}
+	entries := make([]PlanEntry, len(replayPlan.Entries))
+	for i, e := range replayPlan.Entries {
+		entries[i] = PlanEntry{
+			Description: e.Content,
+			Status:      string(e.Status),
+			Priority:    string(e.Priority),
+		}
+	}
+	a.sendUpdate(AgentEvent{
+		Type:        streams.EventTypePlan,
+		SessionID:   sessionID,
+		PlanEntries: entries,
+	})
 }
 
 // emitInitialModeState emits a session_mode event from the session response's Modes field.
@@ -664,17 +839,16 @@ func (a *Adapter) emitSetModelEvent(
 		SessionModels:  convertSessionModels(cachedModels),
 		ConfigOptions:  outConfig,
 	}
-	sent := a.sendUpdateLocked(event)
-	closed := a.closed
 	a.mu.Unlock()
 
 	a.logger.Info("emitting session_models convergence event after SetModel",
 		zap.String("session_id", sessionID),
 		zap.String("model_id", modelID),
 	)
-	if !sent && !closed {
-		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
-	}
+	// COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): sendUpdate blocks rather
+	// than drops on a full updatesCh and must run without a.mu held -- see
+	// emitDialectContextWindow's doc comment for the deadlock this avoids.
+	a.sendUpdate(event)
 }
 
 // currentModelFromConfig returns the CurrentValue of the model-shaped
@@ -1060,12 +1234,11 @@ func (a *Adapter) emitAuthoritativeConfigOptions(
 		}
 		delete(a.contextSamples, sessionID)
 	}
-	sent := a.sendUpdateLocked(event)
-	closed := a.closed
 	a.mu.Unlock()
-	if !sent && !closed {
-		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
-	}
+	// COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): sendUpdate blocks rather
+	// than drops on a full updatesCh and must run without a.mu held -- see
+	// emitDialectContextWindow's doc comment for the deadlock this avoids.
+	a.sendUpdate(event)
 }
 
 // emitSetConfigOptionEvent emits a session_models convergence event after a
@@ -1131,8 +1304,6 @@ func (a *Adapter) emitSetConfigOptionEvent(
 		SessionModels:  convertSessionModels(cachedModels),
 		ConfigOptions:  outConfig,
 	}
-	sent := a.sendUpdateLocked(event)
-	closed := a.closed
 	a.mu.Unlock()
 
 	a.logger.Info("emitting session_models convergence event after SetConfigOption",
@@ -1140,9 +1311,10 @@ func (a *Adapter) emitSetConfigOptionEvent(
 		zap.String("config_id", configID),
 		zap.String("value", value),
 	)
-	if !sent && !closed {
-		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
-	}
+	// COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): sendUpdate blocks rather
+	// than drops on a full updatesCh and must run without a.mu held -- see
+	// emitDialectContextWindow's doc comment for the deadlock this avoids.
+	a.sendUpdate(event)
 }
 
 // isModelConfigID reports whether configID identifies the model-shaped

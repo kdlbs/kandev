@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import { TaskTopBar } from "@/components/task/task-top-bar";
 import { TaskLayout } from "@/components/task/task-layout";
 import { DebugOverlay } from "@/components/debug-overlay";
@@ -9,19 +10,35 @@ import { isDebugUI } from "@/lib/config";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
-import { EnsureSessionErrorBanner } from "@/components/task/ensure-session-error";
+import {
+  EnsureSessionErrorBanner,
+  getSessionRecoveryRetry,
+  SessionRecoveryFeedback,
+} from "@/components/task/ensure-session-error";
+import { TaskMoveErrorBanner } from "@/components/task/task-move-error-banner";
 import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
+import { TaskCommands } from "@/components/task-commands";
 import { SessionCommands } from "@/components/session-commands";
 import { TaskPRShortcut } from "@/components/task/task-pr-shortcut";
 import { useEmbeddedVscodeSupport } from "@/components/task/task-page-editor-capability";
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
+import { PortForwardingVisibilityProvider } from "@/components/task/port-forwarding-visibility-provider";
+import {
+  TaskLaunchErrorProvider,
+  useTaskLaunchErrorContext,
+} from "@/components/task/task-launch-error-context";
+import { SessionBootstrapRecoveryCard } from "@/components/task/chat/session-bootstrap-recovery-card";
+import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
+import { TaskSharedError } from "@/components/task/task-shared-error";
 import {
   buildDebugEntries,
   buildArchivedValue,
   resolveTaskProps,
+  resolveWorkflowCurrentStepId,
+  useTaskActionsMenuBoardRow,
+  selectWorkspaceRepositories,
 } from "@/components/task/task-page-content-helpers";
-import type { useSessionAgent } from "@/hooks/domains/session/use-session-agent";
 import type { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import type { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import type {
@@ -29,12 +46,14 @@ import type {
   useSessionPanelState,
   useMergedAgentState,
 } from "./task-page-content";
+import { useTranslation } from "react-i18next";
+import type { Canvas } from "@/lib/api/domains/canvas-api";
+import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
 
 export type TaskPageInnerProps = {
   task: Task | null;
   effectiveSessionId: string | null;
   repository: Repository | null;
-  agent: ReturnType<typeof useSessionAgent>;
   merged: ReturnType<typeof useMergedAgentState>;
   resumption: ReturnType<typeof useSessionResumption>;
   sessionPanel: ReturnType<typeof useSessionPanelState>;
@@ -52,6 +71,8 @@ export type TaskPageInnerProps = {
   officeTaskHref?: string | null;
   ensureSession: UseEnsureTaskSessionResult;
   onTaskUnarchived: (taskId: string) => void;
+  taskCanvases?: Canvas[];
+  taskCanvasesStatus?: TaskCanvasesLoadStatus;
 };
 
 type RemoteExecutorStatus = {
@@ -85,54 +106,61 @@ function resolveRemoteExecutor(status?: RemoteExecutorStatus | null) {
   };
 }
 
-// Prefer the session-level step (delivered direct via session.state_changed) over the task-level step (routed through the hub broadcast and slightly stale).
 function resolveCurrentStepId(
   sessionStepId: string | null,
   taskStepId: string | null,
+  workflowStepIds: readonly string[],
 ): string | null {
-  return sessionStepId || taskStepId || null;
+  return resolveWorkflowCurrentStepId(sessionStepId, taskStepId, workflowStepIds);
 }
 
 function buildTaskTopBarProps(params: {
+  task: Task | null;
   taskProps: ReturnType<typeof resolveTaskProps>;
-  agent: ReturnType<typeof useSessionAgent>;
-  merged: ReturnType<typeof useMergedAgentState>;
+  actionsMenuBoardRow: ReturnType<typeof useTaskActionsMenuBoardRow>;
   workflowSteps: ReturnType<typeof useWorkflowStepsMapped>;
   showDebugOverlay: boolean;
   onToggleDebugOverlay: () => void;
   effectiveSessionId: string | null;
   remote: ReturnType<typeof resolveRemoteExecutor>;
   sessionWorkflowStepId: string | null;
-  agentctlReady: boolean;
   embeddedVscodeSupported: boolean;
   officeTaskHref?: string | null;
   onTaskUnarchived: (taskId: string) => void;
 }) {
-  const { taskProps, agent, merged, workflowSteps, showDebugOverlay, onToggleDebugOverlay } =
-    params;
+  const { taskProps, workflowSteps, showDebugOverlay, onToggleDebugOverlay } = params;
   return {
     taskId: taskProps.taskId,
     activeSessionId: params.effectiveSessionId,
     taskTitle: taskProps.taskTitle,
-    onStartAgent: agent.handleStartAgent,
-    onStopAgent: agent.handleStopAgent,
-    isAgentRunning: agent.isAgentRunning || merged.isResumed,
-    isAgentLoading: agent.isAgentLoading || merged.isResuming,
+    repositoryLabel: taskProps.repositoryLabel,
+    topbarRepository: taskProps.topbarRepository,
     showDebugOverlay,
     onToggleDebugOverlay,
     workflowSteps,
-    currentStepId: resolveCurrentStepId(params.sessionWorkflowStepId, taskProps.workflowStepId),
+    currentStepId: resolveCurrentStepId(
+      params.sessionWorkflowStepId,
+      taskProps.workflowStepId,
+      workflowSteps.map((step) => step.id),
+    ),
     workflowId: taskProps.workflowId,
+    taskState: params.task?.state ?? null,
     workspaceId: taskProps.workspaceId,
+    projectId: taskProps.projectId,
     issueUrl: taskProps.issueUrl,
     issueNumber: taskProps.issueNumber,
     isArchived: taskProps.isArchived,
-    isRemoteExecutor: params.remote.isRemoteExecutor,
-    isAgentctlReady: params.agentctlReady,
     embeddedVscodeSupported: params.embeddedVscodeSupported,
     remoteExecutorType: params.remote.remoteExecutorType,
     officeTaskHref: params.officeTaskHref,
     onTaskUnarchived: params.onTaskUnarchived,
+    actionsMenuBoardRow: params.actionsMenuBoardRow,
+    // The subject's own last-known values, independent of `actionsMenuBoardRow`:
+    // the board excludes archived (and can lag/miss cross-workflow) tasks, so
+    // these stay available for the actions menu's plugin context and
+    // executor-aware confirmation copy even when the board row is unresolvable.
+    subjectWorkflowStepId: taskProps.workflowStepId,
+    subjectPrimaryExecutorType: taskProps.primaryExecutorType,
   };
 }
 
@@ -146,9 +174,13 @@ function buildTaskLayoutProps(params: {
   merged: ReturnType<typeof useMergedAgentState>;
   remote: ReturnType<typeof resolveRemoteExecutor>;
   initialLayout?: string | null;
+  onTaskUnarchived: (taskId: string) => void;
+  taskCanvases?: Canvas[];
+  taskCanvasesStatus?: TaskCanvasesLoadStatus;
 }) {
   const { taskProps, repository, effectiveSessionId, initialScripts, initialTerminals } = params;
   return {
+    taskId: taskProps.taskId,
     workspaceId: taskProps.workspaceId,
     workflowId: taskProps.workflowId,
     sessionId: effectiveSessionId,
@@ -157,7 +189,11 @@ function buildTaskLayoutProps(params: {
     initialTerminals,
     defaultLayouts: params.defaultLayouts,
     initialLayout: params.initialLayout,
+    taskCanvases: params.taskCanvases,
+    taskCanvasesStatus: params.taskCanvasesStatus,
     taskTitle: taskProps.taskTitle,
+    repositoryLabel: taskProps.repositoryLabel,
+    topbarRepository: taskProps.topbarRepository,
     baseBranch: taskProps.baseBranch,
     worktreeBranch: params.merged.worktreeBranch,
     isRemoteExecutor: params.remote.isRemoteExecutor,
@@ -168,6 +204,7 @@ function buildTaskLayoutProps(params: {
     remoteCheckedAt: params.remote.remoteCheckedAt,
     remoteStatusError: params.remote.remoteStatusError,
     isArchived: taskProps.isArchived,
+    onTaskUnarchived: params.onTaskUnarchived,
   };
 }
 
@@ -201,19 +238,77 @@ function maybeBuildDebugEntries(params: {
   });
 }
 
-export function TaskPageInner({
+function TaskDebugOverlay({ entries }: { entries: ReturnType<typeof maybeBuildDebugEntries> }) {
+  const { t } = useTranslation();
+  if (!entries) return null;
+  return <DebugOverlay title={t("task:taskDebug")} entries={entries} />;
+}
+
+function TaskPageRecoveryFeedback({
+  taskId,
+  sessionId,
+  resumption,
+  workspaceId,
+  isPassthrough,
+}: {
+  taskId: string;
+  sessionId: string | null;
+  resumption: TaskPageInnerProps["resumption"];
+  workspaceId: string | null;
+  isPassthrough: boolean;
+}) {
+  const launchErrorContext = useTaskLaunchErrorContext();
+  const sessionMetadata = useAppStore((state) =>
+    sessionId ? (state.taskSessions.items[sessionId]?.metadata ?? null) : null,
+  );
+  const bootstrapRecoveryError = selectSessionRecoveryError(
+    launchErrorContext?.statusSummary?.active_error,
+    sessionId,
+    sessionMetadata,
+  );
+  if (bootstrapRecoveryError && sessionId && isPassthrough) {
+    return (
+      <SessionBootstrapRecoveryCard
+        taskId={taskId}
+        sessionId={sessionId}
+        workspaceId={workspaceId}
+        error={bootstrapRecoveryError}
+        automaticRecovery={resumption}
+      />
+    );
+  }
+  if (bootstrapRecoveryError) {
+    return null;
+  }
+  return (
+    <SessionRecoveryFeedback
+      error={resumption.error}
+      notice={resumption.notice}
+      recoveryFailure={resumption.recoveryFailure}
+      onRetry={getSessionRecoveryRetry(resumption)}
+      retryDisabled={
+        resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
+      }
+      workspaceId={workspaceId}
+    />
+  );
+}
+
+/**
+ * Derives everything the task page renders from its inputs: the resolved task
+ * props plus the three prop bundles handed to the debug overlay, top bar, and
+ * layout. Kept out of `TaskPageInner` so that component stays a wiring shell.
+ */
+function useTaskPageDerivedProps({
   task,
   effectiveSessionId,
   repository,
-  agent,
   merged,
   resumption,
   sessionPanel,
   agentctlStatus,
   connectionStatus,
   workflowSteps,
-  archivedValue,
-  isMobile,
   showDebugOverlay,
   onToggleDebugOverlay,
   initialScripts,
@@ -221,10 +316,15 @@ export function TaskPageInner({
   defaultLayouts,
   initialLayout,
   officeTaskHref,
-  ensureSession,
   onTaskUnarchived,
+  taskCanvases,
+  taskCanvasesStatus,
 }: TaskPageInnerProps) {
-  const taskProps = resolveTaskProps(task, repository);
+  const workspaceRepositories = useAppStore((state) =>
+    selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
+  );
+  const taskProps = resolveTaskProps(task, repository, workspaceRepositories);
+  const actionsMenuBoardRow = useTaskActionsMenuBoardRow(task);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
   const embeddedVscode = useEmbeddedVscodeSupport(effectiveSessionId, resumption.sessionStatus);
   const activeSessionMetadata = useAppStore((state) =>
@@ -242,16 +342,15 @@ export function TaskPageInner({
     agentctlStatus,
   });
   const topBarProps = buildTaskTopBarProps({
+    task,
     taskProps,
-    agent,
-    merged,
+    actionsMenuBoardRow,
     workflowSteps,
     showDebugOverlay,
     onToggleDebugOverlay,
     effectiveSessionId,
     remote,
     sessionWorkflowStepId: sessionPanel.sessionWorkflowStepId,
-    agentctlReady: agentctlStatus.isReady,
     embeddedVscodeSupported: embeddedVscode,
     officeTaskHref,
     onTaskUnarchived,
@@ -266,39 +365,96 @@ export function TaskPageInner({
     merged,
     remote,
     initialLayout,
+    onTaskUnarchived,
+    taskCanvases,
+    taskCanvasesStatus,
   });
+
+  return { taskProps, debugEntries, topBarProps, layoutProps };
+}
+
+export function TaskPageInner(props: TaskPageInnerProps) {
+  const { effectiveSessionId, task, merged, sessionPanel, archivedValue, isMobile, ensureSession } =
+    props;
+  const [taskMoveError, setTaskMoveError] = useState<unknown>(null);
+  const clearTaskMoveError = useCallback(() => setTaskMoveError(null), []);
+  const reportTaskMoveError = useCallback((error: unknown) => setTaskMoveError(error), []);
+  useEffect(() => {
+    setTaskMoveError(null);
+  }, [task?.id]);
+  const { taskProps, debugEntries, topBarProps, layoutProps } = useTaskPageDerivedProps(props);
+  if (!task) return null;
 
   return (
     <TooltipProvider>
-      <VcsDialogsProvider
+      <PortForwardingVisibilityProvider
+        taskId={taskProps.taskId}
+        metadata={task?.metadata}
         sessionId={effectiveSessionId}
-        baseBranch={taskProps.baseBranch}
-        taskTitle={taskProps.taskTitle}
-        displayBranch={merged.worktreeBranch}
+        isAgentctlReady={props.agentctlStatus.isReady}
+        isArchived={taskProps.isArchived}
       >
-        <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
-          <SessionCommands
-            sessionId={effectiveSessionId}
-            baseBranch={taskProps.baseBranch}
-            isAgentRunning={merged.isAgentWorking}
-            hasWorktree={Boolean(merged.worktreeBranch)}
-            isPassthrough={sessionPanel.isSessionPassthrough}
-          />
-          <TaskPRShortcut taskId={taskProps.taskId} />
-          {debugEntries && <DebugOverlay title="Task Debug" entries={debugEntries} />}
-          {!isMobile && <TaskTopBar {...topBarProps} />}
-          {ensureSession.status === "error" && (
-            <EnsureSessionErrorBanner
-              error={ensureSession.error}
-              onRetry={ensureSession.retry}
-              workspaceId={task?.workspace_id ?? null}
+        <VcsDialogsProvider
+          sessionId={effectiveSessionId}
+          baseBranch={taskProps.baseBranch}
+          pullRequestBaseBranch={taskProps.pullRequestTarget}
+          pullRequestTargetsByRepository={taskProps.pullRequestTargetsByRepository}
+          taskTitle={taskProps.taskTitle}
+          displayBranch={merged.worktreeBranch}
+        >
+          <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
+            <SessionCommands
+              sessionId={effectiveSessionId}
+              baseBranch={taskProps.baseBranch}
+              isAgentRunning={merged.isAgentWorking}
+              hasWorktree={Boolean(merged.worktreeBranch)}
+              isPassthrough={sessionPanel.isSessionPassthrough}
+              isTaskArchived={archivedValue.isArchived}
             />
-          )}
-          <TaskArchivedProvider value={archivedValue}>
-            <TaskLayout {...layoutProps} />
-          </TaskArchivedProvider>
-        </div>
-      </VcsDialogsProvider>
+            <TaskPRShortcut taskId={taskProps.taskId} />
+            <TaskDebugOverlay entries={debugEntries} />
+            {!isMobile && (
+              <TaskTopBar
+                {...topBarProps}
+                onMoveStart={clearTaskMoveError}
+                onMoveError={reportTaskMoveError}
+              />
+            )}
+            {taskMoveError !== null && <TaskMoveErrorBanner error={taskMoveError} />}
+            {ensureSession.status === "error" && (
+              <EnsureSessionErrorBanner
+                error={ensureSession.error}
+                onRetry={ensureSession.retry}
+                workspaceId={task?.workspace_id ?? null}
+              />
+            )}
+            <TaskArchivedProvider value={archivedValue}>
+              <TaskCommands />
+              <TaskLaunchErrorProvider
+                value={{
+                  taskId: task.id,
+                  workspaceId: task.workspace_id,
+                  statusSummary: task.status_summary,
+                  repositories: task.repositories,
+                  automaticRecovery: props.resumption,
+                }}
+              >
+                <TaskPageRecoveryFeedback
+                  taskId={task.id}
+                  sessionId={effectiveSessionId}
+                  resumption={props.resumption}
+                  workspaceId={task?.workspace_id ?? null}
+                  isPassthrough={sessionPanel.isSessionPassthrough}
+                />
+                <TaskSharedError reserveMobileTopBar={isMobile} />
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <TaskLayout {...layoutProps} />
+                </div>
+              </TaskLaunchErrorProvider>
+            </TaskArchivedProvider>
+          </div>
+        </VcsDialogsProvider>
+      </PortForwardingVisibilityProvider>
     </TooltipProvider>
   );
 }

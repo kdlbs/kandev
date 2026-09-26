@@ -91,6 +91,50 @@ func TestTaskReviewRun_CreateGetUpdate(t *testing.T) {
 	}
 }
 
+// TestTaskReviewRun_CreateDuplicateEntryIDReturnsConflictSentinel locks in
+// the documented behavior of ErrTaskReviewRunEntryConflict: a second insert
+// with the same non-empty EntryID is rejected via the sentinel, matching the
+// unique index idx_task_review_runs_entry_id, and the first row's EntryID
+// remains resolvable by FindTaskReviewRunByEntryID.
+func TestTaskReviewRun_CreateDuplicateEntryIDReturnsConflictSentinel(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedReviewTask(t, ctx, repo, "task-entry-conflict")
+
+	first := &models.TaskReviewRun{
+		TaskID:    "task-entry-conflict",
+		SessionID: "sess-1",
+		Trigger:   models.ReviewTriggerWorkflowStep,
+		AgentID:   "claude-acp",
+		Model:     "claude-haiku-4-5",
+		EntryID:   "entry-conflict-1",
+	}
+	if err := repo.CreateTaskReviewRun(ctx, first); err != nil {
+		t.Fatalf("CreateTaskReviewRun (first): %v", err)
+	}
+
+	second := &models.TaskReviewRun{
+		TaskID:    "task-entry-conflict",
+		SessionID: "sess-1",
+		Trigger:   models.ReviewTriggerWorkflowStep,
+		AgentID:   "claude-acp",
+		Model:     "claude-haiku-4-5",
+		EntryID:   "entry-conflict-1",
+	}
+	err := repo.CreateTaskReviewRun(ctx, second)
+	if !errors.Is(err, ErrTaskReviewRunEntryConflict) {
+		t.Fatalf("expected ErrTaskReviewRunEntryConflict, got %v", err)
+	}
+
+	got, err := repo.FindTaskReviewRunByEntryID(ctx, "entry-conflict-1")
+	if err != nil {
+		t.Fatalf("FindTaskReviewRunByEntryID: %v", err)
+	}
+	if got == nil || got.ID != first.ID {
+		t.Fatalf("expected the winner's row (%s) to remain resolvable by entry id, got %+v", first.ID, got)
+	}
+}
+
 func TestTaskReviewRun_GetMissingReturnsSentinel(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -155,30 +199,23 @@ func TestTaskReviewFinding_UpdateStatus(t *testing.T) {
 		t.Fatalf("CreateTaskReviewFindings: %v", err)
 	}
 
-	now := f.CreatedAt
-	if err := repo.UpdateTaskReviewFindingStatus(ctx, f.ID, models.ReviewFindingResolved, &now); err != nil {
-		t.Fatalf("UpdateTaskReviewFindingStatus: %v", err)
-	}
-	got, err := repo.GetTaskReviewFinding(ctx, f.ID)
+	got, err := repo.TransitionTaskReviewFindingStatus(ctx, f.ID, models.ReviewFindingResolved)
 	if err != nil {
-		t.Fatalf("GetTaskReviewFinding: %v", err)
+		t.Fatalf("TransitionTaskReviewFindingStatus: %v", err)
 	}
 	if got.Status != models.ReviewFindingResolved || got.ResolvedAt == nil {
 		t.Fatalf("expected resolved with resolved_at, got %+v", got)
 	}
 
-	if err := repo.UpdateTaskReviewFindingStatus(ctx, f.ID, models.ReviewFindingOpen, nil); err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-	got, err = repo.GetTaskReviewFinding(ctx, f.ID)
+	got, err = repo.TransitionTaskReviewFindingStatus(ctx, f.ID, models.ReviewFindingOpen)
 	if err != nil {
-		t.Fatalf("GetTaskReviewFinding after reopen: %v", err)
+		t.Fatalf("reopen: %v", err)
 	}
 	if got.Status != models.ReviewFindingOpen || got.ResolvedAt != nil {
 		t.Fatalf("expected reopen to clear resolved_at, got %+v", got)
 	}
 
-	err = repo.UpdateTaskReviewFindingStatus(ctx, "missing", models.ReviewFindingOpen, nil)
+	_, err = repo.TransitionTaskReviewFindingStatus(ctx, "missing", models.ReviewFindingOpen)
 	if !errors.Is(err, models.ErrTaskReviewFindingNotFound) {
 		t.Fatalf("expected ErrTaskReviewFindingNotFound, got %v", err)
 	}

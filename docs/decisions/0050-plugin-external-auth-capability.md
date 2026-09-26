@@ -1,12 +1,12 @@
 # 0050 — Plugins provide OIDC/SAML login via a capability-gated, host-minted session
 
-- Status: accepted
+- Status: accepted (amended 2026-08-12)
 - Date: 2026-07-26
 - Area: backend, security, protocol
 - Related: [0043 — Plugin host data API](0043-plugin-host-data-api.md),
   [Opt-in authentication](2026-07-24-opt-in-authentication.md),
-  [docs/specs/auth/spec.md](../specs/auth/spec.md),
-  [docs/specs/plugins/spec.md](../specs/plugins/spec.md)
+  [docs/specs/auth/requirements/auth.md](../specs/auth/requirements/auth.md),
+  [docs/specs/plugins/requirements/plugins.md](../specs/plugins/requirements/plugins.md)
 
 ## Context
 
@@ -19,15 +19,18 @@ delivered as an out-of-tree plugin rather than baked into the host.
 
 The plugin capability model (ADR 0043) is a set of capability-gated `Host` gRPC
 RPCs the plugin *calls*, plus host→plugin events and a proxied inbound webhook
-(`/api/plugins/{id}/webhooks/{key}`, already on the auth public allowlist).
-None of these can establish an authenticated browser session.
+(`/api/plugins/{id}/webhooks/{key}`, reachable by an anonymous visitor when its
+manifest entry declares `webhooks[].public: true` — see the 2026-08-12
+amendment below). None of these can establish an authenticated browser
+session.
 
-The architectural constraint that shaped this decision: the `kandev_session`
-cookie must be set on the **HTTP response to the browser**. A `Host` gRPC RPC
-runs on the go-plugin broker channel, not the browser's HTTP connection, so it
-*cannot* set that cookie. The only plugin→browser HTTP path is the webhook
-response. Therefore session establishment must happen on the webhook response
-path, regardless of whether a new RPC exists.
+The architectural constraint that shaped this decision: the session cookie
+(name derived from the request host — base name `kandev_session`) must be set
+on the **HTTP response to the browser**. A `Host` gRPC RPC runs on the
+go-plugin broker channel, not the browser's HTTP connection, so it *cannot*
+set that cookie. The only plugin→browser HTTP path is the webhook response.
+Therefore session establishment must happen on the webhook response path,
+regardless of whether a new RPC exists.
 
 ## Decision
 
@@ -44,7 +47,7 @@ a reserved header `X-Kandev-Auth-Login` whose value is a JSON assertion
    not silently ignored.
 3. Calls `auth.Service.AuthenticateExternal`, which maps the assertion to a
    user (existing identity → link-by-email → JIT-provision a **member**),
-   mints a session, and the host sets the `kandev_session` cookie itself. The
+   mints a session, and the host sets the session cookie itself. The
    email-linking step is trust-sensitive: the plugin **MUST** only assert an
    email the IdP verified as owned by the subject, otherwise a spoofed email
    claim is an account takeover. As defense-in-depth the host **refuses to
@@ -85,6 +88,16 @@ handing the raw session token to the plugin is strictly weaker.
 - **Not yet built:** setup-mode bootstrap of the first admin via SSO is out of
   scope (SSO requires `ModeEnabled`); the OIDC/SAML plugin implementations live
   in their own repos (e.g. `kandev-plugin-google-oidc`).
+
+**Amendment (2026-08-12):** `2026-08-12-plugin-webhook-auth-gate.md` closed an
+exposure where every plugin webhook, including ones with no external
+authentication of their own, was reachable anonymously by default. The
+`initiate` webhook this ADR depends on (and the IdP callback key it
+redirects to) must now declare `webhooks[].public: true` in the manifest, or
+`SSOProviders()` silently omits that provider from the login screen rather
+than surface a button that 401s. Existing SSO plugin manifests (e.g.
+`kandev-plugin-google-oidc`) need that flag added before their login button
+works again on an auth-enabled install.
 
 ## Alternatives considered
 

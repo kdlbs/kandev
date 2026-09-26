@@ -1,5 +1,6 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
+import { SYSTEM_AGENT_RUNTIME_STATUS_CHANGED } from "@/lib/types/backend";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import { handleBrowserLogCapture } from "@/lib/logger/capture";
 
@@ -11,8 +12,14 @@ export function registerSystemEventsHandlers(store: StoreApi<AppState>): WsHandl
       // jobs map mirrors the latest queued/running/succeeded/failed state.
       store.getState().upsertSystemJob(message.payload);
     },
+    "system.storage.analysis.updated": () => {
+      store.getState().bumpSystemStorageAnalysisRevision();
+    },
     "system.metrics.updated": (message) => {
       store.getState().setSystemMetricsSnapshot(message.payload);
+    },
+    [SYSTEM_AGENT_RUNTIME_STATUS_CHANGED]: (message) => {
+      store.getState().setAgentRuntime(message.payload);
     },
     "system.logs.capture_requested": (message) => {
       const auth = store.getState().auth;

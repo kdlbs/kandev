@@ -43,7 +43,7 @@ func TestBuildShareHTML_RendersChatLayout(t *testing.T) {
 	doc := BuildShareHTML(snap, "en")
 
 	assertContains(t, doc, "<!doctype html>")
-	assertContains(t, doc, "<title>Investigate &lt;flaky&gt; test — kandev share</title>")
+	assertContains(t, doc, "<title>Investigate &lt;flaky&gt; test; kandev share</title>")
 	assertContains(t, doc, "<style>")
 	if strings.Contains(doc, "<flaky>") {
 		t.Fatal("unescaped angle brackets leaked into HTML")

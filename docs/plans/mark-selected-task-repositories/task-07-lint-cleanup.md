@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-workspace-coverage-remediation", "06-github-case-normalization"]
 plan: "plan.md"
-spec: "../../specs/tasks/multi-branch/spec.md"
+spec: "../../specs/tasks/requirements/multi-branch.md"
 ---
 
 # Task 07: Clear repository marker lint warnings

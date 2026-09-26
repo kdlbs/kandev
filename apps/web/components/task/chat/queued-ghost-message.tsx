@@ -9,27 +9,17 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  IconCheck,
-  IconChevronDown,
-  IconChevronUp,
-  IconEdit,
-  IconFile,
-  IconInfoCircle,
-  IconRobot,
-  IconUser,
-  IconX,
-  IconArrowMerge,
-} from "@tabler/icons-react";
+import type { ReactNode } from "react";
+import { IconInfoCircle, IconRobot, IconUser } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import type { DraggableAttributes, DraggableSyntheticListeners } from "@dnd-kit/core";
 import { toast } from "@/lib/toast/sonner";
 import { useTranslation } from "react-i18next";
-import { Button } from "@kandev/ui";
-import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
 import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 import { stripSystemTags } from "@/lib/utils/system-tags";
-import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import {
   SenderTaskBadge,
   type SenderTaskInfo,
@@ -39,7 +29,7 @@ import {
   workflowMessageInfoFromMetadata,
   type WorkflowStepMessageInfo,
 } from "@/components/task/chat/messages/workflow-step-message-badge";
-import { remarkPlugins } from "@/components/shared/markdown-components";
+import { rehypePlugins, remarkPlugins } from "@/components/shared/markdown-components";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import {
@@ -47,50 +37,17 @@ import {
   survivingEntityReferences,
 } from "@/lib/entity-references/message-references";
 import { buildEntityReferenceMarkdownComponents } from "@/components/task/chat/messages/entity-reference-chip";
-
-type QueuedAttachment = NonNullable<QueuedMessage["attachments"]>[number];
-
-type AttachmentRowProps = {
-  attachments: QueuedAttachment[];
-  interactive: boolean;
-};
-
-/**
- * Renders queued-message attachments as compact thumbnails (images) and chips
- * (other resources). Used in both display and edit views; `interactive=false`
- * disables the click-to-open behavior so it stays a passive context cue while
- * editing the message text.
- */
-function AttachmentRow({ attachments, interactive }: AttachmentRowProps) {
-  if (attachments.length === 0) return null;
-  const images = attachments.filter((a) => a.type === "image");
-  const files = attachments.filter((a) => a.type !== "image");
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {images.map((att, i) => (
-        <ImagePreviewDialog
-          key={`img-${i}`}
-          src={`data:${att.mime_type};base64,${att.data}`}
-          alt={`Attachment ${i + 1}`}
-          interactive={interactive}
-          thumbnailClassName={cn(
-            "h-10 w-10 rounded-md border border-border object-cover",
-            interactive && "transition-opacity hover:opacity-90",
-          )}
-        />
-      ))}
-      {files.map((_, i) => (
-        <span
-          key={`file-${i}`}
-          className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground"
-        >
-          <IconFile className="h-3 w-3" />
-          Attachment
-        </span>
-      ))}
-    </div>
-  );
-}
+import { BoundedMessagePreview } from "@/components/task/chat/messages/bounded-message-preview";
+import { QueuedGhostRowActions } from "@/components/task/chat/queued-ghost-row-actions";
+import { useQueuedMessageOverflow } from "@/components/task/chat/use-queued-message-overflow";
+import { AttachmentRow, type QueuedAttachment } from "@/components/task/chat/queued-attachment-row";
+import { QueuedGhostEditView } from "@/components/task/chat/queued-ghost-edit-view";
+import { t } from "@/lib/i18n";
+import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
+import {
+  useQueuedGhostLeaseLoss,
+  useQueuedGhostStartEdit,
+} from "@/hooks/use-queue-edit-protection";
 
 /** Imperative handle for the ghost row, used by chat input "edit last queued" affordance. */
 export type QueuedGhostMessageHandle = {
@@ -121,6 +78,14 @@ function senderKindOf(entry: QueuedMessage): SenderKind {
  * backend rows and are never mergeable. */
 export function canMergeEntry(entry: QueuedMessage): boolean {
   if (entry.queued_by === "server") return false;
+  if (
+    entry.metadata &&
+    ("plan_comment_refs" in entry.metadata ||
+      "plan_comment_request_fingerprint" in entry.metadata ||
+      "client_queue_id" in entry.metadata)
+  ) {
+    return false;
+  }
   const kind = senderKindOf(entry);
   return kind === "user" || kind === "agent";
 }
@@ -154,14 +119,17 @@ function senderLabel(entry: QueuedMessage): string {
   if (kind === "agent") {
     const title = entry.metadata?.sender_task_title;
     const sessionName = entry.metadata?.sender_session_name;
-    const base = typeof title === "string" && title.length > 0 ? `From ${title}` : "From agent";
+    const base =
+      typeof title === "string" && title.length > 0
+        ? t("task:fromTask", { title })
+        : t("task:fromAgent");
     return typeof sessionName === "string" && sessionName.length > 0
-      ? `${base} · ${sessionName}`
+      ? t("task:senderWithSession", { base, sessionName })
       : base;
   }
-  if (kind === "workflow") return "Workflow";
-  if (kind === "system") return "System";
-  return "You";
+  if (kind === "workflow") return t("task:workflowSender");
+  if (kind === "system") return t("task:systemSender");
+  return t("task:you");
 }
 
 type SenderIconProps = { entry: QueuedMessage };
@@ -215,183 +183,22 @@ function getWorkflowMessageInfo(entry: QueuedMessage): WorkflowStepMessageInfo |
   return entry.queued_by === "workflow" || entry.queued_by === "workflow-auto-start" ? {} : null;
 }
 
-type EditViewProps = {
-  value: string;
-  saving: boolean;
-  attachments: QueuedAttachment[];
-  onChange: (v: string) => void;
-  onSave: () => void;
-  onCancel: () => void;
-  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
-};
-
-function EditView({
-  value,
-  saving,
-  attachments,
-  onChange,
-  onSave,
-  onCancel,
-  textareaRef,
-}: EditViewProps) {
-  const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onCancel();
-    } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      onSave();
-    }
-  };
-  return (
-    <div className="space-y-2 py-2">
-      <AttachmentRow attachments={attachments} interactive={false} />
-      <Textarea
-        ref={textareaRef}
-        data-testid="queue-edit-textarea"
-        value={value}
-        disabled={saving}
-        placeholder="Enter message content..."
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={onKeyDown}
-        className={cn(
-          "min-h-[60px] max-h-[200px] resize-none overflow-y-auto bg-background border-border",
-        )}
-      />
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          variant="default"
-          onClick={onSave}
-          disabled={saving || !value.trim()}
-          className="h-7 cursor-pointer"
-        >
-          <IconCheck className="mr-1 h-3.5 w-3.5" />
-          Save
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onCancel}
-          disabled={saving}
-          className="h-7 cursor-pointer"
-        >
-          Cancel
-        </Button>
-        <span className="ml-auto text-xs text-muted-foreground">
-          Press Esc to cancel, Cmd+Enter to save
-        </span>
-      </div>
-    </div>
-  );
-}
-
 type DisplayViewProps = {
   entry: QueuedMessage;
   entityReferences: readonly EntityReference[];
   positionLabel: string;
   canEdit: boolean;
+  canRemove: boolean;
   canMerge: boolean;
   onStartEdit: () => void;
   onRemove: () => void;
   onMerge?: () => void | Promise<void>;
+  onSendNow: () => void;
+  sendNowDisabled: boolean;
 };
 
-/** Rough threshold above which we offer a per-row expand toggle. Two lines of
- * the row's text width fit ~80 chars OR any explicit newline implies overflow,
- * so we use either signal to surface the chevron — short multi-line messages
- * (lists, code blocks) would otherwise be silently truncated. */
-const EXPAND_THRESHOLD = 80;
-
-function shouldOfferExpand(text: string): boolean {
-  return text.length > EXPAND_THRESHOLD || text.includes("\n");
-}
-
-type RowActionsProps = {
-  canExpand: boolean;
-  expanded: boolean;
-  canMerge: boolean;
-  canEdit: boolean;
-  onToggleExpand: () => void;
-  onMerge?: () => void | Promise<void>;
-  onStartEdit: () => void;
-  onRemove: () => void;
-};
-
-function RowActions({
-  canExpand,
-  expanded,
-  canMerge,
-  canEdit,
-  onToggleExpand,
-  onMerge,
-  onStartEdit,
-  onRemove,
-}: RowActionsProps) {
-  const { t } = useTranslation();
-  return (
-    <div
-      className={cn(
-        "flex items-center gap-0.5 flex-shrink-0 transition-opacity",
-        // Hover-reveal on devices that support hover (desktop); always
-        // visible on touch surfaces where there's no hover affordance.
-        "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
-        "[@media(hover:none)]:opacity-100",
-      )}
-    >
-      {canExpand && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-          onClick={onToggleExpand}
-          title={expanded ? t("chat:collapseMessage") : t("chat:expandMessage")}
-          data-testid="queue-entry-expand"
-          aria-expanded={expanded}
-        >
-          {expanded ? (
-            <IconChevronUp className="h-3.5 w-3.5" />
-          ) : (
-            <IconChevronDown className="h-3.5 w-3.5" />
-          )}
-        </Button>
-      )}
-      {canMerge && onMerge && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-          onClick={onMerge}
-          title={t("chat:mergeWithAbove")}
-          data-testid="queue-entry-merge"
-        >
-          <IconArrowMerge className="h-3.5 w-3.5" />
-        </Button>
-      )}
-      {canEdit && (
-        <>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-            onClick={onStartEdit}
-            title={t("chat:editQueuedMessage")}
-          >
-            <IconEdit className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-            onClick={onRemove}
-            title={t("chat:removeQueuedMessage")}
-          >
-            <IconX className="h-4 w-4" />
-          </Button>
-        </>
-      )}
-    </div>
-  );
+function queuePositionLabel(index: number | undefined, position: number | undefined): string {
+  return `#${index === undefined ? (position ?? 1) : index + 1}`;
 }
 
 function DisplayView({
@@ -399,26 +206,37 @@ function DisplayView({
   entityReferences,
   positionLabel,
   canEdit,
+  canRemove,
   canMerge,
   onStartEdit,
   onRemove,
   onMerge,
+  onSendNow,
+  sendNowDisabled,
 }: DisplayViewProps) {
+  const { t } = useTranslation();
   const visible = stripSystemTags(entry.content);
   const attachments = (entry.attachments ?? []) as QueuedAttachment[];
   const senderTask = getSenderTaskInfo(entry);
   const workflowMessage = getWorkflowMessageInfo(entry);
   const [expanded, setExpanded] = useState(false);
-  const canExpand = shouldOfferExpand(visible);
+  const { previewRef, disclosureButtonRef, canExpand } = useQueuedMessageOverflow(
+    visible,
+    expanded,
+    setExpanded,
+  );
   const referenceMarkdownComponents = useMemo(
     () => buildEntityReferenceMarkdownComponents(entityReferences),
     [entityReferences],
   );
   return (
-    <div className="group flex items-start gap-2 py-1.5">
-      <span className="flex items-center gap-1.5 mt-0.5 text-muted-foreground">
+    <div className="group flex items-center gap-2 py-1.5" data-testid="queue-entry">
+      {/* Position label + sender icon are non-interactive; relative keeps them
+       * painted above the coarse-pointer touch target, and pointer-events-none
+       * lets touches reach the handle behind them. */}
+      <span className="relative flex items-center gap-1.5 text-muted-foreground pointer-events-none">
         <span
-          aria-label={`Position ${positionLabel}`}
+          aria-label={t("task:position", { positionLabel })}
           className="font-mono text-[10px] tabular-nums"
         >
           {positionLabel}
@@ -429,33 +247,155 @@ function DisplayView({
         {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} size="xs" />}
         {senderTask && <SenderTaskBadge sender={senderTask} size="xs" />}
         {visible && (
-          <div
-            data-testid="queue-entry-text"
-            data-expanded={expanded ? "true" : "false"}
-            className={cn(
+          <BoundedMessagePreview
+            source={visible}
+            fileName="kandev-queued-message.txt"
+            previewRef={previewRef}
+            previewTestId="queue-entry-text"
+            previewDataExpanded={expanded}
+            previewClassName={cn(
               "markdown-body max-w-none text-sm text-foreground/80 break-words overflow-hidden",
               "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-              "transition-[max-height] duration-200 ease-out motion-reduce:transition-none",
               expanded ? "max-h-[40rem]" : "max-h-[2.75rem]",
             )}
-          >
-            <ReactMarkdown remarkPlugins={remarkPlugins} components={referenceMarkdownComponents}>
-              {visible}
-            </ReactMarkdown>
-          </div>
+            renderContent={(preview) => (
+              <ReactMarkdown
+                remarkPlugins={remarkPlugins}
+                rehypePlugins={rehypePlugins}
+                components={referenceMarkdownComponents}
+              >
+                {preview}
+              </ReactMarkdown>
+            )}
+          />
         )}
         <AttachmentRow attachments={attachments} interactive={true} />
       </div>
-      <RowActions
+      <QueuedGhostRowActions
         canExpand={canExpand}
+        disclosureButtonRef={disclosureButtonRef}
         expanded={expanded}
         canMerge={canMerge}
         canEdit={canEdit}
+        canRemove={canRemove}
         onToggleExpand={() => setExpanded((v) => !v)}
         onMerge={onMerge}
         onStartEdit={onStartEdit}
         onRemove={onRemove}
+        onSendNow={onSendNow}
+        sendNowDisabled={sendNowDisabled}
       />
+    </div>
+  );
+}
+
+type QueueGrabHandleProps = {
+  canDrag: boolean;
+  attributes: DraggableAttributes;
+  listeners: DraggableSyntheticListeners;
+  /** dnd-kit activator node ref: after a keyboard drag, focus returns here. */
+  setActivatorNodeRef: (node: HTMLElement | null) => void;
+};
+
+/**
+ * Dotted drag handle that floats over the row's left edge. It is absolutely
+ * positioned so nothing in the row shifts to make room. It is always visible
+ * when the queue has multiple entries, attached flush to the box's left edge
+ * and painted behind the row content on coarse pointers (no chip surface —
+ * the dots read as part of the box edge).
+ * Dragging starts only from this handle.
+ */
+function QueueGrabHandle({
+  canDrag,
+  attributes,
+  listeners,
+  setActivatorNodeRef,
+}: QueueGrabHandleProps) {
+  const { t } = useTranslation();
+  const dragProps = canDrag ? { ...attributes, ...listeners } : {};
+  return (
+    <button
+      type="button"
+      ref={setActivatorNodeRef}
+      disabled={!canDrag}
+      aria-label={t("chat:reorderQueuedMessage")}
+      data-testid="queue-grab-handle"
+      {...dragProps}
+      aria-roledescription={t("chat:sortable")}
+      className={cn(
+        "absolute top-1/2 z-10 -translate-y-1/2 touch-none rounded-md",
+        "flex items-center justify-center",
+        "left-1 h-3 w-3",
+        "text-muted-foreground/70 hover:text-muted-foreground",
+        "border-0 bg-transparent shadow-none",
+        "opacity-100 transition-opacity duration-150",
+        canDrag ? "cursor-grab active:cursor-grabbing" : "cursor-not-allowed opacity-30",
+        // Coarse pointers: keep a 44px touch target while the visible grip
+        // remains small and behind the row content.
+        "[@media(pointer:coarse)]:opacity-100",
+        "[@media(pointer:coarse)]:left-0 [@media(pointer:coarse)]:z-0",
+        "[@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11",
+        "[@media(pointer:coarse)]:border-0",
+        "[@media(pointer:coarse)]:bg-transparent",
+        "[@media(pointer:coarse)]:shadow-none",
+        "[@media(pointer:coarse)]:justify-start [@media(pointer:coarse)]:pl-2",
+      )}
+    >
+      <span aria-hidden className="grid grid-cols-2 gap-0.5">
+        {[0, 1, 2, 3, 4, 5].map((dot) => (
+          <span key={dot} className="h-px w-px rounded-full bg-current" />
+        ))}
+      </span>
+    </button>
+  );
+}
+
+type SortableRowShellProps = {
+  id: string;
+  /** useSortable is disabled while the row is edited or reordering is off. */
+  disabled: boolean;
+  canDrag: boolean;
+  /** The grab handle is hidden while the row is being edited. */
+  showHandle: boolean;
+  isDragging: boolean;
+  children: ReactNode;
+};
+
+/** Sortable row wrapper: owns the dnd-kit node ref, transform, and the dotted
+ * grab handle overlay, keeping QueuedGhostMessage focused on content. */
+function SortableRowShell({
+  id,
+  disabled,
+  canDrag,
+  showHandle,
+  isDragging,
+  children,
+}: SortableRowShellProps) {
+  const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition } =
+    useSortable({
+      id,
+      disabled,
+    });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        "group relative rounded-md border border-border/60 bg-background/40 pr-2 text-sm",
+        "hover:border-border transition-colors",
+        showHandle ? "pl-5 [@media(pointer:coarse)]:pl-11" : "pl-2",
+        isDragging && "z-10 opacity-40",
+      )}
+    >
+      {showHandle && (
+        <QueueGrabHandle
+          canDrag={canDrag}
+          attributes={attributes}
+          listeners={listeners}
+          setActivatorNodeRef={setActivatorNodeRef}
+        />
+      )}
+      {children}
     </div>
   );
 }
@@ -470,103 +410,252 @@ type QueuedGhostMessageProps = {
    */
   canEdit: boolean;
   /**
+   * Becomes false when the server-side edit lease is lost, so a row cannot
+   * continue presenting an editor that can no longer submit.
+   */
+  editLeaseActive?: boolean;
+  /** Removal is independent from edit ownership and applies to every visible row. */
+  canRemove?: boolean;
+  /**
    * Merge-with-above control; only shown when this row and the one above it
    * share a sender kind. Optional so standalone renders (tests) can omit it.
    */
   canMerge?: boolean;
-  onSave: (content: string, entityReferences: EntityReference[]) => Promise<void>;
+  /**
+   * Reordering is enabled unless a queue mutation or backend cancellation is
+   * in flight; the row's own edit view also suppresses the handle. The queue
+   * panel hides it when there is only one entry. Optional so standalone renders
+   * default to showing the handle.
+   */
+  canDrag?: boolean;
+  /** Whether this row belongs to a queue with enough entries to reorder. */
+  showDragHandle?: boolean;
+  /** Set while this row is the active drag target, for dimming/z-index. */
+  isDragging?: boolean;
+  onSave: (
+    content: string,
+    entityReferences: EntityReference[],
+    attachments?: QueuedMessage["attachments"],
+  ) => Promise<void>;
   onRemove: () => void | Promise<void>;
   /** Fold this entry into the one above it. */
   onMerge?: () => void | Promise<void>;
-  /** Called after edit save/cancel so the parent can refocus the chat input. */
-  onEditComplete?: () => void;
+  /** Interrupt the current turn and dispatch this exact queued entry. */
+  onSendNow?: () => void;
+  /** Disable while the queue mutation or backend cancellation is in flight. */
+  sendNowDisabled?: boolean;
+  /** Called before edit activation; returning false keeps the row read-only. */
+  onEditStart?: () => void | Promise<boolean | string | void>;
+  /** Called after edit save/cancel so the parent can restore queue policy. */
+  onEditComplete?: (editToken?: string, saved?: boolean) => void | Promise<void>;
 };
+
+function useFocusQueuedEdit(
+  editing: boolean,
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>,
+): void {
+  useQueuedGhostEditEscapeGuard(editing, textareaRef);
+  useEffect(() => {
+    if (!editing || !textareaRef.current) return;
+    const textarea = textareaRef.current;
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }, [editing, textareaRef]);
+}
+
+function useQueuedGhostEditEscapeGuard(
+  editing: boolean,
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>,
+): void {
+  const editEscapeGuard = useCallback(
+    (event: KeyboardEvent) => {
+      if (!editing || event.key !== "Escape") return false;
+      const textarea = textareaRef.current;
+      if (!textarea) return false;
+      const target = event.target;
+      return (
+        target === textarea ||
+        (target instanceof Node && textarea.contains(target)) ||
+        document.activeElement === textarea
+      );
+    },
+    [editing, textareaRef],
+  );
+  useClarificationEscapeGuard(editing ? editEscapeGuard : null);
+}
+type QueuedGhostSaveArgs = {
+  value: string;
+  entryContent: string;
+  entityReferences: readonly EntityReference[];
+  attachments?: QueuedMessage["attachments"];
+  onSave: QueuedGhostMessageProps["onSave"];
+  onEditComplete?: (editToken?: string, saved?: boolean) => void | Promise<void>;
+  editTokenRef: React.RefObject<string | undefined>;
+  setEditing: (editing: boolean) => void;
+  setSaving: (saving: boolean) => void;
+  t: (key: string) => string;
+};
+
+function useQueuedGhostSave({
+  value,
+  entryContent,
+  entityReferences,
+  attachments,
+  onSave,
+  onEditComplete,
+  editTokenRef,
+  setEditing,
+  setSaving,
+  t,
+}: QueuedGhostSaveArgs) {
+  return useCallback(async () => {
+    const editToken = editTokenRef.current;
+    const trimmed = value.trim();
+    const hasAttachments = (attachments?.length ?? 0) > 0;
+    if ((!trimmed && !hasAttachments) || trimmed === entryContent) {
+      setEditing(false);
+      await onEditComplete?.(editToken, false);
+      return;
+    }
+    setSaving(true);
+    try {
+      const updatedReferences = survivingEntityReferences(trimmed, entityReferences);
+      if (attachments === undefined) {
+        await onSave(trimmed, updatedReferences);
+      } else {
+        await onSave(trimmed, updatedReferences, attachments);
+      }
+      setEditing(false);
+      await onEditComplete?.(editToken, true);
+    } catch (err) {
+      console.error("Failed to update queued entry:", err);
+      if (err instanceof QueueEntryNotFoundError) {
+        toast.error(t("chat:queueEditAlreadySent"));
+      } else {
+        toast.error(t("chat:queueEditSaveFailed"));
+      }
+      setEditing(false);
+      await onEditComplete?.(editToken, false);
+    } finally {
+      setSaving(false);
+    }
+  }, [
+    value,
+    entryContent,
+    onSave,
+    onEditComplete,
+    entityReferences,
+    attachments,
+    editTokenRef,
+    setEditing,
+    setSaving,
+    t,
+  ]);
+}
+
+type QueuedGhostCancelArgs = {
+  entryContent: string;
+  onEditComplete?: (editToken?: string, saved?: boolean) => void | Promise<void>;
+  editTokenRef: React.RefObject<string | undefined>;
+  setValue: (value: string) => void;
+  setEditing: (editing: boolean) => void;
+};
+
+function useQueuedGhostCancel({
+  entryContent,
+  onEditComplete,
+  editTokenRef,
+  setValue,
+  setEditing,
+}: QueuedGhostCancelArgs) {
+  return useCallback(async () => {
+    const editToken = editTokenRef.current;
+    setValue(entryContent);
+    setEditing(false);
+    await onEditComplete?.(editToken);
+  }, [editTokenRef, entryContent, onEditComplete, setEditing, setValue]);
+}
+
+function useQueuedGhostMetadata(entry: QueuedMessage, canMerge: boolean) {
+  const entityReferences = useMemo(
+    () => entityReferencesFromMetadata(entry.metadata),
+    [entry.metadata],
+  );
+  return { entityReferences, effectiveCanMerge: canMerge && canMergeEntry(entry) };
+}
 
 export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGhostMessageProps>(
   function QueuedGhostMessage(
-    { entry, index, canEdit, canMerge = false, onSave, onRemove, onMerge, onEditComplete },
+    {
+      entry,
+      index,
+      canEdit,
+      editLeaseActive = true,
+      canRemove = true,
+      canMerge = false,
+      canDrag = true,
+      showDragHandle = true,
+      isDragging = false,
+      onSave,
+      onRemove,
+      onMerge,
+      onSendNow = () => undefined,
+      sendNowDisabled = false,
+      onEditStart,
+      onEditComplete,
+    },
     ref,
   ) {
+    const { t } = useTranslation();
     const [editing, setEditing] = useState(false);
     const [value, setValue] = useState(entry.content);
     const [saving, setSaving] = useState(false);
+    const editTokenRef = useRef<string | undefined>(undefined);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const entityReferences = useMemo(
-      () => entityReferencesFromMetadata(entry.metadata),
-      [entry.metadata],
-    );
-    // A row is mergeable only when both the caller gate and the entry itself
-    // pass: workflow/server/system rows are reserved and never mergeable, even
-    // if a parent computed canMerge for a different row.
-    const effectiveCanMerge = canMerge && canMergeEntry(entry);
-
-    useEffect(() => {
-      if (!editing) setValue(entry.content);
-    }, [entry.content, editing]);
-
-    useEffect(() => {
-      if (editing && textareaRef.current) {
-        const el = textareaRef.current;
-        el.focus();
-        el.setSelectionRange(el.value.length, el.value.length);
-      }
-    }, [editing]);
-
-    const startEdit = useCallback(() => {
-      if (!canEdit) return;
-      setValue(entry.content);
-      setEditing(true);
-    }, [entry.content, canEdit]);
-
+    const { entityReferences, effectiveCanMerge } = useQueuedGhostMetadata(entry, canMerge);
+    useFocusQueuedEdit(editing, textareaRef);
+    useQueuedGhostLeaseLoss(editing, editLeaseActive, entry.content, setValue, setEditing);
+    const startEdit = useQueuedGhostStartEdit({
+      canEdit,
+      editing,
+      saving,
+      onEditStart,
+      onStart: (editToken) => {
+        editTokenRef.current = editToken;
+        setValue(entry.content);
+        setEditing(true);
+      },
+    });
     useImperativeHandle(ref, () => ({ startEdit }), [startEdit]);
-
-    const handleCancel = useCallback(() => {
-      setValue(entry.content);
-      setEditing(false);
-      onEditComplete?.();
-    }, [entry.content, onEditComplete]);
-
-    const handleSave = useCallback(async () => {
-      const trimmed = value.trim();
-      if (!trimmed || trimmed === entry.content) {
-        setEditing(false);
-        onEditComplete?.();
-        return;
-      }
-      setSaving(true);
-      try {
-        await onSave(trimmed, survivingEntityReferences(trimmed, entityReferences));
-        setEditing(false);
-        onEditComplete?.();
-      } catch (err) {
-        console.error("Failed to update queued entry:", err);
-        // Exit edit mode so the user sees the current state instead of being
-        // stuck in a textarea with no signal that the save failed (drain race
-        // or transient network error).
-        if (err instanceof QueueEntryNotFoundError) {
-          toast.error("Message already sent — agent picked it up before your edit landed.");
-        } else {
-          toast.error("Failed to save edit. Please try again.");
-        }
-        setEditing(false);
-        onEditComplete?.();
-      } finally {
-        setSaving(false);
-      }
-    }, [value, entry.content, onSave, onEditComplete, entityReferences]);
-
-    const positionNumber = entry.position ?? (index ?? 0) + 1;
-    const positionLabel = `#${positionNumber}`;
-
+    const handleCancel = useQueuedGhostCancel({
+      entryContent: entry.content,
+      onEditComplete,
+      editTokenRef,
+      setValue,
+      setEditing,
+    });
+    const handleSave = useQueuedGhostSave({
+      value,
+      entryContent: entry.content,
+      entityReferences,
+      attachments: entry.attachments,
+      onSave,
+      onEditComplete,
+      editTokenRef,
+      setEditing,
+      setSaving,
+      t,
+    });
     return (
-      <div
-        className={cn(
-          "rounded-md border border-border/60 bg-background/40 px-2 text-sm",
-          "hover:border-border transition-colors",
-        )}
+      <SortableRowShell
+        id={entry.id}
+        disabled={editing || !canDrag}
+        canDrag={canDrag}
+        showHandle={showDragHandle && !editing}
+        isDragging={isDragging}
       >
         {editing ? (
-          <EditView
+          <QueuedGhostEditView
             value={value}
             saving={saving}
             attachments={(entry.attachments ?? []) as QueuedAttachment[]}
@@ -579,15 +668,18 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
           <DisplayView
             entry={entry}
             entityReferences={entityReferences}
-            positionLabel={positionLabel}
+            positionLabel={queuePositionLabel(index, entry.position)}
             canEdit={canEdit}
+            canRemove={canRemove}
             canMerge={effectiveCanMerge}
             onStartEdit={startEdit}
             onRemove={onRemove}
             onMerge={onMerge}
+            onSendNow={onSendNow}
+            sendNowDisabled={sendNowDisabled}
           />
         )}
-      </div>
+      </SortableRowShell>
     );
   },
 );

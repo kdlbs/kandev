@@ -18,11 +18,15 @@ func Run(args []string, build BuildInfo) int {
 	if len(args) > 0 && args[0] == "service" {
 		return runService(args[1:], build)
 	}
+	if len(args) > 0 && args[0] == "maintenance" {
+		return runMaintenance(args[1:], build)
+	}
 	opts, err := parseArgs(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 2
 	}
+	build.Version = normalizedBuildVersion(build.Version)
 	if opts.ShowVersion {
 		fmt.Println(build.Version)
 		return 0
@@ -36,9 +40,11 @@ func Run(args []string, build BuildInfo) int {
 	ctx := context.Background()
 	switch opts.Command {
 	case CommandStart:
-		return runStart(ctx, opts)
+		return runStart(ctx, opts, build)
 	case CommandRun:
-		return runInstalled(ctx, opts)
+		return runInstalled(ctx, opts, build)
+	case CommandDev:
+		return runDev(ctx, opts, build)
 	}
 	fmt.Fprintf(os.Stderr, "[kandev] native launcher command %q is not implemented yet\n", opts.Command)
 	return 1

@@ -1,16 +1,22 @@
 "use client";
+import { SettingsInfo } from "./settings-info";
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import { SettingsCard } from "./settings-card";
+import { SettingsRow, type SettingsPresentation } from "./settings-group";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 
-export function AgentGeneratedTaskTitleSettings() {
+export function AgentGeneratedTaskTitleSettings({
+  presentation = "card",
+}: {
+  presentation?: SettingsPresentation;
+}) {
   const { t } = useTranslation();
   const preference = useAppStore((state) => state.userSettings.agentGeneratedTaskTitles);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
@@ -42,31 +48,45 @@ export function AgentGeneratedTaskTitleSettings() {
     discard: () => setDraft(saved),
   });
 
+  const row = (
+    <SettingsRow
+      label={t("settings:useAgentForNewTaskTitles")}
+      description={t("settings:agentTitlesShort")}
+      info={
+        <SettingsInfo label={t("settings:useAgentForNewTaskTitles")}>
+          <p>{t("settings:agentGeneratedTaskTitlesDescription")}</p>
+          <p>{t("settings:agentGeneratedTaskTitlesDisabledHint")}</p>
+        </SettingsInfo>
+      }
+      controlId="agent-generated-task-titles"
+      touchTarget="switch"
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.agentGeneratedTitles}
+      isDirty={isDirty}
+      control={
+        <Switch
+          id="agent-generated-task-titles"
+          checked={draft}
+          data-settings-dirty={isDirty}
+          onCheckedChange={setDraft}
+          className="shrink-0 cursor-pointer"
+        />
+      }
+    />
+  );
+
+  if (presentation === "row") return row;
+
   return (
-    <SettingsCard isDirty={isDirty} data-testid="agent-generated-task-title-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.agentGeneratedTitles}
+      data-testid="agent-generated-task-title-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:agentGeneratedTaskTitles")}</CardTitle>
         <CardDescription>{t("settings:agentGeneratedTaskTitlesDescription")}</CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="flex min-h-11 items-center justify-between gap-4">
-          <div className="min-w-0 space-y-0.5">
-            <Label htmlFor="agent-generated-task-titles">
-              {t("settings:useAgentForNewTaskTitles")}
-            </Label>
-            <p className="text-xs text-muted-foreground">
-              {t("settings:agentGeneratedTaskTitlesDisabledHint")}
-            </p>
-          </div>
-          <Switch
-            id="agent-generated-task-titles"
-            checked={draft}
-            data-settings-dirty={isDirty}
-            onCheckedChange={setDraft}
-            className="shrink-0 cursor-pointer"
-          />
-        </div>
-      </CardContent>
+      <CardContent>{row}</CardContent>
     </SettingsCard>
   );
 }

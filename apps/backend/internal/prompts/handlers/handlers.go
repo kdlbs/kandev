@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/prompts/controller"
 	"github.com/kandev/kandev/internal/prompts/dto"
@@ -17,6 +18,10 @@ type Handlers struct {
 	controller *controller.Controller
 	logger     *logger.Logger
 }
+
+// Prompt fields are validated independently by the service. Leave enough
+// room for JSON syntax and escaping around the one-megabyte content field.
+const maxPromptRequestBodyBytes = 8 << 20
 
 func NewHandlers(ctrl *controller.Controller, log *logger.Logger) *Handlers {
 	return &Handlers{
@@ -29,9 +34,10 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, log *logger
 	handlers := NewHandlers(ctrl, log)
 	api := router.Group("/api/v1")
 	api.GET("/prompts", handlers.httpListPrompts)
-	api.POST("/prompts", handlers.httpCreatePrompt)
-	api.PATCH("/prompts/:id", handlers.httpUpdatePrompt)
-	api.DELETE("/prompts/:id", handlers.httpDeletePrompt)
+	manageConfig := authz.RequireOrgScope(authz.ScopeOrgConfigManage)
+	api.POST("/prompts", manageConfig, handlers.httpCreatePrompt)
+	api.PATCH("/prompts/:id", manageConfig, handlers.httpUpdatePrompt)
+	api.DELETE("/prompts/:id", manageConfig, handlers.httpDeletePrompt)
 }
 
 func (h *Handlers) httpListPrompts(c *gin.Context) {
@@ -45,6 +51,7 @@ func (h *Handlers) httpListPrompts(c *gin.Context) {
 }
 
 func (h *Handlers) httpCreatePrompt(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxPromptRequestBodyBytes)
 	var req dto.CreatePromptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
@@ -58,6 +65,8 @@ func (h *Handlers) httpCreatePrompt(c *gin.Context) {
 			status, message = http.StatusBadRequest, err.Error()
 		case errors.Is(err, service.ErrPromptAlreadyExists):
 			status, message = http.StatusConflict, err.Error()
+		case errors.Is(err, service.ErrPromptListLimit):
+			status, message = http.StatusUnprocessableEntity, err.Error()
 		}
 		logRejection(h.logger, "create prompt rejected", "failed to create prompt", err, status)
 		c.JSON(status, gin.H{"error": message})
@@ -67,6 +76,7 @@ func (h *Handlers) httpCreatePrompt(c *gin.Context) {
 }
 
 func (h *Handlers) httpUpdatePrompt(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxPromptRequestBodyBytes)
 	var req dto.UpdatePromptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})

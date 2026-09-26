@@ -7,6 +7,7 @@ import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useAppStore } from "@/components/state-provider";
 import type { ComponentProps } from "react";
+import { useTranslation } from "react-i18next";
 
 type QuickChatButtonProps = {
   workspaceId?: string | null;
@@ -20,6 +21,7 @@ export function QuickChatButton({
   size = "default",
   compact = false,
 }: QuickChatButtonProps) {
+  const { t } = useTranslation();
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   const quickChatShortcut = getShortcut("QUICK_CHAT", keyboardShortcuts);
@@ -27,16 +29,19 @@ export function QuickChatButton({
   if (!workspaceId) return null;
 
   return (
-    <KeyboardShortcutTooltip shortcut={quickChatShortcut} description="Quick Chat">
+    <KeyboardShortcutTooltip
+      shortcut={quickChatShortcut}
+      description={t("common:commandQuickChat")}
+    >
       <Button
         variant="outline"
         size={compact ? "icon-lg" : size}
         className="cursor-pointer gap-2"
-        aria-label={compact ? "Quick Chat" : undefined}
+        aria-label={compact ? t("common:commandQuickChat") : undefined}
         onClick={handleOpenQuickChat}
       >
         <IconMessageCircle className="h-4 w-4" />
-        {!compact && "Chat"}
+        {!compact && t("task:chat")}
       </Button>
     </KeyboardShortcutTooltip>
   );

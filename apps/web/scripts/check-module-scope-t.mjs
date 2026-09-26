@@ -23,7 +23,7 @@ import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const TARGETS = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-const DIRS = TARGETS.length ? TARGETS : ["components", "app", "hooks", "lib"];
+const DIRS = TARGETS.length ? TARGETS : ["components", "app", "hooks", "lib", "src"];
 const FUNCTIONS = new Set([
   "FunctionDeclaration",
   "FunctionExpression",

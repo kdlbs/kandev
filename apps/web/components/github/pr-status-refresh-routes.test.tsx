@@ -19,6 +19,9 @@ const wsMock = vi.hoisted(() => ({
 }));
 const CHIP_TESTID = "pr-status-chip";
 const TOPBAR_BUTTON_TESTID = "pr-topbar-button";
+const CHECKS_FAILED = "Checks failed";
+const CHECKS_PASSED = "Checks passed";
+const CONFLICTS = "Conflicts";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({
@@ -76,6 +79,7 @@ function renderWithStore(initialState: Partial<AppState>, ui: ReactNode) {
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-id",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "acme",
     repo: "demo",
@@ -117,10 +121,15 @@ function taskState(prs: TaskPR[], activeTask = false): Partial<AppState> {
             activeSessionId: null,
             pinnedSessionId: null,
             lastSessionByTaskId: {},
+            resumeSkippedSessionIds: {},
           },
         }
       : {}),
   };
+}
+
+function ariaLabel(element: Element): string {
+  return element.getAttribute("aria-label") ?? "";
 }
 
 function setupRefresh(prs: TaskPR[]) {
@@ -175,6 +184,18 @@ afterEach(() => {
 });
 
 describe("TaskPR refresh routes", () => {
+  it("shows only the left PR glyph and number, with localized failing-check and conflict text", () => {
+    const failed = makePR({ has_merge_conflicts: true });
+    setupRefresh([failed]);
+    renderWithStore(taskState([failed], true), <PRTopbarButton />);
+    const button = screen.getByTestId(TOPBAR_BUTTON_TESTID);
+    expect(button.textContent).toBe("#42");
+    expect(button.querySelectorAll("svg")).toHaveLength(2);
+    expect(button.querySelectorAll(":scope > svg")).toHaveLength(0);
+    expect(button.querySelector('[data-testid="pr-merge-conflict-warning"]')).not.toBeNull();
+    expect(ariaLabel(button)).toContain(CHECKS_FAILED);
+    expect(ariaLabel(button)).toContain(CONFLICTS);
+  });
   it("refreshes the stale single-PR chip when its mobile drawer opens", async () => {
     responsiveMock.breakpoint = "mobile";
     responsiveMock.isFinePointer = false;
@@ -249,8 +270,39 @@ describe("TaskPR refresh routes", () => {
     renderWithStore(taskState([failed, passing], true), <PRTopbarButton />);
     await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
     expectTopbarStatusIcon("text-red-500");
+    expect(screen.getByTestId(TOPBAR_BUTTON_TESTID).querySelectorAll("svg")).toHaveLength(2);
     fireEvent.mouseEnter(screen.getByTestId(TOPBAR_BUTTON_TESTID));
 
     await expectTopbarRefresh(request);
+  });
+});
+
+describe("multi-PR accessible status", () => {
+  it("names aggregate and per-PR status in the topbar and menu", async () => {
+    const failed = makePR({ id: "failed", has_merge_conflicts: true });
+    const passing = makePR({
+      id: "passing",
+      repo: "api",
+      pr_number: 77,
+      checks_state: "success",
+      mergeable_state: "clean",
+      review_state: "approved",
+    });
+    setupRefresh([failed, passing]);
+    renderWithStore(taskState([failed, passing], true), <PRTopbarButton />);
+
+    const button = screen.getByTestId(TOPBAR_BUTTON_TESTID);
+    expect(ariaLabel(button)).toContain(button.textContent);
+    expect(ariaLabel(button)).toContain(CHECKS_FAILED);
+    expect(ariaLabel(button)).toContain(CHECKS_PASSED);
+    expect(ariaLabel(button)).toContain(CONFLICTS);
+
+    fireEvent.pointerDown(button, { button: 0, ctrlKey: false, pointerType: "mouse" });
+    const failedRow = await screen.findByTestId("pr-topbar-menu-item-acme-demo-42");
+    const passingRow = screen.getByTestId("pr-topbar-menu-item-acme-api-77");
+    expect(ariaLabel(failedRow)).toContain(CHECKS_FAILED);
+    expect(ariaLabel(failedRow)).toContain(CONFLICTS);
+    expect(ariaLabel(passingRow)).toContain(CHECKS_PASSED);
+    expect(ariaLabel(passingRow)).not.toContain(CONFLICTS);
   });
 });

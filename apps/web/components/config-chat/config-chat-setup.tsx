@@ -6,8 +6,11 @@ import { IconLoader2, IconMessageCircle, IconSend2, IconSparkles } from "@tabler
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 import { ConfigurationChatToggle } from "@/components/quick-chat/configuration-chat-toggle";
+import { orderAgentProfilesByRecentUse } from "@/lib/agent-profile-recent-use";
 
 /**
  * Catalog KEYS, not copy. Resolving these at module scope would freeze them at
@@ -43,7 +46,15 @@ type ConfigChatSetupProps = ConfigChatSetupBaseProps &
 
 function ProfileSelector({ onSelect }: { onSelect: (id: string) => void }) {
   const profiles = useAppStore((state) => state.agentProfiles.items ?? []);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const { t } = useTranslation();
+  const recentProfileIds = useAppStore(
+    (state) => state.agentProfileRecentUse?.records.config_chat?.profileIds,
+  );
+  const selectableProfiles = profiles.filter((profile) =>
+    isSelectableAgentProfile(profile, dynamicRoutingEnabled),
+  );
+  const orderedProfiles = orderAgentProfilesByRecentUse(selectableProfiles, recentProfileIds);
   return (
     <section className="space-y-3" aria-labelledby="config-chat-agent-label">
       <div>
@@ -53,7 +64,7 @@ function ProfileSelector({ onSelect }: { onSelect: (id: string) => void }) {
         <p className="text-xs text-muted-foreground">{t("configChat:agentProfileHelp")}</p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        {profiles.map((profile) => (
+        {orderedProfiles.map((profile) => (
           <button
             key={profile.id}
             type="button"
@@ -332,6 +343,10 @@ export function ConfigChatSetup({
   onKindChange,
 }: ConfigChatSetupProps) {
   const profiles = useAppStore((state) => state.agentProfiles.items ?? []);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
+  const selectableProfiles = profiles.filter((profile) =>
+    isSelectableAgentProfile(profile, dynamicRoutingEnabled),
+  );
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId ?? "");
   const [inputValue, setInputValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -341,8 +356,8 @@ export function ConfigChatSetup({
   }, [defaultProfileId]);
 
   const effectiveProfileId = selectedProfileId || defaultProfileId || "";
-  const profileIsResolved = profiles.some((profile) => profile.id === effectiveProfileId);
-  const needsProfileSelection = profiles.length > 0 && !profileIsResolved;
+  const profileIsResolved = selectableProfiles.some((profile) => profile.id === effectiveProfileId);
+  const needsProfileSelection = selectableProfiles.length > 0 && !profileIsResolved;
   const canSubmit = inputValue.trim().length > 0 && profileIsResolved && !isStarting;
 
   useEffect(() => {
@@ -359,7 +374,7 @@ export function ConfigChatSetup({
     <div className="flex min-h-0 flex-1 flex-col bg-popover" data-testid="config-chat-setup">
       <ConfigGuidance
         presentation={presentation}
-        hasProfiles={profiles.length > 0}
+        hasProfiles={selectableProfiles.length > 0}
         needsProfileSelection={needsProfileSelection}
         isStarting={isStarting}
         onSelectProfile={setSelectedProfileId}
@@ -367,7 +382,7 @@ export function ConfigChatSetup({
         onKindChange={onKindChange}
       />
       <ConfigSetupActions
-        showPrompt={profiles.length > 0 && !needsProfileSelection}
+        showPrompt={selectableProfiles.length > 0 && !needsProfileSelection}
         value={inputValue}
         error={error}
         profileIsResolved={profileIsResolved}

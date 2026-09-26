@@ -7,10 +7,16 @@ import type { FileTreeNode, FileContentResponse, OpenFileTab } from "@/lib/types
 import { getFilesPanelScrollPosition, setFilesPanelScrollPosition } from "@/lib/local-storage";
 import type { useToast } from "@/components/toast-provider";
 import type { useFileBrowserTree } from "./file-browser-hooks";
+import { t } from "@/lib/i18n";
 
 export type FetchAndOpenFileOptions = {
   repo?: string;
   signal?: AbortSignal;
+};
+
+export type LoadNodeChildrenOptions = {
+  force?: boolean;
+  shouldApply?: () => boolean;
 };
 
 /** Hook for scroll position persistence in the file browser. */
@@ -64,22 +70,28 @@ export async function loadNodeChildren(
   node: FileTreeNode,
   sessionId: string,
   treeState: ReturnType<typeof useFileBrowserTree>,
-) {
-  if (node.children && node.children.length > 0) return;
+  options: LoadNodeChildrenOptions = {},
+): Promise<boolean> {
+  if (!options.force && node.children && node.children.length > 0) return true;
   // Dedupe in-flight fetches so rapid double-clicks don't issue two WS round-trips.
-  if (treeState.isLoading(node.path)) return;
+  if (treeState.isLoading(node.path)) return false;
   treeState.showLoading(node.path);
   try {
     const client = getWebSocketClient();
-    if (!client) return;
+    if (!client) return false;
     const response = await requestFileTree(client, sessionId, node.path, 1);
     const updateNode = (n: FileTreeNode): FileTreeNode => {
       if (n.path === node.path) return { ...n, children: response.root.children };
       return n.children ? { ...n, children: n.children.map(updateNode) } : n;
     };
-    if (treeState.tree) treeState.setTree(updateNode(treeState.tree));
+    treeState.setTree((currentTree) => {
+      if (options.shouldApply && !options.shouldApply()) return currentTree;
+      return currentTree ? updateNode(currentTree) : currentTree;
+    });
+    return true;
   } catch (error) {
     console.error("Failed to load children:", error);
+    return false;
   } finally {
     treeState.hideLoading(node.path);
   }
@@ -143,10 +155,11 @@ export async function fetchAndOpenFile(
       originalHash: hash,
       isDirty: false,
       isBinary: response.is_binary,
+      resolvedPath: response.resolved_path,
     });
   } catch (error) {
     if (signal?.aborted) return;
-    const reason = error instanceof Error ? error.message : "Unknown error";
-    toast({ title: "Failed to open file", description: reason, variant: "error" });
+    const reason = error instanceof Error ? error.message : t("common:unknownError");
+    toast({ title: t("task:failedToOpenFile"), description: reason, variant: "error" });
   }
 }

@@ -116,10 +116,10 @@ func TestTaskPR_ReplaceTaskPR_PreservesSiblingsAndUpserts(t *testing.T) {
 
 	// Add a new PR #99 on repo-a — must NOT delete repo-a's PR #1
 	// (multi-branch) nor repo-b's #2 (multi-repo).
-	if err := store.ReplaceTaskPR(ctx, &TaskPR{
+	if _, err := store.ReplaceTaskPR(ctx, &TaskPR{
 		TaskID: "task-2", RepositoryID: "repo-a",
 		Owner: "o", Repo: "r", PRNumber: 99, CreatedAt: now,
-	}); err != nil {
+	}, &PRStatus{}); err != nil {
 		t.Fatalf("replace A#99: %v", err)
 	}
 
@@ -130,10 +130,10 @@ func TestTaskPR_ReplaceTaskPR_PreservesSiblingsAndUpserts(t *testing.T) {
 
 	// Now overwrite repo-a #99 by calling ReplaceTaskPR with the same
 	// (task, repo, pr_number) and a different field — upsert path.
-	if err := store.ReplaceTaskPR(ctx, &TaskPR{
+	if _, err := store.ReplaceTaskPR(ctx, &TaskPR{
 		TaskID: "task-2", RepositoryID: "repo-a",
 		Owner: "o", Repo: "r", PRNumber: 99, PRTitle: "updated", CreatedAt: now,
-	}); err != nil {
+	}, &PRStatus{}); err != nil {
 		t.Fatalf("upsert A#99: %v", err)
 	}
 	all, _ = store.ListTaskPRsByTask(ctx, "task-2")

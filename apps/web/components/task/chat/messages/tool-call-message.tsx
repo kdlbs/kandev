@@ -19,7 +19,13 @@ import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { PermissionActionRow } from "./permission-action-row";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
-import { parsePermission, usePermissionResponseHandlers } from "./use-permission-handlers";
+import {
+  parsePermission,
+  resolvePermissionAvailability,
+  type PermissionRequestMetadata,
+  usePermissionResponseHandlers,
+} from "./use-permission-handlers";
+import { t } from "@/lib/i18n";
 
 const TOOL_ICON_RULES: Array<{ keywords: string[]; Icon: typeof IconCode }> = [
   { keywords: ["edit", "replace", "write", "save"], Icon: IconEdit },
@@ -147,8 +153,6 @@ function parseToolCallMetadata(comment: Message, permissionMessage: Message | un
   const inlineOutput = getInlineOutput(output);
   // When output is shown inline, there's nothing more to expand — skip the expand affordance
   // unless a permission prompt still needs to be rendered.
-  const hasExpandableContent = (hasOutput && !inlineOutput) || isPermissionPending;
-  const isSuccess = status === "complete" && !permissionStatus;
   return {
     toolName,
     status,
@@ -158,9 +162,7 @@ function parseToolCallMetadata(comment: Message, permissionMessage: Message | un
     permissionStatus,
     isPermissionPending,
     hasOutput,
-    hasExpandableContent,
     inlineOutput,
-    isSuccess,
   };
 }
 
@@ -178,20 +180,34 @@ export const ToolCallMessage = memo(function ToolCallMessage({
     permissionStatus,
     isPermissionPending,
     hasOutput,
-    hasExpandableContent,
     inlineOutput,
-    isSuccess,
   } = parseToolCallMetadata(comment, permissionMessage);
-  const { isResponding, handleApprove, handleAllowAlways, hasAllowAlways, handleReject } =
-    usePermissionResponseHandlers({
-      permissionMetadata,
-      permissionMessage,
-    });
-  const autoExpanded = status === "running" || isPermissionPending;
+  const {
+    isResponding,
+    isUnavailable,
+    handleApprove,
+    handleAllowAlways,
+    hasAllowAlways,
+    handleReject,
+  } = usePermissionResponseHandlers({
+    permissionMetadata,
+    permissionMessage,
+  });
+  const {
+    permissionStatus: effectivePermissionStatus,
+    isPermissionPending: effectivePermissionPending,
+  } = resolvePermissionAvailability(permissionStatus, isPermissionPending, isUnavailable);
+  const { hasExpandableContent, isSuccess, autoExpanded } = deriveToolCallPermissionPresentation({
+    status,
+    permissionStatus: effectivePermissionStatus,
+    isPermissionPending: effectivePermissionPending,
+    hasOutput,
+    inlineOutput,
+  });
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
 
   const metadata = comment.metadata as ToolCallMetadata | undefined;
-  const rawTitle = metadata?.title ?? comment.content ?? "Tool call";
+  const rawTitle = metadata?.title ?? comment.content ?? t("task:toolCall");
   const title = transformPathsInText(prettifyToolTitle(rawTitle), worktreePath);
 
   const formattedOutput = hasOutput && !inlineOutput ? formatToolOutput(output) : null;
@@ -202,7 +218,9 @@ export const ToolCallMessage = memo(function ToolCallMessage({
         toolName,
         cn(
           "h-4 w-4",
-          isPermissionPending ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
+          effectivePermissionPending
+            ? "text-amber-600 dark:text-amber-400"
+            : "text-muted-foreground",
         ),
       )}
       header={
@@ -210,7 +228,7 @@ export const ToolCallMessage = memo(function ToolCallMessage({
           <span
             className={cn(
               "inline-flex items-center gap-1.5",
-              isPermissionPending && "text-amber-600 dark:text-amber-400",
+              effectivePermissionPending && "text-amber-600 dark:text-amber-400",
             )}
           >
             <span className="font-mono text-xs text-muted-foreground">{title}</span>
@@ -224,7 +242,7 @@ export const ToolCallMessage = memo(function ToolCallMessage({
                 {inlineOutput}
               </span>
             )}
-            {!isSuccess && getToolCallStatusIcon(status, permissionStatus)}
+            {!isSuccess && getToolCallStatusIcon(status, effectivePermissionStatus)}
           </span>
         </div>
       }
@@ -235,7 +253,7 @@ export const ToolCallMessage = memo(function ToolCallMessage({
       <ToolCallExpandedContent
         formattedOutput={formattedOutput}
         isHttpError={isHttpError}
-        isPermissionPending={isPermissionPending}
+        isPermissionPending={effectivePermissionPending}
         onApprove={handleApprove}
         onReject={handleReject}
         onAllowAlways={hasAllowAlways ? handleAllowAlways : undefined}
@@ -244,3 +262,23 @@ export const ToolCallMessage = memo(function ToolCallMessage({
     </ExpandableRow>
   );
 });
+
+function deriveToolCallPermissionPresentation({
+  status,
+  permissionStatus,
+  isPermissionPending,
+  hasOutput,
+  inlineOutput,
+}: {
+  status: string | undefined;
+  permissionStatus: PermissionRequestMetadata["status"];
+  isPermissionPending: boolean;
+  hasOutput: boolean;
+  inlineOutput: string | null;
+}) {
+  return {
+    hasExpandableContent: (hasOutput && !inlineOutput) || isPermissionPending,
+    isSuccess: status === "complete" && !permissionStatus,
+    autoExpanded: status === "running" || isPermissionPending,
+  };
+}

@@ -3,12 +3,16 @@ package acp
 import (
 	"path"
 	"strings"
+
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 const (
-	codexAgentID                 = "codex-acp"
-	codexCollaborationSpawnAgent = "spawnAgent"
-	codexSubagentStarted         = "started"
+	codexAgentID                   = "codex-acp"
+	codexCollaborationSpawnAgent   = "spawnAgent"
+	codexSubagentStarted           = "started"
+	codexSystemErrorType           = "systemError"
+	codexModelCapacityErrorMessage = "Selected model is at capacity. Please try a different model."
 )
 
 type codexSubagentSignal uint8
@@ -24,7 +28,121 @@ const (
 // operations through the same envelope, so only spawnAgent and the matching
 // "started" activity are creation signals.
 func newCodexACPDialect() acpDialect {
-	return acpDialect{subagentFrame: parseCodexSubagentFrame}
+	return acpDialect{
+		subagentFrame:        parseCodexSubagentFrame,
+		normalizePromptUsage: normalizeCodexPromptUsage,
+		mcpToolCall:          parseCodexMCPToolCall,
+		mcpToolResult:        normalizeCodexMCPToolResult,
+		responseAttemptReset: codexResponseAttemptResetMeta,
+	}
+}
+
+func codexResponseAttemptResetMeta(meta map[string]any) bool {
+	codex, ok := nestedMap(meta, "codex")
+	if !ok {
+		return false
+	}
+	errorMeta, ok := nestedMap(codex, "error")
+	if !ok {
+		return false
+	}
+	willRetry, ok := errorMeta["willRetry"].(bool)
+	if !ok || !willRetry {
+		return false
+	}
+	errorInfo, ok := nestedMap(errorMeta, "codexErrorInfo")
+	if !ok {
+		return false
+	}
+	_, ok = nestedMap(errorInfo, "responseStreamDisconnected")
+	return ok
+}
+
+// normalizeCodexPromptUsage marks codex-acp's typed usage frame as
+// estimated. codex-acp 1.4.0 does emit a typed usage block on the prompt
+// response, but its three response-construction sites (normal end_turn,
+// cancelled, terminal failure) all hardcode it to
+// sessionState.lastTokenUsage — the LAST model request of the turn, not a
+// per-turn total (sessionState.totalTokenUsage is tracked internally but
+// never crosses the ACP boundary). A turn making N requests reports only
+// request N's counts: verified against codex's own rollout log on both a
+// 22-request turn (recorded 410 output tokens vs a true 8813) and a
+// 4-request turn (recorded 9 vs a true 219). Estimated is the existing
+// signal for "not an authoritative per-turn frame" (streams.PromptUsage's
+// doc comment), so this keeps the row honest until codex-acp emits a
+// genuine per-turn total upstream.
+func normalizeCodexPromptUsage(
+	usage *streams.PromptUsage,
+	_ map[string]any,
+) *streams.PromptUsage {
+	if usage != nil {
+		usage.Estimated = true
+	}
+	return usage
+}
+
+// parseCodexMCPToolCall recognizes Codex's observed MCP-over-ACP envelope.
+// Codex reports these as the broad ACP "execute" kind and puts the actual MCP
+// identity and arguments in rawInput. Require the explicit implementation
+// marker plus the complete envelope so ordinary execute tools remain shells.
+func parseCodexMCPToolCall(meta map[string]any, rawInput any) (mcpToolCallFrame, bool) {
+	isMCP, _ := meta["is_mcp_tool_call"].(bool)
+	if !isMCP {
+		return mcpToolCallFrame{}, false
+	}
+	input, ok := rawInput.(map[string]any)
+	if !ok {
+		return mcpToolCallFrame{}, false
+	}
+	server, _ := input["server"].(string)
+	tool, _ := input["tool"].(string)
+	arguments, ok := input["arguments"].(map[string]any)
+	server = strings.TrimSpace(server)
+	tool = strings.TrimSpace(tool)
+	if server == "" || tool == "" || !ok {
+		return mcpToolCallFrame{}, false
+	}
+	return mcpToolCallFrame{name: server + "/" + tool, arguments: arguments}, true
+}
+
+// normalizeCodexMCPToolResult removes Codex's transport-only
+// {error, result} wrapper while retaining the standard MCP CallToolResult.
+func normalizeCodexMCPToolResult(rawOutput any) (any, bool) {
+	output, ok := rawOutput.(map[string]any)
+	if !ok {
+		return rawOutput, rawOutput != nil
+	}
+	result, exists := output["result"]
+	if !exists {
+		return rawOutput, true
+	}
+	return result, true
+}
+
+// codexSystemErrorMeta reports the explicit thread-status marker emitted by
+// codex-acp when a prompt failed at the provider boundary. The marker is
+// implementation metadata, so keep its shape local to the Codex dialect and
+// never expose the raw metadata to routing or the UI.
+func codexSystemErrorMeta(meta map[string]any) bool {
+	status, ok := nestedMap(meta, "threadStatus")
+	if !ok {
+		codex, codexOK := nestedMap(meta, "codex")
+		if !codexOK {
+			return false
+		}
+		status, ok = nestedMap(codex, "threadStatus")
+	}
+	if !ok {
+		return false
+	}
+	typeValue, _ := status["type"].(string)
+	return typeValue == codexSystemErrorType
+}
+
+func codexModelCapacityMessage(text string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(text), " "))
+	return strings.Contains(normalized, "selected model is at capacity") ||
+		strings.Contains(normalized, "model is at capacity")
 }
 
 func parseCodexSubagentFrame(meta map[string]any, _ string, rawInput any) (subagentFrame, bool) {

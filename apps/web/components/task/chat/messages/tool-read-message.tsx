@@ -9,6 +9,8 @@ import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
 import { useOpenFileAtLine } from "@/hooks/use-file-editors";
 import { splitReadFiles, type ReadFileRef } from "@/lib/read-selector";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type ReadFileOutput = {
   content?: string;
@@ -47,9 +49,9 @@ function ReadStatusIcon({ status }: { status: string | undefined }) {
 }
 
 // getReadSummary returns the short "Read N lines" header label for the card.
-function getReadSummary(lineCount: number | undefined): string {
-  if (lineCount) return `Read ${lineCount} line${lineCount !== 1 ? "s" : ""}`;
-  return "Read";
+function getReadSummary(t: TFunction, lineCount: number | undefined): string {
+  if (lineCount) return t("task:readLines", { count: lineCount });
+  return t("task:read");
 }
 
 // formatLineRange renders the range the agent read (carried separately from
@@ -82,13 +84,15 @@ function parseReadMetadata(comment: Message) {
 function ReadFileLink({
   file,
   worktreePath,
+  sessionId,
   onOpenFile,
 }: {
   file: ReadFileRef;
   worktreePath?: string;
+  sessionId?: string;
   onOpenFile?: (path: string) => void;
 }) {
-  const handleOpenFile = useOpenFileAtLine(onOpenFile, file.startLine, worktreePath);
+  const handleOpenFile = useOpenFileAtLine(onOpenFile, file.startLine, worktreePath, sessionId);
   const lineRange = formatLineRange(file.startLine, file.lineCount);
   return (
     <span className="inline-flex items-baseline min-w-0">
@@ -109,8 +113,10 @@ function ReadFileLink({
 export const ToolReadMessage = memo(function ToolReadMessage({
   comment,
   worktreePath,
+  sessionId,
   onOpenFile,
 }: ToolReadMessageProps) {
+  const { t } = useTranslation();
   const { status, readOutput, filePath, offset, limit, hasOutput, isSuccess } =
     parseReadMetadata(comment);
   const autoExpanded = status === "running";
@@ -139,7 +145,7 @@ export const ToolReadMessage = memo(function ToolReadMessage({
         <div className="flex items-center gap-2 text-xs min-w-0">
           <span className="inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap">
             <span className="font-mono text-xs text-muted-foreground">
-              {getReadSummary(readOutput?.line_count)}
+              {getReadSummary(t, readOutput?.line_count)}
             </span>
             {!isSuccess && <ReadStatusIcon status={status} />}
           </span>
@@ -147,7 +153,12 @@ export const ToolReadMessage = memo(function ToolReadMessage({
             <span className="inline-flex flex-wrap items-baseline gap-x-1 min-w-0">
               {resolvedFiles.map((file, idx) => (
                 <span key={`${file.path}-${idx}`} className="inline-flex items-baseline min-w-0">
-                  <ReadFileLink file={file} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+                  <ReadFileLink
+                    file={file}
+                    worktreePath={worktreePath}
+                    sessionId={sessionId}
+                    onOpenFile={onOpenFile}
+                  />
                   {idx < resolvedFiles.length - 1 && (
                     <span className="text-muted-foreground/50">,</span>
                   )}
@@ -156,7 +167,7 @@ export const ToolReadMessage = memo(function ToolReadMessage({
             </span>
           )}
           {readOutput?.truncated && (
-            <span className="text-xs text-amber-500/80 shrink-0">(truncated)</span>
+            <span className="text-xs text-amber-500/80 shrink-0">{t("task:truncatedParen")}</span>
           )}
         </div>
       }

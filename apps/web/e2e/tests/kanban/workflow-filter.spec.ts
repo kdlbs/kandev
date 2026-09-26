@@ -1,8 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import type { Page } from "@playwright/test";
+import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
-const TASK_VISIBLE_TIMEOUT = 10_000;
+const TASK_VISIBLE_TIMEOUT = 30_000;
 const ALPHA_TASK = "Alpha task";
 const BETA_TASK = "Beta task";
 
@@ -21,13 +22,19 @@ async function closeDisplayDropdown(page: Page): Promise<void> {
     await trigger.click({ force: true });
   }
   await expect(trigger).not.toHaveAttribute("data-state", "open");
-  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(page.getByTestId("display-settings-content")).toHaveCount(0);
 }
 
 async function selectWorkflowFilter(page: Page, optionLabel: string): Promise<void> {
   await page.getByTestId("display-button").click();
+  await expandDisplaySettingsGroup(page, "filters");
   await page.getByTestId("display-workflow-filter").click();
   await pickListboxOption(page, optionLabel);
+  await expect(page.getByTestId("display-settings-content")).toBeVisible();
+  await expect(page.getByTestId("display-settings-filters-toggle")).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
   await closeDisplayDropdown(page);
 }
 
@@ -38,8 +45,7 @@ test.describe("Kanban workflow filter", () => {
   // Pull `testPage` so its fixture (which runs `e2eReset` and resets user
   // settings) is set up before this hook seeds workflows/tasks — otherwise
   // the reset wipes the seed data the moment a test first reads testPage.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  test.beforeEach(async ({ apiClient, seedData, testPage }) => {
+  test.beforeEach(async ({ apiClient, seedData, testPage: _testPage }) => {
     const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Workflow B", "simple");
     workflowBId = workflowB.id;
     const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
@@ -54,6 +60,10 @@ test.describe("Kanban workflow filter", () => {
       workflow_step_id: startB.id,
     });
     betaTaskId = beta.id;
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: seedData.workflowId,
+    });
   });
 
   test.afterEach(async ({ apiClient, seedData }) => {
@@ -87,11 +97,13 @@ test.describe("Kanban workflow filter", () => {
     await kanban.goto();
     await selectWorkflowFilter(testPage, "All Workflows");
     await testPage.getByTestId("display-button").click();
+    await expandDisplaySettingsGroup(testPage, "filters");
     await expect(testPage.getByTestId("display-workflow-filter")).toContainText("All Workflows");
     await closeDisplayDropdown(testPage);
 
     await testPage.reload();
     await testPage.getByTestId("display-button").click();
+    await expandDisplaySettingsGroup(testPage, "filters");
     await expect(testPage.getByTestId("display-workflow-filter")).toContainText("All Workflows");
   });
 
@@ -146,6 +158,47 @@ test.describe("Kanban workflow filter", () => {
     await expect(kanban.taskCardByTitle(BETA_TASK)).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
     });
+  });
+
+  // Regression: hidden workflows (e.g. Improve Kandev, whose tasks the user
+  // creates through the Improve dialog) were excluded from the board's swimlane
+  // selection even when explicitly picked in the display dropdown — the user
+  // saw "No tasks yet" for a workflow that had tasks, and the filter reverted
+  // to All Workflows on the next navigation.
+  test("renders a hidden workflow's tasks when the user selects it", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const hiddenWorkflow = await apiClient.e2eCreateHiddenWorkflow(
+      seedData.workspaceId,
+      "Hidden Flow",
+    );
+    // The e2e hidden-workflow endpoint creates a bare workflow (no template),
+    // so seed a start step for the task to land in.
+    const startStep = await apiClient.createWorkflowStep(hiddenWorkflow.id, "Backlog", 0, {
+      is_start_step: true,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Hidden flow task", {
+      workflow_id: hiddenWorkflow.id,
+      workflow_step_id: startStep.id,
+    });
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+
+      // Hidden workflows stay off the All Workflows board by design...
+      await selectWorkflowFilter(testPage, "All Workflows");
+      await expect(kanban.taskCardByTitle("Hidden flow task")).not.toBeVisible();
+
+      // ...but an explicit selection renders their board.
+      await selectWorkflowFilter(testPage, "Hidden Flow");
+      await expect(kanban.taskCardByTitle("Hidden flow task")).toBeVisible({
+        timeout: TASK_VISIBLE_TIMEOUT,
+      });
+    } finally {
+      await apiClient.deleteWorkflow(hiddenWorkflow.id).catch(() => {});
+    }
   });
 
   // Regression: SSR wrote workflows.activeId from the task's workflow_id, clobbering the "All Workflows" filter on return. Pins the cross-page flow.

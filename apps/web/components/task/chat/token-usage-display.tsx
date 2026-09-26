@@ -1,11 +1,12 @@
 "use client";
 
-import { memo, useEffect, useId, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useRef, useState } from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useSessionContextWindow } from "@/hooks/domains/session/use-session-context-window";
+import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 
 type TokenUsageDisplayProps = {
   sessionId: string | null;
@@ -46,6 +47,14 @@ function usePinnableTooltip() {
   const pinnedRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
+  const escapeGuard = useCallback(
+    (event: KeyboardEvent) => event.key === "Escape" && pinnedRef.current,
+    [],
+  );
+  // Radix dialogs inspect Escape during document capture, before the
+  // document-bubble listener below can close the pinned tooltip.
+  useClarificationEscapeGuard(escapeGuard);
+
   useEffect(() => {
     const closePinnedTooltip = () => {
       pinnedRef.current = false;
@@ -62,7 +71,13 @@ function usePinnableTooltip() {
       closePinnedTooltip();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && pinnedRef.current) closePinnedTooltip();
+      if (event.key !== "Escape" || !pinnedRef.current) return;
+      // Claim the key here: once the pinned tooltip is closed, nothing
+      // further up the tree (e.g. a clarification panel's own
+      // Escape-collapses handler) should also react to the same keypress.
+      event.preventDefault();
+      event.stopPropagation();
+      closePinnedTooltip();
     };
 
     document.addEventListener("pointerdown", closeOnOutsidePointer);
@@ -114,14 +129,21 @@ function ContextWindowRing({ usagePercent }: { usagePercent: number }) {
         strokeLinecap="round"
         strokeDasharray={circumference}
         strokeDashoffset={strokeDashoffset}
-        className={cn(getCircleColor(usagePercent), "transition-all duration-300 ease-out")}
+        className={cn(
+          getCircleColor(usagePercent),
+          "transition-[stroke-dashoffset] duration-300 ease-out",
+        )}
       />
     </svg>
   );
 }
 
 function ContextWindowSource({ source }: { source: "acp" | "api" | undefined }) {
+  const { t } = useTranslation();
   const helpId = useId();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [touchMode, setTouchMode] = useState(false);
+  const pointerDownRef = useRef(false);
 
   if (!source) return null;
   const description =
@@ -131,20 +153,43 @@ function ContextWindowSource({ source }: { source: "acp" | "api" | undefined }) 
 
   return (
     <div className="group relative flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
-      <span>Source</span>
+      <span>{t("task:source")}</span>
       <span className="font-medium text-foreground">{source.toUpperCase()}</span>
       <button
         type="button"
-        aria-label="About context window source"
+        aria-label={t("task:aboutContextWindowSource")}
         aria-describedby={helpId}
+        aria-expanded={helpOpen}
         className="inline-flex size-6 cursor-help items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:size-4"
+        onPointerDown={(event) => {
+          pointerDownRef.current = true;
+          if (event.pointerType !== "touch") setTouchMode(false);
+        }}
+        onTouchStart={() => {
+          setTouchMode(true);
+        }}
+        onFocus={() => {
+          if (!pointerDownRef.current) setHelpOpen(true);
+        }}
+        onBlur={() => {
+          pointerDownRef.current = false;
+          setHelpOpen(false);
+        }}
+        onClick={() => {
+          pointerDownRef.current = false;
+          setHelpOpen((open) => !open);
+        }}
       >
         <IconInfoCircle className="h-3 w-3" />
       </button>
       <span
         id={helpId}
         role="tooltip"
-        className="pointer-events-none absolute right-0 bottom-[calc(100%+0.375rem)] z-10 w-60 rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+        className={cn(
+          "pointer-events-none absolute right-0 bottom-[calc(100%+0.375rem)] z-10 w-60 rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground opacity-0 shadow-sm transition-opacity",
+          !touchMode && "group-hover:opacity-100",
+          helpOpen && "opacity-100",
+        )}
       >
         {description}
       </span>
@@ -214,6 +259,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
   sessionId,
   className,
 }: TokenUsageDisplayProps) {
+  const { t } = useTranslation();
   const tooltip = usePinnableTooltip();
   const contextWindow = useSessionContextWindow(sessionId);
 
@@ -226,6 +272,17 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
   if (!isContextWindowReliable(size, used)) return null;
 
   const usagePercent = (used / size) * 100;
+  const pendingUsage = used === 0;
+
+  const usagePercentLabel = pendingUsage
+    ? t("task:contextWindowUsagePendingPercent")
+    : `${usagePercent.toFixed(0)}%`;
+  const usageTokenLabel = pendingUsage
+    ? t("task:contextWindowUsagePendingTokens", { size: formatNumber(size) })
+    : t("task:contextWindowUsedTokens", {
+        used: formatNumber(used),
+        size: formatNumber(size),
+      });
 
   return (
     // The UI wrapper defaults this to true; the source control must remain reachable inside.
@@ -235,7 +292,11 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
           <button
             ref={tooltip.triggerRef}
             type="button"
-            aria-label={`Context window: ${usagePercent.toFixed(0)}% used`}
+            aria-label={
+              pendingUsage
+                ? t("task:contextWindowNotMeasured")
+                : t("task:contextWindowUsed", { percent: usagePercent.toFixed(0) })
+            }
             aria-expanded={tooltip.open}
             onClick={tooltip.onTriggerClick}
             className={cn(
@@ -251,10 +312,10 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
             <div className="space-y-2" data-testid="context-window-usage">
               <div className="flex items-baseline justify-between gap-6">
                 <span className="text-[10px] font-medium uppercase text-muted-foreground">
-                  Context window
+                  {t("task:contextWindow")}
                 </span>
                 <span className="text-base font-semibold tabular-nums text-foreground">
-                  {usagePercent.toFixed(0)}%
+                  {usagePercentLabel}
                 </span>
               </div>
               <div
@@ -273,10 +334,18 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
                 data-testid="context-window-token-row"
               >
                 <span className="text-[11px] tabular-nums text-muted-foreground">
-                  {formatNumber(used)} of {formatNumber(size)} tokens
+                  {usageTokenLabel}
                 </span>
                 <ContextWindowSource source={source} />
               </div>
+              {pendingUsage && (
+                <p
+                  className="text-[11px] text-muted-foreground"
+                  data-testid="context-window-usage-pending"
+                >
+                  {t("task:contextWindowUsagePendingExplain")}
+                </p>
+              )}
               <ContextCompactionCount count={compactionCount} />
             </div>
           </div>

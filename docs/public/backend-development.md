@@ -5,7 +5,9 @@ description: "Change Kandev's Go backend across domain, API, event, persistence,
 
 # Backend Development
 
-The Go module in `apps/backend/` builds both the unified `kandev` binary and the `agentctl` helper installed in task environments.
+The Go module in `apps/backend/` builds the native `kandev` application binary
+with the compiled web frontend embedded. It also builds the separate `agentctl`
+helper installed in task environments.
 
 ## Quick path
 
@@ -17,6 +19,8 @@ The Go module in `apps/backend/` builds both the unified `kandev` binary and the
 ## Run focused loops
 
 Use `make dev` for normal full-stack work: it isolates state, starts Vite, and configures the backend proxy. A raw `make dev-backend` uses the normal application home unless you set an isolated `KANDEV_HOME_DIR`; see [Contributing](contributing.md).
+
+Only one backend can own a Kandev home at a time. A second raw backend using that home exits before it opens the database, writes logs, or performs startup recovery. For an intentional second backend, set `KANDEV_HOME_DIR` to a different directory and use a different port and database. The operating system releases ownership when the backend exits; no manual lock-file cleanup is required.
 
 From the repository root:
 
@@ -81,6 +85,30 @@ Kandev has no central migration directory or external migration runner. Each rep
 SQLite table rebuilds need explicit copy order, index/trigger recreation, and interruption tests. Before a different binary version boots an existing SQLite database, the persistence provider takes a snapshot and retains recent backups. PostgreSQL does not receive that automatic snapshot; operators remain responsible for `pg_dump`.
 
 Test fresh initialization, replay, and upgrade from representative old rows. Useful patterns include `internal/task/repository/sqlite/schema_replay_test.go` and PostgreSQL tests gated by `KANDEV_TEST_POSTGRES_DSN`. Add PostgreSQL coverage when shared SQL or startup ordering changes.
+
+Every built-in SQL schema owner is listed in the
+`internal/persistence/requiredstores` catalog. A new persisted store must add
+one catalog descriptor, wire its constructor through the required-store
+tracker, and add a fixed adapter in
+`internal/persistence/storeconformance`. Keep the store in the catalog even
+when its feature is disabled: the schema is part of the compatibility
+contract. External credentials, remote authentication, and provider probes
+remain degradable after local schema initialization.
+
+Run the local persistence gates from `apps/backend/` when changing a store:
+
+```bash
+go run ./cmd/sqlguard ./internal
+go test -race ./internal/persistence/storeconformance -count=1
+go test -race ./internal/backendapp -run 'TestPostgresBootInitializesRepositories|TestPreviousStableUpgrade' -count=1
+```
+
+The conformance package runs SQLite by default and runs PostgreSQL when
+`KANDEV_TEST_POSTGRES_DSN` is set. Package names and test markers do not count
+as PostgreSQL coverage. For a schema-history change, update the committed
+fixture under `internal/persistence/storeconformance/testdata/upgrades/` with
+the explicit stable tag, source commit, checksums, and sentinel rows; do not
+derive a baseline from the working tree.
 
 ## Agent runtime and agentctl
 

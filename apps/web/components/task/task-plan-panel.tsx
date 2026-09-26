@@ -7,10 +7,15 @@ import dynamic from "@/lib/routing/client-dynamic";
 import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { useTaskPlan } from "@/hooks/domains/session/use-task-plan";
+import { usePlanDraft } from "@/hooks/domains/session/use-plan-draft";
+import { TaskPlanSaveErrorBanner } from "./task-plan-save-error-banner";
 import { useAppStore } from "@/components/state-provider";
 import { PlanSelectionPopover } from "./plan-selection-popover";
 import { usePlanComments } from "@/hooks/domains/comments/use-plan-comments";
-import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
+import {
+  resolvePlanCommentRunAvailability,
+  useRunComment,
+} from "@/hooks/domains/comments/use-run-comment";
 import type { PlanComment } from "@/lib/state/slices/comments";
 import type {
   TextSelection,
@@ -19,6 +24,11 @@ import type {
 import type { Editor } from "@tiptap/core";
 import { PanelSearchBar } from "@/components/search/panel-search-bar";
 import { usePlanFindShortcut } from "./use-plan-find-shortcut";
+import { usePlanSelection } from "./use-plan-selection";
+import { Trans, useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
+import { usePlanCommentMigration } from "@/hooks/domains/comments/use-plan-comment-migration";
+import { PlanCommentMigrationNotice } from "./plan-comment-migration-notice";
 
 // Dynamic import to avoid SSR issues with TipTap
 const PlanEditor = dynamic(
@@ -28,25 +38,40 @@ const PlanEditor = dynamic(
     ssr: false,
     loading: () => (
       <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-        Loading editor...
+        {t("task:loadingEditor")}
       </div>
     ),
   },
 );
 
-/** Debounce delay for auto-saving plan content (ms) */
-const AUTO_SAVE_DELAY = 1500;
-
 type TaskPlanPanelProps = {
   taskId: string | null;
   visible?: boolean;
+  /** Internal mobile layout offset for the docked formatting strip. */
+  mobileBottomOffset?: string;
 };
+
+type TaskOwnedEditor = {
+  taskId: string | null;
+  editor: Editor;
+} | null;
+
+export function getAvailableTaskEditor(
+  ownedEditor: TaskOwnedEditor,
+  selectedTaskId: string | null,
+): Editor | null {
+  if (!ownedEditor || ownedEditor.taskId !== selectedTaskId || ownedEditor.editor.isDestroyed) {
+    return null;
+  }
+  return ownedEditor.editor;
+}
 
 function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
   const {
     plan,
     isLoading,
     isSaving,
+    saveError,
     savePlan,
     revisions,
     isLoadingRevisions,
@@ -67,8 +92,8 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
   const isAgentBusy = sessionState === "STARTING" || sessionState === "RUNNING";
 
   const editorWrapperRef = useRef<HTMLDivElement>(null);
-  const editorInstanceRef = useRef<Editor | null>(null);
-  const [editorInstance, setEditorInstance] = useState<Editor | null>(null);
+  const [ownedEditor, setOwnedEditor] = useState<TaskOwnedEditor>(null);
+  const editorInstance = getAvailableTaskEditor(ownedEditor, taskId);
   const {
     draftContent,
     setDraftContent,
@@ -76,19 +101,21 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     isEditorFocused,
     handleEmptyStateClick,
     hasUnsavedChanges,
-  } = usePlanDraft(plan, isSaving, savePlan, editorWrapperRef);
-  const commentState = usePlanComments(activeSessionId);
-  const selectionState = usePlanSelection(activeSessionId, commentState);
+    attemptSave,
+  } = usePlanDraft({ plan, isSaving, savePlan, editorWrapperRef, taskId, saveError });
+  const commentState = usePlanComments(taskId);
+  const planCommentMigration = usePlanCommentMigration(taskId);
+  const selectionState = usePlanSelection(taskId, plan?.id, commentState);
 
-  const handleEditorReady = useCallback((editor: Editor) => {
-    editorInstanceRef.current = editor;
-    setEditorInstance(editor);
-  }, []);
+  const handleEditorReady = useCallback(
+    (editor: Editor) => setOwnedEditor({ taskId, editor }),
+    [taskId],
+  );
 
   const handleCommentDeleted = useCallback(
     (ids: string[]) => {
       for (const id of ids) {
-        commentState.handleDeleteComment(id);
+        void commentState.handleDeleteComment(id);
       }
     },
     [commentState],
@@ -111,6 +138,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     plan,
     isLoading,
     isSaving,
+    saveError,
     savePlan,
     activeSessionId,
     draftContent,
@@ -119,7 +147,9 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     isEditorFocused,
     handleEmptyStateClick,
     hasUnsavedChanges,
+    attemptSave,
     commentState,
+    planCommentMigration,
     selectionState,
     handleEditorReady,
     handleCommentDeleted,
@@ -127,7 +157,6 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     isAgentBusy,
     isAgentCreatingPlan,
     editorWrapperRef,
-    editorInstanceRef,
     editorInstance,
     revisions,
     isLoadingRevisions,
@@ -145,22 +174,24 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
 export const TaskPlanPanel = memo(function TaskPlanPanel({
   taskId,
   visible = true,
+  mobileBottomOffset,
 }: TaskPlanPanelProps) {
+  const { t } = useTranslation();
   const state = useTaskPlanPanelState(taskId, visible);
   // Ctrl+S to save immediately
-  useSaveShortcut(
-    state.hasUnsavedChanges,
-    state.isSaving,
-    state.savePlan,
-    state.draftContent,
-    state.plan?.title,
-  );
+  useSaveShortcut({
+    hasUnsavedChanges: state.hasUnsavedChanges,
+    isSaving: state.isSaving,
+    attemptSave: state.attemptSave,
+    draftContent: state.draftContent,
+    title: state.plan?.title,
+  });
 
-  if (state.isLoading) {
+  if (state.isLoading && !state.plan) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
         <IconLoader2 className="h-5 w-5 animate-spin mr-2" />
-        <span className="text-sm">Loading plan...</span>
+        <span className="text-sm">{t("task:loadingPlan")}</span>
       </div>
     );
   }
@@ -168,22 +199,25 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
   if (!taskId) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
-        <span className="text-sm">No task selected</span>
+        <span className="text-sm">{t("task:noTaskSelected")}</span>
       </div>
     );
   }
 
-  return <PlanPanelContent taskId={taskId} state={state} />;
+  return <PlanPanelContent taskId={taskId} state={state} mobileBottomOffset={mobileBottomOffset} />;
 });
 
 function PlanPanelContent({
   taskId,
   state,
+  mobileBottomOffset,
 }: {
   taskId: string;
   state: ReturnType<typeof useTaskPlanPanelState>;
+  mobileBottomOffset?: string;
 }) {
-  const { editorWrapperRef, editorInstanceRef, editorInstance, selectionState } = state;
+  const { t } = useTranslation();
+  const { editorWrapperRef, editorInstance, selectionState } = state;
   const { textSelection, setTextSelection } = selectionState;
   // Ctrl+F in-document find (registers a keydown listener on the editor wrapper)
   const planSearch = usePlanFindShortcut(editorWrapperRef, editorInstance);
@@ -199,7 +233,7 @@ function PlanPanelContent({
         isLoadingRevisions={state.isLoadingRevisions}
         isSaving={state.isSaving}
         isAgentBusy={state.isAgentBusy}
-        savePlan={state.savePlan}
+        attemptSave={state.attemptSave}
         onOpenRevisions={state.loadRevisions}
         onRevert={state.revertTo}
         loadRevisionContent={state.loadRevisionContent}
@@ -209,6 +243,8 @@ function PlanPanelContent({
         toggleCompareSelection={state.toggleCompareSelection}
         clearComparePair={state.clearComparePair}
       />
+      {state.saveError && <TaskPlanSaveErrorBanner saveError={state.saveError} />}
+      <PlanCommentMigrationNotice {...state.planCommentMigration} />
       <PanelBody
         padding={false}
         scroll={false}
@@ -224,9 +260,11 @@ function PlanPanelContent({
           key={`${taskId}-${state.editorKey}`}
           taskId={taskId}
           value={state.draftContent}
+          readOnly={state.isLoading}
           onChange={state.setDraftContent}
-          placeholder="Start typing your plan..."
-          onSelectionChange={state.activeSessionId ? setTextSelection : undefined}
+          placeholder={t("task:startTypingYourPlan")}
+          mobileBottomOffset={mobileBottomOffset}
+          onSelectionChange={setTextSelection}
           comments={state.commentHighlights}
           onCommentClick={selectionState.handleCommentHighlightClick}
           onCommentDeleted={state.handleCommentDeleted}
@@ -253,10 +291,9 @@ function PlanPanelContent({
 
       <PlanSelectionPopoverWrapper
         textSelection={textSelection}
-        activeSessionId={state.activeSessionId}
         taskId={taskId}
         commentState={state.commentState}
-        editorRef={editorInstanceRef}
+        editor={editorInstance}
         onClose={selectionState.handleSelectionClose}
       />
     </PanelRoot>
@@ -264,7 +301,7 @@ function PlanPanelContent({
 }
 
 function removeCommentMark(editor: Editor | null, commentId: string) {
-  if (!editor) return;
+  if (!editor || editor.isDestroyed) return;
   const markType = editor.state.schema.marks.commentMark;
   if (!markType) return;
   const { tr } = editor.state;
@@ -272,81 +309,148 @@ function removeCommentMark(editor: Editor | null, commentId: string) {
   editor.view.dispatch(tr);
 }
 
-/** Conditional selection popover for adding/editing comments */
-function PlanSelectionPopoverWrapper({
+function planCommentRunDisabledReason(
+  reason: ReturnType<typeof resolvePlanCommentRunAvailability>["reason"],
+) {
+  if (reason === "no-primary-session") return t("task:noPrimarySessionForPlanComment");
+  if (reason === "primary-session-unavailable") {
+    return t("task:primarySessionUnavailableForPlanComment");
+  }
+  return null;
+}
+
+export function usePlanSelectionCommentActions({
   textSelection,
-  activeSessionId,
-  taskId,
   commentState,
-  editorRef,
-  onClose,
+  editor,
+  runComment,
 }: {
   textSelection: TextSelection | null;
-  activeSessionId: string | null | undefined;
-  taskId: string | null;
   commentState: ReturnType<typeof usePlanComments>;
-  editorRef: React.RefObject<Editor | null>;
-  onClose: () => void;
+  editor: Editor | null;
+  runComment: ReturnType<typeof useRunComment>["runComment"];
 }) {
-  const { runComment } = useRunComment({
-    sessionId: activeSessionId ?? null,
-    taskId,
-  });
+  const [runError, setRunError] = useState<string | null>(null);
+  const savedRunCommentRef = useRef<{
+    owner: string;
+    selection: string;
+    body: string;
+    comment: PlanComment;
+  } | null>(null);
+  const ownerIdentity = `${commentState.snapshot?.task_id ?? ""}:${commentState.snapshot?.plan_id ?? ""}`;
+  const selectionIdentity = textSelection
+    ? `${textSelection.from ?? ""}:${textSelection.to ?? ""}:${textSelection.text}`
+    : "";
+
+  useEffect(() => {
+    savedRunCommentRef.current = null;
+    setRunError(null);
+  }, [ownerIdentity]);
 
   const addCommentAndApplyMark = useCallback(
-    (comment: string, selectedText: string) => {
+    async (comment: string, selectedText: string) => {
       const from = textSelection?.from;
       const to = textSelection?.to;
-      const id = commentState.handleAddComment(comment, selectedText, from, to);
-      const editor = editorRef.current;
-      if (id && editor && from != null && to != null) {
+      const saved = await commentState.handleAddComment(comment, selectedText, from, to);
+      if (saved && editor && !editor.isDestroyed && from != null && to != null) {
         editor
           .chain()
           .setTextSelection({ from, to })
-          .setMark("commentMark", { commentId: id })
+          .setMark("commentMark", { commentId: saved.id })
           .run();
       }
-      return id;
+      return saved;
     },
-    [commentState, textSelection, editorRef],
+    [commentState, textSelection, editor],
   );
 
   const handleAdd = useCallback(
-    (comment: string, selectedText: string) => {
-      addCommentAndApplyMark(comment, selectedText);
+    async (comment: string, selectedText: string) => {
+      setRunError(null);
+      return Boolean(await addCommentAndApplyMark(comment, selectedText));
     },
     [addCommentAndApplyMark],
   );
 
   const handleAddAndRun = useCallback(
-    (comment: string, selectedText: string) => {
-      const id = addCommentAndApplyMark(comment, selectedText);
-      if (!id || !activeSessionId) return;
-      const newComment: PlanComment = {
-        id,
-        sessionId: activeSessionId,
-        source: "plan",
-        text: comment,
-        selectedText,
-        from: textSelection?.from,
-        to: textSelection?.to,
-        createdAt: new Date().toISOString(),
-        status: "pending",
-      };
-      runComment(newComment).catch((err) => console.error("Failed to run plan comment:", err));
+    async (comment: string, selectedText: string) => {
+      setRunError(null);
+      const previous = savedRunCommentRef.current;
+      const current = previous
+        ? commentState.comments.find((candidate) => candidate.id === previous.comment.id)
+        : null;
+      let saved =
+        previous?.owner === ownerIdentity &&
+        previous.selection === selectionIdentity &&
+        previous.body === comment.trim() &&
+        (current == null ||
+          (current.version === previous.comment.version && current.text === previous.comment.text))
+          ? (current ?? previous.comment)
+          : null;
+      if (!saved) {
+        saved = await addCommentAndApplyMark(comment, selectedText);
+        if (!saved) return false;
+        savedRunCommentRef.current = {
+          owner: ownerIdentity,
+          selection: selectionIdentity,
+          body: comment.trim(),
+          comment: saved,
+        };
+      }
+      try {
+        await runComment(saved);
+        savedRunCommentRef.current = null;
+        return true;
+      } catch (error) {
+        setRunError(error instanceof Error ? error.message : t("task:failedToRunPlanComment"));
+        return false;
+      }
     },
-    [addCommentAndApplyMark, activeSessionId, runComment, textSelection],
+    [addCommentAndApplyMark, commentState.comments, ownerIdentity, runComment, selectionIdentity],
   );
 
-  if (!textSelection || !activeSessionId) return null;
+  return { handleAdd, handleAddAndRun, runError };
+}
+
+/** Conditional selection popover for adding/editing comments */
+function PlanSelectionPopoverWrapper({
+  textSelection,
+  taskId,
+  commentState,
+  editor,
+  onClose,
+}: {
+  textSelection: TextSelection | null;
+  taskId: string | null;
+  commentState: ReturnType<typeof usePlanComments>;
+  editor: Editor | null;
+  onClose: () => void;
+}) {
+  const { runComment } = useRunComment({
+    sessionId: null,
+    taskId,
+  });
+  const runUnavailableReason = useAppStore(
+    (state) => resolvePlanCommentRunAvailability(state, taskId).reason,
+  );
+  const runDisabledReason = planCommentRunDisabledReason(runUnavailableReason);
+  const { handleAdd, handleAddAndRun, runError } = usePlanSelectionCommentActions({
+    textSelection,
+    commentState,
+    editor,
+    runComment,
+  });
+
+  if (!textSelection) return null;
   const editingComment = commentState.editingCommentId
     ? commentState.comments.find((c) => c.id === commentState.editingCommentId)?.text
     : undefined;
   const onDelete = commentState.editingCommentId
-    ? () => {
+    ? async () => {
         const id = commentState.editingCommentId!;
-        removeCommentMark(editorRef.current, id);
-        commentState.handleDeleteComment(id);
+        const deleted = await commentState.handleDeleteComment(id);
+        if (deleted) removeCommentMark(editor, id);
+        return deleted;
       }
     : undefined;
   return (
@@ -358,147 +462,43 @@ function PlanSelectionPopoverWrapper({
       onClose={onClose}
       editingComment={editingComment}
       onDelete={onDelete}
+      errorMessage={runError || commentState.mutationError}
+      runDisabledReason={runDisabledReason}
     />
   );
 }
 
-/** Draft content, editor key, focus tracking, and auto-save */
-function usePlanDraft(
-  plan: { content?: string; title?: string } | null | undefined,
-  isSaving: boolean,
-  savePlan: (content: string, title?: string) => Promise<unknown>,
-  editorWrapperRef: React.RefObject<HTMLDivElement | null>,
-) {
-  const [draftContent, setDraftContent] = useState(plan?.content ?? "");
-  const draftContentRef = useRef(draftContent);
-  const [editorKey, setEditorKey] = useState(0);
-  const lastPlanContentRef = useRef<string | undefined>(undefined);
-  const isExternalUpdateRef = useRef(false);
-  const [isEditorFocused, setIsEditorFocused] = useState(false);
-  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleEmptyStateClick = useCallback(() => {
-    const el = editorWrapperRef.current?.querySelector(".ProseMirror");
-    if (el) (el as HTMLElement).focus();
-  }, [editorWrapperRef]);
-
-  // Track focus state
-  useEffect(() => {
-    const checkFocus = () => {
-      const wrapper = editorWrapperRef.current;
-      if (!wrapper) return;
-      setIsEditorFocused(wrapper.contains(document.activeElement));
-    };
-    document.addEventListener("focusin", checkFocus);
-    document.addEventListener("focusout", checkFocus);
-    checkFocus();
-    return () => {
-      document.removeEventListener("focusin", checkFocus);
-      document.removeEventListener("focusout", checkFocus);
-    };
-  }, [editorWrapperRef]);
-
-  useEffect(() => {
-    draftContentRef.current = draftContent;
-  }, [draftContent]);
-
-  // Sync from external plan updates
-  useEffect(() => {
-    const prevContent = lastPlanContentRef.current;
-    const newContent = plan?.content;
-    lastPlanContentRef.current = newContent;
-    if (newContent !== prevContent) {
-      const resolved = newContent ?? "";
-      if (resolved === draftContentRef.current) return;
-      isExternalUpdateRef.current = true;
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing external plan data to local editor state
-      setDraftContent(resolved);
-      setEditorKey((k) => k + 1);
-    }
-  }, [plan?.content]);
-
-  // Auto-save with debounce
-  useEffect(() => {
-    if (isExternalUpdateRef.current) {
-      isExternalUpdateRef.current = false;
-      return;
-    }
-    const hasChanges = plan ? draftContent !== plan.content : draftContent.length > 0;
-    if (!hasChanges || isSaving) return;
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = setTimeout(() => {
-      autoSaveTimerRef.current = null;
-      savePlan(draftContent, plan?.title);
-    }, AUTO_SAVE_DELAY);
-    return () => {
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current);
-        autoSaveTimerRef.current = null;
-      }
-    };
-  }, [draftContent, plan, isSaving, savePlan]);
-
-  const hasUnsavedChanges = plan ? draftContent !== plan.content : draftContent.length > 0;
-  return {
-    draftContent,
-    setDraftContent,
-    editorKey,
-    isEditorFocused,
-    handleEmptyStateClick,
-    hasUnsavedChanges,
-  };
-}
-
-/** Text selection state for comment popover */
-function usePlanSelection(
-  activeSessionId: string | null | undefined,
-  commentState: ReturnType<typeof usePlanComments>,
-) {
-  const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
-
-  const handleCommentHighlightClick = useCallback(
-    (id: string, position: { x: number; y: number }) => {
-      const comment = commentState.comments.find((c) => c.id === id);
-      if (comment) {
-        commentState.setEditingCommentId(id);
-        setTextSelection({
-          text: comment.selectedText,
-          from: comment.from,
-          to: comment.to,
-          position,
-        });
-      }
-    },
-    [commentState],
-  );
-
-  const handleSelectionClose = useCallback(() => {
-    setTextSelection(null);
-    commentState.setEditingCommentId(null);
-    window.getSelection()?.removeAllRanges();
-  }, [commentState]);
-
-  return { textSelection, setTextSelection, handleCommentHighlightClick, handleSelectionClose };
-}
+type SaveShortcutOptions = {
+  hasUnsavedChanges: boolean;
+  isSaving: boolean;
+  attemptSave: (content: string, title?: string) => Promise<unknown>;
+  draftContent: string;
+  title: string | undefined;
+};
 
 /** Ctrl+S save shortcut */
-function useSaveShortcut(
-  hasUnsavedChanges: boolean,
-  isSaving: boolean,
-  savePlan: (content: string, title?: string) => Promise<unknown>,
-  draftContent: string,
-  title?: string,
-) {
+function useSaveShortcut({
+  hasUnsavedChanges,
+  isSaving,
+  attemptSave,
+  draftContent,
+  title,
+}: SaveShortcutOptions) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
-        if (hasUnsavedChanges && !isSaving) savePlan(draftContent, title);
+        if (hasUnsavedChanges && !isSaving) {
+          // An explicit save is the user's escape hatch from a suppressed
+          // autosave: it proceeds unconditionally, even resubmitting
+          // unchanged content.
+          attemptSave(draftContent, title);
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [hasUnsavedChanges, isSaving, savePlan, draftContent, title]);
+  }, [hasUnsavedChanges, isSaving, attemptSave, draftContent, title]);
 }
 
 /** Rich empty state - shows when no content and editor not focused */
@@ -515,6 +515,7 @@ function PlanEmptyState({
   isAgentCreatingPlan: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   if (isLoading || draftContent.trim() !== "" || isEditorFocused || isAgentCreatingPlan)
     return null;
   return (
@@ -527,32 +528,32 @@ function PlanEmptyState({
           <IconFileText className="h-6 w-6 text-muted-foreground" />
         </div>
         <div className="text-center">
-          <h3 className="text-sm font-medium text-foreground mb-1">Plan your implementation</h3>
-          <p className="text-xs text-muted-foreground">
-            A shared document for you and the agent to collaborate on the approach
-          </p>
+          <h3 className="text-sm font-medium text-foreground mb-1">
+            {t("task:planYourImplementation")}
+          </h3>
+          <p className="text-xs text-muted-foreground">{t("task:aSharedDocumentForYouAnd")}</p>
         </div>
         <div className="flex flex-col gap-3 w-full">
           <div className="flex items-start gap-3">
             <IconRobot className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <p className="text-xs text-muted-foreground">
-              The agent can write and update the plan as it works
-            </p>
+            <p className="text-xs text-muted-foreground">{t("task:theAgentCanWriteAndUpdate")}</p>
           </div>
           <div className="flex items-start gap-3">
             <IconMessage className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <p className="text-xs text-muted-foreground">
-              Select text and press{" "}
-              <kbd className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono text-[10px]">
-                &#8984;&#8679;C
-              </kbd>{" "}
-              to comment
+              <Trans i18nKey="task:selectTextAndPressToComment">
+                Select text and press{" "}
+                <kbd className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono text-[10px]">
+                  &#8984;&#8679;C
+                </kbd>{" "}
+                to comment
+              </Trans>
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground/70">
           <IconClick className="h-3.5 w-3.5" />
-          <span>Click anywhere to start writing</span>
+          <span>{t("task:clickAnywhereToStartWriting")}</span>
         </div>
       </div>
     </div>

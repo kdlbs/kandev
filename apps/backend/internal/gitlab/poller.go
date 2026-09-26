@@ -125,8 +125,11 @@ func (p *Poller) mrMonitorLoop(ctx context.Context) {
 func (p *Poller) runMRMonitor(ctx context.Context) {
 	watches, err := p.service.ListActiveMRWatches(ctx)
 	if err != nil {
+		// Log and fall through to the independent lifecycle sync pass below —
+		// a failure listing legacy watches must not also stop lifecycle
+		// notifications for every subscribed task.
 		p.logger.Warn("gitlab poller: list MR watches", zap.Error(err))
-		return
+		watches = nil
 	}
 	for _, w := range watches {
 		if ctx.Err() != nil {
@@ -137,6 +140,50 @@ func (p *Poller) runMRMonitor(ctx context.Context) {
 				zap.String("watch_id", w.ID), zap.Error(err))
 		}
 	}
+	p.runMRLifecycleSync(ctx)
+}
+
+// runMRLifecycleSync re-syncs every linked MR whose task has at least one
+// lifecycle notification, auto-fix, or auto-merge switch enabled, and
+// publishes gitlab.task_mr.updated so the orchestrator's automation
+// evaluation pass runs on the fresh state (AC22). A sync failure is recorded
+// on the per-MR checkpoint (AC25) rather than aborting the pass — one broken
+// MR must not block the rest.
+func (p *Poller) runMRLifecycleSync(ctx context.Context) {
+	rows, err := p.service.ListAutomationSubscribedTaskMRs(ctx)
+	if err != nil {
+		p.logger.Warn("gitlab poller: list automation-subscribed task MRs", zap.Error(err))
+		return
+	}
+	for _, row := range rows {
+		if ctx.Err() != nil {
+			return
+		}
+		p.syncOneLifecycleMR(ctx, row)
+	}
+}
+
+func (p *Poller) syncOneLifecycleMR(ctx context.Context, row *TaskMR) {
+	result, err := p.service.syncTaskMRStrictWithObservation(
+		ctx, row.TaskID, row.RepositoryID, row.ProjectPath, row.MRIID, row.Host,
+	)
+	if err != nil {
+		p.logger.Debug("gitlab poller: MR lifecycle sync failed",
+			zap.String("task_id", row.TaskID), zap.String("project", row.ProjectPath),
+			zap.Int("iid", row.MRIID), zap.Error(err))
+		if recErr := p.service.RecordTaskMRSyncError(
+			ctx, row.TaskID, row.RepositoryID, row.ProjectPath, row.MRIID, err.Error(),
+		); recErr != nil {
+			p.logger.Debug("gitlab poller: record MR lifecycle error failed", zap.Error(recErr))
+		}
+		return
+	}
+	if clearErr := p.service.ClearTaskMRSyncError(
+		ctx, row.TaskID, row.RepositoryID, row.ProjectPath, row.MRIID,
+	); clearErr != nil {
+		p.logger.Debug("gitlab poller: clear MR lifecycle error failed", zap.Error(clearErr))
+	}
+	p.service.publishTaskMRLifecycleSyncEvent(ctx, result.taskMR, result.reviewers, result.reviewersValid)
 }
 
 // --- Review watcher loop ---

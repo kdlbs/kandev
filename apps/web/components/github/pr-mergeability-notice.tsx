@@ -4,6 +4,8 @@ import { IconAlertTriangle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
 import type { MergeableState } from "@/lib/types/github";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 // --- Pure descriptor (unit-tested) ---
 
@@ -30,9 +32,9 @@ export function describeMergeability({
     case "dirty":
       return { kind: "banner" };
     case "blocked":
-      return { kind: "chip", label: "Blocked" };
+      return { kind: "chip", label: t("github:blocked") };
     case "behind":
-      return { kind: "chip", label: "Behind base" };
+      return { kind: "chip", label: t("github:behindBase") };
     case "clean":
     case "unstable":
     case "has_hooks":
@@ -75,6 +77,7 @@ function ConflictBanner({
   resolveDisabled?: boolean;
   popover?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="pr-conflict-banner"
@@ -86,10 +89,10 @@ function ConflictBanner({
       <IconAlertTriangle className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400 mt-0.5" />
       <div className="min-w-0 flex-1">
         <div className="text-xs font-semibold text-red-600 dark:text-red-400">
-          Merge conflicts with <code className="font-mono">{baseBranch}</code>
+          {t("github:mergeConflictsWith")} <code className="font-mono">{baseBranch}</code>
         </div>
         <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-          This branch can&apos;t be merged automatically. Resolve the conflicts before merging.
+          {t("github:thisBranchCanTBeMerged")}
         </p>
         {onResolveConflicts && (
           <Button
@@ -100,7 +103,7 @@ function ConflictBanner({
             onClick={onResolveConflicts}
             disabled={resolveDisabled}
           >
-            {resolveDisabled ? "Added to chat context" : "Resolve conflicts"}
+            {resolveDisabled ? t("github:addedToChatContext") : t("github:resolveConflicts")}
           </Button>
         )}
       </div>
@@ -123,6 +126,7 @@ function MergeabilityChip({ label, popover }: { label: string; popover?: boolean
 }
 
 function NotMergeableText({ popover }: { popover?: boolean }) {
+  const { t } = useTranslation();
   return (
     <span
       className={cn(
@@ -131,7 +135,7 @@ function NotMergeableText({ popover }: { popover?: boolean }) {
       )}
     >
       <IconAlertTriangle className={popover ? "h-3.5 w-3.5" : "h-3 w-3"} />
-      Not mergeable
+      {t("github:notMergeable")}
     </span>
   );
 }

@@ -76,8 +76,12 @@ const (
 )
 
 // acpNotifQueueCapacity returns the per-connection inbound notification queue
-// capacity, honoring KANDEV_ACP_NOTIF_QUEUE when set and parseable.
-func acpNotifQueueCapacity() int {
+// capacity. Managed servers pass the resolved value explicitly; the legacy
+// environment fallback remains for directly constructed adapters.
+func acpNotifQueueCapacity(configured ...int) int {
+	if len(configured) > 0 && configured[0] != 0 {
+		return clampACPNotifQueueCapacity(configured[0])
+	}
 	raw := os.Getenv("KANDEV_ACP_NOTIF_QUEUE")
 	if raw == "" {
 		return acpNotifQueueDefault
@@ -86,6 +90,10 @@ func acpNotifQueueCapacity() int {
 	if err != nil || n <= 0 {
 		return acpNotifQueueDefault
 	}
+	return clampACPNotifQueueCapacity(n)
+}
+
+func clampACPNotifQueueCapacity(n int) int {
 	if n < acpNotifQueueMin {
 		return acpNotifQueueMin
 	}
@@ -127,6 +135,13 @@ type Adapter struct {
 	// Agent info (populated after Initialize)
 	agentInfo    *AgentInfo
 	capabilities acp.AgentCapabilities
+
+	// promptQueueing caches the negotiated prompt-queueing advertisement from the
+	// initialize response. It is derived once under `mu` rather than re-read from
+	// `capabilities` on each prompt because the prompt path reads it concurrently
+	// with nothing else holding the write side, and a plain read of the untyped
+	// `capabilities.Meta` map would race.
+	promptQueueing bool
 
 	// Update channel
 	updatesCh chan AgentEvent
@@ -170,6 +185,13 @@ type Adapter struct {
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
 	activeToolCalls map[string]*streams.NormalizedPayload
+	// cursorTaskMetaBySession stores Cursor's non-standard `cursor/task`
+	// metadata until the matching subagent tool_call appears, keyed by session
+	// then wire tool-call ID. An entry is drained either when its tool_call
+	// arrives (applyPendingCursorTaskMetaLocked) or when the session is cleared
+	// on turn end / reset (clearCursorTaskMetaLocked), so it never outlives the
+	// turn that produced it.
+	cursorTaskMetaBySession map[string]map[string]cursorTaskMeta
 	// toolCallParents preserves nested tool lineage while a handed-off
 	// predecessor continues streaming beside its human successor.
 	toolCallParents map[string]string
@@ -220,11 +242,18 @@ type Adapter struct {
 	availableModels []modelInfo
 
 	// usageBySession tracks the latest and previously consumed cumulative
-	// `usage_update` samples. codex-acp emits no per-turn usage frame, so the
-	// prompt-complete handler uses nonnegative context-occupancy growth as an
-	// estimated input count and derives true deltas from cumulative USD cost.
-	// claude-acp / opencode-acp report a real `result.usage` so this
-	// cache contributes only their provider-reported cost delta.
+	// `usage_update` samples. codex-acp DOES emit a typed per-turn usage
+	// frame on the prompt response, but it is scoped to the LAST model
+	// request of the turn, not the whole turn (see
+	// normalizeCodexPromptUsage in dialect_codex.go) — so this cache
+	// mainly contributes the provider-reported cost delta for adapters
+	// like claude-acp / opencode-acp that report a real `result.usage`.
+	// For an adapter with no typed usage frame at all, the prompt-complete
+	// handler falls back to nonnegative context-occupancy growth as an
+	// estimated input count (fallbackUsageForNilTypedUsage in
+	// adapter_prompt.go). It attaches when context occupancy grew
+	// (delta > 0) OR a provider-reported cost sample is present —
+	// either condition alone is enough.
 	usageBySession map[string]*usageTracker
 
 	// Available auth methods captured from the ACP initialize response.
@@ -249,9 +278,14 @@ type Adapter struct {
 	// Session configuration changes are serialized across model and option
 	// RPCs. configGeneration is incremented when a change begins so an older
 	// completion cannot overwrite a newer selection.
-	configChangeMu   sync.Mutex
-	configGeneration uint64
-	contextSamples   map[string]contextWindowSample
+	// Session transitions use a separate mutex because a reset must keep the
+	// adapter transitionally consistent from session/new through session/close.
+	sessionTransitionMu sync.Mutex
+	sessionCleanupDone  chan struct{}
+	sessionCleanupWg    sync.WaitGroup
+	configChangeMu      sync.Mutex
+	configGeneration    uint64
+	contextSamples      map[string]contextWindowSample
 
 	// Synchronization
 	mu     sync.RWMutex
@@ -281,7 +315,16 @@ type Adapter struct {
 	// prompt response, so sendPrompt's normal complete emission never runs.
 	asyncTurnMu         sync.Mutex
 	asyncTurnFinalizers map[string]*asyncTurnFinalizer
+	cancelJoinTimeout   time.Duration
 	asyncTurnEpochs     map[string]uint64
+
+	// turnStartedAt records, per session, the time agentctl last dispatched
+	// session/prompt for it (human or synthetic). It is agentctl's own clock
+	// and never crosses the process boundary; the background-workload
+	// liveness probe compares descendant process start times against it.
+	// Guarded by asyncTurnMu and cleared on the same lifecycle as the
+	// asyncTurn maps above (new session, adapter close).
+	turnStartedAt map[string]time.Time
 
 	// lifetimeCtx is cancelled by Close. Background work that may outlive
 	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
@@ -293,16 +336,85 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn          context.CancelCauseFunc
-	rpcDone          chan struct{}
-	abortCh          chan struct{}
-	handoffCh        chan struct{}
-	providerErrorCh  chan openCodeStderrDiagnostic
-	promptGeneration uint64
-	allowHandoff     bool
-	handedOff        bool
-	gateOwned        bool
-	finishing        bool
+	endTurn           context.CancelCauseFunc
+	rpcDone           chan struct{}
+	abortCh           chan struct{}
+	handoffCh         chan struct{}
+	providerErrorCh   chan openCodeStderrDiagnostic
+	promptGeneration  uint64
+	evidenceMu        sync.Mutex
+	codexSystemError  bool
+	codexCapacity     bool
+	cursorRetriable   bool
+	cursorRetriableAt time.Time
+	allowHandoff      bool
+	handedOff         bool
+	gateOwned         bool
+	finishing         bool
+}
+
+func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
+	if t == nil || (!systemError && !capacity) {
+		return
+	}
+	t.evidenceMu.Lock()
+	t.codexSystemError = t.codexSystemError || systemError
+	t.codexCapacity = t.codexCapacity || capacity
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) codexCapacityFailure() bool {
+	if t == nil {
+		return false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	return t.codexSystemError && t.codexCapacity
+}
+
+func (t *promptTurnState) hasCodexSystemError() bool {
+	if t == nil {
+		return false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	return t.codexSystemError
+}
+
+func (t *promptTurnState) setCursorRetriable() {
+	if t == nil {
+		return
+	}
+	t.evidenceMu.Lock()
+	if !t.cursorRetriable {
+		t.cursorRetriableAt = time.Now().UTC()
+	}
+	t.cursorRetriable = true
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) clearCursorRetriable() {
+	if t == nil {
+		return
+	}
+	t.evidenceMu.Lock()
+	t.cursorRetriable = false
+	t.cursorRetriableAt = time.Time{}
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) cursorRetriableFailure() bool {
+	failure, _ := t.cursorRetriableFailureAt()
+	return failure
+}
+
+func (t *promptTurnState) cursorRetriableFailureAt() (bool, time.Time) {
+	if t == nil {
+		return false, time.Time{}
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	return t.cursorRetriable, t.cursorRetriableAt
 }
 
 type asyncTurnFinalizer struct {
@@ -311,8 +423,7 @@ type asyncTurnFinalizer struct {
 	promptEpoch uint64
 }
 
-// promptCancelJoinTimeout bounds how long Cancel and sendPrompt wait for a stuck
-// session/prompt RPC to end after a user cancel. Exposed as a var for tests.
+// promptCancelJoinTimeout is the production default and preserves existing direct-test behavior.
 var promptCancelJoinTimeout = 3 * time.Second
 
 // NewAdapter creates a new ACP protocol adapter.
@@ -330,6 +441,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		updatesCh:                 make(chan AgentEvent, 100),
 		notifQueue:                make(chan notifWork, notifQueueCapacity),
 		activeToolCalls:           make(map[string]*streams.NormalizedPayload),
+		cursorTaskMetaBySession:   make(map[string]map[string]cursorTaskMeta),
 		toolCallParents:           make(map[string]string),
 		handoffProtectedToolCalls: make(map[string]struct{}),
 		activeMonitors:            make(map[string]map[string]string),
@@ -339,7 +451,9 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		attachMgr:                 shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 		promptGate:                make(chan struct{}, 1),
 		asyncTurnFinalizers:       make(map[string]*asyncTurnFinalizer),
+		cancelJoinTimeout:         cfg.PromptCancelJoinTimeout,
 		asyncTurnEpochs:           make(map[string]uint64),
+		turnStartedAt:             make(map[string]time.Time),
 		lifetimeCtx:               ctx,
 		lifetimeCancel:            cancel,
 		closedCh:                  make(chan struct{}),
@@ -392,6 +506,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		acpclient.WithWorkspaceRoot(a.cfg.WorkDir),
 		acpclient.WithUpdateHandler(a.enqueueACPUpdate),
 		acpclient.WithPermissionHandler(a.handlePermissionRequest),
+		acpclient.WithCursorTaskHandler(a.handleCursorTask),
 	)
 
 	// Create ACP SDK connection. Raise the inbound notification queue cap
@@ -400,10 +515,14 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	// down. The internal notifQueueCapacity channel sits in front of this
 	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
 	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
-	notifQueueCap := acpNotifQueueCapacity()
-	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout,
-		acp.WithMaxQueuedNotifications(notifQueueCap))
-	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
+	notifQueueCap := acpNotifQueueCapacity(a.cfg.NotificationQueueCapacity)
+	a.acpConn = acpclient.NewClientSideConnectionWithLogger(
+		a.acpClient,
+		a.stdin,
+		a.stdout,
+		slog.Default().With("component", "acp-conn"),
+		acp.WithMaxQueuedNotifications(notifQueueCap),
+	)
 	a.logger.Debug("ACP connection notification queue sized",
 		zap.Int("capacity", notifQueueCap))
 
@@ -412,10 +531,8 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	defer span.End()
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		ClientCapabilities: acp.ClientCapabilities{
-			Meta: map[string]any{"terminal_output": true},
-		},
+		ProtocolVersion:    acp.ProtocolVersionNumber,
+		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-agentctl",
 			Version: "1.0.0",
@@ -436,22 +553,26 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		a.agentInfo.Version = resp.AgentInfo.Version
 	}
 	a.capabilities = resp.AgentCapabilities
+	promptQueueing := agentAdvertisesPromptQueueing(resp.AgentCapabilities)
 
 	span.SetAttributes(
 		attribute.String("agent_name", a.agentInfo.Name),
 		attribute.String("agent_version", a.agentInfo.Version),
 		attribute.Bool("supports_load_session", a.capabilities.LoadSession),
+		attribute.Bool("supports_prompt_queueing", promptQueueing),
 	)
 
 	a.logger.Info("ACP adapter initialized",
 		zap.String("agent_name", a.agentInfo.Name),
 		zap.String("agent_version", a.agentInfo.Version),
-		zap.Bool("supports_load_session", a.capabilities.LoadSession))
+		zap.Bool("supports_load_session", a.capabilities.LoadSession),
+		zap.Bool("supports_prompt_queueing", promptQueueing))
 
 	// Cache auth methods so we can re-emit them on auth_required without re-running initialize.
 	authMethods := convertAuthMethods(resp.AuthMethods)
 	a.mu.Lock()
 	a.availableAuthMethods = authMethods
+	a.promptQueueing = promptQueueing
 	a.mu.Unlock()
 
 	// Emit agent capabilities event with prompt capabilities and auth methods
@@ -460,9 +581,36 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		SupportsImage:           a.capabilities.PromptCapabilities.Image,
 		SupportsAudio:           a.capabilities.PromptCapabilities.Audio,
 		SupportsEmbeddedContext: a.capabilities.PromptCapabilities.EmbeddedContext,
+		SupportsPromptQueueing:  promptQueueing,
 		AuthMethods:             authMethods,
 	})
 
+	if err := a.applyProviderGatewayAuth(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	return nil
+}
+
+// applyProviderGatewayAuth authenticates the agent against a Kandev-configured
+// OpenAI-compatible gateway (base URL + bearer key) right after initialize. It
+// is a no-op unless the launch carries provider gateway auth. A failure aborts
+// the connection rather than letting the agent silently fall back to its
+// built-in vendor endpoint.
+func (a *Adapter) applyProviderGatewayAuth(ctx context.Context) error {
+	gw := a.cfg.ProviderGatewayAuth
+	if gw == nil {
+		return nil
+	}
+	if _, err := a.acpConn.Authenticate(ctx, acp.AuthenticateRequest{
+		MethodId: acp.AuthMethodId(gw.MethodID),
+		Meta:     gw.Meta,
+	}); err != nil {
+		return fmt.Errorf("OpenAI-compatible provider authentication failed: %w", err)
+	}
+	a.logger.Info("authenticated against OpenAI-compatible provider gateway",
+		zap.String("auth_method", gw.MethodID))
 	return nil
 }
 
@@ -490,6 +638,58 @@ func (a *Adapter) GetSessionID() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.sessionID
+}
+
+// GetSessionModelState returns the latest session model snapshot while holding
+// the adapter lock. The snapshot is used in the synchronous session response;
+// the normal session_models stream event remains the long-lived cache update.
+func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if len(a.availableModels) == 0 && len(a.availableConfigOptions) == 0 {
+		return nil
+	}
+	return &streams.SessionModelState{
+		CurrentModelID: currentModelFromConfig(a.availableConfigOptions),
+		Models:         cloneSessionModels(convertSessionModels(a.availableModels)),
+		ConfigOptions:  cloneConfigOptions(a.availableConfigOptions),
+	}
+}
+
+// ProviderErrorContext implements adapter.ProviderErrorContextProvider.
+// modelID is empty until the adapter has settled a model for the session: a
+// non-empty currentModelFromConfig(availableConfigOptions) value at read time.
+func (a *Adapter) ProviderErrorContext() (providerID, modelID string) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.agentID, currentModelFromConfig(a.availableConfigOptions)
+}
+
+func cloneSessionModels(models []streams.SessionModelInfo) []streams.SessionModelInfo {
+	if len(models) == 0 {
+		return nil
+	}
+	cloned := append([]streams.SessionModelInfo(nil), models...)
+	for i, model := range cloned {
+		if model.Meta != nil {
+			cloned[i].Meta = make(map[string]any, len(model.Meta))
+			for key, value := range model.Meta {
+				cloned[i].Meta[key] = value
+			}
+		}
+	}
+	return cloned
+}
+
+func cloneConfigOptions(options []streams.ConfigOption) []streams.ConfigOption {
+	if len(options) == 0 {
+		return nil
+	}
+	cloned := append([]streams.ConfigOption(nil), options...)
+	for i, option := range cloned {
+		cloned[i].Options = append([]streams.ConfigOptionValue(nil), option.Options...)
+	}
+	return cloned
 }
 
 // GetOperationID returns the current operation/turn ID.
@@ -524,6 +724,7 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 	if lifetimeCtx == nil {
 		lifetimeCtx = context.Background()
 	}
+	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	closedCh := a.closedCh
 	if closedCh != nil {
 		a.updateSendWg.Add(1)
@@ -548,6 +749,7 @@ func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
 		return false
 	}
+	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	select {
 	case a.updatesCh <- event:
 		return true
@@ -561,6 +763,7 @@ func (a *Adapter) Close() error {
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
+		a.waitForSessionCleanup()
 		return nil
 	}
 	a.closed = true
@@ -583,6 +786,12 @@ func (a *Adapter) Close() error {
 		a.lifetimeCancel()
 	}
 
+	// A successful reset returns before its best-effort session/close request,
+	// but adapter shutdown owns that worker and must drain it before returning.
+	// Synchronizing with the transition mutex first ensures a reset that is just
+	// committing its cleanup has registered the wait-group entry.
+	a.waitForSessionCleanup()
+
 	// Wait for the update worker to exit before closing updatesCh.
 	// handleACPUpdate may call sendUpdate, so updatesCh must remain open
 	// until the worker is gone.
@@ -590,6 +799,7 @@ func (a *Adapter) Close() error {
 	a.updateSendWg.Wait()
 	a.mu.Lock()
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearCursorTaskMetaLocked("")
 	a.clearPromptHandoffToolTrackingLocked()
 	clear(a.usageBySession)
 	a.mu.Unlock()

@@ -1,37 +1,9 @@
 import { GitHubIntegrationPage } from "@/components/github/github-settings";
-import { StateHydrator } from "@/components/state-hydrator";
-import { normalizeGitHubStatus } from "@/hooks/domains/github/use-github-status";
-import { fetchGitHubStatus } from "@/lib/api/domains/github-api";
 
 type IntegrationsGitHubPageProps = {
   workspaceId?: string;
 };
 
-export default async function IntegrationsGitHubPage({
-  workspaceId,
-}: IntegrationsGitHubPageProps = {}) {
-  const status = workspaceId
-    ? await fetchGitHubStatus(workspaceId, { cache: "no-store" }).catch(() => null)
-    : null;
-  const statusWorkspaceId = workspaceId ?? status?.workspace_id;
-  const initialState =
-    status && statusWorkspaceId
-      ? {
-          githubStatus: {
-            byWorkspaceId: {
-              [statusWorkspaceId]: {
-                status: normalizeGitHubStatus(status),
-                loaded: true,
-                loading: false,
-              },
-            },
-          },
-        }
-      : {};
-  return (
-    <>
-      <StateHydrator initialState={initialState} />
-      <GitHubIntegrationPage workspaceId={workspaceId} />
-    </>
-  );
+export default function IntegrationsGitHubPage({ workspaceId }: IntegrationsGitHubPageProps = {}) {
+  return <GitHubIntegrationPage workspaceId={workspaceId} />;
 }

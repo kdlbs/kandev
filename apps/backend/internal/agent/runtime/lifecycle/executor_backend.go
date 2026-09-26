@@ -3,16 +3,131 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/acpprovider"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func remoteContributionsFromMetadata(metadata map[string]interface{}) (map[string]models.RemoteContribution, error) {
+	if metadata == nil {
+		return nil, nil
+	}
+	raw, ok := metadata[MetadataKeyRemoteContributions]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	if typed, ok := raw.(map[string]models.RemoteContribution); ok {
+		return validateRemoteContributions(typed)
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("encode remote contributions: %w", err)
+	}
+	var decoded map[string]models.RemoteContribution
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil, fmt.Errorf("decode remote contributions: %w", err)
+	}
+	return validateRemoteContributions(decoded)
+}
+
+func validateRemoteContributions(values map[string]models.RemoteContribution) (map[string]models.RemoteContribution, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	validated := make(map[string]models.RemoteContribution, len(values))
+	for key, binding := range values {
+		if err := binding.Validate(); err != nil {
+			return nil, fmt.Errorf("validate remote contribution %q: %w", key, err)
+		}
+		validated[key] = binding
+	}
+	return validated, nil
+}
+
+func contributionDestinationsFromMetadata(metadata map[string]interface{}) (map[string]models.ContributionDestination, error) {
+	if metadata == nil {
+		return nil, nil
+	}
+	raw, ok := metadata[MetadataKeyContributionDestinations]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	if typed, ok := raw.(map[string]models.ContributionDestination); ok {
+		return validateContributionDestinations(typed)
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("encode contribution destinations: %w", err)
+	}
+	var decoded map[string]models.ContributionDestination
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil, fmt.Errorf("decode contribution destinations: %w", err)
+	}
+	return validateContributionDestinations(decoded)
+}
+
+func validateContributionDestinations(values map[string]models.ContributionDestination) (map[string]models.ContributionDestination, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	validated := make(map[string]models.ContributionDestination, len(values))
+	for key, destination := range values {
+		if err := destination.Validate(); err != nil {
+			return nil, fmt.Errorf("validate contribution destination %q: %w", key, err)
+		}
+		validated[key] = destination
+	}
+	return validated, nil
+}
+
+func comparisonTargetsFromMetadata(metadata map[string]interface{}) (map[string]models.ComparisonTarget, error) {
+	if metadata == nil {
+		return nil, nil
+	}
+	raw, ok := metadata[MetadataKeyComparisonTargets]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	if typed, ok := raw.(map[string]models.ComparisonTarget); ok {
+		return validateComparisonTargets(typed)
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("encode comparison targets: %w", err)
+	}
+	var decoded map[string]models.ComparisonTarget
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil, fmt.Errorf("decode comparison targets: %w", err)
+	}
+	return validateComparisonTargets(decoded)
+}
+
+func validateComparisonTargets(values map[string]models.ComparisonTarget) (map[string]models.ComparisonTarget, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	validated := make(map[string]models.ComparisonTarget, len(values))
+	for key, target := range values {
+		if err := target.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target %q: %w", key, err)
+		}
+		validated[key] = target
+	}
+	return validated, nil
+}
 
 // Runtime abstracts the agent execution environment (Docker, Standalone, K8s, SSH, etc.)
 // Each runtime is responsible for creating and managing agentctl instances.
@@ -33,8 +148,11 @@ type ExecutorBackend interface {
 	StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error
 
 	// RecoverInstances discovers and recovers instances that were running before a restart.
+	// records is the live standalone recovery-inventory read at startup step 3
+	// (Manager.ListLiveStandaloneExecutorsRunning); only the standalone runtime
+	// acts on it today, every other implementation ignores it.
 	// Returns recovered instances that can be re-tracked by the manager.
-	RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error)
+	RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error)
 
 	// GetInteractiveRunner returns the interactive runner for passthrough mode.
 	// May return nil if the runtime doesn't support passthrough mode.
@@ -72,17 +190,73 @@ const (
 	// MetadataKeyBaseBranches stores a map[string]string (RepositoryName →
 	// base branch ref) for per-repo diff-stat resolution inside agentctl.
 	// The empty key "" applies to the root / single-repo tracker.
-	MetadataKeyBaseBranches     = "base_branches"
-	MetadataKeyIsRemote         = "is_remote"
-	MetadataKeyRemoteAuthHome   = "remote_auth_target_home"
-	MetadataKeyGitUserName      = "git_user_name"
-	MetadataKeyGitUserEmail     = "git_user_email"
-	MetadataKeyImageTagOverride = "image_tag_override"
-	MetadataKeyContainerID      = "container_id"
-	MetadataKeySpriteName       = "sprite_name"
-	MetadataKeySpriteState      = "sprite_state"
-	MetadataKeySpriteCreatedAt  = "sprite_created_at"
-	MetadataKeyLocalPort        = "local_port"
+	MetadataKeyBaseBranches             = "base_branches"
+	MetadataKeyRemoteContributions      = "remote_contributions"
+	MetadataKeyContributionDestinations = "contribution_destinations"
+	MetadataKeyComparisonTargets        = "comparison_targets"
+	MetadataKeyExecutorType             = "executor_type"
+	MetadataKeyIsRemote                 = "is_remote"
+	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
+	MetadataKeyAgentConfigBundles       = "agent_config_bundles"
+	MetadataKeyExecutorProfileID        = "executor_profile_id"
+	MetadataKeyGitUserName              = "git_user_name"
+	MetadataKeyGitUserEmail             = "git_user_email"
+	MetadataKeyImageTagOverride         = "image_tag_override"
+	MetadataKeyAllowUserNamespaces      = "allow_user_namespaces"
+	MetadataKeyDockerNetwork            = "docker_network"
+	MetadataKeyDockerNetworkGwPriority  = "docker_network_gw_priority"
+	MetadataKeyDockerAdditionalNetworks = "docker_additional_networks"
+	MetadataKeyContainerID              = "container_id"
+	MetadataKeySpriteName               = "sprite_name"
+	MetadataKeySpriteState              = "sprite_state"
+	MetadataKeySpriteCreatedAt          = "sprite_created_at"
+	MetadataKeyLocalPort                = "local_port"
+	MetadataKeyReuseExistingProcess     = "reuse_existing_process"
+
+	// Kubernetes executor connection metadata. These names mirror the persisted
+	// executor config parsed by internal/agent/kubernetes.
+	MetadataKeyKubernetesAuthMode              = "auth_mode"
+	MetadataKeyKubernetesKubeconfigPath        = "kubeconfig_path"
+	MetadataKeyKubernetesKubeContext           = "kube_context"
+	MetadataKeyKubernetesConfigNamespace       = "namespace"
+	MetadataKeyKubernetesRequestTimeoutSeconds = "request_timeout_seconds"
+	MetadataKeyKubernetesProfilePlatform       = "platform"
+	MetadataKeyKubernetesProfileMainContainer  = "main_container"
+	MetadataKeyKubernetesPodTemplateYAML       = "pod_template_yaml"
+	MetadataKeyKubernetesWorkspaceMode         = "workspace.mode"
+	MetadataKeyKubernetesWorkspaceSize         = "workspace.size"
+	MetadataKeyKubernetesWorkspaceStorageClass = "workspace.storage_class"
+	MetadataKeyKubernetesWorkspaceAccessModes  = "workspace.access_modes"
+	MetadataKeyKubernetesWorkspaceClaimName    = "workspace.claim_name"
+
+	// Kubernetes runtime inventory. The local forward port is deliberately not
+	// represented: every process reconnect must allocate a fresh loopback port.
+	MetadataKeyKubernetesNamespace             = "kubernetes_namespace"
+	MetadataKeyKubernetesPodName               = "kubernetes_pod_name"
+	MetadataKeyKubernetesPodUID                = "kubernetes_pod_uid"
+	MetadataKeyKubernetesMainContainer         = "kubernetes_main_container"
+	MetadataKeyKubernetesPlatform              = "kubernetes_platform"
+	MetadataKeyKubernetesRuntimeWorkspaceMode  = "kubernetes_workspace_mode"
+	MetadataKeyKubernetesPVCName               = "kubernetes_pvc_name"
+	MetadataKeyKubernetesPVCUID                = "kubernetes_pvc_uid"
+	MetadataKeyKubernetesPVCCreated            = "kubernetes_pvc_created"
+	MetadataKeyKubernetesAgentctlRemotePort    = "kubernetes_agentctl_remote_port"
+	MetadataKeyKubernetesAgentctlInstanceID    = "kubernetes_agentctl_instance_id"
+	MetadataKeyKubernetesContainerRestartCount = "kubernetes_main_container_restart_count"
+	MetadataKeyKubernetesResourceInstanceID    = agentkubernetes.MetadataKeyResourceInstanceID
+	MetadataKeyKubernetesResourceExecutorID    = agentkubernetes.MetadataKeyResourceExecutorID
+	MetadataKeyKubernetesResourceProfileID     = agentkubernetes.MetadataKeyResourceProfileID
+	MetadataKeyKubernetesResourceTaskID        = agentkubernetes.MetadataKeyResourceTaskID
+	MetadataKeyKubernetesResourceSessionID     = agentkubernetes.MetadataKeyResourceSessionID
+	MetadataKeyKubernetesResourceEnvironmentID = agentkubernetes.MetadataKeyResourceEnvironmentID
+	MetadataKeyKubernetesExecutorConfigHash    = "kubernetes_executor_config_hash"
+	MetadataKeyKubernetesProfileConfigHash     = "kubernetes_profile_config_hash"
+	MetadataKeyKubernetesTemplateHash          = "kubernetes_template_hash"
+	MetadataKeyKubernetesProfileSnapshot       = "kubernetes_profile_snapshot"
+	// MetadataKeyKubernetesInventoryState records how far Kubernetes admission
+	// progressed. Create-returned UIDs are checkpointed before validation so a
+	// failed rollback remains exactly recoverable after process restart.
+	MetadataKeyKubernetesInventoryState = "kubernetes_inventory_state"
 
 	// MetadataKeyModelOverride holds a user-requested model that overrides the
 	// agent profile's configured model on the next launch. Set by SetSessionModel
@@ -91,23 +265,32 @@ const (
 
 	// Office metadata keys
 	MetadataKeySkillManifestJSON = "skill_manifest_json"
+	// MetadataKeyOfficeAgentProfileID persists AgentExecution.OfficeAgentProfileID
+	// (AC-EXECUTORS-SURVIVAL-002.14's "Office profile identity" reconstruction
+	// row): a new key in the existing metadata column rather than a schema
+	// change. Empty for every non-Office launch, which is legitimate, not
+	// missing.
+	MetadataKeyOfficeAgentProfileID = "office_agent_profile_id"
 
 	// SSH runtime metadata keys (per-session, except SSHWorkdirRoot which is per-profile).
-	MetadataKeySSHHostAlias          = "ssh_host_alias"
-	MetadataKeySSHHost               = "ssh_host"
-	MetadataKeySSHPort               = "ssh_port"
-	MetadataKeySSHUser               = "ssh_user"
-	MetadataKeySSHHostFingerprint    = "ssh_host_fingerprint"
-	MetadataKeySSHRemoteTaskDir      = "ssh_remote_task_dir"
-	MetadataKeySSHRemoteSessionDir   = "ssh_remote_session_dir"
-	MetadataKeySSHRemoteAgentctlPort = "ssh_remote_agentctl_port"
-	MetadataKeySSHRemoteAgentctlPID  = "ssh_remote_agentctl_pid"
-	MetadataKeySSHLocalForwardPort   = "ssh_local_forward_port"
-	MetadataKeySSHRemoteAgentctlURL  = "ssh_remote_agentctl_url"
-	MetadataKeySSHWorkdirRoot        = "ssh_workdir_root"
-	MetadataKeySSHProxyJump          = "ssh_proxy_jump"
-	MetadataKeySSHIdentitySource     = "ssh_identity_source"
-	MetadataKeySSHIdentityFile       = "ssh_identity_file"
+	MetadataKeySSHHostAlias            = "ssh_host_alias"
+	MetadataKeySSHHost                 = "ssh_host"
+	MetadataKeySSHPort                 = "ssh_port"
+	MetadataKeySSHUser                 = "ssh_user"
+	MetadataKeySSHHostFingerprint      = "ssh_host_fingerprint"
+	MetadataKeySSHRemoteTaskDir        = "ssh_remote_task_dir"
+	MetadataKeySSHRemoteSessionDir     = "ssh_remote_session_dir"
+	MetadataKeySSHRemoteAgentctlPort   = "ssh_remote_agentctl_port"
+	MetadataKeySSHRemoteAgentctlPID    = "ssh_remote_agentctl_pid"
+	MetadataKeySSHAgentctlInstanceID   = "ssh_remote_agentctl_instance_id"
+	MetadataKeySSHLocalForwardPort     = "ssh_local_forward_port"
+	MetadataKeySSHRemoteAgentctlURL    = "ssh_remote_agentctl_url"
+	MetadataKeySSHRuntimeAPILocalURL   = "ssh_runtime_api_local_url"
+	MetadataKeySSHRuntimeAPIRemotePort = "ssh_runtime_api_remote_port"
+	MetadataKeySSHWorkdirRoot          = "ssh_workdir_root"
+	MetadataKeySSHProxyJump            = "ssh_proxy_jump"
+	MetadataKeySSHIdentitySource       = "ssh_identity_source"
+	MetadataKeySSHIdentityFile         = "ssh_identity_file"
 	// MetadataKeySSHShell names the login shell used when running commands
 	// over SSH on the remote (probe, agentctl launch, install, setup
 	// scripts). Empty / unset falls back to "bash" at runtime — see
@@ -115,6 +298,20 @@ const (
 	// host can use different shells; flows into req.Metadata via the
 	// standard executor-config merge in buildLaunchMetadata.
 	MetadataKeySSHShell = "ssh_shell"
+	// MetadataKeySSHReclaimTaskDir opts a profile in to removing the remote
+	// task directory once its owning task reaches a terminal outcome. Only
+	// the exact string "true" enables it; absent, empty, and every other
+	// value leave the pre-existing behavior of keeping the directory
+	// forever. Default-off is deliberate: existing hosts hold directories
+	// created under a documented promise that Kandev would not delete them,
+	// and an upgrade must not retroactively break that promise against data
+	// on a machine Kandev does not own.
+	//
+	// This is an *authoritative* profile key (see
+	// profileConfigAuthoritativeKeys in internal/orchestrator/executor) —
+	// task-supplied metadata can never enable it, because that would let a
+	// task arm a destructive remote operation its profile never approved.
+	MetadataKeySSHReclaimTaskDir = "ssh_reclaim_task_dir"
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -129,39 +326,86 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyLocalPort:       true,
 
 	// SSH runtime
-	MetadataKeySSHHost:               true,
-	MetadataKeySSHPort:               true,
-	MetadataKeySSHUser:               true,
-	MetadataKeySSHHostFingerprint:    true,
-	MetadataKeySSHRemoteTaskDir:      true,
-	MetadataKeySSHRemoteSessionDir:   true,
-	MetadataKeySSHRemoteAgentctlPort: true,
-	MetadataKeySSHRemoteAgentctlPID:  true,
-	MetadataKeySSHLocalForwardPort:   true,
-	MetadataKeySSHRemoteAgentctlURL:  true,
-	MetadataKeySSHWorkdirRoot:        true,
-	MetadataKeySSHProxyJump:          true,
-	MetadataKeySSHIdentitySource:     true,
-	MetadataKeySSHIdentityFile:       true,
-	MetadataKeySSHShell:              true,
+	MetadataKeySSHHost:                 true,
+	MetadataKeySSHPort:                 true,
+	MetadataKeySSHUser:                 true,
+	MetadataKeySSHHostFingerprint:      true,
+	MetadataKeySSHRemoteTaskDir:        true,
+	MetadataKeySSHRemoteSessionDir:     true,
+	MetadataKeySSHRemoteAgentctlPort:   true,
+	MetadataKeySSHRemoteAgentctlPID:    true,
+	MetadataKeySSHAgentctlInstanceID:   true,
+	MetadataKeySSHLocalForwardPort:     true,
+	MetadataKeySSHRemoteAgentctlURL:    true,
+	MetadataKeySSHRuntimeAPILocalURL:   true,
+	MetadataKeySSHRuntimeAPIRemotePort: true,
+	MetadataKeySSHWorkdirRoot:          true,
+	MetadataKeySSHProxyJump:            true,
+	MetadataKeySSHIdentitySource:       true,
+	MetadataKeySSHIdentityFile:         true,
+	MetadataKeySSHShell:                true,
+	MetadataKeySSHReclaimTaskDir:       true,
+
+	// Kubernetes connection and exact resource inventory.
+	MetadataKeyKubernetesAuthMode:               true,
+	MetadataKeyKubernetesKubeconfigPath:         true,
+	MetadataKeyKubernetesKubeContext:            true,
+	MetadataKeyKubernetesConfigNamespace:        true,
+	MetadataKeyKubernetesRequestTimeoutSeconds:  true,
+	MetadataKeyKubernetesNamespace:              true,
+	MetadataKeyKubernetesPodName:                true,
+	MetadataKeyKubernetesPodUID:                 true,
+	MetadataKeyKubernetesMainContainer:          true,
+	MetadataKeyKubernetesPlatform:               true,
+	MetadataKeyKubernetesRuntimeWorkspaceMode:   true,
+	MetadataKeyKubernetesPVCName:                true,
+	MetadataKeyKubernetesPVCUID:                 true,
+	MetadataKeyKubernetesPVCCreated:             true,
+	MetadataKeyKubernetesAgentctlRemotePort:     true,
+	MetadataKeyKubernetesAgentctlInstanceID:     true,
+	MetadataKeyKubernetesContainerRestartCount:  true,
+	metadataKubernetesTaskOwned:                 true,
+	agentkubernetes.MetadataKeyOwnershipVersion: true,
+	MetadataKeyKubernetesResourceInstanceID:     true,
+	MetadataKeyKubernetesResourceExecutorID:     true,
+	MetadataKeyKubernetesResourceProfileID:      true,
+	MetadataKeyKubernetesResourceTaskID:         true,
+	MetadataKeyKubernetesResourceSessionID:      true,
+	MetadataKeyKubernetesResourceEnvironmentID:  true,
+	MetadataKeyKubernetesExecutorConfigHash:     true,
+	MetadataKeyKubernetesProfileConfigHash:      true,
+	MetadataKeyKubernetesTemplateHash:           true,
+	MetadataKeyKubernetesProfileSnapshot:        true,
+	MetadataKeyKubernetesInventoryState:         true,
 
 	// Executor type marker
-	MetadataKeyIsRemote: true,
+	MetadataKeyExecutorType: true,
+	MetadataKeyIsRemote:     true,
 
 	// Executor profile / auth config
-	MetadataKeyCleanupScript:       true,
-	MetadataKeyRepoSetupScript:     true,
-	MetadataKeyRemoteAuthHome:      true,
-	MetadataKeyGitUserName:         true,
-	MetadataKeyGitUserEmail:        true,
-	"remote_credentials":           true,
-	"remote_auth_secrets":          true,
-	"executor_mcp_policy":          true,
-	"sprites_network_policy_rules": true,
-	"executor_profile_id":          true,
-	MetadataKeyImageTagOverride:    true,
-	MetadataKeyContainerID:         true,
-	MetadataKeyWorktreeBranch:      true,
+	MetadataKeyCleanupScript:            true,
+	MetadataKeyRepoSetupScript:          true,
+	MetadataKeyRemoteAuthHome:           true,
+	MetadataKeyAgentConfigBundles:       true,
+	MetadataKeyGitUserName:              true,
+	MetadataKeyGitUserEmail:             true,
+	"remote_credentials":                true,
+	"remote_auth_secrets":               true,
+	"executor_mcp_policy":               true,
+	"sprites_network_policy_rules":      true,
+	MetadataKeyExecutorProfileID:        true,
+	MetadataKeyImageTagOverride:         true,
+	MetadataKeyAllowUserNamespaces:      true,
+	MetadataKeyDockerNetwork:            true,
+	MetadataKeyDockerNetworkGwPriority:  true,
+	MetadataKeyDockerAdditionalNetworks: true,
+	MetadataKeyContainerID:              true,
+	MetadataKeyWorktreeBranch:           true,
+	metadataCheckoutBranch:              true,
+	metadataCheckoutRef:                 true,
+	MetadataKeyRemoteContributions:      true,
+	MetadataKeyContributionDestinations: true,
+	MetadataKeyOfficeAgentProfileID:     true,
 }
 
 // persistentMetadataPrefixes lists key prefixes that should persist.
@@ -174,15 +418,53 @@ var persistentMetadataPrefixes = []string{
 // runtime resources (process PIDs, allocated ports, session directories on
 // the remote). These keys ARE persisted across a SAME-session resume — that's
 // how a backend restart reattaches to a still-running remote agent — but they
-// MUST NOT be carried across SIBLING sessions on the same task. If they were,
+// MUST NOT be carried across SIBLING sessions on the same task. This includes
+// the SSH runtime API reverse-tunnel URL and port. If they were,
 // the second session would try to attach to the first session's agentctl
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
-	MetadataKeySSHRemoteSessionDir:   true,
-	MetadataKeySSHRemoteAgentctlPort: true,
-	MetadataKeySSHRemoteAgentctlPID:  true,
-	MetadataKeySSHLocalForwardPort:   true,
-	MetadataKeySSHRemoteAgentctlURL:  true,
+	// Office identity belongs to the session that produced the runtime row and
+	// must not be inherited by a sibling session sharing the environment.
+	MetadataKeyOfficeAgentProfileID: true,
+
+	MetadataKeySSHRemoteSessionDir:              true,
+	MetadataKeySSHRemoteAgentctlPort:            true,
+	MetadataKeySSHRemoteAgentctlPID:             true,
+	MetadataKeySSHAgentctlInstanceID:            true,
+	MetadataKeySSHLocalForwardPort:              true,
+	MetadataKeySSHRemoteAgentctlURL:             true,
+	MetadataKeySSHRuntimeAPILocalURL:            true,
+	MetadataKeySSHRuntimeAPIRemotePort:          true,
+	MetadataKeyKubernetesAuthMode:               true,
+	MetadataKeyKubernetesKubeconfigPath:         true,
+	MetadataKeyKubernetesKubeContext:            true,
+	MetadataKeyKubernetesConfigNamespace:        true,
+	MetadataKeyKubernetesRequestTimeoutSeconds:  true,
+	MetadataKeyKubernetesNamespace:              true,
+	MetadataKeyKubernetesPodName:                true,
+	MetadataKeyKubernetesPodUID:                 true,
+	MetadataKeyKubernetesMainContainer:          true,
+	MetadataKeyKubernetesPlatform:               true,
+	MetadataKeyKubernetesRuntimeWorkspaceMode:   true,
+	MetadataKeyKubernetesPVCName:                true,
+	MetadataKeyKubernetesPVCUID:                 true,
+	MetadataKeyKubernetesPVCCreated:             true,
+	MetadataKeyKubernetesAgentctlRemotePort:     true,
+	MetadataKeyKubernetesAgentctlInstanceID:     true,
+	MetadataKeyKubernetesContainerRestartCount:  true,
+	metadataKubernetesTaskOwned:                 true,
+	agentkubernetes.MetadataKeyOwnershipVersion: true,
+	MetadataKeyKubernetesResourceInstanceID:     true,
+	MetadataKeyKubernetesResourceExecutorID:     true,
+	MetadataKeyKubernetesResourceProfileID:      true,
+	MetadataKeyKubernetesResourceTaskID:         true,
+	MetadataKeyKubernetesResourceSessionID:      true,
+	MetadataKeyKubernetesResourceEnvironmentID:  true,
+	MetadataKeyKubernetesExecutorConfigHash:     true,
+	MetadataKeyKubernetesProfileConfigHash:      true,
+	MetadataKeyKubernetesTemplateHash:           true,
+	MetadataKeyKubernetesProfileSnapshot:        true,
+	MetadataKeyKubernetesInventoryState:         true,
 }
 
 // ShouldPersistMetadataKey returns true if the given metadata key should
@@ -293,35 +575,92 @@ type RemoteStatusProvider interface {
 	GetRemoteStatus(ctx context.Context, instance *ExecutorInstance) (*RemoteStatus, error)
 }
 
+// RemoteInstanceRefresh is a staged replacement for a live remote control
+// connection. Commit installs it after lifecycle has durably persisted the
+// replacement token/inventory; Abort closes only the staged resources.
+type RemoteInstanceRefresh struct {
+	Instance               *ExecutorInstance
+	AgentConfig            agents.Agent
+	McpServers             []McpServerConfig
+	AutoApprovePermissions bool
+	ProcessRestarted       bool
+	// Commit installs the staged runtime connection and invokes publish before
+	// closing the prior connection. Callers use publish to atomically expose the
+	// matching lifecycle client under their client-replacement write lock.
+	Commit func(publish func()) error
+	Abort  func()
+}
+
+// RemoteInstanceRefresher is an optional capability for a tracked remote whose
+// control process can restart independently of the backend process.
+type RemoteInstanceRefresher interface {
+	RefreshRemoteInstance(ctx context.Context, instance *ExecutorInstance) (*RemoteInstanceRefresh, error)
+}
+
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID             string
-	TaskID                 string
-	TaskTitle              string
-	SessionID              string
-	TaskEnvironmentID      string // Env this execution belongs to (shared across sessions in same task)
+	InstanceID string
+	// ExecutorType is retained in execution metadata so recovered sessions can
+	// safely re-check host-local filesystem eligibility.
+	ExecutorType      string
+	TaskID            string
+	TaskTitle         string
+	SessionID         string
+	TaskEnvironmentID string // Env this execution belongs to (shared across sessions in same task)
+	// WorkspaceReuseRequired means this runtime must attach to the supplied
+	// environment handle and must never fall back to provisioning a replacement.
+	WorkspaceReuseRequired bool
 	AgentProfileID         string
 	OfficeAgentProfileID   string
+	PromptTurnID           string
 	WorkspacePath          string
 	WorkspaceSourceRoots   []string
 	Protocol               string
 	Env                    map[string]string
+	// ApprovedSecretEnvKeys contains repository binding keys explicitly
+	// approved for SSH forwarding. Other request env keys remain filtered.
+	ApprovedSecretEnvKeys  []string
 	AutoApprovePermissions bool
 	// AutoApprovePermissionsOverride is set when a resolved profile explicitly
 	// selected the auto-approve value. Nil preserves agentctl defaults/env fallback.
 	AutoApprovePermissionsOverride *bool
 	Metadata                       map[string]interface{}
-	McpServers                     []McpServerConfig
-	AgentConfig                    agents.Agent // Agent type info needed by runtimes
-	PreviousExecutionID            string       // Non-empty when reconnecting to a previous execution
-	McpMode                        string       // MCP tool mode: "task" (default), "config", or "office"
-	AuthToken                      string       // Previously handshaken agentctl token for reconnects
-	BootstrapNonce                 string       // Stored nonce for re-handshake after container restart
+	// RemoteContributions carries validated, credential-free bindings to the
+	// runtime/agentctl boundary. Keys use the same workspace subpath convention
+	// as BaseBranches; the empty key is the workspace root.
+	RemoteContributions      map[string]models.RemoteContribution
+	ContributionDestinations map[string]models.ContributionDestination
+	ComparisonTargets        map[string]models.ComparisonTarget
+	McpServers               []McpServerConfig
+	// ProviderGatewayAuth authenticates the ACP agent against an
+	// OpenAI-compatible gateway right after initialize. Resolved from the
+	// launching profile's OpenAI-compatible provider fields.
+	ProviderGatewayAuth *acpprovider.GatewayAuth
+	AgentConfig         agents.Agent // Agent type info needed by runtimes
+	// ManagedRuntimeVersion is the effective exact version resolved for this
+	// launch. Remote executors use it during preflight before agentctl receives
+	// the final command.
+	ManagedRuntimeVersion string
+	PreviousExecutionID   string   // Non-empty when reconnecting to a previous execution
+	McpMode               string   // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
+	McpProviders          []string // Normalized provider capabilities attached to the task
+	McpProfile            *mcpprofile.Context
+	AuthToken             string // Previously handshaken agentctl token for reconnects
+	BootstrapNonce        string // Stored nonce for re-handshake after container restart
+	AgentctlStartupConfig commonconfig.AgentctlStartupConfig
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can
 	// call this to report real-time progress to the frontend.
 	OnProgress PrepareProgressCallback
+
+	// CheckpointRuntimeInventory persists exact, non-secret resource inventory
+	// before a Kubernetes launch enters its next fallible phase. It is nil for
+	// runtimes and embedded tests that do not support provisional persistence.
+	CheckpointRuntimeInventory func(context.Context, map[string]interface{}) error
+	// ReleaseRuntimeInventory removes this launch's provisional row after every
+	// created resource was rolled back. Implementations must use execution CAS.
+	ReleaseRuntimeInventory func(context.Context) error
 }
 
 // ExecutorInstance represents an agentctl instance created by a runtime.
@@ -350,16 +689,48 @@ type ExecutorInstance struct {
 	StopReason      string
 	AgentStopFailed bool
 
+	// Env is the adopted instance's own runtime environment, read back rather
+	// than pushed (AC-EXECUTORS-SURVIVAL-002.14's "runtime environment" row:
+	// deliberately memory-only, so it is only ever populated by a recovery
+	// path -- StandaloneExecutor.RecoverInstances -- reading it back from the
+	// live instance; a fresh launch's environment flows through
+	// ExecutorCreateRequest.Env instead, never through this field.
+	Env map[string]string
+
+	// WorkspaceSourceRoots is the adopted instance's own live source-root
+	// allowlist, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
+	// "workspace source roots" row). Same recovery-only shape as Env above.
+	WorkspaceSourceRoots []string
+
+	// ProviderSessionID is the adopted instance's own live agent-CLI session
+	// identity, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
+	// "provider session identity" row). Same recovery-only shape as Env above.
+	ProviderSessionID string
+
+	// AgentProfileID is a recovery-only carrier for
+	// AC-EXECUTORS-SURVIVAL-002.14's "agent profile identity" row: the
+	// recovery-inventory record's execution-profile column, read by
+	// StandaloneExecutor.buildRecoveredInstances so the recovery loop can set
+	// AgentExecution.AgentProfileID before re-deriving agent identity, without
+	// waiting on persistExecutorRunningResult's separate DB-backed self-heal.
+	// A fresh launch's profile flows through ExecutorCreateRequest.AgentProfileID
+	// instead, never through this field.
+	AgentProfileID string
+
 	// AuthToken is the agentctl auth token retrieved via handshake.
-	// Populated by Docker executor for encrypted storage in SecretStore.
+	// Populated by authenticated container/remote executors for encrypted storage in SecretStore.
 	// Empty for standalone (launcher-owned token wired via cfg.Agent.StandaloneAuthToken)
 	// and Sprites (no agentctl auth).
 	AuthToken string
 
-	// BootstrapNonce is the one-time nonce injected into Docker container env.
+	// BootstrapNonce is the one-time nonce injected into the remote agentctl environment.
 	// It is persisted so a restarted container can complete a fresh handshake
 	// against the newly started agentctl process.
 	BootstrapNonce string
+
+	// ReleaseRuntimeInventory is carried into manager-owned post-create rollback
+	// paths. It must run only after exact runtime cleanup succeeds.
+	ReleaseRuntimeInventory func(context.Context) error
 }
 
 // ToAgentExecution converts a ExecutorInstance to an AgentExecution.
@@ -371,6 +742,12 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	// Merge runtime metadata
 	for k, v := range ri.Metadata {
 		metadata[k] = v
+	}
+	executorType := req.ExecutorType
+	if executorType != "" {
+		metadata[MetadataKeyExecutorType] = executorType
+	} else {
+		delete(metadata, MetadataKeyExecutorType)
 	}
 
 	workspacePath := ri.WorkspacePath
@@ -390,11 +767,14 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 
 	execution := &AgentExecution{
 		ID:                   ri.InstanceID,
+		ExecutorType:         executorType,
+		RunID:                req.Env["KANDEV_RUN_ID"],
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
 		TaskEnvironmentID:    req.TaskEnvironmentID,
 		AgentProfileID:       req.AgentProfileID,
 		OfficeAgentProfileID: req.OfficeAgentProfileID,
+		promptTurnID:         req.PromptTurnID,
 		AgentID:              agentID,
 		ContainerID:          ri.ContainerID,
 		ContainerIP:          ri.ContainerIP,
@@ -403,7 +783,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		RuntimeName:          ri.RuntimeName,
 		Status:               v1.AgentStatusRunning,
 		StartedAt:            time.Now(),
-		Metadata:             metadata,
+		metadata:             metadata,
 		agentctl:             ri.Client,
 		standaloneInstanceID: ri.StandaloneInstanceID,
 		standalonePort:       ri.StandalonePort,

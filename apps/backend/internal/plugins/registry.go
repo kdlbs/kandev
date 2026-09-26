@@ -1,11 +1,14 @@
 package plugins
 
 import (
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/plugins/store"
 )
 
@@ -38,14 +41,24 @@ func (r *Registry) Load(s store.Store) error {
 	}
 
 	byID := make(map[string]*store.Record, len(records))
+	var migrationErrs []error
 	for _, rec := range records {
+		if rec.InstallationID == "" {
+			migrated := cloneRecord(rec)
+			migrated.InstallationID = uuid.NewString()
+			if err := s.Save(migrated); err != nil {
+				migrationErrs = append(migrationErrs, fmt.Errorf("migrate plugin installation id for %s: %w", rec.ID, err))
+			} else {
+				rec = migrated
+			}
+		}
 		byID[rec.ID] = cloneRecord(rec)
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.byID = byID
-	return nil
+	r.mu.Unlock()
+	return errors.Join(migrationErrs...)
 }
 
 // Get returns a copy of the record for id, and whether it was found.
@@ -155,6 +168,7 @@ func (r *Registry) SetRuntimeState(id string, status Status, lastError string, l
 
 func cloneRecord(rec *store.Record) *store.Record {
 	clone := *rec
+	clone.Manifest = rec.Clone()
 	if rec.AutoUpdate != nil {
 		autoUpdate := *rec.AutoUpdate
 		clone.AutoUpdate = &autoUpdate
@@ -164,4 +178,60 @@ func cloneRecord(rec *store.Record) *store.Record {
 		clone.LastErrorAt = &at
 	}
 	return &clone
+}
+
+// activeRepositoryProviderOwner returns the active plugin that owns provider,
+// excluding excludeID (used while validating an in-place upgrade).
+func (r *Registry) activeRepositoryProviderOwner(provider, excludeID string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for id, rec := range r.byID {
+		if id == excludeID || rec.Status != StatusActive {
+			continue
+		}
+		for _, declared := range rec.RepositoryProviders {
+			if strings.EqualFold(strings.TrimSpace(declared), strings.TrimSpace(provider)) {
+				return id, true
+			}
+		}
+	}
+	return "", false
+}
+
+// activeReferenceSourceOwner returns the active plugin that owns source,
+// excluding excludeID (used while validating an in-place upgrade).
+func (r *Registry) activeReferenceSourceOwner(source, excludeID string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for id, rec := range r.byID {
+		if id == excludeID || rec.Status != StatusActive {
+			continue
+		}
+		for _, declared := range rec.ReferenceSources {
+			if declared.Source == source {
+				return id, true
+			}
+		}
+	}
+	return "", false
+}
+
+// activeReferenceProviderKindOwner returns the active plugin that owns the
+// provider/kind pair, excluding excludeID (used while validating an in-place
+// upgrade). Mention routing authorizes by this pair, so source uniqueness on
+// its own cannot prevent ambiguous ownership.
+func (r *Registry) activeReferenceProviderKindOwner(provider, kind, excludeID string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for id, rec := range r.byID {
+		if id == excludeID || rec.Status != StatusActive {
+			continue
+		}
+		for _, declared := range rec.ReferenceSources {
+			if declared.Provider == provider && declared.Kind == kind {
+				return id, true
+			}
+		}
+	}
+	return "", false
 }

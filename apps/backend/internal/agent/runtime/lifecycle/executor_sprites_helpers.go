@@ -13,6 +13,7 @@ import (
 	sprites "github.com/superfly/sprites-go"
 	"go.uber.org/zap"
 
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/githubauth"
 )
 
@@ -128,9 +129,13 @@ func extractUploadHTTPStatus(msg string) int {
 	return code
 }
 
-func (r *SpritesExecutor) buildSpriteEnv(env map[string]string) []string {
-	result := make([]string, 0, len(env))
-	for k, v := range env {
+func (r *SpritesExecutor) buildSpriteEnv(env map[string]string, startup ...commonconfig.AgentctlStartupConfig) []string {
+	merged := env
+	if len(startup) > 0 {
+		merged = mergeAgentctlStartupEnvironment(env, startup[0])
+	}
+	result := make([]string, 0, len(merged))
+	for k, v := range merged {
 		if k == githubauth.CredentialHelperPathEnv {
 			continue
 		}

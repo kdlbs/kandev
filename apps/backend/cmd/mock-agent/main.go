@@ -17,6 +17,22 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 )
 
+// Advertised model ids. mock-slow is a delay tier (see delayRange) that E2E
+// fixtures select for slow responses; it must be advertised for the
+// no-silent-model-fallback strict policy to accept it.
+const (
+	modelConfigID       = "model"
+	modelFast           = "mock-fast"
+	modelSmart          = "mock-smart"
+	modelSlow           = "mock-slow"
+	modelUnique         = "opus[1m]"
+	modelAmbiguousFirst = "opus[270k]"
+	modelAmbiguousLast  = "opus[1m, fast]"
+	reasoningEffortLow  = "low"
+	reasoningEffortMed  = "medium"
+	reasoningEffortHigh = "high"
+)
+
 // logOutput is the writer for log messages (stderr). Tests can override this.
 var logOutput io.Writer = os.Stderr
 
@@ -31,13 +47,16 @@ var mcpServers map[string]mcpServerDef
 
 // mockAgent implements the acp.Agent interface for the mock agent.
 type mockAgent struct {
-	conn            *acp.AgentSideConnection
-	model           string
-	sessions        map[acp.SessionId]bool
-	sessionConfig   map[acp.SessionId][]acp.SessionConfigOption
-	commandsEmitted map[acp.SessionId]bool
-	nextSessionID   uint64
-	mu              sync.Mutex
+	conn              sessionUpdater
+	model             string
+	sessions          map[acp.SessionId]bool
+	promptCancels     map[acp.SessionId]context.CancelFunc
+	promptCancelHolds map[acp.SessionId]chan struct{}
+	sessionMCPServers map[acp.SessionId]map[string]mcpServerDef
+	sessionConfig     map[acp.SessionId][]acp.SessionConfigOption
+	commandsEmitted   map[acp.SessionId]bool
+	nextSessionID     uint64
+	mu                sync.Mutex
 }
 
 var _ acp.Agent = (*mockAgent)(nil)
@@ -66,10 +85,13 @@ func main() {
 	defer closeMCPClients()
 
 	ag := &mockAgent{
-		model:           model,
-		sessions:        make(map[acp.SessionId]bool),
-		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
-		commandsEmitted: make(map[acp.SessionId]bool),
+		model:             model,
+		sessions:          make(map[acp.SessionId]bool),
+		promptCancels:     make(map[acp.SessionId]context.CancelFunc),
+		promptCancelHolds: make(map[acp.SessionId]chan struct{}),
+		sessionMCPServers: make(map[acp.SessionId]map[string]mcpServerDef),
+		sessionConfig:     make(map[acp.SessionId][]acp.SessionConfigOption),
+		commandsEmitted:   make(map[acp.SessionId]bool),
 	}
 	asc := acp.NewAgentSideConnection(ag, os.Stdout, os.Stdin)
 	ag.conn = asc
@@ -78,14 +100,34 @@ func main() {
 }
 
 // Initialize handles the ACP initialize request, returning agent capabilities.
+//
+// The `_meta.claudeCode.promptQueueing` advertisement mirrors what
+// `@agentclientprotocol/claude-agent-acp` sends. It is set deliberately rather
+// than special-casing the mock downstream: prompt handoff and mid-turn steering
+// are gated on this negotiated advertisement, so the mock must earn eligibility
+// the same way a real bridge does or E2E would prove nothing about the gate.
 func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
+	var meta map[string]any
+	if mockPromptQueueingEnabled() {
+		meta = map[string]any{
+			"claudeCode": map[string]any{"promptQueueing": true},
+		}
+	}
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		AgentCapabilities: acp.AgentCapabilities{
 			LoadSession:     true,
 			McpCapabilities: acp.McpCapabilities{Sse: true},
+			SessionCapabilities: acp.SessionCapabilities{
+				Close: &acp.SessionCloseCapabilities{},
+			},
+			Meta: meta,
 		},
 	}, nil
+}
+
+func mockPromptQueueingEnabled() bool {
+	return strings.ToLower(strings.TrimSpace(os.Getenv("KANDEV_MOCK_AGENT_PROMPT_QUEUEING"))) != "false"
 }
 
 // NewSession creates a new conversation session.
@@ -95,8 +137,13 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 // them in the cache — this is what makes the utility-agents settings page
 // show model and mode options for mock-agent in E2E, and lets profile-mode
 // tests select a non-default mode.
-func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (a *mockAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	configOptions := mockSessionConfigOptions()
+	// Register MCP servers from the ACP session request (SSE servers). Keep the
+	// returned definitions on this session. The process may host multiple ACP
+	// sessions, and the global registry alone would route calls to the last URL.
+	sessionMCPServers := registerACPMcpServers(req.McpServers)
+
 	a.mu.Lock()
 	a.nextSessionID++
 	sid := acp.SessionId(fmt.Sprintf("mock-session-%d-%d", os.Getpid(), a.nextSessionID))
@@ -105,12 +152,13 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 		a.sessionConfig = make(map[acp.SessionId][]acp.SessionConfigOption)
 	}
 	a.sessionConfig[sid] = configOptions
+	if a.sessionMCPServers == nil {
+		a.sessionMCPServers = make(map[acp.SessionId]map[string]mcpServerDef)
+	}
+	a.sessionMCPServers[sid] = cloneMCPServerDefs(sessionMCPServers)
 	a.mu.Unlock()
 
-	// Register MCP servers from the ACP session request (SSE servers).
-	// This bridges ACP protocol MCP config to the mock agent's MCP client.
-	registerACPMcpServers(req.McpServers)
-
+	primeKandevMCPToolCatalog(ctx)
 	// Emit available commands asynchronously after the session/new response
 	// flushes. Real ACP agents (OpenCode, Claude) emit available_commands_update
 	// here, which lets clients populate slash menus before the first prompt.
@@ -148,20 +196,49 @@ func mockSessionModes() *acp.SessionModeState {
 }
 
 func mockSessionConfigOptions() []acp.SessionConfigOption {
+	return mockSessionConfigOptionsForModel("mock-fast")
+}
+
+func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 	modelCat := acp.SessionConfigOptionCategoryModel
 	modeCat := acp.SessionConfigOptionCategoryMode
 	thoughtCat := acp.SessionConfigOptionCategoryThoughtLevel
+	effortID := acp.SessionConfigId("effort")
+	effortName := "Effort"
+	effortDescription := "Controls how much reasoning the mock model uses"
+	effortValue := acp.SessionConfigValueId(reasoningEffortMed)
+	effortOptions := acp.SessionConfigSelectOptionsUngrouped{
+		{Value: reasoningEffortLow, Name: "Low", Description: ptr("Faster responses with less reasoning")},
+		{Value: reasoningEffortMed, Name: "Medium", Description: ptr("Balanced speed and reasoning")},
+		{Value: reasoningEffortHigh, Name: "High", Description: ptr("More reasoning for complex tasks")},
+	}
+	if model == modelSmart {
+		effortDescription = "Controls the reasoning depth for the smart mock model"
+		effortValue = reasoningEffortHigh
+		effortOptions = acp.SessionConfigSelectOptionsUngrouped{
+			{Value: reasoningEffortLow, Name: "Low", Description: ptr("Use less reasoning")},
+			{Value: reasoningEffortHigh, Name: "High", Description: ptr("Use deeper reasoning")},
+			{Value: "max", Name: "Max", Description: ptr("Use maximum reasoning")},
+		}
+	}
+	modelOptions := acp.SessionConfigSelectOptionsUngrouped{
+		{Value: modelFast, Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
+		{Value: modelSmart, Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
+		// E2E fixtures use "mock-slow" for the slow-response delay tier.
+		// It must be advertised so the no-silent-model-fallback strict
+		// policy (which fails session start when the profile model is
+		// absent from the advertised list) does not reject it.
+		{Value: modelSlow, Name: "Mock Slow", Description: ptr("Slow mock model for testing")},
+	}
+	modelOptions = append(modelOptions, mockModelVariationOptions()...)
 	return []acp.SessionConfigOption{
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modelCat,
-			CurrentValue: "mock-fast",
-			Id:           "model",
+			CurrentValue: acp.SessionConfigValueId(model),
+			Id:           modelConfigID,
 			Name:         "Model",
-			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-				{Value: "mock-fast", Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
-				{Value: "mock-smart", Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
-			}},
-			Type: "select",
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &modelOptions},
+			Type:         "select",
 		}},
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modeCat,
@@ -176,18 +253,30 @@ func mockSessionConfigOptions() []acp.SessionConfigOption {
 		}},
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &thoughtCat,
-			CurrentValue: "medium",
-			Id:           "effort",
-			Name:         "Effort",
-			Description:  ptr("Controls how much reasoning the mock model uses"),
-			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-				{Value: "low", Name: "Low", Description: ptr("Faster responses with less reasoning")},
-				{Value: "medium", Name: "Medium", Description: ptr("Balanced speed and reasoning")},
-				{Value: "high", Name: "High", Description: ptr("More reasoning for complex tasks")},
-			}},
-			Type: "select",
+			CurrentValue: effortValue,
+			Id:           effortID,
+			Name:         effortName,
+			Description:  ptr(effortDescription),
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &effortOptions},
+			Type:         "select",
 		}},
 	}
+}
+
+func mockModelVariationOptions() []acp.SessionConfigSelectOption {
+	catalog := strings.ToLower(strings.TrimSpace(os.Getenv("MOCK_AGENT_MODEL_CATALOG")))
+	if catalog == "ambiguous" {
+		return []acp.SessionConfigSelectOption{
+			{Value: modelAmbiguousFirst, Name: "Opus (270k)", Description: ptr("Ambiguous variation fixture")},
+			{Value: modelAmbiguousLast, Name: "Opus (1m, fast)", Description: ptr("Ambiguous variation fixture")},
+		}
+	}
+	if catalog == "unique" || (catalog == "" && strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true")) {
+		return []acp.SessionConfigSelectOption{
+			{Value: modelUnique, Name: "Opus (1m)", Description: ptr("Unique variation fixture")},
+		}
+	}
+	return nil
 }
 
 func cloneSessionConfigOptions(options []acp.SessionConfigOption) []acp.SessionConfigOption {
@@ -210,19 +299,43 @@ func ptr(s string) *string {
 // LoadSession restores a previous session for resume.
 // When --fail-on-resume is set, exit before completing the load — LoadSession
 // is only reached on resume, so no resumed-guard is needed here (unlike TUI).
-func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	if parseFailOnResumeFlag() {
 		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: refusing resume for session %s (--fail-on-resume), exiting 1\n", os.Getpid(), req.SessionId)
 		os.Exit(1)
 	}
+	if delay := parseResumeDelayFlag(); delay > 0 {
+		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: delaying resume for session %s by %s\n", os.Getpid(), req.SessionId, delay)
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return acp.LoadSessionResponse{}, ctx.Err()
+		}
+	}
+	sessionMCPServers := registerACPMcpServers(req.McpServers)
 	a.mu.Lock()
-	a.sessions[req.SessionId] = true
+	if a.sessions == nil {
+		a.sessions = make(map[acp.SessionId]bool)
+	}
 	if a.sessionConfig == nil {
 		a.sessionConfig = make(map[acp.SessionId][]acp.SessionConfigOption)
 	}
-	if _, ok := a.sessionConfig[req.SessionId]; !ok {
-		a.sessionConfig[req.SessionId] = mockSessionConfigOptions()
+	if a.commandsEmitted == nil {
+		a.commandsEmitted = make(map[acp.SessionId]bool)
 	}
+	if a.sessionMCPServers == nil {
+		a.sessionMCPServers = make(map[acp.SessionId]map[string]mcpServerDef)
+	}
+	a.sessions[req.SessionId] = true
+	a.sessionMCPServers[req.SessionId] = cloneMCPServerDefs(sessionMCPServers)
+	configOptions, ok := a.sessionConfig[req.SessionId]
+	if !ok {
+		a.sessionConfig[req.SessionId] = mockSessionConfigOptions()
+		configOptions = a.sessionConfig[req.SessionId]
+	}
+	responseConfigOptions := cloneSessionConfigOptions(configOptions)
 	// Reset emit state so the resume re-advertises commands (matches real
 	// agents which re-emit on session/load).
 	delete(a.commandsEmitted, req.SessionId)
@@ -230,28 +343,102 @@ func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (
 	_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: resumed session %s\n", os.Getpid(), req.SessionId)
 
 	// Re-emit available commands after the session/load response flushes.
+	primeKandevMCPToolCatalog(ctx)
 	go a.emitAvailableCommandsAfterDelay(req.SessionId)
 
-	return acp.LoadSessionResponse{}, nil
+	return acp.LoadSessionResponse{
+		ConfigOptions: responseConfigOptions,
+		Modes:         mockSessionModes(),
+	}, nil
 }
 
 // Prompt processes a user message and streams responses via SessionUpdate.
 func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
-	a.emitAvailableCommandsOnce(ctx, req.SessionId)
+	promptCtx, cancelPrompt := context.WithCancel(ctx)
 	prompt := extractPromptText(req.Prompt)
+	var cancelHold chan struct{}
+	if isCancelHoldPrompt(prompt) {
+		cancelHold = make(chan struct{})
+	}
+	a.mu.Lock()
+	if a.promptCancels == nil {
+		a.promptCancels = make(map[acp.SessionId]context.CancelFunc)
+	}
+	if a.promptCancelHolds == nil {
+		a.promptCancelHolds = make(map[acp.SessionId]chan struct{})
+	}
+	a.promptCancels[req.SessionId] = cancelPrompt
+	if cancelHold != nil {
+		a.promptCancelHolds[req.SessionId] = cancelHold
+	}
+	a.mu.Unlock()
+	defer func() {
+		cancelPrompt()
+		a.mu.Lock()
+		delete(a.promptCancels, req.SessionId)
+		delete(a.promptCancelHolds, req.SessionId)
+		a.mu.Unlock()
+	}()
+
+	a.emitAvailableCommandsOnce(promptCtx, req.SessionId)
+	if cancelHold != nil {
+		<-cancelHold
+		time.Sleep(mockCancelHoldDuration())
+		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+	}
 	// The /overloaded scenario must surface a real prompt-time ACP *error*
 	// (a JSON-RPC error response), which handlePrompt's emitter cannot do —
 	// so intercept it here and return the error from Prompt directly.
-	if resp, err, handled := a.handleOverloaded(ctx, req.SessionId, prompt); handled {
+	if resp, err, handled := a.handleOverloaded(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
-	e := &emitter{ctx: ctx, conn: a.conn, sid: req.SessionId}
-	handlePrompt(e, prompt, a.model)
+	// Same rationale as /overloaded above: /transport-lost must also surface a
+	// real prompt-time ACP error, so it is intercepted here rather than routed
+	// through handlePrompt's emitter.
+	if resp, err, handled := a.handleTransportLost(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
+	a.mu.Lock()
+	sessionMCPServers := cloneMCPServerDefs(a.sessionMCPServers[req.SessionId])
+	a.mu.Unlock()
+	e := &emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId, mcpServers: sessionMCPServers}
+	handlePrompt(e, prompt, a.sessionModel(req.SessionId))
+	if promptCtx.Err() != nil {
+		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+	}
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 }
 
+func (a *mockAgent) sessionModel(sessionID acp.SessionId) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, option := range a.sessionConfig[sessionID] {
+		if option.Select != nil && option.Select.Id == modelConfigID && option.Select.CurrentValue != "" {
+			return string(option.Select.CurrentValue)
+		}
+	}
+	return a.model
+}
+
 // Cancel handles session cancellation.
-func (a *mockAgent) Cancel(_ context.Context, _ acp.CancelNotification) error { return nil }
+func (a *mockAgent) Cancel(_ context.Context, req acp.CancelNotification) error {
+	a.mu.Lock()
+	cancelHold := a.promptCancelHolds[req.SessionId]
+	cancelPrompt := a.promptCancels[req.SessionId]
+	a.mu.Unlock()
+	if cancelHold != nil {
+		select {
+		case <-cancelHold:
+		default:
+			close(cancelHold)
+		}
+		return nil
+	}
+	if cancelPrompt != nil {
+		cancelPrompt()
+	}
+	return nil
+}
 
 // Authenticate handles auth requests (no-op for mock).
 func (a *mockAgent) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
@@ -292,8 +479,28 @@ func (a *mockAgent) SetSessionConfigOption(_ context.Context, req acp.SetSession
 	if !found {
 		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("unknown mock config option %q", req.ValueId.ConfigId)
 	}
+	if req.ValueId.ConfigId == modelConfigID {
+		modeValue := mockConfigOptionValue(options, "mode")
+		options = mockSessionConfigOptionsForModel(string(req.ValueId.Value))
+		for i := range options {
+			if options[i].Select != nil && options[i].Select.Id == "mode" && modeValue != "" {
+				if mockConfigOptionContainsValue(options[i].Select.Options, modeValue) {
+					options[i].Select.CurrentValue = modeValue
+				}
+			}
+		}
+	}
 	a.sessionConfig[req.ValueId.SessionId] = options
 	return acp.SetSessionConfigOptionResponse{ConfigOptions: cloneSessionConfigOptions(options)}, nil
+}
+
+func mockConfigOptionValue(options []acp.SessionConfigOption, id acp.SessionConfigId) acp.SessionConfigValueId {
+	for _, option := range options {
+		if option.Select != nil && option.Select.Id == id {
+			return option.Select.CurrentValue
+		}
+	}
+	return ""
 }
 
 func mockConfigOptionContainsValue(options acp.SessionConfigSelectOptions, value acp.SessionConfigValueId) bool {
@@ -324,6 +531,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	delete(a.commandsEmitted, req.SessionId)
 	a.mu.Unlock()
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
+	_ = os.Remove(transportLostCounterPath(req.SessionId))
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -391,10 +599,12 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "slow", Description: "Run a slow response (default 5s)", Input: hint("duration (e.g. 10s)")},
 		{Name: "background", Description: "Spawn a subagent and stay foreground-idle (default 8s)", Input: hint("duration (e.g. 8s)")},
 		{Name: "detached-background", Description: "Launch work that outlives the foreground turn (default 8s)", Input: hint("duration (e.g. 8s)")},
+		{Name: "parked-fixture", Description: "e2e-only: delayed shell-kind detached launch, for scripting the probe before settle", Input: hint("settleDelay (e.g. 3s)")},
 		{Name: "async-subagent-lifecycle", Description: "Replay an async Agent lifecycle (default 20s)", Input: hint("duration (e.g. 20s)")},
 		{Name: "async-subagent-teardown", Description: "Replay async Agent work with a missing completion"},
-		{Name: "error", Description: "Simulate an error"},
+		{Name: toolKeyError, Description: "Simulate an error"},
 		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
+		{Name: "transport-lost", Description: "Simulate an ACP transport disconnect (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},
 		{Name: "crash", Description: "Simulate agent crash"},
 		{Name: "all", Description: "Demonstrate all message types"},
@@ -482,6 +692,41 @@ func parseFailOnResumeFromArgs(args []string) bool {
 	return slices.Contains(args[1:], "--fail-on-resume")
 }
 
+// parseResumeDelayFlag returns the positive duration from --delay-resume. This
+// is a mock-agent-only readiness fixture used by E2E resume tests.
+func parseResumeDelayFlag() time.Duration {
+	if delay := parseResumeDelayFromArgs(os.Args); delay > 0 {
+		return delay
+	}
+	return parseResumeDelayFromValue(os.Getenv("E2E_MOCK_AGENT_RESUME_DELAY"))
+}
+
+func parseResumeDelayFromArgs(args []string) time.Duration {
+	for i, arg := range args[1:] {
+		var raw string
+		if arg == "--delay-resume" && i+1 < len(args)-1 {
+			raw = args[i+2]
+		} else if value, ok := strings.CutPrefix(arg, "--delay-resume="); ok {
+			raw = value
+		}
+		if raw == "" {
+			continue
+		}
+		if delay := parseResumeDelayFromValue(raw); delay > 0 {
+			return delay
+		}
+	}
+	return 0
+}
+
+func parseResumeDelayFromValue(raw string) time.Duration {
+	delay, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err == nil && delay > 0 {
+		return delay
+	}
+	return 0
+}
+
 // mcpConfigPayload is the JSON structure for --mcp-config.
 type mcpConfigPayload struct {
 	MCPServers map[string]mcpServerDef `json:"mcpServers"`
@@ -513,4 +758,19 @@ func parseMCPConfigFromArgs(args []string) string {
 		}
 	}
 	return ""
+}
+
+// isCancelHoldPrompt identifies the E2E-only fixture that holds an acknowledged
+// cancellation long enough to exercise remount and hydration projections.
+func isCancelHoldPrompt(prompt string) bool {
+	return strings.EqualFold(strings.TrimSpace(stripKandevSystem(prompt)), "/e2e:cancel-hold")
+}
+
+func mockCancelHoldDuration() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("KANDEV_E2E_CANCEL_HOLD_DURATION")); raw != "" {
+		if duration, err := time.ParseDuration(raw); err == nil && duration >= 0 {
+			return duration
+		}
+	}
+	return 8 * time.Second
 }

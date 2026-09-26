@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import { IconChevronDown, IconCode, IconLoader2 } from "@tabler/icons-react";
+import { EditorActionsDropdown } from "./editor-actions-dropdown";
+import { IconCode, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
@@ -26,6 +27,7 @@ import {
   getAvailableTaskTopbarEditors,
   resolveTaskTopbarEditorId,
 } from "@/components/task/editors-menu-availability";
+import { useTranslation } from "react-i18next";
 
 const menuItemClass = "cursor-pointer";
 
@@ -173,6 +175,7 @@ function EditorMenuEntry({
 }
 
 export function EditorsMenu({ activeSessionId, embeddedVscodeSupported }: EditorsMenuProps) {
+  const { t } = useTranslation();
   const openEditor = useOpenSessionInEditor(activeSessionId ?? null);
   const { editors } = useEditors();
   const defaultEditorId = useAppStore((state) => state.userSettings.defaultEditorId);
@@ -196,37 +199,24 @@ export function EditorsMenu({ activeSessionId, embeddedVscodeSupported }: Editor
       <OpenEditorButton
         disabled={!activeSessionId || openEditor.isLoading || enabledEditors.length === 0}
         isLoading={openEditor.isLoading}
-        tooltip={activeSessionId ? "Open editor" : "Select a session to open its worktree"}
+        tooltip={activeSessionId ? t("task:openEditor") : t("task:selectASessionToOpenIts")}
         worktreeOptions={worktreeOptions}
         onOpen={(worktreeId) => openWith(resolvedEditorId, worktreeId)}
       />
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            size="sm"
-            variant="outline"
-            className="rounded-none border-0 border-l px-2 cursor-pointer focus-visible:ring-inset"
-            data-testid="editors-menu-list"
-            disabled={!activeSessionId || enabledEditors.length === 0}
-          >
-            <IconChevronDown className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          {enabledEditors.length === 0 ? (
-            <DropdownMenuItem disabled>No editors available</DropdownMenuItem>
-          ) : (
-            enabledEditors.map((editor: EditorOption) => (
-              <EditorMenuEntry
-                key={editor.id}
-                editor={editor}
-                worktreeOptions={worktreeOptions}
-                onOpen={openWith}
-              />
-            ))
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <EditorActionsDropdown sessionId={activeSessionId}>
+        {enabledEditors.length === 0 ? (
+          <DropdownMenuItem disabled>{t("task:noEditorsAvailable")}</DropdownMenuItem>
+        ) : (
+          enabledEditors.map((editor: EditorOption) => (
+            <EditorMenuEntry
+              key={editor.id}
+              editor={editor}
+              worktreeOptions={worktreeOptions}
+              onOpen={openWith}
+            />
+          ))
+        )}
+      </EditorActionsDropdown>
     </div>
   );
 }

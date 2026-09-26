@@ -10,13 +10,14 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/netutil"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
@@ -71,6 +72,14 @@ type Manager struct {
 	// racing cancellation against tracker startup and accepting whichever
 	// outcome it happens to get.
 	afterTrackerStart func()
+
+	// turnIDSeq allocates the turn identifiers retained terminal outcomes
+	// are keyed by (AC-EXECUTORS-SURVIVAL-004.1). It is shared across every
+	// instance this Manager supervises and lives for this process's whole
+	// lifetime, matching the AC's "unique across every turn of every
+	// instance the control server supervises for as long as that control
+	// server runs" -- deliberately NOT reset per instance.
+	turnIDSeq atomic.Int64
 }
 
 // NewManager creates a new instance manager.
@@ -105,6 +114,11 @@ func (m *Manager) SetServerFactory(factory ServerFactory) {
 
 // CreateInstance creates a new agent instance.
 func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*CreateResponse, error) {
+	// createStart includes the m.mu queue wait deliberately: that wait is the
+	// leak pathology described below, and the diagnostic agentctl_create_ready_ms
+	// metric (api.handleSystemMetrics) exists to make it visible.
+	createStart := time.Now()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -160,25 +174,32 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		zap.String("workspace_path", req.WorkspacePath))
 
 	overrides := &config.InstanceOverrides{
-		InstanceID:             id,
-		Protocol:               agent.Protocol(req.Protocol),
-		AgentCommand:           agentCmd,
-		WorkDir:                req.WorkspacePath,
-		AutoStart:              &autoStart,
-		Env:                    agentEnv,
-		AutoApprovePermissions: req.AutoApprovePermissions,
-		AgentType:              req.AgentType,
-		McpServers:             mcpServers,
-		SessionID:              req.SessionID,
-		TaskID:                 req.TaskID,
-		DisableAskQuestion:     req.DisableAskQuestion,
-		AssumeMcpSse:           req.AssumeMcpSse,
-		AssumeMcpHttp:          req.AssumeMcpHttp,
-		McpMode:                req.McpMode,
-		RequiresProcessKill:    req.RequiresProcessKill,
-		StripEnv:               req.StripEnv,
-		BaseBranches:           req.BaseBranches,
-		WorkspaceSourceRoots:   req.WorkspaceSourceRoots,
+		InstanceID:                 id,
+		Protocol:                   agent.Protocol(req.Protocol),
+		AgentCommand:               agentCmd,
+		WorkDir:                    req.WorkspacePath,
+		AutoStart:                  &autoStart,
+		Env:                        agentEnv,
+		AutoApprovePermissions:     req.AutoApprovePermissions,
+		AgentType:                  req.AgentType,
+		McpServers:                 mcpServers,
+		SessionID:                  req.SessionID,
+		TaskID:                     req.TaskID,
+		DisableAskQuestion:         req.DisableAskQuestion,
+		AssumeMcpSse:               req.AssumeMcpSse,
+		AssumeMcpHttp:              req.AssumeMcpHttp,
+		McpMode:                    req.McpMode,
+		McpProviders:               req.McpProviders,
+		McpProfile:                 req.McpProfile,
+		NamespacesMCPToolsByServer: req.NamespacesMCPToolsByServer,
+		RequiresProcessKill:        req.RequiresProcessKill,
+		StripEnv:                   req.StripEnv,
+		ProviderGatewayAuth:        req.ProviderGatewayAuth,
+		BaseBranches:               req.BaseBranches,
+		ComparisonTargets:          req.ComparisonTargets,
+		RemoteContributions:        req.RemoteContributions,
+		ContributionDestinations:   req.ContributionDestinations,
+		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
 	}
 
 	m.logger.Info("CreateInstance: applying overrides",
@@ -192,6 +213,16 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 
 	// Create process manager
 	procMgr := process.NewManager(instanceCfg, m.logger)
+	// Wire retained-outcome recording (AC-EXECUTORS-SURVIVAL-004) before
+	// anything that could reach Start(): this manager satisfies
+	// process.TurnOutcomeRecorder via RetainTurnOutcome above, and nothing
+	// outside this function can start the process manager until
+	// CreateInstance returns, so setting it here happens-before any
+	// terminal event the instance could ever produce.
+	procMgr.SetTurnOutcomeRecorder(id, m)
+	// Materialize provider-qualified comparison targets before any tracker
+	// polling starts. Failures remain explicit unavailable tracker state.
+	procMgr.PrepareComparisonTargets(ctx)
 
 	// Start root + per-repo trackers so file-change events fire even in passthrough mode.
 	procMgr.StartAllWorkspaceTrackers(context.Background())
@@ -229,6 +260,8 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		AgentCommand:  agentCmd,
 		Env:           req.Env,
 		CreatedAt:     time.Now(),
+		SessionID:     req.SessionID,
+		TaskID:        req.TaskID,
 		manager:       procMgr,
 	}
 	inst.MarkActivity()
@@ -237,6 +270,15 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	httpServer := m.startHTTPServer(port, listener, handler, id)
 	inst.server = httpServer
 	m.instances[id] = inst
+
+	// Clamp to a minimum of 1ms so a genuinely sub-millisecond creation can't
+	// be stored as 0, which CreateReadyMillis's zero value reserves to mean
+	// "not yet recorded".
+	readyMillis := time.Since(createStart).Milliseconds()
+	if readyMillis <= 0 {
+		readyMillis = 1
+	}
+	instanceCfg.CreateReadyMillis.Store(readyMillis)
 
 	m.logger.Info("created instance",
 		zap.String("instance_id", id),
@@ -301,7 +343,7 @@ func (m *Manager) allocatePortAndListener(id string) (int, net.Listener, error) 
 		// all interfaces so Docker/remote executors can reach the instance.
 		ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", m.config.ListenHost(), allocated))
 		if err != nil {
-			if errors.Is(err, syscall.EADDRINUSE) || strings.Contains(err.Error(), "address already in use") {
+			if netutil.IsAddrInUse(err) {
 				m.portAlloc.MarkUnavailable(allocated)
 				m.logger.Warn("port already in use; retrying",
 					zap.String("instance_id", id),
@@ -451,13 +493,27 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 	if !ok {
 		return fmt.Errorf("instance %s not found", id)
 	}
+	return m.stopInstance(ctx, id, inst)
+}
+
+func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) error {
 	inst.stopMu.Lock()
 	defer inst.stopMu.Unlock()
 
 	// A concurrent successful stop may have removed the instance while this
 	// caller waited for the per-instance teardown lock.
 	m.mu.Lock()
-	if current, exists := m.instances[id]; !exists || current != inst {
+	current, exists := m.instances[id]
+	if !exists {
+		alreadyStopped := inst.portReleased
+		m.mu.Unlock()
+		if !alreadyStopped {
+			return fmt.Errorf("instance %s not found", id)
+		}
+		m.logger.Debug("StopInstance already completed", zap.String("instance_id", id))
+		return nil
+	}
+	if current != inst {
 		m.mu.Unlock()
 		return fmt.Errorf("instance %s not found", id)
 	}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import type React from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileTree, searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import type { FileTreeNode } from "@/lib/types/backend";
@@ -12,6 +13,7 @@ import { compareTreeNodes, sortRootChildren } from "./file-tree-utils";
 import { restoredExpandedPaths } from "./file-browser-restore";
 import { useTreeLoader } from "./file-browser-tree-loader";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { isWorkspaceTreePath } from "@/lib/workspace-file-path";
 
 const debugLoad = createDebugLogger("file-browser:load");
 const debugChanges = createDebugLogger("file-browser:changes");
@@ -24,6 +26,45 @@ const FB_IS_DIR = (n: FileTreeNode) => n.is_dir;
 export type FileBrowserRow = VisibleRow<FileTreeNode>;
 
 export type LoadState = "loading" | "waiting" | "loaded" | "manual" | "error";
+
+type FileBrowserTreeResult = {
+  tree: FileTreeNode | null;
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
+  expandedPaths: ReadonlySet<string>;
+  setExpandedPaths: React.Dispatch<React.SetStateAction<Set<string>>>;
+  visibleRows: FileBrowserRow[];
+  visibleLoadingPaths: Set<string>;
+  isLoadingTree: boolean;
+  loadState: LoadState;
+  loadError: string | null;
+  loadTree: ReturnType<typeof useTreeLoader>;
+  showLoading: (path: string) => void;
+  hideLoading: (path: string) => void;
+  isLoading: (path: string) => boolean;
+  collapseAll: () => void;
+};
+
+function useMemoizedFileBrowserTreeResult(result: FileBrowserTreeResult) {
+  return useMemo(
+    () => result,
+    [
+      result.tree,
+      result.setTree,
+      result.expandedPaths,
+      result.setExpandedPaths,
+      result.visibleRows,
+      result.visibleLoadingPaths,
+      result.isLoadingTree,
+      result.loadState,
+      result.loadError,
+      result.loadTree,
+      result.showLoading,
+      result.hideLoading,
+      result.isLoading,
+      result.collapseAll,
+    ],
+  );
+}
 
 /** Hook encapsulating file search state and handlers. */
 export function useFileBrowserSearch(sessionId: string) {
@@ -103,6 +144,21 @@ export function useFileBrowserSearch(sessionId: string) {
   };
 }
 
+function nearestExpandedFolder(parentPath: string, expandedPaths: ReadonlySet<string>): string {
+  let candidate = parentPath;
+  while (candidate) {
+    if (expandedPaths.has(candidate)) return candidate;
+    const lastSlash = candidate.lastIndexOf("/");
+    candidate = lastSlash === -1 ? "" : candidate.substring(0, lastSlash);
+  }
+  return "";
+}
+
+function isExpandedPathInRefreshScope(path: string, repositoryName?: string): boolean {
+  if (!isWorkspaceTreePath(path)) return false;
+  return !repositoryName || path === repositoryName || path.startsWith(`${repositoryName}/`);
+}
+
 /** Apply incoming file changes to the tree by refreshing affected folders. */
 export function applyFileChanges(ctx: {
   client: ReturnType<typeof getWebSocketClient>;
@@ -119,16 +175,17 @@ export function applyFileChanges(ctx: {
       foldersToRefresh.add("");
       const repo = change.repository_name;
       for (const exp of expandedPaths) {
-        if (!repo || exp === repo || exp.startsWith(repo + "/")) {
+        if (isExpandedPathInRefreshScope(exp, repo)) {
           foldersToRefresh.add(exp);
         }
       }
       continue;
     }
     const p = change.path;
+    if (!isWorkspaceTreePath(p)) continue;
     const lastSlash = p.lastIndexOf("/");
     const parent = lastSlash === -1 ? "" : p.substring(0, lastSlash);
-    if (parent === "" || expandedPaths.has(parent)) foldersToRefresh.add(parent);
+    foldersToRefresh.add(nearestExpandedFolder(parent, expandedPaths));
     if (p === "" || expandedPaths.has(p)) foldersToRefresh.add(p);
   }
   if (foldersToRefresh.size === 0) {
@@ -440,7 +497,7 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     setFilesPanelExpandedPaths(effectiveResetKey, Array.from(expandedPaths));
   }, [expandedPaths, effectiveResetKey, isLoadingTree]);
   useFileChangeSubscription({ sessionIdRef, expandedPathsRef, setTree, setLoadState });
-  return {
+  return useMemoizedFileBrowserTreeResult({
     tree,
     setTree,
     expandedPaths,
@@ -455,7 +512,7 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     hideLoading,
     isLoading,
     collapseAll: treeApi.collapseAll,
-  };
+  });
 }
 
 export {

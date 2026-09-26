@@ -1,5 +1,6 @@
 import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   skip: number;
@@ -16,6 +17,7 @@ export function AzureDevOpsPullRequestPagination({
   pageSize,
   onPage,
 }: Props) {
+  const { t } = useTranslation();
   if (skip === 0 && count < pageSize) return null;
   return (
     <div className="flex items-center justify-between border-t px-4 py-2">
@@ -30,7 +32,7 @@ export function AzureDevOpsPullRequestPagination({
           onClick={() => onPage(Math.max(0, skip - pageSize))}
           disabled={loading || skip === 0}
           className="cursor-pointer"
-          aria-label="Previous pull request page"
+          aria-label={t("azuredevops:previousPullRequestPage")}
         >
           <IconChevronLeft className="h-4 w-4" />
         </Button>
@@ -41,7 +43,7 @@ export function AzureDevOpsPullRequestPagination({
           onClick={() => onPage(skip + pageSize)}
           disabled={loading || count < pageSize}
           className="cursor-pointer"
-          aria-label="Next pull request page"
+          aria-label={t("azuredevops:nextPullRequestPage")}
         >
           <IconChevronRight className="h-4 w-4" />
         </Button>

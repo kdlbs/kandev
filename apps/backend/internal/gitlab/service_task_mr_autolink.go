@@ -84,6 +84,7 @@ func (s *Service) AutoLinkMRForBranch(
 	if err := store.UpsertTaskMR(ctx, association); err != nil {
 		return nil, fmt.Errorf("upsert task MR: %w", err)
 	}
+	s.reconcileComparisonTarget(ctx, taskID, client.Host(), status.MR)
 	// Detach from ctx's cancellation, bounded by the same timeout as the
 	// URL-link flow's equivalent post-commit call: the association above
 	// already committed, so a caller's context canceling right after must

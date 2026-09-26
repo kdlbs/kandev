@@ -11,16 +11,40 @@ import {
 import {
   DockerfileBuildCard,
   DockerContainersCard,
+  UserNamespacesCard,
 } from "@/components/settings/profile-edit/docker-sections";
+import { DockerNetworkCard } from "@/components/settings/profile-edit/docker-network-card";
+import type { AdditionalNetworkRow } from "@/components/settings/profile-edit/use-docker-networks-form-state";
 import { NetworkPoliciesCard } from "@/components/settings/profile-edit/sprites-sections";
 import { SpritesInstancesCard } from "@/components/settings/sprites-settings";
 
 type DockerSectionsProps = {
+  // Present for a remote Docker profile: the daemon the build targets.
+  remoteExecutorId?: string;
   profile: ExecutorProfile;
   dockerfile: string;
   onDockerfileChange: (v: string) => void;
   imageTag: string;
   onImageTagChange: (v: string) => void;
+  allowsUserNamespaces: boolean;
+  allowUserNamespaces: boolean;
+  onAllowUserNamespacesChange: (v: boolean) => void;
+  networks: DockerNetworksFormSlice;
+};
+
+/** The network form slice the card needs, as the profile form exposes it. */
+type DockerNetworksFormSlice = {
+  primaryNetwork: string;
+  setPrimaryNetwork: (v: string) => void;
+  primaryGwPriority: string;
+  setPrimaryGwPriority: (v: string) => void;
+  additionalNetworks: AdditionalNetworkRow[];
+  addAdditionalNetwork: () => void;
+  updateAdditionalNetwork: (index: number, patch: Partial<AdditionalNetworkRow>) => void;
+  removeAdditionalNetwork: (index: number) => void;
+  baselinePrimaryNetwork: string;
+  baselinePrimaryGwPriority: string;
+  baselineAdditionalNetworks: AdditionalNetworkRow[];
 };
 
 export function DockerSections({
@@ -29,6 +53,11 @@ export function DockerSections({
   onDockerfileChange,
   imageTag,
   onImageTagChange,
+  allowsUserNamespaces,
+  allowUserNamespaces,
+  onAllowUserNamespacesChange,
+  remoteExecutorId,
+  networks,
 }: DockerSectionsProps) {
   return (
     <>
@@ -39,8 +68,29 @@ export function DockerSections({
         imageTag={imageTag}
         baselineImageTag={profile.config?.image_tag ?? ""}
         onImageTagChange={onImageTagChange}
+        remoteExecutorId={remoteExecutorId}
       />
-      <DockerContainersCard profileId={profile.id} />
+      <DockerNetworkCard
+        primaryNetwork={networks.primaryNetwork}
+        onPrimaryNetworkChange={networks.setPrimaryNetwork}
+        primaryGwPriority={networks.primaryGwPriority}
+        onPrimaryGwPriorityChange={networks.setPrimaryGwPriority}
+        additionalNetworks={networks.additionalNetworks}
+        onAddAdditionalNetwork={networks.addAdditionalNetwork}
+        onUpdateAdditionalNetwork={networks.updateAdditionalNetwork}
+        onRemoveAdditionalNetwork={networks.removeAdditionalNetwork}
+        baselinePrimaryNetwork={networks.baselinePrimaryNetwork}
+        baselinePrimaryGwPriority={networks.baselinePrimaryGwPriority}
+        baselineAdditionalNetworks={networks.baselineAdditionalNetworks}
+      />
+      {allowsUserNamespaces && (
+        <UserNamespacesCard
+          enabled={allowUserNamespaces}
+          baselineEnabled={profile.config?.allow_user_namespaces === "true"}
+          onChange={onAllowUserNamespacesChange}
+        />
+      )}
+      {!remoteExecutorId && <DockerContainersCard profileId={profile.id} />}
     </>
   );
 }
@@ -55,6 +105,10 @@ type SpritesSectionsProps = {
   remoteCredentials: string[];
   baselineRemoteCredentials?: string[];
   onRemoteCredentialsChange: (ids: string[]) => void;
+  configBundleIds: string[];
+  baselineConfigBundleIds?: string[];
+  onConfigBundleChange: (ids: string[]) => void;
+  isSSH?: boolean;
   agentEnvVars: Record<string, string | null>;
   baselineAgentEnvVars?: Record<string, string | null>;
   onAgentEnvVarChange: (agentId: string, secretId: string | null) => void;
@@ -81,6 +135,10 @@ export function SpritesSections({
   remoteCredentials,
   baselineRemoteCredentials,
   onRemoteCredentialsChange,
+  configBundleIds,
+  baselineConfigBundleIds,
+  onConfigBundleChange,
+  isSSH,
   agentEnvVars,
   baselineAgentEnvVars,
   onAgentEnvVarChange,
@@ -104,6 +162,10 @@ export function SpritesSections({
         selectedIds={remoteCredentials}
         baselineSelectedIds={baselineRemoteCredentials}
         onChange={onRemoteCredentialsChange}
+        configBundleIds={configBundleIds}
+        baselineConfigBundleIds={baselineConfigBundleIds}
+        onConfigBundleChange={onConfigBundleChange}
+        isSSH={isSSH}
         agentEnvVars={agentEnvVars}
         baselineAgentEnvVars={baselineAgentEnvVars}
         onAgentEnvVarChange={onAgentEnvVarChange}

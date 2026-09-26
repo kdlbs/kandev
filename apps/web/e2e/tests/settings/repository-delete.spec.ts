@@ -50,7 +50,7 @@ test.describe("Repository deletion", () => {
       suffix,
     });
 
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/repositories`);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
 
     const card = testPage.locator('[data-slot="card"]', { hasText: repo.name });
     await expect(card).toBeVisible({ timeout: 15_000 });
@@ -120,7 +120,7 @@ test.describe("Repository deletion", () => {
       )
       .toBeGreaterThan(0);
 
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/repositories`);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
 
     const card = testPage.locator('[data-slot="card"]', { hasText: repo.name });
     await expect(card).toBeVisible({ timeout: 15_000 });

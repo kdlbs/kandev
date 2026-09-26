@@ -2,7 +2,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReviewWatchDialog } from "./review-watch-dialog";
 
+const promptEditor = vi.hoisted(() => vi.fn());
+
 const store = {
+  features: { dynamicAgentRouting: false },
   workspaces: { activeId: "ws-1" },
   workflows: { items: [{ id: "workflow", name: "Delivery", hidden: false }] },
   agentProfiles: { items: [] },
@@ -21,8 +24,17 @@ vi.mock("@/hooks/use-workflow-steps", () => ({
 vi.mock("@/components/watcher-repository-fields", () => ({
   WatcherRepositoryFields: () => <div>Repository and base branch</div>,
 }));
+vi.mock("@/components/settings/settings-prompt-editor", () => ({
+  SettingsPromptEditor: (props: Record<string, unknown>) => {
+    promptEditor(props);
+    return <div aria-label={props.ariaLabel as string} data-testid={props.testId as string} />;
+  },
+}));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  promptEditor.mockReset();
+});
 
 describe("ReviewWatchDialog", () => {
   it("renders the complete watch controls in a narrow-safe dialog", () => {
@@ -44,5 +56,26 @@ describe("ReviewWatchDialog", () => {
     expect(
       screen.getByText(/leave empty to match merge requests requesting your review/i),
     ).toBeTruthy();
+  });
+
+  it("uses GitLab merge request placeholders and saved-prompt references", () => {
+    render(
+      <ReviewWatchDialog
+        open
+        onOpenChange={vi.fn()}
+        watch={null}
+        workspaceId="ws-1"
+        onCreate={vi.fn()}
+        onUpdate={vi.fn()}
+      />,
+    );
+
+    expect(promptEditor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptReferences: true,
+        testId: "review-watch-prompt-editor",
+        placeholders: expect.arrayContaining([expect.objectContaining({ key: "mr.url" })]),
+      }),
+    );
   });
 });

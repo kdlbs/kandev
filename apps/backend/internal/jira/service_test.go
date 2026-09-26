@@ -60,6 +60,7 @@ type fakeClient struct {
 	listProjects  func() ([]JiraProject, error)
 	listStatuses  func(projectKey string) ([]JiraStatus, error)
 	searchFn      func(jql string) (*SearchResult, error)
+	watchSearchFn func(jql string) (*SearchResult, error)
 	transitionLog []string // "key:id"
 }
 
@@ -102,6 +103,13 @@ func (c *fakeClient) SearchTickets(_ context.Context, jql, _ string, _ int) (*Se
 		return c.searchFn(jql)
 	}
 	return &SearchResult{}, nil
+}
+
+func (c *fakeClient) SearchTicketsForWatch(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+	if c.watchSearchFn != nil {
+		return c.watchSearchFn(jql)
+	}
+	return c.SearchTickets(ctx, jql, pageToken, maxResults)
 }
 
 type svcFixture struct {
@@ -238,6 +246,44 @@ func TestService_SetConfig_EmptySecret_KeepsExisting(t *testing.T) {
 	}
 	if got, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace("default")); got != "first" {
 		t.Errorf("secret should be preserved, got %q", got)
+	}
+}
+
+func TestService_LegacySecretOnlyAppliesToMigratedWorkspace(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	f.store.migratedToWorkspace = "default"
+	for _, workspaceID := range []string{"default", "other"} {
+		if err := f.store.UpsertConfigForWorkspace(ctx, workspaceID, &JiraConfig{
+			SiteURL:      "https://acme.atlassian.net",
+			Email:        "user@example.com",
+			AuthMethod:   AuthMethodAPIToken,
+			InstanceType: InstanceTypeCloud,
+		}); err != nil {
+			t.Fatalf("upsert config for %s: %v", workspaceID, err)
+		}
+	}
+	if err := f.secrets.Set(ctx, SecretKey, "Legacy Jira token", "legacy-token"); err != nil {
+		t.Fatalf("set legacy secret: %v", err)
+	}
+
+	migrated, err := f.svc.GetConfigForWorkspace(ctx, "default")
+	if err != nil {
+		t.Fatalf("get migrated workspace config: %v", err)
+	}
+	if !migrated.HasSecret {
+		t.Fatal("expected migrated workspace to retain the legacy secret fallback")
+	}
+
+	other, err := f.svc.GetConfigForWorkspace(ctx, "other")
+	if err != nil {
+		t.Fatalf("get unrelated workspace config: %v", err)
+	}
+	if other.HasSecret {
+		t.Fatal("legacy secret must not leak into an unrelated workspace")
+	}
+	if secret, _ := f.svc.revealSecret(ctx, "other"); secret != "" {
+		t.Fatalf("reveal unrelated workspace secret = %q", secret)
 	}
 }
 

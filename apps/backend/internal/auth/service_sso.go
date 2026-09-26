@@ -62,8 +62,8 @@ type ExternalIdentity struct {
 // New users are always provisioned as members; external login never creates or
 // elevates an admin (role changes stay with admin user management). A disabled
 // account is rejected. The returned string is the raw session token to place
-// in the kandev_session cookie — the caller (the plugin webhook relay) sets the
-// cookie; the plugin never receives this token.
+// in the session cookie (name derived from the request host) — the caller (the
+// plugin webhook relay) sets the cookie; the plugin never receives this token.
 func (s *Service) AuthenticateExternal(ctx context.Context, ext ExternalIdentity, userAgent, ip string) (*usermodels.User, string, error) {
 	if s.Mode() != ModeEnabled {
 		return nil, "", ErrSSONotEnabled

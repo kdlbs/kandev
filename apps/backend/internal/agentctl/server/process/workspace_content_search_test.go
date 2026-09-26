@@ -241,6 +241,33 @@ func TestManagerSearchWorkspaceContentGroupsResultsByRepository(t *testing.T) {
 	}
 }
 
+func TestManagerSearchWorkspaceContentDiscoversRepositoryAddedAfterStartup(t *testing.T) {
+	taskRoot := t.TempDir()
+	firstRepo := filepath.Join(taskRoot, "alpha")
+	initGitRepoAt(t, firstRepo)
+	writeFile(t, firstRepo, "match.txt", "late repository token\n")
+
+	manager := NewManager(&config.InstanceConfig{WorkDir: taskRoot}, newTestLogger(t))
+	t.Cleanup(manager.stopWorkspaceTrackers)
+
+	secondRepo := filepath.Join(taskRoot, "beta")
+	initGitRepoAt(t, secondRepo)
+	writeFile(t, secondRepo, "match.txt", "late repository token\n")
+
+	response, err := manager.SearchWorkspaceContent(context.Background(), "token", 1)
+	if err != nil {
+		t.Fatalf("SearchWorkspaceContent returned error: %v", err)
+	}
+	if len(response.Results) != 2 {
+		t.Fatalf("result count = %d, want one per repo: %#v", len(response.Results), response.Results)
+	}
+	if response.Results[0].RepositoryName != "alpha" ||
+		response.Results[1].RepositoryName != "beta" {
+		t.Fatalf("repository order = %q, %q; want alpha, beta",
+			response.Results[0].RepositoryName, response.Results[1].RepositoryName)
+	}
+}
+
 func TestManagerSearchWorkspaceContentClampsLimitPerRepository(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	t.Cleanup(cleanup)

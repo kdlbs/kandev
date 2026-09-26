@@ -2,14 +2,67 @@ package sqlite
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
 
-// CreateCostEvent records a new cost event.
+// ErrDuplicateUsageEvent is returned by CreateCostEvent when the row's
+// UsageEventID collides with an existing one. The real duplicate source is
+// not bus redelivery — neither the memory nor the NATS event bus redelivers
+// (see internal/events/bus/{memory,nats}.go) — it is the SAME underlying
+// completion frame reaching the publisher twice, e.g. a reconnecting WS
+// client replaying a buffered stream event (see
+// orchestrator.usageEventIDFor's doc comment for how the id is derived to
+// collide in exactly that case). Either way this must not double-count
+// cost; callers treat this as an idempotent no-op, not a failure, but still
+// get a distinct signal to attribute to writer health rather than to
+// "written".
+var ErrDuplicateUsageEvent = errors.New("duplicate usage_event_id")
+
+// usageEventIndexName is the partial unique index enforcing at most one row
+// per non-NULL usage_event_id (docs/specs/office/requirements/costs.md).
+const usageEventIndexName = "uniq_office_cost_usage_event"
+
+// sqliteUsageEventViolationMessage is the substring go-sqlite3 puts in a
+// UNIQUE-constraint error for this index. SQLite exposes no typed access to
+// the violated index's name, only the column ("UNIQUE constraint failed:
+// office_cost_events.usage_event_id"), which is unique to this index in
+// this table.
+const sqliteUsageEventViolationMessage = "UNIQUE constraint failed: office_cost_events.usage_event_id"
+
+// isUsageEventUniqueViolation reports whether err is a violation of
+// uniq_office_cost_usage_event specifically, not any unique violation. On
+// PostgreSQL it inspects the typed pgconn.PgError's constraint name; on
+// SQLite (no typed access to the constraint name) it matches the
+// column-list message documented above. Mirrors
+// internal/task/repository/sqlite/task_external_id.go's
+// isExternalIDUniqueViolation.
+func isUsageEventUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" && pgErr.ConstraintName == usageEventIndexName
+	}
+	return strings.Contains(err.Error(), sqliteUsageEventViolationMessage)
+}
+
+// CreateCostEvent records a new cost event. A UsageEventID collision
+// (redelivery of the same prompt-usage event) is reported as
+// ErrDuplicateUsageEvent rather than the raw driver error, so callers can
+// treat it as an idempotent no-op. Office's cost subscriber no longer
+// shares this insert with a task_sessions rollup write (that pairing now
+// happens entirely inside internal/task/usage's writer via its own
+// insertUsageEventAndRollup — docs/specs/task-cost-ledger/spec.md AC-10,
+// AC-21), so this always executes against r.db directly with no
+// transaction parameter to plumb through.
 func (r *Repository) CreateCostEvent(ctx context.Context, event *models.CostEvent) error {
 	if event.ID == "" {
 		event.ID = uuid.New().String()
@@ -19,23 +72,37 @@ func (r *Repository) CreateCostEvent(ctx context.Context, event *models.CostEven
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO office_cost_events (
 			id, session_id, task_id, agent_profile_id, project_id,
-			model, provider, tokens_in, tokens_cached_in, tokens_out,
-			cost_subcents, estimated, occurred_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			model, provider, tokens_in, tokens_cached_in,
+			tokens_cached_read, tokens_cached_write, tokens_out,
+			cost_subcents, estimated, turn_id, usage_event_id, cost_source,
+			rate_input_per_million, rate_cached_read_per_million,
+			rate_cached_write_per_million, rate_output_per_million,
+			pricing_catalog_version, cost_contract_version,
+			occurred_at, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), event.ID, event.SessionID, event.TaskID, event.AgentProfileID,
 		event.ProjectID, event.Model, event.Provider, event.TokensIn,
-		event.TokensCachedIn, event.TokensOut, event.CostSubcents,
-		event.Estimated, event.OccurredAt, event.CreatedAt)
+		event.TokensCachedIn, event.TokensCachedRead, event.TokensCachedWrite,
+		event.TokensOut, event.CostSubcents, event.Estimated,
+		event.TurnID, event.UsageEventID, event.CostSource,
+		event.RateInputPerMillion, event.RateCachedReadPerMillion,
+		event.RateCachedWritePerMillion, event.RateOutputPerMillion,
+		event.PricingCatalogVersion, event.CostContractVersion,
+		event.OccurredAt, event.CreatedAt)
+	if err != nil && isUsageEventUniqueViolation(err) {
+		return ErrDuplicateUsageEvent
+	}
 	return err
 }
 
-// ListCostEvents returns cost events filtered by workspace (via task join), ordered by time.
+// ListCostEvents returns cost events filtered by their task or run-session workspace, ordered by time.
 func (r *Repository) ListCostEvents(ctx context.Context, workspaceID string) ([]*models.CostEvent, error) {
 	var events []*models.CostEvent
 	err := r.ro.SelectContext(ctx, &events, r.ro.Rebind(`
 		SELECT e.* FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
-		WHERE t.workspace_id = ?
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 		ORDER BY e.occurred_at DESC
 	`), workspaceID)
 	if err != nil {
@@ -58,9 +125,10 @@ func (r *Repository) GetCostsByAgent(ctx context.Context, workspaceID string) ([
 			SUM(e.cost_subcents) AS total_subcents,
 			COUNT(*) AS count
 		FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
 		LEFT JOIN agent_profiles ap ON ap.id = e.agent_profile_id
-		WHERE t.workspace_id = ?
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 		GROUP BY e.agent_profile_id
 	`), workspaceID)
 	if err != nil {
@@ -72,21 +140,29 @@ func (r *Repository) GetCostsByAgent(ctx context.Context, workspaceID string) ([
 	return results, nil
 }
 
-// GetCostsByProject returns aggregated costs grouped by project, filtered by workspace.
-// group_label resolves to the project name; empty when project_id is unset
-// or the project row has been deleted.
+// GetCostsByProject returns aggregated costs grouped by project, filtered by
+// workspace. Attribution is live: it groups by the task's *current*
+// project_id, not the office_cost_events.project_id snapshot written at
+// usage-event time. Unlike agent attribution (see GetCostsByAgent, and
+// costContractVersion's doc comment in prompt_usage_cost.go), a task's
+// project is an organisational grouping the user is expected to change
+// after the work is done — reassigning a finished task must move its whole
+// cost history onto the new project immediately, not strand it as
+// "unassigned". group_label resolves to the project name; empty when
+// project_id is unset or the project row has been deleted.
 func (r *Repository) GetCostsByProject(ctx context.Context, workspaceID string) ([]*models.CostBreakdown, error) {
 	var results []*models.CostBreakdown
 	err := r.ro.SelectContext(ctx, &results, r.ro.Rebind(`
-		SELECT e.project_id AS group_key,
+		SELECT COALESCE(t.project_id, '') AS group_key,
 			COALESCE(MAX(NULLIF(op.name, '')), '') AS group_label,
 			SUM(e.cost_subcents) AS total_subcents,
 			COUNT(*) AS count
 		FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
-		LEFT JOIN office_projects op ON op.id = e.project_id
-		WHERE t.workspace_id = ?
-		GROUP BY e.project_id
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
+		LEFT JOIN office_projects op ON op.id = t.project_id
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
+		GROUP BY COALESCE(t.project_id, '')
 	`), workspaceID)
 	if err != nil {
 		return nil, err
@@ -119,8 +195,9 @@ func (r *Repository) GetCostsByModel(ctx context.Context, workspaceID string) ([
 			SUM(e.cost_subcents) AS total_subcents,
 			COUNT(*) AS count
 		FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
-		WHERE t.workspace_id = ?
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 		GROUP BY e.provider, e.model
 	`), workspaceID)
 	if err != nil {
@@ -153,8 +230,9 @@ func (r *Repository) GetCostsByProvider(ctx context.Context, workspaceID string)
 			SUM(e.cost_subcents) AS total_subcents,
 			COUNT(*) AS count
 		FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
-		WHERE t.workspace_id = ?
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 		GROUP BY COALESCE(NULLIF(e.provider, ''), 'unknown')
 	`), workspaceID)
 	if err != nil {
@@ -173,8 +251,9 @@ func (r *Repository) SumCosts(ctx context.Context, workspaceID string) (int64, e
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT COALESCE(SUM(e.cost_subcents), 0)
 		FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
-		WHERE t.workspace_id = ?
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 	`), workspaceID).Scan(&total)
 	return total, err
 }
@@ -190,8 +269,9 @@ func (r *Repository) SumCostsSince(ctx context.Context, workspaceID string, sinc
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT COALESCE(SUM(e.cost_subcents), 0)
 		FROM office_cost_events e
-		JOIN tasks t ON t.id = e.task_id
-		WHERE t.workspace_id = ? AND e.occurred_at >= ?
+		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
+		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ? AND e.occurred_at >= ?
 	`), workspaceID, since.UTC()).Scan(&total)
 	return total, err
 }
@@ -222,13 +302,19 @@ func (r *Repository) GetCostForAgentSince(ctx context.Context, agentID string, s
 	return total, err
 }
 
-// GetCostForProject returns the total cost in subcents for a specific project.
+// GetCostForProject returns the total cost in subcents for a specific
+// project. Like GetCostsByProject, this joins to tasks and uses the task's
+// current project_id rather than the office_cost_events.project_id
+// snapshot, so a project budget (costs/budgets.go) counts the same set of
+// events as the "cost by project" panel — see GetCostsByProject's doc
+// comment for why project attribution is live.
 func (r *Repository) GetCostForProject(ctx context.Context, projectID string) (int64, error) {
 	var total int64
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT COALESCE(SUM(cost_subcents), 0)
-		FROM office_cost_events
-		WHERE project_id = ?
+		SELECT COALESCE(SUM(e.cost_subcents), 0)
+		FROM office_cost_events e
+		JOIN tasks t ON t.id = e.task_id
+		WHERE t.project_id = ?
 	`), projectID).Scan(&total)
 	return total, err
 }
@@ -241,9 +327,10 @@ func (r *Repository) GetCostForProjectSince(ctx context.Context, projectID strin
 	}
 	var total int64
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT COALESCE(SUM(cost_subcents), 0)
-		FROM office_cost_events
-		WHERE project_id = ? AND occurred_at >= ?
+		SELECT COALESCE(SUM(e.cost_subcents), 0)
+		FROM office_cost_events e
+		JOIN tasks t ON t.id = e.task_id
+		WHERE t.project_id = ? AND e.occurred_at >= ?
 	`), projectID, since.UTC()).Scan(&total)
 	return total, err
 }

@@ -12,7 +12,7 @@ test("warns when a pasted image is too large for a new task", async ({ testPage 
   const prompt = testPage.getByTestId("task-description-input");
   await expect(prompt).toBeEditable();
   await prompt.evaluate((element) => {
-    const image = new File([new Uint8Array(14 * 1024 * 1024)], "copied-image.png", {
+    const image = new File([new Uint8Array(100 * 1024 * 1024 + 1)], "copied-image.png", {
       type: "image/png",
     });
     const clipboardData = new DataTransfer();
@@ -26,7 +26,7 @@ test("warns when a pasted image is too large for a new task", async ({ testPage 
     .getByTestId("toast-message")
     .filter({ hasText: "Attachment is too large" });
   await expect(warning).toContainText(
-    "copied-image.png is 14.0 MB. The maximum file size is 10.0 MB.",
+    "copied-image.png is 100.0 MB. The maximum file size is 100.0 MB.",
   );
 
   const overlay = testPage.locator('[data-slot="dialog-overlay"]:visible');

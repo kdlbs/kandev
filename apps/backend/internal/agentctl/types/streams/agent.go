@@ -65,8 +65,21 @@ const (
 	// EventTypeSessionModels indicates available models from ACP session/new.
 	EventTypeSessionModels = "session_models"
 
+	// EventTypeSessionModelFallback indicates the session started on the
+	// profile's fallback model because the configured start model was
+	// unavailable. Data carries {"fallback_model": <model id>}.
+	EventTypeSessionModelFallback = "session_model_fallback"
+
+	// EventTypeSessionModelSelectionWarning explains an executor-authoritative
+	// default or explicit fallback decision.
+	EventTypeSessionModelSelectionWarning = "session_model_selection_warning"
+
 	// EventTypeSessionInfo indicates ACP session metadata such as title changed.
 	EventTypeSessionInfo = "session_info"
+
+	// EventTypeResponseAttemptReset indicates that the provider abandoned its
+	// current response attempt and will continue the active prompt with a new one.
+	EventTypeResponseAttemptReset = "response_attempt_reset"
 
 	// EventTypeAuthRequired indicates the agent rejected session/new with an
 	// authentication-required error. The event carries the available auth
@@ -78,6 +91,14 @@ const (
 	// configuration delivery and observed use. It deliberately excludes raw
 	// protocol frames, tool payloads, credentials, and full endpoints.
 	EventTypeMCPAttachment = "mcp_attachment"
+
+	// EventTypeTurnStarted marks the single turn boundary this feature relies
+	// on: agentctl's own session/prompt dispatch, emitted on both a human
+	// prompt and a synthetic ScheduleWakeup self-resume. It carries only the
+	// session ID — the turn start itself stays in agentctl's memory and clock,
+	// never crossing the process boundary. The backend consumes it to clear
+	// the background-launch attestation for the turn that is starting.
+	EventTypeTurnStarted = "turn_started"
 )
 
 // AgentEventDataPromptHandoff marks a generation-bearing foreground-idle event
@@ -92,21 +113,27 @@ const (
 )
 
 // AgentEvent is the message type streamed from the agent process.
-// This represents protocol-agnostic events from the agent, normalized from
-// various underlying protocols (ACP, Codex, Claude Code, etc.).
+// This represents agent-agnostic events. ACP session updates are normalized
+// into this shape; agentctl also synthesizes lifecycle and diagnostic events
+// (process exit, MCP attachment, permission cancellation) that never came from
+// the agent.
 //
 // Stream endpoint: ws://.../api/v1/agent/events
 type AgentEvent struct {
-	// Type identifies the event type. Use EventType* constants:
-	// "message_chunk", "reasoning", "tool_call", "tool_update", "plan", "complete", "error"
+	// Type identifies the event type. Use the EventType* constants for supported
+	// values.
 	Type string `json:"type"`
+
+	// AttemptID identifies the recovery attempt that owns this callback. It is
+	// assigned by lifecycle at the startup stream boundary and is immutable for
+	// the lifetime of the callback.
+	AttemptID string `json:"attempt_id,omitempty"`
 
 	// SessionID is the current session identifier.
 	SessionID string `json:"session_id,omitempty"`
 
-	// OperationID identifies the current in-flight operation (turn, prompt, etc.).
-	// Used to target specific operations for cancellation or status updates.
-	// For Codex this is the turn ID, for other protocols it may be empty.
+	// OperationID identifies an operation when the agent exposes an operation ID.
+	// It may be empty when no operation ID is available.
 	OperationID string `json:"operation_id,omitempty"`
 
 	// PromptGeneration is the lifecycle-owned identity assigned when this
@@ -115,14 +142,39 @@ type AgentEvent struct {
 	// attributed to a newer prompt on the same execution.
 	PromptGeneration uint64 `json:"prompt_generation,omitempty"`
 
+	// TurnID is the durable Kandev turn identity captured for terminal events.
+	// It travels with the completion frame so consumers do not have to infer
+	// ownership from cross-subject event ordering.
+	TurnID string `json:"turn_id,omitempty"`
+
+	// ControlTurnID is the control-server-assigned turn identifier
+	// (AC-EXECUTORS-SURVIVAL-004.1), stamped onto a terminal event at the
+	// same point the control server retains it as that instance's turn
+	// outcome (internal/agentctl/server/process.recordTerminalOutcome). Zero
+	// means "not retained" -- the sequence that assigns it starts at 1
+	// (instance.Manager.turnIDSeq). AC-EXECUTORS-SURVIVAL-004.4 requires the
+	// dedup decision between a retrieved outcome and a live-delivered event
+	// for the same turn to be made on this identifier, since it -- unlike
+	// PromptGeneration -- travels on both observations and survives a
+	// restart that resets the backend's own in-memory generation counter.
+	ControlTurnID int64 `json:"control_turn_id,omitempty"`
+
 	// --- Message fields (for "message_chunk" type) ---
 
 	// Text contains streaming text content from the agent.
 	Text string `json:"text,omitempty"`
+	// ProviderDiagnosticCandidate marks a high-confidence ACP provider
+	// diagnostic that remains visible but is not ordinary model progress until
+	// the terminal prompt error is correlated.
+	ProviderDiagnosticCandidate bool `json:"provider_diagnostic_candidate,omitempty"`
 
 	// ProtocolMessageID identifies the source-protocol message this chunk belongs to.
 	// It is distinct from the Kandev message record ID used by downstream streaming.
 	ProtocolMessageID string `json:"protocol_message_id,omitempty"`
+
+	// RetractedMessageIDs identifies Kandev transcript records owned by an
+	// abandoned response attempt. It is populated only on response-attempt resets.
+	RetractedMessageIDs []string `json:"retracted_message_ids,omitempty"`
 
 	// --- Reasoning fields (for "reasoning" type) ---
 
@@ -184,6 +236,9 @@ type AgentEvent struct {
 	MCPAttachmentAttempt *MCPAttachmentAttempt `json:"mcp_attachment_attempt,omitempty"`
 
 	// --- Permission request fields (for "permission_request" type) ---
+	// RequestID is the Kandev-generated identity for this exact request
+	// generation. It is distinct from the provider-controlled PendingID.
+	RequestID string `json:"request_id,omitempty"`
 
 	// PendingID uniquely identifies this pending permission request.
 	PendingID string `json:"pending_id,omitempty"`
@@ -273,6 +328,13 @@ type AgentEvent struct {
 	// SupportsEmbeddedContext indicates the agent supports embedded context.
 	SupportsEmbeddedContext bool `json:"supports_embedded_context"`
 
+	// SupportsPromptQueueing indicates the agent advertised that it accepts a
+	// prompt while another prompt for the same session is still in flight. It is
+	// the negotiated precondition for prompt handoff and mid-turn steering, and
+	// does not by itself promise the agent will fold that prompt into the running
+	// turn. See docs/specs/platform/requirements/mid-turn-steering.md.
+	SupportsPromptQueueing bool `json:"supports_prompt_queueing"`
+
 	// AuthMethods lists authentication methods from ACP initialize.
 	AuthMethods []AuthMethodInfo `json:"auth_methods,omitempty"`
 
@@ -280,6 +342,15 @@ type AgentEvent struct {
 
 	// CurrentModelID is the active model identifier.
 	CurrentModelID string `json:"current_model_id,omitempty"`
+
+	// FallbackModel carries the fallback model a session started on when
+	// the configured start model was unavailable (session_model_fallback
+	// events).
+	FallbackModel string `json:"fallback_model,omitempty"`
+
+	// ModelSelectionWarning carries the provider-neutral model decision made
+	// before the session's first prompt.
+	ModelSelectionWarning *ModelSelectionWarning `json:"model_selection_warning,omitempty"`
 
 	// SessionModels lists models available in the ACP session.
 	SessionModels []SessionModelInfo `json:"session_models,omitempty"`
@@ -311,6 +382,20 @@ type AgentEvent struct {
 
 	// Usage contains token usage stats from the prompt response.
 	Usage *PromptUsage `json:"usage,omitempty"`
+}
+
+// ModelSelectionWarning is the structured, provider-neutral explanation for
+// continuing with an executor model other than the saved profile request.
+type ModelSelectionWarning struct {
+	Kind              string `json:"kind"`
+	DecisionID        string `json:"decision_id,omitempty"`
+	Reason            string `json:"reason"`
+	RequestedModel    string `json:"requested_model,omitempty"`
+	EffectiveModel    string `json:"effective_model,omitempty"`
+	FallbackModel     string `json:"fallback_model,omitempty"`
+	AgentID           string `json:"agent_id,omitempty"`
+	ExecutorType      string `json:"executor_type,omitempty"`
+	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
 }
 
 // PlanEntry represents an entry in the agent's execution plan.
@@ -398,6 +483,18 @@ type SessionModelInfo struct {
 	Meta map[string]any `json:"meta,omitempty"`
 }
 
+// SessionModelState is the synchronous model snapshot returned with a newly
+// created or loaded session. It lets lifecycle callers apply a saved model
+// before the asynchronous session_models stream event is dispatched.
+type SessionModelState struct {
+	CurrentModelID string             `json:"current_model_id,omitempty"`
+	Models         []SessionModelInfo `json:"models,omitempty"`
+	ConfigOptions  []ConfigOption     `json:"config_options,omitempty"`
+	// ConfigOptionsSettled distinguishes a complete empty provider snapshot
+	// from the transient empty state sent before startup settles.
+	ConfigOptionsSettled bool `json:"config_options_settled,omitempty"`
+}
+
 // AuthMethodInfo represents an authentication method from ACP initialize.
 type AuthMethodInfo struct {
 	// ID is the auth method identifier.
@@ -475,20 +572,38 @@ type ConfigOptionValue struct {
 // of a cent (amount_usd * 10000). When > 0 the office subscriber records
 // it verbatim and skips the models.dev pricing lookup.
 //
-// Estimated is true when the adapter synthesised token counts (e.g.
-// codex-acp's cumulative-delta inference) rather than receiving an
-// authoritative per-turn usage frame. Rows flagged estimated still count
-// toward budget totals at face value per
-// docs/specs/office-costs/spec.md.
+// Estimated is true when the token counts do not represent an
+// authoritative per-turn measurement: either the adapter synthesised them
+// (e.g. codex-acp's cumulative-delta inference when no typed usage frame
+// is present at all — fallbackUsageForNilTypedUsage in
+// server/adapter/transport/acp/adapter_prompt.go), or the typed frame
+// itself is scoped to less than the whole turn (codex-acp's usage field is
+// hardcoded to the LAST model request of a multi-request turn, not a
+// per-turn total — see normalizeCodexPromptUsage in
+// server/adapter/transport/acp/dialect_codex.go). Rows flagged estimated
+// still count toward budget totals at face value per
+// docs/specs/office/requirements/costs.md.
 type PromptUsage struct {
-	InputTokens                  int64 `json:"input_tokens"`
-	OutputTokens                 int64 `json:"output_tokens"`
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+
+	// OutputTokensPresent distinguishes an observed zero from a missing
+	// output-token sample. Adapters set it false when they cannot observe output
+	// tokens, such as the context-occupancy fallback. It is always serialized so
+	// downstream consumers can distinguish false from a legacy missing field.
+	OutputTokensPresent bool `json:"output_tokens_present"`
+
 	CachedReadTokens             int64 `json:"cached_read_tokens,omitempty"`
 	CachedWriteTokens            int64 `json:"cached_write_tokens,omitempty"`
 	ThoughtTokens                int64 `json:"thought_tokens,omitempty"`
 	TotalTokens                  int64 `json:"total_tokens"`
 	ProviderReportedCostSubcents int64 `json:"provider_reported_cost_subcents,omitempty"`
-	Estimated                    bool  `json:"estimated,omitempty"`
+	// ProviderReportedCostPresent distinguishes an explicit provider-reported
+	// zero from a missing cost sample. Providers can legitimately report zero
+	// for BYOK/free turns, and that value must still suppress list-price
+	// estimation downstream.
+	ProviderReportedCostPresent bool `json:"provider_reported_cost_present,omitempty"`
+	Estimated                   bool `json:"estimated,omitempty"`
 }
 
 // ToolCallContentItem represents a content item produced by a tool call.

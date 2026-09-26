@@ -4,7 +4,22 @@ import { createDebugLogger } from "@/lib/debug/log";
 
 const debug = createDebugLogger("executor-compat");
 
-const REMOTE_EXECUTOR_TYPES = new Set(["local_docker", "remote_docker", "sprites"]);
+const REMOTE_EXECUTOR_TYPES = new Set(["local_docker", "remote_docker", "sprites", "k8s"]);
+const HOST_AGENT_EXECUTOR_TYPES = new Set(["local", "local_pc", "worktree"]);
+
+/**
+ * Host capability probes are authoritative only for executors that launch the
+ * agent on this Kandev host. Remote and container executors resolve the agent
+ * runtime in their own environment, so a host probe must not hide those
+ * profiles from handoff.
+ */
+export function shouldFilterHandoffByHostHealth(
+  executorProfile: Pick<ExecutorProfile, "executor_type"> | null | undefined,
+): boolean {
+  return Boolean(
+    executorProfile && HOST_AGENT_EXECUTOR_TYPES.has(executorProfile.executor_type ?? ""),
+  );
+}
 
 export function executorRequiresAgentCredentials(executorType?: string | null): boolean {
   if (!executorType) return false;

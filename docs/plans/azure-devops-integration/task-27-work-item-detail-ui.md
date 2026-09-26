@@ -12,7 +12,7 @@ depends_on:
     "23-provider-presets",
   ]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 27: Responsive Work-Item Detail

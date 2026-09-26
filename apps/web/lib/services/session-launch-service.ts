@@ -1,4 +1,5 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
+import type { TaskPriority } from "@/lib/types/http";
 
 export type SessionIntent =
   | "prepare"
@@ -8,11 +9,15 @@ export type SessionIntent =
   | "workflow_step"
   | "restore_workspace";
 
+export type LaunchActivationSource = "user_action" | "session_open";
+
 export type MessageAttachment = {
   type: "image" | "audio" | "resource";
-  data: string;
+  data?: string;
+  attachment_id?: string;
   mime_type: string;
   name?: string;
+  size_bytes?: number;
   delivery_mode?: "prompt" | "path";
 };
 
@@ -21,16 +26,18 @@ export type LaunchSessionRequest = {
   intent?: SessionIntent;
   session_id?: string;
   agent_profile_id?: string;
+  profile_explicit?: boolean;
   executor_id?: string;
   executor_profile_id?: string;
   prompt?: string;
   plan_mode?: boolean;
   workflow_step_id?: string;
-  priority?: number;
+  priority?: TaskPriority;
   launch_workspace?: boolean;
   skip_message_record?: boolean;
   auto_start?: boolean;
   attachments?: MessageAttachment[];
+  activation_source?: LaunchActivationSource;
 };
 
 export type LaunchSessionResponse = {
@@ -38,9 +45,13 @@ export type LaunchSessionResponse = {
   task_id: string;
   session_id?: string;
   agent_execution_id?: string;
+  agent_profile_id?: string;
   state: string;
   worktree_path?: string;
   worktree_branch?: string;
+  error?: string;
+  activation_disposition?: "queued" | "suppressed";
+  activation_reason?: string;
 };
 
 export async function launchSession(
@@ -59,9 +70,18 @@ export type EnsureSessionResponse = {
   session_id?: string;
   state: string;
   agent_profile_id?: string;
-  source: "existing_primary" | "existing_newest" | "created_prepare" | "created_start";
+  source:
+    | "existing_primary"
+    | "existing_newest"
+    | "created_prepare"
+    | "created_start"
+    | "skipped_terminal_pr"
+    | "queued"
+    | "existing_queued";
   newly_created: boolean;
   workspace_path?: string;
+  activation_disposition?: "queued" | "suppressed";
+  activation_reason?: string;
 };
 
 /**
@@ -73,13 +93,23 @@ export type EnsureSessionResponse = {
  */
 export async function ensureTaskSession(
   taskId: string,
-  opts?: { ensureExecution?: boolean; timeout?: number },
+  opts?: {
+    ensureExecution?: boolean;
+    autoStart?: boolean;
+    activationSource?: LaunchActivationSource;
+    timeout?: number;
+  },
 ): Promise<EnsureSessionResponse> {
   const client = getWebSocketClient();
   if (!client) throw new Error("WebSocket client not available");
   return client.request<EnsureSessionResponse>(
     "session.ensure",
-    { task_id: taskId, ensure_execution: opts?.ensureExecution },
+    {
+      task_id: taskId,
+      ensure_execution: opts?.ensureExecution,
+      ...(opts?.autoStart !== undefined ? { auto_start: opts.autoStart } : {}),
+      ...(opts?.activationSource !== undefined ? { activation_source: opts.activationSource } : {}),
+    },
     opts?.timeout ?? 15_000,
   );
 }

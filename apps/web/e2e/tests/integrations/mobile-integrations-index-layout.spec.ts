@@ -6,7 +6,7 @@ test.describe("integrations settings index layout on mobile", () => {
     testPage,
     seedData,
   }) => {
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations`);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations`);
 
     await expectStableIntegrationCardLayout(testPage);
   });

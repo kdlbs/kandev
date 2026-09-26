@@ -1,3 +1,4 @@
+import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import { fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
 import type {
@@ -8,7 +9,10 @@ import type {
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
   Task,
+  TaskPriority,
   MoveTaskResponse,
+  ReorderBand,
+  ReorderStepTasksResponse,
 } from "@/lib/types/http";
 
 // Workflow operations
@@ -65,7 +69,9 @@ export async function createTask(
     workflow_step_id?: string;
     position?: number;
     repositories?: Array<{
+      checkout_options?: RepositoryCheckoutOptions;
       repository_id: string;
+      branch_policy_id?: string;
       base_branch?: string;
       checkout_branch?: string;
       pr_number?: number;
@@ -74,7 +80,9 @@ export async function createTask(
       default_branch?: string;
       github_url?: string;
       remote_url?: string;
-      provider?: "github" | "gitlab" | "azure_devops";
+      provider?: string;
+      provider_host?: string;
+      provider_scope?: string;
       provider_repo_id?: string;
       provider_owner?: string;
       provider_name?: string;
@@ -91,14 +99,23 @@ export async function createTask(
     plan_mode?: boolean;
     attachments?: Array<{
       type: string;
-      data: string;
+      data?: string;
+      attachment_id?: string;
       mime_type: string;
       name?: string;
+      size_bytes?: number;
       delivery_mode?: "prompt" | "path";
     }>;
     parent_id?: string;
+    /**
+     * Task IDs this task depends on. With these set, an agent-start request is
+     * recorded as a start-when-unblocked intent rather than launching now.
+     */
+    blocked_by?: string[];
+    /** Explicitly opt out of (false) or into (true) the auto-start-on-unblock intent. */
+    start_when_unblocked?: boolean;
     workspace_path?: string;
-    priority?: string;
+    priority?: TaskPriority;
     project_id?: string;
     metadata?: Record<string, unknown>;
     /** Office task-handoffs phase 4/5 — workspace policy. */
@@ -106,6 +123,10 @@ export async function createTask(
     workspace_group_id?: string;
     default_child_workspace?: "inherit_parent" | "new_workspace";
     default_child_ordering?: "sequential" | "parallel";
+    /** Start the task in autopilot mode. Fixed at creation time. */
+    autopilot?: boolean;
+    /** Task-only replacements for fixed workflow step agent profiles. */
+    workflow_agent_overrides?: Record<string, string>;
   },
   options?: ApiRequestOptions,
 ) {
@@ -123,17 +144,36 @@ export async function updateTask(
     position?: number;
     state?: Task["state"];
     repositories?: Array<{
+      checkout_options?: RepositoryCheckoutOptions;
       repository_id: string;
       base_branch?: string;
     }>;
     /** Nest under another task. Empty string clears the parent (un-nest). */
     parent_id?: string;
+    /** Human assignee. "" unassigns; omitting the field leaves it alone. */
+    assignee_user_id?: string;
+    priority?: TaskPriority;
   },
   options?: ApiRequestOptions,
 ) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, {
     ...options,
     init: { method: "PATCH", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function updateTaskPortForwarding(
+  taskId: string,
+  enabled: boolean,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<Task>(`/api/v1/tasks/${taskId}/port-forwarding`, {
+    ...options,
+    init: {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+      ...(options?.init ?? {}),
+    },
   });
 }
 
@@ -182,27 +222,206 @@ export async function updateTaskRepositoryBaseBranch(
   });
 }
 
-export async function deleteTask(
-  taskId: string,
-  params?: { cascade?: boolean },
+export type DeleteTaskParams = {
+  cascade?: boolean;
+  discardWorktreeChanges?: boolean;
+};
+
+export type TaskDeletePreflightResponse = {
+  requires_discard_consent: boolean;
+};
+
+export async function getTaskDeletePreflight(
+  taskIds: string[],
+  cascade: boolean,
   options?: ApiRequestOptions,
 ) {
-  const query = params?.cascade ? "?cascade=true" : "";
+  return fetchJson<TaskDeletePreflightResponse>("/api/v1/tasks/delete-preflight", {
+    ...options,
+    cache: "no-store",
+    init: {
+      method: "POST",
+      body: JSON.stringify({ task_ids: taskIds, cascade }),
+      ...(options?.init ?? {}),
+    },
+  });
+}
+
+export async function deleteTask(
+  taskId: string,
+  params?: DeleteTaskParams,
+  options?: ApiRequestOptions,
+) {
+  const queryParams = new URLSearchParams();
+  if (params?.cascade) queryParams.set("cascade", "true");
+  if (params?.discardWorktreeChanges) {
+    queryParams.set("discard_worktree_changes", "true");
+  }
+  const query = queryParams.toString() ? `?${queryParams.toString()}` : "";
   return fetchJson<void>(`/api/v1/tasks/${taskId}${query}`, {
     ...options,
     init: { method: "DELETE", ...(options?.init ?? {}) },
   });
 }
 
+/** One-shot values applied when a task enters the destination workflow step. */
+export type WorkflowMoveEntryOptions = {
+  reset_context?: boolean;
+  instructions?: string;
+  skip_step_prompt?: boolean;
+};
+
+export type WorkflowChangePayload = {
+  expected_workflow_id: string;
+  expected_step_id: string;
+  expected_updated_at: string;
+  agent_overrides: Record<string, string>;
+};
+
+export type MoveTaskPayload = {
+  workflow_id: string;
+  workflow_step_id: string;
+  /** @deprecated Server computes arrival position per AC.28; this field is transmitted but ignored. */
+  position?: number;
+  entry_options?: WorkflowMoveEntryOptions | null;
+  workflow_change?: WorkflowChangePayload | null;
+};
+
+/** Move response fields added by the one-shot entry-options transport. */
+export type WorkflowMoveResponse = MoveTaskResponse & {
+  entry_options?: WorkflowMoveEntryOptions;
+};
+
+export type WorkflowMovePreviewOutcome =
+  | "reuse_current"
+  | "reuse_other"
+  | "create_new"
+  | "no_session"
+  | "unknown";
+export type WorkflowMovePreviewApplicability = "planned" | "unchanged" | "skipped" | "unknown";
+export type WorkflowMovePreviewSourceDisposition = "keep" | "park" | "complete" | "unknown";
+export type WorkflowMovePreviewDispatch =
+  | "prompt"
+  | "no_prompt"
+  | "deferred"
+  | "no_session"
+  | "unknown";
+
+export type WorkflowMovePreviewModelValue = {
+  id?: string;
+  label?: string;
+  known: boolean;
+  mode?: string;
+  config_options?: Record<string, string>;
+};
+
+export type WorkflowMovePreviewResponse = {
+  task_id: string;
+  workflow_step_id: string;
+  source_session_id?: string;
+  evaluated_at: string;
+  outcome: WorkflowMovePreviewOutcome;
+  recipient?: {
+    session_id?: string;
+    session_name?: string;
+    profile_id?: string;
+    profile_name?: string;
+    agent_family?: string;
+  };
+  model: {
+    before: WorkflowMovePreviewModelValue;
+    after: WorkflowMovePreviewModelValue;
+    before_source?: string;
+    after_source?: string;
+  };
+  changes?: Array<{
+    key: string;
+    label: string;
+    before?: string;
+    after?: string;
+    applicability: WorkflowMovePreviewApplicability;
+  }>;
+  context_reset: boolean;
+  context_reset_state: WorkflowMovePreviewApplicability;
+  source_disposition: WorkflowMovePreviewSourceDisposition;
+  dispatch: WorkflowMovePreviewDispatch;
+  notices?: Array<{ code: string; params?: Record<string, string> }>;
+};
+
+/**
+ * Converts form values into the wire contract. Blank text has no one-shot
+ * effect, and an absent/empty object keeps the legacy destination-only body.
+ */
+export function normalizeWorkflowMoveEntryOptions(
+  options: WorkflowMoveEntryOptions | null | undefined,
+): WorkflowMoveEntryOptions | undefined {
+  if (!options) return undefined;
+
+  const normalized: WorkflowMoveEntryOptions = {};
+  if (options.reset_context === true) normalized.reset_context = true;
+  if (options.skip_step_prompt === true) normalized.skip_step_prompt = true;
+
+  const instructions = options.instructions?.trim();
+  if (instructions) normalized.instructions = instructions;
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
 export async function moveTask(
   taskId: string,
-  payload: { workflow_id: string; workflow_step_id: string; position: number },
+  payload: MoveTaskPayload,
+  options?: ApiRequestOptions,
+): Promise<WorkflowMoveResponse> {
+  const { entry_options, ...destination } = payload;
+  const normalizedEntryOptions = normalizeWorkflowMoveEntryOptions(entry_options);
+  const requestPayload = normalizedEntryOptions
+    ? { ...destination, entry_options: normalizedEntryOptions }
+    : destination;
+
+  return fetchJson<WorkflowMoveResponse>(`/api/v1/tasks/${taskId}/move`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(requestPayload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function previewWorkflowMove(
+  taskId: string,
+  payload: MoveTaskPayload,
+  options?: ApiRequestOptions,
+): Promise<WorkflowMovePreviewResponse> {
+  const { entry_options, ...destination } = payload;
+  const normalizedEntryOptions = normalizeWorkflowMoveEntryOptions(entry_options);
+  const requestPayload = normalizedEntryOptions
+    ? { ...destination, entry_options: normalizedEntryOptions }
+    : destination;
+
+  return fetchJson<WorkflowMovePreviewResponse>(`/api/v1/tasks/${taskId}/move-preview`, {
+    ...options,
+    cache: "no-store",
+    init: { method: "POST", body: JSON.stringify(requestPayload), ...(options?.init ?? {}) },
+  });
+}
+
+/**
+ * Reorders one workflow step's band. The only request surface for a reorder
+ * (REQ-TASKS-KANBAN-TASK-REORDERING-001) — a WebSocket action was cut in the
+ * design. On a 409 `step_changed` conflict the thrown ApiError's `body`
+ * carries this same ReorderStepTasksResponse shape (the authoritative order
+ * to reconcile to silently); on a 400 `invalid_reorder` it carries only
+ * `{code}`.
+ */
+export async function reorderStepTasks(
+  workflowStepId: string,
+  payload: { band: ReorderBand; ordered_task_ids: string[] },
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<MoveTaskResponse>(`/api/v1/tasks/${taskId}/move`, {
-    ...options,
-    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
-  });
+  return fetchJson<ReorderStepTasksResponse>(
+    `/api/v1/workflow-steps/${workflowStepId}/tasks/reorder`,
+    {
+      ...options,
+      init: { method: "PUT", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
 }
 
 export async function bulkMoveSelectedTasks(
@@ -265,6 +484,7 @@ export async function listTasksByWorkspace(
     pageSize?: number;
     query?: string;
     includeArchived?: boolean;
+    onlyArchived?: boolean;
     workflowId?: string | null;
     repositoryId?: string | null;
     sort?: string;
@@ -277,6 +497,7 @@ export async function listTasksByWorkspace(
   if (params.pageSize) url.searchParams.set("page_size", String(params.pageSize));
   if (params.query) url.searchParams.set("query", params.query);
   if (params.includeArchived) url.searchParams.set("include_archived", "true");
+  if (params.onlyArchived) url.searchParams.set("only_archived", "true");
   if (params.workflowId) url.searchParams.set("workflow_id", params.workflowId);
   if (params.repositoryId) url.searchParams.set("repository_id", params.repositoryId);
   if (params.sort) url.searchParams.set("sort", params.sort);

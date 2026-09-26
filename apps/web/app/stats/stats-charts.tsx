@@ -3,14 +3,15 @@
 import { useMemo, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
-import type { DailyActivityDTO, AgentUsageDTO, CompletedTaskActivityDTO } from "@/lib/types/http";
+import type { DailyActivityDTO, ModelUsageDTO, CompletedTaskActivityDTO } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 function formatMonthLabel(date: Date): string {
-  return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+  return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
 }
 
 function formatWeekLabel(date: Date): string {
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function getHeatmapColor(intensity: number): string {
@@ -23,10 +24,11 @@ function getHeatmapColor(intensity: number): string {
 
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function HeatmapGrid({ weeks, maxActivity }: { weeks: DailyActivityDTO[][]; maxActivity: number }) {
+  const { t } = useTranslation();
   return (
     <TooltipProvider delayDuration={100}>
       <div className="flex gap-[3px]">
@@ -56,7 +58,10 @@ function HeatmapGrid({ weeks, maxActivity }: { weeks: DailyActivityDTO[][]; maxA
                   <TooltipContent side="top" className="text-xs">
                     <div className="font-medium">{formatDate(day.date)}</div>
                     <div className="text-muted-foreground">
-                      {day.turn_count} turns, {day.message_count} messages
+                      {t("stats:turnsMessagesCount", {
+                        turns: day.turn_count,
+                        messages: day.message_count,
+                      })}
                     </div>
                   </TooltipContent>
                 </Tooltip>
@@ -70,6 +75,7 @@ function HeatmapGrid({ weeks, maxActivity }: { weeks: DailyActivityDTO[][]; maxA
 }
 
 export function ActivityHeatmap({ dailyActivity }: { dailyActivity: DailyActivityDTO[] }) {
+  const { t } = useTranslation();
   const { weeks, maxActivity, monthLabels } = useMemo(() => {
     if (!dailyActivity || dailyActivity.length === 0) {
       return {
@@ -102,7 +108,7 @@ export function ActivityHeatmap({ dailyActivity }: { dailyActivity: DailyActivit
       const date = new Date(`${firstDay}T00:00:00`);
       const month = date.getMonth();
       if (month !== lastMonth) {
-        monthMarkers.push({ index, label: date.toLocaleDateString("en-US", { month: "short" }) });
+        monthMarkers.push({ index, label: date.toLocaleDateString(undefined, { month: "short" }) });
         lastMonth = month;
       }
     });
@@ -143,7 +149,7 @@ export function ActivityHeatmap({ dailyActivity }: { dailyActivity: DailyActivit
       </div>
 
       <div className="flex items-center gap-1 mt-2 text-[10px] text-muted-foreground">
-        <span>Less</span>
+        <span>{t("stats:less")}</span>
         <div className="flex gap-[2px]">
           <div className="h-[10px] w-[10px] rounded-[2px] bg-muted" />
           <div className="h-[10px] w-[10px] rounded-[2px] bg-emerald-500/30" />
@@ -151,40 +157,36 @@ export function ActivityHeatmap({ dailyActivity }: { dailyActivity: DailyActivit
           <div className="h-[10px] w-[10px] rounded-[2px] bg-emerald-500/70" />
           <div className="h-[10px] w-[10px] rounded-[2px] bg-emerald-500/90" />
         </div>
-        <span>More</span>
+        <span>{t("stats:more")}</span>
       </div>
     </div>
   );
 }
 
-export function AgentUsageList({ agentUsage }: { agentUsage: AgentUsageDTO[] }) {
-  if (!agentUsage || agentUsage.length === 0) {
-    return <div className="text-sm text-muted-foreground py-4">No agent usage data yet.</div>;
+export function ModelUsageList({ modelUsage }: { modelUsage: ModelUsageDTO[] }) {
+  const { t } = useTranslation();
+  if (!modelUsage || modelUsage.length === 0) {
+    return (
+      <div className="text-sm text-muted-foreground py-4">{t("stats:noModelUsageDataYet")}</div>
+    );
   }
 
-  const maxSessions = Math.max(...agentUsage.map((a) => a.session_count));
+  const maxSessions = Math.max(...modelUsage.map((m) => m.session_count));
 
   return (
     <div className="space-y-3">
-      {agentUsage.map((agent) => (
-        <div key={agent.agent_profile_id}>
+      {modelUsage.map((entry) => (
+        <div key={entry.model}>
           <div className="flex items-center justify-between mb-1">
-            <div className="min-w-0">
-              <div className="text-sm truncate">{agent.agent_profile_name}</div>
-              {agent.agent_model && (
-                <div className="text-[11px] text-muted-foreground font-mono truncate">
-                  {agent.agent_model}
-                </div>
-              )}
-            </div>
+            <div className="text-sm font-mono truncate min-w-0">{entry.model}</div>
             <span className="text-xs text-muted-foreground tabular-nums ml-2">
-              {agent.session_count}
+              {entry.session_count}
             </span>
           </div>
           <div className="h-1.5 bg-muted rounded-full overflow-hidden">
             <div
               className="h-full bg-primary/60 rounded-full"
-              style={{ width: `${(agent.session_count / maxSessions) * 100}%` }}
+              style={{ width: `${(entry.session_count / maxSessions) * 100}%` }}
             />
           </div>
         </div>
@@ -194,6 +196,12 @@ export function AgentUsageList({ agentUsage }: { agentUsage: AgentUsageDTO[] }) 
 }
 
 type CompletionBucket = "day" | "week" | "month";
+
+const BUCKET_LABEL_KEYS: Record<CompletionBucket, string> = {
+  day: "stats:bucketDay",
+  week: "stats:bucketWeek",
+  month: "stats:bucketMonth",
+};
 
 function BucketBarChart({
   series,
@@ -280,19 +288,22 @@ export function CompletedTasksChart({
 }: {
   completedActivity: CompletedTaskActivityDTO[];
 }) {
+  const { t } = useTranslation();
   const [bucket, setBucket] = useState<CompletionBucket>("day");
   const safeCompleted = useMemo(() => completedActivity ?? [], [completedActivity]);
   const series = useBucketedSeries(safeCompleted, bucket);
   const maxCount = Math.max(...series.map((item) => item.count), 1);
 
   if (safeCompleted.length === 0) {
-    return <div className="text-sm text-muted-foreground py-4">No completed task data yet.</div>;
+    return (
+      <div className="text-sm text-muted-foreground py-4">{t("stats:noCompletedTaskDataYet")}</div>
+    );
   }
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span className="uppercase tracking-wider text-[10px]">Bucket</span>
+        <span className="uppercase tracking-wider text-[10px]">{t("stats:bucket")}</span>
         {(["day", "week", "month"] as CompletionBucket[]).map((b) => (
           <Button
             key={b}
@@ -302,7 +313,7 @@ export function CompletedTasksChart({
             className="h-7 px-2 font-mono text-[11px] cursor-pointer"
             onClick={() => setBucket(b)}
           >
-            {b.charAt(0).toUpperCase() + b.slice(1)}
+            {t(BUCKET_LABEL_KEYS[b])}
           </Button>
         ))}
       </div>
@@ -322,6 +333,7 @@ export function MostProductiveSummary({
 }: {
   completedActivity: CompletedTaskActivityDTO[];
 }) {
+  const { t } = useTranslation();
   const safeCompleted = useMemo(() => completedActivity ?? [], [completedActivity]);
 
   const stats = useMemo(() => {
@@ -366,7 +378,9 @@ export function MostProductiveSummary({
   }, [safeCompleted]);
 
   if (safeCompleted.length === 0) {
-    return <div className="text-sm text-muted-foreground py-4">No completed task data yet.</div>;
+    return (
+      <div className="text-sm text-muted-foreground py-4">{t("stats:noCompletedTaskDataYet")}</div>
+    );
   }
 
   const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -388,21 +402,21 @@ export function MostProductiveSummary({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between text-sm">
-        <span className="text-muted-foreground">Best weekday</span>
+        <span className="text-muted-foreground">{t("stats:bestWeekday")}</span>
         <span className="font-mono tabular-nums">
           {weekdayNames[stats.maxWeekday.idx]} · {stats.maxWeekday.value}
         </span>
       </div>
       <div className="flex items-center justify-between text-sm">
-        <span className="text-muted-foreground">Best month</span>
+        <span className="text-muted-foreground">{t("stats:bestMonth")}</span>
         <span className="font-mono tabular-nums">
           {monthNames[stats.maxMonth.idx]} · {stats.maxMonth.value}
         </span>
       </div>
       <div className="flex items-center justify-between text-sm">
-        <span className="text-muted-foreground">Best year</span>
+        <span className="text-muted-foreground">{t("stats:bestYear")}</span>
         <span className="font-mono tabular-nums">
-          {stats.maxYear.year || "\u2014"} · {stats.maxYear.value}
+          {stats.maxYear.year || "-"} · {stats.maxYear.value}
         </span>
       </div>
     </div>

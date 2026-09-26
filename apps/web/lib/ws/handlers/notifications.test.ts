@@ -7,6 +7,7 @@ import {
   NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE,
 } from "@/lib/notifications/events";
 import type { BackendMessageMap } from "@/lib/types/backend";
+import { i18n } from "@/lib/i18n";
 import { registerNotificationsHandlers } from "./notifications";
 
 vi.mock("@/lib/notifications/sound", () => ({
@@ -21,6 +22,8 @@ const OTHER_TASK_ID = "task-2";
 const MESSAGE_TITLE = "Agent needs your answer";
 const MESSAGE_BODY = 'The agent asked a question on "Task one".';
 const notificationMock = vi.fn();
+const TURN_FINISHED = NOTIFICATION_EVENT_SESSION_TURN_FINISHED;
+const TURN_FINISHED_FALLBACK_TITLE = "Agent turn finished";
 type SemanticNotificationMessage =
   | BackendMessageMap["session.clarification_requested"]
   | BackendMessageMap["session.turn_finished"]
@@ -286,12 +289,12 @@ describe("semantic session notification malformed payloads", () => {
 
     getHandler(
       makeStore(),
-      "session.turn_finished",
+      TURN_FINISHED,
     )(
       makeMessage(
         "turn-1",
-        "session.turn_finished",
-        "Agent turn finished",
+        TURN_FINISHED,
+        TURN_FINISHED_FALLBACK_TITLE,
         'The agent finished a turn on "Task one".',
       ),
     );
@@ -299,7 +302,7 @@ describe("semantic session notification malformed payloads", () => {
     expect(invoke).toHaveBeenCalledWith("show_native_notification", {
       request: expect.objectContaining({
         eventId: "session.turn_finished:turn-1",
-        title: "Agent turn finished",
+        title: TURN_FINISHED_FALLBACK_TITLE,
         body: 'The agent finished a turn on "Task one".',
       }),
     });
@@ -338,5 +341,78 @@ describe("office inbox notification delivery", () => {
     expect(notificationMock).toHaveBeenCalledWith("New inbox item", {
       body: "A new item needs your attention.",
     });
+  });
+});
+
+describe("empty-payload fallback copy", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal(
+      "Notification",
+      Object.assign(notificationMock, { permission: "granted" as NotificationPermission }),
+    );
+  });
+
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    await i18n.changeLanguage("en");
+  });
+
+  function fireEmpty(action: "session.turn_finished" | "session.clarification_requested") {
+    const message = {
+      ...makeMessage("empty-1", action, "", ""),
+      payload: {
+        task_id: TASK_ID,
+        session_id: SESSION_ID,
+        occurrence_id: "o-1",
+        title: "",
+        body: "",
+      },
+    } as SemanticNotificationMessage;
+    getHandler(makeStore(), action)(message);
+  }
+
+  it("renders the English fallback when the backend sends no title or body", () => {
+    fireEmpty(TURN_FINISHED);
+    expect(notificationMock).toHaveBeenCalledWith(TURN_FINISHED_FALLBACK_TITLE, {
+      body: "The agent finished a turn.",
+    });
+
+    notificationMock.mockClear();
+    fireEmpty("session.clarification_requested");
+    expect(notificationMock).toHaveBeenCalledWith("Agent needs your answer", {
+      body: "The agent asked a question.",
+    });
+  });
+
+  it("resolves the fallback per notification, not once at handler registration", async () => {
+    // Registering under `en` and firing under `pseudo` is the regression: the
+    // handlers are registered once when the WS client starts, so a fallback
+    // resolved at registration would stay English for the rest of the session.
+    const handler = getHandler(makeStore(), TURN_FINISHED);
+    await i18n.changeLanguage("pseudo");
+    handler({
+      ...makeMessage("empty-2", TURN_FINISHED, "", ""),
+      payload: {
+        task_id: TASK_ID,
+        session_id: SESSION_ID,
+        occurrence_id: "o-2",
+        title: "",
+        body: "",
+      },
+    } as SemanticNotificationMessage);
+
+    const [title, options] = notificationMock.mock.calls[0] as [string, { body: string }];
+    expect(title).not.toBe(TURN_FINISHED_FALLBACK_TITLE);
+    expect(title).toMatch(/[^\p{ASCII}]/u);
+    expect(options.body).toMatch(/[^\p{ASCII}]/u);
+  });
+
+  it("prefers a backend-supplied title over the fallback", () => {
+    getHandler(
+      makeStore(),
+      TURN_FINISHED,
+    )(makeMessage("kept-1", TURN_FINISHED, "Custom title", "Custom body"));
+    expect(notificationMock).toHaveBeenCalledWith("Custom title", { body: "Custom body" });
   });
 });

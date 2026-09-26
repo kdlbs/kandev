@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Config Sync", () => {
   test("export config returns bundle", async ({ officeApi, officeSeed }) => {
@@ -33,7 +34,7 @@ test.describe("Config Sync", () => {
 
   test("preferences page renders", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office/workspace/settings");
-    await expect(testPage.getByRole("heading", { name: /preferences/i })).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/preferences/i, {
       timeout: 10_000,
     });
   });

@@ -6,6 +6,7 @@ export class SentrySettingsPage {
   readonly addInstanceButton: Locator;
   readonly cards: Locator;
   readonly noInstances: Locator;
+  readonly instanceListLoading: Locator;
   readonly addNameInput: Locator;
   readonly addUrlInput: Locator;
   readonly addSecretInput: Locator;
@@ -16,6 +17,7 @@ export class SentrySettingsPage {
     this.addInstanceButton = page.getByTestId("sentry-add-instance-button");
     this.cards = page.getByTestId("sentry-instance-card");
     this.noInstances = page.getByTestId("sentry-no-instances");
+    this.instanceListLoading = page.getByTestId("sentry-instance-list-loading");
     this.addNameInput = page.getByTestId("sentry-add-name-input");
     this.addUrlInput = page.getByTestId("sentry-add-url-input");
     this.addSecretInput = page.getByTestId("sentry-add-secret-input");
@@ -23,11 +25,16 @@ export class SentrySettingsPage {
     this.addSaveButton = page.getByRole("button", { name: "Save changes" });
   }
 
-  async goto() {
-    await this.page.goto("/settings/integrations/sentry");
+  async goto(workspaceId?: string) {
+    const path = workspaceId
+      ? `/settings/workspaces/${encodeURIComponent(workspaceId)}/integrations/sentry`
+      : "/settings/integrations/sentry";
+    await this.page.goto(path);
     // The "Add instance" button renders whenever no form is open — present in
-    // both the empty and populated states, so it is a reliable ready signal.
+    // both the empty and populated states. It is not sufficient on its own:
+    // it also renders while the async instance list is loading.
     await this.addInstanceButton.waitFor({ state: "visible" });
+    await this.instanceListLoading.waitFor({ state: "hidden", timeout: 15_000 });
   }
 
   async addInstance(name: string, secret: string, url?: string) {

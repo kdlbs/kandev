@@ -44,7 +44,23 @@ async function seedTaskAndWaitForIdle(
   // waitForChatIdle (not a raw idleInput wait) rides out the WS-subscribe race:
   // the auto-started agent can settle RUNNING->WAITING_FOR_INPUT before the
   // client subscribes, so the idle composer never renders without a reload.
-  await session.waitForChatIdle({ timeout: 30_000 });
+  try {
+    await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
+  } catch (error) {
+    // A heavily loaded worker can finish workspace preparation with a
+    // transient agent failure. The recovery action is the same bounded retry a
+    // user has in the session UI; use it once before failing the setup.
+    const freshButton = session.recoveryFreshButton();
+    if (!(await freshButton.isVisible().catch(() => false))) throw error;
+    await freshButton.click();
+    await expect(testPage.locator('[data-placeholder="Preparing workspace..."]')).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(testPage.locator('[data-placeholder="Preparing workspace..."]')).toBeHidden({
+      timeout: 60_000,
+    });
+    await session.waitForChatIdle({ timeout: 60_000, requireEditable: true });
+  }
 
   return { session, taskId: task.id, sessionId: task.session_id! };
 }
@@ -61,7 +77,7 @@ test.describe("Plan mode follow-up messages", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(150_000);
 
     const { session, sessionId } = await seedTaskAndWaitForIdle(
       testPage,
@@ -160,7 +176,8 @@ test.describe("Plan mode follow-up messages", () => {
     // Fill in the comment textarea.
     const textarea = testPage.locator('textarea[placeholder="Add your comment or instruction..."]');
     await expect(textarea).toBeVisible({ timeout: 5_000 });
-    await textarea.fill("Split step 2 into smaller sub-steps");
+    const planCommentText = "Split step 2 into smaller sub-steps";
+    await textarea.fill(planCommentText);
 
     // Click the "Run" button (use exact match to avoid matching sidebar task button).
     const runBtn = testPage.getByRole("button", { name: "Run", exact: true });
@@ -168,12 +185,18 @@ test.describe("Plan mode follow-up messages", () => {
     await runBtn.click();
 
     // The comment should appear in the chat formatted as plan comment markdown.
-    await expect(session.chat.getByText("Plan Comments", { exact: false })).toBeVisible({
+    await expect(
+      session.chat.getByRole("heading", { name: "Plan Comments", exact: true }),
+    ).toBeVisible({
       timeout: 15_000,
     });
-    await expect(
-      session.chat.getByText("Split step 2 into smaller sub-steps", { exact: false }),
-    ).toBeVisible({ timeout: 5_000 });
+    const commentBubble = session.chat
+      .getByTestId("user-message-bubble")
+      .filter({ hasText: planCommentText });
+    await expect(commentBubble).toHaveCount(1, { timeout: 5_000 });
+    await expect(commentBubble.getByText(planCommentText, { exact: true })).toBeVisible({
+      timeout: 5_000,
+    });
 
     // Plan mode badge should be visible on the comment message.
     const planBadges = session.chat.getByText("Plan mode", { exact: true });

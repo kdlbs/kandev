@@ -5,7 +5,7 @@ status: pending
 wave: 3
 depends_on: ["01-foreground-recovery", "02-listing-pull-and-create"]
 plan: "plan.md"
-spec: "../../specs/ui/task-surface-refresh.md"
+spec: "../../specs/ui/requirements/task-surface-refresh.md"
 ---
 
 # Task 03: Task surface browser coverage

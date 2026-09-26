@@ -11,6 +11,8 @@ import {
   type RemoteRepoChipProps,
 } from "@/components/task-create-dialog-remote-repo-chip";
 import { useRemoteRepositories } from "@/hooks/domains/integrations/use-remote-repositories";
+import type { RepositoryInspection } from "@/lib/plugins/types";
+import { useTranslation } from "react-i18next";
 
 /**
  * Chip row for the Remote tab. Renders one `RemoteRepoChip` per row in
@@ -55,6 +57,16 @@ export function RemoteRepoChipsRow({
     }
   }, [fs.remoteRepos, ensureBranches, ensurePRInfo]);
 
+  const inspection = fs.prInfoByUrl.inspection;
+  useEffect(() => {
+    if (!inspection) return;
+    for (const row of fs.remoteRepos) {
+      const resolved = inspection(row.url);
+      const update = resolved ? inspectedRemoteRepositoryUpdate(resolved, row) : undefined;
+      if (update && remoteRepositoryUpdateNeeded(row, update)) onUpdateRow(row.key, update);
+    }
+  }, [fs.remoteRepos, inspection, onUpdateRow]);
+
   // Hoist the accessible-repos hook to the row level so a single backend
   // request serves every chip's popover. Previously each chip called the
   // hook independently and every open popover fired its own request. Each
@@ -75,6 +87,9 @@ export function RemoteRepoChipsRow({
         return (
           <RemoteRepoChip
             key={row.key}
+            workspaceId={workspaceId}
+            executorProfileId={fs.executorProfileId}
+            onOptionsChange={(checkoutOptions) => onUpdateRow(row.key, { checkoutOptions })}
             row={row}
             branches={fs.branchesByUrl.branches(row.url)}
             branchesLoading={fs.branchesByUrl.loading(row.url)}
@@ -91,6 +106,37 @@ export function RemoteRepoChipsRow({
       })}
       <AddRowButton onAddRow={onAddRow} />
     </div>
+  );
+}
+
+function inspectedRemoteRepositoryUpdate(
+  inspection: RepositoryInspection,
+  row: TaskRemoteRepoRow,
+): Partial<TaskRemoteRepoRow> {
+  return {
+    remoteUrl: inspection.cloneUrl,
+    provider: inspection.providerId,
+    providerHost: inspection.providerHost,
+    providerScope: inspection.providerScope,
+    providerRepoId: inspection.repositoryId,
+    providerOwner: inspection.ownerOrProject,
+    providerName: inspection.repositoryName,
+    fullName: `${inspection.ownerOrProject}/${inspection.repositoryName}`,
+    prNumber: inspection.pullRequest?.number,
+    prBaseBranch: inspection.baseBranch,
+    prHeadBranch: inspection.headBranch,
+    ...(!row.branch && (inspection.headBranch || inspection.defaultBranch)
+      ? { branch: inspection.headBranch || inspection.defaultBranch }
+      : {}),
+  };
+}
+
+function remoteRepositoryUpdateNeeded(
+  row: TaskRemoteRepoRow,
+  update: Partial<TaskRemoteRepoRow>,
+): boolean {
+  return Object.entries(update).some(
+    ([key, value]) => row[key as keyof TaskRemoteRepoRow] !== value,
   );
 }
 
@@ -119,6 +165,9 @@ function makeURLChange(
         url,
         source,
         provider: metadata.provider,
+        remoteUrl: metadata.remoteUrl,
+        providerHost: metadata.providerHost,
+        providerScope: metadata.providerScope,
         fullName: metadata.fullName,
         providerRepoId: metadata.providerRepoId,
         providerOwner: metadata.providerOwner,
@@ -131,6 +180,9 @@ function makeURLChange(
       url,
       source,
       provider: undefined,
+      remoteUrl: undefined,
+      providerHost: undefined,
+      providerScope: undefined,
       fullName: undefined,
       providerRepoId: undefined,
       providerOwner: undefined,
@@ -141,13 +193,14 @@ function makeURLChange(
 }
 
 function AddRowButton({ onAddRow }: { onAddRow: () => void }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
           onClick={onAddRow}
-          aria-label="Add remote repository"
+          aria-label={t("task:addRemoteRepository")}
           data-testid="remote-add-row"
           className={cn(
             "h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground",
@@ -157,7 +210,7 @@ function AddRowButton({ onAddRow }: { onAddRow: () => void }) {
           <IconPlus className="h-3.5 w-3.5" />
         </button>
       </TooltipTrigger>
-      <TooltipContent>Add another remote repository</TooltipContent>
+      <TooltipContent>{t("task:addAnotherRemoteRepository")}</TooltipContent>
     </Tooltip>
   );
 }

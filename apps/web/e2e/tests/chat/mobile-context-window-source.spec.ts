@@ -3,7 +3,47 @@ import {
   expectCompactionCount,
   expectSourceRightOfTokenCount,
   seedContextWindowTask,
+  setContextWindowFixture,
 } from "./context-window-source-helpers";
+
+test("pending context usage is reachable by touch without overflow", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await seedContextWindowTask(testPage, apiClient, seedData, {
+    used: 0,
+    remaining: 258_400,
+    efficiency: 0,
+  });
+
+  const contextTrigger = testPage.getByRole("button", {
+    name: "Context window: usage not measured",
+  });
+  await contextTrigger.tap();
+  const contextTooltip = testPage
+    .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
+    .filter({ has: testPage.getByTestId("context-window-usage") });
+  // Radix renders a visually-hidden accessibility copy of the content with the
+  // same testid; scope to the visible instance like the sibling positive test.
+  const contextUsage = contextTooltip.getByTestId("context-window-usage").first();
+  await expect(contextUsage).toBeVisible();
+  await expect(contextUsage.getByText("N/A%", { exact: true })).toBeVisible();
+  await expect(contextUsage.getByText("N/A of 258.4K tokens", { exact: true })).toBeVisible();
+  await expect(
+    contextUsage.getByText(/Usage data appears after the first completed turn/),
+  ).toBeVisible();
+  await expect(contextUsage.getByText("0%", { exact: true })).toHaveCount(0);
+  await expect(contextUsage.getByText(/0 of/)).toHaveCount(0);
+  await expectSourceRightOfTokenCount(contextTooltip);
+  await expectCompactionCount(contextTooltip);
+
+  const hasHorizontalOverflow = await testPage.evaluate(() => {
+    const root = document.scrollingElement ?? document.documentElement;
+    return root.scrollWidth > root.clientWidth + 1;
+  });
+  expect(hasHorizontalOverflow).toBe(false);
+});
 
 test("context source help is reachable by touch without overflow", async ({
   testPage,
@@ -41,6 +81,38 @@ test("context source help is reachable by touch without overflow", async ({
   await expect(testPage.locator(`[id="${compactionHelpId}"]`)).toHaveCSS("opacity", "1");
   await compactionHelpButton.tap();
   await expect(testPage.locator(`[id="${compactionHelpId}"]`)).toHaveCSS("opacity", "0");
+  const hasHorizontalOverflow = await testPage.evaluate(() => {
+    const root = document.scrollingElement ?? document.documentElement;
+    return root.scrollWidth > root.clientWidth + 1;
+  });
+  expect(hasHorizontalOverflow).toBe(false);
+});
+
+test("context ring keeps touch layout while its arc crosses a color threshold", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const { sessionId } = await seedContextWindowTask(testPage, apiClient, seedData);
+  const usageCircle = testPage.locator('button[aria-label^="Context window:"] circle').nth(1);
+  const initialOffset = await usageCircle.getAttribute("stroke-dashoffset");
+
+  await expect(usageCircle).toHaveCSS("transition-property", "stroke-dashoffset");
+  await expect(usageCircle).toHaveClass(/text-blue-300/);
+
+  await setContextWindowFixture(testPage, sessionId, {
+    size: 258_400,
+    used: 200_000,
+    remaining: 58_400,
+    efficiency: 77,
+    compactionCount: 2,
+    source: "acp",
+  });
+
+  await expect(testPage.getByRole("button", { name: "Context window: 77% used" })).toBeVisible();
+  await expect.poll(() => usageCircle.getAttribute("stroke-dashoffset")).not.toBe(initialOffset);
+  await expect(usageCircle).toHaveCSS("transition-property", "stroke-dashoffset");
+  await expect(usageCircle).toHaveClass(/text-yellow-300/);
   const hasHorizontalOverflow = await testPage.evaluate(() => {
     const root = document.scrollingElement ?? document.documentElement;
     return root.scrollWidth > root.clientWidth + 1;

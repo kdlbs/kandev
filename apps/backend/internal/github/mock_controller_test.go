@@ -35,6 +35,124 @@ func serveMockJSON(t *testing.T, router *gin.Engine, method, path, body string) 
 	return response
 }
 
+func TestMockControllerSequencesPRCommitFailureThenSuccess(t *testing.T) {
+	router, svc, _ := setupWorkspaceAuthMockController(t)
+	response := serveMockJSON(t, router, http.MethodPut,
+		"/api/v1/github/mock/pr-commits-failures",
+		`{"owner":"owner","repo":"repo","number":7,"failures":1}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("configure PR commit failure: %d %s", response.Code, response.Body.String())
+	}
+
+	mock, ok := svc.client.(*MockClient)
+	if !ok {
+		t.Fatalf("service client has type %T, want *MockClient", svc.client)
+	}
+	if _, err := mock.ListPRCommits(context.Background(), "owner", "repo", 7); err == nil {
+		t.Fatal("expected the configured request to fail")
+	}
+	if _, err := mock.ListPRCommits(context.Background(), "owner", "repo", 7); err != nil {
+		t.Fatalf("expected the next request to succeed: %v", err)
+	}
+}
+
+func TestMockControllerSeedPRFeedbackClearsPRCaches(t *testing.T) {
+	router, svc, _ := setupWorkspaceAuthMockController(t)
+	svc.prFeedbackCache.set("feedback", "stale")
+	svc.prStatusCache.set("status", "stale")
+
+	response := serveMockJSON(t, router, http.MethodPost,
+		"/api/v1/github/mock/pr-feedback",
+		`{"owner":"owner","repo":"repo","pr_number":7,"workflow_runs":[{"id":7,"run_attempt":1,"workflow_id":9,"name":"CI","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"head"}],"workflow_jobs":[{"run_id":7,"jobs":[{"id":70,"name":"test","status":"completed","conclusion":"success"}]}]}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("seed PR feedback: %d %s", response.Code, response.Body.String())
+	}
+	if _, ok := svc.prFeedbackCache.get("feedback"); ok {
+		t.Fatal("feedback cache still contains the seeded snapshot")
+	}
+	if _, ok := svc.prStatusCache.get("status"); ok {
+		t.Fatal("status cache still contains the seeded snapshot")
+	}
+	mock, ok := svc.client.(*MockClient)
+	if !ok {
+		t.Fatalf("service client has type %T, want *MockClient", svc.client)
+	}
+	jobs, err := mock.ListWorkflowRunJobs(context.Background(), "owner", "repo", 7, 1)
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("workflow jobs with omitted attempt = %#v, err=%v; want attempt 1", jobs, err)
+	}
+}
+
+func TestMockControllerSeedPRFeedbackUsesHeadSHAForExistingPR(t *testing.T) {
+	router, svc, _ := setupWorkspaceAuthMockController(t)
+	mock, ok := svc.client.(*MockClient)
+	if !ok {
+		t.Fatalf("service client has type %T, want *MockClient", svc.client)
+	}
+	mock.AddPR(&PR{Number: 7, RepoOwner: "owner", RepoName: "repo"})
+
+	response := serveMockJSON(t, router, http.MethodPost,
+		"/api/v1/github/mock/pr-feedback",
+		`{"owner":"owner","repo":"repo","pr_number":7,"checks":[{"name":"CI","status":"completed","conclusion":"success"}]}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("seed PR feedback: %d %s", response.Code, response.Body.String())
+	}
+
+	pr, err := mock.GetPR(context.Background(), "owner", "repo", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.HeadSHA == "" {
+		t.Fatal("seeded feedback left the existing PR without a head SHA")
+	}
+
+	feedback, err := mock.GetPRFeedback(context.Background(), "owner", "repo", 7)
+	if err != nil {
+		t.Fatalf("GetPRFeedback: %v", err)
+	}
+	if len(feedback.Checks) != 1 || feedback.Checks[0].Name != "CI" {
+		t.Fatalf("feedback checks = %#v, want the seeded CI check", feedback.Checks)
+	}
+}
+
+func TestMockControllerWorkflowMutationsClearCachesAndNormalizeEvidence(t *testing.T) {
+	router, svc, _ := setupWorkspaceAuthMockController(t)
+	mock, ok := svc.client.(*MockClient)
+	if !ok {
+		t.Fatalf("service client has type %T, want *MockClient", svc.client)
+	}
+
+	svc.prFeedbackCache.set("feedback", "stale")
+	runsResponse := serveMockJSON(t, router, http.MethodPost,
+		"/api/v1/github/mock/workflow-runs",
+		`{"owner":"owner","repo":"repo","head_sha":"head-sha","runs":[{"id":7,"workflow_id":9,"name":"CI","head_sha":""}]}`)
+	if runsResponse.Code != http.StatusOK {
+		t.Fatalf("seed workflow runs: %d %s", runsResponse.Code, runsResponse.Body.String())
+	}
+	if _, ok := svc.prFeedbackCache.get("feedback"); ok {
+		t.Fatal("feedback cache still contains workflow-run mutation snapshot")
+	}
+	runs, err := mock.ListWorkflowRuns(context.Background(), "owner", "repo", "head-sha")
+	if err != nil || len(runs) != 1 || runs[0].HeadSHA != "head-sha" {
+		t.Fatalf("workflow runs = %#v, err=%v; want requested head SHA copied into run", runs, err)
+	}
+
+	svc.prStatusCache.set("status", "stale")
+	jobsResponse := serveMockJSON(t, router, http.MethodPost,
+		"/api/v1/github/mock/workflow-jobs",
+		`{"owner":"owner","repo":"repo","run_id":7,"jobs":[{"id":70,"name":"test","status":"completed","conclusion":"success"}]}`)
+	if jobsResponse.Code != http.StatusOK {
+		t.Fatalf("seed workflow jobs: %d %s", jobsResponse.Code, jobsResponse.Body.String())
+	}
+	if _, ok := svc.prStatusCache.get("status"); ok {
+		t.Fatal("status cache still contains workflow-job mutation snapshot")
+	}
+	jobs, err := mock.ListWorkflowRunJobs(context.Background(), "owner", "repo", 7, 1)
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("workflow jobs = %#v, err=%v; want omitted attempt normalized to 1", jobs, err)
+	}
+}
+
 func TestMockControllerWorkspaceConnectionsResolveIsolatedPrincipals(t *testing.T) {
 	router, svc, _ := setupWorkspaceAuthMockController(t)
 	registration := serveMockJSON(t, router, http.MethodPut,
@@ -234,6 +352,33 @@ func TestMockControllerAddIssues(t *testing.T) {
 	}
 }
 
+func TestMockControllerAddPRsDefaultsSameRepositoryHeadIdentity(t *testing.T) {
+	router, mock := setupMockControllerTestForAddIssues()
+	response := serveMockJSON(t, router, http.MethodPost, "/api/v1/github/mock/prs", `{"prs":[
+		{"number":42,"title":"same repository","state":"open","head_branch":"feature","base_branch":"main","repo_owner":"owner","repo_name":"repo"},
+		{"number":43,"title":"fork source","state":"open","head_branch":"feature","base_branch":"main","repo_owner":"owner","repo_name":"repo","head_repo_owner":"contributor","head_repo_name":"repo-fork"}
+	]}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("add PRs: %d %s", response.Code, response.Body.String())
+	}
+
+	sameRepositoryPR, err := mock.GetPR(context.Background(), "owner", "repo", 42)
+	if err != nil {
+		t.Fatalf("get same-repository PR: %v", err)
+	}
+	if sameRepositoryPR.HeadRepoOwner != "owner" || sameRepositoryPR.HeadRepoName != "repo" {
+		t.Fatalf("same-repository head = %s/%s, want owner/repo", sameRepositoryPR.HeadRepoOwner, sameRepositoryPR.HeadRepoName)
+	}
+
+	forkPR, err := mock.GetPR(context.Background(), "owner", "repo", 43)
+	if err != nil {
+		t.Fatalf("get fork PR: %v", err)
+	}
+	if forkPR.HeadRepoOwner != "contributor" || forkPR.HeadRepoName != "repo-fork" {
+		t.Fatalf("fork head = %s/%s, want contributor/repo-fork", forkPR.HeadRepoOwner, forkPR.HeadRepoName)
+	}
+}
+
 func TestMockControllerAddIssuesInvalidPayload(t *testing.T) {
 	router, _ := setupMockControllerTestForAddIssues()
 
@@ -311,11 +456,12 @@ func TestMockControllerAddRepoFilesRequiresOwnerAndRepo(t *testing.T) {
 
 func TestBuildTaskPRFromRequestCopiesWorkspaceID(t *testing.T) {
 	req := &associateTaskPRRequest{
-		TaskID:      "task-1",
-		WorkspaceID: "ws-1",
-		Owner:       "testorg",
-		Repo:        "testrepo",
-		PRNumber:    103,
+		TaskID:       "task-1",
+		WorkspaceID:  "ws-1",
+		RepositoryID: "repo-1",
+		Owner:        "testorg",
+		Repo:         "testrepo",
+		PRNumber:     103,
 	}
 
 	tp := buildTaskPRFromRequest(req, time.Now().UTC())
@@ -323,22 +469,27 @@ func TestBuildTaskPRFromRequestCopiesWorkspaceID(t *testing.T) {
 	if tp.WorkspaceID != "ws-1" {
 		t.Fatalf("WorkspaceID = %q, want ws-1", tp.WorkspaceID)
 	}
+	if tp.RepositoryID != "repo-1" {
+		t.Fatalf("RepositoryID = %q, want repo-1", tp.RepositoryID)
+	}
 }
 
-func TestEnsureMockPRForRequestCopiesMergeableState(t *testing.T) {
+func TestEnsureMockPRForRequestCopiesMergeableAndConflictState(t *testing.T) {
 	mock := NewMockClient()
 	controller := &MockController{mock: mock}
+	hasConflicts := true
 	req := &associateTaskPRRequest{
-		Owner:          "testorg",
-		Repo:           "testrepo",
-		PRNumber:       102,
-		PRURL:          "https://github.com/testorg/testrepo/pull/102",
-		PRTitle:        "Ready to ship",
-		HeadBranch:     "feat/ready",
-		BaseBranch:     "main",
-		AuthorLogin:    "test-user",
-		State:          "open",
-		MergeableState: "clean",
+		Owner:             "testorg",
+		Repo:              "testrepo",
+		PRNumber:          102,
+		PRURL:             "https://github.com/testorg/testrepo/pull/102",
+		PRTitle:           "Ready to ship",
+		HeadBranch:        "feat/ready",
+		BaseBranch:        "main",
+		AuthorLogin:       "test-user",
+		State:             "open",
+		MergeableState:    "clean",
+		HasMergeConflicts: &hasConflicts,
 	}
 
 	controller.ensureMockPRForRequest(context.Background(), req, time.Now().UTC())
@@ -352,5 +503,8 @@ func TestEnsureMockPRForRequestCopiesMergeableState(t *testing.T) {
 	}
 	if pr.MergeableState != "clean" {
 		t.Fatalf("MergeableState = %q, want clean", pr.MergeableState)
+	}
+	if !pr.HasMergeConflictsObserved || pr.HasMergeConflicts == nil || !*pr.HasMergeConflicts {
+		t.Fatalf("HasMergeConflicts observation = (%v, %v), want explicit true", pr.HasMergeConflicts, pr.HasMergeConflictsObserved)
 	}
 }

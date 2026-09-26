@@ -2,8 +2,14 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 
 /**
- * Calls `onRefetch` when the office refetch trigger matches `triggerType`.
+ * Calls `onRefetch` when a matching office refetch trigger fires.
  * Supports exact match ("dashboard") or prefix match ("comments:" matches "comments:task-123").
+ *
+ * Triggers are batched into a single `office.refetchTrigger` object per tick
+ * rather than tracked as separate values: a WS handler often bumps several
+ * distinct types in one synchronous call (e.g. `task:${id}` then `dashboard`),
+ * and React coalesces those into one render, so per-type values would only
+ * ever be observable by the final type's subscribers.
  *
  * @param triggerType - The trigger type to watch for (e.g. "dashboard", "tasks", "comments")
  * @param onRefetch - Callback invoked when a matching trigger fires
@@ -18,7 +24,9 @@ export function useOfficeRefetch(triggerType: string, onRefetch: () => void) {
 
   useEffect(() => {
     if (!trigger) return;
-    const matches = trigger.type === triggerType || trigger.type.startsWith(triggerType + ":");
+    const matches = trigger.types.some(
+      (type) => type === triggerType || type.startsWith(triggerType + ":"),
+    );
     if (matches) {
       callbackRef.current();
     }

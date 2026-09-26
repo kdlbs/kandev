@@ -7,11 +7,13 @@ import { Button } from "@kandev/ui/button";
 import {
   markdownComponents,
   normalizeMarkdown,
+  rehypePlugins,
   remarkPlugins,
 } from "@/components/shared/markdown-components";
 import { findingLocation } from "@/lib/review/format";
 import type { TaskReviewFinding } from "@/lib/types/review";
 import { ReviewFindingSeverityBadge } from "./review-finding-severity";
+import { useTranslation } from "react-i18next";
 
 export type ReviewFindingCardProps = {
   finding: TaskReviewFinding;
@@ -32,6 +34,7 @@ function FindingActions({
   onReopen,
   onSendToAgent,
 }: Omit<ReviewFindingCardProps, "staleReason" | "showLocation">) {
+  const { t } = useTranslation();
   const isOpen = finding.status === "open";
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1">
@@ -44,7 +47,7 @@ function FindingActions({
           data-testid="review-finding-send-to-agent"
         >
           <IconMessagePlus className="h-3.5 w-3.5" />
-          Send to agent
+          {t("diff:sendToAgent")}
         </Button>
       )}
       {isOpen && onResolve && (
@@ -56,7 +59,7 @@ function FindingActions({
           data-testid="review-finding-resolve"
         >
           <IconCheck className="h-3.5 w-3.5" />
-          Resolve
+          {t("diff:resolve")}
         </Button>
       )}
       {isOpen && onDismiss && (
@@ -68,7 +71,7 @@ function FindingActions({
           data-testid="review-finding-dismiss"
         >
           <IconEyeOff className="h-3.5 w-3.5" />
-          Dismiss
+          {t("diff:dismiss")}
         </Button>
       )}
       {!isOpen && onReopen && (
@@ -80,7 +83,7 @@ function FindingActions({
           data-testid="review-finding-reopen"
         >
           <IconArrowBackUp className="h-3.5 w-3.5" />
-          Reopen
+          {t("diff:reopen")}
         </Button>
       )}
     </div>
@@ -93,10 +96,11 @@ function FindingActions({
  * offering an action the feature does not have.
  */
 function FindingSuggestion({ suggestion }: { suggestion: string }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-2">
       <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-        Suggested change — not applied automatically
+        {t("diff:suggestedChangeNotAppliedAutomatically")}
       </p>
       <pre className="overflow-x-auto rounded bg-muted p-1.5 text-[11px] leading-tight">
         <code>{suggestion}</code>
@@ -113,6 +117,7 @@ function FindingSuggestion({ suggestion }: { suggestion: string }) {
  * dealt with while still letting them change their mind.
  */
 export function ReviewFindingCard(props: ReviewFindingCardProps) {
+  const { t } = useTranslation();
   const { finding, staleReason, showLocation = false } = props;
   const isOpen = finding.status === "open";
 
@@ -134,7 +139,7 @@ export function ReviewFindingCard(props: ReviewFindingCardProps) {
             onClick={() => props.onReopen?.(finding)}
             data-testid="review-finding-reopen"
           >
-            Undo
+            {t("diff:undo")}
           </Button>
         )}
       </div>
@@ -162,7 +167,7 @@ export function ReviewFindingCard(props: ReviewFindingCardProps) {
             title={staleReason}
             data-testid="review-finding-stale"
           >
-            Stale
+            {t("diff:stale")}
           </Badge>
         )}
       </div>
@@ -179,7 +184,11 @@ export function ReviewFindingCard(props: ReviewFindingCardProps) {
         className="prose prose-sm dark:prose-invert mt-1 max-w-none text-xs leading-relaxed [overflow-wrap:anywhere] [&_p]:my-1"
         data-testid="review-finding-body"
       >
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+        <ReactMarkdown
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins}
+          components={markdownComponents}
+        >
           {normalizeMarkdown(finding.body)}
         </ReactMarkdown>
       </div>

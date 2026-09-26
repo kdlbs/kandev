@@ -12,10 +12,11 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// repoBranchCall records one (repositoryID, branch) pair observed by a
-// mockGitHubService call, so multi-branch tests can assert per-call scoping
-// instead of only the most recent call's arguments.
+// repoBranchCall records one (taskID, repositoryID, branch) triple observed
+// by a mockGitHubService call, so multi-branch tests can assert per-call
+// scoping instead of only the most recent call's arguments.
 type repoBranchCall struct {
+	TaskID       string
 	RepositoryID string
 	Branch       string
 }
@@ -41,18 +42,23 @@ type mockGitHubService struct {
 	getPRWatchBySessionRepoAndBranchCalls int
 	exactTaskPRCalls                      int
 	lastExactPRLookup                     github.PRFeedbackEvent
-	prWatch                               *github.PRWatch // returned by GetPRWatchBySession (nil = no watch)
-	ensureWatchCalls                      int
-	createWatchCalls                      int
-	associateCalls                        int
-	updateBranchCalls                     int
-	updatePRNumberCalls                   int
-	resetWatchCalls                       int
-	resetWatchBranch                      string
-	ensureWatchBranch                     string
-	createWatchBranch                     string
-	updatedBranch                         string
-	updatedPRNumber                       int
+	prWatch                               *github.PRWatch // single-watch fixture (nil = no watch)
+	// sessionWatches is the multi-branch fixture: when set, the branch-scoped
+	// lookups honour repository_id + branch instead of returning prWatch for
+	// every query, so tests can assert that a branch switch leaves another
+	// branch's found-PR watch alone.
+	sessionWatches      []*github.PRWatch
+	ensureWatchCalls    int
+	createWatchCalls    int
+	associateCalls      int
+	updateBranchCalls   int
+	updatePRNumberCalls int
+	resetWatchCalls     int
+	resetWatchBranch    string
+	ensureWatchBranch   string
+	createWatchBranch   string
+	updatedBranch       string
+	updatedPRNumber     int
 	// repository_id captured by the most recent CreatePRWatch /
 	// AssociatePRWithTask call. Used by the multi-repo push tests to assert
 	// the per-repo scoping (an empty value indicates the legacy single-repo
@@ -61,12 +67,20 @@ type mockGitHubService struct {
 	lastAssociateRepositoryID   string
 	lastCreateWatchWorkspaceID  string
 	lastAssociateWorkspaceID    string
-	// createWatchLog/associateLog record every call (not just the last), so
-	// multi-branch tests can assert each branch got its own watch/association
-	// scoped to the right repository, rather than only inspecting whichever
-	// call happened to run last.
+	// lastCreateWatchTaskID/lastAssociateTaskID/lastEnsureWatchTaskID capture
+	// the taskID each ForWorkspace call actually wrote under, so tests can pin
+	// the workspace-group redirect (resolveEffectivePushTaskID) at the write
+	// funnel instead of only inferring it from call counts.
+	lastCreateWatchTaskID string
+	lastAssociateTaskID   string
+	lastEnsureWatchTaskID string
+	// createWatchLog/associateLog/ensureWatchLog record every call (not just
+	// the last), so multi-branch tests can assert each branch got its own
+	// watch/association scoped to the right repository, rather than only
+	// inspecting whichever call happened to run last.
 	createWatchLog []repoBranchCall
 	associateLog   []repoBranchCall
+	ensureWatchLog []repoBranchCall
 
 	// Review PR reservation tracking.
 	reserveCalls   int
@@ -103,8 +117,10 @@ type mockGitHubService struct {
 	fixAttempts          []github.TaskCIFixAttempt
 	fixCheckpointRefresh []github.TaskCIFixAttempt
 	mergeAttempts        []github.TaskCIMergeAttempt
+	mergeAttemptErr      error
 	mergeCalls           int
 	mergeErr             error
+	mergeExpectedHeadSHA string
 	ciErrors             []github.TaskCIPRAutomationState
 	ciExhausted          []github.TaskCIPRAutomationState
 	lifecyclePrompts     []github.TaskPRLifecyclePrompt
@@ -209,10 +225,71 @@ func (m *mockGitHubService) RefreshTaskCIFixCheckpoint(_ context.Context, taskID
 		Signature:      signature,
 		CheckpointJSON: checkpointJSON,
 	})
+	if m.ciPRState != nil {
+		m.ciPRState.LastFixSignature = signature
+		m.ciPRState.LastFixCheckpointJSON = checkpointJSON
+		m.ciPRState.LastFixEnqueuedAt = nil
+		// A prompt-free refresh clears the active dispatch timestamp but keeps
+		// the session selected for the next repair round.
+	}
 	return nil
 }
 func (m *mockGitHubService) RecordTaskCIMergeAttempt(_ context.Context, attempt github.TaskCIMergeAttempt) error {
+	if m.mergeAttemptErr != nil {
+		return m.mergeAttemptErr
+	}
+	if m.ciPRState != nil && m.ciPRState.LastMergeSignature == attempt.Signature && !m.ciPRState.MergeRetryPending {
+		return github.ErrTaskCIMergeAttemptAlreadyReserved
+	}
 	m.mergeAttempts = append(m.mergeAttempts, attempt)
+	if m.ciPRState == nil {
+		m.ciPRState = &github.TaskCIPRAutomationState{
+			TaskID: attempt.TaskID, RepositoryID: attempt.RepositoryID, PRNumber: attempt.PRNumber,
+		}
+	}
+	m.ciPRState.LastMergeSignature = attempt.Signature
+	m.ciPRState.LastMergeResult = github.TaskCIMergeResultInFlight
+	m.ciPRState.MergeRetryPending = false
+	m.ciPRState.LastMergeAttemptAt = &attempt.AttemptedAt
+	return nil
+}
+func (m *mockGitHubService) RecordTaskCIMergeAttemptResult(
+	_ context.Context, taskID, repositoryID string, prNumber int, signature, result, message string,
+) error {
+	if m.ciPRState == nil {
+		m.ciPRState = &github.TaskCIPRAutomationState{
+			TaskID: taskID, RepositoryID: repositoryID, PRNumber: prNumber,
+		}
+	}
+	if m.ciPRState.LastMergeSignature != "" && m.ciPRState.LastMergeSignature != signature {
+		return github.ErrTaskCIMergeAttemptNotFound
+	}
+	m.ciPRState.LastMergeResult = result
+	if result == github.TaskCIMergeResultFailed {
+		m.ciPRState.LastError = &message
+		m.ciPRState.LastErrorKind = github.TaskCIErrorKindAutoMerge
+	}
+	return nil
+}
+func (m *mockGitHubService) RecordTaskCIMergeQueueObservation(_ context.Context, observation github.TaskCIMergeQueueObservation) error {
+	if m.ciPRState == nil {
+		m.ciPRState = &github.TaskCIPRAutomationState{
+			TaskID: observation.TaskID, RepositoryID: observation.RepositoryID, PRNumber: observation.PRNumber,
+		}
+	}
+	if observation.ActiveQueueHeadSHA != "" {
+		m.ciPRState.LastQueueAttemptHeadSHA = observation.ActiveQueueHeadSHA
+	}
+	if observation.ActiveQueueHeadSHA != "" || observation.Accepted {
+		m.ciPRState.LastMergeResult = github.TaskCIMergeResultAccepted
+		if m.ciPRState.LastErrorKind == github.TaskCIErrorKindAutoMerge {
+			m.ciPRState.LastError = nil
+			m.ciPRState.LastErrorKind = ""
+		}
+	}
+	if observation.RemovalCause != "" {
+		m.ciPRState.LastQueueRemovalCause = observation.RemovalCause
+	}
 	return nil
 }
 func (m *mockGitHubService) RecordTaskCIError(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
@@ -224,6 +301,13 @@ func (m *mockGitHubService) RecordTaskCIError(_ context.Context, taskID, reposit
 	})
 	return nil
 }
+func (m *mockGitHubService) RecordTaskCIAutoMergeError(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	m.ciErrors = append(m.ciErrors, github.TaskCIPRAutomationState{
+		TaskID: taskID, RepositoryID: repositoryID, PRNumber: prNumber,
+		LastError: &message, LastErrorKind: github.TaskCIErrorKindAutoMerge,
+	})
+	return nil
+}
 func (m *mockGitHubService) MarkTaskCIAutoFixExhausted(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
 	now := time.Now().UTC()
 	m.ciExhausted = append(m.ciExhausted, github.TaskCIPRAutomationState{
@@ -232,6 +316,7 @@ func (m *mockGitHubService) MarkTaskCIAutoFixExhausted(_ context.Context, taskID
 		PRNumber:           prNumber,
 		AutoFixExhaustedAt: &now,
 		LastError:          &message,
+		LastErrorKind:      github.TaskCIErrorKindAutoFix,
 	})
 	return nil
 }
@@ -296,13 +381,16 @@ func (m *mockGitHubService) MergePR(context.Context, string, string, int, string
 }
 
 func (m *mockGitHubService) MergePRForAutomation(
-	ctx context.Context, _, owner, repo string, number int, method string,
+	ctx context.Context, _, owner, repo string, number int, method, expectedHeadSHA string,
 ) error {
+	m.mergeExpectedHeadSHA = expectedHeadSHA
 	return m.MergePR(ctx, owner, repo, number, method)
 }
-func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, _, branch string) (*github.PRWatch, error) {
+func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, taskID, repositoryID, _, _, branch string) (*github.PRWatch, error) {
 	m.ensureWatchCalls++
 	m.ensureWatchBranch = branch
+	m.lastEnsureWatchTaskID = taskID
+	m.ensureWatchLog = append(m.ensureWatchLog, repoBranchCall{TaskID: taskID, RepositoryID: repositoryID, Branch: branch})
 	return &github.PRWatch{}, nil
 }
 
@@ -311,21 +399,42 @@ func (m *mockGitHubService) EnsurePRWatchForWorkspace(
 ) (*github.PRWatch, error) {
 	return m.EnsurePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, branch)
 }
-func (m *mockGitHubService) GetPRWatchBySession(_ context.Context, _ string) (*github.PRWatch, error) {
-	return m.prWatch, nil
-}
 func (m *mockGitHubService) GetPRWatchBySessionAndRepo(_ context.Context, _, _ string) (*github.PRWatch, error) {
 	return m.prWatch, nil
 }
-func (m *mockGitHubService) GetPRWatchBySessionRepoAndBranch(_ context.Context, _, _, _ string) (*github.PRWatch, error) {
+func (m *mockGitHubService) GetPRWatchBySessionRepoAndBranch(
+	_ context.Context, _, repositoryID, branch string,
+) (*github.PRWatch, error) {
 	m.getPRWatchBySessionRepoAndBranchCalls++
-	return m.prWatch, nil
+	if m.sessionWatches == nil {
+		return m.prWatch, nil
+	}
+	for _, watch := range m.sessionWatches {
+		if watch != nil && watch.RepositoryID == repositoryID && watch.Branch == branch {
+			return watch, nil
+		}
+	}
+	return nil, nil
 }
-func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, repositoryID, _, _ string, _ int, branch string) (*github.PRWatch, error) {
+
+// ListPRWatchesBySession serves the per-branch watch bookkeeping. Tests that
+// leave sessionWatches nil fall back to the single prWatch field so the
+// existing single-watch fixtures keep working.
+func (m *mockGitHubService) ListPRWatchesBySession(_ context.Context, _ string) ([]*github.PRWatch, error) {
+	if m.sessionWatches != nil {
+		return m.sessionWatches, nil
+	}
+	if m.prWatch == nil {
+		return nil, nil
+	}
+	return []*github.PRWatch{m.prWatch}, nil
+}
+func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, taskID, repositoryID, _, _ string, _ int, branch string) (*github.PRWatch, error) {
 	m.createWatchCalls++
 	m.createWatchBranch = branch
 	m.lastCreateWatchRepositoryID = repositoryID
-	m.createWatchLog = append(m.createWatchLog, repoBranchCall{RepositoryID: repositoryID, Branch: branch})
+	m.lastCreateWatchTaskID = taskID
+	m.createWatchLog = append(m.createWatchLog, repoBranchCall{TaskID: taskID, RepositoryID: repositoryID, Branch: branch})
 	return &github.PRWatch{}, nil
 }
 func (m *mockGitHubService) CreatePRWatchForWorkspace(
@@ -334,14 +443,15 @@ func (m *mockGitHubService) CreatePRWatchForWorkspace(
 	m.lastCreateWatchWorkspaceID = workspaceID
 	return m.CreatePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, prNumber, branch)
 }
-func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _, repositoryID string, pr *github.PR) (*github.TaskPR, error) {
+func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, taskID, repositoryID string, pr *github.PR) (*github.TaskPR, error) {
 	m.associateCalls++
 	m.lastAssociateRepositoryID = repositoryID
+	m.lastAssociateTaskID = taskID
 	branch := ""
 	if pr != nil {
 		branch = pr.HeadBranch
 	}
-	m.associateLog = append(m.associateLog, repoBranchCall{RepositoryID: repositoryID, Branch: branch})
+	m.associateLog = append(m.associateLog, repoBranchCall{TaskID: taskID, RepositoryID: repositoryID, Branch: branch})
 	return &github.TaskPR{}, nil
 }
 func (m *mockGitHubService) AssociatePRWithTaskForWorkspace(
@@ -358,6 +468,9 @@ func (m *mockGitHubService) UpdatePRWatchBranchIfSearching(_ context.Context, _,
 func (m *mockGitHubService) UpdatePRWatchPRNumber(_ context.Context, _ string, prNumber int) error {
 	m.updatePRNumberCalls++
 	m.updatedPRNumber = prNumber
+	return nil
+}
+func (m *mockGitHubService) UpdatePRWatchRepository(context.Context, string, string, string) error {
 	return nil
 }
 func (m *mockGitHubService) ResetPRWatch(_ context.Context, _, branch string) error {
@@ -514,16 +627,28 @@ func TestCheckSessionPR(t *testing.T) {
 		}
 
 		// Add worktree with branch to the session
-		wt := &models.TaskSessionWorktree{
-			ID:             "wt1",
-			SessionID:      "s1",
-			WorktreeID:     "wtree1",
-			RepositoryID:   "repo1",
-			WorktreeBranch: branch,
-			CreatedAt:      now,
+		if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env1", TaskID: "t1", ExecutorType: "worktree",
+			WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+			Repos: []*models.TaskEnvironmentRepo{
+				{
+					ID:             "wt1",
+					WorktreeID:     "wtree1",
+					RepositoryID:   "repo1",
+					WorktreeBranch: branch,
+					CreatedAt:      now,
+				},
+			},
+		}); err != nil {
+			t.Fatalf("failed to create environment: %v", err)
 		}
-		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
-			t.Fatalf("failed to create worktree: %v", err)
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("load session: %v", err)
+		}
+		session.TaskEnvironmentID = "env1"
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("link session to environment: %v", err)
 		}
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -966,7 +1091,7 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 	seedFullSession := func(t *testing.T, repo interface {
 		CreateRepository(ctx context.Context, r *models.Repository) error
 		CreateTaskRepository(ctx context.Context, tr *models.TaskRepository) error
-		CreateTaskSessionWorktree(ctx context.Context, wt *models.TaskSessionWorktree) error
+		CreateTaskEnvironmentRepo(ctx context.Context, wt *models.TaskEnvironmentRepo) error
 	}, taskID, sessionID, branch, repoID string) {
 		t.Helper()
 		rObj := &models.Repository{
@@ -984,13 +1109,33 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 		}
 		_ = repo.CreateTaskRepository(ctx, tr)
 
-		wt := &models.TaskSessionWorktree{
-			ID: "wt-" + sessionID, SessionID: sessionID,
+		wt := &models.TaskEnvironmentRepo{
+			ID: "wt-" + sessionID, TaskEnvironmentID: "env-" + sessionID,
 			WorktreeID: "wtree-" + sessionID, RepositoryID: repoID,
 			WorktreeBranch: branch, CreatedAt: now,
 		}
-		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
+		if err := repo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
 			t.Fatalf("failed to create worktree: %v", err)
+		}
+	}
+
+	// seedEnvironment creates the environment row a seeded worktree references
+	// and links the session to it.
+	seedEnvironment := func(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string) {
+		t.Helper()
+		if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env-" + sessionID, TaskID: taskID, ExecutorType: "worktree",
+			WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		}); err != nil {
+			t.Fatalf("failed to create environment: %v", err)
+		}
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("load session: %v", err)
+		}
+		session.TaskEnvironmentID = "env-" + sessionID
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("link session to environment: %v", err)
 		}
 	}
 
@@ -1018,7 +1163,9 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 		testRepo := setupTestRepo(t)
 		seedSession(t, testRepo, "t1", "s1", "step1")
 		seedTask(t, testRepo, "t2", "s2")
+		seedEnvironment(t, testRepo, "t1", "s1")
 		seedFullSession(t, testRepo, "t1", "s1", "feature-a", "repo1")
+		seedEnvironment(t, testRepo, "t2", "s2")
 		seedFullSession(t, testRepo, "t2", "s2", "feature-b", "repo1")
 
 		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
@@ -1054,6 +1201,7 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 	t.Run("excludes sessions on archived tasks", func(t *testing.T) {
 		testRepo := setupTestRepo(t)
 		seedSession(t, testRepo, "t1", "s1", "step1")
+		seedEnvironment(t, testRepo, "t1", "s1")
 		seedFullSession(t, testRepo, "t1", "s1", "feature-a", "repo1")
 
 		// Archive the task.
@@ -1123,14 +1271,23 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 				t.Fatalf("link %s: %v", l.ID, err)
 			}
 		}
-		worktrees := []*models.TaskSessionWorktree{
-			{ID: "wt-1", SessionID: "s1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
-			{ID: "wt-2", SessionID: "s1", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
+		if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
+			WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+			Repos: []*models.TaskEnvironmentRepo{
+				{ID: "wt-1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
+				{ID: "wt-2", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
+			},
+		}); err != nil {
+			t.Fatalf("create environment: %v", err)
 		}
-		for _, wt := range worktrees {
-			if err := testRepo.CreateTaskSessionWorktree(ctx, wt); err != nil {
-				t.Fatalf("worktree %s: %v", wt.ID, err)
-			}
+		session, err := testRepo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("load session: %v", err)
+		}
+		session.TaskEnvironmentID = "env-s1"
+		if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("link session to environment: %v", err)
 		}
 
 		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
@@ -1161,6 +1318,157 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 		}
 		if back.Owner != "myorg" || back.Repo != "backend" || back.Branch != "feat/backend" {
 			t.Errorf("secondary entry mis-resolved: %+v", back)
+		}
+	})
+
+	// Task 02: canonical PR-watch identity is task/repository/branch, not
+	// session_id. Two active sessions resolving to the SAME (task,
+	// repository, branch) target must collapse to a single TaskBranchInfo
+	// emission, so the poller performs one GitHub lookup per canonical
+	// target per cycle regardless of how many sessions are attached to it.
+	t.Run("dedupes multiple sessions on the same task/repo/branch", func(t *testing.T) {
+		testRepo := setupTestRepo(t)
+		seedSession(t, testRepo, "t1", "s1", "step1")
+
+		// Second session on the SAME task, sharing the task's one
+		// environment (task_environments.task_id is UNIQUE) and worktree.
+		session2 := &models.TaskSession{
+			ID: "s2", TaskID: "t1",
+			State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+		}
+		if err := testRepo.CreateTaskSession(ctx, session2); err != nil {
+			t.Fatalf("failed to create session s2: %v", err)
+		}
+
+		repoObj := &models.Repository{ID: "repo1", WorkspaceID: "ws1", Name: "myrepo", SourceType: "provider", Provider: "github", ProviderOwner: "myorg", ProviderName: "myrepo", CreatedAt: now, UpdatedAt: now}
+		if err := testRepo.CreateRepository(ctx, repoObj); err != nil {
+			t.Fatalf("create repo: %v", err)
+		}
+		if err := testRepo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-1", TaskID: "t1", RepositoryID: "repo1", Position: 0, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatalf("link repo: %v", err)
+		}
+		if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env-t1", TaskID: "t1", ExecutorType: "worktree", WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+			Repos: []*models.TaskEnvironmentRepo{
+				{ID: "wt-1", WorktreeID: "wtree-1", RepositoryID: "repo1", WorktreeBranch: "feature-a", CreatedAt: now},
+			},
+		}); err != nil {
+			t.Fatalf("create environment: %v", err)
+		}
+		for _, sessionID := range []string{"s1", "s2"} {
+			session, err := testRepo.GetTaskSession(ctx, sessionID)
+			if err != nil {
+				t.Fatalf("load session %s: %v", sessionID, err)
+			}
+			session.TaskEnvironmentID = "env-t1"
+			if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
+				t.Fatalf("link session %s to environment: %v", sessionID, err)
+			}
+		}
+
+		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetGitHubService(&mockGitHubService{prWatch: nil})
+
+		tasks, err := svc.ListTasksNeedingPRWatch(ctx)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		matches := 0
+		for _, ti := range tasks {
+			if ti.TaskID == "t1" && ti.RepositoryID == "repo1" && ti.Branch == "feature-a" {
+				matches++
+			}
+		}
+		if matches != 1 {
+			t.Errorf("expected exactly 1 entry for the shared (task, repo, branch) target, got %d", matches)
+		}
+	})
+}
+
+// TestResolveBranchForRepository verifies the Task 02 fix: branch resolution
+// is scoped to a specific (task, repository) pair, independent of session
+// identity. It replaces a resolver that always used the task's PRIMARY
+// repository's checkout_branch regardless of which repository the caller
+// asked about — a real bug that could corrupt a secondary repo's
+// still-searching PR watch with the primary repo's branch name.
+func TestResolveBranchForRepository(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	t.Run("uses checkout_branch for the requested repository, not the primary", func(t *testing.T) {
+		testRepo := setupTestRepo(t)
+		seedSession(t, testRepo, "t1", "s1", "step1")
+
+		for _, r := range []*models.Repository{
+			{ID: "repo-front", WorkspaceID: "ws1", Name: "frontend", SourceType: "provider", Provider: "github", ProviderOwner: "myorg", ProviderName: "frontend", CreatedAt: now, UpdatedAt: now},
+			{ID: "repo-back", WorkspaceID: "ws1", Name: "backend", SourceType: "provider", Provider: "github", ProviderOwner: "myorg", ProviderName: "backend", CreatedAt: now, UpdatedAt: now},
+		} {
+			if err := testRepo.CreateRepository(ctx, r); err != nil {
+				t.Fatalf("create repo %s: %v", r.ID, err)
+			}
+		}
+		links := []*models.TaskRepository{
+			{ID: "tr-front", TaskID: "t1", RepositoryID: "repo-front", Position: 0, CheckoutBranch: "main-front", CreatedAt: now, UpdatedAt: now},
+			{ID: "tr-back", TaskID: "t1", RepositoryID: "repo-back", Position: 1, CheckoutBranch: "main-back", CreatedAt: now, UpdatedAt: now},
+		}
+		for _, l := range links {
+			if err := testRepo.CreateTaskRepository(ctx, l); err != nil {
+				t.Fatalf("link %s: %v", l.ID, err)
+			}
+		}
+
+		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+
+		if got := svc.ResolveBranchForRepository(ctx, "t1", "repo-back"); got != "main-back" {
+			t.Errorf("expected secondary repo branch %q, got %q", "main-back", got)
+		}
+		if got := svc.ResolveBranchForRepository(ctx, "t1", "repo-front"); got != "main-front" {
+			t.Errorf("expected primary repo branch %q, got %q", "main-front", got)
+		}
+	})
+
+	t.Run("falls back to an active session worktree branch when checkout_branch is unset", func(t *testing.T) {
+		testRepo := setupTestRepo(t)
+		seedSession(t, testRepo, "t1", "s1", "step1")
+
+		repoObj := &models.Repository{ID: "repo1", WorkspaceID: "ws1", Name: "myrepo", SourceType: "provider", Provider: "github", ProviderOwner: "myorg", ProviderName: "myrepo", CreatedAt: now, UpdatedAt: now}
+		if err := testRepo.CreateRepository(ctx, repoObj); err != nil {
+			t.Fatalf("create repo: %v", err)
+		}
+		link := &models.TaskRepository{ID: "tr-1", TaskID: "t1", RepositoryID: "repo1", Position: 0, CreatedAt: now, UpdatedAt: now}
+		if err := testRepo.CreateTaskRepository(ctx, link); err != nil {
+			t.Fatalf("link repo: %v", err)
+		}
+		if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env-s1", TaskID: "t1", ExecutorType: "worktree", WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+			Repos: []*models.TaskEnvironmentRepo{
+				{ID: "wt-1", WorktreeID: "wtree-1", RepositoryID: "repo1", WorktreeBranch: "session-branch", CreatedAt: now},
+			},
+		}); err != nil {
+			t.Fatalf("create environment: %v", err)
+		}
+		session, err := testRepo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("load session: %v", err)
+		}
+		session.TaskEnvironmentID = "env-s1"
+		if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("link session to environment: %v", err)
+		}
+
+		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+		if got := svc.ResolveBranchForRepository(ctx, "t1", "repo1"); got != "session-branch" {
+			t.Errorf("expected fallback branch %q, got %q", "session-branch", got)
+		}
+	})
+
+	t.Run("returns empty when nothing can be resolved", func(t *testing.T) {
+		testRepo := setupTestRepo(t)
+		seedSession(t, testRepo, "t1", "s1", "step1")
+		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+		if got := svc.ResolveBranchForRepository(ctx, "t1", "missing-repo"); got != "" {
+			t.Errorf("expected empty branch, got %q", got)
 		}
 	})
 }
@@ -1204,13 +1512,23 @@ func TestEnsureSessionPRWatch_MultiRepo(t *testing.T) {
 			t.Fatalf("link: %v", err)
 		}
 	}
-	for _, wt := range []*models.TaskSessionWorktree{
-		{ID: "wt-1", SessionID: "s1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
-		{ID: "wt-2", SessionID: "s1", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
-	} {
-		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
-			t.Fatalf("worktree: %v", err)
-		}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "wt-1", WorktreeID: "wtree-1", RepositoryID: "repo-front", WorktreeBranch: "feat/frontend", CreatedAt: now},
+			{ID: "wt-2", WorktreeID: "wtree-2", RepositoryID: "repo-back", WorktreeBranch: "feat/backend", CreatedAt: now},
+		},
+	}); err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.TaskEnvironmentID = "env-s1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("link session to environment: %v", err)
 	}
 
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())

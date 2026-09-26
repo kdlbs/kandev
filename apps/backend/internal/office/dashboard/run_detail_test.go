@@ -2,6 +2,7 @@ package dashboard_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -218,6 +219,49 @@ func TestListAgentRunsPaged_UsesSourceTaskWithoutCommentID(t *testing.T) {
 	}
 }
 
+func TestGetRunDetailUsesNewestRunSessionInvocation(t *testing.T) {
+	deps := newRunDetailDeps(t)
+	ctx := context.Background()
+	seedRunDetailAgent(t, deps, "agent-retry", "agent-retry")
+	runID := seedRunDetailRun(t, deps, "agent-retry", "finished", "task-retry", time.Now().UTC())
+	if _, err := deps.db.Exec(`
+		UPDATE runs
+		SET session_id = ?, resolved_provider_id = ?, resolved_model = ?
+		WHERE id = ?
+	`, "session-old", "run-provider", "run-model", runID); err != nil {
+		t.Fatalf("update run snapshot: %v", err)
+	}
+	for _, session := range []struct {
+		id      string
+		attempt int
+		adapter string
+		model   string
+	}{
+		{"session-old", 1, "old-provider", "old-model"},
+		{"session-new", 2, "new-provider", "new-model"},
+	} {
+		if _, err := deps.db.Exec(`
+			INSERT INTO office_run_sessions (
+				id, workspace_id, agent_profile_id, run_id, attempt, state,
+				adapter, model, created_at
+			) VALUES (?, 'ws-1', 'agent-retry', ?, ?, 'finished', ?, ?, ?)
+		`, session.id, runID, session.attempt, session.adapter, session.model, time.Now().UTC()); err != nil {
+			t.Fatalf("insert session %s: %v", session.id, err)
+		}
+	}
+
+	detail, err := dashboard.GetRunDetail(ctx, deps.repo, "agent-retry", runID)
+	if err != nil {
+		t.Fatalf("GetRunDetail: %v", err)
+	}
+	if detail.Session.SessionID != "session-new" {
+		t.Fatalf("session id = %q, want session-new", detail.Session.SessionID)
+	}
+	if detail.Invocation.Adapter != "new-provider" || detail.Invocation.Model != "new-model" {
+		t.Fatalf("invocation = %+v, want newest attempt", detail.Invocation)
+	}
+}
+
 func TestListAgentRunsPaged_TieBreakOnID(t *testing.T) {
 	deps := newRunDetailDeps(t)
 	// Two runs with identical requested_at — must still be strictly
@@ -288,12 +332,29 @@ func TestGetRunDetail_HappyPathWithCosts(t *testing.T) {
 	if len(resp.TasksTouched) != 1 || resp.TasksTouched[0] != "task-1" {
 		t.Errorf("want primary task in tasks_touched, got %v", resp.TasksTouched)
 	}
-	// After ADR 0005 the agent profile id IS the agent instance id, so
-	// the adapter slug surfaced in the invocation panel matches the agent
-	// row id directly. The legacy "office instance → shallow profile"
-	// indirection is gone.
-	if resp.Invocation.Adapter != "agent-1" {
-		t.Errorf("adapter mismatch: %q", resp.Invocation.Adapter)
+	if resp.Invocation.Adapter != "" {
+		t.Errorf("unrecorded adapter should stay empty, got %q", resp.Invocation.Adapter)
+	}
+	if resp.AgentName != "Agent" {
+		t.Errorf("agent name = %q, want Agent", resp.AgentName)
+	}
+}
+
+func TestGetRunDetailActualInvocation(t *testing.T) {
+	deps := newRunDetailDeps(t)
+	seedRunDetailAgent(t, deps, "agent-1", "ignored")
+	ctx := context.Background()
+	runID := seedRunDetailRun(t, deps, "agent-1", "finished", "task-1", time.Now().UTC())
+	if err := deps.repo.SetRunResolvedRoute(ctx, runID, "profile-1", "codex", "gpt-5"); err != nil {
+		t.Fatalf("set resolved route: %v", err)
+	}
+
+	resp, err := dashboard.GetRunDetail(ctx, deps.repo, "agent-1", runID)
+	if err != nil {
+		t.Fatalf("detail: %v", err)
+	}
+	if resp.Invocation.Adapter != "codex" || resp.Invocation.Model != "gpt-5" {
+		t.Fatalf("invocation = %+v, want recorded provider/model", resp.Invocation)
 	}
 }
 
@@ -394,5 +455,17 @@ func TestGetRunDetail_PromptArtifactsAndSnapshots(t *testing.T) {
 	}
 	if resp.ContextSnapshot == "" {
 		t.Errorf("expected context_snapshot to round-trip from default '{}', got empty string")
+	}
+
+	raw, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal run detail response: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode run detail response: %v", err)
+	}
+	if got := payload["continuation_scope"]; got != "agent:agent-1" {
+		t.Errorf("continuation_scope = %v, want %q", got, "agent:agent-1")
 	}
 }

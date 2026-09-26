@@ -1,18 +1,32 @@
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
+import type { ChangeLayer, CommitDetailTarget } from "@/components/task/changes-diff-target";
+import { t } from "@/lib/i18n";
 import { focusOrAddPanel } from "./dockview-layout-builders";
+import { reviewPanelId, type ReviewPanelTarget } from "./dockview-review-panel-id";
+import { panelTitle } from "./layout-manager/panel-title";
 
-type StoreGet = () => {
+export type ScrollTarget = {
+  sessionId: string;
+  messageId: string;
+  token: number;
+  hostPanelId: string;
+};
+export type StoreGet = () => {
   api: DockviewApi | null;
   centerGroupId: string;
   rightTopGroupId: string;
   rightBottomGroupId: string;
   selectedDiff: { path: string; content?: string } | null;
+  scrollTarget?: ScrollTarget | null;
 };
-type StoreSet = (
-  partial: Partial<{ selectedDiff: { path: string; content?: string } | null }>,
+export type StoreSet = (
+  partial: Partial<{
+    selectedDiff: { path: string; content?: string } | null;
+    scrollTarget: ScrollTarget | null;
+  }>,
 ) => void;
 
-type SimplePanelOpts = {
+export type SimplePanelOpts = {
   id: string;
   component: string;
   title: string;
@@ -20,10 +34,66 @@ type SimplePanelOpts = {
   params?: Record<string, unknown>;
 };
 
-function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts): void {
+/** Add a panel (or focus an existing one with the same id) inside the given group. */
+export function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts): void {
   focusOrAddPanel(api, { ...opts, position: { referenceGroup: groupId } });
 }
 
+export { reviewPanelId };
+
+/** The browser panel a preview should reuse: the active one, else the first. */
+function findBrowserPanel(api: DockviewApi) {
+  return (
+    (api.activePanel?.api.component === "browser" ? api.activePanel : undefined) ??
+    api.panels.find((panel) => panel.api.component === "browser")
+  );
+}
+
+function openBrowserPanel(api: DockviewApi, centerGroupId: string, url: string): void {
+  const browserPanel = findBrowserPanel(api);
+
+  if (browserPanel) {
+    browserPanel.api.updateParameters({ url });
+    browserPanel.api.setActive();
+    return;
+  }
+
+  focusOrAddPanel(api, {
+    id: `browser:${url}`,
+    component: "browser",
+    title: t("task:browser"),
+    params: { url },
+    position: { referenceGroup: centerGroupId },
+  });
+}
+
+export type SidePanelOpts = { groupId?: string; quiet?: boolean; inCenter?: boolean };
+export type ReviewPanelOptions = { groupId?: string };
+
+/**
+ * Shared placement logic for a single-instance "side" panel (Plan, a plugin
+ * task panel, ...): an explicit `groupId` wins, `inCenter` falls back to the
+ * center group, and otherwise the panel opens beside the chat panel. Extracted
+ * from `addPlanPanel` so `addPluginPanel` can reuse the identical placement
+ * rules instead of re-deriving them.
+ */
+export function addSidePanel(
+  api: DockviewApi,
+  centerGroupId: string,
+  panel: SimplePanelOpts,
+  opts?: SidePanelOpts,
+): void {
+  const groupId = opts?.groupId ?? (opts?.inCenter ? centerGroupId : undefined);
+  const position = groupId
+    ? { referenceGroup: groupId }
+    : { referencePanel: "chat" as const, direction: "right" as const };
+  focusOrAddPanel(api, { ...panel, position }, opts?.quiet ?? false);
+}
+
+/**
+ * Focus the legacy single-instance panel when it carries the matching key
+ * param and the modern keyed panel does not exist; returns whether it did.
+ */
 function focusMatchingLegacyPanel(
   api: DockviewApi,
   keyedPanelId: string,
@@ -78,10 +148,12 @@ const PREVIEW_SPECS: Record<PreviewType, PreviewSpec> = {
   },
 };
 
+/** Return the last path segment of `path` (the file name). */
 function getFileName(path: string): string {
   return path.split("/").pop() || path;
 }
 
+/** Build a repo-scoped item id (`repo:path`) so multi-repo files get distinct panels. */
 export function buildRepoScopedItemId(path: string, repo?: string): string {
   return repo ? `${repo}:${path}` : path;
 }
@@ -278,6 +350,11 @@ export type OpenPanelOpts = {
 export const PREVIEW_FILE_EDITOR_ID = "preview:file-editor";
 const PINNED_TAB = "pinnedDefaultTab";
 
+/**
+ * Build the `addFileEditorPanel` action: opens the file-editor preview (or a
+ * pinned per-item panel) for the given path, keyed repo-scoped when a repo
+ * is provided.
+ */
 function buildFileEditorAction(get: StoreGet) {
   return (path: string, name: string, opts?: OpenPanelOpts) => {
     const { api, centerGroupId } = get();
@@ -297,6 +374,16 @@ function buildFileEditorAction(get: StoreGet) {
   };
 }
 
+function buildFileDiffItemId(path: string, scope: string | undefined, layer?: ChangeLayer): string {
+  const scopedItemId = buildRepoScopedItemId(path, scope);
+  return layer ? `${layer}:${scopedItemId}` : scopedItemId;
+}
+
+/**
+ * Build the `addFileDiffPanel` action: opens the file-diff preview (or pinned
+ * panel) for a path, passing content/source/repository/pr params through and
+ * keying the item repo-scoped.
+ */
 function buildFileDiffAction(get: StoreGet) {
   return (
     path: string,
@@ -306,16 +393,21 @@ function buildFileDiffAction(get: StoreGet) {
       source?: string;
       repositoryName?: string;
       prKey?: string;
+      changeLayer?: ChangeLayer;
     },
   ) => {
     const { api, centerGroupId } = get();
     if (!api) return;
-    const itemId = buildRepoScopedItemId(path, opts?.prKey ?? opts?.repositoryName);
+    const itemId = buildFileDiffItemId(
+      path,
+      opts?.prKey ?? opts?.repositoryName,
+      opts?.changeLayer,
+    );
     openOrReplacePreview({
       api,
       type: "file-diff",
       itemId,
-      title: `Diff [${getFileName(path)}]`,
+      title: t("task:panelFileDiff", { file: getFileName(path) }),
       params: {
         kind: "file",
         path,
@@ -323,6 +415,7 @@ function buildFileDiffAction(get: StoreGet) {
         source: opts?.source,
         repositoryName: opts?.repositoryName,
         prKey: opts?.prKey,
+        changeLayer: opts?.changeLayer,
       },
       groupId: opts?.groupId ?? centerGroupId,
       quiet: opts?.quiet,
@@ -332,20 +425,55 @@ function buildFileDiffAction(get: StoreGet) {
   };
 }
 
+/**
+ * Compute the stable panel id for a commit detail target — legacy string
+ * targets keep the raw (or `legacyRepo`-prefixed) id, while discriminated
+ * targets encode provenance (`local:`/`github:`) and repository identity.
+ */
+function buildCommitItemId(
+  requestedTarget: CommitDetailTarget | string,
+  target: CommitDetailTarget,
+  legacyRepo?: string,
+): string {
+  if (typeof requestedTarget === "string") {
+    return legacyRepo ? `${legacyRepo}:${requestedTarget}` : requestedTarget;
+  }
+  if (target.source === "local") return `local:${target.repo ?? ""}:${target.sha}`;
+  return `github:${target.workspaceId}:${target.owner}/${target.repo}:${target.sha}`;
+}
+
+/**
+ * Build the `addCommitDetailPanel` action: opens the commit-detail preview
+ * for a legacy sha string or a discriminated commit target.
+ */
 function buildCommitDetailAction(get: StoreGet) {
-  return (sha: string, opts?: OpenPanelOpts & { groupId?: string; repo?: string }) => {
+  return (
+    requestedTarget: CommitDetailTarget | string,
+    opts?: OpenPanelOpts & { groupId?: string; repo?: string },
+  ) => {
     const { api, centerGroupId } = get();
     if (!api) return;
-    // Multi-repo: scope the panel id by repo so the same SHA from two repos
-    // (rare in practice, but cheap to be correct) doesn't collide and so the
-    // existing-tab dedup doesn't reuse the wrong-repo's panel.
-    const itemId = opts?.repo ? `${opts.repo}:${sha}` : sha;
+    const target: CommitDetailTarget =
+      typeof requestedTarget === "string"
+        ? {
+            source: "local",
+            sha: requestedTarget,
+            ...(opts?.repo ? { repo: opts.repo } : {}),
+          }
+        : requestedTarget;
+    // Preserve the legacy string-call identity for saved callers/tests; new
+    // discriminated targets include provenance and repository identity.
+    const itemId = buildCommitItemId(requestedTarget, target, opts?.repo);
     openOrReplacePreview({
       api,
       type: "commit-detail",
       itemId,
-      title: sha.slice(0, 7),
-      params: { commitSha: sha, repo: opts?.repo },
+      title: target.sha.slice(0, 7),
+      params: {
+        target,
+        commitSha: target.sha,
+        ...(target.source === "local" && target.repo ? { repo: target.repo } : {}),
+      },
       groupId: opts?.groupId ?? centerGroupId,
       quiet: opts?.quiet,
       pin: opts?.pin,
@@ -354,6 +482,10 @@ function buildCommitDetailAction(get: StoreGet) {
   };
 }
 
+/**
+ * Build the store's core panel actions: chat, changes/files, diff viewer,
+ * file diff/editor, commit detail, browser, and preview pinning.
+ */
 export function buildPanelActions(set: StoreSet, get: StoreGet) {
   return {
     addChatPanel: () => {
@@ -363,7 +495,7 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
         id: "chat",
         component: "chat",
         tabComponent: "permanentTab",
-        title: "Agent",
+        title: panelTitle("chat"),
         position: { referenceGroup: centerGroupId },
       });
     },
@@ -373,7 +505,7 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
       addSimplePanel(api, groupId ?? rightTopGroupId, {
         id: "changes",
         component: "changes",
-        title: "Changes",
+        title: panelTitle("changes"),
         tabComponent: "changesTab",
       });
     },
@@ -383,7 +515,7 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
       addSimplePanel(api, groupId ?? rightTopGroupId, {
         id: "files",
         component: "files",
-        title: "Files",
+        title: panelTitle("files"),
       });
     },
     addDiffViewerPanel: (path?: string, content?: string, groupId?: string) => {
@@ -393,7 +525,7 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
       addSimplePanel(api, groupId ?? centerGroupId, {
         id: "diff-viewer",
         component: "diff-viewer",
-        title: "Diff Viewer",
+        title: t("task:panelDiffViewer"),
         params: { kind: "all" },
       });
     },
@@ -407,9 +539,38 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
       addSimplePanel(api, groupId ?? centerGroupId, {
         id: browserId,
         component: "browser",
-        title: "Browser",
+        title: panelTitle("browser"),
         params: { url: url ?? "" },
       });
+    },
+    /**
+     * Open the preview browser without stacking a tab per call.
+     *
+     * `addBrowserPanel()` mints `browser:<timestamp>` when it has no URL, so an
+     * automatic open (start dev server, then stop, then start again) left a new
+     * empty tab behind on every cycle, and a URL detected later updated only the
+     * first of them. Explicit "+ > Browser" still uses `addBrowserPanel`, where
+     * a second tab is what the user asked for.
+     */
+    focusOrAddBrowserPanel: (groupId?: string) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      const existing = findBrowserPanel(api);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      addSimplePanel(api, groupId ?? centerGroupId, {
+        id: `browser:${Date.now()}`,
+        component: "browser",
+        title: panelTitle("browser"),
+        params: { url: "" },
+      });
+    },
+    openBrowserPanel: (url: string) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      openBrowserPanel(api, centerGroupId, url);
     },
     promotePreviewToPinned: (type: PreviewType): void => {
       const { api } = get();
@@ -442,14 +603,19 @@ export function removeSessionPanel(api: DockviewApi, sessionId: string): void {
   if (panel) api.removePanel(panel);
 }
 
-function buildReviewPanelActions(get: StoreGet) {
+/**
+ * Build the review-detail panel actions (`addPRPanel`, `addMRPanel`,
+ * `addReviewPanel`), each focusing an existing matching panel (canonical or
+ * keyed) or adding a keyed detail panel in the requested group.
+ */
+export function buildReviewPanelActions(get: StoreGet) {
   return {
     /**
-     * Focus an existing PR tab in place, or add a keyed tab beside the
-     * layout-owned canonical PR Details panel. Fall back to the center group
-     * when the current layout intentionally omits PR Details.
+     * Focus an existing PR tab in place, or add a keyed tab in the explicitly
+     * requested group. Callers without a group use the layout-owned canonical
+     * PR Details panel, then the center fallback.
      */
-    addPRPanel: (prKey?: string) => {
+    addPRPanel: (prKey?: string, opts?: ReviewPanelOptions) => {
       const { api, centerGroupId } = get();
       if (!api) return;
       // Multi-repo: each TaskPR opens in its own panel keyed by
@@ -464,16 +630,16 @@ function buildReviewPanelActions(get: StoreGet) {
         return;
       }
       if (prKey && focusMatchingLegacyPanel(api, id, "pr-detail", "prKey", prKey)) return;
-      const targetGroupId = api.getPanel("pr-detail")?.group.id ?? centerGroupId;
+      const targetGroupId = opts?.groupId ?? api.getPanel("pr-detail")?.group.id ?? centerGroupId;
       focusOrAddPanel(api, {
         id,
         component: "pr-detail",
-        title: prKey ? "Pull Request" : "PR Details",
+        title: prKey ? t("task:panelPullRequest") : panelTitle("pr-detail"),
         position: { referenceGroup: targetGroupId },
         params: prKey ? { prKey } : undefined,
       });
     },
-    addMRPanel: (mrKey: string) => {
+    addMRPanel: (mrKey: string, opts?: ReviewPanelOptions) => {
       const { api, centerGroupId } = get();
       if (!api) return;
       const id = `mr-detail|${mrKey}`;
@@ -491,79 +657,42 @@ function buildReviewPanelActions(get: StoreGet) {
       focusOrAddPanel(api, {
         id,
         component: "mr-detail",
-        title: "Merge Request",
-        position: { referenceGroup: canonical?.group.id ?? centerGroupId },
+        title: panelTitle("mr-detail"),
+        position: { referenceGroup: opts?.groupId ?? canonical?.group.id ?? centerGroupId },
         params: { mrKey },
       });
     },
-  };
-}
-
-export function buildExtraPanelActions(get: StoreGet) {
-  return {
-    addVscodePanel: () => {
+    addReviewPanel: (review: ReviewPanelTarget, opts?: ReviewPanelOptions) => {
       const { api, centerGroupId } = get();
       if (!api) return;
-      focusOrAddPanel(api, {
-        id: "vscode",
-        component: "vscode",
-        title: "VS Code",
-        position: { referenceGroup: centerGroupId },
-      });
-    },
-    openInternalVscode: (_goto: { file: string; line: number; col: number } | null) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      const existing = api.getPanel("vscode");
+      const canonical = api.getPanel("pr-detail");
+      if (
+        canonical?.params?.providerId === review.providerId &&
+        canonical.params.connectionScope === review.connectionScope &&
+        canonical.params.repositoryId === review.repositoryId &&
+        String(canonical.params.changeRequestNumber) === String(review.changeRequestNumber)
+      ) {
+        canonical.api.setActive();
+        return;
+      }
+      const id = reviewPanelId(review);
+      const existing = api.getPanel(id);
       if (existing) {
         existing.api.setActive();
         return;
       }
       focusOrAddPanel(api, {
-        id: "vscode",
-        component: "vscode",
-        title: "VS Code",
-        position: { referenceGroup: centerGroupId },
-      });
-    },
-    addPlanPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      const groupId = opts?.groupId ?? (opts?.inCenter ? centerGroupId : undefined);
-      const position = groupId
-        ? { referenceGroup: groupId }
-        : { referencePanel: "chat" as const, direction: "right" as const };
-      focusOrAddPanel(
-        api,
-        { id: "plan", component: "plan", title: "Plan", tabComponent: "planTab", position },
-        opts?.quiet ?? false,
-      );
-    },
-    ...buildReviewPanelActions(get),
-    addTerminalPanel: (
-      terminalId?: string,
-      groupId?: string,
-      environmentId?: string,
-      taskID?: string,
-      title?: string,
-    ) => {
-      const { api, rightBottomGroupId } = get();
-      if (!api) return;
-      const id = terminalId ?? `terminal-${Date.now()}`;
-      // Stamp env id + task id into the panel's params so cleanup
-      // (dockview-layout-setup.onDidRemovePanel) can call destroyUserShell
-      // with the correct task scope even after the user switches tasks.
-      // task_id is what the backend uses to verify ownership now — without
-      // it `requireOwnership` rejects with ErrTaskMismatch.
-      addSimplePanel(api, groupId ?? rightBottomGroupId, {
         id,
-        component: "terminal",
-        // terminalTab is a custom dockview tab that adds the `#N` badge
-        // when there's more than one ordinary terminal in the task and
-        // exposes a context menu for rename / park / destroy.
-        tabComponent: "terminalTab",
-        title: title ?? "Terminal",
-        params: { terminalId: id, environmentId, taskID },
+        component: "review-detail",
+        title: review.title,
+        position: { referenceGroup: opts?.groupId ?? canonical?.group.id ?? centerGroupId },
+        params: {
+          providerId: review.providerId,
+          reviewKey: review.reviewKey,
+          connectionScope: review.connectionScope,
+          repositoryId: review.repositoryId,
+          changeRequestNumber: review.changeRequestNumber,
+        },
       });
     },
   };

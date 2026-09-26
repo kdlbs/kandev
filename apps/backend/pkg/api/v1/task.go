@@ -18,10 +18,28 @@ const (
 	TaskStateCancelled       TaskState = "CANCELLED"
 )
 
+// TaskChangeRequestSummary is a compact provider-neutral view of a pull or
+// merge request associated with a task.
+type TaskChangeRequestSummary struct {
+	Provider     string     `json:"provider"`
+	RepositoryID string     `json:"repository_id,omitempty"`
+	Number       int        `json:"number"`
+	URL          string     `json:"url"`
+	Title        string     `json:"title,omitempty"`
+	State        string     `json:"state"`
+	Draft        *bool      `json:"draft,omitempty"`
+	BaseRef      string     `json:"base_ref,omitempty"`
+	BaseSHA      string     `json:"base_sha"`
+	HeadRef      string     `json:"head_ref,omitempty"`
+	HeadSHA      string     `json:"head_sha"`
+	MergedAt     *time.Time `json:"merged_at,omitempty"`
+	ClosedAt     *time.Time `json:"closed_at,omitempty"`
+}
+
 // TaskPRSummary is a compact view of a GitHub pull request associated with a
-// task. Surfaced through the task-listing MCP tools so agents can reason about
-// PR status. State is one of "open", "closed", "merged"; MergedAt is set only
-// when the PR has merged, so agents can report when the work landed.
+// task. Surfaced through the task-listing MCP tools for compatibility with
+// existing agents. State is one of "open", "closed", "merged"; MergedAt is set
+// only when the PR has merged, so agents can report when the work landed.
 type TaskPRSummary struct {
 	Number   int        `json:"number"`
 	URL      string     `json:"url"`
@@ -108,16 +126,24 @@ const (
 	MessageTypeTodo     MessageType = "todo"
 )
 
+// RepositoryCheckoutOptions configures one task attachment's materialization.
+type RepositoryCheckoutOptions struct {
+	Version           int      `json:"version"`
+	DownloadMode      string   `json:"download_mode"`
+	SparseDirectories []string `json:"sparse_directories"`
+}
+
 // TaskRepository represents a repository associated with a task
 type TaskRepository struct {
-	ID           string                 `json:"id"`
-	TaskID       string                 `json:"task_id"`
-	RepositoryID string                 `json:"repository_id"`
-	BaseBranch   string                 `json:"base_branch"`
-	Position     int                    `json:"position"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
+	CheckoutOptions *RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
+	ID              string                     `json:"id"`
+	TaskID          string                     `json:"task_id"`
+	RepositoryID    string                     `json:"repository_id"`
+	BaseBranch      string                     `json:"base_branch"`
+	Position        int                        `json:"position"`
+	Metadata        map[string]interface{}     `json:"metadata,omitempty"`
+	CreatedAt       time.Time                  `json:"created_at"`
+	UpdatedAt       time.Time                  `json:"updated_at"`
 }
 
 // TaskWorkspaceFolder represents a non-Git folder associated with a task.
@@ -148,15 +174,34 @@ type Task struct {
 	StartedAt        *time.Time             `json:"started_at,omitempty"`
 	CompletedAt      *time.Time             `json:"completed_at,omitempty"`
 	Metadata         map[string]interface{} `json:"metadata,omitempty"`
-	IsEphemeral      bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
-	ParentID         string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
-	Identifier       string                 `json:"identifier,omitempty"`
+	// Interrupted reports that the task's session was mid-turn (STARTING/RUNNING)
+	// when the backend died and has not been resumed since. Derived from the
+	// interrupted_at metadata key at DTO conversion time; the orchestrator
+	// clears it when a session of the task next enters STARTING/RUNNING.
+	Interrupted bool `json:"interrupted,omitempty"`
+	// AutoStartFailed reports that a workflow step's auto_start_agent on_enter
+	// action failed to launch a run for this task. Derived from the
+	// auto_start_failed metadata key at DTO conversion time; the orchestrator
+	// clears it when a session of the task next enters STARTING/RUNNING.
+	AutoStartFailed bool `json:"auto_start_failed,omitempty"`
+	// WorkspaceOrphaned reports that this task's materialized workspace was
+	// removed when its parent was archived (metadata.workspace.orphaned),
+	// while workspace.mode is still inherit_parent, so the task cannot start.
+	// Derived at DTO conversion time; a re-parent, detach or unarchive that
+	// resolves the state clears it without touching the underlying keys.
+	WorkspaceOrphaned bool   `json:"workspace_orphaned,omitempty"`
+	IsEphemeral       bool   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
+	ParentID          string `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Autopilot         bool   `json:"autopilot"`
+	Identifier        string `json:"identifier,omitempty"`
 }
 
 // TaskRepositoryInput for creating/updating task repositories
 type TaskRepositoryInput struct {
-	RepositoryID string `json:"repository_id" binding:"required"`
-	BaseBranch   string `json:"base_branch" binding:"required"`
+	CheckoutOptions *RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
+	RepositoryID    string                     `json:"repository_id" binding:"required"`
+	BaseBranch      string                     `json:"base_branch" binding:"required"`
+	BranchPolicyID  string                     `json:"branch_policy_id,omitempty"`
 }
 
 // CreateTaskRequest for creating a new task
@@ -201,9 +246,11 @@ type TaskEvent struct {
 // "resource" → ResourceBlock (text or blob based on MIME type).
 type MessageAttachment struct {
 	Type         string `json:"type"`                    // "image", "audio", "resource"
+	AttachmentID string `json:"attachment_id,omitempty"` // File-backed attachment descriptor ID
 	Data         string `json:"data,omitempty"`          // Base64-encoded data
 	MimeType     string `json:"mime_type,omitempty"`     // MIME type (e.g., "image/png")
 	Name         string `json:"name,omitempty"`          // Display name (e.g., filename)
+	SizeBytes    int64  `json:"size_bytes,omitempty"`    // Raw byte size for file-backed descriptors
 	DeliveryMode string `json:"delivery_mode,omitempty"` // "prompt" (native/default) or "path"
 }
 
@@ -211,10 +258,12 @@ func (a MessageAttachment) HasValidDeliveryMode() bool {
 	return a.DeliveryMode == "" || a.DeliveryMode == "prompt" || a.DeliveryMode == "path"
 }
 
-// ContextFileMeta represents a context file reference attached to a message
+// ContextFileMeta represents a context file reference attached to a message.
+// IsDirectory is optional for compatibility with older file-only entries.
 type ContextFileMeta struct {
-	Path string `json:"path"`
-	Name string `json:"name"`
+	Path        string `json:"path"`
+	Name        string `json:"name"`
+	IsDirectory *bool  `json:"is_directory,omitempty"`
 }
 
 // Message represents a message in a task session (user or agent)
@@ -232,6 +281,11 @@ type Message struct {
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt     time.Time              `json:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at,omitempty"` // Authoritative per-message change signal
+	// PromptIndex is the 1-based ordinal of the message among ALL user
+	// messages of its session (ordered by normalized-microsecond created_at
+	// ascending, ties by id ascending), present only on user messages
+	// produced by an indexed server payload; omitted when zero.
+	PromptIndex int `json:"prompt_index,omitempty"`
 }
 
 // CreateMessageRequest for adding a message to a task session

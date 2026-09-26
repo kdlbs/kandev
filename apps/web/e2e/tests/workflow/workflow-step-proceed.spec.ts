@@ -1,9 +1,54 @@
 import { test, expect } from "../../fixtures/test-base";
 import { routeMainWebSocketWithPromptDrop } from "../../helpers/ws-drop";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Manual proceed to next workflow step", () => {
+  test("shows next step action for an idle signal-gated transition", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Signal Gated Proceed Workflow",
+    );
+    const signalStep = await apiClient.createWorkflowStep(workflow.id, "Signal Gate", 0);
+    const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 1);
+
+    await apiClient.updateWorkflowStep(signalStep.id, {
+      prompt: 'e2e:message("signal-gated turn complete")\n{{task_prompt}}',
+      events: {
+        on_enter: [{ type: "auto_start_agent" }],
+        on_turn_complete: [{ type: "move_to_next" }],
+      },
+      auto_advance_requires_signal: true,
+    });
+
+    const task = await apiClient.createTask(seedData.workspaceId, "Signal Gated Proceed Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: signalStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    await expect(session.stepperStep("Signal Gate")).toHaveAttribute("aria-current", "step");
+    await expect(session.proceedNextStepButton()).toBeVisible();
+
+    await session.proceedNextStepButton().click();
+
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id, {
+        timeout: 15_000,
+      })
+      .toBe(reviewStep.id);
+    await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step");
+  });
+
   /**
    * Regression test: moving a task out of a plan-mode step must disable plan mode
    * and show the next step's auto-start prompt in chat.
@@ -47,29 +92,15 @@ test.describe("Manual proceed to next workflow step", () => {
       },
     });
 
-    await apiClient.saveUserSettings({
-      workspace_id: seedData.workspaceId,
-      workflow_filter_id: workflow.id,
-      enable_preview_on_click: false,
-    });
-
     // Create task via API in Spec step — triggers auto_start_agent
-    await apiClient.createTask(seedData.workspaceId, "Plan Proceed Task", {
+    const task = await apiClient.createTask(seedData.workspaceId, "Plan Proceed Task", {
       workflow_id: workflow.id,
       workflow_step_id: specStep.id,
       agent_profile_id: seedData.agentProfileId,
       repository_ids: [seedData.repositoryId],
     });
 
-    // Navigate to task session page
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardInColumn("Plan Proceed Task", specStep.id);
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
@@ -111,7 +142,7 @@ test.describe("Manual proceed to next workflow step", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
   });
 
-  test("preserves selected model across context reset", async ({
+  test("preserves session settings across context reset", async ({
     testPage,
     apiClient,
     seedData,
@@ -119,13 +150,22 @@ test.describe("Manual proceed to next workflow step", () => {
     const { agents } = await apiClient.listAgents();
     const agent = agents.find((item) => item.name === "mock-agent");
     if (!agent) {
-      throw new Error("E2E mock agent is required for model-reset coverage");
+      throw new Error("E2E mock agent is required for runtime-config reset coverage");
     }
-    const smartProfile = await apiClient.createAgentProfile(agent.id, "Reset Model Profile", {
-      model: "mock-smart",
-    });
+    const runtimeProfile = await apiClient.createAgentProfile(
+      agent.id,
+      "Reset Runtime Config Profile",
+      {
+        model: "mock-fast",
+        mode: "default",
+        config_options: { effort: "medium" },
+      },
+    );
 
-    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Reset Model Workflow");
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Reset Runtime Config Workflow",
+    );
     const startStep = await apiClient.createWorkflowStep(workflow.id, "Start", 0);
     const resetStep = await apiClient.createWorkflowStep(workflow.id, "Reset", 1);
 
@@ -140,10 +180,10 @@ test.describe("Manual proceed to next workflow step", () => {
       },
     });
 
-    const task = await apiClient.createTask(seedData.workspaceId, "Reset Model Task", {
+    const task = await apiClient.createTask(seedData.workspaceId, "Reset Runtime Config Task", {
       workflow_id: workflow.id,
       workflow_step_id: startStep.id,
-      agent_profile_id: smartProfile.id,
+      agent_profile_id: runtimeProfile.id,
       repository_ids: [seedData.repositoryId],
     });
 
@@ -153,19 +193,38 @@ test.describe("Manual proceed to next workflow step", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
 
     const modelTrigger = testPage.getByRole("button", { name: "Session model settings" });
-    await expect(modelTrigger).toContainText("Mock Smart", { timeout: 15_000 });
+    const modeTrigger = testPage.getByTestId("session-mode-selector");
+    await expect(modelTrigger).toHaveText("Mock Fast", { timeout: 15_000 });
+    await expect(modeTrigger).toHaveText("Default", { timeout: 15_000 });
+
+    // Change the live session after launch. These values intentionally differ
+    // from the profile defaults so reset coverage exercises the live caches.
+    await modelTrigger.click();
+    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+    await expect(modelTrigger).toContainText("Mock Smart", { timeout: 5_000 });
+    await modelTrigger.click();
+    await testPage.getByTestId("config-option-trigger-effort").click();
+    await testPage.getByRole("button", { name: "Max", exact: true }).click();
+    await expect(modelTrigger).toHaveText("Mock Smart / Max", { timeout: 5_000 });
+    await testPage.keyboard.press("Escape");
+
+    await modeTrigger.click();
+    await testPage.getByRole("menuitem", { name: /^Plan Mock/ }).click();
+    await expect(modeTrigger).toHaveText("Plan Mock", { timeout: 5_000 });
 
     await session.proceedNextStepButton().click();
     await expect(session.stepperStep("Reset")).toHaveAttribute("aria-current", "step", {
       timeout: 15_000,
     });
     await session.waitForChatIdle({ timeout: 30_000 });
-    await expect(modelTrigger).toContainText("Mock Smart", { timeout: 15_000 });
+    await expect(modelTrigger).toHaveText("Mock Smart / Max", { timeout: 15_000 });
+    await expect(modeTrigger).toHaveText("Plan Mock", { timeout: 15_000 });
 
     await testPage.reload();
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
-    await expect(modelTrigger).toContainText("Mock Smart", { timeout: 15_000 });
+    await expect(modelTrigger).toHaveText("Mock Smart / Max", { timeout: 15_000 });
+    await expect(modeTrigger).toHaveText("Plan Mock", { timeout: 15_000 });
   });
 
   test("shows next step auto-start prompt when its message-added notification is missed", async ({
@@ -192,7 +251,7 @@ test.describe("Manual proceed to next workflow step", () => {
       },
     });
 
-    const workPrompt = "/slow 8s";
+    const workPrompt = "/slow 30s";
     await apiClient.updateWorkflowStep(workStep.id, {
       prompt: `${workPrompt}\n{{task_prompt}}`,
       events: {
@@ -200,27 +259,14 @@ test.describe("Manual proceed to next workflow step", () => {
       },
     });
 
-    await apiClient.saveUserSettings({
-      workspace_id: seedData.workspaceId,
-      workflow_filter_id: workflow.id,
-      enable_preview_on_click: false,
-    });
-
-    await apiClient.createTask(seedData.workspaceId, "Proceed Message Gap Task", {
+    const task = await apiClient.createTask(seedData.workspaceId, "Proceed Message Gap Task", {
       workflow_id: workflow.id,
       workflow_step_id: specStep.id,
       agent_profile_id: seedData.agentProfileId,
       repository_ids: [seedData.repositoryId],
     });
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardInColumn("Proceed Message Gap Task", specStep.id);
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
@@ -237,15 +283,19 @@ test.describe("Manual proceed to next workflow step", () => {
     await expect(session.stepperStep("Work")).toHaveAttribute("aria-current", "step", {
       timeout: 15_000,
     });
-    await expect(
-      session.chat.locator(".chat-message-list:visible").getByText(workPrompt, { exact: false }),
-    ).toBeVisible({ timeout: 5_000 });
     await expect
       .poll(wsDrop.droppedCount, {
         message: "expected the test proxy to drop the workflow prompt's message-added frame",
         timeout: 10_000,
       })
       .toBeGreaterThan(0);
+    await expect(
+      session.chat.locator(".chat-message-list:visible").getByText(workPrompt, { exact: false }),
+    ).toBeVisible({ timeout: 20_000 });
+    expect(
+      wsDrop.recoveryResponseCount(),
+      "expected message backfill after the dropped workflow prompt notification",
+    ).toBeGreaterThan(0);
   });
 
   /**
@@ -284,28 +334,15 @@ test.describe("Manual proceed to next workflow step", () => {
       });
     }
 
-    await apiClient.saveUserSettings({
-      workspace_id: seedData.workspaceId,
-      workflow_filter_id: workflow.id,
-      enable_preview_on_click: false,
-    });
-
     // Create task in Spec step
-    await apiClient.createTask(seedData.workspaceId, "Multi Step Task", {
+    const task = await apiClient.createTask(seedData.workspaceId, "Multi Step Task", {
       workflow_id: workflow.id,
       workflow_step_id: steps[0].id,
       agent_profile_id: seedData.agentProfileId,
       repository_ids: [seedData.repositoryId],
     });
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardInColumn("Multi Step Task", steps[0].id);
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 

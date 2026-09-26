@@ -1,5 +1,6 @@
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import { watchWs } from "../../helpers/causal-waits";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -80,6 +81,9 @@ test.describe("PR auto-detection", () => {
       ],
     });
 
+    // Attach before navigation so this can observe the workspace event stream.
+    const gateway = watchWs(testPage);
+
     // Navigate to kanban BEFORE moving tasks so the WebSocket is subscribed
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -93,6 +97,10 @@ test.describe("PR auto-detection", () => {
     });
 
     // --- Add PR to mock GitHub AFTER task completion ---
+    const prUpdated = gateway.waitForEvent("github.task_pr.updated", {
+      timeout: 120_000,
+      where: (payload) => payload.task_id === task.id && payload.pr_number === 99,
+    });
     await apiClient.mockGitHubAddPRs([
       {
         number: 99,
@@ -108,17 +116,22 @@ test.describe("PR auto-detection", () => {
       },
     ]);
 
-    // --- Open the task to trigger on-demand sync (github.task_pr.sync) ---
+    // The backend poller discovers the PR and publishes the persisted task-PR update.
+    await prUpdated;
+    await expect
+      .poll(async () => (await apiClient.listTaskPRs(task.id)).some((pr) => pr.pr_number === 99), {
+        timeout: 10_000,
+        message: "Waiting for the detected PR association to be readable",
+      })
+      .toBe(true);
+
+    // --- Open the task after detection and verify the session surface ---
     await kanban.taskCardInColumn("Auto-Detect PR Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-
-    // The useTaskPR hook triggers github.task_pr.sync which calls TriggerPRSync.
-    // Since a PR watch was created during task start (ensureSessionPRWatch),
-    // TriggerPRSync finds the PR via FindPRByBranch and associates it.
-    await expect(session.prTopbarButton()).toBeVisible({ timeout: 60_000 });
+    await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
     await expect(session.prTopbarButton()).toContainText("#99");
   });
 
@@ -252,6 +265,25 @@ test.describe("PR auto-detection", () => {
       ],
     });
 
+    // This test covers merged-status synchronization. Seed the existing PR
+    // association directly so branch discovery timing does not gate it.
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      workspace_id: seedData.workspaceId,
+      repository_id: githubRepo.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 101,
+      pr_url: "https://github.com/testorg/testrepo/pull/101",
+      pr_title: "Feature branch PR",
+      head_branch: "main",
+      base_branch: "develop",
+      author_login: "test-user",
+      state: "open",
+      additions: 20,
+      deletions: 3,
+    });
+
     // Navigate to kanban and subscribe to WS events
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -263,31 +295,14 @@ test.describe("PR auto-detection", () => {
       timeout: 45_000,
     });
 
-    // --- Add OPEN PR to mock GitHub ---
-    await apiClient.mockGitHubAddPRs([
-      {
-        number: 101,
-        title: "Feature branch PR",
-        state: "open",
-        head_branch: "main",
-        base_branch: "develop",
-        author_login: "test-user",
-        repo_owner: "testorg",
-        repo_name: "testrepo",
-        additions: 20,
-        deletions: 3,
-      },
-    ]);
-
-    // --- Open the task to trigger on-demand sync and detect the PR ---
+    // --- Open the task and confirm its existing PR association ---
     await kanban.taskCardInColumn("Merged PR Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // useTaskPR triggers github.task_pr.sync -> TriggerPRSync -> FindPRByBranch
-    await expect(session.prTopbarButton()).toBeVisible({ timeout: 60_000 });
+    await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
     await expect(session.prTopbarButton()).toContainText("#101");
 
     // --- Update mock PR to MERGED state ---
@@ -309,8 +324,8 @@ test.describe("PR auto-detection", () => {
 
     // --- Verify PR topbar button updates to merged state ---
     // The backend poller (every 30s) syncs the merged state and broadcasts
-    // via WS. The PRTopbarButton re-renders with the purple merged icon.
-    await expect(session.prTopbarButton().locator(".text-purple-500").first()).toBeVisible({
+    // via WS. Assert the semantic state rather than an icon styling class.
+    await expect(session.prTopbarButton()).toHaveAttribute("data-pr-state", "merged", {
       timeout: 90_000,
     });
   });
@@ -362,13 +377,13 @@ test.describe("PR external detection", () => {
       workflow_id: workflow.id,
       workflow_step_id: inboxStep.id,
       agent_profile_id: seedData.agentProfileId,
-      repository_ids: [seedData.repositoryId],
+      repositories: [{ repository_id: seedData.repositoryId, checkout_branch: "main" }],
     });
     const helperTask = await apiClient.createTask(seedData.workspaceId, "Helper Task", {
       workflow_id: workflow.id,
       workflow_step_id: inboxStep.id,
       agent_profile_id: seedData.agentProfileId,
-      repository_ids: [seedData.repositoryId],
+      repositories: [{ repository_id: seedData.repositoryId, checkout_branch: "main" }],
     });
 
     const kanban = new KanbanPage(testPage);
@@ -392,6 +407,8 @@ test.describe("PR external detection", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
+    const checkoutBranch = "main";
+
     // --- Verify NO PR button initially ---
     await expect(session.prTopbarButton()).not.toBeVisible({ timeout: 5_000 });
 
@@ -401,7 +418,7 @@ test.describe("PR external detection", () => {
         number: 42,
         title: "Add feature X",
         state: "open",
-        head_branch: "feat/feature-x",
+        head_branch: checkoutBranch,
         base_branch: "main",
         author_login: "test-user",
         repo_owner: "testorg",
@@ -432,7 +449,7 @@ test.describe("PR external detection", () => {
       pr_number: 42,
       pr_url: "https://github.com/testorg/testrepo/pull/42",
       pr_title: "Add feature X",
-      head_branch: "feat/feature-x",
+      head_branch: checkoutBranch,
       base_branch: "main",
       author_login: "test-user",
       additions: 50,

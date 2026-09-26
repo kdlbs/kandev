@@ -29,7 +29,7 @@ Add exactly three modular, dependency-free architecture rules:
 Do not add rules for TanStack Query, typed events, a WebSocket contract
 catalog, broad compatibility keywords, or backend composition/setter budgets.
 
-## Current-main audit
+## Initial implementation audit (2026-08)
 
 Initial audit base: `bb71233826549c96b72832bc4bba405c2baa91e8` (the merged
 architecture-linter commit at planning time).
@@ -55,9 +55,9 @@ The scheduler-owner baseline will be present and empty. The existing shared
 baseline comparison remains exact and shrink-only; no baseline-wide or
 count-only exception is permitted.
 
-The final current-main re-audit at `560e35982fbbe67dbb95b6a99967f3a64df67552` found the same
-three runs-to-Office findings and the same two frontend state-to-UI findings; scheduler ownership
-still has zero findings.
+The additional audit at `560e35982fbbe67dbb95b6a99967f3a64df67552` found the same three
+runs-to-Office findings and the same two frontend state-to-UI findings; scheduler ownership still
+had zero findings.
 
 ## Design
 
@@ -96,7 +96,7 @@ the existing CLI.
 
 ### Documentation updates
 
-- Update `docs/architecture-lint.md` with all six enforced rules and their
+- Update `docs/architecture-lint.md` with all seven enforced rules on the refreshed main and their
   intended seams.
 - Amend `docs/decisions/2026-08-01-architecture-lint-budgets.md` so its rule
   inventory names the three new accepted boundaries while retaining the
@@ -163,7 +163,7 @@ are shared:
 - Changing product behavior, runtime scheduling, frontend behavior, or the
   existing compatibility ledger.
 
-## Verification Results
+## Original PR Verification Results (2026-08)
 
 - `python3 scripts/lint-architecture.test.py` — 41 tests passed.
 - `python3 scripts/lint-architecture.py --all` — passed with no diagnostics.
@@ -173,3 +173,29 @@ are shared:
 - `cd apps && pnpm --filter @kandev/web lint` — passed.
 - `cd apps/web && pnpm run typecheck` — passed.
 - `git diff --check` — passed.
+
+## Main refresh verification (2026-09-26)
+
+Refresh base: `5c3dc31b2b65b35ff3121f3b5400c6c99dfb67d9`.
+
+- `ARCH-RUN-SCHEDULER-OWNER`: zero forbidden imports; the only production
+  scheduler import is `apps/backend/internal/backendapp/main.go`.
+- `ARCH-RUNS-OFFICE-IMPORT`: 11 exact path/import entries across 8 production
+  files: 8 `internal/office/models` edges and 3 `internal/office/shared` edges.
+- `ARCH-FRONTEND-STATE-UI-IMPORT`: 4 exact path/import entries across 4
+  production files. `dockview-store.ts` has two import occurrences with one
+  path/import identity; the baseline keys findings by path and specifier.
+- The three new rule baselines are absent from the refresh base. The documented
+  `--baseline-base-ref origin/main --allow-missing-base-baseline` check passes;
+  existing landed rule baselines remain unchanged.
+- `python3 scripts/lint-architecture.test.py` — 62 tests passed, including the
+  landed Inbox History isolation rule.
+- `python3 scripts/lint-architecture.py --all` — passed with no diagnostics.
+- `python3 scripts/lint-architecture.py --all --baseline-base-ref origin/main --allow-missing-base-baseline` — passed.
+- `make lint-architecture` — passed.
+- Harness validation: 19 tests passed; all 199 harness files passed; all 36
+  spec-file tests passed; all spec files passed.
+- `git diff --check` — passed.
+- Backend and frontend source lint/typecheck were not rerun: this refresh changes
+  linter baselines, scanner/test registration, and guidance; it changes no Go or
+  TypeScript production source.

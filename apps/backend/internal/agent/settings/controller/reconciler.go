@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -90,6 +91,11 @@ func (r *ProfileReconciler) Run(ctx context.Context) error {
 		return fmt.Errorf("reconciler not fully configured")
 	}
 
+	// Virtual families are settings identities rather than inference agents.
+	// Seed their parent rows before orphan cleanup so the permanent dynamic
+	// family is protected even when no concrete provider probe is ready.
+	r.ensureVirtualFamilies(ctx)
+
 	// Orphan cleanup first: removed agents can't come back, regardless of
 	// probe state. The cleanup itself fails closed when the registry is empty
 	// so a transient registry/bootstrap issue cannot mass-delete profiles.
@@ -104,6 +110,46 @@ func (r *ProfileReconciler) Run(ctx context.Context) error {
 		r.reconcileAgent(ctx, ag)
 	}
 	return nil
+}
+
+// logReconcileError logs a reconciler store failure at WARN, except when the
+// error is a context cancellation. The reconcile pass runs off hostUtilityCtx,
+// which is canceled on backend shutdown, so an interrupted store call is
+// expected teardown rather than a fault and is downgraded to DEBUG to keep
+// shutdown logs quiet. Mirrors github.Poller.logCleanupError.
+func (r *ProfileReconciler) logReconcileError(msg string, err error, fields ...zap.Field) {
+	fields = append(fields, zap.Error(err))
+	if errors.Is(err, context.Canceled) {
+		r.log.Debug(msg+" (context canceled during shutdown)", fields...)
+		return
+	}
+	r.log.Warn(msg, fields...)
+}
+
+func (r *ProfileReconciler) ensureVirtualFamilies(ctx context.Context) {
+	for _, ag := range r.registry.List() {
+		if !agents.IsVirtualAgent(ag) {
+			continue
+		}
+		if _, err := r.store.GetAgentByName(ctx, ag.ID()); err == nil {
+			continue
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			r.logReconcileError("reconcile: look up virtual agent failed", err,
+				zap.String("agent_id", ag.ID()))
+			continue
+		}
+		parent := &models.Agent{
+			ID:          ag.ID(),
+			Name:        ag.ID(),
+			SupportsMCP: false,
+		}
+		if err := r.store.CreateAgent(ctx, parent); err != nil {
+			r.logReconcileError("reconcile: seed virtual agent failed", err,
+				zap.String("agent_id", ag.ID()))
+			continue
+		}
+		r.log.Info("seeded virtual agent family", zap.String("agent_id", ag.ID()))
+	}
 }
 
 // cleanupOrphans soft-deletes profiles whose DB agent row references an
@@ -145,7 +191,7 @@ func (r *ProfileReconciler) cleanupOrphans(ctx context.Context) {
 	if err != nil {
 		summary.skipped = true
 		summary.skipReason = "list_agents_failed"
-		r.log.Warn("orphan cleanup: list agents failed", zap.Error(err))
+		r.logReconcileError("orphan cleanup: list agents failed", err)
 		return
 	}
 	summary.dbAgentCount = len(dbAgents)
@@ -188,10 +234,9 @@ func (r *ProfileReconciler) collectOrphanCleanupCandidates(
 		if err != nil {
 			summary.profileListFailureCount++
 			summary.profilesCandidatePartial = true
-			r.log.Warn("orphan cleanup: list profiles failed",
+			r.logReconcileError("orphan cleanup: list profiles failed", err,
 				zap.String("agent_id", dbAgent.ID),
-				zap.String("agent_name", dbAgent.Name),
-				zap.Error(err))
+				zap.String("agent_name", dbAgent.Name))
 			continue
 		}
 		for _, p := range profiles {
@@ -223,8 +268,8 @@ func (r *ProfileReconciler) deleteOrphanCleanupCandidates(
 			zap.String("agent_id", candidate.profile.AgentID),
 			zap.String("agent_name", candidate.agent.Name))
 		if err := r.store.DeleteAgentProfile(ctx, candidate.profile.ID); err != nil {
-			r.log.Warn("orphan cleanup: delete failed",
-				zap.String("profile_id", candidate.profile.ID), zap.Error(err))
+			r.logReconcileError("orphan cleanup: delete failed", err,
+				zap.String("profile_id", candidate.profile.ID))
 			continue
 		}
 		summary.profilesDeletedCount++
@@ -265,15 +310,15 @@ func (r *ProfileReconciler) reconcileAgent(ctx context.Context, ag agents.Agent)
 
 	dbAgent, err := r.ensureDBAgent(ctx, ag)
 	if err != nil {
-		r.log.Warn("reconcile: ensure db agent failed",
-			zap.String("agent_id", agentType), zap.Error(err))
+		r.logReconcileError("reconcile: ensure db agent failed", err,
+			zap.String("agent_id", agentType))
 		return
 	}
 
 	profiles, err := r.store.ListAgentProfiles(ctx, dbAgent.ID)
 	if err != nil {
-		r.log.Warn("reconcile: list profiles failed",
-			zap.String("agent_id", agentType), zap.Error(err))
+		r.logReconcileError("reconcile: list profiles failed", err,
+			zap.String("agent_id", agentType))
 		return
 	}
 
@@ -292,8 +337,8 @@ func (r *ProfileReconciler) reconcileAgent(ctx context.Context, ag agents.Agent)
 		// see its orphan-cleaned rows here.)
 		hadProfiles, err := r.store.HasDeletedAgentProfiles(ctx, dbAgent.ID)
 		if err != nil {
-			r.log.Warn("reconcile: check deleted profiles failed",
-				zap.String("agent_id", agentType), zap.Error(err))
+			r.logReconcileError("reconcile: check deleted profiles failed", err,
+				zap.String("agent_id", agentType))
 			return
 		}
 		if hadProfiles {
@@ -306,7 +351,7 @@ func (r *ProfileReconciler) reconcileAgent(ctx context.Context, ag agents.Agent)
 	}
 
 	for _, p := range profiles {
-		r.healProfile(ctx, p, caps)
+		r.healProfile(ctx, p, caps, ag.ID())
 	}
 }
 
@@ -345,18 +390,19 @@ func (r *ProfileReconciler) seedDefaultProfile(
 	caps hostutility.AgentCapabilities,
 ) {
 	profile := &models.AgentProfile{
-		AgentID:          dbAgent.ID,
-		Name:             profileNameFromCaps(ag, caps),
-		AgentDisplayName: ag.DisplayName(),
-		Model:            caps.CurrentModelID,
-		Mode:             caps.CurrentModeID,
-		AllowIndexing:    ag.ID() == "auggie",
-		CLIPassthrough:   false,
-		UserModified:     false,
+		AgentID:              dbAgent.ID,
+		Name:                 profileNameFromCaps(ag, caps),
+		AgentDisplayName:     ag.DisplayName(),
+		Model:                caps.CurrentModelID,
+		Mode:                 caps.CurrentModeID,
+		AllowIndexing:        ag.ID() == "auggie",
+		CLIPassthrough:       false,
+		CursorMCPAuthEnabled: true,
+		UserModified:         false,
 	}
 	if err := r.store.CreateAgentProfile(ctx, profile); err != nil {
-		r.log.Warn("seed default profile failed",
-			zap.String("agent_id", dbAgent.ID), zap.Error(err))
+		r.logReconcileError("seed default profile failed", err,
+			zap.String("agent_id", dbAgent.ID))
 		return
 	}
 	r.log.Info("seeded default profile from probe",
@@ -366,28 +412,70 @@ func (r *ProfileReconciler) seedDefaultProfile(
 		zap.String("mode", profile.Mode))
 }
 
-// healProfile validates the profile's model and mode against the cache and
-// auto-heals values that no longer exist. User-modified profiles are still
-// healed — we always keep profiles in a usable state; the "user_modified"
-// flag survives the write to retain user intent for other fields.
+// healProfile validates system-managed profile routes against the agent-wide
+// capability cache. Compatibility migrations run for every profile, while
+// catalog-driven route changes skip user-modified profiles because they can
+// use provider configuration that is not visible to the host probe.
 func (r *ProfileReconciler) healProfile(
 	ctx context.Context,
 	p *models.AgentProfile,
 	caps hostutility.AgentCapabilities,
+	agentID string,
 ) {
-	changed := healProfileName(p, caps)
-
-	if p.Model != "" && !modelExists(p.Model, caps.Models) {
-		r.log.Info("profile model no longer available, auto-healing",
+	// Compatibility migrations describe persisted protocol identifiers, not
+	// catalog-driven route choices. They must run even for user-modified
+	// profiles so an agent bridge upgrade cannot leave an unusable mode/model.
+	changed := false
+	if model, options, migrated := acpcompat.MigrateCursorModel(agentID, p.Model, p.ConfigOptions); migrated {
+		r.log.Info("migrating Cursor variant profile model",
 			zap.String("profile_id", p.ID),
 			zap.String("old_model", p.Model),
-			zap.String("new_model", caps.CurrentModelID))
-		p.Model = caps.CurrentModelID
+			zap.String("new_model", model))
+		p.Model = model
+		p.ConfigOptions = options
 		changed = true
+	}
+	if healCompatibilityMode(p, caps, agentID) {
+		r.log.Info("migrating legacy agent mode",
+			zap.String("profile_id", p.ID),
+			zap.String("agent_id", agentID),
+			zap.String("mode", p.Mode))
+		changed = true
+	}
+	if p.UserModified {
+		if !changed {
+			return
+		}
+		if err := r.store.UpdateAgentProfile(ctx, p); err != nil {
+			r.logReconcileError("profile compatibility migration update failed", err,
+				zap.String("profile_id", p.ID))
+		}
+		return
+	}
+
+	if healProfileName(p, caps) {
+		changed = true
+	}
+
+	// No-silent-model-fallback: a configured model that is no longer
+	// advertised (e.g. provider auth expired) is KEPT, never overwritten
+	// with the probe default. The UI surfaces it as unavailable so the user
+	// decides — implicitly switching models on boot is exactly what this
+	// feature forbids. Only the empty-model case ("use the agent's
+	// default") is seeded from the probe.
+	if p.Model != "" && !modelExists(p.Model, caps.Models) {
+		r.log.Info("profile model no longer available, keeping (no silent fallback)",
+			zap.String("profile_id", p.ID),
+			zap.String("model", p.Model))
 	}
 	if p.Model == "" && caps.CurrentModelID != "" {
 		p.Model = caps.CurrentModelID
 		changed = true
+	}
+	if p.FallbackModel != "" && !modelExists(p.FallbackModel, caps.Models) {
+		r.log.Info("profile fallback model no longer available, keeping (no silent fallback)",
+			zap.String("profile_id", p.ID),
+			zap.String("fallback_model", p.FallbackModel))
 	}
 
 	if p.Mode != "" && !modeExists(p.Mode, caps.Modes) {
@@ -406,9 +494,23 @@ func (r *ProfileReconciler) healProfile(
 		return
 	}
 	if err := r.store.UpdateAgentProfile(ctx, p); err != nil {
-		r.log.Warn("profile heal update failed",
-			zap.String("profile_id", p.ID), zap.Error(err))
+		r.logReconcileError("profile heal update failed", err,
+			zap.String("profile_id", p.ID))
 	}
+}
+
+// healCompatibilityMode migrates a mode ID that belonged to the legacy Codex
+// bridge. "auto" was accepted by that bridge but is not advertised by the
+// current bridge. Custom modes on user profiles remain untouched.
+func healCompatibilityMode(p *models.AgentProfile, caps hostutility.AgentCapabilities, agentID string) bool {
+	if p == nil || agentID != "codex-acp" || p.Mode != "auto" || caps.CurrentModeID == "" || caps.CurrentModeID == p.Mode {
+		return false
+	}
+	if !modeExists(caps.CurrentModeID, caps.Modes) {
+		return false
+	}
+	p.Mode = caps.CurrentModeID
+	return true
 }
 
 // healProfileName updates the profile name when it still matches the agent

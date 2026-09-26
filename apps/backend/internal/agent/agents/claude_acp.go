@@ -52,24 +52,25 @@ func NewClaudeACP() *ClaudeACP {
 		StandardPassthrough: StandardPassthrough{
 			PermSettings: claudeACPPermSettings,
 			Cfg: PassthroughConfig{
-				Supported:             true,
-				Label:                 "CLI Passthrough",
-				Description:           "Show terminal directly instead of chat interface",
-				PassthroughCmd:        NewCommand("npx", "-y", "@anthropic-ai/claude-code", "--verbose"),
-				ModelFlag:             NewParam("--model", "{model}"),
-				IdleTimeout:           3 * time.Second,
-				BufferMaxBytes:        DefaultBufferMaxBytes,
-				ResumeFlag:            NewParam("-c"),
-				SessionResumeFlag:     NewParam("--resume"),
-				MCPStrategy:           mcpconfig.ClaudeStrategy{},
-				AutoInjectPrompt:      true,
-				SubmitSequence:        "\r",
-				DisableBracketedPaste: true,
+				Supported:         true,
+				Label:             "CLI Passthrough",
+				Description:       "Show terminal directly instead of chat interface",
+				PassthroughCmd:    NewCommand("npx", "-y", "@anthropic-ai/claude-code"),
+				ModelFlag:         NewParam("--model", "{model}"),
+				IdleTimeout:       3 * time.Second,
+				BufferMaxBytes:    DefaultBufferMaxBytes,
+				ResumeFlag:        NewParam("-c"),
+				SessionResumeFlag: NewParam("--resume"),
+				MCPStrategy:       mcpconfig.ClaudeStrategy{},
+				AutoInjectPrompt:  true,
+				SubmitSequence:    "\r",
 				// Claude Code's Ink TUI coalesces multi-byte stdin reads into a
-				// paste burst, absorbing trailing "\r" into the input rather than
-				// dispatching Enter. A short delay before the submit byte forces
-				// it to arrive as a discrete keystroke. 150ms is just over Ink's
-				// paste-detection window and still feels instant to the user.
+				// paste burst, absorbing a trailing "\r" into the input rather
+				// than dispatching Enter. A short delay before the submit byte
+				// makes it arrive as a discrete keystroke; 150ms is just over
+				// Ink's paste-detection window and still feels instant. Because
+				// the submit byte is its own write, the body travels as a
+				// bracketed paste, which the TUI absorbs whole at any length.
 				SubmitDelay: 150 * time.Millisecond,
 			},
 		},
@@ -107,11 +108,11 @@ func (a *ClaudeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *ClaudeACP) BuildCommand(opts CommandOptions) Command {
-	return a.ManagedNPMRuntime().CachedACPCommand()
+	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
 }
 
 func (a *ClaudeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
-	return ManagedNPMRuntimeSpec{Package: claudeACPPackage}
+	return newManagedNPMRuntimeSpec(claudeACPPackage)
 }
 
 func (a *ClaudeACP) Runtime() *RuntimeConfig {
@@ -123,7 +124,13 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 		WorkingDir:  "{workspace}",
 		RequiredEnv: []string{}, // Auth via ANTHROPIC_API_KEY or OAuth credentials file (see RemoteAuth)
 		Env: map[string]string{
-			"MCP_TIMEOUT": "7200000",
+			// MCP_TIMEOUT remains at the CLI default because it also controls the
+			// first-turn MCP wait. MCP_TOOL_TIMEOUT provides the long budget for
+			// blocking calls. ask_user_question stays active through the MCP
+			// server's progress keepalive. See
+			// docs/specs/agents/system-design/mcp-timeout-budgets.md.
+			"MCP_TIMEOUT":      "30000",
+			"MCP_TOOL_TIMEOUT": "7200000",
 		},
 		Mounts: []MountTemplate{
 			{Source: "{workspace}", Target: "/workspace"},
@@ -136,6 +143,7 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
 			SessionDirTemplate:  "{home}/.claude",
+			SessionDirTarget:    "/root/.claude",
 		},
 	}
 }
@@ -159,6 +167,22 @@ chmod 600 "${HOME}/.claude.json"`,
 			},
 		},
 	}
+}
+
+func (a *ClaudeACP) PortableConfig() *PortableConfig {
+	return &PortableConfig{Bundles: []PortableConfigBundle{
+		{
+			ID:    "claude.settings",
+			Label: "Copy Claude settings",
+			Files: []PortableConfigFile{
+				{SourcePaths: map[string]string{
+					"darwin":  ".claude/settings.json",
+					"linux":   ".claude/settings.json",
+					"windows": ".claude/settings.json",
+				}, TargetPath: ".claude/settings.json"},
+			},
+		},
+	}}
 }
 
 // Verified: `claude --help` documents `claude auth login` as the dedicated

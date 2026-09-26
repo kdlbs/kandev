@@ -14,8 +14,9 @@ decision: "../../decisions/2026-08-01-architecture-lint-budgets.md"
 
 ## Acceptance
 
-- The architecture-lint rule inventory and accepted ADR describe all six
-  enforced boundaries and retain the explicitly excluded contracts.
+- The architecture-lint rule inventory and accepted ADR describe all seven
+  enforced boundaries on refreshed main and retain the explicitly excluded
+  contracts.
 - Scoped backend and frontend guidance states scheduler ownership and the
   intended dependency directions without introducing implementation or product
   changes.
@@ -63,4 +64,13 @@ Sequential final integration and verification.
 - `cd apps && pnpm --filter @kandev/web lint` — passed.
 - `cd apps/web && pnpm run typecheck` — passed.
 - `git diff --check` — passed.
-- Final re-audit at `560e35982fbbe67dbb95b6a99967f3a64df67552`: scheduler ownership had zero findings; runs-to-Office had the exact three baseline entries; frontend state-to-UI had the exact two baseline entries.
+- Original final re-audit at `560e35982fbbe67dbb95b6a99967f3a64df67552`:
+  scheduler ownership had zero findings; runs-to-Office had three baseline
+  entries; frontend state-to-UI had two baseline entries.
+- Refreshed against `5c3dc31b2b65b35ff3121f3b5400c6c99dfb67d9`: combined
+  architecture suite passed (62 tests), full scan passed, baseline bootstrap
+  comparison passed, and `make lint-architecture` passed.
+- Harness checks passed: 19 tests, all 199 harness files, and targeted
+  `harness-lint`; spec checks passed: 36 tests and all specification files.
+- Backend/frontend lint and typecheck were not rerun because no production Go or
+  TypeScript source changed in this refresh.

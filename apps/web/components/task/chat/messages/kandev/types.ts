@@ -12,6 +12,8 @@ export type KandevRendererProps = {
   args: Record<string, unknown> | undefined;
   result: unknown;
   status: KandevStatus;
+  sessionId?: string;
+  onOpenFile?: (path: string, repo?: string) => void;
 };
 
 export type KandevRenderer = (props: KandevRendererProps) => ReactElement;

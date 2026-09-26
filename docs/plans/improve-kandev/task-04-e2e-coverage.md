@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-backend-issue-workflow", "03-frontend-dialog-and-mobile"]
 plan: "plan.md"
-spec: "../../specs/improve-kandev/spec.md"
+spec: "../../specs/workspaces/requirements/improve-kandev.md"
 ---
 
 # Task 04: Desktop and mobile E2E coverage

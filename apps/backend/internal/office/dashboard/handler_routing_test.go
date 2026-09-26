@@ -251,7 +251,7 @@ func TestRouting_PreviewComposesAgentRows(t *testing.T) {
 	fake.preview = []routing.PreviewItem{
 		{
 			AgentID: "a1", AgentName: "Alice",
-			TierSource: "inherit", EffectiveTier: "balanced",
+			TierSource: routing.TierSourceWorkspace, EffectiveTier: "balanced",
 			PrimaryProviderID: "claude-acp", PrimaryModel: "sonnet",
 			FallbackChain: []routing.PreviewProviderModel{
 				{ProviderID: "codex-acp", Model: "gpt-5", Tier: "balanced"},
@@ -281,6 +281,87 @@ func TestRouting_PreviewComposesAgentRows(t *testing.T) {
 	}
 	if len(got.Missing) != 1 {
 		t.Fatalf("missing hints = %v", got.Missing)
+	}
+}
+
+// AC-18a/AC-20: the preview row's TierSource passes through unmodified,
+// including the two new widened values ("role", "workspace") the
+// dashboard layer never previously had to carry.
+func TestRouting_PreviewRow_WidenedTierSourceValues(t *testing.T) {
+	cases := []string{
+		routing.TierSourceOverride,
+		routing.TierSourceRole,
+		routing.TierSourceWorkspace,
+	}
+	for _, source := range cases {
+		t.Run(source, func(t *testing.T) {
+			deps, fake := newRoutingTestDeps(t)
+			fake.preview = []routing.PreviewItem{
+				{AgentID: "a1", AgentName: "Alice", TierSource: source, EffectiveTier: "balanced"},
+			}
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/office/workspaces/ws-1/routing/preview", nil)
+			rec := httptest.NewRecorder()
+			deps.router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+			}
+			var resp dashboard.RoutingPreviewResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if len(resp.Agents) != 1 || resp.Agents[0].TierSource != source {
+				t.Fatalf("TierSource = %+v, want %q", resp.Agents, source)
+			}
+		})
+	}
+}
+
+// AC-20/AC-20a: RouteAttemptDTO.TierSource carries the persisted
+// precedence level through the /runs/:id/attempts endpoint.
+func TestRouting_AttemptsEndpoint_TierSourceRoundTrips(t *testing.T) {
+	deps, _ := newRoutingTestDeps(t)
+	lister := &fakeAttemptLister{byRun: map[string][]models.RouteAttempt{
+		"run-1": {
+			{RunID: "run-1", Seq: 1, ProviderID: "claude-acp", Model: "haiku",
+				Tier: "economy", TierSource: "role", Outcome: "launched",
+				StartedAt: time.Now().UTC()},
+		},
+	}}
+	deps.svc.SetRouteAttemptLister(lister)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/office/runs/run-1/attempts", nil)
+	rec := httptest.NewRecorder()
+	deps.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var resp dashboard.RouteAttemptsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Attempts) != 1 || resp.Attempts[0].TierSource != "role" {
+		t.Fatalf("unexpected attempts: %+v", resp.Attempts)
+	}
+}
+
+// An attempt row with no recorded tier_source (pre-migration or a
+// max-attempts-exceeded terminal row) omits the field entirely rather
+// than emitting "tier_source":"" — the DTO field carries omitempty.
+func TestRouting_AttemptsEndpoint_EmptyTierSourceOmittedFromJSON(t *testing.T) {
+	deps, _ := newRoutingTestDeps(t)
+	lister := &fakeAttemptLister{byRun: map[string][]models.RouteAttempt{
+		"run-1": {
+			{RunID: "run-1", Seq: 1, Outcome: "skipped_max_attempts", StartedAt: time.Now().UTC()},
+		},
+	}}
+	deps.svc.SetRouteAttemptLister(lister)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/office/runs/run-1/attempts", nil)
+	rec := httptest.NewRecorder()
+	deps.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte(`"tier_source"`)) {
+		t.Fatalf("expected tier_source to be omitted, got %s", rec.Body.String())
 	}
 }
 

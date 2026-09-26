@@ -64,12 +64,14 @@ function renderContributor({
   savedWorkflowSteps = workflowSteps,
   guardMutation = vi.fn(async ({ operation }: { operation: () => Promise<void> }) => operation()),
   onDeleteWorkflow = vi.fn(async () => undefined),
+  isSessionConfigResolutionPending = false,
 }: {
   draftWorkflow?: Workflow;
   workflowSteps?: WorkflowStep[];
   savedWorkflowSteps?: WorkflowStep[];
   guardMutation?: ReturnType<typeof vi.fn>;
   onDeleteWorkflow?: () => Promise<unknown>;
+  isSessionConfigResolutionPending?: boolean;
 } = {}) {
   const setWorkflowSteps = vi.fn();
   const setSavedWorkflowSteps = vi.fn();
@@ -87,6 +89,7 @@ function renderContributor({
       onWorkflowSaved: vi.fn(),
       onDiscardWorkflow,
       onDeleteWorkflow,
+      isSessionConfigResolutionPending,
     }),
   );
   return { ...view, setWorkflowSteps, onDiscardWorkflow, onDeleteWorkflow };
@@ -105,6 +108,21 @@ beforeEach(() => {
 });
 
 describe("useWorkflowDraftContributor", () => {
+  it("normalizes optional workflow metadata in the save revision", () => {
+    renderContributor({
+      draftWorkflow: { ...savedWorkflow, description: null },
+    });
+
+    expect(contributor().revision).toContain('"workflow":["Workflow","","",""]');
+  });
+
+  it("blocks coordinated saves while session model options are resolving", () => {
+    renderContributor({ isSessionConfigResolutionPending: true });
+
+    expect(contributor().canSave).toBe(false);
+    expect(contributor().invalidReason).toBe("Loading model options…");
+  });
+
   it("deletes a partially persisted temporary workflow when discarding", async () => {
     const draftWorkflow = workflow("temp-workflow-1");
     const steps = [step("temp-step-1", draftWorkflow.id)];

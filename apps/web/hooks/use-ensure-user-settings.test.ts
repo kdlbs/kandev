@@ -29,6 +29,10 @@ let mockState: MockState;
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: MockState) => unknown) => selector(mockState),
+  useAppStoreApi: () => ({
+    getState: () => mockState,
+    setState: vi.fn(),
+  }),
 }));
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
@@ -44,8 +48,10 @@ import {
   useEnsureUserSettings,
 } from "./use-ensure-user-settings";
 
+/** Builds a full default user-settings state marked as not loaded. */
 function makeUnloadedSettings(): UserSettingsState {
   return {
+    revision: null,
     workspaceId: null,
     workflowId: null,
     kanbanViewMode: null,
@@ -61,25 +67,37 @@ function makeUnloadedSettings(): UserSettingsState {
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,
+    preventAutoStartAgentOnOpen: false,
     unreadDivider: true,
     agentGeneratedTaskTitles: false,
+    autoFocusNewTasks: true,
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,
     showScrollToStart: false,
     showTranscriptAutoScrollControl: true,
+    showTodoListPanel: false,
+    showTodoListPanelOnlyWhenNotEmpty: false,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     savedLayouts: [],
     sidebarViews: [],
+    sidebarViewsByWorkspace: {},
+    sidebarLayoutsByWorkspace: {},
     sidebarActiveViewId: null,
     sidebarDraft: null,
+    threadViews: [],
+    threadActiveViewId: null,
+    threadViewDraft: null,
     sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
+    sidebarTaskColorAutomation: { enabled: false, rules: [] },
+    sidebarTaskColors: {},
     taskCreateLastUsed: {
       repositoryId: null,
       branch: null,
       agentProfileId: null,
       executorProfileId: null,
+      workflowIdsByWorkspace: {},
     },
     jiraSavedViews: undefined,
     jiraTaskPresets: undefined,
@@ -88,28 +106,33 @@ function makeUnloadedSettings(): UserSettingsState {
     gitlabSavedPresets: undefined,
     azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
+    defaultUtilityAgentProfileId: null,
     keyboardShortcuts: {},
     terminalLinkBehavior: "new_tab",
     terminalFontFamily: null,
     terminalFontSize: null,
     changesPanelLayout: "tree",
+    lastSeenDisplay: "absolute",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
+    sidebarHoverEnabled: true,
+    sidebarHoverDelayMs: 500,
+    appStatusBarEnabled: false,
+    resolveSessionHostnames: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
-    voiceMode: {
-      enabled: true,
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      autoSend: false,
-      whisperWebModel: "base",
-    },
+    quickChatTabOrderByWorkspace: {},
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},
+    lspStatusLocation: "toolbar",
+    hiddenWorkflowStepIds: {},
+    workflowIdsWithAutoHideEmptySteps: [],
+    kanbanSort: "created_desc",
+    kanbanPriorityFilterTokens: [],
     loaded: false,
   };
 }
 
+/** Builds a mock settings API response wrapping the given task-create last-used payload. */
 function userSettingsResponse(taskCreateLastUsed = {}) {
   return {
     shell_options: [],
@@ -160,7 +183,9 @@ describe("useEnsureUserSettings", () => {
     resolveFetch(userSettingsResponse());
     await waitFor(() => expect(mockSetUserSettings).toHaveBeenCalled());
   });
+});
 
+describe("useEnsureUserSettings — fetched settings overlays", () => {
   it("merges only defined queued task-create fields over fetched settings", async () => {
     mockReadQueuedTaskCreateLastUsedState.mockReturnValue({
       repositoryId: undefined,
@@ -185,6 +210,7 @@ describe("useEnsureUserSettings", () => {
       branch: "main",
       agentProfileId: "agent-2",
       executorProfileId: "exec-profile-1",
+      workflowIdsByWorkspace: {},
       synced: true,
     });
   });
@@ -257,6 +283,7 @@ describe("useEnsureUserSettings — loaded settings overlay", () => {
         branch: "main",
         agentProfileId: "agent-1",
         executorProfileId: "exec-1",
+        workflowIdsByWorkspace: {},
       },
     };
     mockReadQueuedTaskCreateLastUsedState.mockReturnValue({
@@ -274,6 +301,7 @@ describe("useEnsureUserSettings — loaded settings overlay", () => {
       branch: "feature",
       agentProfileId: "agent-1",
       executorProfileId: "exec-1",
+      workflowIdsByWorkspace: {},
     });
   });
 });

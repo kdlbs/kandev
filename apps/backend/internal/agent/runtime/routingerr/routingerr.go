@@ -15,23 +15,44 @@ import (
 // Code is the normalized provider-routing error code.
 type Code string
 
+// Class is the shared recovery class for a normalized provider failure. The
+// class is deliberately smaller than Code so the catalogue can grow without
+// forcing every policy consumer to learn every provider-specific signature.
+type Class string
+
 const (
-	CodeAuthRequired           Code = "auth_required"
-	CodeMissingCredentials     Code = "missing_credentials"
-	CodeSubscriptionRequired   Code = "subscription_required"
-	CodeQuotaLimited           Code = "quota_limited"
-	CodeRateLimited            Code = "rate_limited"
-	CodeProviderUnavailable    Code = "provider_unavailable"
-	CodeProviderOverloaded     Code = "provider_overloaded"
-	CodeModelUnavailable       Code = "model_unavailable"
-	CodeProviderNotConfigured  Code = "provider_not_configured"
-	CodeUnknownProvider        Code = "unknown_provider_error"
-	CodeAgentRuntime           Code = "agent_runtime_error"
-	CodeTask                   Code = "task_error"
-	CodeRepo                   Code = "repo_error"
-	CodePermissionDeniedByUser Code = "permission_denied_by_user"
-	CodeNpxCacheCorrupted      Code = "npx_cache_corrupted"
-	CodeResumeCorrupted        Code = "resume_corrupted"
+	ClassTransient    Class = "transient"
+	ClassHard         Class = "hard"
+	ClassUnclassified Class = "unclassified"
+
+	// CatalogueVersion identifies the deterministic code-to-class catalogue
+	// used for a classification. It is persisted with route decisions so later
+	// catalogue additions do not relabel historical attempts.
+	CatalogueVersion = "provider-errors.v1"
+)
+
+const (
+	CodeAuthRequired                Code = "auth_required"
+	CodeMissingCredentials          Code = "missing_credentials"
+	CodeSubscriptionRequired        Code = "subscription_required"
+	CodeQuotaLimited                Code = "quota_limited"
+	CodeRateLimited                 Code = "rate_limited"
+	CodeNetworkUnavailable          Code = "network_unavailable"
+	CodeProviderUnavailable         Code = "provider_unavailable"
+	CodeProviderOverloaded          Code = "provider_overloaded"
+	CodeModelCapacity               Code = "model_capacity"
+	CodeModelUnavailable            Code = "model_unavailable"
+	CodeProviderNotConfigured       Code = "provider_not_configured"
+	CodeUnknownProvider             Code = "unknown_provider_error"
+	CodeAgentRuntime                Code = "agent_runtime_error"
+	CodeTask                        Code = "task_error"
+	CodeRepo                        Code = "repo_error"
+	CodePermissionDeniedByUser      Code = "permission_denied_by_user"
+	CodeNpxCacheCorrupted           Code = "npx_cache_corrupted"
+	CodeManagedRuntimeNpmResolution Code = "managed_runtime_npm_resolution"
+	CodeManagedRuntimeNpmPolicy     Code = "managed_runtime_npm_policy"
+	CodeResumeCorrupted             Code = "resume_corrupted"
+	CodeAgentTransportLost          Code = "agent_transport_lost"
 )
 
 // RemediationStartFreshSession is the symbolic RemediationPath value for
@@ -41,6 +62,29 @@ const (
 // clean; the agent's persisted reasoning state is corrupted and only a brand
 // new session recovers.
 const RemediationStartFreshSession = "start_fresh_session"
+
+// ModelUnavailableMessage renders the actionable user-facing message for a
+// configured model that is no longer available. Shared by the session-start
+// policy and the office post-start failure path so chat and run detail both
+// ask the user to change the model instead of silently falling back.
+func ModelUnavailableMessage(modelID string) string {
+	return fmt.Sprintf("Model unavailable: the configured model %q is no longer available. Change the model in the agent profile or configure a fallback.", modelID)
+}
+
+// IsAvailabilityCode reports whether a classified code means the provider or
+// model became unavailable (auth expired, model dropped, credentials or
+// subscription missing) — the failure class the no-silent-model-fallback
+// feature treats as "ask the user to change the model". Transient conditions
+// (rate limiting, quota) are deliberately excluded: they carry their own
+// AutoRetryable handling and must not trigger "change the model" guidance.
+func IsAvailabilityCode(code Code) bool {
+	switch code {
+	case CodeModelUnavailable, CodeAuthRequired, CodeMissingCredentials,
+		CodeSubscriptionRequired, CodeProviderUnavailable:
+		return true
+	}
+	return false
+}
 
 // Confidence reflects how strongly the classifier trusts the matched signal.
 type Confidence string
@@ -67,32 +111,57 @@ const (
 // Error is the classifier's normalized output. It wraps stderr/stdout in
 // RawExcerpt after sanitization + truncation.
 type Error struct {
-	Code            Code
-	Confidence      Confidence
-	Phase           Phase
-	FallbackAllowed bool
-	AutoRetryable   bool
-	UserAction      bool
-	ClassifierRule  string
-	ExitCode        *int
-	ResetHint       *time.Time
-	RawExcerpt      string
-	RemediationPath string // path to clean before retry; only set for codes that have a known remediation
+	Code             Code
+	Class            Class
+	CatalogueVersion string
+	Confidence       Confidence
+	Phase            Phase
+	FallbackAllowed  bool
+	AutoRetryable    bool
+	UserAction       bool
+	ClassifierRule   string
+	ExitCode         *int
+	ResetHint        *time.Time
+	RawExcerpt       string
+	RemediationPath  string // path to clean before retry; only set for codes that have a known remediation
+}
+
+// ClassForCode returns the policy class assigned by the provider-error
+// catalogue. Codes outside the provider recovery catalogue fail closed.
+func ClassForCode(code Code) Class {
+	switch code {
+	case CodeNetworkUnavailable, CodeProviderUnavailable, CodeProviderOverloaded,
+		CodeModelCapacity, CodeRateLimited, CodeAgentTransportLost:
+		return ClassTransient
+	case CodeAuthRequired, CodeMissingCredentials, CodeSubscriptionRequired,
+		CodeQuotaLimited, CodeModelUnavailable, CodeProviderNotConfigured:
+		return ClassHard
+	default:
+		return ClassUnclassified
+	}
 }
 
 func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.ClassifierRule)
 }
 
+// ShouldShortRetry reports whether a classified failure is worth retrying
+// against the same provider before falling back or escalating.
+func (e *Error) ShouldShortRetry() bool {
+	return e != nil && e.Class == ClassTransient && e.AutoRetryable && e.FallbackAllowed
+}
+
 // Input is the raw signal bundle adapters pass to Classify.
 type Input struct {
-	Phase         Phase
-	ProviderID    string
-	ExitCode      *int
-	StructuredErr error
-	HTTPStatus    int
-	Stderr        string
-	Stdout        string
+	Phase                     Phase
+	ProviderID                string
+	ExitCode                  *int
+	StructuredErr             error
+	HTTPStatus                int
+	ResetHint                 *time.Time
+	Stderr                    string
+	Stdout                    string
+	ManagedRuntimePackageSpec string // trusted exact package from the managed runtime command
 }
 
 const exitCodeBinaryMissing = 127
@@ -102,27 +171,63 @@ const exitCodeBinaryMissing = 127
 const statusOverloaded = 529
 
 // Classify normalizes a failure into a routing-aware Error. See package doc.
+// Classify always returns a non-nil *Error, even for an unmatched or empty
+// input; callers may dereference the result without a nil check.
 func Classify(in Input) *Error {
-	excerpt := Sanitize(in.Stderr + "\n" + in.Stdout)
+	rawText := in.Stderr + "\n" + in.Stdout
+	excerpt := Sanitize(rawText)
 	if e := classifyInjection(in, excerpt); e != nil {
 		return e
 	}
 	if e := classifyStructured(in, excerpt); e != nil {
+		e.ResetHint = in.ResetHint
 		return applyInvariants(e)
 	}
-	if e, ok := matchProviderRules(in.ProviderID, in.Stderr+"\n"+in.Stdout); ok {
+	if e := classifyManagedRuntimeNpmPolicy(in, rawText); e != nil {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
+		e.ResetHint = in.ResetHint
+		return applyInvariants(e)
+	}
+	if e, ok := matchProviderRules(in.ProviderID, excerpt); ok {
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
+		e.ResetHint = in.ResetHint
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	if e, ok := matchRuntimeEnvironmentRules(in.Stderr + "\n" + in.Stdout); ok {
+	if e, ok := matchProviderNeutralRules(excerpt); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
+		e.ResetHint = in.ResetHint
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	return applyInvariants(classifyByPhase(in, excerpt))
+	if e, ok := matchRuntimeEnvironmentRulesForProvider(in.ProviderID, excerpt, rawText); ok {
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
+		e.ResetHint = in.ResetHint
+		if e.Code == CodeNpxCacheCorrupted {
+			// Preserve the legacy path for the path-aware remediation guard;
+			// the path is validated again before deletion.
+			e.RemediationPath = extractNpxCachePath(rawText)
+		}
+		e.RawExcerpt = excerpt
+		return applyInvariants(e)
+	}
+	if e, ok := matchLegacyRuntimeEnvironmentRulesForProvider(in.ProviderID, rawText, rawText); ok {
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
+		e.ResetHint = in.ResetHint
+		if e.Code == CodeNpxCacheCorrupted {
+			e.RemediationPath = extractNpxCachePath(rawText)
+		}
+		e.RawExcerpt = excerpt
+		return applyInvariants(e)
+	}
+	e := classifyByPhase(in, excerpt)
+	e.ResetHint = in.ResetHint
+	return applyInvariants(e)
 }
 
 func classifyInjection(in Input, excerpt string) *Error {
@@ -140,6 +245,7 @@ func classifyInjection(in Input, excerpt string) *Error {
 		Phase:          in.Phase,
 		ClassifierRule: "inject.env",
 		ExitCode:       in.ExitCode,
+		ResetHint:      in.ResetHint,
 		RawExcerpt:     excerpt,
 	}
 	return applyInvariants(e)
@@ -179,6 +285,11 @@ func httpStatusToCode(status int) Code {
 		return CodeSubscriptionRequired
 	case http.StatusTooManyRequests:
 		return CodeRateLimited
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusGatewayTimeout:
+		// A gateway may expose an upstream 5xx directly instead of translating
+		// it to 503. These are provider-side availability failures, not a task
+		// or agent-runtime failure, so the shared transient policy may recover.
+		return CodeProviderUnavailable
 	case http.StatusServiceUnavailable:
 		return CodeProviderUnavailable
 	case statusOverloaded:
@@ -210,6 +321,8 @@ func classifyByPhase(in Input, excerpt string) *Error {
 }
 
 func applyInvariants(e *Error) *Error {
+	e.Class = ClassForCode(e.Code)
+	e.CatalogueVersion = CatalogueVersion
 	switch e.Code {
 	case CodeAuthRequired, CodeMissingCredentials, CodeSubscriptionRequired, CodeProviderNotConfigured:
 		e.UserAction = true
@@ -219,7 +332,7 @@ func applyInvariants(e *Error) *Error {
 		e.UserAction = true
 		e.AutoRetryable = false
 		e.FallbackAllowed = true
-	case CodeRateLimited, CodeQuotaLimited:
+	case CodeRateLimited, CodeQuotaLimited, CodeNetworkUnavailable, CodeModelCapacity:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
 	case CodeProviderUnavailable, CodeUnknownProvider:
@@ -234,6 +347,10 @@ func applyInvariants(e *Error) *Error {
 	case CodeNpxCacheCorrupted:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
+	case CodeManagedRuntimeNpmResolution, CodeManagedRuntimeNpmPolicy:
+		e.UserAction = true
+		e.AutoRetryable = false
+		e.FallbackAllowed = false
 	case CodeResumeCorrupted:
 		// The agent's persisted reasoning state is poisoned. Retrying the
 		// resume hits the same 400, and falling back to another provider
@@ -244,6 +361,14 @@ func applyInvariants(e *Error) *Error {
 	case CodePermissionDeniedByUser, CodeTask, CodeRepo, CodeAgentRuntime:
 		e.FallbackAllowed = false
 		e.AutoRetryable = false
+	case CodeAgentTransportLost:
+		// The ACP pipe dropped mid-turn: a recoverable transport failure, not a
+		// model-availability problem. Retrying the same provider is expected to
+		// succeed (the resume token belongs to the current provider), so
+		// falling back to another provider can't fix it and isn't offered.
+		e.AutoRetryable = true
+		e.FallbackAllowed = false
+		e.UserAction = false
 	}
 	if isPostStartPhase(e.Phase) && e.Code == CodeAgentRuntime {
 		e.FallbackAllowed = false

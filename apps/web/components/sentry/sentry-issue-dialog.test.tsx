@@ -109,4 +109,19 @@ describe("SentryIssueDialog", () => {
 
     expect(document.querySelector(".animate-spin")).toBeNull();
   });
+
+  // The query placeholder is Sentry search syntax the user copies. It must stay
+  // outside the catalog: a translated `is:` or `release:` is invalid syntax and
+  // silently returns nothing. Only the surrounding "e.g." wrapper is localized.
+  it("keeps the Sentry query syntax out of the translated placeholder", async () => {
+    mockAvailability();
+    vi.mocked(listSentryProjects).mockResolvedValue({
+      projects: [{ id: "project-1", slug: "web", name: "Web", orgSlug: "acme" }],
+    } as never);
+
+    render(<SentryIssueDialog open={true} onOpenChange={vi.fn()} workspaceId="workspace-1" />);
+
+    const query = await screen.findByLabelText("Query");
+    expect(query.getAttribute("placeholder")).toContain("is:unresolved release:1.2.3");
+  });
 });

@@ -8,8 +8,13 @@ import (
 const (
 	MCPTaskAgentProfileDefaultCurrentTask      = "current_task"
 	MCPTaskAgentProfileDefaultWorkspaceDefault = "workspace_default"
+	LspStatusLocationToolbar                   = "toolbar"
+	LspStatusLocationStatusBar                 = "status_bar"
 )
 
+// NormalizeMCPTaskAgentProfileDefault returns the canonical MCP task agent
+// profile default: workspace_default is accepted as-is, anything else is
+// coerced to current_task.
 func NormalizeMCPTaskAgentProfileDefault(value string) string {
 	if value == MCPTaskAgentProfileDefaultWorkspaceDefault {
 		return value
@@ -17,16 +22,41 @@ func NormalizeMCPTaskAgentProfileDefault(value string) string {
 	return MCPTaskAgentProfileDefaultCurrentTask
 }
 
+// NormalizeLspStatusLocation returns the canonical LSP status location:
+// status_bar is accepted as-is, anything else is coerced to toolbar.
+func NormalizeLspStatusLocation(value string) string {
+	if value == LspStatusLocationStatusBar {
+		return value
+	}
+	return LspStatusLocationToolbar
+}
+
 const (
 	StartupPageTaskOverview = "task_overview"
 	StartupPageLastTask     = "last_task"
+	StartupPageThreads      = "threads"
 )
 
+// NormalizeStartupPage preserves supported choices and defaults to task_overview.
 func NormalizeStartupPage(value string) string {
-	if value == StartupPageLastTask {
+	if value == StartupPageLastTask || value == StartupPageThreads {
 		return value
 	}
 	return StartupPageTaskOverview
+}
+
+const (
+	LastSeenDisplayAbsolute = "absolute"
+	LastSeenDisplayRelative = "relative"
+)
+
+// NormalizeLastSeenDisplay returns the canonical last-seen display mode:
+// relative is accepted as-is, anything else is coerced to absolute.
+func NormalizeLastSeenDisplay(value string) string {
+	if value == LastSeenDisplayRelative {
+		return value
+	}
+	return LastSeenDisplayAbsolute
 }
 
 const (
@@ -36,6 +66,9 @@ const (
 	RoleAdmin = "admin"
 	// RoleMember is a regular authenticated user.
 	RoleMember = "member"
+	// RoleGuest reaches only workspaces it is an explicit member of. It is
+	// never assigned by migration; an admin grants it deliberately.
+	RoleGuest = "guest"
 
 	// StatusActive marks a user that may log in.
 	StatusActive = "active"
@@ -44,69 +77,115 @@ const (
 	StatusDisabled = "disabled"
 )
 
+// NormalizeRole returns the canonical org role. Admin and guest are accepted
+// as-is; anything else (including empty and unknown values) becomes member,
+// which is the role every pre-guest account already had.
+func NormalizeRole(value string) string {
+	switch value {
+	case RoleAdmin:
+		return RoleAdmin
+	case RoleGuest:
+		return RoleGuest
+	default:
+		return RoleMember
+	}
+}
+
 type User struct {
-	ID          string    `json:"id"`
-	Email       string    `json:"email"`
-	DisplayName string    `json:"display_name"`
-	Role        string    `json:"role"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string `json:"id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+	Role        string `json:"role"`
+	Status      string `json:"status"`
+	// OrgID is the user's tenant. Empty means the account predates
+	// organizations or the tenancy migration has not run.
+	OrgID string `json:"org_id,omitempty"`
+	// IsOperator marks the instance operator tier: managing organizations,
+	// feature toggles and instance configuration. It grants NO access inside
+	// any organization, including the operator's own.
+	IsOperator bool      `json:"is_operator,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type UserSettings struct {
-	UserID                          string                            `json:"user_id"`
-	WorkspaceID                     string                            `json:"workspace_id"`
-	KanbanViewMode                  string                            `json:"kanban_view_mode"`
-	StartupPage                     string                            `json:"startup_page"`
-	WorkflowFilterID                string                            `json:"workflow_filter_id"`
-	RepositoryIDs                   []string                          `json:"repository_ids"`
-	TasksListSort                   string                            `json:"tasks_list_sort"`
-	TasksListGroup                  string                            `json:"tasks_list_group"`
-	TasksListShowDetails            bool                              `json:"tasks_list_show_details"`
-	InitialSetupComplete            bool                              `json:"initial_setup_complete"`
-	PreferredShell                  string                            `json:"preferred_shell"`
-	DefaultEditorID                 string                            `json:"default_editor_id"`
-	EnablePreviewOnClick            bool                              `json:"enable_preview_on_click"`
-	ChatSubmitKey                   string                            `json:"chat_submit_key"` // "enter" | "cmd_enter"
-	ReviewAutoMarkOnScroll          bool                              `json:"review_auto_mark_on_scroll"`
-	ConfirmTaskArchive              bool                              `json:"confirm_task_archive"`
-	UnreadDivider                   bool                              `json:"unread_divider"`
-	AgentGeneratedTaskTitles        bool                              `json:"agent_generated_task_titles"`
-	MCPTaskAgentProfileDefault      string                            `json:"mcp_task_agent_profile_default"`
-	ShowAnchoredPromptBar           bool                              `json:"show_anchored_prompt_bar"` // desktop-only sticky last-prompt bar
-	ShowScrollToLastPrompt          bool                              `json:"show_scroll_to_last_prompt"`
-	ShowScrollToStart               bool                              `json:"show_scroll_to_start"`
-	ShowTranscriptAutoScrollControl bool                              `json:"show_transcript_auto_scroll_control"`
-	ShowReleaseNotification         bool                              `json:"show_release_notification"`
-	ReleaseNotesLastSeenVersion     string                            `json:"release_notes_last_seen_version"`
-	LspAutoStartLanguages           []string                          `json:"lsp_auto_start_languages"`
-	LspAutoInstallLanguages         []string                          `json:"lsp_auto_install_languages"`
-	LspServerConfigs                map[string]map[string]interface{} `json:"lsp_server_configs"`
-	SavedLayouts                    []SavedLayout                     `json:"saved_layouts"`
-	SidebarViews                    []SidebarView                     `json:"sidebar_views"`
-	SidebarActiveViewID             string                            `json:"sidebar_active_view_id"`
-	SidebarDraft                    *SidebarViewDraft                 `json:"sidebar_draft"`
-	SidebarTaskPrefs                SidebarTaskPrefs                  `json:"sidebar_task_prefs"`
-	TaskCreateLastUsed              TaskCreateLastUsed                `json:"task_create_last_used"`
-	JiraSavedViews                  json.RawMessage                   `json:"jira_saved_views"`
-	JiraTaskPresets                 json.RawMessage                   `json:"jira_task_presets"`
-	GitHubSavedPresets              json.RawMessage                   `json:"github_saved_presets"`
-	GitHubDefaultQueryPresets       json.RawMessage                   `json:"github_default_query_presets"`
-	GitLabSavedPresets              json.RawMessage                   `json:"gitlab_saved_presets"`
-	AzureDevOpsBrowsePreferences    json.RawMessage                   `json:"azure_devops_browse_preferences"`
-	DefaultUtilityAgentID           string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
-	DefaultUtilityModel             string                            `json:"default_utility_model"`    // Default model for utility agents
-	KeyboardShortcuts               map[string]interface{}            `json:"keyboard_shortcuts"`       // User-configured keyboard shortcut overrides
-	TerminalLinkBehavior            string                            `json:"terminal_link_behavior"`   // "new_tab" | "browser_panel"
-	TerminalFontFamily              string                            `json:"terminal_font_family"`
-	TerminalFontSize                int                               `json:"terminal_font_size"`
-	ChangesPanelLayout              string                            `json:"changes_panel_layout"` // "flat" | "tree"
-	SystemMetricsDisplay            SystemMetricsDisplaySettings      `json:"system_metrics_display"`
-	AppStatusBarOrder               AppStatusBarOrder                 `json:"app_status_bar_order"`
-	VoiceMode                       VoiceModeSettings                 `json:"voice_mode"`
-	CreatedAt                       time.Time                         `json:"created_at"`
-	UpdatedAt                       time.Time                         `json:"updated_at"`
+	UserID                            string                            `json:"user_id"`
+	WorkspaceID                       string                            `json:"workspace_id"`
+	KanbanViewMode                    string                            `json:"kanban_view_mode"`
+	StartupPage                       string                            `json:"startup_page"`
+	WorkflowFilterID                  string                            `json:"workflow_filter_id"`
+	RepositoryIDs                     []string                          `json:"repository_ids"`
+	TasksListSort                     string                            `json:"tasks_list_sort"`
+	TasksListGroup                    string                            `json:"tasks_list_group"`
+	TasksListShowDetails              bool                              `json:"tasks_list_show_details"`
+	InitialSetupComplete              bool                              `json:"initial_setup_complete"`
+	PreferredShell                    string                            `json:"preferred_shell"`
+	DefaultEditorID                   string                            `json:"default_editor_id"`
+	EnablePreviewOnClick              bool                              `json:"enable_preview_on_click"`
+	ChatSubmitKey                     string                            `json:"chat_submit_key"` // "enter" | "cmd_enter"
+	ReviewAutoMarkOnScroll            bool                              `json:"review_auto_mark_on_scroll"`
+	ConfirmTaskArchive                bool                              `json:"confirm_task_archive"`
+	PreventAutoStartAgentOnOpen       bool                              `json:"prevent_auto_start_agent_on_open"`
+	UnreadDivider                     bool                              `json:"unread_divider"`
+	AgentGeneratedTaskTitles          bool                              `json:"agent_generated_task_titles"`
+	AutoFocusNewTasks                 bool                              `json:"auto_focus_new_tasks"`
+	MCPTaskAgentProfileDefault        string                            `json:"mcp_task_agent_profile_default"`
+	ShowAnchoredPromptBar             bool                              `json:"show_anchored_prompt_bar"` // desktop-only sticky last-prompt bar
+	ShowScrollToLastPrompt            bool                              `json:"show_scroll_to_last_prompt"`
+	ShowScrollToStart                 bool                              `json:"show_scroll_to_start"`
+	ShowTranscriptAutoScrollControl   bool                              `json:"show_transcript_auto_scroll_control"`
+	ShowTodoListPanel                 bool                              `json:"show_todo_list_panel"`
+	ShowTodoListPanelOnlyWhenNotEmpty bool                              `json:"show_todo_list_panel_only_when_not_empty"`
+	ShowReleaseNotification           bool                              `json:"show_release_notification"`
+	ReleaseNotesLastSeenVersion       string                            `json:"release_notes_last_seen_version"`
+	LspAutoStartLanguages             []string                          `json:"lsp_auto_start_languages"`
+	LspAutoInstallLanguages           []string                          `json:"lsp_auto_install_languages"`
+	LspServerConfigs                  map[string]map[string]interface{} `json:"lsp_server_configs"`
+	LspStatusLocation                 string                            `json:"lsp_status_location"`
+	SavedLayouts                      []SavedLayout                     `json:"saved_layouts"`
+	SidebarViewsByWorkspace           map[string]SidebarWorkspaceState  `json:"sidebar_views_by_workspace"`
+	SidebarLayoutsByWorkspace         map[string]SidebarLayout          `json:"sidebar_layouts_by_workspace"`
+	SidebarWorkspaceVersion           int                               `json:"sidebar_workspace_version"`
+	SidebarViews                      []SidebarView                     `json:"sidebar_views"`
+	SidebarActiveViewID               string                            `json:"sidebar_active_view_id"`
+	SidebarDraft                      *SidebarViewDraft                 `json:"sidebar_draft"`
+	ThreadViews                       []ThreadView                      `json:"thread_views"`
+	ThreadActiveViewID                string                            `json:"thread_active_view_id"`
+	ThreadViewDraft                   *ThreadViewDraft                  `json:"thread_view_draft"`
+	SidebarTaskPrefs                  SidebarTaskPrefs                  `json:"sidebar_task_prefs"`
+	SidebarTaskColorAutomation        SidebarTaskColorAutomation        `json:"sidebar_task_color_automation"`
+	SidebarTaskColors                 map[string]*string                `json:"sidebar_task_colors"`
+	TaskCreateLastUsed                TaskCreateLastUsed                `json:"task_create_last_used"`
+	JiraSavedViews                    json.RawMessage                   `json:"jira_saved_views"`
+	JiraDefaultViewID                 string                            `json:"jira_default_view_id"`
+	JiraTaskPresets                   json.RawMessage                   `json:"jira_task_presets"`
+	GitHubSavedPresets                json.RawMessage                   `json:"github_saved_presets"`
+	GitHubDefaultQueryPresets         json.RawMessage                   `json:"github_default_query_presets"`
+	GitLabSavedPresets                json.RawMessage                   `json:"gitlab_saved_presets"`
+	AzureDevOpsBrowsePreferences      json.RawMessage                   `json:"azure_devops_browse_preferences"`
+	DefaultUtilityAgentID             string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
+	DefaultUtilityModel               string                            `json:"default_utility_model"`    // Default model for utility agents
+	DefaultUtilityAgentProfileID      string                            `json:"default_utility_agent_profile_id"`
+	KeyboardShortcuts                 map[string]interface{}            `json:"keyboard_shortcuts"`     // User-configured keyboard shortcut overrides
+	TerminalLinkBehavior              string                            `json:"terminal_link_behavior"` // "new_tab" | "browser_panel"
+	TerminalFontFamily                string                            `json:"terminal_font_family"`
+	TerminalFontSize                  int                               `json:"terminal_font_size"`
+	ChangesPanelLayout                string                            `json:"changes_panel_layout"` // "flat" | "tree"
+	LastSeenDisplay                   string                            `json:"last_seen_display"`    // "absolute" | "relative"
+	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
+	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
+	SidebarHoverEnabled               bool                              `json:"sidebar_hover_enabled"`
+	SidebarHoverDelayMs               int                               `json:"sidebar_hover_delay_ms"`
+	ResolveSessionHostnames           bool                              `json:"resolve_session_hostnames"`
+	AppStatusBarOrder                 AppStatusBarOrder                 `json:"app_status_bar_order"`
+	QuickChatTabOrderByWorkspace      map[string][]string               `json:"quick_chat_tab_order_by_workspace"`
+	KanbanHiddenStepIDs               map[string][]string               `json:"kanban_hidden_step_ids"`
+	WorkflowIDsWithAutoHideEmptySteps []string                          `json:"workflow_ids_with_auto_hide_empty_steps"`
+	KanbanSort                        string                            `json:"kanban_sort"`
+	KanbanPriorityFilterTokens        []string                          `json:"kanban_priority_filter_tokens"`
+	Revision                          int64                             `json:"revision"`
+	CreatedAt                         time.Time                         `json:"created_at"`
+	UpdatedAt                         time.Time                         `json:"updated_at"`
 }
 
 type SystemMetricsDisplaySettings struct {
@@ -117,31 +196,6 @@ type SystemMetricsDisplaySettings struct {
 type AppStatusBarOrder struct {
 	LeftItemIDs  []string `json:"left_item_ids"`
 	RightItemIDs []string `json:"right_item_ids"`
-}
-
-// VoiceModeSettings is the per-user configuration surface for the chat
-// voice-input feature. Stored as a nested JSON object inside the `users.settings`
-// blob — adding fields here does not require a schema migration.
-type VoiceModeSettings struct {
-	// Enabled gates the whole feature. When false, the mic button is hidden
-	// entirely and no voice-related hooks run on the chat input. Defaults to
-	// true for new users; pre-existing user rows that have no `enabled` field
-	// in their stored JSON are also treated as enabled (see store layer).
-	Enabled bool `json:"enabled"`
-	// Engine is the user's preferred transcription engine.
-	// "auto" | "webSpeech" | "whisperWeb" | "whisperServer". Default "auto".
-	Engine string `json:"engine"`
-	// Language is the BCP-47 tag or "auto" to use the browser's language.
-	// Examples: "en-US", "pt-PT", "ja-JP". Default "auto".
-	Language string `json:"language"`
-	// Mode controls how the mic button is activated: "toggle" (click to start/stop)
-	// or "hold" (push-to-talk). Default "toggle".
-	Mode string `json:"mode"`
-	// AutoSend submits the chat message immediately after the transcript is inserted.
-	AutoSend bool `json:"auto_send"`
-	// WhisperWebModel selects the in-browser Whisper model when engine = whisperWeb.
-	// "tiny" | "base" | "small". Default "base".
-	WhisperWebModel string `json:"whisper_web_model"`
 }
 
 // SavedLayout represents a user-saved dockview layout configuration.
@@ -157,12 +211,13 @@ type SavedLayout struct {
 // The payload is stored and returned as-is; the server does not interpret
 // clause values beyond passing them through.
 type SidebarView struct {
-	ID              string              `json:"id"`
-	Name            string              `json:"name"`
-	Filters         []SidebarViewClause `json:"filters"`
-	Sort            SidebarViewSort     `json:"sort"`
-	Group           string              `json:"group"`
-	CollapsedGroups []string            `json:"collapsed_groups"`
+	ID              string                      `json:"id"`
+	Name            string                      `json:"name"`
+	Filters         []SidebarViewClause         `json:"filters"`
+	Sort            SidebarViewSort             `json:"sort"`
+	Group           string                      `json:"group"`
+	CollapsedGroups []string                    `json:"collapsed_groups"`
+	TaskRow         *SidebarTaskRowPresentation `json:"task_row,omitempty"`
 }
 
 type SidebarViewClause struct {
@@ -178,10 +233,31 @@ type SidebarViewSort struct {
 }
 
 type SidebarViewDraft struct {
-	BaseViewID string              `json:"base_view_id"`
-	Filters    []SidebarViewClause `json:"filters"`
-	Sort       SidebarViewSort     `json:"sort"`
-	Group      string              `json:"group"`
+	BaseViewID string                      `json:"base_view_id"`
+	Filters    []SidebarViewClause         `json:"filters"`
+	Sort       SidebarViewSort             `json:"sort"`
+	Group      string                      `json:"group"`
+	TaskRow    *SidebarTaskRowPresentation `json:"task_row,omitempty"`
+}
+
+// SidebarTaskRowPresentation controls the optional metadata and trailing
+// presentation for a task row in a saved sidebar view.
+type SidebarTaskRowPresentation struct {
+	DetailsEnabled bool     `json:"details_enabled"`
+	DetailOrder    []string `json:"detail_order"`
+	VisibleDetails []string `json:"visible_details"`
+	Trailing       string   `json:"trailing"`
+}
+
+// DefaultSidebarTaskRowPresentation returns the presentation used by the
+// original sidebar layout.
+func DefaultSidebarTaskRowPresentation() *SidebarTaskRowPresentation {
+	return &SidebarTaskRowPresentation{
+		DetailsEnabled: true,
+		DetailOrder:    []string{"relative_time", "repository", "pull_request_number"},
+		VisibleDetails: []string{"relative_time", "repository", "pull_request_number"},
+		Trailing:       "git_changes",
+	}
 }
 
 type SidebarTaskPrefs struct {
@@ -191,8 +267,60 @@ type SidebarTaskPrefs struct {
 }
 
 type TaskCreateLastUsed struct {
-	RepositoryID      string `json:"repository_id"`
-	Branch            string `json:"branch"`
-	AgentProfileID    string `json:"agent_profile_id"`
-	ExecutorProfileID string `json:"executor_profile_id"`
+	RepositoryID           string            `json:"repository_id"`
+	Branch                 string            `json:"branch"`
+	AgentProfileID         string            `json:"agent_profile_id"`
+	ExecutorProfileID      string            `json:"executor_profile_id"`
+	WorkflowIDsByWorkspace map[string]string `json:"workflow_ids_by_workspace"`
+}
+
+// AgentProfileRecentUseContext identifies an operational selector whose
+// profile order is remembered independently from user settings.
+type AgentProfileRecentUseContext string
+
+const (
+	AgentProfileRecentUseTaskCreate  AgentProfileRecentUseContext = "task_create"
+	AgentProfileRecentUseTaskSession AgentProfileRecentUseContext = "task_session"
+	AgentProfileRecentUseQuickChat   AgentProfileRecentUseContext = "quick_chat"
+	AgentProfileRecentUseConfigChat  AgentProfileRecentUseContext = "config_chat"
+)
+
+const (
+	AgentProfileRecentUseMaxProfiles       = 10
+	AgentProfileRecentUseMaxContexts       = 4
+	AgentProfileRecentUseMaxProfileIDBytes = 255
+)
+
+// SupportedAgentProfileRecentUseContexts returns the closed set of contexts
+// that may be persisted for a user.
+func SupportedAgentProfileRecentUseContexts() []AgentProfileRecentUseContext {
+	return []AgentProfileRecentUseContext{
+		AgentProfileRecentUseTaskCreate,
+		AgentProfileRecentUseTaskSession,
+		AgentProfileRecentUseQuickChat,
+		AgentProfileRecentUseConfigChat,
+	}
+}
+
+// IsAgentProfileRecentUseContext reports whether context is supported.
+func IsAgentProfileRecentUseContext(context AgentProfileRecentUseContext) bool {
+	switch context {
+	case AgentProfileRecentUseTaskCreate,
+		AgentProfileRecentUseTaskSession,
+		AgentProfileRecentUseQuickChat,
+		AgentProfileRecentUseConfigChat:
+		return true
+	default:
+		return false
+	}
+}
+
+// AgentProfileRecentUse is the persisted move-to-front history for one user
+// and operational selector context.
+type AgentProfileRecentUse struct {
+	UserID     string                       `json:"user_id"`
+	Context    AgentProfileRecentUseContext `json:"context"`
+	ProfileIDs []string                     `json:"profile_ids"`
+	Revision   int64                        `json:"revision"`
+	UpdatedAt  time.Time                    `json:"updated_at"`
 }

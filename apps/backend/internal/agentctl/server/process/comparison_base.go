@@ -31,7 +31,7 @@ func correctStaleComparisonBase(
 	git comparisonBaseGit,
 	baseCommit, targetBranch string,
 ) string {
-	if baseCommit == "" || isIntegrationBranch(targetBranch) {
+	if baseCommit == "" || isExplicitComparisonRef(targetBranch) || isIntegrationBranch(targetBranch) {
 		return baseCommit
 	}
 	if targetHasUpstreamRef(ctx, git, targetBranch) {

@@ -168,10 +168,11 @@ function expectStableAnimatedToggle(capture: SidebarToggleCapture): void {
   const panelWidths = frames.map((frame) => frame.panelWidth);
   const minimumPanelWidth = Math.min(...panelWidths);
   const maximumPanelWidth = Math.max(...panelWidths);
+  // Browser layout can report the 200px design delta one subpixel below 200.
   expect(
     maximumPanelWidth - minimumPanelWidth,
     "Visual sidebar should travel between its expanded and collapsed widths",
-  ).toBeGreaterThan(200);
+  ).toBeGreaterThanOrEqual(199);
   expect(
     panelWidths
       .slice(1, -1)
@@ -205,7 +206,8 @@ test.describe("Toggle sidebar shortcut (global)", () => {
 
   test("toggles the AppSidebar on a Settings page", async ({ testPage, apiClient, seedData }) => {
     await bindToggleSidebar(apiClient, seedData);
-    await testPage.goto("/settings/general");
+    // A leaf, not the `/settings/preferences` prefix, which only redirects here.
+    await testPage.goto("/settings/preferences/appearance");
     await expectShortcutTogglesSidebar(testPage, testPage.getByTestId("app-sidebar"));
   });
 

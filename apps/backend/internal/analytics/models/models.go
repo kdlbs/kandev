@@ -53,14 +53,18 @@ type CompletedTaskActivity struct {
 	CompletedTasks int    `json:"completed_tasks"`
 }
 
-// AgentUsage represents usage statistics for a single agent profile
-type AgentUsage struct {
-	AgentProfileID   string `json:"agent_profile_id"`
-	AgentProfileName string `json:"agent_profile_name"`
-	AgentModel       string `json:"agent_model"`
-	SessionCount     int    `json:"session_count"`
-	TurnCount        int    `json:"turn_count"`
-	TotalDurationMs  int64  `json:"total_duration_ms"`
+// ModelUsage represents usage statistics for a single model.
+//
+// Usage is keyed by model rather than by agent profile because a profile is
+// mutable: it gets renamed and repointed at other models, so its sessions carry
+// several different snapshots and no single one of them describes the group.
+// A model string never changes meaning, so every row is exactly true and a
+// short range's counts are always contained in the longer range around it.
+type ModelUsage struct {
+	Model           string `json:"model"`
+	SessionCount    int    `json:"session_count"`
+	TurnCount       int    `json:"turn_count"`
+	TotalDurationMs int64  `json:"total_duration_ms"`
 }
 
 // RepositoryStats represents aggregated statistics for a repository in a workspace
@@ -98,10 +102,17 @@ type GitStats struct {
 // wants a single "effective lines" number (the larger of the two, to avoid
 // double-counting work that was later committed) computes that itself, the
 // same way the source plugin's effectiveLines helper does.
+//
+// LinesAddedCommitted / LinesDeletedCommitted are nil, not 0, for a session
+// that predates commit-capture activation (see commit_capture_activated_at in
+// kandev_meta) and has no observed commits: capture wasn't running yet for
+// that session, so "zero" cannot be distinguished from "unknown" and must not
+// be asserted as a real measurement. A session with at least one observed
+// commit, or one that started after activation, always gets a real int64.
 type SessionCodeStats struct {
 	SessionID               string `json:"session_id"`
-	LinesAddedCommitted     int64  `json:"lines_added_committed"`
-	LinesDeletedCommitted   int64  `json:"lines_deleted_committed"`
+	LinesAddedCommitted     *int64 `json:"lines_added_committed"`
+	LinesDeletedCommitted   *int64 `json:"lines_deleted_committed"`
 	LinesAddedPeakPending   int64  `json:"lines_added_peak_pending"`
 	LinesDeletedPeakPending int64  `json:"lines_deleted_peak_pending"`
 }

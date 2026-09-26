@@ -27,9 +27,8 @@ test.describe("Task List", () => {
       testPage.getByTestId("tasks-list").getByText("Direct Navigate Task"),
     ).toBeVisible();
     await expect(testPage.getByTestId("kanban-header-search")).toBeVisible();
-    await expect(
-      testPage.locator("header").first().getByText("Tasks", { exact: true }),
-    ).toHaveCount(0);
+    // The bar names the page through the shared title crumb.
+    await expect(testPage.locator('[data-slot="breadcrumb-page"]')).toHaveText("Tasks");
     await expect(testPage.locator("main").getByRole("button", { name: "New Task" })).toHaveCount(0);
 
     const rowBox = await testPage
@@ -62,17 +61,21 @@ test.describe("Task List", () => {
       .fill("Hierarchy");
 
     const taskList = testPage.getByTestId("tasks-list");
-    const parentRow = taskList.getByTestId("tasks-list-row").filter({
-      hasText: "Hierarchy Parent Task",
-    });
-    const childRow = taskList.getByTestId("tasks-list-row").filter({
-      hasText: "Hierarchy Child Task",
-    });
+    const parentRow = taskList
+      .getByTestId("tasks-list-row-title")
+      .filter({ hasText: /^Hierarchy Parent Task$/ })
+      .locator("xpath=ancestor::*[@data-testid='tasks-list-row']");
+    const childRow = taskList
+      .getByTestId("tasks-list-row-title")
+      .filter({ hasText: /^Hierarchy Child Task$/ })
+      .locator("xpath=ancestor::*[@data-testid='tasks-list-row']");
 
+    // Wait for the filtered list to settle before reading row attributes. SSR
+    // and the client list can briefly overlap while the search result mounts.
+    await expect(parentRow).toHaveCount(1, { timeout: 5000 });
+    await expect(childRow).toHaveCount(1, { timeout: 5000 });
     await expect(parentRow).toHaveAttribute("data-level", "0", { timeout: 5000 });
     await expect(childRow).toHaveAttribute("data-level", "1", { timeout: 5000 });
-    await expect(parentRow).toHaveCount(1);
-    await expect(childRow).toHaveCount(1);
     await expect(taskList.getByTestId("tasks-list-row-title")).toHaveText([
       "Hierarchy Parent Task",
       "Hierarchy Child Task",

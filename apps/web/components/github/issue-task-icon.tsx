@@ -2,10 +2,12 @@
 
 import { IconCircleDot } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useTranslation } from "react-i18next";
 
 type IssueInfo = { url: string; number: number };
 
 export function IssueTaskIcon({ issueInfo }: { issueInfo: IssueInfo }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -16,12 +18,15 @@ export function IssueTaskIcon({ issueInfo }: { issueInfo: IssueInfo }) {
           onClick={(e) => e.stopPropagation()}
           className="inline-flex items-center shrink-0 text-green-600 hover:text-green-500 cursor-pointer"
           data-testid="issue-task-icon"
-          aria-label={`Issue #${issueInfo.number}`}
+          aria-label={t("github:issue", { number: issueInfo.number })}
         >
           <IconCircleDot className="h-3.5 w-3.5" />
         </a>
       </TooltipTrigger>
-      <TooltipContent>Issue #{issueInfo.number}</TooltipContent>
+      <TooltipContent>
+        {t("github:issue2")}
+        {issueInfo.number}
+      </TooltipContent>
     </Tooltip>
   );
 }

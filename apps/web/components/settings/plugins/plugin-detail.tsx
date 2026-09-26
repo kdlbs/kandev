@@ -1,25 +1,31 @@
 "use client";
 
+import { useRef, useState, type RefObject } from "react";
 import { IconArrowLeft } from "@tabler/icons-react";
+import { Trans, useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
-import { SettingsCard } from "@/components/settings/settings-card";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { PluginConfigForm } from "./plugin-config-form";
 import { PluginManifestCard } from "./plugin-manifest-card";
+import { PluginShortcutsCard } from "./plugin-shortcuts-card";
 import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
 import { PluginErrorDiagnostic } from "./plugin-error-diagnostic";
-import { UninstallPluginDialog } from "./uninstall-plugin-dialog";
+import { PluginUninstallConfirmation } from "./uninstall-plugin-dialog";
 import { usePluginActions } from "./use-plugin-actions";
 import { usePluginConfigForm } from "./use-plugin-config-form";
 import type { PluginRecord } from "@/lib/types/plugins";
+import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 const PLUGINS_SETTINGS_HREF = "/settings/plugins";
 
@@ -31,16 +37,20 @@ const PLUGINS_SETTINGS_HREF = "/settings/plugins";
  * GetConfig RPC.
  */
 export function PluginDetail({ pluginId }: { pluginId: string }) {
+  const canManage = useIsAdmin();
   const { items, loaded } = usePlugins();
   const router = useRouter();
+  const { isFinePointer } = useResponsiveBreakpoint();
   const actions = usePluginActions();
   const plugin = items.find((p) => p.id === pluginId) ?? null;
-  const form = usePluginConfigForm(plugin);
+  const [confirmingUninstall, setConfirmingUninstall] = useState(false);
+  const uninstallAnchorRef = useRef<HTMLButtonElement>(null);
+  const form = usePluginConfigForm(canManage ? plugin : null);
   useSettingsSaveContributor({
     id: `plugin-config:${pluginId}`,
     revision: form.revision,
-    isDirty: form.isDirty,
-    canSave: form.canSave,
+    isDirty: canManage && form.isDirty,
+    canSave: canManage && form.canSave,
     invalidReason: form.invalidReason,
     save: form.handleSave,
     discard: form.discard,
@@ -55,25 +65,52 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
       <PluginDetailHeader plugin={plugin} />
       <Separator />
 
-      {/* Owner-scoped inline slot for the plugin's own settings UI, at the top (see PLUGIN-API.md). */}
-      <PluginSlot
-        name="plugin-settings"
-        ownerPluginId={plugin.id}
-        slotProps={{ pluginId: plugin.id, status: plugin.status }}
-      />
-      <PluginSettingsCard plugin={plugin} form={form} busy={actions.busyId === plugin.id} />
+      {canManage && (
+        <>
+          {/* Owner-scoped inline slot for the plugin's own settings UI, at the top (see PLUGIN-API.md). */}
+          <PluginSlot
+            name="plugin-settings"
+            ownerPluginId={plugin.id}
+            slotProps={{ pluginId: plugin.id, status: plugin.status }}
+          />
+          <PluginSettingsCard
+            plugin={plugin}
+            form={form}
+            busy={actions.busyId === plugin.id || actions.uninstallBusy}
+          />
+        </>
+      )}
+      <PluginShortcutsCard plugin={plugin} plugins={items} />
       <PluginManifestCard plugin={plugin} />
 
-      <PluginDangerZone plugin={plugin} actions={actions} />
-      <UninstallPluginDialog
-        target={actions.uninstallTarget}
-        busy={actions.uninstallBusy}
-        onClose={actions.closeUninstall}
-        onConfirm={async () => {
-          await actions.confirmUninstall();
-          router.push(PLUGINS_SETTINGS_HREF);
-        }}
-      />
+      {canManage && (
+        <>
+          <PluginDangerZone
+            plugin={plugin}
+            actions={actions}
+            isFinePointer={isFinePointer}
+            confirmingUninstall={confirmingUninstall}
+            uninstallAnchorRef={uninstallAnchorRef}
+            onUninstall={() => {
+              setConfirmingUninstall(true);
+            }}
+          />
+          <PluginUninstallConfirmation
+            target={plugin}
+            open={confirmingUninstall}
+            isFinePointer={isFinePointer}
+            anchorRef={uninstallAnchorRef}
+            onOpenChange={setConfirmingUninstall}
+            onCancel={() => {
+              setConfirmingUninstall(false);
+            }}
+            onConfirm={async () => {
+              const uninstalled = await actions.confirmUninstall(plugin);
+              if (uninstalled) router.push(PLUGINS_SETTINGS_HREF);
+            }}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -83,6 +120,7 @@ type PluginDetailHeaderProps = {
 };
 
 function PluginDetailHeader({ plugin }: PluginDetailHeaderProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <Link
@@ -90,7 +128,7 @@ function PluginDetailHeader({ plugin }: PluginDetailHeaderProps) {
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground cursor-pointer"
       >
         <IconArrowLeft className="h-4 w-4" />
-        Plugins
+        {t("common:plugins")}
       </Link>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
@@ -100,9 +138,12 @@ function PluginDetailHeader({ plugin }: PluginDetailHeaderProps) {
             {plugin.signed === false && (
               <Badge
                 variant="outline"
-                className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[11px]"
+                className={
+                  "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 " +
+                  SETTINGS_TYPOGRAPHY.meta
+                }
               >
-                unsigned
+                {t("plugins:unsigned")}
               </Badge>
             )}
           </div>
@@ -129,23 +170,28 @@ type PluginSettingsCardProps = {
 };
 
 function PluginSettingsCard({ plugin, form, busy }: PluginSettingsCardProps) {
+  const { t } = useTranslation();
   return (
-    <SettingsCard isDirty={form.isDirty} data-testid="plugin-settings-card">
-      <CardHeader>
-        <CardTitle className="text-base">Settings</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <PluginSettingsBody plugin={plugin} form={form} busy={busy} />
-      </CardContent>
-    </SettingsCard>
+    <SettingsGroup
+      title={t("plugins:settings")}
+      isDirty={form.isDirty}
+      data-testid="plugin-settings-card"
+      contentClassName="divide-y-0"
+    >
+      <PluginSettingsBody plugin={plugin} form={form} busy={busy} />
+    </SettingsGroup>
   );
 }
 
 function PluginSettingsBody({ plugin, form, busy }: PluginSettingsCardProps) {
+  const { t } = useTranslation();
   if (form.fields.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        This plugin does not declare any settings (no <code>config_schema</code> in its manifest).
+        {/* `config_schema` is a manifest key — the contract, not copy. */}
+        <Trans i18nKey="plugins:noDeclaredSettings">
+          This plugin does not declare any settings (no <code>config_schema</code> in its manifest).
+        </Trans>
       </p>
     );
   }
@@ -153,7 +199,7 @@ function PluginSettingsBody({ plugin, form, busy }: PluginSettingsCardProps) {
     return <p className="text-sm text-destructive">{form.configError}</p>;
   }
   if (form.configLoading) {
-    return <p className="text-sm text-muted-foreground">Loading settings...</p>;
+    return <p className="text-sm text-muted-foreground">{t("plugins:loadingSettings")}</p>;
   }
   return (
     <div className="space-y-4">
@@ -165,9 +211,7 @@ function PluginSettingsBody({ plugin, form, busy }: PluginSettingsCardProps) {
         onChange={form.handleChange}
       />
       {plugin.status === "active" && (
-        <p className="text-xs text-muted-foreground">
-          Saving restarts the plugin so the new settings take effect.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("plugins:savingRestartsPlugin")}</p>
       )}
     </div>
   );
@@ -176,10 +220,23 @@ function PluginSettingsBody({ plugin, form, busy }: PluginSettingsCardProps) {
 type PluginDangerZoneProps = {
   plugin: PluginRecord;
   actions: ReturnType<typeof usePluginActions>;
+  isFinePointer: boolean;
+  confirmingUninstall: boolean;
+  uninstallAnchorRef: RefObject<HTMLButtonElement | null>;
+  onUninstall: () => void;
 };
 
-function PluginDangerZone({ plugin, actions }: PluginDangerZoneProps) {
-  const busy = actions.busyId === plugin.id;
+function PluginDangerZone({
+  plugin,
+  actions,
+  isFinePointer,
+  confirmingUninstall,
+  uninstallAnchorRef,
+  onUninstall,
+}: PluginDangerZoneProps) {
+  const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
+  const busy = actions.busyId === plugin.id || actions.uninstallBusy;
   const canEnable =
     plugin.status === "disabled" || plugin.status === "registered" || plugin.status === "error";
   const canDisable = plugin.status === "active" || plugin.status === "error";
@@ -190,38 +247,51 @@ function PluginDangerZone({ plugin, actions }: PluginDangerZoneProps) {
         <Button
           variant="outline"
           size="sm"
-          className="cursor-pointer min-h-11 sm:min-h-0"
+          className={controlSizingClassName(
+            "compact",
+            "cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11",
+          )}
           disabled={busy}
           onClick={() => actions.handleEnable(plugin)}
         >
-          Enable
+          {t("plugins:enable")}
         </Button>
       )}
       {canDisable && (
         <Button
           variant="outline"
           size="sm"
-          className="cursor-pointer min-h-11 sm:min-h-0"
+          className={controlSizingClassName(
+            "compact",
+            "cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11",
+          )}
           disabled={busy}
           onClick={() => actions.handleDisable(plugin)}
         >
-          Disable
+          {t("plugins:disable")}
         </Button>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="cursor-pointer min-h-11 text-destructive hover:text-destructive sm:min-h-0"
-        disabled={busy}
-        onClick={() => actions.openUninstall(plugin)}
-      >
-        Uninstall
-      </Button>
+      {(isMobile || isFinePointer || !confirmingUninstall) && (
+        <Button
+          ref={uninstallAnchorRef}
+          variant="ghost"
+          size="sm"
+          className={controlSizingClassName(
+            "compact",
+            "cursor-pointer text-destructive hover:text-destructive max-md:min-h-11 [@media(pointer:coarse)]:min-h-11",
+          )}
+          disabled={busy}
+          onClick={onUninstall}
+        >
+          {t("plugins:uninstall")}
+        </Button>
+      )}
     </div>
   );
 }
 
 function PluginNotFound({ pluginId }: { pluginId: string }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4">
       <Link
@@ -229,10 +299,13 @@ function PluginNotFound({ pluginId }: { pluginId: string }) {
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground cursor-pointer"
       >
         <IconArrowLeft className="h-4 w-4" />
-        Plugins
+        {t("common:plugins")}
       </Link>
       <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-        No installed plugin with id <span className="font-mono">{pluginId}</span>.
+        {/* The plugin id is an identifier the user typed or followed, never copy. */}
+        <Trans i18nKey="plugins:noInstalledPluginWithId" values={{ id: pluginId }}>
+          No installed plugin with id <span className="font-mono">{pluginId}</span>.
+        </Trans>
       </div>
     </div>
   );

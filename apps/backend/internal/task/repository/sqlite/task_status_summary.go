@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -65,6 +66,119 @@ func (r *Repository) LoadTaskStatusSummaries(ctx context.Context, taskIDs []stri
 		_ = rows.Close()
 	}
 	return result, nil
+}
+
+// LoadTaskLastActivity returns the latest bounded activity timestamp for each
+// requested task. Every source is filtered by task ID inside its union branch
+// so the batch remains scoped and does not scan unrelated task history.
+func (r *Repository) LoadTaskLastActivity(ctx context.Context, taskIDs []string) (map[string]time.Time, error) {
+	result := make(map[string]time.Time, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return result, nil
+	}
+
+	for _, chunk := range chunkIDs(taskIDs, sqliteMaxHostParams/6) {
+		placeholders, ids := buildInPlaceholders(chunk)
+		lifecycleOnlyPredicate := turnLifecycleOnlyPredicate(r.ro.DriverName(), "task_session_turns")
+		query := `
+			WITH activity AS (
+				SELECT id AS task_id, created_at AS activity_at
+				FROM tasks
+				WHERE id IN (` + placeholders + `)
+				UNION ALL
+				SELECT id AS task_id, updated_at AS activity_at
+				FROM tasks
+				WHERE id IN (` + placeholders + `)
+				UNION ALL
+				SELECT task_id, created_at AS activity_at
+				FROM task_session_messages
+				WHERE task_id IN (` + placeholders + `)
+				  AND author_type = 'user'
+				UNION ALL
+				SELECT task_id, queued_at AS activity_at
+				FROM queued_messages
+				WHERE task_id IN (` + placeholders + `)
+				  AND queued_by NOT IN ('agent', 'workflow', 'server')
+				UNION ALL
+				SELECT task_id, started_at AS activity_at
+				FROM task_session_turns
+				WHERE task_id IN (` + placeholders + `)
+				  AND started_at IS NOT NULL
+				  AND NOT (` + lifecycleOnlyPredicate + `)
+				UNION ALL
+				SELECT task_id, completed_at AS activity_at
+				FROM task_session_turns
+				WHERE task_id IN (` + placeholders + `)
+				  AND completed_at IS NOT NULL
+				  AND NOT (` + lifecycleOnlyPredicate + `)
+			)
+			SELECT task_id, MAX(activity_at) AS activity_at
+			FROM activity
+			GROUP BY task_id`
+		args := make([]interface{}, 0, len(ids)*6)
+		for range 6 {
+			args = append(args, ids...)
+		}
+		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+		if err != nil {
+			return nil, fmt.Errorf("load task last activity: %w", err)
+		}
+		for rows.Next() {
+			var (
+				taskID        string
+				rawActivityAt interface{}
+			)
+			if err := rows.Scan(&taskID, &rawActivityAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan task last activity: %w", err)
+			}
+			activityAt, err := parseTaskActivityTime(rawActivityAt)
+			if err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("parse task last activity %q: %w", taskID, err)
+			}
+			result[taskID] = activityAt
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("read task last activity: %w", err)
+		}
+		_ = rows.Close()
+	}
+	return result, nil
+}
+
+func parseTaskActivityTime(value interface{}) (time.Time, error) {
+	switch value := value.(type) {
+	case time.Time:
+		return value, nil
+	case string:
+		return parseTaskActivityTimeString(value)
+	case []byte:
+		return parseTaskActivityTimeString(string(value))
+	default:
+		return time.Time{}, fmt.Errorf("unsupported timestamp type %T", value)
+	}
+}
+
+func parseTaskActivityTimeString(value string) (time.Time, error) {
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed, nil
+	}
+	if normalized := strings.Replace(value, " ", "T", 1); normalized != value {
+		if parsed, err := time.Parse(time.RFC3339Nano, normalized); err == nil {
+			return parsed, nil
+		}
+	}
+	for _, layout := range []string{
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+	} {
+		if parsed, err := time.ParseInLocation(layout, value, time.UTC); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid timestamp %q", value)
 }
 
 // CompareAndUpdateTaskStatusSummary inserts a new row or replaces an older

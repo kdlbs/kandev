@@ -10,9 +10,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/mentions"
+	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	api "github.com/kandev/kandev/pkg/api/v1"
@@ -24,6 +26,7 @@ type MentionComponents struct {
 	Registry   *mentions.Registry
 	Search     mentions.Searcher
 	Submission entityrefs.SubmissionValidator
+	Log        *logger.Logger
 }
 
 type mentionWorkspaceResolver interface {
@@ -35,24 +38,32 @@ type mentionConversationResolver interface {
 }
 
 func newMentionComponents(
+	log *logger.Logger,
 	workspaces mentionWorkspaceResolver,
 	conversations mentionConversationResolver,
 	providers ...mentions.MentionProvider,
 ) (*MentionComponents, error) {
 	registry := mentions.NewRegistry()
 	for _, provider := range providers {
+		if sourceRegistrar, ok := provider.(mentions.SourceRegistrar); ok {
+			if err := sourceRegistrar.RegisterMentionSources(registry); err != nil {
+				return nil, fmt.Errorf("register mention provider: %w", err)
+			}
+			continue
+		}
 		if err := registry.Register(provider); err != nil {
 			return nil, fmt.Errorf("register mention provider: %w", err)
 		}
 	}
 	search := &workspaceValidatingMentionSearcher{
 		workspaces: workspaces,
-		searcher:   mentions.NewService(registry),
+		searcher:   mentions.NewService(registry, mentions.WithLogger(log)),
 	}
 	return &MentionComponents{
 		Registry:   registry,
 		Search:     search,
 		Submission: entityrefs.NewSubmissionService(conversations, registry),
+		Log:        log,
 	}, nil
 }
 
@@ -70,14 +81,14 @@ func (s *workspaceValidatingMentionSearcher) Search(
 		return nil, mentions.ErrInvalidRequest
 	}
 	if s == nil || s.workspaces == nil || s.searcher == nil {
-		return nil, errors.New("mention search is unavailable")
+		return nil, mentions.NewSearchFailure(mentions.FailureStageSearch, mentions.FailureClassInternal, errors.New("mention search is unavailable"))
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, request.WorkspaceID)
 	if err != nil {
 		if errors.Is(err, repository.ErrWorkspaceNotFound) {
 			return nil, mentions.ErrWorkspaceNotFound
 		}
-		return nil, fmt.Errorf("validate mention workspace: %w", err)
+		return nil, mentions.NewSearchFailure(mentions.FailureStageWorkspaceValidation, mentions.FailureClassWorkspaceLookup, err)
 	}
 	if workspace == nil || workspace.ID != request.WorkspaceID {
 		return nil, mentions.ErrWorkspaceNotFound
@@ -137,6 +148,9 @@ func builtinMentionProviders(
 		sentryService = services.Sentry
 	}
 	providers = append(providers, mentions.NewSentryIssueProvider(sentryService))
+	if services.Plugins != nil {
+		providers = append(providers, plugins.NewMentionSourceBridge(services.Plugins))
+	}
 	return providers
 }
 
@@ -298,5 +312,5 @@ func registerMentionRoutes(router gin.IRoutes, components *MentionComponents) {
 	if router == nil || components == nil || components.Search == nil {
 		return
 	}
-	mentions.NewHandler(components.Search).RegisterRoutes(router)
+	mentions.NewHandler(components.Search, components.Log).RegisterRoutes(router)
 }

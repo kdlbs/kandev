@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,8 +15,10 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -39,18 +42,47 @@ import (
 // mockStepGetter implements WorkflowStepGetter for testing.
 type mockStepGetter struct {
 	steps                  map[string]*wfmodels.WorkflowStep // stepID -> step
-	workflowAgentProfileID string                            // returned by GetWorkflowAgentProfileID
+	getStepFunc            func(context.Context, string) (*wfmodels.WorkflowStep, error)
+	workflowAgentProfileID string            // returned by GetWorkflowMeta
+	workflowAgentProfiles  []string          // optional profiles returned per call
+	workflowPrompts        map[string]string // workflowID -> prompt
+	workflowMetaCalls      int               // GetWorkflowMeta invocations
+	workflowMetaErr        error             // optional error from GetWorkflowMeta
+	workflowMetaDelay      time.Duration     // optional sleep before returning meta
+	workflowMetaMu         sync.Mutex        // guards workflowMetaCalls for concurrent tests
+	getStepCalls           int               // GetStep invocations, guarded by getStepMu
+	getStepMu              sync.Mutex
 }
 
 func newMockStepGetter() *mockStepGetter {
-	return &mockStepGetter{steps: make(map[string]*wfmodels.WorkflowStep)}
+	return &mockStepGetter{
+		steps:           make(map[string]*wfmodels.WorkflowStep),
+		workflowPrompts: make(map[string]string),
+	}
 }
 
-func (m *mockStepGetter) GetStep(_ context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+func (m *mockStepGetter) GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	m.getStepMu.Lock()
+	m.getStepCalls++
+	m.getStepMu.Unlock()
+	if m.getStepFunc != nil {
+		return m.getStepFunc(ctx, stepID)
+	}
 	if s, ok := m.steps[stepID]; ok {
 		return s, nil
 	}
 	return nil, nil
+}
+
+// GetStepCalls reports how many times GetStep has been invoked. autoStartTaskForStep
+// calls GetStep synchronously, before any launch work is handed off to a detached
+// goroutine (see autoStartTaskForLoadedStep) — so a zero count is a race-free way for
+// a test to prove autoStartTaskForStep was never entered at all, without waiting on
+// or racing against async launch/DB-teardown timing.
+func (m *mockStepGetter) GetStepCalls() int {
+	m.getStepMu.Lock()
+	defer m.getStepMu.Unlock()
+	return m.getStepCalls
 }
 
 func (m *mockStepGetter) GetNextStepByPosition(_ context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error) {
@@ -77,11 +109,36 @@ func (m *mockStepGetter) GetPreviousStepByPosition(_ context.Context, workflowID
 	return best, nil
 }
 
-func (m *mockStepGetter) GetWorkflowAgentProfileID(_ context.Context, workflowID string) (string, error) {
-	if m.workflowAgentProfileID != "" {
-		return m.workflowAgentProfileID, nil
+func (m *mockStepGetter) GetWorkflowMeta(_ context.Context, workflowID string) (WorkflowMeta, error) {
+	m.workflowMetaMu.Lock()
+	m.workflowMetaCalls++
+	callNumber := m.workflowMetaCalls
+	delay := m.workflowMetaDelay
+	m.workflowMetaMu.Unlock()
+	if delay > 0 {
+		time.Sleep(delay)
 	}
-	return "", nil
+	if m.workflowMetaErr != nil {
+		return WorkflowMeta{}, m.workflowMetaErr
+	}
+	prompt := ""
+	if m.workflowPrompts != nil {
+		prompt = m.workflowPrompts[workflowID]
+	}
+	profileID := m.workflowAgentProfileID
+	if callNumber <= len(m.workflowAgentProfiles) {
+		profileID = m.workflowAgentProfiles[callNumber-1]
+	}
+	return WorkflowMeta{
+		AgentProfileID: profileID,
+		Prompt:         prompt,
+	}, nil
+}
+
+func (m *mockStepGetter) metaCalls() int {
+	m.workflowMetaMu.Lock()
+	defer m.workflowMetaMu.Unlock()
+	return m.workflowMetaCalls
 }
 
 // mockTaskRepo implements scheduler.TaskRepository for testing.
@@ -214,6 +271,13 @@ func (m *mockTaskRepo) UpdateTaskStateIfSessionState(
 type mockAgentManager struct {
 	isPassthrough  bool
 	isAgentRunning bool
+	// getGitLogFunc, when non-nil, overrides GetGitLog. Lets tests model a
+	// commit reconcile sweep (or archive capture) observing new commits, or
+	// simulate the agent process being gone (nil, nil).
+	getGitLogFunc         func(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error)
+	getCumulativeDiffFunc func(ctx context.Context, sessionID, baseCommit string) (*client.CumulativeDiffResult, error)
+	getGitStatusFunc      func(ctx context.Context, sessionID string) (*client.GitStatusResult, error)
+	getGitStatusFreshFunc func(ctx context.Context, sessionID string) (*client.GitStatusResult, error)
 	// isAgentRunningFn, when non-nil, overrides isAgentRunning for
 	// IsAgentRunningForSession. Lets tests model state changes mid-sequence
 	// (e.g. stream disconnect between PromptAgent call and queue write).
@@ -223,15 +287,29 @@ type mockAgentManager struct {
 	// optional rowLivenessProber so reconciliation tests can drive runtime-aware
 	// liveness per row. Nil → the mock is not a prober and reconciliation treats
 	// every row as Unknown.
-	rowLivenessFn       func(*models.ExecutorRunning) models.ProcessLiveness
-	resolveProfileInfo  *executor.AgentProfileInfo
-	resolveProfileErr   error
-	restartProcessCalls []string // tracks execution IDs passed to RestartAgentProcess
-	restartProcessErr   error
-	promptErr           error
-	promptResult        *executor.PromptResult
-	promptAgentFunc     func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error)
-	launchAgentFunc     func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
+	rowLivenessFn func(*models.ExecutorRunning) models.ProcessLiveness
+	// newStandaloneLivenessScopeCalls counts NewStandaloneLivenessScope
+	// invocations, letting a test assert a reconciliation pass takes exactly
+	// one enumeration and reuses it across every row.
+	newStandaloneLivenessScopeCalls int
+	resolveProfileInfo              *executor.AgentProfileInfo
+	resolveProfileErr               error
+	restartProcessCalls             []string // tracks execution IDs passed to RestartAgentProcess
+	restartProcessErr               error
+	promptErr                       error
+	promptResult                    *executor.PromptResult
+	promptAcceptedOnError           bool
+	promptAgentFunc                 func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error)
+	launchAgentFunc                 func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
+	initialPromptDispatchCallback   func()
+	initialPromptFailureCallback    func()
+	startAgentProcessCalls          []string
+	startAgentProcessErr            error
+	startAgentProcessFunc           func(context.Context, string) error
+
+	// probeBackgroundWorkloadsFunc, when non-nil, overrides
+	// ProbeBackgroundWorkloads's default Unknown/nil response.
+	probeBackgroundWorkloadsFunc func(context.Context, string) (client.ProbeResult, error)
 
 	mu                      sync.Mutex
 	stopAgentWithReasonArgs []stopAgentCall // tracks StopAgentWithReason calls
@@ -239,12 +317,23 @@ type mockAgentManager struct {
 	stopAgentWithReasonFunc func(context.Context, string, string, bool) error
 	stopAgentArgs           []stopAgentCall // tracks StopAgent calls (no reason)
 	stopAgentErr            error           // optional error to return from StopAgent
+	stopAgentFunc           func(context.Context, string, bool) error
 
 	// Prompt tracking — capturedPrompts records prompts only (legacy, several
 	// tests assert on it directly). capturedPromptCalls records the same with
 	// the execution ID so callers can filter by the agent that received it.
-	capturedPrompts     []string
-	capturedPromptCalls []promptCall
+	capturedPrompts              []string
+	capturedPromptCalls          []promptCall
+	setExecutionDescriptionCalls []promptCall
+	// Steer tracking. capturedSteerCalls records every SteerAgentWithDispatchCallback
+	// invocation; steerErr, when set, is returned instead of dispatching. Having
+	// this method also makes the mock satisfy the executor's optional
+	// steerAgentWithDispatchCallback capability.
+	capturedSteerCalls []promptCall
+	steerErr           error
+	steerStarted       chan struct{}
+	steerRelease       chan struct{}
+	steerStartOnce     sync.Once
 	// Optional: closed once on the first PromptAgent call so tests can wait
 	// deterministically without polling. Tests opt in by initializing the channel.
 	promptDone chan struct{}
@@ -272,6 +361,11 @@ type mockAgentManager struct {
 	repoForExecutionLookup interface {
 		GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
 	}
+	// Optional current ACP session lookup used by reset-token generation tests.
+	getACPSessionIDForSessionFunc func(string) (string, bool)
+	// Optional override for ListExecutionsForTask. When unset, the default
+	// implementation returns nil (no registry-recovered sessions).
+	listExecutionsForTaskFunc func(taskID string) []lifecycle.ExecutionReference
 
 	// CancelAgent tracking. cancelAgentCalls counts every invocation. If
 	// cancelAgentBlock is non-nil, CancelAgent blocks on it before returning;
@@ -285,27 +379,46 @@ type mockAgentManager struct {
 	// supplied context has been cancelled. It lets cancellation tests verify
 	// that accepted work uses a detached context.
 	cancelAgentContextErr error
+	cancelAgentFunc       func(context.Context, string) error
+	listPermissionsFunc   func(context.Context, string) ([]streams.PendingAgentPermission, error)
+	resolvePermissionFunc func(context.Context, string, string, string, string) (*streams.PermissionResolveResponse, error)
+	cancelPermissionFunc  func(context.Context, string, string, string) (*streams.PermissionCancelResponse, error)
 	// cancelAgentErr, when set, is returned by CancelAgent instead of nil —
 	// lets tests exercise callers that must react to a genuine cancel
 	// failure (as opposed to the tolerated ErrNoExecutionForSession /
 	// ErrCancelEscalated sentinels handled inside cancelAgentSilent).
 	cancelAgentErr error
+	// cancelAgentForPromptFunc observes the identity-aware cancellation seam
+	// used by the stuck-signal watchdog. When unset, the test double keeps the
+	// legacy behavior by forwarding to CancelAgent.
+	cancelAgentForPromptFunc  func(context.Context, string, string, uint64, uint64) error
+	cancelAgentForPromptCalls atomic.Int32
 
-	currentPromptGeneration  atomic.Uint64
-	currentPromptExecutionID string
+	currentPromptGeneration     atomic.Uint64
+	currentPromptActivityEpoch  atomic.Uint64
+	currentPromptExecutionID    string
+	currentPromptLastActivityAt time.Time
+
+	// getPromptActivityForSessionFunc, when set, overrides
+	// GetPromptActivityForSession's default (report the current*
+	// fields above, or ErrNoExecutionForSession if no execution ID is
+	// set). Tests use this to control exactly what a watchdog's activity
+	// gate observes, e.g. a lastActivityAt within its inactivity window.
+	getPromptActivityForSessionFunc func(sessionID string) (string, uint64, uint64, time.Time, error)
 
 	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
 	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
 	// returned to simulate "no running agent".
-	setSessionModeCalls       []sessionModeCall
-	setSessionModeErr         error
-	mcpModeCalls              []sessionModeCall
-	setSessionModelCalls      []sessionModelCall
-	setSessionModelSupported  bool
-	setSessionModelErr        error
-	setSessionConfigCalls     []sessionConfigCall
-	setSessionConfigSupported bool
-	setSessionConfigErr       error
+	setSessionModeCalls               []sessionModeCall
+	setSessionModeErr                 error
+	mcpModeCalls                      []sessionModeCall
+	setSessionModelCalls              []sessionModelCall
+	setSessionModelSupported          bool
+	setSessionModelErr                error
+	setSessionConfigCalls             []sessionConfigCall
+	setSessionConfigSupported         bool
+	setSessionConfigErr               error
+	getPromptGenerationForSessionFunc func(context.Context, string) (uint64, error)
 }
 
 type sessionModelCall struct {
@@ -346,15 +459,39 @@ func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *executor.Launch
 	if m.launchAgentFunc != nil {
 		return m.launchAgentFunc(ctx, req)
 	}
-	return nil, nil
+	return &executor.LaunchAgentResponse{AgentExecutionID: "mock-launch-" + req.SessionID}, nil
 }
-func (m *mockAgentManager) StartAgentProcess(_ context.Context, _ string) error { return nil }
-func (m *mockAgentManager) IsAgentCommandConfigured(_ string) bool              { return true }
-func (m *mockAgentManager) StopAgent(_ context.Context, agentExecutionID string, force bool) error {
+func (m *mockAgentManager) StartAgentProcess(ctx context.Context, sessionID string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.startAgentProcessCalls = append(m.startAgentProcessCalls, sessionID)
+	hook := m.startAgentProcessFunc
+	err := m.startAgentProcessErr
+	m.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, sessionID)
+	}
+	return err
+}
+
+func (m *mockAgentManager) RegisterInitialPromptDispatchCallbacks(_ string, onDispatched, onFailure func()) error {
+	m.mu.Lock()
+	m.initialPromptDispatchCallback = onDispatched
+	m.initialPromptFailureCallback = onFailure
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *mockAgentManager) IsAgentCommandConfigured(_ string) bool { return true }
+func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
+	m.mu.Lock()
 	m.stopAgentArgs = append(m.stopAgentArgs, stopAgentCall{ExecutionID: agentExecutionID, Force: force})
-	return m.stopAgentErr
+	hook := m.stopAgentFunc
+	err := m.stopAgentErr
+	m.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, agentExecutionID, force)
+	}
+	return err
 }
 func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecutionID, reason string, force bool) error {
 	m.mu.Lock()
@@ -398,12 +535,43 @@ func (m *mockAgentManager) PromptAgent(ctx context.Context, executionID string, 
 
 func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
 	result, err := m.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
-	if err == nil && onDispatched != nil {
+	if (err == nil || m.promptAcceptedOnError) && onDispatched != nil {
 		onDispatched()
 	}
 	return result, err
 }
-func (m *mockAgentManager) CancelAgent(ctx context.Context, _ string) error {
+
+func (m *mockAgentManager) SteerAgentWithDispatchCallback(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
+	m.mu.Lock()
+	m.capturedSteerCalls = append(m.capturedSteerCalls, promptCall{ExecutionID: executionID, Prompt: prompt, DispatchOnly: dispatchOnly})
+	steerErr := m.steerErr
+	steerStarted := m.steerStarted
+	steerRelease := m.steerRelease
+	m.mu.Unlock()
+	if steerStarted != nil {
+		m.steerStartOnce.Do(func() { close(steerStarted) })
+	}
+	if steerRelease != nil {
+		<-steerRelease
+	}
+	if steerErr != nil {
+		return nil, steerErr
+	}
+	if onDispatched != nil {
+		onDispatched()
+	}
+	return &executor.PromptResult{StopReason: "dispatched"}, nil
+}
+
+func (m *mockAgentManager) getCapturedSteerCalls() []promptCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]promptCall(nil), m.capturedSteerCalls...)
+}
+
+// CancelAgent keeps its named sessionID parameter: the body below forwards it
+// to cancelAgentFunc, so the topic's `_ string` would not compile here.
+func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {
 	m.cancelAgentCalls.Add(1)
 	if m.cancelAgentEntered != nil {
 		select {
@@ -414,13 +582,52 @@ func (m *mockAgentManager) CancelAgent(ctx context.Context, _ string) error {
 	if m.cancelAgentBlock != nil {
 		<-m.cancelAgentBlock
 	}
+	if m.cancelAgentFunc != nil {
+		return m.cancelAgentFunc(ctx, sessionID)
+	}
 	if m.cancelAgentContextErr != nil && ctx.Err() != nil {
 		return m.cancelAgentContextErr
 	}
 	return m.cancelAgentErr
 }
+
+func (m *mockAgentManager) CancelAgentForPrompt(
+	ctx context.Context,
+	sessionID, executionID string,
+	generation, activityEpoch uint64,
+) error {
+	m.cancelAgentForPromptCalls.Add(1)
+	if m.cancelAgentForPromptFunc != nil {
+		return m.cancelAgentForPromptFunc(ctx, sessionID, executionID, generation, activityEpoch)
+	}
+	return m.CancelAgent(ctx, sessionID)
+}
 func (m *mockAgentManager) RespondToPermissionBySessionID(_ context.Context, _, _, _ string, _ bool) error {
 	return nil
+}
+func (m *mockAgentManager) ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error) {
+	if m.listPermissionsFunc != nil {
+		return m.listPermissionsFunc(ctx, sessionID)
+	}
+	return nil, nil
+}
+func (m *mockAgentManager) ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	if m.resolvePermissionFunc != nil {
+		return m.resolvePermissionFunc(ctx, sessionID, requestID, pendingID, optionID)
+	}
+	return nil, nil
+}
+func (m *mockAgentManager) CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	if m.cancelPermissionFunc != nil {
+		return m.cancelPermissionFunc(ctx, sessionID, requestID, pendingID)
+	}
+	return nil, nil
+}
+func (m *mockAgentManager) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	if m.probeBackgroundWorkloadsFunc != nil {
+		return m.probeBackgroundWorkloadsFunc(ctx, sessionID)
+	}
+	return client.ProbeResultUnknown, nil
 }
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	if m.isAgentRunningFn != nil {
@@ -435,8 +642,40 @@ func (m *mockAgentManager) IsAgentReadyForPrompt(ctx context.Context, sessionID 
 	return m.IsAgentRunningForSession(ctx, sessionID)
 }
 
+func (*mockAgentManager) BindResumeAttempt(context.Context, string, string) error {
+	return nil
+}
+
 func (m *mockAgentManager) OwnsPromptGeneration(_ string, executionID string, generation uint64) bool {
 	return executionID == m.currentPromptExecutionID && generation == m.currentPromptGeneration.Load()
+}
+
+func (m *mockAgentManager) OwnsPromptActivity(
+	_ string,
+	executionID string,
+	generation, activityEpoch uint64,
+) bool {
+	return m.OwnsPromptGeneration("", executionID, generation) &&
+		activityEpoch == m.currentPromptActivityEpoch.Load()
+}
+
+func (m *mockAgentManager) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
+	if m.getPromptGenerationForSessionFunc != nil {
+		return m.getPromptGenerationForSessionFunc(ctx, sessionID)
+	}
+	return m.currentPromptGeneration.Load(), nil
+}
+
+func (m *mockAgentManager) GetPromptActivityForSession(
+	_ context.Context, sessionID string,
+) (string, uint64, uint64, time.Time, error) {
+	if m.getPromptActivityForSessionFunc != nil {
+		return m.getPromptActivityForSessionFunc(sessionID)
+	}
+	if m.currentPromptExecutionID == "" {
+		return "", 0, 0, time.Time{}, fmt.Errorf("%w: %s", lifecycle.ErrNoExecutionForSession, sessionID)
+	}
+	return m.currentPromptExecutionID, m.currentPromptGeneration.Load(), m.currentPromptActivityEpoch.Load(), m.currentPromptLastActivityAt, nil
 }
 
 // RowLiveness makes the mock satisfy the orchestrator's optional
@@ -447,6 +686,21 @@ func (m *mockAgentManager) RowLiveness(row *models.ExecutorRunning) models.Proce
 		return m.rowLivenessFn(row)
 	}
 	return models.ProcessLivenessUnknown
+}
+
+// NewStandaloneLivenessScope and RowLivenessScoped make the mock satisfy the
+// orchestrator's optional standaloneLivenessScoper alongside rowLivenessProber.
+// The mock has no real enumeration to scope, so it returns a nil placeholder
+// scope and RowLivenessScoped simply delegates to the existing RowLiveness/
+// rowLivenessFn machinery -- every existing rowLivenessFn-based test keeps its
+// exact behavior without change.
+func (m *mockAgentManager) NewStandaloneLivenessScope(_ context.Context) interface{} {
+	m.newStandaloneLivenessScopeCalls++
+	return nil
+}
+
+func (m *mockAgentManager) RowLivenessScoped(row *models.ExecutorRunning, _ interface{}) models.ProcessLiveness {
+	return m.RowLiveness(row)
 }
 func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
 	if m.resolveProfileErr != nil {
@@ -469,7 +723,13 @@ func (m *mockAgentManager) RestartAgentProcess(_ context.Context, agentExecution
 func (m *mockAgentManager) ResetAgentContext(ctx context.Context, agentExecutionID string) error {
 	return m.RestartAgentProcess(ctx, agentExecutionID)
 }
-func (m *mockAgentManager) SetExecutionDescription(_ context.Context, _, _ string) error {
+func (m *mockAgentManager) SetExecutionDescription(_ context.Context, executionID, description string) error {
+	m.mu.Lock()
+	m.setExecutionDescriptionCalls = append(m.setExecutionDescriptionCalls, promptCall{
+		ExecutionID: executionID,
+		Prompt:      description,
+	})
+	m.mu.Unlock()
 	return nil
 }
 func (m *mockAgentManager) SetExecutionEnv(_ context.Context, _ string, _ map[string]string) error {
@@ -573,20 +833,48 @@ func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, session
 	}
 	return "", fmt.Errorf("no execution found")
 }
-func (m *mockAgentManager) GetGitLog(_ context.Context, _, _ string, _ int, _ string) (*client.GitLogResult, error) {
+
+func (m *mockAgentManager) ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference {
+	if m.listExecutionsForTaskFunc != nil {
+		return m.listExecutionsForTaskFunc(taskID)
+	}
+	return nil
+}
+
+func (m *mockAgentManager) GetACPSessionIDForSession(sessionID string) (string, bool) {
+	if m.getACPSessionIDForSessionFunc == nil {
+		return "", false
+	}
+	return m.getACPSessionIDForSessionFunc(sessionID)
+}
+
+func (m *mockAgentManager) GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error) {
+	if m.getGitLogFunc != nil {
+		return m.getGitLogFunc(ctx, sessionID, baseCommit, limit, targetBranch)
+	}
 	return nil, nil
 }
-func (m *mockAgentManager) GetCumulativeDiff(_ context.Context, _, _ string) (*client.CumulativeDiffResult, error) {
+
+func (m *mockAgentManager) GetCumulativeDiff(ctx context.Context, sessionID, baseCommit string) (*client.CumulativeDiffResult, error) {
+	if m.getCumulativeDiffFunc != nil {
+		return m.getCumulativeDiffFunc(ctx, sessionID, baseCommit)
+	}
 	return nil, nil
 }
-func (m *mockAgentManager) GetGitStatus(_ context.Context, _ string) (*client.GitStatusResult, error) {
+func (m *mockAgentManager) GetGitStatus(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	if m.getGitStatusFunc != nil {
+		return m.getGitStatusFunc(ctx, sessionID)
+	}
 	return &client.GitStatusResult{
 		Success:    true,
 		Branch:     "main",
 		HeadCommit: "mock-commit",
 	}, nil
 }
-func (m *mockAgentManager) GetGitStatusFresh(_ context.Context, _ string) (*client.GitStatusResult, error) {
+func (m *mockAgentManager) GetGitStatusFresh(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	if m.getGitStatusFreshFunc != nil {
+		return m.getGitStatusFreshFunc(ctx, sessionID)
+	}
 	return nil, nil
 }
 func (m *mockAgentManager) WaitForAgentctlReady(_ context.Context, _ string) error {
@@ -601,6 +889,33 @@ func testLogger() *logger.Logger {
 		Format: "console",
 	})
 	return log
+}
+
+func newAuthoritativeMemoryRepository(repo *sqliterepo.Repository) messagequeue.Repository {
+	return messagequeue.NewMemoryRepositoryWithAuthority(
+		func(ctx context.Context, taskID, sessionID string) (messagequeue.QueueSessionIdentity, error) {
+			session, err := repo.GetTaskSession(ctx, sessionID)
+			if err != nil {
+				return messagequeue.QueueSessionIdentity{}, err
+			}
+			if session.TaskID != taskID || session.QueueIncarnationID == "" {
+				return messagequeue.QueueSessionIdentity{}, messagequeue.ErrSessionIdentityMismatch
+			}
+			return messagequeue.QueueSessionIdentity{
+				TaskID:               taskID,
+				SessionID:            sessionID,
+				SessionIncarnationID: session.QueueIncarnationID,
+			}, nil
+		},
+	)
+}
+
+func newAuthoritativeMemoryQueue(repo *sqliterepo.Repository, log *logger.Logger) *messagequeue.Service {
+	return messagequeue.NewService(
+		newAuthoritativeMemoryRepository(repo),
+		messagequeue.DefaultMaxPerSession,
+		log,
+	)
 }
 
 func strPtr(s string) *string { return &s }
@@ -673,6 +988,40 @@ func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, w
 	}
 }
 
+// seedTaskWithoutSession creates a task, workspace, and workflow in the repo
+// but deliberately no task session — the F38/dispatcher case for a task with
+// zero task_sessions rows.
+func seedTaskWithoutSession(t *testing.T, repo *sqliterepo.Repository, taskID, workflowStepID string) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	ws := &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}
+	if err := repo.CreateWorkspace(ctx, ws); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}
+	if err := repo.CreateWorkflow(ctx, wf); err != nil {
+		_ = err
+	}
+
+	task := &models.Task{
+		ID:             taskID,
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: workflowStepID,
+		Title:          "Test Task",
+		Description:    "Test",
+		State:          v1.TaskStateInProgress,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+}
+
 type ownershipOverrideRepo struct {
 	sessionExecutorStore
 	tasks map[string]*models.Task
@@ -717,16 +1066,30 @@ func createTestServiceWithAgent(repo *sqliterepo.Repository, stepGetter *mockSte
 	if mock, ok := agentMgr.(*mockAgentManager); ok && mock.repoForExecutionLookup == nil {
 		mock.repoForExecutionLookup = repo
 	}
+	// The real registry, not a stub: configure_session rule matching has to
+	// resolve the agent family names people actually write in workflows
+	// ("Claude") onto the IDs sessions actually store ("claude-acp").
+	agentRegistry := registry.NewRegistry(log)
+	agentRegistry.LoadDefaults()
 	svc := &Service{
-		logger:             log,
-		repo:               repo,
-		workflowStepGetter: stepGetter,
-		taskRepo:           taskRepo,
-		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewServiceMemory(log),
+		logger:              log,
+		repo:                repo,
+		workflowStepGetter:  stepGetter,
+		taskRepo:            taskRepo,
+		agentManager:        agentMgr,
+		messageQueue:        newAuthoritativeMemoryQueue(repo, log),
+		agentFamilyResolver: agentRegistry,
 	}
 	repo.SetTaskQueuePurger(func(ctx context.Context, taskID string) {
 		_, _ = svc.messageQueue.PurgeTask(ctx, taskID)
+	})
+	repo.SetTaskQueuePurgePreparer(func(_ context.Context, taskID string) {
+		svc.cancelPassthroughDispatches(taskID)
+	})
+	// Mirror production: after task-scoped queue purge, publish queue-status
+	// so the status-summary projector can zero queued_prompt_count.
+	repo.SetTaskQueuePurgeNotifier(func(ctx context.Context, taskID string) {
+		svc.publishTaskQueueStatusEvent(ctx, taskID, "")
 	})
 	return svc
 }
@@ -1163,9 +1526,11 @@ func TestHandleAgentReadyGuards_ConcurrentInterruptRaces(t *testing.T) {
 		if _, err := svc.turnService.StartTurn(ctx, "s1"); err != nil {
 			t.Fatalf("seed original turn: %v", err)
 		}
-		svc.messageQueue.SetPendingMove(ctx, "s1", &messagequeue.PendingMove{
+		if err := svc.messageQueue.SetPendingMove(ctx, "s1", &messagequeue.PendingMove{
 			TaskID: "t1", WorkflowID: "wf1", WorkflowStepID: "step2",
-		})
+		}); err != nil {
+			t.Fatalf("seed pending move: %v", err)
+		}
 
 		turnB := raceGuardAgainstTurnReplacement(t, svc, "s1")
 
@@ -1239,9 +1604,9 @@ func TestHandleAgentReady_DelayedOldGenerationDoesNotCompleteReplacementTurn(t *
 		require.NoError(t, err)
 		require.NotEqual(t, oldTurn.ID, replacementTurn.ID)
 		if withPendingMove {
-			svc.messageQueue.SetPendingMove(ctx, "s1", &messagequeue.PendingMove{
+			require.NoError(t, svc.messageQueue.SetPendingMove(ctx, "s1", &messagequeue.PendingMove{
 				TaskID: "t1", WorkflowID: "wf1", WorkflowStepID: "missing-step",
-			})
+			}))
 		}
 
 		close(releaseOldReady)
@@ -1442,7 +1807,7 @@ func TestExecuteQueuedMessage_FiresOnTurnStart(t *testing.T) {
 		repo:         repo,
 		taskRepo:     taskRepo,
 		agentManager: agentMgr,
-		messageQueue: messagequeue.NewServiceMemory(log),
+		messageQueue: newAuthoritativeMemoryQueue(repo, log),
 	}
 	svc.SetWorkflowStepGetter(stepGetter)
 	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
@@ -1497,7 +1862,7 @@ func TestExecuteQueuedMessage_NoOnTurnStart_StepUnchanged(t *testing.T) {
 		repo:         repo,
 		taskRepo:     taskRepo,
 		agentManager: agentMgr,
-		messageQueue: messagequeue.NewServiceMemory(log),
+		messageQueue: newAuthoritativeMemoryQueue(repo, log),
 	}
 	svc.SetWorkflowStepGetter(stepGetter)
 	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
@@ -1532,12 +1897,20 @@ func createTestServiceWithScheduler(repo *sqliterepo.Repository, stepGetter *moc
 		workflowStepGetter: stepGetter,
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewServiceMemory(log),
+		messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 		executor:           exec,
 		scheduler:          sched,
 	}
 	repo.SetTaskQueuePurger(func(ctx context.Context, taskID string) {
 		_, _ = svc.messageQueue.PurgeTask(ctx, taskID)
+	})
+	repo.SetTaskQueuePurgePreparer(func(_ context.Context, taskID string) {
+		svc.cancelPassthroughDispatches(taskID)
+	})
+	// Mirror production: after task-scoped queue purge, publish queue-status
+	// so the status-summary projector can zero queued_prompt_count.
+	repo.SetTaskQueuePurgeNotifier(func(ctx context.Context, taskID string) {
+		svc.publishTaskQueueStatusEvent(ctx, taskID, "")
 	})
 	return svc
 }
@@ -2142,6 +2515,54 @@ func TestDeliverPassthroughPrompt(t *testing.T) {
 			t.Errorf("markPassthroughRunning should fire once before the write; got %d calls", len(agentMgr.markPassthroughCalls))
 		}
 	})
+
+	t.Run("refuses the prompt when config resolution fails", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		configErr := errors.New("agent definition is unavailable")
+		agentMgr := &mockAgentManager{
+			isPassthrough:        true,
+			passthroughConfigErr: configErr,
+		}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		err := svc.writePassthroughPrompt(context.Background(), "s1", strings.Repeat("long prompt ", 100))
+		if !errors.Is(err, configErr) {
+			t.Fatalf("writePassthroughPrompt error = %v, want config error", err)
+		}
+		if got := len(agentMgr.passthroughStdinCalls); got != 0 {
+			t.Fatalf("stdin calls after config failure = %d, want 0", got)
+		}
+	})
+
+	t.Run("cancellation interrupts submit delay", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		writeCtx, cancel := context.WithCancel(context.Background())
+		agentMgr := &mockAgentManager{
+			isPassthrough: true,
+			passthroughConfig: agents.PassthroughConfig{
+				Supported:             true,
+				SubmitSequence:        "\r",
+				DisableBracketedPaste: true,
+				SubmitDelay:           time.Second,
+			},
+			passthroughConfigSet: true,
+		}
+		agentMgr.passthroughStdinFunc = func(context.Context, string, string) error {
+			cancel()
+			return nil
+		}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		err := svc.writePassthroughPrompt(writeCtx, "s1", "hello")
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("writePassthroughPrompt error = %v, want context cancellation", err)
+		}
+		if got := len(agentMgr.passthroughStdinCalls); got != 1 {
+			t.Fatalf("stdin calls after cancellation = %d, want 1", got)
+		}
+	})
 }
 
 func TestHandleAgentReady_PassthroughQueuedMessage(t *testing.T) {
@@ -2326,6 +2747,107 @@ func TestClearResumeToken(t *testing.T) {
 func TestHandleRecoverableFailure(t *testing.T) {
 	ctx := context.Background()
 
+	t.Run("persists validated remediation URL in last agent error metadata", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+		const wantURL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"
+
+		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "usage limit reached",
+			ProviderError: &streams.ProviderError{
+				Source:         streams.ProviderErrorSourceOpenCodeStderr,
+				Message:        "usage limit reached",
+				RemediationURL: wantURL,
+				OccurredAt:     time.Date(2026, 8, 2, 15, 15, 44, 0, time.UTC),
+			},
+		})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		lastErr, ok := models.LoadLastAgentError(session.Metadata)
+		if !ok {
+			t.Fatalf("expected last agent error metadata, got %#v", session.Metadata)
+		}
+		if lastErr.RemediationURL != wantURL {
+			t.Fatalf("remediation URL = %q, want %q", lastErr.RemediationURL, wantURL)
+		}
+		// The plain error_message contract stays URL-free.
+		if strings.Contains(session.ErrorMessage, "https://") ||
+			strings.Contains(session.ErrorMessage, "wrk_") {
+			t.Fatalf("error_message contains private URL or identifier: %q", session.ErrorMessage)
+		}
+	})
+
+	t.Run("omits remediation URL when the diagnostic carries none", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "provider failed",
+		})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		lastErr, ok := models.LoadLastAgentError(session.Metadata)
+		if !ok {
+			t.Fatalf("expected last agent error metadata, got %#v", session.Metadata)
+		}
+		if lastErr.RemediationURL != "" {
+			t.Fatalf("remediation URL = %q, want empty", lastErr.RemediationURL)
+		}
+	})
+
+	t.Run("persists structured managed runtime failure fields safely", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "managed npm runtime failed to prepare",
+			FailureCode:      "managed_runtime_npm_resolution",
+			FailureDetails:   "npm error code ETARGET\nsecret=super-secret-value",
+		})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		lastErr, ok := models.LoadLastAgentError(session.Metadata)
+		if !ok {
+			t.Fatalf("expected last agent error metadata, got %#v", session.Metadata)
+		}
+		if lastErr.Code != "managed_runtime_npm_resolution" {
+			t.Fatalf("failure code = %q, want managed runtime code", lastErr.Code)
+		}
+		if !strings.Contains(lastErr.Details, "secret: ***") || strings.Contains(lastErr.Details, "super-secret-value") {
+			t.Fatalf("failure details were not sanitized: %q", lastErr.Details)
+		}
+	})
+
 	t.Run("sets session to WAITING_FOR_INPUT with error message", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
@@ -2435,6 +2957,46 @@ func TestIsOfficeSessionUsesCanonicalTaskOwnership(t *testing.T) {
 				t.Fatalf("isOfficeSession = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestClassifyManagedRuntimeNpmStartFailureUsesStructuredError(t *testing.T) {
+	err := fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.CodeManagedRuntimeNpmResolution,
+		Details: "npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3",
+	})
+
+	classified := classifyManagedRuntimeNpmStartFailure(err)
+	if classified == nil {
+		t.Fatal("expected structured npm startup error to classify")
+	}
+	if classified.Code != routingerr.CodeManagedRuntimeNpmResolution {
+		t.Fatalf("code = %q, want %q", classified.Code, routingerr.CodeManagedRuntimeNpmResolution)
+	}
+	if !strings.Contains(classified.RawExcerpt, "No matching version found") {
+		t.Fatalf("raw excerpt = %q, want structured details", classified.RawExcerpt)
+	}
+
+	generic := fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.CodeAgentRuntime,
+		Details: "sanitized runtime failure",
+	})
+	if classifyManagedRuntimeNpmStartFailure(generic) != nil {
+		t.Fatal("generic structured startup failure must not use the npm recovery card")
+	}
+
+	if classifyManagedRuntimeNpmStartFailure(errors.New(
+		"npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3",
+	)) != nil {
+		t.Fatal("unstructured npm text must not select the managed runtime recovery card")
+	}
+
+	policy := classifyManagedRuntimeNpmStartFailure(fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.Code("managed_runtime_npm_policy"),
+		Details: "npm error code ETARGET\nnpm error notarget No matching version found with a date before <release-date>",
+	}))
+	if policy == nil || policy.Code != routingerr.Code("managed_runtime_npm_policy") {
+		t.Fatalf("policy startup failure = %#v, want managed runtime policy classification", policy)
 	}
 }
 
@@ -2674,13 +3236,59 @@ func TestHandleAgentStopped_PreservesRecoveryState(t *testing.T) {
 		}
 	})
 
+	t.Run("closes a cancelled auto-fix turn without scheduling a retry", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.UpdateTaskSessionState(
+			ctx, "s1", models.TaskSessionStateCancelled, "operator stopped",
+		))
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.turnService = &repoTurnService{repo: repo}
+		ghSvc := &cancellationCIAutoFixGitHubService{mockGitHubService: &mockGitHubService{}}
+		svc.SetGitHubService(ghSvc)
+		if _, err := svc.turnService.StartTurn(ctx, "s1"); err != nil {
+			t.Fatalf("seed auto-fix turn: %v", err)
+		}
+
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-cancelled-auto-fix",
+		})
+
+		require.Zero(t, openTurnCount(t, repo, "s1"))
+		require.Zero(t, ghSvc.completionCalls,
+			"cancelled user stops must not rearm the auto-fix attempt")
+	})
+
+	t.Run("closes a turn for a durable stop owner without scheduling a retry", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.turnService = &repoTurnService{repo: repo}
+		ghSvc := &cancellationCIAutoFixGitHubService{mockGitHubService: &mockGitHubService{}}
+		svc.SetGitHubService(ghSvc)
+		if _, err := svc.turnService.StartTurn(ctx, "s1"); err != nil {
+			t.Fatalf("seed owned auto-fix turn: %v", err)
+		}
+		svc.RegisterExecutionStopOwner("s1", "exec-owned-stop", false)
+
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-owned-stop",
+		})
+
+		require.Zero(t, openTurnCount(t, repo, "s1"))
+		require.Zero(t, ghSvc.completionCalls)
+	})
+
 	// Office fire-and-forget regression: when the office turn-complete
 	// handler sets the session to IDLE before stopping the agent, the
 	// resulting agent.stopped event must NOT clobber IDLE → CANCELLED.
 	// Without this guard, the next office run's EnsureSessionForAgent
-	// sees a terminal session, tries to INSERT a new row, and the partial
-	// unique index on (task_id, agent_profile_id) rejects it. Comments
-	// silently fail to wake the agent.
+	// creates a fresh row instead of reusing the durable conversation. The
+	// session then loses its expected Office conversation state.
 	t.Run("does not clobber IDLE state (office fire-and-forget)", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
@@ -2741,6 +3349,56 @@ func TestHandleAgentStopped_PreservesRecoveryState(t *testing.T) {
 				models.TaskSessionStateRunning, updated.State)
 		}
 	})
+}
+
+func TestHandleAgentStopped_DefersUntilSessionGuardIsReleased(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	lock, release := svc.acquireCancelInFlightGuard("s1")
+	lock.Lock()
+	defer release()
+
+	eventDone := make(chan struct{})
+	go func() {
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+		})
+		close(eventDone)
+	}()
+
+	// The handler must return while the current lifecycle owner still holds the
+	// mutex. This is required for synchronous stop callbacks from the in-memory
+	// event bus; the deferred reconciliation waits for the owner below.
+	select {
+	case <-eventDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("agent.stopped handler blocked behind the session guard")
+	}
+
+	lockedSession, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session while guard is held: %v", err)
+	}
+	if lockedSession.State != models.TaskSessionStateRunning {
+		t.Fatalf("session state changed before guard release: %q", lockedSession.State)
+	}
+
+	lock.Unlock()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		updated, err := repo.GetTaskSession(ctx, "s1")
+		if err == nil && updated.State == models.TaskSessionStateCancelled {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("deferred agent.stopped reconciliation did not run after guard release")
 }
 
 // waitForStopCall polls until the mock agent manager has received at least one

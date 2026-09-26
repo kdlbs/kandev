@@ -1,21 +1,44 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { useAppStore } from "@/components/state-provider";
+import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
 import { searchTasks, updateTask } from "@/lib/api/domains/office-extended-api";
 import { detachTask, fetchTask } from "@/lib/api/domains/kanban-api";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
-import { TaskDetachConfirmDialog } from "@/components/task/task-detach-confirm-dialog";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import type { Task } from "@/app/office/tasks/[id]/types";
 import { workspaceModeFromMetadata, type WorkspaceMode } from "@/lib/kanban/map-task";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type ParentPickerProps = {
   task: Task;
 };
 
 const NO_PARENT = "__none__";
+const DETACH_CONFIRMATION_DELAY_MS = 300;
+
+function useDeferredDetachConfirmation() {
+  const [open, setOpen] = useState(false);
+  const timerRef = useRef<number | null>(null);
+  const cancelPending = useCallback(() => {
+    if (timerRef.current === null) return;
+    window.clearTimeout(timerRef.current);
+    timerRef.current = null;
+  }, []);
+  const request = useCallback(() => {
+    cancelPending();
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null;
+      setOpen(true);
+    }, DETACH_CONFIRMATION_DELAY_MS);
+  }, [cancelPending]);
+
+  useEffect(() => cancelPending, [cancelPending]);
+  return { open, setOpen, cancelPending, request };
+}
 
 function useTaskWorkspaceMode(task: Task) {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | undefined>(task.workspaceMode);
@@ -45,9 +68,9 @@ function useTaskWorkspaceMode(task: Task) {
 function buildOptions(candidates: OfficeTask[], currentTaskId: string): ComboboxOption[] {
   const noOpt: ComboboxOption = {
     value: NO_PARENT,
-    label: "No parent",
+    label: t("task:noParent"),
     keywords: ["none"],
-    renderLabel: () => <span className="text-muted-foreground">No parent</span>,
+    renderLabel: () => <span className="text-muted-foreground">{t("task:noParent")}</span>,
   };
   const taskOpts = candidates
     .filter((t) => t.id !== currentTaskId)
@@ -66,11 +89,13 @@ function buildOptions(candidates: OfficeTask[], currentTaskId: string): Combobox
 }
 
 export function ParentPicker({ task }: ParentPickerProps) {
+  const { t, i18n } = useTranslation();
   const storeTasks = useAppStore((s) => s.office.tasks.items);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const [fetched, setFetched] = useState<OfficeTask[]>([]);
-  const [detachRequested, setDetachRequested] = useState(false);
   const [isDetaching, setIsDetaching] = useState(false);
+  const detachAnchorRef = useRef<HTMLButtonElement>(null);
+  const detachConfirmation = useDeferredDetachConfirmation();
   const workspaceMode = useTaskWorkspaceMode(task);
   const mutate = useOptimisticTaskMutation();
 
@@ -92,15 +117,24 @@ export function ParentPicker({ task }: ParentPickerProps) {
 
   const candidates = storeTasks.length > 0 ? storeTasks : fetched;
 
-  const options = useMemo(() => buildOptions(candidates, task.id), [candidates, task.id]);
+  // `buildOptions` resolves its "No parent" label through the module-level `t`.
+  // Keeping the language in the deps is what makes that label follow a runtime
+  // locale switch; without it the memo only recomputes when the data changes.
+  const options = useMemo(
+    () => buildOptions(candidates, task.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- i18n.language is the locale trigger
+    [candidates, task.id, i18n.language],
+  );
 
   const currentValue = task.parentId || NO_PARENT;
 
   const handleSelect = async (next: string) => {
+    detachConfirmation.cancelPending();
     const sendValue = next === NO_PARENT || next === "" ? "" : next;
     if (sendValue === (task.parentId ?? "")) return;
     if (!sendValue) {
-      setDetachRequested(true);
+      // Let the combobox finish closing before the local confirmation opens.
+      detachConfirmation.request();
       return;
     }
     const matched = candidates.find((t) => t.id === sendValue);
@@ -132,7 +166,7 @@ export function ParentPicker({ task }: ParentPickerProps) {
         },
         () => detachTask(task.id),
       );
-      setDetachRequested(false);
+      detachConfirmation.setOpen(false);
     } catch {
       // useOptimisticTaskMutation restores state and reports the request error.
     } finally {
@@ -146,20 +180,22 @@ export function ParentPicker({ task }: ParentPickerProps) {
         options={options}
         value={currentValue}
         onValueChange={handleSelect}
-        placeholder="No parent"
-        searchPlaceholder="Search tasks..."
-        emptyMessage="No tasks found."
+        placeholder={t("task:noParent")}
+        searchPlaceholder={t("task:searchTasks")}
+        emptyMessage={t("task:noTasksFound")}
         disabled={isDetaching}
         triggerClassName="h-7 w-full justify-end px-2"
         popoverAlign="end"
+        triggerRef={detachAnchorRef}
         testId="parent-picker-trigger"
       />
-      <TaskDetachConfirmDialog
-        open={detachRequested}
-        onOpenChange={setDetachRequested}
+      <TaskDetachConfirmationSurface
+        taskId={task.id}
+        open={detachConfirmation.open}
+        anchorRef={detachAnchorRef}
         taskTitle={task.title}
         sharesParentWorkspace={workspaceMode === "inherit_parent"}
-        isDetaching={isDetaching}
+        onOpenChange={detachConfirmation.setOpen}
         onConfirm={handleDetachConfirm}
       />
     </>

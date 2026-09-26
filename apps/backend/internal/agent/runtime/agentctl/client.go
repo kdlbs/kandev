@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sync"
@@ -14,7 +15,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -55,8 +58,53 @@ type Client struct {
 	streamWriteMu sync.Mutex
 
 	// Pending request/response tracking for agent stream
-	pendingRequests map[string]chan *ws.Message
-	pendingMu       sync.Mutex
+	pendingRequests     map[string]chan *ws.Message
+	pendingRequestConns map[string]*websocket.Conn
+	pendingMu           sync.Mutex
+
+	// lastSessionModelState is populated by session/new, session/reset, and
+	// session/load responses and by asynchronous session_models events. Lifecycle
+	// policy evaluation can use it before the event reaches its handler.
+	lastSessionModelState *streams.SessionModelState
+}
+
+func (c *Client) setLastSessionModelState(state *streams.SessionModelState) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastSessionModelState = cloneSessionModelState(state)
+}
+
+// GetLastSessionModelState returns the latest session model catalog observed
+// in a session response or asynchronous session_models event.
+func (c *Client) GetLastSessionModelState() *streams.SessionModelState {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return cloneSessionModelState(c.lastSessionModelState)
+}
+
+func cloneSessionModelState(state *streams.SessionModelState) *streams.SessionModelState {
+	if state == nil {
+		return nil
+	}
+	cloned := &streams.SessionModelState{
+		CurrentModelID:       state.CurrentModelID,
+		Models:               append([]streams.SessionModelInfo(nil), state.Models...),
+		ConfigOptions:        append([]streams.ConfigOption(nil), state.ConfigOptions...),
+		ConfigOptionsSettled: state.ConfigOptionsSettled,
+	}
+	for i, model := range cloned.Models {
+		if model.Meta == nil {
+			continue
+		}
+		cloned.Models[i].Meta = make(map[string]any, len(model.Meta))
+		for key, value := range model.Meta {
+			cloned.Models[i].Meta[key] = value
+		}
+	}
+	for i, option := range cloned.ConfigOptions {
+		cloned.ConfigOptions[i].Options = append([]streams.ConfigOptionValue(nil), option.Options...)
+	}
+	return cloned
 }
 
 // ClientOption configures optional Client settings.
@@ -126,8 +174,9 @@ func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) 
 		longRunningHTTPClient: &http.Client{
 			Timeout: 5 * time.Minute,
 		},
-		logger:          log.WithFields(zap.String("component", "agentctl-client")),
-		pendingRequests: make(map[string]chan *ws.Message),
+		logger:              log.WithFields(zap.String("component", "agentctl-client")),
+		pendingRequests:     make(map[string]chan *ws.Message),
+		pendingRequestConns: make(map[string]*websocket.Conn),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -259,6 +308,18 @@ func (c *Client) GetStatus(ctx context.Context) (*StatusResponse, error) {
 // ConfigureAgent configures the agent command and optional approval policy. Must be called before Start().
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
 func (c *Client) ConfigureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string) error {
+	return c.configureAgent(ctx, command, agentArgs, env, approvalPolicy, continueCommand, continueArgs, false)
+}
+
+// ConfigureAgentWithEnvironment configures the agent with a complete effective
+// environment. The agentctl instance replaces its indexed Git configuration
+// block while preserving ordinary instance variables. Use this when the
+// caller has already composed inherited and generated environment sources.
+func (c *Client) ConfigureAgentWithEnvironment(ctx context.Context, command string, agentArgs []string, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string) error {
+	return c.configureAgent(ctx, command, agentArgs, env, approvalPolicy, continueCommand, continueArgs, true)
+}
+
+func (c *Client) configureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, replaceEnv bool) error {
 	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/agent/configure", c.executionID)
 	defer span.End()
 
@@ -268,11 +329,13 @@ func (c *Client) ConfigureAgent(ctx context.Context, command string, agentArgs [
 		ContinueCommand string            `json:"continue_command,omitempty"`
 		ContinueArgs    *[]string         `json:"continue_args,omitempty"`
 		Env             map[string]string `json:"env,omitempty"`
+		ReplaceEnv      bool              `json:"replace_env,omitempty"`
 		ApprovalPolicy  string            `json:"approval_policy,omitempty"`
 	}{
 		Command:         command,
 		ContinueCommand: continueCommand,
 		Env:             env,
+		ReplaceEnv:      replaceEnv,
 		ApprovalPolicy:  approvalPolicy,
 	}
 	if agentArgs != nil {
@@ -369,6 +432,109 @@ func (c *Client) SetMcpMode(ctx context.Context, mode string) error {
 
 	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
 	return nil
+}
+
+// SetMcpProviders replaces the provider capabilities advertised by task-mode
+// MCP tools on the agentctl instance.
+func (c *Client) SetMcpProviders(ctx context.Context, providers []string) error {
+	ctx, span := tracing.TraceHTTPRequest(ctx, "PUT", "/api/v1/mcp/providers", c.executionID)
+	defer span.End()
+
+	body, err := json.Marshal(struct {
+		Providers []string `json:"mcp_providers"`
+	}{Providers: providers})
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL+"/api/v1/mcp/providers", bytes.NewReader(body))
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := readResponseBody(resp)
+		httpErr := fmt.Errorf("set MCP providers failed with status %d: %s", resp.StatusCode, string(respBody))
+		tracing.TraceHTTPResponse(span, resp.StatusCode, httpErr)
+		return httpErr
+	}
+
+	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
+	return nil
+}
+
+// SetPluginTools replaces the plugin-contributed MCP catalog on agentctl.
+func (c *Client) SetPluginTools(ctx context.Context, snapshot plugintools.Snapshot) error {
+	ctx, span := tracing.TraceHTTPRequest(ctx, "PUT", "/api/v1/mcp/plugin-tools", c.executionID)
+	defer span.End()
+	body, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL+"/api/v1/mcp/plugin-tools", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := readResponseBody(resp)
+		return fmt.Errorf("set plugin tools failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// StreamCanvasSource requests the assigned canvas source root from agentctl.
+// The response is a bounded tar stream and must be closed by the caller. The
+// route is deliberately kept in the agentctl client so every executor type
+// uses the same authenticated transfer contract.
+func (c *Client) StreamCanvasSource(ctx context.Context, root string) (io.ReadCloser, error) {
+	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", types.CanvasSourceTransferPath, c.executionID)
+	defer span.End()
+
+	body, err := json.Marshal(types.CanvasSourceTransferRequest{Root: root})
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+types.CanvasSourceTransferPath, bytes.NewReader(body))
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			tracing.TraceHTTPResponse(span, resp.StatusCode, readErr)
+			return nil, fmt.Errorf("canvas source request failed with status %d: %w", resp.StatusCode, readErr)
+		}
+		httpErr := fmt.Errorf("canvas source request failed with status %d: %s", resp.StatusCode, string(responseBody))
+		tracing.TraceHTTPResponse(span, resp.StatusCode, httpErr)
+		return nil, httpErr
+	}
+	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
+	return resp.Body, nil
 }
 
 // Start starts the agent process and returns the full command that was executed.

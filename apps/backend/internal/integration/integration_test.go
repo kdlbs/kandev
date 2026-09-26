@@ -38,13 +38,24 @@ import (
 
 // TestServer holds the test server and its dependencies
 type TestServer struct {
-	Server     *httptest.Server
-	Gateway    *gateways.Gateway
-	TaskRepo   *sqliterepo.Repository
-	TaskSvc    *taskservice.Service
-	EventBus   bus.EventBus
-	Logger     *logger.Logger
-	cancelFunc context.CancelFunc
+	Server             *httptest.Server
+	Gateway            *gateways.Gateway
+	TaskRepo           *sqliterepo.Repository
+	TaskSvc            *taskservice.Service
+	EventBus           bus.EventBus
+	Logger             *logger.Logger
+	mcpCallerTaskID    string
+	mcpCallerSessionID string
+	cancelFunc         context.CancelFunc
+}
+
+// testWorkspacePolicyAttacher keeps this integration harness focused on the
+// task/MCP contract while satisfying the service's required attachment
+// boundary. Production wiring installs HandoffService here.
+type testWorkspacePolicyAttacher struct{}
+
+func (testWorkspacePolicyAttacher) AttachWorkspacePolicy(context.Context, string, string, taskservice.WorkspacePolicy) error {
+	return nil
 }
 
 // NewTestServer creates a new test server with all components initialized
@@ -100,6 +111,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	taskSvc.SetWorkflowStepCreator(workflowSvc)
 	taskSvc.SetWorkflowStepGetter(workflowSvc)
 	taskSvc.SetWorkspaceBootstrapper(taskRepo)
+	taskSvc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 
 	// Create WebSocket gateway
 	gateway := gateways.NewGateway(log)

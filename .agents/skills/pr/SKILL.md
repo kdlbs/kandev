@@ -31,6 +31,11 @@ checks, and push. Ready PR monitoring and remediation continue through
 - `--draft` — create the PR as draft and skip the fixup step. Use when the work is not ready for review.
 - Default (no flag) — create as ready-for-review and continue with `/pr-fixup` in the same conversation.
 
+**Publishing-state precedence:** explicit user state (`--draft` or an explicit
+ready-for-review request) wins. If the `github:yeet` plugin is explicitly
+selected, follow its draft default only when the user did not request either
+state; otherwise `/pr` defaults to ready-for-review. Always report the result.
+
 ## Steps
 
 Track these steps with an internal todo/checklist and mark them complete as you go.
@@ -61,7 +66,25 @@ explicitly requests task tracking.
    and stop before PR publication. For non-UI changes, record that screenshots
    are not required and continue.
 
-5. **Create the PR.** Use `--draft` flag if the user requested draft mode, otherwise create as ready-for-review.
+5. **Create the PR.** Before creating, check open PRs for the current branch and
+   inspect task-linked PR metadata. Reuse an existing PR; create a duplicate only
+   when the user explicitly requests separate PRs. Use `--draft` if requested,
+   otherwise create as ready-for-review.
+
+   **Architecture and scope gate:** Before running any PR creation command, verify
+   the authenticated actor's repository permission. Do not treat a user statement
+   as proof of maintainer status. On GitHub, query
+   `gh api repos/{owner}/{repo}/collaborators/{login}/permission`; `push`,
+   `maintain`, and `admin` permissions are write-authorized, so those actors may
+   open large or architectural PRs directly. On other hosts, use the equivalent
+   repository permission check. When the host confirms write access, the
+   permission itself satisfies this gate and no linked issue is required solely
+   for this purpose. If permission cannot be verified, or the actor has no write
+   access, require a linked issue with maintainer discussion before opening a
+   large or architectural PR. If that issue or discussion is missing, stop and
+   report the blocker. Do not create an issue or open a PR solely to start the
+   discussion. Prefer one logical change and the smallest practical diff; split
+   unrelated cleanup, refactoring, and feature work into separate PRs.
 
    **PR title** must follow Conventional Commits format (see `/commit` for full rules). CI validates via `pr-title.yml` — the PR title becomes the squash-merge commit used for release notes.
 
@@ -84,22 +107,43 @@ explicitly requests task tracking.
 
    Do not fall back to hand-composed `--body` prose. If creation fails, surface the exact stderr, fix the template/body-file problem, and retry with `--body-file`.
 
+   If `gh pr create` fails after the branch is pushed with a credential-lease
+   or repository-scope error, use the REST fallback with the same template body.
+   Build the payload with `jq --rawfile` and submit it with
+   `gh api --method POST repos/<owner>/<repo>/pulls --input <payload-file>`;
+   preserve the validated title, head, base, and body, and never hand-escape
+   Markdown or JSON.
+
 6. **If ready (not draft):** For GitHub, do not begin `/pr-fixup` until any
 required screenshot embedding in step 7 is complete.
 
 7. **Screenshots — publish already captured assets.** If the diff touches user-visible UI (typically under `apps/web/`, excluding e2e-only or backend-only edits), publish the affected-viewport assets captured and validated in step 4 through the host-specific flow before treating the PR as complete — do not wait to be asked. Preserve any structural-absence rationale recorded in step 4.
 
    **Capture prerequisite:**
-   - If `npx --no-install playwright-cli list` has no local browser, use the
+   - If `pnpm --dir apps exec playwright-cli list` has no local browser, use the
      managed `apps/web` E2E runner with a disposable capture spec instead of
      treating capture as blocked. Name mobile specs `mobile-*.spec.ts`, write
      assets to ignored `apps/web/.pr-assets`, inspect/compress them, then remove
      the temporary spec and confirm `git status` is clean.
+   - After opening a popover or dialog, assert that the intended surface is
+     visible and await finite active CSS animations (`element.getAnimations().finished`)
+     before capture; do not publish a mid-transition asset.
+   - For disposable capture specs, prefer the existing `prCapture` fixture from
+     `apps/web/e2e/fixtures/test-base.ts`; it writes the expected filenames and
+     manifest for PR assets.
+   - `apps/web/e2e/scripts/run-e2e.sh` clears `.pr-assets` at the start of each
+     managed-runner invocation. Capture desktop and mobile assets in one
+     invocation when possible; if separate runs are necessary, preserve/merge
+     the prior assets and revalidate the complete manifest afterward.
    - Reuse only fresh entries from `apps/web/.pr-assets/manifest.json`. After
      every capture, require a non-empty manifest with the intended fresh asset
      entries: `test -s apps/web/.pr-assets/manifest.json`. If it is absent or
      lacks the capture, do not treat the run as successful; rerun with `--host`
      and report the managed-runner gap.
+   - Before inspecting, compressing, or publishing the assets, verify that every
+     manifest entry maps to an existing file under `apps/web/.pr-assets`. If any
+     entry is missing, treat the capture as incomplete and restore or recapture
+     the asset; revalidate the complete mapping immediately before publication.
    - If required assets are missing, run the Playwright capture before
      publication; do not create the PR first.
    - For a mobile capture through `pnpm e2e:run`, select the runner project
@@ -148,21 +192,22 @@ required screenshot embedding in step 7 is complete.
    ```bash
    set -euo pipefail
    PAYLOAD="/tmp/pr-body-<PR_NUMBER>-payload.json"
-   if command -v rtk >/dev/null 2>&1; then
-     rtk proxy jq -n --rawfile body "<body-file>" '{body: $body}' > "$PAYLOAD"
-     rtk proxy jq empty "$PAYLOAD"
-   else
-     jq -n --rawfile body "<body-file>" '{body: $body}' > "$PAYLOAD"
-     jq empty "$PAYLOAD"
-   fi
-   gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input "$PAYLOAD"
+   jq -n --rawfile body "<body-file>" '{body: $body}' > "$PAYLOAD"
+   jq empty "$PAYLOAD"
+   gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input "$PAYLOAD" --silent
    ```
-   **RTK and JSON payloads:** RTK is optional. If it is installed, it
-   summarizes normal stdout, so it must not sit between a JSON producer and a
-   redirected file or another parser. The conditional recipe above keeps the
-   REST fallback byte-preserving whether or not RTK is installed.
-   The same rule applies to command substitutions, `xargs`, and any other
-   consumer that expects unmodified Git or JSON output.
+   For a write-only PATCH, `--silent` prevents `gh` from decoding a response
+   body that the caller does not consume. Redirecting stdout to `/dev/null`
+   does not prevent a truncated or empty JSON response from making `gh` report
+   an error after the mutation succeeds. Read the resource back with a
+   separate GET and verify the intended change.
+   **JSON payloads:** Use `jq` (or an equivalent JSON tool) to build and
+   validate payloads without interpolating untrusted Markdown into shell
+   syntax. When command output is redirected, piped, or consumed by `jq` or
+   another parser, run the command through `rtk proxy` so stdout is
+   byte-preserving; normal RTK filtering can truncate or annotate machine-readable
+   output. Keep the REST fallback byte-preserving for command substitutions,
+   `xargs`, and any other consumer that expects unmodified Git or JSON output.
 
    **Preserve the existing PR description:** The PR body is a shared, mutable
    document. Preview automation and other bots may add sections after the PR
@@ -182,9 +227,11 @@ required screenshot embedding in step 7 is complete.
       before PATCH and compare the two live snapshots (not the candidate with a
       snapshot). Use PR-scoped temporary filenames, fail immediately on a
       differing `cmp`, and discard any payload on failure; never reuse a prior
-      `/tmp` payload. Verify the payload contains this PR's current body and
-      required sentinels before PATCH. If it changed, re-fetch and merge again;
-      do not overwrite the newer body.
+      `/tmp` payload. Extract JSON bodies byte-for-byte with `jq -j .body` before
+      `cmp`; `jq -r .body` appends a newline and can report a false mismatch.
+      Verify the payload contains this PR's current body and required sentinels
+      before PATCH. If it changed, re-fetch and merge again; do not overwrite
+      the newer body.
    4. After PATCH, read the body back and verify both the intended change and
       all previously present sentinel sections are still present.
 

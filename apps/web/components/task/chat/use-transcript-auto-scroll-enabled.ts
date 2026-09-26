@@ -6,11 +6,10 @@ import { isTranscriptAutoScrollEnabled } from "@/lib/state/slices/ui/transcript-
 
 /**
  * Reactive read of the per-session auto-scroll preference. Shared by the
- * toggle button and both message list renderers so all three consistently
- * default new sessions to enabled. Non-reactive reads/writes (from scroll
- * listeners, imperative Virtuoso callbacks) go straight through
- * `useAppStore.getState()` instead — see message-list-native.tsx /
- * message-list-virtuoso.tsx.
+ * toggle button and the message list so both consistently default new
+ * sessions to enabled. Non-reactive reads/writes from scroll listeners go
+ * straight through `useAppStore.getState()` instead — see
+ * message-list-native.tsx.
  *
  * Falls back to the sessionStorage-persisted preference (see
  * setTranscriptAutoScrollEnabled) when the in-memory store hasn't seen this

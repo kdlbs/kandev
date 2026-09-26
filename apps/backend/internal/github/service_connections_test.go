@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeConnectionSecrets struct {
@@ -454,4 +455,50 @@ func TestWorkspaceConnectionStaleUsesConflictResponse(t *testing.T) {
 	if status != http.StatusConflict || code != "github_connection_changed" {
 		t.Fatalf("stale response = %d, %q", status, code)
 	}
+}
+
+func TestCopyWorkspaceConnectionToWorkspace(t *testing.T) {
+	t.Run("copies PAT connection and secret", func(t *testing.T) {
+		service, secrets := newWorkspaceConnectionService(t, "alice")
+		ctx := context.Background()
+		if _, err := service.store.db.Exec(`INSERT INTO workspaces (id) VALUES ('ws-dst')`); err != nil {
+			t.Fatalf("seed destination workspace: %v", err)
+		}
+		if _, err := service.SetWorkspaceConnection(ctx, "ws-1", SetWorkspaceConnectionRequest{
+			Source: ConnectionSourcePAT,
+			Login:  "alice",
+			Token:  "ghp_source_token",
+		}); err != nil {
+			t.Fatalf("seed source connection: %v", err)
+		}
+
+		require.NoError(t, service.CopyWorkspaceConnectionToWorkspace(ctx, "ws-1", "ws-dst"))
+
+		got, err := service.store.GetWorkspaceConnection(ctx, "ws-dst")
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, ConnectionSourcePAT, got.Source)
+		require.Equal(t, "alice", got.Login)
+		require.Equal(t, ConnectionStatusActive, got.Status)
+		token, err := secrets.Reveal(ctx, WorkspacePATSecretKey("ws-dst"))
+		require.NoError(t, err)
+		require.Equal(t, "ghp_source_token", token)
+	})
+
+	t.Run("no-op without a source connection", func(t *testing.T) {
+		service, _ := newWorkspaceConnectionService(t, "alice")
+		ctx := context.Background()
+		if _, err := service.store.db.Exec(`INSERT INTO workspaces (id) VALUES ('ws-dst')`); err != nil {
+			t.Fatalf("seed destination workspace: %v", err)
+		}
+		require.NoError(t, service.CopyWorkspaceConnectionToWorkspace(ctx, "ws-1", "ws-dst"))
+		got, err := service.store.GetWorkspaceConnection(ctx, "ws-dst")
+		require.NoError(t, err)
+		require.Nil(t, got)
+	})
+
+	t.Run("no-op for identical workspaces", func(t *testing.T) {
+		service, _ := newWorkspaceConnectionService(t, "alice")
+		require.NoError(t, service.CopyWorkspaceConnectionToWorkspace(context.Background(), "ws-1", "ws-1"))
+	})
 }

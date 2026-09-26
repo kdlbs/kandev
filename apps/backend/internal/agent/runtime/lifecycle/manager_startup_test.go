@@ -2,11 +2,19 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // mockAgentProfileResolver returns a profile pointing to the mock-agent.
@@ -100,6 +108,376 @@ func TestStartAgentProcess_NonPassthrough_NoAgentctl(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no agentctl client") {
 		t.Errorf("expected 'no agentctl client' error, got: %v", err)
+	}
+}
+
+func TestStartAgentProcess_RunsContributionPreflightBeforeAgentStart(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/git/push-preflight":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"error":   "source branch is read-only",
+			})
+		default:
+			t.Errorf("unexpected agentctl request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	host, portText, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatalf("parse agentctl test URL: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse agentctl test port: %v", err)
+	}
+
+	mgr := newTestManager(t)
+	binding := models.RemoteContribution{
+		Version:      models.RemoteContributionVersion,
+		Provider:     models.RemoteContributionProviderGitHub,
+		Kind:         models.RemoteContributionKindPullRequest,
+		CanonicalURL: "https://github.com/acme/widget/pull/7",
+		Number:       7,
+		State:        models.RemoteContributionStateOpen,
+		BaseBranch:   "main",
+		HeadBranch:   "feature/remote",
+		HeadSHA:      strings.Repeat("a", 40),
+		SourceRepository: models.RemoteContributionRepository{
+			Host: "github.com", Path: "contributor/widget", RemoteURL: "https://github.com/contributor/widget.git",
+		},
+		CollaborationAllowed: true,
+	}
+	execution := &AgentExecution{
+		ID:             "exec-preflight",
+		SessionID:      "session-preflight",
+		AgentCommand:   "agent",
+		AgentProfileID: "profile-preflight",
+		metadata: map[string]interface{}{
+			MetadataKeyRemoteContributions: map[string]models.RemoteContribution{"": binding},
+		},
+		agentctl: agentctl.NewClient(host, port, newTestLogger()),
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+
+	err = mgr.StartAgentProcess(context.Background(), execution.ID)
+	if err == nil || !strings.Contains(err.Error(), "source branch is read-only") {
+		t.Fatalf("StartAgentProcess() error = %v, want preflight failure", err)
+	}
+	if len(paths) != 2 || paths[0] != "/health" || paths[1] != "/api/v1/git/push-preflight" {
+		t.Fatalf("agentctl request order = %v, want health then push-preflight only", paths)
+	}
+}
+
+func TestStartAgentProcessBoundsContributionPreflight(t *testing.T) {
+	if got := (&Manager{}).contributionPreflightTimeout(); got != 2*time.Minute {
+		t.Fatalf("default contribution preflight timeout = %s, want 2m", got)
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/git/push-preflight":
+			close(started)
+			<-release
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	host, portText, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatalf("parse agentctl test URL: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse agentctl test port: %v", err)
+	}
+
+	mgr := newTestManager(t)
+	mgr.remoteContributionPreflightTimeout = 10 * time.Millisecond
+	binding := models.RemoteContribution{
+		Version:      models.RemoteContributionVersion,
+		Provider:     models.RemoteContributionProviderGitHub,
+		Kind:         models.RemoteContributionKindPullRequest,
+		CanonicalURL: "https://github.com/acme/widget/pull/7",
+		Number:       7,
+		State:        models.RemoteContributionStateOpen,
+		BaseBranch:   "main",
+		HeadBranch:   "feature/remote",
+		HeadSHA:      strings.Repeat("a", 40),
+		SourceRepository: models.RemoteContributionRepository{
+			Host: "github.com", Path: "contributor/widget", RemoteURL: "https://github.com/contributor/widget.git",
+		},
+		CollaborationAllowed: true,
+	}
+	execution := &AgentExecution{
+		ID: "exec-preflight-timeout", SessionID: "session-preflight-timeout",
+		AgentCommand: "agent", AgentProfileID: "profile-preflight-timeout",
+		metadata: map[string]interface{}{
+			MetadataKeyRemoteContributions: map[string]models.RemoteContribution{"": binding},
+		},
+		agentctl: agentctl.NewClient(host, port, newTestLogger()),
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- mgr.StartAgentProcess(context.Background(), execution.ID) }()
+	<-started
+	startedAt := time.Now()
+	select {
+	case err := <-errCh:
+		close(release)
+		if err == nil {
+			t.Fatal("StartAgentProcess() succeeded after preflight timeout")
+		}
+		if elapsed := time.Since(startedAt); elapsed > 500*time.Millisecond {
+			t.Fatalf("StartAgentProcess() returned after %s; want bounded preflight", elapsed)
+		}
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("StartAgentProcess() did not return after preflight timeout")
+	}
+}
+
+func newContributionPreflightExecution(
+	t *testing.T,
+	serverURL, id, sessionID, agentCommand string,
+	contributions map[string]models.RemoteContribution,
+) *AgentExecution {
+	t.Helper()
+	host, portText, err := net.SplitHostPort(strings.TrimPrefix(serverURL, "http://"))
+	if err != nil {
+		t.Fatalf("parse agentctl test URL: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse agentctl test port: %v", err)
+	}
+	return &AgentExecution{
+		ID: id, SessionID: sessionID, AgentCommand: agentCommand,
+		metadata: map[string]interface{}{MetadataKeyRemoteContributions: contributions},
+		agentctl: agentctl.NewClient(host, port, newTestLogger()),
+	}
+}
+
+func TestPreflightRemoteContributionPushesBoundsDirectCaller(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/git/push-preflight":
+			close(started)
+			<-release
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	mgr := newTestManager(t)
+	mgr.remoteContributionPreflightTimeout = 10 * time.Millisecond
+	execution := newContributionPreflightExecution(t, server.URL, "exec-direct-preflight-timeout", "", "",
+		map[string]models.RemoteContribution{"": contributionPreflightTestBinding()})
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- mgr.preflightRemoteContributionPushes(context.Background(), execution) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("direct contribution preflight did not start")
+	}
+	select {
+	case err := <-errCh:
+		close(release)
+		if err == nil {
+			t.Fatal("preflight unexpectedly succeeded after its direct budget expired")
+		}
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("direct preflight caller was not bounded")
+	}
+}
+
+func TestPreflightRemoteContributionPushesUsesOneBudgetForAllRepositories(t *testing.T) {
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan struct{})
+	firstRelease := make(chan struct{})
+	firstReleased := false
+	releaseFirst := func() {
+		if !firstReleased {
+			firstReleased = true
+			close(firstRelease)
+		}
+	}
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/git/push-preflight" {
+			http.NotFound(w, r)
+			return
+		}
+		requestCount++
+		switch requestCount {
+		case 1:
+			close(firstStarted)
+			<-firstRelease
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+		case 2:
+			close(secondStarted)
+			timer := time.NewTimer(650 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+			case <-r.Context().Done():
+			}
+		}
+	}))
+	t.Cleanup(func() {
+		releaseFirst()
+		server.Close()
+	})
+
+	mgr := newTestManager(t)
+	mgr.remoteContributionPreflightTimeout = time.Second
+	execution := newContributionPreflightExecution(t, server.URL, "exec-multi-preflight-timeout", "", "",
+		map[string]models.RemoteContribution{
+			"a": contributionPreflightTestBinding(),
+			"b": contributionPreflightTestBinding(),
+		})
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- mgr.preflightRemoteContributionPushes(context.Background(), execution) }()
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first contribution preflight did not start")
+	}
+	timer := time.NewTimer(650 * time.Millisecond)
+	<-timer.C
+	timer.Stop()
+	releaseFirst()
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("second contribution preflight did not start")
+	}
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("preflight succeeded after the shared budget expired")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("preflight did not finish at the shared budget")
+	}
+	if requestCount != 2 {
+		t.Fatalf("preflight request count = %d, want both repositories checked", requestCount)
+	}
+}
+
+func TestPreflightRemoteContributionPushesRejectsWhenAnyRepositoryFails(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/git/push-preflight" {
+			http.NotFound(w, r)
+			return
+		}
+		requestCount++
+		if requestCount == 1 {
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "source branch is read-only"})
+	}))
+	t.Cleanup(server.Close)
+
+	mgr := newTestManager(t)
+	execution := newContributionPreflightExecution(t, server.URL, "exec-multi-preflight-rejected", "", "",
+		map[string]models.RemoteContribution{
+			"a": contributionPreflightTestBinding(),
+			"b": contributionPreflightTestBinding(),
+		})
+
+	err := mgr.preflightRemoteContributionPushes(context.Background(), execution)
+	if err == nil || !strings.Contains(err.Error(), "source branch is read-only") {
+		t.Fatalf("preflight error = %v, want the failing repository rejection", err)
+	}
+	if requestCount != 2 {
+		t.Fatalf("preflight request count = %d, want both repositories checked", requestCount)
+	}
+}
+
+func TestStartAgentProcessPreservesCallerCancellationDuringContributionPreflight(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	requests := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.URL.Path
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/git/push-preflight":
+			close(started)
+			<-release
+		default:
+			t.Errorf("unexpected agentctl request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(func() {
+		close(release)
+		server.Close()
+	})
+
+	mgr := newTestManager(t)
+	execution := newContributionPreflightExecution(t, server.URL, "exec-preflight-cancelled", "session-preflight-cancelled", "agent",
+		map[string]models.RemoteContribution{
+			"": contributionPreflightTestBinding(),
+		})
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- mgr.StartAgentProcess(ctx, execution.ID) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("contribution preflight did not start")
+	}
+	cancel()
+
+	var startErr error
+	select {
+	case startErr = <-errCh:
+	case <-time.After(time.Second):
+		t.Fatal("StartAgentProcess did not return after caller cancellation")
+	}
+	if !errors.Is(startErr, context.Canceled) {
+		t.Fatalf("StartAgentProcess() error = %v, want context cancellation", startErr)
+	}
+
+	gotRequests := []string{<-requests, <-requests}
+	if gotRequests[0] != "/health" || gotRequests[1] != "/api/v1/git/push-preflight" {
+		t.Fatalf("agentctl requests = %v, want readiness and preflight only", gotRequests)
 	}
 }
 

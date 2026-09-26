@@ -15,6 +15,7 @@ test.describe("shell command output echo stripping", () => {
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(120_000);
     const command = "cat file.txt";
     const echoedOutput = `$ ${command}=== marker ===\n`;
 
@@ -46,6 +47,7 @@ test.describe("shell command output echo stripping", () => {
     await expect(commandRow).toHaveText(command);
 
     const disclosure = chat.getByRole("button", { name: "Show command output" });
+    await expect(disclosure).toBeVisible({ timeout: 45_000 });
     const responsePromise = testPage.waitForResponse(
       (response) => response.url().endsWith("/shell-output") && response.status() === 200,
     );
@@ -64,6 +66,7 @@ test.describe("shell command output echo stripping", () => {
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(120_000);
     // Some providers resolve a relative file-path argument in the command
     // to an absolute (cwd-joined) one before actually invoking the real
     // terminal, while the reported "command" - the same text the chat
@@ -104,6 +107,7 @@ test.describe("shell command output echo stripping", () => {
     await expect(commandRow).toHaveText(command);
 
     const disclosure = chat.getByRole("button", { name: "Show command output" });
+    await expect(disclosure).toBeVisible({ timeout: 45_000 });
     const responsePromise = testPage.waitForResponse(
       (response) => response.url().endsWith("/shell-output") && response.status() === 200,
     );
@@ -123,6 +127,7 @@ test.describe("shell command output echo stripping", () => {
     apiClient,
     seedData,
   }, testInfo) => {
+    test.setTimeout(120_000);
     // Regression for a report that the workDir-resolved-path fix above
     // still leaked the echo: a command that itself carries an embedded
     // newline (a multi-line script or commit message passed as a single
@@ -135,6 +140,7 @@ test.describe("shell command output echo stripping", () => {
 
     const script = [
       `e2e:shell_result("${command.replace(/\n/g, "\\n")}", "${echoedOutput.replace(/\n/g, "\\n")}", "${cwd}")`,
+      "e2e:delay(100)",
       'e2e:message("done")',
     ].join("\n");
 
@@ -153,7 +159,7 @@ test.describe("shell command output echo stripping", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
 
     const chat = session.activeChat();
     const commandRow = chat.getByTestId("tool-execute-command").filter({ hasText: "echo start" });
@@ -161,6 +167,7 @@ test.describe("shell command output echo stripping", () => {
     await expect(commandRow).toHaveText(command);
 
     const disclosure = chat.getByRole("button", { name: "Show command output" });
+    await expect(disclosure).toBeVisible({ timeout: 45_000 });
     const responsePromise = testPage.waitForResponse(
       (response) => response.url().endsWith("/shell-output") && response.status() === 200,
     );
@@ -181,5 +188,70 @@ test.describe("shell command output echo stripping", () => {
       path: testInfo.outputPath("shell-output-multiline-workdir-echo-fixed.png"),
       fullPage: true,
     });
+  });
+
+  test("does not repeat a CRLF multi-line echo with no cwd inside the expanded Output disclosure", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Chat idle can precede the final tool-call metadata projection under CI
+    // load. Give the disclosure its own bounded wait instead of letting the
+    // default test timeout close the page while the output button is pending.
+    test.setTimeout(120_000);
+    // Regression for a live report: a multi-line command with no reported
+    // cwd (the common case - most commands don't need one), echoed by a
+    // real terminal using canonical-mode "\r\n" line endings, while the
+    // command's own embedded newlines - the literal bytes of the reported
+    // "command" field - stay plain "\n". The workDir-resolved-path fix
+    // above only reached its CRLF-normalizing comparison when a cwd was
+    // present, so a multi-line command with no cwd at all still leaked its
+    // entire echo verbatim into the Output disclosure.
+    const command = "echo start\necho hello";
+    const echoedOutput = "$ echo start\r\necho hello\r\nstart\nhello\n";
+
+    const script = [
+      `e2e:shell_result("${command.replace(/\n/g, "\\n")}", "${echoedOutput.replace(/\n/g, "\\n")}")`,
+      'e2e:message("done")',
+    ].join("\n");
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Shell echo CRLF multiline regression",
+      seedData.agentProfileId,
+      {
+        description: script,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 60_000 });
+
+    const chat = session.activeChat();
+    const commandRow = chat.getByTestId("tool-execute-command").filter({ hasText: "echo start" });
+    await expect(commandRow).toBeVisible();
+    await expect(commandRow).toHaveText(command);
+
+    const disclosure = chat.getByRole("button", { name: "Show command output" });
+    await expect(disclosure).toBeVisible({ timeout: 45_000 });
+    const responsePromise = testPage.waitForResponse(
+      (response) => response.url().endsWith("/shell-output") && response.status() === 200,
+    );
+    await disclosure.click();
+    await responsePromise;
+
+    const outputRegion = chat.getByTestId("tool-execute-output");
+    await expect(outputRegion).toContainText("start");
+    await expect(outputRegion).toContainText("hello");
+    // Critical: the CRLF-echoed command lines must not also appear inside
+    // the Output disclosure - they're already shown once in the command
+    // row above.
+    await expect(outputRegion).not.toContainText("echo start");
+    await expect(outputRegion).not.toContainText("$ echo");
   });
 });

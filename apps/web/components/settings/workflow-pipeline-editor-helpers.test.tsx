@@ -73,6 +73,16 @@ describe("step colour and prompt-template tables", () => {
       expect(template.prompt.startsWith("workflows:")).toBe(false);
     }
   });
+
+  it("derives the review base from the remote default branch", () => {
+    const reviewPrompt = PROMPT_TEMPLATES.find(
+      (template) => template.labelKey === "workflows:templateCodeReview",
+    )?.prompt;
+
+    expect(reviewPrompt).toContain("git remote show origin | grep 'HEAD branch'");
+    expect(reviewPrompt).toContain('git merge-base "$BASE_REF" HEAD');
+    expect(reviewPrompt).not.toContain("git merge-base origin/main HEAD");
+  });
 });
 
 describe("workflow pipeline editor helpers", () => {

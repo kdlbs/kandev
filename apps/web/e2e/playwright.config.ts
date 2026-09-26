@@ -4,10 +4,9 @@ const CI = !!process.env.CI;
 
 export default defineConfig({
   testDir: "./tests",
-  // `fullyParallel: true` is required so `--shard=N/M` splits work at the test
-  // level (not the file level). With file-level sharding the suite was wildly
-  // unbalanced: largest shard ran 12 min, smallest 1.5 min, because spec files
-  // vary from 1 to 30+ tests. Test-level sharding flattens that distribution.
+  // `fullyParallel: true` keeps direct local `--shard=N/M` runs at test level.
+  // CI uses explicit duration-aware file manifests from e2e/scripts instead;
+  // this setting preserves the existing local debugging behavior.
   //
   // Concurrency is still capped by `workers: 1` below — only one test runs at a
   // time per shard process, preserving the worker-scoped backend invariant that
@@ -24,6 +23,7 @@ export default defineConfig({
   // the fixture's baseline env snapshot).
   fullyParallel: true,
   forbidOnly: CI,
+  failOnFlakyTests: !CI || process.env.E2E_FAIL_ON_FLAKY === "1",
   retries: CI ? 2 : 0,
   workers: 1,
   timeout: 60_000,
@@ -58,17 +58,22 @@ export default defineConfig({
       // ApiClient). Serial within the file; afterAll restarts to baseline.
       name: "auth",
       testMatch: /auth\/.*\.spec\.ts/,
+      // mobile-users-* specs under tests/auth/ run in the mobile-chrome
+      // project (Pixel 5) instead of here.
+      testIgnore: /mobile-.*\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "chromium",
       testIgnore: [
         /mobile-.*\.spec\.ts/,
-        // Container-backed tests (Docker executor, SSH executor) live in the
+        // Container-backed tests (Docker, SSH, and Kubernetes executors) live in the
         // `containers` project and skip when Docker is not available locally.
         // See apps/web/e2e/README.md for what runs there.
         /docker\/.*\.spec\.ts/,
         /ssh\/.*\.spec\.ts/,
+        /kubernetes\/.*\.spec\.ts/,
+        /kubernetes-compat\/.*\.spec\.ts/,
         /office-routing-.*\.spec\.ts/,
         // Auth specs run in the dedicated `auth` project (see above).
         /auth\/.*\.spec\.ts/,
@@ -85,23 +90,36 @@ export default defineConfig({
       // Spawns the backend with KANDEV_E2E_CONTAINERS=1 (KANDEV_E2E_DOCKER=1
       // is honored as a deprecated alias for one release). Builds the
       // kandev-agent:e2e and kandev-sshd:e2e images and skips entirely on
-      // hosts without a Docker daemon — Docker is used as the runtime for
-      // both the Docker executor's own containers AND the sshd target the
-      // SSH executor connects to. Container-bound tests are slow (~10-30s
-      // each) so they live in their own project to keep the default CI fast.
+      // hosts without a Docker daemon. Docker is used as the runtime for the
+      // Docker executor's own containers, the sshd target the SSH executor
+      // connects to, and the pinned Kind cluster used by Kubernetes specs.
+      // Container-bound tests are slow, so they live in their own project to
+      // keep the default CI fast.
       //
       // See apps/web/e2e/README.md for context and how to run locally.
       name: "containers",
-      testMatch: [/docker\/.*\.spec\.ts/, /ssh\/.*\.spec\.ts/],
+      testMatch: [
+        /docker\/.*\.spec\.ts/,
+        /remote-docker\/.*\.spec\.ts/,
+        /ssh\/.*\.spec\.ts/,
+        /kubernetes\/.*\.spec\.ts/,
+      ],
       use: { ...devices["Desktop Chrome"] },
       timeout: 180_000,
-      // Per-test sharding: CI runs `--shard=N/6` to split this project's
-      // tests across runners. Playwright only shards at the test level
-      // when fullyParallel is true (otherwise sharding is by file, and
-      // since this project has a single spec file every test would land
-      // in shard 1). Each shard is its own process with its own backend,
-      // and workers:1 still serializes tests within a shard, so this is
-      // safe.
+      // Local `--shard=N/6` runs can still split this project at test level.
+      // CI uses explicit files from the duration-aware containers manifests.
+      // Each CI shard is its own process, and workers:1 still serializes tests
+      // within a shard, so the worker-scoped backend remains safe.
+      fullyParallel: true,
+    },
+    {
+      // Small API-only Kubernetes compatibility smoke. CI runs this once for
+      // each supported server version; it intentionally does not multiply the
+      // full browser lifecycle matrix in the `containers` project.
+      name: "kubernetes-compat",
+      testMatch: /kubernetes-compat\/.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      timeout: 300_000,
       fullyParallel: true,
     },
   ],

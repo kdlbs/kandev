@@ -10,19 +10,22 @@ import { toast } from "@/lib/toast/sonner";
 import { updateProject } from "@/lib/api/domains/office-api";
 import { useAppStore } from "@/components/state-provider";
 import type { Project, ProjectStatus } from "@/lib/state/slices/office/types";
+import { PROJECT_STATUS_LABEL_KEYS } from "../../lib/label-keys";
+import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
-const STATUS_OPTIONS: { value: ProjectStatus; label: string }[] = [
-  { value: "active", label: "Active" },
-  { value: "completed", label: "Completed" },
-  { value: "on_hold", label: "On Hold" },
-  { value: "archived", label: "Archived" },
-];
+// `labelKey`, not `label` — module scope freezes a `t()` at the boot locale.
+// The `value`s are the persisted project-status ids and stay untranslated.
+const STATUS_OPTIONS: { value: ProjectStatus; labelKey: string }[] = (
+  ["active", "completed", "on_hold", "archived"] as const
+).map((value) => ({ value, labelKey: PROJECT_STATUS_LABEL_KEYS[value] }));
 
 type ProjectHeaderProps = {
   project: Project;
 };
 
 export function ProjectHeader({ project }: ProjectHeaderProps) {
+  const { t } = useTranslation();
   const updateProjectStore = useAppStore((s) => s.updateProject);
 
   const [name, setName] = useState(project.name);
@@ -41,12 +44,12 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
 
       if (Object.keys(patch).length > 0) {
         await updateProject(project.id, patch);
-        updateProjectStore(project.id, patch);
+        updateProjectStore(project.workspaceId, project.id, patch);
       }
       setDirty(false);
-      toast.success("Project saved");
+      toast.success(t("office:projectSaved"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save project");
+      toast.error(err instanceof Error ? err.message : t("office:failedToSaveProject"));
     } finally {
       setSaving(false);
     }
@@ -65,7 +68,7 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
             setName(e.target.value);
             setDirty(true);
           }}
-          className="text-lg font-semibold h-9 px-2.5"
+          className={controlSizingClassName("standard", "text-lg font-semibold px-2.5")}
         />
         <Select
           value={status}
@@ -74,21 +77,25 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
             setDirty(true);
           }}
         >
-          <SelectTrigger className="w-[140px] data-[size=default]:h-9 cursor-pointer">
+          <SelectTrigger className={controlSizingClassName("standard", "w-[140px] cursor-pointer")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {STATUS_OPTIONS.map((opt) => (
               <SelectItem key={opt.value} value={opt.value} className="cursor-pointer">
-                {opt.label}
+                {t(opt.labelKey)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         {dirty && (
-          <Button size="sm" onClick={handleSave} disabled={saving} className="cursor-pointer">
+          <Button
+            onClick={handleSave}
+            disabled={saving}
+            className={controlSizingClassName("standard", "cursor-pointer")}
+          >
             <IconDeviceFloppy className="h-4 w-4 mr-1" />
-            {saving ? "Saving..." : "Save"}
+            {saving ? t("office:saving") : t("common:save")}
           </Button>
         )}
       </div>
@@ -98,7 +105,7 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
           setDescription(e.target.value);
           setDirty(true);
         }}
-        placeholder="Add a description..."
+        placeholder={t("office:addADescription")}
         className="min-h-[60px] text-sm resize-none"
       />
     </div>

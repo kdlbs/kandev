@@ -3,21 +3,26 @@ import {
   taskId as toTaskId,
   workflowId as toWorkflowId,
   workspaceId as toWorkspaceId,
+  type Repository,
   type Task,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 import {
   buildArchivedValue,
   buildDebugEntries,
+  buildTaskFromKanban,
   hasResolvedTaskDetails,
   resolveEffectiveTask,
+  resolveTaskPullRequestProps,
   resolveTaskContentState,
   resolveTaskProps,
+  selectWorkspaceRepositories,
   syncActiveTaskSession,
 } from "./task-page-content-helpers";
 
 type KanbanTask = KanbanState["tasks"][number];
 const ARCHIVED_AT = "2026-07-19T00:00:00Z";
+const FRESH_KANBAN_UPDATED_AT = "2026-07-20T00:00:00Z";
 
 function makeArchivedTaskDetails(overrides: Partial<Task> = {}): Task {
   return {
@@ -29,7 +34,7 @@ function makeArchivedTaskDetails(overrides: Partial<Task> = {}): Task {
     state: "TODO",
     workspace_id: "ws-1",
     workflow_id: "wf-1",
-    priority: 0,
+    priority: "medium",
     repositories: [],
     created_at: "",
     updated_at: ARCHIVED_AT,
@@ -90,7 +95,115 @@ describe("buildDebugEntries", () => {
   });
 });
 
-describe("resolveTaskProps", () => {
+describe("resolveTaskProps remote repository topbar projection", () => {
+  // @covers AC-UI-REMOTE-REPO-TOPBAR-001.1, AC-UI-REMOTE-REPO-TOPBAR-001.3
+  it("projects the short identity and safe browser URL for one resolved remote repository", () => {
+    const repository = {
+      id: "repo-1",
+      name: "agent-orchestrator",
+      source_type: "provider",
+      provider: "github",
+      provider_owner: "Untrivial-ai",
+      provider_name: "agent-orchestrator",
+      remote_url: "https://github.com/Untrivial-ai/agent-orchestrator.git/",
+    } as unknown as Repository;
+    const task = {
+      id: "task-1",
+      title: "Explain agent connections",
+      repositories: [{ repository_id: "repo-1" }],
+    } as unknown as Task;
+
+    const props = resolveTaskProps(task, repository);
+
+    expect(props.repositoryLabel).toBe("Untrivial-ai/agent-orchestrator");
+    expect(props.topbarRepository).toEqual({
+      displayName: "agent-orchestrator",
+      fullName: "Untrivial-ai/agent-orchestrator",
+      provider: "github",
+      browserUrl: "https://github.com/Untrivial-ai/agent-orchestrator",
+    });
+  });
+});
+
+describe("resolveTaskProps repository eligibility", () => {
+  // @covers AC-UI-REMOTE-REPO-TOPBAR-001.2, AC-UI-REMOTE-REPO-TOPBAR-001.4
+  it.each([
+    ["a local repository", "local", [{ repository_id: "repo-1" }], "https://github.com/owner/repo"],
+    [
+      "a task with multiple repositories",
+      "provider",
+      [{ repository_id: "repo-1" }, { repository_id: "repo-2" }],
+      "https://github.com/owner/repo",
+    ],
+    [
+      "an unresolved primary repository",
+      "provider",
+      [{ repository_id: "repo-2" }],
+      "https://github.com/owner/repo",
+    ],
+  ])(
+    "does not create a topbar-only link for %s",
+    (_reason, sourceType, taskRepositories, remoteURL) => {
+      const repository = {
+        id: "repo-1",
+        name: "repo",
+        source_type: sourceType,
+        provider: "github",
+        provider_owner: "owner",
+        provider_name: "repo",
+        remote_url: remoteURL,
+      } as unknown as Repository;
+
+      const props = resolveTaskProps(
+        { id: "task-1", title: "Any", repositories: taskRepositories } as unknown as Task,
+        repository,
+      );
+
+      expect(props.topbarRepository).toBeNull();
+    },
+  );
+});
+
+describe("resolveTaskProps safe browser URL", () => {
+  it.each([
+    undefined,
+    "",
+    "git@github.com:owner/repo.git",
+    "http://github.com/owner/repo",
+    "https://user:secret@github.com/owner/repo",
+    "https://github.com/owner/repo?tab=code",
+    "https://github.com/owner/repo#readme",
+    "not a URL",
+  ])("keeps an unsafe or missing remote URL out of browser navigation: %s", (remoteURL) => {
+    const repository = {
+      id: "repo-1",
+      name: "repo",
+      source_type: "provider",
+      provider: "github",
+      provider_owner: "owner",
+      provider_name: "repo",
+      remote_url: remoteURL,
+    } as unknown as Repository;
+
+    const props = resolveTaskProps(
+      {
+        id: "task-1",
+        title: "Any",
+        repositories: [{ repository_id: "repo-1" }],
+      } as unknown as Task,
+      repository,
+    );
+
+    expect(props.topbarRepository).toMatchObject({
+      displayName: "repo",
+      fullName: "owner/repo",
+      provider: "github",
+      browserUrl: null,
+    });
+  });
+});
+
+describe("resolveTaskProps additional metadata", () => {
   it("exposes linked GitHub issue metadata for the top bar", () => {
     const props = resolveTaskProps(
       {
@@ -106,6 +219,147 @@ describe("resolveTaskProps", () => {
 
     expect(props.issueUrl).toBe("https://github.com/kdlbs/kandev/issues/1470");
     expect(props.issueNumber).toBe(1470);
+  });
+
+  it("labels the repository by its provider slug, not its local clone path", () => {
+    const props = resolveTaskProps(
+      { id: "task-1", title: "Any" } as unknown as Task,
+      {
+        id: "repo-1",
+        name: "kandev",
+        local_path: "/home/dev/src/kandev",
+        provider_owner: "kdlbs",
+        provider_name: "kandev",
+      } as unknown as Repository,
+    );
+
+    expect(props.repositoryLabel).toBe("kdlbs/kandev");
+  });
+
+  it("falls back to the repository name when no provider owns it", () => {
+    const props = resolveTaskProps(
+      { id: "task-1", title: "Any" } as unknown as Task,
+      {
+        id: "repo-1",
+        name: "scratchpad",
+        local_path: "/home/dev/src/scratchpad",
+      } as unknown as Repository,
+    );
+
+    expect(props.repositoryLabel).toBe("scratchpad");
+  });
+
+  it("has no repository label for a task with no repository", () => {
+    const props = resolveTaskProps({ id: "task-1", title: "Any" } as unknown as Task, null);
+
+    expect(props.repositoryLabel).toBeNull();
+  });
+
+  it("exposes each repository policy pull request target to task flows", () => {
+    const repository = {
+      id: "repo-1",
+      name: "kandev",
+      provider_owner: "kdlbs",
+      provider_name: "kandev",
+    } as unknown as Repository;
+    const task = {
+      id: "task-1",
+      title: "Open a pull request",
+      repositories: [
+        { repository_id: "repo-1", branch_policy_pull_request_target: "release" },
+        { repository_id: "repo-2", branch_policy_pull_request_target: "develop" },
+      ],
+    } as unknown as Task;
+
+    const props = resolveTaskProps(task, repository, [
+      repository,
+      { id: "repo-2", name: "other" } as Repository,
+    ]);
+
+    expect(props.pullRequestTarget).toBe("release");
+    expect(props.pullRequestTargetsByRepository).toEqual({
+      "repo-1": "release",
+      "kdlbs/kandev": "release",
+      kandev: "release",
+      "repo-2": "develop",
+      other: "develop",
+    });
+  });
+});
+
+describe("resolveTaskPullRequestProps", () => {
+  it("supports the office task shape while preserving policy targets", () => {
+    const props = resolveTaskPullRequestProps(
+      {
+        title: "Open a pull request",
+        repositories: [
+          {
+            repository_id: "repo-1",
+            base_branch: "develop",
+            branch_policy_pull_request_target: "main",
+          },
+        ],
+      } as unknown as Task,
+      [{ id: "repo-1", name: "kandev" } as Repository],
+    );
+
+    expect(props).toMatchObject({
+      baseBranch: "develop",
+      pullRequestTarget: "main",
+      pullRequestTargetsByRepository: { "repo-1": "main", kandev: "main" },
+      taskTitle: "Open a pull request",
+    });
+  });
+});
+
+describe("selectWorkspaceRepositories", () => {
+  it("returns a stable empty value until the workspace repository slice is hydrated", () => {
+    const itemsByWorkspaceId: Record<string, Repository[]> = {};
+
+    expect(selectWorkspaceRepositories(itemsByWorkspaceId, "ws-missing")).toBe(
+      selectWorkspaceRepositories(itemsByWorkspaceId, "ws-missing"),
+    );
+  });
+
+  it("returns the hydrated repositories for the task workspace", () => {
+    const repositories = [{ id: "repo-1" }] as Repository[];
+
+    expect(selectWorkspaceRepositories({ "ws-1": repositories }, "ws-1")).toBe(repositories);
+  });
+});
+
+describe("buildArchivedValue repository identity", () => {
+  // The archived row renders this value, so a local clone path here would put
+  // "/home/dev/src/kandev" in the sidebar and give archived tasks a different
+  // repository grouping key from every ordinary task.
+  it("carries the provider slug, not the local clone path", () => {
+    const value = buildArchivedValue(
+      { id: "task-1", title: "Any", archived_at: ARCHIVED_AT } as unknown as Task,
+      {
+        id: "repo-1",
+        name: "kandev",
+        local_path: "/home/dev/src/kandev",
+        provider_owner: "kdlbs",
+        provider_name: "kandev",
+      } as unknown as Repository,
+    );
+
+    expect(value.archivedTaskRepositoryLabel).toBe("kdlbs/kandev");
+  });
+
+  it("leaves the label unset for a task that is not archived", () => {
+    const value = buildArchivedValue(
+      { id: "task-1", title: "Any" } as unknown as Task,
+      {
+        id: "repo-1",
+        name: "kandev",
+        local_path: "/home/dev/src/kandev",
+        provider_owner: "kdlbs",
+        provider_name: "kandev",
+      } as unknown as Repository,
+    );
+
+    expect(value.archivedTaskRepositoryLabel).toBeUndefined();
   });
 });
 
@@ -198,14 +452,17 @@ describe("syncActiveTaskSession", () => {
     const setActiveSessionAuto = vi.fn();
     const setActiveTask = vi.fn();
 
-    syncActiveTaskSession({
+    const applied = syncActiveTaskSession({
       initialTaskId: "task-1",
       fallbackTaskId: null,
       initialSessionId: "session-1",
+      activeTaskId: null,
+      previousRouteTaskId: undefined,
       setActiveSessionAuto,
       setActiveTask,
     });
 
+    expect(applied).toBe(true);
     expect(setActiveSessionAuto).toHaveBeenCalledWith("task-1", "session-1");
     expect(setActiveTask).not.toHaveBeenCalled();
   });
@@ -214,20 +471,109 @@ describe("syncActiveTaskSession", () => {
     const setActiveSessionAuto = vi.fn();
     const setActiveTask = vi.fn();
 
-    syncActiveTaskSession({
+    const applied = syncActiveTaskSession({
       initialTaskId: "task-1",
       fallbackTaskId: null,
       initialSessionId: null,
+      activeTaskId: null,
+      previousRouteTaskId: undefined,
       setActiveSessionAuto,
       setActiveTask,
     });
 
+    expect(applied).toBe(true);
     expect(setActiveTask).toHaveBeenCalledWith("task-1");
     expect(setActiveSessionAuto).not.toHaveBeenCalled();
+  });
+
+  it("applies a changed route over the previous active task", () => {
+    const setActiveSessionAuto = vi.fn();
+    const setActiveTask = vi.fn();
+
+    const applied = syncActiveTaskSession({
+      initialTaskId: "task-2",
+      fallbackTaskId: null,
+      initialSessionId: "session-2",
+      activeTaskId: "task-1",
+      previousRouteTaskId: "task-1",
+      setActiveSessionAuto,
+      setActiveTask,
+    });
+
+    expect(applied).toBe(true);
+    expect(setActiveSessionAuto).toHaveBeenCalledWith("task-2", "session-2");
+    expect(setActiveTask).not.toHaveBeenCalled();
+  });
+
+  it("adopts a session that arrives for the current route", () => {
+    const setActiveSessionAuto = vi.fn();
+    const setActiveTask = vi.fn();
+
+    const applied = syncActiveTaskSession({
+      initialTaskId: "task-1",
+      fallbackTaskId: null,
+      initialSessionId: "session-1",
+      activeTaskId: "task-1",
+      previousRouteTaskId: "task-1",
+      setActiveSessionAuto,
+      setActiveTask,
+    });
+
+    expect(applied).toBe(true);
+    expect(setActiveSessionAuto).toHaveBeenCalledWith("task-1", "session-1");
+    expect(setActiveTask).not.toHaveBeenCalled();
+  });
+
+  it("does not restore an unchanged route over an in-place sibling selection", () => {
+    const setActiveSessionAuto = vi.fn();
+    const setActiveTask = vi.fn();
+    const applied = syncActiveTaskSession({
+      initialTaskId: "missing-task",
+      fallbackTaskId: null,
+      initialSessionId: "sibling-session",
+      activeTaskId: "sibling-task",
+      previousRouteTaskId: "missing-task",
+      setActiveSessionAuto,
+      setActiveTask,
+    });
+
+    expect(applied).toBe(false);
+    expect(setActiveSessionAuto).not.toHaveBeenCalled();
+    expect(setActiveTask).not.toHaveBeenCalled();
   });
 });
 
 describe("resolveEffectiveTask archived state", () => {
+  it("preserves a non-default priority for kanban-only tasks", () => {
+    const resolved = buildTaskFromKanban(makeKanbanTask({ priority: "high" }));
+
+    expect(resolved.priority).toBe("high");
+  });
+
+  it("builds a kanban-only task with its metadata", () => {
+    const metadata = { port_forwarding_enabled: true };
+    const resolved = resolveEffectiveTask(null, null, makeKanbanTask({ metadata }), "task-1");
+
+    expect(resolved?.metadata).toEqual(metadata);
+  });
+
+  it("uses live kanban metadata while preserving base metadata when omitted", () => {
+    const base = makeArchivedTaskDetails({ metadata: { port_forwarding_enabled: false } });
+    const enabled = resolveEffectiveTask(
+      base,
+      null,
+      makeKanbanTask({
+        metadata: { port_forwarding_enabled: true },
+        updatedAt: FRESH_KANBAN_UPDATED_AT,
+      }),
+      "task-1",
+    );
+    expect(enabled?.metadata).toEqual({ port_forwarding_enabled: true });
+
+    const omitted = resolveEffectiveTask(base, null, makeKanbanTask(), "task-1");
+    expect(omitted?.metadata).toEqual({ port_forwarding_enabled: false });
+  });
+
   it("keeps fetched archived state when a stale matching kanban card remains", () => {
     const taskDetails = makeArchivedTaskDetails();
     const kanbanTask = makeKanbanTask({ updatedAt: "2026-07-18T00:00:00Z" });
@@ -259,7 +605,11 @@ describe("resolveEffectiveTask archived state", () => {
 
   it("prefers live kanban title/state while preserving base-only fields", () => {
     const taskDetails = makeArchivedTaskDetails({ archived_at: null });
-    const kanbanTask = makeKanbanTask({ title: "Live title", state: "IN_PROGRESS" });
+    const kanbanTask = makeKanbanTask({
+      title: "Live title",
+      state: "IN_PROGRESS",
+      updatedAt: FRESH_KANBAN_UPDATED_AT,
+    });
 
     const resolved = resolveEffectiveTask(taskDetails, null, kanbanTask, "task-1");
 

@@ -50,6 +50,26 @@ describe("MarketplaceEntryRow repo link", () => {
 
   it("renders unknown (null) stars as a dash, not zero", () => {
     render(<MarketplaceEntryRow entry={entry({ stars: null })} busy={false} onInstall={noop} />);
-    expect(screen.getByText("—")).toBeTruthy();
+    expect(screen.getByText("-")).toBeTruthy();
+  });
+});
+
+describe("MarketplaceEntryRow member view", () => {
+  it("keeps catalog metadata visible without install or update actions", () => {
+    const { rerender } = render(
+      <MarketplaceEntryRow entry={entry()} busy={false} onInstall={noop} canManage={false} />,
+    );
+    expect(screen.getByText("Acme")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Install" })).toBeNull();
+
+    rerender(
+      <MarketplaceEntryRow
+        entry={entry({ install_state: "update_available" })}
+        busy={false}
+        onInstall={noop}
+        canManage={false}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Update" })).toBeNull();
   });
 });

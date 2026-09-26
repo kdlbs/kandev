@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -12,6 +13,10 @@ import (
 type SettingsManager interface {
 	GetSettings(context.Context) (StorageMaintenanceSettings, error)
 	SaveSettingsWithConfirmations(context.Context, StorageMaintenanceSettings, SaveConfirmations) (StorageMaintenanceSettings, error)
+}
+
+type SettingsPatcher interface {
+	PatchSettingsWithConfirmations(context.Context, map[string]json.RawMessage, SaveConfirmations) (StorageMaintenanceSettings, error)
 }
 
 type RunLister interface {
@@ -32,18 +37,39 @@ type Mutations interface {
 }
 
 type Capabilities struct {
-	ManagedGoCachePath       string `json:"managed_go_cache_path"`
-	GoCacheAdoptionAvailable bool   `json:"go_cache_adoption_available"`
-	DockerAvailable          bool   `json:"docker_available"`
-	DockerHost               string `json:"docker_host"`
-	HostGlobalDockerCleanup  bool   `json:"host_global_docker_cleanup_allowed"`
+	ManagedGoCachePath          string `json:"managed_go_cache_path"`
+	GoCacheAdoptionAvailable    bool   `json:"go_cache_adoption_available"`
+	TemporaryArtifactsAvailable bool   `json:"temporary_artifacts_available"`
+	DockerAvailable             bool   `json:"docker_available"`
+	DockerHost                  string `json:"docker_host"`
+	HostGlobalDockerCleanup     bool   `json:"host_global_docker_cleanup_allowed"`
 }
 
 type Summary struct {
-	Workspaces any `json:"workspaces"`
-	GoCache    any `json:"go_cache"`
-	Quarantine any `json:"quarantine"`
-	Docker     any `json:"docker"`
+	Workspaces         any `json:"workspaces"`
+	GoCache            any `json:"go_cache"`
+	Quarantine         any `json:"quarantine"`
+	TemporaryArtifacts any `json:"temporary_artifacts"`
+	SystemTemporary    any `json:"system_temporary"`
+	Docker             any `json:"docker"`
+	Database           any `json:"database"`
+	DatabaseBackups    any `json:"database_backups"`
+}
+
+type DiskCapacity struct {
+	Path           string  `json:"path"`
+	TotalBytes     uint64  `json:"total_bytes"`
+	UsedBytes      uint64  `json:"used_bytes"`
+	AvailableBytes uint64  `json:"available_bytes"`
+	UsedPercent    float64 `json:"used_percent"`
+	Available      bool    `json:"available"`
+	Warning        string  `json:"warning,omitempty"`
+}
+
+type DiskCapacityReader func(context.Context, string) (DiskCapacity, error)
+
+func (r DiskCapacityReader) ReadDiskCapacity(ctx context.Context, path string) (DiskCapacity, error) {
+	return r(ctx, path)
 }
 
 type QuarantineSummary struct {
@@ -63,11 +89,17 @@ type OverviewReader interface {
 	SettingsCapabilities(context.Context, StorageMaintenanceSettings) Capabilities
 }
 
+type OverviewStateReader interface {
+	Read(context.Context) (OverviewRead, error)
+}
+
 type HandlerConfig struct {
 	Settings          SettingsManager
 	Runs              RunLister
 	Quarantine        QuarantineLister
 	Overview          OverviewReader
+	DiskCapacity      DiskCapacityReader
+	DiskPath          string
 	Mutations         Mutations
 	OnSettingsChanged func(StorageMaintenanceSettings)
 	LogError          func(string, error)
@@ -81,24 +113,82 @@ func NewHandler(config HandlerConfig) *Handler {
 	return &Handler{config: config}
 }
 
+func (h *Handler) GetSettings(ctx context.Context) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	return h.config.Settings.GetSettings(ctx)
+}
+
+func (h *Handler) SaveSettingsWithConfirmations(ctx context.Context, settings StorageMaintenanceSettings, confirmations SaveConfirmations) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	updated, err := h.config.Settings.SaveSettingsWithConfirmations(ctx, settings, confirmations)
+	if err == nil && h.config.OnSettingsChanged != nil {
+		h.config.OnSettingsChanged(updated)
+	}
+	return updated, err
+}
+
+func (h *Handler) PatchSettingsWithConfirmations(ctx context.Context, changes map[string]json.RawMessage, confirmations SaveConfirmations) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	patcher, ok := h.config.Settings.(SettingsPatcher)
+	if !ok {
+		return StorageMaintenanceSettings{}, errors.New("atomic storage settings patch is unavailable")
+	}
+	updated, err := patcher.PatchSettingsWithConfirmations(ctx, changes, confirmations)
+	if err == nil && h.config.OnSettingsChanged != nil {
+		h.config.OnSettingsChanged(updated)
+	}
+	return updated, err
+}
+
 func (h *Handler) logError(message string, err error) {
 	if h.config.LogError != nil {
 		h.config.LogError(message, err)
 	}
 }
 
-func RegisterRoutes(group *gin.RouterGroup, handler *Handler) {
-	group.GET("/storage", handler.getStorage)
-	group.GET("/storage/settings", handler.getStorageSettings)
-	group.PATCH("/storage/settings", handler.patchSettings)
-	group.POST("/storage/go-cache/adopt", handler.adoptGoCache)
-	group.POST("/storage/analyze", handler.analyze)
-	group.POST("/storage/run", handler.runNow)
-	group.GET("/storage/runs", handler.listRuns)
-	group.GET("/storage/quarantine", handler.listQuarantine)
-	group.POST("/storage/quarantine/:id/restore", handler.restoreQuarantine)
-	group.DELETE("/storage/quarantine", handler.deleteQuarantineBulk)
-	group.DELETE("/storage/quarantine/:id", handler.deleteQuarantine)
+// RegisterRoutes wires storage maintenance onto the /api/v1/system groups.
+// Reading the current usage, policy, run history, and quarantine contents is
+// open to any authenticated caller; every route that changes install-wide
+// state (settings, adoption, cleanup passes, quarantine restore/purge)
+// requires the admin role.
+func RegisterRoutes(read, admin *gin.RouterGroup, handler *Handler) {
+	read.GET("/storage", handler.getStorage)
+	read.GET("/storage/disk", handler.getStorageDisk)
+	read.GET("/storage/settings", handler.getStorageSettings)
+	read.GET("/storage/runs", handler.listRuns)
+	read.GET("/storage/quarantine", handler.listQuarantine)
+	admin.PATCH("/storage/settings", handler.patchSettings)
+	admin.POST("/storage/go-cache/adopt", handler.adoptGoCache)
+	admin.POST("/storage/analyze", handler.analyze)
+	admin.POST("/storage/run", handler.runNow)
+	admin.POST("/storage/quarantine/:id/restore", handler.restoreQuarantine)
+	admin.DELETE("/storage/quarantine", handler.deleteQuarantineBulk)
+	admin.DELETE("/storage/quarantine/:id", handler.deleteQuarantine)
+}
+
+func (h *Handler) getStorageDisk(c *gin.Context) {
+	result := DiskCapacity{Path: h.config.DiskPath}
+	if h.config.DiskCapacity == nil {
+		result.Warning = "disk usage unavailable"
+		c.JSON(http.StatusOK, result)
+		return
+	}
+	capacity, err := h.config.DiskCapacity.ReadDiskCapacity(c.Request.Context(), h.config.DiskPath)
+	if err != nil {
+		h.logError("failed to read storage disk capacity", err)
+		result.Warning = "disk usage unavailable"
+		c.JSON(http.StatusOK, result)
+		return
+	}
+	capacity.Path = h.config.DiskPath
+	capacity.Available = true
+	c.JSON(http.StatusOK, capacity)
 }
 
 func (h *Handler) listRuns(c *gin.Context) {
@@ -242,10 +332,25 @@ func (h *Handler) getStorage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load storage settings"})
 		return
 	}
-	snapshot, err := h.config.Overview.Get(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	var (
+		snapshot *OverviewSnapshot
+		analysis StorageAnalysisState
+	)
+	if stateReader, ok := h.config.Overview.(OverviewStateReader); ok {
+		read, readErr := stateReader.Read(c.Request.Context())
+		if readErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": readErr.Error()})
+			return
+		}
+		snapshot, analysis = read.Snapshot, read.Analysis
+	} else {
+		legacy, readErr := h.config.Overview.Get(c.Request.Context())
+		if readErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": readErr.Error()})
+			return
+		}
+		snapshot = &legacy
+		analysis = readyAnalysisState(0, defaultOverviewCacheTTL, legacy.AnalyzedAt, legacy.AnalyzedAt, legacy.AnalyzedAt)
 	}
 	runs, err := h.config.Runs.ListRuns(c.Request.Context(), 1)
 	if err != nil {
@@ -256,9 +361,14 @@ func (h *Handler) getStorage(c *gin.Context) {
 	if len(runs) > 0 {
 		lastRun = &runs[0]
 	}
+	var summary any
+	var analyzedAt any
+	if snapshot != nil {
+		summary, analyzedAt = snapshot.Summary, snapshot.AnalyzedAt
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"settings": settings, "capabilities": h.config.Overview.Capabilities(c.Request.Context(), settings),
-		"summary": snapshot.Summary, "analyzed_at": snapshot.AnalyzedAt, "last_run": lastRun,
+		"summary": summary, "analyzed_at": analyzedAt, "analysis": analysis, "last_run": lastRun,
 	})
 }
 

@@ -5,7 +5,7 @@ description: "Install, start, and operate Kandev from the command line."
 
 # Kandev CLI
 
-The `kandev` command starts a local Kandev backend, which serves the web UI, HTTP API, WebSocket API, and MCP endpoint. Use it when you want a browser-based installation or a headless/service process. For a packaged system WebView and desktop updates, use the [desktop app](./desktop-app.md) instead.
+The packaged `kandev` executable is a single native Go binary with the compiled web frontend embedded. It starts the backend and serves the web UI, HTTP API, WebSocket API, and MCP endpoint from one listener. Use it for a browser-based installation or a headless/service process. For a packaged system WebView and desktop updates, use the [desktop app](desktop-app.md) instead.
 
 ## Quick path
 
@@ -20,11 +20,21 @@ The `kandev` command starts a local Kandev backend, which serves the web UI, HTT
 |---|---|---|
 | macOS | Apple silicon (`arm64`), Intel (`x64`) | Homebrew, npm/npx |
 | Linux | `arm64`, `x64` | Homebrew, npm/npx |
-| Windows | `x64` | npm/npx |
+| Windows | `x64` | Scoop, npm/npx |
 
-The npm package is a small Node.js shim. It selects an exact, same-version native runtime package for `process.platform` and `process.arch`, then starts its `kandev` binary. npm 7 or later is required because the native packages are platform-specific optional dependencies. There is no native Windows ARM64 npm package; running the x64 package under Windows emulation is OS-dependent and is not a tested release target.
+The `kandev` binary contains the backend and compiled web application. A
+release bundle also contains the host `agentctl` and Linux/macOS remote
+`agentctl` helpers for task environments. These helpers support agent
+execution in SSH and container environments. They do not serve the Kandev web
+application.
 
-Every runtime bundle contains the backend, `agentctl`, the embedded web application, and Linux/macOS `agentctl` helpers used by supported remote executors. Node.js is used only to select the npm runtime; the application itself is native.
+The npm package is a small Node.js shim. It selects an exact, same-version
+native runtime package for `process.platform` and `process.arch`, then starts
+its `kandev` binary. npm 7 or later is required because the native packages are
+platform-specific optional dependencies. Node.js is not needed to serve the
+Kandev web application. There is no native Windows ARM64 npm package. Running
+the x64 package under Windows emulation is OS-dependent and is not a tested
+release target.
 
 ## Install
 
@@ -36,6 +46,20 @@ Homebrew is available on macOS and Linux:
 brew install kdlbs/kandev/kandev
 kandev --version
 ```
+
+### Scoop
+
+Scoop is available on Windows:
+
+```bash
+scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
+scoop install kandev
+kandev --version
+```
+
+The bucket installs the native runtime bundle, so Node.js is not required to
+install or start Kandev. Node.js is still needed for the agent CLIs Kandev
+installs through its own interface.
 
 ### npm or npx
 
@@ -54,6 +78,50 @@ npx -y kandev@latest
 
 If an npm policy such as `--omit=optional` prevents optional dependencies from being installed, Kandev cannot find its native runtime.
 
+### Release archive
+
+Every release publishes a runtime archive per platform, named `kandev-<platform>.tar.gz`, where
+`<platform>` is one of `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`, or `windows-x64`.
+Pick the archive matching the machine, verify it against the `.sha256` published beside it, extract
+it, and run the launcher from the extracted tree:
+
+```bash
+curl -fsSLO https://github.com/kdlbs/kandev/releases/latest/download/kandev-linux-x64.tar.gz
+curl -fsSLO https://github.com/kdlbs/kandev/releases/latest/download/kandev-linux-x64.tar.gz.sha256
+shasum -a 256 -c kandev-linux-x64.tar.gz.sha256
+tar -xzf kandev-linux-x64.tar.gz
+./kandev/bin/kandev --version
+```
+
+Verifying the checksum matters more here than with the package managers, which do that themselves.
+
+The archive extracts to a `kandev/` directory containing `bin/`, and the launcher finds the rest of
+the bundle relative to itself. The extracted directory can be moved anywhere; add `kandev/bin` to
+`PATH` for a persistent command. Set `KANDEV_BUNDLE_DIR` only to point the launcher at a bundle it
+is not part of.
+
+### npm nightly
+
+Stable remains npm's default `latest` tag. To opt into the current prerelease from `main`, install
+or run the `nightly` tag explicitly:
+
+```bash
+npm install -g kandev@nightly
+kandev --version
+
+# One-off launch
+npx -y kandev@nightly
+```
+
+A nightly version has the form `X.Y.(Z+1)-nightly.sha<12-hex-character SHA prefix>`, based on the latest
+stable `X.Y.Z`. The launcher and all five platform runtime packages use that same immutable
+version. Nightlies are best-effort daily snapshots. A new one appears only when `main` has changed
+since the latest Stable release, so some days may have no new Nightly.
+
+Nightly does not move `latest` and does not publish a Homebrew formula, Desktop updater feed,
+container tag, Git tag, or GitHub Release. Use it for prerelease testing, not unattended production
+rollout.
+
 ## Start and stop
 
 `run` is the default command. These are equivalent:
@@ -69,10 +137,27 @@ On a normal start, the launcher:
 2. creates the Kandev data directory with owner-only permissions where the platform supports Unix modes;
 3. selects backend and `agentctl` ports;
 4. starts and supervises the backend;
-5. waits up to 45 seconds for `/health`; and
-6. opens the printed local URL in the default browser.
+5. derives one or more `/health` targets from the effective server binds;
+6. waits up to 45 seconds for any target to return the launcher's health token (the backend is alive and its socket is bound);
+7. waits for `/ready` (the backend has finished startup recovery and can serve real requests); this wait is unbounded by design, since recovery can legitimately take much longer than 45 seconds; and
+8. opens the reachable access URL in the default browser.
+
+While `/ready` returns 503, it reports the current startup phase and elapsed
+time. The launcher prints phase changes and periodic status, so a long backup,
+migration, or recovery can be distinguished from an unreachable backend. These
+values describe elapsed work and do not estimate completion.
 
 The launcher remains in the foreground. Press `Ctrl+C` or terminate it to stop the backend and its managed children cleanly. A force-kill can leave worktree processes or containers running; inspect them before deleting data.
+
+On macOS and Linux, Kandev includes the runtime user's `~/.local/bin` in its
+backend and local agent process PATH when that home resolves to a usable absolute
+path. Otherwise, the inherited PATH remains unchanged. System services use the
+effective service account's home, even if inherited HOME names another user. This applies to regular launches and OS
+services, including agent CLIs installed after Kandev starts. Existing PATH
+entries take precedence. After installing an agent such as Cursor, its
+post-install refresh or a manual rescan can discover it without restarting to
+reload shell configuration. The runtime user's home is separate from Kandev's
+configured data directory.
 
 Use headless mode for SSH sessions, containers, or an external reverse proxy:
 
@@ -108,27 +193,31 @@ These commands and options describe the installed native launcher. Unknown argum
 
 ### `dev` and the internal web port are source-checkout options
 
-The repository's TypeScript launcher supports hot-reload development with this logical CLI syntax:
+The native launcher supports hot-reload development with this CLI syntax:
 
 ```text
 kandev dev [--port <backend-port>] [--web-internal-port <web-port>]
 kandev --dev [--port <backend-port>] [--web-internal-port <web-port>]
 ```
 
-Run its normal setup path from the repository root with `make dev`. To pass the internal-port override directly, invoke the same package script used by that Make target:
+Run its normal setup path from the repository root with `make dev`. To pass the internal-port override directly, invoke the launcher binary:
 
 ```bash
-cd apps
-pnpm -C cli dev -- dev --web-internal-port 37430
+make dev WEB_PORT=37430
+# or, after `make -C apps/backend build`:
+apps/backend/bin/kandev dev --web-internal-port 37430
 ```
 
-`--web-internal-port` accepts an integer from `1` through `65535`, including the `--web-internal-port=<port>` form. It controls the Vite development server that the Go backend reverse-proxies to; `--port` continues to control the backend URL. The flag is valid only with `dev` or `--dev`. `KANDEV_WEB_PORT` is its environment equivalent in dev mode and is ignored by `run` and `start`. Without either override, the source launcher prefers web port `37429` and selects a fallback if that port is unavailable.
+`--web-internal-port` accepts an integer from `1` through `65535`, including the `--web-internal-port=<port>` form. It controls the Vite development server that the Go backend reverse-proxies to; `--port` continues to control the backend URL. The flag is valid only with `dev` or `--dev`. `KANDEV_WEB_PORT` is its environment equivalent in dev mode and is ignored by `run` and `start`. Without either override, the launcher prefers web port `37429` and selects a fallback if that port is unavailable.
 
-The old `--web-port` spelling has been removed, not retained as an alias. The TypeScript launcher rejects both `--web-port <port>` and `--web-port=<port>` and directs callers to `--web-internal-port`; the native release launcher rejects both web-port spellings because it serves embedded web assets and has no separate web process.
+The old `--web-port` spelling has been removed, not retained as an alias. The launcher rejects both `--web-port <port>` and `--web-port=<port>` and directs callers to `--web-internal-port`; outside dev mode the release launcher rejects both web-port spellings because it serves embedded web assets and has no separate web process.
 
 ### `start` is for a source build
 
-`kandev start` makes the executable invoke its own embedded backend instead of resolving an installed bundle. It is a contributor/local-production-build path, not a second installation channel. From a checkout, use the Make targets so the correct binary and embedded web assets are built:
+`kandev start` uses the embedded web assets and backend in the executable. It is
+a contributor/local-production-build path, not a second installation channel.
+From a checkout, run the Make targets to build the correct binary and embedded
+web assets:
 
 ```bash
 make build
@@ -141,7 +230,7 @@ Development hot reload is also checkout-only:
 make dev
 ```
 
-`make dev` builds the remote `agentctl` helpers and invokes the repository's TypeScript development launcher. The `kandev dev` syntax above belongs to that source launcher; installing the npm or Homebrew release does not install it as a second runtime mode.
+`make dev` builds the launcher plus the host `agentctl` and, on hosts other than Linux/amd64, one Linux/amd64 helper. It then invokes the repository's native Go launcher. The `kandev dev` syntax above belongs to that source launcher; installing the npm or Homebrew release does not install it as a second runtime mode.
 
 ### OS service commands
 
@@ -153,9 +242,97 @@ kandev service status
 kandev service logs --follow
 ```
 
-Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--run-as <user>` (only with `--system`), `--port`, `--home-dir`, and `--no-boot-start`. Reinstalling an existing Kandev-managed system service preserves its account unless `--run-as` is supplied explicitly. A first system install from a root login requires `--run-as`, including `--run-as root` when root is intentional. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`. See [Run as a service](./run-as-a-service.md) for privileges, paths, upgrades, and recovery.
+Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--run-as <user>` (only with `--system`), `--port`, `--home-dir`, and `--no-boot-start`. Reinstalling an existing Kandev-managed system service preserves its account unless `--run-as` is supplied explicitly. A first system install from a root login requires `--run-as`, including `--run-as root` when root is intentional. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`. See [Run as a service](run-as-a-service.md) for privileges, paths, upgrades, and recovery.
 
 </details>
+
+## Database maintenance
+
+`kandev maintenance database` is an offline SQLite retention and compaction
+command for the same file the backend uses (`--home-dir`, `database.path`,
+`KANDEV_HOME_DIR`, and `KANDEV_DATABASE_PATH` resolve identically to the
+normal launcher):
+
+```text
+kandev maintenance database [--execute] [--compact]
+    [--keep-plan-revisions <n>] [--candidate-limit <n>] [--home-dir <path>]
+```
+
+| Option | Meaning |
+|---|---|
+| `--execute` | Perform retention deletes. Without it, the command is a read-only dry run (the default). |
+| `--compact` | After retention deletes commit, additionally stage a compacted copy and atomically replace the live database. Only takes effect together with `--execute`. |
+| `--keep-plan-revisions <n>` | Additionally protect the `n` most recent non-HEAD plan revisions per task (default `0`). |
+| `--candidate-limit <n>` | Cap how many rows are reported/deleted per retention category (default: unlimited). |
+| `--home-dir <path>` | Kandev home directory override (default: `$KANDEV_HOME_DIR` or `~/.kandev`). |
+| `--help`, `-h` | Print command help. |
+
+**Dry run (default).** Without `--execute`, the command never acquires a
+lock, takes a backup, or changes anything; it is always safe to run
+alongside a live `kandev` process. It reports a row count and estimated
+byte size for each retention category: duplicate git snapshots (content-
+identical repository-state polls for the same session), obsolete plan
+revisions (superseded, non-HEAD plan history beyond `--keep-plan-revisions`),
+and orphaned message payloads (externalized tool output no message still
+references). Normal conversation rows, the current plan HEAD, revert
+ancestry, and any protected snapshot are never candidates.
+
+**Execute.** `--execute` requires exclusive access to the database: it takes
+the same ownership lock a live backend takes at boot, so it refuses to run
+while `kandev` is already running against the same home/database. It always
+takes and verifies a fresh backup before deleting anything, written to
+`<database-dir>/backups/kandev-pre-maintenance-<timestamp>.db`; a failed or
+unverified backup aborts before any delete. Retention deletes run inside a
+single transaction, so partial deletion across categories cannot happen.
+
+**Compaction and rollback.** `--compact` (with `--execute`) stages a
+`VACUUM INTO` compacted copy after retention deletes commit, verifies it
+with an integrity check, requires enough free disk for the staged copy, and
+atomically replaces the live database file. The pre-compaction file is kept
+alongside the live database as
+`<database-path>.pre-compact-<timestamp>.bak` for manual rollback: stop
+`kandev` if it is running, then move that file back over the live database
+path. If compaction fails after retention deletes already committed, the
+command still reports the completed backup path and deleted-row counts; only
+the optional compaction step is aborted.
+
+### PR-watch and bounded-storage diagnostics
+
+Kandev publishes aggregate operational counters through Go's `/debug/vars`
+endpoint when diagnostics are enabled with `--debug`,
+`KANDEV_DEBUG_DEV_MODE=true`, or `KANDEV_DEBUG_PPROF_ENABLED=true`. Bind the
+backend to loopback while diagnostics are enabled and treat the complete
+response as sensitive process data. The counters below never use task,
+workspace, repository, branch, session, or execution identifiers as labels.
+
+| Metric | Meaning |
+|---|---|
+| `github_pr_watch_active` | Canonical watches eligible for polling in the latest poll census. |
+| `github_pr_watch_searching` | Eligible watches still searching by branch. |
+| `github_pr_watch_duplicates` | Rows that violate the canonical searching or discovered identity in the latest census. Expected value: `0`. |
+| `github_pr_watch_orphans` | Watches whose task or task/repository relationship is missing. Expected value: `0`. |
+| `github_pr_watch_canonical_poll_requests_total` | Canonical watch targets submitted to GitHub polling, including targets combined into one batch request. |
+| `task_status_summary_cas_retries_total` | Projection compare-and-swap losses retried after reloading authoritative state. |
+| `task_status_summary_cas_exhaustions_total` | Projection updates that exhausted the bounded retry policy. Expected steady-state value: no increase. |
+| `task_status_summary_event_handler_failures_total` | Status-summary events that returned a handler error. |
+| `task_message_payload_hydrations_total` | Explicit payload hydration outcomes, labelled only by `outcome=success` or `outcome=error`. |
+| `task_message_payload_hydration_latency_ms` | Cumulative hydration counts in the bounded `10`, `50`, `250`, `1000`, and `+Inf` millisecond buckets, labelled by outcome. |
+| `task_message_content_bytes` | Logical bytes in message content from the latest database-stat read. |
+| `task_message_metadata_bytes` | Logical bytes in inline message metadata from the latest database-stat read. |
+| `task_message_payload_compressed_bytes` | Compressed external payload bytes from the latest database-stat read. |
+| `task_git_snapshot_bytes` | Logical Git snapshot file and metadata bytes from the latest database-stat read. |
+| `database_size_bytes` / `database_wal_size_bytes` | Database and SQLite WAL bytes from the latest database-stat read. PostgreSQL reports `0` for the SQLite-only WAL gauge. |
+| `message_queue_depth` | Current unreserved prompt queue depth. `-1` means the queue is unavailable or the bounded read failed. |
+| `agent_active_runtimes` | Agent executions currently owned by the lifecycle runtime. |
+
+`GET /api/v1/system/database` refreshes the database and storage gauges and
+returns the same values as typed fields: `size_bytes`, `wal_size_bytes`,
+`message_content_bytes`, `message_metadata_bytes`, `message_payload_bytes`,
+and `git_snapshot_bytes`. Storage categories use portable logical byte
+aggregates, so they remain available when SQLite `dbstat` or PostgreSQL
+relation-size facilities are unavailable. Use them for trends and retention
+decisions; use filesystem or database-provider metrics for physical quota and
+capacity alerts.
 
 ## Ports and network exposure
 
@@ -164,26 +341,40 @@ Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `statu
 | Backend (UI, HTTP, WebSocket, MCP) | `38429` | If no port was requested and this port cannot bind on loopback, try up to 10 random ports in `10000`-`60000`. |
 | Core `agentctl` | `39429` | Uses the same automatic fallback strategy and never shares the backend port. |
 
-There is no separate web-server port in an installed release: the backend serves embedded assets. If `--port`, `KANDEV_BACKEND_PORT`, or `KANDEV_PORT` specifies a port, the launcher does not substitute another one; backend startup fails if the configured listen address cannot bind it.
+There is no separate web-server port in an installed release: the backend serves embedded assets. For the `run`, `start`, and development launcher flows, if `--port`, `KANDEV_BACKEND_PORT`, or `KANDEV_PORT` specifies a port, the launcher checks it before declaring the backend ready, does not substitute another one, and fails startup if the configured listen address cannot bind it. `kandev service install --port` remains the separate installer behavior described above.
 
-The launcher prints `http://localhost:<port>`, but the backend's default `server.host` is `0.0.0.0`. That can expose Kandev to other machines on the network, and the current local product path is not an authenticated multi-user boundary. Bind it to loopback unless remote access is deliberately protected:
+The launcher derives readiness targets and the access URL from the effective `server.host` or `server.hosts` values. A specific IP or hostname is probed directly. An IPv4 wildcard is probed through `127.0.0.1`, while the default local browser/access URL remains `http://localhost:<port>` to preserve the established browser origin. An IPv6 wildcard is probed and accessed through `[::1]`. With multiple binds, the launcher probes all targets concurrently but preserves target priority: a lower-priority success is selected only after higher-priority targets complete without the launcher's health token. It prefers a loopback target for the printed or opened access URL.
+
+When it can enumerate non-loopback interfaces, the launcher also prints `network:` URLs for each unique non-loopback, non-link-local address on the same port, including local-network and Tailscale addresses. IPv6 addresses are shown in brackets. If the effective bind restricts the listener, the launcher only prints matching addresses. These lines are informational and are omitted if interface discovery is unavailable.
+
+The `dev`, `start`, and `run` startup banners also print a `version:` line. Its value matches `kandev --version`; an unstamped local build reports `dev`.
+
+The backend's default `server.host` is `0.0.0.0`. That can expose Kandev to other machines on the network, and the current local product path is not an authenticated multi-user boundary. The launcher uses `localhost` for its default local access URL, but the backend still listens on every interface. Bind it to loopback unless remote access is deliberately protected:
 
 ```bash
 KANDEV_SERVER_HOST=127.0.0.1 kandev
 ```
 
-See [Configuration](./configuration.md) before putting Kandev behind a reverse proxy or publishing the port.
+See [Configuration](configuration.md) before putting Kandev behind a reverse proxy or publishing the port.
 
 ## Launcher environment
 
 Flags take precedence over the equivalent port variables. `KANDEV_BACKEND_PORT` takes precedence over `KANDEV_PORT`.
+
+Every CLI launch automatically uses the startup configuration discovery in
+[Configuration](configuration.md): `config.yaml` in the working directory,
+then `<KANDEV_HOME_DIR>/config.yaml` (or `~/.kandev/config.yaml`), then
+`/etc/kandev/config.yaml`. The first existing file is authoritative; Kandev
+does not merge candidates, and an unreadable or invalid first file stops the
+launch. There is no public `--config` flag. Service launches use the same
+discovery and carry the selected file into the managed backend process.
 
 | Variable | Default | Behavior |
 |---|---|---|
 | `KANDEV_BACKEND_PORT` | unset | Backend port when `--port` is absent. |
 | `KANDEV_PORT` | unset | Compatibility backend-port alias. |
 | `KANDEV_HOME_DIR` | `~/.kandev` | Root for application data, tasks, repositories, logs, and launcher state. |
-| `KANDEV_DATABASE_PATH` | `<home>/data/kandev.db` | Advanced SQLite path override. See the backup caveat in [Configuration](./configuration.md). |
+| `KANDEV_DATABASE_PATH` | `<home>/data/kandev.db` | Advanced SQLite path override. System backups use the sibling `backups/` directory. See [Configuration](configuration.md). |
 | `KANDEV_LOG_LEVEL` | `warn` from the launcher | Explicit backend log level; overrides `--verbose` and `--debug` log-level selection. |
 | `KANDEV_HEALTH_TIMEOUT_MS` | `45000` | Positive integer startup-health timeout. Invalid or non-positive values fall back to 45 seconds. |
 | `KANDEV_NO_BROWSER` | unset | The exact value `1` suppresses browser opening. |
@@ -193,25 +384,39 @@ Flags take precedence over the equivalent port variables. `KANDEV_BACKEND_PORT` 
 
 The launcher also sets the selected server and `agentctl` ports for the backend. Treat its supervisor socket and manifest under `<home>/supervisor/` as private implementation state, not a control API.
 
-`--debug` sets `KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true`. Debug events go to `<home>/logs/backend-logs.log`; warn and above still appear on stdout. ACP logs can contain full prompts, file content, and tool calls, while diagnostic endpoints expose process details. Use debug mode only on a trusted machine and remove retained debug logs afterward. [Configuration](./configuration.md) lists locations and retention.
+`--debug` sets `KANDEV_DEBUG_AGENT_MESSAGES=true` and
+`KANDEV_DEBUG_PPROF_ENABLED=true` without selecting the `dev` profile. The
+`make start-debug` launcher also defaults the browser title to `Debug Kandev`;
+`make dev` selects the development profile and uses `Dev Kandev`. Debug events
+go to `<home>/logs/backend-logs.log`; warn and above still appear on stdout.
+ACP logs can contain full prompts, file content, and tool calls, while
+diagnostic endpoints expose process details. Use debug mode only on a trusted
+machine and remove retained debug logs afterward. [Configuration](configuration.md)
+lists locations and retention.
 
 ## Data and cleanup
 
-The default persistent root is `~/.kandev` (on Windows, `.kandev` below the user's profile directory). The SQLite database normally resides at `<home>/data/kandev.db`; repositories, task worktrees, logs, and encrypted settings also live below the home root.
+The default persistent root is `~/.kandev` (on Windows, `.kandev` below the user's profile directory). The SQLite database normally resides at `<home>/data/kandev.db`; its snapshots reside at `<home>/data/backups/`. With `KANDEV_DATABASE_PATH`, Kandev uses `backups/` beside the configured database file. Repositories, task worktrees, logs, and encrypted settings also live below the home root.
 
 Runtime program files live in the Homebrew Cellar, the global npm dependency tree, or npm's `_npx` cache. They are not application data. `npm config get cache` and `npm root -g` show the latter two roots.
 
-Uninstalling the package does not remove `<home>`. Before removing that directory, stop Kandev and any service, confirm no task or executor is running, and take a backup. See [Operations](./operations.md) for safe database backup and restore procedures.
+Uninstalling the package does not remove `<home>`. Before removing that directory, stop Kandev and any service, confirm no task or executor is running, and take a backup. See [Operations](operations.md) for safe database backup and restore procedures.
 
 ## Update
 
-The installer owns CLI updates:
+The installer owns CLI updates. Update persistent Stable installs with:
 
 ```bash
 brew upgrade kandev
+scoop update kandev
 npm install -g kandev@latest
-npx -y kandev@latest
 ```
+
+Use `npm install -g kandev@nightly` for a persistent npm Nightly install. `npx -y kandev@latest`
+and `npx -y kandev@nightly` launch one-off copies from the requested channel; they do not update a
+global package. A verified managed npm/npx user service can also select **Nightly** under
+**Settings > System > Updates**. Stable is selected by default; Desktop, Homebrew, system-service,
+unmanaged, local-checkout, and unknown installs cannot change this setting.
 
 Release packages pin the shim and native runtime packages to the same SemVer. Do not copy only one binary from a different release into a bundle. A service unit contains installation-specific executable and bundle paths; after the package upgrade, reinstall it with the same service flags and restart it as described above.
 
@@ -252,7 +457,20 @@ kandev --verbose
 KANDEV_HEALTH_TIMEOUT_MS=90000 kandev --verbose
 ```
 
-The launcher prints buffered backend output when startup fails. Common causes are an invalid `config.yaml`, a database migration/permission error, an occupied explicit port, or a damaged runtime bundle.
+The launcher prints buffered backend output once when startup fails, followed by a bounded summary. The summary includes the effective bind addresses, every attempted health target and its last safe outcome, the selected configuration file, the effective `server.host` source, the backend log path, one next step, and a link to this troubleshooting guide. It never prints the launcher's health token or sensitive configuration values.
+
+Use the failure class to choose the next action:
+
+| Failure class | Meaning and recovery |
+|---|---|
+| Early backend exit | The child stopped before readiness. Read the named backend log for the startup error. |
+| Unreachable backend | No target accepted a connection. Check the effective binds, firewall rules, and environment overrides. |
+| Unhealthy HTTP response | A target answered with a non-success status. Inspect that status and the backend log. |
+| Different process | A selected port answered without the launcher's token. Free the port or choose another backend port. |
+
+If the backend is still running when readiness expires, the summary says that the launcher stopped it after readiness failed. It does not describe that case as a backend crash. Common underlying causes include an invalid `config.yaml`, a database migration or permission error, an occupied explicit port, or a damaged runtime bundle.
+
+ACP probe closure messages occur after an agent protocol probe and do not cause a launcher `/health` timeout. Likewise, an `X-Forwarded-Host` warning means that a reverse proxy reached a running backend without trusted-proxy configuration; it is not a launcher readiness failure. Configure the immediate proxy peer under `server.trustedProxies` as described in [Configuration](./configuration.md).
 
 ### Browser does not open
 
@@ -260,4 +478,8 @@ Open the printed URL manually. Linux requires a working `xdg-open`; WSL often ne
 
 ### Configuration appears ignored
 
-The public CLI has no `--config` option. `config.yaml` must be in the launcher's backend working directory or `/etc/kandev/`, and environment values override it. For predictable installed/service deployments, prefer explicit environment variables and verify the active home and database paths printed at startup. See [Configuration](./configuration.md).
+The public CLI has no `--config` option. Confirm the first existing candidate
+in the working-directory, home, and `/etc/kandev/` order, and remember that
+environment values override YAML. For predictable installed/service
+deployments, verify the active home and database paths printed at startup.
+See [Configuration](configuration.md).

@@ -6,7 +6,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
-	"github.com/kandev/kandev/internal/lsp/installer"
+	"github.com/kandev/kandev/internal/plugins"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -41,6 +41,10 @@ func NewGateway(log *logger.Logger) *Gateway {
 	}
 }
 
+func (g *Gateway) SetPluginConversationService(service *plugins.Service) {
+	g.Hub.SetPluginConversationService(service)
+}
+
 // SetLifecycleManager enables the dedicated terminal WebSocket handler for passthrough mode.
 // This must be called before SetupRoutes if terminal passthrough is needed.
 func (g *Gateway) SetLifecycleManager(lifecycleMgr *lifecycle.Manager, userService UserService, scriptService scripts.ScriptService) {
@@ -48,8 +52,8 @@ func (g *Gateway) SetLifecycleManager(lifecycleMgr *lifecycle.Manager, userServi
 }
 
 // SetLSPHandler enables the LSP WebSocket handler.
-func (g *Gateway) SetLSPHandler(lifecycleMgr *lifecycle.Manager, userService LSPUserService, installerRegistry *installer.Registry) {
-	g.LSPHandler = NewLSPHandler(lifecycleMgr, userService, installerRegistry, g.logger)
+func (g *Gateway) SetLSPHandler(lifecycleMgr *lifecycle.Manager, userService LSPUserService, configuredMax ...int) {
+	g.LSPHandler = NewLSPHandler(lifecycleMgr, userService, g.logger, configuredMax...)
 }
 
 // SetVscodeProxy enables the VS Code reverse proxy handler.

@@ -3,7 +3,136 @@ package scriptengine
 import (
 	"fmt"
 	"strings"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
+
+// RemoteContributionSetupScript returns the kandev-owned checkout fragment
+// used by clone-based executors. The target repository is cloned by the
+// normal prepare script; this fragment adds a separate source remote, fetches
+// the exact provider head, and checks out a collision-safe local branch.
+//
+// All binding values have already passed the credential-free domain validator,
+// but they are still shell-quoted here because branch names are provider data.
+// The fragment intentionally does not print the remote URL or provider text.
+func RemoteContributionSetupScript(binding *models.RemoteContribution) (string, error) {
+	if binding == nil {
+		return "", nil
+	}
+	if err := binding.Validate(); err != nil {
+		return "", fmt.Errorf("validate remote contribution: %w", err)
+	}
+	remoteName := binding.ContributionRemoteName()
+	remoteBranch := binding.HeadBranch
+	remoteRef := "refs/remotes/" + remoteName + "/" + remoteBranch
+	refspec := "+refs/heads/" + remoteBranch + ":" + remoteRef
+	branchSuffix := strings.TrimPrefix(remoteName, "contrib-")
+
+	return fmt.Sprintf(`
+
+# ---- kandev-managed: materialize existing remote contribution ----
+# The target repository remains origin. The source fork is a separate,
+# binding-derived remote and the fetched head is verified before checkout.
+(
+  set -eu
+  cd %s
+  contribution_remote=%s
+  contribution_url=%s
+  contribution_branch=%s
+  contribution_ref=%s
+  contribution_refspec=%s
+  expected_head=%s
+  if configured_url=$(git config --get "remote.$contribution_remote.url" 2>/dev/null); then
+    if [ "$configured_url" != "$contribution_url" ]; then
+      echo 'kandev: contribution remote identity conflict' >&2
+      exit 1
+    fi
+  else
+    git remote add "$contribution_remote" "$contribution_url"
+  fi
+  if ! git fetch --no-tags "$contribution_remote" "$contribution_refspec" >/dev/null 2>&1; then
+    echo 'kandev: contribution source branch is unavailable' >&2
+    exit 1
+  fi
+  actual_head=$(git rev-parse --verify "$contribution_ref" 2>/dev/null || true)
+  expected_head=$(printf '%%s' "$expected_head" | tr '[:upper:]' '[:lower:]')
+  actual_head=$(printf '%%s' "$actual_head" | tr '[:upper:]' '[:lower:]')
+  if [ -z "$actual_head" ] || [ "$actual_head" != "$expected_head" ]; then
+    echo 'kandev: contribution source head changed' >&2
+    exit 1
+  fi
+  checkout_branch="$contribution_branch"
+  if git show-ref --verify --quiet "refs/heads/$checkout_branch"; then
+    checkout_branch="$contribution_branch-kandev-%s"
+    suffix=0
+    while git show-ref --verify --quiet "refs/heads/$checkout_branch"; do
+      suffix=$((suffix + 1))
+      checkout_branch="$contribution_branch-kandev-%s-$suffix"
+    done
+  fi
+  git checkout -b "$checkout_branch" "$contribution_ref"
+  git branch --set-upstream-to="$contribution_remote/$contribution_branch" "$checkout_branch"
+)
+`, shellQuote("/workspace"), shellQuote(remoteName), shellQuote(binding.SourceRepository.RemoteURL),
+		shellQuote(remoteBranch), shellQuote(remoteRef), shellQuote(refspec), shellQuote(binding.HeadSHA),
+		branchSuffix, branchSuffix), nil
+}
+
+// ContributionDestinationSetupScript configures a server-bound fork as the
+// push remote for the current branch. It never changes origin or the branch's
+// upstream remote, so fetch and pull continue to use the canonical checkout.
+func ContributionDestinationSetupScript(destination *models.ContributionDestination) (string, error) {
+	return ContributionDestinationSetupScriptAt(destination, "/workspace")
+}
+
+// ContributionDestinationSetupScriptAt is the workspace-path variant used by
+// host and SSH preparers whose checkout root is not /workspace.
+func ContributionDestinationSetupScriptAt(destination *models.ContributionDestination, workspacePath string) (string, error) {
+	if destination == nil {
+		return "", nil
+	}
+	if err := destination.Validate(); err != nil {
+		return "", fmt.Errorf("validate contribution destination: %w", err)
+	}
+	remoteName := destination.ContributionRemoteName()
+	return fmt.Sprintf(`
+
+# ---- kandev-managed: configure contribution destination ----
+# origin and the branch upstream remain canonical; only ordinary pushes use
+# this exact, server-verified destination repository.
+(
+  set -eu
+  cd %s
+  destination_remote=%s
+  destination_url=%s
+  if configured_url=$(git config --get "remote.$destination_remote.url" 2>/dev/null); then
+    if [ "$configured_url" != "$destination_url" ]; then
+      echo 'kandev: contribution destination identity conflict' >&2
+      exit 1
+    fi
+  else
+    git remote add "$destination_remote" "$destination_url"
+  fi
+  configured_push_urls=$(git config --get-all "remote.$destination_remote.pushurl" 2>/dev/null || true)
+  if [ -n "$configured_push_urls" ]; then
+    while IFS= read -r configured_push_url; do
+      if [ "$configured_push_url" != "$destination_url" ]; then
+        echo 'kandev: contribution destination push identity conflict' >&2
+        exit 1
+      fi
+    done <<EOF
+$configured_push_urls
+EOF
+  else
+    git config --add "remote.$destination_remote.pushurl" "$destination_url"
+  fi
+  current_branch=$(git branch --show-current)
+  if [ -n "$current_branch" ]; then
+    git config "branch.$current_branch.pushRemote" "$destination_remote"
+  fi
+)
+	`, shellQuote(workspacePath), shellQuote(remoteName), shellQuote(destination.TargetRepository.RemoteURL)), nil
+}
 
 // RepositoryProvider returns git-related placeholders from metadata and environment.
 // Parameters:
@@ -36,7 +165,7 @@ func RepositoryProvider(
 		if branch == "" {
 			branch = getMetaString(metadata, "repository_branch")
 		}
-		vars["repository.branch"] = shellQuote(branch)
+		vars["repository.branch"] = shellQuote(repositoryBranchName(branch))
 
 		// repository.setup_script is a script FRAGMENT (intentional multi-line
 		// shell), not data — do NOT quote it.
@@ -59,17 +188,46 @@ func RepositoryProvider(
 	}
 }
 
-// AgentctlProvider returns kandev agentctl-related placeholders.
+// AgentctlProviderOptions configures executor-specific agentctl placeholders.
+type AgentctlProviderOptions struct {
+	BinaryPath string
+	Start      bool
+}
+
+// AgentctlProvider returns the legacy agentctl placeholders used by existing
+// callers.
 func AgentctlProvider(agentctlPort int, workspacePath string) PlaceholderProvider {
+	return agentctlProvider(agentctlPort, workspacePath, "/usr/local/bin/agentctl", "agentctl")
+}
+
+// AgentctlProviderWithOptions returns agentctl placeholders for an
+// executor-visible binary path.
+func AgentctlProviderWithOptions(
+	agentctlPort int,
+	workspacePath string,
+	options AgentctlProviderOptions,
+) PlaceholderProvider {
+	startCommand := ""
+	if options.Start {
+		startCommand = options.BinaryPath
+	}
+	return agentctlProvider(agentctlPort, workspacePath, options.BinaryPath, startCommand)
+}
+
+func agentctlProvider(agentctlPort int, workspacePath, binaryPath, startCommand string) PlaceholderProvider {
 	return func() map[string]string {
 		portStr := fmt.Sprintf("%d", agentctlPort)
+		startScript := ""
+		if startCommand != "" {
+			startScript = fmt.Sprintf(
+				"nohup %s --port %s --workdir %s > /tmp/agentctl.log 2>&1 &\nsleep 1",
+				shellQuote(startCommand), portStr, shellQuote(workspacePath),
+			)
+		}
 		return map[string]string{
 			"kandev.agentctl.port":    portStr,
-			"kandev.agentctl.install": "chmod +x /usr/local/bin/agentctl",
-			"kandev.agentctl.start": fmt.Sprintf(
-				"nohup agentctl --port %s --workdir %s > /tmp/agentctl.log 2>&1 &\nsleep 1",
-				portStr, workspacePath,
-			),
+			"kandev.agentctl.install": "chmod +x " + shellQuote(binaryPath),
+			"kandev.agentctl.start":   startScript,
 		}
 	}
 }
@@ -228,7 +386,16 @@ gh config set git_protocol https --host github.com 2>/dev/null || true`
 		lines := []string{
 			"# GitHub token authentication",
 			"# Configure git credential helper for GitHub HTTPS authentication",
-			`git config --global credential.https://github.com.helper '!/bin/sh -c "echo username=x-access-token; echo password=${GH_TOKEN:-${GITHUB_TOKEN}}"'`,
+			// --replace-all is required, not cosmetic. `gh auth setup-git` (run
+			// below, and by the no-token branch above) leaves the key
+			// multi-valued: an empty entry that resets the helper chain plus
+			// gh's own helper. A plain `git config --global <key> <value>`
+			// refuses to overwrite a multi-valued key and exits 5, which aborts
+			// the whole prepare script under `set -euo pipefail`. That makes the
+			// no-token branch poison the with-token branch: on a host whose home
+			// directory persists between runs (SSH, unlike an ephemeral Docker
+			// container) exactly one launch succeeds and every later one fails.
+			`git config --global --replace-all credential.https://github.com.helper '!/bin/sh -c "echo username=x-access-token; echo password=${GH_TOKEN:-${GITHUB_TOKEN}}"'`,
 			"# Configure gh CLI to use HTTPS protocol",
 			"gh config set git_protocol https --host github.com 2>/dev/null || true",
 			"# Register gh as git credential helper (backup method)",

@@ -19,8 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Plugin_DeliverEvent_FullMethodName  = "/kandev.plugin.v1.Plugin/DeliverEvent"
-	Plugin_HandleWebhook_FullMethodName = "/kandev.plugin.v1.Plugin/HandleWebhook"
+	Plugin_DeliverEvent_FullMethodName                = "/kandev.plugin.v1.Plugin/DeliverEvent"
+	Plugin_HandleWebhook_FullMethodName               = "/kandev.plugin.v1.Plugin/HandleWebhook"
+	Plugin_DescribeAutomationCondition_FullMethodName = "/kandev.plugin.v1.Plugin/DescribeAutomationCondition"
+	Plugin_VerifyAutomationWebhook_FullMethodName     = "/kandev.plugin.v1.Plugin/VerifyAutomationWebhook"
+	Plugin_HandleAction_FullMethodName                = "/kandev.plugin.v1.Plugin/HandleAction"
+	Plugin_SearchEntityReferences_FullMethodName      = "/kandev.plugin.v1.Plugin/SearchEntityReferences"
+	Plugin_AuthorizeEntityReference_FullMethodName    = "/kandev.plugin.v1.Plugin/AuthorizeEntityReference"
+	Plugin_ResolveGitCredential_FullMethodName        = "/kandev.plugin.v1.Plugin/ResolveGitCredential"
+	Plugin_GetGitCredentialBinding_FullMethodName     = "/kandev.plugin.v1.Plugin/GetGitCredentialBinding"
+	Plugin_InvokeAgentTool_FullMethodName             = "/kandev.plugin.v1.Plugin/InvokeAgentTool"
 )
 
 // PluginClient is the client API for Plugin service.
@@ -31,6 +39,26 @@ const (
 type PluginClient interface {
 	DeliverEvent(ctx context.Context, in *Event, opts ...grpc.CallOption) (*EventAck, error)
 	HandleWebhook(ctx context.Context, in *WebhookRequest, opts ...grpc.CallOption) (*WebhookResponse, error)
+	// Optional automation adapter extension. Old plugins return Unimplemented.
+	DescribeAutomationCondition(ctx context.Context, in *AutomationConditionRequest, opts ...grpc.CallOption) (*AutomationConditionResponse, error)
+	VerifyAutomationWebhook(ctx context.Context, in *AutomationWebhookRequest, opts ...grpc.CallOption) (*AutomationWebhookResponse, error)
+	// Browser-originated calls reach this method only through Kandev's
+	// authenticated declared-action route. Context is host-verified; body is
+	// bounded untrusted JSON.
+	HandleAction(ctx context.Context, in *PluginActionRequest, opts ...grpc.CallOption) (*PluginActionResponse, error)
+	// Dynamic composer-reference operations. Candidate identity is untrusted;
+	// the host owns canonical references and reauthorizes on submission.
+	SearchEntityReferences(ctx context.Context, in *SearchEntityReferencesRequest, opts ...grpc.CallOption) (*SearchEntityReferencesResponse, error)
+	AuthorizeEntityReference(ctx context.Context, in *AuthorizeEntityReferenceRequest, opts ...grpc.CallOption) (*AuthorizeEntityReferenceResponse, error)
+	// Optional resolver for manifest-owned repository providers. Returned
+	// credentials are transient and never persisted by the host.
+	ResolveGitCredential(ctx context.Context, in *ResolveGitCredentialRequest, opts ...grpc.CallOption) (*ResolveGitCredentialResponse, error)
+	// Optional non-secret credential revision for an exact resolver scope.
+	// The host stores this opaque value in a lease and compares it before and
+	// after credential redemption so a rotated or disconnected provider fails
+	// closed without resolving a secret merely to inspect its revision.
+	GetGitCredentialBinding(ctx context.Context, in *GitCredentialBindingRequest, opts ...grpc.CallOption) (*GitCredentialBindingResponse, error)
+	InvokeAgentTool(ctx context.Context, in *AgentToolRequest, opts ...grpc.CallOption) (*AgentToolResponse, error)
 }
 
 type pluginClient struct {
@@ -61,6 +89,86 @@ func (c *pluginClient) HandleWebhook(ctx context.Context, in *WebhookRequest, op
 	return out, nil
 }
 
+func (c *pluginClient) DescribeAutomationCondition(ctx context.Context, in *AutomationConditionRequest, opts ...grpc.CallOption) (*AutomationConditionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AutomationConditionResponse)
+	err := c.cc.Invoke(ctx, Plugin_DescribeAutomationCondition_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) VerifyAutomationWebhook(ctx context.Context, in *AutomationWebhookRequest, opts ...grpc.CallOption) (*AutomationWebhookResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AutomationWebhookResponse)
+	err := c.cc.Invoke(ctx, Plugin_VerifyAutomationWebhook_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) HandleAction(ctx context.Context, in *PluginActionRequest, opts ...grpc.CallOption) (*PluginActionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PluginActionResponse)
+	err := c.cc.Invoke(ctx, Plugin_HandleAction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) SearchEntityReferences(ctx context.Context, in *SearchEntityReferencesRequest, opts ...grpc.CallOption) (*SearchEntityReferencesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchEntityReferencesResponse)
+	err := c.cc.Invoke(ctx, Plugin_SearchEntityReferences_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) AuthorizeEntityReference(ctx context.Context, in *AuthorizeEntityReferenceRequest, opts ...grpc.CallOption) (*AuthorizeEntityReferenceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuthorizeEntityReferenceResponse)
+	err := c.cc.Invoke(ctx, Plugin_AuthorizeEntityReference_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) ResolveGitCredential(ctx context.Context, in *ResolveGitCredentialRequest, opts ...grpc.CallOption) (*ResolveGitCredentialResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveGitCredentialResponse)
+	err := c.cc.Invoke(ctx, Plugin_ResolveGitCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) GetGitCredentialBinding(ctx context.Context, in *GitCredentialBindingRequest, opts ...grpc.CallOption) (*GitCredentialBindingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GitCredentialBindingResponse)
+	err := c.cc.Invoke(ctx, Plugin_GetGitCredentialBinding_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) InvokeAgentTool(ctx context.Context, in *AgentToolRequest, opts ...grpc.CallOption) (*AgentToolResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AgentToolResponse)
+	err := c.cc.Invoke(ctx, Plugin_InvokeAgentTool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PluginServer is the server API for Plugin service.
 // All implementations must embed UnimplementedPluginServer
 // for forward compatibility.
@@ -69,6 +177,26 @@ func (c *pluginClient) HandleWebhook(ctx context.Context, in *WebhookRequest, op
 type PluginServer interface {
 	DeliverEvent(context.Context, *Event) (*EventAck, error)
 	HandleWebhook(context.Context, *WebhookRequest) (*WebhookResponse, error)
+	// Optional automation adapter extension. Old plugins return Unimplemented.
+	DescribeAutomationCondition(context.Context, *AutomationConditionRequest) (*AutomationConditionResponse, error)
+	VerifyAutomationWebhook(context.Context, *AutomationWebhookRequest) (*AutomationWebhookResponse, error)
+	// Browser-originated calls reach this method only through Kandev's
+	// authenticated declared-action route. Context is host-verified; body is
+	// bounded untrusted JSON.
+	HandleAction(context.Context, *PluginActionRequest) (*PluginActionResponse, error)
+	// Dynamic composer-reference operations. Candidate identity is untrusted;
+	// the host owns canonical references and reauthorizes on submission.
+	SearchEntityReferences(context.Context, *SearchEntityReferencesRequest) (*SearchEntityReferencesResponse, error)
+	AuthorizeEntityReference(context.Context, *AuthorizeEntityReferenceRequest) (*AuthorizeEntityReferenceResponse, error)
+	// Optional resolver for manifest-owned repository providers. Returned
+	// credentials are transient and never persisted by the host.
+	ResolveGitCredential(context.Context, *ResolveGitCredentialRequest) (*ResolveGitCredentialResponse, error)
+	// Optional non-secret credential revision for an exact resolver scope.
+	// The host stores this opaque value in a lease and compares it before and
+	// after credential redemption so a rotated or disconnected provider fails
+	// closed without resolving a secret merely to inspect its revision.
+	GetGitCredentialBinding(context.Context, *GitCredentialBindingRequest) (*GitCredentialBindingResponse, error)
+	InvokeAgentTool(context.Context, *AgentToolRequest) (*AgentToolResponse, error)
 	mustEmbedUnimplementedPluginServer()
 }
 
@@ -84,6 +212,30 @@ func (UnimplementedPluginServer) DeliverEvent(context.Context, *Event) (*EventAc
 }
 func (UnimplementedPluginServer) HandleWebhook(context.Context, *WebhookRequest) (*WebhookResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HandleWebhook not implemented")
+}
+func (UnimplementedPluginServer) DescribeAutomationCondition(context.Context, *AutomationConditionRequest) (*AutomationConditionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribeAutomationCondition not implemented")
+}
+func (UnimplementedPluginServer) VerifyAutomationWebhook(context.Context, *AutomationWebhookRequest) (*AutomationWebhookResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyAutomationWebhook not implemented")
+}
+func (UnimplementedPluginServer) HandleAction(context.Context, *PluginActionRequest) (*PluginActionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HandleAction not implemented")
+}
+func (UnimplementedPluginServer) SearchEntityReferences(context.Context, *SearchEntityReferencesRequest) (*SearchEntityReferencesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SearchEntityReferences not implemented")
+}
+func (UnimplementedPluginServer) AuthorizeEntityReference(context.Context, *AuthorizeEntityReferenceRequest) (*AuthorizeEntityReferenceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AuthorizeEntityReference not implemented")
+}
+func (UnimplementedPluginServer) ResolveGitCredential(context.Context, *ResolveGitCredentialRequest) (*ResolveGitCredentialResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResolveGitCredential not implemented")
+}
+func (UnimplementedPluginServer) GetGitCredentialBinding(context.Context, *GitCredentialBindingRequest) (*GitCredentialBindingResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetGitCredentialBinding not implemented")
+}
+func (UnimplementedPluginServer) InvokeAgentTool(context.Context, *AgentToolRequest) (*AgentToolResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InvokeAgentTool not implemented")
 }
 func (UnimplementedPluginServer) mustEmbedUnimplementedPluginServer() {}
 func (UnimplementedPluginServer) testEmbeddedByValue()                {}
@@ -142,6 +294,150 @@ func _Plugin_HandleWebhook_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Plugin_DescribeAutomationCondition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AutomationConditionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).DescribeAutomationCondition(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_DescribeAutomationCondition_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).DescribeAutomationCondition(ctx, req.(*AutomationConditionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_VerifyAutomationWebhook_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AutomationWebhookRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).VerifyAutomationWebhook(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_VerifyAutomationWebhook_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).VerifyAutomationWebhook(ctx, req.(*AutomationWebhookRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_HandleAction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PluginActionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).HandleAction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_HandleAction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).HandleAction(ctx, req.(*PluginActionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_SearchEntityReferences_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchEntityReferencesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).SearchEntityReferences(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_SearchEntityReferences_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).SearchEntityReferences(ctx, req.(*SearchEntityReferencesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_AuthorizeEntityReference_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthorizeEntityReferenceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).AuthorizeEntityReference(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_AuthorizeEntityReference_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).AuthorizeEntityReference(ctx, req.(*AuthorizeEntityReferenceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_ResolveGitCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveGitCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).ResolveGitCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_ResolveGitCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).ResolveGitCredential(ctx, req.(*ResolveGitCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_GetGitCredentialBinding_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GitCredentialBindingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).GetGitCredentialBinding(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_GetGitCredentialBinding_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).GetGitCredentialBinding(ctx, req.(*GitCredentialBindingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_InvokeAgentTool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AgentToolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).InvokeAgentTool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_InvokeAgentTool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).InvokeAgentTool(ctx, req.(*AgentToolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Plugin_ServiceDesc is the grpc.ServiceDesc for Plugin service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -157,36 +453,83 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "HandleWebhook",
 			Handler:    _Plugin_HandleWebhook_Handler,
 		},
+		{
+			MethodName: "DescribeAutomationCondition",
+			Handler:    _Plugin_DescribeAutomationCondition_Handler,
+		},
+		{
+			MethodName: "VerifyAutomationWebhook",
+			Handler:    _Plugin_VerifyAutomationWebhook_Handler,
+		},
+		{
+			MethodName: "HandleAction",
+			Handler:    _Plugin_HandleAction_Handler,
+		},
+		{
+			MethodName: "SearchEntityReferences",
+			Handler:    _Plugin_SearchEntityReferences_Handler,
+		},
+		{
+			MethodName: "AuthorizeEntityReference",
+			Handler:    _Plugin_AuthorizeEntityReference_Handler,
+		},
+		{
+			MethodName: "ResolveGitCredential",
+			Handler:    _Plugin_ResolveGitCredential_Handler,
+		},
+		{
+			MethodName: "GetGitCredentialBinding",
+			Handler:    _Plugin_GetGitCredentialBinding_Handler,
+		},
+		{
+			MethodName: "InvokeAgentTool",
+			Handler:    _Plugin_InvokeAgentTool_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "kandev/plugin/v1/plugin.proto",
 }
 
 const (
-	Host_GetState_FullMethodName             = "/kandev.plugin.v1.Host/GetState"
-	Host_SetState_FullMethodName             = "/kandev.plugin.v1.Host/SetState"
-	Host_DeleteState_FullMethodName          = "/kandev.plugin.v1.Host/DeleteState"
-	Host_ListState_FullMethodName            = "/kandev.plugin.v1.Host/ListState"
-	Host_RevealSecret_FullMethodName         = "/kandev.plugin.v1.Host/RevealSecret"
-	Host_EmitEvent_FullMethodName            = "/kandev.plugin.v1.Host/EmitEvent"
-	Host_GetSecret_FullMethodName            = "/kandev.plugin.v1.Host/GetSecret"
-	Host_SetSecret_FullMethodName            = "/kandev.plugin.v1.Host/SetSecret"
-	Host_DeleteSecret_FullMethodName         = "/kandev.plugin.v1.Host/DeleteSecret"
-	Host_GetConfig_FullMethodName            = "/kandev.plugin.v1.Host/GetConfig"
-	Host_ListTasks_FullMethodName            = "/kandev.plugin.v1.Host/ListTasks"
-	Host_GetTask_FullMethodName              = "/kandev.plugin.v1.Host/GetTask"
-	Host_ListWorkspaces_FullMethodName       = "/kandev.plugin.v1.Host/ListWorkspaces"
-	Host_ListWorkflows_FullMethodName        = "/kandev.plugin.v1.Host/ListWorkflows"
-	Host_ListWorkflowSteps_FullMethodName    = "/kandev.plugin.v1.Host/ListWorkflowSteps"
-	Host_ListAgentProfiles_FullMethodName    = "/kandev.plugin.v1.Host/ListAgentProfiles"
-	Host_ListRepositories_FullMethodName     = "/kandev.plugin.v1.Host/ListRepositories"
-	Host_ListSessions_FullMethodName         = "/kandev.plugin.v1.Host/ListSessions"
-	Host_ListSessionCodeStats_FullMethodName = "/kandev.plugin.v1.Host/ListSessionCodeStats"
-	Host_ListMessages_FullMethodName         = "/kandev.plugin.v1.Host/ListMessages"
-	Host_InvokeUtilityAgent_FullMethodName   = "/kandev.plugin.v1.Host/InvokeUtilityAgent"
-	Host_CreateTask_FullMethodName           = "/kandev.plugin.v1.Host/CreateTask"
-	Host_UpdateTask_FullMethodName           = "/kandev.plugin.v1.Host/UpdateTask"
-	Host_SendMessage_FullMethodName          = "/kandev.plugin.v1.Host/SendMessage"
+	Host_GetState_FullMethodName                      = "/kandev.plugin.v1.Host/GetState"
+	Host_SetState_FullMethodName                      = "/kandev.plugin.v1.Host/SetState"
+	Host_DeleteState_FullMethodName                   = "/kandev.plugin.v1.Host/DeleteState"
+	Host_ListState_FullMethodName                     = "/kandev.plugin.v1.Host/ListState"
+	Host_RevealSecret_FullMethodName                  = "/kandev.plugin.v1.Host/RevealSecret"
+	Host_EmitEvent_FullMethodName                     = "/kandev.plugin.v1.Host/EmitEvent"
+	Host_GetSecret_FullMethodName                     = "/kandev.plugin.v1.Host/GetSecret"
+	Host_SetSecret_FullMethodName                     = "/kandev.plugin.v1.Host/SetSecret"
+	Host_DeleteSecret_FullMethodName                  = "/kandev.plugin.v1.Host/DeleteSecret"
+	Host_GetConfig_FullMethodName                     = "/kandev.plugin.v1.Host/GetConfig"
+	Host_ListTasks_FullMethodName                     = "/kandev.plugin.v1.Host/ListTasks"
+	Host_GetTask_FullMethodName                       = "/kandev.plugin.v1.Host/GetTask"
+	Host_ListTaskStepTransitions_FullMethodName       = "/kandev.plugin.v1.Host/ListTaskStepTransitions"
+	Host_ListWorkspaces_FullMethodName                = "/kandev.plugin.v1.Host/ListWorkspaces"
+	Host_ListWorkflows_FullMethodName                 = "/kandev.plugin.v1.Host/ListWorkflows"
+	Host_ListWorkflowSteps_FullMethodName             = "/kandev.plugin.v1.Host/ListWorkflowSteps"
+	Host_ListWorkflowTransitionGroups_FullMethodName  = "/kandev.plugin.v1.Host/ListWorkflowTransitionGroups"
+	Host_ListAgentProfiles_FullMethodName             = "/kandev.plugin.v1.Host/ListAgentProfiles"
+	Host_ListExecutorProfiles_FullMethodName          = "/kandev.plugin.v1.Host/ListExecutorProfiles"
+	Host_ListRepositories_FullMethodName              = "/kandev.plugin.v1.Host/ListRepositories"
+	Host_ListSessions_FullMethodName                  = "/kandev.plugin.v1.Host/ListSessions"
+	Host_ListSessionCodeStats_FullMethodName          = "/kandev.plugin.v1.Host/ListSessionCodeStats"
+	Host_ListMessages_FullMethodName                  = "/kandev.plugin.v1.Host/ListMessages"
+	Host_ListPendingInteractions_FullMethodName       = "/kandev.plugin.v1.Host/ListPendingInteractions"
+	Host_GetInteraction_FullMethodName                = "/kandev.plugin.v1.Host/GetInteraction"
+	Host_InvokeUtilityAgent_FullMethodName            = "/kandev.plugin.v1.Host/InvokeUtilityAgent"
+	Host_InvokeUtilityAgentWithOptions_FullMethodName = "/kandev.plugin.v1.Host/InvokeUtilityAgentWithOptions"
+	Host_CreateTask_FullMethodName                    = "/kandev.plugin.v1.Host/CreateTask"
+	Host_UpdateTask_FullMethodName                    = "/kandev.plugin.v1.Host/UpdateTask"
+	Host_MoveTask_FullMethodName                      = "/kandev.plugin.v1.Host/MoveTask"
+	Host_SendMessage_FullMethodName                   = "/kandev.plugin.v1.Host/SendMessage"
+	Host_PreviewPluginOwnedTaskTree_FullMethodName    = "/kandev.plugin.v1.Host/PreviewPluginOwnedTaskTree"
+	Host_DeletePluginOwnedTaskTree_FullMethodName     = "/kandev.plugin.v1.Host/DeletePluginOwnedTaskTree"
+	Host_EnsureAgentConversation_FullMethodName       = "/kandev.plugin.v1.Host/EnsureAgentConversation"
+	Host_DispatchAgentConversation_FullMethodName     = "/kandev.plugin.v1.Host/DispatchAgentConversation"
+	Host_DeleteAgentConversation_FullMethodName       = "/kandev.plugin.v1.Host/DeleteAgentConversation"
+	Host_RespondToPermission_FullMethodName           = "/kandev.plugin.v1.Host/RespondToPermission"
+	Host_AnswerClarification_FullMethodName           = "/kandev.plugin.v1.Host/AnswerClarification"
+	Host_CancelClarification_FullMethodName           = "/kandev.plugin.v1.Host/CancelClarification"
 )
 
 // HostClient is the client API for Host service.
@@ -240,10 +583,13 @@ type HostClient interface {
 	// Reads — capability api_read:<resource>
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*ListTasksResponse, error)
 	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*GetTaskResponse, error)
+	ListTaskStepTransitions(ctx context.Context, in *ListTaskStepTransitionsRequest, opts ...grpc.CallOption) (*ListTaskStepTransitionsResponse, error)
 	ListWorkspaces(ctx context.Context, in *ListWorkspacesRequest, opts ...grpc.CallOption) (*ListWorkspacesResponse, error)
 	ListWorkflows(ctx context.Context, in *ListWorkflowsRequest, opts ...grpc.CallOption) (*ListWorkflowsResponse, error)
 	ListWorkflowSteps(ctx context.Context, in *ListWorkflowStepsRequest, opts ...grpc.CallOption) (*ListWorkflowStepsResponse, error)
+	ListWorkflowTransitionGroups(ctx context.Context, in *ListWorkflowTransitionGroupsRequest, opts ...grpc.CallOption) (*ListWorkflowTransitionGroupsResponse, error)
 	ListAgentProfiles(ctx context.Context, in *ListAgentProfilesRequest, opts ...grpc.CallOption) (*ListAgentProfilesResponse, error)
+	ListExecutorProfiles(ctx context.Context, in *ListExecutorProfilesRequest, opts ...grpc.CallOption) (*ListExecutorProfilesResponse, error)
 	ListRepositories(ctx context.Context, in *ListRepositoriesRequest, opts ...grpc.CallOption) (*ListRepositoriesResponse, error)
 	// Sessions + code stats — capability api_read:sessions. Driven by a real
 	// plugin (kandev-plugin-agent-stats) that otherwise read task_sessions,
@@ -258,11 +604,27 @@ type HostClient interface {
 	// <kandev-system> blocks are stripped, exactly like the message.added bus
 	// event — raw system prompts are never exposed to plugins.
 	ListMessages(ctx context.Context, in *ListMessagesRequest, opts ...grpc.CallOption) (*ListMessagesResponse, error)
+	// Pending agent interactions — capability api_read:interactions. The
+	// DURABLE record of every permission request and clarification bundle still
+	// owed a human response, under the same turn/session authority kandev's own
+	// list surfaces use. Session state alone cannot answer this: WAITING_FOR_INPUT
+	// also describes an ordinarily completed turn, so a state-only consumer
+	// reports attention that is not owed. Reading the record is what lets a
+	// consumer that started late, restarted, or missed an event reconcile.
+	// GetInteraction resolves ANY interaction — including terminal ones — so a
+	// replayed or missed event converges on the current result instead of
+	// NotFound.
+	ListPendingInteractions(ctx context.Context, in *ListPendingInteractionsRequest, opts ...grpc.CallOption) (*ListPendingInteractionsResponse, error)
+	GetInteraction(ctx context.Context, in *GetInteractionRequest, opts ...grpc.CallOption) (*GetInteractionResponse, error)
 	// Utility agent — capability agent_invoke. Runs a one-shot, non-interactive
-	// completion using the operator-configured "utility agent" profile (Settings
-	// > System), so a plugin can delegate a lightweight LLM step without holding
-	// its own API key. FailedPrecondition when no utility agent is configured.
+	// completion using the platform default utility profile when no explicit
+	// profile is supplied. Existing prompt-only clients continue to use this
+	// method and therefore receive the platform default.
 	InvokeUtilityAgent(ctx context.Context, in *InvokeUtilityAgentRequest, opts ...grpc.CallOption) (*InvokeUtilityAgentResponse, error)
+	// Explicit utility profile selection. This separate method prevents an old
+	// host from silently ignoring a profile override and executing a different
+	// profile.
+	InvokeUtilityAgentWithOptions(ctx context.Context, in *InvokeUtilityAgentWithOptionsRequest, opts ...grpc.CallOption) (*InvokeUtilityAgentResponse, error)
 	// Writes — capability api_write:<resource>. Route through the first-party
 	// service layer so events fire and WS clients update — the whole reason not
 	// to let plugins write the DB. CreateTask/UpdateTask require api_write:tasks
@@ -273,7 +635,33 @@ type HostClient interface {
 	// session is running, resume/start it otherwise).
 	CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*CreateTaskResponse, error)
 	UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts ...grpc.CallOption) (*UpdateTaskResponse, error)
+	// MoveTask transitions a task to a workflow step through the same path the
+	// board's own move uses (validation, WIP admission, task.moved publication,
+	// auto-start gates, queue reconciliation) — unlike UpdateTask, which rejects
+	// workflow_step_id. Requires api_write:tasks.
+	MoveTask(ctx context.Context, in *MoveTaskRequest, opts ...grpc.CallOption) (*MoveTaskResponse, error)
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
+	PreviewPluginOwnedTaskTree(ctx context.Context, in *PreviewPluginOwnedTaskTreeRequest, opts ...grpc.CallOption) (*PreviewPluginOwnedTaskTreeResponse, error)
+	DeletePluginOwnedTaskTree(ctx context.Context, in *DeletePluginOwnedTaskTreeRequest, opts ...grpc.CallOption) (*DeletePluginOwnedTaskTreeResponse, error)
+	// Agent conversations — capability agent_conversation. Ensure creates or
+	// repairs one hidden workflowless ephemeral task with a primary session per
+	// (plugin_id, workspace_id, conversation_key). Dispatch sends a prompt to an
+	// ensured conversation with stable occurrence idempotency and busy-session
+	// coalescing. Delete removes only conversations owned by this plugin.
+	EnsureAgentConversation(ctx context.Context, in *EnsureAgentConversationRequest, opts ...grpc.CallOption) (*EnsureAgentConversationResponse, error)
+	DispatchAgentConversation(ctx context.Context, in *DispatchAgentConversationRequest, opts ...grpc.CallOption) (*DispatchAgentConversationResponse, error)
+	DeleteAgentConversation(ctx context.Context, in *DeleteAgentConversationRequest, opts ...grpc.CallOption) (*DeleteAgentConversationResponse, error)
+	// Interaction responses — capability api_write:interactions. Each routes
+	// through the same first-party service the native UI uses, so the agent
+	// unblocks, the durable record turns terminal, and every surface converges
+	// through the normal events. Terminal-once: an interaction that already has
+	// a resolution answers FailedPrecondition rather than dispatching a second
+	// response, and an unknown id answers NotFound — the two outcomes a
+	// reconciling cache needs to distinguish "someone else got there first" from
+	// "I am holding a stale id".
+	RespondToPermission(ctx context.Context, in *RespondToPermissionRequest, opts ...grpc.CallOption) (*RespondToPermissionResponse, error)
+	AnswerClarification(ctx context.Context, in *AnswerClarificationRequest, opts ...grpc.CallOption) (*AnswerClarificationResponse, error)
+	CancelClarification(ctx context.Context, in *CancelClarificationRequest, opts ...grpc.CallOption) (*CancelClarificationResponse, error)
 }
 
 type hostClient struct {
@@ -404,6 +792,16 @@ func (c *hostClient) GetTask(ctx context.Context, in *GetTaskRequest, opts ...gr
 	return out, nil
 }
 
+func (c *hostClient) ListTaskStepTransitions(ctx context.Context, in *ListTaskStepTransitionsRequest, opts ...grpc.CallOption) (*ListTaskStepTransitionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTaskStepTransitionsResponse)
+	err := c.cc.Invoke(ctx, Host_ListTaskStepTransitions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) ListWorkspaces(ctx context.Context, in *ListWorkspacesRequest, opts ...grpc.CallOption) (*ListWorkspacesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListWorkspacesResponse)
@@ -434,10 +832,30 @@ func (c *hostClient) ListWorkflowSteps(ctx context.Context, in *ListWorkflowStep
 	return out, nil
 }
 
+func (c *hostClient) ListWorkflowTransitionGroups(ctx context.Context, in *ListWorkflowTransitionGroupsRequest, opts ...grpc.CallOption) (*ListWorkflowTransitionGroupsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListWorkflowTransitionGroupsResponse)
+	err := c.cc.Invoke(ctx, Host_ListWorkflowTransitionGroups_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) ListAgentProfiles(ctx context.Context, in *ListAgentProfilesRequest, opts ...grpc.CallOption) (*ListAgentProfilesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListAgentProfilesResponse)
 	err := c.cc.Invoke(ctx, Host_ListAgentProfiles_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListExecutorProfiles(ctx context.Context, in *ListExecutorProfilesRequest, opts ...grpc.CallOption) (*ListExecutorProfilesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListExecutorProfilesResponse)
+	err := c.cc.Invoke(ctx, Host_ListExecutorProfiles_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -484,10 +902,40 @@ func (c *hostClient) ListMessages(ctx context.Context, in *ListMessagesRequest, 
 	return out, nil
 }
 
+func (c *hostClient) ListPendingInteractions(ctx context.Context, in *ListPendingInteractionsRequest, opts ...grpc.CallOption) (*ListPendingInteractionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListPendingInteractionsResponse)
+	err := c.cc.Invoke(ctx, Host_ListPendingInteractions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetInteraction(ctx context.Context, in *GetInteractionRequest, opts ...grpc.CallOption) (*GetInteractionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetInteractionResponse)
+	err := c.cc.Invoke(ctx, Host_GetInteraction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) InvokeUtilityAgent(ctx context.Context, in *InvokeUtilityAgentRequest, opts ...grpc.CallOption) (*InvokeUtilityAgentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(InvokeUtilityAgentResponse)
 	err := c.cc.Invoke(ctx, Host_InvokeUtilityAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) InvokeUtilityAgentWithOptions(ctx context.Context, in *InvokeUtilityAgentWithOptionsRequest, opts ...grpc.CallOption) (*InvokeUtilityAgentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InvokeUtilityAgentResponse)
+	err := c.cc.Invoke(ctx, Host_InvokeUtilityAgentWithOptions_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -514,10 +962,100 @@ func (c *hostClient) UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts
 	return out, nil
 }
 
+func (c *hostClient) MoveTask(ctx context.Context, in *MoveTaskRequest, opts ...grpc.CallOption) (*MoveTaskResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MoveTaskResponse)
+	err := c.cc.Invoke(ctx, Host_MoveTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SendMessageResponse)
 	err := c.cc.Invoke(ctx, Host_SendMessage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) PreviewPluginOwnedTaskTree(ctx context.Context, in *PreviewPluginOwnedTaskTreeRequest, opts ...grpc.CallOption) (*PreviewPluginOwnedTaskTreeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PreviewPluginOwnedTaskTreeResponse)
+	err := c.cc.Invoke(ctx, Host_PreviewPluginOwnedTaskTree_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) DeletePluginOwnedTaskTree(ctx context.Context, in *DeletePluginOwnedTaskTreeRequest, opts ...grpc.CallOption) (*DeletePluginOwnedTaskTreeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeletePluginOwnedTaskTreeResponse)
+	err := c.cc.Invoke(ctx, Host_DeletePluginOwnedTaskTree_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) EnsureAgentConversation(ctx context.Context, in *EnsureAgentConversationRequest, opts ...grpc.CallOption) (*EnsureAgentConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnsureAgentConversationResponse)
+	err := c.cc.Invoke(ctx, Host_EnsureAgentConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) DispatchAgentConversation(ctx context.Context, in *DispatchAgentConversationRequest, opts ...grpc.CallOption) (*DispatchAgentConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DispatchAgentConversationResponse)
+	err := c.cc.Invoke(ctx, Host_DispatchAgentConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) DeleteAgentConversation(ctx context.Context, in *DeleteAgentConversationRequest, opts ...grpc.CallOption) (*DeleteAgentConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteAgentConversationResponse)
+	err := c.cc.Invoke(ctx, Host_DeleteAgentConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) RespondToPermission(ctx context.Context, in *RespondToPermissionRequest, opts ...grpc.CallOption) (*RespondToPermissionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RespondToPermissionResponse)
+	err := c.cc.Invoke(ctx, Host_RespondToPermission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) AnswerClarification(ctx context.Context, in *AnswerClarificationRequest, opts ...grpc.CallOption) (*AnswerClarificationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AnswerClarificationResponse)
+	err := c.cc.Invoke(ctx, Host_AnswerClarification_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) CancelClarification(ctx context.Context, in *CancelClarificationRequest, opts ...grpc.CallOption) (*CancelClarificationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelClarificationResponse)
+	err := c.cc.Invoke(ctx, Host_CancelClarification_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -575,10 +1113,13 @@ type HostServer interface {
 	// Reads — capability api_read:<resource>
 	ListTasks(context.Context, *ListTasksRequest) (*ListTasksResponse, error)
 	GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error)
+	ListTaskStepTransitions(context.Context, *ListTaskStepTransitionsRequest) (*ListTaskStepTransitionsResponse, error)
 	ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error)
 	ListWorkflows(context.Context, *ListWorkflowsRequest) (*ListWorkflowsResponse, error)
 	ListWorkflowSteps(context.Context, *ListWorkflowStepsRequest) (*ListWorkflowStepsResponse, error)
+	ListWorkflowTransitionGroups(context.Context, *ListWorkflowTransitionGroupsRequest) (*ListWorkflowTransitionGroupsResponse, error)
 	ListAgentProfiles(context.Context, *ListAgentProfilesRequest) (*ListAgentProfilesResponse, error)
+	ListExecutorProfiles(context.Context, *ListExecutorProfilesRequest) (*ListExecutorProfilesResponse, error)
 	ListRepositories(context.Context, *ListRepositoriesRequest) (*ListRepositoriesResponse, error)
 	// Sessions + code stats — capability api_read:sessions. Driven by a real
 	// plugin (kandev-plugin-agent-stats) that otherwise read task_sessions,
@@ -593,11 +1134,27 @@ type HostServer interface {
 	// <kandev-system> blocks are stripped, exactly like the message.added bus
 	// event — raw system prompts are never exposed to plugins.
 	ListMessages(context.Context, *ListMessagesRequest) (*ListMessagesResponse, error)
+	// Pending agent interactions — capability api_read:interactions. The
+	// DURABLE record of every permission request and clarification bundle still
+	// owed a human response, under the same turn/session authority kandev's own
+	// list surfaces use. Session state alone cannot answer this: WAITING_FOR_INPUT
+	// also describes an ordinarily completed turn, so a state-only consumer
+	// reports attention that is not owed. Reading the record is what lets a
+	// consumer that started late, restarted, or missed an event reconcile.
+	// GetInteraction resolves ANY interaction — including terminal ones — so a
+	// replayed or missed event converges on the current result instead of
+	// NotFound.
+	ListPendingInteractions(context.Context, *ListPendingInteractionsRequest) (*ListPendingInteractionsResponse, error)
+	GetInteraction(context.Context, *GetInteractionRequest) (*GetInteractionResponse, error)
 	// Utility agent — capability agent_invoke. Runs a one-shot, non-interactive
-	// completion using the operator-configured "utility agent" profile (Settings
-	// > System), so a plugin can delegate a lightweight LLM step without holding
-	// its own API key. FailedPrecondition when no utility agent is configured.
+	// completion using the platform default utility profile when no explicit
+	// profile is supplied. Existing prompt-only clients continue to use this
+	// method and therefore receive the platform default.
 	InvokeUtilityAgent(context.Context, *InvokeUtilityAgentRequest) (*InvokeUtilityAgentResponse, error)
+	// Explicit utility profile selection. This separate method prevents an old
+	// host from silently ignoring a profile override and executing a different
+	// profile.
+	InvokeUtilityAgentWithOptions(context.Context, *InvokeUtilityAgentWithOptionsRequest) (*InvokeUtilityAgentResponse, error)
 	// Writes — capability api_write:<resource>. Route through the first-party
 	// service layer so events fire and WS clients update — the whole reason not
 	// to let plugins write the DB. CreateTask/UpdateTask require api_write:tasks
@@ -608,7 +1165,33 @@ type HostServer interface {
 	// session is running, resume/start it otherwise).
 	CreateTask(context.Context, *CreateTaskRequest) (*CreateTaskResponse, error)
 	UpdateTask(context.Context, *UpdateTaskRequest) (*UpdateTaskResponse, error)
+	// MoveTask transitions a task to a workflow step through the same path the
+	// board's own move uses (validation, WIP admission, task.moved publication,
+	// auto-start gates, queue reconciliation) — unlike UpdateTask, which rejects
+	// workflow_step_id. Requires api_write:tasks.
+	MoveTask(context.Context, *MoveTaskRequest) (*MoveTaskResponse, error)
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
+	PreviewPluginOwnedTaskTree(context.Context, *PreviewPluginOwnedTaskTreeRequest) (*PreviewPluginOwnedTaskTreeResponse, error)
+	DeletePluginOwnedTaskTree(context.Context, *DeletePluginOwnedTaskTreeRequest) (*DeletePluginOwnedTaskTreeResponse, error)
+	// Agent conversations — capability agent_conversation. Ensure creates or
+	// repairs one hidden workflowless ephemeral task with a primary session per
+	// (plugin_id, workspace_id, conversation_key). Dispatch sends a prompt to an
+	// ensured conversation with stable occurrence idempotency and busy-session
+	// coalescing. Delete removes only conversations owned by this plugin.
+	EnsureAgentConversation(context.Context, *EnsureAgentConversationRequest) (*EnsureAgentConversationResponse, error)
+	DispatchAgentConversation(context.Context, *DispatchAgentConversationRequest) (*DispatchAgentConversationResponse, error)
+	DeleteAgentConversation(context.Context, *DeleteAgentConversationRequest) (*DeleteAgentConversationResponse, error)
+	// Interaction responses — capability api_write:interactions. Each routes
+	// through the same first-party service the native UI uses, so the agent
+	// unblocks, the durable record turns terminal, and every surface converges
+	// through the normal events. Terminal-once: an interaction that already has
+	// a resolution answers FailedPrecondition rather than dispatching a second
+	// response, and an unknown id answers NotFound — the two outcomes a
+	// reconciling cache needs to distinguish "someone else got there first" from
+	// "I am holding a stale id".
+	RespondToPermission(context.Context, *RespondToPermissionRequest) (*RespondToPermissionResponse, error)
+	AnswerClarification(context.Context, *AnswerClarificationRequest) (*AnswerClarificationResponse, error)
+	CancelClarification(context.Context, *CancelClarificationRequest) (*CancelClarificationResponse, error)
 	mustEmbedUnimplementedHostServer()
 }
 
@@ -655,6 +1238,9 @@ func (UnimplementedHostServer) ListTasks(context.Context, *ListTasksRequest) (*L
 func (UnimplementedHostServer) GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTask not implemented")
 }
+func (UnimplementedHostServer) ListTaskStepTransitions(context.Context, *ListTaskStepTransitionsRequest) (*ListTaskStepTransitionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTaskStepTransitions not implemented")
+}
 func (UnimplementedHostServer) ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorkspaces not implemented")
 }
@@ -664,8 +1250,14 @@ func (UnimplementedHostServer) ListWorkflows(context.Context, *ListWorkflowsRequ
 func (UnimplementedHostServer) ListWorkflowSteps(context.Context, *ListWorkflowStepsRequest) (*ListWorkflowStepsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorkflowSteps not implemented")
 }
+func (UnimplementedHostServer) ListWorkflowTransitionGroups(context.Context, *ListWorkflowTransitionGroupsRequest) (*ListWorkflowTransitionGroupsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListWorkflowTransitionGroups not implemented")
+}
 func (UnimplementedHostServer) ListAgentProfiles(context.Context, *ListAgentProfilesRequest) (*ListAgentProfilesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListAgentProfiles not implemented")
+}
+func (UnimplementedHostServer) ListExecutorProfiles(context.Context, *ListExecutorProfilesRequest) (*ListExecutorProfilesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListExecutorProfiles not implemented")
 }
 func (UnimplementedHostServer) ListRepositories(context.Context, *ListRepositoriesRequest) (*ListRepositoriesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListRepositories not implemented")
@@ -679,8 +1271,17 @@ func (UnimplementedHostServer) ListSessionCodeStats(context.Context, *ListSessio
 func (UnimplementedHostServer) ListMessages(context.Context, *ListMessagesRequest) (*ListMessagesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListMessages not implemented")
 }
+func (UnimplementedHostServer) ListPendingInteractions(context.Context, *ListPendingInteractionsRequest) (*ListPendingInteractionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListPendingInteractions not implemented")
+}
+func (UnimplementedHostServer) GetInteraction(context.Context, *GetInteractionRequest) (*GetInteractionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetInteraction not implemented")
+}
 func (UnimplementedHostServer) InvokeUtilityAgent(context.Context, *InvokeUtilityAgentRequest) (*InvokeUtilityAgentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InvokeUtilityAgent not implemented")
+}
+func (UnimplementedHostServer) InvokeUtilityAgentWithOptions(context.Context, *InvokeUtilityAgentWithOptionsRequest) (*InvokeUtilityAgentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InvokeUtilityAgentWithOptions not implemented")
 }
 func (UnimplementedHostServer) CreateTask(context.Context, *CreateTaskRequest) (*CreateTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTask not implemented")
@@ -688,8 +1289,35 @@ func (UnimplementedHostServer) CreateTask(context.Context, *CreateTaskRequest) (
 func (UnimplementedHostServer) UpdateTask(context.Context, *UpdateTaskRequest) (*UpdateTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateTask not implemented")
 }
+func (UnimplementedHostServer) MoveTask(context.Context, *MoveTaskRequest) (*MoveTaskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MoveTask not implemented")
+}
 func (UnimplementedHostServer) SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendMessage not implemented")
+}
+func (UnimplementedHostServer) PreviewPluginOwnedTaskTree(context.Context, *PreviewPluginOwnedTaskTreeRequest) (*PreviewPluginOwnedTaskTreeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PreviewPluginOwnedTaskTree not implemented")
+}
+func (UnimplementedHostServer) DeletePluginOwnedTaskTree(context.Context, *DeletePluginOwnedTaskTreeRequest) (*DeletePluginOwnedTaskTreeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeletePluginOwnedTaskTree not implemented")
+}
+func (UnimplementedHostServer) EnsureAgentConversation(context.Context, *EnsureAgentConversationRequest) (*EnsureAgentConversationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EnsureAgentConversation not implemented")
+}
+func (UnimplementedHostServer) DispatchAgentConversation(context.Context, *DispatchAgentConversationRequest) (*DispatchAgentConversationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DispatchAgentConversation not implemented")
+}
+func (UnimplementedHostServer) DeleteAgentConversation(context.Context, *DeleteAgentConversationRequest) (*DeleteAgentConversationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteAgentConversation not implemented")
+}
+func (UnimplementedHostServer) RespondToPermission(context.Context, *RespondToPermissionRequest) (*RespondToPermissionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RespondToPermission not implemented")
+}
+func (UnimplementedHostServer) AnswerClarification(context.Context, *AnswerClarificationRequest) (*AnswerClarificationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AnswerClarification not implemented")
+}
+func (UnimplementedHostServer) CancelClarification(context.Context, *CancelClarificationRequest) (*CancelClarificationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelClarification not implemented")
 }
 func (UnimplementedHostServer) mustEmbedUnimplementedHostServer() {}
 func (UnimplementedHostServer) testEmbeddedByValue()              {}
@@ -928,6 +1556,24 @@ func _Host_GetTask_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_ListTaskStepTransitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTaskStepTransitionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListTaskStepTransitions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListTaskStepTransitions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListTaskStepTransitions(ctx, req.(*ListTaskStepTransitionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_ListWorkspaces_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListWorkspacesRequest)
 	if err := dec(in); err != nil {
@@ -982,6 +1628,24 @@ func _Host_ListWorkflowSteps_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_ListWorkflowTransitionGroups_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWorkflowTransitionGroupsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListWorkflowTransitionGroups(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListWorkflowTransitionGroups_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListWorkflowTransitionGroups(ctx, req.(*ListWorkflowTransitionGroupsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_ListAgentProfiles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListAgentProfilesRequest)
 	if err := dec(in); err != nil {
@@ -996,6 +1660,24 @@ func _Host_ListAgentProfiles_Handler(srv interface{}, ctx context.Context, dec f
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).ListAgentProfiles(ctx, req.(*ListAgentProfilesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListExecutorProfiles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListExecutorProfilesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListExecutorProfiles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListExecutorProfiles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListExecutorProfiles(ctx, req.(*ListExecutorProfilesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1072,6 +1754,42 @@ func _Host_ListMessages_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_ListPendingInteractions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPendingInteractionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListPendingInteractions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListPendingInteractions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListPendingInteractions(ctx, req.(*ListPendingInteractionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetInteraction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetInteractionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetInteraction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetInteraction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetInteraction(ctx, req.(*GetInteractionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_InvokeUtilityAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(InvokeUtilityAgentRequest)
 	if err := dec(in); err != nil {
@@ -1086,6 +1804,24 @@ func _Host_InvokeUtilityAgent_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).InvokeUtilityAgent(ctx, req.(*InvokeUtilityAgentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_InvokeUtilityAgentWithOptions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InvokeUtilityAgentWithOptionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).InvokeUtilityAgentWithOptions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_InvokeUtilityAgentWithOptions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).InvokeUtilityAgentWithOptions(ctx, req.(*InvokeUtilityAgentWithOptionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1126,6 +1862,24 @@ func _Host_UpdateTask_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_MoveTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MoveTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).MoveTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_MoveTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).MoveTask(ctx, req.(*MoveTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_SendMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SendMessageRequest)
 	if err := dec(in); err != nil {
@@ -1140,6 +1894,150 @@ func _Host_SendMessage_Handler(srv interface{}, ctx context.Context, dec func(in
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).SendMessage(ctx, req.(*SendMessageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_PreviewPluginOwnedTaskTree_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PreviewPluginOwnedTaskTreeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).PreviewPluginOwnedTaskTree(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_PreviewPluginOwnedTaskTree_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).PreviewPluginOwnedTaskTree(ctx, req.(*PreviewPluginOwnedTaskTreeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_DeletePluginOwnedTaskTree_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeletePluginOwnedTaskTreeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).DeletePluginOwnedTaskTree(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_DeletePluginOwnedTaskTree_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).DeletePluginOwnedTaskTree(ctx, req.(*DeletePluginOwnedTaskTreeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_EnsureAgentConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnsureAgentConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).EnsureAgentConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_EnsureAgentConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).EnsureAgentConversation(ctx, req.(*EnsureAgentConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_DispatchAgentConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DispatchAgentConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).DispatchAgentConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_DispatchAgentConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).DispatchAgentConversation(ctx, req.(*DispatchAgentConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_DeleteAgentConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteAgentConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).DeleteAgentConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_DeleteAgentConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).DeleteAgentConversation(ctx, req.(*DeleteAgentConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_RespondToPermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RespondToPermissionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).RespondToPermission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_RespondToPermission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).RespondToPermission(ctx, req.(*RespondToPermissionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_AnswerClarification_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AnswerClarificationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).AnswerClarification(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_AnswerClarification_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).AnswerClarification(ctx, req.(*AnswerClarificationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_CancelClarification_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelClarificationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).CancelClarification(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_CancelClarification_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).CancelClarification(ctx, req.(*CancelClarificationRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1200,6 +2098,10 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Host_GetTask_Handler,
 		},
 		{
+			MethodName: "ListTaskStepTransitions",
+			Handler:    _Host_ListTaskStepTransitions_Handler,
+		},
+		{
 			MethodName: "ListWorkspaces",
 			Handler:    _Host_ListWorkspaces_Handler,
 		},
@@ -1212,8 +2114,16 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Host_ListWorkflowSteps_Handler,
 		},
 		{
+			MethodName: "ListWorkflowTransitionGroups",
+			Handler:    _Host_ListWorkflowTransitionGroups_Handler,
+		},
+		{
 			MethodName: "ListAgentProfiles",
 			Handler:    _Host_ListAgentProfiles_Handler,
+		},
+		{
+			MethodName: "ListExecutorProfiles",
+			Handler:    _Host_ListExecutorProfiles_Handler,
 		},
 		{
 			MethodName: "ListRepositories",
@@ -1232,8 +2142,20 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Host_ListMessages_Handler,
 		},
 		{
+			MethodName: "ListPendingInteractions",
+			Handler:    _Host_ListPendingInteractions_Handler,
+		},
+		{
+			MethodName: "GetInteraction",
+			Handler:    _Host_GetInteraction_Handler,
+		},
+		{
 			MethodName: "InvokeUtilityAgent",
 			Handler:    _Host_InvokeUtilityAgent_Handler,
+		},
+		{
+			MethodName: "InvokeUtilityAgentWithOptions",
+			Handler:    _Host_InvokeUtilityAgentWithOptions_Handler,
 		},
 		{
 			MethodName: "CreateTask",
@@ -1244,8 +2166,44 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Host_UpdateTask_Handler,
 		},
 		{
+			MethodName: "MoveTask",
+			Handler:    _Host_MoveTask_Handler,
+		},
+		{
 			MethodName: "SendMessage",
 			Handler:    _Host_SendMessage_Handler,
+		},
+		{
+			MethodName: "PreviewPluginOwnedTaskTree",
+			Handler:    _Host_PreviewPluginOwnedTaskTree_Handler,
+		},
+		{
+			MethodName: "DeletePluginOwnedTaskTree",
+			Handler:    _Host_DeletePluginOwnedTaskTree_Handler,
+		},
+		{
+			MethodName: "EnsureAgentConversation",
+			Handler:    _Host_EnsureAgentConversation_Handler,
+		},
+		{
+			MethodName: "DispatchAgentConversation",
+			Handler:    _Host_DispatchAgentConversation_Handler,
+		},
+		{
+			MethodName: "DeleteAgentConversation",
+			Handler:    _Host_DeleteAgentConversation_Handler,
+		},
+		{
+			MethodName: "RespondToPermission",
+			Handler:    _Host_RespondToPermission_Handler,
+		},
+		{
+			MethodName: "AnswerClarification",
+			Handler:    _Host_AnswerClarification_Handler,
+		},
+		{
+			MethodName: "CancelClarification",
+			Handler:    _Host_CancelClarification_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

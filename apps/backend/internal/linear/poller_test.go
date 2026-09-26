@@ -54,10 +54,15 @@ func (f *pollerFixture) saveConfigForWorkspace(t *testing.T, workspaceID, secret
 	}); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-	key := SecretKey
-	if workspaceID != "" {
-		key = SecretKeyForWorkspace(workspaceID)
+	secretWorkspaceID := workspaceID
+	if secretWorkspaceID == "" {
+		var err error
+		secretWorkspaceID, err = f.store.defaultWorkspaceID()
+		if err != nil {
+			t.Fatalf("resolve default workspace: %v", err)
+		}
 	}
+	key := SecretKeyForWorkspace(secretWorkspaceID)
 	if err := f.secrets.Set(ctx, key, "linear", secret); err != nil {
 		t.Fatalf("save secret: %v", err)
 	}

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-unpinned-managed-runtimes"]
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 role: implementer
 model_tier: default
 ---

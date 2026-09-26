@@ -34,7 +34,8 @@ test.describe("Quick Chat repository context on mobile", () => {
     await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
     await assertNoDocumentHorizontalOverflow(testPage);
 
-    await dialog.getByLabel("Start new chat").click();
+    await dialog.getByTestId("quick-chat-add-menu-trigger").click();
+    await testPage.getByTestId("quick-chat-new-agent").click();
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 5_000 });
     const secondAgentSelector = dialog.getByTestId("agent-profile-selector");
     if (await secondAgentSelector.getByText("Select agent", { exact: false }).isVisible()) {
@@ -46,7 +47,13 @@ test.describe("Quick Chat repository context on mobile", () => {
 
     const originalTabs = dialog.getByTestId("quick-chat-tab");
     await expect(originalTabs).toHaveCount(2);
-    const originalNames = await originalTabs.locator("span").allTextContents();
+    const readTabNames = (tabs: typeof originalTabs) =>
+      tabs
+        .locator("button")
+        .evaluateAll((buttons) =>
+          buttons.map((button) => button.textContent?.trim() ?? "").filter(Boolean),
+        );
+    const originalNames = await readTabNames(originalTabs);
 
     await testPage.reload();
     await testPage.waitForLoadState("networkidle");
@@ -55,7 +62,9 @@ test.describe("Quick Chat repository context on mobile", () => {
     const restoredDialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     const restoredTabs = restoredDialog.getByTestId("quick-chat-tab");
     await expect(restoredTabs).toHaveCount(2);
-    await expect(restoredTabs.locator("span")).toHaveText([...originalNames].reverse());
+    await expect
+      .poll(async () => (await readTabNames(restoredTabs)).toSorted())
+      .toEqual(originalNames.toSorted());
     await expect(restoredDialog.getByTestId("quick-chat-setup")).not.toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);
   });

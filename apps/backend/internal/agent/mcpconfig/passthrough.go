@@ -168,6 +168,11 @@ func claudeRemoteType(t string) string {
 // inferred from the presence of `command` vs `url` (there is no `type` key).
 type CodexStrategy struct{}
 
+const (
+	codexKandevServerName   = "kandev"
+	codexKandevApprovalMode = "approve"
+)
+
 func (CodexStrategy) BuildPassthroughMCP(servers []types.McpServer, _ PassthroughPaths) (PassthroughArtifacts, error) {
 	args := make([]string, 0, len(servers)*4)
 	for _, srv := range servers {
@@ -214,6 +219,9 @@ func codexServerArgs(srv types.McpServer) ([]string, error) {
 		if len(srv.Headers) > 0 {
 			pairs = append(pairs, pair{"http_headers", srv.Headers})
 		}
+	}
+	if srv.Name == codexKandevServerName {
+		pairs = append(pairs, pair{"default_tools_approval_mode", codexKandevApprovalMode})
 	}
 	// NOTE: env vars and headers are JSON-encoded into `-c` overrides, which
 	// land in the process argument list (visible via `ps aux`) — a local user
@@ -342,6 +350,7 @@ type piServerEntry struct {
 	Env       map[string]string `json:"env,omitempty"`
 	URL       string            `json:"url,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
+	Lifecycle string            `json:"lifecycle,omitempty"`
 }
 
 func (PiStrategy) BuildPassthroughMCP(servers []types.McpServer, paths PassthroughPaths) (PassthroughArtifacts, error) {
@@ -354,9 +363,9 @@ func (PiStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Passthrou
 			continue
 		}
 		if isStdioServer(srv) {
-			entries[srv.Name] = piServerEntry{Transport: string(ServerTypeStdio), Command: srv.Command, Args: srv.Args, Env: srv.Env}
+			entries[srv.Name] = piServerEntry{Transport: string(ServerTypeStdio), Command: srv.Command, Args: srv.Args, Env: srv.Env, Lifecycle: "eager"}
 		} else {
-			entries[srv.Name] = piServerEntry{Transport: piTransport(srv.Type), URL: srv.URL, Headers: srv.Headers}
+			entries[srv.Name] = piServerEntry{Transport: piTransport(srv.Type), URL: srv.URL, Headers: srv.Headers, Lifecycle: "eager"}
 		}
 	}
 	if len(entries) == 0 {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -13,6 +14,29 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
+
+// workspaceStreamConn is the single seam onto the workspace stream socket.
+//
+// A gorilla *websocket.Conn supports exactly one concurrent writer, and this
+// endpoint has two producers: the event-forwarding loop and the input loop
+// that answers client pings. Both write through WriteJSON, so the lock lives
+// in one place and a future write site cannot forget it.
+type workspaceStreamConn struct {
+	conn    *websocket.Conn
+	writeMu sync.Mutex
+}
+
+// WriteJSON sends one message. Safe for concurrent use.
+func (w *workspaceStreamConn) WriteJSON(msg types.WorkspaceStreamMessage) error {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+	return w.conn.WriteJSON(msg)
+}
+
+// ReadJSON receives one message. Only the input loop reads, so it needs no lock.
+func (w *workspaceStreamConn) ReadJSON(msg *types.WorkspaceStreamMessage) error {
+	return w.conn.ReadJSON(msg)
+}
 
 // handleWorkspaceStreamWS handles the unified workspace stream WebSocket endpoint.
 // It streams git status, file changes, file lists, and shell I/O over a single connection.
@@ -27,6 +51,8 @@ func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
 			s.logger.Debug("failed to close workspace stream websocket", zap.Error(err))
 		}
 	}()
+
+	stream := &workspaceStreamConn{conn: conn}
 
 	s.logger.Info("Workspace stream WebSocket connected")
 
@@ -50,7 +76,7 @@ func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
 
 	// Send connected message
 	connectedMsg := types.NewWorkspaceConnected()
-	if err := conn.WriteJSON(connectedMsg); err != nil {
+	if err := stream.WriteJSON(connectedMsg); err != nil {
 		s.logger.Debug("failed to send connected message", zap.Error(err))
 		return
 	}
@@ -64,18 +90,39 @@ func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
 	if shell != nil {
 		shellWriter = shell
 	}
-	go s.handleWorkspaceStreamInput(conn, shellWriter, done)
+	go s.handleWorkspaceStreamInput(stream, shellWriter, done)
 
-	// Forward all workspace events to WebSocket
+	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2: the invalidation channel comes
+	// from instanceAuth's context value, captured atomically with this
+	// request's own accept check -- not a fresh Invalidated() call here,
+	// which would be a second, independent lock acquisition racing a
+	// concurrent rotation.
+	s.forwardWorkspaceStream(stream, sub, shellOutputCh, done, credentialInvalidatedFromContext(c))
+}
+
+// forwardWorkspaceStream forwards workspace events and shell output to the
+// WebSocket until the client goes away or the handler shuts down. invalidated
+// is nil when credentialSource is unset, which never fires in a select --
+// legacy behavior for every existing test constructing a Server without a
+// control server alongside it.
+func (s *Server) forwardWorkspaceStream(
+	stream *workspaceStreamConn,
+	sub types.WorkspaceStreamSubscriber,
+	shellOutputCh chan []byte,
+	done <-chan struct{},
+	invalidated <-chan struct{},
+) {
 	for {
 		select {
 		case <-done:
+			return
+		case <-invalidated:
 			return
 		case msg, ok := <-sub:
 			if !ok {
 				return
 			}
-			if err := conn.WriteJSON(msg); err != nil {
+			if err := stream.WriteJSON(msg); err != nil {
 				s.logger.Debug("workspace stream write error", zap.Error(err))
 				return
 			}
@@ -87,7 +134,7 @@ func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
 			}
 			// Forward shell output as workspace stream message
 			shellMsg := types.NewWorkspaceShellOutput(string(data))
-			if err := conn.WriteJSON(shellMsg); err != nil {
+			if err := stream.WriteJSON(shellMsg); err != nil {
 				s.logger.Debug("workspace stream shell output write error", zap.Error(err))
 				return
 			}
@@ -132,7 +179,11 @@ func (s *Server) handleFileContent(c *gin.Context) {
 
 	content, size, isBinary, resolvedPath, err := s.procMgr.GetWorkspaceTracker().GetFileContent(scopedPath)
 	if err != nil {
-		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
+		status := http.StatusBadRequest
+		if errors.Is(err, process.ErrFileNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
 		return
 	}
 
@@ -158,7 +209,7 @@ func (s *Server) handleFileContentAtRef(c *gin.Context) {
 	}
 
 	repo := c.Query("repo")
-	if repo == "" && len(s.procMgr.RepoSubpaths()) > 0 {
+	if repo == "" && requiresExplicitRepositoryScope(s.procMgr.RepositoryScopes()) {
 		c.JSON(400, types.FileContentResponse{Path: path, Error: "repo is required for multi-repo workspace"})
 		return
 	}
@@ -390,14 +441,14 @@ func (s *Server) handleFileRename(c *gin.Context) {
 	})
 }
 
-func (s *Server) handleWorkspaceStreamInput(conn *websocket.Conn, shell io.Writer, done <-chan struct{}) {
+func (s *Server) handleWorkspaceStreamInput(stream *workspaceStreamConn, shell io.Writer, done <-chan struct{}) {
 	for {
 		select {
 		case <-done:
 			return
 		default:
 			var msg types.WorkspaceStreamMessage
-			if err := conn.ReadJSON(&msg); err != nil {
+			if err := stream.ReadJSON(&msg); err != nil {
 				s.logger.Debug("workspace stream WebSocket read error", zap.Error(err))
 				return
 			}
@@ -412,7 +463,7 @@ func (s *Server) handleWorkspaceStreamInput(conn *websocket.Conn, shell io.Write
 				s.logger.Debug("shell resize requested", zap.Int("cols", msg.Cols), zap.Int("rows", msg.Rows))
 			case types.WorkspaceMessageTypePing:
 				pongMsg := types.NewWorkspacePong()
-				if err := conn.WriteJSON(pongMsg); err != nil {
+				if err := stream.WriteJSON(pongMsg); err != nil {
 					s.logger.Debug("workspace stream pong write error", zap.Error(err))
 					return
 				}

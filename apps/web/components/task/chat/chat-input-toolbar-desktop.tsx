@@ -14,17 +14,13 @@ import { cn } from "@/lib/utils";
 import { ResetContextButton } from "./reset-context-button";
 import { ImplementPlanButton } from "./implement-plan-button";
 import { ChatInputPluginActions } from "./chat-input-plugin-actions";
-import { VoiceInputButton } from "./voice-input-button";
 import { ContextPopover } from "./context-popover";
-import {
-  AttachFilesButton,
-  McpIndicator,
-  PlanToggleButton,
-  SubmitButton,
-} from "./chat-input-toolbar-primitives";
+import { AttachFilesButton, PlanToggleButton, SubmitButton } from "./chat-input-toolbar-primitives";
+import { McpIndicator } from "./mcp-explorer/mcp-indicator";
 import { type ChatInputToolbarProps } from "./chat-input-toolbar";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { SHORTCUTS } from "@/lib/keyboard/constants";
+import { useTranslation } from "react-i18next";
 
 type ToolbarItemConfig = {
   id: string;
@@ -48,6 +44,7 @@ type DesktopToolbarProps = ChatInputToolbarProps & {
 };
 
 function ToolbarExpandToggle(props: { isExpanded: boolean; onToggle: () => void }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -55,7 +52,7 @@ function ToolbarExpandToggle(props: { isExpanded: boolean; onToggle: () => void 
           type="button"
           variant="ghost"
           size="icon"
-          aria-label={props.isExpanded ? "Collapse toolbar" : "More toolbar actions"}
+          aria-label={props.isExpanded ? t("task:collapseToolbar") : t("task:moreToolbarActions")}
           aria-expanded={props.isExpanded}
           className="h-7 w-7 cursor-pointer hover:bg-muted/40"
           data-testid="toolbar-overflow-menu"
@@ -68,7 +65,9 @@ function ToolbarExpandToggle(props: { isExpanded: boolean; onToggle: () => void 
           )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{props.isExpanded ? "Collapse" : "More actions"}</TooltipContent>
+      <TooltipContent>
+        {props.isExpanded ? t("task:collapse") : t("task:moreActions")}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -103,7 +102,7 @@ function buildCollapsibleItems(props: DesktopToolbarProps): ToolbarItemConfig[] 
       id: "reset-context",
       section: "right",
       visible: !!props.sessionId && !props.isAgentBusy,
-      render: () => <ResetContextButton sessionId={props.sessionId!} />,
+      render: () => <ResetContextButton sessionId={props.sessionId!} presentation="desktop" />,
     },
     {
       id: "sessions",
@@ -120,7 +119,7 @@ function buildCollapsibleItems(props: DesktopToolbarProps): ToolbarItemConfig[] 
     {
       id: "model",
       section: "right",
-      render: () => <ModelSelector sessionId={props.sessionId} />,
+      render: () => <ModelSelector sessionId={props.sessionId} showAgentIcon />,
     },
     {
       id: "enhance",
@@ -155,8 +154,8 @@ function DesktopRightSection(props: {
   onCancel: () => void | Promise<void>;
   onSubmit: () => void;
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
-  onVoiceTranscript?: (text: string) => void;
-  onVoiceAutoSend?: () => void;
+  composerCapability?: ChatInputToolbarProps["composerCapability"];
+  composerSurface?: ChatInputToolbarProps["composerSurface"];
 }) {
   return (
     <div className="flex items-center gap-0.5 shrink-0">
@@ -172,20 +171,22 @@ function DesktopRightSection(props: {
           sessionId={props.sessionId}
           taskId={props.taskId}
           taskTitle={props.taskTitle}
+          surface={props.composerSurface ?? (props.taskId ? "task-chat" : "quick-chat")}
+          presentation="desktop"
+          disabled={props.isDisabled}
+          submittable={!props.isDisabled && props.hasContent}
+          disabledReason={props.submitDisabledReason}
+          composer={props.composerCapability}
         />
       )}
       <div className="ml-1 flex items-center gap-1">
-        {props.onVoiceTranscript && (
-          <VoiceInputButton
-            onTranscript={props.onVoiceTranscript}
-            onAutoSend={props.onVoiceAutoSend}
-            disabled={props.isDisabled}
-          />
-        )}
         <SubmitButton
           isAgentBusy={props.isAgentBusy}
           canCancelAgent={props.canCancelAgent}
           sessionId={props.sessionId}
+          taskId={props.taskId}
+          taskTitle={props.taskTitle}
+          presentation="desktop"
           hasContent={props.hasContent}
           isDisabled={props.isDisabled}
           submitDisabledReason={props.submitDisabledReason}
@@ -201,6 +202,7 @@ function DesktopRightSection(props: {
 }
 
 export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
+  const { t } = useTranslation();
   const toolbarRef = useRef<HTMLDivElement>(null);
   const isCollapsed = useToolbarCollapsed(toolbarRef);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -238,7 +240,7 @@ export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
               size="sm"
               className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
               data-testid="chat-context-button"
-              aria-label="Session context"
+              aria-label={t("task:sessionContext")}
             >
               <IconAt className="h-4 w-4" />
               {props.contextCount > 0 && !isCollapsed && (
@@ -278,8 +280,8 @@ export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
         onCancel={props.onCancel}
         onSubmit={props.onSubmit}
         submitShortcut={props.submitShortcut}
-        onVoiceTranscript={props.onVoiceTranscript}
-        onVoiceAutoSend={props.onVoiceAutoSend}
+        composerCapability={props.composerCapability}
+        composerSurface={props.composerSurface}
       />
     </div>
   );

@@ -20,6 +20,10 @@ test.describe("System Updates page", () => {
           latest_url: "https://example.com/r/v1.0.1",
           latest_checked_at: new Date().toISOString(),
           update_available: true,
+          channel: "stable",
+          channel_editable: false,
+          channel_unsupported_reason:
+            "Nightly updates require a Kandev-managed npm or npx user service.",
         }),
       });
     });
@@ -35,6 +39,11 @@ test.describe("System Updates page", () => {
 
     await expect(testPage.getByTestId("system-updates-current")).toHaveText("v1.0.0");
     await expect(testPage.getByTestId("system-updates-latest")).toHaveText("v1.0.1");
+    await expect(testPage.getByRole("radio", { name: /^Stable/ })).toBeChecked();
+    await expect(testPage.getByRole("radio", { name: /^Nightly/ })).toBeDisabled();
+    await expect(testPage.getByTestId("system-updates-channel-reason")).toContainText(
+      /managed npm or npx user service/i,
+    );
     await expect(testPage.getByTestId("system-updates-apply")).toHaveCount(0);
   });
 
@@ -51,6 +60,9 @@ test.describe("System Updates page", () => {
           latest_url: "https://example.com/r/v1.0.1",
           latest_checked_at: new Date().toISOString(),
           update_available: true,
+          channel: "stable",
+          channel_editable: true,
+          channel_unsupported_reason: "",
           install: {
             running_as_service: true,
             managed_service: true,
@@ -106,6 +118,9 @@ test.describe("System Updates page", () => {
           latest_url: "https://example.com/r/v1.0.1",
           latest_checked_at: new Date().toISOString(),
           update_available: true,
+          channel: "stable",
+          channel_editable: true,
+          channel_unsupported_reason: "",
           install: {
             running_as_service: true,
             managed_service: true,
@@ -208,6 +223,10 @@ test.describe("System Updates page", () => {
           latest_url: "https://example.com/r/v1.0.1",
           latest_checked_at: new Date().toISOString(),
           update_available: true,
+          channel: "stable",
+          channel_editable: false,
+          channel_unsupported_reason:
+            "Nightly updates require a Kandev-managed npm or npx user service.",
           install: { running_as_service: false, managed_service: false },
           apply_supported: false,
           apply_unsupported_reason: "Kandev is not running as a managed service.",

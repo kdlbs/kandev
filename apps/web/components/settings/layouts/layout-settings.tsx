@@ -1,33 +1,36 @@
 "use client";
 
-import { useState } from "react";
-import {
-  IconAlertTriangle,
-  IconLayoutDashboard,
-  IconRestore,
-  IconTrash,
-} from "@tabler/icons-react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { IconAlertTriangle, IconLayoutDashboard, IconRestore } from "@tabler/icons-react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsPageHeader } from "@/components/settings/settings-typography";
+import {
+  SettingsTabs,
+  SettingsTabsList,
+  SettingsTabsPanel,
+  type SettingsTabOption,
+} from "@/components/settings/settings-tabs";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useSettingsTab } from "@/hooks/domains/settings/use-settings-tab";
 import { LayoutEditor } from "./layout-editor";
 import { LayoutProfileList } from "./layout-profile-list";
+import { LayoutProfileDeleteConfirmation } from "./layout-profile-delete-confirmation";
 import { useLayoutSettings } from "./use-layout-settings";
+import { SidebarLayoutEditor } from "../sidebar-layout-editor";
 import { useTranslation } from "react-i18next";
+import { SettingsTarget } from "@/components/settings/settings-target";
+import { SettingsGroup } from "@/components/settings/settings-group";
+import {
+  settingsActionClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 type Controller = ReturnType<typeof useLayoutSettings>;
 
@@ -38,19 +41,20 @@ function defaultActionHelpKey(selectedSavedDefault: boolean, selectedIsDefault: 
   return "settings:useThisLayoutAsTheStarting";
 }
 
-function LayoutSettingsHeader() {
+function LayoutSettingsHeader({ tabs }: { tabs: ReactNode }) {
   const { t } = useTranslation();
   return (
     <>
-      <div className="min-w-0">
-        <h2 className="flex items-center gap-2 text-2xl font-bold">
-          <IconLayoutDashboard className="h-5 w-5" />
-          {t("settings:layouts")}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("settings:configureTheInitialDesktopTaskWorkbench")}
-        </p>
-      </div>
+      <SettingsPageHeader
+        title={
+          <span className="flex items-center gap-2">
+            <IconLayoutDashboard className="h-5 w-5" />
+            {t("settings:layouts")}
+          </span>
+        }
+        description={t("settings:configureTheInitialDesktopTaskWorkbench")}
+        tabs={tabs}
+      />
       <Separator />
     </>
   );
@@ -63,9 +67,8 @@ function ResetBuiltInButton({ onClick }: { onClick: () => void }) {
       <TooltipTrigger asChild>
         <Button
           type="button"
-          size="sm"
           variant="outline"
-          className="min-h-11 cursor-pointer sm:min-h-8"
+          className={settingsActionClassName("cursor-pointer")}
           aria-label={t("settings:resetBuiltInLayout")}
           onClick={onClick}
         >
@@ -77,33 +80,12 @@ function ResetBuiltInButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function DeleteProfileButton({ onClick }: { onClick: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          size="icon-sm"
-          variant="outline"
-          className="min-h-11 min-w-11 cursor-pointer sm:min-h-8 sm:min-w-8"
-          aria-label={t("settings:deleteLayoutProfile")}
-          onClick={onClick}
-        >
-          <IconTrash className="h-4 w-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{t("settings:deleteThisCustomLayoutAfterConfirmation")}</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function SelectedLayoutHeader({
   controller,
-  onDelete,
+  deleteAction,
 }: {
   controller: Controller;
-  onDelete: () => void;
+  deleteAction: ReactNode;
 }) {
   const { t } = useTranslation();
   return (
@@ -114,7 +96,7 @@ function SelectedLayoutHeader({
             aria-label={t("settings:layoutProfileName")}
             value={controller.selectedCustom.name}
             onChange={(event) => controller.updateSelected({ name: event.target.value })}
-            className="min-h-11 max-w-md sm:min-h-9"
+            className={settingsControlClassName("max-w-md")}
           />
         ) : (
           <div className="flex flex-wrap items-center gap-2">
@@ -132,9 +114,8 @@ function SelectedLayoutHeader({
             <span tabIndex={controller.defaultActionDisabled ? 0 : -1} className="inline-flex">
               <Button
                 type="button"
-                size="sm"
                 variant="outline"
-                className="min-h-11 cursor-pointer sm:min-h-8"
+                className={settingsActionClassName("cursor-pointer")}
                 disabled={controller.defaultActionDisabled}
                 onClick={controller.setDefault}
               >
@@ -149,7 +130,7 @@ function SelectedLayoutHeader({
         {controller.selectedBuiltInOverride && (
           <ResetBuiltInButton onClick={controller.resetBuiltIn} />
         )}
-        {controller.selectedCustom && <DeleteProfileButton onClick={onDelete} />}
+        {deleteAction}
       </div>
     </div>
   );
@@ -179,64 +160,29 @@ function SelectedLayoutEditor({ controller }: { controller: Controller }) {
   );
 }
 
-function DeleteProfileDialog({
+function LayoutProfilesPanel({
   controller,
-  open,
-  onOpenChange,
+  isFinePointer,
+  deleteOpen,
+  deleteAnchorRef,
+  requestDelete,
+  closeDelete,
+  confirmDelete,
 }: {
   controller: Controller;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  isFinePointer: boolean;
+  deleteOpen: boolean;
+  deleteAnchorRef: RefObject<HTMLButtonElement | null>;
+  requestDelete: () => void;
+  closeDelete: () => void;
+  confirmDelete: () => void;
 }) {
   const { t } = useTranslation();
-  const confirm = () => {
-    controller.deleteSelected();
-    onOpenChange(false);
-  };
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          {/* The profile name is user data — interpolated, never translated. */}
-          <AlertDialogTitle>
-            {t("settings:deleteLayoutProfileNamed", {
-              name: controller.selectedCustom?.name ?? t("settings:layoutProfile"),
-            })}
-          </AlertDialogTitle>
-          <AlertDialogDescription>
-            {controller.selectedCustom?.is_default
-              ? t("settings:theBuiltInDefaultLayoutWill")
-              : t("settings:thisProfileWillBeRemovedWhen")}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t("settings:cancel")}</AlertDialogCancel>
-          <AlertDialogAction className="cursor-pointer" onClick={confirm}>
-            {t("settings:delete")}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
-export function LayoutSettings() {
-  const { t } = useTranslation();
-  const controller = useLayoutSettings();
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const invalidName = controller.profiles.some((profile) => !profile.name.trim());
-  useSettingsSaveContributor({
-    id: "layout-profiles",
-    revision: controller.profilesKey,
-    isDirty: controller.isDirty,
-    canSave: !invalidName,
-    invalidReason: invalidName ? t("settings:layoutProfileNamesMustNotBe") : undefined,
-    save: controller.save,
-    discard: controller.cancel,
-  });
-  return (
-    <div className="min-w-0 space-y-6" data-testid="layout-settings">
-      <LayoutSettingsHeader />
+    <SettingsTarget
+      targetId={GENERAL_SETTINGS_TARGETS.layoutProfiles}
+      className="min-w-0 space-y-6"
+    >
       {controller.error && (
         <Alert variant="destructive">
           <IconAlertTriangle className="h-4 w-4" />
@@ -256,11 +202,95 @@ export function LayoutSettings() {
           className="min-w-0 space-y-3"
           aria-label={t("settings:layoutEditorForProfile", { name: controller.selectedName })}
         >
-          <SelectedLayoutHeader controller={controller} onDelete={() => setDeleteOpen(true)} />
+          <SelectedLayoutHeader
+            controller={controller}
+            deleteAction={
+              controller.selectedCustom ? (
+                <LayoutProfileDeleteConfirmation
+                  profile={controller.selectedCustom}
+                  isFinePointer={isFinePointer}
+                  open={deleteOpen}
+                  anchorRef={deleteAnchorRef}
+                  onOpenChange={(open) => (open ? requestDelete() : closeDelete())}
+                  onConfirm={confirmDelete}
+                />
+              ) : null
+            }
+          />
           <SelectedLayoutEditor controller={controller} />
         </section>
       </div>
-      <DeleteProfileDialog controller={controller} open={deleteOpen} onOpenChange={setDeleteOpen} />
-    </div>
+    </SettingsTarget>
+  );
+}
+
+export function LayoutSettings() {
+  const { t } = useTranslation();
+  const controller = useLayoutSettings();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const deleteAnchorRef = useRef<HTMLButtonElement>(null);
+  const [deleteProfileId, setDeleteProfileId] = useState<string | null>(null);
+  const selectedCustomId = controller.selectedCustom?.id ?? null;
+  const deleteOpen = deleteProfileId !== null && deleteProfileId === selectedCustomId;
+  const tabs: SettingsTabOption[] = [
+    { id: "profiles", label: t("settings:layoutProfiles") },
+    { id: "sidebar", label: t("settings:sidebar") },
+  ];
+  const { value, selectTab } = useSettingsTab({
+    tabs: tabs.map((tab) => tab.id),
+    defaultTab: "profiles",
+  });
+
+  useEffect(() => {
+    if (deleteProfileId && deleteProfileId !== selectedCustomId) setDeleteProfileId(null);
+  }, [deleteProfileId, selectedCustomId]);
+
+  const requestDelete = () => {
+    if (selectedCustomId) setDeleteProfileId(selectedCustomId);
+  };
+  const closeDelete = () => setDeleteProfileId(null);
+  const confirmDelete = () => {
+    if (!deleteOpen) return;
+    closeDelete();
+    controller.deleteSelected();
+  };
+  const invalidName = controller.profiles.some((profile) => !profile.name.trim());
+  useSettingsSaveContributor({
+    id: "layout-profiles",
+    revision: controller.profilesKey,
+    isDirty: controller.isDirty,
+    canSave: !invalidName,
+    invalidReason: invalidName ? t("settings:layoutProfileNamesMustNotBe") : undefined,
+    save: controller.save,
+    discard: controller.cancel,
+  });
+  return (
+    <SettingsTabs tabs={tabs} value={value} onValueChange={selectTab}>
+      <div className="min-w-0 space-y-6" data-testid="layout-settings">
+        <LayoutSettingsHeader tabs={<SettingsTabsList ariaLabel={t("settings:layouts")} />} />
+        <SettingsTabsPanel value="profiles">
+          <SettingsGroup title={t("settings:layoutProfiles")} contentClassName="p-0 divide-y-0">
+            <LayoutProfilesPanel
+              controller={controller}
+              isFinePointer={isFinePointer}
+              deleteOpen={deleteOpen}
+              deleteAnchorRef={deleteAnchorRef}
+              requestDelete={requestDelete}
+              closeDelete={closeDelete}
+              confirmDelete={confirmDelete}
+            />
+          </SettingsGroup>
+        </SettingsTabsPanel>
+        <SettingsTabsPanel value="sidebar" testId="settings-layouts-sidebar">
+          <SettingsGroup
+            title={t("settings:sidebar")}
+            description={t("settings:sidebarDescription")}
+            contentClassName="p-0 divide-y-0"
+          >
+            <SidebarLayoutEditor embedded />
+          </SettingsGroup>
+        </SettingsTabsPanel>
+      </div>
+    </SettingsTabs>
   );
 }

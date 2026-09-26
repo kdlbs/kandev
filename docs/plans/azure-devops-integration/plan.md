@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/azure-devops-integration/spec.md
+spec: docs/specs/integrations/requirements/azure-devops-integration.md
 created: 2026-07-17
 updated: 2026-07-31
 status: building
@@ -10,7 +10,7 @@ status: building
 ## Scope
 
 Implement the Azure DevOps Services integration defined in
-[`../../specs/azure-devops-integration/spec.md`](../../specs/azure-devops-integration/spec.md):
+[`../../specs/integrations/requirements/azure-devops-integration.md`](../../specs/integrations/requirements/azure-devops-integration.md):
 workspace-scoped PAT configuration, direct REST work-item and pull-request
 reads, persistent task PR links, responsive settings/browse surfaces, immediate
 integration availability updates, provider-neutral remote repository selection,

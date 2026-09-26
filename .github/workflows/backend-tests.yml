@@ -1,32 +1,26 @@
 name: Backend Tests
 
+# No trigger-level `paths:` filter, deliberately. A workflow skipped by one
+# reports no conclusion at all, and a required check that never reports leaves
+# a pull request unable to enter a merge queue and a merge group unable to
+# leave it. `merge_group` cannot carry a `paths:` filter in the first place.
+# The filter lives in the `changes` job below instead, and the `test` job
+# reports the single conclusion the queue waits on. See docs/ci-merge-queue.md.
 on:
   push:
     branches: [main]
-    paths:
-      - "apps/backend/**"
-      # check-make-shells also lints the root Makefile's $(shell ...) probes, so
-      # a change there has to be able to trip it.
-      - "Makefile"
-      - "scripts/check-make-shells"
-      - ".github/workflows/backend-tests.yml"
-      - "!**/*.md"
-      - "!**/*.mdx"
-      - "!**/*.markdown"
   pull_request:
     branches: [main]
-    paths:
-      - "apps/backend/**"
-      - "Makefile"
-      - "scripts/check-make-shells"
-      - ".github/workflows/backend-tests.yml"
-      - "!**/*.md"
-      - "!**/*.mdx"
-      - "!**/*.markdown"
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a merge-queue run. Its ref is unique per queue entry, so a
+  # cancellation here could only come from a mis-keyed group, and the queue
+  # would read the cancelled check as a failure and eject the pull request.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 # Least-privilege default. The Linux static/test jobs and the Windows `test-windows`
 # job only read source and run tests — no PR/issue writes, no release ops.
@@ -38,9 +32,117 @@ permissions:
   contents: read
   packages: read
 
+env:
+  # Container jobs may override HOME. Keep Corepack pointed at the pnpm cache
+  # prepared in the CI image.
+  COREPACK_HOME: /root/.cache/node/corepack
+
 jobs:
+  runner_plan:
+    name: Plan external runner allocation
+    runs-on: ubuntu-latest
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Plan runner allocation
+        id: plan
+        uses: ./.github/actions/plan-external-runners
+        with:
+          workflow: backend
+          run-id: ${{ github.run_id }}
+          families: >-
+            [{"name":"test","tier":"light"}]
+          burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
+          percent: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
+          light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
+          standard-label: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
+
+  # The former trigger-level `paths:` list, applied one level down so a skip
+  # still produces a conclusion. `.github/scripts/changed-paths.py` implements
+  # the same last-match-wins semantics GitHub applies to `paths:`.
+  changes:
+    name: Detect relevant changes
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.detect.outputs.run }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # The base commit has to be present locally for the diff below. Every
+          # other job in this workflow already pays for a full clone.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect relevant changes
+        id: detect
+        env:
+          PATTERNS: |
+            apps/backend/**
+            apps/web/lib/settings-discovery/contract.generated.json
+            apps/web/lib/settings-discovery/profile-contract.generated.json
+            scripts/settings-contract-ci.test.mjs
+            # check-make-shells also lints the root Makefile's $(shell ...)
+            # probes, so a change there has to be able to trip it.
+            Makefile
+            scripts/check-make-shells
+            .github/workflows/backend-tests.yml
+            .github/scripts/changed-paths.py
+            .github/scripts/bounded-step-summary.py
+            !**/*.md
+            !**/*.mdx
+            !**/*.markdown
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          case "${EVENT_NAME}" in
+            # The checkout is the merge ref, whose first parent is the base
+            # branch tip. Diffing against that tip directly collapses to a
+            # two-dot diff over everything main landed since the PR opened, so
+            # take the fork point instead.
+            pull_request) BASE="$(git merge-base HEAD "origin/${BASE_REF}")" ;;
+            # The queue branch is cut from this commit, so it is a true ancestor.
+            merge_group) BASE="${MERGE_GROUP_BASE_SHA}" ;;
+            push) BASE="${PUSH_BEFORE}" ;;
+            *) BASE="" ;;
+          esac
+
+          # Fail open. A first push to a branch, a force push, or an unknown
+          # event leaves no usable base, and running the suite needlessly is
+          # cheaper than merging something no job ever looked at.
+          if [[ -z "${BASE}" || "${BASE}" == "0000000000000000000000000000000000000000" ]] \
+             || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "No usable base commit for '${EVENT_NAME}'; running everything."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # `-z`, not plain --name-only: git quotes non-ASCII paths under its
+          # default core.quotePath, and a quoted path matches no pattern, so a
+          # change to one would skip every job and still report success.
+          git diff --name-only -z "${BASE}" HEAD \
+            | python3 .github/scripts/changed-paths.py
+
   static_checks:
     name: Backend Static Checks
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
     # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
@@ -70,7 +172,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Cache Go modules
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod
@@ -84,6 +186,19 @@ jobs:
       - name: Build
         run: go build -v ./cmd/kandev
 
+      - name: Verify settings catalog contract
+        working-directory: ${{ github.workspace }}
+        run: node --test scripts/settings-contract-ci.test.mjs
+
+      - name: Check required-store SQL portability
+        run: go run ./cmd/sqlguard ./internal
+
+      - name: Run catalog and SQLite conformance gates
+        run: |
+          set -euo pipefail
+          go test -v -race ./internal/persistence/storeconformance \
+            -run '^(TestStoreCatalogCompleteness|TestStoreConformance|TestUpgradeFixtureManifest|TestPreviousStableUpgrade)$'
+
       # Assert the run/dev/start-debug targets expand to the right per-shell
       # command line (native Windows / Git Bash / Unix). The windows-latest job
       # below compiles Go but never exercises this Make-target dispatch, so a
@@ -94,13 +209,28 @@ jobs:
       - name: Resolve base SHA
         shell: bash
         working-directory: ${{ github.workspace }}
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
 
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          # On `pull_request` the checkout is the merge ref, whose first parent
+          # is the current base branch tip. `pull_request.base.sha` is the base
+          # tip from when the PR event fired, so it can be stale after main
+          # advances. Use the merge ref's actual base tip to keep the diff and
+          # incremental lint scoped to this PR.
+          #
+          # A merge_group run has no pull request behind it, so the queue branch
+          # is cut from `merge_group.base_sha`, which is the equivalent base.
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            BASE_SHA="$(git merge-base HEAD "origin/${BASE_REF}")"
+          elif [[ "${EVENT_NAME}" == "merge_group" ]]; then
+            BASE_SHA="${MERGE_GROUP_BASE_SHA}"
           else
-            BASE_SHA="${{ github.event.before }}"
+            BASE_SHA="${PUSH_BEFORE}"
           fi
 
           if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
@@ -136,14 +266,17 @@ jobs:
       - name: Run golangci-lint
         # golangci-lint is preinstalled in the kandev-ci image; invoke it
         # directly instead of going through `golangci/golangci-lint-action`,
-        # which would re-download its own binary on every run. `--timeout=5m`
-        # matches the action's previous implicit default (the binary's own
-        # default is 1m, which can trip on cold caches).
+        # which would re-download its own binary on every run. Ten minutes
+        # leaves headroom for cold caches while still bounding analysis time.
         shell: bash
-        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=5m
+        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=10m
 
   test_shards:
     name: Backend Tests (${{ matrix.shard }}/2)
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -173,7 +306,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Cache Go modules
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod
@@ -236,15 +369,48 @@ jobs:
                   end
               '
 
-      - name: Generate test report
-        uses: robherley/go-test-action@3856e4e57831b3b6d6d8d89f91747e5200c533f7 # v0
+      # Run the pinned reporter as a child process so its summary target can be
+      # redirected. A `uses:` step cannot override GITHUB_STEP_SUMMARY because
+      # the runner reapplies its own file-command environment to JS actions.
+      - name: Checkout Go test reporter
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         if: always()
         with:
-          fromJSONFile: apps/backend/test-results-${{ matrix.shard }}.json
-          omit: successful
+          repository: robherley/go-test-action
+          ref: 2f859e0c8769d755d3174eecb9af8f64660827f3 # v1.1.0
+          path: .github/vendor/go-test-action
+          persist-credentials: false
+
+      - name: Generate test report
+        if: always()
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          BACKEND_TEST_SHARD: ${{ matrix.shard }}
+        run: |
+          report_summary="$RUNNER_TEMP/backend-test-summary-${BACKEND_TEST_SHARD}.md"
+          : > "$report_summary"
+          GITHUB_STEP_SUMMARY="$report_summary" \
+          INPUT_FROMJSONFILE="$GITHUB_WORKSPACE/apps/backend/test-results-${BACKEND_TEST_SHARD}.json" \
+          INPUT_MODULEDIRECTORY="$GITHUB_WORKSPACE/apps/backend" \
+          INPUT_OMIT="successful" \
+            node ".github/vendor/go-test-action/dist/index.js"
+
+      - name: Publish bounded test report summary
+        if: always()
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          BACKEND_TEST_SHARD: ${{ matrix.shard }}
+        run: |
+          python3 .github/scripts/bounded-step-summary.py \
+            --input "$RUNNER_TEMP/backend-test-summary-${BACKEND_TEST_SHARD}.md" \
+            --output "$GITHUB_STEP_SUMMARY" \
+            --diagnostics-label "backend-test-results-${BACKEND_TEST_SHARD}" \
+            --diagnostics-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID#artifacts"
 
       - name: Upload test artifacts
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: backend-test-results-${{ matrix.shard }}
@@ -253,31 +419,156 @@ jobs:
             apps/backend/test-results-${{ matrix.shard }}.json
           retention-days: 30
 
+  test_ambient_env:
+    name: Backend (ambient integration env)
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
+    runs-on: ubuntu-latest
+    # test_shards runs in the same clean container and never sets these vars,
+    # so it cannot catch a package that starts reading them again — the class
+    # of bug that shipped alongside internal/gitlab's host-trust tests (they
+    # only passed because CI never set KANDEV_GITLAB_HOST/GITLAB_HOST/
+    # GITLAB_TOKEN), and that internal/github hit for real with an ambient
+    # GH_TOKEN/GITHUB_TOKEN picking a PAT client over the "no auth configured"
+    # path. This job poisons them with obviously-fake values so the GitLab-
+    # and GitHub-facing packages are forced to prove they stay hermetic
+    # instead of accidentally depending on an unset ambient env.
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Mark workspace safe for git
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache Go modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ambient-env-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+          restore-keys: |
+            go-ambient-env-${{ runner.os }}-
+            go-${{ runner.os }}-
+
+      - name: Run GitLab-facing packages under a poisoned host environment
+        env:
+          KANDEV_GITLAB_HOST: https://gitlab.ambient-ci.invalid
+          GITLAB_HOST: https://gitlab.ambient-ci.invalid
+          GITLAB_TOKEN: glpat-ambient-ci-not-a-real-token
+        run: go test -race ./internal/gitlab/... ./internal/agentctl/server/process/...
+
+      - name: Run GitHub-facing package under a poisoned ambient environment
+        env:
+          GH_TOKEN: ghp-ambient-ci-not-a-real-token
+          KANDEV_MOCK_GITHUB: "true"
+        run: GITHUB_TOKEN=ghp-ambient-ci-not-a-real-token-legacy go test -race ./internal/github/...
+
+  # The required check. Runs on every event, including the ones where every job
+  # above is correctly skipped, so the merge queue always has a conclusion to
+  # read instead of a check that stays pending forever.
+  #
+  # `needs` covers every other job in this workflow on purpose. A merge queue
+  # gates on check names an admin selects by hand, and a job missing from this
+  # list is a job whose failure would never block a merge — silently, and
+  # without appearing anywhere in the ruleset. `postgres-boot` and
+  # `test-windows` were outside it before this workflow became a gate.
   test:
     name: Run Backend Tests
-    runs-on: ubuntu-latest
-    needs: [static_checks, test_shards]
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).test_runner }}
+    needs:
+      - changes
+      - runner_plan
+      - static_checks
+      - test_shards
+      - test_ambient_env
+      - postgres-boot
+      - postgres-18
+      - test-windows
     if: ${{ always() }}
     steps:
       - name: Require backend checks to pass
         env:
+          RUNNER_PLAN_RESULT: ${{ needs.runner_plan.result }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
           STATIC_CHECKS_RESULT: ${{ needs.static_checks.result }}
           TEST_SHARDS_RESULT: ${{ needs.test_shards.result }}
+          TEST_AMBIENT_ENV_RESULT: ${{ needs.test_ambient_env.result }}
+          POSTGRES_BOOT_RESULT: ${{ needs['postgres-boot'].result }}
+          POSTGRES_18_RESULT: ${{ needs['postgres-18'].result }}
+          TEST_WINDOWS_RESULT: ${{ needs['test-windows'].result }}
         run: |
           set -euo pipefail
-          if [[ "${STATIC_CHECKS_RESULT}" != "success" || "${TEST_SHARDS_RESULT}" != "success" ]]; then
-            echo "Static checks: ${STATIC_CHECKS_RESULT}"
-            echo "Test shards: ${TEST_SHARDS_RESULT}"
+
+          echo "Runner plan: ${RUNNER_PLAN_RESULT}"
+          echo "Change detection: ${CHANGES_RESULT}"
+          echo "Static checks: ${STATIC_CHECKS_RESULT}"
+          echo "Test shards: ${TEST_SHARDS_RESULT}"
+          echo "Ambient env tests: ${TEST_AMBIENT_ENV_RESULT}"
+          echo "Postgres boot: ${POSTGRES_BOOT_RESULT}"
+          echo "Postgres 18: ${POSTGRES_18_RESULT}"
+          echo "Windows tests: ${TEST_WINDOWS_RESULT}"
+
+          # Runner planning must succeed because its outputs select the runner
+          # fleet. A planner error cannot silently become a hosted fallback.
+          if [[ "${RUNNER_PLAN_RESULT}" != "success" ]]; then
+            echo "Runner planning did not succeed; refusing to report a pass." >&2
             exit 1
           fi
 
+          # Change detection itself must succeed: if it errored we do not know
+          # whether the skips below were deliberate.
+          if [[ "${CHANGES_RESULT}" != "success" ]]; then
+            echo "Change detection did not succeed; refusing to report a pass." >&2
+            exit 1
+          fi
+
+          # `skipped` is a pass — the change-detection job decided nothing this
+          # workflow covers was touched. `cancelled` is not: a cancelled job
+          # never reached a verdict, and treating that as a pass would let an
+          # untested merge group through.
+          #
+          # This gate is the one check a human opens when a merge is blocked, so
+          # name the job that failed here rather than making them correlate the
+          # list above by eye.
+          for entry in \
+            "static_checks:${STATIC_CHECKS_RESULT}" \
+            "test_shards:${TEST_SHARDS_RESULT}" \
+            "test_ambient_env:${TEST_AMBIENT_ENV_RESULT}" \
+            "postgres-boot:${POSTGRES_BOOT_RESULT}" \
+            "postgres-18:${POSTGRES_18_RESULT}" \
+            "test-windows:${TEST_WINDOWS_RESULT}"; do
+            name="${entry%%:*}"
+            result="${entry#*:}"
+            if [[ "${result}" != "success" && "${result}" != "skipped" ]]; then
+              echo "${name} finished with result: ${result}" >&2
+              exit 1
+            fi
+          done
+
   postgres-boot:
     name: Backend Postgres
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: read
-    timeout-minutes: 10
+    # The env-gated package suite runs with the race detector and can exceed
+    # ten minutes on a hosted runner as the repository test set grows.
+    timeout-minutes: 20
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     services:
       postgres:
@@ -311,36 +602,114 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run env-gated Postgres tests
+      - name: Run fixed PostgreSQL 16 persistence gates
         run: |
           set -euo pipefail
-
-          mapfile -t postgres_packages < <(
-            grep -RIl 'PostgresDSNFromEnv' . --include='*_test.go' \
-              | xargs -r dirname \
-              | sort -u
+          # Keep this package list explicit. PostgreSQL coverage is a reviewed
+          # contract, not a grep over test source markers that can silently
+          # omit a package when a test is renamed or moved.
+          POSTGRES_PACKAGES=(
+            ./internal/agent/settings/store
+            ./internal/analytics/repository/sqlite
+            ./internal/automation
+            ./internal/azuredevops
+            ./internal/backendapp
+            ./internal/db
+            ./internal/delivery
+            ./internal/github
+            ./internal/gitlab
+            ./internal/jira
+            ./internal/linear
+            ./internal/notifications/store
+            ./internal/office/configsync
+            ./internal/office/repository/sqlite
+            ./internal/office/retention
+            ./internal/orchestrator/messagequeue
+            ./internal/persistence
+            ./internal/persistence/storeconformance
+            ./internal/plugins/state
+            ./internal/prompts/store
+            ./internal/runs/service
+            ./internal/runtimeflags
+            ./internal/secrets
+            ./internal/sentry
+            ./internal/system/settings
+            ./internal/system/storage
+            ./internal/task/repository/sqlite
+            ./internal/telemetrycontract
+            ./internal/terminal/repository
+            ./internal/user/store
+            ./internal/workflow/repository
+            ./internal/workflowsync
+            ./internal/worktree
           )
+          go test -v -race -timeout 15m "${POSTGRES_PACKAGES[@]}"
 
-          if [[ "${#postgres_packages[@]}" -eq 0 ]]; then
-            echo "::error::No Postgres test packages found"
-            exit 1
-          fi
+  postgres-18:
+    name: Backend Postgres 18
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    timeout-minutes: 20
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    services:
+      postgres:
+        image: ghcr.io/kdlbs/kandev-ci:postgres-18@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: kandev
+          POSTGRES_PASSWORD: kandev
+          POSTGRES_DB: kandev_admin
+        options: >-
+          --health-cmd "pg_isready -U kandev -d kandev_admin"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/backend
+    env:
+      KANDEV_TEST_POSTGRES_DSN: host=postgres port=5432 user=kandev password=kandev dbname=kandev_admin sslmode=disable
 
-          printf 'Running Postgres tests in:\n'
-          printf '  %s\n' "${postgres_packages[@]}"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
+      - name: Run PostgreSQL 18 boot and upgrade gates
+        run: |
+          set -euo pipefail
           output_file="$(mktemp)"
-          go test -v -race "${postgres_packages[@]}" 2>&1 | tee "${output_file}"
+          go test -v -race \
+            ./internal/persistence/storeconformance ./internal/backendapp \
+            -run '^(TestPreviousStableUpgrade|TestPostgresBootInitializesRepositories)$' \
+            2>&1 | tee "${output_file}"
 
-          if ! grep -q '^=== RUN   TestPostgresBootInitializesRepositories$' "${output_file}"; then
-            echo "::error::Postgres boot smoke test matched no tests"
-            exit 1
-          fi
+          for test_name in \
+            '=== RUN   TestPreviousStableUpgrade' \
+            '=== RUN   TestPostgresBootInitializesRepositories'; do
+            if ! grep -q "^${test_name}$" "${output_file}"; then
+              echo "::error::PostgreSQL 18 gate matched no ${test_name#*   } test"
+              exit 1
+            fi
+          done
 
   test-windows:
     name: Backend (windows)
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: windows-latest
-    timeout-minutes: 15
+    # Dependency hydration, build, vet, and the race-sensitive package suite
+    # can consume 30 minutes on a cold hosted runner. Keep the cap finite while
+    # leaving the final targeted regression checks time to run.
+    timeout-minutes: 40
     # Least-privilege: this job only reads source and runs tests, no PR/issue
     # writes or release operations. Flagged by CodeQL workflow audit + matching
     # CodeRabbit nitpick.
@@ -378,7 +747,22 @@ jobs:
       # a self-hosting Go helper (see testmain_test.go) so they run on
       # every platform.
       - name: Test windows-sensitive packages
-        run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/...
+        # The process package is large and the race detector is slow on
+        # windows-latest. Go's default package timeout is 10 minutes, which can
+        # terminate a healthy suite before the workflow's 30-minute job cap.
+        run: go test -race -v -timeout 25m ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
+
+      - name: Test Windows managed runtime cache repair
+        run: go test -race -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent
+
+      # Keep port-collision coverage targeted: the instance package contains
+      # broader stdio MCP fixture tests that depend on Unix command behavior.
+      - name: Test Windows port collision handling
+        shell: bash
+        run: |
+          go test -race -v ./internal/common/netutil -run '^TestIsAddrInUse'
+          go test -race -v ./internal/agentctl/server/instance -run '^TestAllocatePortAndListenerRetriesAddressInUse$'
+          go test -race -v ./internal/gateway/websocket -run '^TestResolveAndBindReportsOccupiedPort$'
 
       # Keep this targeted: the service package has broad subprocess coverage,
       # while this native test is the Windows path-semantics regression.
@@ -387,3 +771,11 @@ jobs:
           go test -race -v
           -run '^(TestExplicitLocalRepositoryWindowsPathSemantics|TestListDirectory.*|TestDriveRootsFromMask|TestSplitAbsForRoot)$'
           ./internal/task/service
+
+      - name: Test Cursor project slug path normalization
+        run: go test -race -v ./internal/agent/mcpconfig -run '^TestDeriveCursorProjectSlug$'
+
+      # Pure GOOS-branch logic (no syscalls), but it must actually observe
+      # Windows to prove the unavailable branch, not just compile under it.
+      - name: Test Windows agent-survival flag availability
+        run: go test -race -v -run '^TestAgentSurvivalAvailabilityMatchesPlatformScope$' ./internal/runtimeflags

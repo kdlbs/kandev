@@ -58,6 +58,26 @@ func compareSemver(a, b string) int {
 	return strings.Compare(ap, bp)
 }
 
+// compareSemverCore compares only major.minor.patch and ignores prerelease
+// identifiers. Callers use it when different nightly SHAs at the same numeric
+// version are both valid targets, while a lower numeric target is a rollback.
+func compareSemverCore(a, b string) int {
+	an, _, _, aok := parseSemver(a)
+	bn, _, _, bok := parseSemver(b)
+	if !aok || !bok {
+		return compareSemver(a, b)
+	}
+	for i := range an {
+		if an[i] < bn[i] {
+			return -1
+		}
+		if an[i] > bn[i] {
+			return 1
+		}
+	}
+	return 0
+}
+
 // parseSemver returns the three numeric segments, the pre-release suffix (or
 // ""), the git-describe "commits ahead" count (0 when not a git-describe
 // build), and ok=false when the input is not a recognisable major.minor.patch

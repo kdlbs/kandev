@@ -1,627 +1,272 @@
 "use client";
 
-import { memo, useMemo } from "react";
-import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
-import { TaskItem } from "./task-item";
-import { TaskItemWithContextMenu, type StepDef } from "./task-switcher-context-menu";
-import {
-  countGroupTasks,
-  type GroupedSidebarList,
-  type SidebarGroup,
-} from "@/lib/sidebar/apply-view";
-import { type TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
-import { SortableTaskLevel, SortableTaskNode } from "./task-switcher-subtask-dnd";
-import { GroupHeader, TaskSwitcherSkeleton } from "./task-switcher-group";
+import { memo, useLayoutEffect, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import { TaskSwitcherSkeleton } from "./task-switcher-group";
+import { GroupSection, type GroupSectionProps, type TaskRowBaseProps } from "./task-switcher-tree";
+import { useSharedGroupedSidebarList } from "./task-session-sidebar-grouped-view";
+import type { TaskSwitcherProps } from "./task-switcher-types";
 
-export type TaskSwitcherItem = {
-  id: string;
-  title: string;
-  state?: TaskState;
-  sessionState?: TaskSessionState;
-  /** Task-level most-active-wins busy aggregate (ADR-0049) from the task record. */
-  foregroundActivity?: ForegroundActivity | null;
-  description?: string;
-  workflowId?: string;
-  workflowName?: string;
-  workflowStepId?: string;
-  workflowStepTitle?: string;
-  repositoryPath?: string;
-  repositories?: string[];
-  diffStats?: { additions: number; deletions: number };
-  isRemoteExecutor?: boolean;
-  remoteExecutorType?: string;
-  remoteExecutorName?: string;
-  updatedAt?: string;
-  createdAt?: string;
-  isArchived?: boolean;
-  primarySessionId?: string | null;
-  hasPendingClarification?: boolean;
-  hasPendingPermission?: boolean;
-  parentTaskTitle?: string;
-  parentTaskId?: string;
-  workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
-  prInfo?: { number: number; state: string; aggregateState?: string };
-  isPRReview?: boolean;
-  isIssueWatch?: boolean;
-  issueInfo?: { url: string; number: number };
-  agentErrorMessage?: string | null;
-};
-
-type TaskSwitcherProps = {
-  grouped: GroupedSidebarList;
-  workflows?: TaskMoveWorkflow[];
-  stepsByWorkflowId?: Record<string, StepDef[]>;
-  activeTaskId: string | null;
-  selectedTaskId: string | null;
-  collapsedGroupKeys?: string[];
-  onToggleGroup?: (groupKey: string) => void;
-  collapsedSubtaskParentIds?: string[];
-  onToggleSubtasks?: (parentTaskId: string) => void;
-  onSelectTask: (taskId: string) => void;
-  onEditTask?: (task: TaskSwitcherItem) => void;
-  onRenameTask?: (taskId: string, currentTitle: string) => void;
-  onArchiveTask?: (taskId: string) => void;
-  onCreateSubtask?: (taskId: string, taskTitle: string) => void;
-  onDeleteTask?: (taskId: string) => void;
-  onDetachTask?: (taskId: string) => void;
-  onLinkPullRequest?: TaskLinkHandler;
-  onLinkIssue?: TaskLinkHandler;
-  onLinkMergeRequest?: TaskLinkHandler;
-  onLinkJiraTicket?: TaskLinkHandler;
-  onLinkLinearIssue?: TaskLinkHandler;
-  onLinkSentryIssue?: TaskLinkHandler;
-  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
-  onTogglePin?: (taskId: string) => void;
-  onReorderGroup?: (groupTaskIds: string[]) => void;
-  onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
-  pinnedTaskIds?: string[];
-  deletingTaskId?: string | null;
-  isLoading?: boolean;
-  totalTaskCount?: number;
-  // Multi-select (cmd/shift click). When the selection is non-empty, plain
-  // clicks toggle instead of navigating; the context menu acts on the selection.
-  selectedTaskIds?: Set<string>;
-  onToggleSelectTask?: (taskId: string) => void;
-  onSelectTaskRange?: (taskId: string) => void;
-  onBulkArchive?: (taskIds: string[]) => void;
-  onBulkDelete?: (taskIds: string[]) => void;
-  onBulkPin?: (taskIds: string[]) => void;
-  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
-  onClearSelection?: () => void;
-  isMixedWorkflowSelection?: boolean;
-};
-
-type TaskLinkHandler = (taskId: string, taskTitle?: string) => void;
+export type {
+  StepDef,
+  TaskLinkHandler,
+  TaskSwitcherItem,
+  TaskSwitcherProps,
+} from "./task-switcher-types";
+export { dispatchSidebarRowClick } from "./task-switcher-click";
 
 /**
- * Modifier-aware sidebar row click: cmd/ctrl toggles one task, shift extends a
- * range, a plain click toggles while a selection is active and otherwise
- * navigates to the task.
+ * Rows name their repository unless the list is already grouped by it, where
+ * the section header says it once for the whole group. A list whose grouping is
+ * unknown (a hand-built `grouped` without `groupKey`) shows the label.
  */
-/** @internal Exported for unit testing the modifier-aware click dispatch. */
-export function dispatchSidebarRowClick(
-  e: React.MouseEvent | React.KeyboardEvent,
-  taskId: string,
-  isSelecting: boolean,
-  handlers: {
-    onSelectTask: (taskId: string) => void;
-    onToggleSelectTask?: (taskId: string) => void;
-    onSelectTaskRange?: (taskId: string) => void;
-  },
-): void {
-  // Only intercept a modifier click when the matching handler is wired (the
-  // mobile switcher renders without selection handlers — there a Cmd/Shift click
-  // must still navigate rather than become a no-op).
-  if ((e.metaKey || e.ctrlKey) && handlers.onToggleSelectTask) {
-    e.preventDefault();
-    handlers.onToggleSelectTask(taskId);
-    return;
-  }
-  if (e.shiftKey && handlers.onSelectTaskRange) {
-    e.preventDefault();
-    handlers.onSelectTaskRange(taskId);
-    return;
-  }
-  if (isSelecting && handlers.onToggleSelectTask) {
-    handlers.onToggleSelectTask(taskId);
-    return;
-  }
-  handlers.onSelectTask(taskId);
+function shouldShowRowRepository(grouped: TaskSwitcherProps["grouped"]): boolean {
+  return grouped.groupKey !== "repository";
 }
 
-type SubtaskToggleInfo = {
-  subtaskCount: number;
-  subtasksCollapsed: boolean;
-  onToggleSubtasks: () => void;
+const TASK_ROW_HANDLER_KEYS = [
+  "onSelectTask",
+  "onEditTask",
+  "onRenameTask",
+  "onArchiveTask",
+  "onCreateSubtask",
+  "onDeleteTask",
+  "onDetachTask",
+  "onLinkPullRequest",
+  "onLinkIssue",
+  "onLinkMergeRequest",
+  "onLinkJiraTicket",
+  "onLinkLinearIssue",
+  "onLinkSentryIssue",
+  "onMoveToStep",
+  "onRequestMoveOptions",
+  "onBeforeMoveOptionsOpen",
+  "onTogglePin",
+  "onToggleSelectTask",
+  "onSelectTaskRange",
+  "onBulkArchive",
+  "onBulkDelete",
+  "onBulkPin",
+  "onBulkMove",
+  "onClearSelection",
+] as const;
+
+type TaskRowHandlerKey = (typeof TASK_ROW_HANDLER_KEYS)[number];
+type StableTaskRowHandlers = {
+  [Key in TaskRowHandlerKey]-?: NonNullable<TaskSwitcherProps[Key]>;
 };
 
-type TaskRowProps = {
-  task: TaskSwitcherItem;
-  isSubTask?: boolean;
-  depth?: number;
-  subtaskToggle?: SubtaskToggleInfo;
-  workflows?: TaskMoveWorkflow[];
-  stepsByWorkflowId?: Record<string, StepDef[]>;
-  activeTaskId: string | null;
-  selectedTaskId: string | null;
-  onSelectTask: (taskId: string) => void;
-  onEditTask?: (task: TaskSwitcherItem) => void;
-  onRenameTask?: (taskId: string, currentTitle: string) => void;
-  onArchiveTask?: (taskId: string) => void;
-  onCreateSubtask?: (taskId: string, taskTitle: string) => void;
-  onDeleteTask?: (taskId: string) => void;
-  onDetachTask?: (taskId: string) => void;
-  onLinkPullRequest?: TaskLinkHandler;
-  onLinkIssue?: TaskLinkHandler;
-  onLinkMergeRequest?: TaskLinkHandler;
-  onLinkJiraTicket?: TaskLinkHandler;
-  onLinkLinearIssue?: TaskLinkHandler;
-  onLinkSentryIssue?: TaskLinkHandler;
-  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
-  onTogglePin?: (taskId: string) => void;
-  isPinned?: boolean;
-  pinnedTaskIds?: string[];
-  deletingTaskId?: string | null;
-  selectedTaskIds?: Set<string>;
-  onToggleSelectTask?: (taskId: string) => void;
-  onSelectTaskRange?: (taskId: string) => void;
-  onBulkArchive?: (taskIds: string[]) => void;
-  onBulkDelete?: (taskIds: string[]) => void;
-  onBulkPin?: (taskIds: string[]) => void;
-  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
-  onClearSelection?: () => void;
-  isMixedWorkflowSelection?: boolean;
-};
-
-function TaskRow({
-  task,
-  isSubTask,
-  depth,
-  subtaskToggle,
-  workflows,
-  stepsByWorkflowId,
-  activeTaskId,
-  selectedTaskId,
-  onSelectTask,
-  onRenameTask,
-  onArchiveTask,
-  onCreateSubtask,
-  onDeleteTask,
-  onDetachTask,
-  onMoveToStep,
-  onTogglePin,
-  isPinned,
-  pinnedTaskIds,
-  deletingTaskId,
-  selectedTaskIds,
-  onToggleSelectTask,
-  onSelectTaskRange,
-  onBulkArchive,
-  onBulkDelete,
-  onBulkPin,
-  onBulkMove,
-  onClearSelection,
-  isMixedWorkflowSelection,
-  ...props
-}: TaskRowProps) {
-  const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
-  const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
-  const stepId = task.workflowStepId;
-  return (
-    <TaskItemWithContextMenu
-      task={task}
-      workflows={workflows}
-      stepsByWorkflowId={stepsByWorkflowId}
-      steps={taskSteps}
-      {...props}
-      onRenameTask={onRenameTask}
-      onArchiveTask={onArchiveTask}
-      onCreateSubtask={onCreateSubtask}
-      onDeleteTask={onDeleteTask}
-      onDetachTask={onDetachTask}
-      onMoveToStep={onMoveToStep}
-      onTogglePin={onTogglePin}
-      isPinned={isPinned}
-      pinnedTaskIds={pinnedTaskIds}
-      isDeleting={deletingTaskId === task.id}
-      selectedTaskIds={selectedTaskIds}
-      onBulkArchive={onBulkArchive}
-      onBulkDelete={onBulkDelete}
-      onBulkPin={onBulkPin}
-      onBulkMove={onBulkMove}
-      onClearSelection={onClearSelection}
-      isMixedWorkflowSelection={isMixedWorkflowSelection}
-    >
-      <TaskItem
-        isMultiSelected={selectedTaskIds?.has(task.id) ?? false}
-        onSelect={(e) =>
-          dispatchSidebarRowClick(e, task.id, (selectedTaskIds?.size ?? 0) > 0, {
-            onSelectTask,
-            onToggleSelectTask,
-            onSelectTaskRange,
-          })
+function useStableTaskRowHandlers(props: TaskSwitcherProps): StableTaskRowHandlers {
+  // A memoized row must keep its function identities without retaining a
+  // range-selection or dialog handler from an older committed task tree.
+  const committedPropsRef = useRef(props);
+  useLayoutEffect(() => {
+    committedPropsRef.current = props;
+  }, [props]);
+  return useMemo(() => {
+    const handlers: Partial<Record<TaskRowHandlerKey, (...args: unknown[]) => unknown>> = {};
+    for (const key of TASK_ROW_HANDLER_KEYS) {
+      handlers[key] = (...args: unknown[]) => {
+        const handler = committedPropsRef.current[key];
+        if (typeof handler === "function") {
+          return (handler as (...handlerArgs: unknown[]) => unknown)(...args);
         }
-        title={task.title}
-        state={task.state}
-        sessionState={task.sessionState}
-        foregroundActivity={task.foregroundActivity}
-        isArchived={task.isArchived}
-        isSelected={isSelected}
-        diffStats={task.diffStats}
-        isRemoteExecutor={task.isRemoteExecutor}
-        remoteExecutorType={task.remoteExecutorType}
-        remoteExecutorName={task.remoteExecutorName}
-        taskId={task.id}
-        primarySessionId={task.primarySessionId ?? null}
-        hasPendingClarification={task.hasPendingClarification}
-        hasPendingPermission={task.hasPendingPermission}
-        updatedAt={task.updatedAt}
-        repositories={task.repositories}
-        prInfo={task.prInfo}
-        issueInfo={task.issueInfo}
-        agentErrorMessage={task.agentErrorMessage}
-        isSubTask={isSubTask}
-        isOnLastWorkflowStep={!!stepId && taskSteps?.at(-1)?.id === stepId}
-        depth={depth}
-        subtaskCount={subtaskToggle?.subtaskCount}
-        subtasksCollapsed={subtaskToggle?.subtasksCollapsed}
-        onToggleSubtasks={subtaskToggle?.onToggleSubtasks}
-        onClick={() => onSelectTask(task.id)}
-        isDeleting={deletingTaskId === task.id}
-        isPinned={isPinned}
-      />
-    </TaskItemWithContextMenu>
-  );
+      };
+    }
+    return handlers as StableTaskRowHandlers;
+  }, []);
 }
 
-// Shared, per-render context threaded through the recursive task tree so each
-// node can look up its children, collapse state, and reorder callbacks without
-// drilling a dozen props through every level.
-type TaskTreeContext = {
-  subTasksByParentId: Map<string, TaskSwitcherItem[]>;
-  collapsedSubs: Set<string>;
-  onToggleSubtasks?: (parentTaskId: string) => void;
-  pinnedSet: Set<string>;
-  rowProps: Omit<TaskRowProps, "task" | "subtaskToggle" | "isPinned" | "isSubTask" | "depth">;
-  onReorderGroup?: (groupTaskIds: string[]) => void;
-  onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
-};
-
-// One task row plus — when expanded — its nested subtree. Mutually recursive
-// with TaskTreeLevel, so it renders arbitrarily deep hierarchies.
-function TaskTreeNode({
-  task,
-  depth,
-  ctx,
-  isDraggable,
-}: {
-  task: TaskSwitcherItem;
-  depth: number;
-  ctx: TaskTreeContext;
-  isDraggable: boolean;
-}) {
-  const subs = ctx.subTasksByParentId.get(task.id);
-  const hasSubs = !!subs?.length;
-  const subsHidden = hasSubs && !!ctx.onToggleSubtasks && ctx.collapsedSubs.has(task.id);
-  const toggleInfo: SubtaskToggleInfo | undefined =
-    hasSubs && ctx.onToggleSubtasks
-      ? {
-          subtaskCount: countGroupTasks(subs!, ctx.subTasksByParentId),
-          subtasksCollapsed: subsHidden,
-          onToggleSubtasks: () => ctx.onToggleSubtasks!(task.id),
-        }
-      : undefined;
-  const isRoot = depth === 0;
-  const handle = (
-    <TaskRow
-      task={task}
-      depth={depth}
-      isSubTask={!isRoot}
-      subtaskToggle={toggleInfo}
-      isPinned={isRoot && ctx.pinnedSet.has(task.id)}
-      {...ctx.rowProps}
-      // Only root tasks are pinnable — `floatPinnedToTop` reorders root tasks
-      // only, so a pin on a nested row would show an icon but never move it.
-      onTogglePin={isRoot ? ctx.rowProps.onTogglePin : undefined}
-    />
-  );
-  const nested =
-    !subsHidden && hasSubs ? (
-      <TaskTreeLevel parentTaskId={task.id} tasks={subs!} depth={depth + 1} ctx={ctx} />
-    ) : undefined;
-  return (
-    <SortableTaskNode
-      taskId={task.id}
-      depth={depth}
-      handle={handle}
-      nested={nested}
-      isDraggable={isDraggable}
-    />
-  );
+function optionalHandler<Key extends TaskRowHandlerKey>(
+  props: TaskSwitcherProps,
+  handlers: StableTaskRowHandlers,
+  key: Key,
+): StableTaskRowHandlers[Key] | undefined {
+  return props[key] ? handlers[key] : undefined;
 }
 
-// One level of sibling tasks. `parentTaskId === null` is the group root (whose
-// reorder maps to onReorderGroup); deeper levels reorder via onReorderSubtasks
-// scoped to that parent's children.
-function TaskTreeLevel({
-  parentTaskId,
-  tasks,
-  depth,
-  ctx,
-}: {
-  parentTaskId: string | null;
-  tasks: TaskSwitcherItem[];
-  depth: number;
-  ctx: TaskTreeContext;
-}) {
-  let onReorder: ((orderedTaskIds: string[]) => void) | undefined;
-  if (parentTaskId === null) {
-    onReorder = ctx.onReorderGroup;
-  } else if (ctx.onReorderSubtasks) {
-    const pid = parentTaskId;
-    onReorder = (ids: string[]) => ctx.onReorderSubtasks!(pid, ids);
-  }
-  return (
-    <SortableTaskLevel
-      tasks={tasks}
-      onReorder={onReorder}
-      renderNode={(task, levelDraggable) => (
-        <TaskTreeNode
-          key={task.id}
-          task={task}
-          depth={depth}
-          ctx={ctx}
-          isDraggable={levelDraggable}
-        />
-      )}
-    />
-  );
-}
-
-type GroupSectionProps = {
-  group: SidebarGroup;
-  subTasksByParentId: Map<string, TaskSwitcherItem[]>;
-  workflows?: TaskMoveWorkflow[];
-  stepsByWorkflowId?: Record<string, StepDef[]>;
-  activeTaskId: string | null;
-  selectedTaskId: string | null;
-  isCollapsed: boolean;
-  onToggleCollapsed: () => void;
-  collapsedSubtaskParentIds?: string[];
-  onToggleSubtasks?: (parentTaskId: string) => void;
-  showHeader: boolean;
-  onSelectTask: (taskId: string) => void;
-  onEditTask?: (task: TaskSwitcherItem) => void;
-  onRenameTask?: (taskId: string, currentTitle: string) => void;
-  onArchiveTask?: (taskId: string) => void;
-  onCreateSubtask?: (taskId: string, taskTitle: string) => void;
-  onDeleteTask?: (taskId: string) => void;
-  onDetachTask?: (taskId: string) => void;
-  onLinkPullRequest?: TaskLinkHandler;
-  onLinkIssue?: TaskLinkHandler;
-  onLinkMergeRequest?: TaskLinkHandler;
-  onLinkJiraTicket?: TaskLinkHandler;
-  onLinkLinearIssue?: TaskLinkHandler;
-  onLinkSentryIssue?: TaskLinkHandler;
-  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
-  onTogglePin?: (taskId: string) => void;
-  onReorderGroup?: (groupTaskIds: string[]) => void;
-  onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
-  pinnedTaskIds?: string[];
-  pinnedSet: Set<string>;
-  deletingTaskId?: string | null;
-  selectedTaskIds?: Set<string>;
-  onToggleSelectTask?: (taskId: string) => void;
-  onSelectTaskRange?: (taskId: string) => void;
-  onBulkArchive?: (taskIds: string[]) => void;
-  onBulkDelete?: (taskIds: string[]) => void;
-  onBulkPin?: (taskIds: string[]) => void;
-  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
-  onClearSelection?: () => void;
-  isMixedWorkflowSelection?: boolean;
-};
-
-function GroupSection({
-  group,
-  subTasksByParentId,
-  workflows,
-  stepsByWorkflowId,
-  activeTaskId,
-  selectedTaskId,
-  isCollapsed,
-  onToggleCollapsed,
-  collapsedSubtaskParentIds,
-  onToggleSubtasks,
-  showHeader,
-  onSelectTask,
-  onEditTask,
-  onRenameTask,
-  onArchiveTask,
-  onCreateSubtask,
-  onDeleteTask,
-  onDetachTask,
-  onLinkPullRequest,
-  onLinkIssue,
-  onLinkMergeRequest,
-  onLinkJiraTicket,
-  onLinkLinearIssue,
-  onLinkSentryIssue,
-  onMoveToStep,
-  onTogglePin,
-  onReorderGroup,
-  onReorderSubtasks,
-  pinnedTaskIds,
-  pinnedSet,
-  deletingTaskId,
-  selectedTaskIds,
-  onToggleSelectTask,
-  onSelectTaskRange,
-  onBulkArchive,
-  onBulkDelete,
-  onBulkPin,
-  onBulkMove,
-  onClearSelection,
-  isMixedWorkflowSelection,
-}: GroupSectionProps) {
-  const totalCount = countGroupTasks(group.tasks, subTasksByParentId);
-  const ctx: TaskTreeContext = {
-    subTasksByParentId,
-    collapsedSubs: new Set(collapsedSubtaskParentIds ?? []),
-    onToggleSubtasks,
-    pinnedSet,
-    rowProps: {
-      workflows,
-      stepsByWorkflowId,
-      activeTaskId,
-      selectedTaskId,
-      onSelectTask,
-      onEditTask,
-      onRenameTask,
-      onArchiveTask,
-      onCreateSubtask,
-      onDeleteTask,
-      onDetachTask,
-      onLinkPullRequest,
-      onLinkIssue,
-      onLinkMergeRequest,
-      onLinkJiraTicket,
-      onLinkLinearIssue,
-      onLinkSentryIssue,
-      onMoveToStep,
-      onTogglePin,
-      pinnedTaskIds,
-      deletingTaskId,
-      selectedTaskIds,
-      onToggleSelectTask,
-      onSelectTaskRange,
-      onBulkArchive,
-      onBulkDelete,
-      onBulkPin,
-      onBulkMove,
-      onClearSelection,
-      isMixedWorkflowSelection,
-    },
-    onReorderGroup,
-    onReorderSubtasks,
+function buildTaskRowProps(
+  props: TaskSwitcherProps,
+  handlers: StableTaskRowHandlers,
+): TaskRowBaseProps {
+  return {
+    workflows: props.workflows,
+    stepsByWorkflowId: props.stepsByWorkflowId,
+    activeTaskId: props.activeTaskId,
+    selectedTaskId: props.selectedTaskId,
+    showActivityTime: props.showActivityTime,
+    taskRowPresentation: props.taskRowPresentation,
+    showRepository: shouldShowRowRepository(props.grouped),
+    onSelectTask: handlers.onSelectTask,
+    onEditTask: optionalHandler(props, handlers, "onEditTask"),
+    onRenameTask: optionalHandler(props, handlers, "onRenameTask"),
+    onArchiveTask: optionalHandler(props, handlers, "onArchiveTask"),
+    onCreateSubtask: optionalHandler(props, handlers, "onCreateSubtask"),
+    onDeleteTask: optionalHandler(props, handlers, "onDeleteTask"),
+    onDetachTask: optionalHandler(props, handlers, "onDetachTask"),
+    onLinkPullRequest: optionalHandler(props, handlers, "onLinkPullRequest"),
+    onLinkIssue: optionalHandler(props, handlers, "onLinkIssue"),
+    onLinkMergeRequest: optionalHandler(props, handlers, "onLinkMergeRequest"),
+    onLinkJiraTicket: optionalHandler(props, handlers, "onLinkJiraTicket"),
+    onLinkLinearIssue: optionalHandler(props, handlers, "onLinkLinearIssue"),
+    onLinkSentryIssue: optionalHandler(props, handlers, "onLinkSentryIssue"),
+    onMoveToStep: optionalHandler(props, handlers, "onMoveToStep"),
+    onRequestMoveOptions: optionalHandler(props, handlers, "onRequestMoveOptions"),
+    onBeforeMoveOptionsOpen: optionalHandler(props, handlers, "onBeforeMoveOptionsOpen"),
+    onTogglePin: optionalHandler(props, handlers, "onTogglePin"),
+    pinnedTaskIds: props.pinnedTaskIds,
+    deletingTaskId: props.deletingTaskId,
+    archivingTaskId: props.archivingTaskId,
+    isArchiving: props.isArchiving,
+    selectedTaskIds: props.selectedTaskIds,
+    onToggleSelectTask: optionalHandler(props, handlers, "onToggleSelectTask"),
+    onSelectTaskRange: optionalHandler(props, handlers, "onSelectTaskRange"),
+    onBulkArchive: optionalHandler(props, handlers, "onBulkArchive"),
+    onBulkDelete: optionalHandler(props, handlers, "onBulkDelete"),
+    onBulkPin: optionalHandler(props, handlers, "onBulkPin"),
+    onBulkMove: optionalHandler(props, handlers, "onBulkMove"),
+    onClearSelection: optionalHandler(props, handlers, "onClearSelection"),
+    isMixedWorkflowSelection: props.isMixedWorkflowSelection,
   };
+}
 
+function shallowRowPropsEqual(previous: TaskRowBaseProps, next: TaskRowBaseProps): boolean {
+  const keys = Object.keys(previous) as Array<keyof TaskRowBaseProps>;
   return (
-    <div>
-      {showHeader && (
-        <GroupHeader
-          label={group.label}
-          groupKey={group.key}
-          count={totalCount}
-          isCollapsed={isCollapsed}
-          onToggle={onToggleCollapsed}
-        />
-      )}
-      {!isCollapsed && (
-        <TaskTreeLevel parentTaskId={null} tasks={group.tasks} depth={0} ctx={ctx} />
+    keys.length === Object.keys(next).length &&
+    keys.every((key) => Object.is(previous[key], next[key]))
+  );
+}
+
+function useTaskRowProps(props: TaskSwitcherProps): TaskRowBaseProps {
+  const handlers = useStableTaskRowHandlers(props);
+  const previousRef = useRef<TaskRowBaseProps | null>(null);
+  const next = buildTaskRowProps(props, handlers);
+  if (previousRef.current && shallowRowPropsEqual(previousRef.current, next)) {
+    return previousRef.current;
+  }
+  previousRef.current = next;
+  return next;
+}
+
+function buildGroupSectionProps(
+  props: TaskSwitcherProps,
+  grouped: TaskSwitcherProps["grouped"],
+  options: {
+    group: GroupSectionProps["group"];
+    rowProps: TaskRowBaseProps;
+    pinnedSet: Set<string>;
+    collapsedSet: Set<string>;
+    showHeader: boolean;
+    getNestHierarchyTasks: () => TaskSwitcherProps["nestHierarchyTasks"];
+  },
+): GroupSectionProps {
+  const { group, rowProps, pinnedSet, collapsedSet, showHeader, getNestHierarchyTasks } = options;
+  return {
+    group,
+    subTasksByParentId: grouped.subTasksByParentId,
+    getNestHierarchyTasks,
+    rowProps,
+    pinnedSet,
+    isCollapsed: collapsedSet.has(group.key),
+    onToggleGroup: props.onToggleGroup,
+    collapsedSubtaskParentIds: props.collapsedSubtaskParentIds,
+    onToggleSubtasks: props.onToggleSubtasks,
+    showHeader,
+    onReorderGroup: props.onReorderGroup,
+    onReorderSubtasks: props.onReorderSubtasks,
+    onNestTask: props.onNestTask,
+  };
+}
+
+function LoadErrorNotice({
+  error,
+  onRetry,
+  retryLabel,
+}: {
+  error?: string | null;
+  onRetry?: () => void;
+  retryLabel?: string;
+}) {
+  if (!error) return null;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex items-center gap-2 px-3 py-2 text-xs text-destructive"
+      data-testid="sidebar-task-load-error"
+    >
+      <span className="min-w-0 flex-1">{error}</span>
+      {onRetry && retryLabel && (
+        <button
+          type="button"
+          className="h-11 min-h-11 shrink-0 cursor-pointer underline underline-offset-2 [@media(pointer:fine)]:h-7 [@media(pointer:fine)]:min-h-7"
+          onClick={onRetry}
+        >
+          {retryLabel}
+        </button>
       )}
     </div>
   );
 }
 
-// eslint-disable-next-line max-lines-per-function -- assembles the shared recursive task-tree props.
-export const TaskSwitcher = memo(function TaskSwitcher({
-  grouped,
-  workflows,
-  stepsByWorkflowId,
-  activeTaskId,
-  selectedTaskId,
-  collapsedGroupKeys = [],
-  onToggleGroup,
-  collapsedSubtaskParentIds,
-  onToggleSubtasks,
-  onSelectTask,
-  onEditTask,
-  onRenameTask,
-  onArchiveTask,
-  onCreateSubtask,
-  onDeleteTask,
-  onDetachTask,
-  onLinkPullRequest,
-  onLinkIssue,
-  onLinkMergeRequest,
-  onLinkJiraTicket,
-  onLinkLinearIssue,
-  onLinkSentryIssue,
-  onMoveToStep,
-  onTogglePin,
-  onReorderGroup,
-  onReorderSubtasks,
-  pinnedTaskIds,
-  deletingTaskId,
-  isLoading = false,
-  totalTaskCount,
-  selectedTaskIds,
-  onToggleSelectTask,
-  onSelectTaskRange,
-  onBulkArchive,
-  onBulkDelete,
-  onBulkPin,
-  onBulkMove,
-  onClearSelection,
-  isMixedWorkflowSelection,
-}: TaskSwitcherProps) {
-  const pinnedSet = useMemo(() => new Set(pinnedTaskIds ?? []), [pinnedTaskIds]);
+export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps) {
+  const { t } = useTranslation("sidebar");
+  const { isLoading = false, loadError, onRetryLoad, retryLabel, totalTaskCount } = props;
+  const grouped = useSharedGroupedSidebarList(props.grouped);
+  const pinnedSet = useMemo(() => new Set(props.pinnedTaskIds ?? []), [props.pinnedTaskIds]);
+  const rowProps = useTaskRowProps(props);
+  const collapsedSet = useMemo(
+    () => new Set(props.collapsedGroupKeys ?? []),
+    [props.collapsedGroupKeys],
+  );
+  const nestHierarchyTasksRef = useRef(props.nestHierarchyTasks);
+  useLayoutEffect(() => {
+    nestHierarchyTasksRef.current = props.nestHierarchyTasks;
+  }, [props.nestHierarchyTasks]);
+  const getNestHierarchyTasks = useMemo(() => () => nestHierarchyTasksRef.current, []);
+
   if (isLoading) return <TaskSwitcherSkeleton />;
-  const totalTasks = totalTaskCount ?? grouped.groups.reduce((sum, g) => sum + g.tasks.length, 0);
+
+  const totalTasks =
+    totalTaskCount ?? grouped.groups.reduce((sum, group) => sum + group.tasks.length, 0);
+  const loadErrorNotice = (
+    <LoadErrorNotice error={loadError} onRetry={onRetryLoad} retryLabel={retryLabel} />
+  );
   if (totalTasks === 0) {
-    return <div className="px-3 py-3 text-xs text-muted-foreground">No tasks yet.</div>;
+    return (
+      <>
+        {loadErrorNotice}
+        {!loadError && (
+          <div
+            data-slot="task-switcher-empty-state"
+            className="px-3 py-3 text-xs text-muted-foreground"
+          >
+            {t("sidebar:noTasksYet")}
+          </div>
+        )}
+      </>
+    );
   }
 
-  const collapsedSet = new Set(collapsedGroupKeys);
   const showHeaders =
     grouped.groups.length > 1 ||
     (grouped.groups.length === 1 && grouped.groups[0].key !== "__all__");
 
   return (
     <div>
+      {loadErrorNotice}
       {grouped.groups.map((group) => (
         <GroupSection
           key={group.key}
-          group={group}
-          subTasksByParentId={grouped.subTasksByParentId}
-          workflows={workflows}
-          stepsByWorkflowId={stepsByWorkflowId}
-          activeTaskId={activeTaskId}
-          selectedTaskId={selectedTaskId}
-          isCollapsed={collapsedSet.has(group.key)}
-          onToggleCollapsed={() => onToggleGroup?.(group.key)}
-          collapsedSubtaskParentIds={collapsedSubtaskParentIds}
-          onToggleSubtasks={onToggleSubtasks}
-          showHeader={showHeaders}
-          onSelectTask={onSelectTask}
-          onEditTask={onEditTask}
-          onRenameTask={onRenameTask}
-          onArchiveTask={onArchiveTask}
-          onCreateSubtask={onCreateSubtask}
-          onDeleteTask={onDeleteTask}
-          onDetachTask={onDetachTask}
-          onLinkPullRequest={onLinkPullRequest}
-          onLinkIssue={onLinkIssue}
-          onLinkMergeRequest={onLinkMergeRequest}
-          onLinkJiraTicket={onLinkJiraTicket}
-          onLinkLinearIssue={onLinkLinearIssue}
-          onLinkSentryIssue={onLinkSentryIssue}
-          onMoveToStep={onMoveToStep}
-          onTogglePin={onTogglePin}
-          onReorderGroup={onReorderGroup}
-          onReorderSubtasks={onReorderSubtasks}
-          pinnedTaskIds={pinnedTaskIds}
-          pinnedSet={pinnedSet}
-          deletingTaskId={deletingTaskId}
-          selectedTaskIds={selectedTaskIds}
-          onToggleSelectTask={onToggleSelectTask}
-          onSelectTaskRange={onSelectTaskRange}
-          onBulkArchive={onBulkArchive}
-          onBulkDelete={onBulkDelete}
-          onBulkPin={onBulkPin}
-          onBulkMove={onBulkMove}
-          onClearSelection={onClearSelection}
-          isMixedWorkflowSelection={isMixedWorkflowSelection}
+          {...buildGroupSectionProps(props, grouped, {
+            group,
+            rowProps,
+            pinnedSet,
+            collapsedSet,
+            showHeader: showHeaders,
+            getNestHierarchyTasks,
+          })}
         />
       ))}
     </div>

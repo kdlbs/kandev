@@ -363,3 +363,248 @@ func TestCreateAgent_RejectsBadNestedProfileBeforeAnyWrite(t *testing.T) {
 		t.Fatalf("bad create made writes: agents=%d profiles=%d", len(st.agents), len(st.created))
 	}
 }
+
+func TestCreateProfile_DefaultsEnabled(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	ctrl.repo = st
+
+	profile, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: "agent-1",
+		Name:    "Fresh",
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	if !profile.Enabled {
+		t.Fatal("expected new profile DTO to be enabled")
+	}
+	if len(st.created) != 1 || !st.created[0].Enabled {
+		t.Fatalf("expected stored profile to be enabled, got %+v", st.created)
+	}
+}
+
+func TestUpdateProfile_SetsEnabled(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	st.profiles[agent.ID] = []*models.AgentProfile{{
+		ID:               "profile-1",
+		AgentID:          agent.ID,
+		Name:             "Existing",
+		AgentDisplayName: "Test Agent",
+		Enabled:          true,
+	}}
+	ctrl.repo = st
+
+	disable := false
+	updated, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{
+		ID:      "profile-1",
+		Enabled: &disable,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+	if updated.Enabled {
+		t.Fatal("expected updated DTO to be disabled")
+	}
+	if updated.UpdatedAt.IsZero() {
+		t.Fatal("expected enabled-only update to return the persisted updated_at")
+	}
+	if len(st.updated) != 1 || st.updated[0].Enabled {
+		t.Fatalf("expected stored profile to be disabled, got %+v", st.updated)
+	}
+
+	// Leaving Enabled nil must not touch the stored value.
+	if _, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{ID: "profile-1"}); err != nil {
+		t.Fatalf("nil Enabled UpdateProfile: %v", err)
+	}
+	if len(st.updated) != 2 || st.updated[1].Enabled {
+		t.Fatalf("expected omitted Enabled to preserve false, got %+v", st.updated)
+	}
+
+	enable := true
+	if _, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{ID: "profile-1", Enabled: &enable}); err != nil {
+		t.Fatalf("re-enable UpdateProfile: %v", err)
+	}
+	if len(st.updated) != 3 || !st.updated[2].Enabled {
+		t.Fatalf("expected stored profile to be re-enabled, got %+v", st.updated)
+	}
+}
+
+// TestUpdateProfile_MixedEnabledAndFallbackPersistsBoth verifies a request
+// carrying enabled plus the fallback fields takes the full-update path. The
+// enabled-only shortcut must never silently drop FallbackModel/AutoFallback
+// supplied in the same PATCH.
+func TestUpdateProfile_MixedEnabledAndFallbackPersistsBoth(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	ctrl.repo = st
+
+	profile, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: "agent-1",
+		Name:    "Mixed",
+		Model:   "gpt-5",
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+
+	enabled := false
+	fallback := "gpt-5-mini"
+	autoFallback := true
+	updated, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{
+		ID:            profile.ID,
+		Enabled:       &enabled,
+		FallbackModel: &fallback,
+		AutoFallback:  &autoFallback,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+	if updated.FallbackModel != fallback {
+		t.Fatalf("response fallback_model = %q, want %q (must not take the enabled-only path)", updated.FallbackModel, fallback)
+	}
+	if updated.Enabled {
+		t.Fatal("response enabled = true, want false")
+	}
+	if !updated.AutoFallback {
+		t.Fatal("response auto_fallback = false, want true")
+	}
+	stored, err := st.GetAgentProfile(context.Background(), profile.ID)
+	if err != nil {
+		t.Fatalf("GetAgentProfile: %v", err)
+	}
+	if stored.FallbackModel != fallback || !stored.AutoFallback {
+		t.Fatalf("stored fallback fields lost: fallback_model=%q auto_fallback=%v",
+			stored.FallbackModel, stored.AutoFallback)
+	}
+}
+
+// TestUpdateProfile_ModelOnlyLeavesNameUnchanged is the regression guard for
+// the MCP update_agent_profile silent-rename bug: a model-only patch (the
+// shape the MCP tool sends, since it omits name unless explicitly asked for
+// one) must not derive and overwrite the profile's name from the model ID.
+func TestUpdateProfile_ModelOnlyLeavesNameUnchanged(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	ctrl.repo = st
+
+	profile, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: "agent-1",
+		Name:    "Product Manager",
+		Model:   "opus",
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+
+	model := "sonnet"
+	updated, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{
+		ID:    profile.ID,
+		Model: &model,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+	if updated.Name != "Product Manager" {
+		t.Fatalf("response name = %q, want unchanged %q", updated.Name, "Product Manager")
+	}
+	if updated.Model != model {
+		t.Fatalf("response model = %q, want %q", updated.Model, model)
+	}
+	stored, err := st.GetAgentProfile(context.Background(), profile.ID)
+	if err != nil {
+		t.Fatalf("GetAgentProfile: %v", err)
+	}
+	if stored.Name != "Product Manager" {
+		t.Fatalf("stored name = %q, want unchanged %q", stored.Name, "Product Manager")
+	}
+	if stored.AgentDisplayName != "Test Agent" {
+		t.Fatalf("stored agent_display_name = %q, want unchanged %q", stored.AgentDisplayName, "Test Agent")
+	}
+	if stored.Model != model {
+		t.Fatalf("stored model = %q, want %q", stored.Model, model)
+	}
+}
+
+// TestUpdateProfile_NameOnlyLeavesModelUnchanged pins the other half of the
+// acceptance criteria: a name-only patch must not touch the stored model.
+func TestUpdateProfile_NameOnlyLeavesModelUnchanged(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	ctrl.repo = st
+
+	profile, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: "agent-1",
+		Name:    "Product Manager",
+		Model:   "opus",
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+
+	newName := "Renamed"
+	updated, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{
+		ID:   profile.ID,
+		Name: &newName,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+	if updated.Name != newName {
+		t.Fatalf("response name = %q, want %q", updated.Name, newName)
+	}
+	if updated.Model != "opus" {
+		t.Fatalf("response model = %q, want unchanged %q", updated.Model, "opus")
+	}
+	stored, err := st.GetAgentProfile(context.Background(), profile.ID)
+	if err != nil {
+		t.Fatalf("GetAgentProfile: %v", err)
+	}
+	if stored.Name != newName {
+		t.Fatalf("stored name = %q, want %q", stored.Name, newName)
+	}
+	if stored.Model != "opus" {
+		t.Fatalf("stored model = %q, want unchanged %q", stored.Model, "opus")
+	}
+}

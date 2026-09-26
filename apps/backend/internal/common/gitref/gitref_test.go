@@ -66,6 +66,33 @@ func TestDefaultBranch_AcceptsAbsolutePathToValidRepo(t *testing.T) {
 	}
 }
 
+func TestDefaultBranchOrEmpty_DoesNotUseFeatureBranchAsIntegrationDefault(t *testing.T) {
+	repoPath := t.TempDir()
+	gitDir := filepath.Join(repoPath, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("mkdir git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/feature/review\n"), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+
+	branch, err := DefaultBranch(repoPath)
+	if err != nil {
+		t.Fatalf("DefaultBranch error: %v", err)
+	}
+	if branch != "feature/review" {
+		t.Fatalf("DefaultBranch = %q, want feature/review", branch)
+	}
+
+	branch, err = DefaultBranchOrEmpty(repoPath)
+	if err != nil {
+		t.Fatalf("DefaultBranchOrEmpty error: %v", err)
+	}
+	if branch != "" {
+		t.Fatalf("DefaultBranchOrEmpty = %q, want empty", branch)
+	}
+}
+
 func TestDefaultBranch_PrefersMainWhenOriginHeadPointsAtMaster(t *testing.T) {
 	repoPath := t.TempDir()
 	gitDir := filepath.Join(repoPath, ".git")

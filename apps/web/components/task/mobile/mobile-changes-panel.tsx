@@ -11,7 +11,13 @@ import { ChangesPanelHeader } from "../changes-panel-header";
 import { MobileDiffSheet } from "./mobile-diff-sheet";
 import { useReviewSources } from "@/hooks/domains/session/use-review-sources";
 import { useAppStore } from "@/components/state-provider";
+import { getWebSocketClient } from "@/lib/ws/connection";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
+import {
+  consumeContributionComparisonRequest,
+  useContributionComparisonRequest,
+} from "../remote-contribution-comparison";
+import { contributionHistoryExplanationKey } from "@/hooks/domains/session/use-contribution-history-explanation";
 import type { SelectedDiff } from "../task-layout";
 import type { OpenDiffOptions, DiffSheetMode } from "../changes-diff-target";
 
@@ -20,6 +26,77 @@ type MobileChangesPanelProps = {
   onClearSelected: () => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
 };
+
+function buildContributionHeaderProps(data: ReturnType<typeof useChangesPanelData>) {
+  return {
+    relation: data.relation,
+    contributionHistoryTarget: data.contributionHistoryTarget,
+    resolution: data.resolution,
+    resolutionTarget: data.resolutionTarget,
+    remoteContributionUrl: data.selectedPR?.pr_url ?? data.existingPrUrl,
+    remoteContributionNumber: data.selectedPR?.pr_number,
+  };
+}
+
+function useRefreshMobileSessionData(sessionId: string | null | undefined) {
+  useEffect(() => {
+    if (!sessionId) return;
+    getWebSocketClient()?.refreshSessionData(sessionId);
+  }, [sessionId]);
+}
+
+function useContributionComparisonRequestToken(
+  target: Parameters<typeof contributionHistoryExplanationKey>[0],
+): number | undefined {
+  const comparisonRequest = useContributionComparisonRequest();
+  const contributionKey = contributionHistoryExplanationKey(target);
+  const comparisonRequestToken =
+    comparisonRequest?.key === contributionKey ? comparisonRequest.token : undefined;
+
+  useEffect(() => {
+    if (comparisonRequestToken === undefined) return;
+    // Let the targeted disclosure schedule its focus before consuming the
+    // one-shot request. The second frame also lets the Drawer finish its
+    // focus bookkeeping on touch browsers.
+    let consumeFrame = 0;
+    const settleFrame = requestAnimationFrame(() => {
+      consumeFrame = requestAnimationFrame(() => {
+        consumeContributionComparisonRequest(comparisonRequestToken);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(settleFrame);
+      if (consumeFrame) cancelAnimationFrame(consumeFrame);
+    };
+  }, [comparisonRequestToken]);
+
+  return comparisonRequestToken;
+}
+
+function useOpenSelectedDiff(
+  selectedDiff: SelectedDiff | null,
+  onClearSelected: () => void,
+  setDiffSheet: (mode: DiffSheetMode | null) => void,
+) {
+  const prevSelectedDiffRef = useRef<SelectedDiff | null>(null);
+
+  useEffect(() => {
+    if (!selectedDiff?.path) {
+      prevSelectedDiffRef.current = selectedDiff;
+      return;
+    }
+
+    const prevPath = prevSelectedDiffRef.current?.path;
+    prevSelectedDiffRef.current = selectedDiff;
+    if (prevPath === selectedDiff.path) return;
+
+    // queueMicrotask satisfies react-hooks/set-state-in-effect; executes before next paint.
+    queueMicrotask(() => {
+      setDiffSheet({ kind: "file", path: selectedDiff.path });
+      onClearSelected();
+    });
+  }, [selectedDiff, onClearSelected, setDiffSheet]);
+}
 
 /**
  * Mobile Changes panel — renders the same timeline summary surface as desktop.
@@ -35,31 +112,18 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const { sourceCounts } = useReviewSources(activeSessionId);
   const [diffSheet, setDiffSheet] = useState<DiffSheetMode | null>(null);
+
+  useRefreshMobileSessionData(data.activeSessionId);
+
   const requestWalkthrough = useRequestChangesWalkthrough({
     taskId: data.activeTaskId,
     sessionId: data.activeSessionId,
     ready: data.walkthroughRequestReady,
   });
-
-  // Track the previous selectedDiff to detect changes
-  const prevSelectedDiffRef = useRef<SelectedDiff | null>(null);
-  useEffect(() => {
-    // Only open the sheet if selectedDiff changed from null/undefined to a new path
-    if (!selectedDiff?.path) {
-      prevSelectedDiffRef.current = selectedDiff;
-      return;
-    }
-
-    const prevPath = prevSelectedDiffRef.current?.path;
-    prevSelectedDiffRef.current = selectedDiff;
-    if (prevPath === selectedDiff.path) return;
-
-    // queueMicrotask satisfies react-hooks/set-state-in-effect; executes before next paint.
-    queueMicrotask(() => {
-      setDiffSheet({ kind: "file", path: selectedDiff.path });
-      onClearSelected();
-    });
-  }, [selectedDiff, onClearSelected]);
+  const comparisonRequestToken = useContributionComparisonRequestToken(
+    data.contributionHistoryTarget,
+  );
+  useOpenSelectedDiff(selectedDiff, onClearSelected, setDiffSheet);
 
   const handleOpenDiffAll = useCallback(() => {
     setDiffSheet({ kind: "all" });
@@ -76,6 +140,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
       sourceFilter: options?.source ?? "all",
       repositoryName: options?.repositoryName || undefined,
       prKey: options?.prKey,
+      changeLayer: options?.changeLayer,
     });
   }, []);
 
@@ -86,8 +151,8 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   const bodyProps = buildChangesPanelBodyProps(data, {
     onOpenDiffFile: handleOpenDiffFile,
     onEditFile: onOpenFile ?? (() => {}),
-    onOpenCommitDetail: (sha, repo) => {
-      setDiffSheet({ kind: "commit", sha, repo });
+    onOpenCommitDetail: (target) => {
+      setDiffSheet({ kind: "commit", target });
     },
     onOpenReview: handleOpenReview,
   });
@@ -102,7 +167,9 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
           displayBranch={data.git.branch}
           baseBranchDisplay={data.baseBranchDisplay}
           baseBranchByRepo={data.baseBranchByRepo}
-          behindCount={data.git.behind}
+          behindCount={data.git.pullBehind}
+          pullDisabled={data.pullDisabled}
+          pullDisabledReason={data.pullDisabledReason}
           isLoading={data.git.isLoading}
           loadingOperation={data.git.loadingOperation}
           onOpenDiffAll={handleOpenDiffAll}
@@ -118,8 +185,10 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
           repoDisplayName={data.repoDisplayName}
           taskId={data.activeTaskId}
           credentialDisplay={data.gitCredentialDisplay}
+          comparisonTargets={data.git.comparisonTargets}
+          {...buildContributionHeaderProps(data)}
         />
-        <ChangesPanelBody {...bodyProps} />
+        <ChangesPanelBody {...bodyProps} comparisonRequestToken={comparisonRequestToken} />
       </PanelRoot>
 
       <MobileDiffSheet

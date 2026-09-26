@@ -1,21 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act, type RenderHookResult } from "@testing-library/react";
+import { renderHook, act, waitFor, type RenderHookResult } from "@testing-library/react";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import type { Message } from "@/lib/types/http";
 import {
+  parsePermission,
   usePermissionResponseHandlers,
   type PermissionOption,
   type PermissionRequestMetadata,
 } from "./use-permission-handlers";
 
+const mocks = vi.hoisted(() => ({
+  toastError: vi.fn(),
+  toastWarning: vi.fn(),
+}));
 const requestMock = vi.fn().mockResolvedValue({});
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: requestMock }),
 }));
-
+vi.mock("@/lib/toast/sonner", () => ({
+  toast: { error: mocks.toastError, warning: mocks.toastWarning },
+}));
 beforeEach(() => {
   requestMock.mockReset().mockResolvedValue({});
+  mocks.toastError.mockReset();
+  mocks.toastWarning.mockReset();
 });
 
 const ALLOW_ONCE: PermissionOption = { option_id: "allow", name: "Allow", kind: "allow_once" };
@@ -28,6 +37,7 @@ const ALLOW_ALWAYS: PermissionOption = {
 
 function makePermissionMessage(options: PermissionOption[] = [ALLOW_ONCE, REJECT_ONCE]): Message {
   const meta: PermissionRequestMetadata = {
+    request_id: "req-1",
     pending_id: "pend-1",
     tool_call_id: "tc-1",
     action_type: "mcp_tool",
@@ -70,6 +80,10 @@ describe("handleApprove", () => {
 
     expect(requestMock).toHaveBeenCalledOnce();
     expect(firstPayload().option_id).toBe("allow");
+    expect(firstPayload().task_id).toBe("task-1");
+    expect(firstPayload().session_id).toBe("sess-1");
+    expect(firstPayload().request_id).toBe("req-1");
+    expect(firstPayload().pending_id).toBe("pend-1");
     expect(firstPayload().cancelled).toBeFalsy();
     expect(firstPayload().rejected).toBeFalsy();
   });
@@ -91,6 +105,116 @@ describe("handleApprove", () => {
     });
 
     expect(firstPayload().option_id).toBe("always");
+  });
+});
+
+describe("request identity", () => {
+  it("treats a cached pre-generation request as expired and unanswerable", async () => {
+    const message = makePermissionMessage();
+    delete (message.metadata as PermissionRequestMetadata).request_id;
+    expect(parsePermission(message)).toMatchObject({
+      permissionStatus: "expired",
+      isPermissionPending: false,
+    });
+    const result = renderHandlers(message);
+
+    await act(async () => {
+      result.current.handleApprove();
+    });
+
+    expect(requestMock).not.toHaveBeenCalled();
+    expect(result.current.isUnavailable).toBe(true);
+    expect(mocks.toastWarning).toHaveBeenCalledWith(
+      "This permission request is no longer available.",
+    );
+  });
+
+  it("expires the cached card and shows feedback when the executor response is stale", async () => {
+    const message = makePermissionMessage();
+    requestMock.mockRejectedValueOnce(new Error("permission_not_found"));
+    const result = renderHandlers(message);
+
+    await act(async () => {
+      result.current.handleApprove();
+    });
+
+    await waitFor(() => expect(result.current.isUnavailable).toBe(true));
+    expect(mocks.toastWarning).toHaveBeenCalledWith(
+      "This permission request is no longer available.",
+    );
+  });
+
+  it("resets unavailable state when a replacement generation arrives", async () => {
+    const first = makePermissionMessage();
+    requestMock.mockRejectedValueOnce(new Error("permission_not_found"));
+    const rendered = renderHook(
+      ({ message }: { message: Message }) =>
+        usePermissionResponseHandlers({
+          permissionMetadata: message.metadata as unknown as PermissionRequestMetadata,
+          permissionMessage: message,
+        }),
+      { initialProps: { message: first } },
+    );
+
+    await act(async () => {
+      rendered.result.current.handleApprove();
+    });
+    await waitFor(() => expect(rendered.result.current.isUnavailable).toBe(true));
+
+    const replacement = makePermissionMessage();
+    const replacementMetadata = replacement.metadata as unknown as PermissionRequestMetadata;
+    replacementMetadata.request_id = "req-2";
+    replacementMetadata.pending_id = "pend-2";
+    rendered.rerender({ message: replacement });
+
+    await waitFor(() => expect(rendered.result.current.isUnavailable).toBe(false));
+    await act(async () => {
+      rendered.result.current.handleApprove();
+    });
+
+    expect(requestMock).toHaveBeenCalledTimes(2);
+    expect(requestMock.mock.calls[1][1]).toMatchObject({
+      request_id: "req-2",
+      pending_id: "pend-2",
+    });
+  });
+
+  it("ignores a stale response failure after a replacement generation arrives", async () => {
+    const first = makePermissionMessage();
+    let rejectFirst!: (reason?: unknown) => void;
+    requestMock.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectFirst = reject;
+        }),
+    );
+    const rendered = renderHook(
+      ({ message }: { message: Message }) =>
+        usePermissionResponseHandlers({
+          permissionMetadata: message.metadata as unknown as PermissionRequestMetadata,
+          permissionMessage: message,
+        }),
+      { initialProps: { message: first } },
+    );
+
+    await act(async () => {
+      rendered.result.current.handleApprove();
+    });
+    await waitFor(() => expect(rejectFirst).toBeTypeOf("function"));
+
+    const replacement = makePermissionMessage();
+    const replacementMetadata = replacement.metadata as unknown as PermissionRequestMetadata;
+    replacementMetadata.request_id = "req-2";
+    replacementMetadata.pending_id = "pend-2";
+    rendered.rerender({ message: replacement });
+    await waitFor(() => expect(rendered.result.current.isUnavailable).toBe(false));
+
+    await act(async () => {
+      rejectFirst(new Error("permission_not_found"));
+    });
+
+    expect(rendered.result.current.isUnavailable).toBe(false);
+    expect(mocks.toastWarning).not.toHaveBeenCalled();
   });
 });
 

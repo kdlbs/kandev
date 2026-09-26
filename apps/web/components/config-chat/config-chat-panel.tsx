@@ -12,7 +12,6 @@ import { QuickChatSessionView } from "@/components/quick-chat/quick-chat-session
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { ConfigChatSetup } from "./config-chat-setup";
 import { useConfigChat } from "./use-config-chat";
-import { cn } from "@/lib/utils";
 
 function useConfigChatPanelStore() {
   return useAppStore(
@@ -24,7 +23,15 @@ function useConfigChatPanelStore() {
   );
 }
 
-function PanelHeader({ onExpand, onClose }: { onExpand: () => void; onClose: () => void }) {
+function PanelHeader({
+  expandDisabled,
+  onExpand,
+  onClose,
+}: {
+  expandDisabled: boolean;
+  onExpand: () => void;
+  onClose: () => void;
+}) {
   const { t } = useTranslation();
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b bg-muted/30 pl-3">
@@ -35,15 +42,18 @@ function PanelHeader({ onExpand, onClose }: { onExpand: () => void; onClose: () 
       <div className="flex items-center">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-11 w-11 cursor-pointer rounded-none"
-              onClick={onExpand}
-              aria-label={t("configChat:openInQuickChat")}
-            >
-              <IconArrowsMaximize className="h-4 w-4" />
-            </Button>
+            <span tabIndex={expandDisabled ? 0 : -1} className="inline-flex">
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-11 w-11 cursor-pointer rounded-none"
+                onClick={onExpand}
+                aria-label={t("configChat:openInQuickChat")}
+                disabled={expandDisabled}
+              >
+                <IconArrowsMaximize className="h-4 w-4" />
+              </Button>
+            </span>
           </TooltipTrigger>
           <TooltipContent>{t("configChat:openInQuickChat")}</TooltipContent>
         </Tooltip>
@@ -124,7 +134,7 @@ function ConfigChatFloatingActionsHost({
   return (
     <div
       ref={setHost}
-      className="pointer-events-none absolute right-0 bottom-[calc(100%+0.75rem)] z-10 max-w-[calc(100vw_-_2rem_-_env(safe-area-inset-left)_-_env(safe-area-inset-right))]"
+      className="pointer-events-none absolute inset-x-0 bottom-[calc(100%+0.75rem)] z-10 flex w-full max-w-[calc(100vw_-_2rem_-_env(safe-area-inset-left)_-_env(safe-area-inset-right))] justify-center pl-[calc(0.75rem+_env(safe-area-inset-left))] pr-[calc(0.75rem+_env(safe-area-inset-right))]"
       data-testid="config-chat-floating-actions"
     />
   );
@@ -144,12 +154,7 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
           <PopoverTrigger asChild>
             <Button
               size="icon"
-              aria-hidden={panel.isOpen}
-              tabIndex={panel.isOpen ? -1 : undefined}
-              className={cn(
-                "fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-50 h-12 w-12 cursor-pointer rounded-full shadow-lg",
-                panel.isOpen && "pointer-events-none opacity-0",
-              )}
+              className="fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-50 size-12 max-md:size-12 [@media(pointer:coarse)]:size-12 cursor-pointer rounded-full shadow-lg"
               aria-label={t("common:configurationChat")}
             >
               <IconSparkles className="h-6 w-6" />
@@ -172,13 +177,14 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
         <ConfigChatFloatingActionsHost setHost={setFloatingActionsHost} />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[inherit]">
           <PanelHeader
+            expandDisabled={panel.isStarting}
             onExpand={panel.handleExpand}
             onClose={() => panel.handleOpenChange(false)}
           />
           {panel.session ? (
             <QuickChatSessionView
               session={panel.session}
-              onInitialPromptSent={() =>
+              onInitialPromptAttempted={() =>
                 panel.setQuickChatInitialPrompt(panel.session!.sessionId, undefined)
               }
             />

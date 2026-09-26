@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/pkg/agent"
 )
 
 func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryResponse, error) {
@@ -92,7 +93,6 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	}
 
 	modelConfig := c.buildModelConfigFromHostUtility(ag.ID())
-	_ = ctx
 
 	capabilities := dto.AgentCapabilitiesDTO{
 		SupportsSessionResume: availability.Capabilities.SupportsSessionResume,
@@ -132,7 +132,7 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	}
 
 	loginCommand := buildLoginCommandDTO(ag)
-	runtimeUpdate := c.buildRuntimeUpdateDTO(ag, availability.Available)
+	runtimeUpdate := c.buildRuntimeUpdateDTO(ctx, ag, availability.Available)
 
 	return dto.AvailableAgentDTO{
 		Name:               ag.ID(),
@@ -154,7 +154,7 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	}
 }
 
-func (c *Controller) buildRuntimeUpdateDTO(ag agents.Agent, available bool) *dto.RuntimeUpdateDTO {
+func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent, available bool) *dto.RuntimeUpdateDTO {
 	if !available {
 		return nil
 	}
@@ -166,7 +166,20 @@ func (c *Controller) buildRuntimeUpdateDTO(ag agents.Agent, available bool) *dto
 	if spec.Package == "" {
 		return nil
 	}
-	item := &dto.RuntimeUpdateDTO{Supported: true, Package: spec.Package}
+	defaultVersion := spec.DefaultVersionOrPinned()
+	item := &dto.RuntimeUpdateDTO{
+		Supported:        true,
+		Package:          spec.Package,
+		DefaultVersion:   defaultVersion,
+		EffectiveVersion: defaultVersion,
+	}
+	if c.managedRuntimeSelections != nil {
+		if selection, found, err := c.managedRuntimeSelections.Get(ctx, ag.ID(), spec.Package); err == nil && found &&
+			selection.Package == spec.Package {
+			item.ActiveVersion = selection.Version
+			item.EffectiveVersion = selection.Version
+		}
+	}
 	if c.runtimeUpdater != nil {
 		if caps, found := c.runtimeUpdater.CurrentCapabilities(ag.ID()); found {
 			item.CurrentVersion = caps.AgentVersion
@@ -199,16 +212,15 @@ func buildLoginCommandDTO(ag agents.Agent) *dto.LoginCommandDTO {
 }
 
 // buildModelConfigFromHostUtility reads cached ACP probe data for the agent
-// type and produces a ModelConfigDTO with models, modes, and status. Agents
-// not in the probe cache (e.g. the mock agent used in E2E tests, which
-// doesn't speak ACP through its binary) fall back to `SupportsDynamicModels:
-// false` with an empty model list — callers render the profile's stored
-// model as a plain string rather than offering a dropdown.
+// type and produces a ModelConfigDTO with models, modes, and status. The
+// capability cache can be empty while the asynchronous host-utility probe
+// is still starting, so the dynamic-support flag comes from the registered
+// agent capability rather than from cache presence.
 func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelConfigDTO {
 	// Always initialize slices so JSON marshals as [] not null — the
 	// frontend uses .some()/.find() on these without null checks.
 	cfg := dto.ModelConfigDTO{
-		SupportsDynamicModels: false,
+		SupportsDynamicModels: c.agentSupportsDynamicModelConfig(agentID),
 		AvailableModels:       []dto.ModelEntryDTO{},
 		AvailableModes:        []dto.ModeEntryDTO{},
 	}
@@ -252,6 +264,25 @@ func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelCo
 		})
 	}
 	return cfg
+}
+
+func (c *Controller) agentSupportsDynamicModelConfig(agentID string) bool {
+	if c.agentRegistry == nil {
+		return false
+	}
+	ag, ok := c.agentRegistry.Get(agentID)
+	if !ok {
+		return false
+	}
+	ia, ok := ag.(agents.InferenceAgent)
+	if !ok {
+		return false
+	}
+	if cfg := ia.InferenceConfig(); cfg == nil || !cfg.Supported {
+		return false
+	}
+	runtime := ag.Runtime()
+	return runtime != nil && runtime.Protocol == agent.ProtocolACP
 }
 
 func configOptionDTOs(options []hostutility.ConfigOption) []dto.ConfigOptionDTO {
@@ -443,6 +474,7 @@ func (c *Controller) createDefaultProfile(ctx context.Context, agentID string, p
 		AllowIndexing:              p.allowIndexing,
 		DangerouslySkipPermissions: p.skipPermissions,
 		CLIPassthrough:             p.isPassthrough,
+		CursorMCPAuthEnabled:       true,
 	}
 	return c.repo.CreateAgentProfile(ctx, defaultProfile)
 }
@@ -456,9 +488,13 @@ func resolveDefaultModel(agentConfig agents.Agent, _ string) (string, bool, erro
 		return "passthrough", true, nil
 	}
 	// Mock agent is not probed (not an InferenceAgent) but needs a concrete
-	// model for E2E tests that exercise the ModelSelector UI.
+	// model for E2E tests that exercise the ModelSelector UI. It must be one
+	// of the models the mock agent actually advertises (mock-fast /
+	// mock-smart): the no-silent-model-fallback policy fails session start
+	// explicitly when the profile model is absent from the advertised list,
+	// and "mock-default" is not advertised.
 	if agentConfig.ID() == "mock-agent" {
-		return "mock-default", false, nil
+		return "mock-fast", false, nil
 	}
 	return "", false, nil
 }
@@ -548,9 +584,9 @@ func (c *Controller) detectAgents(ctx context.Context) ([]discovery.Availability
 }
 
 // synthAvailabilityFromRegistry builds Availability records for every enabled
-// agent without hitting the filesystem. All agents are marked Available=true
-// because in E2E mode only MockAgent instances are registered and they are
-// always available by definition.
+// inference agent without hitting the filesystem. Virtual families remain
+// visible through their durable settings rows, but they are not discovery
+// results and must never receive a concrete default profile.
 //
 // We still call IsInstalled() per-agent to copy over the agent's static
 // capability flags (SupportsMCP, MCPConfigPaths). Without those, downstream
@@ -561,6 +597,9 @@ func (c *Controller) synthAvailabilityFromRegistry() []discovery.Availability {
 	enabled := c.agentRegistry.ListEnabled()
 	results := make([]discovery.Availability, 0, len(enabled))
 	for _, ag := range enabled {
+		if agents.IsVirtualAgent(ag) {
+			continue
+		}
 		av := discovery.Availability{
 			Name:      ag.ID(),
 			Available: true,

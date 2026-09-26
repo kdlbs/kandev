@@ -4,7 +4,7 @@ Scoped guidance for `apps/web/`. Repo-wide rules (commit format, code-quality li
 
 ## Plugin authoring
 
-For plugin UI work, begin with the [canonical plugin authoring guide](../../docs/public/plugins-authoring.md). Follow: choose recipe → edit `manifest.yaml` → implement → validate → package → smoke test. The frontend contract pair is `../../docs/plans/plugins/PLUGIN-API.md` plus `lib/plugins/types.ts`; concrete shared Host UI exports are in `lib/plugins/host-api.ts`, and registration/cleanup behavior is in `lib/plugins/registry.ts` and `lib/plugins/host.ts`. Keep the guide and that contract pair synchronized; do not invent hooks such as task panels, task-menu actions, per-user `host.storage`, rich-text components, or Kanban-card injection when they are absent from the current source.
+For plugin UI work, begin with the [canonical plugin authoring guide](../../docs/public/plugins-authoring.md). Follow: choose recipe → edit `manifest.yaml` → implement → validate → package → smoke test. The independently consumable author contract is `@kandev/plugin-sdk` in `../packages/plugin-sdk`; `../../docs/plans/plugins/PLUGIN-API.md` and `lib/plugins/types.ts` document and implement host compatibility. Concrete shared Host UI exports are in `lib/plugins/host-api.ts`, and registration/cleanup behavior is in `lib/plugins/registry.ts` and `lib/plugins/host.ts`. New and official plugins use typed `host.context` reads and never copy/import private `AppState` or Zustand slice shapes. Extend the SDK, host implementation, contract docs, and exact-consumer compatibility test together. Standard mounted action slots use `host.ui.Action`/`ActionGroup`; preserve raw slots and `host.ui.Button`, avoid broad descendant CSS, and use touch-sized phone/coarse-pointer surfaces except the 24px tablet status bar. Phone status actions use the Status drawer.
 
 ## UI Components
 
@@ -14,22 +14,25 @@ For plugin UI work, begin with the [canonical plugin authoring guide](../../docs
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Dialog } from "@kandev/ui/dialog";
-// etc...
 ```
 
 **Do NOT** import from `@/components/ui/*` - always use `@kandev/ui` package.
 
-- Always prefer native shadcn components over custom implementations.
+- Always prefer native shadcn components over custom implementations. For async-status UI, do not rely on a changing button label as a live announcement: use one translated `role="status"` region, keep the button's accessible name stable, and override `@kandev/ui/spinner`'s default English `aria-label` with `t(...)` when it is announced (or use `aria-hidden` when another live status covers it).
 - Check `apps/packages/ui/src/` for available components (pagination, table, dialog, etc.).
 - For data tables, use `@kandev/ui/table` with TanStack Table; use shadcn Pagination components.
 - Only create custom components when shadcn doesn't provide what's needed.
 
 ### Responsive and touch surfaces
 
-- Use `hooks/use-responsive-breakpoint.ts` for application layout decisions. Its phone boundary is 640px and it also models tablet, compact desktop, full desktop, and pointer precision; do not substitute the UI package's generic `useIsMobile` hook.
-- Use `useTouchDrawer` when a hover/popover disclosure needs a coarse-pointer `Drawer` alternative. Width-based phone composition and pointer-based disclosure behavior are related but not interchangeable.
-- Existing Radix DropdownMenu and ContextMenu surfaces receive inset, safe-area-aware bottom-sheet treatment below 640px in `app/globals.css`. Reuse those primitives for contextual actions and add focused coverage for long or nested menus instead of creating a parallel mobile menu.
-- Mobile capability parity does not require desktop layout parity. Load `/mobile-parity` for the Kandev surface decision guide, mobile design contract, and verification requirements.
+- Use `hooks/use-responsive-breakpoint.ts` for application layout decisions. Its mobile boundary matches the sidebar's 768px `md` boundary, and it also models tablet, compact desktop, full desktop, and pointer precision; do not substitute the UI package's generic `useIsMobile` hook. Tablet is a coarse-pointer fallback between `md` and `lg`, so no fine-pointer width reports it — a spec that needs the tablet layout has to emulate touch.
+- When a Tailwind visibility class gates the same surface the hook picks, both must use the same boundary. A `sm:` class paired with a hook-driven mobile branch leaves 640-767px in a state neither side renders.
+- CSS visibility classes can leave the other viewport tree mounted. Gate live effects such as polling, subscriptions, timers, and measurements with the same responsive or pointer condition, and test both initialization orders when readiness can precede or follow hydration.
+- Use `useTouchDrawer` when a hover/popover disclosure needs a coarse-pointer `Drawer` alternative. Width-based phone composition and pointer-based disclosure behavior are related but not interchangeable. Apply the 44px minimum to coarse-pointer hit areas, touch rows, and mobile controls only; keep fine-pointer desktop controls at the surrounding design-system density, using 28px for ordinary buttons, inputs, and selectors and 24px only for deliberate compact inline controls, and do not reuse a touch-sized `h-11` class as the shared visual button size. See the [sizing guide](../../.agents/skills/mobile-parity/references/control-sizing.md) for exceptions.
+- Below 640px, shared Radix DropdownMenu/ContextMenu use inset, safe-area-aware bottom sheets in `app/globals.css`. Open `mobile-menu-root` content owns one decorative positioner backdrop matching Drawer dimming and blur; fade it with the sheet's exit motion. Never mark submenus; keep the backdrop outside scrolling content and pointer-transparent so Radix owns dismissal and non-modal interaction. Reuse these primitives and cover long/nested menus instead of adding parallel mobile menus.
+- Mobile capability parity does not require desktop layout parity. Load `/mobile-parity` for the Kandev surface decision guide, mobile design contract, and verification requirements; read [confirmation guidance](components/confirmation/AGENTS.md) when adopting phone confirmation surfaces.
+- Phone hamburger buttons use `AppNavSheet` for app navigation across listings, task workbenches, and page shells. The task title opens the task picker; `ResponsiveTaskPicker` owns its dialogs above responsive layout branches, and `TaskSheetSelectionProvider` shares cancellation with the embedded task sidebar. `MobileTaskNavigationProvider` retains the inline sidebar controller and action dialogs above responsive page headers, rendering the body into the shared menu outlet. Tasks collapses in place and shares the menu scroller. `KanbanHeaderMobile` opens listing-only `MobileMenuSheet` options from the Kanban/Threads/List title dropdown; Threads saved views render inline inside that surface. `MobileListingMenuActions` supplies search in listing options. Phone app navigation groups main-toolbar, sidebar workspace, and task plugin controls in `MobilePluginNavSection`, in one wrapping group. When task controls exist, each plugin uses its task toolbar instead of a second workspace toolbar; workspace-only plugins and sidebar actions remain available. Fallback system metrics follow navigation before Utilities. Keep activity/connection cues on `AppNavTrigger` and restore the actual opener unless focus moves into a launched surface. Tablet/desktop composition stays separate. Phone navigation uses Home for all listing modes; Tasks/Threads remain routes and palette destinations. The inline Tasks heading retains its independent plus. Phone Automations reuses workspace automation reads only while expanded, and Integrations retains a workspace settings entry even without configured links. Phone app navigation groups the built-in Quick Chat/Quick terminal actions below Home. `MobileQuickActions` shares launch and focus behavior; plugin actions and metrics retain separate slots. `MobileIntegrationsSection` opts into a local, initially collapsed disclosure only for phone app navigation; wider consumers retain expanded rendering.
+- Saved phone sidebar layouts retain Home/quick actions before the task outlet and put optional tools/groups afterward in saved relative order. Built-in Automations, Canvases, and Integrations use labelled phone disclosures; icon strips belong to custom shortcut groups. The built-in integration disclosure excludes plugin links rendered as independently customizable nodes. Never persist this phone composition over the desktop layout.
 
 ## Data Flow Pattern (Critical)
 
@@ -37,12 +40,11 @@ import { Dialog } from "@kandev/ui/dialog";
 Go Boot Payload -> Hydrate Store -> Components Read Store -> Hooks Subscribe
 ```
 
-**Never fetch data directly in components.**
+**Never fetch data directly in components.** State in `lib/state/` is below UI/routes: components and routes may consume it, but state must not import `components/` or `app/`, including type-only, re-export, or dynamic imports. Put shared values in dependency-neutral modules.
 
-**State dependency direction:** Production modules under `apps/web/lib/state/` are below the UI
-and route layers. Components and app routes may consume state, but state must not import from
-`apps/web/components/` or `apps/web/app/`, including type-only, re-export, and dynamic imports.
-Place shared values needed by both layers in a dependency-neutral module.
+### Browser capability boundaries
+
+- Use `generateUUID()` for client-only non-security IDs, not `crypto.randomUUID()`; use `copyToClipboard()` for copy actions, not `navigator.clipboard.writeText()`. Keep fallbacks non-security; test missing or rejected capabilities with an `rg` audit.
 
 ## Store Structure (Domain Slices)
 
@@ -58,10 +60,10 @@ lib/state/
 │   ├── settings/                  # executors, agents, editors, prompts (incl. userSettings)
 │   ├── comments/                  # code review diff comments
 │   ├── github/                    # GitHub PRs, reviews
+│   ├── gitlab/                    # GitLab MRs, watches, MR automation options
 │   └── ui/                        # preview, connection, active state, sidebar views
 ├── hydration/                     # SSR merge strategies
-
-hooks/domains/{kanban,session,workspace,settings,comments,github}/  # Domain-organized hooks
+hooks/domains/{kanban,session,workspace,settings,comments,github,gitlab}/  # Domain-organized hooks
 lib/api/domains/                    # API clients
 ├── kanban-api, session-api, workspace-api, settings-api, process-api
 ├── plan-api, queue-api, workflow-api, stats-api, github-api
@@ -71,14 +73,15 @@ lib/api/domains/                    # API clients
 
 **Key State Paths:**
 
-- `messages.bySession[sessionId]`, `shell.outputs[sessionId]`, `gitStatus.bySessionId[sessionId]`
+- `messages.bySession[sessionId]`, `shell.outputs[taskEnvironmentId]`, `gitStatus.byEnvironmentId[taskEnvironmentId]`, `gitStatus.byEnvironmentRepo[taskEnvironmentId][repositoryName]`, and `sessionCommits.byEnvironmentId[taskEnvironmentId]`; code/tests starting from a session ID must resolve `environmentIdBySessionId[sessionId]` before direct environment-scoped reads/writes, and `setGitStatus` takes the environment ID.
 - `tasks.activeTaskId`, `tasks.activeSessionId`, `workspaces.activeId`
 - `repositories.byWorkspace`, `repositoryBranches.byRepository`
 
+`chatMotion` owns per-device chat animation preview and persistence; `useChatMotion` applies OS reduced motion. Keep it separate from `richOutputMotion` and transcript auto-scroll. Quick Chat stores server conversations in `quickChat.sessions` and browser-local terminals in `quickChat.terminalTabs`; `activeKind` and terminal IDs track selection. `quick-terminal-actions.ts` owns lifecycle/fallback; terminal descriptors never enter conversation APIs or get lost in reconciliation.
+
 **Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
 
-For rebasing or finishing PRs written against the old Next.js runtime, follow
-[`docs/nextjs-spa-migration.md`](../../docs/nextjs-spa-migration.md).
+For rebasing or finishing PRs written against the old Next.js runtime, follow [`docs/nextjs-spa-migration.md`](../../docs/nextjs-spa-migration.md).
 
 **Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscription + store selection. WS client deduplicates subscriptions automatically.
 
@@ -87,9 +90,13 @@ For rebasing or finishing PRs written against the old Next.js runtime, follow
 **Format:** `{id, type, action, payload, timestamp}`.
 
 Use subscription hooks only; the WS client auto-deduplicates.
+**Task overview vs. session detail:** Shared task rows read `Task.statusSummary` and `task.status_summary.updated`; rich streams stay session-detail-only. Extend the bounded projection per the [spec](../../docs/specs/platform/requirements/bounded-task-status-delivery.md) and [ADR](../../docs/decisions/2026-08-01-separate-task-summary-session-stream-traffic.md).
+**Branch-scoped task state:** For live worktree/session state plus `task_prs`, key by `(repository, checked-out branch)`, not task/repository alone. `branch_switched` invalidates prior status/commits; reject late results with a generation/identity guard and preserve siblings. Historical PRs affect Changes only when `repository_id` and normalized `head_branch` match; Review/PR history may still show them. Test single/multi-repo cases and desktop/mobile Changes behavior.
+**HTTP/WS cache races:** When HTTP hydrates a cache also updated by WebSockets, resolve every freshness-sensitive displayed field from one accepted live/HTTP projection, not a mixture of sources; this includes workflow placement and step badge name/color as well as activity/status. Guard responses with per-scope revision and request/workspace generation; discard or refresh stale responses and cover a newer live move plus stale-live rejection. For React StrictMode or multiple hydration effects, keep the mocked response deferred, assert request count while it is pending, then resolve it for cleanup. Action-level pending markers spanning status refreshes clear from the initiating request's settle path, not unrelated status changes; scope them by repository/path for concurrent operations. `useEnsureTaskSession` re-fires `session.ensure` when an open task page sees zero sessions after a prior ensure, so deleting the last session from that page spawns a replacement; test zero-session states through the backend/API instead.
 
-When changing task lifecycle WS handlers (`task.updated`, `task.deleted`,
-`task.state_changed`), check both kanban and Office surfaces. Archive/delete
+- **Wire timestamps:** Use the shared `parseTurnTimestamp` parser before formatting or comparing untrusted RFC3339 values; `Date.parse` accepts or normalizes values such as `"0"` and February 30. Test syntactically malformed and Date-normalized malformed inputs, then follow the consumer's omit-or-reject contract.
+
+When changing task lifecycle WS handlers (`task.updated`, `task.deleted`, `task.state_changed`), check both kanban and Office surfaces. Archive/delete
 events may need to update kanban caches, `tasks.activeTaskId` / session pin
 state, recent/sidebar prefs, Office refetch triggers such as
 `setOfficeRefetchTrigger("tasks")`, and route redirects for `/t/:id`,
@@ -105,19 +112,39 @@ surface.
   `next-themes` directly. The routing/image/dynamic adapters now provide
   browser-native behavior for the Vite SPA while legacy Next entrypoints are
   phased out.
-- Components: <200 lines, extract to domain components, composition over props.
-- Hooks: domain-organized in `hooks/domains/`, encapsulate subscription + selection.
+- Task links: `lib/links.ts::linkToTask` is the only `/t/:taskId` builder; pass raw IDs, use `TaskLink` or `AppLink`, and use `linkToTask` for router pushes. Keep compatibility `/tasks/:id`, Office/API paths, and route-recognition prefixes separate.
+- Components stay under 200 lines; extract domain components. Hooks belong in `hooks/domains/` and encapsulate subscription plus selection.
+- **Code-host dashboards:** GitHub, GitLab, and plugin code-host pages must use
+  the provider-neutral primitives in `components/integrations/` for
+  change-request lists, rows, toolbars, scope controls, task preset menus, and
+  linked-task indicators. Use the shared semantic `IntegrationIcon` glyphs instead of
+  copying first-party SVG paths. Keep provider API/state logic in adapters; do not fork row
+  anatomy or add dashboard review/launch flows outside the native task dialog and
+  registered review surface. Plugins may override create transport only through an
+  authenticated action; host verifies repository, session, and worktree branch authority.
+- **Code-host task status:** registered providers publish `ReviewItemSummary.taskStatus`.
+  Host chrome renders shared topbar, composer, popover/drawer, eager linked-row summaries,
+  hover/focus refresh, and semantic colors. Initial refreshes are leased and deduplicated;
+  do not add provider color fields, visual slots, or pollers; use `change-request-*` anatomy.
+- **Code-host review detail:** GitHub and compatible review providers render
+  `components/integrations/change-request-detail.tsx` (also exposed as
+  `host.ui.ChangeRequestDetail`). Providers own normalized data/capabilities/actions,
+  not parallel headers, review/check/comment sections, scroll containers, or mobile
+  geometry.
+- **Code-host task links:** keep one-field pull/merge-request linking in
+  `components/integrations/task-change-request-link-form.tsx`. First-party providers
+  compose it directly; plugins call `host.openTaskLinkDialog`. Link submenu children
+  name the target only (for example, `Bitbucket Pull Request`) and preserve their
+  registered provider icon.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
-- **Self-documenting settings:** every setting must explain in visible, plain-language copy what
-  changes, when the setting applies, and when the user should choose each non-obvious option. State
-  important exclusions, precedence, cost, or destructive consequences next to the control when they
-  can affect the decision. Do not rely on tooltips, external documentation, or implementation terms
-  alone to teach the setting.
+- **Self-documenting settings:** give each setting a short, plain-language description of its effect. Use `SettingsInfo` for optional scope and implementation details: hover/focus on desktop, a drawer on touch devices. Keep active errors, permissions, managed values, and essential input constraints visible.
+- **Settings composition:** use `SettingsGroup` for bordered groups and `SettingsRow` for simple preferences; keep one domain owner/save contributor and attach discovery to actual controls. Keep sections expanded and use existing header tabs for larger pages. Preserve specialized editor/table/diagnostic/credential layouts.
 - **Settings save coordination:** settings surfaces with local unsaved state must register a
   contributor with `useSettingsSaveContributor` (or use `SettingsPageTemplate`) so the shared
   floating **Save changes** control, navigation guard, and discard flow own persistence. Do not add
   page-local Save/Cancel controls. Contributor `save` callbacks must reject on failure so the
   coordinator can report an error; `discard` must restore the contributor's authoritative baseline.
+- **Settings tabs:** use `components/settings/settings-tabs.tsx` in `SettingsPageHeader`; preserve drafts with validated URL `tab` state, map discovery fragments to the owning tab, and use 44px controls on phones and coarse pointers.
 - **Dialog Enter-to-confirm:** the base `@kandev/ui` `DialogContent` / `AlertDialogContent`
   activate the dialog's semantic action on plain Enter (`packages/ui/src/lib/dialog-default-action.ts`),
   so per-dialog "submit on Enter" input handlers are unnecessary — let the base own it.
@@ -153,105 +180,71 @@ surface.
   with independent open state. Touch-pinned help must close on a second trigger
   tap, outside interaction, and Escape; verify desktop pointer and mobile-sized
   touch flows.
-- **Renaming a `data-testid`:** set the new id as `data-testid="<new>"` and keep
-  the old id as `data-legacy-testid="<old>"`, then migrate e2e specs to the new
-  id in the same PR. JSX rejects two `data-testid` attributes on one element,
-  and Playwright's `getByTestId` only matches one attribute name — the
-  `data-legacy-testid` alias lets existing specs keep selecting the element
-  while the migration is in flight.
-- **Dockview session panel activation:** session chat panels can become active
-  through tab pointer/keyboard events, global tab-cycling shortcuts,
-  reopen/menu actions, and Dockview close controls. When changing
-  `tasks.activeSessionId` or active-session sync, audit all of those paths. Use
-  store state in addition to Dockview `api.isActive`; the current session's chat
-  tab may be Dockview-inactive while Files/Changes is active. Same-session
-  clicks must not leave stale activation intent, and Dockview
-  `.dv-default-tab-action` close controls should be treated as close/delete
-  actions rather than session-switch intent.
-- **Conditional review-panel ownership:** the reusable `pr-detail` panel may be
-  visible only while the active task has a linked PR or MR. A custom Default
-  layout's canonical panel supplies the preferred group and tab index; it does
-  not make an empty tab persistent. After review data hydrates, review loss
-  removes any canonical panel regardless of how it entered the runtime layout.
-  Restoration, maximized layouts, and a session's offered/dismissed marker
-  defer or suppress automatic insertion; linked existing panels synchronize
-  provider and review identity without moving them.
-- **GitHub PR status UI:** visual PR/CI status surfaces should use the shared
-  helpers in `apps/web/components/github/pr-task-icon.tsx`
-  (`hasPRChecksPassedForDisplay`, `hasPRChecksInProgressForDisplay`, and
-  `hasPRChecksPassedWithoutReviewWaitForDisplay`) instead of re-deriving status
-  from `checks_state`, `checks_total`, or `checks_passing` locally. Aggregate
-  check counts are a display-only fallback when `checks_state` is empty; they may
-  make chips or task icons render passed/in-progress, but must not enable merge
-  actions. Merge readiness must use `isPRReadyToMerge`, which requires GitHub's
-  explicit `checks_state === "success"` rollup. When changing PR status behavior,
-  update both `pr-task-icon.test.ts` and `pr-status-chip.test.tsx`.
-- **Task repository labels:** user-facing task/card repo chips should display a
-  stable repo slug or name (`owner/repo` when known, otherwise the repo name),
-  not a local filesystem path. Local clone paths or folder paths belong in
-  hover/title/tooltip metadata. Tasks with no repository, or only a non-repo
-  local folder, should not render a repo chip.
+- **Renaming a `data-testid`:** use `data-legacy-testid` for the old id while
+  migrating specs; JSX and Playwright only support one `data-testid` attribute.
+- **Dockview session activation:** audit pointer/keyboard tabs, shortcuts,
+  reopen/menu actions, and close controls; combine store state with
+  `api.isActive`, clear same-session intent, and treat default-tab close as
+  delete rather than session switching.
+- **Conditional review panels:** show `pr-detail` only for active tasks with a
+  linked PR/MR; default layouts only provide preferred placement. Hydrated review
+  loss removes canonical panels, while restoration/maximized and offered/dismissed
+  markers suppress insertion; existing panels sync identity without moving.
+- **Dockview environment switching:** reconcile ephemeral panels before restoring views;
+  correlate ID-less groups by stable ID or position. Setup can precede asynchronous layout restoration. Reconcile dependent state after restoration settles. Dispose added subscriptions. Test late restoration and mixed valid or stale candidates before ambiguity checks. Treat `chat`/`session:*` as semantic only with a non-null `activeSessionId`.
+- **GitHub PR status UI:** use the shared `pr-task-icon.tsx` display helpers and
+  `isPRReadyToMerge`; aggregate counts are display-only and cannot enable merges.
+  Update `pr-task-icon.test.ts` and `pr-status-chip.test.tsx` with behavior changes.
+- **GitHub PR associations:** retain terminal/merged siblings for tabs/unlink;
+  derive `openPRs` only for aggregate status/automation and test desktop/mobile terminal unlink plus two-to-one collapse/focus.
+- **Task repository labels and projections:** user-facing task/card repo chips
+  should display a stable repo slug or name (`owner/repo` when known, otherwise the repo name),
+  not a local filesystem path; local paths belong in metadata. Tasks with no repository should not render a repo chip.
+  When a UI projection adds normalized collection data for grouping, preserve scalar filter fields such as
+  `repositoryPath` and test both grouping and filtered views.
 
 ## Internationalization (i18n)
 
-**The migration is in progress, one directory per PR.** The runtime, the gates,
-and Settings → General → Appearance are done; most of the app still holds English
-literals. New user-facing copy must go through `t()` / `<Trans>` wherever you
-write it, even in a directory that has not been migrated yet.
+**Externalization is complete.** A hardcoded user-facing literal is a
+regression, not leftover migration work. New copy goes through `t()` / `<Trans>`
+wherever you write it.
 
-User-facing strings are localized with i18next + react-i18next, keyed as
-`namespace:key`. Add the English text to `src/locales/en/<namespace>.json`, then
-reference it with `t("settings:deleteExecutor")` (`useTranslation()` in
-components, the module-level `t` from `@/lib/i18n` in plain helpers). Use
-`<Trans i18nKey=... values={...}>` only for copy containing markup — and never a
-`t()` call inside its children, which shifts the message's tag indices.
+Add English keys to `src/locales/en/<namespace>.json`; use `useTranslation()` in
+components and module-level `t` only inside plain helper calls. `<Trans>` is only
+for markup, and a `t()` child corrupts its tag indices. Do not translate domain
+data, identifiers, test IDs, discriminants, comparison tokens, or map keys; split
+display copy from logic first. Keep `lib/i18n/provider.tsx` module
+initialization; removing it blanks the app. Use `_one`/`_other` plural keys,
+never English suffixes. Never capture `t()` in a module-level constant; it
+freezes the boot locale. No Unicode em dash (U+2014) in copy or locale values.
 
-Never translate user/domain data, code identifiers, `data-testid`, or a literal
-that is also compared with `===`, used as a map key, or typed as a string-literal
-union. When a prop is both display copy and logic (`label: "Reviewers" |
-"Assignees"`), split it into a `kind`/`origin` discriminant plus a translated
-label rather than translating in place.
+`pnpm lint` fails on hardcoded UI strings: `i18next/no-literal-string` is an
+**error on every `.ts`/`.tsx` file** (tests, `*.test-helpers.*`, `*.test-utils.*`
+and `e2e/**` excluded). It was scoped to `i18nGuardFiles` during the migration;
+measured at zero violations across all 2560 source files, it was widened.
+`i18nGuardFiles` remains the migration record and the `lint:i18n <path>` preview
+scope: append when you externalize a path, never delete an entry
+(`check-guard-allowlist.mjs` rejects that). `i18n:ratchet` guards new/changed
+lines independently. The rule sees only JSX literals; SCREAMING_CASE tables,
+plain `.ts` helpers, parameter defaults and toast/setter arguments are gated by
+`scripts/check-nonjsx-copy.mjs`, which scans the **whole tree by exclusion**.
+Silence a legitimate one with `// i18n-exempt: <reason>` (required) as a `//`
+LINE comment — the detector's pattern is line-anchored, so a marker inside a
+`/** */` block is silently ignored.
 
-`lib/i18n/provider.tsx` initializes i18next at module load. Do not remove that
-call: react-i18next suspends on an uninitialized instance and there is no
-Suspense boundary above the root, so the app renders a blank page with no error
-of any kind. Unit tests cannot catch it — `vitest.setup.ts` pre-initializes.
+**Real-locale catalogs gate.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw`, `ja` are complete;
+`check-i18n-keys.mjs` fails on a missing/extra key, a dropped `{{placeholder}}`
+or `<n>` tag, an empty value, or a value identical to English. Untranslatable
+values are handled in two tiers: those `looksLikeCopy` rejects as non-copy need
+no declaration; prose that reads the same in the target language goes in
+`src/locales/<locale>/_verbatim.json` (or the shared `_verbatim.json`) with a
+mandatory reason — reasonless or stale entries are errors. For zh-tw/zh-hk run
+`pnpm run i18n:zh-hant`, do not hand-translate.
 
-Never write a plural ending yourself: use `t(key, { count })` with `_one`/`_other`
-keys. Passing the morpheme as a value (`{ s: n === 1 ? "" : "s" }`) is
-untranslatable — the plural rule ends up at the call site.
-
-Never assign `t()` to a module-level constant. It resolves at import, before a
-locale is active, and never updates on a switch — and the pseudo-locale cannot
-see it, because the text _is_ translated, just frozen. Store the key and resolve
-at render, or make the value a component. `check-module-scope-t.mjs` enforces it.
-
-`pnpm lint` fails on hardcoded UI strings (`i18next/no-literal-string` is an
-**error**), but **only on the `i18nGuardFiles` allowlist** in
-`eslint.i18n.options.mjs` — paths already migrated. That scoping is deliberate:
-a repo-wide error breaks every unrelated PR that adds a label, which is what made
-the first attempt at this migration unmergeable. **When you migrate a directory,
-append it to `i18nGuardFiles` in the same PR** — that is the step that stops it
-drifting back. Never delete an entry to make a build pass. Use
-`pnpm run lint:i18n <path>` to preview the guard on a path that is not on the
-list yet.
-
-Separately, `pnpm run i18n:ratchet` (pre-commit + CI) guards **new code
-everywhere**, regardless of the allowlist: a file you added must be clean outright,
-and a file you modified is judged on the lines you touched. Untouched literals are
-never reported, so it cannot ask you to migrate code you did not write — the same
-contract as `golangci-lint --new-from-rev` for Go.
-
-The rule **only sees literals in JSX** — `confirm()` arguments and copy in plain
-`.ts` helpers are invisible to it — and it **skips anything assigned to a
-SCREAMING_CASE identifier**, so `const ROWS = [{ label: "Disk usage" }]` passes
-silently. A clean lint is not proof a file is done. `pnpm run i18n:check` gates key/catalog
-drift, `<Trans>` tag indices, inline plurals and module-scope `t()`, and the
-**pseudo-locale** (Settings → General → Appearance, dev/e2e) is the completeness
-check — any plain-English text under it was never externalized. The tooling needs
-**Node 24**. Full guide:
-[`docs/i18n.md`](../../docs/i18n.md); spec:
-[`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
+`i18n:check` also gates key/catalog drift, `<Trans>` indices, inline plurals,
+module-scope `t()`, em dashes, and the **pseudo-locale** check. Needs **Node 24**.
+Guide: [`docs/i18n.md`](../../docs/i18n.md); spec
+[`docs/specs/platform/requirements/i18n.md`](../../docs/specs/platform/requirements/i18n.md).
 
 ## Markdown safety
 
@@ -265,7 +258,7 @@ README markup and for stripping executable HTML and unsafe URLs.
 
 Enforced by `apps/web/eslint.config.mjs` (warnings, will become errors):
 
-- Files: ≤600 lines · Functions: ≤100 lines
+- Files: ≤600 lines · Functions: ≤100 lines · Absolute-positioned virtualizer rows do not collapse CSS margins; do not layer row padding/gaps over an item's existing margin. Preserve the old rendered gap with a focused bounding-box regression.
 - Cyclomatic complexity: ≤15 · Cognitive complexity: ≤20
 - Nesting depth: ≤4 · Parameters: ≤5
 - No duplicated strings (≥4 occurrences) · No identical functions · No unused imports
@@ -273,13 +266,35 @@ Enforced by `apps/web/eslint.config.mjs` (warnings, will become errors):
 
 When you hit a limit, extract a helper function, custom hook, or sub-component. Prefer composition over growing a single function.
 
+## Plugin system
+
+The public frontend contract is `apps/packages/plugin-sdk`; `docs/plans/plugins/PLUGIN-API.md`
+and `lib/plugins/types.ts` are its detailed host implementation — all three must change together.
+`lib/plugins/registry.ts` is the reactive singleton `PluginRegistry`; every
+`register*` call needs matching cleanup in `unregisterPlugin` and `totalCount()`, or a disabled/uninstalled plugin leaks a stale registration.
+
+- **Task panels** (`registerTaskPanel`): one generic dockview component, `"plugin-panel"`, shared by
+  every plugin — identity lives in `params: { pluginId, panelKey }` (id helpers in
+  `lib/state/layout-manager/plugin-panels.ts`). `renderPanel` in `dockview-shared.tsx` and
+  `dockview-panel-content.tsx` each get exactly one `"plugin-panel"` case (lookup tables, not
+  switches). `PluginTaskPanel` (`components/task/`) resolves the registration behind a
+  `PluginErrorBoundary`; `mobileEnabled: true` also renders it via the phone bottom nav
+  (`session-mobile-bottom-nav.tsx`) with `presentation: "mobile"`.
+- **Task contributions:** `registerTaskMenuAction({ group: "edit", ... })` adds card-only actions to
+  the `Edit` submenu. Group `"primary"` adds top-level actions to card and desktop/mobile task-row
+  menus; declaring `items(context)` renders an action of either group as a submenu of its children
+  instead, with `run` kept as the flat fallback.
+  Card indicator/tag slots stay card-specific; `task-row-metadata` is generic for sidebar and `/tasks` rows.
+- **Sidebar workspace actions:** `registerComponent("sidebar-workspace-actions", ...)` renders after Quick Terminal/Quick Chat in the desktop sidebar's New Task row and in the shared phone navigation sheet, forwarding `SidebarWorkspaceActionsSlotProps` with `presentation: "desktop" | "mobile"`; mobile plugin controls own a 44px touch target and accessible name.
+- **`host.storage`:** authenticated per-user key/value storage (`lib/plugins/host-api.ts`) backed by `/api/plugins/{id}/user-state/...` (`docs/decisions/2026-08-01-per-user-plugin-storage.md`); `subscribe` (`lib/plugins/user-state-sync.ts`) wraps `registerWsHandler` with own-plugin filtering and own-tab echo suppression via a per-tab `writerId`.
+- **`host.ui.RichTextEditor`/`RichTextReadOnly`** (`components/editors/tiptap/rich-text-editor.tsx`): narrow Plan-panel-tiptap wrappers; update `PLUGIN-API.md` before widening props beyond `{ taskId, value, onChange, placeholder, className, testId }` / `{ value, className, testId }`.
+
+## Sidebar task views
+
+`sidebarViewsByWorkspace` stores personal view state by workspace ID. Use `selectSidebarViews`, preserve workspace identity through async saves and rollback, and keep `sidebarViews` only for legacy wire/hydration compatibility. The backend owns migration/defaults; writes use scoped `sidebar_view_state`, never legacy global fields.
+
 ## Testing notes
 
-- jsdom drops `secure` cookies over `http`, so `document.cookie` reads back empty. To assert a cookie write in a Vitest unit test, intercept the setter with `Object.defineProperty(document, "cookie", { set: ... })` and restore it after.
-- jsdom synthetic mouse events do not reliably open Radix Tooltip. In component
-  tests, render under `TooltipProvider` and assert the keyboard-focus path with
-  `fireEvent.focus`. Cover pointer hover in Playwright with `locator.hover()` and
-  assert the visible portaled `role="tooltip"`; do not remove a hover regression
-  solely because `mouseenter` or `pointerMove` failed in jsdom.
-- In Playwright tests, avoid strict locators that assume only one `terminal-panel` or `.xterm` exists. Mobile and dockview layouts can mount multiple terminal instances; scope to the active panel or use `.first()` / `.last()` deliberately with a comment or helper.
-- Shared E2E helpers that inspect mounted React/DOM internals must be scoped to the active panel/container, not global selectors, because hidden or stale mounted panels can coexist in dock/mobile layouts.
+- `vitest.config.ts` pins `process.env.NODE_ENV = "test"`, and that line is load-bearing. React exports `act()` only from its development build, so under `NODE_ENV=production` — which the runtime image sets (`Dockerfile`) and every container/agent shell inherits, while CI's image does not — `@testing-library/react` falls back to `react-dom/test-utils` and **every** `render()`/`renderHook()` throws `TypeError: React.act is not a function` before any assertion, with CI still green. `vitest-environment.test.tsx` and the `vitest.setup.ts` preflight fail by name if the pin goes, and the `Run tests` step in `.github/workflows/frontend-tests.yml` exports `NODE_ENV=production` on purpose so those guards fire in CI too rather than only in a container.
+- **E2E waits name the cause, they do not budget for the effect.** The suite's dominant flake is `await expect(x).toBeEnabled({ timeout: 30_000 })` — an assertion on a UI shadow of a backend event whose hand-picked budget expires under load. `e2e/helpers/causal-waits.ts` has one primitive per transport (`waitForHttp`, `watchWs().waitForEvent`, `watchWs().waitForResponse`): arm it before the action, await it after, then assert the UI with its **default** timeout. "The backend reached state X" needs no primitive — `expect.poll` against `e2e/helpers/api-client.ts` already reads the backend, not the DOM. `watchWs(page)` only sees sockets opened after it is called, so it goes before the first `page.goto()`. Confirm a causal chain by probing a live run with a throwaway `page.on("response")` logger; reading the components predicts it wrong often enough to matter. The only sanctioned wall-clock wait is `dwell(page, ms, category, reason)`, or `dwell(ms, category, reason)` where no `Page` exists (fixtures, api-client retries) — `category` is the closed `DwellCategory` union (`negative-assertion` is permanent, `unverified` is debt to drive to zero), `reason` says why no event exists, no options; a delay inside a `page.route()` handler is `injectLatency(ms, reason)` instead, since the delay is the stimulus rather than a wait; raw `page.waitForTimeout` and promise sleeps are not sanctioned. Guide and worked examples: `e2e/README.md`. **The sleep ban is enforced in two layers**, the same shape as the i18n guards, and the conversion is complete so both cover the whole tree. `eslint-rules/no-unsanctioned-sleep.mjs` is an AST rule (`e2e/` has ~700 `test.setTimeout()` calls, Playwright's per-test timeout setter, which a regex cannot separate from a sleep — nor a sleep from a `Promise.race` guard); it is an **error across all of `e2e/`** via `e2eSleepGuardFiles`, and it also rejects a `dwell`/`injectLatency` not imported from `e2e/helpers/causal-waits`, since a failed import otherwise lints clean and throws on exactly the loaded shard the wait existed to survive. `pnpm run e2e:sleep-ratchet` (CI + pre-commit) is the second layer and judges the **change, not the file**. The guard **only ever widens** — never narrow it to make a build pass; `e2e-sleep-wiring.test.ts` asserts coverage via ESLint's own config resolution and fails if the CI step or hook disappears. Details: `e2e/README.md` ("How this is enforced").
+- jsdom secure cookies need cookie-setter interception; Radix Tooltip tests use keyboard focus, while Playwright covers pointer hover with `locator.hover()`. Scope terminal selectors to the active panel/container; mobile and dockview may mount multiple instances, so shared helpers must not use global selectors. Local full Vitest suites use the configured 20-percent worker budget; do not pass all-worker overrides or overlap suites.

@@ -105,6 +105,15 @@ describe("SHORTCUTS", () => {
     });
   });
 
+  describe("WORKSPACE_PICKER", () => {
+    it("uses E with the ctrlOrCmd modifier and no shift", () => {
+      const shortcut = SHORTCUTS.WORKSPACE_PICKER as KeyboardShortcut;
+      expect(shortcut.key).toBe("e");
+      expect(shortcut.modifiers?.ctrlOrCmd).toBe(true);
+      expect(shortcut.modifiers?.shift).toBeUndefined();
+    });
+  });
+
   it("has correct type", () => {
     // TypeScript ensures these are readonly at compile time
     const shortcuts: typeof SHORTCUTS = SHORTCUTS;

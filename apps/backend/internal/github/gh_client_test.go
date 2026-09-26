@@ -69,6 +69,7 @@ func TestGhMergeStatusCode(t *testing.T) {
 		{"404 Not Found phrase", errors.New("404 Not Found"), true, 404},
 		{"status 404", errors.New("request failed (status: 404)"), true, 404},
 		{"HTTP 403", errors.New("HTTP 403: Forbidden"), true, 403},
+		{"HTTP 400", errors.New("HTTP 400: Bad Request"), true, 400},
 		{"HTTP 405", errors.New("gh: HTTP 405: Method Not Allowed"), true, 405},
 		{"status 405", errors.New("status: 405"), true, 405},
 		{"405 phrase", errors.New("405 Method Not Allowed"), true, 405},
@@ -145,6 +146,50 @@ func TestGHSearchParsingPreservesImmutableIdentity(t *testing.T) {
 	}
 }
 
+func TestPRBaseGHCLIQueriesAndRetainsBaseOID(t *testing.T) {
+	calls := newFakeGH(t,
+		ghResponse{
+			Prefix: "pr view 7",
+			Stdout: `{"number":7,"title":"Remote contribution","url":"https://github.com/acme/widget/pull/7","state":"OPEN","body":"","headRefName":"feature/remote","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","baseRefName":"main","author":{"login":"alice"},"isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","additions":1,"deletions":0,"createdAt":"2025-01-01T00:00:00Z","updatedAt":"2025-01-02T00:00:00Z","mergedAt":"","closedAt":"","reviewRequests":[],"maintainerCanModify":true,"headRepository":{"id":"R_kgDOFork123","name":"widget-fork","nameWithOwner":"contributor/widget-fork","url":"https://github.com/contributor/widget-fork","cloneUrl":"https://github.com/contributor/widget-fork.git"},"headRepositoryOwner":{"login":"contributor"}}`,
+		},
+		ghResponse{
+			Prefix: "api repos/acme/widget/pulls/7",
+			Stdout: `{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","ref":"release/next","repo":{"id":17,"name":"widget","owner":{"login":"upstream"}}}`,
+		},
+	)
+
+	pr, err := NewGHClient().GetPR(context.Background(), "acme", "widget", 7)
+	if err != nil {
+		t.Fatalf("GetPR() error = %v", err)
+	}
+	if pr.HeadRepoNodeID != "R_kgDOFork123" || pr.HeadRepoOwner != "contributor" || pr.HeadRepoName != "widget-fork" {
+		t.Fatalf("source repository = (%q, %q, %q), want CLI node ID and owner shape", pr.HeadRepoNodeID, pr.HeadRepoOwner, pr.HeadRepoName)
+	}
+	if pr.BaseRepoID != 17 || pr.BaseRepoOwner != "upstream" || pr.BaseRepoName != "widget" ||
+		pr.BaseBranch != "release/next" || pr.BaseDefaultBranch != "" {
+		t.Fatalf("target repository = (%d, %q, %q), base=%q default=%q, want REST target identity and ref", pr.BaseRepoID, pr.BaseRepoOwner, pr.BaseRepoName, pr.BaseBranch, pr.BaseDefaultBranch)
+	}
+	got := calls(t)
+	assertGHArgv(t, got, 0, []string{
+		"pr", "view", "7", "--repo", "acme/widget", "--json",
+		"number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,changedFiles,mergedBy,autoMergeRequest,createdAt,updatedAt,mergedAt,closedAt,reviewRequests,maintainerCanModify,headRepository,headRepositoryOwner",
+	})
+	assertGHArgv(t, got, 1, []string{
+		"api", "repos/acme/widget/pulls/7", "--jq",
+		"{sha: .base.sha, ref: .base.ref, repo: {id: .base.repo.id, name: .base.repo.name, owner: .base.repo.owner}}",
+	})
+	for _, invocation := range got {
+		for index, arg := range invocation {
+			if arg == "--json" && index+1 < len(invocation) && strings.Contains(invocation[index+1], "baseRefOid") {
+				t.Fatalf("unsupported baseRefOid requested from gh pr --json: %#v", invocation)
+			}
+		}
+	}
+	if pr.BaseSHA != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("BaseSHA = %q, want REST base.sha", pr.BaseSHA)
+	}
+}
+
 func TestGHClient_ListCheckRuns_PaginatesCheckRuns(t *testing.T) {
 	binDir := t.TempDir()
 	logPath := filepath.Join(t.TempDir(), "gh-args.log")
@@ -195,6 +240,53 @@ esac
 	}
 	if strings.Contains(string(logged), "--slurp") {
 		t.Fatalf("ListCheckRuns should not combine gh api --slurp with --jq, got:\n%s", logged)
+	}
+}
+
+func TestGHClient_PRCommitDetailUsesExactSHAAndMergesPages(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "gh-args.log")
+	ghPath := filepath.Join(binDir, "gh")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_ARGS_LOG"
+case "$*" in
+  *commits/*)
+    printf '%s\n' '[{"sha":"2222222222222222222222222222222222222222","commit":{"message":"remote detail","author":{"name":"Octo Cat","date":"2026-08-04T11:00:00Z"}},"author":{"login":"octocat"},"stats":{"additions":7,"deletions":3},"files":[{"filename":"one.txt","status":"modified","additions":4,"deletions":1,"patch":"@@ -1 +1 @@\\n-old\\n+new"}]},{"sha":"2222222222222222222222222222222222222222","commit":{"message":"ignored","author":{"name":"Other","date":"2026-08-05T11:00:00Z"}},"stats":{"additions":99,"deletions":99},"files":[{"filename":"two.txt","status":"removed","additions":0,"deletions":2,"patch":"@@ -1 +0,0 @@\\n-gone"}]}]'
+    ;;
+  *) printf '%s\n' '[]' ;;
+esac
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_ARGS_LOG", logPath)
+
+	detail, err := NewGHClient().GetPRCommitDetail(
+		context.Background(), "acme", "widget", "2222222222222222222222222222222222222222",
+	)
+	if err != nil {
+		t.Fatalf("GetPRCommitDetail: %v", err)
+	}
+	if detail.SHA != "2222222222222222222222222222222222222222" || detail.Additions != 7 || detail.Deletions != 3 {
+		t.Fatalf("detail = %#v", detail)
+	}
+	if len(detail.Files) != 2 {
+		t.Fatalf("files = %#v, want two merged files", detail.Files)
+	}
+	args, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read gh args: %v", err)
+	}
+	command := string(args)
+	for _, want := range []string{
+		"api repos/acme/widget/commits/2222222222222222222222222222222222222222?per_page=100",
+		"--paginate",
+		"--slurp",
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("gh args = %q, want %q", command, want)
+		}
 	}
 }
 
@@ -312,7 +404,7 @@ func TestConvertGHPR(t *testing.T) {
 		HeadRefName: "feature-branch",
 		HeadRefOid:  "abc123def456",
 		BaseRefName: "main",
-		IsDraft:     true,
+		IsDraft:     boolPtr(true),
 		Mergeable:   "MERGEABLE",
 		Additions:   100,
 		Deletions:   50,
@@ -344,6 +436,9 @@ func TestConvertGHPR(t *testing.T) {
 	if !pr.Draft {
 		t.Error("expected draft = true")
 	}
+	if !pr.IsDraftObserved {
+		t.Error("expected IsDraftObserved = true when isDraft is present in the response")
+	}
 	if !pr.Mergeable {
 		t.Error("expected mergeable = true")
 	}
@@ -361,6 +456,41 @@ func TestConvertGHPR(t *testing.T) {
 	}
 	if pr.MergedAt != nil {
 		t.Error("expected nil MergedAt")
+	}
+}
+
+// TestConvertGHPR_MissingIsDraftAndChangedFilesLeavesUnobserved covers
+// AC-12a on the gh CLI decode path: a response that omits isDraft and
+// changedFiles must decode to unobserved (Observed=false), not a fabricated
+// false/0 masquerading as a real observation.
+func TestConvertGHPR_MissingIsDraftAndChangedFilesLeavesUnobserved(t *testing.T) {
+	raw := &ghPR{Number: 7, State: "OPEN"}
+	pr := convertGHPR(raw, "owner", "repo")
+	if pr.IsDraftObserved {
+		t.Error("IsDraftObserved = true, want false when isDraft is absent from the response")
+	}
+	if pr.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = true, want false when changedFiles is absent from the response")
+	}
+}
+
+// TestConvertGHPR_ExplicitFalseAndZeroAreObserved covers AC-12a's other
+// half: a response that genuinely reports isDraft=false and changedFiles=0
+// must be distinguishable from one that omits them — both mark Observed=true.
+func TestConvertGHPR_ExplicitFalseAndZeroAreObserved(t *testing.T) {
+	raw := &ghPR{Number: 7, State: "OPEN", IsDraft: boolPtr(false), ChangedFiles: intPtr(0)}
+	pr := convertGHPR(raw, "owner", "repo")
+	if !pr.IsDraftObserved {
+		t.Error("IsDraftObserved = false, want true for an explicit isDraft=false")
+	}
+	if pr.Draft {
+		t.Error("Draft = true, want false")
+	}
+	if !pr.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = false, want true for an explicit changedFiles=0")
+	}
+	if pr.ChangedFiles != 0 {
+		t.Errorf("ChangedFiles = %d, want 0", pr.ChangedFiles)
 	}
 }
 

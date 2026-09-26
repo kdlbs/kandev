@@ -16,12 +16,10 @@ import { TaskChatPanel } from "./task-chat-panel";
 import { TaskChangesPanel } from "./task-changes-panel";
 import { FileTabContent } from "./file-tab-content";
 import { PassthroughToolbar } from "./passthrough-toolbar";
-import type { OpenFileTab, FileContentResponse } from "@/lib/types/backend";
+import type { OpenFileTab } from "@/lib/types/backend";
 import { useAppStore } from "@/components/state-provider";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import { executeApprove } from "@/lib/services/session-approve";
-import { requestFileContent } from "@/lib/ws/workspace-files";
 import {
   setOpenFileTabs as saveOpenFileTabs,
   getActiveTabForSession,
@@ -33,13 +31,15 @@ import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { calculateHash } from "@/lib/utils/file-diff";
 import { useToast } from "@/components/toast-provider";
 import { useFileTabRestoration, useFileSaveDelete } from "./task-center-panel-restoration";
-import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
-import { PRDetailContent } from "@/components/github/pr-detail-panel";
-import { MRDetailPanelComponent, mrTaskKey } from "@/components/gitlab/mr-detail-panel";
-import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
+import { useNormalizedTaskReviews } from "./review-panel-provider";
+import { useReviewItemSelection } from "./review-selection";
 import { getFileTabKey, upsertOpenFileTab } from "./task-center-panel-file-tabs";
+import { TaskCenterReviewContent } from "./task-center-review-content";
+import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
+import { getFilePreviewKind } from "@/lib/utils/file-types";
 
 import type { SelectedDiff } from "./task-layout";
+import { useTranslation } from "react-i18next";
 
 type TaskCenterPanelProps = {
   selectedDiff: SelectedDiff | null;
@@ -150,37 +150,11 @@ function useFileTabOperations({
     [setOpenFileTabs, setLeftTab],
   );
 
-  const handleOpenFileFromChat = useCallback(
-    async (filePath: string) => {
-      const client = getWebSocketClient();
-      if (!client || !activeSessionId) return;
-      try {
-        const response: FileContentResponse = await requestFileContent(
-          client,
-          activeSessionId,
-          filePath,
-        );
-        const fileName = filePath.split("/").pop() || filePath;
-        const hash = await calculateHash(response.content);
-        addFileTab({
-          path: filePath,
-          name: fileName,
-          content: response.content,
-          originalContent: response.content,
-          originalHash: hash,
-          isDirty: false,
-          isBinary: response.is_binary,
-        });
-      } catch (error) {
-        toast({
-          title: "Failed to open file",
-          description: error instanceof Error ? error.message : "Unknown error",
-          variant: "error",
-        });
-      }
-    },
-    [activeSessionId, toast, addFileTab],
-  );
+  const handleOpenFileFromChat = useTaskCenterFileOpen({
+    activeSessionId,
+    addFileTab,
+    toast,
+  });
 
   const handleCloseFileTab = useCallback(
     (fileKey: string) => {
@@ -204,11 +178,11 @@ function useFileTabOperations({
     [setOpenFileTabs],
   );
 
-  const handleMarkdownPreviewToggle = useCallback(
+  const handleRenderedPreviewToggle = useCallback(
     (fileKey: string) => {
       setOpenFileTabs((prev) =>
         prev.map((tab) =>
-          getFileTabKey(tab) === fileKey ? { ...tab, markdownPreview: !tab.markdownPreview } : tab,
+          getFileTabKey(tab) === fileKey ? { ...tab, renderedPreview: !tab.renderedPreview } : tab,
         ),
       );
     },
@@ -227,7 +201,7 @@ function useFileTabOperations({
     handleOpenFileFromChat,
     handleCloseFileTab,
     handleFileChange,
-    handleMarkdownPreviewToggle,
+    handleRenderedPreviewToggle,
     handleFileSave,
     handleFileDelete,
     addFileTab,
@@ -238,12 +212,13 @@ function useCenterPanelTabs(
   openFileTabs: OpenFileTab[],
   handleCloseFileTab: (fileKey: string) => void,
   hasChanges: boolean | undefined,
-  reviewLabel: "Pull Request" | "Merge Request" | null,
+  reviewLabel: string | null,
 ) {
+  const { t } = useTranslation();
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
-      ...(hasChanges ? [{ id: "changes", label: "All changes" }] : []),
-      { id: "chat", label: "Chat" },
+      ...(hasChanges ? [{ id: "changes", label: t("task:allChanges") }] : []),
+      { id: "chat", label: t("task:chat") },
       ...(reviewLabel ? [{ id: "pr", label: reviewLabel }] : []),
     ];
     const fileTabs: SessionTab[] = openFileTabs.map((tab) => ({
@@ -258,7 +233,7 @@ function useCenterPanelTabs(
       className: "cursor-pointer group gap-1.5 data-[state=active]:bg-muted",
     }));
     return [...staticTabs, ...fileTabs];
-  }, [openFileTabs, handleCloseFileTab, hasChanges, reviewLabel]);
+  }, [openFileTabs, handleCloseFileTab, hasChanges, reviewLabel, t]);
   const separatorAfterIndex = useMemo(() => {
     if (openFileTabs.length === 0) return undefined;
     const staticCount = (hasChanges ? 1 : 0) + 1 + (reviewLabel ? 1 : 0);
@@ -268,12 +243,27 @@ function useCenterPanelTabs(
 }
 
 function useTaskReview(taskId: string | null) {
-  const taskPR = useActiveTaskPR();
-  const taskMR = useTaskMRs(taskId)[0] ?? null;
-  let reviewLabel: "Pull Request" | "Merge Request" | null = null;
-  if (taskPR) reviewLabel = "Pull Request";
-  else if (taskMR) reviewLabel = "Merge Request";
-  return { taskPR, taskMR, reviewLabel };
+  const { t } = useTranslation();
+  const reviews = useNormalizedTaskReviews(taskId);
+  const { selectedReview, selectReview } = useReviewItemSelection(taskId, reviews);
+  return {
+    reviews,
+    selectedReview,
+    selectReview,
+    reviewLabel: reviewLabelForReviews(reviews, t),
+  };
+}
+
+function reviewLabelForReviews(
+  reviews: readonly { providerId: string }[],
+  t: (key: string, options?: { count: number }) => string,
+): string | null {
+  if (reviews.length === 0) return null;
+  if (reviews.length > 1) return t("task:reviewsCount", { count: reviews.length });
+  const providerId = reviews[0]?.providerId;
+  if (providerId === "github") return t("task:pullRequest2");
+  if (providerId === "gitlab") return t("task:mergeRequestLabel");
+  return t("task:review");
 }
 
 function usePersistOpenFileTabs(activeSessionId: string | null, openFileTabs: OpenFileTab[]) {
@@ -281,11 +271,11 @@ function usePersistOpenFileTabs(activeSessionId: string | null, openFileTabs: Op
     if (!activeSessionId) return;
     saveOpenFileTabs(
       activeSessionId,
-      openFileTabs.map(({ path, name, repo, markdownPreview }) => ({
+      openFileTabs.map(({ path, name, repo, renderedPreview }) => ({
         path,
         name,
         repo,
-        markdownPreview,
+        ...(getFilePreviewKind(path) === "markdown" && renderedPreview ? { renderedPreview } : {}),
       })),
     );
   }, [activeSessionId, openFileTabs]);
@@ -311,7 +301,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     activeSessionId,
     activeTaskId,
   );
-  const { taskPR, taskMR, reviewLabel } = useTaskReview(activeTaskId);
+  const { reviews, selectedReview, selectReview, reviewLabel } = useTaskReview(activeTaskId);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
@@ -372,8 +362,9 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     isPassthroughMode,
     showApproveButton,
     handleApprove,
-    taskPR,
-    taskMR,
+    reviews,
+    selectedReview,
+    selectReview,
     openFileTabs,
     savingFiles,
     selectedDiff,
@@ -399,8 +390,9 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
     isPassthroughMode,
     showApproveButton,
     handleApprove,
-    taskPR,
-    taskMR,
+    reviews,
+    selectedReview,
+    selectReview,
     openFileTabs,
     savingFiles,
     selectedDiff,
@@ -417,7 +409,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
   const {
     handleOpenFileFromChat,
     handleFileChange,
-    handleMarkdownPreviewToggle,
+    handleRenderedPreviewToggle,
     handleFileSave,
     handleFileDelete,
   } = fileTabOps;
@@ -452,18 +444,12 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
           onDismissTooltip={() => setShowRequestChangesTooltip(false)}
           onOpenFile={handleOpenFileFromChat}
         />
-        {taskPR && activeSessionId && (
-          <TabsContent value="pr" className="flex-1 min-h-0" data-testid="pr-detail-panel">
-            <PRDetailContent taskPR={taskPR} sessionId={activeSessionId} />
-          </TabsContent>
-        )}
-        {!taskPR && taskMR && activeSessionId && (
-          <TabsContent value="pr" className="flex-1 min-h-0" data-testid="mr-detail-panel">
-            <MRDetailPanelComponent
-              panelId="task-center-mr"
-              params={{ mrKey: mrTaskKey(taskMR) }}
-            />
-          </TabsContent>
+        {reviews.length > 0 && activeSessionId && (
+          <TaskCenterReviewContent
+            reviews={reviews}
+            selectedReview={selectedReview}
+            onSelectReview={selectReview}
+          />
         )}
         {openFileTabs.map((tab) => (
           <FileTabContent
@@ -476,15 +462,13 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
             onFileChange={handleFileChange}
             onFileSave={handleFileSave}
             onFileDelete={handleFileDelete}
-            onToggleMarkdownPreview={() => handleMarkdownPreviewToggle(getFileTabKey(tab))}
+            onTogglePreview={() => handleRenderedPreviewToggle(getFileTabKey(tab))}
           />
         ))}
       </SessionTabs>
     </SessionPanel>
   );
 });
-
-// --- Extracted sub-components ---
 
 function ApproveButtonGroup({
   onApprove,
@@ -493,6 +477,7 @@ function ApproveButtonGroup({
   onApprove: () => void;
   onRequestChanges: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-0.5">
       <Button
@@ -502,7 +487,7 @@ function ApproveButtonGroup({
         onClick={onApprove}
       >
         <IconCheck className="h-3.5 w-3.5" />
-        Approve
+        {t("task:approve")}
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -517,7 +502,7 @@ function ApproveButtonGroup({
         <DropdownMenuContent align="end" className="w-48">
           <DropdownMenuItem onClick={onApprove} className="cursor-pointer">
             <IconCheck className="h-4 w-4 mr-2" />
-            Approve and continue
+            {t("task:approveAndContinue")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -525,7 +510,7 @@ function ApproveButtonGroup({
             className="cursor-pointer text-amber-600 dark:text-amber-500"
           >
             <IconX className="h-4 w-4 mr-2" />
-            Request changes
+            {t("task:requestChanges")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -548,8 +533,9 @@ function ChatTabContent({
   taskId: string | null;
   showRequestChangesTooltip: boolean;
   onDismissTooltip: () => void;
-  onOpenFile: (filePath: string) => void;
+  onOpenFile: (filePath: string, repositoryName?: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!activeTaskId) {
     return (
       <TabsContent
@@ -558,7 +544,7 @@ function ChatTabContent({
         style={{ minHeight: "200px" }}
       >
         <div className="flex items-center justify-center h-full text-muted-foreground">
-          No task selected
+          {t("task:noTaskSelected")}
         </div>
       </TabsContent>
     );

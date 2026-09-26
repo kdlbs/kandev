@@ -10,12 +10,43 @@ describe("getWorkspaceSourceCapabilities", () => {
     expect(getWorkspaceSourceCapabilities(executorType).canAddFolders).toBe(true);
   });
 
-  it.each(["local_docker", "remote_docker", "ssh", "sprites"] as const)(
+  it.each(["local_docker", "remote_docker", "ssh", "sprites", "k8s"] as const)(
     "hides folders for %s",
     (executorType) => {
       expect(getWorkspaceSourceCapabilities(executorType).canAddFolders).toBe(false);
     },
   );
+
+  it.each([
+    "local",
+    "local_pc",
+    "worktree",
+    "local_docker",
+    "remote_docker",
+    "ssh",
+    "sprites",
+    "remote_vps",
+    "k8s",
+  ] as const)("marks executor capabilities as known once resolved for %s", (executorType) => {
+    expect(getWorkspaceSourceCapabilities(executorType).executorCapabilitiesKnown).toBe(true);
+  });
+
+  it.each([null, undefined])(
+    "marks executor capabilities as unknown, not unsupported, for %s",
+    (executorType) => {
+      expect(getWorkspaceSourceCapabilities(executorType)).toMatchObject({
+        canAddFolders: false,
+        executorCapabilitiesKnown: false,
+      });
+    },
+  );
+
+  it("keeps an unrecognized executor type unresolved", () => {
+    expect(getWorkspaceSourceCapabilities("future_executor")).toMatchObject({
+      canAddFolders: false,
+      executorCapabilitiesKnown: false,
+    });
+  });
 
   it.each(["local", "local_pc"] as const)(
     "uses the live checkout and does not offer a checkout branch for %s",
@@ -27,7 +58,7 @@ describe("getWorkspaceSourceCapabilities", () => {
     },
   );
 
-  it.each(["worktree", "local_docker", "remote_docker", "ssh", "sprites"] as const)(
+  it.each(["worktree", "local_docker", "remote_docker", "ssh", "sprites", "k8s"] as const)(
     "offers a checkout branch for owned clones on %s",
     (executorType) => {
       expect(getWorkspaceSourceCapabilities(executorType)).toMatchObject({
@@ -36,7 +67,7 @@ describe("getWorkspaceSourceCapabilities", () => {
     },
   );
 
-  it.each(["local_docker", "remote_docker", "ssh", "sprites"] as const)(
+  it.each(["local_docker", "remote_docker", "ssh", "sprites", "k8s"] as const)(
     "requires a cloneable origin for a selected local repository on %s",
     (executorType) => {
       expect(getWorkspaceSourceCapabilities(executorType)).toMatchObject({
@@ -51,6 +82,21 @@ describe("getWorkspaceSourceCapabilities", () => {
       "a supported provider owner and name",
       { provider: "github", provider_owner: "acme", provider_name: "api" },
       true,
+    ],
+    [
+      "a future provider with an explicit host, owner, and name",
+      {
+        provider: "example-vcs",
+        provider_host: "code.example.test",
+        provider_owner: "acme",
+        provider_name: "api",
+      },
+      true,
+    ],
+    [
+      "an unknown provider without an explicit host",
+      { provider: "example-vcs", provider_owner: "acme", provider_name: "api" },
+      false,
     ],
     ["a provider ID without owner and name", { provider: "github", provider_repo_id: "42" }, false],
     ["no remote locator", {}, false],

@@ -14,6 +14,7 @@ import {
 
 const REVIEW_STEP_NAME = "Review";
 const STEP_COLOR = "bg-blue-500";
+const WORKSPACE_NAME = "My Workspace";
 
 describe("exportAllWorkflowsAction", () => {
   beforeEach(() => {
@@ -65,16 +66,36 @@ describe("deleteWorkspaceAction", () => {
     vi.restoreAllMocks();
   });
 
-  it("sends the workspace name as confirm_name in the DELETE body", async () => {
-    await deleteWorkspaceAction("ws-1", "My Workspace");
-
+  const deleteCall = () => {
     const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    return fetchMock.mock.calls[0];
+  };
 
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("http://backend.test/api/v1/office/workspaces/ws-1");
+  it("sends the workspace name as confirm_name in the DELETE body", async () => {
+    await deleteWorkspaceAction("ws-1", WORKSPACE_NAME, true);
+
+    const [, init] = deleteCall();
     expect(init.method).toBe("DELETE");
-    expect(JSON.parse(init.body as string)).toEqual({ confirm_name: "My Workspace" });
+    expect(JSON.parse(init.body as string)).toEqual({ confirm_name: WORKSPACE_NAME });
+  });
+
+  it("uses the office route when the office feature is enabled", async () => {
+    await deleteWorkspaceAction("ws-1", WORKSPACE_NAME, true);
+
+    expect(deleteCall()[0]).toBe("http://backend.test/api/v1/office/workspaces/ws-1");
+  });
+
+  // The `/api/v1/office` router group is not mounted when `features.office` is
+  // off, so the office route 404s there. Deletion has to go to the generic
+  // endpoint, which owns the same cascade and confirm-name guard.
+  it("uses the generic route when the office feature is disabled", async () => {
+    await deleteWorkspaceAction("ws-1", WORKSPACE_NAME, false);
+
+    const [url, init] = deleteCall();
+    expect(url).toBe("http://backend.test/api/v1/workspaces/ws-1");
+    expect(init.method).toBe("DELETE");
+    expect(JSON.parse(init.body as string)).toEqual({ confirm_name: WORKSPACE_NAME });
   });
 });
 
@@ -242,5 +263,150 @@ describe("workflow step cancellation fields", () => {
     expect(JSON.parse(init.body as string)).toMatchObject({
       cancel_triggers_turn_complete: false,
     });
+  });
+});
+
+describe("workflow step completion fields", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          id: "step-1",
+          workflow_id: "wf-1",
+          name: REVIEW_STEP_NAME,
+          position: 1,
+          color: STEP_COLOR,
+          complete_task_on_enter: true,
+          created_at: "",
+          updated_at: "",
+        }),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("preserves the completion policy returned from the step API", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          steps: [
+            {
+              id: "step-1",
+              workflow_id: "wf-1",
+              name: REVIEW_STEP_NAME,
+              position: 1,
+              color: STEP_COLOR,
+              complete_task_on_enter: true,
+              created_at: "",
+              updated_at: "",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await listWorkflowStepsAction("wf-1");
+
+    expect(result.steps[0].complete_task_on_enter).toBe(true);
+  });
+
+  it("sends explicit false when creating and updating completion policy", async () => {
+    await createWorkflowStepAction({
+      workflow_id: "wf-1",
+      name: REVIEW_STEP_NAME,
+      position: 1,
+      color: STEP_COLOR,
+      complete_task_on_enter: false,
+    });
+    await updateWorkflowStepAction("step-1", { complete_task_on_enter: false });
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({
+      complete_task_on_enter: false,
+    });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toMatchObject({
+      complete_task_on_enter: false,
+    });
+  });
+});
+
+describe("workflow step stage types", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          id: "step-1",
+          workflow_id: "wf-1",
+          name: REVIEW_STEP_NAME,
+          position: 1,
+          color: STEP_COLOR,
+          stage_type: "review",
+          created_at: "",
+          updated_at: "",
+        }),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("preserves stage types returned from workflow step APIs", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          steps: [
+            {
+              id: "step-1",
+              workflow_id: "wf-1",
+              name: REVIEW_STEP_NAME,
+              position: 1,
+              color: STEP_COLOR,
+              stage_type: "review",
+              created_at: "",
+              updated_at: "",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await listWorkflowStepsAction("wf-1");
+
+    expect(result.steps[0].stage_type).toBe("review");
+  });
+
+  it("sends stage types when creating a workflow step", async () => {
+    await createWorkflowStepAction({
+      workflow_id: "wf-1",
+      name: REVIEW_STEP_NAME,
+      position: 1,
+      color: STEP_COLOR,
+      stage_type: "review",
+    } as Parameters<typeof createWorkflowStepAction>[0]);
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toMatchObject({ stage_type: "review" });
+  });
+
+  it("sends stage types when updating a workflow step", async () => {
+    await updateWorkflowStepAction("step-1", {
+      stage_type: "review",
+    } as Parameters<typeof updateWorkflowStepAction>[1]);
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toMatchObject({ stage_type: "review" });
   });
 });

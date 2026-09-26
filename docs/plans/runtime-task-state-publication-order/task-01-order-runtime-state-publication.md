@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/runtime-state-publication-order.md"
+spec: "../../specs/tasks/requirements/runtime-state-publication-order.md"
 ---
 
 # Task 01: Order runtime state publication

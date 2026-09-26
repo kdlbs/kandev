@@ -29,7 +29,7 @@ func (r *Repository) QueryRunActivity(ctx context.Context, workspaceID string, d
 		FROM task_sessions ts
 		WHERE ts.started_at >= ?
 		  AND ts.task_id IN (
-		      SELECT id FROM tasks WHERE workspace_id = ? AND is_ephemeral = 0
+		      SELECT id FROM tasks WHERE workspace_id = ? AND is_ephemeral = 0`+andNotAutomationOrigin+`
 		  )
 		GROUP BY DATE(ts.started_at)
 		ORDER BY date
@@ -53,7 +53,7 @@ func (r *Repository) QueryTaskBreakdown(ctx context.Context, workspaceID string)
 		SELECT COALESCE(state,'') as state, COUNT(*) as count
 		FROM tasks
 		WHERE workspace_id = ?
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 		  AND archived_at IS NULL
 		GROUP BY state
 	`), workspaceID)
@@ -85,7 +85,7 @@ func (r *Repository) QueryRecentTasks(ctx context.Context, workspaceID string, l
 		       updated_at
 		FROM tasks
 		WHERE workspace_id = ?
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 		  AND archived_at IS NULL
 		ORDER BY updated_at DESC
 		LIMIT ?
@@ -119,7 +119,7 @@ func (r *Repository) QueryRecentSessions(ctx context.Context, workspaceID string
 		       ts.completed_at
 		FROM task_sessions ts
 		WHERE ts.task_id IN (
-		      SELECT id FROM tasks WHERE workspace_id = ? AND is_ephemeral = 0
+		      SELECT id FROM tasks WHERE workspace_id = ? AND is_ephemeral = 0`+andNotAutomationOrigin+`
 		)
 		ORDER BY ts.started_at DESC
 		LIMIT ?

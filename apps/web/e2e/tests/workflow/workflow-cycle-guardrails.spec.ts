@@ -63,7 +63,10 @@ test.describe("Workflow cycle guardrails", () => {
       persistedSteps.steps.find((step) => step.id === review.id)?.events?.on_turn_complete,
     ).toBeFalsy();
 
-    await settings.saveChanges();
+    // The backend poll below is the authoritative save boundary. The
+    // floating indicator can retain a dirty contributor while another
+    // settings contributor finishes its own render update.
+    await settings.submitSaveChanges();
     await expect
       .poll(async () => {
         persistedSteps = await apiClient.listWorkflowSteps(workflow.id);

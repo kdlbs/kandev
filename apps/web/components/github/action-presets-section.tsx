@@ -19,13 +19,15 @@ import {
   iconForPresetKey,
 } from "@/components/github/my-github/action-presets";
 import type { GitHubActionPreset } from "@/lib/types/github";
-import {
-  ScriptEditor,
-  computeEditorHeight,
-} from "@/components/settings/profile-edit/script-editor";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import {
+  settingsActionClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
 
 // A function, not a const: `description` is copy, and a module-scope `t()` call
 // would freeze at the boot locale (see docs/i18n.md). `key` is the substitution
@@ -52,6 +54,7 @@ function actionPromptPlaceholders(t: TFunction): ScriptPlaceholder[] {
 // preset seeded in one locale and saved unedited would keep that locale's text
 // forever. Same contract as DEFAULT_PR_PRESETS in my-github/action-presets.ts.
 function newPreset(): GitHubActionPreset {
+  // i18n-exempt: persisted, editable preset label. See the comment above.
   return {
     id: `preset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     label: "New action",
@@ -74,7 +77,7 @@ function PresetIconSelect({
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger
-        className="!h-8 py-0.5 text-sm cursor-pointer"
+        className={settingsControlClassName("py-0.5 text-sm cursor-pointer")}
         aria-label={t("github:icon")}
         data-settings-dirty={isDirty}
       >
@@ -133,7 +136,7 @@ function PresetRow({
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] text-muted-foreground">{t("github:label")}</span>
           <Input
-            className="h-8 w-40"
+            className={settingsControlClassName("w-40")}
             value={preset.label}
             data-settings-dirty={preset.label !== baseline?.label}
             placeholder={t("github:label")}
@@ -143,7 +146,7 @@ function PresetRow({
         <div className="flex flex-col gap-0.5 flex-1">
           <span className="text-[10px] text-muted-foreground">{t("github:hint")}</span>
           <Input
-            className="h-8"
+            className={settingsControlClassName()}
             value={preset.hint}
             data-settings-dirty={preset.hint !== baseline?.hint}
             placeholder={t("github:hintOptional")}
@@ -152,8 +155,7 @@ function PresetRow({
         </div>
         <Button
           variant="outline"
-          size="sm"
-          className="h-8 cursor-pointer text-xs"
+          className={settingsActionClassName("cursor-pointer")}
           onClick={onToggle}
         >
           {expanded ? t("github:hidePrompt") : t("github:editPrompt")}
@@ -161,7 +163,7 @@ function PresetRow({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 cursor-pointer text-destructive"
+          className={controlSizingClassName("icon", "cursor-pointer text-destructive")}
           onClick={onRemove}
           aria-label={t("github:remove")}
         >
@@ -186,34 +188,30 @@ function PresetPromptEditor({
   const { t } = useTranslation();
   const placeholders = useMemo(() => actionPromptPlaceholders(t), [t]);
   return (
-    <div className="px-2 pb-2 space-y-1">
-      <div
-        className="rounded-md border overflow-hidden"
-        data-settings-dirty={preset.prompt_template !== baseline?.prompt_template}
-        data-settings-dirty-level="container"
-      >
-        <ScriptEditor
-          value={preset.prompt_template}
-          onChange={(v) => onPatch({ prompt_template: v })}
-          language="markdown"
-          height={computeEditorHeight(preset.prompt_template)}
-          lineNumbers="off"
-          placeholders={placeholders}
-        />
-      </div>
-      <p className="text-[11px] text-muted-foreground/60">
-        {/* The three `{{…}}` tokens are passed as values, never written into the
-            catalog, where i18next would interpolate them away. */}
-        <Trans
-          i18nKey="github:actionPromptPlaceholderHelp"
-          values={{ token: "{{", url: "{{url}}", title: "{{title}}" }}
-        >
-          Type {"{{token}}"} to see available placeholders.{" "}
-          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{url}}"}</code> and{" "}
-          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{title}}"}</code> are
-          substituted when the action runs.
-        </Trans>
-      </p>
+    <div className="px-2 pb-2">
+      <SettingsPromptEditor
+        value={preset.prompt_template}
+        onChange={(v) => onPatch({ prompt_template: v })}
+        placeholders={placeholders}
+        promptReferences
+        isDirty={preset.prompt_template !== baseline?.prompt_template}
+        testId={`github-action-prompt-editor-${preset.id}`}
+        help={
+          <p className="text-[11px] text-muted-foreground/60">
+            {/* The three `{{…}}` tokens are passed as values, never written into the
+                catalog, where i18next would interpolate them away. */}
+            <Trans
+              i18nKey="github:actionPromptPlaceholderHelp"
+              values={{ token: "{{", url: "{{url}}", title: "{{title}}" }}
+            >
+              Type {"{{token}}"} to see available placeholders.{" "}
+              <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{url}}"}</code> and{" "}
+              <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{title}}"}</code> are
+              substituted when the action runs.
+            </Trans>
+          </p>
+        }
+      />
     </div>
   );
 }
@@ -262,7 +260,7 @@ function PresetEditor({
           onRemove={() => remove(index)}
         />
       ))}
-      <Button size="sm" variant="outline" onClick={add} className="cursor-pointer">
+      <Button variant="outline" onClick={add} className={settingsActionClassName("cursor-pointer")}>
         <IconPlus className="h-3.5 w-3.5 mr-1" />
         {addLabel}
       </Button>
@@ -391,11 +389,10 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
       action={
         <div className="flex gap-2">
           <Button
-            size="sm"
             variant="outline"
             onClick={reset}
             disabled={loading}
-            className="cursor-pointer"
+            className={settingsActionClassName("cursor-pointer")}
           >
             <IconRefresh className="h-3.5 w-3.5 mr-1" />
             {t("common:reset")}

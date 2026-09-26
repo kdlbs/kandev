@@ -4,6 +4,7 @@ import { IntegrationScopeBar } from "@/components/integrations/presets-scope-bar
 import { MR_PRESETS, ISSUE_PRESETS, type PresetOption } from "./presets";
 import type { SavedPreset } from "./use-saved-presets";
 import type { SidebarSelection } from "./presets-sidebar";
+import { useTranslation } from "react-i18next";
 
 type PresetsScopeBarProps = {
   className?: string;
@@ -17,9 +18,10 @@ type PresetsScopeBarProps = {
   issuePresets?: PresetOption[];
 };
 
+/** `value` is the persisted kind; only the catalog key is copy. */
 const KINDS = [
-  { value: "mr", label: "Merge requests" },
-  { value: "issue", label: "Issues" },
+  { value: "mr", labelKey: "gitlab:titleMergeRequests" },
+  { value: "issue", labelKey: "gitlab:titleIssues" },
 ] as const;
 
 /**
@@ -32,13 +34,19 @@ export function PresetsScopeBar({
   issuePresets = ISSUE_PRESETS,
   ...props
 }: PresetsScopeBarProps) {
+  const { t } = useTranslation();
   return (
     <IntegrationScopeBar
       {...props}
       testId="gitlab-presets-scope-bar"
       savedMenuTestId="gitlab-saved-queries-menu"
-      kinds={KINDS}
-      presetsByKind={(kind) => (kind === "mr" ? mrPresets : issuePresets)}
+      kinds={KINDS.map(({ value, labelKey }) => ({ value, label: t(labelKey) }))}
+      presetsByKind={(kind) =>
+        (kind === "mr" ? mrPresets : issuePresets).map((preset) => ({
+          ...preset,
+          label: t(preset.labelKey),
+        }))
+      }
     />
   );
 }

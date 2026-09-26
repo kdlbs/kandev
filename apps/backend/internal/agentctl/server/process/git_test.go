@@ -9,7 +9,229 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
+
+func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testing.T) {
+	cases := []struct {
+		name         string
+		provider     string
+		kind         string
+		canonicalURL string
+		sourceHost   string
+		sourcePath   string
+		sourceRemote string
+	}{
+		{
+			name:         "github pull request",
+			provider:     taskmodels.RemoteContributionProviderGitHub,
+			kind:         taskmodels.RemoteContributionKindPullRequest,
+			canonicalURL: "https://github.com/acme/widget/pull/7",
+			sourceHost:   "github.com",
+			sourcePath:   "contributor/widget",
+			sourceRemote: "https://github.com/contributor/widget.git",
+		},
+		{
+			name:         "gitlab merge request",
+			provider:     taskmodels.RemoteContributionProviderGitLab,
+			kind:         taskmodels.RemoteContributionKindMergeRequest,
+			canonicalURL: "https://gitlab.example.test/acme/widget/-/merge_requests/7",
+			sourceHost:   "gitlab.example.test",
+			sourcePath:   "contributor/widget",
+			sourceRemote: "https://gitlab.example.test/contributor/widget.git",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repoDir, cleanup := setupTestRepo(t)
+			t.Cleanup(cleanup)
+
+			originDir := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin"))
+			runGit(t, repoDir, "checkout", "-b", "feature/contribution")
+			writeFile(t, repoDir, "contribution.txt", "contribution\n")
+			runGit(t, repoDir, "add", ".")
+			runGit(t, repoDir, "commit", "-m", "contribution")
+			headSHA := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+			binding := &taskmodels.RemoteContribution{
+				Version:      taskmodels.RemoteContributionVersion,
+				Provider:     tc.provider,
+				Kind:         tc.kind,
+				CanonicalURL: tc.canonicalURL,
+				Number:       7,
+				State:        taskmodels.RemoteContributionStateOpen,
+				BaseBranch:   "main",
+				HeadBranch:   "feature/contribution",
+				HeadSHA:      headSHA,
+				SourceRepository: taskmodels.RemoteContributionRepository{
+					Host:      tc.sourceHost,
+					Path:      tc.sourcePath,
+					RemoteURL: tc.sourceRemote,
+				},
+				CollaborationAllowed: true,
+			}
+			if err := binding.Validate(); err != nil {
+				t.Fatalf("binding.Validate() = %v", err)
+			}
+			// Keep the test hermetic while exercising the credential-free source URL
+			// that the operator receives from runtime materialization.
+			runGit(t, repoDir, "config", "url."+originDir+".insteadOf", binding.SourceRepository.RemoteURL)
+			runGit(t, repoDir, "remote", "add", binding.ContributionRemoteName(), binding.SourceRepository.RemoteURL)
+			runGit(t, repoDir, "push", binding.ContributionRemoteName(), "HEAD:refs/heads/feature/contribution")
+
+			operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+			operator.setRemoteContribution(binding)
+
+			preflight, err := operator.PushPreflight(context.Background(), PushOptions{})
+			if err != nil {
+				t.Fatalf("PushPreflight returned error: %v", err)
+			}
+			if !preflight.Success {
+				t.Fatalf("PushPreflight failed: %+v", preflight)
+			}
+			if got := strings.TrimSpace(runGit(t, originDir, "rev-parse", "refs/heads/feature/contribution")); got != headSHA {
+				t.Fatalf("preflight changed source branch: %q != %q", got, headSHA)
+			}
+			if preflight.PushedRemote != "" || preflight.PushedBranch != "" {
+				t.Fatalf("contribution-routed preflight = %+v, want PushedRemote and PushedBranch omitted", preflight)
+			}
+
+			forced, err := operator.Push(context.Background(), PushOptions{Force: true})
+			if err != nil {
+				t.Fatalf("forced Push returned error: %v", err)
+			}
+			if forced.Success || !strings.Contains(forced.Error, "force push is not allowed") {
+				t.Fatalf("forced Push = %+v, want a contribution force-push rejection", forced)
+			}
+
+			pushed, err := operator.Push(context.Background(), PushOptions{})
+			if err != nil {
+				t.Fatalf("Push returned error: %v", err)
+			}
+			if !pushed.Success {
+				t.Fatalf("Push failed: %+v", pushed)
+			}
+			remoteHead := strings.TrimSpace(runGit(t, originDir, "rev-parse", "refs/heads/feature/contribution"))
+			if remoteHead != headSHA {
+				t.Fatalf("source branch head = %q, want %q", remoteHead, headSHA)
+			}
+			if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got != originDir {
+				t.Fatalf("origin URL = %q, want %q", got, originDir)
+			}
+
+			result, err := operator.CreatePR(context.Background(), "untrusted title", "untrusted body", "main", false)
+			if err != nil {
+				t.Fatalf("CreatePR returned error: %v", err)
+			}
+			if !result.Success || !result.BranchPushed || result.PRURL != binding.CanonicalURL || result.Provider != binding.Provider {
+				t.Fatalf("CreatePR = %+v, want reuse of existing contribution", result)
+			}
+		})
+	}
+}
+
+func TestGitOperatorRemoteContributionPullsFromSourceRemote(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+	targetDir := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin"))
+
+	sourceRoot := t.TempDir()
+	sourceBare := filepath.Join(sourceRoot, "source.git")
+	sourceWork := filepath.Join(sourceRoot, "source-work")
+	runGit(t, sourceRoot, "init", "--bare", "--initial-branch=main", sourceBare)
+	runGit(t, sourceRoot, "clone", targetDir, sourceWork)
+	runGit(t, sourceWork, "config", "user.email", "test@test.com")
+	runGit(t, sourceWork, "config", "user.name", "Test User")
+	runGit(t, sourceWork, "checkout", "-b", "feature/contribution")
+	writeFile(t, sourceWork, "source-change.txt", "source change\n")
+	runGit(t, sourceWork, "add", "source-change.txt")
+	runGit(t, sourceWork, "commit", "-m", "source contribution")
+	sourceSHA := strings.TrimSpace(runGit(t, sourceWork, "rev-parse", "HEAD"))
+	runGit(t, sourceWork, "remote", "add", "source", sourceBare)
+	runGit(t, sourceWork, "push", "source", "main", "feature/contribution")
+
+	sourceURL := "https://github.com/contributor/widget.git"
+	runGit(t, repoDir, "config", "url.file://"+sourceBare+".insteadOf", sourceURL)
+	runGit(t, repoDir, "checkout", "-b", "feature/contribution")
+	binding := &taskmodels.RemoteContribution{
+		Version:      taskmodels.RemoteContributionVersion,
+		Provider:     taskmodels.RemoteContributionProviderGitHub,
+		Kind:         taskmodels.RemoteContributionKindPullRequest,
+		CanonicalURL: "https://github.com/acme/widget/pull/7",
+		Number:       7,
+		State:        taskmodels.RemoteContributionStateOpen,
+		BaseBranch:   "main",
+		HeadBranch:   "feature/contribution",
+		HeadSHA:      sourceSHA,
+		SourceRepository: taskmodels.RemoteContributionRepository{
+			Host: "github.com", Path: "contributor/widget", RemoteURL: sourceURL,
+		},
+		CollaborationAllowed: true,
+	}
+	runGit(t, repoDir, "remote", "add", binding.ContributionRemoteName(), sourceURL)
+
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.setRemoteContribution(binding)
+	result, err := operator.Pull(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Pull returned error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Pull failed: %+v", result)
+	}
+	if got := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD")); got != sourceSHA {
+		t.Fatalf("pulled HEAD = %q, want source SHA %q", got, sourceSHA)
+	}
+	if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got != targetDir {
+		t.Fatalf("origin URL = %q, want target %q", got, targetDir)
+	}
+}
+
+func TestGitOperatorContributionDestinationPushesWithoutChangingPullRemote(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	targetDir := t.TempDir()
+	runGit(t, targetDir, "init", "--bare")
+	runGit(t, repoDir, "remote", "add", "contrib-destination", targetDir)
+	runGit(t, repoDir, "checkout", "-b", "feature/destination")
+	writeFile(t, repoDir, "destination.txt", "destination\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "destination")
+
+	destination := &taskmodels.ContributionDestination{
+		Version:  taskmodels.ContributionDestinationVersion,
+		Provider: taskmodels.ContributionDestinationProviderGitHub,
+		SourceRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+		},
+	}
+	if err := destination.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "config", "url."+targetDir+".insteadOf", destination.TargetRepository.RemoteURL)
+	// The model derives the actual deterministic remote name. Rename the test
+	// remote after binding so the operator exercises the server-authored name.
+	runGit(t, repoDir, "remote", "rename", "contrib-destination", destination.ContributionRemoteName())
+	runGit(t, repoDir, "remote", "set-url", "--push", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.setContributionDestination(destination)
+	pushed, err := operator.Push(context.Background(), PushOptions{})
+	if err != nil || !pushed.Success {
+		t.Fatalf("Push = %+v, err = %v", pushed, err)
+	}
+	if got := strings.TrimSpace(runGit(t, targetDir, "rev-parse", "refs/heads/feature/destination")); got == "" {
+		t.Fatal("destination branch was not pushed")
+	}
+	if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got == "" {
+		t.Fatal("origin remote was removed or rewritten")
+	}
+}
 
 func TestGitOperatorPush_PreservesExistingUpstream(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
@@ -41,7 +263,7 @@ func TestGitOperatorPush_PreservesExistingUpstream(t *testing.T) {
 	}
 
 	gitOp := NewGitOperator(suffixedDir, log, nil)
-	result, err := gitOp.Push(context.Background(), false, false)
+	result, err := gitOp.Push(context.Background(), PushOptions{})
 	if err != nil {
 		t.Fatalf("Push returned error: %v", err)
 	}

@@ -11,9 +11,7 @@
 // or repository id (which would otherwise let resolve*() silently rewrite a
 // user's selection).
 export const NO_REPOSITORY = "kandev:no-repository";
-export const NO_REPOSITORY_LABEL = "(no repository)";
 export const DEFAULT_BRANCH = "kandev:default-branch";
-export const DEFAULT_BRANCH_LABEL = "(repository default branch)";
 
 // Map a repository select value back to the stored id, collapsing the sentinel
 // to "" so the payload keeps signalling "no repository".
@@ -56,8 +54,10 @@ export function clearWorkspaceScopedForm<
 // branchPlaceholder mirrors the workflow-step placeholder pattern: it nudges the
 // user to pick a repository first, then shows a loading hint while branches
 // stream in.
-export function branchPlaceholder(repositoryId: string, loading: boolean): string {
-  if (!repositoryId) return "Pick a repository first";
-  if (loading) return "Loading…";
-  return DEFAULT_BRANCH_LABEL;
+export type BranchPlaceholder = "pickRepository" | "loading" | "defaultBranch";
+
+export function branchPlaceholder(repositoryId: string, loading: boolean): BranchPlaceholder {
+  if (!repositoryId) return "pickRepository";
+  if (loading) return "loading";
+  return "defaultBranch";
 }

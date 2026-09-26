@@ -20,7 +20,7 @@ Use the smallest seam that owns the behavior, then follow the completion checkli
 
 ## Add an agent
 
-For a local passthrough-only CLI, users can choose **Settings → Agents → Add TUI Agent**. That path persists a custom definition and default profile; no source patch is required.
+For a local CLI, users can choose **Settings → Agents → Add custom agent** and pick Terminal or ACP. That path persists a custom definition and default profile; no source patch is required.
 
 To ship a built-in integration, add an `agents.Agent` implementation under `apps/backend/internal/agent/agents/` and register it in `internal/agent/registry/registry.go`. Structured agents currently need an ACP-speaking process. Optional interfaces add inference, CLI passthrough, native-binary preference, or interactive login.
 
@@ -49,8 +49,7 @@ Choose the closest existing provider domain under `apps/backend/internal/`. Ther
 
 - Jira and Linear use workspace-scoped connection state;
 - Sentry supports multiple named workspace instances;
-- GitHub keeps installation-wide authentication with workspace settings, while GitLab owns one connection and its watches per workspace;
-- Slack follows a workspace-oriented pattern.
+- GitHub keeps installation-wide authentication with workspace settings, while GitLab owns one connection and its watches per workspace.
 
 A domain may contain a client, store/repository, service, provider, handlers, and poller. Shared helpers under `internal/integrations/` cover secret adapters, health polling, and workspace scope. Construction and non-fatal provider startup live in `internal/backendapp/`. Web clients/hooks live in `lib/api/domains/` and `hooks/domains/`; settings and shared provider UI live under `app/settings/` and `components/integrations/`.
 
@@ -74,7 +73,7 @@ A new relayed tool normally requires:
 4. server mode/count, handler, transport, and integration tests;
 5. an update to [Automation and MCP](automation-and-mcp.md) when capability changes.
 
-Inject task/session identity from server context instead of trusting arguments. Enforce task/workspace reachability, confirmation for destructive actions, pagination, concurrency behavior, and least-privilege credentials. The backend's external MCP routes currently have no Kandev user-auth middleware; deployment network controls are part of the security boundary.
+Inject task/session identity from server context instead of trusting arguments. Enforce task/workspace reachability, confirmation for destructive actions, pagination, concurrency behavior, and least-privilege credentials. External MCP remains open while authentication is disabled; when the experimental authentication feature is enabled, it requires an authenticated identity and carries that user into dispatch. External clients use personal access tokens, while same-origin browser tooling can use a session. Deployment network controls remain part of the security boundary.
 
 ## Build a plugin
 
@@ -82,7 +81,7 @@ Plugins are a peer extension mechanism to the seams above, aimed at
 extensions that should ship and version independently of a kandev release.
 A plugin backend is a Go binary that kandev spawns and supervises as a
 subprocess, communicating over a strict typed gRPC protocol
-(`internal/plugins/`, `pkg/pluginsdk`) — it receives bus events and relays
+(`internal/plugins/`, `pkg/pluginsdk`); it receives bus events and relays
 external webhooks, calling back into kandev through a capability-gated Host
 RPC service (state, secrets, read-only data, cross-plugin events). A plugin may additionally ship an optional **native
 frontend bundle** that the SPA loads at boot to register real routes, nav
@@ -90,7 +89,7 @@ items, slot components, and WebSocket handlers, sharing kandev's own React
 instance and app store.
 
 Plugins are distributed as a signed-or-unsigned tarball and installed by URL,
-manual upload, or filesystem sideload/sync — there is no manifest-paste
+manual upload, or filesystem sideload/sync, there is no manifest-paste
 registration step and no credentials to issue. Plugins are part of the base
 product and are not a runtime feature toggle. See [Plugins](plugins.md) for the operator-facing
 install/operate flow, [Authoring a plugin](plugins-authoring.md) for the

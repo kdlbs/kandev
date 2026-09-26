@@ -1,6 +1,6 @@
 ---
-spec: docs/specs/agent-stall-recovery/spec.md
-decision: docs/decisions/2026-07-29-agent-stall-user-controlled-recovery.md
+spec: docs/specs/agents/requirements/agent-stall-recovery.md
+decision: docs/decisions/2026-08-18-never-started-agent-stall-terminal.md
 created: 2026-07-29
 status: draft
 ---
@@ -12,8 +12,9 @@ status: draft
 Turn the lifecycle watchdog's existing inactivity observation into one
 generation-scoped internal event, persist that event as an actionable notice,
 and make the notice visible while the session is still `RUNNING`. The existing
-cancel-escalation path remains the sole recovery mechanism; no timeout changes
-session or process state automatically.
+cancel-escalation path remains the recovery mechanism for turns that already
+produced activity. A current zero-event snapshot uses the launch failure path
+described by ADR-2026-08-18-never-started-agent-stall-terminal.
 
 ## Confirmed root cause
 
@@ -43,7 +44,8 @@ waits, force-releases a stuck prompt, and reconciles the session to
   60 seconds, detect five minutes of inactivity, and publish `agent.stalled`
   once per prompt generation. The payload carries task/session/execution IDs,
   prompt generation, last-activity time, stalled duration, and optional tool
-  ID/name/title/status.
+  ID/name/title/status. Include an activity epoch so the orchestrator can
+  reject a snapshot that became stale after an agent event arrived.
 - Add the payload and publisher support in
   `apps/backend/internal/agent/runtime/lifecycle/event_types.go`,
   `apps/backend/internal/agent/runtime/lifecycle/events.go`, and
@@ -66,6 +68,8 @@ waits, force-releases a stuck prompt, and reconciles the session to
   the notice the active `turn_id` without lazily creating a successor turn.
 - If message persistence fails, log the error and leave the running prompt
   untouched.
+- Never-started notices use settled error metadata and do not expose the
+  running-only cancel action.
 
 ---
 
@@ -191,8 +195,8 @@ requires them; the task-level commands remain the TDD evidence for each change.
 
 ## Risks and non-goals
 
-- Event silence remains ambiguous, so the notice is advisory and cannot alter
-  lifecycle state by itself.
+- Event silence remains advisory after genuine activity. A current zero-event
+  snapshot is the explicit launch-failure exception recorded in the ADR.
 - Tool titles are already user-visible display data; raw command arguments must
   not be copied into the notice.
 - The notice is persisted once per prompt generation and assigned the active

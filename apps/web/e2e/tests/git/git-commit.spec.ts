@@ -138,7 +138,7 @@ test.describe("Git commit body", () => {
     });
 
     // Stage the file via the UI "Stage all" button
-    await session.changes.getByRole("button", { name: "Stage all" }).click();
+    await session.changes.getByRole("button", { name: "Stage all", exact: true }).click();
 
     // Wait for the "Commit" button to appear (indicates staged section is ready)
     const commitButton = session.changes.getByRole("button", { name: "Commit", exact: true });
@@ -239,7 +239,7 @@ test.describe("Git commit pre-hooks", () => {
       await expect(session.changes.getByText("hook-test.txt")).toBeVisible({ timeout: 30_000 });
 
       // Stage the file via the UI "Stage all" button
-      await session.changes.getByRole("button", { name: "Stage all" }).click();
+      await session.changes.getByRole("button", { name: "Stage all", exact: true }).click();
 
       // Wait for the "Commit" button to appear (indicates staged section is ready)
       // Use exact match to avoid matching the "Commits" section toggle

@@ -4,9 +4,11 @@ STEP 1: Determine what to review
 - First, check if there are any uncommitted changes (dirty working directory)
 - If there are uncommitted/staged changes: review those files
 - If the working directory is clean: review ONLY the commits from this branch
-  - Use: git log --oneline $(git merge-base origin/main HEAD)..HEAD to list the branch commits
-  - Use: git diff $(git merge-base origin/main HEAD) to see the cumulative changes
-  - Do NOT diff directly against origin/main or master - that would include unrelated changes if the branch is outdated
+  - Run: git remote show origin | grep 'HEAD branch' to find the default branch name
+  - Set BASE_REF to origin/<default-branch> using the reported branch
+  - Use: git log --oneline $(git merge-base "$BASE_REF" HEAD)..HEAD to list the branch commits
+  - Use: git diff $(git merge-base "$BASE_REF" HEAD) to see the cumulative changes
+  - Do NOT diff directly against BASE_REF or origin/main/master - that would include unrelated changes if the branch is outdated
 - Read each changed file in full — understand surrounding code, not just the diff
 - Navigate callers, interfaces, and tests to understand changes end-to-end
 - Check git blame on modified sections to understand why code was written a certain way
@@ -16,7 +18,29 @@ If a code review skill is available (e.g. /code-review, /review), invoke it inst
 
 STEP 2: Review the changes across these layers (skip layers that don't apply):
 
+ARCHITECTURAL FIT (highest priority):
+
+- Changes belong in the correct layer/module and follow the dependency direction used by the codebase
+- Business/domain logic is not placed in controllers, transport handlers, repositories, data sources, or infrastructure code
+- Controllers handle protocol concerns, use cases orchestrate workflows, repositories define persistence needs, and data sources handle external systems
+- Domain/application code does not depend on frameworks, transport models, database models, or vendor-specific types
+- Changes do not bypass existing boundaries, duplicate responsibilities, or introduce unnecessary coupling between modules or domains
+- New interfaces and abstractions have clear ownership and represent a meaningful boundary, rather than wrapping a single implementation
+- Compare with neighbouring features and established patterns, but flag deviations only when they create a real architectural or maintainability problem
+- Treat fundamental architectural misplacement or broken dependency direction as a blocker
+
+DATA & STATE MODELLING:
+
+- Domain entities, value objects, DTOs, persistence models, and external API models remain separate where their responsibilities differ
+- State transitions and invariants are explicit and cannot create invalid or partially updated state
+- There is a single clear source of truth; state or business rules are not duplicated across layers
+- Nullability, optional fields, defaults, and invalid combinations are modelled deliberately
+- Persistence schemas or transport types are not leaking implementation details into domain/application contracts
+- Concurrency, retries, partial failures, and duplicate requests cannot corrupt state or apply transitions more than once
+- Backward compatibility, migrations, and mixed-version behaviour are considered when contracts or persisted data change
+
 SECURITY (blockers if found):
+
 - No secrets, tokens, or credentials in code
 - Input validation at system boundaries (user input, API handlers, external data)
 - No SQL injection, XSS, command injection, or path traversal

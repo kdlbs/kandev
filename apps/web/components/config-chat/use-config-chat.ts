@@ -6,6 +6,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { t } from "@/lib/i18n";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import { startConfigChat } from "@/lib/api/domains/workspace-api";
+import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { persistQuickChatRename } from "@/lib/quick-chat/rename";
 import {
@@ -112,6 +113,7 @@ function registerStartedSession({
   // locale-dependent value that then renders unchanged after a locale switch,
   // on surfaces this directory does not own. Same call as the built-in layout
   // profile names and the seeded workflow step names.
+  // i18n-exempt: persisted as the task title. See the comment above.
   const derivedName = prompt.slice(0, 40) || "Config Chat";
   store.renameQuickChatSession(response.session_id, derivedName);
   void persistQuickChatRename(response.session_id, response.task_id, derivedName).catch(
@@ -134,6 +136,12 @@ async function saveDefaultConfigProfile(
   } catch {
     // The chat is usable even when saving the future default fails.
   }
+}
+
+function recordConfigChatProfileUse(profileId: string, storeApi: AppStoreApi) {
+  recordAgentProfileRecentUseBestEffort("config_chat", profileId, (record) =>
+    storeApi.getState().applyAgentProfileRecentUse("config_chat", record),
+  );
 }
 
 export function useConfigChat(workspaceId: string) {
@@ -190,19 +198,21 @@ export function useConfigChat(workspaceId: string) {
           await deleteSupersededConfigChatTask(response.task_id);
           return undefined;
         }
+        const effectiveProfileId = response.agent_profile_id ?? agentProfileId;
+        recordConfigChatProfileUse(effectiveProfileId, storeApi);
         registerStartedSession({
           store,
           storeApi,
           response,
           workspaceId,
-          agentProfileId,
+          agentProfileId: effectiveProfileId,
           prompt,
           isPassthrough,
           openInQuickChat: options.openInQuickChat !== false,
         });
         await saveDefaultConfigProfile(
           workspaceId,
-          agentProfileId,
+          effectiveProfileId,
           Boolean(workspace?.default_config_agent_profile_id),
           updateWorkspaceInStore,
         );

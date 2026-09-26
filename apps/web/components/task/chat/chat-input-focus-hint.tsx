@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 type ChatInputFocusHintProps = {
   visible: boolean;
@@ -8,6 +9,7 @@ type ChatInputFocusHintProps = {
 };
 
 export function ChatInputFocusHint({ visible, className }: ChatInputFocusHintProps) {
+  const { t } = useTranslation();
   if (!visible) return null;
 
   return (
@@ -25,7 +27,7 @@ export function ChatInputFocusHint({ visible, className }: ChatInputFocusHintPro
       <kbd className="px-1 py-0.5 text-xs font-medium text-muted-foreground/70 border border-border/40 rounded">
         /
       </kbd>
-      <span>to focus</span>
+      <span>{t("task:toFocus")}</span>
     </div>
   );
 }

@@ -16,6 +16,8 @@ type TaskStateActionsProps = {
   hasPendingClarification?: boolean;
   /** Message-derived pending-permission flag. */
   hasPendingPermission?: boolean;
+  /** True when the task's session was mid-turn when the backend died. */
+  interrupted?: boolean;
 };
 
 export function TaskStateActions({
@@ -24,16 +26,16 @@ export function TaskStateActions({
   foregroundActivity,
   hasPendingClarification = false,
   hasPendingPermission = false,
+  interrupted = false,
 }: TaskStateActionsProps) {
   return (
     <div className="flex items-center justify-end">
-      {getTaskStateIcon(
-        state,
-        className,
+      {getTaskStateIcon(state, className, {
         hasPendingClarification,
         foregroundActivity,
         hasPendingPermission,
-      )}
+        interrupted,
+      })}
     </div>
   );
 }

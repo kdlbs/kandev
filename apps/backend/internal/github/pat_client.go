@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,10 +33,50 @@ type GitHubAPIError struct {
 	StatusCode int
 	Endpoint   string
 	Body       string
+	RetryAt    *time.Time
 }
 
 func (e *GitHubAPIError) Error() string {
 	return fmt.Sprintf("GitHub API %s returned %d: %s", e.Endpoint, e.StatusCode, e.Body)
+}
+
+func (e *GitHubAPIError) ProviderRetryAt() *time.Time {
+	if e == nil || e.RetryAt == nil {
+		return nil
+	}
+	value := *e.RetryAt
+	return &value
+}
+
+// retryAtFromHTTPResponse preserves provider-supplied retry evidence. The
+// later of Retry-After and X-RateLimit-Reset is used so a secondary-limit hint
+// cannot cause discovery to resume before the primary reset.
+func retryAtFromHTTPResponse(resp *http.Response, defaultResource Resource, now time.Time) *time.Time {
+	if resp == nil {
+		return nil
+	}
+	var latest *time.Time
+	if value := strings.TrimSpace(resp.Header.Get("Retry-After")); value != "" {
+		var retryAt time.Time
+		if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+			retryAt = now.Add(time.Duration(seconds) * time.Second)
+		} else if parsed, parseErr := http.ParseTime(value); parseErr == nil {
+			retryAt = parsed.UTC()
+		}
+		if retryAt.After(now) {
+			latest = &retryAt
+		}
+	}
+	if snapshot, ok := parseRateHeaders(resp, defaultResource); ok && snapshot.ResetAt.After(now) &&
+		(latest == nil || snapshot.ResetAt.After(*latest)) {
+		resetAt := snapshot.ResetAt
+		latest = &resetAt
+	}
+	if latest == nil {
+		return nil
+	}
+	copy := *latest
+	return &copy
 }
 
 // WithRateTracker attaches a rate tracker so response headers are recorded.
@@ -152,6 +193,48 @@ func (c *PATClient) HasRepositoryAccess(ctx context.Context, owner, repo string)
 	return metadata.FullName != "", nil
 }
 
+// GetRepository returns the provider-authoritative repository identity and
+// permissions used by managed contribution-destination preparation.
+func (c *PATClient) GetRepository(ctx context.Context, owner, repo string) (*GitHubRepository, error) {
+	var raw githubRepositoryResponse
+	endpoint := fmt.Sprintf("/repos/%s/%s", owner, repo)
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("get repository %s/%s: %w", owner, repo, err)
+	}
+	return projectGitHubRepository(raw), nil
+}
+
+// ListRepositoryForks lists every fork in the canonical repository's fork
+// network, including forks whose names differ from the canonical name.
+func (c *PATClient) ListRepositoryForks(ctx context.Context, owner, repo string) ([]*GitHubRepository, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/forks?per_page=100", owner, repo)
+	forks := make([]*GitHubRepository, 0)
+	for endpoint != "" {
+		var page []githubRepositoryResponse
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list repository forks for %s/%s: %w", owner, repo, err)
+		}
+		for _, raw := range page {
+			forks = append(forks, projectGitHubRepository(raw))
+		}
+		endpoint = next
+	}
+	return forks, nil
+}
+
+// CreateFork creates a fork for the authenticated human automation identity.
+// GitHub may return before the fork is fully readable; the service resolver
+// performs the bounded follow-up verification.
+func (c *PATClient) CreateFork(ctx context.Context, owner, repo string) (*GitHubRepository, error) {
+	var raw githubRepositoryResponse
+	endpoint := fmt.Sprintf("/repos/%s/%s/forks", owner, repo)
+	if err := c.postJSON(ctx, endpoint, []byte(`{}`), &raw); err != nil {
+		return nil, fmt.Errorf("create fork for %s/%s: %w", owner, repo, err)
+	}
+	return projectGitHubRepository(raw), nil
+}
+
 func (c *PATClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	var raw patPR
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number)
@@ -179,11 +262,27 @@ func (c *PATClient) FindPRByBranch(ctx context.Context, owner, repo, branch stri
 	if err != nil {
 		return nil, fmt.Errorf("find PR by branch %q: %w", branch, err)
 	}
-	status := statuses[graphqlBranchKey(owner, repo, branch)]
+	status := statuses.Statuses[graphqlBranchKey(owner, repo, branch)]
 	if status == nil {
 		return nil, nil
 	}
 	return status.PR, nil
+}
+
+func (c *PATClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, headRepo, branch string) (*PR, error) {
+	var raw []patPR
+	head := url.QueryEscape(headOwner + ":" + branch)
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?state=open&head=%s&per_page=100", owner, repo, head)
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("find PR by head %q:%q: %w", headOwner, branch, err)
+	}
+	for i := range raw {
+		pr := convertPatPR(&raw[i], owner, repo)
+		if sameRepositoryIdentity(pr.HeadRepoOwner, pr.HeadRepoName, headOwner, headRepo) {
+			return pr, nil
+		}
+	}
+	return nil, nil
 }
 
 func (c *PATClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*PR, error) {
@@ -552,6 +651,45 @@ func (c *PATClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) 
 	), nil
 }
 
+func (c *PATClient) ListWorkflowRuns(ctx context.Context, owner, repo, headSHA string) ([]WorkflowRun, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/actions/runs?head_sha=%s&per_page=100", owner, repo, url.QueryEscape(headSHA))
+	var runs []WorkflowRun
+	for endpoint != "" {
+		var page struct {
+			WorkflowRuns []ghWorkflowRun `json:"workflow_runs"`
+		}
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, err
+		}
+		for _, raw := range page.WorkflowRuns {
+			runs = append(runs, convertRawWorkflowRun(raw))
+		}
+		endpoint = next
+	}
+	return runs, nil
+}
+
+func (c *PATClient) ListWorkflowRunJobs(ctx context.Context, owner, repo string, runID int64, attempt int) ([]WorkflowJob, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/jobs?per_page=100", owner, repo, runID)
+	if attempt > 0 {
+		endpoint = fmt.Sprintf("/repos/%s/%s/actions/runs/%d/attempts/%d/jobs?per_page=100", owner, repo, runID, attempt)
+	}
+	var jobs []WorkflowJob
+	for endpoint != "" {
+		var page struct {
+			Jobs []ghWorkflowJob `json:"jobs"`
+		}
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, convertRawWorkflowJobs(page.Jobs)...)
+		endpoint = next
+	}
+	return jobs, nil
+}
+
 func (c *PATClient) GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error) {
 	return getPRFeedback(ctx, c, owner, repo, number)
 }
@@ -570,12 +708,40 @@ func (c *PATClient) ListPRFiles(ctx context.Context, owner, repo string, number 
 }
 
 func (c *PATClient) ListPRCommits(ctx context.Context, owner, repo string, number int) ([]PRCommitInfo, error) {
-	var raw []ghPRCommit
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/commits?per_page=100", owner, repo, number)
-	if err := c.get(ctx, endpoint, &raw); err != nil {
-		return nil, fmt.Errorf("list PR commits: %w", err)
+	var raw []ghPRCommit
+	for endpoint != "" {
+		var page []ghPRCommit
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list PR commits: %w", err)
+		}
+		raw = append(raw, page...)
+		endpoint = next
 	}
 	return convertRawPRCommits(raw), nil
+}
+
+func (c *PATClient) GetPRCommitDetail(ctx context.Context, owner, repo, sha string) (PRCommitDetail, error) {
+	if err := validateGitHubCommitSHA(sha); err != nil {
+		return PRCommitDetail{}, err
+	}
+	var pages []ghPRCommitDetail
+	endpoint := fmt.Sprintf("/repos/%s/%s/commits/%s?per_page=100", owner, repo, sha)
+	for endpoint != "" {
+		var page ghPRCommitDetail
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return PRCommitDetail{}, fmt.Errorf("get PR commit detail: %w", err)
+		}
+		pages = append(pages, page)
+		endpoint = next
+	}
+	encoded, err := json.Marshal(pages)
+	if err != nil {
+		return PRCommitDetail{}, fmt.Errorf("encode PR commit detail pages: %w", err)
+	}
+	return parsePRCommitDetailJSON(string(encoded))
 }
 
 func (c *PATClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
@@ -642,17 +808,46 @@ func (c *PATClient) RequestReviewers(ctx context.Context, owner, repo string, nu
 	return c.post(ctx, endpoint, jsonBody)
 }
 
-func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
-	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, number)
-	payload := map[string]string{}
-	if mergeMethod != "" {
-		payload["merge_method"] = mergeMethod
+func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int, request MergePRRequest) (MergeOutcome, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
+	payload := map[string]string{"merge_action": "default"}
+	if request.MergeMethod != "" {
+		payload["merge_method"] = request.MergeMethod
+	}
+	if request.ExpectedHeadSHA != "" {
+		payload["sha"] = request.ExpectedHeadSHA
 	}
 	jsonBody, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("marshal merge payload: %w", err)
+		return "", fmt.Errorf("marshal merge payload: %w", err)
 	}
-	return c.put(ctx, endpoint, jsonBody)
+	var response mergeAsyncResponse
+	if err := c.putJSON(ctx, endpoint, jsonBody, &response); err != nil {
+		var apiErr *GitHubAPIError
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusConflict ||
+			json.Unmarshal([]byte(apiErr.Body), &response) != nil || response.Details.UUID == "" {
+			return "", err
+		}
+	}
+	for response.Status == "pending" {
+		if response.Details.UUID == "" {
+			return "", fmt.Errorf("GitHub merge response is pending without a UUID")
+		}
+		wait := c.mergePollWait
+		if wait == nil {
+			wait = waitForMergePoll
+		}
+		if waitErr := wait(ctx, mergePollInterval); waitErr != nil {
+			return "", fmt.Errorf("wait to poll merge PR #%d: %w", number, waitErr)
+		}
+		if err := c.get(ctx, endpoint+"/"+response.Details.UUID, &response); err != nil {
+			return "", err
+		}
+	}
+	if response.Status == mergeStatusFailed {
+		return "", newMergeFailureError(response.Details)
+	}
+	return normalizeMergeOutcome(response.Status)
 }
 
 func (c *PATClient) CreateGist(ctx context.Context, in CreateGistInput) (*GistResponse, error) {
@@ -762,8 +957,18 @@ func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) erro
 // postJSON sends a POST and decodes the response body into result.
 // 2xx with no body returns nil; 4xx/5xx returns a *GitHubAPIError.
 func (c *PATClient) postJSON(ctx context.Context, endpoint string, body []byte, result interface{}) error {
+	return c.requestJSON(ctx, http.MethodPost, endpoint, body, result)
+}
+
+func (c *PATClient) requestJSON(
+	ctx context.Context,
+	method string,
+	endpoint string,
+	body []byte,
+	result interface{},
+) error {
 	u := githubAPIBase + endpoint
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -772,7 +977,7 @@ func (c *PATClient) postJSON(ctx context.Context, endpoint string, body []byte, 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request POST %s: %w", endpoint, err)
+		return fmt.Errorf("request %s %s: %w", method, endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	c.recordRateHeaders(resp, endpoint)
@@ -814,27 +1019,11 @@ func (c *PATClient) delete(ctx context.Context, endpoint string) error {
 }
 
 func (c *PATClient) put(ctx context.Context, endpoint string, body []byte) error {
-	u := githubAPIBase + endpoint
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	c.setGitHubHeaders(req)
-	req.Header.Set("Content-Type", "application/json")
+	return c.putJSON(ctx, endpoint, body, nil)
+}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("request PUT %s: %w", endpoint, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	c.recordRateHeaders(resp, endpoint)
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
-	}
-	return nil
+func (c *PATClient) putJSON(ctx context.Context, endpoint string, body []byte, result interface{}) error {
+	return c.requestJSON(ctx, http.MethodPut, endpoint, body, result)
 }
 
 func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}) error {
@@ -945,20 +1134,34 @@ func (c *PATClient) FetchBranchProtection(ctx context.Context, owner, repo, bran
 
 // patPR is the JSON shape from the GitHub REST API for PRs.
 type patPR struct {
-	Number             int       `json:"number"`
-	Title              string    `json:"title"`
-	HTMLURL            string    `json:"html_url"`
-	Body               string    `json:"body"`
-	State              string    `json:"state"`
-	Draft              bool      `json:"draft"`
-	Mergeable          *bool     `json:"mergeable"`
-	MergeableState     string    `json:"mergeable_state"`
-	Additions          int       `json:"additions"`
-	Deletions          int       `json:"deletions"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
-	MergedAt           *string   `json:"merged_at"`
-	ClosedAt           *string   `json:"closed_at"`
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	HTMLURL string `json:"html_url"`
+	Body    string `json:"body"`
+	State   string `json:"state"`
+	// Draft is a pointer: AC-12a requires distinguishing an omitted or null
+	// draft from a genuine false, which a plain bool can't after decode.
+	Draft          *bool  `json:"draft"`
+	Mergeable      *bool  `json:"mergeable"`
+	MergeableState string `json:"mergeable_state"`
+	Additions      int    `json:"additions"`
+	Deletions      int    `json:"deletions"`
+	// ChangedFiles is a pointer for the same reason as Draft (AC-12a): 0 is
+	// a legitimate observation and must stay distinguishable from absent/null.
+	ChangedFiles *int      `json:"changed_files"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	MergedAt     *string   `json:"merged_at"`
+	ClosedAt     *string   `json:"closed_at"`
+	// MergedBy is absent from the REST pulls response for an unmerged PR;
+	// its zero-value Login must never be written as a placeholder.
+	MergedBy *struct {
+		Login string `json:"login"`
+	} `json:"merged_by"`
+	// AutoMerge is present as a non-null object only while auto-merge is
+	// armed; GitHub clears it to null once it fires, so this can only ever
+	// mean "armed at fetch time" — never "merged by auto-merge".
+	AutoMerge          *struct{} `json:"auto_merge"`
 	RequestedReviewers []struct {
 		Login string `json:"login"`
 	} `json:"requested_reviewers"`
@@ -975,7 +1178,45 @@ type patPR struct {
 	} `json:"head"`
 	Base struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"base"`
+	MaintainerCanModify bool           `json:"maintainer_can_modify"`
+	HeadRepository      *patRepository `json:"-"`
+	BaseRepository      *patRepository `json:"-"`
+}
+
+type patRepository struct {
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	FullName      string `json:"full_name"`
+	CloneURL      string `json:"clone_url"`
+	DefaultBranch string `json:"default_branch"`
+	Owner         struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+}
+
+func (p *patPR) UnmarshalJSON(data []byte) error {
+	type plain patPR
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*p = patPR(decoded)
+	var nested struct {
+		Head struct {
+			Repo *patRepository `json:"repo"`
+		} `json:"head"`
+		Base struct {
+			Repo *patRepository `json:"repo"`
+		} `json:"base"`
+	}
+	if err := json.Unmarshal(data, &nested); err != nil {
+		return err
+	}
+	p.HeadRepository = nested.Head.Repo
+	p.BaseRepository = nested.Base.Repo
+	return nil
 }
 
 type patIssue struct {
@@ -1026,27 +1267,47 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 	if raw.Mergeable != nil {
 		mergeable = *raw.Mergeable
 	}
-	pr := &PR{
-		Number:             raw.Number,
-		Title:              raw.Title,
-		HTMLURL:            raw.HTMLURL,
-		Body:               raw.Body,
-		State:              state,
-		HeadBranch:         raw.Head.Ref,
-		HeadSHA:            raw.Head.SHA,
-		BaseBranch:         raw.Base.Ref,
-		AuthorLogin:        raw.User.Login,
-		RepoOwner:          owner,
-		RepoName:           repo,
-		Draft:              raw.Draft,
-		Mergeable:          mergeable,
-		MergeableState:     strings.ToLower(raw.MergeableState),
-		Additions:          raw.Additions,
-		Deletions:          raw.Deletions,
-		RequestedReviewers: convertPatRequestedReviewers(raw),
-		CreatedAt:          raw.CreatedAt,
-		UpdatedAt:          raw.UpdatedAt,
+	mergedByLogin := ""
+	if raw.MergedBy != nil {
+		mergedByLogin = raw.MergedBy.Login
 	}
+	draft, changedFiles := false, 0
+	if raw.Draft != nil {
+		draft = *raw.Draft
+	}
+	if raw.ChangedFiles != nil {
+		changedFiles = *raw.ChangedFiles
+	}
+	pr := &PR{
+		Number:               raw.Number,
+		Title:                raw.Title,
+		HTMLURL:              raw.HTMLURL,
+		Body:                 raw.Body,
+		State:                state,
+		HeadBranch:           raw.Head.Ref,
+		HeadSHA:              raw.Head.SHA,
+		BaseBranch:           raw.Base.Ref,
+		BaseSHA:              raw.Base.SHA,
+		AuthorLogin:          raw.User.Login,
+		RepoOwner:            owner,
+		RepoName:             repo,
+		MaintainerCanModify:  raw.MaintainerCanModify,
+		Draft:                draft,
+		IsDraftObserved:      raw.Draft != nil,
+		Mergeable:            mergeable,
+		MergeableState:       strings.ToLower(raw.MergeableState),
+		Additions:            raw.Additions,
+		Deletions:            raw.Deletions,
+		ChangedFiles:         changedFiles,
+		ChangedFilesObserved: raw.ChangedFiles != nil,
+		MergedByLogin:        mergedByLogin,
+		AutoMergeEnabled:     raw.AutoMerge != nil,
+		RequestedReviewers:   convertPatRequestedReviewers(raw),
+		CreatedAt:            raw.CreatedAt,
+		UpdatedAt:            raw.UpdatedAt,
+	}
+	applyPatHeadRepository(pr, raw.HeadRepository)
+	applyPatBaseRepository(pr, raw.BaseRepository)
 	if raw.MergedAt != nil {
 		pr.MergedAt = parseTimePtr(*raw.MergedAt)
 	}
@@ -1054,6 +1315,42 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 		pr.ClosedAt = parseTimePtr(*raw.ClosedAt)
 	}
 	return pr
+}
+
+func completePatRepositoryIdentity(owner, name, fullName string) (string, string) {
+	parts := strings.SplitN(fullName, "/", 2)
+	if len(parts) != 2 {
+		return owner, name
+	}
+	if owner == "" {
+		owner = parts[0]
+	}
+	if name == "" {
+		name = parts[1]
+	}
+	return owner, name
+}
+
+func applyPatHeadRepository(pr *PR, repository *patRepository) {
+	if repository == nil {
+		return
+	}
+	pr.HeadRepoID = repository.ID
+	pr.HeadRepoOwner, pr.HeadRepoName = completePatRepositoryIdentity(
+		repository.Owner.Login, repository.Name, repository.FullName,
+	)
+	pr.HeadRepoCloneURL = repository.CloneURL
+}
+
+func applyPatBaseRepository(pr *PR, repository *patRepository) {
+	if repository == nil {
+		return
+	}
+	pr.BaseRepoID = repository.ID
+	pr.BaseRepoOwner, pr.BaseRepoName = completePatRepositoryIdentity(
+		repository.Owner.Login, repository.Name, repository.FullName,
+	)
+	pr.BaseDefaultBranch = repository.DefaultBranch
 }
 
 func convertPatIssue(raw *patIssue, owner, repo string) *Issue {

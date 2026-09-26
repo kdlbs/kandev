@@ -23,6 +23,7 @@ function makePermissionRequest(id: string, status?: string): Message {
 }
 
 type KanbanTask = KanbanState["tasks"][number];
+const ACTIVE_TASK_UPDATED_AT = "2026-08-29T09:14:02Z";
 
 function makeStep(
   id: string,
@@ -93,22 +94,6 @@ describe("aggregateSidebarTasks", () => {
     expect(result.allSteps).toHaveLength(1);
   });
 
-  it("does not duplicate tasks already present in the snapshot", () => {
-    const snapshots: WorkflowSnapshotMap = {
-      "wf-1": makeSnapshot([makeStep("s1", 0)], [makeTask("t1", "s1", { title: "from snapshot" })]),
-    };
-    const result = aggregateSidebarTasks(
-      snapshots,
-      "wf-1",
-      [makeTask("t1", "s1", { title: "from active" }), makeTask("t2", "s1")],
-      [makeStep("s1", 0)],
-    );
-    expect(result.allTasks).toHaveLength(2);
-    const t1 = result.allTasks.find((t) => t.id === "t1");
-    expect(t1?.title).toBe("from snapshot");
-    expect(result.allTasks.find((t) => t.id === "t2")).toBeDefined();
-  });
-
   it("prefers live active steps when the workflow snapshot is stale", () => {
     const snapshots: WorkflowSnapshotMap = {
       "wf-1": makeSnapshot([makeStep("s1", 0, { title: "Snapshot Step" })], []),
@@ -159,6 +144,239 @@ describe("aggregateSidebarTasks", () => {
       [makeStep("step-B", 0)],
     );
     expect(result.allTasks.map((t) => t.id)).toEqual(["task-B"]);
+  });
+});
+
+describe("aggregateSidebarTasks active precedence", () => {
+  it("prefers the live active task over a stale workflow snapshot", () => {
+    const snapshots: WorkflowSnapshotMap = {
+      "wf-1": makeSnapshot(
+        [makeStep("s1", 0)],
+        [
+          makeTask("t1", "s1", {
+            title: "from snapshot",
+            state: "IN_PROGRESS",
+            primarySessionState: "STARTING",
+            statusSummary: {
+              revision: 2,
+              updated_at: "2026-08-03T00:00:00Z",
+            },
+          }),
+        ],
+      ),
+    };
+    const result = aggregateSidebarTasks(
+      snapshots,
+      "wf-1",
+      [
+        makeTask("t1", "s1", {
+          title: "from active",
+          state: "REVIEW",
+          primarySessionState: "WAITING_FOR_INPUT",
+          statusSummary: {
+            revision: 4,
+            updated_at: "2026-08-03T00:00:02Z",
+          },
+        }),
+        makeTask("t2", "s1"),
+      ],
+      [makeStep("s1", 0)],
+    );
+    expect(result.allTasks).toHaveLength(2);
+    const t1 = result.allTasks.find((t) => t.id === "t1");
+    expect(t1).toMatchObject({
+      title: "from active",
+      state: "REVIEW",
+      primarySessionState: "WAITING_FOR_INPUT",
+      statusSummary: { revision: 4 },
+    });
+    expect(result.allTasks.find((t) => t.id === "t2")).toBeDefined();
+  });
+
+  it("keeps a newer projected summary when the active task has no summary", () => {
+    const projected = makeTask("t1", "s1", {
+      statusSummary: {
+        revision: 4,
+        updated_at: "2026-08-03T00:00:02Z",
+        git: { additions: 3, deletions: 0 },
+      },
+    });
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [makeTask("t1", "s1", { statusSummary: undefined })],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks).toHaveLength(1);
+    expect(result.allTasks[0].statusSummary).toMatchObject({
+      revision: 4,
+      git: { additions: 3, deletions: 0 },
+    });
+  });
+
+  it("preserves autopilot from the projection when the active task is partial", () => {
+    const projected = makeTask("t1", "s1", {
+      autopilot: true,
+      statusSummary: { revision: 1, updated_at: "2026-08-03T00:00:00Z" },
+    });
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [
+        makeTask("t1", "s1", {
+          statusSummary: { revision: 2, updated_at: "2026-08-03T00:00:01Z" },
+        }),
+      ],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0].autopilot).toBe(true);
+  });
+
+  // @covers AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4
+  it("preserves projected Office identity through a newer partial active task", () => {
+    const projected = makeTask("t1", "s1", {
+      isFromOffice: true,
+      updatedAt: "2026-08-03T00:00:00Z",
+    });
+    const active = makeTask("t1", "s1", {
+      updatedAt: "2026-08-03T00:00:01Z",
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0].isFromOffice).toBe(true);
+  });
+});
+
+describe("aggregateSidebarTasks task lifecycle freshness", () => {
+  it("uses newer task state when status-summary revisions are equal", () => {
+    // @covers AC-TASKS-RUNTIME-STATE-PUBLICATION-ORDER-001.4
+    const projected = makeTask("t1", "s1", {
+      state: "REVIEW",
+      updatedAt: "2026-08-29T09:14:01Z",
+      statusSummary: {
+        revision: 4,
+        updated_at: "2026-08-29T09:14:01Z",
+        queued_prompt_count: 5,
+      },
+    });
+    const active = makeTask("t1", "s1", {
+      state: "IN_PROGRESS",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+      statusSummary: {
+        revision: 4,
+        updated_at: ACTIVE_TASK_UPDATED_AT,
+        queued_prompt_count: 0,
+      },
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0].state).toBe("IN_PROGRESS");
+    expect(result.allTasks[0].statusSummary?.queued_prompt_count).toBe(5);
+  });
+
+  it("prefers the active task when task timestamps are equal", () => {
+    const projected = makeTask("t1", "s1", {
+      state: "REVIEW",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+    });
+    const active = makeTask("t1", "s1", {
+      state: "IN_PROGRESS",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0].state).toBe("IN_PROGRESS");
+  });
+
+  it("keeps task freshness independent from status-summary freshness", () => {
+    const projected = makeTask("t1", "s1", {
+      state: "REVIEW",
+      updatedAt: "2026-08-29T09:14:01Z",
+      statusSummary: { revision: 5, updated_at: "2026-08-29T09:14:03Z" },
+    });
+    const active = makeTask("t1", "s1", {
+      state: "IN_PROGRESS",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+      statusSummary: { revision: 4, updated_at: ACTIVE_TASK_UPDATED_AT },
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0]).toMatchObject({
+      state: "IN_PROGRESS",
+      statusSummary: { revision: 5 },
+    });
+  });
+
+  it("keeps a newer workflow snapshot task over an older active task", () => {
+    const projected = makeTask("t1", "s1", {
+      state: "REVIEW",
+      updatedAt: "2026-08-29T09:14:03Z",
+    });
+    const active = makeTask("t1", "s1", {
+      state: "IN_PROGRESS",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0]).toMatchObject({
+      state: "REVIEW",
+      updatedAt: "2026-08-29T09:14:03Z",
+    });
+  });
+});
+
+describe("aggregateSidebarTasks interruption projection", () => {
+  it("preserves projected interruption when an equal-timestamp active task omits it", () => {
+    const projected = makeTask("t1", "s1", {
+      state: "REVIEW",
+      interrupted: true,
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+    });
+    const active = makeTask("t1", "s1", {
+      state: "REVIEW",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0].interrupted).toBe(true);
   });
 });
 

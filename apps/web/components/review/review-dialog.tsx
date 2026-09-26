@@ -1,11 +1,11 @@
 "use client";
 
 import { memo, useMemo, useCallback, createRef, useState } from "react";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type { FileInfo, CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import type { Comment } from "@/lib/state/slices/comments";
-import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
+import { useCommentsStore, isReviewComment } from "@/lib/state/slices/comments";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useAppStore } from "@/components/state-provider";
@@ -26,7 +26,9 @@ import {
   normalizeDiffContent,
   reviewFileKey,
   splitReviewFileKey as splitFileKey,
+  suppressAvailableGitlinkFiles,
 } from "./types";
+import { t } from "@/lib/i18n";
 
 /**
  * Multi-repo dedup: keying ReviewFile entries by `path` only collapses
@@ -58,8 +60,12 @@ function addCumulativeDiffFiles(
     const path = file.path ?? splitFileKey(mapKey).path;
     if (!path) continue;
     const key = fileMapKey(path, repoName);
-    const hasRepoUnawareCollision = key !== path && fileMap.has(path);
-    if (fileMap.has(key) || hasRepoUnawareCollision) continue;
+    // In multi-scope mode, a bare path belongs to the workspace root while a
+    // repository-scoped path belongs to that repository. They may share a
+    // filename (README.md is common), so only the canonical scoped key is a
+    // collision. Single-repository callers pass useRepositoryKeys=false and
+    // therefore still dedupe on the bare path.
+    if (fileMap.has(key)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     fileMap.set(key, {
       path,
@@ -73,6 +79,7 @@ function addCumulativeDiffFiles(
       diff_skip_reason: file.diff_skip_reason,
       repository_name: repoName,
       base_ref: file.base_ref ?? defaultBaseRef,
+      is_submodule: file.is_submodule,
     });
   }
 }
@@ -80,9 +87,12 @@ function addCumulativeDiffFiles(
 function addUncommittedFiles(
   fileMap: Map<string, ReviewFile>,
   gitStatusFiles: Record<string, FileInfo>,
+  useRepositoryKeys: boolean,
+  isSubmodule = false,
 ) {
   for (const file of Object.values(gitStatusFiles)) {
-    const key = fileMapKey(file.path, file.repository_name);
+    const repositoryName = useRepositoryKeys ? file.repository_name : undefined;
+    const key = fileMapKey(file.path, repositoryName);
     if (fileMap.has(key)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     fileMap.set(key, {
@@ -95,17 +105,17 @@ function addUncommittedFiles(
       source: "uncommitted",
       old_path: file.old_path,
       diff_skip_reason: file.diff_skip_reason,
-      repository_name: file.repository_name,
+      repository_name: repositoryName,
+      is_submodule: file.is_submodule ?? isSubmodule,
     });
   }
 }
 
 function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[], repoName?: string) {
-  const repositoryName = repoName || undefined;
+  const repositoryName = repoName;
   for (const file of files) {
     const key = fileMapKey(file.filename, repositoryName);
-    const hasRepoUnawareCollision = !!repositoryName && fileMap.has(file.filename);
-    if (fileMap.has(key) || hasRepoUnawareCollision) continue;
+    if (fileMap.has(key)) continue;
     const diff = file.patch ? normalizeDiffContent(file.patch) : "";
     fileMap.set(key, {
       path: file.filename,
@@ -117,6 +127,7 @@ function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[], repoN
       source: "pr",
       old_path: file.old_path,
       repository_name: repositoryName,
+      is_submodule: file.is_submodule,
     });
   }
 }
@@ -137,7 +148,7 @@ export function buildAllFiles(
   // (panel: fresh worktree content from `git-status`, dialog: stale cumulative
   // diff snapshot from the last fetch) — the dialog appeared to show outdated
   // content even though the cumulative-diff hook was successfully refetching.
-  if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles);
+  if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles, useRepositoryKeys);
   if (cumulativeDiff?.files) {
     addCumulativeDiffFiles(
       fileMap,
@@ -147,19 +158,21 @@ export function buildAllFiles(
     );
   }
   if (prDiffFiles) addPRFiles(fileMap, prDiffFiles, prRepoName);
-  return Array.from(fileMap.values()).sort((a, b) => {
+  const sortedFiles = Array.from(fileMap.values()).sort((a, b) => {
     const repoCmp = (a.repository_name ?? "").localeCompare(b.repository_name ?? "");
     if (repoCmp !== 0) return repoCmp;
     return a.path.localeCompare(b.path);
   });
+  return suppressAvailableGitlinkFiles(sortedFiles);
 }
 
-export function filterPendingDiffCommentsForSession(
+export function filterPendingReviewCommentsForSession(
   comments: Comment[],
   sessionId: string,
-): DiffComment[] {
+): ReviewComment[] {
   return comments.filter(
-    (comment): comment is DiffComment => comment.sessionId === sessionId && isDiffComment(comment),
+    (comment): comment is ReviewComment =>
+      comment.sessionId === sessionId && isReviewComment(comment),
   );
 }
 
@@ -168,7 +181,7 @@ export type ReviewDialogProps = {
   onOpenChange: (open: boolean) => void;
   sessionId: string;
   baseBranch?: string;
-  onSendComments: (comments: DiffComment[]) => void;
+  onSendComments: (comments: ReviewComment[]) => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
   gitStatusFiles: Record<string, FileInfo> | null;
   cumulativeDiff: CumulativeDiff | null;
@@ -201,15 +214,40 @@ function computeReviewSets(
   return { reviewedFiles: reviewed, staleFiles: stale };
 }
 
+function wholeFileCommentKey(path: string, repositoryName = ""): string {
+  return JSON.stringify([repositoryName, path]);
+}
+
+function countScopedFileComments(byId: Record<string, Comment>, ids: string[]) {
+  const counts = new Map<string, number>();
+  for (const id of ids) {
+    const comment = byId[id];
+    if (!comment || !isReviewComment(comment) || comment.repositoryName === undefined) continue;
+    const key = wholeFileCommentKey(comment.filePath, comment.repositoryName);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+const bucketKey = (repoId: string, path: string) => JSON.stringify([repoId, path]);
+
+function countLegacyLineComments(byId: Record<string, Comment>, ids: string[]) {
+  const counts = new Map<string, number>();
+  for (const id of ids) {
+    const comment = byId[id];
+    if (comment?.source !== "diff" || comment.repositoryName !== undefined) continue;
+    const key = bucketKey(comment.repositoryId ?? "", comment.filePath);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /**
- * Counts diff comments per file, scoped by repo when known. Multi-repo:
- * comments carrying `repositoryId` are matched only against files in that
- * repo (translated from `repository_name` via `repositoryNameToId`); legacy
- * comments without `repositoryId` and same-repo unattributed comments
- * match by path. Returned record is keyed by `reviewFileKey(file)` so the
- * file tree's per-row badge correctly disambiguates same-named files.
+ * Counts scoped review comments by repository name and path. Legacy line
+ * comments retain repository-ID or path-only matching. The file tree uses
+ * reviewFileKey so same-named files keep independent badges.
  */
-function computeCommentCounts(
+export function computeCommentCounts(
   byId: Record<string, import("@/lib/state/slices/comments").Comment>,
   sessionCommentIds: string[] | undefined,
   allFiles: ReviewFile[],
@@ -218,18 +256,11 @@ function computeCommentCounts(
   const counts: Record<string, number> = {};
   if (!sessionCommentIds) return counts;
 
-  type BucketKey = string;
-  const bucketKey = (repoId: string, path: string) => `${repoId}::${path}`;
-  const bucket = new Map<BucketKey, number>();
-  for (const id of sessionCommentIds) {
-    const comment = byId[id];
-    if (!comment || !isDiffComment(comment)) continue;
-    const k = bucketKey(comment.repositoryId ?? "", comment.filePath);
-    bucket.set(k, (bucket.get(k) ?? 0) + 1);
-  }
+  const bucket = countLegacyLineComments(byId, sessionCommentIds);
+  const scopedFileCounts = countScopedFileComments(byId, sessionCommentIds);
 
   for (const file of allFiles) {
-    let total = 0;
+    let total = scopedFileCounts.get(wholeFileCommentKey(file.path, file.repository_name)) ?? 0;
     if (file.repository_name) {
       const repoId = repositoryNameToId.get(file.repository_name) ?? "";
       if (repoId) total += bucket.get(bucketKey(repoId, file.path)) ?? 0;
@@ -282,7 +313,7 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
   );
 
   const handleSendComments = useCallback(
-    (comments: DiffComment[]) => {
+    (comments: ReviewComment[]) => {
       onSendComments(comments);
       onOpenChange(false);
     },
@@ -295,19 +326,19 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
       // discard runs in the correct repo's worktree.
       const { repositoryName, path } = splitFileKey(key);
       try {
-        const result = await discard([path], repositoryName || undefined);
+        const result = await discard([path], repositoryName);
         if (result.success)
-          toast({ title: "Changes discarded", description: path, variant: "success" });
+          toast({ title: t("review:changesDiscarded"), description: path, variant: "success" });
         else
           toast({
-            title: "Discard failed",
-            description: result.error || "An error occurred",
+            title: t("review:discardFailed"),
+            description: result.error || t("common:anErrorOccurred"),
             variant: "error",
           });
       } catch (e) {
         toast({
-          title: "Discard failed",
-          description: e instanceof Error ? e.message : "An error occurred",
+          title: t("review:discardFailed"),
+          description: e instanceof Error ? e.message : t("common:anErrorOccurred"),
           variant: "error",
         });
       }
@@ -369,8 +400,8 @@ function useReviewDialogState(props: ReviewDialogProps) {
   const byId = useCommentsStore((s) => s.byId);
   const sessionCommentIds = useCommentsStore((s) => s.bySession[sessionId]);
   const getStorePendingComments = useCommentsStore((s) => s.getPendingComments);
-  const getPendingComments = useCallback((): DiffComment[] => {
-    return filterPendingDiffCommentsForSession(getStorePendingComments(), sessionId);
+  const getPendingComments = useCallback((): ReviewComment[] => {
+    return filterPendingReviewCommentsForSession(getStorePendingComments(), sessionId);
   }, [getStorePendingComments, sessionId]);
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
 

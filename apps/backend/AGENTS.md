@@ -3,7 +3,6 @@
 Scoped guidance for `apps/backend/`. Repo-wide rules (commit format, code-quality limits, etc.) live in the root `AGENTS.md`. For plugin work, start at the [canonical plugin authoring guide](../../docs/public/plugins-authoring.md), follow choose recipe → edit `manifest.yaml` → implement → validate → package → smoke test, and treat `pkg/pluginsdk`, `proto/kandev/plugin/v1/plugin.proto`, `internal/plugins/manifest`, and `internal/plugins/pkgtar` as authoritative; the fixture is test support, and plugins must not access databases or `internal/...` packages.
 
 ## Package Structure
-
 ```text
 apps/backend/
 ├── cmd/
@@ -24,11 +23,14 @@ apps/backend/
 │   │   ├── dto/          # Agent data transfer objects
 │   │   ├── executor/     # Executor types, checks, and service
 │   │   ├── handlers/     # Agent event handlers
+│   │   ├── kubernetes/   # Kubernetes config, Pod/PVC composition, admission, and client streaming
 │   │   ├── registry/     # Agent type registry and defaults
 │   │   ├── settings/     # Agent settings
 │   │   ├── mcpconfig/    # MCP server configuration
-│   │   └── remoteauth/   # Remote auth catalog and method IDs for remote executors/UI
+│   │   ├── remoteauth/   # Remote auth catalog and method IDs for remote executors/UI
+│   │   └── planinjection/ # Bounds a task plan document before session-handover/dynamic-continuation injection
 │   ├── auth/             # Opt-in auth, per-user scoping, middleware, API, store
+│   ├── canvas/           # Agent-authored plugin web-app canvas lifecycle and governance
 │   ├── agentctl/
 │   │   └── server/       # agentctl HTTP server
 │   │       ├── acp/      # ACP protocol implementation
@@ -57,9 +59,11 @@ apps/backend/
 │   │   ├── repository/   # Database access (SQLite)
 │   │   └── service/      # Task business logic
 │   ├── runs/             # Generic backend-wide run scheduling and execution state
-│   ├── office/           # Autonomous agent management (agents, approvals, channels, config, costs, dashboard, infra, labels, onboarding, projects, repository, runtime, routines, routing, scheduler, service, shared, skills, workspaces)
+│   ├── office/           # Autonomous agent management (agents, approvals, channels, config, configsync,
+│   │                     # costs, dashboard, infra, labels, onboarding, projects, repository, runtime,
+│   │                     # routines, routing, scheduler, service, shared, skills, workspaces)
 │   ├── events/           # Event bus for internal pub/sub
-│   ├── gateway/          # WebSocket gateway
+│   ├── gateway/          # WebSocket gateway, including task-owned LSP lease lifecycle
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
 │   ├── githubauth/       # Shared GitHub credential-broker environment contract
 │   ├── common/           # Shared utilities, config, logger
@@ -69,6 +73,7 @@ apps/backend/
 │   │   └── secretadapter/ # Upsert-style adapter over secrets.SecretStore
 │   ├── i18n/             # Localization for backend-rendered browser/share artifacts
 │   ├── jira/             # Jira/Atlassian Cloud integration (config, REST client, poller)
+│   ├── kubernetes/       # Task-owned Pod/PVC diagnostics; session stop preserves compute. See docs/specs/executors/system-design/kubernetes-task-pod.md for ownership, credentials, and recovery invariants.
 │   ├── linear/           # Linear integration (config, GraphQL client, poller)
 │   ├── lsp/              # LSP server
 │   ├── mcp/              # MCP protocol support
@@ -89,6 +94,15 @@ apps/backend/
 │   └── worktree/         # Git worktree management for workspace isolation
 ```
 
+Canvas creation authority comes only from the trusted task adapter and binds
+the owner, session, task, and policy version. Its first valid static release
+may consume that authority for exact workspace-ceiling grants in the activation
+transaction. Existing drafts, imports, later permission increases, and
+revoked grants still require human review; source metadata and manifests never
+grant authority.
+Canvas scopes expose `canvas_data_scope_transition_total` with fixed transition
+and result labels. Lifecycle events carry IDs; metrics never label task data.
+
 ## Key Concepts
 
 **Orchestrator** coordinates task execution:
@@ -97,15 +111,9 @@ apps/backend/
 - Handles event-driven state transitions via workflow engine
 - Located in `internal/orchestrator/`
 
-**Cancellation progress projection:** `orchestrator.Service.CancellationPending(sessionID)` is a
-runtime-only, session-scoped view of accepted cancellation work. Serialization that carries the
-boolean with ordering identity uses the atomic `CancellationPendingSnapshot(sessionID)` provider,
-whose process-local revision increments on first-begin and last-end transitions. The task DTO
-package exposes both the compatibility boolean provider and snapshot seam; boot state, task-session
-HTTP/WS lists and detail responses, and the session-scoped WebSocket notification must project
-explicit `true`/`false` values plus the revision. Keep count, revision, and publication queue updates
-in one critical section, drain event-bus sends outside it, and never persist this transient marker or
-turn it into a coarse session lifecycle state.
+**Cancellation progress projection:** `orchestrator.Service.CancellationPending(sessionID)` is a runtime-only, session-scoped view of accepted cancellation work. Serialization that carries the boolean with ordering identity uses the atomic `CancellationPendingSnapshot(sessionID)` provider, whose process-local revision increments on first-begin and last-end transitions.
+The task DTO package exposes both the compatibility boolean provider and snapshot seam; boot state, task-session HTTP/WS lists and detail responses, and the session-scoped WebSocket notification must project explicit `true`/`false` values plus the revision.
+Keep count, revision, and publication queue updates in one critical section, drain event-bus sends outside it, and never persist this transient marker or turn it into a coarse session lifecycle state.
 
 **Watcher Dispatch Coordinator** (`internal/orchestrator/watcher_dispatch.go`) is the single pipeline that turns a freshly-observed external issue (Linear, Jira, future) into a Kandev task. Bus subscribers for each integration forward the event to `WatcherDispatchCoordinator.Dispatch` with a per-integration `WatcherSource` implementation (`source_linear.go`, `source_jira.go`). Source methods carry the integration-specific bits (reserve dedup, build task request, attach task ID, release, auto-start params); the coordinator owns the cross-cutting pipeline (create task, decide auto-start, error/release handling). Add a new watcher = implement `WatcherSource` + register a one-line bus subscriber. Do NOT add another `createXIssueTask` mirror.
 
@@ -128,29 +136,27 @@ replace state verification, installation association, or HMAC verification.
 - `RequiresApproval` on actions: transitions requiring review gating are skipped
 - Idempotent by `OperationID`; session-scoped data bag via `MachineState.Data`
 
-**Agent Runtime** (`internal/agent/runtime/`) is the single seam for launching, resuming, stopping, and observing agent executions. ADR 0004 introduced this in Phase 1 of task-model-unification. The public surface is `runtime.Runtime` (`runtime.go`); a thin facade (`facade.go`) delegates to a `Backend` (satisfied by `*lifecycle.Manager`).
+**Agent Runtime** (`internal/agent/runtime/`) is the single seam for launching, resuming, stopping, and observing agent executions. ADR 0004 introduced this in Phase 1 of task-model-unification. The public surface is `runtime.Runtime` (`runtime.go`); a thin facade (`facade.go`) delegates to a `Backend` (satisfied by `*lifecycle.Manager`). Run-owned executions use `runtime.LaunchSpec.Owner` (`kind=run`) with durable run-session identity; admission fails closed before allocation and lifecycle registration, and `runtime.Start` rolls back failed startup while task launches keep task/session checks.
 
 **Run scheduling ownership:** `internal/runs/` is generic; only `internal/backendapp/` constructs and owns the single `internal/runs/scheduler` and its lifecycle. Office adapters may depend on runs, but generic runs must not import `internal/office` or its subpackages.
 
 **Runtime environment invariant:** `Agent.Runtime().Env` applies to every ACP subprocess entry point. Route new overrides through host-utility probes and sessionless prompts into agentctl child processes before sanitization; cover probe DTO, prompt DTO, and child-process boundaries.
 
-**Convention:** only `internal/agent/runtime/` (and code that pre-dates Phase 1 migration) may import `runtime/lifecycle` or `runtime/agentctl` directly. New consumers — workflow engine actions, cron-driven trigger handlers, future task-tier callers — should depend on `runtime.Runtime`. Existing call sites are migrated through later phases of task-model-unification.
+**Convention:** only `internal/agent/runtime/` (and code that pre-dates Phase 1 migration) may import `runtime/lifecycle` or `runtime/agentctl` directly. New consumers — workflow engine actions, cron-driven trigger handlers, future task-tier callers — should depend on `runtime.Runtime` or narrow local interfaces for the lifecycle-owned capability they consume. Existing call sites are migrated through later phases of task-model-unification.
 
 **Lifecycle Manager** (`internal/agent/runtime/lifecycle/`) manages agent instances under the runtime:
 - `Manager` (`manager.go`, `manager_*.go`) - central coordinator for agent lifecycle
-- `ExecutorBackend` interface (`executor_backend.go`) - abstracts execution environment (Docker, Standalone, Sprites, Remote Docker)
+- `ExecutorBackend` interface (`executor_backend.go`) - abstracts execution environment (Docker, Standalone, Sprites, SSH, Kubernetes, Remote Docker)
 - `ExecutionStore` (`execution_store.go`) - thread-safe in-memory execution tracking
 - `session.go` - ACP session initialization and resume
 - `streams.go` - WebSocket stream connections to agentctl
 - `process_runner.go` - agent process launch and management
 - `profile_resolver.go` - resolves agent profiles/settings
+**Lifecycle callback identity:** Process callbacks must retain the launched PID and generation captured when scheduled, revalidate both before state/I/O, and ignore delayed callbacks from replaced processes and duplicates; test replacement before start and after waits. Prompt callbacks and asynchronous prompt errors must likewise carry immutable execution, session, prompt-generation, and turn evidence captured at the result boundary; never reread mutable execution snapshots later, because a successor prompt may already own them. Settle through the correlated terminal path and test both replacement-execution and same-execution successor-prompt races.
 
 **agentctl client** (`internal/agent/runtime/agentctl/`) is the HTTP/WS client used by the lifecycle manager to talk to a running agentctl instance. It is a runtime-tier package and should not be imported outside `internal/agent/runtime/`.
 
-**Agent discovery vs. ACP probing:** discovery answers only whether an agent
-executable is available. Authentication, protocol compatibility, and supported
-models or modes belong to the ACP probe path; do not reintroduce those checks
-as installation gates.
+**Agent discovery vs. ACP probing:** discovery answers only whether an agent executable is available; authentication, protocol compatibility, and supported models or modes belong to the ACP probe path, not installation gates.
 
 **agentctl** is an HTTP server that:
 - Runs inside Docker containers or as standalone process
@@ -158,28 +164,34 @@ as installation gates.
 - Exposes workspace operations (shell, git, files)
 - Supports multiple concurrent instances on different ports
 
-Standalone agentctl is launched in its own process group so terminal Ctrl+C is
-handled by the backend lifecycle manager first. Do not make standalone agentctl
-share the backend's foreground process group; that bypasses supervised shutdown
-and can leak ACP subprocesses.
+Standalone agentctl is launched in its own process group so terminal Ctrl+C is handled by the backend lifecycle manager first; do not share the backend's foreground group, which bypasses supervised shutdown and can leak ACP subprocesses.
 
 **Executor Types** (database model):
 - `local_pc` - Standalone process on host
 - `local_docker` - Docker container on host
 - `sprites` - Sprites cloud environment
-- `remote_docker`, `remote_vps`, `k8s` - Planned
+- `ssh` - Remote SSH host
+- `k8s` - Namespaced Kubernetes Pod with optional PVC workspace
+- `remote_docker` - Container on a Docker daemon reached over SSH; `remote_vps` - Planned
+
+**Kubernetes lifecycle:** `task_environment_kubernetes` owns shared physical Pod/PVC inventory; `executors_running` records individual sessions and legacy session-owned pods. Persist the exact Pod/PVC names, UIDs, full `kandev.ai/*` identity, workload snapshot, and internal runtime-secret references before reporting a launch as durable. Session stop deletes only its agentctl instance, and backend shutdown preserves resources; task cleanup deletes the Pod and only a Kandev-created PVC after exact identity checks and confirmed absence. Reconnect uses the current executor connection config but the recorded workload/resource snapshot, and any ambiguity fails closed. Keep agentctl reachable only through a process-local loopback port-forward; never add a Service or place resolved credentials in a Pod spec.
 
 **Remote SSH executor platforms:** Treat supported remote OS/arch values as an end-to-end contract. Platform probe/normalization, lifecycle support checks, agentctl helper resolution, platform default shell, SSH readiness endpoints, frontend response types, and tests must stay aligned. Preserve raw unsupported platform details in user-facing errors, but use normalized values for supported-platform matching. Keep shell defaults platform-aware: Darwin defaults to `zsh`, Linux defaults to `bash`, unless an explicit shell is saved.
 
-**Opt-in authentication & per-user scoping** (`internal/auth/`): auth is OFF by default; the global middleware (`auth/httpmw`, installed after CORS in `backendapp.buildHTTPServer`) then injects a synthetic admin identity for the pre-auth single user, so behavior is unchanged. Enablement is the `features.auth` runtime flag (`KANDEV_FEATURES_AUTH`, Settings > System > Feature Toggles) — the auth service derives its mode from `cfg.Features.Auth` (`disabled` / `setup` = flag-on-no-admin / `enabled` = flag-on-admin-exists); there is no separate `auth.mode` setting. When enabled, requests authenticate via a `kandev_session` cookie (opaque token, SHA-256 at rest, DB-backed) or a `kandev_pat_*` bearer token. Scoping rules:
+**Remote SSH lifecycle:** Resolve and run remote preparation, then verify the canonical checkout, origin, and `HEAD` before starting agentctl. Retain the remote task directory in session state for stop/resume. On a terminal archive/delete/cascade stop the profile's `cleanup_script` runs over the live SSH connection before teardown; `StopInstance` never removes the task directory itself, on any stop reason. Ordinary stop and backend shutdown preserve the workspace. Reclaiming the task directory is an opt-in phase of the durable task-resource cleanup job, not part of the stop path (see `docs/specs/executors/system-design/remote-task-directory-reclamation.md`). Every stop reason except graceful backend shutdown kills the remote agentctl process and removes its per-session runtime directory.
+
+**Opt-in authentication & per-user scoping** (`internal/auth/`): auth is OFF by default; the global middleware (`auth/httpmw`, installed after CORS in `backendapp.buildHTTPServer`) then injects a synthetic admin identity for the pre-auth single user, so behavior is unchanged. Enablement is the `features.auth` runtime flag (`KANDEV_FEATURES_AUTH`, Settings > System > Feature Toggles) — the auth service derives its mode from `cfg.Features.Auth` (`disabled` / `setup` = flag-on-no-admin / `enabled` = flag-on-admin-exists); there is no separate `auth.mode` setting. When enabled, requests authenticate via the session cookie (base name `kandev_session`; the effective name is derived from the request host — port-scoped on a ported host via `internal/common/httpcookie`, plain on a default-port host) or a `kandev_pat_*` bearer token. Scoping rules:
 - **Identity travels in the request context** (`authn.IdentityFromContext`). No identity = internal caller (pollers, event bus, office schedulers) = unscoped. Synthetic identity = auth disabled = unscoped.
 - **In-session agent MCP is scoped to the task owner.** The MCP tools an agent gets inside its own session are relayed over the agent's WebSocket stream, which carries no credential of its own. `internal/mcp/scope` resolves the stream's task → workspace → owner and attaches that user's real identity before dispatch (`lifecycle.Manager.SetMCPIdentityScoper`), so the same `authorize*` checks apply as for the PAT-authenticated `/mcp` endpoint. The owning task comes from the `AgentExecution`, never from the agent-supplied payload — do not "improve" this by reading `session_id`/`task_id` out of the request. Tool handlers stay identity-agnostic. Under enforced auth every dispatch is scoped to *somebody*: a resolvable active owner gets their identity; an unowned workspace gets a sentinel user ID that reaches unowned rows only; anything unresolvable (missing task/workspace row, or an owner whose account was deleted or disabled) is **denied**. Never return an identity-free context from this path — the task service reads that as an internal caller and grants everything.
 - **Workspaces are per-user** (`workspaces.owner_id`); the task service filters/denies at the service layer with `*NotFound` sentinels (no existence leak). Unowned rows (`owner_id=''`) stay visible until the setup wizard claims them for the admin.
 - **New user-facing service entry points must apply scoping** — call the `authorize*` helpers in `task/service/service_access.go` (or the same pattern) when adding routes that read or mutate workspace-scoped data. This includes **session-keyed** entry points: any service method taking a caller-supplied `sessionID` (or a `taskID` used to reach sessions) authorizes via `authorizeTaskID(session.TaskID)`. Authorize off the row you already read rather than calling `AuthorizeSessionAccess`, which re-reads the session. Batch helpers that take ID *lists* (`BatchGetSessionsForTasks`, `GetPrimarySessionInfoForTasks`, …) are exempt by convention: their callers derive the IDs from an already-authorized task list, so per-ID checks would add N queries to list views for no gain — keep it that way, and don't hand them caller-supplied IDs.
 - **Two session paths bypass the task service and must guard themselves.** (1) Handlers that resolve an execution by a bare in-memory lookup (`GetExecutionBySessionID`, `*BySessionID`) skip the `GetOrEnsure*` chokepoint where the lifecycle check runs — call `service.AuthorizeSessionAccess` (see `ProcessHandlers.denySessionAccess`) or `lifecycleMgr.CheckSessionAccess` first. (2) The orchestrator reads sessions through its own repo handle, so it inherits nothing from the task service; session-keyed entry points there call `authorizeSession` / `authorizeTask`, wired by `SetSessionAccessChecker` / `SetTaskAccessChecker`. An entry point that accepts **both** a task and a session ID must use `authorizeTaskSessionPair`, never `authorizeSession` alone: the caller can satisfy a session-only check with one of their own sessions while pointing `taskID` at someone else's task, which the method then uses for its task-scoped work. Put the guard **first** in the method, before any repo/executor/agent-manager use — `TestSessionKeyedEntryPointsGuardBeforeDependencies` runs each entry point with nil dependencies and fails on a panic if a guard is placed too late.
-- **Dispatched WS actions have a gateway backstop.** `Client.authorizeAction` (`internal/gateway/websocket/dispatch_scope.go`) checks any payload carrying `task_id` or `session_id` against the client's identity *before* dispatch, so a newly added action is scoped by default rather than only when its author remembers. Handler-level scoping is still required (defense in depth, and it covers non-WS callers) — do not delete a service-layer check because the backstop exists. The backstop reads `task_id`, `session_id` and `task_environment_id` — keep using those names for task-scoped actions, because an action that invents a new name for the same kind of resource silently opts out. (`user_shell.stop` was exactly that: it keys off `task_environment_id` with `task_id` optional, so a `task_id`-only backstop missed it.) Also avoid permissive types (`any`, `json.RawMessage`) for those fields: a payload that fails to unmarshal into the ref struct is treated as naming nothing.
-- **WS**: clients carry their identity; dispatched actions and subscriptions are scoped; workspace-carrying events route via `Hub.BroadcastToWorkspace`. A new `hub.Broadcast` (global) call site needs a `//ws:global` justification comment.
-- **Self-authenticating webhooks** (automation, office channels, plugin webhooks) and `/health`, `/api/v1/features`, `/api/v1/app-state` stay public — the allowlist lives in `auth/httpmw/middleware.go` with a pinning test.
+- **The workflow-step surface scopes itself in `internal/workflow`.** Steps, workspace step lists, export and import all reach a workflow or workspace by caller-supplied ID, and none of those IDs is a name the WS dispatch backstop parses, so the guard has to be in this package. `internal/workflow/service/access.go` holds `AuthorizeWorkflow` / `AuthorizeWorkspace` / `AuthorizeStep`, backed by `SetWorkflowAccessChecker` / `SetWorkspaceAccessChecker` (wired to `taskSvc.AuthorizeWorkflowAccess` / `AuthorizeWorkspaceAccess` in `backendapp/services.go`, next to the older `SetSessionAccessChecker`). Step CRUD authorizes in the **controller**, because REST, WS and the MCP tools all share it; `ListStepsByWorkspaceID` and the export/import trio authorize in the **service**, because the boot-payload builder and the MCP config tools call those directly. A denial and a genuine miss both surface as `service.ErrNotVisible` → one 404, so a foreign step and a nonexistent one are indistinguishable. Templates are deliberately unscoped (install-global, ownerless). Note that an empty ID **fails closed** here rather than being passed to `AuthorizeWorkspaceAccess`, which reads `""` as "no scoping applies". A step also *contains* IDs — `move_to_step` names a step, `queue_run` names a task — and the engine dereferences them later on the event bus, with no identity to check against, so they are validated at write time: `models.CollectStepEventReferences` enumerates them (keep it in sync with `RemapStepEvents` when adding a trigger), a transition target must resolve to a step in the same workflow, and a task target is authorized like any other. A reorder's step IDs must belong to the workflow named in the URL, which is also what keeps a read-only workflow's steps from being reordered through a mutable workflow's route.
+- **Dispatched WS actions have a gateway backstop.** `Client.authorizeAction` (`internal/gateway/websocket/dispatch_scope.go`) checks any payload carrying `task_id` or `session_id` against the client's identity *before* dispatch, so a newly added action is scoped by default rather than only when its author remembers. Handler-level scoping is still required (defense in depth, and it covers non-WS callers) — do not delete a service-layer check because the backstop exists. The backstop reads `task_id`, `session_id` and `task_environment_id`, plus `id` on **top-level `task.<verb>` actions only** (`task.state`, `task.move`, `task.get`, … — `task.` and exactly one more segment). Keep using those names for task-scoped actions, because an action that invents a new name for the same kind of resource silently opts out. (`user_shell.stop` was exactly that: it keys off `task_environment_id` with `task_id` optional, so a `task_id`-only backstop missed it. `task.state` and `task.move` were the second instance: they name the task `id`, so the backstop parsed no refs and let one user mutate any other user's task — hence the `id` rule.) Deeper `task.*` namespaces are deliberately excluded: in `task.plan.revision.get` and `task.review.finding.update` the `id` names a revision or a finding, so those actions must carry `task_id` when they are task-scoped. Also avoid permissive types (`any`, `json.RawMessage`) for those fields: a payload that fails to unmarshal into the ref struct is treated as naming nothing. **The backstop does not cover HTTP.** The dispatch backstop only sees WS payloads, so an HTTP route that names a task or environment has to guard itself, and only the third-party integration prefixes have a global middleware. The two SSR terminal lists (`GET /api/v1/environments/:id/terminals`, `GET /api/v1/tasks/:id/terminals`) were the gap: they read straight from the interactive runner and the terminal service (which has no authorization of its own), leaking another user's terminal display names and initial command lines. They now mount `authorizeEnvironmentRoute` / `authorizeTaskRoute` (`internal/agent/handlers/shell_handlers.go`) as gin route guards calling `lifecycleMgr.CheckEnvironmentAccess` / `CheckTaskAccess`, so the check runs before any terminal state is read. Guard **every** ID the handler consumes, not just the path param: `/tasks/:id/terminals` also takes `?task_environment_id=`, which is a second way into a foreign environment. When a handler merges state keyed by two IDs, authorize them as a **pair** (`AuthorizeTaskEnvironmentAccess`, the task/environment sibling of `AuthorizeTaskSessionAccess`) rather than independently: both single-ID checks pass for a caller who holds each ID separately, and the handler then merges two unrelated lists. Pair on the binding, not on row ownership: `inherit_parent` binds a subtask's session to the parent task's environment and `shared_group` binds every group member to one canonical environment, so `env.TaskID == taskID` is the wrong predicate and would empty the terminal panel for both modes.
+- **WS**: clients carry their identity; dispatched actions and subscriptions are scoped; workspace-carrying events route via `Hub.BroadcastToWorkspace`. A new `hub.Broadcast` (global) call site needs a `//ws:global` justification comment. Subscription actions (`*.subscribe`) `return` before reaching the dispatch backstop (`Client.authorizeAction`), so scoping a new subscribe topic means adding a hook to `SubscriptionAccessPolicy` (`internal/gateway/websocket/access.go`) *and* calling it explicitly inside that action's own handler — the backstop's `scopedActionRefs` cannot reach it. `run.subscribe`'s `Subscriptions.Run` hook (added for WO-02, resolving the run's workspace via `runs.GetRunWorkspaceID`) is the worked example.
+- **Task overview vs. session detail:** Keep cross-task state in the bounded, persisted `TaskStatusSummary` projection and `task.status_summary.updated`; keep unbounded transcript and execution data session-scoped. The [bounded task-status spec](../../docs/specs/platform/requirements/bounded-task-status-delivery.md) and [accepted ADR](../../docs/decisions/2026-08-01-separate-task-summary-session-stream-traffic.md) define the shared contract.
+- **Port-proxy subtree capability:** with auth enforced, `/port-proxy/:sessionId/:port/*` needs a credential on *every* request, but browser subresource fetches cannot always carry one (the `<link rel="manifest">` fetch never sends cookies; sandboxed iframes and `?token=`-opened previews drop them elsewhere). `PortProxyHandler` mints a short-lived (15 min, sliding), path-scoped, HMAC-signed capability after the document authenticates and propagates it as a cookie scoped to the proxy subtree plus a `kandev_cap` query parameter appended to rewritten asset URLs. `requireConnectionAuth` (`internal/gateway/websocket/access.go`) accepts either form only for the exact session:port it was minted for and restores the issuing identity, so `CheckSessionAccess` still gates on the real owner. Synthetic identities (auth disabled) skip minting — proxied bodies stay byte-identical to the pre-auth behavior.
+- **Self-authenticating webhooks** (automation and office channels) and `/health`, `/ready`, `/api/v1/features`, `/api/v1/app-state` stay public — the allowlist lives in `auth/httpmw/middleware.go` with a pinning test. Plugin webhooks are not allowlisted: `auth/httpmw` structurally defers only GET/POST relay paths because it cannot read manifests, and `internal/plugins.Controller.webhook` enforces each manifest's `access` policy.
 
 ## Execution Flow
 
@@ -204,61 +216,56 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
 
 **Executor default scripts:** Default prepare scripts are in `internal/agent/runtime/lifecycle/default_scripts.go`; `internal/scriptengine/` handles placeholder resolution.
 
+- **Launcher quoting:** Quote interpolated environment values for POSIX/Git Bash
+  versus native Windows; when launch recipes change, extend
+  `scripts/check-make-shells` with default, spaced, and quote-containing values.
+
 ## Conventions
 
 - Provider pattern for DI; stderr for logs, stdout for ACP only.
 - Pass context through chains; event bus for cross-component comm.
-- Production Git commands must use `subproc.NewGitCommand` with a classified
-  `subproc.RunGit*` helper, or hold a classified admission slot across
-  streaming `Start`/`Wait`. Do not construct raw Git commands outside
-  `internal/common/subproc`; choose `interactive`, `lifecycle`, or `background`
-  explicitly for each operation.
-- **Event-bus wildcard parity:** New NATS wildcard subscriptions must verify equivalent `MemoryEventBus` semantics in `go test ./internal/events/bus`.
+- **Dependency direction:** Shared admission limits used by task models and orchestrator/messagequeue belong in a neutral internal package; task/models must not import the higher-level orchestrator/messagequeue package.
+- Production Git commands must use `subproc.NewGitCommand` with a classified `subproc.RunGit*` helper, or hold a classified admission slot across streaming `Start`/`Wait`. Do not construct raw Git commands outside `internal/common/subproc`; choose `interactive`, `lifecycle`, or `background`.
+- Managed Git final preparation runs immediately before `Start` and owns the full `Start`-to-`Wait` lifecycle. Network callers choose finite post-admission budgets; use `AfterAcquire` builders so queue wait is outside the execution budget. Shared lifecycle code belongs in `internal/common`, and agentctl keeps only compatibility wrappers.
+- **Cross-tier shared code belongs in `internal/common/`.** agentctl ships as a standalone binary uploaded into containers, so neither it nor the backend may own code the other imports — put shared logic in a neutral `internal/common/*` package instead of importing across the boundary or forking a copy (`ptyexec` is the worked example; `subproc`, `gitref`, `securityutil` are older ones). Duplicating to "avoid the dependency" is how the two PTY copies drifted.
+- **Startup configuration ownership:** `internal/common/config/catalog.go` and `source.go` own the stable operator catalog, discovery, precedence, provenance, and typed values; managed agentctl children receive a private subset contract. Do not reparse stable env in executors or copy YAML into public child environments.
+- **Pure computation that only matters on Windows should not carry `//go:build windows`.** One CI job runs on Windows and it tests a package allowlist, so tagged code is easily unverified — loginpty's copy of the Win32 quoting was compiled by no job at all. Keep platform API calls behind the tag, leave string/path helpers untagged, and add packages needing native coverage to the `test-windows` job in `.github/workflows/backend-tests.yml`.
+- **Event-bus wildcard parity:** New NATS wildcard subscriptions must verify equivalent `MemoryEventBus` semantics in `go test ./internal/events/bus`. `EventBus.Publish` completion means transport/enqueue, not remote NATS subscriber processing; never use publication as a local ordering acknowledgement. If a waiter must not release until local state is armed, use a construction-supplied synchronous local notifier or durable state transition before publishing fan-out, and test with an async/NATS-like bus fake as well as `MemoryEventBus`.
 - **Repository provider identity:** Provider-backed repositories are keyed by workspace, provider, normalized `provider_host` origin, full owner/namespace, and name. Persist `provider_host` when importing or resolving a remote; do not infer self-managed GitLab rows from owner/name alone. Legacy rows with an empty host have unknown identity and must fail closed for provider write/link operations.
+- **Repository provider branches:** Native task branch pickers derive provider identity only from the persisted workspace repository. GitHub uses the first-party service; manifest-owned providers route through the owning active plugin's workspace-scoped `repositories.branches` action. Do not add provider-specific task-service branches or accept browser-supplied repository descriptors on this path.
+- **PR status sync:** For watch identity, PR lifecycle persistence, or batched lookup changes, read [GitHub guidance](internal/github/AGENTS.md).
 - **Execution access:** Workspace-oriented handlers (files, shell, inference, ports, vscode, LSP) MUST use `GetOrEnsureExecution(ctx, sessionID)` — it recovers from backend restarts by creating executions on-demand. Only use `GetExecutionBySessionID` for operations that require a running agent process (prompt, cancel, mode).
-- **Task lifecycle events:** Any code path that mutates a task row must publish via the event bus (`task.created` / `task.updated` / `task.deleted`) — either by going through `Service.CreateTask` / `UpdateTask` / `DeleteTask` / `ArchiveTask`, or by calling `publishTaskEvent` (or one of the `Publish*` helpers in `service_events.go`) directly. Walking `repository.TaskRepository` straight bypasses event publishing and breaks WS-driven UI like the All-Workflows kanban view. `HandoffService`'s cascade methods learned this the hard way — they now require a `TaskEventPublisher` wired via `SetTaskEventPublisher`. New cascade / bulk / cleanup paths must follow the same pattern.
-- **Testing:** Prefer `testing/synctest` (Go 1.24+) over `time.Sleep` for time-dependent tests. Use `synctest.Test` to wrap tests with tickers or timeouts — it advances fake time instantly when all goroutines are idle. When `synctest` is not feasible (e.g., tests spawning external processes like `git`), use channel-based synchronization (`<-started`, non-blocking `select`) instead of sleep-based waits. Reserve `time.Sleep` only for integration tests that need real subprocess execution time.
-  - **Test cleanup:** Register `t.Cleanup` immediately after creating resources that need teardown (adapters, `io.Pipe` writers, background goroutines) — before any `t.Fatal`/`t.Fatalf` path. Late cleanup registration leaks pipes and goroutines on early failure.
-  - **Joining production goroutines in tests:** When code spawns untracked goroutines (e.g. `fireWakeup`), don't rely on arbitrary sleeps. Join via an observable side effect — e.g. block on `EventTypeComplete` from `a.updatesCh` after unblocking the fake agent. Use short timeouts (~100ms) for in-process negative assertions; reserve multi-second waits for subprocess/integration tests only.
-  - **Path/security tests:** Avoid using the real filesystem root as a fixture root. Build fake absolute roots under `t.TempDir()` with `filepath.Join`; this keeps tests portable across Windows, POSIX, and privileged cloud executors.
-  - **Filesystem permission tests:** Assert permission-denied behavior only after probing that the current executor enforces the permission bit change. Root-like Sprite executors may bypass `chmod` restrictions.
-  - **Filesystem safety checks:** Carry the original `os.Lstat` `FileInfo` (or opened handle) through every decision; do not re-stat a validated path, which reopens a TOCTOU window before side effects. Test mismatches before writes or manager commands.
-  - **Git indexed-environment tests:** When a test supplies `GIT_CONFIG_COUNT`,
-    `GIT_CONFIG_KEY_n`, and `GIT_CONFIG_VALUE_n`, clear every inherited indexed
-    key first and restore it with `t.Cleanup`. Changing only the count can leave
-    higher parent indexes behind and create a malformed Git config block.
-  - **Full test output:** For local full-suite pass/fail validation, prefer plain `go test -race ./...`. `go test -json ./...` can emit very large JSONL streams; if a wrapper or tracing tool truncates the stream mid-record, downstream JSON parsing may fail even when Go tests passed. Use JSON output mainly for CI artifacts or test-report tooling that explicitly requires it.
-  - **Private executable helpers:** When library code starts `os.Executable()` in
-    a private helper mode, do not rely only on a command package's dispatch or
-    package-specific `TestMain`: an importing package's test binary can be the
-    executable and recursively run tests. Use either an explicitly marked
-    private env-and-argument trampoline that runs before normal test entry, or
-    inject a dedicated helper executable. Cover it from a different importing
-    package, not only the helper package.
+- **Generated-title ownership:** Claim generated-title ownership only after task, config, and Office eligibility is known. Config tasks, Office/External modes, and workspace-only preparation (`StartAgent: false`) must never claim it; only an eligible agent-start task may claim the generated title.
+- **Task lifecycle events:** Any code path that mutates a task row must publish via the event bus (`task.created` / `task.updated` / `task.deleted`) — either by going through `Service.CreateTask` / `UpdateTask` / `DeleteTask` / `ArchiveTask`, or by calling `publishTaskEvent` (or one of the `Publish*` helpers in `service_events.go`) directly. Walking `repository.TaskRepository` straight bypasses event publishing and breaks WS-driven UI like the All-Workflows kanban view. `HandoffService`'s cascade methods learned this the hard way — they now require a `TaskEventPublisher` wired via `SetTaskEventPublisher`. New cascade / bulk / cleanup paths must follow the same pattern. **Workflow steps** follow the same rule with their own publisher: step create/update/delete publish `workflow_step.created` / `.updated` / `.deleted` through `internal/workflow/stepevents.Publisher` (the WS gateway fans them out; the orchestrator re-evaluates queue admission off `.updated`). Both mutation surfaces — REST/WS in `internal/workflow/handlers`, MCP in `internal/mcp/handlers` — share that publisher and differ only in the source label they pass, so a new step-mutation path uses it rather than hand-rolling the payload; promoting a start step demotes the previous one, so also publish `.updated` for every entry in `DemotedStartSteps`.
+- **Agent task plans:** Agent whole-document writes must carry `expected_version` when a plan already exists. The task service rejects suspicious reductions before storage and requires explicit `allow_truncation` plus verified history for intentional reductions. Exact edits and revision recovery stay task-scoped, use the service lock, and check both the current plan version and the selected revision snapshot. Keep browser DTOs and browser write behavior independent from the agent-only version contract.
+- **Workspace deletion side tables:** Any workspace-scoped integration side table without a database foreign key/cascade must be deleted explicitly from its `WorkspaceDeleted` handler. Cover the create → delete lifecycle in a test, and include the same cleanup in E2E reset fixtures; do not assume deleting the workspace row removes orphaned integration metadata.
+- **Testing:** For backend test changes, load [backend-tests.md](../../.agents/skills/tdd/references/backend-tests.md).
+  It covers time, cleanup, filesystem fixtures, environment isolation, and subprocess helpers.
 
 ### Goroutine ownership and leak testing
 
 Every long-running goroutine must have a single owner with explicit start and stop semantics:
 
-- **Lifecycle:** the type that spawns the goroutine also exposes `Start(ctx)` / `Stop()` (or equivalent). `Start` registers on a `sync.WaitGroup`; `Stop` cancels the goroutine's context (or closes a `stopCh`) and `wg.Wait()`s for drain. Idempotent on both ends. `internal/integrations/healthpoll`, `internal/jira`, `internal/linear`, and `internal/github` pollers are the canonical shape.
+- **Lifecycle:** the type that spawns the goroutine also exposes `Start(ctx)` / `Stop()` (or equivalent). `Start` registers on a `sync.WaitGroup`; `Stop` cancels the goroutine's context (or closes a `stopCh`) and `wg.Wait()`s for drain. Idempotent on both ends. Restartable services must reset stopped state and create a fresh cancellable context/cancel under the same mutex used by `Stop`; cover `Stop` → `Start`. `internal/integrations/healthpoll`, `internal/jira`, `internal/linear`, and `internal/github` pollers are the canonical shape.
 - **E2E reset invariant:** `seedData`/backend are worker-scoped, so any workspace-scoped state a global poller reads (for example `github_review_watches`) must be deleted in `cmd/kandev/e2e_reset.go` before task deletion — otherwise the poller recreates rows mid-reset and later tests see duplicates. Add a `Delete...ByWorkspace` cascade when introducing a new poller-backed entity.
 - **Cancellation:** the goroutine selects on `ctx.Done()` (or `stopCh`) in every long wait. Never use `time.Sleep` in a retry/backoff loop — use `time.NewTimer` inside a `select` that also watches the shutdown signal (see `lifecycle.StreamManager.sleepOrStop`).
 - **Detached helpers:** event handlers and short-lived `go func()` calls in `internal/orchestrator/` and `internal/agent/runtime/lifecycle/` must accept a cancellable context (or check the owning type's shutdown signal) and return promptly when it fires.
-- **Leak testing:** packages that spawn goroutines add `goleak.VerifyTestMain(m)` in a per-package `TestMain`. New packages of this kind must follow suit. When a third-party background goroutine genuinely can't be drained, suppress it with `goleak.IgnoreTopFunction(...)` and leave a comment explaining why. Currently instrumented: `internal/gateway/websocket/`, `internal/agent/runtime/lifecycle/`, `internal/agentctl/server/process/`, `internal/orchestrator/`, `internal/github/`, `internal/jira/`, `internal/linear/`, `internal/integrations/healthpoll/`.
+- **Leak testing:** packages that spawn goroutines add `goleak.VerifyTestMain(m)` in a per-package `TestMain`. New packages of this kind must follow suit. When a third-party background goroutine genuinely can't be drained, suppress it with `goleak.IgnoreTopFunction(...)` and leave a comment explaining why. Currently instrumented: `internal/gateway/websocket/`, `internal/agent/runtime/lifecycle/`, `internal/agentctl/server/process/`, `internal/orchestrator/`, `internal/github/`, `internal/gitlab/`, `internal/jira/`, `internal/linear/`, `internal/integrations/healthpoll/`.
 
 ## Backups
-
-- On every SQLite boot, `persistence.Provide` reads `kandev_meta.kandev_version`. If the stored version differs from the binary version (or any user tables exist but no version is recorded), it takes a `VACUUM INTO` snapshot into `<data-dir>/backups/` before running migrations.
+- `internal/system/toolretention` owns opt-in payload cleanup; policy and progress share one settings record. Its batches share `internal/system/maintenance` admission with backup, restore/reset, and compaction. Keep preparation cancellable and accepted manual jobs independent of HTTP cancellation. Message replacements must preserve removal markers and activity timestamps; analysis and cleanup share the reducer. Status polling and startup never scan payloads. See [the retention design](../../docs/specs/system-page/system-design/tool-payload-retention.md).
+- On every SQLite boot, `persistence.Provide` reads `kandev_meta.kandev_version`. If the stored version differs from the binary version (or any user tables exist but no version is recorded), it takes a `VACUUM INTO` snapshot into `backups/` beside the configured SQLite database file before running migrations. `VACUUM INTO` recreates its target, so create staged snapshots inside a same-filesystem private `0700` staging directory and chmod the file to `0600` before validation/install; removing a placeholder and chmodding afterward does not protect the creation window. The default path is `<home>/data/kandev.db`, with backups in `<home>/data/backups/`.
 - Retention: 2 backups kept (newest two by mtime); older ones are pruned after the snapshot succeeds.
 - Postgres: backup is skipped with a log line. Use `pg_dump` for Postgres backups.
 - Boot aborts if the backup fails — the pool is closed and `Provide` returns an error.
+- Restore quiesces scheduling, active executions, and database-backed workers, validates the SQLite checkpoint result, and closes the shared pool. It quarantines the configured database and sidecars, installs the staged file, and restores the originals if replacement fails. The frontend requires a restart before database-backed work resumes; PostgreSQL restore is rejected.
 - After all repos complete `initSchema`, `cmd/kandev/storage.go:recordSchemaVersion` writes the current binary version into `kandev_meta` (non-fatal; a failure just means the next boot will take a fresh snapshot).
 - Migration logging: `db.MigrateLogger.Apply(name, stmt)` — success logs Info, "already exists" / "duplicate column name" is silently swallowed, anything else logs Warn but never returns an error (preserving the existing swallow-error contract).
 - Schema replay handling: use `internal/db` helpers such as `IsDuplicateColumnError` / `IsAlreadyExistsError` instead of local error-string matching. When adding or changing startup schema code, include fresh-DB plus same-DB replay tests for SQLite; add the same env-gated Postgres replay coverage when the path supports Postgres. See `docs/decisions/0027-replayable-schema-migrations.md`.
 
 ## Schema & migrations (SQLite repository)
 
-`internal/task/repository/sqlite` also runs against PostgreSQL: avoid unguarded SQLite-only `rowid`, JSON, or date syntax and add an environment-gated PostgreSQL behavior test for every changed dialect-sensitive method (schema replay is insufficient).
+`internal/task/repository/sqlite` also runs against PostgreSQL: avoid unguarded SQLite-only `rowid`, JSON, or date syntax and add an environment-gated PostgreSQL behavior test for every changed dialect-sensitive method (schema replay is insufficient). For PostgreSQL read-modify-write invariants, acquire a transaction-scoped `pg_advisory_xact_lock(hashtextextended(namespace+identity, 0))` before the first read or update; SQLite's single-writer lock does not need this, and unique constraints/retries remain defense in depth. Verify with an env-gated real multi-connection test under `go test -race`.
 
 `initSchema()` in `internal/task/repository/sqlite/base_schema.go` runs the `init*Schema` (CREATE TABLE) steps **before** `runMigrations()`. The table-creation DDL uses `CREATE TABLE IF NOT EXISTS`, so on an **existing** database it is a no-op and never adds columns to a table that is already present.
 
@@ -270,28 +277,23 @@ Built-in prompt content refreshes are seed-data migrations, not schema migration
 
 ## Internationalization
 
-`internal/i18n` renders only browser-facing copy: SPA-unavailable pages and shared-task artifacts. Diagnostics, logs, agent/ACP output, and CLI output remain English.
-Use `i18n.T`/`i18n.Tf` with explicit locale threading (including interpolation/plurals); resolve artifact locale at creation. Catalogs are embedded in `internal/i18n/locales/`; regenerate `pseudo` with `pnpm run i18n:pseudo`.
+`internal/i18n` renders only browser-facing copy: SPA-unavailable pages and shared-task artifacts. Diagnostics, logs, agent/ACP output, and CLI output remain English. Use `i18n.T`/`i18n.Tf` with explicit locale threading (including interpolation/plurals); resolve artifact locale at creation. Catalogs are embedded in `internal/i18n/locales/`; regenerate `pseudo` with `pnpm run i18n:pseudo`.
 Prefer stable error codes for new output so the frontend translates it. See `docs/i18n.md` and ADR `2026-08-01-share-artifact-locale.md`.
+
+**Table-rebuild migrations:** When a legacy or constraint migration recreates a table, mirror every new column in the replacement `CREATE TABLE` and `INSERT ... SELECT` copy list; add a replay regression test proving values, including timestamps, survive. **Destructive cutover migrations:** Build a legacy schema with `NewWithDB` on a fresh database, replace final-shaped tables with legacy-shaped ones, inject a test-only failpoint after each cutover step, and assert byte-equivalent rollback; run the same matrix with `KANDEV_TEST_POSTGRES_DSN`, looking up PostgreSQL constraint names dynamically because they truncate at 63 bytes.
+
+Every built-in SQL schema owner needs a descriptor in `internal/persistence/requiredstores` and a fixed adapter in `internal/persistence/storeconformance`.
+Bootstrap records each constructor through the tracker; missing required schema fails before readiness. Provider credentials and remote probes remain independently degradable.
+For persistence changes, run `go run ./cmd/sqlguard ./internal` and `go test -race ./internal/persistence/storeconformance -count=1`; set `KANDEV_TEST_POSTGRES_DSN` for PostgreSQL coverage and update the explicit-tag upgrade fixture and manifest when schema history changes.
 
 ## Code-quality limits
 
 Enforced by `apps/backend/.golangci.yml` (errors on new code only):
-- Functions: ≤80 lines, ≤50 statements · Cyclomatic complexity: ≤15 · Cognitive complexity: ≤30
-- Nesting depth: ≤5 · Naked returns only in functions ≤30 lines · No duplicated blocks (≥150 tokens) · Repeated strings → constants (≥3 occurrences)
+- Functions: ≤80 lines, ≤50 statements · Cyclomatic complexity: ≤15 · Cognitive complexity: ≤30 · Nesting depth: ≤5 · Naked returns only in functions ≤30 lines · No duplicated blocks (≥150 tokens) · Repeated strings → constants (≥3 occurrences) · Revive's 800-effective-line file limit also applies to test files; put new tests in a new file instead of appending to an already-large test file.
 
-When you hit a limit, extract a helper function. Prefer composition over growing a single function.
-
-When a PR fixup touches backend code, run the CI-style changed-file linter locally from `apps/backend` with the PR base SHA before pushing, because CI enforces changed-file complexity thresholds:
-
-```bash
-golangci-lint run ./... --new-from-rev="<base-sha>" --timeout=5m
-```
-
-## Further scoped notes
-
-- `internal/agentctl/AGENTS.md` — agentctl server route groups, adapter model, ACP protocol
+When a PR fixup touches backend code, run `golangci-lint run ./... --new-from-rev="<base-sha>" --timeout=5m` from `apps/backend` with the PR base SHA before pushing; CI enforces changed-file complexity thresholds.
+- `internal/launcher/` — native launcher owning every entrypoint (`dev`, `start`, `run`, `service`); `dev` runs `make -C apps/backend dev` with Vite as a supervised child, state under `<repoRoot>/.kandev-dev/`. The root `make dev` prebuilds only the copied launcher; the backend dev target builds the native agentctl and a linux/amd64 helper when the host is not Linux/amd64 (`docs/plans/go-dev-launcher/`).
+- `internal/agentctl/AGENTS.md` — server routes, adapters, ACP; `cmd/mock-agent/AGENTS.md` — E2E scenario patterns and rebuild requirements
 - `internal/agentctl/server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`), iframe-blocking header stripping
 - `internal/integrations/AGENTS.md` — playbook for adding a new third-party integration (Jira/Linear pattern)
 - `docs/i18n.md` ("Backend") — `internal/i18n` covers only what Go renders straight to a browser: the SPA-unavailable error pages and the shared-task artifacts (`share.html`, gist README and description). Both are complete. Everything else stays English by design; for new user-facing output prefer a stable error code the frontend translates. Use `i18n.Tf` for anything carrying a value — never `fmt.Sprintf` a translated string, and never build a plural in Go. A locale for output that outlives the request is resolved once at write time and threaded as an argument, not a context value (ADR `2026-08-01-share-artifact-locale.md`).
-- `cmd/mock-agent/AGENTS.md` — predefined `/e2e:<name>` scenarios vs inline `e2e:...` scripts, recipe for adding a scenario, and the rebuild-before-e2e requirement

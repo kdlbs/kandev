@@ -23,20 +23,6 @@ type Capabilities struct {
 	SupportsWorkspaceOnly bool `json:"supports_workspace_only"`
 }
 
-// KnownAgent represents an agent definition with discovery metadata.
-// Model data now comes from the host utility capability cache — see
-// internal/agent/hostutility. The Models/DefaultModel fields below are
-// intentionally empty; discovery only advertises *which* agent types exist
-// and whether their CLI is installed.
-type KnownAgent struct {
-	Name              string       `json:"name"`
-	DisplayName       string       `json:"display_name"`
-	SupportsMCP       bool         `json:"supports_mcp"`
-	MCPConfigPaths    []string     `json:"mcp_config_paths"`
-	InstallationPaths []string     `json:"installation_paths"`
-	Capabilities      Capabilities `json:"capabilities"`
-}
-
 // Availability represents the result of detecting an agent's installation.
 type Availability struct {
 	Name              string       `json:"name"`
@@ -49,74 +35,50 @@ type Availability struct {
 }
 
 // Registry manages agent discovery using the agents.Agent interface.
+//
+// The agent list is read from the agent registry on every sweep rather than
+// captured once. Custom agents are registered, replaced, and unregistered
+// while the backend runs (agent creation, MCP-strategy changes, deletion), and
+// a captured list would keep reporting a deleted agent as installed — and keep
+// a replaced one's superseded discovery flags — until the next restart.
 type Registry struct {
-	agents      []agents.Agent
-	definitions []KnownAgent
-	logger      *logger.Logger
+	registry *registry.Registry
+	logger   *logger.Logger
 
 	mu            sync.RWMutex
 	cachedResults []Availability
 	cachedAt      time.Time
 	cacheTTL      time.Duration
+	// generation counts invalidations. A sweep reads the registry when it
+	// starts and writes its results when it finishes, so an invalidation can
+	// land in between; the sweep carries the generation it began with and
+	// discards its results when that no longer matches.
+	generation uint64
 }
 
-// LoadRegistry creates a new discovery registry from the agent registry.
-// It iterates over all enabled agents, calls IsInstalled and ListModels
-// to populate the KnownAgent definitions.
-func LoadRegistry(ctx context.Context, reg *registry.Registry, log *logger.Logger) (*Registry, error) {
-	enabled := reg.ListEnabled()
-
-	definitions := make([]KnownAgent, 0, len(enabled))
-	agentList := make([]agents.Agent, 0, len(enabled))
-
-	for _, ag := range enabled {
-		// Gather discovery info from the agent.
-		result, err := ag.IsInstalled(ctx)
-		if err != nil {
-			log.Warn("discovery: failed to check agent installation",
-				zap.String("agent", ag.ID()),
-				zap.Error(err),
-			)
-			// Still include the agent but with empty discovery data.
-			result = &agents.DiscoveryResult{}
-		}
-
-		displayName := ag.DisplayName()
-		if displayName == "" {
-			displayName = ag.Name()
-		}
-
-		knownAgent := KnownAgent{
-			Name:              ag.ID(),
-			DisplayName:       displayName,
-			SupportsMCP:       result.SupportsMCP,
-			MCPConfigPaths:    result.MCPConfigPaths,
-			InstallationPaths: result.InstallationPaths,
-			Capabilities: Capabilities{
-				SupportsSessionResume: result.Capabilities.SupportsSessionResume,
-				SupportsShell:         result.Capabilities.SupportsShell,
-				SupportsWorkspaceOnly: result.Capabilities.SupportsWorkspaceOnly,
-			},
-		}
-
-		definitions = append(definitions, knownAgent)
-		agentList = append(agentList, ag)
-	}
-
+// LoadRegistry creates a new discovery registry backed by the agent registry.
+// The context is unused: nothing is probed here, because detection resolves the
+// agent list when a sweep runs.
+func LoadRegistry(_ context.Context, reg *registry.Registry, log *logger.Logger) (*Registry, error) {
 	return &Registry{
-		agents:      agentList,
-		definitions: definitions,
-		logger:      log,
-		cacheTTL:    defaultCacheTTL,
+		registry: reg,
+		logger:   log,
+		cacheTTL: defaultCacheTTL,
 	}, nil
 }
 
-// Definitions returns a copy of all known agent definitions.
-func (r *Registry) Definitions() []KnownAgent {
-	if r == nil {
-		return nil
+// enabledAgents returns the agents a sweep should probe: every enabled entry in
+// the agent registry except virtual families, which have no CLI to detect.
+func (r *Registry) enabledAgents() []agents.Agent {
+	enabled := r.registry.ListEnabled()
+	result := make([]agents.Agent, 0, len(enabled))
+	for _, ag := range enabled {
+		if agents.IsVirtualAgent(ag) {
+			continue
+		}
+		result = append(result, ag)
 	}
-	return append([]KnownAgent(nil), r.definitions...)
+	return result
 }
 
 // Detect checks whether each agent is installed by calling IsInstalled.
@@ -126,11 +88,17 @@ func (r *Registry) Detect(ctx context.Context) ([]Availability, error) {
 		return cached, nil
 	}
 
+	r.mu.RLock()
+	startedAt := r.generation
+	r.mu.RUnlock()
+
 	results := r.detectAll(ctx)
 
 	r.mu.Lock()
-	r.cachedResults = results
-	r.cachedAt = time.Now()
+	if r.generation == startedAt {
+		r.cachedResults = results
+		r.cachedAt = time.Now()
+	}
 	r.mu.Unlock()
 
 	return results, nil
@@ -142,6 +110,7 @@ func (r *Registry) InvalidateCache() {
 	r.mu.Lock()
 	r.cachedResults = nil
 	r.cachedAt = time.Time{}
+	r.generation++
 	r.mu.Unlock()
 }
 
@@ -175,8 +144,9 @@ func (r *Registry) detectAll(ctx context.Context) []Availability {
 		err   error
 	}
 
-	ch := make(chan indexedResult, len(r.agents))
-	for i, ag := range r.agents {
+	sweep := r.enabledAgents()
+	ch := make(chan indexedResult, len(sweep))
+	for i, ag := range sweep {
 		go func(idx int, ag agents.Agent) {
 			result, err := ag.IsInstalled(ctx)
 			if err != nil {
@@ -210,14 +180,14 @@ func (r *Registry) detectAll(ctx context.Context) []Availability {
 
 	// Collect results preserving original order.
 	// If the context expires before all agents respond, return partial results.
-	slots := make([]Availability, len(r.agents))
-	valid := make([]bool, len(r.agents))
-	for range r.agents {
+	slots := make([]Availability, len(sweep))
+	valid := make([]bool, len(sweep))
+	for range sweep {
 		select {
 		case res := <-ch:
 			if res.err != nil {
 				r.logger.Warn("discovery: detect failed for agent",
-					zap.String("agent", r.agents[res.index].ID()),
+					zap.String("agent", sweep[res.index].ID()),
 					zap.Error(res.err),
 				)
 				continue
@@ -231,7 +201,7 @@ func (r *Registry) detectAll(ctx context.Context) []Availability {
 	}
 collect:
 
-	results := make([]Availability, 0, len(r.agents))
+	results := make([]Availability, 0, len(sweep))
 	for i, v := range valid {
 		if v {
 			results = append(results, slots[i])

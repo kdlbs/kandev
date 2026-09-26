@@ -16,6 +16,7 @@ import { useAppStore } from "@/components/state-provider";
 import { dismissInboxItem, retryProvider } from "@/lib/api/domains/office-extended-api";
 import type { InboxItem } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
+import { useTranslation } from "react-i18next";
 
 const ICON_MAP: Record<string, typeof IconShieldCheck> = {
   "shield-check": IconShieldCheck,
@@ -26,15 +27,18 @@ const ICON_MAP: Record<string, typeof IconShieldCheck> = {
   route: IconRoute,
 };
 
-const FALLBACK_TYPE_CONFIG: Record<string, { icon: typeof IconShieldCheck; label: string }> = {
-  approval: { icon: IconShieldCheck, label: "Approval" },
-  budget_alert: { icon: IconAlertTriangle, label: "Budget Alert" },
-  agent_error: { icon: IconBug, label: "Agent Error" },
-  agent_run_failed: { icon: IconBug, label: "Agent run failed" },
-  agent_paused_after_failures: { icon: IconPlayerPause, label: "Agent auto-paused" },
-  task_review: { icon: IconEye, label: "Task Review" },
-  task_review_request: { icon: IconEye, label: "Review Request" },
-  provider_degraded: { icon: IconRoute, label: "Provider degraded" },
+// `labelKey` rather than `label`: this table is module scope, so a `t()` here
+// would resolve once at import and freeze at the boot locale. The key travels
+// and `useInboxTypeConfig` resolves it at render.
+const FALLBACK_TYPE_CONFIG: Record<string, { icon: typeof IconShieldCheck; labelKey: string }> = {
+  approval: { icon: IconShieldCheck, labelKey: "office:approval" },
+  budget_alert: { icon: IconAlertTriangle, labelKey: "office:budgetAlert" },
+  agent_error: { icon: IconBug, labelKey: "office:agentError" },
+  agent_run_failed: { icon: IconBug, labelKey: "office:agentRunFailed" },
+  agent_paused_after_failures: { icon: IconPlayerPause, labelKey: "office:agentAutoPaused" },
+  task_review: { icon: IconEye, labelKey: "office:taskReview" },
+  task_review_request: { icon: IconEye, labelKey: "office:reviewRequest" },
+  provider_degraded: { icon: IconRoute, labelKey: "office:providerDegraded" },
 };
 
 // taskReviewHref returns the deep link for a `task_review_request`
@@ -62,15 +66,18 @@ type Props = {
 };
 
 function useInboxTypeConfig(type: string) {
+  const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
-  const metaType = meta?.inboxItemTypes.find((t) => t.id === type);
+  const metaType = meta?.inboxItemTypes.find((item) => item.id === type);
   if (metaType) {
+    // Server-supplied label: workspace data, so it travels as-is.
     return {
       icon: ICON_MAP[metaType.icon] ?? IconShieldCheck,
       label: metaType.label,
     };
   }
-  return FALLBACK_TYPE_CONFIG[type] ?? FALLBACK_TYPE_CONFIG.approval;
+  const fallback = FALLBACK_TYPE_CONFIG[type] ?? FALLBACK_TYPE_CONFIG.approval;
+  return { icon: fallback.icon, label: t(fallback.labelKey) };
 }
 
 function InboxRowBody({ item }: { item: InboxItem }) {
@@ -94,6 +101,7 @@ function InboxRowBody({ item }: { item: InboxItem }) {
 }
 
 export function InboxItemRow({ item, onApprove, onReject, onChanged }: Props) {
+  const { t } = useTranslation();
   const taskHref = taskReviewHref(item);
   if (taskHref) {
     return (
@@ -119,7 +127,7 @@ export function InboxItemRow({ item, onApprove, onReject, onChanged }: Props) {
             className="bg-green-700 text-white hover:bg-green-800 cursor-pointer"
             onClick={() => onApprove?.(item.id)}
           >
-            Approve
+            {t("office:approve")}
           </Button>
           <Button
             size="sm"
@@ -127,7 +135,7 @@ export function InboxItemRow({ item, onApprove, onReject, onChanged }: Props) {
             className="cursor-pointer"
             onClick={() => onReject?.(item.id)}
           >
-            Reject
+            {t("office:reject")}
           </Button>
         </div>
       )}
@@ -142,6 +150,7 @@ export function InboxItemRow({ item, onApprove, onReject, onChanged }: Props) {
 }
 
 function ProviderDegradedActions({ item, onChanged }: { item: InboxItem; onChanged?: () => void }) {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const [busy, setBusy] = useState(false);
   const action = (item.payload?.action as string | undefined) ?? "configure";
@@ -162,14 +171,14 @@ function ProviderDegradedActions({ item, onChanged }: { item: InboxItem; onChang
     <div className="flex gap-2 shrink-0">
       {action === "wait_for_capacity" ? (
         <Button size="sm" variant="outline" disabled className="cursor-pointer">
-          Waiting…
+          {t("office:waiting")}
         </Button>
       ) : (
         <Link
           href="/office/workspace/routing"
           className="text-xs underline-offset-4 hover:underline cursor-pointer"
         >
-          {action === "reconnect" ? "Reconnect" : "Configure"}
+          {action === "reconnect" ? t("office:reconnect") : t("office:configure")}
         </Link>
       )}
       <Button
@@ -179,13 +188,14 @@ function ProviderDegradedActions({ item, onChanged }: { item: InboxItem; onChang
         onClick={handleRetry}
         disabled={busy || !providerId}
       >
-        {busy ? "Retrying…" : "Retry now"}
+        {busy ? t("office:retrying") : t("office:retryNow")}
       </Button>
     </div>
   );
 }
 
 function MarkFixedButton({ item, onChanged }: { item: InboxItem; onChanged?: () => void }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const handleClick = async () => {
     if (busy) return;
@@ -209,7 +219,7 @@ function MarkFixedButton({ item, onChanged }: { item: InboxItem; onChanged?: () 
         disabled={busy}
         data-testid={`inbox-mark-fixed-${item.type}`}
       >
-        {busy ? "Marking…" : "Mark fixed"}
+        {busy ? t("office:marking") : t("office:markFixed")}
       </Button>
     </div>
   );

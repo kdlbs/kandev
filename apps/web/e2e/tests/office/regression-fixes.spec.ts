@@ -10,6 +10,7 @@ import { test, expect } from "../../fixtures/office-fixture";
  *   - Comment input hidden on office tasks
  *   - Topbar disappears on /office/tasks/:id
  *   - Role-aware avatar shown on agent detail page
+ *   - Fresh (raw "CREATED"-status) task missing from Board/Todo filter
  */
 
 test.describe("Office regression net", () => {
@@ -113,19 +114,19 @@ test.describe("Office regression net", () => {
     apiClient,
     officeSeed,
   }) => {
-    // The topbar disappeared once because office-topbar.tsx's
-    // isDetailPage regex still matched /office/issues/ after the
-    // issues→tasks rename. Pin the breadcrumb visibility on the
-    // new route shape — without it, the topbar is gone.
+    // The topbar disappeared once because the office shell decided which pages
+    // were detail pages with a route regex that still matched /office/issues/
+    // after the issues->tasks rename. The regex is gone (detail pages now
+    // declare their chrome through useOfficeTopbar), but the outcome it broke
+    // is still worth pinning on the new route shape.
     const task = await apiClient.createTask(officeSeed.workspaceId, "Topbar visible task", {
       workflow_id: officeSeed.workflowId,
     });
 
     await testPage.goto(`/office/tasks/${task.id}`);
 
-    // Breadcrumb is rendered into the office topbar slot — it has a
-    // <nav aria-label="breadcrumb"> wrapper that disappears when the
-    // topbar bug regresses.
+    // The shell's shared breadcrumb has a <nav aria-label="breadcrumb">
+    // wrapper, and that is what disappears when the topbar bug regresses.
     await expect(testPage.getByRole("navigation", { name: /breadcrumb/i })).toBeVisible({
       timeout: 10_000,
     });
@@ -163,5 +164,53 @@ test.describe("Office regression net", () => {
     // The old generic robot icon should not appear anywhere on the
     // agent detail page.
     await expect(testPage.locator('svg[class*="tabler-icon-robot"]')).toHaveCount(0);
+  });
+
+  test("board and list views place a freshly created task under Todo", async ({
+    testPage,
+    apiClient,
+    officeSeed,
+  }) => {
+    // A freshly created task's tasks.state DB column defaults to
+    // "CREATED" (buildTask in service_tasks.go) and stays there until
+    // something acts on it — assignment, a session start, or an explicit
+    // status change. dbStateToOfficeStatus only maps 7 known DB states;
+    // "CREATED" falls through its default branch unmapped, so the API
+    // returns the raw string "CREATED" rather than the canonical "todo".
+    // Pre-fix, task-board.tsx and use-tasks-tree.ts compared that raw
+    // value directly against the canonical lowercase vocabulary, so the
+    // task silently vanished from every board column and from the Todo
+    // filter in list view — reported as "task in Todo status not shown
+    // in Board view".
+    const title = "Status Normalization Regression Task";
+    await apiClient.createTask(officeSeed.workspaceId, title, {
+      workflow_id: officeSeed.workflowId,
+    });
+
+    await testPage.goto("/office/tasks");
+    // Sanity: the unfiltered list always shows it — matchesFilters
+    // short-circuits its status check when no status filter is active,
+    // so this alone would pass even pre-fix.
+    await expect(testPage.getByText(title)).toBeVisible({ timeout: 10_000 });
+
+    // --- Board view: pre-fix groupTasksByStatus keyed the column map on
+    // the raw task.status, so "CREATED" matched no column and the task
+    // disappeared from the board entirely.
+    await testPage.locator("button:has(svg.tabler-icon-columns-3)").click();
+    const todoColumn = testPage
+      .getByText("Todo", { exact: true })
+      .locator("xpath=ancestor::div[contains(@class,'min-w-[240px]')]");
+    await expect(todoColumn.getByText(title)).toBeVisible({ timeout: 10_000 });
+
+    // --- List view + Todo status filter: the server-side query already
+    // maps canonical "todo" to the backend states {TODO, CREATED,
+    // SCHEDULING} and returns the row correctly, but pre-fix the
+    // client-side re-filter in use-tasks-tree.ts's matchesFilters
+    // compared the raw status again and dropped the task a second time.
+    await testPage.locator("button:has(svg.tabler-icon-list)").click();
+    await testPage.locator("button:has(svg.tabler-icon-filter)").click();
+    await testPage.getByText("Todo", { exact: true }).click();
+    await testPage.keyboard.press("Escape");
+    await expect(testPage.getByText(title)).toBeVisible({ timeout: 10_000 });
   });
 });

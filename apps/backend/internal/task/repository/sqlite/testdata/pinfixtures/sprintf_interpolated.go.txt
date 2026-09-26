@@ -1,0 +1,21 @@
+package pinfixtures
+
+import "fmt"
+
+// Shape (b): the column name is interpolated via fmt.Sprintf, mirroring the
+// live taskScalarColumns/execTaskScalar allowlist pattern in
+// internal/office/repository/sqlite/tasks.go. Neither function alone
+// contains the literal string "workflow_step_id" adjacent to "UPDATE
+// tasks"/"SET" the way the naive detector's substring check requires: the
+// SQL shape lives in execScalarColumn, and the mutating column name is only
+// ever a plain string argument at the call site in
+// sprintfInterpolatedStepMutator.
+func (r *FixtureRepo) execScalarColumn(column, value, id string) error {
+	query := fmt.Sprintf("UPDATE tasks SET %s = ?, updated_at = ? WHERE id = ?", column)
+	_, err := r.exec(query, value, id)
+	return err
+}
+
+func (r *FixtureRepo) sprintfInterpolatedStepMutator(id, step string) error {
+	return r.execScalarColumn("workflow_step_id", step, id)
+}

@@ -55,11 +55,12 @@ func TestHandleGetTaskConversation_FallsBackToLatestTaskSession(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Office task",
 	})
+	task := taskResult.Task
 	require.NoError(t, err)
 	older := &models.TaskSession{
 		ID:             "older-office-session",
@@ -108,11 +109,12 @@ func TestHandleGetTaskConversation_SessionMustBelongToTask(t *testing.T) {
 	_, taskA, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
 
 	// Create another task/session in the same workflow to validate cross-task mismatch.
-	taskB, err := svc.CreateTask(context.Background(), &service.CreateTaskRequest{
+	taskBResult, err := svc.CreateTask(context.Background(), &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Other task",
 	})
+	taskB := taskBResult.Task
 	require.NoError(t, err)
 	sessB := &models.TaskSession{
 		ID:             "sess-2",

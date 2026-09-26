@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import type { FilterDimension } from "@/lib/state/slices/ui/sidebar-view-types";
@@ -57,6 +58,11 @@ export function repositoryOptions(repositoriesByWorkspace: ReposByWorkspace): Op
 export function useFilterValueOptions(dimension: FilterDimension): Option[] {
   const snapshots = useAppStore((s) => s.kanbanMulti.snapshots);
   const repositoriesByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  // `executorTypeOptions` resolves its labels through `getExecutorLabel`, which
+  // now reads the catalog. Subscribing here — and keeping the language in the
+  // memo's deps — is what makes those labels follow a runtime locale switch;
+  // without it the memo only recomputes when store data changes.
+  const { i18n } = useTranslation();
 
   return useMemo(() => {
     if (dimension === "workflow") return workflowOptions(snapshots);
@@ -64,5 +70,5 @@ export function useFilterValueOptions(dimension: FilterDimension): Option[] {
     if (dimension === "executorType") return executorTypeOptions(snapshots);
     if (dimension === "repository") return repositoryOptions(repositoriesByWorkspace);
     return [];
-  }, [dimension, snapshots, repositoriesByWorkspace]);
+  }, [dimension, snapshots, repositoriesByWorkspace, i18n.language]);
 }

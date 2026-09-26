@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/office/costs/modelsdev"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Regression: when the agent renames or switches branches inside a session,
@@ -35,12 +37,26 @@ func TestHandleBranchSwitched_UpdatesWorktreeBranch(t *testing.T) {
 	if err := testRepo.CreateRepository(ctx, rObj); err != nil {
 		t.Fatalf("create repository: %v", err)
 	}
-	wt := &models.TaskSessionWorktree{
-		ID: "wt-s1", SessionID: "s1",
+	if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+	session, err := testRepo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.TaskEnvironmentID = "env-s1"
+	if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("link session to environment: %v", err)
+	}
+	wt := &models.TaskEnvironmentRepo{
+		ID: "wt-s1", TaskEnvironmentID: "env-s1",
 		WorktreeID: "wtree-s1", RepositoryID: "repo1",
 		WorktreeBranch: "feature/a", CreatedAt: now,
 	}
-	if err := testRepo.CreateTaskSessionWorktree(ctx, wt); err != nil {
+	if err := testRepo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
 
@@ -71,11 +87,147 @@ func TestHandleBranchSwitched_UpdatesWorktreeBranch(t *testing.T) {
 	}
 }
 
-// Regression: when a PR watch already exists for the session and the branch
-// is switched, the watch must be reset (branch updated, pr_number cleared) so
-// the poller re-searches for the PR on the new branch. This covers both
-// rename and stacked-PR workflows.
-func TestHandleBranchSwitched_ResetsPRWatch(t *testing.T) {
+func TestGitStatusHashIncludesRepositoryName(t *testing.T) {
+	status := &lifecycle.GitStatusData{RepositoryName: "backend", Branch: "feature/x", HeadCommit: "abc"}
+	other := *status
+	other.RepositoryName = "frontend"
+	if gitStatusHash(status) == gitStatusHash(&other) {
+		t.Fatal("status snapshots from different repositories must not share a hash")
+	}
+}
+
+func TestHandleGitStatusUpdateResolvesEnvironmentForRecoveredEvent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-recovered-git", "s-recovered-git", "step1")
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-recovered-git", TaskID: "t-recovered-git", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		CreatedAt: now, UpdatedAt: now,
+	}))
+	session, err := repo.GetTaskSession(ctx, "s-recovered-git")
+	require.NoError(t, err)
+	session.TaskEnvironmentID = "env-recovered-git"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	eventBus := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eventBus
+	svc.handleGitStatusUpdate(ctx, watcher.GitEventData{
+		TaskID:    "t-recovered-git",
+		SessionID: "s-recovered-git",
+		Status:    &lifecycle.GitStatusData{RepositoryName: "root", Branch: "feature/recovered"},
+	})
+
+	require.Len(t, eventBus.events, 1)
+	payload, ok := eventBus.events[0].event.Data.(*watcher.GitEventData)
+	require.True(t, ok)
+	require.Equal(t, "env-recovered-git", payload.TaskEnvironmentID)
+}
+
+func TestHandleBranchSwitched_RepositoryScopedUpdateKeepsSiblingBranch(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	taskRoot := t.TempDir()
+	testRepo := setupTestRepo(t)
+	seedSession(t, testRepo, "t-multi", "s-multi", "step1")
+	for _, repository := range []*models.Repository{
+		{ID: "repo-backend", WorkspaceID: "ws1", Name: "backend", CreatedAt: now, UpdatedAt: now},
+		{ID: "repo-frontend", WorkspaceID: "ws1", Name: "frontend", CreatedAt: now, UpdatedAt: now},
+	} {
+		require.NoError(t, testRepo.CreateRepository(ctx, repository))
+	}
+
+	require.NoError(t, testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-multi", TaskID: "t-multi", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}))
+	multiSession, err := testRepo.GetTaskSession(ctx, "s-multi")
+	require.NoError(t, err)
+	multiSession.TaskEnvironmentID = "env-multi"
+	require.NoError(t, testRepo.UpdateTaskSession(ctx, multiSession))
+	require.NoError(t, testRepo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID: "wt-multi-backend", TaskEnvironmentID: "env-multi", WorktreeID: "worktree-backend", RepositoryID: "repo-backend",
+		WorktreePath: filepath.Join(taskRoot, "backend"), WorktreeBranch: "feature/backend-old", Position: 0, CreatedAt: now,
+	}))
+	require.NoError(t, testRepo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID: "wt-multi-frontend", TaskEnvironmentID: "env-multi", WorktreeID: "worktree-frontend", RepositoryID: "repo-frontend",
+		WorktreePath: filepath.Join(taskRoot, "frontend"), WorktreeBranch: "feature/frontend-old", Position: 1, CreatedAt: now,
+	}))
+
+	svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+	svc.handleBranchSwitched(ctx, watcher.GitEventData{
+		TaskID: "t-multi", SessionID: "s-multi",
+		BranchSwitch: &lifecycle.GitBranchSwitchData{
+			PreviousBranch: "feature/backend-old", CurrentBranch: "feature/backend-new", RepositoryName: "backend",
+		},
+	})
+
+	worktrees, err := testRepo.ListTaskSessionWorktrees(ctx, "s-multi")
+	require.NoError(t, err)
+	require.Len(t, worktrees, 2)
+	branches := make(map[string]string, len(worktrees))
+	for _, worktree := range worktrees {
+		branches[worktree.RepositoryID] = worktree.WorktreeBranch
+	}
+	require.Equal(t, "feature/backend-new", branches["repo-backend"])
+	require.Equal(t, "feature/frontend-old", branches["repo-frontend"])
+}
+
+func TestHandleBranchSwitched_UnknownRepositoryNameDoesNotOverwriteSiblings(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	taskRoot := t.TempDir()
+	testRepo := setupTestRepo(t)
+	seedSession(t, testRepo, "t-multi-unknown", "s-multi-unknown", "step1")
+	for _, repository := range []*models.Repository{
+		{ID: "repo-unknown-backend", WorkspaceID: "ws1", Name: "backend", CreatedAt: now, UpdatedAt: now},
+		{ID: "repo-unknown-frontend", WorkspaceID: "ws1", Name: "frontend", CreatedAt: now, UpdatedAt: now},
+	} {
+		require.NoError(t, testRepo.CreateRepository(ctx, repository))
+	}
+
+	require.NoError(t, testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-multi-unknown", TaskID: "t-multi-unknown", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}))
+	multiUnknownSession, err := testRepo.GetTaskSession(ctx, "s-multi-unknown")
+	require.NoError(t, err)
+	multiUnknownSession.TaskEnvironmentID = "env-multi-unknown"
+	require.NoError(t, testRepo.UpdateTaskSession(ctx, multiUnknownSession))
+	require.NoError(t, testRepo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID: "wt-unknown-backend", TaskEnvironmentID: "env-multi-unknown", WorktreeID: "worktree-unknown-backend", RepositoryID: "repo-unknown-backend",
+		WorktreePath: filepath.Join(taskRoot, "backend"), WorktreeBranch: "feature/backend-old", Position: 0, CreatedAt: now,
+	}))
+	require.NoError(t, testRepo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID: "wt-unknown-frontend", TaskEnvironmentID: "env-multi-unknown", WorktreeID: "worktree-unknown-frontend", RepositoryID: "repo-unknown-frontend",
+		WorktreePath: filepath.Join(taskRoot, "frontend"), WorktreeBranch: "feature/frontend-old", Position: 1, CreatedAt: now,
+	}))
+
+	svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+	svc.handleBranchSwitched(ctx, watcher.GitEventData{
+		TaskID: "t-multi-unknown", SessionID: "s-multi-unknown",
+		BranchSwitch: &lifecycle.GitBranchSwitchData{
+			PreviousBranch: "feature/old", CurrentBranch: "feature/new", RepositoryName: "unknown-repository",
+		},
+	})
+
+	worktrees, err := testRepo.ListTaskSessionWorktrees(ctx, "s-multi-unknown")
+	require.NoError(t, err)
+	branches := make(map[string]string, len(worktrees))
+	for _, worktree := range worktrees {
+		branches[worktree.RepositoryID] = worktree.WorktreeBranch
+	}
+	require.Equal(t, "feature/backend-old", branches["repo-unknown-backend"])
+	require.Equal(t, "feature/frontend-old", branches["repo-unknown-frontend"])
+}
+
+// seedBranchSwitchSession wires the task/session/repository/worktree rows
+// handleBranchSwitched needs to resolve a session's repository, with the
+// session's worktree parked on startBranch.
+func seedBranchSwitchSession(t *testing.T, startBranch string) (*Service, *mockGitHubService) {
+	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
 
@@ -91,36 +243,238 @@ func TestHandleBranchSwitched_ResetsPRWatch(t *testing.T) {
 	if err := testRepo.CreateRepository(ctx, rObj); err != nil {
 		t.Fatalf("create repository: %v", err)
 	}
-	wt := &models.TaskSessionWorktree{
-		ID: "wt-s1", SessionID: "s1",
-		WorktreeID: "wtree-s1", RepositoryID: "repo1",
-		WorktreeBranch: "feature/a", CreatedAt: now,
+	if err := testRepo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "tr1", TaskID: "t1", RepositoryID: "repo1",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task repository: %v", err)
 	}
-	if err := testRepo.CreateTaskSessionWorktree(ctx, wt); err != nil {
-		t.Fatalf("create worktree: %v", err)
+	if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{
+				ID: "wt-s1", WorktreeID: "wtree-s1", RepositoryID: "repo1",
+				WorktreeBranch: startBranch, CreatedAt: now,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+	session, err := testRepo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.TaskEnvironmentID = "env-s1"
+	session.RepositoryID = "repo1"
+	if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("link session to environment: %v", err)
 	}
 
 	svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
-	ghSvc := &mockGitHubService{
-		prWatch: &github.PRWatch{ID: "watch-1", Branch: "feature/a", PRNumber: 42},
-	}
+	ghSvc := &mockGitHubService{}
 	svc.SetGitHubService(ghSvc)
+	return svc, ghSvc
+}
 
-	svc.handleBranchSwitched(ctx, watcher.GitEventData{
+// switchBranch tags the event with RepositoryName, so these tests drive
+// resolvePushRepo's named-repository routing — the multi-repo path — rather
+// than its empty-name fallback to the session's primary repo. The git-status
+// test below leaves RepositoryName empty and covers the fallback.
+func switchBranch(t *testing.T, svc *Service, from, to string) {
+	t.Helper()
+	svc.handleBranchSwitched(context.Background(), watcher.GitEventData{
 		TaskID:    "t1",
 		SessionID: "s1",
 		BranchSwitch: &lifecycle.GitBranchSwitchData{
-			PreviousBranch: "feature/a",
-			CurrentBranch:  "feature/b",
+			PreviousBranch: from,
+			CurrentBranch:  to,
 			BaseCommit:     "deadbeef",
+			RepositoryName: "myrepo",
 		},
 	})
+}
+
+// Regression: a branch switch must not re-point a watch that already found a
+// PR. That watch is the only handle keeping the previous branch's PR synced —
+// the poller and the on-demand sync both iterate watches, and CI automation
+// only runs off the events they publish. Re-pointing it froze the earlier PR
+// at its last-observed checks/review state, so on a task working two branches
+// auto-fix stopped seeing new failures and auto-merge never saw the PR turn
+// mergeable. The new branch gets its own watch instead.
+func TestHandleBranchSwitched_KeepsWatchThatFoundAPR(t *testing.T) {
+	svc, ghSvc := seedBranchSwitchSession(t, "feature/a")
+	ghSvc.sessionWatches = []*github.PRWatch{
+		{ID: "watch-1", RepositoryID: "repo1", Branch: "feature/a", PRNumber: 42},
+	}
+
+	switchBranch(t, svc, "feature/a", "feature/b")
+
+	if ghSvc.resetWatchCalls != 0 {
+		t.Errorf("ResetPRWatch called %d times, want 0 — feature/a's PR 42 lost its watch", ghSvc.resetWatchCalls)
+	}
+	if ghSvc.ensureWatchCalls != 1 {
+		t.Fatalf("EnsurePRWatch called %d times, want 1", ghSvc.ensureWatchCalls)
+	}
+	if ghSvc.ensureWatchBranch != "feature/b" {
+		t.Errorf("ensured watch branch = %q, want feature/b", ghSvc.ensureWatchBranch)
+	}
+}
+
+// A branch renamed before any PR existed still reuses the searching watch, so
+// branch churn can't accumulate watches that will never find a PR.
+func TestHandleBranchSwitched_ReusesSearchingWatch(t *testing.T) {
+	svc, ghSvc := seedBranchSwitchSession(t, "feature/a")
+	ghSvc.sessionWatches = []*github.PRWatch{
+		{ID: "watch-1", RepositoryID: "repo1", Branch: "feature/a", PRNumber: 0},
+	}
+
+	switchBranch(t, svc, "feature/a", "feature/b")
 
 	if ghSvc.resetWatchCalls != 1 {
-		t.Errorf("expected 1 ResetPRWatch call, got %d", ghSvc.resetWatchCalls)
+		t.Errorf("ResetPRWatch called %d times, want 1", ghSvc.resetWatchCalls)
 	}
 	if ghSvc.resetWatchBranch != "feature/b" {
 		t.Errorf("reset watch branch = %q, want feature/b", ghSvc.resetWatchBranch)
+	}
+	if ghSvc.ensureWatchCalls != 0 {
+		t.Errorf("EnsurePRWatch called %d times, want 0 — the searching watch should be reused", ghSvc.ensureWatchCalls)
+	}
+}
+
+// The git-status branch sync has the same multi-branch hazard: it used to load
+// "a" watch for the session and re-point it whenever it was still searching.
+// With one watch per branch that could drag a searching watch onto a branch
+// another watch already covers. It must leave an already-covered branch alone.
+func TestHandleGitStatusUpdate_LeavesAlreadyWatchedBranchAlone(t *testing.T) {
+	svc, ghSvc := seedBranchSwitchSession(t, "feature/b")
+	ghSvc.sessionWatches = []*github.PRWatch{
+		{ID: "watch-1", RepositoryID: "repo1", Branch: "feature/a", PRNumber: 0},
+		{ID: "watch-2", RepositoryID: "repo1", Branch: "feature/b", PRNumber: 7},
+	}
+
+	svc.handleGitStatusUpdate(context.Background(), watcher.GitEventData{
+		TaskID:    "t1",
+		SessionID: "s1",
+		Status:    &lifecycle.GitStatusData{Branch: "feature/b"},
+	})
+
+	if ghSvc.resetWatchCalls != 0 {
+		t.Errorf("ResetPRWatch called %d times, want 0 — feature/b already has watch-2", ghSvc.resetWatchCalls)
+	}
+}
+
+// Switching back to a branch that already has a watch is a no-op. The previous
+// code compared only the branch it happened to load and reset the watch when
+// it had a PR number, so hopping between two branches repeatedly cleared each
+// PR association it had already made.
+func TestHandleBranchSwitched_AlreadyWatchedBranchIsNoop(t *testing.T) {
+	svc, ghSvc := seedBranchSwitchSession(t, "feature/b")
+	ghSvc.sessionWatches = []*github.PRWatch{
+		{ID: "watch-1", RepositoryID: "repo1", Branch: "feature/a", PRNumber: 42},
+		{ID: "watch-2", RepositoryID: "repo1", Branch: "feature/b", PRNumber: 43},
+	}
+
+	switchBranch(t, svc, "feature/b", "feature/a")
+
+	if ghSvc.resetWatchCalls != 0 {
+		t.Errorf("ResetPRWatch called %d times, want 0", ghSvc.resetWatchCalls)
+	}
+	if ghSvc.ensureWatchCalls != 0 {
+		t.Errorf("EnsurePRWatch called %d times, want 0", ghSvc.ensureWatchCalls)
+	}
+}
+
+// TestHandleBranchSwitched_RedirectsToWorkspaceGroupOwner covers Review Round
+// 2's F4 finding: resetPRWatchForBranchSwitch was a fifth watch-creation call
+// site that read taskID straight off the observing branch-switch event
+// instead of routing through resolveEffectivePushTaskID, so a shared-worktree
+// subtask that switched branches got its own member-attributed watch for the
+// new branch — reproducing the "one PR bound to several tasks" defect on
+// every branch switch, independent of dispatchPushDetection/
+// ensureSessionPRWatch/CheckSessionPR/buildTaskBranchList already routing
+// through the redirect (see event_handlers_github_multi_branch_assoc_test.go).
+func TestHandleBranchSwitched_RedirectsToWorkspaceGroupOwner(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	testRepo := setupTestRepo(t)
+	seedSession(t, testRepo, "t1", "s1", "step1")
+
+	if err := testRepo.CreateTask(ctx, &models.Task{
+		ID: "parent1", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "step1",
+		Title: "Parent", Description: "Test", State: v1.TaskStateInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create parent task: %v", err)
+	}
+	seedWorkspaceGroup(t, testRepo, "group1", "parent1", "parent1", "t1")
+
+	rObj := &models.Repository{
+		ID: "repo1", WorkspaceID: "ws1", Name: "myrepo",
+		SourceType: "provider", Provider: "github",
+		ProviderOwner: "myorg", ProviderName: "myrepo",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := testRepo.CreateRepository(ctx, rObj); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	if err := testRepo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "tr1", TaskID: "t1", RepositoryID: "repo1",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task repository: %v", err)
+	}
+	// The owner shares the same physical checkout as its members (that's the
+	// whole premise of inherit_parent/shared_group), so it holds repo1 too —
+	// this is what makes the redirect eligible under the F2 ownership guard.
+	seedGroupOwnerTaskRepository(t, testRepo, "parent1", "repo1", "feature/a")
+	if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{
+				ID: "wt-s1", WorktreeID: "wtree-s1", RepositoryID: "repo1",
+				WorktreeBranch: "feature/a", CreatedAt: now,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+	session, err := testRepo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.TaskEnvironmentID = "env-s1"
+	session.RepositoryID = "repo1"
+	if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("link session to environment: %v", err)
+	}
+	if _, err := testRepo.DB().Exec(
+		`UPDATE task_workspace_groups SET materialized_environment_id = ? WHERE id = ?`,
+		"env-s1", "group1",
+	); err != nil {
+		t.Fatalf("bind workspace group to environment: %v", err)
+	}
+
+	svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &mockGitHubService{}
+	svc.SetGitHubService(ghSvc)
+
+	// switchBranch hardcodes TaskID "t1" / SessionID "s1" / RepositoryName
+	// "myrepo" — the observing subtask's own identity, exactly like a real
+	// inherit_parent/shared_group member that shares the owner's worktree.
+	switchBranch(t, svc, "feature/a", "feature/b")
+
+	if ghSvc.ensureWatchCalls != 1 {
+		t.Fatalf("EnsurePRWatch called %d times, want 1", ghSvc.ensureWatchCalls)
+	}
+	if ghSvc.lastEnsureWatchTaskID != "parent1" {
+		t.Fatalf("EnsurePRWatchForWorkspace taskID = %q, want parent1 (the group owner)", ghSvc.lastEnsureWatchTaskID)
+	}
+	for _, c := range ghSvc.ensureWatchLog {
+		if c.TaskID == "t1" {
+			t.Fatalf("subtask t1 got its own watch after branch switch, want zero: %+v", ghSvc.ensureWatchLog)
+		}
 	}
 }
 

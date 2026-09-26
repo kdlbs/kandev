@@ -38,7 +38,7 @@ Without these, `tsc` fails with missing module errors for `@/generated/release-n
 
 ## Running dev mode
 
-`make dev` from the repo root builds the backend and starts both the Go backend (port 38429) and Vite frontend (port 37429). The CLI launcher sets `KANDEV_DEBUG_DEV_MODE=true` which activates the `dev` profile from `profiles.yaml`, enabling mock agent and other dev conveniences. No external services (database, message queue, Docker) are needed — SQLite is embedded and the event bus runs in-memory.
+`make dev` from the repo root builds the backend and starts both the Go backend (port 38429) and Vite frontend (port 37429). It needs a Go toolchain plus `pnpm` (for the Vite dev server); the `tsx`/TypeScript launcher is gone — all launch modes (`dev`, `start`, `run`, `service`) go through the native Go launcher (`apps/backend/bin/kandev`). The launcher sets `KANDEV_DEBUG_DEV_MODE=true` which activates the `dev` profile from `profiles.yaml`, enabling mock agent and other dev conveniences. No external services (database, message queue, Docker) are needed — SQLite is embedded and the event bus runs in-memory.
 
 ## Key commands
 
@@ -55,6 +55,6 @@ All documented in the root `Makefile`:
 These apply to Cursor Cloud, Codex, and similar Firecracker-backed sandboxes:
 
 - **tool PATH**: `scripts/bootstrap-dev-env` activates mise for its own process. New shells should run `eval "$(mise activate bash)"` or use a shell profile that activates mise so `node`, `pnpm`, `go`, `golangci-lint`, and `pre-commit` resolve from the pinned toolchain.
-- **First page load**: `make dev` compiles pages on first visit via Turbopack — expect ~25 s for the initial load.
-- **CLI test flake**: `src/ports.test.ts > isPortInUse > returns false within the timeout when the host black-holes packets` fails because `192.0.2.1` behaves differently inside Firecracker. This is a known environment-specific flake, not a code issue.
+- **First page load**: `make dev` compiles pages on first visit via the Vite dev server — expect ~25 s for the initial load.
+- **CLI shim tests**: `apps/cli` tests run under the Node built-in test runner (`node --test`); the old Vitest-based `src/` tree was deleted when `make dev` moved to the Go launcher.
 - **Playwright browser installation**: `playwright install chromium` hangs during zip extraction (Node.js io_uring incompatibility with the Firecracker kernel). Workaround: `scripts/install-playwright-browsers.sh` runs the install with a timeout, then falls back to extracting the already-downloaded zips with `unzip`. `scripts/bootstrap-dev-env --with-e2e` calls this automatically. System deps can be installed via `playwright install-deps chromium`.

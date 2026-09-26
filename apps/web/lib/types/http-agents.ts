@@ -19,6 +19,13 @@ export type {
 import type { AgentProfile } from "./agent-profile";
 import type { BackendMessage } from "./backend-message";
 
+/**
+ * How kandev drives a custom agent's command. Absent means terminal
+ * passthrough, which is what every definition stored before the field existed
+ * decodes to.
+ */
+export type CustomAgentProtocol = "acp";
+
 export type TUIConfig = {
   command: string;
   display_name: string;
@@ -26,6 +33,29 @@ export type TUIConfig = {
   description?: string;
   command_args?: string[];
   wait_for_terminal: boolean;
+  /**
+   * How kandev injects its per-session MCP server into the wrapped CLI.
+   * Empty/absent means no injection — the agent gets no kandev task tools.
+   * Keys come from `GET /api/v1/agents/tui/mcp-strategies`; never hardcode a
+   * list here, or a strategy added in Go silently stops being selectable.
+   */
+  mcp_strategy?: string;
+  /**
+   * Runtime kandev drives the command with. Absent means terminal passthrough;
+   * `"acp"` means kandev speaks the Agent Client Protocol to it on standard
+   * input and output, which is what gives the agent structured chat, tool
+   * calls, models, and modes.
+   */
+  protocol?: CustomAgentProtocol;
+  /** Use paced unframed writes for TUIs that reject bracketed-paste markers. */
+  disable_bracketed_paste?: boolean;
+};
+
+/** One selectable MCP injection mechanism, served by the backend. */
+export type MCPStrategyOption = {
+  key: string;
+  /** The strategy's own description of the mechanism it uses. */
+  description: string;
 };
 
 export type Agent = {
@@ -44,6 +74,8 @@ export type Agent = {
    */
   capability_status?: CapabilityStatus;
   capability_error?: string;
+  /** Whether this agent supports sessionless host-utility inference. */
+  inference_capable?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -159,6 +191,21 @@ export type DynamicModelsResponse = {
   error: string | null;
 };
 
+export type ResolveAgentModelConfigRequest = {
+  model: string;
+  mode?: string;
+  config_options?: Record<string, string>;
+  refresh?: boolean;
+};
+
+export type AgentModelConfigResponse = {
+  agent_name: string;
+  model: string;
+  status: CapabilityStatus;
+  config_options: ConfigOptionEntry[];
+  error: string | null;
+};
+
 export type PermissionSetting = {
   supported: boolean;
   default: boolean;
@@ -202,6 +249,9 @@ export type RuntimeUpdate = {
   supported: boolean;
   package: string;
   current_version?: string;
+  default_version?: string;
+  active_version?: string;
+  effective_version?: string;
 };
 
 export type AvailableAgent = {
@@ -296,11 +346,118 @@ export type TaskPlan = {
   implementation_started_at?: string | null;
   implementation_started_session_id?: string | null;
   implementation_started_by?: string | null;
+  comments_revision?: number;
 };
 
 export type TaskPlanResponse = {
   plan: TaskPlan | null;
 };
+
+export type TaskPlanComment = {
+  id: string;
+  task_id: string;
+  plan_id: string;
+  body: string;
+  selected_text: string;
+  anchor_from: number;
+  anchor_to: number;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskPlanCommentSnapshot = {
+  task_id: string;
+  plan_id: string;
+  revision: number;
+  comments: TaskPlanComment[];
+};
+
+export type TaskPlanCommentRef = Pick<TaskPlanComment, "id" | "version">;
+
+export type PreviewCaptureRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  document_x?: number;
+  document_y?: number;
+  scroll_x?: number;
+  scroll_y?: number;
+  viewport_width?: number;
+  viewport_height?: number;
+  device_pixel_ratio?: number;
+};
+
+export type PreviewElementSnapshot = {
+  tag: string;
+  id?: string;
+  classes: string[];
+  role?: string;
+  accessible_label?: string;
+  visible_text?: string;
+  selector?: string;
+  outer_html: string;
+};
+
+export type PreviewTextEndpoint = {
+  selector?: string;
+  node_path: number[];
+  offset: number;
+};
+
+export type PreviewTextAnchor = {
+  start: PreviewTextEndpoint;
+  end: PreviewTextEndpoint;
+  rects?: PreviewCaptureRect[];
+  union_rect?: PreviewCaptureRect;
+  scroll_x?: number;
+  scroll_y?: number;
+  viewport_width?: number;
+  viewport_height?: number;
+  device_pixel_ratio?: number;
+  containing_element?: PreviewElementSnapshot;
+};
+
+export type TaskPreviewScreenshot = {
+  attachment_id: string;
+  name: string;
+  mime_type: string;
+  kind: string;
+  delivery_mode: string;
+  size_bytes: number;
+  state: string;
+};
+
+export type TaskPreviewFeedback = {
+  id: string;
+  task_id: string;
+  kind: "text" | "element" | "screenshot";
+  comment: string;
+  source_kind: "browser" | "html_file";
+  source_session_id?: string;
+  source_label: string;
+  source_path?: string;
+  page_route: string;
+  page_title: string;
+  selected_text?: string;
+  text_anchor?: PreviewTextAnchor;
+  element_snapshot?: PreviewElementSnapshot;
+  capture_rect?: PreviewCaptureRect;
+  screenshot_attachment_id?: string;
+  screenshot_attachment?: TaskPreviewScreenshot;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskPreviewFeedbackSnapshot = {
+  task_id: string;
+  revision: number;
+  items: TaskPreviewFeedback[];
+};
+
+export type TaskPreviewFeedbackRef = Pick<TaskPreviewFeedback, "id" | "version">;
 
 /** A single anchored stop in a code walkthrough. */
 export type WalkthroughStep = {
@@ -340,9 +497,17 @@ export type TaskPlanRevision = {
   revision_number: number;
   title: string;
   content?: string;
+  // Character count of `content`, computed server-side so it survives even
+  // when list/WS payloads omit `content` for size.
+  content_length?: number;
   author_kind: "agent" | "user";
   author_name: string;
   revert_of_revision_id?: string | null;
+  // Workflow step snapshot at write time; empty for revisions written before
+  // this stamping existed.
+  workflow_step_id?: string;
+  workflow_step_name?: string;
+  workflow_step_color?: string;
   coalesced?: boolean;
   created_at: string;
   updated_at: string;
@@ -396,10 +561,8 @@ export type CompletedTaskActivityDTO = {
   completed_tasks: number;
 };
 
-export type AgentUsageDTO = {
-  agent_profile_id: string;
-  agent_profile_name: string;
-  agent_model: string;
+export type ModelUsageDTO = {
+  model: string;
   session_count: number;
   turn_count: number;
   total_duration_ms: number;
@@ -435,7 +598,7 @@ export type StatsResponse = {
   task_stats: TaskStatsDTO[];
   daily_activity: DailyActivityDTO[];
   completed_activity: CompletedTaskActivityDTO[];
-  agent_usage: AgentUsageDTO[];
+  model_usage: ModelUsageDTO[];
   repository_stats: RepositoryStatsDTO[];
   git_stats: GitStatsDTO;
 };

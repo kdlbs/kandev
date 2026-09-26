@@ -4,6 +4,11 @@ import path from "node:path";
 
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionState } from "../../helpers/session";
+import {
+  seedActiveSessionForegroundActivity,
+  waitForActiveSessionForegroundActivity,
+} from "../../helpers/session-store";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
@@ -35,6 +40,82 @@ async function openTaskSession(page: Page, title: string): Promise<SessionPage> 
   const session = new SessionPage(page);
   await session.waitForLoad();
   return session;
+}
+
+type SessionTabHistoryEntry = { id: string; text: string };
+
+type E2EStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      kanbanMulti: {
+        snapshots: Record<
+          string,
+          {
+            steps: Array<{ id: string }>;
+            tasks: Array<{ id: string; workflowStepId: string }>;
+          }
+        >;
+      };
+      workflows: { activeId: string | null };
+    };
+  };
+};
+
+/** Wait for the workflow snapshot source that renders the Kanban cards to hydrate. */
+async function waitForKanbanTask(page: Page, workflowId: string, taskId: string): Promise<void> {
+  await page.waitForFunction(
+    ({ expectedWorkflowId, expectedTaskId }) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      const state = store?.getState();
+      if (!state) return false;
+      if (state.workflows.activeId !== expectedWorkflowId) return false;
+      const snapshot = state.kanbanMulti.snapshots[expectedWorkflowId];
+      if (!snapshot) return false;
+      const stepIds = new Set(snapshot.steps.map((step) => step.id));
+      return snapshot.tasks.some(
+        (task) => task.id === expectedTaskId && stepIds.has(task.workflowStepId),
+      );
+    },
+    { expectedWorkflowId: workflowId, expectedTaskId: taskId },
+    { timeout: 30_000 },
+  );
+}
+
+async function recordSessionTabHistory(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const history: SessionTabHistoryEntry[][] = [];
+    const record = () => {
+      const entries = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-testid^="session-tab-"]'),
+      )
+        .map((element) => {
+          const testId = element.getAttribute("data-testid") ?? "";
+          return {
+            id: testId.slice("session-tab-".length),
+            text: element.textContent?.trim() ?? "",
+          };
+        })
+        .filter((entry) => entry.id && entry.text);
+      if (entries.length > 0) history.push(entries);
+    };
+    const observer = new MutationObserver(record);
+    const start = () => {
+      observer.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
+      record();
+    };
+    if (document.documentElement) {
+      start();
+    } else {
+      document.addEventListener("DOMContentLoaded", start, { once: true });
+    }
+    (
+      window as Window & { __KANDEV_SESSION_TAB_HISTORY__?: SessionTabHistoryEntry[][] }
+    ).__KANDEV_SESSION_TAB_HISTORY__ = history;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +189,142 @@ test.describe("Session resume (ACP mode)", () => {
     // 10. The agent should respond to the new prompt
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
   });
+
+  // @covers AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.9
+  test("clears stale background activity after backend restart", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Settled Activity Resume Task",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const sessionId = task.session_id;
+    if (!sessionId) throw new Error("createTaskWithAgent did not return a session_id");
+
+    const session = await openTaskSession(testPage, "Settled Activity Resume Task");
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Initial session did not settle before restart",
+      timeout: 30_000,
+    });
+
+    await backend.restart();
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 60_000 });
+    await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Resumed session did not settle before activity reconciliation",
+      timeout: 30_000,
+    });
+
+    // Reproduce the stale client projection left behind when the reconnect
+    // state_changed event is missed. The real session-list refresh must clear it.
+    await seedActiveSessionForegroundActivity(testPage, "background");
+    await waitForActiveSessionForegroundActivity(testPage, "background");
+    await expect(session.agentStatus()).toHaveAccessibleName("Background work is running");
+
+    const refreshedSessions = testPage.waitForResponse((response) => {
+      const path = new URL(response.url()).pathname;
+      return response.request().method() === "GET" && path === `/api/v1/tasks/${task.id}/sessions`;
+    });
+    await testPage.evaluate(() => window.dispatchEvent(new Event("focus")));
+    expect((await refreshedSessions).ok()).toBe(true);
+
+    await waitForActiveSessionForegroundActivity(testPage, null);
+    await expect(testPage.getByRole("status", { name: "Background work is running" })).toHaveCount(
+      0,
+    );
+    await expect(session.anyIdleInput()).toBeVisible();
+  });
+
+  // @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.2
+  test("preserves the worktree Files path after backend restart", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Worktree Path Resume Task",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      },
+    );
+    const sessionId = task.session_id;
+    if (!sessionId) throw new Error("createTaskWithAgent did not return a session_id");
+
+    const session = await openTaskSession(testPage, "Worktree Path Resume Task");
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Initial worktree session did not settle before restart",
+      timeout: 30_000,
+    });
+
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const initialSession = sessions.find((candidate) => candidate.id === sessionId);
+    const expectedWorkspacePath = initialSession?.workspace_path ?? initialSession?.worktree_path;
+    if (!expectedWorkspacePath) throw new Error("Worktree session did not expose a workspace path");
+    const expectedDisplayPath = expectedWorkspacePath.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
+
+    await session.clickTab("Files");
+    const visibleWorkspacePath = session.files.getByTestId("file-browser-workspace-path");
+    await expect(visibleWorkspacePath).toHaveText(expectedDisplayPath, { timeout: 30_000 });
+
+    // Reload can foreground Changes while the resumed execution refreshes its
+    // working tree. Wait for the hydrated workbench, then select Files before
+    // asserting the workspace path.
+    await backend.restart();
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.clickTab("Files");
+    await expect(session.files).toBeVisible({ timeout: 30_000 });
+
+    await session.clickSessionChatTab();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 60_000 });
+    await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Reload once promotion has persisted the task environment. The boot payload
+    // must project the promoted execution's canonical workspace, not stale UI state.
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.clickTab("Files");
+    await expect(visibleWorkspacePath).toHaveText(expectedDisplayPath, { timeout: 30_000 });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -127,7 +344,7 @@ test.describe("Task status during resume", () => {
 
     // 1. Create task and start agent — after the turn completes the workflow
     //    advances it from "Running" to "Turn Finished".
-    await apiClient.createTaskWithAgent(
+    const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Status Stable Task",
       seedData.agentProfileId,
@@ -138,6 +355,8 @@ test.describe("Task status during resume", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    const sessionId = task.session_id;
+    if (!sessionId) throw new Error("createTaskWithAgent did not return a session_id");
 
     // 2. Navigate to the session and wait for the agent to finish its first turn
     const session = await openTaskSession(testPage, "Status Stable Task");
@@ -145,10 +364,23 @@ test.describe("Task status during resume", () => {
       timeout: 30_000,
     });
     await session.waitForChatIdle({ timeout: 15_000 });
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Initial session did not settle before the Turn Finished assertion",
+      timeout: 30_000,
+    });
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).state, {
+        timeout: 30_000,
+        message: "Initial task did not advance to REVIEW before the Turn Finished assertion",
+      })
+      .toBe("REVIEW");
 
     // 3. Confirm the task moved to the "Turn Finished" section after the turn completed
     await expect(session.taskInSection("Status Stable Task", "Turn Finished")).toBeVisible({
-      timeout: 15_000,
+      timeout: 30_000,
     });
 
     // 4. Restart the backend
@@ -160,6 +392,12 @@ test.describe("Task status during resume", () => {
 
     // 6. Immediately after reload, the task must still be in "Turn Finished" — not
     //    regressed to "Backlog" or "Running" due to resume lifecycle.
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).state, {
+        timeout: 30_000,
+        message: "Task state regressed while reloading before auto-resume",
+      })
+      .toBe("REVIEW");
     await expect(session.taskInSection("Status Stable Task", "Turn Finished")).toBeVisible({
       timeout: 30_000,
     });
@@ -172,10 +410,28 @@ test.describe("Task status during resume", () => {
 
     // 7. Wait for auto-resume to complete (agent relaunches and becomes idle)
     await session.waitForChatIdle({ timeout: 60_000 });
+    // The idle composer can briefly survive the reload before auto-resume starts.
+    // The durable boot message proves that the resumed agent actually relaunched.
+    await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Resumed session did not settle before the final Turn Finished assertion",
+      timeout: 30_000,
+    });
 
     // 8. After resume completes, the task must still be in "Turn Finished"
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).state, {
+        timeout: 30_000,
+        message: "Task state regressed after auto-resume",
+      })
+      .toBe("REVIEW");
     await expect(session.taskInSection("Status Stable Task", "Turn Finished")).toBeVisible({
-      timeout: 15_000,
+      timeout: 30_000,
     });
   });
 });
@@ -199,16 +455,22 @@ test.describe("Session resume (TUI passthrough mode)", () => {
     const tuiProfile = await createTUIProfile(apiClient, "TUI Resume");
 
     // 2. Create task with TUI agent
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "TUI Resume Task", tuiProfile.id, {
-      description: "hello from resume test",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "TUI Resume Task",
+      tuiProfile.id,
+      {
+        description: "hello from resume test",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
 
     // 3. Navigate and wait for TUI terminal to load
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    await waitForKanbanTask(testPage, seedData.workflowId, task.id);
 
     const card = kanban.taskCardByTitle("TUI Resume Task");
     await expect(card).toBeVisible({ timeout: 15_000 });
@@ -274,7 +536,7 @@ test.describe("Session resume (TUI passthrough mode)", () => {
 
     // 2. TUI profile + multi-repo task
     const tuiProfile = await createTUIProfile(apiClient, "TUI Multi-Repo Resume");
-    await apiClient.createTaskWithAgent(
+    const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "TUI Multi-Repo Resume Task",
       tuiProfile.id,
@@ -288,6 +550,7 @@ test.describe("Session resume (TUI passthrough mode)", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    await waitForKanbanTask(testPage, seedData.workflowId, task.id);
     const card = kanban.taskCardByTitle("TUI Multi-Repo Resume Task");
     await expect(card).toBeVisible({ timeout: 15_000 });
     await card.click();
@@ -399,6 +662,121 @@ test.describe("Session resume (multi-session)", () => {
         },
       )
       .toBe(true);
+  });
+
+  test("keeps distinct model titles during multi-session resume", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  }) => {
+    test.setTimeout(180_000);
+
+    const { agents } = await apiClient.listAgents();
+    const mockAgent = agents.find((agent) => agent.name === "mock-agent") ?? agents[0];
+    if (!mockAgent) throw new Error("mock-agent is not available for model resume test");
+    const solProfile = await apiClient.createAgentProfile(mockAgent.id, "Resume Sol Profile", {
+      model: "mock-smart",
+    });
+    const lunaProfile = await apiClient.createAgentProfile(mockAgent.id, "Resume Luna Profile", {
+      model: "mock-fast",
+    });
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Distinct Model Resume Task",
+      solProfile.id,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const firstSessionId = task.session_id;
+    if (!firstSessionId) throw new Error("first model resume session was not created");
+
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.some(
+            (session) =>
+              session.id === firstSessionId &&
+              ["WAITING_FOR_INPUT", "COMPLETED"].includes(session.state),
+          );
+        },
+        { timeout: 60_000, message: "first distinct-model session did not settle" },
+      )
+      .toBe(true);
+
+    const second = await apiClient.launchSession(
+      {
+        task_id: task.id,
+        agent_profile_id: lunaProfile.id,
+        workflow_step_id: seedData.startStepId,
+        prompt: "/e2e:simple-message",
+      },
+      60_000,
+    );
+    const secondSessionId = second.session_id;
+
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return (
+            sessions.length === 2 &&
+            sessions.every((session) => ["WAITING_FOR_INPUT", "COMPLETED"].includes(session.state))
+          );
+        },
+        { timeout: 60_000, message: "both distinct-model sessions did not settle" },
+      )
+      .toBe(true);
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.sessionTabBySessionId(firstSessionId)).toContainText("Mock Smart", {
+      timeout: 30_000,
+    });
+    await expect(session.sessionTabBySessionId(secondSessionId)).toContainText("Mock Fast", {
+      timeout: 15_000,
+    });
+    await prCapture.screenshot("desktop-distinct-model-tabs", {
+      caption: "Distinct model labels remain visible across desktop session tabs",
+    });
+
+    await recordSessionTabHistory(testPage);
+    await backend.restart();
+    await testPage.reload();
+    await session.waitForLoad();
+
+    await expect(session.sessionTabBySessionId(firstSessionId)).toContainText("Mock Smart", {
+      timeout: 60_000,
+    });
+    await expect(session.sessionTabBySessionId(secondSessionId)).toContainText("Mock Fast", {
+      timeout: 30_000,
+    });
+
+    const history = await testPage.evaluate(
+      () =>
+        (window as Window & { __KANDEV_SESSION_TAB_HISTORY__?: SessionTabHistoryEntry[][] })
+          .__KANDEV_SESSION_TAB_HISTORY__ ?? [],
+    );
+    const completeSamples = history.filter((sample) => {
+      const first = sample.find((entry) => entry.id === firstSessionId);
+      const secondEntry = sample.find((entry) => entry.id === secondSessionId);
+      return !!first?.text && !!secondEntry?.text;
+    });
+    expect(completeSamples.length).toBeGreaterThan(0);
+    for (const sample of completeSamples) {
+      const first = sample.find((entry) => entry.id === firstSessionId);
+      const secondEntry = sample.find((entry) => entry.id === secondSessionId);
+      expect(first?.text).toContain("Mock Smart");
+      expect(secondEntry?.text).toContain("Mock Fast");
+    }
   });
 });
 

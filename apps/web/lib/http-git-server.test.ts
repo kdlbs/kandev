@@ -1,9 +1,9 @@
+// @vitest-environment node
 import { expect, test } from "vitest";
 import { startHTTPGitFixture } from "../e2e/helpers/http-git-server";
 import { execFileSync } from "node:child_process";
 import { type Server } from "node:http";
 import fs from "node:fs";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -50,12 +50,12 @@ test("uses a trusted GitLab URL with isolated executor and backend Git rewrites"
 
 test("closes its listener when backend config setup fails after listening", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-http-git-test-"));
-  let port: number | undefined;
+  let server: Server | undefined;
   try {
     await expect(
       startHTTPGitFixture(root, "config-write-failure", {
-        onListening: (listeningPort) => {
-          port = listeningPort;
+        onListening: (listeningServer) => {
+          server = listeningServer;
         },
         writeBackendGitConfig: () => {
           throw new Error("config write failed");
@@ -63,8 +63,8 @@ test("closes its listener when backend config setup fails after listening", asyn
       }),
     ).rejects.toThrow("config write failed");
 
-    expect(port).toBeDefined();
-    expect(await canConnect(port!)).toBe(false);
+    expect(server).toBeDefined();
+    expect(server?.listening).toBe(false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -93,17 +93,6 @@ test("aggregates setup and listener-close failures", async () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
-
-function canConnect(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.connect(port, "127.0.0.1");
-    socket.once("connect", () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.once("error", () => resolve(false));
-  });
-}
 
 function closeTestServer(server: Server): Promise<void> {
   return new Promise((resolve, reject) =>

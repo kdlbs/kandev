@@ -1,6 +1,7 @@
 package updates
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -28,8 +29,15 @@ func TestService_GetManagedUserServiceSupportsApply(t *testing.T) {
 	t.Setenv(envInstallKind, "npm")
 	t.Setenv(envServiceMetadata, metadataPath)
 
-	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default(), WithHomeDir(homeDir))
-	resp, err := svc.Get()
+	svc := NewService(
+		newTestPool(t),
+		"v1.0.0",
+		nil,
+		logger.Default(),
+		WithHomeDir(homeDir),
+		WithSettingsStore(&memorySettingsStore{}),
+	)
+	resp, err := svc.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -38,6 +46,9 @@ func TestService_GetManagedUserServiceSupportsApply(t *testing.T) {
 	}
 	if !resp.ApplySupported {
 		t.Fatalf("ApplySupported=false reason=%q", resp.ApplyUnsupportedReason)
+	}
+	if !resp.ChannelEditable || resp.ChannelUnsupportedReason != "" {
+		t.Fatalf("nightly capability editable=%v reason=%q", resp.ChannelEditable, resp.ChannelUnsupportedReason)
 	}
 }
 
@@ -80,12 +91,15 @@ func TestService_GetManagedNativeServiceSupportsApply(t *testing.T) {
 	t.Setenv(envServiceMetadata, metadataPath)
 
 	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default(), WithHomeDir(homeDir))
-	resp, err := svc.Get()
+	resp, err := svc.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if !resp.Install.ManagedService || !resp.ApplySupported {
 		t.Fatalf("native install state = %+v apply_supported=%v reason=%q", resp.Install, resp.ApplySupported, resp.ApplyUnsupportedReason)
+	}
+	if resp.ChannelEditable || resp.ChannelUnsupportedReason == "" {
+		t.Fatalf("Homebrew nightly capability editable=%v reason=%q", resp.ChannelEditable, resp.ChannelUnsupportedReason)
 	}
 }
 
@@ -112,7 +126,7 @@ func TestService_GetManagedSystemdServiceSupportsApplyWithPercentInMetadataPath(
 	t.Setenv(envServiceMetadata, metadataPath)
 
 	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default(), WithHomeDir(homeDir))
-	resp, err := svc.Get()
+	resp, err := svc.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -141,7 +155,7 @@ func TestService_GetSystemServiceDisablesApply(t *testing.T) {
 	t.Setenv(envServiceMetadata, metadataPath)
 
 	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default(), WithHomeDir(homeDir))
-	resp, err := svc.Get()
+	resp, err := svc.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -184,7 +198,7 @@ func TestService_GetForeignServiceDisablesApply(t *testing.T) {
 	t.Setenv(envServiceMetadata, metadataPath)
 
 	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default(), WithHomeDir(homeDir))
-	resp, err := svc.Get()
+	resp, err := svc.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -216,7 +230,7 @@ func TestService_GetLocalBundleServiceDisablesApply(t *testing.T) {
 	t.Setenv(envServiceMetadata, metadataPath)
 
 	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default(), WithHomeDir(homeDir))
-	resp, err := svc.Get()
+	resp, err := svc.Get(context.Background())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -244,6 +258,60 @@ func TestManualCommandsNPXHasNoDuplicateBinaryName(t *testing.T) {
 	}
 	if hasString(cmds, "npx -y kandev@1.2.3 kandev service install") {
 		t.Fatalf("npx manual command duplicates the binary name: %v", cmds)
+	}
+}
+
+func TestManagedUserServiceCapabilitiesShareBaseEligibility(t *testing.T) {
+	for name, state := range map[string]InstallStateResponse{
+		"not running": {
+			ManagedService: true,
+			Mode:           installModeUser,
+			Manager:        serviceManagerSystemd,
+			Kind:           installKindNPM,
+		},
+		"unmanaged": {
+			RunningAsService: true,
+			Mode:             installModeUser,
+			Manager:          serviceManagerSystemd,
+			Kind:             installKindNPM,
+		},
+		"system mode": {
+			RunningAsService: true,
+			ManagedService:   true,
+			Mode:             installModeSystem,
+			Manager:          serviceManagerSystemd,
+			Kind:             installKindNPM,
+		},
+		"unsupported manager": {
+			RunningAsService: true,
+			ManagedService:   true,
+			Mode:             installModeUser,
+			Manager:          "other",
+			Kind:             installKindNPM,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if supported, _ := state.applySupport(); supported {
+				t.Fatal("apply unexpectedly supported")
+			}
+			if supported, _ := state.nightlySupport(); supported {
+				t.Fatal("Nightly unexpectedly supported")
+			}
+		})
+	}
+
+	homebrew := InstallStateResponse{
+		RunningAsService: true,
+		ManagedService:   true,
+		Mode:             installModeUser,
+		Manager:          serviceManagerLaunchd,
+		Kind:             installKindHomebrew,
+	}
+	if supported, _ := homebrew.applySupport(); !supported {
+		t.Fatal("managed Homebrew user service should support Stable apply")
+	}
+	if supported, _ := homebrew.nightlySupport(); supported {
+		t.Fatal("managed Homebrew user service should not support Nightly")
 	}
 }
 

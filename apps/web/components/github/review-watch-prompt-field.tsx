@@ -3,12 +3,8 @@
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Label } from "@kandev/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
-import {
-  ScriptEditor,
-  computeEditorHeight,
-} from "@/components/settings/profile-edit/script-editor";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import { reviewWatchPlaceholders } from "@/components/github/review-watch-placeholders";
-import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { Trans, useTranslation } from "react-i18next";
 import { useMemo } from "react";
 
@@ -16,7 +12,9 @@ import { useMemo } from "react";
 // than written into the catalog: they contain a literal `{{task_prompt}}` token,
 // which i18next would read as an interpolation and substitute away, and the
 // pseudo-locale would transliterate the URL.
+// i18n-exempt: example prompt text, shown as a sample of what is sent verbatim to the agent.
 const STEP_PROMPT_EXAMPLE = "Analyze the task: {{task_prompt}}";
+// i18n-exempt: example prompt text, shown as a sample of what is sent verbatim to the agent.
 const FINAL_PROMPT_EXAMPLE = "Analyze the task: Pull Request ready for review: https://...";
 
 // Pulled out of review-watch-dialog.tsx to keep that file under the 600-line
@@ -56,7 +54,6 @@ export function ReviewWatchPromptField({
   onChange: (v: string) => void;
 }) {
   const { t } = useTranslation();
-  const { prompts } = useCustomPrompts();
   const placeholders = useMemo(() => reviewWatchPlaceholders(t), [t]);
   return (
     <div className="space-y-1.5">
@@ -69,28 +66,27 @@ export function ReviewWatchPromptField({
             catalog, where i18next would read `{{` as an interpolation opener. */}
         {t("github:reviewWatchPromptHelp", { token: "{{", mention: "@" })}
       </p>
-      <div className="rounded-md border border-border overflow-hidden">
-        <ScriptEditor
-          value={value}
-          onChange={onChange}
-          language="markdown"
-          height={computeEditorHeight(value)}
-          lineNumbers="off"
-          placeholders={placeholders}
-          mentionPrompts={prompts}
-        />
-      </div>
-      <p className="text-xs text-muted-foreground/70">
-        <Trans
-          i18nKey="github:workflowStepPromptWrapHelp"
-          values={{ stepPrompt: STEP_PROMPT_EXAMPLE, finalPrompt: FINAL_PROMPT_EXAMPLE }}
-        >
-          The workflow step prompt wraps this prompt. For example, if the step prompt is{" "}
-          <code className="text-[10px] bg-muted px-1 rounded">{"{{stepPrompt}}"}</code>, the final
-          prompt becomes{" "}
-          <code className="text-[10px] bg-muted px-1 rounded">{"{{finalPrompt}}"}</code>
-        </Trans>
-      </p>
+      <SettingsPromptEditor
+        value={value}
+        onChange={onChange}
+        placeholders={placeholders}
+        promptReferences
+        ariaLabel={t("github:taskPrompt")}
+        testId="github-review-watch-prompt-editor"
+        help={
+          <p className="text-xs text-muted-foreground/70">
+            <Trans
+              i18nKey="github:workflowStepPromptWrapHelp"
+              values={{ stepPrompt: STEP_PROMPT_EXAMPLE, finalPrompt: FINAL_PROMPT_EXAMPLE }}
+            >
+              The workflow step prompt wraps this prompt. For example, if the step prompt is{" "}
+              <code className="text-[10px] bg-muted px-1 rounded">{"{{stepPrompt}}"}</code>, the
+              final prompt becomes{" "}
+              <code className="text-[10px] bg-muted px-1 rounded">{"{{finalPrompt}}"}</code>
+            </Trans>
+          </p>
+        }
+      />
     </div>
   );
 }

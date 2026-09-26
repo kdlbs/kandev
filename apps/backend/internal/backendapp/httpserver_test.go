@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/loginpty"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/goleak"
@@ -21,12 +22,37 @@ func TestBuildHTTPServerAbortsWhenInterlockTokenGenerationFails(t *testing.T) {
 	newInterimSettingsInterlockToken = func() (string, error) { return "", wantErr }
 	t.Cleanup(func() { newInterimSettingsInterlockToken = original })
 
-	server, err := buildHTTPServer(&config.Config{}, testLogger(t), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	server, err := buildHTTPServer(&config.Config{}, testLogger(t), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("buildHTTPServer error = %v, want %v", err, wantErr)
 	}
 	if server != nil {
 		t.Fatal("buildHTTPServer returned a server after token generation failed")
+	}
+}
+
+func TestBuildLoginPTYServicesRegistersStopAllCleanup(t *testing.T) {
+	var cleanups []func() error
+	loginMgr, _ := buildLoginPTYServices(testLogger(t), nil, nil, nil, func(fn func() error) {
+		cleanups = append(cleanups, fn)
+	})
+	if len(cleanups) != 1 {
+		t.Fatalf("cleanup count = %d, want 1", len(cleanups))
+	}
+
+	sess, err := loginMgr.StartWithKey("_host_shell:tab-a", loginpty.HostShellAgentID, []string{"sh", "-c", "sleep 1"}, 80, 24)
+	if err != nil {
+		t.Fatalf("StartWithKey: %v", err)
+	}
+	t.Cleanup(func() { _ = loginMgr.StopAll() })
+	if err := cleanups[0](); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if loginMgr.GetByID(sess.ID) != nil {
+		t.Fatal("cleanup returned before login session stopped")
+	}
+	if err := cleanups[0](); err != nil {
+		t.Fatalf("second cleanup: %v", err)
 	}
 }
 
@@ -232,27 +258,5 @@ func TestServerListenersStopClosesListenersAndDrains(t *testing.T) {
 	}
 	if _, err := getStatus("127.0.0.2", port); err == nil {
 		t.Fatal("expected connection failure on 127.0.0.2 after shutdown")
-	}
-}
-
-func TestProbeAddrPrefersLoopback(t *testing.T) {
-	sl := &serverListeners{bound: []string{"100.64.0.1:8080", "127.0.0.1:8080"}}
-	if got := sl.probeAddr(); got != "127.0.0.1:8080" {
-		t.Fatalf("probeAddr() = %q, want 127.0.0.1:8080", got)
-	}
-
-	wildcard := &serverListeners{bound: []string{"0.0.0.0:8080"}}
-	if got := wildcard.probeAddr(); got != "127.0.0.1:8080" {
-		t.Fatalf("probeAddr() wildcard = %q, want 127.0.0.1:8080", got)
-	}
-
-	wildcard6 := &serverListeners{bound: []string{"[::]:8080"}}
-	if got := wildcard6.probeAddr(); got != "[::1]:8080" {
-		t.Fatalf("probeAddr() ipv6 wildcard = %q, want [::1]:8080", got)
-	}
-
-	tailnetOnly := &serverListeners{bound: []string{"100.64.0.1:8080"}}
-	if got := tailnetOnly.probeAddr(); got != "100.64.0.1:8080" {
-		t.Fatalf("probeAddr() tailnet-only = %q, want 100.64.0.1:8080", got)
 	}
 }

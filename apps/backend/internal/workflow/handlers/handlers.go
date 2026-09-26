@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -14,25 +17,34 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/workflow/controller"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/workflow/stepevents"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+// stepEventSource labels workflow-step events published by this surface.
+const stepEventSource = "workflow-handlers"
 
 // Handlers manages workflow HTTP and WebSocket handlers
 type Handlers struct {
 	controller *controller.Controller
 	eventBus   bus.EventBus
+	stepEvents *stepevents.Publisher
 	logger     *logger.Logger
 }
 
 // NewHandlers creates new workflow handlers
 func NewHandlers(ctrl *controller.Controller, eventBus bus.EventBus, log *logger.Logger) *Handlers {
+	scoped := log.WithFields(zap.String("component", "workflow-handlers"))
 	return &Handlers{
 		controller: ctrl,
 		eventBus:   eventBus,
-		logger:     log.WithFields(zap.String("component", "workflow-handlers")),
+		stepEvents: stepevents.NewPublisher(eventBus, stepEventSource, scoped),
+		logger:     scoped,
 	}
 }
 
@@ -63,6 +75,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	// Export/Import routes
 	api.GET("/workflows/:id/export", h.httpExportWorkflow)
 	api.GET("/workspaces/:id/workflows/export", h.httpExportWorkflows)
+	api.POST("/workspaces/:id/workflows/import/preview", h.httpPreviewImportWorkflows)
 	api.POST("/workspaces/:id/workflows/import", h.httpImportWorkflows)
 
 	// History routes
@@ -108,6 +121,9 @@ func (h *Handlers) httpListStepsByWorkflow(c *gin.Context) {
 	})
 	if err != nil {
 		h.logger.Error("failed to list steps", zap.Error(err))
+		if writeNotVisible(c, err, "Workflow not found") {
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list steps"})
 		return
 	}
@@ -118,6 +134,9 @@ func (h *Handlers) httpListStepsByWorkspace(c *gin.Context) {
 	resp, err := h.controller.ListStepsByWorkspace(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to list steps by workspace", zap.Error(err))
+		if writeNotVisible(c, err, "Workspace not found") {
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list steps"})
 		return
 	}
@@ -165,12 +184,15 @@ func (h *Handlers) httpCreateStep(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workflow_id and name are required"})
 		return
 	}
-	resp, err := h.controller.CreateStep(c.Request.Context(), req)
+	ctx := c.Request.Context()
+	resp, err := h.controller.CreateStep(ctx, req)
 	if err != nil {
 		h.logger.Error("failed to create step", zap.Error(err))
 		h.writeStepMutationError(c, err)
 		return
 	}
+	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.DemotedStartSteps)
+	h.publishWorkflowStepEvent(ctx, events.WorkflowStepCreated, resp.Step)
 	c.JSON(http.StatusCreated, resp.Step)
 }
 
@@ -181,18 +203,36 @@ func (h *Handlers) httpUpdateStep(c *gin.Context) {
 		return
 	}
 	req.ID = c.Param("id")
-	resp, err := h.controller.UpdateStep(c.Request.Context(), req)
+	ctx := c.Request.Context()
+	resp, err := h.controller.UpdateStep(ctx, req)
 	if err != nil {
 		h.logger.Error("failed to update step", zap.Error(err))
 		h.writeStepMutationError(c, err)
 		return
 	}
+	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.DemotedStartSteps)
+	h.publishWorkflowStepEvent(ctx, events.WorkflowStepUpdated, resp.Step)
 	c.JSON(http.StatusOK, resp.Step)
 }
 
+// writeNotVisible answers 404 for a workflow, workspace or step the caller may
+// not see, and reports whether it handled the error. The same 404 covers a
+// resource that does not exist, so neither response reveals which it was.
+func writeNotVisible(c *gin.Context, err error, message string) bool {
+	if !errors.Is(err, service.ErrNotVisible) {
+		return false
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": message})
+	return true
+}
+
 func (h *Handlers) writeStepMutationError(c *gin.Context, err error) {
-	if errors.Is(err, service.ErrWorkflowReadOnly) {
+	if errors.Is(err, service.ErrWorkflowReadOnly) || errors.Is(err, service.ErrWorkflowWorkspaceReadOnly) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	// A step the caller may not see reads exactly like one that is not there.
+	if writeNotVisible(c, err, "Step not found") {
 		return
 	}
 	msg := strings.ToLower(err.Error())
@@ -217,7 +257,10 @@ func (h *Handlers) httpDeleteStep(c *gin.Context) {
 	ctx := c.Request.Context()
 	stepID := c.Param("id")
 	stepResp, getErr := h.controller.GetStep(ctx, stepID)
-	if getErr != nil {
+	// A step the caller may not see is the ordinary rejection below, not a
+	// failure to read one — warning about it would file every unauthorized
+	// delete under infrastructure trouble.
+	if getErr != nil && !errors.Is(getErr, service.ErrNotVisible) {
 		h.logger.Warn("failed to fetch step before delete; workflow_step.deleted event will not be published",
 			zap.String("step_id", stepID), zap.Error(getErr))
 	}
@@ -234,38 +277,11 @@ func (h *Handlers) httpDeleteStep(c *gin.Context) {
 }
 
 func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType string, step *models.WorkflowStep) {
-	if step == nil {
-		return
-	}
-	data := map[string]interface{}{
-		"step": map[string]interface{}{
-			"id":                            step.ID,
-			"workflow_id":                   step.WorkflowID,
-			"name":                          step.Name,
-			"position":                      step.Position,
-			"color":                         step.Color,
-			"prompt":                        step.Prompt,
-			"events":                        step.Events,
-			"show_in_command_panel":         step.ShowInCommandPanel,
-			"allow_manual_move":             step.AllowManualMove,
-			"is_start_step":                 step.IsStartStep,
-			"auto_archive_after_hours":      step.AutoArchiveAfterHours,
-			"wip_limit":                     step.WIPLimit,
-			"pull_from_step_id":             step.PullFromStepID,
-			"agent_profile_id":              step.AgentProfileID,
-			"stage_type":                    string(step.StageType),
-			"auto_advance_requires_signal":  step.AutoAdvanceRequiresSignal,
-			"cancel_triggers_turn_complete": step.CancelTriggersTurnComplete,
-			"created_at":                    step.CreatedAt,
-			"updated_at":                    step.UpdatedAt,
-		},
-	}
-	if err := h.eventBus.Publish(ctx, eventType, bus.NewEvent(eventType, "workflow-handlers", data)); err != nil {
-		h.logger.Error("failed to publish workflow step event",
-			zap.String("event_type", eventType),
-			zap.String("step_id", step.ID),
-			zap.Error(err))
-	}
+	h.stepEvents.Publish(ctx, eventType, step)
+}
+
+func (h *Handlers) publishWorkflowStepEvents(ctx context.Context, eventType string, steps []*models.WorkflowStep) {
+	h.stepEvents.PublishAll(ctx, eventType, steps)
 }
 
 type httpReorderStepsRequest struct {
@@ -297,7 +313,15 @@ func (h *Handlers) httpListHistoryBySession(c *gin.Context) {
 	})
 	if err != nil {
 		h.logger.Error("failed to list history", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list history"})
+		// Session IDs are opaque, so denied/missing access is reported as
+		// not-found rather than leaking whether another workspace owns the
+		// session. Any other error (e.g. a repository read failure) is a
+		// genuine server error and must not be masked as not-found.
+		if errors.Is(err, taskmodels.ErrTaskSessionNotFound) || errors.Is(err, repoerrors.ErrTaskNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list history"})
 		return
 	}
 	c.JSON(http.StatusOK, resp)
@@ -309,6 +333,9 @@ func (h *Handlers) httpExportWorkflow(c *gin.Context) {
 	resp, err := h.controller.ExportWorkflow(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to export workflow", zap.Error(err))
+		if writeNotVisible(c, err, "Workflow not found") {
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to export workflow"})
 		return
 	}
@@ -319,6 +346,9 @@ func (h *Handlers) httpExportWorkflows(c *gin.Context) {
 	resp, err := h.controller.ExportWorkflows(c.Request.Context(), c.Param("id"), parseExportIDs(c))
 	if err != nil {
 		h.logger.Error("failed to export workflows", zap.Error(err))
+		if writeNotVisible(c, err, "Workspace not found") {
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to export workflows"})
 		return
 	}
@@ -343,10 +373,78 @@ func parseExportIDs(c *gin.Context) []string {
 }
 
 func (h *Handlers) httpImportWorkflows(c *gin.Context) {
-	const maxImportSize = 1 << 20 // 1 MB
-	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxImportSize))
+	body, tooLarge, err := readImportBody(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+		return
+	}
+	if tooLarge {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Import request exceeds the 1 MiB limit"})
+		return
+	}
+
+	request, err := parseImportWorkflowsRequest(c, body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": capitalizeImportError(err.Error())})
+		return
+	}
+
+	resp, err := h.controller.ImportWorkflows(c.Request.Context(), request)
+	if err != nil {
+		h.writeImportError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func parseImportWorkflowsRequest(c *gin.Context, body []byte) (controller.ImportWorkflowsRequest, error) {
+	request := controller.ImportWorkflowsRequest{WorkspaceID: c.Param("id")}
+	if importMediaType(c) != "application/json" {
+		var data models.WorkflowExport
+		if err := yaml.Unmarshal(body, &data); err != nil {
+			return request, fmt.Errorf("invalid YAML: %w", err)
+		}
+		request.Data = &data
+		return request, nil
+	}
+
+	var envelope struct {
+		YAML                string                         `json:"yaml"`
+		StepProfileBindings []service.ImportProfileBinding `json:"step_profile_bindings"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return request, fmt.Errorf("invalid JSON: %w", err)
+	}
+	if strings.TrimSpace(envelope.YAML) == "" {
+		return request, errors.New("the import YAML is required")
+	}
+	var data models.WorkflowExport
+	if err := yaml.Unmarshal([]byte(envelope.YAML), &data); err != nil {
+		return request, fmt.Errorf("invalid YAML: %w", err)
+	}
+	if envelope.StepProfileBindings == nil {
+		envelope.StepProfileBindings = []service.ImportProfileBinding{}
+	}
+	request.Data = &data
+	request.StepProfileBindings = envelope.StepProfileBindings
+	return request, nil
+}
+
+func capitalizeImportError(message string) string {
+	if message == "" {
+		return message
+	}
+	return strings.ToUpper(message[:1]) + message[1:]
+}
+
+func (h *Handlers) httpPreviewImportWorkflows(c *gin.Context) {
+	body, tooLarge, err := readImportBody(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+		return
+	}
+	if tooLarge {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Import request exceeds the 1 MiB limit"})
 		return
 	}
 	var data models.WorkflowExport
@@ -354,17 +452,57 @@ func (h *Handlers) httpImportWorkflows(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid YAML: " + err.Error()})
 		return
 	}
-	req := controller.ImportWorkflowsRequest{
-		WorkspaceID: c.Param("id"),
-		Data:        &data,
-	}
-	resp, err := h.controller.ImportWorkflows(c.Request.Context(), req)
+	resp, err := h.controller.PreviewImportWorkflows(c.Request.Context(), c.Param("id"), &data)
 	if err != nil {
-		h.logger.Error("failed to import workflows", zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		h.writeImportError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+const maxImportSize = 1 << 20
+
+func readImportBody(c *gin.Context) ([]byte, bool, error) {
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxImportSize+1))
+	if err != nil {
+		return nil, false, err
+	}
+	return body, len(body) > maxImportSize, nil
+}
+
+func importMediaType(c *gin.Context) string {
+	mediaType, _, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
+	if err != nil {
+		return strings.ToLower(strings.TrimSpace(strings.Split(c.GetHeader("Content-Type"), ";")[0]))
+	}
+	return strings.ToLower(mediaType)
+}
+
+func (h *Handlers) writeImportError(c *gin.Context, err error) {
+	if writeNotVisible(c, err, "Workspace not found") {
+		return
+	}
+	var resolutionErr *service.ImportProfileResolutionError
+	if errors.As(err, &resolutionErr) {
+		c.JSON(http.StatusConflict, gin.H{
+			"code":  "workflow_import_profiles_required",
+			"error": resolutionErr.Error(),
+			"steps": resolutionErr.Conflicts,
+		})
+		return
+	}
+	var bindingsErr *service.InvalidImportProfileBindingsError
+	if errors.As(err, &bindingsErr) {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_workflow_import_profile_bindings", "error": bindingsErr.Error()})
+		return
+	}
+	if errors.Is(err, service.ErrImportProfileCatalogUnavailable) {
+		h.logger.Error("failed to import workflows", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Import profile catalog is unavailable"})
+		return
+	}
+	h.logger.Error("failed to import workflows", zap.Error(err))
+	c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 }
 
 // respondYAML marshals the value as YAML and writes it to the response.
@@ -439,6 +577,9 @@ func (h *Handlers) wsCreateStepsFromTemplate(ctx context.Context, msg *ws.Messag
 		TemplateID: req.TemplateID,
 	}); err != nil {
 		h.logger.Error("failed to create steps", zap.Error(err))
+		if errors.Is(err, service.ErrNotVisible) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, notFoundMessage, nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create steps", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"success": true})

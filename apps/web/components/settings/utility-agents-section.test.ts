@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { UtilityAgent } from "@/lib/api/domains/utility-api";
+import { USE_DEFAULT } from "./utility-sections";
 import {
   isUtilityAgentDirty,
   mergeRefreshedUtilityAgents,
   replaceCustomUtilityAgents,
+  updateBuiltinProfileDraft,
 } from "./utility-agents-section";
 
 const DRAFT_MODEL = "draft-model";
@@ -23,7 +25,7 @@ function agent(id: string, builtin: boolean, model: string): UtilityAgent {
   };
 }
 
-describe("replaceCustomUtilityAgents", () => {
+describe("utility agent helpers", () => {
   it("compares only draftable built-in fields", () => {
     const baseline = agent("commit", true, "saved-model");
 
@@ -52,5 +54,32 @@ describe("replaceCustomUtilityAgents", () => {
     expect(mergeRefreshedUtilityAgents([draft], [baseline], [refreshed])).toEqual([
       { ...refreshed, model: DRAFT_MODEL },
     ]);
+  });
+});
+
+describe("updateBuiltinProfileDraft", () => {
+  it("treats the picker fallback value as an inherited binding", () => {
+    const base = {
+      ...agent("commit", true, ""),
+      enabled: false,
+      agent_profile_id: "deleted-profile",
+      profile_binding_state: "unconfigured",
+    };
+
+    for (const pickerValue of ["", USE_DEFAULT]) {
+      const draft = updateBuiltinProfileDraft(base, pickerValue);
+
+      expect(draft.agent_profile_id).toBe("");
+      expect(draft.profile_binding_state).toBe("inherit");
+      expect(draft.enabled).toBe(true);
+    }
+  });
+
+  it("keeps a concrete profile selection explicit", () => {
+    const draft = updateBuiltinProfileDraft(agent("commit", true, ""), "profile-1");
+
+    expect(draft.agent_profile_id).toBe("profile-1");
+    expect(draft.profile_binding_state).toBe("explicit");
+    expect(draft.enabled).toBe(true);
   });
 });

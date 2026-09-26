@@ -1,14 +1,36 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
+  activatePlanMode,
   autoSelectBranch,
   buildCreateTaskPayload,
+  buildRepositoriesPayload,
+  computeRunnerEditable,
+  computeRunnerIneligibleReason,
+  findUnresolvedProviderRemote,
   shouldShowTaskTitleField,
   validateCreateInputs,
 } from "./task-create-dialog-helpers";
+import { createAppStore } from "@/lib/state/store";
+import { useContextFilesStore } from "@/lib/state/context-files-store";
+import type { TaskRemoteRepoRow } from "./task-create-dialog-types";
 const STORAGE_KEYS = { LAST_BRANCH: "kandev.dialog.lastBranch" } as const;
+
+// The agent-bearing fields every buildCreateTaskPayload case needs but none of
+// them is asserting; each test spreads these and overrides only what it checks.
+const AGENT_PAYLOAD_DEFAULTS = {
+  workspaceId: "ws-1",
+  effectiveWorkflowId: "wf-1",
+  repositoriesPayload: [],
+  agentProfileId: "agent-1",
+  executorId: "executor-1",
+  executorProfileId: "profile-1",
+  withAgent: true,
+};
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
+  useContextFilesStore.setState({ filesBySessionId: {} });
 });
 
 describe("autoSelectBranch", () => {
@@ -94,6 +116,39 @@ describe("autoSelectBranch", () => {
   });
 });
 
+describe("computeRunnerEditable", () => {
+  it("is always editable in create mode, regardless of any editingTask", () => {
+    expect(computeRunnerEditable(false)).toBe(true);
+    expect(computeRunnerEditable(false, { runnerEditable: false })).toBe(true);
+  });
+
+  it("defers to the projected verdict in edit mode", () => {
+    expect(computeRunnerEditable(true, { runnerEditable: true })).toBe(true);
+    expect(computeRunnerEditable(true, { runnerEditable: false })).toBe(false);
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-004.3: never decide editability from workflow
+  // state — computeRunnerEditable doesn't even accept a `state` field.
+  it("fails closed when the projection is absent", () => {
+    expect(computeRunnerEditable(true, {})).toBe(false);
+    expect(computeRunnerEditable(true, null)).toBe(false);
+    expect(computeRunnerEditable(true, undefined)).toBe(false);
+  });
+});
+
+describe("computeRunnerIneligibleReason", () => {
+  it("returns the projected reason", () => {
+    expect(computeRunnerIneligibleReason({ runnerIneligibleReason: "session_exists" })).toBe(
+      "session_exists",
+    );
+  });
+
+  it("falls back to evaluation_unavailable when absent", () => {
+    expect(computeRunnerIneligibleReason({})).toBe("evaluation_unavailable");
+    expect(computeRunnerIneligibleReason(null)).toBe("evaluation_unavailable");
+  });
+});
+
 describe("shouldShowTaskTitleField", () => {
   it.each([
     {
@@ -132,6 +187,64 @@ describe("shouldShowTaskTitleField", () => {
   );
 });
 
+describe("buildRepositoriesPayload — inspected provider repository", () => {
+  it("sends the exact inspected clone URL and complete Data Center descriptor", () => {
+    const remoteRow = {
+      key: "remote-0",
+      url: "https://bitbucket.example.test/bitbucket/projects/PLATFORM/repos/web/pull-requests/42",
+      remoteUrl: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+      branch: "feature/dc",
+      source: "paste",
+      provider: "bitbucket",
+      providerHost: "https://bitbucket.example.test/bitbucket",
+      providerRepoId: "web-42",
+      providerOwner: "PLATFORM",
+      providerName: "web",
+      prNumber: 42,
+      prBaseBranch: "main",
+      prHeadBranch: "feature/dc",
+    } as unknown as TaskRemoteRepoRow;
+
+    const payload = buildRepositoriesPayload({
+      useRemote: true,
+      remoteRepos: [remoteRow],
+      repositories: [],
+      discoveredRepositories: [],
+    });
+
+    expect(payload).toEqual([
+      expect.objectContaining({
+        repository_id: "",
+        remote_url: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+        provider: "bitbucket",
+        provider_host: "https://bitbucket.example.test/bitbucket",
+        provider_repo_id: "web-42",
+        provider_owner: "PLATFORM",
+        provider_name: "web",
+        base_branch: "main",
+        checkout_branch: "feature/dc",
+        pr_number: 42,
+      }),
+    ]);
+    expect(payload[0]).not.toHaveProperty("github_url");
+  });
+});
+
+describe("findUnresolvedProviderRemote", () => {
+  it("blocks a plugin URL until inspection attaches provider identity", () => {
+    const row = {
+      key: "remote-0",
+      url: "https://bitbucket.example.test/projects/TEAM/repos/app",
+      branch: "",
+      source: "paste",
+    } as TaskRemoteRepoRow;
+    const matches = (url: string) => url.includes("bitbucket.example.test");
+
+    expect(findUnresolvedProviderRemote([row], matches)).toBe(row);
+    expect(findUnresolvedProviderRemote([{ ...row, provider: "bitbucket" }], matches)).toBeNull();
+  });
+});
+
 describe("auto-title creation helpers", () => {
   const base = {
     workspaceId: "ws-1",
@@ -157,19 +270,125 @@ describe("auto-title creation helpers", () => {
 
   it("omits the manual title and opts into backend provisional naming", () => {
     const payload = buildCreateTaskPayload({
-      workspaceId: "ws-1",
-      effectiveWorkflowId: "wf-1",
+      ...AGENT_PAYLOAD_DEFAULTS,
       trimmedTitle: "ignored",
       trimmedDescription: "Fix the login flow",
-      repositoriesPayload: [],
-      agentProfileId: "agent-1",
-      executorId: "executor-1",
-      executorProfileId: "profile-1",
-      withAgent: true,
       autoTitle: true,
     });
 
     expect(payload).toMatchObject({ auto_title: true });
     expect(payload).not.toHaveProperty("title");
   });
+
+  it("includes autopilot only when the create form opts in", () => {
+    const payload = buildCreateTaskPayload({
+      ...AGENT_PAYLOAD_DEFAULTS,
+      trimmedTitle: "Autonomous task",
+      trimmedDescription: "Run the migration",
+      autopilot: true,
+    });
+
+    expect(payload.autopilot).toBe(true);
+  });
+
+  it("keeps autopilot off when the create form does not opt in", () => {
+    const payload = buildCreateTaskPayload({
+      ...AGENT_PAYLOAD_DEFAULTS,
+      trimmedTitle: "Manual task",
+      trimmedDescription: "Run the migration",
+      autopilot: false,
+    });
+
+    expect(payload.autopilot).toBeUndefined();
+  });
+});
+
+describe("buildCreateTaskPayload dependencies", () => {
+  const base = {
+    ...AGENT_PAYLOAD_DEFAULTS,
+    trimmedTitle: "Second step",
+    trimmedDescription: "Runs after the first",
+  };
+
+  it("sends the selected predecessors as blocked_by", () => {
+    const payload = buildCreateTaskPayload({ ...base, blockedBy: ["task-a", "task-b"] });
+    expect(payload.blocked_by).toEqual(["task-a", "task-b"]);
+  });
+
+  it("omits blocked_by when nothing is selected", () => {
+    expect(buildCreateTaskPayload({ ...base, blockedBy: [] }).blocked_by).toBeUndefined();
+    expect(buildCreateTaskPayload(base).blocked_by).toBeUndefined();
+  });
+});
+
+describe("buildCreateTaskPayload priority", () => {
+  const base = {
+    ...AGENT_PAYLOAD_DEFAULTS,
+    trimmedTitle: "Fix the bug",
+    trimmedDescription: "",
+  };
+
+  it("submits the selected priority token", () => {
+    expect(buildCreateTaskPayload({ ...base, priority: "critical" }).priority).toBe("critical");
+  });
+
+  it("defaults to medium when no priority is selected", () => {
+    expect(buildCreateTaskPayload(base).priority).toBe("medium");
+  });
+
+  it("sends task-only workflow profile replacements and omits an empty map", () => {
+    expect(
+      buildCreateTaskPayload({
+        ...base,
+        workflowAgentOverrides: { "profile-luna": "profile-terra" },
+      }).workflow_agent_overrides,
+    ).toEqual({ "profile-luna": "profile-terra" });
+    expect(buildCreateTaskPayload(base).workflow_agent_overrides).toBeUndefined();
+  });
+});
+
+it("initializes a planning session without navigating when auto-focus is off", () => {
+  const currentSessionId = "current-session";
+  const backgroundSessionId = "session-plan";
+  const store = createAppStore();
+  const { setActiveDocument, setPlanMode, setActiveSession } = store.getState();
+  setActiveSession("current-task", currentSessionId);
+  setActiveDocument(currentSessionId, { type: "plan", taskId: "current-task" });
+  setPlanMode(currentSessionId, false);
+  useContextFilesStore.getState().addFile(currentSessionId, { path: "notes.md", name: "notes.md" });
+  const currentTasks = store.getState().tasks;
+  const currentDocument =
+    store.getState().documentPanel.activeDocumentBySessionId[currentSessionId];
+  const currentContext = useContextFilesStore.getState().filesBySessionId[currentSessionId];
+  const router = {
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    refresh: vi.fn(),
+    prefetch: vi.fn(),
+  };
+  activatePlanMode({
+    taskId: "task-plan",
+    sessionId: backgroundSessionId,
+    autoFocus: false,
+    setActiveDocument,
+    setPlanMode,
+    router,
+  });
+  expect(store.getState().chatInput.planModeBySessionId[backgroundSessionId]).toBe(true);
+  expect(store.getState().documentPanel.activeDocumentBySessionId[backgroundSessionId]).toEqual({
+    type: "plan",
+    taskId: "task-plan",
+  });
+  expect(useContextFilesStore.getState().filesBySessionId[backgroundSessionId]).toEqual([
+    { path: "plan:context", name: "Plan" },
+  ]);
+  expect(store.getState().tasks).toBe(currentTasks);
+  expect(store.getState().documentPanel.activeDocumentBySessionId[currentSessionId]).toBe(
+    currentDocument,
+  );
+  expect(store.getState().chatInput.planModeBySessionId[currentSessionId]).toBe(false);
+  expect(useContextFilesStore.getState().filesBySessionId[currentSessionId]).toBe(currentContext);
+  expect(router.push).not.toHaveBeenCalled();
 });

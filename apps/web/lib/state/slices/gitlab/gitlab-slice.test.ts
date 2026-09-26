@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createGitLabSlice } from "./gitlab-slice";
 import type { GitLabSlice } from "./types";
-import type { TaskMR } from "@/lib/types/gitlab";
+import type { GitLabStatus, TaskMR, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 
 function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
   return {
@@ -26,8 +26,42 @@ function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
     required_approvals: 0,
     pipeline_jobs_total: 0,
     pipeline_jobs_pass: 0,
+    reviewer_count: 0,
+    unapproved_reviewers: 0,
+    unresolved_discussions: 0,
     created_at: "",
     updated_at: "",
+    ...overrides,
+  };
+}
+
+function makeOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAutomationOptions {
+  return {
+    task_id: "task-a",
+    auto_fix_enabled: false,
+    auto_merge_enabled: false,
+    auto_fix_max_rounds: 10,
+    effective_auto_fix_prompt: "",
+    using_default_prompt: true,
+    prompt_on_review_requested: false,
+    prompt_on_merged: false,
+    prompt_on_closed: false,
+    review_reviewer_username: "",
+    updated_at: "2026-01-01T00:00:00Z",
+    mr_states: [],
+    mr_options: [],
+    ...overrides,
+  };
+}
+
+function makeStatus(overrides: Partial<GitLabStatus> = {}): GitLabStatus {
+  return {
+    authenticated: true,
+    username: "alice",
+    auth_method: "pat",
+    host: "https://gitlab.example",
+    token_configured: true,
+    required_scopes: [],
     ...overrides,
   };
 }
@@ -170,6 +204,35 @@ describe("resetTaskMRs", () => {
   });
 });
 
+describe("GitLab status", () => {
+  it("keeps status and loading state isolated by workspace", () => {
+    const store = makeStore();
+    const workspaceAStatus = makeStatus();
+
+    store.getState().setGitLabStatus("ws-a", workspaceAStatus);
+    store.getState().setGitLabStatusLoading("ws-b", true);
+
+    expect(store.getState().gitlabStatus.byWorkspaceId).toEqual({
+      "ws-a": { data: workspaceAStatus, loading: false, loadedAt: expect.any(Number) },
+      "ws-b": { data: null, loading: true, loadedAt: null },
+    });
+  });
+
+  it("resets one workspace status without affecting another", () => {
+    const store = makeStore();
+    store.getState().setGitLabStatus("ws-a", makeStatus());
+    store.getState().setGitLabStatusLoading("ws-a", true);
+    store.getState().setGitLabStatus("ws-b", makeStatus());
+
+    store.getState().resetGitLabStatus("ws-a");
+
+    expect(store.getState().gitlabStatus.byWorkspaceId).toEqual({
+      "ws-a": { data: null, loading: false, loadedAt: null },
+      "ws-b": { data: expect.any(Object), loading: false, loadedAt: expect.any(Number) },
+    });
+  });
+});
+
 describe("removeTaskMR", () => {
   it("removes only the selected association", () => {
     const store = makeStore();
@@ -270,5 +333,54 @@ describe("action presets + stats", () => {
     });
     expect(store.getState().gitlabStats.data?.open_mrs).toBe(5);
     expect(store.getState().gitlabStats.loadedAt).not.toBeNull();
+  });
+});
+
+describe("task MR automation options", () => {
+  it("keys options, loading, saving, and errors independently per task", () => {
+    const store = makeStore();
+    const optionsA = makeOptions({ prompt_on_review_requested: true });
+
+    store.getState().setTaskMRAutomationOptions("task-a", optionsA);
+    store.getState().setTaskMRAutomationLoading("task-b", true);
+    store.getState().setTaskMRAutomationSaving("task-a", true);
+    store.getState().setTaskMRAutomationError("task-b", "boom");
+
+    expect(store.getState().taskMRAutomation.byTaskId["task-a"]).toEqual(optionsA);
+    expect(store.getState().taskMRAutomation.byTaskId["task-b"]).toBeUndefined();
+    expect(store.getState().taskMRAutomation.loading["task-b"]).toBe(true);
+    expect(store.getState().taskMRAutomation.loading["task-a"]).toBeUndefined();
+    expect(store.getState().taskMRAutomation.saving["task-a"]).toBe(true);
+    expect(store.getState().taskMRAutomation.errors["task-b"]).toBe("boom");
+    expect(store.getState().taskMRAutomation.errors["task-a"]).toBeUndefined();
+  });
+
+  it("setTaskMRAutomationOptions fully replaces a task's stored options", () => {
+    const store = makeStore();
+    store
+      .getState()
+      .setTaskMRAutomationOptions("task-a", makeOptions({ prompt_on_review_requested: true }));
+    store.getState().setTaskMRAutomationOptions(
+      "task-a",
+      makeOptions({
+        prompt_on_merged: true,
+        prompt_on_closed: true,
+        review_reviewer_username: "bob",
+        updated_at: "2026-01-02T00:00:00Z",
+      }),
+    );
+
+    const stored = store.getState().taskMRAutomation.byTaskId["task-a"];
+    expect(stored?.prompt_on_review_requested).toBe(false);
+    expect(stored?.prompt_on_merged).toBe(true);
+    expect(stored?.review_reviewer_username).toBe("bob");
+  });
+
+  it("setTaskMRAutomationError clears the error by passing null", () => {
+    const store = makeStore();
+    store.getState().setTaskMRAutomationError("task-a", "boom");
+    expect(store.getState().taskMRAutomation.errors["task-a"]).toBe("boom");
+    store.getState().setTaskMRAutomationError("task-a", null);
+    expect(store.getState().taskMRAutomation.errors["task-a"]).toBeNull();
   });
 });

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-acp-live-updates", "03-frontend-command-row"]
 plan: "plan.md"
-spec: "../../specs/ui/acp-shell-command-output.md"
+spec: "../../specs/ui/requirements/acp-shell-command-output.md"
 ---
 
 # Task 04: Command Output E2E Verification
@@ -39,7 +39,7 @@ make lint
 - `apps/web/e2e/tests/chat/tool-execute-output.spec.ts` (new)
 - `apps/web/e2e/tests/chat/mobile-tool-execute-output.spec.ts` (new)
 - `apps/web/e2e/pages/session-page.ts` only if a small reusable command-row helper is justified
-- `docs/specs/ui/acp-shell-command-output.md` only if implementation reveals a contract correction
+- `docs/specs/ui/requirements/acp-shell-command-output.md` only if implementation reveals a contract correction
 - `docs/plans/acp-shell-command-output/plan.md`
 
 ## Dependencies

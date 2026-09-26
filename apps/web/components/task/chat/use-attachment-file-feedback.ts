@@ -2,32 +2,36 @@ import { useCallback } from "react";
 import { useToast } from "@/components/toast-provider";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { MAX_FILES, MAX_FILE_SIZE, MAX_TOTAL_SIZE } from "./file-attachment";
+import { useTranslation } from "react-i18next";
 
 export function useAttachmentCountFeedback() {
+  const { t } = useTranslation();
   const { toast } = useToast();
 
   return useCallback(() => {
     toast({
-      title: "Attachment limit reached",
-      description: `You can attach up to ${MAX_FILES} files.`,
+      title: t("task:attachmentLimitReached"),
+      description: t("task:youCanAttachUpToFiles", { maxFiles: MAX_FILES }),
       variant: "error",
     });
   }, [toast]);
 }
 
 export function useAttachmentTotalSizeFeedback() {
+  const { t } = useTranslation();
   const { toast } = useToast();
 
   return useCallback(() => {
     toast({
-      title: "Attachment limit reached",
-      description: `Attachments can total up to ${formatBytes(MAX_TOTAL_SIZE)}.`,
+      title: t("task:attachmentLimitReached"),
+      description: t("task:attachmentsCanTotalUpTo", { bytes: formatBytes(MAX_TOTAL_SIZE) }),
       variant: "error",
     });
   }, [toast]);
 }
 
 export function useAttachmentFileFeedback() {
+  const { t } = useTranslation();
   const { toast } = useToast();
 
   return useCallback(
@@ -35,8 +39,12 @@ export function useAttachmentFileFeedback() {
       if (file.size <= MAX_FILE_SIZE) return false;
 
       toast({
-        title: "Attachment is too large",
-        description: `${file.name} is ${formatBytes(file.size)}. The maximum file size is ${formatBytes(MAX_FILE_SIZE)}.`,
+        title: t("task:attachmentIsTooLarge"),
+        description: t("task:isTheMaximumFileSizeIs", {
+          name: file.name,
+          size: formatBytes(file.size),
+          maxSize: formatBytes(MAX_FILE_SIZE),
+        }),
         variant: "error",
       });
       return true;
@@ -46,13 +54,13 @@ export function useAttachmentFileFeedback() {
 }
 
 export function useUnreadablePastedImageFeedback() {
+  const { t } = useTranslation();
   const { toast } = useToast();
 
   return useCallback(() => {
     toast({
-      title: "Pasted image couldn’t be attached",
-      description:
-        "The browser didn’t provide image data. Save the image, then attach the file instead.",
+      title: t("task:pastedImageCouldnTBeAttached"),
+      description: t("task:theBrowserDidnTProvideImage"),
       variant: "error",
     });
   }, [toast]);

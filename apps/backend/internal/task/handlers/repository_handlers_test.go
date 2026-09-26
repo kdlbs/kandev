@@ -23,6 +23,8 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	ws "github.com/kandev/kandev/pkg/websocket"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHTTPCreateRepositoryRejectsInvalidLocalPathWithoutPersistence(t *testing.T) {
@@ -55,7 +57,7 @@ func TestHTTPCreateRepositoryRejectsInvalidLocalPathWithoutPersistence(t *testin
 
 func TestHTTPInitializeLocalRepositoryCreatesRepository(t *testing.T) {
 	router, repo := newRepositoryHTTPTestRouter(t)
-	parentPath := canonicalTempDir(t)
+	parentPath := trustedRepositoryParent(t)
 	body := []byte(`{"name":"new-project","parent_path":` + strconv.Quote(parentPath) + `}`)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -119,7 +121,7 @@ func TestHTTPInitializeLocalRepositoryMapsClientErrors(t *testing.T) {
 
 	t.Run("existing target", func(t *testing.T) {
 		router, repo := newRepositoryHTTPTestRouter(t)
-		parent := t.TempDir()
+		parent := trustedRepositoryParent(t)
 		target := filepath.Join(parent, "existing")
 		if err := os.Mkdir(target, 0o755); err != nil {
 			t.Fatalf("Mkdir target: %v", err)
@@ -253,9 +255,9 @@ type repositoryHandlerRemoteLister struct {
 	expectedWorkspaceID string
 }
 
-func (l *repositoryHandlerRemoteLister) ListRepoBranches(_ context.Context, workspaceID, owner, name string) ([]service.Branch, error) {
+func (l *repositoryHandlerRemoteLister) ListRepoBranches(_ context.Context, source service.RemoteBranchSource) ([]service.Branch, error) {
 	l.calls++
-	if workspaceID != l.expectedWorkspaceID || owner != "owner" || name != "repo" {
+	if source.WorkspaceID != l.expectedWorkspaceID || source.Provider != "github" || source.Owner != "owner" || source.Name != "repo" {
 		return nil, errors.New("unexpected provider identity")
 	}
 	return []service.Branch{{Name: "main", Type: "remote"}}, nil
@@ -316,7 +318,7 @@ func TestHTTPListDirectoryIncludesChoosableContract(t *testing.T) {
 
 func TestHTTPCreateDirectoryCreatesFolder(t *testing.T) {
 	router, _ := newRepositoryHTTPTestRouter(t)
-	parent := canonicalTempDir(t)
+	parent := trustedRepositoryParent(t)
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/api/v1/fs/create-dir",
@@ -337,6 +339,15 @@ func TestHTTPCreateDirectoryCreatesFolder(t *testing.T) {
 	if !strings.Contains(response.Body.String(), strconv.Quote(wantPath)) {
 		t.Fatalf("response missing created path %q: %s", wantPath, response.Body.String())
 	}
+}
+
+func trustedRepositoryParent(t *testing.T) string {
+	t.Helper()
+	directory := canonicalTempDir(t)
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatalf("chmod trusted repository parent: %v", err)
+	}
+	return directory
 }
 
 func TestHTTPListBranchesRejectsRepositoryFromAnotherWorkspace(t *testing.T) {
@@ -405,6 +416,105 @@ func TestHTTPListBranchesRejectsInvalidExplicitPath(t *testing.T) {
 	}
 }
 
+func TestHTTPDesktopDiscoveryRootLifecycle(t *testing.T) {
+	router, repo, _ := newDesktopRepositoryHTTPTestRouter(t)
+	rootPath := canonicalTempDir(t)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/repositories/discovery/roots",
+		strings.NewReader(`{"path":`+strconv.Quote(rootPath)+`}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("add status = %d, want %d; body = %s", response.Code, http.StatusCreated, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), strconv.Quote(rootPath)) {
+		t.Fatalf("add response does not contain root path %q: %s", rootPath, response.Body.String())
+	}
+
+	listResponse := httptest.NewRecorder()
+	router.ServeHTTP(listResponse, httptest.NewRequest(http.MethodGet, "/api/v1/repositories/discovery/roots", nil))
+	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), strconv.Quote(rootPath)) {
+		t.Fatalf("list status/body = %d/%s", listResponse.Code, listResponse.Body.String())
+	}
+
+	snapshotResponse := httptest.NewRecorder()
+	router.ServeHTTP(snapshotResponse, httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/workspaces/ws-1/repositories/discovery",
+		nil,
+	))
+	if snapshotResponse.Code != http.StatusOK || !strings.Contains(snapshotResponse.Body.String(), `"desktop_runtime":true`) {
+		t.Fatalf("snapshot status/body = %d/%s", snapshotResponse.Code, snapshotResponse.Body.String())
+	}
+
+	removeResponse := httptest.NewRecorder()
+	router.ServeHTTP(removeResponse, httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v1/repositories/discovery/roots?path="+url.QueryEscape(rootPath),
+		nil,
+	))
+	if removeResponse.Code != http.StatusNoContent {
+		t.Fatalf("remove status = %d, want %d; body = %s", removeResponse.Code, http.StatusNoContent, removeResponse.Body.String())
+	}
+	roots, err := repo.ListDesktopDiscoveryRoots(context.Background())
+	if err != nil {
+		t.Fatalf("list roots after remove: %v", err)
+	}
+	if len(roots) != 0 {
+		t.Fatalf("roots after remove = %+v, want none", roots)
+	}
+}
+
+func TestConfirmHomeDiscoveryHTTPUsesBackendHomeAndIsIdempotent(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve Home: %v", err)
+	}
+	t.Setenv("HOME", home)
+	router, repo, _ := newDesktopRepositoryHTTPTestRouter(t)
+	if err := repo.SetDesktopDiscoveryMigration(context.Background(), &models.DesktopDiscoveryMigration{
+		HomeConfirmationRequired: true,
+	}); err != nil {
+		t.Fatalf("set migration state: %v", err)
+	}
+
+	confirm := func(target *gin.Engine) *httptest.ResponseRecorder {
+		t.Helper()
+		response := httptest.NewRecorder()
+		target.ServeHTTP(response, httptest.NewRequest(
+			http.MethodPost,
+			"/api/v1/repositories/discovery/roots/confirm-home",
+			nil,
+		))
+		return response
+	}
+	first := confirm(router)
+	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"path":"`+home+`"`) {
+		t.Fatalf("first confirmation = %d/%s", first.Code, first.Body.String())
+	}
+	second := confirm(router)
+	if second.Code != http.StatusOK {
+		t.Fatalf("retry confirmation status = %d, want %d: %s", second.Code, http.StatusOK, second.Body.String())
+	}
+	roots, err := repo.ListDesktopDiscoveryRoots(context.Background())
+	if err != nil {
+		t.Fatalf("list roots: %v", err)
+	}
+	if len(roots) != 1 || roots[0].Path != home {
+		t.Fatalf("roots = %+v, want one backend Home root", roots)
+	}
+
+	serverRouter, _, _ := newRepositoryHTTPTestRouterWithService(t)
+	serverResponse := confirm(serverRouter)
+	if serverResponse.Code != http.StatusConflict {
+		t.Fatalf("server mode status = %d, want %d: %s", serverResponse.Code, http.StatusConflict, serverResponse.Body.String())
+	}
+}
+
 func TestHTTPLocalRepositoryStatusRejectsInvalidExplicitPath(t *testing.T) {
 	router, _ := newRepositoryHTTPTestRouter(t)
 	request := httptest.NewRequest(
@@ -428,6 +538,14 @@ func newRepositoryHTTPTestRouter(t *testing.T) (*gin.Engine, *taskrepo.Repositor
 }
 
 func newRepositoryHTTPTestRouterWithService(t *testing.T) (*gin.Engine, *taskrepo.Repository, *service.Service) {
+	return newRepositoryHTTPTestRouterWithConfig(t, service.RepositoryDiscoveryConfig{})
+}
+
+func newDesktopRepositoryHTTPTestRouter(t *testing.T) (*gin.Engine, *taskrepo.Repository, *service.Service) {
+	return newRepositoryHTTPTestRouterWithConfig(t, service.RepositoryDiscoveryConfig{DesktopRuntime: true})
+}
+
+func newRepositoryHTTPTestRouterWithConfig(t *testing.T, discoveryConfig service.RepositoryDiscoveryConfig) (*gin.Engine, *taskrepo.Repository, *service.Service) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -455,9 +573,10 @@ func newRepositoryHTTPTestRouterWithService(t *testing.T) (*gin.Engine, *taskrep
 	}
 	eventBus := bus.NewMemoryEventBus(log)
 	svc := service.NewService(service.Repos{
-		Workspaces:   repo,
-		RepoEntities: repo,
-	}, eventBus, log, service.RepositoryDiscoveryConfig{})
+		Workspaces:     repo,
+		RepoEntities:   repo,
+		DiscoveryRoots: repo,
+	}, eventBus, log, discoveryConfig)
 	router := gin.New()
 	NewRepositoryHandlers(svc, log).registerHTTP(router)
 	return router, repo, svc
@@ -538,5 +657,121 @@ func TestRepositoryUpdateRequestJSONCopyFilesPointer(t *testing.T) {
 		if *req.CopyFiles != "" {
 			t.Errorf("*CopyFiles = %q, want empty string", *req.CopyFiles)
 		}
+	})
+}
+
+func TestRepositoryMutationsRejectedInImproveKandevWorkspace(t *testing.T) {
+	router, repo, _ := newRepositoryHTTPTestRouterWithService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-improve", Name: "Improve Kandev"}))
+
+	// Create repository -> 409.
+	body := strings.NewReader(`{"name":"new-repo","source_type":"local","local_path":"/tmp/x"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-improve/repositories", body)
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusConflict, res.Code, res.Body.String())
+
+	// Initialize-local -> 409.
+	body2 := strings.NewReader(`{"name":"proj","parent_path":"/tmp"}`)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-improve/repositories/initialize-local", body2)
+	req2.Header.Set("Content-Type", "application/json")
+	res2 := httptest.NewRecorder()
+	router.ServeHTTP(res2, req2)
+	require.Equal(t, http.StatusConflict, res2.Code, res2.Body.String())
+
+	// A normal workspace keeps working (initialize-local succeeds).
+	okPath := trustedRepositoryParent(t)
+	body3 := strings.NewReader(`{"name":"ok-repo","parent_path":` + strconv.Quote(okPath) + `}`)
+	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-1/repositories/initialize-local", body3)
+	req3.Header.Set("Content-Type", "application/json")
+	res3 := httptest.NewRecorder()
+	router.ServeHTTP(res3, req3)
+	require.Equal(t, http.StatusCreated, res3.Code, res3.Body.String())
+
+	// Update/delete of a repo in the improve workspace -> 409.
+	created := &models.Repository{ID: "repo-improve", WorkspaceID: "ws-improve", Name: "kandev"}
+	require.NoError(t, repo.CreateRepository(ctx, created))
+	req4 := httptest.NewRequest(http.MethodPatch, "/api/v1/repositories/repo-improve", strings.NewReader(`{"name":"renamed"}`))
+	req4.Header.Set("Content-Type", "application/json")
+	res4 := httptest.NewRecorder()
+	router.ServeHTTP(res4, req4)
+	require.Equal(t, http.StatusConflict, res4.Code, res4.Body.String())
+
+	req5 := httptest.NewRequest(http.MethodDelete, "/api/v1/repositories/repo-improve", nil)
+	res5 := httptest.NewRecorder()
+	router.ServeHTTP(res5, req5)
+	require.Equal(t, http.StatusConflict, res5.Code, res5.Body.String())
+}
+
+// TestWSRepositoryMutationsRejectedInImproveKandevWorkspace verifies the
+// WebSocket repository mutation handlers carry the same Improve Kandev
+// read-only guard as their HTTP counterparts: create by workspace id, and
+// update/delete (plus repository-script mutations) by repository workspace.
+func TestWSRepositoryMutationsRejectedInImproveKandevWorkspace(t *testing.T) {
+	_, repo, svc := newRepositoryHTTPTestRouterWithService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-improve", Name: "Improve Kandev"}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-improve", WorkspaceID: "ws-improve", Name: "kandev",
+	}))
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	require.NoError(t, err)
+	h := NewRepositoryHandlers(svc, log)
+
+	assertConflict := func(t *testing.T, resp *ws.Message, err error) {
+		t.Helper()
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.Equal(t, ws.MessageTypeError, resp.Type)
+		var payload ws.ErrorPayload
+		require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+		require.Equal(t, ws.ErrorCodeConflict, payload.Code)
+		require.Contains(t, payload.Message, "managed by Improve Kandev")
+	}
+
+	t.Run("create_rejected", func(t *testing.T) {
+		msg := &ws.Message{ID: "1", Action: ws.ActionRepositoryCreate,
+			Payload: json.RawMessage(`{"workspace_id":"ws-improve","name":"new-repo","source_type":"local","local_path":"/tmp/x"}`)}
+		resp, err := h.wsCreateRepository(ctx, msg)
+		assertConflict(t, resp, err)
+	})
+
+	t.Run("update_rejected", func(t *testing.T) {
+		msg := &ws.Message{ID: "2", Action: ws.ActionRepositoryUpdate,
+			Payload: json.RawMessage(`{"id":"repo-improve","name":"renamed"}`)}
+		resp, err := h.wsUpdateRepository(ctx, msg)
+		assertConflict(t, resp, err)
+	})
+
+	t.Run("delete_rejected", func(t *testing.T) {
+		msg := &ws.Message{ID: "3", Action: ws.ActionRepositoryDelete,
+			Payload: json.RawMessage(`{"id":"repo-improve"}`)}
+		resp, err := h.wsDeleteRepository(ctx, msg)
+		assertConflict(t, resp, err)
+	})
+
+	t.Run("script_create_rejected", func(t *testing.T) {
+		msg := &ws.Message{ID: "4", Action: ws.ActionRepositoryScriptCreate,
+			Payload: json.RawMessage(`{"repository_id":"repo-improve","name":"dev","command":"npm run dev"}`)}
+		resp, err := h.wsCreateRepositoryScript(ctx, msg)
+		assertConflict(t, resp, err)
+	})
+
+	t.Run("script_update_rejected", func(t *testing.T) {
+		script := &models.RepositoryScript{ID: "script-1", RepositoryID: "repo-improve", Name: "dev", Command: "npm run dev"}
+		require.NoError(t, repo.CreateRepositoryScript(ctx, script))
+		msg := &ws.Message{ID: "5", Action: ws.ActionRepositoryScriptUpdate,
+			Payload: json.RawMessage(`{"id":"script-1","command":"npm test"}`)}
+		resp, err := h.wsUpdateRepositoryScript(ctx, msg)
+		assertConflict(t, resp, err)
+	})
+
+	t.Run("script_delete_rejected", func(t *testing.T) {
+		msg := &ws.Message{ID: "6", Action: ws.ActionRepositoryScriptDelete,
+			Payload: json.RawMessage(`{"id":"script-1"}`)}
+		resp, err := h.wsDeleteRepositoryScript(ctx, msg)
+		assertConflict(t, resp, err)
 	})
 }

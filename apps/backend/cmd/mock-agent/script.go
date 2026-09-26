@@ -19,18 +19,22 @@ func isScriptMode(cmd string) bool {
 
 // executeScript processes a multi-line script command.
 func executeScript(e *emitter, fullPrompt, cmd string) {
+	planVersion := ""
 	lines := strings.Split(cmd, "\n")
 	for _, line := range lines {
+		if e.ctx != nil && e.ctx.Err() != nil {
+			return
+		}
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		executeCommand(e, fullPrompt, line)
+		executeCommand(e, fullPrompt, line, &planVersion)
 	}
 }
 
 // executeCommand dispatches a single script command line.
-func executeCommand(e *emitter, fullPrompt, line string) {
+func executeCommand(e *emitter, fullPrompt, line string, planVersion *string) {
 	switch {
 	case strings.HasPrefix(line, "e2e:message("):
 		text := extractStringArg(line, "e2e:message(")
@@ -47,10 +51,10 @@ func executeCommand(e *emitter, fullPrompt, line string) {
 
 	case strings.HasPrefix(line, "e2e:delay("):
 		ms := extractIntArg(line, "e2e:delay(")
-		fixedDelay(ms)
+		waitForDelay(e.ctx, ms)
 
 	case strings.HasPrefix(line, "e2e:mcp:"):
-		executeMCPCommand(e, fullPrompt, line)
+		executeMCPCommand(e, fullPrompt, line, planVersion)
 
 	case strings.HasPrefix(line, "e2e:plan("):
 		executePlanCommand(e, line)
@@ -125,7 +129,7 @@ func executeMonitorEnd(e *emitter, line string) {
 }
 
 // executeMCPCommand parses and executes: e2e:mcp:<server>:<tool>(<json_args>)
-func executeMCPCommand(e *emitter, fullPrompt, line string) {
+func executeMCPCommand(e *emitter, fullPrompt, line string, planVersion *string) {
 	rest := strings.TrimPrefix(line, "e2e:mcp:")
 
 	colonIdx := strings.Index(rest, ":")
@@ -155,17 +159,29 @@ func executeMCPCommand(e *emitter, fullPrompt, line string) {
 		return
 	}
 
-	substituteContextPlaceholders(args, fullPrompt)
+	currentPlanVersion := ""
+	if planVersion != nil {
+		currentPlanVersion = *planVersion
+	}
+	substituteScriptPlaceholders(args, fullPrompt, currentPlanVersion)
 
 	toolID := nextToolID()
 	e.startTool(toolID, toolName, acp.ToolKindOther, args)
 
-	result, err := callMCPTool(server, toolName, args)
+	// Tie scripted MCP calls to the ACP prompt context. A cancelled turn must
+	// be able to interrupt an in-flight HTTP/SSE call; otherwise the mock
+	// agent can keep the prompt RPC open while the backend waits for cancel.
+	result, err := e.callMCPToolCtx(e.ctx, server, toolName, args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mock-agent: MCP call %s/%s failed: %v\n", server, toolName, err)
-		e.completeTool(toolID, map[string]any{"error": "MCP error: " + err.Error()})
+		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 	} else {
-		e.completeTool(toolID, map[string]any{"result": result})
+		e.completeTool(toolID, map[string]any{toolKeyResult: result})
+		if planVersion != nil {
+			if version := extractPlanVersion(result); version != "" {
+				*planVersion = version
+			}
+		}
 	}
 }
 
@@ -218,7 +234,7 @@ func executeSimulatedToolUse(e *emitter, line string) {
 // Format: e2e:tool_result("content")
 func executeSimulatedToolResult(e *emitter, line string) {
 	content := extractStringArg(line, "e2e:tool_result(")
-	e.completeTool(acp.ToolCallId(state.lastToolID), map[string]any{"result": content})
+	e.completeTool(acp.ToolCallId(state.lastToolID), map[string]any{toolKeyResult: content})
 }
 
 // executeSimulatedShellResult emits an execute-kind (shell) tool call for
@@ -342,6 +358,36 @@ func substituteContextPlaceholders(args map[string]any, fullPrompt string) {
 			args[k] = s
 		}
 	}
+}
+
+// substituteScriptPlaceholders replaces the context placeholders and the
+// version returned by the most recent scripted plan MCP call. The latter lets
+// deterministic E2E scripts perform a sequence of conditional agent writes
+// without weakening the production requirement to pass expected_version.
+func substituteScriptPlaceholders(args map[string]any, fullPrompt, planVersion string) {
+	substituteContextPlaceholders(args, fullPrompt)
+	for k, v := range args {
+		if s, ok := v.(string); ok {
+			args[k] = strings.ReplaceAll(s, "{plan_version}", planVersion)
+		}
+	}
+}
+
+var (
+	planWriteVersionRegex = regexp.MustCompile(`(?:^|[\s,])version=([^\s.,]+)`)
+	planReadVersionRegex  = regexp.MustCompile(`"version"\s*:\s*"([^"]+)"`)
+)
+
+// extractPlanVersion reads the committed version from either a plan-write
+// acknowledgement or the metadata block returned by get_task_plan_kandev.
+func extractPlanVersion(result string) string {
+	if match := planWriteVersionRegex.FindStringSubmatch(result); len(match) == 2 {
+		return match[1]
+	}
+	if match := planReadVersionRegex.FindStringSubmatch(result); len(match) == 2 {
+		return match[1]
+	}
+	return ""
 }
 
 // extractRegexMatch returns the first capture group match, or empty string.

@@ -3,8 +3,12 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 
@@ -36,20 +40,17 @@ func (r *SSHExecutor) uploadCredentials(
 	r.resolveAuthSecrets(ctx, req, catalog)
 	r.runAuthSetupScripts(ctx, client, req, catalog, platform)
 
-	credsJSON := getMetadataString(req.Metadata, "remote_credentials")
-	if credsJSON == "" {
-		return nil
+	var fileMethods []remoteauth.Method
+	if credsJSON := getMetadataString(req.Metadata, "remote_credentials"); credsJSON != "" {
+		var selectedMethodIDs []string
+		if err := json.Unmarshal([]byte(credsJSON), &selectedMethodIDs); err != nil {
+			return fmt.Errorf("failed to parse remote_credentials: %w", err)
+		}
+		selectedMethodIDs = r.resolveGHToken(selectedMethodIDs)
+		fileMethods = selectFileMethods(catalog, selectedMethodIDs, r.logger)
 	}
-
-	var selectedMethodIDs []string
-	if err := json.Unmarshal([]byte(credsJSON), &selectedMethodIDs); err != nil {
-		return fmt.Errorf("failed to parse remote_credentials: %w", err)
-	}
-
-	selectedMethodIDs = r.resolveGHToken(selectedMethodIDs)
-
-	fileMethods := selectFileMethods(catalog, selectedMethodIDs, r.logger)
-	if len(fileMethods) == 0 {
+	selectedBundles := selectedPortableConfigBundleIDs(req.Metadata)
+	if len(fileMethods) == 0 && len(selectedBundles) == 0 {
 		return nil
 	}
 
@@ -58,7 +59,18 @@ func (r *SSHExecutor) uploadCredentials(
 	if err != nil {
 		return err
 	}
-	return UploadCredentialFiles(ctx, uploader, fileMethods, homeDir, r.logger)
+	var uploadErr error
+	if len(fileMethods) > 0 {
+		uploadErr = UploadCredentialFiles(ctx, uploader, fileMethods, homeDir, r.logger)
+		if uploadErr != nil {
+			r.logger.Warn("ssh executor: credential files failed; continuing with configuration bundles", zap.Error(uploadErr))
+		}
+	}
+	if len(selectedBundles) > 0 && req.AgentConfig != nil {
+		warnings := UploadPortableConfigBundles(ctx, uploader, req.AgentConfig, selectedBundles, homeDir, r.logger)
+		reportPortableConfigWarnings(req.OnProgress, warnings)
+	}
+	return uploadErr
 }
 
 // runAuthSetupScripts executes setup scripts for env-type auth methods whose
@@ -100,7 +112,7 @@ func (r *SSHExecutor) runOneAuthSetupScript(
 	platform SSHRemotePlatform,
 ) {
 	shell := sshShellForRemote(req.Metadata, platform)
-	envScript, err := buildSSHEnvInitScript(req.Env)
+	envScript, err := buildSSHEnvInitScript(sshRemoteAgentEnv(req))
 	if err != nil {
 		r.logger.Warn("auth setup script skipped: invalid environment key",
 			zap.String("display_name", displayName),
@@ -108,14 +120,14 @@ func (r *SSHExecutor) runOneAuthSetupScript(
 			zap.Error(err))
 		return
 	}
-	// `. /dev/stdin` sources the env lines fed via session.Stdin; `set -a`
+	// `sshStdinEnvImport` evaluates the env lines fed via session.Stdin; `set -a`
 	// makes those assignments automatically exported so the user's setup
 	// script sees them in env without a per-key `export`. The script body
 	// itself runs in the same shell after stdin EOF, which means scripts
 	// that need their own stdin are unsupported here — none of the
 	// env-type SetupScripts in the catalog (gh_cli_env etc.) consume
 	// stdin, so this is fine in practice.
-	wrapped := WrapLoginShell(shell, "set -a; . /dev/stdin; set +a\n"+method.SetupScript)
+	wrapped := WrapLoginShell(shell, "set -a; "+sshStdinEnvImport+"; set +a\n"+method.SetupScript)
 	out, stderr, err := runSSHCommandStdin(ctx, client, wrapped, strings.NewReader(envScript))
 	if err != nil {
 		r.logger.Warn("auth setup script failed",
@@ -162,11 +174,10 @@ func (r *SSHExecutor) resolveAuthSecrets(
 		if !ok || method.Type != authMethodTypeEnv || method.EnvVar == "" {
 			continue
 		}
-		value, err := r.secretStore.Reveal(ctx, secretID)
+		value, err := revealGlobalSecret(ctx, r.secretStore, secretID)
 		if err != nil {
 			r.logger.Warn("failed to resolve auth secret",
 				zap.String("method_id", methodID),
-				zap.String("secret_id", secretID),
 				zap.Error(err))
 			continue
 		}
@@ -270,6 +281,82 @@ type sshFileUploader struct {
 	client *ssh.Client
 }
 
+func (u *sshFileUploader) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	c, err := newSFTPClientContext(ctx, u.client)
+	if err != nil {
+		return nil, fmt.Errorf("sftp: new client: %w", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	data, err := readSFTPFileContext(ctx, c, path)
+	if err != nil {
+		if isSFTPNotExist(err) {
+			return nil, &fs.PathError{Op: fileReadOperation, Path: path, Err: fs.ErrNotExist}
+		}
+		return nil, fmt.Errorf("sftp: read %s: %w", path, err)
+	}
+	return data, nil
+}
+
+type sftpClientResult struct {
+	client *sftp.Client
+	err    error
+}
+
+func newSFTPClientContext(ctx context.Context, client *ssh.Client) (*sftp.Client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	resultCh := make(chan sftpClientResult, 1)
+	go func() {
+		created, err := sftp.NewClient(client)
+		select {
+		case resultCh <- sftpClientResult{client: created, err: err}:
+		case <-ctx.Done():
+			if created != nil {
+				_ = created.Close()
+			}
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		return result.client, result.err
+	}
+}
+
+type sftpReadResult struct {
+	data []byte
+	err  error
+}
+
+func readSFTPFileContext(ctx context.Context, client *sftp.Client, path string) ([]byte, error) {
+	resultCh := make(chan sftpReadResult, 1)
+	go func() {
+		file, err := client.Open(path)
+		if err != nil {
+			resultCh <- sftpReadResult{err: err}
+			return
+		}
+		data, readErr := io.ReadAll(file)
+		_ = file.Close()
+		resultCh <- sftpReadResult{data: data, err: readErr}
+	}()
+	select {
+	case <-ctx.Done():
+		_ = client.Close()
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		return result.data, result.err
+	}
+}
+
+func isSFTPNotExist(err error) bool {
+	var statusErr *sftp.StatusError
+	return errors.As(err, &statusErr) && statusErr.FxCode() == sftp.ErrSSHFxNoSuchFile
+}
+
 func (u *sshFileUploader) WriteFile(_ context.Context, path string, data []byte, mode os.FileMode) error {
 	c, err := sftp.NewClient(u.client)
 	if err != nil {
@@ -298,6 +385,47 @@ func (u *sshFileUploader) WriteFile(_ context.Context, path string, data []byte,
 		return fmt.Errorf("sftp: chmod %s: %w", path, err)
 	}
 	return nil
+}
+
+func (u *sshFileUploader) RemoveAll(ctx context.Context, target string) error {
+	c, err := newSFTPClientContext(ctx, u.client)
+	if err != nil {
+		return fmt.Errorf("sftp: new client: %w", err)
+	}
+	defer func() { _ = c.Close() }()
+	if err := removeSFTPPath(ctx, c, target); err != nil && !isSFTPNotExist(err) && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("sftp: remove %s: %w", target, err)
+	}
+	return nil
+}
+
+func removeSFTPPath(ctx context.Context, client *sftp.Client, target string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	info, err := client.Lstat(target)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return client.Remove(target)
+	}
+	if !info.IsDir() {
+		return client.Remove(target)
+	}
+	entries, err := client.ReadDirContext(ctx, target)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := removeSFTPPath(ctx, client, path.Join(target, entry.Name())); err != nil {
+			if isSFTPNotExist(err) || errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+	}
+	return client.RemoveDirectory(target)
 }
 
 // sshMkdirAll mimics `mkdir -p` over SFTP. Walks every prefix of dir and

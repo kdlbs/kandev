@@ -107,6 +107,7 @@ function makePrInfoByUrl(ensure = vi.fn()) {
   return {
     info: () => undefined,
     loading: () => false,
+    settled: () => true,
     error: () => undefined,
     ensure,
     clear: () => undefined,
@@ -241,6 +242,100 @@ describe("RemoteRepoChipsRow identity tracking", () => {
 });
 
 describe("RemoteRepoChipsRow controls", () => {
+  it("hydrates a pasted provider URL with its inspected descriptor", () => {
+    const onUpdateRow = vi.fn();
+    const fs = makeFs({
+      remoteRepos: [
+        {
+          key: "remote-0",
+          url: "https://bitbucket.example.test/bitbucket/projects/PLATFORM/repos/web/pull-requests/42",
+          branch: "feature/dc",
+          source: "paste",
+        },
+      ],
+      prInfoByUrl: {
+        ...makePrInfoByUrl(),
+        inspection: () => ({
+          providerId: "bitbucket",
+          providerHost: "https://bitbucket.example.test/bitbucket",
+          ownerOrProject: "PLATFORM",
+          repositoryId: "web-42",
+          repositoryName: "web",
+          cloneUrl: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+          baseBranch: "main",
+          headBranch: "feature/dc",
+          pullRequest: { number: 42, title: "Data Center pull request" },
+        }),
+      } as unknown as DialogFormState["prInfoByUrl"],
+    });
+
+    renderInProvider(
+      <RemoteRepoChipsRow
+        workspaceId="ws-1"
+        fs={fs}
+        onUpdateRow={onUpdateRow}
+        onAddRow={vi.fn()}
+        onRemoveRow={vi.fn()}
+      />,
+    );
+
+    expect(onUpdateRow).toHaveBeenCalledWith("remote-0", {
+      remoteUrl: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+      provider: "bitbucket",
+      providerHost: "https://bitbucket.example.test/bitbucket",
+      providerRepoId: "web-42",
+      providerOwner: "PLATFORM",
+      providerName: "web",
+      fullName: "PLATFORM/web",
+      prNumber: 42,
+      prBaseBranch: "main",
+      prHeadBranch: "feature/dc",
+    });
+  });
+
+  it("uses the inspected provider default when a pasted repository has no branch", () => {
+    const onUpdateRow = vi.fn();
+    const fs = makeFs({
+      remoteRepos: [
+        {
+          key: "remote-0",
+          url: "https://bitbucket.example.test/projects/PLATFORM/repos/web",
+          branch: "",
+          source: "paste",
+        },
+      ],
+      prInfoByUrl: {
+        ...makePrInfoByUrl(),
+        inspection: () => ({
+          providerId: "bitbucket",
+          providerHost: "https://bitbucket.example.test",
+          ownerOrProject: "PLATFORM",
+          repositoryId: "web-42",
+          repositoryName: "web",
+          cloneUrl: "https://bitbucket.example.test/scm/PLATFORM/web.git",
+          defaultBranch: "trunk",
+        }),
+      } as unknown as DialogFormState["prInfoByUrl"],
+    });
+
+    renderInProvider(
+      <RemoteRepoChipsRow
+        workspaceId="ws-1"
+        fs={fs}
+        onUpdateRow={onUpdateRow}
+        onAddRow={vi.fn()}
+        onRemoveRow={vi.fn()}
+      />,
+    );
+
+    expect(onUpdateRow).toHaveBeenCalledWith(
+      "remote-0",
+      expect.objectContaining({ branch: "trunk" }),
+    );
+  });
+});
+
+describe("RemoteRepoChipsRow retry", () => {
   it("retries both resolution paths for the failed row", () => {
     const branchEnsure = vi.fn();
     const branchClear = vi.fn();

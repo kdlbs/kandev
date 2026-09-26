@@ -11,9 +11,9 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
-	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -111,7 +111,6 @@ func newTestController(agentList map[string]agents.Agent) *Controller {
 	}
 	return &Controller{
 		agentRegistry: reg,
-		modelCache:    modelfetcher.NewCache(),
 		logger:        log,
 	}
 }
@@ -171,6 +170,26 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 		if cmdPart == "--model" {
 			t.Errorf("PreviewAgentCommand() should not emit --model, got %v", result.Command)
 		}
+	}
+}
+
+func TestController_PreviewAgentCommandUsesActiveManagedRuntimeVersion(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	agent := agents.NewOpenCodeACP()
+	controller := newTestController(map[string]agents.Agent{agent.ID(): agent})
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values[agent.ID()+"\x00opencode-ai"] = managedruntime.Selection{
+		Package: "opencode-ai",
+		Version: "1.18.5",
+	}
+	controller.SetManagedRuntimeSelectionStore(selectionStore)
+
+	result, err := controller.PreviewAgentCommand(context.Background(), agent.ID(), CommandPreviewRequest{})
+	if err != nil {
+		t.Fatalf("PreviewAgentCommand() error = %v", err)
+	}
+	if !slices.Contains(result.Command, "opencode-ai@1.18.5") {
+		t.Fatalf("preview command = %v, want exact active version", result.Command)
 	}
 }
 
@@ -324,11 +343,10 @@ func TestController_PreviewAgentCommand_PassthroughDisabled(t *testing.T) {
 	}
 }
 
-// TestController_PreviewAgentCommand_PassthroughDoesNotDuplicateCLIFlag regresses
-// the Auggie case where enabling CLI passthrough caused --allow-indexing to be
-// emitted twice: once by BuildPassthroughCommand via Settings() and again by an
-// unconditional CLIFlagTokens append in the preview. The launch path only adds
-// it via Settings(), so the preview must match.
+// TestController_PreviewAgentCommand_PassthroughDoesNotDuplicateCLIFlag keeps
+// legacy permission CLI flags from being emitted twice when the same token is
+// also present in the profile CLI-flags list. Preview and launch use the shared
+// passthrough builder, so both paths must emit one token.
 func TestController_PreviewAgentCommand_PassthroughDoesNotDuplicateCLIFlag(t *testing.T) {
 	permSettings := map[string]agents.PermissionSetting{
 		"allow_indexing": {
@@ -562,13 +580,15 @@ func TestSyncAgentFromDiscovery_UnknownAgentSkipped(t *testing.T) {
 // TestDetectAgents_E2EMockBypassesFilesystem verifies that when
 // KANDEV_E2E_MOCK=true, detectAgents returns results synthesised from the
 // registry without calling c.discovery.Detect (which would panic here
-// because c.discovery is nil). Every enabled agent must appear as Available.
+// because c.discovery is nil). Every enabled inference agent must appear as
+// Available, while virtual families remain outside host discovery.
 func TestDetectAgents_E2EMockBypassesFilesystem(t *testing.T) {
 	t.Setenv("KANDEV_E2E_MOCK", "true")
 
 	ctrl := newTestController(map[string]agents.Agent{
-		"mock-agent": &testAgent{id: "mock-agent", name: "mock-agent", enabled: true},
-		"other-mock": &testAgent{id: "other-mock", name: "other-mock", enabled: true},
+		"mock-agent":          &testAgent{id: "mock-agent", name: "mock-agent", enabled: true},
+		"other-mock":          &testAgent{id: "other-mock", name: "other-mock", enabled: true},
+		agents.DynamicAgentID: agents.NewDynamicAgent(),
 	})
 
 	// c.discovery is nil — if detectAgents called it the test would panic.
@@ -577,9 +597,12 @@ func TestDetectAgents_E2EMockBypassesFilesystem(t *testing.T) {
 		t.Fatalf("detectAgents() error = %v", err)
 	}
 	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
+		t.Fatalf("expected 2 inference results, got %d", len(results))
 	}
 	for _, r := range results {
+		if r.Name == agents.DynamicAgentID {
+			t.Fatal("virtual Dynamic family must not appear in host discovery")
+		}
 		if !r.Available {
 			t.Errorf("agent %q: Available = false, want true in E2E mock mode", r.Name)
 		}
@@ -656,7 +679,8 @@ func TestController_PreviewAgentCommand_CopilotKeepsManagedPackage(t *testing.T)
 	if err != nil {
 		t.Fatalf("PreviewAgentCommand() error = %v", err)
 	}
-	want := []string{"npx", "--yes", "--prefer-offline", "@github/copilot", "--acp"}
+	managed := agents.NewCopilotACP()
+	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", managed.ManagedNPMRuntime().PackageSpec(""), "--acp"}
 	if got := res.Command; !slices.Equal(got, want) {
 		t.Errorf("preview with copilot on PATH = %v, want %v", got, want)
 	}

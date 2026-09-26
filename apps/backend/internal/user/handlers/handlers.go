@@ -38,6 +38,8 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/user", h.httpGetUser)
 	api.GET("/user/settings", h.httpGetUserSettings)
 	api.PATCH("/user/settings", h.httpUpdateUserSettings)
+	api.GET("/user/agent-profile-recent-use", h.httpGetAgentProfileRecentUse)
+	api.PUT("/user/agent-profile-recent-use/:context", h.httpRecordAgentProfileRecentUse)
 }
 
 func (h *Handlers) registerWS(dispatcher *ws.Dispatcher) {
@@ -65,9 +67,65 @@ func (h *Handlers) httpGetUserSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+func (h *Handlers) httpGetAgentProfileRecentUse(c *gin.Context) {
+	records, err := h.controller.GetAgentProfileRecentUse(c.Request.Context())
+	if err != nil {
+		h.logger.Error("failed to get agent profile recent use", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get agent profile recent use"})
+		return
+	}
+	c.JSON(http.StatusOK, records)
+}
+
+const maxRecordAgentProfileRecentUseBodyBytes = 4 * 1024
+
+func (h *Handlers) httpRecordAgentProfileRecentUse(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRecordAgentProfileRecentUseBodyBytes)
+	var req dto.RecordAgentProfileRecentUseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	record, err := h.controller.RecordAgentProfileRecentUse(
+		c.Request.Context(),
+		c.Param("context"),
+		req,
+	)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrValidation) {
+			status = http.StatusBadRequest
+		} else if errors.Is(err, service.ErrAgentProfileRecentUseConflict) {
+			status = http.StatusConflict
+		}
+		h.logger.Error("failed to record agent profile recent use", zap.Error(err))
+		c.JSON(status, gin.H{"error": "failed to record agent profile recent use"})
+		return
+	}
+	c.JSON(http.StatusOK, record)
+}
+
+// maxUpdateUserSettingsBodyBytes bounds the update-settings request body via
+// http.MaxBytesReader, writing the 413 response below when exceeded. The
+// settings payload can legitimately carry several capped-but-large fields
+// (saved layouts, sidebar views, preference blobs, kanban_hidden_step_ids),
+// so the limit is generous relative to those per-field caps rather than tight.
+const maxUpdateUserSettingsBodyBytes = 2 * 1024 * 1024
+
 func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUpdateUserSettingsBodyBytes)
 	var req dto.UpdateUserSettingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
@@ -76,6 +134,8 @@ func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
 		status := http.StatusInternalServerError
 		if errors.Is(err, service.ErrValidation) {
 			status = http.StatusBadRequest
+		} else if errors.Is(err, service.ErrUserSettingsConflict) {
+			status = http.StatusConflict
 		}
 		h.logger.Error("failed to update user settings", zap.Error(err))
 		c.JSON(status, gin.H{"error": "failed to update user settings"})
@@ -102,6 +162,8 @@ func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*
 		code := ws.ErrorCodeInternalError
 		if errors.Is(err, service.ErrValidation) {
 			code = ws.ErrorCodeBadRequest
+		} else if errors.Is(err, service.ErrUserSettingsConflict) {
+			code = ws.ErrorCodeConflict
 		}
 		return ws.NewError(msg.ID, msg.Action, code, "Failed to update user settings", nil)
 	}

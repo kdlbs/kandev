@@ -1,45 +1,65 @@
 "use client";
 
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+
 import { useCallback, useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { MAX_SIDEBAR_VIEWS } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { t } from "@/lib/i18n";
 
 export function getNewViewDisabledReason(viewCount: number, hasDraft: boolean): string | null {
-  if (hasDraft) return "Save or discard changes before creating a new view.";
+  if (hasDraft) return t("task:saveOrDiscardBeforeNewView");
   if (viewCount >= MAX_SIDEBAR_VIEWS) {
-    return `You can save up to ${MAX_SIDEBAR_VIEWS} views.`;
+    return t("task:viewLimitReached", { count: MAX_SIDEBAR_VIEWS });
   }
   return null;
 }
 
 export function useSidebarViewPopover() {
-  const views = useAppStore((state) => state.sidebarViews.views);
-  const draft = useAppStore((state) => state.sidebarViews.draft);
+  const store = useAppStoreApi();
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const views = useAppStore((state) => selectSidebarViews(state).views);
+  const draft = useAppStore((state) => selectSidebarViews(state).draft);
   const createSidebarView = useAppStore((state) => state.createSidebarView);
-  const [open, setOpen] = useState(false);
+  const [openWorkspaceId, setOpenWorkspaceId] = useState<string | null>(null);
+  const open = Boolean(workspaceId && openWorkspaceId === workspaceId);
   const [renameRequestedViewId, setRenameRequestedViewId] = useState<string | null>(null);
   const newViewDisabledReason = getNewViewDisabledReason(views.length, draft !== null);
 
   const startNewView = useCallback(
     (options?: { openPopover?: boolean }): boolean => {
-      if (newViewDisabledReason) return false;
+      if (
+        newViewDisabledReason ||
+        !workspaceId ||
+        store.getState().workspaces.activeId !== workspaceId
+      )
+        return false;
       const createdViewId = createSidebarView();
       if (!createdViewId) return false;
       setRenameRequestedViewId(createdViewId);
-      if (options?.openPopover !== false) setOpen(true);
+      if (options?.openPopover !== false) setOpenWorkspaceId(workspaceId);
       return true;
     },
-    [createSidebarView, newViewDisabledReason],
+    [createSidebarView, newViewDisabledReason, store, workspaceId],
   );
 
-  const onOpenChange = useCallback((nextOpen: boolean) => {
-    setOpen(nextOpen);
-    if (!nextOpen) setRenameRequestedViewId(null);
-  }, []);
+  const onOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (store.getState().workspaces.activeId !== workspaceId) return;
+      setOpenWorkspaceId(nextOpen ? workspaceId : null);
+      if (!nextOpen) setRenameRequestedViewId(null);
+    },
+    [store, workspaceId],
+  );
 
   const consumeRenameRequest = useCallback((viewId: string) => {
     setRenameRequestedViewId((current) => (current === viewId ? null : current));
   }, []);
+
+  useEffect(() => {
+    setOpenWorkspaceId(null);
+    setRenameRequestedViewId(null);
+  }, [workspaceId]);
 
   useEffect(() => {
     if (renameRequestedViewId && !views.some((view) => view.id === renameRequestedViewId)) {

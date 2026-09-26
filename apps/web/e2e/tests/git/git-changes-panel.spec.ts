@@ -1,11 +1,15 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, restoreSeedRepositoryOrigin, type SeedData } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionState } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import type { Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import type { Page, WebSocketRoute } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { waitForDiffText, waitForDiffTextAbsent } from "./diff-update-helpers";
 
 // ---------------------------------------------------------------------------
 // Git helper for E2E tests - runs git commands in the test repository
@@ -91,6 +95,171 @@ async function openTaskSession(page: Page, title: string): Promise<SessionPage> 
   return session;
 }
 
+type WorktreeFileAction = "worktree.stage" | "worktree.unstage";
+
+type PausedWorktreeFileAction = {
+  action: WorktreeFileAction;
+  frame: string;
+  requestId: string;
+  server: WebSocketRoute;
+};
+
+type AwaitedWorktreeFileState = {
+  action: WorktreeFileAction;
+  requestId: string;
+  path: string;
+  staged: boolean;
+  response: { success: boolean; error?: string } | null;
+  fileStateObserved: boolean;
+};
+
+type WorktreeFrame = {
+  id?: unknown;
+  type?: unknown;
+  action?: unknown;
+  payload?: {
+    success?: unknown;
+    error?: unknown;
+    type?: unknown;
+    status?: { files?: Record<string, { staged?: unknown }> };
+  };
+};
+
+function parseWorktreeFrame(part: string): WorktreeFrame | null {
+  if (!part.trim()) return null;
+  try {
+    return JSON.parse(part) as WorktreeFrame;
+  } catch {
+    return null;
+  }
+}
+
+function worktreeFileActionRequestId(part: string, action: WorktreeFileAction): string | null {
+  const frame = parseWorktreeFrame(part);
+  return frame?.type === "request" && frame.action === action && typeof frame.id === "string"
+    ? frame.id
+    : null;
+}
+
+function partitionWorktreeFileAction(
+  message: string | Buffer,
+  action: WorktreeFileAction,
+): { frame: string; passthrough: string | null } | null {
+  if (typeof message !== "string") return null;
+  const frames = message.split("\n");
+  const actionIndex = frames.findIndex(
+    (part) => worktreeFileActionRequestId(part, action) !== null,
+  );
+  if (actionIndex === -1) return null;
+  const passthrough = frames.filter((_, index) => index !== actionIndex).join("\n");
+  return {
+    frame: frames[actionIndex]!,
+    passthrough: passthrough.trim() ? passthrough : null,
+  };
+}
+
+function observeWorktreeResponse(frame: WorktreeFrame, awaited: AwaitedWorktreeFileState) {
+  if (
+    frame.type !== "response" ||
+    frame.action !== awaited.action ||
+    frame.id !== awaited.requestId
+  ) {
+    return;
+  }
+  awaited.response = {
+    success: frame.payload?.success === true,
+    ...(typeof frame.payload?.error === "string" ? { error: frame.payload.error } : {}),
+  };
+}
+
+function observeWorktreeFileState(frame: WorktreeFrame, awaited: AwaitedWorktreeFileState) {
+  if (
+    frame.action === "session.git.event" &&
+    frame.payload?.type === "status_update" &&
+    frame.payload.status?.files?.[awaited.path]?.staged === awaited.staged
+  ) {
+    awaited.fileStateObserved = true;
+  }
+}
+
+function observeWorktreeFileAction(message: string | Buffer, awaited: AwaitedWorktreeFileState) {
+  const parts = (typeof message === "string" ? message : message.toString("utf8")).split("\n");
+  for (const part of parts) {
+    const frame = parseWorktreeFrame(part);
+    if (!frame) continue;
+    observeWorktreeResponse(frame, awaited);
+    observeWorktreeFileState(frame, awaited);
+  }
+}
+
+async function pauseNextWorktreeFileAction(page: Page) {
+  let armedAction: WorktreeFileAction | null = null;
+  let paused: PausedWorktreeFileAction | null = null;
+  let awaitedState: AwaitedWorktreeFileState | null = null;
+
+  await page.context().routeWebSocket(/\/ws$/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const partition = armedAction ? partitionWorktreeFileAction(message, armedAction) : null;
+      if (partition && armedAction) {
+        const requestId = worktreeFileActionRequestId(partition.frame, armedAction);
+        if (!requestId) throw new Error(`Paused ${armedAction} request has no ID`);
+        paused = { action: armedAction, frame: partition.frame, requestId, server };
+        armedAction = null;
+        if (partition.passthrough) server.send(partition.passthrough);
+        return;
+      }
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      if (awaitedState) observeWorktreeFileAction(message, awaitedState);
+      socket.send(message);
+    });
+  });
+
+  return {
+    arm(action: WorktreeFileAction) {
+      if (armedAction || paused) throw new Error("A worktree file action is already paused");
+      armedAction = action;
+    },
+    async waitForRequest(action: WorktreeFileAction) {
+      await expect
+        .poll(() => paused?.action ?? null, {
+          message: `${action} should reach the paused WebSocket boundary`,
+        })
+        .toBe(action);
+    },
+    async releaseAndWaitForFileState(action: WorktreeFileAction, path: string, staged: boolean) {
+      if (paused?.action !== action) throw new Error(`No paused ${action} request`);
+      const request = paused;
+      awaitedState = {
+        action,
+        requestId: request.requestId,
+        path,
+        staged,
+        response: null,
+        fileStateObserved: false,
+      };
+      paused = null;
+      request.server.send(request.frame);
+      await expect
+        .poll(() => awaitedState?.response ?? null, {
+          message: `${action} should return a response`,
+        })
+        .not.toBeNull();
+      if (!awaitedState?.response?.success) {
+        throw new Error(awaitedState?.response?.error ?? `${action} failed`);
+      }
+      await expect
+        .poll(() => awaitedState?.fileStateObserved ?? false, {
+          message: `${action} should publish ${path} with staged=${staged}`,
+        })
+        .toBe(true);
+      awaitedState = null;
+    },
+  };
+}
+
 /** Create a non-passthrough (standard) agent profile for the mock agent. */
 async function createStandardProfile(apiClient: ApiClient, name: string) {
   const { agents } = await apiClient.listAgents();
@@ -105,16 +274,264 @@ async function createStandardProfile(apiClient: ApiClient, name: string) {
   });
 }
 
+function createRewrittenProviderHistory(
+  git: GitHelper,
+  branch: string,
+): {
+  head: string;
+  commits: Array<{
+    sha: string;
+    message: string;
+    author_login: string;
+    author_date: string;
+    stats_available: boolean;
+  }>;
+} {
+  git.exec(`git checkout -B kandev-e2e-provider-rewrite origin/main`);
+  const commits: Array<{
+    sha: string;
+    message: string;
+    author_login: string;
+    author_date: string;
+    stats_available: boolean;
+  }> = [];
+  for (let index = 1; index <= 15; index += 1) {
+    const message = `Rewritten provider commit ${index}`;
+    git.createFile(`provider-rewrite-${index}.txt`, message);
+    git.stageFile(`provider-rewrite-${index}.txt`);
+    const sha = git.commit(message);
+    commits.push({
+      sha,
+      message,
+      author_login: "remote-contributor",
+      author_date: `2026-08-${String(index).padStart(2, "0")}T12:00:00Z`,
+      stats_available: false,
+    });
+  }
+  git.exec(`git push --force origin HEAD:refs/heads/${branch}`);
+  git.exec("git checkout -f main");
+  return { head: commits[commits.length - 1].sha, commits };
+}
+
+function createLocalRebasedProviderHistory(
+  git: GitHelper,
+  branch: string,
+): {
+  localHead: string;
+  publishedHead: string;
+  newBaseCommitCount: number;
+  commits: Array<{
+    sha: string;
+    message: string;
+    author_login: string;
+    author_date: string;
+    stats_available: boolean;
+  }>;
+} {
+  const publishedBranch = "kandev-e2e-published-history";
+  git.exec(`git checkout -B ${publishedBranch} origin/main`);
+  const commits: Array<{
+    sha: string;
+    message: string;
+    author_login: string;
+    author_date: string;
+    stats_available: boolean;
+  }> = [];
+  for (let index = 1; index <= 5; index += 1) {
+    const message = `Published contribution commit ${index}`;
+    git.createFile(`published-contribution-${index}.txt`, message);
+    git.stageFile(`published-contribution-${index}.txt`);
+    const sha = git.commit(message);
+    commits.push({
+      sha,
+      message,
+      author_login: "local-rebase-contributor",
+      author_date: `2026-08-${String(index).padStart(2, "0")}T12:00:00Z`,
+      stats_available: false,
+    });
+  }
+  const publishedHead = git.getCurrentSha();
+  git.exec(`git push --force origin HEAD:refs/heads/${branch}`);
+
+  git.exec("git checkout -B main origin/main");
+  const newBaseCommitCount = 3;
+  for (let index = 1; index <= newBaseCommitCount; index += 1) {
+    git.createFile(`newer-base-${index}.txt`, `newer base commit ${index}`);
+    git.stageFile(`newer-base-${index}.txt`);
+    git.commit(`Newer base commit ${index}`);
+  }
+  git.exec("git push --force origin main");
+
+  // Leave the branch at the completed rebase head. The branch and HEAD
+  // reflogs therefore retain the adjacent published head and rebase sequence
+  // that the production observer requires.
+  git.exec(`git checkout -B ${branch} ${publishedHead}`);
+  git.exec("git rebase origin/main");
+  const localHead = git.getCurrentSha();
+  git.exec(`git branch --set-upstream-to=origin/${branch} ${branch}`);
+  return { localHead, publishedHead, newBaseCommitCount, commits };
+}
+
+function advanceProviderHead(git: GitHelper, previousHead: string, branch: string): string {
+  const tree = git.exec(`git rev-parse ${previousHead}^{tree}`).trim();
+  const nextHead = git
+    .exec(
+      `git -c commit.gpgsign=false commit-tree ${tree} -p ${previousHead} -m "Provider head advanced"`,
+    )
+    .trim();
+  git.exec(`git push --force origin ${nextHead}:refs/heads/${branch}`);
+  return nextHead;
+}
+
+function configureContributionRemote(
+  git: GitHelper,
+  remoteName: string,
+  sourceRemoteURL: string,
+  localRemoteURL: string,
+): void {
+  const remotes = git.exec("git remote").split(/\r?\n/);
+  if (remotes.includes(remoteName)) {
+    git.exec(`git remote set-url ${remoteName} "${sourceRemoteURL}"`);
+  } else {
+    git.exec(`git remote add ${remoteName} "${sourceRemoteURL}"`);
+  }
+  // Keep the production binding's exact credential-free URL while routing
+  // the disposable E2E source through its local bare origin.
+  git.exec(`git config url."${localRemoteURL}".insteadOf "${sourceRemoteURL}"`);
+}
+
+function recoveryBranches(git: GitHelper): string[] {
+  return git
+    .exec('git for-each-ref --format="%(refname:short)" refs/heads/kandev')
+    .split(/\r?\n/)
+    .map((branch) => branch.trim())
+    .filter(Boolean);
+}
+
+function restoreContributionHistoryRepository(
+  seedData: SeedData,
+  backend: { tmpDir: string },
+): void {
+  const git = new GitHelper(seedData.repositoryPath, {
+    ...process.env,
+    HOME: backend.tmpDir,
+    GIT_AUTHOR_NAME: "E2E Test",
+    GIT_AUTHOR_EMAIL: "e2e@test.local",
+    GIT_COMMITTER_NAME: "E2E Test",
+    GIT_COMMITTER_EMAIL: "e2e@test.local",
+  });
+  for (const command of ["git rebase --abort", "git merge --abort"]) {
+    try {
+      git.exec(command);
+    } catch {
+      // The fixture is normally idle when the test finishes.
+    }
+  }
+  git.exec("git checkout -f main");
+  git.exec("git clean -fd");
+  restoreSeedRepositoryOrigin(seedData);
+  git.exec(`git push --force origin ${seedData.repositoryBaselineOID}:refs/heads/main`);
+  git.exec("git fetch --no-tags origin main");
+  git.exec(`git reset --hard ${seedData.repositoryBaselineOID}`);
+  git.exec("git clean -fd");
+  for (const branch of ["feature/local-rebase-explanation", "kandev-e2e-published-history"]) {
+    try {
+      git.exec(`git branch -D ${branch}`);
+    } catch {
+      // Setup may have failed before creating this branch.
+    }
+    try {
+      git.exec(`git push origin --delete ${branch}`);
+    } catch {
+      // The branch may only exist locally.
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 test.describe("Git Changes Panel", () => {
+  test.afterEach(({ backend, seedData }) => {
+    // Local-rebase scenarios rewrite origin/main and create temporary refs.
+    // Restore both sides after every test, including assertion failures, so a
+    // later worker test cannot inherit the synthetic provider history.
+    restoreContributionHistoryRepository(seedData, backend);
+  });
+
   /**
    * Verifies that modified files appear in the unstaged section of the Changes panel.
    * Creates a task, modifies a file in the repository, and verifies the Changes panel
    * shows the modification in real-time via WebSocket updates.
    */
+  // @covers AC-UI-CHANGES-FILE-ROW-CONTAINMENT-002.4
+  test("keeps compact desktop actions across the phone breakpoint", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Improve mobile changes",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle();
+    const git = new GitHelper(path.join(backend.tmpDir, "repos", "e2e-repo"), {
+      ...process.env,
+      HOME: backend.tmpDir,
+    });
+    const filePath = "status-surface-metrics.test.ts";
+    git.createFile(filePath, "METRICS_MARKER\n");
+    git.createFile("mobile-resource-metrics-display.test.ts", "MOBILE_MARKER\n");
+    await session.clickTab("Changes");
+    await session.expandChangesSection("unstaged-files-section");
+    const row = testPage.getByTestId(`file-row-${filePath}`);
+    const stage = row.getByTitle("Stage file");
+    await expect(stage).toBeVisible();
+    expect((await stage.boundingBox())!.height).toBeLessThanOrEqual(24);
+    await expect(row.getByRole("button", { name: "Show more actions" })).toHaveCount(0);
+    if (prCapture.capturing) {
+      await row.hover();
+      await waitForFiniteAnimations(row.getByTestId("file-row-hover-actions"));
+      await expect(row.getByRole("button", { name: "Copy path" })).toBeVisible();
+    }
+    await prCapture.screenshot("desktop-changes", {
+      caption: "Desktop Changes rows expose Copy path alongside compact hover actions.",
+    });
+
+    await testPage.setViewportSize({ width: 767, height: 851 });
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .click();
+    await expect(row.getByRole("button", { name: "Show more actions" })).toBeVisible();
+    await expect(row.getByText(filePath, { exact: true })).toHaveCSS("white-space", "normal");
+    await expect(stage).toHaveCount(0);
+
+    await testPage.setViewportSize({ width: 768, height: 851 });
+    await session.clickTab("Changes");
+    await expect(stage).toBeVisible();
+    expect((await stage.boundingBox())!.height).toBeLessThanOrEqual(24);
+    await expect(row.getByRole("button", { name: "Show more actions" })).toHaveCount(0);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+  });
+
   test("shows modified files in unstaged section", async ({
     testPage,
     apiClient,
@@ -165,6 +582,224 @@ test.describe("Git Changes Panel", () => {
     await expect(session.changes.getByText("test-file.txt")).toBeVisible({ timeout: 15_000 });
   });
 
+  test("copies a changed file path without opening its diff", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    await testPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    const title = "Copy changed file path";
+    await apiClient.createTaskWithAgent(seedData.workspaceId, title, seedData.agentProfileId, {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const session = await openTaskSession(testPage, title);
+    const filePath = "copy-path-e2e/copy-me.txt";
+    const git = new GitHelper(path.join(backend.tmpDir, "repos", "e2e-repo"), {
+      ...process.env,
+      HOME: backend.tmpDir,
+    });
+    fs.mkdirSync(path.join(backend.tmpDir, "repos", "e2e-repo", "copy-path-e2e"), {
+      recursive: true,
+    });
+    git.createFile(filePath, "COPY_PATH_MARKER\n");
+
+    await session.clickTab("Changes");
+    await session.expandChangesSection("unstaged-files-section");
+    const row = testPage.getByTestId(`file-row-${filePath.replace(/[/\\]/g, "-")}`);
+    await expect(row).toBeVisible();
+    const fileIdentity = row.getByTitle(filePath, { exact: true });
+    const copyPath = row.getByRole("button", { name: "Copy path" });
+    const rowButtonCount = await row.getByRole("button").count();
+    await fileIdentity.focus();
+    for (let index = 0; index < rowButtonCount; index += 1) {
+      await testPage.keyboard.press("Tab");
+      if (await copyPath.evaluate((element) => element === document.activeElement)) break;
+    }
+    await expect(copyPath).toBeFocused();
+    await expect
+      .poll(() =>
+        row
+          .getByTestId("file-row-hover-actions")
+          .evaluate((element) => getComputedStyle(element).opacity),
+      )
+      .toBe("1");
+    await testPage.keyboard.press("Enter");
+    await expect.poll(() => testPage.evaluate(() => navigator.clipboard.readText())).toBe(filePath);
+    await expect(testPage.locator("diffs-container")).toHaveCount(0);
+  });
+
+  // @covers AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.1
+  // @covers AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.2
+  // @covers AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.3
+  // @covers AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.4
+  test("keeps stage and unstage progress visible after pointer leaves", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const pausedAction = await pauseNextWorktreeFileAction(testPage);
+    const profile = await createStandardProfile(apiClient, "Git Pending Action Profile");
+
+    await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Pending Action Test",
+      profile.id,
+      {
+        description: "Testing pending stage and unstage feedback",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const session = await openTaskSession(testPage, "Git Pending Action Test");
+    await session.waitForChatIdle();
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    });
+    git.createFile("pending-action.txt", "base\n");
+    git.createFile("pending-sibling.txt", "base\n");
+    git.stageAll();
+    git.commit("Add pending action fixtures");
+    git.modifyFile("pending-action.txt", "base\nchanged\n");
+    git.modifyFile("pending-sibling.txt", "base\nunchanged pending state\n");
+
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await session.expandChangesSection("unstaged-files-section");
+
+    const unstagedSection = testPage.getByTestId("unstaged-files-section");
+    const unstagedRow = unstagedSection.getByTestId("file-row-pending-action.txt");
+    const siblingRow = unstagedSection.getByTestId("file-row-pending-sibling.txt");
+    await expect(unstagedRow).toBeVisible();
+    await expect(siblingRow).toBeVisible();
+
+    pausedAction.arm("worktree.stage");
+    await unstagedRow.hover();
+    await unstagedRow.getByTitle("Stage file").click();
+    await pausedAction.waitForRequest("worktree.stage");
+    await testPage.mouse.move(0, 0);
+
+    const pendingStageSlot = unstagedRow.getByTestId("file-row-icon-action-slot");
+    expect(await unstagedRow.evaluate((row) => row.matches(":hover"))).toBe(false);
+    await expect(pendingStageSlot.locator(":scope > div")).toHaveCSS("opacity", "1");
+    await expect(pendingStageSlot.locator(":scope > span[aria-hidden='true']")).toHaveCSS(
+      "opacity",
+      "0",
+    );
+    await expect(pendingStageSlot.locator("svg.animate-spin")).toBeVisible();
+    await expect(siblingRow.locator("svg.animate-spin")).toHaveCount(0);
+
+    await pausedAction.releaseAndWaitForFileState("worktree.stage", "pending-action.txt", true);
+    await session.expandChangesSection("staged-files-section");
+    const stagedSection = testPage.getByTestId("staged-files-section");
+    const stagedRow = stagedSection.getByTestId("file-row-pending-action.txt");
+    await expect(stagedRow).toBeVisible();
+    // The stage response and its status refresh arrive on separate WebSocket
+    // frames. Wait for the first operation's pending state to clear before
+    // starting the second operation, so a late stage refresh cannot clear the
+    // unstage marker that the next assertion is checking.
+    await expect(
+      stagedRow.getByTestId("file-row-icon-action-slot").locator(":scope > div"),
+    ).toHaveCSS("opacity", "0");
+
+    pausedAction.arm("worktree.unstage");
+    await stagedRow.hover();
+    await stagedRow.getByTitle("Unstage file").click();
+    await pausedAction.waitForRequest("worktree.unstage");
+    await testPage.mouse.move(0, 0);
+
+    const pendingUnstageSlot = stagedRow.getByTestId("file-row-icon-action-slot");
+    expect(await stagedRow.evaluate((row) => row.matches(":hover"))).toBe(false);
+    await expect(pendingUnstageSlot.locator(":scope > div")).toHaveCSS("opacity", "1");
+    await expect(pendingUnstageSlot.locator(":scope > span[aria-hidden='true']")).toHaveCSS(
+      "opacity",
+      "0",
+    );
+    await expect(pendingUnstageSlot.locator("svg.animate-spin")).toBeVisible();
+
+    await pausedAction.releaseAndWaitForFileState("worktree.unstage", "pending-action.txt", false);
+    await expect(unstagedSection.getByTestId("file-row-pending-action.txt")).toBeVisible();
+    await expect(stagedRow).toHaveCount(0);
+  });
+
+  // @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.10
+  test("shows same path in staged and unstaged sections", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const profile = await createStandardProfile(apiClient, "Git Mixed Change Profile");
+
+    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Mixed Change Test", profile.id, {
+      description: "Testing mixed staged and unstaged changes",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const session = await openTaskSession(testPage, "Git Mixed Change Test");
+    await session.waitForChatIdle();
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    });
+
+    git.createFile("mixed-layer.txt", "base\n");
+    git.stageFile("mixed-layer.txt");
+    git.commit("Add mixed layer fixture");
+    git.modifyFile("mixed-layer.txt", "base\nSTAGED_LAYER_MARKER\n");
+    git.stageFile("mixed-layer.txt");
+    git.modifyFile("mixed-layer.txt", "base\nSTAGED_LAYER_MARKER\nUNSTAGED_LAYER_MARKER\n");
+
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await session.expandChangesSection("unstaged-files-section");
+    await session.expandChangesSection("staged-files-section");
+
+    const unstagedRow = testPage
+      .getByTestId("unstaged-files-section")
+      .getByTestId("file-row-mixed-layer.txt");
+    const stagedRow = testPage
+      .getByTestId("staged-files-section")
+      .getByTestId("file-row-mixed-layer.txt");
+    await expect(unstagedRow).toBeVisible();
+    await expect(stagedRow).toBeVisible();
+    await expect(unstagedRow.getByText("+1", { exact: true })).toBeVisible();
+    await expect(stagedRow.getByText("+1", { exact: true })).toBeVisible();
+
+    await unstagedRow.click();
+    await waitForDiffText(testPage, "UNSTAGED_LAYER_MARKER");
+
+    await stagedRow.click();
+    await waitForDiffText(testPage, "STAGED_LAYER_MARKER");
+    await waitForDiffTextAbsent(testPage, "UNSTAGED_LAYER_MARKER");
+
+    await stagedRow.getByTitle("Unstage file").click();
+    await expect(stagedRow).toHaveCount(0);
+    await expect(unstagedRow).toBeVisible();
+    await expect(unstagedRow.getByText("+2", { exact: true })).toBeVisible();
+  });
+
   /**
    * Verifies that new untracked files appear in the unstaged section.
    */
@@ -211,6 +846,75 @@ test.describe("Git Changes Panel", () => {
 
     // Clean up
     git.deleteFile("new-feature.ts");
+  });
+
+  // @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.13, AC-PLATFORM-WORKSPACE-GIT-STATUS-001.14
+  test("omits untracked node_modules before repository ignore exists", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const profile = await createStandardProfile(apiClient, "Git Dependency Tree Profile");
+
+    await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Dependency Tree Test",
+      profile.id,
+      {
+        description: "Testing untracked dependency-tree exclusion",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const session = await openTaskSession(testPage, "Git Dependency Tree Test");
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    });
+
+    const sourcePath = "untracked-source.ts";
+    const dependencyPaths = [
+      "node_modules/demo-package/package.json",
+      "packages/app/node_modules/nested-package/package.json",
+    ];
+    try {
+      git.createFile(sourcePath, "export const source = true;\n");
+      for (const dependencyPath of dependencyPaths) {
+        fs.mkdirSync(path.dirname(path.join(repoDir, dependencyPath)), { recursive: true });
+        git.createFile(dependencyPath, '{"name":"demo-package"}\n');
+      }
+
+      await session.clickTab("Changes");
+      await expect(session.changes).toBeVisible({ timeout: 10_000 });
+      await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(session.changes.getByTestId(`file-row-${sourcePath}`)).toBeVisible({
+        timeout: 15_000,
+      });
+
+      for (const dependencyPath of dependencyPaths) {
+        const rowTestId = `file-row-${dependencyPath.replace(/[/\\]/g, "-")}`;
+        await expect(session.changes.getByTestId(rowTestId)).toHaveCount(0);
+      }
+    } finally {
+      git.deleteFile(sourcePath);
+      for (const dependencyPath of dependencyPaths) {
+        git.deleteFile(dependencyPath);
+        fs.rmSync(path.dirname(path.join(repoDir, dependencyPath)), {
+          recursive: true,
+          force: true,
+        });
+      }
+    }
   });
 
   /**
@@ -401,6 +1105,155 @@ test.describe("Git Changes Panel", () => {
     await expect(testPage.getByText("line 1")).toBeVisible({ timeout: 5_000 });
   });
 
+  test("PR-only commit uses GitHub details when local history is stale", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const profile = await createStandardProfile(apiClient, "Git PR-only Detail Profile");
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git PR-only Detail Test",
+      profile.id,
+      {
+        description: "Testing PR-only commit details after a force-push",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const session = await openTaskSession(testPage, "Git PR-only Detail Test");
+
+    const remoteSha = "d".repeat(40);
+    const remoteMessage = "Force-pushed remote commit";
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    });
+    git.createFile("pr-shared-marker.ts", "shared provider checkout commit");
+    git.stageFile("pr-shared-marker.ts");
+    const sharedSha = git.commit("Shared provider checkout commit");
+    const checkoutBranch = git.exec("git branch --show-current").trim();
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("remote-author");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 2253,
+        title: "Force-pushed PR",
+        state: "open",
+        head_branch: checkoutBranch,
+        base_branch: "main",
+        author_login: "remote-author",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        head_sha: remoteSha,
+      },
+    ]);
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 2253, [
+      {
+        sha: sharedSha,
+        message: "Shared provider checkout commit",
+        author_login: "remote-author",
+        author_date: "2026-08-03T12:00:00Z",
+      },
+      {
+        sha: remoteSha,
+        message: remoteMessage,
+        author_login: "remote-author",
+        author_date: "2026-08-04T12:00:00Z",
+        stats_available: false,
+      },
+    ]);
+    await apiClient.mockGitHubAddPRCommitDetail("testorg", "testrepo", remoteSha, {
+      message: remoteMessage,
+      author_login: "remote-author",
+      author_name: "Remote Author",
+      author_date: "2026-08-04T12:00:00Z",
+      additions: 1,
+      deletions: 0,
+      files_changed: 1,
+      files: [
+        {
+          filename: "pr-only-marker.ts",
+          status: "added",
+          additions: 1,
+          deletions: 0,
+          patch: "@@ -0,0 +1 @@\n+PR_ONLY_REMOTE_MARKER",
+        },
+      ],
+    });
+    await apiClient.mockGitHubSetPRCommitsFailures("testorg", "testrepo", 2253, 1);
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 2253,
+      pr_url: "https://github.com/testorg/testrepo/pull/2253",
+      pr_title: "Force-pushed PR",
+      head_branch: checkoutBranch,
+      base_branch: "main",
+      author_login: "remote-author",
+    });
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 20_000 });
+    await session.expandCommitsSection();
+    const commitsList = testPage.getByTestId("commits-list");
+
+    const row = testPage.getByTestId(`commit-row-${remoteSha.slice(0, 7)}`);
+    await expect(row).toBeVisible({ timeout: 20_000 });
+    await expect(row.getByTestId("commit-provenance")).toHaveAttribute(
+      "data-commit-provenance",
+      "current_pr",
+    );
+    await expect(row.getByTestId("commit-provenance")).toHaveAttribute(
+      "title",
+      "Current PR commit",
+    );
+    const sharedRow = testPage.getByTestId(`commit-row-${sharedSha.slice(0, 7)}`);
+    await expect(sharedRow).toBeVisible({ timeout: 20_000 });
+    await expect(sharedRow.getByTestId("commit-provenance")).toHaveAttribute(
+      "data-commit-provenance",
+      "pushed",
+    );
+    await expect(testPage.getByTestId("header-remote-contribution-warning")).toHaveCount(0);
+    const commitMessages = await commitsList
+      .locator('[data-testid^="commit-row-"]')
+      .allTextContents();
+    const remoteIndex = commitMessages.findIndex((message) => message.includes(remoteMessage));
+    const sharedIndex = commitMessages.findIndex((message) =>
+      message.includes("Shared provider checkout commit"),
+    );
+    expect(remoteIndex).toBeGreaterThanOrEqual(0);
+    expect(sharedIndex).toBeGreaterThanOrEqual(0);
+    expect(remoteIndex).toBeLessThan(sharedIndex);
+    await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
+    await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
+    await row.hover();
+    await expect(row.getByRole("button")).toHaveCount(0);
+
+    await row.click();
+    await expect(testPage.getByText(remoteMessage).last()).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText("Remote Author")).toBeVisible({ timeout: 10_000 });
+    await testPage.waitForFunction(
+      (marker: string) =>
+        Array.from(document.querySelectorAll("diffs-container")).some((container) =>
+          container.shadowRoot?.textContent?.includes(marker),
+        ),
+      "PR_ONLY_REMOTE_MARKER",
+      { timeout: 60_000 },
+    );
+  });
+
   /**
    * Verifies that reverting a commit undoes it (soft reset).
    * Note: The "Revert commit" action does `git reset --soft HEAD~1`,
@@ -481,16 +1334,30 @@ test.describe("Git Changes Panel", () => {
     seedData,
     backend,
   }) => {
+    test.setTimeout(120_000);
     const profile = await createStandardProfile(apiClient, "Git Reset Profile");
 
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Reset Test", profile.id, {
-      description: "Testing reset to commit",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Reset Test",
+      profile.id,
+      {
+        description: "Testing reset to commit",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
 
     const session = await openTaskSession(testPage, "Git Reset Test");
+    expect(task.session_id, "task must have a session to await").toBeTruthy();
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id as string,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "the initial reset-test turn did not settle before git actions",
+      timeout: 30_000,
+    });
 
     // Set up git helper
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
@@ -520,12 +1387,18 @@ test.describe("Git Changes Panel", () => {
     // Wait for both commits to appear. The commits-section header renders as
     // soon as the section mounts (no commits required), so asserting on the
     // text alone races the WS git-status push that carries the actual commit
-    // list. Gate on the row count first — that's the signal that the FE
-    // received both commits — and only then check text content.
+    // list. Gate on the two *named* commit rows we created — that's the signal
+    // that the FE received them. Don't assert an exact total count: the
+    // auto-started agent can land its own commit in the same worktree, so the
+    // list may legitimately hold a third row.
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
     await session.expandCommitsSection();
     const commitsList = testPage.getByTestId("commits-list");
-    await expect(commitsList.locator('[data-testid^="commit-row-"]')).toHaveCount(2, {
+    const commitRows = commitsList.locator('[data-testid^="commit-row-"]');
+    await expect(commitRows.filter({ hasText: "First commit" })).toHaveCount(1, {
+      timeout: 15_000,
+    });
+    await expect(commitRows.filter({ hasText: "Second commit" })).toHaveCount(1, {
       timeout: 15_000,
     });
     await expect(session.changes.getByText("First commit")).toBeVisible({ timeout: 5_000 });
@@ -546,7 +1419,10 @@ test.describe("Git Changes Panel", () => {
     await firstCommitRow.hover();
     const resetButton = firstCommitRow.getByRole("button", { name: "Reset to this commit" });
     await expect(resetButton).toBeVisible({ timeout: 5_000 });
-    await resetButton.click();
+    // The action is rendered inside a group-hover span. Keep the row hovered
+    // for the user-facing check above, then bypass CSS interception while the
+    // stable idle session keeps the row from being replaced by a status push.
+    await resetButton.click({ force: true });
 
     // Confirm the reset in the dialog
     const resetDialog = testPage.getByRole("dialog");
@@ -671,8 +1547,12 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
 
-    // Wait for initial load
-    await testPage.waitForTimeout(2_000);
+    await dwell(
+      testPage,
+      2_000,
+      "unverified",
+      "pre-existing spacing before the external-git edits below; the panel is already asserted visible above and no timer was identified behind this, so it is labelled as debt rather than given a cause it does not have",
+    );
 
     // Set up git helper
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
@@ -1026,7 +1906,19 @@ test.describe("Git Changes Panel", () => {
     git.exec(`git reset --soft ${baseSha}`);
     git.commit("Squashed commit");
 
-    // Wait for the UI to update - old commits should disappear
+    // The squash happens on the filesystem while the Changes tab is already
+    // open, so the FE only reflects it once the backend's git-status watcher
+    // fires a WS push. Under CI shard load that push can lag past the wait
+    // budget. Reload to force a fresh git-status load — deterministic instead of
+    // racing the watcher (same approach as the persistent-commits test above).
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
+
+    // Old commits should be gone after the squash.
     await expect(session.changes.getByText("First commit to squash")).not.toBeVisible({
       timeout: 15_000,
     });
@@ -1063,10 +1955,15 @@ test.describe("Git Changes Panel", () => {
 
     const session = await openTaskSession(testPage, "Git Cumulative Test");
 
-    // Wait for the session to fully initialize including base commit capture.
-    // The captureBaseCommit runs async after agent launch, we need it to complete
-    // before making commits so the cumulative diff works correctly.
-    await testPage.waitForTimeout(3_000);
+    // captureBaseCommit runs asynchronously after agent launch and has to finish
+    // before the commits below, or the cumulative diff is computed against the
+    // wrong base.
+    await dwell(
+      testPage,
+      3_000,
+      "product-timer",
+      "captureBaseCommit runs async after agent launch and publishes nothing when it completes, so the commits below have to be spaced past it",
+    );
 
     // Set up git helper
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
@@ -1101,17 +1998,48 @@ test.describe("Git Changes Panel", () => {
     await expect(session.changes.getByText("Add first line")).toBeVisible({ timeout: 10_000 });
     await expect(session.changes.getByText("Add second line")).toBeVisible({ timeout: 10_000 });
 
+    // The poll below proves a "diff-viewer" panel exists after the click, which
+    // only implicates the click if none existed before it. Nothing in this test
+    // opens one earlier, so this reads as already-true today — it is here so
+    // that stops being an unstated assumption if the surrounding test ever
+    // reuses a session or restores a saved layout.
+    const diffViewerOpen = () =>
+      testPage.evaluate(() => {
+        type Api = { getPanel: (id: string) => unknown };
+        return Boolean(
+          (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__?.getPanel("diff-viewer"),
+        );
+      });
+    expect(await diffViewerOpen(), "no cumulative diff panel before clicking Diff").toBe(false);
+
     // Click the "Diff" button in the header to open the cumulative diff view
-    await session.changes.getByRole("button", { name: "Diff" }).click();
+    await session.openChangesDiff();
 
-    // Wait for diff viewer to load
-    await testPage.waitForTimeout(2_000);
+    // Assert what the click actually opens. Without this the checks below are
+    // vacuous: the two commit texts were already visible before the click and
+    // never go away, and "No changes" is absent from a page where the diff
+    // never opened at all, so all three passed whether or not the button did
+    // anything. The button calls `addDiffViewerPanel()`, which mounts a
+    // dockview panel with id "diff-viewer" -- it is not the Review dialog, as a
+    // first attempt at this assertion assumed and a run disproved.
+    await expect
+      .poll(diffViewerOpen, {
+        timeout: 15_000,
+        message: "the Diff button never opened the cumulative diff panel",
+      })
+      .toBe(true);
 
-    // Verify commits are visible (this proves git changes are tracked)
     await expect(session.changes.getByText("Add first line")).toBeVisible({ timeout: 5_000 });
     await expect(session.changes.getByText("Add second line")).toBeVisible({ timeout: 5_000 });
 
-    // The cumulative diff should NOT show "No changes"
+    // The cumulative diff should NOT show "No changes". A negative has no event
+    // to wait on, so it needs the render window to elapse before sampling.
+    await dwell(
+      testPage,
+      2_000,
+      "negative-assertion",
+      'asserts the cumulative diff never renders its empty state; "No changes" not appearing publishes nothing, so the check has to outlast the dialog\'s own load',
+    );
     await expect(testPage.locator("text=No changes")).not.toBeVisible({ timeout: 5_000 });
   });
 
@@ -1227,22 +2155,12 @@ test.describe("Git Changes Panel", () => {
   }) => {
     const profile = await createStandardProfile(apiClient, "Git PR Dedup Profile");
 
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Git PR Dedup Test",
-      profile.id,
-      {
-        description: "Testing PR commit deduplication",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-
-    const session = await openTaskSession(testPage, "Git PR Dedup Test");
-
-    // Set up git helper
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    // This test mutates repository history. Use a disposable local repository
+    // so commits from earlier cumulative-diff tests cannot leak into the
+    // unified list. The fixture has no fetchable origin, so keep materialization
+    // offline while testing PR commit deduplication.
+    const repoDir = path.join(backend.tmpDir, "repos", "git-pr-dedup-repo");
+    fs.mkdirSync(repoDir, { recursive: true });
     const gitEnv = {
       ...process.env,
       HOME: backend.tmpDir,
@@ -1251,12 +2169,35 @@ test.describe("Git Changes Panel", () => {
       GIT_COMMITTER_NAME: "E2E Test",
       GIT_COMMITTER_EMAIL: "e2e@test.local",
     };
+    execSync("git init -b main", { cwd: repoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+    const repository = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: "Git PR Dedup Repo",
+      pull_before_worktree: false,
+    });
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git PR Dedup Test",
+      profile.id,
+      {
+        description: "Testing PR commit deduplication",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [repository.id],
+      },
+    );
+
+    const session = await openTaskSession(testPage, "Git PR Dedup Test");
+
+    // Set up git helper
     const git = new GitHelper(repoDir, gitEnv);
 
     // Create a commit
     git.createFile("pr-dedup.txt", "dedup content");
     git.stageFile("pr-dedup.txt");
     const sha = git.commit("Commit in PR");
+    const checkoutBranch = git.exec("git branch --show-current").trim();
 
     // Click the Changes tab and verify commit appears locally
     await session.clickTab("Changes");
@@ -1273,7 +2214,7 @@ test.describe("Git Changes Panel", () => {
       pr_number: 1,
       pr_url: "https://github.com/test-org/test-repo/pull/1",
       pr_title: "Test PR",
-      head_branch: "feature",
+      head_branch: checkoutBranch,
       base_branch: "main",
       author_login: "e2e-test",
     });
@@ -1351,6 +2292,7 @@ test.describe("Git Changes Panel", () => {
     git.createFile("unpushed.txt", "unpushed content");
     git.stageFile("unpushed.txt");
     git.commit("Unpushed commit");
+    const checkoutBranch = git.exec("git branch --show-current").trim();
 
     // Mock a PR that only contains the first commit
     await apiClient.mockGitHubAssociateTaskPR({
@@ -1360,7 +2302,7 @@ test.describe("Git Changes Panel", () => {
       pr_number: 2,
       pr_url: "https://github.com/test-org/test-repo/pull/2",
       pr_title: "Partial PR",
-      head_branch: "feature",
+      head_branch: checkoutBranch,
       base_branch: "main",
       author_login: "e2e-test",
     });
@@ -1404,5 +2346,658 @@ test.describe("Git Changes Panel", () => {
       .first();
     await expect(pushedRow).toBeVisible({ timeout: 10_000 });
     await expect(pushedRow.locator(".tabler-icon-git-commit")).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("local-first contribution keeps rewritten provider history separate", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+    const git = new GitHelper(repoDir, gitEnv);
+
+    // Build a deterministic stale checkout. The upstream stays at the fixture
+    // seed commit while the task checkout grows six local commits.
+    git.exec("git checkout -f main");
+    if (git.exec("git remote").split(/\r?\n/).includes("origin")) {
+      git.exec(`git remote set-url origin "${seedData.repositoryRemoteURL}"`);
+    } else {
+      git.exec(`git remote add origin "${seedData.repositoryRemoteURL}"`);
+    }
+    git.exec("git fetch origin main");
+    git.exec("git reset --hard origin/main");
+    git.exec("git clean -fd");
+    git.exec("git branch --set-upstream-to=origin/main main");
+    for (let index = 1; index <= 6; index += 1) {
+      git.createFile(`drift-local-${index}.txt`, `local checkout commit ${index}`);
+      git.stageFile(`drift-local-${index}.txt`);
+      git.commit(`Contribution commit ${index}`);
+    }
+    const localHead = git.getCurrentSha();
+    const providerBranch = "feature/rewritten-contribution";
+    const providerHistory = createRewrittenProviderHistory(git, providerBranch);
+    const contributionRepository = await apiClient.createRepository(
+      seedData.workspaceId,
+      repoDir,
+      "main",
+      {
+        name: "E2E GitHub Contribution Repository",
+        provider: "github",
+        provider_host: "https://github.com",
+        provider_owner: "testorg",
+        provider_name: "testrepo",
+        remote_url: "https://github.com/testorg/testrepo.git",
+      },
+    );
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Rewritten Contribution History",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [contributionRepository.id],
+        start_agent: false,
+      },
+    );
+
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("remote-contributor");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 901,
+        title: "Rewritten contribution",
+        state: "open",
+        head_branch: providerBranch,
+        base_branch: "main",
+        author_login: "remote-contributor",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        head_sha: providerHistory.head,
+        head_repo_owner: "testorg",
+        head_repo_name: "testrepo",
+        base_repo_owner: "testorg",
+        base_repo_name: "testrepo",
+        base_default_branch: "main",
+      },
+    ]);
+    const contribution = await apiClient.attachE2EGitHubContribution(
+      task.id,
+      "https://github.com/testorg/testrepo/pull/901",
+    );
+    configureContributionRemote(
+      git,
+      contribution.remote_name,
+      contribution.binding.source_repository.remote_url,
+      seedData.repositoryRemoteURL,
+    );
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 901, providerHistory.commits);
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 901,
+      pr_url: "https://github.com/testorg/testrepo/pull/901",
+      pr_title: "Rewritten contribution",
+      head_branch: "feature/rewritten-contribution",
+      base_branch: "main",
+      author_login: "remote-contributor",
+    });
+    await apiClient.ensureTaskSession(task.id);
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    git.exec(`git checkout -B ${providerBranch} ${localHead}`);
+    git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
+    await session.clickTab("Changes");
+
+    const changes = testPage.getByTestId("changes-panel");
+    await expect(changes.getByTestId("remote-contribution-drift-status")).toHaveCount(0);
+    const providerSection = changes.getByTestId("current-pr-commits-section");
+    const localSection = changes.getByTestId("local-checkout-commits-section");
+    await expect(providerSection).toBeVisible({ timeout: 10_000 });
+    await expect(localSection).toBeVisible({ timeout: 10_000 });
+    await expect(
+      providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
+    ).toContainText("PR #901 version");
+    await expect(
+      localSection.getByTestId("local-checkout-commits-section-collapse-toggle"),
+    ).toContainText("Local checkout commits");
+    await expect(
+      providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
+    ).toHaveAttribute("aria-expanded", "false");
+    await expect(localSection.locator('[data-testid^="commit-row-"]')).toHaveCount(6);
+    await providerSection.getByTestId("current-pr-commits-section-collapse-toggle").click();
+    await expect(providerSection.locator('[data-commit-provenance="current_pr"]')).toHaveCount(15);
+    await expect(localSection.locator('[data-commit-provenance="local_checkout"]')).toHaveCount(6);
+    await expect(
+      providerSection.locator('[data-commit-provenance="current_pr"]').first(),
+    ).toHaveAttribute("title", "Current PR commit");
+    await expect(
+      localSection.locator('[data-commit-provenance="local_checkout"]').first(),
+    ).toHaveAttribute("title", "Local checkout commit");
+    await expect(providerSection.locator('[data-testid^="commit-row-"]')).toHaveCount(15);
+    await expect(providerSection.locator('[data-testid^="commit-row-"]').first()).toContainText(
+      "Rewritten provider commit 15",
+    );
+
+    // A rewritten provider history must not label the preserved checkout as
+    // six unpushed commits, and reading the panel must not mutate the checkout.
+    await expect(providerSection.locator(".tabler-icon-arrow-up")).toHaveCount(0);
+    await expect(localSection.locator(".tabler-icon-arrow-up")).toHaveCount(0);
+    expect(git.getCurrentSha()).toBe(localHead);
+    expect(git.exec("git status --porcelain").trim()).toBe("");
+
+    const changesPull = changes.getByRole("button", { name: /^Pull/ });
+    await expect(changesPull).toBeDisabled();
+    const driftWarning = changes.getByTestId("header-remote-contribution-warning");
+    await expect(driftWarning).toBeVisible();
+    await driftWarning.click();
+    const driftMenu = testPage.getByTestId("header-remote-contribution-menu");
+    await expect(driftMenu).toBeVisible();
+    await waitForFiniteAnimations(driftMenu);
+    await prCapture.screenshot("remote-contribution-menu-desktop", {
+      caption: "Desktop history choices explain the preserved checkout and published PR history",
+    });
+    await expect(driftMenu.getByTestId("header-compare-versions")).toBeVisible();
+    await driftMenu.getByTestId("header-compare-versions").click();
+    await expect(driftMenu).toBeHidden();
+    await expect(
+      providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(git.getCurrentSha()).toBe(localHead);
+
+    await driftWarning.click();
+    const reopenedDriftMenu = testPage.getByTestId("header-remote-contribution-menu");
+    await expect(reopenedDriftMenu).toBeVisible();
+    await expect(reopenedDriftMenu.getByTestId("header-replace-pr-branch")).toBeVisible();
+    await expect(reopenedDriftMenu.getByTestId("header-use-pr-version")).toBeVisible();
+    await expect(reopenedDriftMenu.getByTestId("header-view-pr-version")).toContainText(
+      "Open PR on GitHub",
+    );
+    const replaceInfo = reopenedDriftMenu.getByRole("img", {
+      name: /Replace the published PR history/,
+    });
+    await replaceInfo.focus();
+    await expect(replaceInfo).not.toHaveAttribute("title");
+    const openTooltip = testPage.locator(
+      '[data-slot="tooltip-content"]:not([data-state="closed"])',
+    );
+    await expect(openTooltip).toContainText("Replace the published PR history");
+    const useInfo = reopenedDriftMenu.getByRole("img", {
+      name: /Replace the task checkout history/,
+    });
+    await expect(useInfo).toHaveAttribute(
+      "aria-label",
+      "Replace the task checkout history with the PR history. Kandev creates a recovery branch first and requires a clean working tree.",
+    );
+    await replaceInfo.evaluate((element) => (element as HTMLElement).blur());
+    await expect(openTooltip).toBeHidden({ timeout: 5_000 });
+    await reopenedDriftMenu.getByTestId("header-replace-pr-branch").click();
+    const resolutionDialog = testPage.getByTestId("remote-contribution-resolution-dialog");
+    await expect(resolutionDialog).toBeVisible();
+    await expect(resolutionDialog).toContainText(providerHistory.head);
+    const changedProviderHead = advanceProviderHead(git, providerHistory.head, providerBranch);
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 901,
+        title: "Rewritten contribution",
+        state: "open",
+        head_branch: providerBranch,
+        base_branch: "main",
+        author_login: "remote-contributor",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        head_sha: changedProviderHead,
+      },
+    ]);
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 901, [
+      {
+        sha: changedProviderHead,
+        message: "Provider head advanced",
+        author_login: "remote-contributor",
+        author_date: "2026-08-20T12:00:00Z",
+        stats_available: false,
+      },
+    ]);
+    await resolutionDialog.getByTestId("remote-contribution-confirm").click();
+    await expect(resolutionDialog).toContainText("The PR changed again");
+    await expect(resolutionDialog).toContainText(changedProviderHead);
+    expect(git.getCurrentSha()).toBe(localHead);
+    expect(git.exec("git status --porcelain").trim()).toBe("");
+    expect(git.exec(`git ls-remote origin refs/heads/${providerBranch}`)).toContain(
+      changedProviderHead,
+    );
+    await resolutionDialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(resolutionDialog).toBeHidden();
+    await prCapture.screenshot("remote-contribution-drift-desktop", {
+      caption: "Rewritten provider history is separated from the preserved local checkout",
+    });
+  });
+
+  test("explains a completed local rebase before offering history changes", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    });
+    const providerBranch = "feature/local-rebase-explanation";
+    const history = createLocalRebasedProviderHistory(git, providerBranch);
+    // Let session preparation start from the published branch. Recreate the
+    // local rebase after the session owns the contribution binding so the
+    // startup push does not race a deliberately divergent checkout.
+    git.exec(`git checkout -B ${providerBranch} ${history.publishedHead}`);
+    git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
+    const contributionRepository = await apiClient.createRepository(
+      seedData.workspaceId,
+      repoDir,
+      "main",
+      {
+        name: "E2E GitHub Contribution Repository",
+        provider: "github",
+        provider_host: "https://github.com",
+        provider_owner: "testorg",
+        provider_name: "testrepo",
+        remote_url: "https://github.com/testorg/testrepo.git",
+      },
+    );
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("local-rebase-contributor");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 904,
+        title: "Local rebase explanation",
+        state: "open",
+        head_branch: providerBranch,
+        base_branch: "main",
+        author_login: "local-rebase-contributor",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        head_sha: history.publishedHead,
+        head_repo_owner: "testorg",
+        head_repo_name: "testrepo",
+        base_repo_owner: "testorg",
+        base_repo_name: "testrepo",
+        base_default_branch: "main",
+      },
+    ]);
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Local Rebase Explanation",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [contributionRepository.id],
+        start_agent: false,
+      },
+    );
+
+    const contribution = await apiClient.attachE2EGitHubContribution(
+      task.id,
+      "https://github.com/testorg/testrepo/pull/904",
+    );
+    configureContributionRemote(
+      git,
+      contribution.remote_name,
+      contribution.binding.source_repository.remote_url,
+      seedData.repositoryRemoteURL,
+    );
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 904, history.commits);
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 904,
+      pr_url: "https://github.com/testorg/testrepo/pull/904",
+      pr_title: "Local rebase explanation",
+      head_branch: providerBranch,
+      base_branch: "main",
+      author_login: "local-rebase-contributor",
+    });
+    await apiClient.ensureTaskSession(task.id);
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+
+    // Recreate the rebase after the one-time session preparation. The active
+    // session already owns the server-authored binding, so this leaves the
+    // production observer's latest HEAD reflog transition as the rebase.
+    git.exec(`git checkout -B ${providerBranch} ${history.publishedHead}`);
+    git.exec("git rebase origin/main");
+    history.localHead = git.getCurrentSha();
+    git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    await session.clickTab("Changes");
+
+    const changes = testPage.getByTestId("changes-panel");
+    const providerSection = changes.getByTestId("current-pr-commits-section");
+    const localSection = changes.getByTestId("local-checkout-commits-section");
+    await expect(providerSection).toBeVisible({ timeout: 15_000 });
+    await expect(localSection).toBeVisible({ timeout: 15_000 });
+
+    const warning = changes.getByTestId("header-remote-contribution-warning");
+    await warning.click();
+    const menu = testPage.getByTestId("header-remote-contribution-menu");
+    await expect(menu).toBeVisible();
+    await expect(menu).toContainText("Task and PR histories differ");
+    await expect(menu).toContainText("The task branch was rebased locally");
+    await expect(menu).toContainText("Task commits: 5");
+    await expect(menu).toContainText("Published commits: 5");
+    await expect(menu).toContainText("Newer base commits: 3");
+    await expect(menu.getByTestId("header-compare-versions")).toBeVisible();
+
+    await menu.getByTestId("header-compare-versions").click();
+    await expect(menu).toBeHidden();
+    const providerToggle = providerSection.getByTestId(
+      "current-pr-commits-section-collapse-toggle",
+    );
+    const localToggle = localSection.getByTestId("local-checkout-commits-section-collapse-toggle");
+    await expect(providerToggle).toHaveAttribute("aria-expanded", "true");
+    await expect(providerToggle).toBeFocused();
+    await expect(providerToggle).toHaveJSProperty("tabIndex", 0);
+    await testPage.keyboard.press("Enter");
+    await expect(providerToggle).toHaveAttribute("aria-expanded", "false");
+    await localToggle.focus();
+    for (let index = 0; index < 8; index += 1) {
+      if (await providerToggle.evaluate((element) => document.activeElement === element)) break;
+      await testPage.keyboard.press("Tab");
+    }
+    await expect(providerToggle).toBeFocused();
+    await testPage.keyboard.press("Enter");
+    await expect(providerToggle).toHaveAttribute("aria-expanded", "true");
+    await expect(providerSection.locator('[data-testid^="commit-row-"]')).toHaveCount(5);
+    await expect(localSection.locator('[data-testid^="commit-row-"]')).toHaveCount(5);
+    expect(git.getCurrentSha()).toBe(history.localHead);
+    expect(git.exec("git status --porcelain").trim()).toBe("");
+    expect(git.exec(`git rev-parse refs/remotes/origin/${providerBranch}`).trim()).toBe(
+      history.publishedHead,
+    );
+
+    await warning.click();
+    const reopenedMenu = testPage.getByTestId("header-remote-contribution-menu");
+    await expect(reopenedMenu).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expect(reopenedMenu).toBeHidden();
+    await expect(warning).toBeFocused();
+    await warning.click();
+    await expect(reopenedMenu).toBeVisible();
+    const recoveryBefore = recoveryBranches(git);
+    git.createFile("local-rebase-dirty.txt", "uncommitted local change");
+    await reopenedMenu.getByTestId("header-use-pr-version").click();
+    const dialog = testPage.getByTestId("remote-contribution-resolution-dialog");
+    await expect(dialog).toContainText("replaces the current task checkout history");
+    await expect(dialog).toContainText(history.publishedHead);
+    await dialog.getByTestId("remote-contribution-confirm").click();
+    await expect(dialog).toContainText("Commit or discard your local changes");
+    expect(git.getCurrentSha()).toBe(history.localHead);
+    expect(git.exec("git status --porcelain").trim()).toContain("local-rebase-dirty.txt");
+    expect(recoveryBranches(git)).toEqual(recoveryBefore);
+
+    git.deleteFile("local-rebase-dirty.txt");
+    await dialog.getByTestId("remote-contribution-confirm").click();
+    await expect(dialog).toBeHidden();
+    expect(git.getCurrentSha()).toBe(history.publishedHead);
+    expect(git.exec("git status --porcelain").trim()).toBe("");
+    const recoveryAfter = recoveryBranches(git);
+    const createdRecoveryBranches = recoveryAfter.filter(
+      (branch) => !recoveryBefore.includes(branch),
+    );
+    expect(createdRecoveryBranches).toHaveLength(1);
+    expect(git.exec(`git rev-parse refs/heads/${createdRecoveryBranches[0]}`).trim()).toBe(
+      history.localHead,
+    );
+  });
+
+  test("uses the PR for the checked-out branch when an older PR is merged", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+    const git = new GitHelper(repoDir, gitEnv);
+    const currentBranch = "feature/current-contribution";
+    const historicalBranch = "feature/merged-contribution";
+
+    git.exec("git checkout -f main");
+    if (git.exec("git remote").split(/\r?\n/).includes("origin")) {
+      git.exec(`git remote set-url origin "${seedData.repositoryRemoteURL}"`);
+    } else {
+      git.exec(`git remote add origin "${seedData.repositoryRemoteURL}"`);
+    }
+    git.exec("git fetch origin main");
+    git.exec("git reset --hard origin/main");
+    git.exec("git clean -fd");
+    git.exec(`git checkout -B ${currentBranch}`);
+    git.createFile("current-contribution.txt", "current PR commit");
+    git.stageFile("current-contribution.txt");
+    const currentHead = git.commit("Current PR commit");
+    git.exec(`git push --force --set-upstream origin ${currentBranch}`);
+
+    const historicalHistory = createRewrittenProviderHistory(git, historicalBranch);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Current Branch PR Selection",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("branch-owner");
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 910,
+      pr_url: "https://github.com/testorg/testrepo/pull/910",
+      pr_title: "Merged contribution",
+      head_branch: historicalBranch,
+      base_branch: "main",
+      author_login: "branch-owner",
+      state: "merged",
+    });
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 910, historicalHistory.commits);
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 911,
+      pr_url: "https://github.com/testorg/testrepo/pull/911",
+      pr_title: "Current contribution",
+      head_branch: currentBranch,
+      base_branch: "main",
+      author_login: "branch-owner",
+      state: "open",
+    });
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 911, [
+      {
+        sha: currentHead,
+        message: "Current PR commit",
+        author_login: "branch-owner",
+        author_date: "2026-08-12T12:00:00Z",
+        stats_available: false,
+      },
+    ]);
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    git.exec(`git checkout -B ${currentBranch} ${currentHead}`);
+    git.exec(`git branch --set-upstream-to=origin/${currentBranch} ${currentBranch}`);
+    await session.clickTab("Changes");
+
+    const changes = testPage.getByTestId("changes-panel");
+    await expect(changes.getByTestId("commits-section")).toBeVisible({ timeout: 30_000 });
+    const currentPRRow = changes.getByTestId(`commit-row-${currentHead.slice(0, 7)}`);
+    await expect(currentPRRow).toBeVisible();
+    await expect(currentPRRow.getByTestId("commit-provenance")).toHaveAttribute(
+      "data-commit-provenance",
+      "pushed",
+    );
+    await expect(changes.getByText("Rewritten provider commit 15")).toHaveCount(0);
+    await expect(changes.getByTestId("header-remote-contribution-warning")).toHaveCount(0);
+    await expect(changes.getByTestId("remote-contribution-drift-status")).toHaveCount(0);
+    await expect(testPage.getByRole("button", { name: /2 PRs/ })).toBeVisible();
+    expect(git.getCurrentSha()).toBe(currentHead);
+  });
+
+  test("keeps a one-commit local-ahead contribution pushable", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+    const git = new GitHelper(repoDir, gitEnv);
+
+    git.exec("git checkout -f main");
+    if (git.exec("git remote").split(/\r?\n/).includes("origin")) {
+      git.exec(`git remote set-url origin "${seedData.repositoryRemoteURL}"`);
+    } else {
+      git.exec(`git remote add origin "${seedData.repositoryRemoteURL}"`);
+    }
+    git.exec("git fetch origin main");
+    git.exec("git reset --hard origin/main");
+    git.exec("git clean -fd");
+    git.exec("git branch --set-upstream-to=origin/main main");
+    const providerHead = git.exec("git rev-parse origin/main").trim();
+    git.createFile("local-ahead-contribution.txt", "one local commit ahead");
+    git.stageFile("local-ahead-contribution.txt");
+    const localHead = git.commit("Local maintainer contribution");
+    const providerBranch = "feature/local-ahead";
+    git.exec(`git push origin ${providerHead}:refs/heads/${providerBranch}`);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Local Ahead Contribution",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("local-ahead-author");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 903,
+        title: "Local ahead contribution",
+        state: "open",
+        head_branch: "feature/local-ahead",
+        base_branch: "main",
+        author_login: "local-ahead-author",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+      },
+    ]);
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 903, [
+      {
+        sha: providerHead,
+        message: "Current provider head",
+        author_login: "local-ahead-author",
+        author_date: "2026-08-10T12:00:00Z",
+        stats_available: false,
+      },
+    ]);
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 903,
+      pr_url: "https://github.com/testorg/testrepo/pull/903",
+      pr_title: "Local ahead contribution",
+      head_branch: "feature/local-ahead",
+      base_branch: "main",
+      author_login: "local-ahead-author",
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    git.exec(`git checkout -B ${providerBranch} ${localHead}`);
+    git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
+    await session.clickTab("Changes");
+    const changes = testPage.getByTestId("changes-panel");
+    await expect(changes.getByTestId("commits-section")).toBeVisible({ timeout: 30_000 });
+    await expect(changes.getByText("Local maintainer contribution")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(changes.getByTestId("remote-contribution-drift-status")).toHaveCount(0);
+
+    await changes.getByRole("button", { name: "Review" }).click();
+    const reviewDialog = testPage.getByRole("dialog", { name: "Review Changes" });
+    await expect(reviewDialog).toBeVisible({ timeout: 15_000 });
+    await expect(reviewDialog.getByTestId("vcs-primary-push")).toBeVisible({ timeout: 15_000 });
+    await reviewDialog.getByRole("button", { name: "Open VCS options" }).click();
+    const openMenu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
+    const pushAction = openMenu
+      .locator('[data-slot="dropdown-menu-sub-trigger"]')
+      .filter({ hasText: /^Push/ });
+    await expect(pushAction).not.toHaveAttribute("aria-disabled", "true", { timeout: 15_000 });
+    expect(git.getCurrentSha()).toBe(localHead);
+    expect(git.exec("git status --porcelain").trim()).toBe("");
   });
 });

@@ -3,9 +3,12 @@
  * Complements task-create-prompt-autocomplete.spec.ts with edge-case coverage.
  */
 import { test, expect } from "../../fixtures/test-base";
+import type { Locator } from "@playwright/test";
 import { KanbanPage } from "../../pages/kanban-page";
+import { expectTaskDescription } from "../../pages/task-description-editor";
 
 const MENU_TITLE = /Mention tasks, files, prompts/i;
+const LONG_PROMPT_NAME = "qa-long-prompt-reference-name-that-definitely-overflows-editor-width";
 
 async function cleanupPrompts(
   apiClient: {
@@ -33,7 +36,83 @@ const ALL_QA_PROMPTS = [
   "qa-back",
   "qa-arrow",
   "qa-submit",
+  "qa-compact",
+  LONG_PROMPT_NAME,
 ];
+
+type Box = { x: number; y: number; width: number; height: number };
+
+async function readPromptReferenceMetrics(reference: Locator) {
+  return reference.evaluate((element) => {
+    const readBox = (target: Element): Box => {
+      const rect = target.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    };
+    const mention = element.querySelector<HTMLElement>('[data-testid="custom-prompt-mention"]');
+    const remove = element.querySelector<HTMLElement>(
+      '[data-testid="task-prompt-reference-remove"]',
+    );
+    const label = mention?.querySelector<HTMLElement>(
+      '[data-testid="custom-prompt-mention-label"]',
+    );
+    if (!mention || !remove || !label) throw new Error("prompt reference controls are missing");
+
+    const elementsWithGreenBorder = [
+      element,
+      ...Array.from(element.querySelectorAll<HTMLElement>("[class]")),
+    ].filter((target) => target.getAttribute("class")?.includes("border-emerald-300/35"));
+    const labelStyle = getComputedStyle(label);
+    return {
+      shell: readBox(element),
+      mention: readBox(mention),
+      label: readBox(label),
+      remove: readBox(remove),
+      labelText: label.textContent ?? "",
+      labelClientWidth: label.clientWidth,
+      labelScrollWidth: label.scrollWidth,
+      labelFontSize: labelStyle.fontSize,
+      labelOverflow: labelStyle.overflow,
+      labelTextOverflow: labelStyle.textOverflow,
+      labelWhiteSpace: labelStyle.whiteSpace,
+      shellBorderWidth: getComputedStyle(element).borderTopWidth,
+      mentionBorderWidth: getComputedStyle(mention).borderTopWidth,
+      greenBorderCount: elementsWithGreenBorder.length,
+    };
+  });
+}
+
+async function readEditorContentMetrics(editor: Locator) {
+  return editor.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
+    const paddingRight = Number.parseFloat(style.paddingRight) || 0;
+    const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+    const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+    return {
+      contentBox: {
+        x: rect.x + paddingLeft,
+        y: rect.y + paddingTop,
+        width: Math.max(0, rect.width - paddingLeft - paddingRight),
+        height: Math.max(0, rect.height - paddingTop - paddingBottom),
+      },
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    };
+  });
+}
+
+function expectContained(parent: Box, child: Box, label: string) {
+  const epsilon = 1;
+  expect(child.x, `${label} left edge`).toBeGreaterThanOrEqual(parent.x - epsilon);
+  expect(child.y, `${label} top edge`).toBeGreaterThanOrEqual(parent.y - epsilon);
+  expect(child.x + child.width, `${label} right edge`).toBeLessThanOrEqual(
+    parent.x + parent.width + epsilon,
+  );
+  expect(child.y + child.height, `${label} bottom edge`).toBeLessThanOrEqual(
+    parent.y + parent.height + epsilon,
+  );
+}
 
 test.describe("@-mention autocomplete: adversarial QA", () => {
   test.afterEach(async ({ apiClient }) => {
@@ -49,9 +128,9 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
     await expect(testPage.getByRole("option", { name: /qa-alpha/ })).toBeVisible();
@@ -66,19 +145,49 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa-es");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@qa-es");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await textarea.press("Escape");
+    await editor.press("Escape");
     await expect(testPage.getByText(MENU_TITLE)).not.toBeVisible();
 
     // The @query text is preserved (Esc just closes the menu, doesn't undo typing).
-    await expect(textarea).toHaveValue("@qa-es");
+    await expectTaskDescription(editor, "@qa-es");
 
-    // Dialog should still be open — Escape went to the menu, not the dialog.
-    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+    // The open state must persist after the close animation window.
+    await expect(testPage.getByTestId("create-task-dialog")).toHaveAttribute("data-state", "open");
+    await expect(editor).toBeFocused();
+
+    await editor.pressSequentially(" continued");
+    await expectTaskDescription(editor, "@qa-es continued");
+    await expect(testPage.getByText(MENU_TITLE)).toHaveCount(0);
+  });
+
+  test("Escape keeps Create Task open without an autocomplete menu", async ({
+    testPage,
+    prCapture,
+  }) => {
+    test.setTimeout(60_000);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.createTaskButton.first().click();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    const editor = testPage.getByTestId("task-description-input");
+    await expect(dialog).toHaveAttribute("data-state", "open");
+    await editor.fill("Keep this draft");
+    await expect(testPage.getByText(MENU_TITLE)).toHaveCount(0);
+
+    await editor.press("Escape");
+
+    await expect(dialog).toHaveAttribute("data-state", "open");
+    await expectTaskDescription(editor, "Keep this draft");
+    await prCapture.screenshot("create-task-dialog-after-escape-desktop", {
+      caption: "Create Task stays open with the draft after Escape on desktop.",
+    });
   });
 
   test("ArrowDown + Enter selects the second prompt", async ({ testPage, apiClient }) => {
@@ -92,26 +201,29 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa-arr");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@qa-arr");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
     // Both should be visible.
     await expect(testPage.getByRole("option", { name: /qa-arr-1/ })).toBeVisible();
     await expect(testPage.getByRole("option", { name: /qa-arr-2/ })).toBeVisible();
 
-    await textarea.press("ArrowDown");
-    await textarea.press("Enter");
+    const secondOption = testPage.getByRole("option", { name: /qa-arr-2/ });
+    await expect(async () => {
+      await editor.focus();
+      await editor.press("ArrowDown");
+      await expect(secondOption).toHaveAttribute("aria-selected", "true", { timeout: 500 });
+    }).toPass({ timeout: 5_000, intervals: [100, 250, 500] });
+    await editor.press("Enter");
 
-    const value = await textarea.inputValue();
-    // Equal filter scores → insertion order (stable sort): qa-arr-1 at index 0,
-    // qa-arr-2 at index 1. One ArrowDown moves from 0 → 1, so "SECOND" is selected.
-    expect(value).toBe("SECOND");
+    // Equal filter scores keep insertion order. One ArrowDown selects qa-arr-2.
+    await expectTaskDescription(editor, "@qa-arr-2");
     await expect(testPage.getByText(MENU_TITLE)).not.toBeVisible();
   });
 
-  test("clicking a menu item with the mouse inlines the prompt", async ({
+  test("clicking a menu item with the mouse inserts a prompt reference", async ({
     testPage,
     apiClient,
   }) => {
@@ -123,41 +235,46 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa-mo");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@qa-mo");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
     await testPage.getByRole("option", { name: /qa-mouse/ }).click();
 
-    await expect(textarea).toHaveValue("MOUSE_CONTENT");
+    await expectTaskDescription(editor, "@qa-mouse");
     await expect(testPage.getByText(MENU_TITLE)).not.toBeVisible();
   });
 
-  test("inserted prompt with multi-line content auto-grows the textarea", async ({
+  test("selecting a prompt with multi-line content keeps the alias compact", async ({
     testPage,
     apiClient,
   }) => {
     test.setTimeout(60_000);
     const lines = Array.from({ length: 8 }, (_, i) => `line ${i + 1}`).join("\n");
-    await apiClient.createPrompt("qa-multi", lines);
+    const promptName = `qa-multi-${Date.now()}`;
+    const prompt = await apiClient.createPrompt(promptName, lines);
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.createTaskButton.first().click();
-    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+      await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa-mu");
-    await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await textarea.press("Enter");
+      const editor = testPage.getByTestId("task-description-input");
+      await editor.fill("");
+      await editor.click();
+      await editor.pressSequentially(`@${promptName}`);
+      await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
+      // Select the exact prompt row. Keyboard selection can use a stale
+      // filtered item while the prompt store is still hydrating.
+      await testPage.getByRole("option", { name: new RegExp(promptName) }).click();
 
-    await expect(textarea).toHaveValue(lines);
-
-    // Height should reflect content (8 lines should be taller than the default ~96px min-h).
-    const height = await textarea.evaluate((el) => (el as HTMLTextAreaElement).scrollHeight);
-    expect(height).toBeGreaterThan(100);
+      await expectTaskDescription(editor, `@${promptName}`);
+      await expect(editor).toContainText(`@${promptName}`);
+    } finally {
+      await apiClient.deletePrompt(prompt.id).catch(() => undefined);
+    }
   });
 
   test("typing space after @ closes the menu", async ({ testPage, apiClient }) => {
@@ -169,11 +286,11 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@");
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await textarea.pressSequentially(" foo");
+    await editor.pressSequentially(" foo");
     // After a space immediately follows @, trigger detection should yield null.
     await expect(testPage.getByText(MENU_TITLE)).toHaveCount(0);
   });
@@ -187,25 +304,20 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@qa");
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await textarea.press("Backspace");
-    await textarea.press("Backspace");
-    await textarea.press("Backspace"); // deletes the @
-    await expect(textarea).toHaveValue("");
+    await editor.press("Backspace");
+    await editor.press("Backspace");
+    await editor.press("Backspace"); // deletes the @
+    await expectTaskDescription(editor, "");
     await expect(testPage.getByText(MENU_TITLE)).toHaveCount(0);
   });
 
-  test("ArrowUp/ArrowDown don't propagate to native textarea cursor motion", async ({
-    testPage,
-    apiClient,
-  }) => {
-    // When the menu is open, the hook calls preventDefault on Arrow keys, so the
-    // textarea's selection cursor should NOT move. Probe by verifying that
-    // arrow-up does not change the textarea content/cursor in a way that
-    // breaks the subsequent Enter selection.
+  test("ArrowUp/ArrowDown stay in the suggestion menu", async ({ testPage, apiClient }) => {
+    // When the menu is open, the hook calls preventDefault on Arrow keys, so
+    // the editor keeps the active query while the menu changes selection.
     test.setTimeout(60_000);
     await apiClient.createPrompt("qa-arrow", "ARROW_CONTENT");
 
@@ -214,28 +326,24 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa-arr");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@qa-arr");
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
 
-    const before = await textarea.evaluate((el) => (el as HTMLTextAreaElement).selectionStart);
-    await textarea.press("ArrowDown");
-    await textarea.press("ArrowUp");
-    const after = await textarea.evaluate((el) => (el as HTMLTextAreaElement).selectionStart);
-    expect(after).toBe(before);
+    await editor.press("ArrowDown");
+    await editor.press("ArrowUp");
 
-    await textarea.press("Enter");
-    await expect(textarea).toHaveValue("ARROW_CONTENT");
+    await editor.press("Enter");
+    await expectTaskDescription(editor, "@qa-arrow");
   });
 
-  test("description with inlined prompt is sent to backend on submit", async ({
+  test("description with a prompt alias is sent to backend on submit", async ({
     testPage,
     apiClient,
   }) => {
-    // Acceptance criterion: the textarea contains the inlined prompt content before submit
-    // and the form completes successfully. API-level task description verification is a
-    // follow-up — it requires retrieving the created task by title after creation.
+    // The visible alias is submitted and the existing server launch path
+    // resolves its definition later.
     test.setTimeout(60_000);
     const content = "INLINED_FROM_PROMPT_PAYLOAD";
     await apiClient.createPrompt("qa-submit", content);
@@ -248,12 +356,12 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     // Use scratch mode so submit does not depend on a pre-selected repository.
     await testPage.getByTestId("source-mode-scratch").click();
     await testPage.getByTestId("task-title-input").fill("qa-submit-task");
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa-su");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@qa-su");
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await textarea.press("Enter");
-    await expect(textarea).toHaveValue(content);
+    await editor.press("Enter");
+    await expectTaskDescription(editor, "@qa-submit");
 
     const start = testPage.getByTestId("submit-start-agent");
     await expect(start).toBeEnabled({ timeout: 30_000 });
@@ -261,6 +369,148 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     await expect(testPage.getByTestId("create-task-dialog")).not.toBeVisible({
       timeout: 10_000,
+    });
+  });
+
+  test("editable prompt chip is compact and contains removal", async ({
+    testPage,
+    apiClient,
+    prCapture,
+  }) => {
+    test.setTimeout(90_000);
+    await apiClient.createPrompt("qa-compact", "Compact prompt content");
+
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.createTaskButton.first().click();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    const editor = dialog.getByTestId("task-description-input");
+    await expect(dialog).toBeVisible();
+    await editor.fill("");
+    await editor.click();
+    await editor.pressSequentially("@qa-com");
+    await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
+    const promptOption = testPage.getByRole("option").filter({ hasText: "qa-compact" });
+    await expect(promptOption).toBeVisible();
+    await promptOption.click();
+    await expect(dialog.getByTestId("task-prompt-reference")).toHaveCount(1);
+
+    const reference = dialog.getByTestId("task-prompt-reference").first();
+    const remove = reference.getByTestId("task-prompt-reference-remove");
+    await expect(reference.getByTestId("custom-prompt-mention")).toBeVisible();
+    await expect(remove).toBeVisible();
+    const metrics = await readPromptReferenceMetrics(reference);
+    expect(metrics.shell.height).toBeCloseTo(24, 0);
+    expect(metrics.labelFontSize).toBe("12px");
+    expect(metrics.shellBorderWidth).toBe("1px");
+    expect(metrics.mentionBorderWidth).toBe("0px");
+    expect(metrics.greenBorderCount).toBe(1);
+    expectContained(metrics.shell, metrics.mention, "preview target");
+    expectContained(metrics.shell, metrics.remove, "removal target");
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      await testPage.evaluate(() => document.documentElement.clientWidth),
+    );
+
+    const defaultBackground = await remove.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    );
+    await remove.hover();
+    const hoverBackground = await remove.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    );
+    expect(hoverBackground).not.toBe(defaultBackground);
+    await remove.focus();
+    await expect(remove).toBeFocused();
+    const focusOutline = await remove.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { style: style.outlineStyle, width: style.outlineWidth };
+    });
+    expect(focusOutline.style).toBe("solid");
+    expect(focusOutline.width).toBe("2px");
+    await prCapture.screenshot("desktop-task-prompt-reference-chip", {
+      caption: "The desktop task prompt reference uses one compact border around both controls.",
+    });
+
+    await remove.press("Enter");
+    await expectTaskDescription(editor, "");
+    await expect(testPage.getByText("Compact prompt content", { exact: false })).toHaveCount(0);
+    await editor.press("ControlOrMeta+z");
+    await expectTaskDescription(editor, "@qa-compact");
+    await expect(dialog.getByTestId("task-prompt-reference")).toHaveCount(1);
+
+    for (const width of [767, 768]) {
+      await testPage.setViewportSize({ width, height: 900 });
+      await expect(reference).toBeVisible();
+      const resized = await readPromptReferenceMetrics(reference);
+      if (width < 768) {
+        expect(resized.shell.height).toBeGreaterThanOrEqual(44);
+      } else {
+        expect(resized.shell.height).toBeCloseTo(24, 0);
+      }
+    }
+  });
+
+  test("long prompt chips truncate and wrap without hiding removal", async ({
+    testPage,
+    apiClient,
+    prCapture,
+  }) => {
+    test.setTimeout(90_000);
+    const promptName = LONG_PROMPT_NAME;
+    await apiClient.createPrompt(promptName, "Long prompt content");
+
+    await testPage.setViewportSize({ width: 480, height: 900 });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await testPage.getByTestId("mobile-fab").click();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    const editor = dialog.getByTestId("task-description-input");
+    await expect(dialog).toBeVisible();
+    await editor.fill("");
+    await editor.click();
+    await editor.pressSequentially(`@${promptName}`);
+    await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
+    const promptOption = testPage.getByRole("option").filter({ hasText: promptName });
+    await expect(promptOption).toBeVisible();
+    await promptOption.click();
+    await editor.focus();
+    await editor.press("ControlOrMeta+End");
+    await editor.pressSequentially(` and @${promptName}`);
+    await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
+    await expect(promptOption).toBeVisible();
+    await promptOption.click();
+    const references = dialog.getByTestId("task-prompt-reference");
+    await expect(references).toHaveCount(2);
+    const editorMetrics = await readEditorContentMetrics(editor);
+    expect(editorMetrics.scrollWidth).toBeLessThanOrEqual(editorMetrics.clientWidth);
+
+    for (let index = 0; index < 2; index += 1) {
+      const reference = references.nth(index);
+      const mention = reference.getByTestId("custom-prompt-mention");
+      const remove = reference.getByTestId("task-prompt-reference-remove");
+      await expect(mention).toHaveAttribute("aria-label", `Custom prompt: ${promptName}`);
+      await expect(mention).toBeVisible();
+      await expect(remove).toBeVisible();
+      const metrics = await readPromptReferenceMetrics(reference);
+      expect(metrics.labelText).toBe(`@${promptName}`);
+      expect(metrics.labelScrollWidth).toBeGreaterThan(metrics.labelClientWidth);
+      expect(metrics.labelOverflow).toBe("hidden");
+      expect(metrics.labelTextOverflow).toBe("ellipsis");
+      expect(metrics.labelWhiteSpace).toBe("nowrap");
+      expectContained(editorMetrics.contentBox, metrics.shell, `editor content ${index}`);
+      expectContained(metrics.shell, metrics.mention, `preview target ${index}`);
+      expectContained(metrics.shell, metrics.label, `label ${index}`);
+      expectContained(metrics.shell, metrics.remove, `removal target ${index}`);
+      await expect(remove).toBeVisible();
+    }
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      await testPage.evaluate(() => document.documentElement.clientWidth),
+    );
+    await prCapture.screenshot("desktop-task-prompt-reference-long-name", {
+      caption: "Long task prompt references keep their removal controls visible while truncating.",
     });
   });
 });

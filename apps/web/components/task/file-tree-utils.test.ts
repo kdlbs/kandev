@@ -3,7 +3,9 @@ import type { FileTreeNode } from "@/lib/types/backend";
 import {
   moveNodesInTree,
   computeMoveTargets,
+  findUnloadedAncestor,
   findNodeByPath,
+  getAncestorPaths,
   getVisiblePaths,
   sortRootChildren,
 } from "./file-tree-utils";
@@ -134,5 +136,36 @@ describe("getVisiblePaths", () => {
     const expanded = new Set<string>();
     const paths = getVisiblePaths(tree, expanded);
     expect(paths).toEqual(["lib", "readme.md"]);
+  });
+});
+
+describe("file tree reveal", () => {
+  const targetPath = "src/main/kotlin/Greeting.kt";
+  const ancestors = ["src", "src/main", "src/main/kotlin"];
+
+  it("returns every directory path above the target file", () => {
+    expect(getAncestorPaths(targetPath)).toEqual(ancestors);
+    expect(getAncestorPaths("Greeting.kt")).toEqual([]);
+  });
+
+  it("loads one missing ancestor level at a time", () => {
+    const initialTree = root([dir("src", [])]);
+    expect(findUnloadedAncestor(initialTree, targetPath, ancestors)?.path).toBe("src");
+
+    const srcLoaded = root([dir("src", [dir("main", [], "src")])]);
+    expect(findUnloadedAncestor(srcLoaded, targetPath, ancestors)?.path).toBe("src/main");
+
+    const mainLoaded = root([dir("src", [dir("main", [dir("kotlin", [], "src/main")], "src")])]);
+    expect(findUnloadedAncestor(mainLoaded, targetPath, ancestors)?.path).toBe("src/main/kotlin");
+  });
+
+  it("stops when the target is loaded or its first ancestor is absent", () => {
+    const loadedTree = root([
+      dir("src", [
+        dir("main", [dir("kotlin", [file("Greeting.kt", "src/main/kotlin")], "src/main")], "src"),
+      ]),
+    ]);
+    expect(findUnloadedAncestor(loadedTree, targetPath, ancestors)).toBeNull();
+    expect(findUnloadedAncestor(root([dir("other", [])]), targetPath, ancestors)).toBeNull();
   });
 });

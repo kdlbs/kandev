@@ -9,6 +9,8 @@ import {
   type NativeNotificationPermission,
 } from "@/lib/desktop/native-notification-client";
 import type { PermissionRefresh } from "./notifications-settings-actions";
+import { SettingsGroup } from "./settings-group";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 type NotificationPermissionState =
   | NativeNotificationPermission
@@ -42,14 +44,11 @@ export function DesktopNotificationsSection({
 }: DesktopNotificationsSectionProps) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <div className="text-base font-medium">{t("settings:desktopNotifications")}</div>
-          <p className="text-sm text-muted-foreground">
-            {t("settings:desktopNotificationsDescription")}
-          </p>
-        </div>
+    <SettingsGroup
+      title={t("settings:desktopNotifications")}
+      description={t("settings:desktopNotificationsDescription")}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.desktopNotifications}
+      action={
         <div className="flex items-center gap-2">
           <Button
             title={t("settings:enableDesktopNotifications")}
@@ -97,27 +96,27 @@ export function DesktopNotificationsSection({
                 <IconBell className="h-4 w-4" />
               </Button>
             </HoverCardTrigger>
-            <HoverCardContent side="top" className="text-sm">
+            <HoverCardContent side="top">
               {t("settings:notificationsNotShowingHint")}
             </HoverCardContent>
           </HoverCard>
         </div>
-      </div>
-
+      }
+    >
       {notificationPermission === "denied" && (
-        <p className="text-sm text-amber-600">
+        <p className="text-xs text-amber-600">
           {nativeNotifications.isAvailable()
             ? t("settings:notificationsBlockedInOs")
             : t("settings:notificationsBlockedInBrowser")}
         </p>
       )}
       {notificationPermission === "unsupported" && (
-        <p className="text-sm text-amber-600">{t("settings:notificationsUnsupported")}</p>
+        <p className="text-xs text-amber-600">{t("settings:notificationsUnsupported")}</p>
       )}
       {notificationPermission === "error" && (
-        <p className="text-sm text-amber-600">{t("settings:notificationPermissionCheckFailed")}</p>
+        <p className="text-xs text-amber-600">{t("settings:notificationPermissionCheckFailed")}</p>
       )}
-    </div>
+    </SettingsGroup>
   );
 }
 

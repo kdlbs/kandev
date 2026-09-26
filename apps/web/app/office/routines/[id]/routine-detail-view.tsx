@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
-import { IconChevronRight, IconPlayerPlay, IconDeviceFloppy } from "@tabler/icons-react";
+import { IconPlayerPlay, IconDeviceFloppy } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -12,15 +11,23 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
-import {
-  updateRoutine,
-  runRoutine,
-  createRoutineTrigger,
-  deleteRoutineTrigger,
-} from "@/lib/api/domains/office-api";
-import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
+import { updateRoutine, runRoutine } from "@/lib/api/domains/office-api";
+import type {
+  Routine,
+  RoutineStatus,
+  RoutineTrigger,
+  UpdateRoutinePatch,
+} from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
-import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
+import { useOfficeTopbar } from "../../components/office-topbar-context";
+import { isRoutineFiring } from "../../lib/routine-status";
+import { routineNotFiringMessage } from "../../lib/routine-not-firing";
+import { ScheduleStateBadge, UnarmedScheduleHint } from "../schedule-state-badge";
+import { coerceCatchUpMax } from "../../lib/catch-up-max";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import { reconcileCronTrigger, type CronReconcileOutcome } from "./cron-reconcile";
 
 // Lift the form state out of the component so the file stays under the
 // 100-line per-function ceiling and the helpers can render typed slices
@@ -28,15 +35,23 @@ import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
 type DraftState = {
   name: string;
   description: string;
-  status: "active" | "paused" | "archived";
+  // Undefined means the stored status is not one of the three selectable
+  // options; the control shows no selection and a save omits the field.
+  status: RoutineStatus | undefined;
   assigneeAgentProfileId: string;
   concurrencyPolicy: string;
   catchUpPolicy: string;
-  catchUpMax: number;
+  catchUpMax: string;
   triggerKind: "cron" | "webhook";
   cronExpression: string;
   timezone: string;
 };
+
+const ROUTINE_STATUSES: RoutineStatus[] = ["active", "paused", "archived"];
+
+function normalizeDraftStatus(status: string): RoutineStatus | undefined {
+  return (ROUTINE_STATUSES as string[]).includes(status) ? (status as RoutineStatus) : undefined;
+}
 
 function pickTriggerKind(triggers: RoutineTrigger[]): "cron" | "webhook" {
   const cron = triggers.find((t) => t.kind === "cron");
@@ -52,14 +67,60 @@ function buildDraft(routine: Routine, triggers: RoutineTrigger[]): DraftState {
   return {
     name: routine.name,
     description: routine.description ?? "",
-    status: (routine.status as DraftState["status"]) ?? "active",
+    status: normalizeDraftStatus(routine.status),
     assigneeAgentProfileId: routine.assigneeAgentProfileId ?? "",
     concurrencyPolicy: routine.concurrencyPolicy ?? "coalesce_if_active",
-    catchUpPolicy: routine.catchUpPolicy ?? "enqueue_missed_with_cap",
-    catchUpMax: routine.catchUpMax ?? 25,
+    catchUpPolicy: routine.catchUpPolicy ?? "summarize_missed",
+    catchUpMax: String(coerceCatchUpMax(routine.catchUpMax)),
     triggerKind,
     cronExpression: cron?.cronExpression ?? "",
     timezone: cron?.timezone ?? "UTC",
+  };
+}
+
+function buildUpdatePatch(draft: DraftState): UpdateRoutinePatch {
+  return {
+    name: draft.name,
+    description: draft.description,
+    status: draft.status,
+    assigneeAgentProfileId: draft.assigneeAgentProfileId,
+    concurrencyPolicy: draft.concurrencyPolicy,
+    catchUpPolicy: draft.catchUpPolicy,
+    catchUpMax: coerceCatchUpMax(draft.catchUpMax),
+  };
+}
+
+function describeCronOutcome(
+  outcome: CronReconcileOutcome,
+  t: TFunction,
+): { toastKind: "success" | "error"; message: string; refresh: boolean } {
+  if (outcome.kind === "unchanged") {
+    return { toastKind: "success", message: t("office:routineSaved"), refresh: true };
+  }
+  if (outcome.kind === "success") {
+    return outcome.triggers === null
+      ? {
+          toastKind: "success",
+          message: t("office:routineSavedScheduleMayBeStale"),
+          refresh: false,
+        }
+      : { toastKind: "success", message: t("office:routineSaved"), refresh: true };
+  }
+  if (outcome.triggers === null) {
+    return { toastKind: "error", message: t("office:routineScheduleFateUnknown"), refresh: false };
+  }
+  if (outcome.kind === "create-failed") {
+    return {
+      toastKind: "error",
+      message: t("office:routineSavedScheduleChangeFailed", { error: outcome.message }),
+      refresh: false,
+    };
+  }
+  const count = outcome.triggers.filter((trigger) => trigger.kind === "cron").length;
+  return {
+    toastKind: "error",
+    message: t("office:routineSavedScheduleDeleteFailed", { error: outcome.message, count }),
+    refresh: false,
   };
 }
 
@@ -69,10 +130,11 @@ type RoutineDetailViewProps = {
 };
 
 export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDetailViewProps) {
+  const { t } = useTranslation();
   const router = useRouter();
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
   const [routine] = useState(initialRoutine);
-  const [triggers, setTriggers] = useState(initialTriggers);
+  const [triggers, setTriggers] = useState<RoutineTrigger[] | null>(initialTriggers);
   const [draft, setDraft] = useState<DraftState>(buildDraft(initialRoutine, initialTriggers));
   const [saving, setSaving] = useState(false);
   const update = useCallback(
@@ -80,68 +142,84 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
     [],
   );
 
-  const cronTrigger = triggers.find((t) => t.kind === "cron");
+  const cronTrigger = triggers?.find((t) => t.kind === "cron");
   const lastFired = cronTrigger?.lastFiredAt ?? null;
 
   const handleSave = useCallback(async () => {
+    if (triggers === null) {
+      toast.error(t("office:routineScheduleFateUnknown"));
+      return;
+    }
     setSaving(true);
     try {
-      await updateRoutine(routine.id, {
-        name: draft.name,
-        description: draft.description,
-        status: draft.status,
-        assigneeAgentProfileId: draft.assigneeAgentProfileId,
-        concurrencyPolicy: draft.concurrencyPolicy,
-        catchUpPolicy: draft.catchUpPolicy,
-        catchUpMax: draft.catchUpMax,
-      } as Record<string, unknown>);
-      const nextTriggers = await syncCronTrigger(routine.id, draft, triggers);
-      setTriggers(nextTriggers);
-      toast.success("Routine saved");
-      router.refresh();
+      await updateRoutine(routine.id, buildUpdatePatch(draft));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save routine");
+      toast.error(err instanceof Error ? err.message : t("office:failedToSaveRoutine"));
+      setSaving(false);
+      return;
+    }
+
+    try {
+      const outcome = await reconcileCronTrigger(routine.id, draft, triggers);
+      if (outcome.kind !== "unchanged") setTriggers(outcome.triggers);
+      const result = describeCronOutcome(outcome, t);
+      if (result.toastKind === "success") {
+        toast.success(result.message);
+      } else {
+        toast.error(result.message);
+      }
+      if (result.refresh) router.refresh();
+    } catch (err) {
+      // reconcileCronTrigger is designed to always resolve (every internal
+      // call is its own try/catch) rather than throw, but nothing enforces
+      // that contract. Catching here — not just the `finally` below — keeps
+      // a future violation from becoming an unhandled rejection out of an
+      // unawaited click handler on top of a stuck Save button.
+      toast.error(err instanceof Error ? err.message : t("office:failedToSaveRoutine"));
     } finally {
       setSaving(false);
     }
-  }, [routine.id, draft, triggers, router]);
+  }, [routine.id, draft, triggers, router, t]);
 
   const handleRunNow = useCallback(async () => {
     try {
       await runRoutine(routine.id);
-      toast.success("Routine fired");
+      toast.success(t("office:routineFired"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to run routine");
+      toast.error(routineNotFiringMessage(err, t, "office:failedToRunRoutine"));
     }
   }, [routine.id]);
 
-  return (
-    <>
-      <OfficeTopbarPortal>
-        <Link
-          href="/office/routines"
-          className="text-sm text-muted-foreground hover:text-foreground cursor-pointer"
-        >
-          Routines
-        </Link>
-        <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
-        <span className="text-sm font-medium truncate">{routine.name}</span>
-        <div className="ml-auto flex gap-2">
-          <Button size="sm" variant="outline" onClick={handleRunNow} className="cursor-pointer">
-            <IconPlayerPlay className="h-4 w-4 mr-1" /> Run now
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={saving} className="cursor-pointer">
-            <IconDeviceFloppy className="h-4 w-4 mr-1" /> {saving ? "Saving…" : "Save"}
-          </Button>
-        </div>
-      </OfficeTopbarPortal>
+  useOfficeTopbar({
+    // The draft is the live name; `routine` is frozen at mount, so a saved
+    // rename would otherwise keep the old title until a reload.
+    title: draft.name,
+    parents: [{ label: t("office:routines"), href: "/office/routines" }],
+    actions: (
+      <>
+        <Button size="sm" variant="outline" onClick={handleRunNow} className="cursor-pointer">
+          <IconPlayerPlay className="h-4 w-4 mr-1" /> {t("office:runNow")}
+        </Button>
+        <Button size="sm" onClick={handleSave} disabled={saving} className="cursor-pointer">
+          <IconDeviceFloppy className="h-4 w-4 mr-1" />{" "}
+          {saving ? t("office:savingEllipsis") : t("common:save")}
+        </Button>
+      </>
+    ),
+  });
 
-      <div className="p-6 space-y-6 max-w-3xl">
-        <DetailGeneralCard draft={draft} update={update} agents={agents} />
-        <DetailTriggerCard draft={draft} update={update} />
-        <DetailReadOnlyCard lastFiredAt={lastFired} nextRunAt={cronTrigger?.nextRunAt ?? null} />
-      </div>
-    </>
+  return (
+    <div className="p-6 space-y-6 max-w-3xl">
+      <DetailGeneralCard draft={draft} update={update} agents={agents} />
+      <DetailTriggerCard draft={draft} update={update} />
+      <DetailReadOnlyCard
+        routine={routine}
+        lastFiredAt={lastFired}
+        nextRunAt={
+          isRoutineFiring(draft.status ?? routine.status) ? (cronTrigger?.nextRunAt ?? null) : null
+        }
+      />
+    </div>
   );
 }
 
@@ -154,22 +232,24 @@ function DetailGeneralCard({
   update: (patch: Partial<DraftState>) => void;
   agents: Array<{ id: string; name: string }>;
 }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm font-medium">General</CardTitle>
+        <CardTitle className="text-sm font-medium">{t("office:general")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <BasicGeneralFields draft={draft} update={update} />
         <StatusAndAssigneeFields draft={draft} update={update} agents={agents} />
         <PolicyFields draft={draft} update={update} />
-        {draft.catchUpPolicy === "enqueue_missed_with_cap" && (
-          <Field label="Catch-up max">
+        {draft.catchUpPolicy === "summarize_missed" && (
+          <Field label={t("office:catchUpMax")}>
             <Input
               type="number"
               min={1}
               value={draft.catchUpMax}
-              onChange={(e) => update({ catchUpMax: Number(e.target.value) || 25 })}
+              onChange={(e) => update({ catchUpMax: e.target.value })}
+              onBlur={(e) => update({ catchUpMax: String(coerceCatchUpMax(e.target.value)) })}
             />
           </Field>
         )}
@@ -185,12 +265,13 @@ function BasicGeneralFields({
   draft: DraftState;
   update: (patch: Partial<DraftState>) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
-      <Field label="Name">
+      <Field label={t("office:name")}>
         <Input value={draft.name} onChange={(e) => update({ name: e.target.value })} />
       </Field>
-      <Field label="Description">
+      <Field label={t("office:description")}>
         <Textarea
           rows={2}
           value={draft.description}
@@ -210,11 +291,12 @@ function StatusAndAssigneeFields({
   update: (patch: Partial<DraftState>) => void;
   agents: Array<{ id: string; name: string }>;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="grid grid-cols-2 gap-4">
-      <Field label="Status">
+      <Field label={t("common:status")}>
         <Select
-          value={draft.status}
+          value={draft.status ?? ""}
           onValueChange={(v) => update({ status: v as DraftState["status"] })}
         >
           <SelectTrigger className="cursor-pointer">
@@ -222,24 +304,24 @@ function StatusAndAssigneeFields({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="active" className="cursor-pointer">
-              Active
+              {t("office:routineStatusActive")}
             </SelectItem>
             <SelectItem value="paused" className="cursor-pointer">
-              Paused
+              {t("office:routineStatusPaused")}
             </SelectItem>
             <SelectItem value="archived" className="cursor-pointer">
-              Archived
+              {t("office:routineStatusArchived")}
             </SelectItem>
           </SelectContent>
         </Select>
       </Field>
-      <Field label="Assignee">
+      <Field label={t("office:assignee")}>
         <Select
           value={draft.assigneeAgentProfileId}
           onValueChange={(v) => update({ assigneeAgentProfileId: v })}
         >
           <SelectTrigger className="cursor-pointer">
-            <SelectValue placeholder="Unassigned" />
+            <SelectValue placeholder={t("office:unassigned")} />
           </SelectTrigger>
           <SelectContent>
             {agents.map((a) => (
@@ -261,9 +343,10 @@ function PolicyFields({
   draft: DraftState;
   update: (patch: Partial<DraftState>) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="grid grid-cols-2 gap-4">
-      <Field label="Concurrency policy">
+      <Field label={t("office:concurrencyPolicy")}>
         <Select
           value={draft.concurrencyPolicy}
           onValueChange={(v) => update({ concurrencyPolicy: v })}
@@ -273,28 +356,28 @@ function PolicyFields({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="skip_if_active" className="cursor-pointer">
-              Skip if active
+              {t("office:skipIfActive")}
             </SelectItem>
             <SelectItem value="coalesce_if_active" className="cursor-pointer">
-              Coalesce if active
+              {t("office:coalesceIfActive")}
             </SelectItem>
             <SelectItem value="always_create" className="cursor-pointer">
-              Always create
+              {t("office:alwaysCreate")}
             </SelectItem>
           </SelectContent>
         </Select>
       </Field>
-      <Field label="Catch-up policy">
+      <Field label={t("office:catchUpPolicy")}>
         <Select value={draft.catchUpPolicy} onValueChange={(v) => update({ catchUpPolicy: v })}>
           <SelectTrigger className="cursor-pointer">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="enqueue_missed_with_cap" className="cursor-pointer">
-              Enqueue missed (with cap)
+            <SelectItem value="summarize_missed" className="cursor-pointer">
+              {t("office:summarizeMissed")}
             </SelectItem>
             <SelectItem value="skip_missed" className="cursor-pointer">
-              Skip missed
+              {t("office:skipMissed")}
             </SelectItem>
           </SelectContent>
         </Select>
@@ -310,14 +393,15 @@ function DetailTriggerCard({
   draft: DraftState;
   update: (patch: Partial<DraftState>) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm font-medium">Trigger</CardTitle>
+        <CardTitle className="text-sm font-medium">{t("office:trigger")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Kind">
+          <Field label={t("office:kind")}>
             <Select
               value={draft.triggerKind}
               onValueChange={(v) => update({ triggerKind: v as DraftState["triggerKind"] })}
@@ -327,16 +411,16 @@ function DetailTriggerCard({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="cron" className="cursor-pointer">
-                  Cron
+                  {t("office:cron")}
                 </SelectItem>
                 <SelectItem value="webhook" className="cursor-pointer">
-                  Webhook
+                  {t("office:webhook")}
                 </SelectItem>
               </SelectContent>
             </Select>
           </Field>
           {draft.triggerKind === "cron" && (
-            <Field label="Cron expression">
+            <Field label={t("office:cronExpression")}>
               <Input
                 value={draft.cronExpression}
                 onChange={(e) => update({ cronExpression: e.target.value })}
@@ -346,7 +430,7 @@ function DetailTriggerCard({
           )}
         </div>
         {draft.triggerKind === "cron" && (
-          <Field label="Timezone">
+          <Field label={t("office:timezone")}>
             <Input
               value={draft.timezone}
               onChange={(e) => update({ timezone: e.target.value })}
@@ -360,20 +444,34 @@ function DetailTriggerCard({
 }
 
 function DetailReadOnlyCard({
+  routine,
   lastFiredAt,
   nextRunAt,
 }: {
+  routine: Routine;
   lastFiredAt: string | null;
   nextRunAt: string | null;
 }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm font-medium">Schedule</CardTitle>
+        <CardTitle className="text-sm font-medium">{t("office:schedule")}</CardTitle>
       </CardHeader>
-      <CardContent className="text-sm text-muted-foreground space-y-1">
-        <div>Last fired: {lastFiredAt ? timeAgo(lastFiredAt) : "never"}</div>
-        <div>Next fire: {nextRunAt ? new Date(nextRunAt).toLocaleString() : "—"}</div>
+      <CardContent className="text-sm text-muted-foreground space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <ScheduleStateBadge routine={routine} />
+          <UnarmedScheduleHint routine={routine} />
+        </div>
+        {/* `{{when}}` carries a formatted timestamp, not a translated label. */}
+        <div>
+          {t("office:lastFired", { when: lastFiredAt ? timeAgo(lastFiredAt) : t("office:never") })}
+        </div>
+        <div>
+          {t("office:nextFire", {
+            when: nextRunAt ? new Date(nextRunAt).toLocaleString() : "-",
+          })}
+        </div>
       </CardContent>
     </Card>
   );
@@ -386,43 +484,4 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
-}
-
-// syncCronTrigger reconciles the routine's cron trigger with the
-// draft's expression / timezone / kind. Two paths:
-//   - Draft.kind === "cron" with a non-empty expression → ensure a
-//     matching trigger exists (delete the old one + create a new one
-//     when the expression changes; the trigger model has no PATCH
-//     endpoint today and the cron-expression is the schedule's
-//     identity, so a delete + create is the simplest path).
-//   - Draft.kind === "webhook" or empty cron → leave triggers alone for
-//     now. A future iteration can add explicit webhook config.
-async function syncCronTrigger(
-  routineId: string,
-  draft: DraftState,
-  triggers: RoutineTrigger[],
-): Promise<RoutineTrigger[]> {
-  if (draft.triggerKind !== "cron" || !draft.cronExpression.trim()) {
-    return triggers;
-  }
-  const existing = triggers.find((t) => t.kind === "cron");
-  if (
-    existing &&
-    existing.cronExpression === draft.cronExpression &&
-    (existing.timezone ?? "UTC") === draft.timezone
-  ) {
-    return triggers;
-  }
-  if (existing) {
-    await deleteRoutineTrigger(existing.id);
-  }
-  const res = await createRoutineTrigger(routineId, {
-    kind: "cron",
-    cronExpression: draft.cronExpression,
-    timezone: draft.timezone,
-  });
-  const created = (res as unknown as { trigger?: RoutineTrigger }).trigger ?? null;
-  const next = triggers.filter((t) => t.id !== existing?.id);
-  if (created) next.push(created);
-  return next;
 }

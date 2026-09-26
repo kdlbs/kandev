@@ -54,6 +54,7 @@ function hydrateCreatedTask(
           ...currentKanban.tasks,
           {
             id: task.id,
+            workflowId: task.workflow_id,
             workflowStepId: task.workflow_step_id,
             title: task.title,
             description: task.description ?? undefined,
@@ -71,7 +72,7 @@ function hydrateCreatedTask(
 }
 
 /** Handle editing an existing task - only update dialog-editable fields. */
-function hydrateEditedTask(
+export function hydrateEditedTask(
   store: ReturnType<typeof useAppStoreApi>,
   task: BackendTask,
   currentKanban: KanbanState,

@@ -33,6 +33,10 @@ func (c *NoopClient) FindPRByBranch(context.Context, string, string, string) (*P
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) FindPRByHead(context.Context, string, string, string, string, string) (*PR, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) ListAuthoredPRs(context.Context, string, string) ([]*PR, error) {
 	return nil, ErrNoClient
 }
@@ -61,6 +65,18 @@ func (c *NoopClient) HasRepositoryAccess(context.Context, string, string) (bool,
 	return false, ErrNoClient
 }
 
+func (c *NoopClient) GetRepository(context.Context, string, string) (*GitHubRepository, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) ListRepositoryForks(context.Context, string, string) ([]*GitHubRepository, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) CreateFork(context.Context, string, string) (*GitHubRepository, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) ListPRReviews(context.Context, string, string, int) ([]PRReview, error) {
 	return nil, ErrNoClient
 }
@@ -70,6 +86,14 @@ func (c *NoopClient) ListPRComments(context.Context, string, string, int, *time.
 }
 
 func (c *NoopClient) ListCheckRuns(context.Context, string, string, string) ([]CheckRun, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) ListWorkflowRuns(context.Context, string, string, string) ([]WorkflowRun, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) ListWorkflowRunJobs(context.Context, string, string, int64, int) ([]WorkflowJob, error) {
 	return nil, ErrNoClient
 }
 
@@ -89,6 +113,10 @@ func (c *NoopClient) ListPRCommits(context.Context, string, string, int) ([]PRCo
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) GetPRCommitDetail(context.Context, string, string, string) (PRCommitDetail, error) {
+	return PRCommitDetail{}, ErrNoClient
+}
+
 func (c *NoopClient) ListRepoBranches(context.Context, string, string) ([]RepoBranch, error) {
 	return nil, ErrNoClient
 }
@@ -105,8 +133,8 @@ func (c *NoopClient) RequestReviewers(context.Context, string, string, int, []st
 	return ErrNoClient
 }
 
-func (c *NoopClient) MergePR(context.Context, string, string, int, string) error {
-	return ErrNoClient
+func (c *NoopClient) MergePR(context.Context, string, string, int, MergePRRequest) (MergeOutcome, error) {
+	return "", ErrNoClient
 }
 
 func (c *NoopClient) ListIssues(context.Context, string, string) ([]*Issue, error) {

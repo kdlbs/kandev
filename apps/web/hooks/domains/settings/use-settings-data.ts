@@ -1,7 +1,68 @@
 import { useEffect, useRef } from "react";
-import { useAppStore } from "@/components/state-provider";
+import type { StoreApi } from "zustand";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { listAgents, listAvailableAgents, listExecutors } from "@/lib/api";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { toAgentProfileOption, type AgentProfileOption } from "@/lib/state/slices/settings/types";
+import type { AppState } from "@/lib/state/store";
+
+const AGENT_LIST_RETRY_DELAYS_MS = [100, 250, 500, 1_000] as const;
+
+type AgentListResponse = Awaited<ReturnType<typeof listAgents>>;
+
+function hasAgentProfiles(response: AgentListResponse): boolean {
+  return response.agents.some((agent) => (agent.profiles?.length ?? 0) > 0);
+}
+
+function waitForAgentListRetry(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+/**
+ * Agent discovery and profile persistence complete before the backend health
+ * endpoint becomes ready, but a freshly started client can still observe an
+ * empty list while that state is settling. Keep the settings surface loading
+ * briefly instead of treating that transient response as the authoritative
+ * "no agents" state.
+ */
+export async function listAgentsUntilSettled(): Promise<AgentListResponse> {
+  for (const retryDelayMs of AGENT_LIST_RETRY_DELAYS_MS) {
+    try {
+      const response = await listAgents({ cache: "no-store" });
+      if (hasAgentProfiles(response)) {
+        return response;
+      }
+    } catch {}
+
+    await waitForAgentListRetry(retryDelayMs);
+  }
+
+  return listAgents({ cache: "no-store" });
+}
+
+function applyAgentList(
+  response: AgentListResponse,
+  setSettingsAgents: (agents: AgentListResponse["agents"]) => void,
+  setAgentProfiles: (profiles: AgentProfileOption[]) => void,
+): void {
+  setSettingsAgents(response.agents);
+  const rebuiltProfiles = response.agents.flatMap((agent) =>
+    agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
+  );
+  setAgentProfiles(rebuiltProfiles);
+}
+
+async function refreshAgentList(
+  storeApi: StoreApi<AppState>,
+  setSettingsAgents: (agents: AgentListResponse["agents"]) => void,
+  setAgentProfiles: (profiles: AgentProfileOption[]) => void,
+): Promise<void> {
+  const profileVersion = storeApi.getState().agentProfiles.version;
+  const response = await listAgentsUntilSettled();
+  if (storeApi.getState().agentProfiles.version !== profileVersion) {
+    return refreshAgentList(storeApi, setSettingsAgents, setAgentProfiles);
+  }
+  applyAgentList(response, setSettingsAgents, setAgentProfiles);
+}
 
 export function useSettingsData(enabled = true) {
   const executors = useAppStore((state) => state.executors.items);
@@ -14,6 +75,7 @@ export function useSettingsData(enabled = true) {
   const setAvailableAgents = useAppStore((state) => state.setAvailableAgents);
   const setAvailableAgentsLoading = useAppStore((state) => state.setAvailableAgentsLoading);
   const setSettingsData = useAppStore((state) => state.setSettingsData);
+  const storeApi = useAppStoreApi();
 
   useEffect(() => {
     if (!enabled) return;
@@ -32,15 +94,7 @@ export function useSettingsData(enabled = true) {
     if (!enabled) return;
     if (settingsData.agentsLoaded) return;
     if (settingsAgents.length === 0) {
-      listAgents({ cache: "no-store" })
-        .then((response) => {
-          setSettingsAgents(response.agents);
-          setAgentProfiles(
-            response.agents.flatMap((agent) =>
-              agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-            ),
-          );
-        })
+      refreshAgentList(storeApi, setSettingsAgents, setAgentProfiles)
         .catch(() => {
           setSettingsAgents([]);
           setAgentProfiles([]);
@@ -90,24 +144,16 @@ export function useSettingsData(enabled = true) {
     if (!settingsData.agentsLoaded) return; // Wait for the initial agents fetch first.
     if (reconciledRef.current) return;
     reconciledRef.current = true;
-    listAgents({ cache: "no-store" })
-      .then((response) => {
-        setSettingsAgents(response.agents);
-        setAgentProfiles(
-          response.agents.flatMap((agent) =>
-            agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-          ),
-        );
-      })
-      .catch(() => {
-        // Best-effort reconcile; keep prior (possibly stale) profiles rather
-        // than wiping the dialog state on a transient error.
-      });
+    refreshAgentList(storeApi, setSettingsAgents, setAgentProfiles).catch(() => {
+      // Best-effort reconcile; keep prior (possibly stale) profiles rather
+      // than wiping the dialog state on a transient error.
+    });
   }, [
     enabled,
     availableAgents.loaded,
     settingsData.agentsLoaded,
     setAgentProfiles,
     setSettingsAgents,
+    storeApi,
   ]);
 }

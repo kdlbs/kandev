@@ -39,6 +39,7 @@ test("nests multi-repository changes below each repository on desktop and mobile
   execSync('git commit --allow-empty -m "init"', { cwd: extraRepoDir, env: gitEnv });
   const extraRepo = await apiClient.createRepository(seedData.workspaceId, extraRepoDir, "main", {
     name: "indent-extra-repo",
+    pull_before_worktree: false,
   });
 
   const task = await apiClient.createTaskWithAgent(
@@ -77,7 +78,10 @@ test("nests multi-repository changes below each repository on desktop and mobile
   await expectTreeNestedUnderRepository(session.changes);
 
   await testPage.setViewportSize({ width: 393, height: 851 });
-  await testPage.getByRole("button", { name: "Changes" }).click();
+  await testPage
+    .getByRole("navigation")
+    .getByRole("button", { name: /Changes$/ })
+    .click();
   const mobilePanel = testPage.getByTestId("mobile-changes-panel");
   await expect(mobilePanel).toBeVisible();
   await expectTreeNestedUnderRepository(mobilePanel);

@@ -26,6 +26,7 @@ function wrapper({ children }: { children: ReactNode }) {
 function makeTaskPR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-1",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "acme",
     repo: "widget",

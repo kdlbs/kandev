@@ -4,6 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BackendFixtureEnvOverrides, createScopedEnvUse } from "./backend-env";
+import { E2E_DOCKER_SCOPE } from "./docker-probe";
+import { dwell } from "../helpers/causal-waits";
+import { killProcessGroup } from "./process-group";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
@@ -30,7 +33,12 @@ const HEALTH_POLL_MS = 250;
  * release. See apps/web/e2e/README.md.
  */
 function isContainerProjectActive(projectName: string): boolean {
-  if (projectName === "containers" || projectName === "docker") return true;
+  if (
+    projectName === "containers" ||
+    projectName === "kubernetes-compat" ||
+    projectName === "docker"
+  )
+    return true;
   if (process.env.KANDEV_E2E_CONTAINERS === "1") return true;
   if (process.env.KANDEV_E2E_DOCKER === "1") return true;
   return false;
@@ -42,6 +50,10 @@ export type BackendContext = {
   frontendPort: number;
   frontendUrl: string;
   tmpDir: string;
+  /** Active structured backend log for assertions that need Info records. */
+  logPath: string;
+  /** Current backend PID, exposed for process-owned socket assertions. */
+  pid: () => number | undefined;
   /**
    * Kill the backend process and respawn with the same config (DB, ports,
    * tmpDir persist). The captured env is rebuilt from the baseline snapshot
@@ -51,6 +63,11 @@ export type BackendContext = {
    * agents, WS connections) is lost.
    */
   restart: (envOverrides?: Record<string, string>) => Promise<void>;
+  /**
+   * Verify the worker backend is serving requests and recover it when a
+   * previous test left the process unavailable.
+   */
+  ensureReady: () => Promise<void>;
   /**
    * Applies test-owned process environment values to the current backend and
    * every later restart until the returned release callback is awaited.
@@ -117,7 +134,11 @@ export async function waitForHealth(
       } catch {
         // not ready yet
       }
-      await new Promise((r) => setTimeout(r, HEALTH_POLL_MS));
+      await dwell(
+        HEALTH_POLL_MS,
+        "poll-interval",
+        "sampling interval for the backend health probe; the process is still starting, so there is nothing to subscribe to and the only signal is the port answering",
+      );
     }
     throw new Error(`Service did not become healthy at ${url} within ${timeoutMs}ms`);
   } finally {
@@ -144,55 +165,41 @@ async function waitForPortFree(port: number, timeoutMs = 10_000): Promise<void> 
       sock.once("error", () => resolve(true)); // ECONNREFUSED → port is free
     });
     if (free) return;
-    await new Promise((r) => setTimeout(r, 100));
+    await dwell(
+      100,
+      "poll-interval",
+      "sampling interval while waiting for the previous backend to release its port; the OS publishes nothing when a socket is finally freed",
+    );
   }
   // Timeout expired — proceed anyway; the new process will fail-fast if the
   // port is still held and waitForHealth will surface the error.
-}
-
-/**
- * Kills an entire process group. Used for the backend process which is spawned
- * with `detached: true` so it becomes a process group leader. Sending signals
- * to the negative PID targets all processes in that group (backend + agentctl).
- * The 7s grace period gives agentctl time to cascade cleanup to agent process groups.
- */
-function killProcessGroup(proc: ChildProcess): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (!proc.pid) {
-      resolve();
-      return;
-    }
-
-    const pid = proc.pid;
-
-    try {
-      process.kill(-pid, "SIGTERM");
-    } catch {
-      // Process group may already be gone
-      resolve();
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      try {
-        process.kill(-pid, "SIGKILL");
-      } catch {
-        // Already dead
-      }
-      resolve();
-    }, 7_000);
-
-    proc.on("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-  });
 }
 
 type BackendFixtureLifecycle = {
   stopProcess?: (proc: ChildProcess) => Promise<void>;
   removeTempRoot?: (tmpDir: string) => void;
 };
+
+type BackendProcess = ChildProcess & {
+  waitForLogFile?: () => Promise<void>;
+};
+
+type LogFileStream = Pick<NodeJS.EventEmitter, "once" | "on">;
+
+export function observeLogFile(logFile: LogFileStream): () => Promise<void> {
+  let logFileError: Error | undefined;
+  const logFileClosed = new Promise<void>((resolve) => {
+    logFile.once("close", resolve);
+  });
+  logFile.on("error", (error: Error) => {
+    logFileError ??= error;
+  });
+
+  return async () => {
+    await logFileClosed;
+    if (logFileError) throw logFileError;
+  };
+}
 
 function removeOwnedTempRoot(tmpDir: string): void {
   fs.rmSync(tmpDir, {
@@ -205,18 +212,20 @@ function removeOwnedTempRoot(tmpDir: string): void {
 
 export async function runOwnedBackendFixture<T>(
   tmpDir: string,
-  run: (registerProcess: (proc: ChildProcess) => void) => Promise<T>,
+  run: (registerProcess: (proc: BackendProcess) => void) => Promise<T>,
   lifecycle: BackendFixtureLifecycle = {},
 ): Promise<T> {
   const stopProcess = lifecycle.stopProcess ?? killProcessGroup;
   const removeTempRoot = lifecycle.removeTempRoot ?? removeOwnedTempRoot;
-  let backendProc: ChildProcess | undefined;
+  let backendProc: BackendProcess | undefined;
+  const backendProcesses: BackendProcess[] = [];
   let result: T | undefined;
   const failures: unknown[] = [];
 
   try {
     result = await run((proc) => {
       backendProc = proc;
+      backendProcesses.push(proc);
     });
   } catch (error) {
     failures.push(error);
@@ -225,6 +234,15 @@ export async function runOwnedBackendFixture<T>(
   if (backendProc) {
     try {
       await stopProcess(backendProc);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+
+  for (const proc of backendProcesses) {
+    if (!proc.waitForLogFile) continue;
+    try {
+      await proc.waitForLogFile();
     } catch (error) {
       failures.push(error);
     }
@@ -252,31 +270,37 @@ function spawnBackendProcess(
   env: Record<string, string>,
   debug: boolean,
   port: number,
-): ChildProcess {
+  logPath: string,
+): BackendProcess {
   const proc = spawn(KANDEV_BIN, ["__backend"], {
     env: env as unknown as NodeJS.ProcessEnv,
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
   });
 
-  const logFile = debug ? fs.createWriteStream(`/tmp/e2e-backend-${port}.log`) : null;
-  proc.once("exit", () => {
-    logFile?.end();
-  });
+  const logFile = fs.createWriteStream(logPath, { flags: "a" });
+  const waitForLogFile = observeLogFile(logFile);
+  const closeLogFile = () => {
+    if (!logFile.writableEnded) logFile.end();
+  };
+  proc.once("close", closeLogFile);
+  proc.once("error", closeLogFile);
   proc.stderr?.on("data", (chunk: Buffer) => {
+    logFile.write(chunk);
     if (debug) {
       process.stderr.write(`[backend:${port}] ${chunk.toString()}`);
-      logFile?.write(chunk);
     }
   });
   proc.stdout?.on("data", (chunk: Buffer) => {
+    logFile.write(chunk);
     if (debug) {
       process.stderr.write(`[backend-log:${port}] ${chunk.toString()}`);
-      logFile?.write(chunk);
     }
   });
 
-  return proc;
+  return Object.assign(proc, {
+    waitForLogFile,
+  });
 }
 
 /**
@@ -294,15 +318,19 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       const tmpDir = fs.mkdtempSync(
         path.join(os.tmpdir(), `kandev-e2e-${workerInfo.workerIndex}-`),
       );
+      const processLogPath = path.join(tmpDir, "backend-process.log");
+      const backendLogPath = path.join(tmpDir, ".kandev", "logs", "backend-logs.log");
       let backendProc: ChildProcess | undefined;
 
       await runOwnedBackendFixture(tmpDir, async (registerProcess) => {
         const homeDir = path.join(tmpDir, ".kandev");
+        const systemTemporaryRoot = path.join(tmpDir, "system-temporary");
         const dbPath = path.join(tmpDir, "kandev.db");
         const worktreeBase = path.join(tmpDir, "worktrees");
         const repoCloneBase = path.join(tmpDir, "managed-repos");
 
         fs.mkdirSync(homeDir, { recursive: true });
+        fs.mkdirSync(systemTemporaryRoot, { recursive: true });
         fs.mkdirSync(worktreeBase, { recursive: true });
         fs.mkdirSync(repoCloneBase, { recursive: true });
 
@@ -374,6 +402,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           KANDEV_SERVER_PORT: String(backendPort),
           KANDEV_WEB_DIST_DIR: WEB_DIST_DIR,
           KANDEV_DATABASE_PATH: dbPath,
+          KANDEV_E2E_SYSTEM_TEMP_ROOT: systemTemporaryRoot,
           // Profile selector. KANDEV_E2E_MOCK=true tells the backend to
           // apply the `e2e:` profile from profiles.yaml at startup —
           // which sets the mock agent and third-party provider flags,
@@ -389,6 +418,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // binaries the test runner pre-built, so containers can bind-mount them.
           ...(dockerEnabled
             ? {
+                KANDEV_E2E_DOCKER_SCOPE: E2E_DOCKER_SCOPE,
                 KANDEV_AGENTCTL_LINUX_BINARY: agentctlLinuxBinary,
                 KANDEV_MOCK_AGENT_LINUX_BINARY: mockAgentLinuxBinary,
               }
@@ -396,7 +426,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           KANDEV_WORKTREE_ENABLED: "true",
           KANDEV_WORKTREE_BASEPATH: worktreeBase,
           KANDEV_REPOCLONE_BASEPATH: repoCloneBase,
-          KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "warn",
+          KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "info",
           AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
           AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
           // AGENTCTL_AUTO_APPROVE_PERMISSIONS=true and
@@ -407,8 +437,9 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // process.env.X before spawn — that already flows through the
           // `...sanitizeInheritedEnv(process.env)` spread above, and the
           // backend's ApplyProfile leaves already-set vars alone. (Note:
-          // KANDEV_FEATURES_* is the exception — it's stripped from the
-          // inherited env so the profile always governs feature flags.)
+          // KANDEV_FEATURES_* and KANDEV_WEB_TITLE_PREFIX are exceptions —
+          // they are stripped from the inherited env so the e2e profile
+          // always controls the baseline.)
           GIT_AUTHOR_NAME: "E2E Test",
           GIT_AUTHOR_EMAIL: "e2e@test.local",
           GIT_COMMITTER_NAME: "E2E Test",
@@ -425,9 +456,17 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         const scopedEnv = new BackendFixtureEnvOverrides();
 
         // --- Spawn backend ---
-        backendProc = spawnBackendProcess(scopedEnv.apply(baselineEnv), debug, backendPort);
+        backendProc = spawnBackendProcess(
+          scopedEnv.apply(baselineEnv),
+          debug,
+          backendPort,
+          processLogPath,
+        );
         registerProcess(backendProc);
-        await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
+        // /ready (not /health) — /health flips green as soon as the listener
+        // is bound, before routes are wired; tests that immediately issue API
+        // requests need the readiness contract instead.
+        await waitForHealth(`${baseUrl}/ready`, HEALTH_TIMEOUT_MS, backendProc);
         const frontendUrl = baseUrl;
 
         /**
@@ -449,10 +488,27 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // 2 s. TIME_WAIT can linger for 30–120 s under load; the probe exits
           // as soon as the port stops accepting connections (typically <200 ms).
           await waitForPortFree(backendPort);
-          backendProc = spawnBackendProcess(nextEnv, debug, backendPort);
+          backendProc = spawnBackendProcess(nextEnv, debug, backendPort, processLogPath);
           registerProcess(backendProc);
-          // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use)
-          await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
+          // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use).
+          // /ready, not /health — see the comment on the initial spawn above.
+          await waitForHealth(`${baseUrl}/ready`, HEALTH_TIMEOUT_MS, backendProc);
+        };
+
+        let recovery: Promise<void> | null = null;
+        const ensureReady = async () => {
+          try {
+            await waitForHealth(`${baseUrl}/ready`, 5_000, backendProc);
+            return;
+          } catch {
+            // A worker can outlive a backend process that a prior test left
+            // stopped. Restart the isolated fixture before the next page is
+            // created so its setup requests do not hit a refused port.
+            recovery ??= restart().finally(() => {
+              recovery = null;
+            });
+            await recovery;
+          }
         };
 
         const useEnv = createScopedEnvUse(scopedEnv, restart);
@@ -463,7 +519,10 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           frontendPort,
           frontendUrl,
           tmpDir,
+          logPath: backendLogPath,
+          pid: () => backendProc?.pid,
           restart,
+          ensureReady,
           useEnv,
         });
       });
@@ -508,6 +567,9 @@ function writeGitShimLauncher(shimDir: string, shimScript: string): void {
 //     in the test backend → /api/v1/office/* 404s. Dropping the whole
 //     KANDEV_FEATURES_* namespace lets the e2e profile govern feature flags so
 //     the suite always exercises them, regardless of where it's launched.
+//   - KANDEV_WEB_TITLE_PREFIX — the browser identity is profile-managed in
+//     this suite. Explicit per-test values are applied after this baseline is
+//     sanitized through `backend.restart(overrides)`.
 //   - PATH casing aliases — Windows commonly inherits `Path`; retaining it
 //     beside the fixture's new `PATH` makes child-process lookup order
 //     ambiguous. The caller restores one canonical PATH after sanitizing.
@@ -516,7 +578,9 @@ function sanitizeInheritedEnv(env: Record<string, string>): Record<string, strin
   delete cleaned.GH_TOKEN;
   delete cleaned.GITHUB_TOKEN;
   for (const key of Object.keys(cleaned)) {
-    if (key.startsWith("KANDEV_FEATURES_")) delete cleaned[key];
+    if (key === "KANDEV_WEB_TITLE_PREFIX" || key.startsWith("KANDEV_FEATURES_")) {
+      delete cleaned[key];
+    }
     if (key.toUpperCase() === "PATH") delete cleaned[key];
   }
   return cleaned;

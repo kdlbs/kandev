@@ -27,9 +27,12 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/githubauth"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
+	"github.com/kandev/kandev/internal/profiles"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
@@ -43,28 +46,54 @@ var (
 )
 
 func main() {
+	os.Exit(runMain())
+}
+
+func runMain() int {
 	if code, handled := runGitHubUtilityCommand(); handled {
-		os.Exit(code)
+		return code
 	}
 
 	// Dispatch kandev CLI subcommands before flag parsing or server startup.
 	// When invoked as "agentctl kandev <cmd>", this runs the CLI and exits
 	// without starting the HTTP server.
 	if len(os.Args) > 1 && os.Args[1] == "kandev" {
-		os.Exit(runKandevCLI(os.Args[2:]))
+		return runKandevCLI(os.Args[2:])
 	}
 
 	cleanupGitHubCLIShim, err := prepareGitHubCLIShim()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return 1
 	}
 	defer cleanupGitHubCLIShim()
 
 	flag.Parse()
 
-	// Load configuration
-	cfg := config.Load()
+	// Load configuration. Managed launches receive a validated, resolved child
+	// contract from the backend. Direct invocations retain legacy environment
+	// compatibility when that private contract is absent.
+	startup, managed, err := config.StartupConfigFromEnv()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to load managed agentctl configuration: %v\n", err)
+		return 1
+	}
+	var cfg *config.Config
+	if managed {
+		cfg, err = config.LoadWithStartup(startup)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to load managed agentctl configuration: %v\n", err)
+			return 1
+		}
+		tracing.ConfigureEndpoint(startup.OTLPEndpoint)
+	} else {
+		cfg = config.Load()
+		tracing.ConfigureEndpoint(cfg.OTLPEndpoint)
+	}
+	if _, _, err := profiles.ApplyProfile(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to apply profile defaults: %v\n", err)
+		return 1
+	}
 
 	// Override with CLI flags if provided
 	if *protocolFlag != "" {
@@ -80,15 +109,13 @@ func main() {
 		cfg.Port = *portFlag
 	}
 
+	applySIGPIPEDisposition(cfg, signal.Ignore)
+
 	// Initialize logger
-	log, err := logger.NewLogger(logger.LoggingConfig{
-		Level:      cfg.LogLevel,
-		Format:     cfg.LogFormat,
-		OutputPath: "stdout",
-	})
+	log, err := logger.NewLogger(resolveRunLoggingConfig(cfg))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	defer func() {
 		_ = log.Sync()
@@ -97,15 +124,21 @@ func main() {
 	log.Info("starting agentctl",
 		zap.Int("port", cfg.Port),
 		zap.String("log_level", cfg.LogLevel))
+	log.Info("agentctl bootstrap nonce mode",
+		zap.Bool("configured", cfg.BootstrapNonceConfigured()),
+		zap.String("nonce_fingerprint", cfg.BootstrapNonceFingerprint()))
 
 	run(cfg, log)
+	return 0
 }
 
 func runGitHubUtilityCommand() (int, bool) {
 	if isGitHubCLIShimInvocation(os.Args[0]) {
+		self, _ := os.Executable()
+		lookPath := lookPathSkippingShims(self)
 		err := runGitHubCLIShim(
 			context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr,
-			os.Getenv, os.Environ, nil, os.Getenv(envGitHubCLIShimDir), lookPathIn, executeGitHubCLI,
+			os.Getenv, os.Environ, nil, os.Getenv(envGitHubCLIShimDir), lookPath, executeGitHubCLI,
 		)
 		return githubUtilityExitCode(err), true
 	}
@@ -173,6 +206,13 @@ func run(cfg *config.Config, log *logger.Logger) {
 	// Create instance manager
 	instMgr := instance.NewManager(cfg, log)
 
+	// Declared here and assigned below, before any instance can actually be
+	// created: the server factory closure reads controlServer.CredentialSource()
+	// lazily (at CreateInstance time, not at SetServerFactory time), so the
+	// forward reference is safe as long as controlServer is assigned before
+	// the first instance is created.
+	var controlServer *api.ControlServer
+
 	// Set the server factory to create API servers for each instance
 	instMgr.SetServerFactory(func(instCfg *config.InstanceConfig, procMgr *process.Manager, instLog *logger.Logger) http.Handler {
 		// Create MCP backend client for bidirectional communication through agent stream
@@ -180,16 +220,27 @@ func run(cfg *config.Config, log *logger.Logger) {
 		mcpBackendClient := mcpserver.NewChannelBackendClient(instLog)
 
 		// Create MCP server using the channel-based backend client
-		mcpSrv := mcpserver.New(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, instCfg.McpMode)
+		var mcpSrv *mcpserver.Server
+		mcpNamePresentationOption := mcpserver.WithMCPToolNamespacingByServer(instCfg.NamespacesMCPToolsByServer)
+		if instCfg.McpProfile != nil {
+			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, *instCfg.McpProfile, mcpNamePresentationOption)
+		} else {
+			legacyProfile := mcpprofile.Legacy(instCfg.McpMode, instCfg.DisableAskQuestion, instCfg.McpProviders)
+			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, legacyProfile, mcpNamePresentationOption)
+		}
 		mcpSrv.SetAttachmentReporter(procMgr.PublishMCPAttachment)
 		instLog.Info("MCP server enabled (channel-based)",
 			zap.String("session_id", instCfg.SessionID))
 
-		return api.NewServer(instCfg, procMgr, mcpSrv, mcpBackendClient, instLog).Router()
+		srv := api.NewServer(instCfg, procMgr, mcpSrv, mcpBackendClient, instLog)
+		srv.SetCredentialSource(controlServer.CredentialSource())
+		return srv.Router()
 	})
 
 	// Create control server
-	controlServer := api.NewControlServer(cfg, instMgr, log)
+	controlServer = api.NewControlServer(cfg, instMgr, log)
+	stopUnownedReaper := startUnownedReaperIfEnabled(cfg, controlServer)
+	defer stopUnownedReaper()
 
 	// Start HTTP server. When no auth token is configured (auth disabled),
 	// ListenHost binds to loopback only so the unauthenticated command/shell/
@@ -221,8 +272,9 @@ func run(cfg *config.Config, log *logger.Logger) {
 	// Returns a channel that closes when the parent dies.
 	parentDied := monitorParentLiveness(log)
 
-	// Wait for shutdown signal (OS signal or parent death)
-	waitForShutdown(log, parentDied, func(ctx context.Context) {
+	// Wait for shutdown signal (OS signal, parent death, or an authenticated
+	// ownership-shutdown operation from an adopting/owning backend).
+	waitForShutdown(log, parentDied, controlServer.ShutdownRequested(), func(ctx context.Context) {
 		// Flush pending traces before stopping instances
 		if err := shared.ShutdownTracing(ctx); err != nil {
 			log.Error("error shutting down tracing", zap.Error(err))
@@ -240,23 +292,24 @@ func run(cfg *config.Config, log *logger.Logger) {
 	})
 }
 
-// waitForShutdown waits for a shutdown trigger (OS signal or parent death) and
-// runs the cleanup function. parentDied may be nil when no parent monitor is active.
-func waitForShutdown(log *logger.Logger, parentDied <-chan struct{}, cleanup func(ctx context.Context)) {
+// waitForShutdown waits for a shutdown trigger (OS signal, parent death, or
+// an ownership-shutdown operation) and runs the cleanup function. parentDied
+// may be nil when no parent monitor is active. ownershipShutdown may be nil
+// in tests that don't exercise a control server.
+func waitForShutdown(log *logger.Logger, parentDied <-chan struct{}, ownershipShutdown <-chan struct{}, cleanup func(ctx context.Context)) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	if parentDied == nil {
-		// No parent monitor — wait for OS signal only.
-		sig := <-sigCh
+	// A nil channel (no parent monitor, no control server) blocks forever in
+	// a select, so that case is simply never chosen -- no separate branching
+	// needed for the "not active" cases.
+	select {
+	case sig := <-sigCh:
 		log.Info("received signal", zap.String("signal", sig.String()))
-	} else {
-		select {
-		case sig := <-sigCh:
-			log.Info("received signal", zap.String("signal", sig.String()))
-		case <-parentDied:
-			log.Warn("parent process died, initiating shutdown")
-		}
+	case <-parentDied:
+		log.Warn("parent process died, initiating shutdown")
+	case <-ownershipShutdown:
+		log.Warn("ownership-shutdown operation invoked, initiating shutdown")
 	}
 
 	log.Info("shutting down agentctl...")

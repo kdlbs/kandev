@@ -14,8 +14,21 @@ import {
   remapWorkflowDraftSteps,
 } from "./workflow-card-actions";
 import type { useWorkflowMutationGuard } from "./workflow-mutation-guard";
+import { hasInvalidWorkflowSessionTargets } from "./workflow-session-target-validation";
 
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
+
+function workflowSaveInvalidReason(
+  workflowName: string,
+  modelConfigResolutionPending: boolean,
+  invalidSessionTargets: boolean,
+  translate: (key: string) => string,
+): string | undefined {
+  if (!workflowName.trim()) return translate("workflows:workflowNameIsRequired");
+  if (modelConfigResolutionPending) return translate("agents:resolvingModelOptions");
+  if (invalidSessionTargets) return translate("workflows:workflowSessionTargetMustBeRepaired");
+  return undefined;
+}
 
 type WorkflowSavedParams = {
   clientWorkflow: Workflow;
@@ -38,6 +51,7 @@ type WorkflowDraftContributorArgs = {
   onWorkflowSaved: (params: WorkflowSavedParams) => void;
   onDiscardWorkflow: () => void;
   onDeleteWorkflow: () => Promise<unknown>;
+  isSessionConfigResolutionPending?: boolean;
 };
 
 function useWorkflowDraftPersistence(args: WorkflowDraftContributorArgs) {
@@ -47,7 +61,12 @@ function useWorkflowDraftPersistence(args: WorkflowDraftContributorArgs) {
   const saveProgressRef = useRef(createWorkflowDraftSaveProgress());
   const saveFailedRef = useRef(false);
   const revision = JSON.stringify({
-    workflow: [workflow.name, workflow.description, workflow.agent_profile_id],
+    workflow: [
+      workflow.name,
+      workflow.description ?? "",
+      workflow.prompt ?? "",
+      workflow.agent_profile_id ?? "",
+    ],
     steps: workflowSteps,
   });
   const latestRevisionRef = useRef(revision);
@@ -87,23 +106,45 @@ function useWorkflowDraftPersistence(args: WorkflowDraftContributorArgs) {
     });
   };
 
-  return { revision, persistSubmittedDraft, saveProgressRef, saveFailedRef };
+  return {
+    revision,
+    latestRevisionRef,
+    persistSubmittedDraft,
+    saveProgressRef,
+    saveFailedRef,
+  };
 }
 
 export function useWorkflowDraftContributor(args: WorkflowDraftContributorArgs) {
-  const { workflow, workflowSteps, savedWorkflowSteps, mutationGuard, toast } = args;
+  const {
+    workflow,
+    workflowSteps,
+    savedWorkflowSteps,
+    mutationGuard,
+    toast,
+    isSessionConfigResolutionPending = false,
+  } = args;
   const persistence = useWorkflowDraftPersistence(args);
   const removingDraftRef = useRef(false);
   const [isRemovingDraft, setIsRemovingDraft] = useState(false);
   const stepsDirty = !areStepDraftsEqual(workflowSteps, savedWorkflowSteps);
+  const invalidSessionTargets = hasInvalidWorkflowSessionTargets(workflowSteps);
 
   useSettingsSaveContributor({
     id: `workflow:${workflow.id}`,
     order: 100,
     revision: persistence.revision,
     isDirty: args.isWorkflowDirty || stepsDirty,
-    canSave: workflow.name.trim().length > 0,
-    invalidReason: workflow.name.trim() ? undefined : t("workflows:workflowNameIsRequired"),
+    canSave:
+      workflow.name.trim().length > 0 &&
+      !isSessionConfigResolutionPending &&
+      !invalidSessionTargets,
+    invalidReason: workflowSaveInvalidReason(
+      workflow.name,
+      isSessionConfigResolutionPending,
+      invalidSessionTargets,
+      t,
+    ),
     save: async (submittedRevision) => {
       if (!workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)) {
         await persistence.persistSubmittedDraft(submittedRevision);
@@ -132,12 +173,18 @@ export function useWorkflowDraftContributor(args: WorkflowDraftContributorArgs) 
       guardReturned = true;
       if (!operationStarted) throw new SettingsSaveCancelledError();
     },
-    discard: async () => {
+    discard: async (submittedRevision) => {
       const persistedDraft = persistence.saveProgressRef.current.workflow;
       if (workflow.id.startsWith(TEMP_WORKFLOW_PREFIX) && persistedDraft) {
         await deleteWorkflowAction(persistedDraft.id);
       } else if (persistence.saveFailedRef.current) {
         throw new Error(t("workflows:retryPartialSaveBeforeLeaving"));
+      }
+      if (
+        submittedRevision !== undefined &&
+        !Object.is(submittedRevision, persistence.latestRevisionRef.current)
+      ) {
+        return;
       }
       args.setWorkflowSteps(savedWorkflowSteps);
       args.onDiscardWorkflow();

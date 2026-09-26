@@ -67,6 +67,9 @@ function legacyMergeRequest(host: string): TaskMR {
     required_approvals: 0,
     pipeline_jobs_total: 0,
     pipeline_jobs_pass: 0,
+    reviewer_count: 0,
+    unapproved_reviewers: 0,
+    unresolved_discussions: 0,
     created_at: "",
     updated_at: "",
   };
@@ -81,6 +84,7 @@ function wrapper(repository: Repository, mr: TaskMR) {
       tasks: [
         {
           id: TASK_ID,
+          workflowId: "wf-1",
           workflowStepId: "step-1",
           title: "External links",
           position: 0,

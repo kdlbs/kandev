@@ -6,6 +6,7 @@ import { replaceTaskUrl } from "@/lib/links";
 import { useAppStore } from "@/components/state-provider";
 import {
   buildRepositoriesPayload,
+  hasPendingAttachmentUploads,
   toMessageAttachments,
 } from "@/components/task-create-dialog-helpers";
 import { useToast } from "@/components/toast-provider";
@@ -14,6 +15,7 @@ import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import type { Repository } from "@/lib/types/http";
 import type { SubtaskWorkspaceMode, useSubtaskFormState } from "./new-subtask-form-state";
 import { toContextItems, useDialogAttachments } from "./session-dialog-shared";
+import { t } from "@/lib/i18n";
 
 type UseSubtaskSubmitOpts = {
   fs: ReturnType<typeof useSubtaskFormState>;
@@ -26,10 +28,13 @@ type UseSubtaskSubmitOpts = {
   resolvePrompt: () => string;
   title: string;
   autoTitle?: boolean;
+  autopilot?: boolean;
   setIsCreating: (v: boolean) => void;
   onClose: () => void;
   /** Workspace mode for the new subtask (handoffs phase 5). */
   workspaceMode: SubtaskWorkspaceMode;
+  /** Whether the selected executor profile runs directly on the local clone. */
+  isLocalExecutor?: boolean;
 };
 
 type CreateSubtaskArgs = {
@@ -43,7 +48,11 @@ type CreateSubtaskArgs = {
   trimmedTitle: string;
   prompt: string;
   autoTitle: boolean;
+  autopilot: boolean;
   workspaceMode: SubtaskWorkspaceMode;
+  isLocalExecutor: boolean;
+  freshBranchEnabled: boolean;
+  onClose: () => void;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
 };
@@ -59,7 +68,11 @@ async function createSubtask({
   trimmedTitle,
   prompt,
   autoTitle,
+  autopilot,
   workspaceMode,
+  isLocalExecutor,
+  freshBranchEnabled,
+  onClose,
   setActiveTask,
   setActiveSession,
 }: CreateSubtaskArgs) {
@@ -73,6 +86,10 @@ async function createSubtask({
           repositories: fs.repositories,
           discoveredRepositories: fs.discoveredRepositories,
           workspaceRepositories: availableRepositories,
+          isLocalExecutor,
+          freshBranch: freshBranchEnabled
+            ? { confirmDiscard: false, consentedDirtyFiles: [] }
+            : undefined,
         });
   const response = await createTask({
     workspace_id: workspaceId,
@@ -87,8 +104,12 @@ async function createSubtask({
     parent_id: parentTaskId,
     attachments: toMessageAttachments(attachments),
     workspace_mode: workspaceMode,
+    autopilot: autopilot || undefined,
   });
   const newSessionId = response.session_id ?? response.primary_session_id ?? null;
+  // Close the dialog before navigation. Navigation can remount the sidebar
+  // that owns the dialog state, which makes a later close update a stale owner.
+  onClose();
   if (newSessionId) {
     setActiveTask(response.id);
     setActiveSession(response.id, newSessionId);
@@ -113,10 +134,13 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
     resolvePrompt,
     title,
     autoTitle = false,
+    autopilot = false,
     setIsCreating,
     onClose,
     workspaceMode,
+    isLocalExecutor = false,
   } = opts;
+  const freshBranchEnabled = fs.freshBranchEnabled;
   const { toast } = useToast();
   const setActiveTask = useAppStore((s) => s.setActiveTask);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
@@ -132,6 +156,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
       const trimmedTitle = title.trim();
       const prompt = resolvePrompt().trim();
       if ((!autoTitle && !trimmedTitle) || !prompt || !workspaceId || !workflowId) return;
+      if (hasPendingAttachmentUploads(attachments)) return;
 
       isSubmittingRef.current = true;
       setIsCreating(true);
@@ -147,15 +172,18 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
           trimmedTitle,
           prompt,
           autoTitle,
+          autopilot,
           workspaceMode,
+          isLocalExecutor,
+          freshBranchEnabled,
+          onClose,
           setActiveTask,
           setActiveSession,
         });
-        onClose();
       } catch (error) {
         toast({
-          title: "Failed to create subtask",
-          description: error instanceof Error ? error.message : "Unknown error",
+          title: t("task:failedToCreateSubtask"),
+          description: error instanceof Error ? error.message : t("common:unknownError"),
           variant: "error",
         });
       } finally {
@@ -166,6 +194,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
     [
       title,
       autoTitle,
+      autopilot,
       workspaceId,
       workflowId,
       resolvePrompt,
@@ -177,6 +206,8 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
       setActiveTask,
       setActiveSession,
       workspaceMode,
+      isLocalExecutor,
+      freshBranchEnabled,
       setIsCreating,
       onClose,
       toast,
@@ -193,6 +224,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
  */
 export function useSubtaskPromptZone(opts: {
   parentTaskId: string;
+  workspaceId?: string | null;
   taskTitle: string;
   inputDisabled: boolean;
   contextValue: string;
@@ -203,6 +235,7 @@ export function useSubtaskPromptZone(opts: {
 }) {
   const {
     parentTaskId,
+    workspaceId,
     taskTitle,
     inputDisabled,
     contextValue,
@@ -215,7 +248,7 @@ export function useSubtaskPromptZone(opts: {
   const latestPromptValueRef = useRef(promptValue);
   latestPromptValueRef.current = promptValue;
   const { toast } = useToast();
-  const attachments = useDialogAttachments(inputDisabled);
+  const attachments = useDialogAttachments(inputDisabled, workspaceId);
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
     sessionId: null,
     taskTitle,
@@ -241,15 +274,24 @@ export function useSubtaskPromptZone(opts: {
     await enhancePrompt(current, (enhanced) => {
       const delivered = promptResultDelivery.deliver(current, enhanced, generation);
       if (delivered) {
-        toast({ description: "Enhanced prompt applied.", variant: "success" });
+        toast({ description: t("task:enhancedPromptApplied"), variant: "success" });
       }
 
       return delivered;
     });
   }, [enhancePrompt, promptResultDelivery, toast]);
   const contextItems = useMemo(
-    () => toContextItems(attachments.attachments, attachments.handleRemoveAttachment),
-    [attachments.attachments, attachments.handleRemoveAttachment],
+    () =>
+      toContextItems(
+        attachments.attachments,
+        attachments.handleRemoveAttachment,
+        attachments.handleRetryAttachment,
+      ),
+    [
+      attachments.attachments,
+      attachments.handleRemoveAttachment,
+      attachments.handleRetryAttachment,
+    ],
   );
   const resolvePrompt = useCallback(() => {
     const typed = promptValue.trim();

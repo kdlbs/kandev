@@ -2,10 +2,12 @@ package acp
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -61,6 +63,106 @@ func TestSendUpdateBackpressureIsCanceledOnClose(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("sendUpdate remained blocked after adapter close")
+	}
+}
+
+func TestSendUpdateSnapshotsNormalizedPayloadBeforeQueueing(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+
+	nested := map[string]any{"value": "before"}
+	payload := streams.NewGeneric("custom_tool", map[string]any{"nested": nested})
+	a.sendUpdate(AgentEvent{
+		Type:              streams.EventTypeToolCall,
+		NormalizedPayload: payload,
+	})
+
+	event := <-a.updatesCh
+	nested["value"] = "after"
+
+	data, err := json.Marshal(event.NormalizedPayload)
+	if err != nil {
+		t.Fatalf("marshal queued payload: %v", err)
+	}
+	want := `{"kind":"generic","generic":{"name":"custom_tool","input":{"nested":{"value":"before"}}}}`
+	if string(data) != want {
+		t.Fatalf("queued payload changed after source mutation: got %s, want %s", data, want)
+	}
+}
+
+func TestSendUpdateLockedSnapshotsNormalizedPayloadBeforeQueueing(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+
+	nested := map[string]any{"value": "before"}
+	payload := streams.NewGeneric("custom_tool", map[string]any{"nested": nested})
+	a.mu.Lock()
+	if !a.sendUpdateLocked(AgentEvent{
+		Type:              streams.EventTypeToolCall,
+		NormalizedPayload: payload,
+	}) {
+		a.mu.Unlock()
+		t.Fatal("sendUpdateLocked did not enqueue event")
+	}
+	a.mu.Unlock()
+
+	event := <-a.updatesCh
+	nested["value"] = "after"
+	data, err := json.Marshal(event.NormalizedPayload)
+	if err != nil {
+		t.Fatalf("marshal queued payload: %v", err)
+	}
+	if !json.Valid(data) || string(data) == "" {
+		t.Fatalf("queued payload is not valid JSON: %s", data)
+	}
+	if string(data) != `{"kind":"generic","generic":{"name":"custom_tool","input":{"nested":{"value":"before"}}}}` {
+		t.Fatalf("queued payload changed after source mutation: %s", data)
+	}
+}
+
+func TestQueuedNormalizedPayloadCanMarshalDuringSourceMutation(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+
+	nested := map[string]any{"value": "before"}
+	payload := streams.NewGeneric("custom_tool", map[string]any{"nested": nested})
+	a.sendUpdate(AgentEvent{
+		Type:              streams.EventTypeToolCall,
+		NormalizedPayload: payload,
+	})
+	event := <-a.updatesCh
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for index := 0; index < 10000; index++ {
+			nested["value"] = index
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for index := 0; index < 10000; index++ {
+			if _, err := json.Marshal(event.NormalizedPayload); err != nil {
+				t.Errorf("marshal queued payload: %v", err)
+			}
+		}
+	}()
+	close(start)
+	wg.Wait()
+
+	data, err := json.Marshal(event.NormalizedPayload)
+	if err != nil {
+		t.Fatalf("marshal final queued payload: %v", err)
+	}
+	if !json.Valid(data) || string(data) == "" {
+		t.Fatalf("queued payload is not valid JSON: %s", data)
+	}
+	if string(data) != `{"kind":"generic","generic":{"name":"custom_tool","input":{"nested":{"value":"before"}}}}` {
+		t.Fatalf("queued payload changed during source mutation: %s", data)
 	}
 }
 
@@ -978,6 +1080,62 @@ func TestConvertAvailableCommands_NoDuplicates(t *testing.T) {
 	}
 }
 
+func TestConvertAvailableCommands_CursorPlaceholderDescriptionCleared(t *testing.T) {
+	a := newTestAdapterForAgent(acpcompat.CursorAgentID)
+	// cursor-agent sends a bare dash run for commands with no real description.
+	update := &acp.SessionAvailableCommandsUpdate{
+		AvailableCommands: []acp.AvailableCommand{
+			{Name: "bootstrap-go-service", Description: "---"},
+			{Name: "preferences", Description: "  ---  "},
+			{Name: "commit", Description: "Commit changes"},
+			{Name: "worktree", Description: ""},
+		},
+	}
+
+	result := a.convertAvailableCommands("session-placeholder", update)
+
+	if len(result.AvailableCommands) != 4 {
+		t.Fatalf("expected 4 commands, got %d", len(result.AvailableCommands))
+	}
+	if result.AvailableCommands[0].Description != "" {
+		t.Errorf("command[0].Description = %q, want empty (dash placeholder cleared)",
+			result.AvailableCommands[0].Description)
+	}
+	if result.AvailableCommands[1].Description != "" {
+		t.Errorf("command[1].Description = %q, want empty (padded dash placeholder cleared)",
+			result.AvailableCommands[1].Description)
+	}
+	if result.AvailableCommands[2].Description != "Commit changes" {
+		t.Errorf("command[2].Description = %q, want %q (real description preserved)",
+			result.AvailableCommands[2].Description, "Commit changes")
+	}
+	if result.AvailableCommands[3].Description != "" {
+		t.Errorf("command[3].Description = %q, want empty (already empty preserved)",
+			result.AvailableCommands[3].Description)
+	}
+}
+
+// A non-Cursor agent that legitimately advertises a dashes-only description
+// keeps it: the placeholder cleanup is Cursor-scoped.
+func TestConvertAvailableCommands_NonCursorDescriptionPreserved(t *testing.T) {
+	a := newTestAdapterForAgent("claude-acp")
+	update := &acp.SessionAvailableCommandsUpdate{
+		AvailableCommands: []acp.AvailableCommand{
+			{Name: "rule", Description: "---"},
+		},
+	}
+
+	result := a.convertAvailableCommands("session-noncursor", update)
+
+	if len(result.AvailableCommands) != 1 {
+		t.Fatalf("expected 1 command, got %d", len(result.AvailableCommands))
+	}
+	if result.AvailableCommands[0].Description != "---" {
+		t.Errorf("command[0].Description = %q, want %q (non-Cursor description untouched)",
+			result.AvailableCommands[0].Description, "---")
+	}
+}
+
 // --- generated usage/session-info updates ---
 
 func TestConvertNotification_UsageUpdateFixture(t *testing.T) {
@@ -1048,6 +1206,31 @@ func TestConvertNotification_SessionInfoUpdateFixture(t *testing.T) {
 	}
 	if got := result.SessionMeta["cursor"].(map[string]any)["requestId"]; got != "req-1" {
 		t.Errorf("SessionMeta cursor.requestId = %v, want req-1", got)
+	}
+}
+
+func TestConvertNotification_SessionInfoUpdateGoalFixture(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"session_info_update","_meta":{"goal":{"objective":"Coordinate contributor PR reviews","status":"active","createdAt":1789079689000,"updatedAt":1789287777000,"tokenBudget":null,"tokensUsed":9547009,"timeUsedSeconds":47312,"controlMethod":"_session/goal"}}}}`)
+	var notification acp.SessionNotification
+	if err := json.Unmarshal(raw, &notification); err != nil {
+		t.Fatalf("unmarshal goal fixture: %v", err)
+	}
+	if notification.Update.SessionInfoUpdate == nil {
+		t.Fatal("generated SDK did not decode goal session_info_update")
+	}
+
+	result := a.convertNotification(notification)
+	if result == nil {
+		t.Fatal("expected non-nil result for goal session_info_update")
+	}
+	goal, ok := result.SessionMeta["goal"].(map[string]any)
+	if !ok {
+		t.Fatalf("goal metadata type = %T, want map[string]any", result.SessionMeta["goal"])
+	}
+	if goal["status"] != "active" || goal["objective"] != "Coordinate contributor PR reviews" {
+		t.Fatalf("goal metadata = %#v", goal)
 	}
 }
 

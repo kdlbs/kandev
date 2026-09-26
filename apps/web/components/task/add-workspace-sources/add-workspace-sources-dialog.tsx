@@ -1,15 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type RefObject, type ReactNode } from "react";
-import {
-  IconChevronDown,
-  IconCloudDownload,
-  IconFolderPlus,
-  IconGitBranch,
-  IconPlus,
-  IconStack2,
-  IconX,
-} from "@tabler/icons-react";
+import { IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -26,12 +18,6 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@kandev/ui/drawer";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
 import { Input } from "@kandev/ui/input";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
@@ -47,13 +33,16 @@ import {
   getWorkspaceSourceCapabilities,
   hasCloneableSavedRepository,
 } from "@/components/workspace-source-picker/executor-capabilities";
+import { RepositorySourceMenu } from "./repository-source-menu";
+import { AddFolderButton } from "./add-folder-button";
 import { SavedRepositorySourceRow } from "./saved-repository-source-row";
 import { useDialogOpenerFocus } from "./use-dialog-opener-focus";
 import { useSubmitWorkspaceSources } from "./use-submit-workspace-sources";
 import { useWorkspaceRepositoryOptions } from "./use-workspace-repository-options";
 import { useWorkspaceSourceRows } from "./use-workspace-source-rows";
 import { WorkspaceChangeConsequences } from "./workspace-change-consequences";
-import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type Props = {
   open: boolean;
@@ -173,7 +162,7 @@ function selectableRepositories(
 }
 
 function isRemoteWorkspaceExecutor(executorType: string | null | undefined): boolean {
-  return ["local_docker", "remote_docker", "ssh", "sprites"].includes(executorType ?? "");
+  return ["local_docker", "remote_docker", "ssh", "sprites", "k8s"].includes(executorType ?? "");
 }
 
 type AddWorkspaceSourcesSurfaceProps = {
@@ -205,6 +194,7 @@ function AddWorkspaceSourcesSurface({
   onCancel,
   onSubmit,
 }: AddWorkspaceSourcesSurfaceProps) {
+  const { t } = useTranslation();
   const footer = (
     <div className="flex justify-end gap-2">
       <Button
@@ -214,7 +204,7 @@ function AddWorkspaceSourcesSurface({
         disabled={submitting}
         onClick={onCancel}
       >
-        Cancel
+        {t("common:cancel")}
       </Button>
       <Button
         type="button"
@@ -223,7 +213,7 @@ function AddWorkspaceSourcesSurface({
         disabled={submitting || !canSubmit}
         onClick={onSubmit}
       >
-        {submitting ? "Adding…" : "Add to workspace"}
+        {submitting ? t("task:adding") : t("task:addToWorkspace")}
       </Button>
     </div>
   );
@@ -244,10 +234,8 @@ function AddWorkspaceSourcesSurface({
           className="h-dvh !max-h-dvh rounded-none flex flex-col overflow-hidden data-[vaul-drawer-direction=bottom]:!mt-0"
         >
           <DrawerHeader className="shrink-0 text-left">
-            <DrawerTitle>Add to workspace</DrawerTitle>
-            <DrawerDescription>
-              Choose repositories or folders to make available in this task.
-            </DrawerDescription>
+            <DrawerTitle>{t("task:addToWorkspace")}</DrawerTitle>
+            <DrawerDescription>{t("task:chooseRepositoriesOrFoldersToMake")}</DrawerDescription>
           </DrawerHeader>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4">
             {errorMessage}
@@ -268,10 +256,8 @@ function AddWorkspaceSourcesSurface({
         onCloseAutoFocus={onCloseAutoFocus}
       >
         <DialogHeader className="shrink-0">
-          <DialogTitle>Add to workspace</DialogTitle>
-          <DialogDescription>
-            Choose repositories or folders to make available in this task.
-          </DialogDescription>
+          <DialogTitle>{t("task:addToWorkspace")}</DialogTitle>
+          <DialogDescription>{t("task:chooseRepositoriesOrFoldersToMake")}</DialogDescription>
         </DialogHeader>
         <div
           data-testid="add-workspace-sources-dialog-scroll"
@@ -314,26 +300,16 @@ function SourceForm({
   onUpdate: (key: string, patch: Partial<WorkspaceSourceRow>) => void;
   isMobile: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4 py-1" data-testid="add-workspace-sources-form">
       <div className="flex flex-wrap items-center gap-2">
         <RepositorySourceMenu isMobile={isMobile} onAdd={onAdd} />
-        {capabilities.canAddFolders && (
-          <Button
-            type="button"
-            variant="outline"
-            className={cn("cursor-pointer", isMobile ? "min-h-11" : "h-9 px-3")}
-            onClick={() => onAdd("folder")}
-          >
-            <IconFolderPlus className="h-4 w-4" />
-            Add folder
-          </Button>
-        )}
+        <AddFolderButton isMobile={isMobile} capabilities={capabilities} onAdd={onAdd} />
       </div>
       {capabilities.requiresCloneableLocalRepository && (
         <p className="text-sm text-muted-foreground">
-          Saved and local Git repositories must have a cloneable origin for this executor. Local
-          folders are unavailable.
+          {t("task:savedAndLocalGitRepositoriesMust")}
         </p>
       )}
       {rows.map((row) => (
@@ -352,78 +328,6 @@ function SourceForm({
         />
       ))}
     </div>
-  );
-}
-
-function RepositorySourceMenu({
-  isMobile,
-  onAdd,
-}: {
-  isMobile: boolean;
-  onAdd: (kind: "saved_repository" | "local_repository" | "remote_repository") => void;
-}) {
-  const itemClass = cn("cursor-pointer items-start gap-3", isMobile ? "min-h-11" : "py-2");
-  return (
-    <DropdownMenu modal={!isMobile}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          className={cn("cursor-pointer", isMobile ? "min-h-11" : "h-9 px-3")}
-        >
-          <IconPlus className="h-4 w-4" />
-          Add repository
-          <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-80 max-w-[calc(100vw-2rem)]">
-        <RepositorySourceMenuItem
-          label="Workspace repository"
-          description="Choose from saved or discovered repositories."
-          icon={<IconStack2 className="mt-0.5 h-4 w-4 text-muted-foreground" />}
-          className={itemClass}
-          onSelect={() => onAdd("saved_repository")}
-        />
-        <RepositorySourceMenuItem
-          label="Local Git repository"
-          description="Use an existing checkout on this machine."
-          icon={<IconGitBranch className="mt-0.5 h-4 w-4 text-muted-foreground" />}
-          className={itemClass}
-          onSelect={() => onAdd("local_repository")}
-        />
-        <RepositorySourceMenuItem
-          label="Remote repository"
-          description="Clone from a provider or Git URL."
-          icon={<IconCloudDownload className="mt-0.5 h-4 w-4 text-muted-foreground" />}
-          className={itemClass}
-          onSelect={() => onAdd("remote_repository")}
-        />
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function RepositorySourceMenuItem({
-  label,
-  description,
-  icon,
-  className,
-  onSelect,
-}: {
-  label: string;
-  description: string;
-  icon: ReactNode;
-  className: string;
-  onSelect: () => void;
-}) {
-  return (
-    <DropdownMenuItem aria-label={label} className={className} onSelect={onSelect}>
-      {icon}
-      <span className="min-w-0">
-        <span className="block text-sm font-medium text-foreground">{label}</span>
-        <span className="block text-xs text-muted-foreground">{description}</span>
-      </span>
-    </DropdownMenuItem>
   );
 }
 
@@ -450,6 +354,7 @@ function SourceRow({
   onRemove: (key: string) => void;
   onUpdate: (key: string, patch: Partial<WorkspaceSourceRow>) => void;
 }) {
+  const { t } = useTranslation();
   const type = row.sourceType ?? (row.kind === "folder" ? "folder" : "saved_repository");
   return (
     <fieldset className="space-y-2 rounded border p-3" data-testid="workspace-source-row">
@@ -457,7 +362,7 @@ function SourceRow({
         <legend className="text-sm font-medium">{labelFor(type)}</legend>
         <button
           type="button"
-          aria-label="Remove source"
+          aria-label={t("task:removeSource")}
           className="min-h-11 min-w-11 cursor-pointer text-muted-foreground"
           onClick={() => onRemove(row.key)}
         >
@@ -479,7 +384,7 @@ function SourceRow({
       {type === "local_repository" && (
         <LocalPathRow
           row={row}
-          label="Choose local Git repository"
+          label={t("task:chooseLocalGitRepository")}
           requiresCloneableOrigin={capabilities.requiresCloneableLocalRepository}
           onUpdate={onUpdate}
         />
@@ -488,7 +393,7 @@ function SourceRow({
         <RemoteRepositoryRow row={row} workspaceId={workspaceId} onUpdate={onUpdate} />
       )}
       {type === "folder" && (
-        <LocalPathRow row={row} label="Choose local folder" onUpdate={onUpdate} />
+        <LocalPathRow row={row} label={t("task:chooseLocalFolder")} onUpdate={onUpdate} />
       )}
       {error && (
         <p role="alert" className="text-xs text-destructive">
@@ -499,16 +404,18 @@ function SourceRow({
   );
 }
 
+// Module-level `t` rather than a hook: this runs from render, after a locale is
+// active. The `type` values are wire enums and stay in English.
 function labelFor(type: NonNullable<WorkspaceSourceRow["sourceType"]>) {
   switch (type) {
     case "saved_repository":
-      return "Workspace repository";
+      return t("task:workspaceRepository");
     case "local_repository":
-      return "Local Git repository";
+      return t("task:localGitRepository");
     case "remote_repository":
-      return "Remote repository";
+      return t("task:remoteRepository");
     case "folder":
-      return "Folder";
+      return t("task:folder");
   }
 }
 
@@ -523,6 +430,7 @@ function LocalPathRow({
   requiresCloneableOrigin?: boolean;
   onUpdate: (key: string, patch: Partial<WorkspaceSourceRow>) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <FolderPicker
@@ -534,8 +442,8 @@ function LocalPathRow({
       />
       {row.sourceType === "folder" && (
         <Input
-          aria-label="Folder display name"
-          placeholder="Display name (optional)"
+          aria-label={t("task:folderDisplayName")}
+          placeholder={t("task:displayNameOptional")}
           value={row.displayName ?? ""}
           onChange={(event) => onUpdate(row.key, { displayName: event.target.value })}
         />
@@ -543,15 +451,15 @@ function LocalPathRow({
       {row.sourceType === "local_repository" && (
         <>
           <Input
-            aria-label="Base branch"
-            placeholder="Base branch"
+            aria-label={t("task:baseBranch")}
+            placeholder={t("task:baseBranch")}
             value={row.baseBranch ?? ""}
             onChange={(event) => onUpdate(row.key, { baseBranch: event.target.value })}
           />
           <p className="text-sm text-muted-foreground">
             {requiresCloneableOrigin
-              ? "This repository must have a cloneable origin; Kandev will verify it before adding."
-              : "Uses the current checkout. Kandev does not switch your local repository branch."}
+              ? t("task:thisRepositoryMustHaveACloneable")
+              : t("task:usesTheCurrentCheckoutKandevDoes")}
           </p>
         </>
       )}

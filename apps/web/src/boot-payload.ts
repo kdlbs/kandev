@@ -1,7 +1,14 @@
-import type { AppState } from "@/lib/state/store";
+import type { HydrationState } from "@/lib/state/store";
 import { getBackendConfig } from "@/lib/config";
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
-import type { Repository, Task, Workflow, WorkflowStep } from "@/lib/types/http";
+import type {
+  Repository,
+  RepositoryBranchPolicy,
+  RepositorySet,
+  Task,
+  Workflow,
+  WorkflowStep,
+} from "@/lib/types/http";
 import type { ActivePlugin } from "@/lib/plugins/types";
 
 export type { ActivePlugin };
@@ -16,6 +23,8 @@ export type BootRoute = {
 export type BootRuntime = {
   apiPrefix?: string;
   webSocketPath?: string;
+  bootId?: string;
+  lspAutoInstallPreferenceLanguages?: string[];
   debug?: boolean;
   /**
    * True for a dev or e2e build. The e2e harness serves a PRODUCTION bundle, so
@@ -25,6 +34,17 @@ export type BootRuntime = {
   nonProduction?: boolean;
   /** Active UI locale from the kandev_locale cookie; drives first-paint i18n. */
   locale?: string;
+  /**
+   * Operator-configured browser tab title prefix (KANDEV_WEB_TITLE_PREFIX), so
+   * several Kandev instances are distinguishable in adjacent tabs. The Go shell
+   * already rewrites `<title>`; this covers the /api/v1/app-state boot path,
+   * which never renders through the shell.
+   */
+  titlePrefix?: string;
+  /** True only when the Tauri shell launched the backend with its picker bridge. */
+  nativeFolderPickerAvailable?: boolean;
+  /** True when the backend was launched by the desktop shell. */
+  desktopRuntime?: boolean;
 };
 
 export type BootRouteData = {
@@ -34,12 +54,16 @@ export type BootRouteData = {
     workflows?: Workflow[];
     steps?: WorkflowStep[];
     repositories?: Repository[];
+    repositorySets?: RepositorySet[];
+    repositoryBranchPolicies?: RepositoryBranchPolicy[];
   };
   tasksPage?: {
     activeWorkspaceId?: string | null;
     workflows?: Workflow[];
     steps?: WorkflowStep[];
     repositories?: Repository[];
+    repositorySets?: RepositorySet[];
+    repositoryBranchPolicies?: RepositoryBranchPolicy[];
     tasks?: Task[];
     total?: number;
     tasksListSort?: string;
@@ -51,7 +75,7 @@ export type BootPayload = {
   version?: number;
   route?: BootRoute;
   runtime?: BootRuntime;
-  initialState?: Partial<AppState>;
+  initialState?: HydrationState;
   routeData?: BootRouteData;
   plugins?: ActivePlugin[];
   /** Replayable per-boot CSRF/accidental-mutation interlock; not authentication. */
@@ -75,7 +99,7 @@ export function readBootPayload(win: Window = window): BootPayload {
     version: typeof payload.version === "number" ? payload.version : undefined,
     route: isRecord(payload.route) ? readRoute(payload.route) : undefined,
     runtime,
-    initialState: isRecord(payload.initialState) ? (payload.initialState as Partial<AppState>) : {},
+    initialState: isRecord(payload.initialState) ? (payload.initialState as HydrationState) : {},
     routeData: isRecord(payload.routeData) ? (payload.routeData as BootRouteData) : undefined,
     plugins: Array.isArray(payload.plugins) ? readPlugins(payload.plugins) : undefined,
     interimSettingsInterlockToken: readNonEmptyString(payload.interimSettingsInterlockToken),
@@ -102,7 +126,16 @@ function readPlugin(value: Record<string, unknown>): ActivePlugin | undefined {
   const styleUrls = Array.isArray(value.styleUrls)
     ? value.styleUrls.filter((entry): entry is string => typeof entry === "string")
     : undefined;
-  return { id, name, bundleUrl, styleUrls };
+  const repositoryProviderIds = Array.isArray(value.repositoryProviderIds)
+    ? value.repositoryProviderIds.filter((entry): entry is string => typeof entry === "string")
+    : undefined;
+  return {
+    id,
+    name,
+    bundleUrl,
+    styleUrls,
+    ...(repositoryProviderIds ? { repositoryProviderIds } : {}),
+  };
 }
 
 export async function loadBootPayload(
@@ -141,14 +174,24 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
   return {
     apiPrefix: readString(value.apiPrefix),
     webSocketPath: readString(value.webSocketPath),
+    bootId: readNonEmptyString(value.bootId),
+    lspAutoInstallPreferenceLanguages: readStringArray(value.lspAutoInstallPreferenceLanguages),
     debug: value.debug === true ? true : undefined,
     nonProduction: value.nonProduction === true ? true : undefined,
     locale: readString(value.locale),
+    titlePrefix: readString(value.titlePrefix),
+    nativeFolderPickerAvailable: value.nativeFolderPickerAvailable === true ? true : undefined,
+    desktopRuntime: value.desktopRuntime === true ? true : undefined,
   };
 }
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) return undefined;
+  return value;
 }
 
 function readNonEmptyString(value: unknown): string | undefined {

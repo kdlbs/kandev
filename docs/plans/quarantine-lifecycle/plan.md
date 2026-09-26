@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/system-page/storage-maintenance.md
+spec: docs/specs/system-page/requirements/storage-maintenance.md
 created: 2026-07-29
 status: complete
 ---

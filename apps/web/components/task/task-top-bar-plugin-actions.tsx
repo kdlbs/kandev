@@ -1,39 +1,37 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useRef } from "react";
 import { useOptionalAppStore } from "@/components/state-provider";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
+import { usePluginRegistry } from "@/lib/plugins/registry";
+import type { ChatTopBarSlotProps } from "@/lib/plugins/types";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
 
-/**
- * Props forwarded to every plugin component registered for the `chat-top-bar`
- * slot (`registry.registerComponent("chat-top-bar", Component)`). This is the
- * session top bar's right-hand cluster, beside the document / editors / debug
- * controls — the place for at-a-glance status a
- * plugin wants to surface for the current task.
- *
- * A task can hold several sessions; the top bar is bound to one at a time
- * (`activeSessionId`), so both it and the full `sessionIds` list are provided,
- * mirroring the `chat-input-actions` slot. These are kandev session ids;
- * resolving one to an agent/ACP transcript id (e.g. to key cost data on a
- * session) is the plugin's job — do it server-side in the plugin backend
- * through the Host data API, not here. See PLUGIN-API.md.
- */
-export type ChatTopBarSlotProps = {
-  /** Task the top bar belongs to, or null before one exists. */
-  taskId: string | null;
-  /** Display title of the task, when known. */
-  taskTitle?: string;
-  /** Workspace the task lives in, when known. */
-  workspaceId: string | null;
-  /** Session the top bar is currently bound to, or null before one exists. */
-  activeSessionId: string | null;
-  /** Every kandev session id on the task (includes `activeSessionId`). */
-  sessionIds: string[];
-};
+export type { ChatTopBarSlotProps } from "@/lib/plugins/types";
 
 const EMPTY_SESSIONS: TaskSession[] = [];
+const MemoizedPluginSlot = memo(PluginSlot);
+
+function sameStringArray(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function useStableSessionIds(
+  taskSessions: TaskSession[],
+  activeSessionId: string | null,
+): string[] {
+  const sessionIdsRef = useRef<string[]>([]);
+  return useMemo(() => {
+    const nextSessionIds: string[] = taskSessions.map((session) => session.id);
+    if (activeSessionId && !nextSessionIds.includes(activeSessionId)) {
+      nextSessionIds.unshift(activeSessionId);
+    }
+    if (sameStringArray(sessionIdsRef.current, nextSessionIds)) return sessionIdsRef.current;
+    sessionIdsRef.current = nextSessionIds;
+    return nextSessionIds;
+  }, [taskSessions, activeSessionId]);
+}
 
 /**
  * Plugin extension point in the session top bar, rendered alongside the
@@ -47,8 +45,9 @@ export function TaskTopBarPluginActions(props: {
   taskId: string | null;
   taskTitle?: string;
   workspaceId: string | null;
+  presentation?: ChatTopBarSlotProps["presentation"];
 }) {
-  const { sessionId, taskId, taskTitle, workspaceId } = props;
+  const { sessionId, taskId, taskTitle, workspaceId, presentation = "desktop" } = props;
   // itemsByTaskId holds a stable per-task array reference (updated only when
   // that task's sessions change), so selecting it avoids a new-array-per-render.
   // Read optionally so the top bar can render in isolation (unit tests) without
@@ -59,14 +58,40 @@ export function TaskTopBarPluginActions(props: {
     [taskId],
   );
   const taskSessions = useOptionalAppStore(selectSessions, EMPTY_SESSIONS);
+  const sessionIds = useStableSessionIds(taskSessions, sessionId);
 
   const slotProps = useMemo<ChatTopBarSlotProps>(() => {
-    const sessionIds: string[] = taskSessions.map((session) => session.id);
-    // The active session may not yet be in the store list (freshly prepared);
-    // make sure the plugin always receives it.
-    if (sessionId && !sessionIds.includes(sessionId)) sessionIds.unshift(sessionId);
-    return { taskId, taskTitle, workspaceId, activeSessionId: sessionId, sessionIds };
-  }, [taskSessions, sessionId, taskId, taskTitle, workspaceId]);
+    return {
+      taskId,
+      taskTitle,
+      workspaceId,
+      activeSessionId: sessionId,
+      sessionIds,
+      presentation,
+    };
+  }, [presentation, sessionId, sessionIds, taskId, taskTitle, workspaceId]);
 
-  return <PluginSlot name="chat-top-bar" slotProps={slotProps} />;
+  const actionSurface = useMemo(
+    () => ({ surface: "topbar" as const, presentation }),
+    [presentation],
+  );
+
+  const content = (
+    <MemoizedPluginSlot name="chat-top-bar" slotProps={slotProps} actionSurface={actionSurface} />
+  );
+  if (presentation === "desktop") return content;
+
+  return (
+    <div
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-2 overflow-x-clip [&>*]:min-w-0 [&>*]:max-w-full [&_[data-slot=button]]:!min-h-11 [&_[data-slot=button]]:!min-w-11 [&_[data-slot=button]]:!max-w-full [&_[data-slot=button]]:!whitespace-normal"
+      data-testid="mobile-chat-top-bar-plugin-actions"
+    >
+      {content}
+    </div>
+  );
+}
+
+/** Reactively reports whether the phone menu needs a session-plugin section. */
+export function useHasTaskTopBarPluginActions(): boolean {
+  return usePluginRegistry().getSlotRegistrations("chat-top-bar").length > 0;
 }

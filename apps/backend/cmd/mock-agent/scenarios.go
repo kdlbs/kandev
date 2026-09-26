@@ -14,12 +14,18 @@ import (
 
 // Predefined e2e test scenarios with fixed timing for deterministic test assertions.
 
+const (
+	savedPromptDeliveryScenario  = "saved-prompt-delivery"
+	savedPromptDeliveryResponse  = "SAVED_PROMPT_DELIVERED"
+	savedPromptDeliveryDirective = `e2e:saved_prompt_delivery("SAVED_PROMPT_DELIVERED")`
+)
+
 // scenarioRegistry maps scenario names to their handler functions.
 var scenarioRegistry = map[string]func(e *emitter){
 	"simple-message":          scenarioSimpleMessage,
 	"read-and-edit":           scenarioReadAndEdit,
 	"permission-flow":         scenarioPermissionFlow,
-	"error":                   scenarioError,
+	toolKeyError:              scenarioError,
 	"subagent":                scenarioSubagent,
 	"all-tools":               scenarioAllTools,
 	"multi-turn":              scenarioMultiTurn,
@@ -32,6 +38,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"untracked-file-setup":    scenarioUntrackedFileSetup,
 	"untracked-file-modify":   scenarioUntrackedFileModify,
 	"clarification":           scenarioClarification,
+	"clarification-markdown":  scenarioClarificationMarkdown,
 	"clarification-multi":     scenarioClarificationMulti,
 	"clarification-timeout":   scenarioClarificationTimeout,
 	"multi-permission":        scenarioMultiPermission,
@@ -44,6 +51,50 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"markdown-table":          scenarioMarkdownTable,
 	"empty-turn":              scenarioEmptyTurn,
 	"push-current-branch":     scenarioPushCurrentBranch,
+	"steer-fold-setup":        scenarioSteerFoldSetup,
+	"steer-defer-setup":       scenarioSteerDeferSetup,
+	"saved-prompt-delivery":   scenarioSavedPromptDelivery,
+	"response-retry":          scenarioResponseRetry,
+	"goal-active":             scenarioGoalActive,
+	"goal-complete":           scenarioGoalComplete,
+	"goal-clear":              scenarioGoalClear,
+	"goal-long":               scenarioGoalLong,
+}
+
+// steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup
+// keep their prompt open after any setup output, so the session reads
+// "generating" (steer-eligible) for long enough that an e2e test can reliably
+// deliver a mid-turn steer against it. Cancellation (turn end, session
+// cleanup) interrupts the hold immediately via waitForDelay's ctx.Done case.
+const steerSetupHoldMillis = 30_000
+
+// scenarioSteerFoldSetup holds the foreground turn open without ever emitting
+// text of its own, so a mid-turn steer delivered while it runs can only be
+// answered by the steer's own successor turn. This reproduces the "folded"
+// outcome from the mid-turn steering spec's outcome taxonomy
+// (docs/specs/platform/requirements/mid-turn-steering.md): the predecessor settles without
+// having produced an answer, and the operator sees a single, combined reply.
+func scenarioSteerFoldSetup(e *emitter) {
+	waitForDelay(e.ctx, steerSetupHoldMillis)
+}
+
+// scenarioSteerDeferSetup answers its own prompt immediately, then continues
+// to hold the turn open silently. A mid-turn steer delivered during the hold
+// still reaches the agent as a concurrent prompt, but runs as a genuinely
+// separate turn with its own answer -- the "deferred" outcome from the
+// outcome taxonomy. The transcript therefore shows two independent answers in
+// submission order, matching an installation whose agent CLI never folds.
+func scenarioSteerDeferSetup(e *emitter) {
+	e.text("Predecessor turn's own answer, delivered before any steer arrives.")
+	// A tool-call boundary flushes the buffered text above into its own
+	// message row (cmd/mock-agent/AGENTS.md: "flushMessageBuffer only fires
+	// on a tool-call/turn boundary"). Without it the answer stays buffered
+	// server-side for as long as this turn holds open below, so an operator
+	// (or an e2e assertion) would see nothing until the turn eventually ends.
+	flushID := nextToolID()
+	e.startTool(flushID, "Acknowledge predecessor answer", acp.ToolKindOther, map[string]any{})
+	e.completeTool(flushID, map[string]any{toolKeyResult: "ok"})
+	waitForDelay(e.ctx, steerSetupHoldMillis)
 }
 
 // scenarioEmptyTurn emits no content and no tool calls, so the turn ends
@@ -57,6 +108,13 @@ func scenarioEmptyTurn(e *emitter) {
 	// must outlast the client's initial WS subscribe (especially on mobile,
 	// where a fast auto-start turn can finish before the chat subscribes).
 	fixedDelay(3000)
+}
+
+// scenarioSavedPromptDelivery emits the fixed response used by the Quick Chat
+// saved-prompt E2E test. The handler routes here only after it finds the exact
+// directive inside a backend-generated expansion block.
+func scenarioSavedPromptDelivery(e *emitter) {
+	e.text(savedPromptDeliveryResponse)
 }
 
 // emitPredefinedScenario dispatches to a named e2e scenario.
@@ -79,6 +137,13 @@ func scenarioSimpleMessage(e *emitter) {
 
 	fixedDelay(100)
 	e.text("This is a simple mock response for e2e testing.")
+}
+
+func scenarioResponseRetry(e *emitter) {
+	e.thoughtWithID("Abandoned response attempt reasoning.")
+	e.textWithID("Abandoned response attempt answer.")
+	e.responseAttemptReset()
+	e.textWithID("Replacement response after provider retry.")
 }
 
 // scenarioReadAndEdit: read -> edit -> text with fixed delays, using real files.
@@ -112,9 +177,9 @@ func scenarioReadAndEdit(e *emitter) {
 
 	fixedDelay(50)
 	if allowed {
-		e.completeTool(editID, map[string]any{"result": "File edited successfully: " + f.absPath})
+		e.completeTool(editID, map[string]any{toolKeyResult: "File edited successfully: " + f.absPath})
 	} else {
-		e.completeTool(editID, map[string]any{"result": "Edit was denied"})
+		e.completeTool(editID, map[string]any{toolKeyResult: "Edit was denied"})
 		e.text("Edit was denied.")
 	}
 
@@ -170,7 +235,7 @@ func scenarioKandevMCPPermission(e *emitter) {
 			"total":      1,
 		})
 	} else {
-		e.completeTool(id, map[string]any{"error": "denied"})
+		e.completeTool(id, map[string]any{toolKeyError: "denied"})
 	}
 
 	fixedDelay(50)
@@ -265,7 +330,7 @@ func scenarioAllTools(e *emitter) {
 	fixedDelay(50)
 	webID := nextToolID()
 	e.startTool(webID, "Fetch example.com", acp.ToolKindFetch,
-		map[string]any{"url": "https://example.com", "prompt": "Summarize"})
+		map[string]any{"url": "https://example.com", clarificationPromptKey: "Summarize"})
 	fixedDelay(50)
 	e.completeTool(webID, map[string]any{"content": "Example page content"})
 
@@ -309,9 +374,9 @@ func scenarioAllToolsEditBash(e *emitter, editFile fileInfo) {
 	allowed := e.requestPermission(editID, "Edit "+editFile.relPath, acp.ToolKindEdit, editInput)
 	fixedDelay(50)
 	if allowed {
-		e.completeTool(editID, map[string]any{"result": "File edited successfully: " + editFile.absPath})
+		e.completeTool(editID, map[string]any{toolKeyResult: "File edited successfully: " + editFile.absPath})
 	} else {
-		e.completeTool(editID, map[string]any{"result": "Edit denied"})
+		e.completeTool(editID, map[string]any{toolKeyResult: "Edit denied"})
 		e.text("Edit denied.")
 	}
 
@@ -361,19 +426,16 @@ func scenarioDiffExpansionSetup(e *emitter) {
 	}
 
 	runGitCmd := makeGitRunner(wd)
-	_ = runGitCmd("rm", "--force", filePath)
-	_ = runGitCmd("commit", "-m", "cleanup expansion_test.go")
-
-	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
-		e.text("diff-expansion-setup: re-write failed: " + err.Error())
-		return
-	}
-
+	// Add the canonical content directly. `--allow-empty` makes retries
+	// idempotent when a reused worktree already has the same file at HEAD;
+	// overwriting before `git add` also repairs a worktree left with the prior
+	// scenario's modified content. The old rm/cleanup commit sequence could
+	// fail under concurrent git setup and left the real fixture commit absent.
 	if err := runGitCmd("add", filePath); err != nil {
 		e.text("diff-expansion-setup: git add failed")
 		return
 	}
-	if err := runGitCmd("commit", "-m", "add expansion_test.go for e2e diff expansion test"); err != nil {
+	if err := runGitCmd("commit", "--allow-empty", "-m", "add expansion_test.go for e2e diff expansion test"); err != nil {
 		e.text("diff-expansion-setup: git commit failed")
 		return
 	}
@@ -664,6 +726,7 @@ const (
 	clarificationDescKey    = "description"
 	clarificationPromptKey  = "prompt"
 	clarificationIDKey      = "id"
+	clarificationTitleKey   = "title"
 )
 
 func mockOption(label, description string) map[string]any {
@@ -683,6 +746,27 @@ func clarificationQuestionArgs() map[string]any {
 					mockOption("PostgreSQL", "Relational database with strong consistency"),
 					mockOption("MongoDB", "Document database for flexible schemas"),
 					mockOption("SQLite", "Embedded database for simplicity"),
+				},
+			},
+		},
+	}
+}
+
+// clarificationMarkdownQuestionArgs keeps a permanent real-protocol fixture
+// for the lightweight Markdown supported by clarification question fields.
+func clarificationMarkdownQuestionArgs() map[string]any {
+	return map[string]any{
+		"context": "Keep `context` literal.\n\nNo Markdown rendering here.",
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:    "markdown",
+				clarificationTitleKey: "Use `DB`",
+				clarificationPromptKey: "Choose **one** storage mode:\n\n" +
+					"1. Prefer reliability\n2. Prefer speed\n\n" +
+					"Read [storage guidance](https://example.com/storage).",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("`Postgres` [docs](https://example.com/postgres)", "Best for **production** workloads"),
+					mockOption("SQLite", "Best for *local* work"),
 				},
 			},
 		},
@@ -721,7 +805,10 @@ func clarificationMultiQuestionArgs() map[string]any {
 				},
 			},
 		},
-		"context": "Picking the foundational stack — answer all three so we can move forward.",
+		"context_paragraphs": []string{
+			"Picking the foundational stack.",
+			"Answer all three so we can move forward.",
+		},
 	}
 }
 
@@ -730,7 +817,23 @@ func scenarioClarification(e *emitter) {
 	fixedDelay(100)
 	e.text("Let me ask you a question about the project setup.")
 
-	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationQuestionArgs())
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationQuestionArgs())
+	if err != nil {
+		e.text(fmt.Sprintf("Question failed: %s", err))
+		return
+	}
+
+	fixedDelay(50)
+	e.text(fmt.Sprintf("You answered: %s", result))
+}
+
+// scenarioClarificationMarkdown exercises the restricted Markdown renderer
+// through the same blocking MCP round trip used by real clarification calls.
+func scenarioClarificationMarkdown(e *emitter) {
+	fixedDelay(100)
+	e.text("Let me ask you a formatted question about project storage.")
+
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationMarkdownQuestionArgs())
 	if err != nil {
 		e.text(fmt.Sprintf("Question failed: %s", err))
 		return
@@ -746,7 +849,7 @@ func scenarioClarificationMulti(e *emitter) {
 	fixedDelay(100)
 	e.text("Let me ask you a few questions about the project setup.")
 
-	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationMultiQuestionArgs())
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationMultiQuestionArgs())
 	if err != nil {
 		e.text(fmt.Sprintf("Questions failed: %s", err))
 		return
@@ -764,7 +867,7 @@ func scenarioClarificationTimeout(e *emitter) {
 	ctx, cancel := contextWithTimeout(5)
 	defer cancel()
 
-	result, err := callMCPToolCtx(ctx, "kandev", "ask_user_question_kandev", clarificationQuestionArgs())
+	result, err := e.callMCPToolCtx(ctx, "kandev", "ask_user_question_kandev", clarificationQuestionArgs())
 	if err != nil {
 		fixedDelay(50)
 		if ctx.Err() != nil {
@@ -884,7 +987,7 @@ func scenarioWalkthroughReemit(e *emitter) {
 	}
 
 	e.text("First tour incoming.")
-	if _, err := callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("First",
+	if _, err := e.callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("First",
 		wtStep("First step", "reemit.txt", "REEMIT_FIRST step one.", 1, 0),
 		wtStep("First step 2", "reemit.txt", "REEMIT_FIRST step two.", 2, 0),
 	)); err != nil {
@@ -895,7 +998,7 @@ func scenarioWalkthroughReemit(e *emitter) {
 
 	fixedDelay(200)
 
-	if _, err := callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("Second",
+	if _, err := e.callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("Second",
 		wtStep("Second step", "reemit.txt", "REEMIT_SECOND step one.", 1, 0),
 		wtStep("Second step 2", "reemit.txt", "REEMIT_SECOND step two.", 2, 0),
 		wtStep("Second step 3", "reemit.txt", "REEMIT_SECOND step three.", 1, 0),
@@ -922,7 +1025,7 @@ func walkthroughDemoArgs() map[string]interface{} {
 			wtStep("File C", "walkthrough_c.txt",
 				"Step 4: WALKTHROUGH_CHANGE_C lives in file C.", 2, 0),
 			wtStep("Unchanged file", "walkthrough_base.txt",
-				"Step 5: WALKTHROUGH_UNCHANGED — this base file did not change; shown from its current state.", 1, 0),
+				"Step 5: WALKTHROUGH_UNCHANGED: this base file did not change; shown from its current state.", 1, 0),
 		},
 	}
 }
@@ -998,13 +1101,13 @@ func emitWalkthroughTour(e *emitter, doneText string) {
 	toolName := "show_walkthrough_kandev"
 	args := walkthroughDemoArgs()
 	e.startTool(toolID, toolName, acp.ToolKindOther, args)
-	result, err := callMCPTool("kandev", toolName, args)
+	result, err := e.callMCPTool("kandev", toolName, args)
 	if err != nil {
-		e.completeTool(toolID, map[string]any{"error": "MCP error: " + err.Error()})
+		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("show_walkthrough failed: %s", err))
 		return
 	}
-	e.completeTool(toolID, map[string]any{"result": result})
+	e.completeTool(toolID, map[string]any{toolKeyResult: result})
 	fixedDelay(50)
 	e.text(doneText)
 }
@@ -1091,18 +1194,40 @@ func makeGitRunner(wd string) func(args ...string) error {
 		"GIT_COMMITTER_EMAIL=mock@test.local",
 	)
 	return func(args ...string) error {
-		cmd := subproc.NewGitCommand(context.Background(), append([]string{
-			"-c", "commit.gpgsign=false",
-			"-c", "tag.gpgsign=false",
-		}, args...)...)
-		cmd.Dir = wd
-		cmd.Env = gitEnv
-		out, cmdErr := subproc.RunGitCombinedOutputClass(context.Background(), subproc.GitLifecycle, cmd)
-		if cmdErr != nil {
-			_, _ = fmt.Fprintf(logOutput, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
+		for attempt := 0; attempt < 5; attempt++ {
+			cmd := subproc.NewGitCommand(context.Background(), append([]string{
+				"-c", "commit.gpgsign=false",
+				"-c", "tag.gpgsign=false",
+			}, args...)...)
+			cmd.Dir = wd
+			cmd.Env = gitEnv
+			out, cmdErr := subproc.RunGitCombinedOutputClass(context.Background(), subproc.GitLifecycle, cmd)
+			if cmdErr == nil {
+				return nil
+			}
+			if !retryableGitSetupOutput(string(out)) || attempt == 4 {
+				_, _ = fmt.Fprintf(logOutput, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
+				return cmdErr
+			}
+			time.Sleep(time.Duration(50*(1<<attempt)) * time.Millisecond)
 		}
-		return cmdErr
+		return fmt.Errorf("git %v failed after retries", args)
 	}
+}
+
+func retryableGitSetupOutput(output string) bool {
+	lower := strings.ToLower(output)
+	for _, marker := range []string{
+		"index.lock",
+		"could not lock",
+		"another git process",
+		"unable to create",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // contextWithTimeout creates a context with timeout in seconds.
@@ -1123,7 +1248,7 @@ func scenarioMarkdownTable(e *emitter) {
 		"|---|---|\n" +
 		"| **Failing test** | `TestHandleAgentBootReady_DrainsOrphanedQueuedMessage/already_WAITING_FOR_INPUT_(boot_raced_persistResumeState)` |\n" +
 		"| **Symptom** | `session.State = \"RUNNING\", want WAITING_FOR_INPUT` |\n" +
-		"| **Root cause** | Pre-existing race, not introduced by this PR. `handleAgentBootReady` synchronously flips state to `WAITING_FOR_INPUT` then spawns a goroutine that calls `PromptTask` → flips state to `RUNNING`. The test asserted on `WAITING_FOR_INPUT` immediately after the handler returned — on faster CI scheduling the goroutine wins the race. The kandev-ci container apparently schedules tighter than the github-hosted ubuntu, so it loses where the previous env got lucky. |\n" +
-		"| **Fix** | Cherry-picked `b8d06ea8 test(backend): fix race in TestHandleAgentBootReady_DrainsOrphanedQueuedMessage` from `feature/subtask-with-repo-se-vhz` (a parallel branch that already addressed this). The test now accepts either `WAITING_FOR_INPUT` or `RUNNING` — both prove the boot-ready flip landed and rule out the original `STARTING + queue still full` regression. |\n" +
+		"| **Root cause** | Pre-existing race, not introduced by this PR. `handleAgentBootReady` synchronously flips state to `WAITING_FOR_INPUT` then spawns a goroutine that calls `PromptTask` and flips state to `RUNNING`. The test asserted on `WAITING_FOR_INPUT` immediately after the handler returned. On faster CI scheduling the goroutine wins the race. The kandev-ci container apparently schedules tighter than the github-hosted ubuntu, so it loses where the previous env got lucky. |\n" +
+		"| **Fix** | Cherry-picked `b8d06ea8 test(backend): fix race in TestHandleAgentBootReady_DrainsOrphanedQueuedMessage` from `feature/subtask-with-repo-se-vhz` (a parallel branch that already addressed this). The test now accepts either `WAITING_FOR_INPUT` or `RUNNING`. Both prove the boot-ready flip landed and rule out the original `STARTING + queue still full` regression. |\n" +
 		"| **Local verification** | `go test -race -count=5` → 5/5 PASS. |\n")
 }

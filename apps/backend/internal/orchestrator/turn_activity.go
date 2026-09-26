@@ -70,6 +70,14 @@ type turnActivity struct {
 	hasPendingCompletionGeneration bool
 	completedGeneration            uint64
 	hasCompletedGeneration         bool
+
+	// promptQueueing records the connected agent's negotiated prompt-queueing
+	// advertisement, delivered over the agent_capabilities stream event. It
+	// replaces comparing the persisted agent_name: an identity does not prove the
+	// installed provider version advertises the capability (ADR 0049). It is
+	// execution-lifetime state and is deliberately never persisted — a restart
+	// with no connected execution must read as not capable.
+	promptQueueing bool
 }
 
 // backgroundWork binds a detached workload to the execution that launched it.
@@ -1139,19 +1147,54 @@ const (
 	mockAgentProviderID = "mock-agent"
 )
 
+// sessionAdvertisesPromptQueueing reports the connected agent's negotiated
+// prompt-queueing advertisement for sessionID, as delivered over the
+// agent_capabilities stream event.
+//
+// This replaces comparing the persisted `agent_name`. ADR 0049 rejects a central
+// agent-name whitelist because an agent identity does not prove the installed
+// provider version advertises what Kandev expects — a bridge too old to advertise
+// prompt queueing must be ineligible even though its name still matches.
+//
+// Fails closed whenever no live activity record exists, which is exactly the
+// case after a restart with no connected execution: the capability is
+// execution-lifetime state and is never persisted.
+func (s *Service) sessionAdvertisesPromptQueueing(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	ta := s.lockTurnActivity(sessionID, false)
+	if ta == nil {
+		return false
+	}
+	queueing := ta.promptQueueing
+	ta.mu.Unlock()
+	return queueing
+}
+
+// recordSessionPromptQueueing stores the negotiated advertisement for sessionID.
+// Creates the activity record if absent so a capabilities frame arriving before
+// any prompt still lands.
+func (s *Service) recordSessionPromptQueueing(sessionID string, queueing bool) {
+	if sessionID == "" {
+		return
+	}
+	ta := s.lockTurnActivity(sessionID, true)
+	if ta == nil {
+		return
+	}
+	ta.promptQueueing = queueing
+	ta.mu.Unlock()
+}
+
 // claudeBackgroundPromptHandoffEnabled reports whether sessionID is allowed to
-// use the high-risk fine-grained policy. Provider identity comes from the
-// persisted launch snapshot rather than a client-supplied activity value. A
-// missing session, snapshot, or provider fails closed.
+// use the high-risk fine-grained policy: the experiment must be enabled and the
+// connected agent must have advertised prompt queueing.
 func (s *Service) claudeBackgroundPromptHandoffEnabled(sessionID string) bool {
-	if !s.config.ClaudeBackgroundPromptHandoff || s.repo == nil || sessionID == "" {
+	if !s.config.ClaudeBackgroundPromptHandoff {
 		return false
 	}
-	session, err := s.repo.GetTaskSession(context.Background(), sessionID)
-	if err != nil || session == nil {
-		return false
-	}
-	return s.claudeBackgroundPromptHandoffEnabledForSession(session)
+	return s.sessionAdvertisesPromptQueueing(sessionID)
 }
 
 func (s *Service) claudeBackgroundPromptHandoffEnabledForSession(
@@ -1160,8 +1203,7 @@ func (s *Service) claudeBackgroundPromptHandoffEnabledForSession(
 	if !s.config.ClaudeBackgroundPromptHandoff || session == nil {
 		return false
 	}
-	agentName, _ := session.AgentProfileSnapshot["agent_name"].(string)
-	return agentName == claudeACPProviderID || agentName == mockAgentProviderID
+	return s.sessionAdvertisesPromptQueueing(session.ID)
 }
 
 // ForegroundActivity exposes the conservative operator-facing busy signal by
@@ -1252,6 +1294,7 @@ func (s *Service) publishForegroundActivityNow(
 		metaKeySessionID:        sessionID,
 		"foreground_activity":   s.publicForegroundActivityValue(ctx, sessionID, value),
 		"active_subagent_count": activeSubagentCount,
+		"supports_steering":     s.steerEligibleForSession(ctx, sessionID),
 	}
 	if err := s.eventBus.Publish(ctx, events.TaskSessionActivityChanged,
 		bus.NewEvent(events.TaskSessionActivityChanged, "task-session", eventData)); err != nil {

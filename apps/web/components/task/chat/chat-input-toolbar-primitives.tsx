@@ -6,27 +6,31 @@ import {
   IconFileTextSpark,
   IconPaperclip,
   IconPlayerPauseFilled,
-  IconPlugConnected,
-  IconPlugConnectedX,
 } from "@tabler/icons-react";
 
 import { GridSpinner } from "@/components/grid-spinner";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { Button } from "@kandev/ui/button";
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@kandev/ui/drawer";
+import { SurfaceAction } from "@/components/actions/surface-action";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import { cn } from "@/lib/utils";
-import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
+import { ChatSubmitPluginDecoration } from "./chat-submit-plugin-decoration";
+import type { PluginPresentation } from "@/lib/plugins/types";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
+import { useComposerActivity } from "./composer-disclosure";
 
 type SubmitButtonProps = {
   isAgentBusy: boolean;
   canCancelAgent?: boolean;
   sessionId: string | null;
+  /** Task context for the `chat-submit-decoration` plugin slot. */
+  taskId: string | null;
+  taskTitle?: string;
   hasContent: boolean;
   isDisabled: boolean;
   submitDisabledReason?: string;
@@ -35,11 +39,21 @@ type SubmitButtonProps = {
   onCancel: () => void | Promise<void>;
   onSubmit: () => void;
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
+  presentation?: PluginPresentation;
 };
 
 type SendSubmitButtonProps = Pick<
   SubmitButtonProps,
-  "isDisabled" | "isSending" | "planModeEnabled" | "onSubmit" | "submitShortcut"
+  | "isAgentBusy"
+  | "sessionId"
+  | "taskId"
+  | "taskTitle"
+  | "presentation"
+  | "isDisabled"
+  | "isSending"
+  | "planModeEnabled"
+  | "onSubmit"
+  | "submitShortcut"
 > & {
   tooltipDescription?: string;
 };
@@ -50,19 +64,25 @@ function submitTooltipDescription(
   submitDisabledReason?: string,
 ) {
   if (submitDisabledReason) return submitDisabledReason;
-  if (isAgentBusy) return "Queue message";
-  if (planModeEnabled) return "Request plan changes";
+  if (isAgentBusy) return t("task:submitTooltipQueueMessage");
+  if (planModeEnabled) return t("task:submitTooltipRequestPlanChanges");
   return undefined;
 }
 
 function SendSubmitButton({
+  isAgentBusy,
+  sessionId,
+  taskId,
+  taskTitle,
   isDisabled,
   isSending,
   planModeEnabled,
   onSubmit,
   submitShortcut,
+  presentation = "desktop",
   tooltipDescription,
 }: SendSubmitButtonProps) {
+  const { t } = useTranslation();
   return (
     <KeyboardShortcutTooltip
       shortcut={submitShortcut}
@@ -70,19 +90,22 @@ function SendSubmitButton({
       enabled={!isDisabled || !!tooltipDescription}
     >
       <span
-        className="inline-flex"
+        className="relative inline-flex"
         tabIndex={isDisabled && !!tooltipDescription ? 0 : undefined}
-        aria-label={isDisabled ? (tooltipDescription ?? "Submit unavailable") : undefined}
+        aria-label={isDisabled ? (tooltipDescription ?? t("task:submitUnavailable")) : undefined}
       >
         <Button
           type="button"
           variant="default"
           size="icon"
           className={cn(
-            "h-7 w-7 rounded-full cursor-pointer",
+            presentation === "mobile"
+              ? "min-h-11 min-w-11 rounded-full cursor-pointer"
+              : "h-7 w-7 rounded-full cursor-pointer",
             planModeEnabled && "bg-violet-600 hover:bg-violet-500",
           )}
           disabled={isDisabled}
+          onMouseDown={(e) => e.preventDefault()}
           onClick={onSubmit}
           data-testid="submit-message-button"
         >
@@ -90,6 +113,16 @@ function SendSubmitButton({
           {!isSending && planModeEnabled && <IconFileTextSpark className="h-4 w-4" />}
           {!isSending && !planModeEnabled && <IconArrowUp className="h-4 w-4" />}
         </Button>
+        <ChatSubmitPluginDecoration
+          sessionId={sessionId}
+          taskId={taskId}
+          taskTitle={taskTitle}
+          presentation={presentation}
+          isSending={isSending}
+          isAgentBusy={isAgentBusy}
+          isDisabled={isDisabled}
+          planModeEnabled={planModeEnabled}
+        />
       </span>
     </KeyboardShortcutTooltip>
   );
@@ -97,8 +130,10 @@ function SendSubmitButton({
 
 export function SubmitButton({
   isAgentBusy,
-  canCancelAgent = isAgentBusy,
+  canCancelAgent = false,
   sessionId,
+  taskId,
+  taskTitle,
   hasContent,
   isDisabled,
   submitDisabledReason,
@@ -107,7 +142,9 @@ export function SubmitButton({
   onCancel,
   onSubmit,
   submitShortcut,
+  presentation = "desktop",
 }: SubmitButtonProps) {
+  const { t } = useTranslation();
   const showSendButton = !isAgentBusy || hasContent;
   const storeApi = useAppStoreApi();
   const isCancelling = useAppStore((state) => {
@@ -117,6 +154,7 @@ export function SubmitButton({
       state.chatInput.cancellingBySessionId[sessionId] === true
     );
   });
+  useComposerActivity({ busy: isCancelling });
   const tooltipDescription = submitTooltipDescription(
     isAgentBusy,
     planModeEnabled,
@@ -144,28 +182,39 @@ export function SubmitButton({
               type="button"
               variant="secondary"
               size="icon"
-              className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:cursor-not-allowed disabled:opacity-70"
+              className={cn(
+                presentation === "mobile" ? "min-h-11 min-w-11" : "h-7 w-7",
+                "rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:cursor-not-allowed disabled:opacity-70",
+              )}
               onClick={handleCancelClick}
               disabled={isCancelling}
+              aria-label={t("task:cancelAgent")}
               data-testid="cancel-agent-button"
             >
               {isCancelling ? (
-                <GridSpinner className="text-destructive" />
+                <GridSpinner className="text-destructive" ariaLabel={t("task:cancelling")} />
               ) : (
                 <IconPlayerPauseFilled className="h-3.5 w-3.5" />
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{isCancelling ? "Cancelling..." : "Cancel agent"}</TooltipContent>
+          <TooltipContent>
+            {isCancelling ? t("task:cancelling") : t("task:cancelAgent")}
+          </TooltipContent>
         </Tooltip>
       )}
       {showSendButton && (
         <SendSubmitButton
+          isAgentBusy={isAgentBusy}
+          sessionId={sessionId}
+          taskId={taskId}
+          taskTitle={taskTitle}
           isDisabled={isDisabled}
           isSending={isSending}
           planModeEnabled={planModeEnabled}
           onSubmit={onSubmit}
           submitShortcut={submitShortcut}
+          presentation={presentation}
           tooltipDescription={tooltipDescription}
         />
       )}
@@ -177,16 +226,18 @@ export function PlanToggleButton({
   planModeEnabled,
   planModeAvailable,
   onPlanModeChange,
+  presentation = "desktop",
 }: {
   planModeEnabled: boolean;
   planModeAvailable: boolean;
   onPlanModeChange: (enabled: boolean) => void;
+  presentation?: "desktop" | "mobile";
 }) {
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   const planModeShortcutLabel = formatShortcut(getShortcut("TOGGLE_PLAN_MODE", keyboardShortcuts));
   const tooltip = planModeAvailable
-    ? `Toggle plan mode (${planModeShortcutLabel}) — Agent collaborates on the plan without implementing changes`
-    : `Toggle plan layout (${planModeShortcutLabel}) — View and edit the plan (agent cannot read/write it without MCP)`;
+    ? `Toggle plan mode (${planModeShortcutLabel}) - Agent collaborates on the plan without implementing changes`
+    : `Toggle plan layout (${planModeShortcutLabel}) - View and edit the plan (agent cannot read/write it without MCP)`;
 
   return (
     <Tooltip>
@@ -199,7 +250,9 @@ export function PlanToggleButton({
           data-plan-available={planModeAvailable}
           data-plan-enabled={planModeEnabled}
           className={cn(
-            "h-7 gap-1.5 px-2 hover:bg-muted/40 cursor-pointer",
+            presentation === "mobile"
+              ? "min-h-11 min-w-11 gap-1.5 px-2 hover:bg-muted/40 cursor-pointer"
+              : "h-7 gap-1.5 px-2 hover:bg-muted/40 cursor-pointer",
             planModeEnabled && planModeAvailable && "bg-violet-500/15 text-violet-400",
           )}
           onClick={() => onPlanModeChange(!planModeEnabled)}
@@ -212,134 +265,28 @@ export function PlanToggleButton({
   );
 }
 
-const mcpStatusColor: Record<string, string> = {
-  active: "bg-emerald-500",
-  connected: "bg-amber-500",
-  delivered: "bg-amber-500",
-  failed: "bg-destructive",
-  filtered: "bg-muted-foreground/50",
-  unavailable: "bg-muted-foreground/50",
-  unknown: "bg-muted-foreground/50",
-};
-
-const mcpStatusLabel: Record<string, string> = {
-  active: "Active",
-  connected: "Connected",
-  delivered: "Delivered — connection unverified",
-  failed: "Failed",
-  filtered: "Filtered",
-  unavailable: "Unavailable",
-  unknown: "Unknown",
-};
-
-export function McpIndicator({
-  mcpServers,
-  attachmentHistory,
+export function AttachFilesButton({
+  onClick,
+  presentation = "desktop",
 }: {
-  mcpServers: string[];
-  attachmentHistory?: MCPAttachmentHistory;
+  onClick: () => void;
+  presentation?: "desktop" | "mobile";
 }) {
-  const usesTouchDrawer = useTouchDrawer();
-  const hasMcp = mcpServers.length > 0;
-  const Icon = hasMcp ? IconPlugConnected : IconPlugConnectedX;
-  const observedServers = attachmentHistory?.current.servers;
-  const servers =
-    observedServers && observedServers.length > 0
-      ? observedServers
-      : mcpServers.map((name) => ({ name, status: "unknown" as const, summary: undefined }));
-  const statusList = hasMcp ? (
-    <div className="space-y-1">
-      <div className="font-medium">MCP servers</div>
-      {servers.map((server) => (
-        <div key={server.name} className="flex items-center gap-2">
-          <span
-            className={cn(
-              "h-2 w-2 shrink-0 rounded-full",
-              mcpStatusColor[server.status] ?? mcpStatusColor.unknown,
-            )}
-            aria-hidden="true"
-          />
-          <span className="truncate">{server.name}</span>
-          <span className="text-muted-foreground">
-            {mcpStatusLabel[server.status] ?? "Unknown"}
-          </span>
-          {server.summary && <span className="text-muted-foreground">{server.summary}</span>}
-        </div>
-      ))}
-    </div>
-  ) : (
-    "Agent does not support MCP"
-  );
-  const trigger = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      aria-label="Show MCP connection status"
-      className={cn(
-        "h-7 w-7 cursor-pointer rounded-md hover:bg-muted/40",
-        hasMcp ? "text-foreground" : "text-muted-foreground/40",
-      )}
-      data-testid="mcp-status-trigger"
-    >
-      <Icon className="h-4 w-4" />
-    </Button>
-  );
-
-  if (usesTouchDrawer) {
-    return (
-      <Drawer>
-        <DrawerTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="Show MCP connection status"
-            className={cn(
-              "h-11 w-11 cursor-pointer rounded-md active:scale-95",
-              hasMcp ? "text-foreground" : "text-muted-foreground/40",
-            )}
-            data-testid="mcp-status-trigger"
-          >
-            <Icon className="h-4 w-4" />
-          </Button>
-        </DrawerTrigger>
-        <DrawerContent data-testid="mcp-status-drawer" className="max-h-[80dvh]">
-          <DrawerHeader>
-            <DrawerTitle>MCP connection status</DrawerTitle>
-          </DrawerHeader>
-          <div className="min-h-0 overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] text-sm">
-            {statusList}
-          </div>
-        </DrawerContent>
-      </Drawer>
-    );
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-      <TooltipContent data-testid="mcp-status-popover">{statusList}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-export function AttachFilesButton({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation();
+  const label = t("task:attachFiles");
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
+        <SurfaceAction
+          surface="composer"
+          presentation={presentation}
+          label={label}
+          icon={<IconPaperclip />}
           onClick={onClick}
           data-testid="chat-attachments-button"
-        >
-          <IconPaperclip className="h-4 w-4" />
-        </Button>
+        />
       </TooltipTrigger>
-      <TooltipContent>Attach files</TooltipContent>
+      <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
 }

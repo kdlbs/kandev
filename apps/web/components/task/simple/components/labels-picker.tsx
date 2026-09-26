@@ -9,6 +9,7 @@ import { useAppStore } from "@/components/state-provider";
 import { addLabel, removeLabel } from "@/lib/api/domains/office-extended-api";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
 import type { Task, TaskLabelLocal } from "@/app/office/tasks/[id]/types";
+import { useTranslation } from "react-i18next";
 
 type LabelsPickerProps = {
   task: Task;
@@ -21,6 +22,7 @@ function LabelChips({
   labels: TaskLabelLocal[];
   onRemove: (name: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       {labels.map((label) => (
@@ -45,7 +47,7 @@ function LabelChips({
                 onRemove(label.name);
               }
             }}
-            aria-label={`Remove ${label.name}`}
+            aria-label={t("task:remove2", { name: label.name })}
           >
             <IconX className="h-2.5 w-2.5" />
           </span>
@@ -56,6 +58,7 @@ function LabelChips({
 }
 
 export function LabelsPicker({ task }: LabelsPickerProps) {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const [open, setOpen] = useState(false);
   const [newLabel, setNewLabel] = useState("");
@@ -69,7 +72,7 @@ export function LabelsPicker({ task }: LabelsPickerProps) {
     const name = newLabel.trim();
     if (!name || !workspaceId) return;
     if (labels.some((l) => l.name === name)) {
-      toast.error("Label already exists");
+      toast.error(t("task:labelAlreadyExists"));
       return;
     }
     const next = [...labels, { name, color: newColor }];
@@ -104,7 +107,7 @@ export function LabelsPicker({ task }: LabelsPickerProps) {
           className="flex flex-wrap items-center justify-end gap-1 ml-auto cursor-pointer rounded px-2 py-1 hover:bg-accent/50 min-h-[28px]"
         >
           {labels.length === 0 ? (
-            <span className="text-muted-foreground text-xs">+ Add labels</span>
+            <span className="text-muted-foreground text-xs">{t("task:addLabels")}</span>
           ) : (
             <LabelChips labels={labels} onRemove={handleRemove} />
           )}
@@ -113,7 +116,7 @@ export function LabelsPicker({ task }: LabelsPickerProps) {
       <PopoverContent align="end" className="w-64 p-3 space-y-2" portal={false}>
         <div className="flex flex-wrap gap-1">
           {labels.length === 0 ? (
-            <span className="text-xs text-muted-foreground">No labels yet</span>
+            <span className="text-xs text-muted-foreground">{t("task:noLabelsYet")}</span>
           ) : (
             <LabelChips labels={labels} onRemove={handleRemove} />
           )}
@@ -122,7 +125,7 @@ export function LabelsPicker({ task }: LabelsPickerProps) {
           <input
             ref={inputRef}
             className="flex-1 px-1.5 py-0.5 text-xs border border-border rounded bg-background"
-            placeholder="label name"
+            placeholder={t("task:labelName")}
             value={newLabel}
             onChange={(e) => setNewLabel(e.target.value)}
             onKeyDown={(e) => {
@@ -139,14 +142,14 @@ export function LabelsPicker({ task }: LabelsPickerProps) {
             className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
             value={newColor}
             onChange={(e) => setNewColor(e.target.value)}
-            aria-label="Label color"
+            aria-label={t("task:labelColor")}
           />
           <Button
             variant="ghost"
             size="icon"
             className="h-6 w-6 cursor-pointer"
             onClick={() => void handleAdd()}
-            aria-label="Add label"
+            aria-label={t("task:addLabel")}
           >
             <IconPlus className="h-3 w-3" />
           </Button>

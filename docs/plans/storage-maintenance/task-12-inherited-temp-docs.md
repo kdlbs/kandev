@@ -5,7 +5,7 @@ status: complete
 wave: 8
 depends_on: ["10-inherit-service-temp", "11-e2e-temp-cleanup"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 12: Update inherited-temp operations docs

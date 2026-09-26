@@ -23,6 +23,7 @@ import {
   analyzeStorage,
   deleteStorageQuarantine,
   fetchStorageOverview,
+  fetchStorageDisk,
   fetchStoragePolicy,
   fetchStorageQuarantine,
   fetchStorageRuns,
@@ -35,6 +36,7 @@ import type {
   StorageBusyResource,
   StorageBusyResponse,
   StorageMaintenanceSettings,
+  StorageOverviewResponse,
   StoragePolicyResponse,
   StorageQuarantinePurgeScope,
   SystemJob,
@@ -96,7 +98,7 @@ export function settingsWithDockerAcknowledgement(
   };
 }
 
-export type StorageSection = "policy" | "overview" | "runs" | "quarantine";
+export type StorageSection = "policy" | "overview" | "disk" | "runs" | "quarantine";
 export type StorageSectionLoading = Record<StorageSection, boolean>;
 export type StorageSectionErrors = Record<StorageSection, string | null>;
 type Reload = (sections?: StorageSection[]) => Promise<void>;
@@ -104,6 +106,8 @@ type SetStorageError = Dispatch<SetStateAction<string | null>>;
 const TERMINAL_REFRESH_RETRY_MS = 1000;
 const TERMINAL_REFRESH_MAX_RETRY_MS = 8000;
 const MAX_TERMINAL_REFRESH_ATTEMPTS = 6;
+const STORAGE_ANALYSIS_POLL_MS = 1500;
+const MAX_BROWSER_TIMEOUT_MS = 2_147_483_647;
 
 function useStorageActionRunner() {
   const { toast } = useToast();
@@ -372,27 +376,98 @@ function useReloadCompletedJobs(
   useTerminalJobRefresh(reload, setError, deleteJob);
 }
 
+function useStorageAnalysisUpdates(analysisRevision: number, reload: Reload) {
+  const previousRevision = useRef(analysisRevision);
+  useEffect(() => {
+    if (previousRevision.current === analysisRevision) return;
+    previousRevision.current = analysisRevision;
+    void reload(["overview"]).catch(() => undefined);
+  }, [analysisRevision, reload]);
+}
+
+function useStorageAnalysisPolling(
+  analysisState: string | undefined,
+  analysisGeneration: number | undefined,
+  reload: Reload,
+) {
+  useEffect(() => {
+    if (analysisState !== "scanning") return;
+    const timer = setInterval(() => {
+      void reload(["overview"]).catch(() => undefined);
+    }, STORAGE_ANALYSIS_POLL_MS);
+    return () => clearInterval(timer);
+  }, [analysisGeneration, analysisState, reload]);
+}
+
+function useStorageAnalysisRefreshSchedule(
+  analysisState: string | undefined,
+  refreshDueAt: string | null | undefined,
+  reload: Reload,
+) {
+  useEffect(() => {
+    if (!refreshDueAt || analysisState === "scanning") return;
+    const dueAt = Date.parse(refreshDueAt);
+    if (!Number.isFinite(dueAt)) return;
+    const delay = Math.max(0, dueAt - Date.now());
+    if (delay > MAX_BROWSER_TIMEOUT_MS) return;
+    const timer = setTimeout(() => {
+      void reload(["overview"]).catch(() => undefined);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [analysisState, refreshDueAt, reload]);
+}
+
+function useStorageMaintenanceEffects(
+  reload: Reload,
+  setError: SetStorageError,
+  actions: ReturnType<typeof useStorageActions>,
+  analysisRevision: number,
+  overview: StorageOverviewResponse | null,
+) {
+  useEffect(() => {
+    void reload().catch(() => undefined);
+  }, [reload]);
+  const analysisState = overview?.analysis.state;
+  const analysisGeneration = overview?.analysis.generation;
+  const refreshDueAt = overview?.analysis.refresh_due_at;
+  useStorageAnalysisUpdates(analysisRevision, reload);
+  useStorageAnalysisPolling(analysisState, analysisGeneration, reload);
+  useStorageAnalysisRefreshSchedule(analysisState, refreshDueAt, reload);
+  useReloadCompletedJobs(
+    reload,
+    actions.setError,
+    actions.analysisJob,
+    actions.cleanupJob,
+    actions.deleteJob,
+  );
+}
+
 export function useStorageMaintenance() {
   const storage = useAppStore((state) => state.system.storage);
+  const analysisRevision = useAppStore((state) => state.system.storage.analysisRevision);
   const setPolicy = useAppStore((state) => state.setSystemStoragePolicy);
   const setOverview = useAppStore((state) => state.setSystemStorageOverview);
+  const setDisk = useAppStore((state) => state.setSystemStorageDisk);
   const setRuns = useAppStore((state) => state.setSystemStorageRuns);
   const setQuarantine = useAppStore((state) => state.setSystemStorageQuarantine);
   const [loading, setLoading] = useState<StorageSectionLoading>({
     policy: true,
     overview: true,
+    disk: true,
     runs: true,
     quarantine: true,
   });
   const [sectionErrors, setSectionErrors] = useState<StorageSectionErrors>({
     policy: null,
     overview: null,
+    disk: null,
     runs: null,
     quarantine: null,
   });
   const sectionGenerations = useRef<Record<StorageSection, number>>({
     policy: 0,
     overview: 0,
+    disk: 0,
     runs: 0,
     quarantine: 0,
   });
@@ -421,13 +496,15 @@ export function useStorageMaintenance() {
     [],
   );
   const reload = useCallback(
-    async (sections: StorageSection[] = ["policy", "overview", "runs", "quarantine"]) => {
+    async (sections: StorageSection[] = ["policy", "overview", "disk", "runs", "quarantine"]) => {
       const jobs = sections.map((section) => {
         switch (section) {
           case "policy":
             return loadSection("policy", fetchStoragePolicy, setPolicy);
           case "overview":
             return loadSection("overview", fetchStorageOverview, setOverview);
+          case "disk":
+            return loadSection("disk", fetchStorageDisk, setDisk);
           case "runs":
             return loadSection("runs", () => fetchStorageRuns(20), setRuns);
           case "quarantine":
@@ -440,7 +517,7 @@ export function useStorageMaintenance() {
       );
       if (failure) throw failure.reason;
     },
-    [loadSection, setOverview, setPolicy, setQuarantine, setRuns],
+    [loadSection, setDisk, setOverview, setPolicy, setQuarantine, setRuns],
   );
   const commitAdoptedPolicy = useCallback(
     (policy: StoragePolicyResponse) => {
@@ -452,16 +529,12 @@ export function useStorageMaintenance() {
     [setPolicy],
   );
   const actions = useStorageActions(reload, commitAdoptedPolicy);
-
-  useEffect(() => {
-    void reload().catch(() => undefined);
-  }, [reload]);
-  useReloadCompletedJobs(
+  useStorageMaintenanceEffects(
     reload,
     actions.setError,
-    actions.analysisJob,
-    actions.cleanupJob,
-    actions.deleteJob,
+    actions,
+    analysisRevision,
+    storage.overview,
   );
   return { ...storage, ...actions, loading, sectionErrors, reload };
 }

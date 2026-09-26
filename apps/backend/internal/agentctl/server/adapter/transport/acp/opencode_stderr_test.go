@@ -13,6 +13,186 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
+func TestNormalizeOpenCodeActionURLAcceptsOnlyAllowlistedRoute(t *testing.T) {
+	const want = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"
+	accepted := []string{
+		want,
+		"https://opencode.ai/workspace/a/go",
+		"https://opencode.ai/workspace/WRK-build_run-42/go",
+		"https://opencode.ai/workspace/" + strings.Repeat("x", 128) + "/go",
+	}
+	for _, raw := range accepted {
+		if got := NormalizeOpenCodeActionURL(raw); got != raw {
+			t.Errorf("NormalizeOpenCodeActionURL(%q) = %q, want the input itself", raw, got)
+		}
+	}
+
+	rejected := []string{
+		"",
+		"http://opencode.ai/workspace/wrk_123/go",
+		"https://opencode.example.com/workspace/wrk_123/go",
+		"https://opencode.ai/workspace/wrk_123",
+		"https://opencode.ai/workspace/wrk_123/go/",
+		"https://opencode.ai/workspace/wrk_123/go/extra",
+		"https://opencode.ai/workspace/wrk_123/other",
+		"https://opencode.ai/workspace/wrk_123/go?source=email",
+		"https://opencode.ai/workspace/wrk_123/go?",
+		"https://opencode.ai/workspace/wrk_123/go#fragment",
+		"https://opencode.ai/workspace/wrk_123/go#",
+		"https://opencode.ai/workspace/wrk_123/go?#",
+		"https://user:" +
+			"PASSWORD@opencode.ai/workspace/wrk_123/go",
+		"https://opencode.ai:443/workspace/wrk_123/go",
+		"https://opencode.ai/workspace/wrk_123%2F..%2Fgo",
+		"https://opencode.ai/workspace/%77rk_123/go",
+		"https://opencode.ai/workspace/../go",
+		"https://opencode.ai/workspace/../workspace/wrk_123/go",
+		"https://opencode.ai/workspace/wrk_123/go extra",
+		"https://opencode.ai/workspace/wrk_123/go.",
+		"https://opencode.ai/workspace/" + strings.Repeat("w", 200) + "/go",
+		"https://example.test/workspace/wrk_123/go",
+		"not a url",
+	}
+	for _, raw := range rejected {
+		if got := NormalizeOpenCodeActionURL(raw); got != "" {
+			t.Errorf("NormalizeOpenCodeActionURL(%q) = %q, want empty", raw, got)
+		}
+	}
+}
+
+func TestExtractOpenCodeActionURLFindsValidTokenInMessage(t *testing.T) {
+	const want = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"
+	line := "AI_APICallError: 5-hour usage limit reached. To continue using this model now, enable usage from your available balance: " + want
+	if got := extractOpenCodeActionURL(line); got != want {
+		t.Fatalf("extractOpenCodeActionURL() = %q, want %q", got, want)
+	}
+	for _, raw := range []string{
+		"provider failed",
+		"visit https://example.test/workspace/wrk_123/go instead",
+		"balance: https://opencode.ai/workspace/wrk_123/go.",
+		"https://opencode.ai/workspace/wrk_123",
+	} {
+		if got := extractOpenCodeActionURL(raw); got != "" {
+			t.Errorf("extractOpenCodeActionURL(%q) = %q, want empty", raw, got)
+		}
+	}
+}
+
+func TestProviderErrorFromACPRequestErrorReadsOnlyStructuredActionURL(t *testing.T) {
+	const wantURL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"
+
+	t.Run("structured action_url projects a safe provider error", func(t *testing.T) {
+		err := &sdk.RequestError{
+			Code:    -32603,
+			Message: "AI_APICallError: 5-hour usage limit reached: " + wantURL,
+			Data:    map[string]any{"action_url": wantURL},
+		}
+		got := ProviderErrorFromError(err, "", "")
+		if got == nil {
+			t.Fatal("ProviderErrorFromError() = nil, want provider error")
+		}
+		if got.Source != streams.ProviderErrorSourceOpenCodeACP {
+			t.Fatalf("source = %q", got.Source)
+		}
+		if got.RemediationURL != wantURL {
+			t.Fatalf("remediation URL = %q, want %q", got.RemediationURL, wantURL)
+		}
+		if strings.Contains(got.Message, "https://") ||
+			strings.Contains(got.Message, "wrk_01KQM7K5CYT715264YKKFB17ZY") {
+			t.Fatalf("message contains private URL or identifier: %q", got.Message)
+		}
+		if got.Message == "" {
+			t.Fatal("message is empty")
+		}
+	})
+
+	t.Run("missing or malformed action_url uses the generic ACP projection", func(t *testing.T) {
+		for _, tt := range []struct {
+			name         string
+			err          error
+			wantProvider bool
+		}{
+			{name: "no data", err: &sdk.RequestError{Code: -32603, Message: "provider failed"}, wantProvider: true},
+			{name: "wrong shape", err: &sdk.RequestError{Code: -32603, Message: "provider failed", Data: "action_url"}, wantProvider: true},
+			{name: "wrong host", err: &sdk.RequestError{
+				Code: -32603, Message: "provider failed",
+				Data: map[string]any{"action_url": "https://example.test/workspace/wrk_123/go"},
+			}, wantProvider: true},
+			{name: "query", err: &sdk.RequestError{
+				Code: -32603, Message: "provider failed",
+				Data: map[string]any{"action_url": wantURL + "?source=email"},
+			}, wantProvider: true},
+			{name: "malformed id", err: &sdk.RequestError{
+				Code: -32603, Message: "provider failed",
+				Data: map[string]any{"action_url": "https://opencode.ai/workspace/../go"},
+			}, wantProvider: true},
+			{name: "oversized", err: &sdk.RequestError{
+				Code: -32603, Message: "provider failed",
+				Data: map[string]any{"action_url": "https://opencode.ai/workspace/" + strings.Repeat("w", 300) + "/go"},
+			}, wantProvider: true},
+			{name: "wrapped generic error", err: fmt.Errorf("provider failed")},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				got := ProviderErrorFromError(tt.err, "", "")
+				if tt.wantProvider && (got == nil || got.Source != streams.ProviderErrorSourceACPPrompt) {
+					t.Fatalf("ProviderErrorFromError() = %+v, want generic ACP provider error", got)
+				}
+				if !tt.wantProvider && got != nil {
+					t.Fatalf("ProviderErrorFromError() = %+v, want nil", got)
+				}
+			})
+		}
+	})
+}
+
+func TestParseOpenCodeStderrLineWeeklyLimitResetInDays(t *testing.T) {
+	line := `timestamp=2026-09-03T07:19:45.000Z level=ERROR run=4120ce87 message="stream error" providerID=opencode-go modelID=deepseek-v4-flash session.id=ses_f99491a97ffeeWlCMErV9o00vr small=false agent=build mode=primary error.error="AI_APICallError: Weekly usage limit reached. Resets in 3 days. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"`
+
+	diagnostic, ok := parseOpenCodeStderrLine(line)
+	if !ok {
+		t.Fatal("parseOpenCodeStderrLine() rejected a weekly usage-limit stream error")
+	}
+	wantOccurred := time.Date(2026, 9, 3, 7, 19, 45, 0, time.UTC)
+	wantReset := wantOccurred.Add(3 * 24 * time.Hour)
+	if diagnostic.ProviderError.ResetAt == nil || !diagnostic.ProviderError.ResetAt.Equal(wantReset) {
+		t.Fatalf("reset at = %v, want %s", diagnostic.ProviderError.ResetAt, wantReset)
+	}
+
+	t.Run("mixed units", func(t *testing.T) {
+		line := `timestamp=2026-09-03T07:19:45.000Z level=ERROR run=4120ce87 message="stream error" providerID=opencode-go modelID=deepseek-v4-flash session.id=ses_f99491a97ffeeWlCMErV9o00vr small=false agent=build mode=primary error.error="AI_APICallError: Weekly usage limit reached. Resets in 3 days 4 hours 19 min."`
+		diagnostic, ok := parseOpenCodeStderrLine(line)
+		if !ok {
+			t.Fatal("parseOpenCodeStderrLine() rejected a mixed-unit weekly usage-limit stream error")
+		}
+		wantReset := wantOccurred.Add(3*24*time.Hour + 4*time.Hour + 19*time.Minute)
+		if diagnostic.ProviderError.ResetAt == nil || !diagnostic.ProviderError.ResetAt.Equal(wantReset) {
+			t.Fatalf("reset at = %v, want %s", diagnostic.ProviderError.ResetAt, wantReset)
+		}
+	})
+}
+
+func TestProviderErrorFromACPRequestErrorProjectsGenericPromptFailure(t *testing.T) {
+	err := &sdk.RequestError{
+		Code:    -32603,
+		Message: "Internal error: API Error: Repeated 529 Overloaded errors. See https://gateway.example/private/session",
+		Data:    map[string]any{"errorKind": "server_error", "private_token": "must-not-cross-boundary"},
+	}
+
+	got := ProviderErrorFromError(err, "", "")
+	if got == nil {
+		t.Fatal("ProviderErrorFromError() = nil, want a sanitized generic ACP provider error")
+	}
+	if got.Source != "acp_prompt" {
+		t.Fatalf("source = %q, want acp_prompt", got.Source)
+	}
+	if strings.Contains(got.Message, "https://") || strings.Contains(got.Message, "private_token") {
+		t.Fatalf("generic ACP message leaked private detail: %q", got.Message)
+	}
+	if !strings.Contains(got.Message, "529 Overloaded") {
+		t.Fatalf("generic ACP message = %q, want provider diagnostic", got.Message)
+	}
+}
+
 func TestParseOpenCodeStderrLineAcceptsForegroundStreamError(t *testing.T) {
 	line := `timestamp=2026-08-02T15:15:44.504Z level=ERROR run=a93db686 message="stream error" providerID=opencode-go modelID=kimi-k3 session.id=ses_03d1ac324ffeA2eAGeBfuq80dq small=false agent=build mode=primary error.error="AI_APICallError: 5-hour usage limit reached. Resets in 4hr 19min. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"`
 
@@ -46,6 +226,58 @@ func TestParseOpenCodeStderrLineAcceptsForegroundStreamError(t *testing.T) {
 	}
 	if diagnostic.ProviderError.Message == "" {
 		t.Fatal("message is empty")
+	}
+	wantURL := "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"
+	if diagnostic.ProviderError.RemediationURL != wantURL {
+		t.Fatalf("remediation URL = %q, want %q", diagnostic.ProviderError.RemediationURL, wantURL)
+	}
+}
+
+func TestParseOpenCodeStderrLineCapturesExplicitActionURLField(t *testing.T) {
+	line := `timestamp=2026-08-02T15:15:44Z level=ERROR message="stream error" providerID=opencode-go modelID=kimi-k3 session.id=ses_123 small=false agent=build action_url="https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go" error.error="AI_APICallError: usage limit reached"`
+
+	diagnostic, ok := parseOpenCodeStderrLine(line)
+	if !ok {
+		t.Fatal("parseOpenCodeStderrLine() rejected an action_url record")
+	}
+	wantURL := "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"
+	if diagnostic.ProviderError.RemediationURL != wantURL {
+		t.Fatalf("remediation URL = %q, want %q", diagnostic.ProviderError.RemediationURL, wantURL)
+	}
+	if strings.Contains(diagnostic.ProviderError.Message, "https://") ||
+		strings.Contains(diagnostic.ProviderError.Message, "wrk_") {
+		t.Fatalf("message contains private URL or identifier: %q", diagnostic.ProviderError.Message)
+	}
+}
+
+func TestParseOpenCodeStderrLineRejectsUntrustedActionURLs(t *testing.T) {
+	base := `timestamp=2026-08-02T15:15:44Z level=ERROR message="stream error" providerID=opencode-go modelID=kimi-k3 session.id=ses_123 small=false agent=build error.error="usage limit reached"`
+	for _, tt := range []struct {
+		name string
+		line string
+	}{
+		{
+			name: "wrong host",
+			line: strings.Replace(base, `error.error=`, `action_url="https://example.test/workspace/wrk_123/go" error.error=`, 1),
+		},
+		{
+			name: "query",
+			line: strings.Replace(base, `error.error=`, `action_url="https://opencode.ai/workspace/wrk_123/go?x=1" error.error=`, 1),
+		},
+		{
+			name: "malformed id",
+			line: strings.Replace(base, `error.error=`, `action_url="https://opencode.ai/workspace/../go" error.error=`, 1),
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			diagnostic, ok := parseOpenCodeStderrLine(tt.line)
+			if !ok {
+				t.Fatal("parseOpenCodeStderrLine() rejected the record")
+			}
+			if diagnostic.ProviderError.RemediationURL != "" {
+				t.Fatalf("remediation URL = %q, want empty", diagnostic.ProviderError.RemediationURL)
+			}
+		})
 	}
 }
 

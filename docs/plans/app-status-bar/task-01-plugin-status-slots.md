@@ -11,7 +11,7 @@ plan: docs/plans/app-status-bar/plan.md
 
 ## Inputs
 
-[Spec: plugin slots](../../specs/ui/app-status-bar.md#plugin-slots); [frozen API](../plugins/PLUGIN-API.md#app-status-bar-slots); existing chat-input typed wrapper.
+[Spec: plugin slots](../../specs/ui/requirements/app-status-bar.md#plugin-slots); [frozen API](../plugins/PLUGIN-API.md#app-status-bar-slots); existing chat-input typed wrapper.
 
 ## Files
 

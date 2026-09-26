@@ -72,9 +72,9 @@ func emitEditFile(e *emitter, model string) {
 		acp.ToolCallLocation{Path: f.absPath})
 
 	if e.requestPermission(toolID, "Edit "+f.relPath, acp.ToolKindEdit, input) {
-		e.completeTool(toolID, map[string]any{"result": "File edited successfully: " + f.absPath})
+		e.completeTool(toolID, map[string]any{toolKeyResult: "File edited successfully: " + f.absPath})
 	} else {
-		e.completeTool(toolID, map[string]any{"result": "Permission denied for Edit"})
+		e.completeTool(toolID, map[string]any{toolKeyResult: "Permission denied for Edit"})
 		e.text("Permission denied for Edit, skipping.")
 	}
 }
@@ -104,7 +104,7 @@ func emitCodeSearch(e *emitter, model string) {
 	toolID := nextToolID()
 	randomDelay(model)
 
-	searchPatterns := []string{"func ", "import ", "TODO", "return ", "error", "type "}
+	searchPatterns := []string{"func ", "import ", "TODO", "return ", toolKeyError, "type "}
 	pattern := searchPatterns[state.toolCallCounter%len(searchPatterns)]
 
 	f := randomFile()
@@ -175,7 +175,7 @@ func emitTodo(e *emitter, model string) {
 	})
 
 	randomDelay(model)
-	e.completeTool(toolID, map[string]any{"result": "Todo list updated: 3 items (1 in progress, 2 pending)"})
+	e.completeTool(toolID, map[string]any{toolKeyResult: "Todo list updated: 3 items (1 in progress, 2 pending)"})
 }
 
 // emitMermaidSequence emits a rich markdown message containing mermaid diagrams.
@@ -253,12 +253,12 @@ func markdownLongParaMsg() string {
 		"The approach mirrors how a senior engineer would tackle an unfamiliar codebase: read the entry points, " +
 		"trace the data flow, identify the invariants that must hold, and only then start making changes. " +
 		"Getting this sequence right matters because changes made without understanding the invariants tend to " +
-		"introduce subtle regressions that only surface under production load — exactly the kind of bug that is " +
+		"introduce subtle regressions that only surface under production load. This is exactly the kind of bug that is " +
 		"hardest to diagnose after the fact.\n\n" +
 		"A second long paragraph follows immediately to check spacing between blocks. " +
 		"The spacing should feel consistent with single-paragraph messages, neither too tight nor too loose. " +
 		"Inter-paragraph spacing is controlled by `margin-top` on `.markdown-body p + p`, " +
-		"which currently sits at `0.5em` — enough breathing room without pushing content off-screen on short viewports."
+		"which currently sits at `0.5em`: enough breathing room without pushing content off-screen on short viewports."
 }
 
 func markdownCodeBlocksMsg() string {
@@ -302,7 +302,7 @@ func markdownListsMsg() string {
 	return "## Lists\n\n" +
 		"Unordered:\n\n" +
 		"- First item with `inline code` in it\n" +
-		"- Second item — **bold text** and *italic text* inline\n" +
+		"- Second item: **bold text** and *italic text* inline\n" +
 		"- Third item with a longer description: this tests wrapping inside list items at narrow panel widths, " +
 		"which is a common layout scenario in split-pane editors\n" +
 		"  - Nested item A\n" +
@@ -326,7 +326,7 @@ func markdownTableBlockquoteMsg() string {
 		"---\n\n" +
 		"## Blockquote\n\n" +
 		"> Programs must be written for people to read, and only incidentally for machines to execute.\n" +
-		"> — Harold Abelson\n\n" +
+		"> Harold Abelson\n\n" +
 		"> A second blockquote paragraph to verify spacing between consecutive quote blocks " +
 		"and to ensure the left-border styling extends for the full height of wrapped lines.\n\n" +
 		"---\n\n" +
@@ -343,8 +343,8 @@ func emitWebFetch(e *emitter, model string) {
 	randomDelay(model)
 
 	e.startTool(toolID, "Fetch API docs", acp.ToolKindFetch, map[string]any{
-		"url":    "https://example.com/api/docs",
-		"prompt": "Extract the API endpoints and their descriptions",
+		"url":                  "https://example.com/api/docs",
+		clarificationPromptKey: "Extract the API endpoints and their descriptions",
 	})
 
 	randomDelay(model)

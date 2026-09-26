@@ -94,6 +94,15 @@ explicitly requests task tracking.
      ```
      Retry the normal commit after the install; never bypass the hook.
 
+   - After merging or rebasing the base branch, if `apps/package.json` or
+     `apps/pnpm-lock.yaml` changed and a hook reports
+     `ERR_MODULE_NOT_FOUND` even though `apps/node_modules/.bin/commitlint`
+     exists, refresh the workspace dependencies from `apps/`:
+     ```bash
+     cd apps && pnpm install --frozen-lockfile
+     ```
+     Retry the normal commit without bypassing hooks.
+
    Why this matters: a missing hook lets lint regressions slip past local commits and only surface in CI (e.g. funlen / cognitive complexity on backend Go code). The hook catches them in <1s at commit time. See `Makefile`'s `doctor` target for the idempotent install command.
 
 3. **Capture the parent SHA and preserve hook evidence:**
@@ -106,35 +115,73 @@ explicitly requests task tracking.
 qualifies as a successful hook receipt.
 
 4. **Stage files:** Stage relevant files (prefer specific files over `git add -A`).
+   Before reviewing or committing, inspect every `??` path from `git status
+   --short`; `git diff` omits untracked files. Stage each relevant path or read
+   it explicitly so new tests and helpers are not missed.
    - **Splitting commits with new files:** When introducing a brand-new file alongside the file that uses it, stage them together. The Go lint pre-commit hook stashes *unstaged* changes before linting but keeps *untracked* files in the working tree — so a new helper committed alone, while its (still-unstaged) caller sits in the working tree, lints as `unused` and rejects the commit.
 
 5. **Commit:** Write a commit message following the format above. If changes span multiple concerns, consider separate commits.
+   When `MERGE_HEAD` exists or a merge commit is being completed, use
+   `git commit --no-edit` so a non-interactive runner does not open an editor;
+   normal hooks still run. Confirm the merge commit exists and `MERGE_HEAD` is
+   gone before reporting success.
    If a formatter changes files and prevents the commit, review and re-stage
    those files, then create a new commit attempt; do not use `--amend`.
-   Capture the normal hook stream in a temporary log while committing and use
-   that log to record each hook ID and result. Do not infer hook results from a
-   condensed launcher summary. For example:
+   When editing harness files such as `AGENTS.md`, `CLAUDE.md`, or skills, run
+   the shared validation in
+   `.agents/skills/harness-improvement/references/validation.md` before
+   committing.
+   If a JSX layout-only edit touches an element containing an existing
+   hardcoded user-facing literal, `i18n-new-code` may classify that literal as
+   changed copy and fail. Localize it and add matching `en`/`pseudo` catalog
+   entries before retrying; verify with `cd apps/web && pnpm run i18n:check` and
+   the normal hook receipt.
+   If the commit command returns an `exec_command` `session_id`, preserve the
+   full result and poll that same session until it is terminal; never start a
+   second commit attempt while the first is live. Retain the exact temporary
+   log path from that single attempt for the hook receipt. Capture the normal
+   hook stream in a temporary log while committing and use that log to record
+   each hook ID and result. RTK can condense `rtk git commit`
+   output, so use `rtk proxy git commit` when preserving raw hook output. Do not
+   infer hook results from a condensed launcher summary. For example:
    ```bash
    COMMIT_LOG="$(mktemp "${TMPDIR:-/tmp}/kandev-commit.XXXXXX.log")"
    set -o pipefail
-   if command -v rtk >/dev/null 2>&1; then
-     rtk proxy git commit -m "type(scope): description"
-   else
-     git commit -m "type(scope): description"
-   fi 2>&1 | tee "$COMMIT_LOG" >/dev/null
+   rtk proxy git commit -m "type(scope): description" 2>&1 | rtk proxy tee "$COMMIT_LOG" >/dev/null
    ```
-   Read the log to extract the hook receipt, rather than printing the full
-   stream again. Remove the exact temporary file after copying the receipt into
+   Both the commit and `tee` stages must use raw-output mode when the log is
+   parsed; normal `rtk git commit` output may contain only `ok <sha>` and is not
+   hook evidence. Read the log to extract every hook ID/result and confirm the receipt still
+   says `bypass: false`, rather than printing the full stream again. Remove the
+   exact temporary file after copying the receipt into
    the handoff:
    ```bash
    unlink "$COMMIT_LOG"
    ```
+   If a timed-out hook leaves a commit or linter process running, inspect
+   `git status`, `git log`, and only that attempt's processes before retrying.
+   Wait for or stop the owned process tree first; do not mistake a transient
+   `parallel golangci-lint is running` message for a second commit failure.
+   If the commit exits nonzero, preserve and print the full or bounded log
+   before cleanup so hook diagnostics are not lost. Remove the temporary log
+   only after copying a successful hook receipt or recording the failed output.
+   When extracting receipt lines from a nested shell, use shell-safe single-
+   quoted `awk` or `sed` expressions; a double-quoted `sed` range containing
+   `$` can be expanded by the outer shell and hide the receipt. Record active
+   hooks that report `Skipped` or `no files to check` as `skipped`; do not infer
+   their result from the launcher's summary, and retain the log until both the
+   pre-commit and commit-msg results are recorded.
 
    If a hook fails only because another worktree is already running
    golangci-lint (for example, `parallel golangci-lint is running`), wait for
    that run to finish and retry the same commit. Do not bypass hooks or change
    code for this transient lock; verify the retry has a normal hook receipt and
    a clean worktree.
+
+   If a hook fails with `ENOSPC`, load `/verify`'s Disk-constrained runners
+   guidance: inspect `df`, preserve managed caches, relocate only the affected
+   cache to an explicit persistent agent-owned path, and never bypass hooks or
+   blindly delete shared caches.
 
 6. **Return a hook receipt:** After a successful commit, report:
    ```text

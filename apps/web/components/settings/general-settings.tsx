@@ -1,42 +1,59 @@
 "use client";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import Link from "@/components/routing/app-link";
 import { useTheme } from "@/components/theme/app-theme";
 import {
-  IconActivity,
+  IconBinaryTree,
   IconCommand,
   IconPalette,
   IconKeyboard,
-  IconGitBranch,
   IconArchive,
   IconArrowBackUp,
+  IconListCheck,
   IconHome,
 } from "@tabler/icons-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { SettingsCard } from "@/components/settings/settings-card";
+import { settingsControlClassName } from "@/components/settings/settings-control";
+import { SettingsRow } from "@/components/settings/settings-group";
+import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
-import { SystemMetricsSettingsCard } from "@/components/settings/system-metrics-settings-card";
-import { useGeneralNavItems } from "@/components/settings/general-nav";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 import { ArchiveConfirmationSettings } from "@/components/settings/archive-confirmation-settings";
+import { CreationAutoFocusSettings } from "@/components/settings/creation-auto-focus-settings";
+import { PreventAutoStartAgentSettings } from "@/components/settings/prevent-auto-start-agent-settings";
 import { LanguageSettings } from "@/components/settings/language-settings";
 import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-task-agent-profile-default-settings";
 import { UnreadDividerSettings } from "@/components/settings/unread-divider-settings";
 import { AgentGeneratedTaskTitleSettings } from "@/components/settings/agent-generated-task-title-settings";
 import { AnchoredPromptBarSettings } from "@/components/settings/anchored-prompt-bar-settings";
+import { TodoListPanelSettings } from "@/components/settings/todo-list-panel-settings";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import { buildPluginShortcutEntries } from "@/lib/keyboard/plugin-shortcuts";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { StartupPageSettingsCard } from "@/components/settings/startup-page-settings-card";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
+import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-settings";
+import { SettingsMenuModeCard } from "@/components/settings/settings-menu-mode-card";
+import { ChatMotionSettingsCard } from "./chat-motion-settings-card";
+import { RichOutputMotionSettingsCard } from "@/components/settings/rich-output-motion-settings-card";
+import { AppearanceAccountSections } from "@/components/settings/appearance-account-sections";
+import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
+import {
+  appearanceRevision,
+  parseSidebarHoverDelay,
+  buildAppearanceUserSettingsPatch,
+  createAppearanceSavedState,
+  rebaseAppearanceDraft,
+  type AppearanceState,
+} from "@/components/settings/appearance-settings-state";
 
 function ThemeSettingsCard({
   theme,
@@ -49,25 +66,29 @@ function ThemeSettingsCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard isDirty={isDirty} data-testid="theme-settings-card">
-      <CardHeader>
-        <CardTitle className="text-base">{t("settings:colorTheme")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <Select value={theme} onValueChange={(value) => onChange(value as Theme)}>
-            <SelectTrigger id="theme" data-settings-dirty={isDirty}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="system">{t("common:system")}</SelectItem>
-              <SelectItem value="light">{t("settings:light")}</SelectItem>
-              <SelectItem value="dark">{t("settings:dark")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </CardContent>
-    </SettingsCard>
+    <SettingsRow
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.colorTheme}
+      data-testid="theme-settings-card"
+      label={t("settings:colorTheme")}
+      controlId="theme"
+      control={
+        <Select value={theme} onValueChange={(value) => onChange(value as Theme)}>
+          <SelectTrigger
+            id="theme"
+            className={settingsControlClassName()}
+            data-settings-dirty={isDirty}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="system">{t("common:system")}</SelectItem>
+            <SelectItem value="light">{t("settings:light")}</SelectItem>
+            <SelectItem value="dark">{t("settings:dark")}</SelectItem>
+          </SelectContent>
+        </Select>
+      }
+    />
   );
 }
 
@@ -82,88 +103,35 @@ function ChatSubmitKeyCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard isDirty={isDirty} data-testid="chat-submit-key-card">
-      <CardHeader>
-        <CardTitle className="text-base">{t("settings:submitShortcut")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <Label htmlFor="chat-submit-key">{t("settings:messageSubmitKey")}</Label>
-          <Select value={value} onValueChange={(next) => onChange(next as "enter" | "cmd_enter")}>
-            <SelectTrigger id="chat-submit-key" data-settings-dirty={isDirty}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="cmd_enter">{t("settings:cmdCtrlEnterToSend")}</SelectItem>
-              <SelectItem value="enter">{t("settings:enterToSend")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            {value === "cmd_enter"
-              ? t("settings:pressCmdCtrlEnterToSend")
-              : t("settings:pressEnterToSendMessagesPress")}
-          </p>
-        </div>
-      </CardContent>
-    </SettingsCard>
+    <SettingsRow
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.submitShortcut}
+      data-testid="chat-submit-key-card"
+      label={t("settings:messageSubmitKey")}
+      description={
+        value === "cmd_enter"
+          ? t("settings:pressCmdCtrlEnterToSend")
+          : t("settings:pressEnterToSendMessagesPress")
+      }
+      controlId="chat-submit-key"
+      descriptionId="chat-submit-key-description"
+      control={
+        <Select value={value} onValueChange={(next) => onChange(next as "enter" | "cmd_enter")}>
+          <SelectTrigger
+            id="chat-submit-key"
+            aria-describedby="chat-submit-key-description"
+            data-settings-dirty={isDirty}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="cmd_enter">{t("settings:cmdCtrlEnterToSend")}</SelectItem>
+            <SelectItem value="enter">{t("settings:enterToSend")}</SelectItem>
+          </SelectContent>
+        </Select>
+      }
+    />
   );
-}
-
-function ChangesPanelLayoutCard({
-  value,
-  isDirty,
-  onChange,
-}: {
-  value: "flat" | "tree";
-  isDirty: boolean;
-  onChange: (value: "flat" | "tree") => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <SettingsCard isDirty={isDirty} data-testid="changes-panel-layout-card">
-      <CardHeader>
-        <CardTitle className="text-base">{t("settings:changesPanelLayout")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <Label htmlFor="changes-panel-layout">{t("settings:fileListView")}</Label>
-          <Select value={value} onValueChange={(next) => onChange(next as "flat" | "tree")}>
-            <SelectTrigger
-              id="changes-panel-layout"
-              data-testid="changes-panel-layout-select"
-              data-settings-dirty={isDirty}
-              className="cursor-pointer"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="flat">{t("settings:flatList")}</SelectItem>
-              <SelectItem value="tree">{t("settings:tree")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            {t("settings:displayChangedFilesAsAFlat")}
-          </p>
-        </div>
-      </CardContent>
-    </SettingsCard>
-  );
-}
-
-function createAppearanceSavedState(
-  theme: Theme,
-  userSettings: Pick<
-    UserSettingsState,
-    "changesPanelLayout" | "startupPage" | "systemMetricsDisplay"
-  >,
-) {
-  return {
-    theme,
-    changesPanelLayout: userSettings.changesPanelLayout,
-    startupPage: userSettings.startupPage,
-    showMetrics: userSettings.systemMetricsDisplay.showInTopbar,
-    simplifiedMetrics: userSettings.systemMetricsDisplay.simplified,
-  };
 }
 
 function StartupPageSettingsSection({
@@ -193,14 +161,51 @@ function StartupPageSettingsSection({
   );
 }
 
-function AppearanceThemeSection({
-  theme,
+function SettingsMenuModeSection({
+  value,
   isDirty,
   onChange,
 }: {
-  theme: Theme;
+  value: SettingsMenuMode;
   isDirty: boolean;
-  onChange: (theme: Theme) => void;
+  onChange: (mode: SettingsMenuMode) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Separator />
+
+      <SettingsSection
+        icon={<IconBinaryTree className="h-5 w-5" />}
+        title={t("settings:settingsMenu")}
+        description={t("settings:chooseHowDeepTheSettingsMenuGoes")}
+      >
+        <SettingsMenuModeCard value={value} isDirty={isDirty} onChange={onChange} />
+      </SettingsSection>
+    </>
+  );
+}
+
+function AppearanceThemeSection({
+  theme,
+  isThemeDirty,
+  onThemeChange,
+  richOutputAnimationsEnabled,
+  isRichOutputMotionDirty,
+  onRichOutputMotionChange,
+  chatAnimationsEnabled,
+  isChatMotionDirty,
+  onChatMotionChange,
+}: {
+  theme: Theme;
+  isThemeDirty: boolean;
+  onThemeChange: (theme: Theme) => void;
+  richOutputAnimationsEnabled: boolean;
+  isRichOutputMotionDirty: boolean;
+  onRichOutputMotionChange: (enabled: boolean) => void;
+  chatAnimationsEnabled: boolean;
+  isChatMotionDirty: boolean;
+  onChatMotionChange: (enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -209,33 +214,18 @@ function AppearanceThemeSection({
       title={t("settings:appearance")}
       description={t("settings:customizeHowTheApplicationLooks")}
     >
-      <ThemeSettingsCard theme={theme} isDirty={isDirty} onChange={onChange} />
+      <ThemeSettingsCard theme={theme} isDirty={isThemeDirty} onChange={onThemeChange} />
+      <RichOutputMotionSettingsCard
+        enabled={richOutputAnimationsEnabled}
+        isDirty={isRichOutputMotionDirty}
+        onChange={onRichOutputMotionChange}
+      />
+      <ChatMotionSettingsCard
+        enabled={chatAnimationsEnabled}
+        isDirty={isChatMotionDirty}
+        onChange={onChatMotionChange}
+      />
     </SettingsSection>
-  );
-}
-
-export function GeneralSettings() {
-  const navItems = useGeneralNavItems();
-  return (
-    <div className="space-y-8">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {navItems.map(({ href, label, description, icon: Icon }) => (
-          <Link key={href} href={href} className="cursor-pointer">
-            <Card className="h-full transition-colors hover:bg-muted/40">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Icon className="h-4 w-4 text-muted-foreground" />
-                  {label}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">{description}</p>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -249,10 +239,13 @@ export function TaskActionsSettings() {
         description={t("settings:configureArchiveSafeguardsAndDefaultsFor")}
       >
         <div className="space-y-4">
+          <PreventAutoStartAgentSettings />
+          <CreationAutoFocusSettings />
           <MCPTaskAgentProfileDefaultSettings />
           <AgentGeneratedTaskTitleSettings />
           <ArchiveConfirmationSettings />
           <UnreadDividerSettings />
+          <SleepInhibitionSettings />
         </div>
       </SettingsSection>
 
@@ -265,75 +258,199 @@ export function TaskActionsSettings() {
       >
         <AnchoredPromptBarSettings />
       </SettingsSection>
+
+      <Separator />
+
+      <SettingsSection
+        icon={<IconListCheck className="h-5 w-5" />}
+        title={t("settings:todoListPanel")}
+        description={t("settings:pinTheAgentsLiveTodoChecklistAs")}
+      >
+        <TodoListPanelSettings />
+      </SettingsSection>
     </div>
   );
 }
 
-export function AppearanceSettings() {
-  const { t } = useTranslation();
-  const userSettings = useAppStore((state) => state.userSettings);
+/**
+ * Register the Appearance page with the shared save coordinator.
+ *
+ * Split out of `AppearanceSettings` for length. It is also where the page's two
+ * kinds of setting meet: the account-level ones go out in one
+ * `updateUserSettings` call, while the theme and the settings menu shape are
+ * per-device and commit through their own preview/commit/restore pairs — one
+ * Save changes control over both.
+ */
+function useAppearanceSaveContributor({
+  draft,
+  draftRef,
+  editedDuringSaveRef,
+  saved,
+  setSaved,
+  setDraft,
+}: {
+  draft: AppearanceState;
+  draftRef: { current: AppearanceState };
+  editedDuringSaveRef: { current: Set<keyof AppearanceState> | null };
+  saved: AppearanceState;
+  setSaved: (next: AppearanceState) => void;
+  setDraft: (next: AppearanceState) => void;
+}) {
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
-  const { savedTheme, previewTheme, commitTheme, restoreTheme } = useTheme();
-  const [saved, setSaved] = useState(() => createAppearanceSavedState(savedTheme, userSettings));
-  const [draft, setDraft] = useState(saved);
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-  const revision = JSON.stringify(draft);
-  const isDirty = revision !== JSON.stringify(saved);
+  const { previewTheme, commitTheme, restoreTheme } = useTheme();
+  const previewMenuMode = useAppStore((state) => state.previewSettingsMenuMode);
+  const commitMenuMode = useAppStore((state) => state.commitSettingsMenuMode);
+  const restoreMenuMode = useAppStore((state) => state.restoreSettingsMenuMode);
+  const previewRichOutputAnimations = useAppStore((state) => state.previewRichOutputAnimations);
+  const previewChatAnimations = useAppStore((state) => state.previewChatAnimations);
+  const commitRichOutputAnimations = useAppStore((state) => state.commitRichOutputAnimations);
+  const restoreRichOutputAnimations = useAppStore((state) => state.restoreRichOutputAnimations);
+  const commitChatAnimations = useAppStore((state) => state.commitChatAnimations);
+  const restoreChatAnimations = useAppStore((state) => state.restoreChatAnimations);
+  const { t } = useTranslation();
+  const delayValid = parseSidebarHoverDelay(draft.sidebarHoverDelayMs) !== null;
+  const revision = appearanceRevision(draft);
 
   useSettingsSaveContributor({
     id: "general-appearance",
+    canSave: delayValid,
+    invalidReason: delayValid ? undefined : t("settings:sidebarHoverDelayError"),
     order: 10,
     revision,
-    isDirty,
+    isDirty: revision !== appearanceRevision(saved),
     save: async () => {
       const submitted = draft;
-      const current = storeApi.getState().userSettings;
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        startup_page: submitted.startupPage,
-        changes_panel_layout: submitted.changesPanelLayout,
-        system_metrics_display: {
-          show_in_topbar: submitted.showMetrics,
-          simplified: submitted.simplifiedMetrics,
-        },
-      });
-      commitTheme(submitted.theme);
-      if (draftRef.current.theme !== submitted.theme) {
-        previewTheme(draftRef.current.theme);
+      const patch = buildAppearanceUserSettingsPatch(submitted, saved);
+      const settingsAtSubmit = storeApi.getState().userSettings;
+      const editedDuringSave = new Set<keyof AppearanceState>();
+      editedDuringSaveRef.current = editedDuringSave;
+      try {
+        const response = Object.keys(patch).length > 0 ? await updateUserSettings(patch) : null;
+        commitTheme(submitted.theme);
+        commitMenuMode(submitted.settingsMenuMode);
+        commitRichOutputAnimations(submitted.richOutputAnimationsEnabled);
+        commitChatAnimations(submitted.chatAnimationsEnabled);
+        // Keep edits made during the save visible over the submitted baseline.
+        if (draftRef.current.theme !== submitted.theme) {
+          previewTheme(draftRef.current.theme);
+        }
+        if (draftRef.current.settingsMenuMode !== submitted.settingsMenuMode) {
+          previewMenuMode(draftRef.current.settingsMenuMode);
+        }
+        if (
+          draftRef.current.richOutputAnimationsEnabled !== submitted.richOutputAnimationsEnabled
+        ) {
+          previewRichOutputAnimations(draftRef.current.richOutputAnimationsEnabled);
+        }
+        if (draftRef.current.chatAnimationsEnabled !== submitted.chatAnimationsEnabled) {
+          previewChatAnimations(draftRef.current.chatAnimationsEnabled);
+        }
+        const latestUserSettings = storeApi.getState().userSettings;
+        const responseOrder = response
+          ? compareUserSettingsRevisions(response.settings.revision, latestUserSettings.revision)
+          : null;
+        const responseIsCurrent =
+          responseOrder === null ? latestUserSettings === settingsAtSubmit : responseOrder >= 0;
+        const nextUserSettings =
+          response && responseIsCurrent
+            ? mapUserSettingsResponse(response, latestUserSettings)
+            : latestUserSettings;
+        const confirmed = createAppearanceSavedState(
+          submitted.theme,
+          submitted.settingsMenuMode,
+          submitted.richOutputAnimationsEnabled,
+          nextUserSettings,
+          submitted.chatAnimationsEnabled,
+        );
+        setSaved(confirmed);
+        setDraft(rebaseAppearanceDraft(draftRef.current, submitted, confirmed, editedDuringSave));
+        if (response) setUserSettings(nextUserSettings);
+      } finally {
+        if (editedDuringSaveRef.current === editedDuringSave) {
+          editedDuringSaveRef.current = null;
+        }
       }
-      setSaved(submitted);
-      setUserSettings({
-        ...storeApi.getState().userSettings,
-        changesPanelLayout: submitted.changesPanelLayout,
-        startupPage: submitted.startupPage,
-        systemMetricsDisplay: {
-          showInTopbar: submitted.showMetrics,
-          simplified: submitted.simplifiedMetrics,
-        },
-      });
     },
     discard: () => {
       setDraft(saved);
       restoreTheme();
+      restoreMenuMode();
+      restoreRichOutputAnimations();
+      restoreChatAnimations();
     },
   });
+}
 
-  const updateDraft = useCallback(
-    (patch: Partial<typeof draft>) => setDraft((current) => ({ ...current, ...patch })),
-    [],
+function useAppearanceDraftUpdater(
+  setDraft: (update: (current: AppearanceState) => AppearanceState) => void,
+  editedDuringSaveRef: { current: Set<keyof AppearanceState> | null },
+) {
+  return useCallback(
+    (patch: Partial<AppearanceState>) =>
+      setDraft((current) => {
+        const next = { ...current, ...patch };
+        for (const field of Object.keys(patch) as Array<keyof AppearanceState>) {
+          if (current[field] !== next[field]) {
+            editedDuringSaveRef.current?.add(field);
+          }
+        }
+        return next;
+      }),
+    [editedDuringSaveRef, setDraft],
   );
+}
 
+function AppearanceSettingsSections({
+  draft,
+  saved,
+  updateDraft,
+  previewTheme,
+  previewMenuMode,
+  previewRichOutputAnimations,
+  previewChatAnimations,
+}: {
+  draft: AppearanceState;
+  saved: AppearanceState;
+  updateDraft: (patch: Partial<AppearanceState>) => void;
+  previewTheme: (theme: Theme) => void;
+  previewMenuMode: (mode: SettingsMenuMode) => void;
+  previewRichOutputAnimations: (enabled: boolean) => void;
+  previewChatAnimations: (enabled: boolean) => void;
+}) {
   return (
-    <div className="space-y-8">
+    <>
       <AppearanceThemeSection
         theme={draft.theme}
-        isDirty={draft.theme !== saved.theme}
-        onChange={(theme) => {
+        isThemeDirty={draft.theme !== saved.theme}
+        onThemeChange={(theme) => {
           updateDraft({ theme });
           previewTheme(theme);
+        }}
+        chatAnimationsEnabled={draft.chatAnimationsEnabled}
+        isChatMotionDirty={draft.chatAnimationsEnabled !== saved.chatAnimationsEnabled}
+        onChatMotionChange={(chatAnimationsEnabled) => {
+          updateDraft({ chatAnimationsEnabled });
+          previewChatAnimations(chatAnimationsEnabled);
+        }}
+        richOutputAnimationsEnabled={draft.richOutputAnimationsEnabled}
+        isRichOutputMotionDirty={
+          draft.richOutputAnimationsEnabled !== saved.richOutputAnimationsEnabled
+        }
+        onRichOutputMotionChange={(richOutputAnimationsEnabled) => {
+          updateDraft({ richOutputAnimationsEnabled });
+          previewRichOutputAnimations(richOutputAnimationsEnabled);
+        }}
+      />
+
+      <SettingsMenuModeSection
+        value={draft.settingsMenuMode}
+        isDirty={draft.settingsMenuMode !== saved.settingsMenuMode}
+        onChange={(settingsMenuMode) => {
+          updateDraft({ settingsMenuMode });
+          // The settings menu is on screen beside this page, so previewing is
+          // the whole point: you see the shape you are choosing.
+          previewMenuMode(settingsMenuMode);
         }}
       />
 
@@ -344,37 +461,84 @@ export function AppearanceSettings() {
       />
 
       <LanguageSettings />
+      <AppearanceAccountSections draft={draft} saved={saved} updateDraft={updateDraft} />
+    </>
+  );
+}
 
+export function AppearanceSettings() {
+  const { t } = useTranslation();
+  const userSettings = useAppStore((state) => state.userSettings);
+  const { savedTheme, previewTheme } = useTheme();
+  const savedMenuMode = useAppStore((state) => state.settingsMenu.savedMode);
+  const savedRichOutputAnimations = useAppStore((state) => state.richOutputMotion.savedEnabled);
+  const savedChatAnimations = useAppStore((state) => state.chatMotion.savedEnabled);
+  const previewMenuMode = useAppStore((state) => state.previewSettingsMenuMode);
+  const previewRichOutputAnimations = useAppStore((state) => state.previewRichOutputAnimations);
+  const previewChatAnimations = useAppStore((state) => state.previewChatAnimations);
+  const [saved, setSaved] = useState(() =>
+    createAppearanceSavedState(
+      savedTheme,
+      savedMenuMode,
+      savedRichOutputAnimations,
+      userSettings,
+      savedChatAnimations,
+    ),
+  );
+  const [draft, setDraft] = useState(saved);
+  const draftRef = useRef(draft);
+  const savedRef = useRef(saved);
+  const editedDuringSaveRef = useRef<Set<keyof AppearanceState> | null>(null);
+  draftRef.current = draft;
+  savedRef.current = saved;
+
+  useEffect(() => {
+    const previousSaved = savedRef.current;
+    const nextSaved = createAppearanceSavedState(
+      previousSaved.theme,
+      previousSaved.settingsMenuMode,
+      previousSaved.richOutputAnimationsEnabled,
+      userSettings,
+      previousSaved.chatAnimationsEnabled,
+    );
+    setDraft(
+      rebaseAppearanceDraft(
+        draftRef.current,
+        previousSaved,
+        nextSaved,
+        editedDuringSaveRef.current ?? undefined,
+      ),
+    );
+    setSaved(nextSaved);
+  }, [userSettings]);
+
+  useAppearanceSaveContributor({
+    draft,
+    draftRef,
+    editedDuringSaveRef,
+    saved,
+    setSaved,
+    setDraft,
+  });
+
+  const updateDraft = useAppearanceDraftUpdater(setDraft, editedDuringSaveRef);
+
+  return (
+    <div className="space-y-8">
+      <SettingsPageHeader
+        title={t("settings:appearance")}
+        description={t("settings:customizeHowTheApplicationLooks")}
+      />
       <Separator />
-
-      <SettingsSection
-        icon={<IconGitBranch className="h-5 w-5" />}
-        title={t("settings:changesPanel")}
-        description={t("settings:customizeHowChangedFilesAreDisplayed")}
-      >
-        <ChangesPanelLayoutCard
-          value={draft.changesPanelLayout}
-          isDirty={draft.changesPanelLayout !== saved.changesPanelLayout}
-          onChange={(changesPanelLayout) => updateDraft({ changesPanelLayout })}
-        />
-      </SettingsSection>
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconActivity className="h-5 w-5" />}
-        title={t("settings:resourceMetrics")}
-        description={t("settings:configureBackendAndExecutionResourceSampling")}
-      >
-        <SystemMetricsSettingsCard
-          showInTopbar={draft.showMetrics}
-          isShowInTopbarDirty={draft.showMetrics !== saved.showMetrics}
-          onShowInTopbarChange={(showMetrics) => updateDraft({ showMetrics })}
-          simplified={draft.simplifiedMetrics}
-          isSimplifiedDirty={draft.simplifiedMetrics !== saved.simplifiedMetrics}
-          onSimplifiedChange={(simplifiedMetrics) => updateDraft({ simplifiedMetrics })}
-        />
-      </SettingsSection>
+      <AppearanceSettingsSections
+        draft={draft}
+        saved={saved}
+        updateDraft={updateDraft}
+        previewTheme={previewTheme}
+        previewMenuMode={previewMenuMode}
+        previewRichOutputAnimations={previewRichOutputAnimations}
+        previewChatAnimations={previewChatAnimations}
+      />
     </div>
   );
 }

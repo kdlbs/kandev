@@ -133,12 +133,16 @@ func (c *ttlCache) generation() uint64 {
 }
 
 func (c *ttlCache) set(key string, value any) {
+	c.setWithTTL(key, value, c.ttl)
+}
+
+func (c *ttlCache) setWithTTL(key string, value any, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.entries) >= c.maxSize {
 		c.evictLocked()
 	}
-	c.entries[key] = ttlEntry{value: value, expiresAt: c.now().Add(c.ttl)}
+	c.entries[key] = ttlEntry{value: value, expiresAt: c.now().Add(ttl)}
 }
 
 // setIfCurrentGeneration writes `value` for `key` only if the cache's
@@ -185,6 +189,12 @@ func (c *ttlCache) endFill(key string, gen uint64) {
 }
 
 func (c *ttlCache) setIfCurrentVersions(key string, value any, gen, keyEpoch uint64) {
+	c.setIfCurrentVersionsWithTTL(key, value, gen, keyEpoch, c.ttl)
+}
+
+func (c *ttlCache) setIfCurrentVersionsWithTTL(
+	key string, value any, gen, keyEpoch uint64, ttl time.Duration,
+) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	state, ok := c.keyEpochs[key]
@@ -194,7 +204,7 @@ func (c *ttlCache) setIfCurrentVersions(key string, value any, gen, keyEpoch uin
 	if len(c.entries) >= c.maxSize {
 		c.evictLocked()
 	}
-	c.entries[key] = ttlEntry{value: value, expiresAt: c.now().Add(c.ttl)}
+	c.entries[key] = ttlEntry{value: value, expiresAt: c.now().Add(ttl)}
 }
 
 // evictLocked first drops expired entries; if still over the cap, drops the
@@ -258,6 +268,25 @@ func (c *ttlCache) invalidateKey(key string) {
 	c.keyEpochs[key] = state
 }
 
+// invalidatePrefix removes a bounded family of entries while preserving
+// unrelated fills. It is used when a refresh knows the repository and
+// credential scope but not the head SHA or run IDs that are currently cached.
+func (c *ttlCache) invalidatePrefix(prefix string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key := range c.entries {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.entries, key)
+		}
+	}
+	for key, state := range c.keyEpochs {
+		if strings.HasPrefix(key, prefix) {
+			state.epoch++
+			c.keyEpochs[key] = state
+		}
+	}
+}
+
 // cachedErr wraps an error stored in a ttlCache so that a deterministic
 // upstream failure (e.g. ErrRepoNotResolvable) can be negative-cached
 // alongside the cache's normal success-value entries. Currently used by
@@ -274,6 +303,16 @@ type cachedErr struct{ err error }
 // caller still receives the freshly-fetched value but the cache stays empty
 // (the next ensure() will re-fetch under the new generation).
 func (c *ttlCache) doOrFetch(key string, fetch func() (any, error)) (any, error) {
+	return c.doOrFetchWithTTL(key, fetch, func(any) time.Duration { return c.ttl })
+}
+
+// doOrFetchWithTTL is doOrFetch with a result-dependent expiry. The fetch is
+// still singleflighted and errors are still omitted from the cache. The TTL
+// selector runs only for a successful result, so a provider failure cannot
+// accidentally become a short-lived cached absence.
+func (c *ttlCache) doOrFetchWithTTL(
+	key string, fetch func() (any, error), ttlFor func(any) time.Duration,
+) (any, error) {
 	if v, ok := c.get(key); ok {
 		return v, nil
 	}
@@ -291,7 +330,11 @@ func (c *ttlCache) doOrFetch(key string, fetch func() (any, error)) (any, error)
 		if err != nil {
 			return nil, err
 		}
-		c.setIfCurrentVersions(key, v, gen, keyEpoch)
+		ttl := c.ttl
+		if ttlFor != nil {
+			ttl = ttlFor(v)
+		}
+		c.setIfCurrentVersionsWithTTL(key, v, gen, keyEpoch, ttl)
 		return v, nil
 	})
 	return v, err
@@ -319,6 +362,18 @@ func prStatusCacheKey(owner, repo string, number int) string {
 // state that flips back only via an explicit re-link or token swap,
 // both of which evict the entry directly.
 func newRepoErrorCache() *ttlCache {
+	c := newTTLCache()
+	c.ttl = 10 * time.Minute
+	return c
+}
+
+// newForkParentCache backs Service.forkParentRepositoryForLookup. Whether a
+// repository is a fork, and of what, effectively never changes, but the lookup
+// runs once per searching PR watch per sync cycle — a constant answer re-fetched
+// dozens of times a minute. 10 minutes matches the negative repo cache, so a
+// repository that genuinely becomes a fork is picked up within the same window
+// the rest of the repo-identity caching already tolerates.
+func newForkParentCache() *ttlCache {
 	c := newTTLCache()
 	c.ttl = 10 * time.Minute
 	return c

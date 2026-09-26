@@ -19,10 +19,19 @@ var codexACPLogoDark []byte
 const codexACPPackage = "@agentclientprotocol/codex-acp"
 
 var (
-	_ Agent                  = (*CodexACP)(nil)
-	_ PassthroughAgent       = (*CodexACP)(nil)
-	_ InferenceAgent         = (*CodexACP)(nil)
-	_ ManagedNPMRuntimeAgent = (*CodexACP)(nil)
+	_ Agent                         = (*CodexACP)(nil)
+	_ PassthroughAgent              = (*CodexACP)(nil)
+	_ InferenceAgent                = (*CodexACP)(nil)
+	_ ManagedNPMRuntimeAgent        = (*CodexACP)(nil)
+	_ OpenAICompatibleProviderAgent = (*CodexACP)(nil)
+)
+
+// codex-acp >= 1.7 advertises an ACP "gateway" auth method when the client
+// sends clientCapabilities.auth._meta.gateway=true, then applies the base URL
+// and Authorization header from authenticate({methodId:"gateway"}) live.
+const (
+	codexGatewayAuthMethodID = "gateway"
+	codexGatewayProviderName = "Kandev"
 )
 
 // CodexACP implements Agent for the Agent Client Protocol codex-acp package.
@@ -96,11 +105,11 @@ func (a *CodexACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *CodexACP) BuildCommand(opts CommandOptions) Command {
-	return a.ManagedNPMRuntime().CachedACPCommand()
+	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
 }
 
 func (a *CodexACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
-	return ManagedNPMRuntimeSpec{Package: codexACPPackage}
+	return newManagedNPMRuntimeSpec(codexACPPackage)
 }
 
 func (a *CodexACP) Runtime() *RuntimeConfig {
@@ -137,11 +146,11 @@ func (a *CodexACP) RemoteAuth() *RemoteAuth {
 	return &RemoteAuth{
 		Methods: []RemoteAuthMethod{
 			{
-				Type:  "files",
-				Label: "Copy auth files",
+				Type:  remoteAuthMethodTypeFiles,
+				Label: remoteAuthLabelCopyFiles,
 				SourceFiles: map[string][]string{
-					"darwin": {".codex/auth.json", ".codex/config.toml"},
-					"linux":  {".codex/auth.json", ".codex/config.toml"},
+					"darwin": {".codex/auth.json"},
+					"linux":  {".codex/auth.json"},
 				},
 				TargetRelDir: ".codex",
 			},
@@ -151,6 +160,22 @@ func (a *CodexACP) RemoteAuth() *RemoteAuth {
 			},
 		},
 	}
+}
+
+func (a *CodexACP) PortableConfig() *PortableConfig {
+	return &PortableConfig{Bundles: []PortableConfigBundle{
+		{
+			ID:    "codex.config",
+			Label: "Copy Codex configuration",
+			Files: []PortableConfigFile{
+				{SourcePaths: map[string]string{
+					"darwin":  ".codex/config.toml",
+					"linux":   ".codex/config.toml",
+					"windows": ".codex/config.toml",
+				}, TargetPath: ".codex/config.toml"},
+			},
+		},
+	}}
 }
 
 // Verified against `codex --help`: `codex login --device-auth` is the
@@ -174,6 +199,16 @@ func (a *CodexACP) BillingType() usage.BillingType { return codexBillingType() }
 
 func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings
+}
+
+// OpenAICompatibleProvider lets a Codex profile point at a self-hosted
+// OpenAI-compatible router through codex-acp's ACP gateway auth method.
+func (a *CodexACP) OpenAICompatibleProvider() *OpenAICompatibleProviderSpec {
+	return &OpenAICompatibleProviderSpec{
+		AuthMethodID: codexGatewayAuthMethodID,
+		ProviderName: codexGatewayProviderName,
+		KeyEnvVar:    "OPENAI_API_KEY",
+	}
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.

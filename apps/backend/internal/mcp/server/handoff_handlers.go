@@ -16,16 +16,10 @@ import (
 func (s *Server) registerRelatedTasksTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_related_tasks_kandev",
-			mcp.WithDescription(
-				`List parent, children, siblings, blockers, and blocked tasks for the current task.
-Use this to discover task IDs you can reach via message_task_kandev. Each related task includes its
-title and description, so you can read dependency metadata (e.g. a "Depends on:" line) from a sibling
-that has not started yet — no need to fetch its conversation or list every task in the workflow. Each
-related task also includes its associated GitHub pull requests (number, url, title, state) under the
-"prs" field when any exist. In office mode, document keys are also included so you can fetch documents
-with get_task_document_kandev. Pass task_id to inspect a different task in the same workspace.`,
-			),
+			mcp.WithDescription(`List a task's parent, children, siblings, blockers, and blocked tasks. Entries include identity, state, and linked pull requests; Office entries also include document keys. Descriptions are omitted unless verbose=true. task_id defaults to the current task and may inspect another task in the same workspace.`),
 			mcp.WithString("task_id", mcp.Description("Defaults to the current task.")),
+			mcp.WithBoolean("verbose", mcp.Description(
+				"Include each related task's full description. Defaults to false, which returns the compact projection.")),
 		),
 		s.wrapHandler("list_related_tasks_kandev", s.listRelatedTasksHandler()),
 	)
@@ -93,8 +87,37 @@ func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListRelatedTasks, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		if !req.GetBool("verbose", false) {
+			stripRelatedTaskDescriptions(result)
+		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// relatedTaskGroups are the explicit keys of the ActionMCPListRelatedTasks
+// response that carry task projections — "task" and "parent" hold a single
+// object, the rest arrays. Keep this list in sync when that response gains a
+// new relationship group so compact-mode stripping remains complete.
+var relatedTaskGroups = []string{"task", "parent", "children", "siblings", "blockers", "blocked_by"}
+
+// stripRelatedTaskDescriptions drops the description from every projected task
+// in the response. Descriptions are the bulk of the payload — a task with five
+// children easily returns tens of thousands of characters — and a caller
+// looking up relatives usually wants the ids and states, not the prose. The
+// verbose flag restores them for the dependency-metadata case.
+func stripRelatedTaskDescriptions(result map[string]interface{}) {
+	for _, group := range relatedTaskGroups {
+		switch node := result[group].(type) {
+		case map[string]interface{}:
+			delete(node, "description")
+		case []interface{}:
+			for _, item := range node {
+				if task, ok := item.(map[string]interface{}); ok {
+					delete(task, "description")
+				}
+			}
+		}
 	}
 }
 

@@ -5,19 +5,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -51,15 +57,23 @@ type executorStore interface {
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionIfCurrentState(ctx context.Context, session *models.TaskSession, expected models.TaskSessionState) (bool, error)
+	// UpdateTaskSessionStateIfCurrent transitions only the state-related
+	// columns (state, error_message, completed_at, updated_at) guarded by a
+	// CAS on the row's current state. Prefer this over
+	// UpdateTaskSessionIfCurrentState for a pure state transition: the latter
+	// writes the full row from the caller's (possibly stale) in-memory copy,
+	// which can silently revert a concurrent update to unrelated fields
+	// (profile snapshot, routing, execution identifiers) that landed between
+	// the caller's read and its write.
+	UpdateTaskSessionStateIfCurrent(ctx context.Context, id string, expected, status models.TaskSessionState, errorMessage string) (bool, time.Time, error)
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
-	// Session worktree
-	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
-	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
+	// Session worktree projections (owned by the task environment)
+	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error)
 	// Repository entity
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	// Executor
@@ -85,11 +99,104 @@ type executorStore interface {
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
 
+// sessionMetadataKeyStateSetter is an optional repository capability. Legacy
+// test stores can keep their existing metadata API, while the SQL repository
+// can guard recovery markers against a concurrent stop or archive.
+type sessionMetadataKeyStateSetter interface {
+	SetSessionMetadataKeyIfState(
+		ctx context.Context,
+		sessionID, key string,
+		value interface{},
+		expectedState models.TaskSessionState,
+	) (bool, error)
+}
+
+// bootstrapFailureCommitter is the atomic repository boundary for an
+// asynchronous process-start failure. The expected state and error stamp are
+// captured immediately before the commit; the repository must also require
+// the execution row to still carry agentExecutionID before changing either
+// metadata or session state.
+type bootstrapFailureCommitter interface {
+	CommitBootstrapFailureIfCurrentExecution(
+		ctx context.Context,
+		taskID, sessionID, agentExecutionID string,
+		expectedState models.TaskSessionState,
+		expectedStamp string,
+		errorValue models.LastAgentError,
+	) (changed bool, updatedAt time.Time, err error)
+}
+
 // officeTaskSessionCreator lets repositories make Office-session origin
 // selection part of the insert transaction. Test and legacy stores can omit
 // it; the executor keeps a per-task fallback lock for those implementations.
 type officeTaskSessionCreator interface {
 	CreateOfficeTaskSession(context.Context, *models.TaskSession) error
+}
+
+// initialRuntimeSeedTaskSessionCreator lets repositories claim the launch-only
+// runtime seed and create the session in one transaction. Test and legacy
+// stores can omit it; the executor keeps its existing best-effort fallback.
+type initialRuntimeSeedTaskSessionCreator interface {
+	CreateTaskSessionWithInitialRuntimeSeed(context.Context, *models.TaskSession) error
+}
+
+// Workflow-route-aware creators keep a prepared destination record in the
+// same transaction as session insertion. Repositories that do not expose the
+// specialized workspace variants retain the legacy creation path for tests
+// and older adapters.
+type workflowSessionRouteTaskSessionCreator interface {
+	CreateTaskSessionWithWorkflowSessionRoute(context.Context, *models.TaskSession, *models.WorkflowSessionRoute) error
+}
+
+type initialRuntimeSeedWorkflowRouteTaskSessionCreator interface {
+	CreateTaskSessionWithInitialRuntimeSeedAndWorkflowRoute(context.Context, *models.TaskSession, *models.WorkflowSessionRoute) error
+}
+
+type workspaceBindingWorkflowRouteTaskSessionCreator interface {
+	CreateTaskSessionWithWorkspaceBindingAndWorkflowRoute(context.Context, *models.TaskSession, *models.TaskEnvironment, *models.WorkflowSessionRoute) error
+}
+
+type sharedGroupWorkspaceBindingWorkflowRouteTaskSessionCreator interface {
+	CreateTaskSessionWithSharedGroupWorkspaceBindingAndWorkflowRoute(context.Context, *models.TaskSession, *models.TaskEnvironment, string, *models.WorkflowSessionRoute) error
+}
+
+// taskEnvironmentMaterializationFinalizer publishes a successfully prepared
+// canonical environment only after its complete repository inventory is saved.
+// It is kept narrow so legacy test stores retain the existing fallback path.
+type taskEnvironmentMaterializationFinalizer interface {
+	FinalizeTaskEnvironmentMaterialization(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, string) error
+}
+
+// taskEnvironmentTransitionPersister commits an existing environment rebind
+// and its repository inventory as one durable operation. Legacy adapters may
+// omit it and use the compatibility persistence path in executor_execute.go.
+type taskEnvironmentTransitionPersister interface {
+	PersistTaskEnvironmentTransition(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, bool) error
+}
+
+// taskEnvironmentTaskDirNameStamper claims the stable task-root identity on a
+// shared environment without rewriting unrelated environment fields. It is
+// optional so lightweight test and legacy stores can retain the compatibility
+// path in executor_execute.go.
+type taskEnvironmentTaskDirNameStamper interface {
+	SetTaskEnvironmentTaskDirNameIfEmpty(context.Context, string, string) (bool, error)
+}
+
+// workspaceBindingTaskSessionCreator elects the single materializing session
+// and inserts its creating environment in the same transaction as the session.
+// It is optional for lightweight test/legacy stores; production repositories
+// must implement it so a concurrent sibling cannot enter lifecycle setup
+// without a durable canonical workspace binding.
+type workspaceBindingTaskSessionCreator interface {
+	CreateTaskSessionWithWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment) error
+}
+
+// sharedGroupWorkspaceBindingTaskSessionCreator elects the sole first
+// materializer for a shared workspace group while inserting its session and
+// creating environment. Later members observe the same durable claim instead
+// of independently creating task-local workspaces.
+type sharedGroupWorkspaceBindingTaskSessionCreator interface {
+	CreateTaskSessionWithSharedGroupWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment, string) error
 }
 
 type primarySessionTaskStateStore interface {
@@ -117,7 +224,15 @@ var (
 	// concurrent terminal session transition won the persistence race. Callers
 	// must not start the process and must arbitrate exact-execution teardown
 	// ownership before deciding whether to force-stop the registered runtime.
-	ErrSessionStateSuperseded = errors.New("session state superseded by terminal transition")
+	ErrSessionStateSuperseded   = errors.New("session state superseded by terminal transition")
+	errSessionAdvancedToRunning = errors.New("session state advanced to RUNNING before runtime persistence")
+	// ErrOrphanRecoveryIncomplete means StopByTaskID stopped every session it
+	// found but could not load at least one registry-only orphan's row, so the
+	// task-scoped stop is not fully confirmed. Callers that already observed a
+	// successful stop should log this rather than treat it as a hard failure;
+	// it stays distinguishable from ErrExecutionNotFound so a retry keeps
+	// happening instead of being reported as a false all-clear.
+	ErrOrphanRecoveryIncomplete = errors.New("orphaned execution recovery incomplete")
 )
 
 // SessionStateSupersededError records the terminal state that rejected a
@@ -138,6 +253,18 @@ type PromptResult struct {
 	StopReason   string // The reason the agent stopped (e.g., "end_turn")
 	AgentMessage string // The agent's accumulated response message
 }
+
+// ProbeResult re-exports client.ProbeResult so callers above this package
+// (e.g. internal/orchestrator) can reference it without a direct import of
+// internal/agent/runtime/agentctl, which is restricted to this package and
+// internal/agent/runtime/ (see ARCH-RUNTIME-IMPORT).
+type ProbeResult = client.ProbeResult
+
+const (
+	ProbeResultLive    = client.ProbeResultLive
+	ProbeResultSettled = client.ProbeResultSettled
+	ProbeResultUnknown = client.ProbeResultUnknown
+)
 
 // AgentManagerClient is an interface for the Agent Manager service
 // This will be implemented via gRPC or HTTP client
@@ -169,6 +296,14 @@ type AgentManagerClient interface {
 
 	// RespondToPermission sends a response to a permission request
 	RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error
+	ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error)
+	ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error)
+	CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error)
+
+	// ProbeBackgroundWorkloads samples a session's agent process for
+	// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+	// No timeout is applied here — the caller wraps ctx with the probe budget.
+	ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error)
 
 	// IsAgentRunningForSession checks if an agent is actually running for a session
 	// This probes the actual agent (Docker container or standalone process) rather than relying on cached state
@@ -258,6 +393,13 @@ type AgentManagerClient interface {
 	// Used to detect stale AgentExecutionID values in the database after restart.
 	GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error)
 
+	// ListExecutionsForTask returns a snapshot of the session and execution IDs
+	// registered in-memory for taskID, independent of persisted session state.
+	// StopByTaskID uses the paired IDs to recover a registered execution whose
+	// session row is already terminal in the database (for example, FAILED
+	// after a never-started stall whose teardown attempt failed).
+	ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference
+
 	// GetGitLog retrieves the git log for a session from baseCommit to HEAD.
 	// If targetBranch is provided, uses dynamic merge-base calculation for accurate filtering.
 	// Used for archive snapshot capture. Returns nil, nil if no execution exists.
@@ -283,6 +425,13 @@ type AgentManagerClient interface {
 	WaitForAgentctlReady(ctx context.Context, sessionID string) error
 }
 
+// PromptTurnIDSetter is an optional lifecycle capability. Keeping it out of
+// AgentManagerClient lets test and legacy adapters continue to work while the
+// production lifecycle carries durable turn identity with completion events.
+type PromptTurnIDSetter interface {
+	SetPromptTurnID(ctx context.Context, agentExecutionID, turnID string) error
+}
+
 // RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.
 type RemoteRuntimeStatus struct {
 	RuntimeName   agentruntime.Runtime
@@ -295,6 +444,7 @@ type RemoteRuntimeStatus struct {
 
 // RemoteStatusPollRequest contains the fields from ExecutorRunning needed for remote status polling.
 type RemoteStatusPollRequest struct {
+	TaskID           string
 	SessionID        string
 	Runtime          agentruntime.Runtime
 	AgentExecutionID string
@@ -310,12 +460,19 @@ type AgentProfileInfo struct {
 	AgentName                  string
 	Model                      string
 	Mode                       string
+	FallbackModel              string
+	AutoFallback               bool
+	RequireExactModel          bool
 	ConfigOptions              map[string]string
 	AutoApprove                bool
 	DangerouslySkipPermissions bool
 	CLIPassthrough             bool
 	NativeSessionResume        bool // Agent supports ACP session/load for resume
 	SupportsMCP                bool
+	// EnvVars carries profile definitions, including only opaque SecretID
+	// references for secret-backed values. The executor uses credential-store
+	// selection variables before probing the optional host bridge.
+	EnvVars []models.ProfileEnvVar
 }
 
 // LaunchAgentRequest contains parameters for launching an agent
@@ -324,8 +481,15 @@ type LaunchAgentRequest struct {
 	WorkspaceID       string // Kandev workspace ID — used to build scratch dir for repo-less tasks
 	SessionID         string
 	TaskEnvironmentID string // Env owning this session (shared across sessions in the same task)
-	TaskTitle         string // Human-readable task title for semantic worktree naming
-	AgentProfileID    string
+	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
+	// task environment. It must never be inferred from a sibling execution ID.
+	WorkspaceReuseRequired bool
+	// AllowBranchReplacement is granted only by the explicit new-branch recovery
+	// action. It permits lifecycle to replace a confirmed missing worktree branch.
+	AllowBranchReplacement bool
+	TaskTitle              string // Human-readable task title for semantic worktree naming
+	AgentProfileID         string
+	TurnID                 string // Durable Kandev turn for the initial prompt, when present
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
@@ -337,14 +501,26 @@ type LaunchAgentRequest struct {
 	Priority             string
 	Metadata             map[string]interface{}
 	Env                  map[string]string
-	ACPSessionID         string            // ACP session ID to resume, if available
-	ModelOverride        string            // If set, use this model instead of the profile's model
-	ExecutorType         string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
-	ExecutorConfig       map[string]string // Executor config (docker_host, git_token, etc.)
-	PreviousExecutionID  string            // Previous execution ID for runtime reconnect
-	McpMode              string            // MCP tool mode: "task" (default), "config", or "office"
-	IsEphemeral          bool              // Ephemeral task (quick chat) — enables fallback workspace creation
-	WorkspacePath        string            // Optional host folder for repo-less tasks (overrides scratch fallback)
+	// AdditionalSkillSlugs are launch-scoped skills selected by Office.
+	AdditionalSkillSlugs []string
+	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
+	// forward in addition to its managed credential allowlist. Values are
+	// still taken only from Env; the key list is the explicit repository grant.
+	ApprovedSecretEnvKeys []string
+	// EnvironmentDefinitions preserve source identity until lifecycle has added
+	// every managed runtime value and can perform the final strict resolution.
+	EnvironmentDefinitions        []runtimeenv.Definition
+	EnvironmentResolutionRequired bool
+	ACPSessionID                  string              // ACP session ID to resume, if available
+	ModelOverride                 string              // If set, use this model instead of the profile's model
+	ExecutorType                  string              // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
+	ExecutorConfig                map[string]string   // Executor config (docker_host, git_token, etc.)
+	PreviousExecutionID           string              // Previous execution ID for runtime reconnect
+	McpMode                       string              // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
+	McpProviders                  []string            // Normalized provider capabilities attached to the task
+	McpProfile                    *mcpprofile.Context // Backend-owned base surface and additive MCP capabilities
+	IsEphemeral                   bool                // Ephemeral task (quick chat) — enables fallback workspace creation
+	WorkspacePath                 string              // Optional host folder for repo-less tasks (overrides scratch fallback)
 
 	// IsPassthrough is the session's mode snapshot (TaskSession.IsPassthrough)
 	// at session-creation time. Forwarded to the lifecycle manager so
@@ -364,18 +540,33 @@ type LaunchAgentRequest struct {
 	CopyFiles string
 
 	// Worktree configuration for concurrent agent execution
-	UseWorktree            bool   // Whether to use a Git worktree for isolation
-	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
-	RepositoryID           string // Repository ID for worktree tracking
-	RepositoryPath         string // Path to the main repository (for worktree creation)
-	BaseBranch             string // Base branch for the worktree (e.g., "main")
-	DefaultBranch          string // Repository's default_branch, used as a fallback when BaseBranch is missing
-	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
-	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	WorktreeBranchPrefix   string // Branch prefix for worktree branches
-	WorktreeBranchTemplate string // Branch name template for worktree branches
-	WorktreeBranchTicket   string // External ticket value for branch templates
-	PullBeforeWorktree     bool   // Whether to pull from remote before creating the worktree
+	UseWorktree             bool   // Whether to use a Git worktree for isolation
+	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
+	RepositoryID            string // Repository ID for worktree tracking
+	TaskRepositoryID        string // Exact task_repositories row for worktree recovery
+	RepositoryPath          string // Path to the main repository (for worktree creation)
+	BaseBranch              string // Base branch for the worktree (e.g., "main")
+	IntegrationRef          string // Verified terminal integration target for managed branch compaction
+	DefaultBranch           string // Repository's default_branch, used as a fallback when BaseBranch is missing
+	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
+	ContributionDestination *models.ContributionDestination
+	ComparisonTarget        *models.ComparisonTarget
+	QualifiedPRBase         *models.PRBase
+	WorktreeBranchPrefix    string // Branch prefix for worktree branches
+	WorktreeBranchTemplate  string // Branch name template for worktree branches
+	WorktreeBranchTicket    string // External ticket value for branch templates
+	PullBeforeWorktree      bool   // Whether to pull from remote before creating the worktree
+	RemoteSyncHandled       bool   // Provider-authenticated origin refresh already completed
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until worktree materialization. A valid reusable worktree bypasses it.
+	RefreshRepository func(context.Context) error
+	// RefreshRepositoryWithState is the typed refresh path used to distinguish
+	// an authenticated empty remote from an unknown refresh result.
+	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
+	RemoteRefState             repoclone.RemoteRefState
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
@@ -406,22 +597,37 @@ type WorkspaceFolderSpec struct{ Name, LocalPath string }
 // the orchestrator package does not need to import lifecycle types into its
 // public API.
 type RepoSpec struct {
-	RepositoryID           string
-	RepositoryPath         string
-	RepositoryURL          string
-	RepoName               string
-	BaseBranch             string
-	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch         string
-	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	WorktreeID             string
+	TaskRepositoryID        string
+	RepositoryID            string
+	RepositoryPath          string
+	RepositoryURL           string
+	RepoName                string
+	BaseBranch              string
+	IntegrationRef          string
+	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch          string
+	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
+	ContributionDestination *models.ContributionDestination
+	ComparisonTarget        *models.ComparisonTarget
+	QualifiedPRBase         *models.PRBase
+	WorktreeID              string
+	// AllowBranchReplacement permits explicit branch replacement for this repo.
+	AllowBranchReplacement bool
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
 	WorktreeBranchTicket   string
 	PullBeforeWorktree     bool
-	RepoSetupScript        string
-	RepoCleanupScript      string
-	CopyFiles              string
+	RemoteSyncHandled      bool
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until worktree materialization. A valid reusable worktree bypasses it.
+	RefreshRepository          func(context.Context) error
+	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
+	RemoteRefState             repoclone.RemoteRefState
+	RepoSetupScript            string
+	RepoCleanupScript          string
+	CopyFiles                  string
 	// BranchSlug, when non-empty, suffixes the repo dir so the same repo can
 	// host multiple branch worktrees as siblings within one task. Set by the
 	// orchestrator when buildRepoSpecs detects multiple rows sharing a
@@ -436,29 +642,44 @@ type RepoSpec struct {
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP
 // config, tasks). Used when plan_mode is enabled on a session.
-const McpModeConfig = "config"
+const McpModeConfig = mcpmode.Config
 
 // McpModeTaskTitlePending exposes the task-mode MCP surface plus the one-shot
 // title tool while a prompt-first task still has its provisional title.
-const McpModeTaskTitlePending = "task-title-pending"
+const McpModeTaskTitlePending = mcpmode.TaskTitlePending
 
 // McpModeOffice restricts the MCP toolset for office (autonomous) agents to
 // interaction + plan tools. Office agents manage tasks via the kandev CLI
 // (exposed through agentctl + $KANDEV_CLI), not MCP — see
-// docs/specs/office-agent-cli/spec.md.
-const McpModeOffice = "office"
+// docs/specs/office/system-design/agents-03.md.
+const McpModeOffice = mcpmode.Office
+
+// McpModeAutomation selects the fixed coordinator MCP surface for tasks
+// created by a user-configured automation.
+const McpModeAutomation = mcpmode.Automation
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
 	AgentProfileID       string
 	OfficeAgentProfileID string
 	ExecutorID           string
-	Prompt               string
-	WorkflowStepID       string
-	StartAgent           bool
-	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, or McpModeOffice
-	Attachments          []v1.MessageAttachment
-	Env                  map[string]string
+	TurnID               string
+	// OnExecutionAdmitted runs after the launch path has identified and
+	// persisted the execution that will receive this turn, but before its
+	// process is started. Callers use this boundary to bind turn-scoped
+	// evidence to the execution that actually won admission.
+	OnExecutionAdmitted func(executionID string)
+	Prompt              string
+	PriorACPSession     string // ACP session ID to resume for the same concrete profile
+	WorkflowStepID      string
+	StartAgent          bool
+	McpMode             string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
+	McpProfile          *mcpprofile.Context
+	Attachments         []v1.MessageAttachment
+	Env                 map[string]string
+	// AdditionalSkillSlugs are materialized for this launch in addition to the
+	// durable profile selection.
+	AdditionalSkillSlugs []string
 	// RouteOverride carries a provider-routing override resolved by the
 	// office scheduler. When nil, launch behavior is identical to today.
 	RouteOverride *RouteOverride
@@ -482,27 +703,33 @@ type RouteOverride struct {
 // preserve the Office-built prompt and configuration that the legacy
 // path receives via StartTaskWithEnv.
 type LaunchContext struct {
-	ExecutorID        string
-	ExecutorProfileID string
-	Priority          string
-	Prompt            string
-	WorkflowStepID    string
-	PlanMode          bool
-	Attachments       []v1.MessageAttachment
-	Env               map[string]string
+	ExecutorID           string
+	ExecutorProfileID    string
+	Priority             string
+	Prompt               string
+	WorkflowStepID       string
+	PlanMode             bool
+	Attachments          []v1.MessageAttachment
+	Env                  map[string]string
+	AdditionalSkillSlugs []string
 }
 
 // LaunchAgentResponse contains the result of launching an agent
 type LaunchAgentResponse struct {
-	AgentExecutionID string
-	ContainerID      string
-	Status           v1.AgentStatus
-	WorktreeID       string
-	WorktreePath     string
-	WorktreeBranch   string
-	WorkspacePath    string // Effective workspace path (may differ from WorktreePath for quick-chat sessions)
-	Metadata         map[string]interface{}
-	PrepareResult    *lifecycle.EnvPrepareResult `json:"-"` // Carried from lifecycle.Launch for synchronous persistence
+	AgentExecutionID          string
+	ContainerID               string
+	Status                    v1.AgentStatus
+	WorktreeID                string
+	WorktreePath              string
+	WorktreeBranch            string
+	WorktreeBranchOwner       string
+	WorktreeIntegrationRef    string
+	RequestedBaseBranch       string
+	BaseBranch                string
+	BaseBranchFallbackWarning string
+	WorkspacePath             string // Effective workspace path (may differ from WorktreePath for quick-chat sessions)
+	Metadata                  map[string]interface{}
+	PrepareResult             *lifecycle.EnvPrepareResult `json:"-"` // Carried from lifecycle.Launch for synchronous persistence
 
 	// Worktrees is the per-repository preparer result list when the launch is
 	// multi-repo. Empty for single-repo launches; the legacy WorktreeID/Path/
@@ -513,13 +740,19 @@ type LaunchAgentResponse struct {
 // RepoWorktreeResult mirrors lifecycle.RepoWorktreeResult for the orchestrator
 // API surface. One entry per repository prepared during a multi-repo launch.
 type RepoWorktreeResult struct {
-	RepositoryID   string
-	BranchSlug     string
-	WorktreeID     string
-	WorktreeBranch string
-	WorktreePath   string
-	MainRepoGitDir string
-	ErrorMessage   string
+	TaskRepositoryID          string
+	RepositoryID              string
+	BranchSlug                string
+	WorktreeID                string
+	WorktreeBranch            string
+	WorktreeBranchOwner       string
+	WorktreeIntegrationRef    string
+	WorktreePath              string
+	MainRepoGitDir            string
+	RequestedBaseBranch       string
+	BaseBranch                string
+	BaseBranchFallbackWarning string
+	ErrorMessage              string
 }
 
 // TaskExecution tracks an active task execution
@@ -527,6 +760,7 @@ type TaskExecution struct {
 	TaskID           string
 	AgentExecutionID string
 	AgentProfileID   string
+	TurnID           string
 	StartedAt        time.Time
 	SessionState     v1.TaskSessionState
 	LastUpdate       time.Time
@@ -582,10 +816,33 @@ type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, 
 type SessionStateTransitionFunc func(
 	ctx context.Context,
 	taskID, sessionID string,
+	expectedState *models.TaskSessionState,
 	state models.TaskSessionState,
 	errorMessage string,
 	onChanged func(),
 ) (changed bool, finalState models.TaskSessionState, err error)
+
+// BootstrapFailureTransitionFunc atomically commits a bootstrap error and
+// its FAILED session transition, then publishes the accepted transition.
+// expectedState and expectedStamp come from the executor's final ownership
+// read and are checked again by the repository commit.
+type BootstrapFailureTransitionFunc func(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	expectedState models.TaskSessionState,
+	expectedStamp string,
+	errorValue models.LastAgentError,
+) (changed bool, finalState models.TaskSessionState, err error)
+
+// BootstrapFailureMessageRepairFunc retries the idempotent transcript write
+// after the state admission has already succeeded. The repair is deliberately
+// separate from the state commit so a transient message-store failure cannot
+// make an accepted bootstrap failure disappear from session history.
+type BootstrapFailureMessageRepairFunc func(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	errorValue models.LastAgentError,
+) error
 
 // SessionStartingFunc is called when the executor has prepared/resumed an
 // execution and needs to mark the session STARTING while preserving other
@@ -599,6 +856,19 @@ type SessionStartingFunc func(
 	session *models.TaskSession,
 	expectedState models.TaskSessionState,
 	promoteTask bool,
+) error
+
+// SessionStartingWithOptionsFunc is the extended STARTING callback used by
+// explicit completed-conversation recovery. It keeps the legacy callback
+// shape available to lightweight executors and tests while carrying the
+// narrow permission needed for the guarded completed-state transition.
+type SessionStartingWithOptionsFunc func(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	expectedState models.TaskSessionState,
+	promoteTask bool,
+	allowCompletedResume bool,
 ) error
 
 // ExecutionCleanupClaimFunc atomically claims forced cleanup for one exact
@@ -624,10 +894,42 @@ type TaskReviewStateReconcileFunc func(ctx context.Context, taskID, completedSes
 // its default FAILED state updates.
 type AgentStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) (handled bool)
 
+// AgentProcessStartedFunc is called after the agent process starts
+// successfully and the executor has run its normal success callback.
+type AgentProcessStartedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string)
+
+// AgentProcessStartFailedFunc is called after the executor has handled a
+// failed process start. It lets an owning subsystem settle any durable claim
+// that was made before the asynchronous start began.
+type AgentProcessStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error)
+
 // LaunchFailedFunc is called when session launch fails before the agent starts.
 // repositoryID identifies the repository whose launch failed. Useful for
 // creating repository-scoped user-facing status messages tied to launch errors.
 type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID string, err error)
+
+// CeilingReservationReleaseFunc releases the orchestrator's session-ceiling
+// reservation for a session this package just moved out of the counted
+// population through a write that bypasses onSessionStateChange /
+// onSessionStateTransition (MarkCompletedBySession, the resume-failure
+// rollback). Releasing a session that held no reservation is a defined
+// no-op, so this can be called unconditionally on a successful write.
+type CeilingReservationReleaseFunc func(sessionID string)
+
+// LaunchFailureReviewEligibilityFunc reports whether a failed launch can offer
+// the mark-review-done recovery action. The resolver owns workflow and PR
+// lookups; an error omits the action without blocking failure persistence.
+type LaunchFailureReviewEligibilityFunc func(ctx context.Context, taskID string) (bool, error)
+
+// WorktreeRecoveryAdmissionFunc is the legacy task-scoped recovery seam. It is
+// retained for lightweight adapters; production wiring uses the selected
+// environment callback below.
+type WorktreeRecoveryAdmissionFunc func(ctx context.Context, taskID string) error
+
+// SelectedWorktreeRecoveryAdmissionFunc decides whether the already-selected
+// task environment may launch. The returned admission remains held through the
+// external workspace-start boundary and is released by the executor.
+type SelectedWorktreeRecoveryAdmissionFunc func(context.Context, worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error)
 
 // PrimarySessionSetFunc is called when the first session for a task is marked
 // primary. This lets the orchestrator publish a task.updated event so the
@@ -645,6 +947,12 @@ type ExecutorTypeCapabilities interface {
 	ShouldApplyPreferredShell(executorType string) bool
 }
 
+// AttachmentReader is the narrow attachment-store seam used to stream a
+// claimed descriptor into a passthrough workspace.
+type AttachmentReader interface {
+	OpenClaimed(ctx context.Context, id, taskID, sessionID string) (io.ReadCloser, string, string, int64, error)
+}
+
 // GitLabCredentialResolver returns the configured origin and credential for
 // exactly one workspace. Implementations must not fall back across workspaces.
 type GitLabCredentialResolver interface {
@@ -654,17 +962,20 @@ type GitLabCredentialResolver interface {
 // Executor manages agent execution for tasks
 type Executor struct {
 	agentManager      AgentManagerClient
+	attachmentReader  AttachmentReader
 	repo              executorStore
 	secretStore       secrets.SecretStore
 	shellPrefs        ShellPreferenceProvider
 	capabilities      ExecutorTypeCapabilities
 	gitlabCredentials GitLabCredentialResolver
 	logger            *logger.Logger
+	canvasesEnabled   bool
 
-	githubCredentialIssuer         GitHubCredentialLeaseIssuer
-	githubCredentialBrokerURL      string
+	gitCredentialIssuer            GitCredentialLeaseIssuer
+	gitCredentialBrokerURL         string
 	githubCredentialPolicyResolver TaskGitCredentialPolicyResolver
 	agentctlBinaryPath             string
+	hostGitHubCredentialProbe      hostGitHubCredentialProbe
 
 	// Configuration
 	retryLimit int
@@ -689,10 +1000,21 @@ type Executor struct {
 	// accepted writes from terminal/no-op races.
 	onSessionStateTransition SessionStateTransitionFunc
 
+	// Atomic bootstrap-failure callback used by the orchestrator to commit the
+	// typed error, FAILED state, and corresponding publication as one ownership
+	// decision.
+	onBootstrapFailureTransition BootstrapFailureTransitionFunc
+	// Retry hook for the chronological transcript entry when the state commit
+	// succeeds but the first idempotent message write fails.
+	onBootstrapFailureMessageRepair BootstrapFailureMessageRepairFunc
+
 	// Callback for STARTING writes that carry full session-row changes. Set by
 	// the orchestrator so launch/resume/model-switch transitions serialize with
 	// runtime task-state reconciliation.
 	onSessionStarting SessionStartingFunc
+	// Extended STARTING callback for explicit completed-session recovery. When
+	// present, it takes precedence over the legacy callback above.
+	onSessionStartingWithOptions SessionStartingWithOptionsFunc
 
 	// Callback for exact-execution forced cleanup arbitration. Set by the
 	// orchestrator so coordinator graceful stop and launch cleanup cannot both
@@ -712,10 +1034,28 @@ type Executor struct {
 	// delegates failure handling to this callback, allowing the orchestrator
 	// to detect auth errors and treat them as recoverable.
 	onAgentStartFailed AgentStartFailedFunc
+	// Callback after a process start succeeds or fails. These callbacks run
+	// after the executor's normal lifecycle bookkeeping.
+	onAgentProcessStarted     AgentProcessStartedFunc
+	onAgentProcessStartFailed AgentProcessStartFailedFunc
 
 	// Callback for session launch failures (pre-start). Allows orchestrator
 	// to emit user-friendly guidance for known failure patterns.
 	onLaunchFailed LaunchFailedFunc
+
+	// Callback releasing the session-ceiling reservation for writes this
+	// package makes directly against the repository, bypassing
+	// onSessionStateChange / onSessionStateTransition (AC-51a).
+	onCeilingReservationRelease CeilingReservationReleaseFunc
+	// Optional observation-only bypass detector for the three entry points
+	// that start an agent process (AC-41/AC-41a).
+	ceilingBackingChecker CeilingBackingChecker
+	// Optional resolver for the mark-review-done recovery action.
+	launchFailureReviewEligibility LaunchFailureReviewEligibilityFunc
+	// Optional compatibility gate for legacy adapters.
+	worktreeRecoveryAdmission WorktreeRecoveryAdmissionFunc
+	// Selected environment gate used by production worktree recovery.
+	selectedWorktreeRecoveryAdmission SelectedWorktreeRecoveryAdmissionFunc
 
 	// Callback when the first session for a task is marked primary.
 	onPrimarySessionSet PrimarySessionSetFunc
@@ -742,8 +1082,10 @@ type Executor struct {
 	officeSessionLocks sync.Map // map[string]*sync.Mutex
 
 	// Optional cloner for provider-backed repos without a local path.
-	repoCloner  RepoCloner
-	repoUpdater RepoUpdater
+	repoCloner                      RepoCloner
+	repoUpdater                     RepoUpdater
+	taskRepositoryBaseBranchUpdater TaskRepositoryBaseBranchUpdater
+	prBaseResolver                  PRBaseResolver
 }
 
 // taskEnvLock returns the per-task mutex for env persistence, creating one on
@@ -760,15 +1102,19 @@ func (e *Executor) officeSessionLock(taskID string) *sync.Mutex {
 
 // RepoCloner clones remote repositories to local disk.
 type RepoCloner interface {
-	EnsureWorkspaceClonedForProvider(
-		ctx context.Context, workspaceID, cloneURL, provider, providerHost,
-		owner, name, credentialHost, token string,
+	EnsureWorkspaceClonedWithCredentialRequest(
+		ctx context.Context, request repoclone.GitCredentialRequest,
+		credentialHost, token string,
 	) (string, error)
+	RefreshWorkspaceRepositoryWithCredentialRequest(
+		ctx context.Context, request repoclone.GitCredentialRequest,
+		repositoryPath, credentialHost, token string,
+	) error
 	ShouldRecloneForWorkspace(workspaceID, path string) bool
 	// SetOriginURL updates a Kandev-managed checkout remote without exposing credentials.
 	SetOriginURL(ctx context.Context, repositoryPath, originURL string) error
 	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
-	BuildCloneURLWithHost(provider, host, owner, name string) (string, error)
+	BuildCloneURLWithHost(ctx context.Context, provider, host, owner, name string) (string, error)
 }
 
 type authenticatedRepoCloner interface {
@@ -778,32 +1124,107 @@ type authenticatedRepoCloner interface {
 	) (string, error)
 }
 
+type strictAuthenticatedRepoCloner interface {
+	RefreshWorkspaceRepositoryWithBasicAuth(
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, repositoryPath, username, password string,
+	) error
+}
+
+type remoteStateRepoCloner interface {
+	EnsureWorkspaceClonedWithCredentialRequestAndState(
+		ctx context.Context, request repoclone.GitCredentialRequest,
+		credentialHost, token string,
+	) (string, repoclone.RemoteRefState, error)
+	RefreshWorkspaceRepositoryWithCredentialRequestAndState(
+		ctx context.Context, request repoclone.GitCredentialRequest,
+		repositoryPath, credentialHost, token string,
+	) (repoclone.RemoteRefState, error)
+}
+
+type remoteStateAuthenticatedRepoCloner interface {
+	EnsureWorkspaceClonedWithBasicAuthAndState(
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, username, password string,
+	) (string, repoclone.RemoteRefState, error)
+	RefreshWorkspaceRepositoryWithBasicAuthAndState(
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, repositoryPath, username, password string,
+	) (repoclone.RemoteRefState, error)
+}
+
+type localRemoteStateRepoCloner interface {
+	InspectLocalRepositoryRemoteRefState(
+		ctx context.Context, repositoryPath string,
+	) (repoclone.RemoteRefState, error)
+}
+
+const providerAzureDevOps = "azure_devops"
+
 func (e *Executor) ensureClonedWithWorkspaceAuth(
 	ctx context.Context, repo *models.Repository, cloneURL string,
 ) (string, error) {
+	path, _, err := e.ensureClonedWithWorkspaceAuthForSessionAndState(ctx, "", "", repo, cloneURL)
+	return path, err
+}
+
+func (e *Executor) ensureClonedWithWorkspaceAuthForSession(
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, cloneURL string,
+) (string, error) {
+	path, _, err := e.ensureClonedWithWorkspaceAuthForSessionAndState(ctx, taskID, sessionID, repo, cloneURL)
+	return path, err
+}
+
+func (e *Executor) ensureClonedWithWorkspaceAuthForSessionAndState(
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, cloneURL string,
+) (string, repoclone.RemoteRefState, error) {
 	credentialHost, token := "", ""
 	if strings.EqualFold(repo.Provider, "gitlab") && e.gitlabCredentials != nil {
 		credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
 	}
-	if repo.Provider != "azure_devops" || !strings.HasPrefix(cloneURL, "https://") {
-		return e.repoCloner.EnsureWorkspaceClonedForProvider(
-			ctx, repo.WorkspaceID, cloneURL, repo.Provider, repo.ProviderHost,
-			repo.ProviderOwner, repo.ProviderName, credentialHost, token,
+	if repo.Provider != providerAzureDevOps || !strings.HasPrefix(cloneURL, "https://") {
+		request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
+		if stateCloner, ok := e.repoCloner.(remoteStateRepoCloner); ok {
+			return stateCloner.EnsureWorkspaceClonedWithCredentialRequestAndState(
+				ctx, request, credentialHost, token,
+			)
+		}
+		path, err := e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
+			ctx, request, credentialHost, token,
 		)
+		return path, repoclone.RemoteRefStateHasRefs, err
 	}
 	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
 	if !ok || e.secretStore == nil {
-		return "", fmt.Errorf("azure DevOps repository clone authentication is unavailable")
+		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("azure DevOps repository clone authentication is unavailable")
 	}
 	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
 	if err != nil {
-		return "", fmt.Errorf("read Azure DevOps clone credential: %w", err)
+		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("read Azure DevOps clone credential: %w", err)
 	}
 	// Azure DevOps PAT authentication ignores the username; any non-empty value works.
-	return authCloner.EnsureWorkspaceClonedWithBasicAuth(
+	if stateCloner, ok := e.repoCloner.(remoteStateAuthenticatedRepoCloner); ok {
+		return stateCloner.EnsureWorkspaceClonedWithBasicAuthAndState(
+			ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
+			cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
+		)
+	}
+	path, err := authCloner.EnsureWorkspaceClonedWithBasicAuth(
 		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
 		cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
 	)
+	return path, repoclone.RemoteRefStateHasRefs, err
+}
+
+func repositoryGitCredentialRequest(
+	taskID, sessionID string, repo *models.Repository, cloneURL string,
+) repoclone.GitCredentialRequest {
+	return repoclone.GitCredentialRequest{
+		WorkspaceID: repo.WorkspaceID, TaskID: taskID, SessionID: sessionID,
+		RepositoryID: repo.ID, Provider: repo.Provider, ProviderHost: repo.ProviderHost,
+		ProviderScope: repo.ProviderScope, ProviderRepositoryID: repo.ProviderRepoID,
+		CloneURL: cloneURL, Owner: repo.ProviderOwner, Name: repo.ProviderName,
+	}
 }
 
 // RepoUpdater updates repository records in the database.
@@ -814,6 +1235,73 @@ type RepoUpdater interface {
 	// the repository row was created without an upstream-derived value
 	// (e.g. via the MCP create_task path that takes a bare github URL).
 	UpdateRepositoryDefaultBranch(ctx context.Context, repositoryID, defaultBranch string) error
+}
+
+// TaskRepositoryBaseBranchUpdater persists a recovered base branch on the
+// exact task_repositories row. It is optional so lifecycle and executor unit
+// tests remain independent of the task service.
+type TaskRepositoryBaseBranchUpdater interface {
+	UpdateTaskRepositoryBaseBranch(ctx context.Context, taskID, taskRepositoryID, baseBranch string) error
+}
+
+// PRBaseResolver returns the current repository-qualified base for one PR.
+type PRBaseResolver interface {
+	ResolvePRBase(ctx context.Context, workspaceID string, lookup PRBaseLookup) (models.PRBase, error)
+}
+
+// PRBaseResolutionError marks provider failures that make a legacy PR
+// association unsafe to resolve by branch alone.
+type PRBaseResolutionError struct {
+	cause                error
+	knownCrossRepository bool
+	invalidAssociation   bool
+}
+
+func (e *PRBaseResolutionError) Error() string {
+	if e == nil || e.cause == nil {
+		return "pull request base resolution failed"
+	}
+	return e.cause.Error()
+}
+
+func (e *PRBaseResolutionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+// KnownCrossRepository reports whether the resolver has identified a target
+// repository that differs from the checked out repository.
+func (e *PRBaseResolutionError) KnownCrossRepository() bool {
+	return e != nil && e.knownCrossRepository
+}
+
+// InvalidAssociation reports that provider data did not match the exact task
+// repository and checkout binding.
+func (e *PRBaseResolutionError) InvalidAssociation() bool {
+	return e != nil && e.invalidAssociation
+}
+
+// NewPRBaseResolutionError classifies a provider-side resolution failure for
+// the launch boundary. Invalid or known cross-repository associations cannot
+// continue with a bare task-repository branch.
+func NewPRBaseResolutionError(cause error, knownCrossRepository, invalidAssociation bool) *PRBaseResolutionError {
+	return &PRBaseResolutionError{
+		cause: cause, knownCrossRepository: knownCrossRepository, invalidAssociation: invalidAssociation,
+	}
+}
+
+// PRBaseLookup ties a provider lookup to one task-repository attachment.
+type PRBaseLookup struct {
+	TaskID             string
+	TaskRepositoryID   string
+	RepositoryID       string
+	Number             int
+	CheckoutBranch     string
+	AttachedOwner      string
+	AttachedRepository string
+	Target             *models.ComparisonTarget
 }
 
 // ExecutorConfig holds configuration for the Executor
@@ -829,14 +1317,28 @@ type ShellPreferenceProvider interface {
 // NewExecutor creates a new executor
 func NewExecutor(agentManager AgentManagerClient, repo executorStore, log *logger.Logger, cfg ExecutorConfig) *Executor {
 	return &Executor{
-		agentManager: agentManager,
-		repo:         repo,
-		secretStore:  cfg.SecretStore,
-		shellPrefs:   cfg.ShellPrefs,
-		logger:       log.WithFields(zap.String("component", "executor")),
-		retryLimit:   3,
-		retryDelay:   5 * time.Second,
+		agentManager:              agentManager,
+		repo:                      repo,
+		secretStore:               cfg.SecretStore,
+		shellPrefs:                cfg.ShellPrefs,
+		logger:                    log.WithFields(zap.String("component", "executor")),
+		retryLimit:                3,
+		retryDelay:                5 * time.Second,
+		hostGitHubCredentialProbe: runHostGitHubCredentialProbe,
 	}
+}
+
+// SetAttachmentReader wires the backend attachment store used to stream
+// claimed descriptors into passthrough workspaces.
+func (e *Executor) SetAttachmentReader(reader AttachmentReader) {
+	e.attachmentReader = reader
+}
+
+// SetCanvasesEnabled controls whether task MCP profiles receive the gated
+// canvas-authoring capability. The flag is applied during backend startup
+// before any new agent session is launched.
+func (e *Executor) SetCanvasesEnabled(enabled bool) {
+	e.canvasesEnabled = enabled
 }
 
 // SetOnTaskStateChange sets a callback for task state changes.
@@ -858,6 +1360,18 @@ func (e *Executor) SetOnEarlyLaunchTaskStateReconcile(fn TaskRuntimeStateReconci
 	e.onEarlyLaunchTaskStateReconcile = fn
 }
 
+// SetWorktreeRecoveryAdmission installs the task-scoped linked-worktree
+// admission gate. Nil disables the optional integration for legacy callers.
+func (e *Executor) SetWorktreeRecoveryAdmission(fn WorktreeRecoveryAdmissionFunc) {
+	e.worktreeRecoveryAdmission = fn
+}
+
+// SetSelectedWorktreeRecoveryAdmission installs the environment-scoped
+// recovery gate used after executor and workspace selection.
+func (e *Executor) SetSelectedWorktreeRecoveryAdmission(fn SelectedWorktreeRecoveryAdmissionFunc) {
+	e.selectedWorktreeRecoveryAdmission = fn
+}
+
 // SetOnSessionStateChange sets a callback for session state changes.
 // This allows the orchestrator to route state changes through updateTaskSessionState
 // which updates the DB and publishes WebSocket events to the frontend.
@@ -871,9 +1385,27 @@ func (e *Executor) SetOnSessionStateTransition(fn SessionStateTransitionFunc) {
 	e.onSessionStateTransition = fn
 }
 
+// SetOnBootstrapFailureTransition wires the atomic bootstrap-failure commit
+// used by asynchronous agent-process start failures.
+func (e *Executor) SetOnBootstrapFailureTransition(fn BootstrapFailureTransitionFunc) {
+	e.onBootstrapFailureTransition = fn
+}
+
+// SetOnBootstrapFailureMessageRepair wires the bounded repair hook for a
+// bootstrap failure whose session admission already succeeded.
+func (e *Executor) SetOnBootstrapFailureMessageRepair(fn BootstrapFailureMessageRepairFunc) {
+	e.onBootstrapFailureMessageRepair = fn
+}
+
 // SetOnSessionStarting sets a callback for full session-row STARTING updates.
 func (e *Executor) SetOnSessionStarting(fn SessionStartingFunc) {
 	e.onSessionStarting = fn
+}
+
+// SetOnSessionStartingWithOptions sets the extended STARTING callback used by
+// explicit completed-session recovery.
+func (e *Executor) SetOnSessionStartingWithOptions(fn SessionStartingWithOptionsFunc) {
+	e.onSessionStartingWithOptions = fn
 }
 
 // SetOnExecutionCleanupClaim sets the exact-execution forced cleanup arbiter.
@@ -898,11 +1430,51 @@ func (e *Executor) SetRepoCloner(cloner RepoCloner, updater RepoUpdater) {
 	e.repoUpdater = updater
 }
 
+// SetTaskRepositoryBaseBranchUpdater wires the task-service seam used by
+// successful worktree fallback self-healing.
+func (e *Executor) SetTaskRepositoryBaseBranchUpdater(updater TaskRepositoryBaseBranchUpdater) {
+	e.taskRepositoryBaseBranchUpdater = updater
+}
+
+// SetPRBaseResolver wires best-effort pull-request base resolution at launch.
+func (e *Executor) SetPRBaseResolver(resolver PRBaseResolver) {
+	e.prBaseResolver = resolver
+}
+
 // SetOnAgentStartFailed sets a callback for agent process start failures.
 // This allows the orchestrator to intercept auth errors and treat them as
 // recoverable instead of terminal failures.
 func (e *Executor) SetOnAgentStartFailed(fn AgentStartFailedFunc) {
 	e.onAgentStartFailed = fn
+}
+
+// SetOnAgentProcessStarted sets a callback invoked after asynchronous process
+// startup succeeds and the session has been reconciled to RUNNING.
+func (e *Executor) SetOnAgentProcessStarted(fn AgentProcessStartedFunc) {
+	e.onAgentProcessStarted = fn
+}
+
+// SetOnAgentProcessStartFailed sets a callback invoked after asynchronous
+// process startup fails and the normal failure handler has run.
+func (e *Executor) SetOnAgentProcessStartFailed(fn AgentProcessStartFailedFunc) {
+	e.onAgentProcessStartFailed = fn
+}
+
+// SetOnCeilingReservationRelease sets the callback used by writes this
+// package makes directly against the repository, bypassing
+// onSessionStateChange / onSessionStateTransition, to release the
+// session-ceiling reservation for a session that just left the counted
+// population (AC-51a).
+func (e *Executor) SetOnCeilingReservationRelease(fn CeilingReservationReleaseFunc) {
+	e.onCeilingReservationRelease = fn
+}
+
+// SetCeilingBackingChecker wires the AC-41 dependency-inverted bypass
+// detector. Leaving it unset (every existing construction site) is AC-41a's
+// contract: the three instrumented entry points behave exactly as they do
+// without this card at all.
+func (e *Executor) SetCeilingBackingChecker(checker CeilingBackingChecker) {
+	e.ceilingBackingChecker = checker
 }
 
 // SetOnPrimarySessionSet sets a callback for when the first session for a task
@@ -923,6 +1495,14 @@ func (e *Executor) SetOnLaunchFailed(fn LaunchFailedFunc) {
 	e.onLaunchFailed = fn
 }
 
+// SetLaunchFailureReviewEligibility wires the narrow review-completion
+// eligibility check used when a launch fails before an agent starts.
+func (e *Executor) SetLaunchFailureReviewEligibility(
+	fn LaunchFailureReviewEligibilityFunc,
+) {
+	e.launchFailureReviewEligibility = fn
+}
+
 // SetCapabilities sets the executor type capabilities provider.
 func (e *Executor) SetCapabilities(c ExecutorTypeCapabilities) {
 	e.capabilities = c
@@ -931,4 +1511,10 @@ func (e *Executor) SetCapabilities(c ExecutorTypeCapabilities) {
 // SetGitLabCredentialResolver wires workspace-scoped GitLab execution auth.
 func (e *Executor) SetGitLabCredentialResolver(resolver GitLabCredentialResolver) {
 	e.gitlabCredentials = resolver
+}
+
+// ProbeBackgroundWorkloads samples a session's agent process for
+// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+func (e *Executor) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	return e.agentManager.ProbeBackgroundWorkloads(ctx, sessionID)
 }

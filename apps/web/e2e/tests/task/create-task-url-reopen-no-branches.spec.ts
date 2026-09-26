@@ -118,12 +118,14 @@ test.describe("Create-task URL flow - branches after reopen", () => {
     const branchChip = testPage.getByTestId("branch-chip-trigger").first();
     await expect(branchChip).toBeEnabled({ timeout: 10_000 });
 
-    // Open the dropdown and verify every mocked branch is present. Substring
-    // name matching (string, not regex) tolerates the "remote" badge that the
-    // pill renders alongside the branch name in the option's accessible name.
+    // Open the dropdown and verify every mocked branch is present. Match the
+    // complete accessible name so a repository option containing a branch name
+    // (for example, "desktop-unborn-main") cannot satisfy this assertion.
     await branchChip.click();
     for (const name of ["main", "develop", "feature/test"]) {
-      await expect(testPage.getByRole("option", { name })).toBeVisible({ timeout: 5_000 });
+      await expect(
+        testPage.getByRole("option", { name: `${name} remote`, exact: true }),
+      ).toBeVisible({ timeout: 5_000 });
     }
   });
 });

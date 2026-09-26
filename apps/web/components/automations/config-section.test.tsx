@@ -1,16 +1,56 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const REPOSITORY_SELECTOR_TEST_ID = "repository-selector";
-const REPOSITORY_ROWS_TEST_ID = "repository-rows";
+const WORKSPACE_ID = "workspace-1";
+const mockRepositories = [
+  {
+    id: "repo-1",
+    name: "kandev",
+    local_path: "/code/kandev",
+    provider_owner: "",
+    provider_name: "",
+  },
+];
 
 const mockState = {
   workflows: {
-    items: [{ id: "workflow-1", name: "Build" }],
+    items: [
+      {
+        id: "workflow-1",
+        name: "Development",
+        workspaceId: WORKSPACE_ID,
+        agent_profile_id: "agent-1",
+      },
+    ],
+  },
+  kanbanMulti: {
+    snapshots: {
+      "workflow-1": {
+        workflowId: "workflow-1",
+        workflowName: "Development",
+        steps: [
+          {
+            id: "step-backlog",
+            title: "Backlog",
+            position: 0,
+            color: "#123456",
+            is_start_step: true,
+            agent_profile_id: "agent-1",
+          },
+        ],
+        tasks: [],
+      },
+    },
   },
   agentProfiles: {
-    items: [],
+    items: [
+      {
+        id: "agent-1",
+        label: "Codex • Default",
+        agent_name: "codex",
+      },
+    ],
   },
   executors: {
     items: [
@@ -18,31 +58,17 @@ const mockState = {
         id: "executor-worktree",
         type: "worktree",
         name: "Worktree",
-        profiles: [
-          {
-            id: "profile-worktree",
-            executor_id: "executor-worktree",
-            name: "Worktree Profile",
-          },
-        ],
+        profiles: [{ id: "worktree-1", name: "Worktree", executor_type: "worktree" }],
       },
       {
         id: "executor-local",
         type: "local_pc",
-        name: "Local PC",
-        profiles: [
-          {
-            id: "profile-local",
-            executor_id: "executor-local",
-            name: "Local PC Profile",
-          },
-        ],
+        name: "Local",
+        profiles: [{ id: "local-1", name: "Local", executor_type: "local_pc" }],
       },
     ],
   },
 };
-
-const mockRepositories: Array<{ id: string; name: string; local_path: string }> = [];
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
@@ -53,7 +79,11 @@ vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
 }));
 
 vi.mock("@/hooks/use-workflows", () => ({
-  useWorkflows: vi.fn(),
+  useWorkflows: () => ({ workflows: mockState.workflows.items }),
+}));
+
+vi.mock("@/hooks/domains/kanban/use-all-workflow-snapshots", () => ({
+  useAllWorkflowSnapshots: vi.fn(),
 }));
 
 vi.mock("@/hooks/domains/workspace/use-repositories", () => ({
@@ -62,127 +92,131 @@ vi.mock("@/hooks/domains/workspace/use-repositories", () => ({
 
 vi.mock("@/app/actions/workspaces", () => ({
   discoverRepositoriesAction: vi.fn().mockResolvedValue({ repositories: [] }),
+  getRepositoryDiscoveryAction: vi.fn().mockResolvedValue({ repositories: [] }),
+  refreshRepositoryDiscoveryAction: vi.fn().mockResolvedValue({ repositories: [] }),
 }));
 
-vi.mock("@/lib/api/domains/workflow-api", () => ({
-  listWorkflowSteps: vi.fn().mockResolvedValue({ steps: [] }),
+vi.mock("@/components/task-create-dialog-options", () => ({
+  useAgentProfileOptions: (profiles: Array<{ id: string; label: string }>) =>
+    profiles.map((profile) => ({
+      value: profile.id,
+      label: profile.label,
+      renderLabel: () => <span data-testid="shared-agent-logo">{profile.label}</span>,
+    })),
+  useExecutorProfileOptions: (profiles: Array<{ id: string; name: string }>) =>
+    profiles.map((profile) => ({
+      value: profile.id,
+      label: profile.name,
+      renderLabel: () => <span data-testid="shared-executor-logo">{profile.name}</span>,
+    })),
+}));
+
+vi.mock("@/components/task-create-dialog-workspace-repo-chips", () => ({
+  WorkspaceRepoChips: ({
+    rows,
+    onAdd,
+    showDiscoveryControls,
+  }: {
+    rows: Array<{ key: string; branch: string }>;
+    onAdd: () => void;
+    showDiscoveryControls?: boolean;
+  }) => (
+    <div data-testid="shared-repository-chips">
+      {rows.map((row) => (
+        <span key={row.key}>{row.branch}</span>
+      ))}
+      <button type="button" onClick={onAdd}>
+        Add repository
+      </button>
+      {showDiscoveryControls ? <div data-testid="repository-discovery-selector-enabled" /> : null}
+    </div>
+  ),
 }));
 
 import { ConfigSection, getExecutorItemDisabledReason } from "./config-section";
 
-function renderConfigSection(overrides: Partial<ComponentProps<typeof ConfigSection>> = {}) {
+function renderConfig(overrides: Partial<ComponentProps<typeof ConfigSection>> = {}) {
   return render(
     <ConfigSection
-      workspaceId="workspace-1"
+      workspaceId={WORKSPACE_ID}
       workflowId=""
-      workflowStepId=""
       agentProfileId=""
       executorProfileId=""
       repositorySelections={[]}
-      executionMode="task"
-      conditionType={null}
       onWorkflowChange={() => {}}
-      onStepChange={() => {}}
       onAgentProfileChange={() => {}}
       onExecutorProfileChange={() => {}}
       onRepositoriesChange={() => {}}
-      onExecutionModeChange={() => {}}
       {...overrides}
     />,
   );
 }
 
-describe("ConfigSection", () => {
-  afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
-  it("marks task workflow fields as required and explains missing selections", () => {
-    renderConfigSection();
+describe("ConfigSection shared task selectors", () => {
+  it("shows the shared workflow preview and removes the workflow-step picker", () => {
+    renderConfig();
 
-    screen.getByText("Workflow");
-    screen.getByText("Workflow Step");
-    expect(screen.getAllByText("required")).toHaveLength(2);
-    screen.getByText("Select a workflow to enable saving.");
-    screen.getByText("Select a workflow before choosing a step.");
-    expect(screen.getByTestId("workflow-selector").getAttribute("aria-describedby")).toBe(
-      "workflow-selector-help",
-    );
-  });
+    fireEvent.click(screen.getByTestId("workflow-selector-trigger"));
 
-  it("changes step help text once a workflow is selected", () => {
-    renderConfigSection({ workflowId: "workflow-1" });
-
-    expect(screen.queryByText("Select a workflow to enable saving.")).toBeNull();
-    expect(screen.queryByText("Select a workflow before choosing a step.")).toBeNull();
-    screen.getByText("Select a workflow step to enable saving.");
-    expect(screen.getByTestId("workflow-step-selector").getAttribute("aria-describedby")).toBe(
-      "workflow-step-selector-help",
-    );
-  });
-
-  it("hides workflow required markers in run mode", () => {
-    renderConfigSection({ executionMode: "run" });
-
-    expect(screen.queryByText("Workflow")).toBeNull();
+    expect(screen.getByText("Development")).toBeTruthy();
+    expect(screen.getByText("Backlog")).toBeTruthy();
+    expect(screen.getByTestId("workflow-agent-logo")).toBeTruthy();
+    expect(screen.getByTestId("step-agent-logo")).toBeTruthy();
     expect(screen.queryByText("Workflow Step")).toBeNull();
-    expect(screen.queryAllByText("required")).toHaveLength(0);
+    expect(screen.queryByTestId("workflow-step-selector")).toBeNull();
   });
 
-  it("renders a single dropdown when no executor profile is selected", () => {
-    renderConfigSection();
+  it("uses the shared searchable profile selectors", async () => {
+    renderConfig();
 
-    screen.getByTestId(REPOSITORY_SELECTOR_TEST_ID);
-    expect(screen.queryByTestId(REPOSITORY_ROWS_TEST_ID)).toBeNull();
+    fireEvent.click(screen.getByTestId("agent-profile-selector"));
+    expect(screen.getByTestId("shared-agent-logo")).toBeTruthy();
+    expect(screen.getByPlaceholderText("Search agents...")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("executor-profile-selector"));
+    expect(screen.getAllByTestId("shared-executor-logo")).toHaveLength(2);
+    expect(screen.getByPlaceholderText("Search profiles...")).toBeTruthy();
   });
 
-  it("renders a repeatable repository list when the executor profile supports multi-repo", () => {
-    renderConfigSection({ executorProfileId: "profile-worktree" });
+  it("uses paired repository chips and has no workspace-default choice", () => {
+    renderConfig();
 
-    expect(screen.queryByTestId(REPOSITORY_SELECTOR_TEST_ID)).toBeNull();
-    const rows = screen.getByTestId(REPOSITORY_ROWS_TEST_ID);
-    within(rows).getByRole("button", { name: "Add repository" });
-    screen.getByText(
-      "With no repositories selected, this automation runs against the workspace's first repository.",
-    );
-  });
-
-  it("renders a single dropdown when the executor profile does not support multi-repo", () => {
-    renderConfigSection({ executorProfileId: "profile-local" });
-
-    screen.getByTestId(REPOSITORY_SELECTOR_TEST_ID);
-    expect(screen.queryByTestId(REPOSITORY_ROWS_TEST_ID)).toBeNull();
-  });
-
-  it("keeps the single disabled repository picker for github_pr triggers even with a multi-repo-capable executor", () => {
-    renderConfigSection({ executorProfileId: "profile-worktree", conditionType: "github_pr" });
-
-    expect(screen.queryByTestId(REPOSITORY_ROWS_TEST_ID)).toBeNull();
-    const selector = screen.getByTestId(REPOSITORY_SELECTOR_TEST_ID);
-    expect(selector.hasAttribute("disabled")).toBe(true);
-    screen.getByText("PR triggers always use the PR's own repository.");
-  });
-
-  it("computes a disabled reason for incompatible executor types once two or more repositories are selected", () => {
-    const twoRepos = [
-      { kind: "registered" as const, id: "repo-1" },
-      { kind: "registered" as const, id: "repo-2" },
-    ];
-    expect(getExecutorItemDisabledReason("local_pc", twoRepos)).toEqual(
-      expect.stringContaining("Local"),
-    );
-  });
-
-  it("keeps a compatible executor type enabled with two or more repositories selected", () => {
-    const twoRepos = [
-      { kind: "registered" as const, id: "repo-1" },
-      { kind: "registered" as const, id: "repo-2" },
-    ];
-    expect(getExecutorItemDisabledReason("worktree", twoRepos)).toBeNull();
-  });
-
-  it("never disables an executor type when zero or one repository is selected", () => {
-    expect(getExecutorItemDisabledReason("local_pc", [])).toBeNull();
+    expect(screen.getByTestId("shared-repository-chips")).toBeTruthy();
+    expect(screen.getByTestId("repository-discovery-selector-enabled")).toBeTruthy();
+    expect(screen.queryByText("Use workspace default")).toBeNull();
     expect(
-      getExecutorItemDisabledReason("local_pc", [{ kind: "registered", id: "repo-1" }]),
-    ).toBeNull();
+      screen.getByText("Run without repository files in a task-owned scratch workspace."),
+    ).toBeTruthy();
+  });
+
+  it("adds an empty repository row through the shared chip control", () => {
+    const onRepositoriesChange = vi.fn();
+    renderConfig({ onRepositoriesChange });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add repository" }));
+
+    expect(onRepositoriesChange).toHaveBeenCalledWith([
+      expect.objectContaining({ kind: "none", branch: "" }),
+    ]);
+  });
+});
+
+describe("getExecutorItemDisabledReason", () => {
+  it("allows Worktree to use a repository-free scratch workspace", () => {
+    expect(getExecutorItemDisabledReason("worktree", [])).toBeNull();
+  });
+
+  it("uses the shared multi-repository capability guard", () => {
+    expect(
+      getExecutorItemDisabledReason("local_pc", [
+        { kind: "registered", id: "repo-1", branch: "main" },
+        { kind: "registered", id: "repo-2", branch: "main" },
+      ]),
+    ).not.toBeNull();
   });
 });

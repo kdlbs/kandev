@@ -1,6 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
 import { openTaskSession } from "../../helpers/session";
 import { isScrolledIntoView, seedScrollTestConversation } from "../../helpers/unread-divider";
+import { routeMarkReadResponseHold } from "../../helpers/mark-read-response-hold";
+import { waitForStableActiveSession } from "../../helpers/session-store";
+
+const END_TOLERANCE_PX = 10;
 
 test.describe("Unread divider", () => {
   test.beforeEach(async ({ apiClient }) => {
@@ -29,17 +33,7 @@ test.describe("Unread divider", () => {
     const sessionId = task.session_id;
 
     let session = await openTaskSession(testPage, task.id);
-    // attemptTimeout must be raised explicitly, not just `timeout` — its
-    // default is capped at min(15_000, ...) regardless of `timeout` (see
-    // SessionPage.waitForChatIdle). Past that cap it does a page.reload()
-    // to recover from a stuck WS subscription, which is a *real*
-    // navigate-away-and-back from this feature's own perspective — it
-    // would legitimately (and correctly) re-capture a fresh divider
-    // anchor, making later assertions in this test fail for a reason
-    // unrelated to what they're testing (the cursor advancing live while
-    // the session stays genuinely, continuously visible in one browser
-    // session).
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
 
     // First-ever visit: there is no prior read cursor, so nothing renders as
     // "New" — but the cursor must still advance to the latest message so a
@@ -57,7 +51,7 @@ test.describe("Unread divider", () => {
     // cursor keeps advancing live while the session stays in view, so this
     // alone must not produce a divider either.
     await session.sendMessageViaButton("second question");
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
 
     const fullTranscript = await apiClient.listSessionMessages(sessionId);
@@ -134,7 +128,10 @@ test.describe("Unread divider", () => {
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
     let session = await openTaskSession(testPage, task.id);
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    // No live-tail observation has happened yet, so the normal reload recovery
+    // is safe here. The post-send wait below stays reload-free because that
+    // interval is the continuously-visible behavior under test.
+    await session.waitForChatIdle({ timeout: 60_000 });
     const initialMessages = await apiClient.listSessionMessages(task.session_id);
     const initialTail = initialMessages.messages[initialMessages.messages.length - 1];
     if (!initialTail) throw new Error("expected the initial transcript to contain a message");
@@ -152,7 +149,7 @@ test.describe("Unread divider", () => {
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
 
     await session.sendMessageViaButton("prompt while actively reading");
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
   });
 
@@ -186,6 +183,83 @@ test.describe("Unread divider", () => {
     // instead.
     const newestRow = activeChat.locator(`[id="msg-${newestMessageId}"]`);
     expect(await isScrolledIntoView(scrollContainer, newestRow)).toBe(false);
+  });
+
+  // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.15
+  test("completed task switch keeps each read cursor and returns to the bottom", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const taskA = await seedScrollTestConversation(
+      apiClient,
+      seedData,
+      "Completed read cursor desktop A",
+    );
+    const taskB = await seedScrollTestConversation(
+      apiClient,
+      seedData,
+      "Completed read cursor desktop B",
+    );
+    const responseHold = await routeMarkReadResponseHold(testPage, taskA.sessionId);
+
+    const session = await openTaskSession(testPage, taskA.taskId);
+    await waitForStableActiveSession(testPage, taskA.sessionId);
+    await expect(session.activeChat().getByTestId("unread-divider")).toBeVisible();
+    await responseHold.waitUntilHeld();
+    await session
+      .activeChat()
+      .locator(".chat-message-list")
+      .evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+        element.dispatchEvent(new Event("scroll"));
+      });
+    await testPage.getByTestId("dockview-tab-changes").click();
+
+    const taskBMarkRead = testPage.waitForResponse(
+      (response) =>
+        response.url().includes(`/api/v1/task-sessions/${taskB.sessionId}/mark-read`) &&
+        response.request().method() === "POST",
+    );
+    await session.sidebarTaskItem("Completed read cursor desktop B").click();
+    await waitForStableActiveSession(testPage, taskB.sessionId);
+    await taskBMarkRead;
+    await session
+      .activeChat()
+      .locator(".chat-message-list")
+      .evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+        element.dispatchEvent(new Event("scroll"));
+      });
+
+    await responseHold.releaseHeldResponse();
+    await session.sidebarTaskItem("Completed read cursor desktop A").click();
+    await waitForStableActiveSession(testPage, taskA.sessionId);
+
+    const activeChat = session.activeChat();
+    const scrollContainer = activeChat.locator(".chat-message-list");
+    await expect
+      .poll(() =>
+        testPage.evaluate(
+          () =>
+            (
+              window as unknown as {
+                __dockviewApi__?: { activePanel?: { id: string } };
+              }
+            ).__dockviewApi__?.activePanel?.id ?? null,
+        ),
+      )
+      .toBe("changes");
+    await expect(scrollContainer).toBeVisible();
+    await expect(activeChat.getByTestId("unread-divider")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        scrollContainer.evaluate(
+          (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+        ),
+      )
+      .toBeLessThan(END_TOLERANCE_PX);
   });
 
   test("reserves room for the anchored last-prompt bar so it does not cover the New divider on visit start", async ({

@@ -170,6 +170,25 @@ describe("resolveBase on a pull_request merge ref", () => {
 });
 
 describe("resolveBase on other checkout shapes", () => {
+  it("uses the base tip while merging origin/main into a PR branch", () => {
+    const { dir, root } = initRepo();
+
+    git(dir, ["checkout", "-q", "-b", "pr"]);
+    write(dir, OWNED, CLEAN_SOURCE);
+    const prHead = commit(dir, "feat: pr work");
+
+    git(dir, ["checkout", "-q", "main"]);
+    const mainTip = landOnMain(dir);
+    setOriginMain(dir, mainTip);
+
+    git(dir, ["checkout", "-q", prHead]);
+    git(dir, ["merge", "-q", "--no-ff", "--no-commit", mainTip]);
+
+    expect(baseOf(dir, [])).toBe(mainTip);
+    expect(changedFiles(baseOf(dir, []), "A", dir)).toEqual([OWNED]);
+    expect(changedFiles(root, "A", dir)).toContain(FOREIGN);
+  });
+
   it("floors a rebased branch, which has no merge commit but the same defect", () => {
     const { dir, root } = initRepo();
     const mainTip = landOnMain(dir);

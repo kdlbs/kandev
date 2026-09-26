@@ -81,7 +81,7 @@ describe("useResizableClarificationOverlay", () => {
     expect(result.current.height).toBe(MIN_HEIGHT);
   });
 
-  it("clamps above 50% of viewport when dragging up past it", () => {
+  it("clamps above 50% of viewport when dragging up past it (default ratio)", () => {
     setInnerHeight(800); // 50% = 400 cap
     const { result } = renderHook(() => useResizableClarificationOverlay());
     attachContainerWithHeight(result.current.containerRef, 300);
@@ -168,5 +168,29 @@ describe("useResizableClarificationOverlay", () => {
     // Listeners removed: a synthetic mousemove must not throw / update anything.
     expect(() => dispatchMouseMove(200)).not.toThrow();
     expect(result.current.height).toBeNull();
+  });
+});
+
+describe("useResizableClarificationOverlay — maxViewportRatio parameter", () => {
+  beforeEach(() => {
+    setInnerHeight(1000);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  });
+
+  afterEach(() => {
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  });
+
+  it("honors a caller-supplied maxViewportRatio instead of the 50% default", () => {
+    setInnerHeight(800); // 35% = 280 cap, well below the 400 the default would allow
+    const { result } = renderHook(() => useResizableClarificationOverlay(0.35));
+    attachContainerWithHeight(result.current.containerRef, 300);
+
+    act(() => result.current.resizeHandleProps.onMouseDown(fakeReactMouseEvent(500)));
+    act(() => dispatchMouseMove(0)); // delta=500 → 800 requested, must clamp to 280 (35%), not 400 (50%)
+
+    expect(result.current.height).toBe(280);
   });
 });

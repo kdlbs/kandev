@@ -4,13 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // repoTurnService is a minimal TurnService used by lifecycle tests. It mirrors
@@ -19,6 +22,78 @@ import (
 // that DB-backed assertions stay coherent across components.
 type repoTurnService struct {
 	repo *sqliterepo.Repository
+}
+
+type failingReservedTurnPublisher struct {
+	TurnService
+	err error
+}
+
+type completedReservedTurnPublisher struct {
+	TurnService
+}
+
+type blockingReservedTurnMarker struct {
+	TurnService
+	entered chan struct{}
+	release chan struct{}
+}
+
+type failingPromptTurnReconciler struct {
+	TurnService
+	err error
+}
+
+type failingReservedTurnRollback struct {
+	TurnService
+	err error
+}
+
+type failingActiveTurnLookup struct {
+	TurnService
+	err        error
+	turn       *models.Turn
+	startCalls int
+}
+
+func (s failingReservedTurnPublisher) PublishReservedTurn(context.Context, *models.Turn) error {
+	return s.err
+}
+
+func (s completedReservedTurnPublisher) PublishReservedTurn(_ context.Context, turn *models.Turn) error {
+	completedAt := time.Now().UTC()
+	turn.CompletedAt = &completedAt
+	return nil
+}
+
+func (s blockingReservedTurnMarker) MarkReservedTurnDispatchAttempted(
+	ctx context.Context,
+	turn *models.Turn,
+) error {
+	close(s.entered)
+	<-s.release
+	return s.TurnService.MarkReservedTurnDispatchAttempted(ctx, turn)
+}
+
+func (s failingPromptTurnReconciler) ReconcileUnpublishedPromptTurns(context.Context) (int, error) {
+	return 0, s.err
+}
+
+func (s failingReservedTurnRollback) RollbackReservedTurn(context.Context, string, string) (bool, error) {
+	return false, s.err
+}
+
+func (s *failingActiveTurnLookup) GetActiveTurn(context.Context, string) (*models.Turn, error) {
+	return s.turn, s.err
+}
+
+func (s *failingActiveTurnLookup) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	s.startCalls++
+	return s.TurnService.StartTurn(ctx, sessionID)
+}
+
+func (failingReservedTurnPublisher) GetActiveTurn(context.Context, string) (*models.Turn, error) {
+	return nil, nil
 }
 
 func (a *repoTurnService) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
@@ -35,6 +110,31 @@ func (a *repoTurnService) StartTurn(ctx context.Context, sessionID string) (*mod
 		return nil, err
 	}
 	return turn, nil
+}
+
+func (a *repoTurnService) ReserveTurn(
+	ctx context.Context,
+	sessionID string,
+	_ *models.PromptDispatchRecovery,
+) (*models.Turn, error) {
+	return a.StartTurn(ctx, sessionID)
+}
+
+func (a *repoTurnService) PublishReservedTurn(context.Context, *models.Turn) error { return nil }
+
+func (a *repoTurnService) MarkReservedTurnDispatchAttempted(context.Context, *models.Turn) error {
+	return nil
+}
+
+func (a *repoTurnService) RollbackReservedTurn(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, error) {
+	return a.repo.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
+}
+
+func (a *repoTurnService) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error) {
+	return a.repo.ReconcileUnpublishedPromptTurns(ctx)
 }
 
 func (a *repoTurnService) CompleteTurn(ctx context.Context, turnID string) error {
@@ -55,6 +155,18 @@ func (a *repoTurnService) GetActiveTurn(ctx context.Context, sessionID string) (
 
 func (a *repoTurnService) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 	return a.repo.UpdateTurn(ctx, turn)
+}
+
+func (a *repoTurnService) PatchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+) error {
+	updated, _, err := a.repo.PatchTurnMetadata(ctx, sessionID, turnID, updates)
+	if err == nil && !updated {
+		return sql.ErrNoRows
+	}
+	return err
 }
 
 func (a *repoTurnService) AbandonOpenTurns(ctx context.Context, sessionID string) error {
@@ -91,6 +203,158 @@ func newTurnLifecycleTestService(t *testing.T) (*Service, *sqliterepo.Repository
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.turnService = &repoTurnService{repo: repo}
 	return svc, repo
+}
+
+func TestApplyRouteActionRejectsActiveTurn(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	if _, err := svc.turnService.StartTurn(ctx, "session1"); err != nil {
+		t.Fatalf("start turn: %v", err)
+	}
+	svc.SetRouteActionHandler(func(context.Context, RouteActionRequest) (*RouteActionResult, error) {
+		t.Fatal("route action handler must not run while a turn is active")
+		return nil, nil
+	})
+
+	_, err := svc.ApplyRouteAction(ctx, RouteActionRequest{
+		SessionID: "session1",
+		Action:    RouteActionRetry,
+	})
+	if !errors.Is(err, ErrRouteActionActiveTurn) {
+		t.Fatalf("ApplyRouteAction error = %v, want %v", err, ErrRouteActionActiveTurn)
+	}
+}
+
+func TestApplyRouteActionRunsAfterTurnSettles(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	turn, err := svc.turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("start turn: %v", err)
+	}
+	if err := svc.turnService.CompleteTurn(ctx, turn.ID); err != nil {
+		t.Fatalf("complete turn: %v", err)
+	}
+	want := &RouteActionResult{SessionID: "session1", State: "starting"}
+	svc.SetRouteActionHandler(func(_ context.Context, request RouteActionRequest) (*RouteActionResult, error) {
+		if request.Action != RouteActionTryNext {
+			t.Fatalf("route action = %q, want %q", request.Action, RouteActionTryNext)
+		}
+		return want, nil
+	})
+
+	got, err := svc.ApplyRouteAction(ctx, RouteActionRequest{
+		SessionID: "session1",
+		Action:    RouteActionTryNext,
+	})
+	if err != nil {
+		t.Fatalf("ApplyRouteAction: %v", err)
+	}
+	if got != want {
+		t.Fatalf("ApplyRouteAction result = %#v, want %#v", got, want)
+	}
+}
+
+func TestStartTurnDropsPromptAfterActiveTurnLookupFailure(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	lookupErr := errors.New("active turn read failed")
+	failing := &failingActiveTurnLookup{
+		TurnService: svc.turnService,
+		err:         lookupErr,
+		turn:        &models.Turn{ID: "partial-active-turn"},
+	}
+	svc.turnService = failing
+
+	turnID, created := svc.startTurnForSessionWithOwnership(context.Background(), "session1")
+	if turnID != "" || created {
+		t.Fatalf("start after lookup failure = (%q, %v), want empty drop", turnID, created)
+	}
+	if failing.startCalls != 0 {
+		t.Fatalf("StartTurn calls = %d, want 0 after lookup failure", failing.startCalls)
+	}
+	turns, err := repo.ListTurnsBySession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	if len(turns) != 0 {
+		t.Fatalf("turns after lookup failure = %#v, want none", turns)
+	}
+}
+
+func TestReservedPromptCallbackOwnerCancelsAndDrains(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	svc.resetReservedPromptCallbacks()
+	t.Cleanup(svc.stopReservedPromptCallbacks)
+	reservation := newReservedPromptTurn("turn-callback-owner")
+	entered := make(chan struct{})
+	finished := make(chan struct{})
+	if !svc.deferReservedPromptCallback(reservation, func(ctx context.Context) {
+		close(entered)
+		<-ctx.Done()
+		close(finished)
+	}) {
+		t.Fatal("failed to defer reservation callback")
+	}
+	svc.reservedPromptTurns.Store("session1", reservation)
+	if !svc.resolveReservedPromptTurn("session1", reservation.id, true) {
+		t.Fatal("failed to resolve reservation")
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("reserved callback did not start")
+	}
+
+	stopDone := make(chan struct{})
+	go func() {
+		svc.stopReservedPromptCallbacks()
+		close(stopDone)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("reserved callback did not observe owner cancellation")
+	}
+	select {
+	case <-stopDone:
+	case <-time.After(time.Second):
+		t.Fatal("reserved callback owner did not drain before returning")
+	}
+}
+
+func TestAgentReadyDetachedContextPreservesReservedCallbackShutdown(t *testing.T) {
+	ownerCtx, cancelOwner := context.WithCancel(context.Background())
+	callbackCtx, cancelCallback := reservedPromptCallbackContext(ownerCtx, context.Background())
+	t.Cleanup(cancelCallback)
+	detached := agentReadyDetachedContext(callbackCtx)
+	cancelOwner()
+	select {
+	case <-detached.Done():
+	case <-time.After(time.Second):
+		t.Fatal("agent-ready detached context discarded callback-owner cancellation")
+	}
+}
+
+func TestReservedPromptCallbackContextCanBeReattachedAfterRetry(t *testing.T) {
+	ownerCtx, cancelOwner := context.WithCancel(context.Background())
+	firstCtx, cancelFirst := reservedPromptCallbackContext(ownerCtx, context.Background())
+	retryCtx := context.WithoutCancel(firstCtx)
+	cancelFirst()
+
+	secondCtx, cancelSecond := reservedPromptCallbackContext(ownerCtx, retryCtx)
+	t.Cleanup(cancelSecond)
+	select {
+	case <-secondCtx.Done():
+		t.Fatal("reattached callback inherited the prior invocation's cancellation")
+	default:
+	}
+
+	cancelOwner()
+	select {
+	case <-secondCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("reattached callback did not preserve owner cancellation")
+	}
 }
 
 // TestStartTurnAdoptsExistingDBTurn covers the dual-creation leak that left
@@ -145,6 +409,499 @@ func TestStartTurnIsIdempotentInMemory(t *testing.T) {
 	}
 	if len(turns) != 1 {
 		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+}
+
+func TestReservedTurnCannotBeAdoptedBeforePublication(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+
+	turnID, created, reserved, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
+	if err != nil || !created || reserved == nil || turnID == "" {
+		t.Fatalf("reserve turn: id=%q created=%v reserved=%v err=%v", turnID, created, reserved, err)
+	}
+	if cached, ok := svc.activeTurns.Load("session1"); ok {
+		t.Fatalf("unpublished reserved turn entered active cache: %v", cached)
+	}
+
+	adoptedID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false, nil)
+	if !errors.Is(err, ErrAgentPromptInProgress) || adoptedID != "" {
+		t.Fatalf("second prompt adopted unpublished turn: id=%q err=%v", adoptedID, err)
+	}
+	if got := svc.getActiveTurnID("session1"); got != turnID {
+		t.Fatalf("message turn ID = %q, want reserved turn %q", got, turnID)
+	}
+	if open := openTurnCount(t, repo, "session1"); open != 1 {
+		t.Fatalf("open turns before publication = %d, want 1", open)
+	}
+
+	svc.promptDispatchCallback(ctx, "task1", "session1", reserved, nil, &promptDispatchOutcome{})()
+	cached, ok := svc.activeTurns.Load("session1")
+	if !ok || cached != turnID {
+		t.Fatalf("published turn cache = %v, %v; want %q", cached, ok, turnID)
+	}
+}
+
+func TestAcceptedReservationStaysActiveWhenPublicationWriteFails(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	reserved := &models.Turn{ID: "turn-accepted", TaskSessionID: "session1", TaskID: "task1"}
+	svc.turnService = failingReservedTurnPublisher{
+		TurnService: svc.turnService,
+		err:         errors.New("turn metadata write failed"),
+	}
+	svc.reservedPromptTurns.Store("session1", newReservedPromptTurn(reserved.ID))
+
+	svc.promptDispatchCallback(
+		context.Background(), "task1", "session1", reserved, nil, &promptDispatchOutcome{},
+	)()
+
+	active, ok := svc.activeTurns.Load("session1")
+	if !ok || active != reserved.ID {
+		t.Fatalf("accepted reservation cache = %v, %v; want %q", active, ok, reserved.ID)
+	}
+	if pending := svc.reservedPromptTurnID("session1"); pending != "" {
+		t.Fatalf("private reservation cache = %q, want cleared after agentctl acceptance", pending)
+	}
+}
+
+func TestAcceptedReservationDoesNotRestoreTerminalOrMissingCache(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		publisher func(TurnService) TurnService
+	}{
+		{
+			name: "terminal",
+			publisher: func(delegate TurnService) TurnService {
+				return completedReservedTurnPublisher{TurnService: delegate}
+			},
+		},
+		{
+			name: "missing",
+			publisher: func(delegate TurnService) TurnService {
+				return failingReservedTurnPublisher{TurnService: delegate, err: sql.ErrNoRows}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newTurnLifecycleTestService(t)
+			reserved := &models.Turn{ID: "turn-accepted", TaskSessionID: "session1", TaskID: "task1"}
+			svc.turnService = tc.publisher(svc.turnService)
+			svc.reservedPromptTurns.Store("session1", newReservedPromptTurn(reserved.ID))
+
+			svc.promptDispatchCallback(
+				context.Background(), "task1", "session1", reserved, nil, &promptDispatchOutcome{},
+			)()
+
+			if active, ok := svc.activeTurns.Load("session1"); ok {
+				t.Fatalf("terminal or missing reservation restored active cache: %v", active)
+			}
+			if pending := svc.reservedPromptTurnID("session1"); pending != "" {
+				t.Fatalf("private reservation cache = %q, want cleared", pending)
+			}
+		})
+	}
+}
+
+func TestReservedTurnAttemptMarkingHoldsCancellationGuard(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		"session1",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+	marker := blockingReservedTurnMarker{
+		TurnService: svc.turnService,
+		entered:     make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	releaseMarker := func() { releaseOnce.Do(func() { close(marker.release) }) }
+	t.Cleanup(releaseMarker)
+	svc.turnService = marker
+
+	claimDone := make(chan error, 1)
+	go func() {
+		_, _, err := svc.claimPromptDispatch(
+			ctx,
+			"task1",
+			"session1",
+			"",
+			false,
+			true,
+			&models.PromptDispatchRecovery{},
+			nil,
+			nil,
+			"",
+			false,
+		)
+		claimDone <- err
+	}()
+	select {
+	case <-marker.entered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for reserved-turn attempt marker")
+	}
+
+	guardAcquired := make(chan struct{})
+	go func() {
+		guard, release := svc.acquireCancelInFlightGuard("session1")
+		defer release()
+		guard.Lock()
+		close(guardAcquired)
+		guard.Unlock()
+	}()
+	select {
+	case <-guardAcquired:
+		t.Fatal("cancellation guard was released before attempt marking completed")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	releaseMarker()
+	select {
+	case err := <-claimDone:
+		if err != nil {
+			t.Fatalf("claimPromptDispatch: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for prompt claim")
+	}
+	select {
+	case <-guardAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation guard remained blocked after attempt marking")
+	}
+}
+
+func TestAgentReadyWaitsForReservedPromptGeneration(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	agentMgr := svc.agentManager.(*mockAgentManager)
+	agentMgr.currentPromptExecutionID = "exec1"
+	agentMgr.currentPromptGeneration.Store(1)
+
+	turnID, _, reserved, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
+	t.Cleanup(func() { svc.resolveReservedPromptTurn("session1", turnID, false) })
+	if err != nil {
+		t.Fatalf("reserve successor turn: %v", err)
+	}
+	reserved.Metadata = map[string]interface{}{
+		models.TurnMetaKeyPromptDispatchPending:   true,
+		models.TurnMetaKeyPromptDispatchAttempted: true,
+	}
+	if err := repo.UpdateTurn(ctx, reserved); err != nil {
+		t.Fatalf("mark successor dispatch attempted: %v", err)
+	}
+
+	readyDone := make(chan struct{})
+	go func() {
+		svc.handleAgentReady(ctx, watcher.AgentEventData{
+			TaskID: "task1", SessionID: "session1",
+			AgentExecutionID: "exec1", PromptGeneration: 1,
+		})
+		close(readyDone)
+	}()
+	select {
+	case <-readyDone:
+		t.Fatal("predecessor ready completed the reserved successor before dispatch resolution")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	agentMgr.currentPromptGeneration.Store(2)
+	svc.promptDispatchCallback(ctx, "task1", "session1", reserved, nil, &promptDispatchOutcome{})()
+	select {
+	case <-readyDone:
+	case <-time.After(time.Second):
+		t.Fatal("predecessor ready did not resume after dispatch resolution")
+	}
+	turn, err := repo.GetTurn(ctx, turnID)
+	if err != nil {
+		t.Fatalf("load successor after predecessor ready: %v", err)
+	}
+	if turn.CompletedAt != nil {
+		t.Fatalf("predecessor ready completed reserved successor at %v", turn.CompletedAt)
+	}
+}
+
+func TestAgentReadyRevalidatesAfterReservedPromptRollback(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	stepGetter := svc.workflowStepGetter.(*mockStepGetter)
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1"}
+	agentMgr := svc.agentManager.(*mockAgentManager)
+	agentMgr.currentPromptExecutionID = "exec1"
+	agentMgr.currentPromptGeneration.Store(1)
+
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
+	t.Cleanup(func() { svc.resolveReservedPromptTurn("session1", turnID, false) })
+	if err != nil {
+		t.Fatalf("reserve successor turn: %v", err)
+	}
+	readyDone := make(chan struct{})
+	go func() {
+		svc.handleAgentReady(ctx, watcher.AgentEventData{
+			TaskID: "task1", SessionID: "session1",
+			AgentExecutionID: "exec1", PromptGeneration: 1,
+		})
+		close(readyDone)
+	}()
+	select {
+	case <-readyDone:
+		t.Fatal("predecessor ready returned before reservation resolution")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	svc.rollbackReservedPromptTurn(ctx, "session1", turnID)
+	select {
+	case <-readyDone:
+	case <-time.After(time.Second):
+		t.Fatal("predecessor ready did not resume after reservation rollback")
+	}
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("load session after ready: %v", err)
+	}
+	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+		t.Fatalf("rolled-back reservation stranded predecessor in %q", session.State)
+	}
+}
+
+func TestAgentReadyDetachesDeliveryCancellationAfterReservedPromptRollback(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	stepGetter := svc.workflowStepGetter.(*mockStepGetter)
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1"}
+	agentMgr := svc.agentManager.(*mockAgentManager)
+	agentMgr.currentPromptExecutionID = "exec1"
+	agentMgr.currentPromptGeneration.Store(1)
+
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(context.Background(), "session1", true, nil)
+	t.Cleanup(func() { svc.resolveReservedPromptTurn("session1", turnID, false) })
+	if err != nil {
+		t.Fatalf("reserve successor turn: %v", err)
+	}
+	deliveryCtx, cancelDelivery := context.WithCancel(context.Background())
+	t.Cleanup(cancelDelivery)
+	readyDone := make(chan struct{})
+	go func() {
+		svc.handleAgentReady(deliveryCtx, watcher.AgentEventData{
+			TaskID: "task1", SessionID: "session1",
+			AgentExecutionID: "exec1", PromptGeneration: 1,
+		})
+		close(readyDone)
+	}()
+	select {
+	case <-readyDone:
+		t.Fatal("predecessor ready returned before reservation resolution")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	cancelDelivery()
+	svc.rollbackReservedPromptTurn(context.Background(), "session1", turnID)
+	select {
+	case <-readyDone:
+	case <-time.After(time.Second):
+		t.Fatal("predecessor ready did not resume after reservation rollback")
+	}
+	session, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("load session after ready: %v", err)
+	}
+	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+		t.Fatalf("canceled delivery context stranded predecessor in %q", session.State)
+	}
+}
+
+func TestAgentReadyReconcilesWhenReservedPromptRollbackFinishesAfterWaitTimeout(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	svc.agentReadyReservationWaitTimeout = 20 * time.Millisecond
+	ctx := context.Background()
+	stepGetter := svc.workflowStepGetter.(*mockStepGetter)
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1"}
+	agentMgr := svc.agentManager.(*mockAgentManager)
+	agentMgr.currentPromptExecutionID = "exec1"
+	agentMgr.currentPromptGeneration.Store(1)
+
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
+	t.Cleanup(func() { svc.resolveReservedPromptTurn("session1", turnID, false) })
+	if err != nil {
+		t.Fatalf("reserve successor turn: %v", err)
+	}
+	readyDone := make(chan struct{})
+	go func() {
+		svc.handleAgentReady(ctx, watcher.AgentEventData{
+			TaskID: "task1", SessionID: "session1",
+			AgentExecutionID: "exec1", PromptGeneration: 1,
+		})
+		close(readyDone)
+	}()
+	select {
+	case <-readyDone:
+	case <-time.After(time.Second):
+		t.Fatal("ready handler did not return after reservation wait timeout")
+	}
+
+	svc.rollbackReservedPromptTurn(ctx, "session1", turnID)
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		session, loadErr := repo.GetTaskSession(ctx, "session1")
+		if loadErr != nil {
+			t.Fatalf("load session after late rollback: %v", loadErr)
+		}
+		if session.State != models.TaskSessionStateRunning && session.State != models.TaskSessionStateStarting {
+			break
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("late rollback stranded predecessor in %q", session.State)
+		case <-ticker.C:
+		}
+	}
+}
+
+func TestAgentReadyWaitsForReservedTurnThenDropsGenerationlessEventOnRollback(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	agentMgr := svc.agentManager.(*mockAgentManager)
+	agentMgr.currentPromptExecutionID = "exec1"
+
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
+	t.Cleanup(func() { svc.resolveReservedPromptTurn("session1", turnID, false) })
+	if err != nil {
+		t.Fatalf("reserve successor turn: %v", err)
+	}
+	readyDone := make(chan struct{})
+	go func() {
+		svc.handleAgentReady(ctx, watcher.AgentEventData{
+			TaskID: "task1", SessionID: "session1",
+			AgentExecutionID: "exec1", PromptGeneration: 0,
+		})
+		close(readyDone)
+	}()
+	select {
+	case <-readyDone:
+		t.Fatal("generationless ready returned before reservation resolution")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	svc.rollbackReservedPromptTurn(ctx, "session1", turnID)
+	select {
+	case <-readyDone:
+	case <-time.After(time.Second):
+		t.Fatal("generationless ready did not resume after reservation rollback")
+	}
+	if _, err := repo.GetTurn(ctx, turnID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("rolled-back reserved turn remains: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("load session after generationless ready: %v", err)
+	}
+	if session.State != models.TaskSessionStateRunning {
+		t.Fatalf("generationless ready changed session state to %q", session.State)
+	}
+}
+
+func TestStartFailsClosedWhenPromptTurnRecoveryFails(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	recoveryErr := errors.New("recover unpublished prompt turn")
+	svc.turnService = failingPromptTurnReconciler{TurnService: svc.turnService, err: recoveryErr}
+
+	err := svc.Start(context.Background())
+	if !errors.Is(err, recoveryErr) {
+		t.Fatalf("Start error = %v, want %v", err, recoveryErr)
+	}
+	if svc.running {
+		t.Fatal("service remained running after prompt-turn recovery failure")
+	}
+}
+
+func TestStartFailsClosedWithoutTurnService(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	svc.turnService = nil
+
+	err := svc.Start(context.Background())
+	if err == nil {
+		_ = svc.Stop()
+		t.Fatal("Start error = nil, want missing turn service failure")
+	}
+	if svc.running {
+		t.Fatal("service remained running without prompt-turn recovery")
+	}
+}
+
+func TestPublishedReservedTurnCannotBeRolledBack(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	turnID, _, reserved, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
+	if err != nil {
+		t.Fatalf("reserve turn: %v", err)
+	}
+
+	svc.promptDispatchCallback(ctx, "task1", "session1", reserved, nil, &promptDispatchOutcome{})()
+	svc.rollbackReservedPromptTurn(ctx, "session1", turnID)
+
+	turn, err := repo.GetTurn(ctx, turnID)
+	if err != nil {
+		t.Fatalf("load accepted turn after late rollback: %v", err)
+	}
+	if turn == nil {
+		t.Fatal("late prompt failure deleted an already-published turn")
+	}
+}
+
+func TestRejectedReservedTurnClearsPrivateCache(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
+	if err != nil {
+		t.Fatalf("reserve turn: %v", err)
+	}
+	svc.rollbackReservedPromptTurn(ctx, "session1", turnID)
+	if reserved := svc.reservedPromptTurnID("session1"); reserved != "" {
+		t.Fatalf("reserved cache after rollback = %q, want empty", reserved)
+	}
+	if _, ok := svc.activeTurns.Load("session1"); ok {
+		t.Fatal("rolled-back reservation entered active cache")
+	}
+	if open := openTurnCount(t, repo, "session1"); open != 0 {
+		t.Fatalf("open turns after rollback = %d, want 0", open)
+	}
+
+	successorID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false, nil)
+	if err != nil || successorID == "" || successorID == turnID {
+		t.Fatalf("successor after rollback: id=%q rejected=%q err=%v", successorID, turnID, err)
+	}
+}
+
+func TestFailedReservedTurnRollbackKeepsSessionQuarantined(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
+	if err != nil {
+		t.Fatalf("reserve turn: %v", err)
+	}
+	reservation := svc.reservedPromptTurn("session1")
+	rollbackErr := errors.New("ambiguous rollback commit")
+	svc.turnService = failingReservedTurnRollback{TurnService: svc.turnService, err: rollbackErr}
+
+	svc.rollbackReservedPromptTurn(ctx, "session1", turnID)
+	if pending := svc.reservedPromptTurnID("session1"); pending != turnID {
+		t.Fatalf("reservation after failed rollback = %q, want quarantine %q", pending, turnID)
+	}
+	select {
+	case <-reservation.done:
+		t.Fatal("failed rollback resolved the reservation waiter")
+	default:
+	}
+	if _, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false, nil); !errors.Is(err, ErrAgentPromptInProgress) {
+		t.Fatalf("new prompt after failed rollback error = %v, want %v", err, ErrAgentPromptInProgress)
 	}
 }
 
@@ -349,6 +1106,59 @@ func TestReconcileSessionsOnStartupAbandonsOpenTurns(t *testing.T) {
 	if !got.CompletedAt.Equal(got.StartedAt) {
 		t.Fatalf("expected completed_at == started_at, got started=%v completed=%v",
 			got.StartedAt, *got.CompletedAt)
+	}
+}
+
+func TestReconcileSessionsOnStartupRestoresUnpublishedClarificationDispatch(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	completedAt := startedAt.Add(time.Second)
+
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-clarification", TaskSessionID: "session1", TaskID: "task1",
+		StartedAt: startedAt, CompletedAt: &completedAt,
+	}); err != nil {
+		t.Fatalf("create clarification turn: %v", err)
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: "message-clarification", TaskSessionID: "session1", TaskID: "task1",
+		TurnID: "turn-clarification", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeClarificationRequest, Content: "Continue?",
+		Metadata: map[string]interface{}{
+			"pending_id": "pending-restart", "question_id": "q1",
+			"status": "answered", "response": map[string]interface{}{"custom_text": "yes"},
+		},
+		CreatedAt: startedAt,
+	}); err != nil {
+		t.Fatalf("create terminal clarification: %v", err)
+	}
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-unpublished", TaskSessionID: "session1", TaskID: "task1",
+		StartedAt: startedAt.Add(time.Minute),
+		Metadata: map[string]interface{}{
+			"prompt_dispatch_pending":                   true,
+			"prompt_dispatch_clarification_pending_id":  "pending-restart",
+			"prompt_dispatch_clarification_turn_id":     "turn-clarification",
+			"prompt_dispatch_clarification_message_ids": []string{"message-clarification"},
+		},
+	}); err != nil {
+		t.Fatalf("create unpublished reservation: %v", err)
+	}
+
+	// No executors_running row exists. Recovery must still run before the
+	// ordinary startup reconciler takes its current early-return path.
+	svc.reconcileSessionsOnStartup(ctx)
+
+	if _, err := repo.GetTurn(ctx, "turn-unpublished"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("unpublished turn error = %v, want deleted reservation", err)
+	}
+	message, err := repo.GetMessage(ctx, "message-clarification")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if message.Metadata["status"] != "pending" || message.Metadata["response"] != nil {
+		t.Fatalf("recovered metadata = %#v, want pending without response", message.Metadata)
 	}
 }
 

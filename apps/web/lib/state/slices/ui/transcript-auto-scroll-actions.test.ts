@@ -44,12 +44,4 @@ describe("transcript auto-scroll actions", () => {
     store.getState().setTranscriptScrollTop("session-a", 400);
     expect(store.getState().transcriptAutoScroll.scrollTopBySessionId["session-a"]).toBe(400);
   });
-
-  it("setTranscriptVirtuosoState records an opaque per-session snapshot", () => {
-    const snapshot = { ranges: [{ startIndex: 0, endIndex: 10, size: 40 }], scrollTop: 300 };
-    store.getState().setTranscriptVirtuosoState("session-a", snapshot);
-    expect(store.getState().transcriptAutoScroll.virtuosoStateBySessionId["session-a"]).toEqual(
-      snapshot,
-    );
-  });
 });

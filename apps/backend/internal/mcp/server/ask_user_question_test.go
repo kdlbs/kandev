@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
@@ -38,6 +39,7 @@ func TestAskUserQuestion_ToolSchema_RequiresQuestionsArray(t *testing.T) {
 	require.True(t, ok, "schema should have properties")
 	assert.Contains(t, props, "questions", "schema must expose 'questions'")
 	assert.Contains(t, props, "context")
+	assert.Contains(t, props, "context_paragraphs")
 	assert.NotContains(t, props, "prompt", "legacy 'prompt' must not be top-level anymore")
 	assert.NotContains(t, props, "options", "legacy 'options' must not be top-level anymore")
 
@@ -110,6 +112,75 @@ func TestAskUserQuestion_SingleQuestion_PayloadShape(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(textBlock.Text), &parsed))
 	q1 := parsed["q1"].(map[string]interface{})
 	assert.Equal(t, "q1_opt1", q1["selected_option"])
+}
+
+func TestAskUserQuestion_PreservesLiteralContextEscapes(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "ask_user_question_kandev", map[string]interface{}{
+		"context": `First paragraph.\n\nSecond paragraph.`,
+		"questions": []map[string]interface{}{
+			{
+				"id":     "q1",
+				"prompt": "Continue?",
+				"options": []map[string]interface{}{
+					{"label": "Yes", "description": "Continue"},
+					{"label": "No", "description": "Stop"},
+				},
+			},
+		},
+	})
+	require.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, `First paragraph.\n\nSecond paragraph.`, payload["context"])
+}
+
+func TestAskUserQuestion_JoinsContextParagraphs(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "ask_user_question_kandev", clarificationArgsWithParagraphs())
+	require.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "First paragraph.\n\nSecond paragraph.", payload["context"])
+}
+
+func TestAskParentQuestion_JoinsContextParagraphs(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{}}
+	profile := mcpprofile.New(
+		mcpprofile.SurfaceKanbanTask,
+		[]mcpprofile.Capability{mcpprofile.CapabilityParentQuestion},
+		nil,
+	)
+	s := NewWithProfile(backend, "child-session", "child-task", 10005, newTestLogger(t), "", false, profile)
+
+	result := callTool(t, s, "ask_parent_question_kandev", clarificationArgsWithParagraphs())
+	require.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "First paragraph.\n\nSecond paragraph.", payload["context"])
+}
+
+func clarificationArgsWithParagraphs() map[string]interface{} {
+	return map[string]interface{}{
+		"context_paragraphs": []string{"First paragraph.", "Second paragraph."},
+		"questions": []map[string]interface{}{
+			{
+				"id":     "q1",
+				"prompt": "Continue?",
+				"options": []map[string]interface{}{
+					{"label": "Yes", "description": "Continue"},
+					{"label": "No", "description": "Stop"},
+				},
+			},
+		},
+	}
 }
 
 // TestAskUserQuestion_MultiQuestion_BuildsMapResponse covers the full multi-q
@@ -397,4 +468,15 @@ func TestAskUserQuestion_StreamsKeepAliveDuringWait(t *testing.T) {
 	}
 	assert.GreaterOrEqual(t, progressSeen, 1, "expected at least one keepalive progress notification")
 	assert.True(t, finalSeen, "expected the final tool result to be delivered")
+}
+
+// TestAskUserQuestion_KeepAliveIntervalBelowClientIdleDeadline protects the
+// managed-default safety margin described in the timeout design record. The
+// <= 60s bound targets the managed 300s watchdog, not every accepted
+// MCP_TOOL_TIMEOUT override. An override below this interval remains a
+// documented configuration edge. TestAskUserQuestion_StreamsKeepAliveDuringWait
+// cannot catch a default-value regression because it overrides the interval.
+func TestAskUserQuestion_KeepAliveIntervalBelowClientIdleDeadline(t *testing.T) {
+	assert.Greater(t, askQuestionKeepAliveInterval, time.Duration(0), "a non-positive interval disables emitKeepAlivePings entirely")
+	assert.LessOrEqual(t, askQuestionKeepAliveInterval, 60*time.Second)
 }

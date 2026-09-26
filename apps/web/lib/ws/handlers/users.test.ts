@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- User-settings notification cases share one handler contract file. */
+
 import { describe, expect, it } from "vitest";
 import { createStore } from "zustand/vanilla";
 import { registerUsersHandlers } from "./users";
@@ -5,10 +7,14 @@ import { defaultState } from "@/lib/state/default-state";
 import type { AppState } from "@/lib/state/store";
 import type { BackendMessageMap } from "@/lib/types/backend";
 
+/** Creates a vanilla Zustand store seeded with a structured clone of the default app state. */
 function makeStore() {
   return createStore<AppState>(() => structuredClone(defaultState) as AppState);
 }
 
+const LOCAL_VIEW_ID = "view-local";
+
+/** Builds a `user.settings.updated` notification frame merging the given payload over default values. */
 function userSettingsMessage(
   payload: Partial<BackendMessageMap["user.settings.updated"]["payload"]>,
 ): BackendMessageMap["user.settings.updated"] {
@@ -24,7 +30,70 @@ function userSettingsMessage(
   };
 }
 
+function recentUseMessage(
+  payload: Partial<BackendMessageMap["user.agent_profile_recent_use.updated"]["payload"]>,
+): BackendMessageMap["user.agent_profile_recent_use.updated"] {
+  return {
+    type: "notification",
+    action: "user.agent_profile_recent_use.updated",
+    payload: {
+      context: "task_create",
+      profile_ids: [],
+      revision: 1,
+      updated_at: "2026-08-27T12:00:00Z",
+      ...payload,
+    },
+  };
+}
+
+describe("agent profile recent-use websocket sync", () => {
+  it("keeps newer context revisions and accepts independent contexts", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      agentProfileRecentUse: {
+        loaded: true,
+        records: {
+          task_create: { profileIds: ["profile-new"], revision: 2, updatedAt: "later" },
+        },
+      },
+    }));
+
+    const handler = registerUsersHandlers(store)["user.agent_profile_recent_use.updated"];
+    handler?.(
+      recentUseMessage({
+        profile_ids: ["profile-old"],
+        revision: 1,
+        updated_at: "older",
+      }),
+    );
+    expect(store.getState().agentProfileRecentUse.records.task_create?.profileIds).toEqual([
+      "profile-new",
+    ]);
+
+    handler?.(
+      recentUseMessage({
+        context: "quick_chat",
+        profile_ids: ["profile-chat"],
+        revision: 1,
+      }),
+    );
+    expect(store.getState().agentProfileRecentUse.records.quick_chat?.profileIds).toEqual([
+      "profile-chat",
+    ]);
+  });
+});
+
 describe("startup page websocket sync", () => {
+  it("retains Threads through live updates that omit the startup choice", () => {
+    const store = makeStore();
+    const handler = registerUsersHandlers(store)["user.settings.updated"];
+    handler?.(userSettingsMessage({ startup_page: "threads" }));
+    expect(store.getState().userSettings.startupPage).toBe("threads");
+    handler?.(userSettingsMessage({ tasks_list_show_details: true }));
+    expect(store.getState().userSettings.startupPage).toBe("threads");
+  });
+
   it("applies startup page preferences and normalizes unknown values", () => {
     const store = makeStore();
 
@@ -44,7 +113,266 @@ describe("startup page websocket sync", () => {
   });
 });
 
+describe("status bar visibility websocket sync", () => {
+  it("updates status bar visibility and preserves it when omitted", () => {
+    const store = makeStore();
+
+    expect(
+      (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
+    ).toBe(false);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        app_status_bar_enabled: true,
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(
+      (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
+    ).toBe(true);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(
+      (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
+    ).toBe(true);
+  });
+
+  it("ignores older settings revisions and accepts newer ones", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      userSettings: {
+        ...state.userSettings,
+        appStatusBarEnabled: false,
+        revision: 2,
+      },
+    }));
+    const handler = registerUsersHandlers(store)["user.settings.updated"];
+
+    handler?.(
+      userSettingsMessage({
+        app_status_bar_enabled: true,
+        revision: 1,
+      }),
+    );
+    expect(store.getState().userSettings).toMatchObject({
+      appStatusBarEnabled: false,
+      revision: 2,
+    });
+
+    handler?.(
+      userSettingsMessage({
+        app_status_bar_enabled: true,
+        revision: 3,
+      }),
+    );
+    expect(store.getState().userSettings).toMatchObject({
+      appStatusBarEnabled: true,
+      revision: 3,
+    });
+  });
+});
+
+describe("session hostname resolution websocket sync", () => {
+  it("updates the setting and preserves it when omitted", () => {
+    const store = makeStore();
+    const handler = registerUsersHandlers(store)["user.settings.updated"];
+
+    handler?.(
+      userSettingsMessage({
+        resolve_session_hostnames: true,
+      }),
+    );
+    expect(store.getState().userSettings.resolveSessionHostnames).toBe(true);
+
+    handler?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.resolveSessionHostnames).toBe(true);
+  });
+});
+
+describe("manual task-color websocket sync", () => {
+  it("applies the normalized server map, including clear tombstones", () => {
+    const store = makeStore();
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        revision: 1,
+        sidebar_task_colors: {
+          "task-red": "red",
+          "task-cleared": null,
+        },
+      }),
+    );
+
+    expect(store.getState().userSettings.sidebarTaskColors).toEqual({
+      "task-red": "red",
+      "task-cleared": null,
+    });
+  });
+});
+
+describe("last seen display websocket sync", () => {
+  it("applies a relative value and normalizes unknown values", () => {
+    const store = makeStore();
+    expect(store.getState().userSettings.lastSeenDisplay).toBe("absolute");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ last_seen_display: "relative" }),
+    );
+    expect(store.getState().userSettings.lastSeenDisplay).toBe("relative");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        last_seen_display: "unexpected",
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(store.getState().userSettings.lastSeenDisplay).toBe("absolute");
+  });
+
+  it("preserves the current value when omitted", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      userSettings: { ...state.userSettings, lastSeenDisplay: "relative" },
+    }));
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.lastSeenDisplay).toBe("relative");
+  });
+
+  it("ignores older settings revisions", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      userSettings: { ...state.userSettings, lastSeenDisplay: "absolute", revision: 2 },
+    }));
+    const handler = registerUsersHandlers(store)["user.settings.updated"];
+    handler?.(userSettingsMessage({ last_seen_display: "relative", revision: 1 }));
+    expect(store.getState().userSettings.lastSeenDisplay).toBe("absolute");
+  });
+});
+
+// eslint-disable-next-line max-lines-per-function -- The handler contract cases share one store fixture and revision setup.
 describe("user settings websocket handler", () => {
+  it("hydrates Threads views independently from sidebar views", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      sidebarViews: {
+        ...state.sidebarViews,
+        activeViewId: "view-all-tasks",
+      },
+    }));
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        thread_views: [
+          {
+            id: "thread-view",
+            name: "Thread view",
+            task_scope: { mode: "all", task_ids: [] },
+            filters: [],
+            sort: { key: "attention", direction: "asc" },
+            max_columns: 3,
+            layout: "grid",
+            auto_hide_composer: true,
+          },
+        ],
+        thread_active_view_id: "thread-view",
+        thread_view_draft: null,
+      }),
+    );
+
+    expect(store.getState().threadViews.activeViewId).toBe("thread-view");
+    expect(store.getState().threadViews.views).toHaveLength(1);
+    expect(store.getState().threadViews.views[0]).toMatchObject({
+      layout: "grid",
+      autoHideComposer: true,
+    });
+    expect(store.getState().threadViews.draft).toBeNull();
+    expect(store.getState().sidebarViews.activeViewId).toBe("view-all-tasks");
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().threadViews.views[0]).toMatchObject({
+      layout: "grid",
+      autoHideComposer: true,
+    });
+  });
+
+  it("does not replace optimistic Threads views while a local write is pending", () => {
+    const store = makeStore();
+    const draft = {
+      baseViewId: LOCAL_VIEW_ID,
+      taskScope: { mode: "all" as const, taskIds: [] as [] },
+      filters: [],
+      sort: { key: "attention" as const, direction: "asc" as const },
+      maxColumns: 1,
+      layout: "columns" as const,
+      autoHideComposer: false,
+    };
+    store.setState((state) => ({
+      ...state,
+      threadViews: {
+        ...state.threadViews,
+        views: [
+          {
+            id: LOCAL_VIEW_ID,
+            name: "Local",
+            taskScope: { mode: "all", taskIds: [] },
+            filters: [],
+            sort: { key: "attention", direction: "asc" },
+            maxColumns: null,
+            layout: "columns",
+            autoHideComposer: false,
+          },
+        ],
+        activeViewId: LOCAL_VIEW_ID,
+        draft,
+        syncPending: true,
+      },
+    }));
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        revision: 1,
+        thread_views: [
+          {
+            id: "view-server",
+            name: "Server",
+            task_scope: { mode: "all", task_ids: [] },
+            filters: [],
+            sort: { key: "attention", direction: "asc" },
+            max_columns: null,
+          },
+        ],
+        thread_active_view_id: "view-server",
+        thread_view_draft: null,
+      }),
+    );
+
+    expect(store.getState().threadViews).toMatchObject({
+      activeViewId: LOCAL_VIEW_ID,
+      draft,
+      syncPending: true,
+    });
+    expect(store.getState().threadViews.views[0].id).toBe(LOCAL_VIEW_ID);
+  });
+
+  it("updates LSP status location, normalizes unknown values, and preserves omissions", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ lsp_status_location: "status_bar" }),
+    );
+    expect(store.getState().userSettings.lspStatusLocation).toBe("status_bar");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.lspStatusLocation).toBe("status_bar");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        lsp_status_location: "sidebar",
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(store.getState().userSettings.lspStatusLocation).toBe("toolbar");
+  });
+
   it("updates the List detail preference and preserves it when omitted", () => {
     const store = makeStore();
 
@@ -136,7 +464,9 @@ describe("user settings websocket handler", () => {
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
     expect(store.getState().userSettings.agentGeneratedTaskTitles).toBe(true);
   });
+});
 
+describe("user settings websocket transcript navigation", () => {
   it("syncs transcript navigation preferences and uses the documented defaults", () => {
     const store = makeStore();
 
@@ -160,6 +490,32 @@ describe("user settings websocket handler", () => {
       showScrollToStart: false,
       showTranscriptAutoScrollControl: false,
     });
+  });
+});
+
+describe("todo list panel websocket sync", () => {
+  it("syncs the todo list panel preference and preserves it when omitted", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ show_todo_list_panel: true }),
+    );
+    expect(store.getState().userSettings.showTodoListPanel).toBe(true);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.showTodoListPanel).toBe(true);
+  });
+
+  it("syncs the not-empty sub-option and preserves it when omitted", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ show_todo_list_panel_only_when_not_empty: true }),
+    );
+    expect(store.getState().userSettings.showTodoListPanelOnlyWhenNotEmpty).toBe(true);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.showTodoListPanelOnlyWhenNotEmpty).toBe(true);
   });
 });
 
@@ -264,6 +620,7 @@ describe("user settings websocket task-create last-used", () => {
       branch: null,
       agentProfileId: null,
       executorProfileId: null,
+      workflowIdsByWorkspace: {},
       synced: false,
     });
   });
@@ -281,6 +638,25 @@ describe("user settings websocket task-create last-used", () => {
     });
   });
 
+  it("maps workspace-scoped workflow history from broadcasts", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        task_create_last_used: {
+          workflow_ids_by_workspace: {
+            "workspace-1": "workflow-1",
+          },
+        },
+      }),
+    );
+
+    expect(store.getState().userSettings.taskCreateLastUsed).toMatchObject({
+      workflowIdsByWorkspace: { "workspace-1": "workflow-1" },
+      synced: true,
+    });
+  });
+
   it("preserves task-create last-used state when broadcasts omit it", () => {
     const store = makeStore();
     store.setState((state) => ({
@@ -292,6 +668,7 @@ describe("user settings websocket task-create last-used", () => {
           branch: "main",
           agentProfileId: "agent-1",
           executorProfileId: "exec-1",
+          workflowIdsByWorkspace: {},
           synced: true,
         },
       },
@@ -306,8 +683,31 @@ describe("user settings websocket task-create last-used", () => {
       branch: "main",
       agentProfileId: "agent-1",
       executorProfileId: "exec-1",
+      workflowIdsByWorkspace: {},
       synced: true,
     });
+  });
+});
+
+describe("user settings websocket sidebar draft migration", () => {
+  it("preserves an archived clause in a live draft", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        sidebar_views: [],
+        sidebar_draft: {
+          base_view_id: "all",
+          filters: [{ id: "archived", dimension: "archived", op: "is", value: true }],
+          sort: { key: "state", direction: "asc" },
+          group: "none",
+        },
+      }),
+    );
+
+    expect(store.getState().sidebarViews.draft?.filters).toEqual([
+      { id: "archived", dimension: "archived", op: "is", value: true },
+    ]);
   });
 });
 
@@ -410,5 +810,21 @@ describe("user settings websocket sidebar settings", () => {
       orderedTaskIds: ["server"],
       syncError: "Failed to sync",
     });
+  });
+});
+
+it("syncs hover settings while preserving omitted fields and rejecting old revisions", () => {
+  const store = makeStore();
+  const handler = registerUsersHandlers(store)["user.settings.updated"];
+  handler?.(
+    userSettingsMessage({ sidebar_hover_enabled: false, sidebar_hover_delay_ms: 0, revision: 10 }),
+  );
+  handler?.(userSettingsMessage({ app_status_bar_enabled: true, revision: 11 }));
+  handler?.(
+    userSettingsMessage({ sidebar_hover_enabled: true, sidebar_hover_delay_ms: 500, revision: 9 }),
+  );
+  expect(store.getState().userSettings).toMatchObject({
+    sidebarHoverEnabled: false,
+    sidebarHoverDelayMs: 0,
   });
 });

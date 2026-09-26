@@ -6,6 +6,7 @@ import { listBranches, listRepositoryBranches } from "@/lib/api";
 import type { Branch } from "@/lib/types/http";
 
 const EMPTY_BRANCHES: Branch[] = [];
+const BRANCH_LIST_RETRY_DELAYS_MS = [100, 250, 500, 1_000] as const;
 
 /**
  * Source of branches for a row: either a workspace repo (by id) or an
@@ -24,6 +25,25 @@ function cacheKeyFor(source: BranchSource | null): string {
   return source.kind === "id" ? source.repositoryId : `path::${source.workspaceId}::${source.path}`;
 }
 
+async function listBranchesUntilSettled(source: BranchSource): Promise<Branch[]> {
+  for (const retryDelayMs of BRANCH_LIST_RETRY_DELAYS_MS) {
+    try {
+      const response =
+        source.kind === "id"
+          ? await listBranches(source.workspaceId, { repositoryId: source.repositoryId })
+          : await listBranches(source.workspaceId, { path: source.path });
+      return response.branches;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
+  }
+  const response =
+    source.kind === "id"
+      ? await listBranches(source.workspaceId, { repositoryId: source.repositoryId })
+      : await listBranches(source.workspaceId, { path: source.path });
+  return response.branches;
+}
+
 /**
  * Loads git branches for a workspace repo or an on-machine path. One hook,
  * one cache, one backend endpoint — the source shape decides which query
@@ -31,6 +51,8 @@ function cacheKeyFor(source: BranchSource | null): string {
  */
 export type UseBranchesResult = {
   branches: Branch[];
+  /** True after a non-refresh request has completed, including an empty list. */
+  isLoaded: boolean;
   isLoading: boolean;
   /**
    * Refreshes the branch list. For id-based sources the backend runs
@@ -62,14 +84,12 @@ export function useBranches(source: BranchSource | null, enabled = true): UseBra
     inFlightKeysRef.current.add(key);
     setRepositoryBranchesLoading(key, true);
 
-    const promise =
-      source.kind === "id"
-        ? listBranches(source.workspaceId, { repositoryId: source.repositoryId })
-        : listBranches(source.workspaceId, { path: source.path });
-
-    promise
-      .then((response) => setRepositoryBranches(key, response.branches))
-      .catch(() => setRepositoryBranches(key, []))
+    listBranchesUntilSettled(source)
+      .then((branches) => setRepositoryBranches(key, branches))
+      .catch(() => {
+        // Keep the cache unloaded after a failed request. A transient branch
+        // endpoint failure must not permanently disable the branch pill.
+      })
       .finally(() => {
         inFlightKeysRef.current.delete(key);
         setRepositoryBranchesLoading(key, false);
@@ -98,6 +118,7 @@ export function useBranches(source: BranchSource | null, enabled = true): UseBra
 
   return {
     branches,
+    isLoaded,
     isLoading,
     refresh: source ? refresh : undefined,
   };

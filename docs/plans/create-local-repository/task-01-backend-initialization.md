@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/create-local-repository/spec.md"
+spec: "../../specs/workspaces/requirements/create-local-repository.md"
 ---
 
 # Task 01: Backend Local Repository Initialization

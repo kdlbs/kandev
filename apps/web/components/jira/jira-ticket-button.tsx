@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { JiraTicketDialog } from "./jira-ticket-dialog";
 import { extractJiraKey } from "./jira-ticket-common";
+import { useTranslation } from "react-i18next";
 
 export { extractJiraKey };
 
@@ -17,6 +18,7 @@ type JiraTicketButtonProps = {
 // JiraTicketButton sits in the task top bar. It extracts a Jira key from the
 // task title and opens a full ticket dialog on click.
 export function JiraTicketButton({ workspaceId, taskTitle }: JiraTicketButtonProps) {
+  const { t } = useTranslation();
   const ticketKey = extractJiraKey(taskTitle);
   const [open, setOpen] = useState(false);
 
@@ -36,7 +38,9 @@ export function JiraTicketButton({ workspaceId, taskTitle }: JiraTicketButtonPro
             <span className="text-xs font-medium">{ticketKey}</span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Open Jira ticket {ticketKey}</TooltipContent>
+        <TooltipContent>
+          {t("jira:openJiraTicket")} {ticketKey}
+        </TooltipContent>
       </Tooltip>
       <JiraTicketDialog
         open={open}

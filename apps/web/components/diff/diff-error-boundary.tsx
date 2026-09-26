@@ -2,6 +2,7 @@
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { IconAlertTriangle } from "@tabler/icons-react";
+import { t } from "@/lib/i18n";
 
 type DiffErrorBoundaryProps = {
   filePath: string;
@@ -40,10 +41,7 @@ export class DiffErrorBoundary extends Component<DiffErrorBoundaryProps, DiffErr
       return (
         <div className="flex items-center gap-2 py-4 px-3 text-xs text-muted-foreground border-t">
           <IconAlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
-          <span>
-            Unable to render diff for this file. The cached diff may be out of sync with the working
-            tree — refresh to retry.
-          </span>
+          <span>{t("diff:unableToRenderDiffForThis")}</span>
         </div>
       );
     }

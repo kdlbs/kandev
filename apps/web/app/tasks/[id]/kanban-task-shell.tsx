@@ -16,6 +16,7 @@
  */
 
 import Link from "@/components/routing/app-link";
+import TaskLink from "@/components/routing/task-link";
 import { TaskPageContent } from "@/components/task/task-page-content";
 import { TaskBody, resolveTaskBodyMode } from "@/components/task/TaskBody";
 import { TaskHeader } from "@/components/task/TaskHeader";
@@ -26,6 +27,8 @@ import { isFromOffice } from "@/lib/types/http";
 import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { Layout } from "react-resizable-panels";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type KanbanTaskShellProps = {
   task: Task | null;
@@ -52,6 +55,7 @@ export function KanbanTaskShell({
   urlSimple,
   urlMode,
 }: KanbanTaskShellProps) {
+  const { t } = useTranslation();
   // Kanban shell defaults to advanced. ?simple flips to simple.
   const mode = resolveTaskBodyMode({ simple: urlSimple, mode: urlMode }, "advanced");
   // "Open in office view" only makes sense when (a) the office feature is
@@ -81,8 +85,8 @@ export function KanbanTaskShell({
         <SimpleTaskHeaderRow task={task} />
         <p className="mt-4 text-sm text-muted-foreground">
           {showOfficeLink
-            ? "Simple view for kanban tasks shows the chat that's already in the panels. For the full Linear-style experience (comments, properties, activity timeline), open this task in the office view."
-            : "Simple view shows the chat that's already in the panels. Use ?simple=false to flip back to the advanced layout."}
+            ? t("tasks:simpleViewForKanbanTasksShows")
+            : t("tasks:simpleViewShowsTheChatThat", { simpleQuery: "?simple=false" })}
         </p>
       </div>
     </div>
@@ -100,19 +104,26 @@ export function KanbanTaskShell({
 // background-running task reads distinctly and never as done,
 // and carry the sidebar's rich "needs me" reading — pending clarification /
 // permission — so the header distinguishes waiting-for-input.
+function simpleTaskPendingFallback(task: Task | null) {
+  if (!task) return {};
+  return {
+    taskId: task.id,
+    taskPendingAction: task.task_pending_action,
+    statusSummary: task.status_summary,
+    primarySessionState: task.primary_session_state,
+    primarySessionPendingAction: task.primary_session_pending_action,
+  };
+}
+
 function simpleTaskHeaderData(task: Task | null) {
   return {
     primarySessionId: task?.primary_session_id,
-    pendingFallback: {
-      taskId: task?.id,
-      taskPendingAction: task?.task_pending_action,
-      primarySessionState: task?.primary_session_state,
-      primarySessionPendingAction: task?.primary_session_pending_action,
-    },
+    pendingFallback: simpleTaskPendingFallback(task),
     identifier: task?.id?.slice(0, 8),
-    title: task?.title ?? "Loading...",
+    title: task?.title ?? t("tasks:loading"),
     state: task?.state ?? null,
     foregroundActivity: task?.foreground_activity,
+    interrupted: task?.interrupted ?? false,
   };
 }
 
@@ -127,6 +138,7 @@ function SimpleTaskHeaderRow({ task }: { task: Task | null }) {
         foregroundActivity={data.foregroundActivity}
         hasPendingClarification={pendingInput.clarification}
         hasPendingPermission={pendingInput.permission}
+        interrupted={data.interrupted}
       />
       <TaskHeader
         identifier={data.identifier}
@@ -141,11 +153,22 @@ function SimpleTaskHeaderRow({ task }: { task: Task | null }) {
 }
 
 function CrossLinkRow({ taskId, target }: { taskId: string; target: "office" | "kanban" }) {
-  const href = target === "office" ? `/office/tasks/${taskId}` : `/t/${taskId}`;
-  const label = target === "office" ? "Open in office view" : "Open in advanced view";
+  const { t } = useTranslation();
+  const label = target === "office" ? t("tasks:openInOfficeView") : t("tasks:openInAdvancedView");
+  if (target === "kanban") {
+    return (
+      <TaskLink
+        taskId={taskId}
+        className="text-xs text-muted-foreground underline-offset-2 hover:underline cursor-pointer"
+        data-testid="task-cross-link"
+      >
+        {label}
+      </TaskLink>
+    );
+  }
   return (
     <Link
-      href={href}
+      href={`/office/tasks/${taskId}`}
       className="text-xs text-muted-foreground underline-offset-2 hover:underline cursor-pointer"
       data-testid="task-cross-link"
     >

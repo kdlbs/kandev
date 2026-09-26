@@ -67,13 +67,21 @@ func (r *Repository) ListAgentRuntimes(ctx context.Context) (map[string]*Runtime
 }
 
 // UpdateRuntimeLastRunFinished records the time an agent's run finished.
+// Upserts because UpsertAgentRuntime's only production caller is
+// onboarding, so an agent that never onboarded through that path has no
+// office_agent_runtime row yet — a bare UPDATE would silently affect 0
+// rows and the stamp would be lost. A newly-created row defaults to
+// status "idle" / empty pause_reason and must not clobber either on
+// conflict, matching UpsertAgentRuntime's own defaults.
 func (r *Repository) UpdateRuntimeLastRunFinished(ctx context.Context, agentID string, finishedAt time.Time) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE office_agent_runtime
-		SET last_run_finished_at = ?, updated_at = ?
-		WHERE agent_id = ?
-	`), finishedAt, now, agentID)
+		INSERT INTO office_agent_runtime (agent_id, status, pause_reason, last_run_finished_at, updated_at)
+		VALUES (?, 'idle', '', ?, ?)
+		ON CONFLICT(agent_id) DO UPDATE SET
+			last_run_finished_at = excluded.last_run_finished_at,
+			updated_at = excluded.updated_at
+	`), agentID, finishedAt, now)
 	return err
 }
 

@@ -121,7 +121,7 @@ func pickPrimarySession(sessions []*models.TaskSession) *models.TaskSession {
 // kind is single_repo for a single worktree, multi_repo for >1
 // worktrees, and falls back to whatever the group declared when there
 // are zero worktrees.
-func buildMaterialization(group *orchmodels.WorkspaceGroup, worktrees []*models.TaskSessionWorktree, envID string) (kind, path, restoreCfg string) {
+func buildMaterialization(group *orchmodels.WorkspaceGroup, worktrees []*models.TaskEnvironmentRepo, envID string) (kind, path, restoreCfg string) {
 	switch len(worktrees) {
 	case 0:
 		// No worktrees but the session may still own a TaskEnvironment

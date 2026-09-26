@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "@/components/routing/app-link";
+import { getExecutorLabel } from "@/lib/executor-icons";
 import { AgentStatusDot } from "../../agents/components/agent-status-dot";
 import type { OrgTreeNode } from "./org-tree-layout";
 import { CARD_W } from "./org-tree-layout";
@@ -46,6 +47,7 @@ export function OrgNodeCard({ node }: OrgNodeCardProps) {
   return (
     <Link
       href={`/office/agents/${agent.id}`}
+      data-reports-to={agent.reportsTo ?? ""}
       className="absolute group rounded-xl border border-border bg-card p-3.5 shadow-sm hover:shadow-md hover:border-primary/50 hover:-translate-y-0.5 cursor-pointer transition-all"
       style={{ left: node.x, top: node.y, width: CARD_W }}
     >
@@ -66,7 +68,7 @@ export function OrgNodeCard({ node }: OrgNodeCardProps) {
           )}
           {agent.executorPreference?.type && (
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70 truncate mt-1">
-              {agent.executorPreference.type.replace(/_/g, " ")}
+              {getExecutorLabel(agent.executorPreference.type)}
             </p>
           )}
         </div>

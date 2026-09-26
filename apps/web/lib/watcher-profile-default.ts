@@ -5,7 +5,6 @@
 // disallows <SelectItem value="">, so the dropdown item carries this sentinel
 // value and maps back to "" on change.
 export const STEP_DEFAULT = "__step_default__";
-export const STEP_DEFAULT_LABEL = "(use step default)";
 
 // Map a select value back to the stored profile id, collapsing the sentinel to
 // "" so the payload keeps signalling "use step default".

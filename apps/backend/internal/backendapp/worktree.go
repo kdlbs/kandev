@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -66,10 +67,10 @@ func (a *bootMsgAdapter) UpdateMessage(ctx context.Context, message *models.Mess
 	return a.svc.UpdateMessage(ctx, message)
 }
 
-func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Logger, lifecycleMgr *lifecycle.Manager, taskSvc *taskservice.Service) (*worktree.Manager, *worktree.Recreator, func() error, error) {
+func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Logger, lifecycleMgr *lifecycle.Manager, taskSvc *taskservice.Service) (*worktree.Manager, func() error, error) {
 	manager, cleanup, err := worktree.Provide(dbPool.Writer(), dbPool.Reader(), cfg, log)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	if lifecycleMgr != nil {
 		lifecycleMgr.SetWorktreeManager(manager)
@@ -80,8 +81,14 @@ func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Log
 		taskSvc.SetEnvironmentDestroyer(&environmentDestroyerAdapter{
 			lifecycle: lifecycleMgr,
 			worktrees: manager,
+			containers: &containerOpsDispatch{
+				local:     &lifecycleContainerOps{lifecycle: lifecycleMgr},
+				remote:    runtime.NewRemoteDockerContainers(log),
+				executors: taskSvc,
+			},
 		})
 	}
+	taskSvc.SetSSHTaskDirReclaimer(newSSHTaskDirReclaimerAdapter(log))
 
 	// Wire script message handler with adapters
 	taskSvcAdapter := &taskServiceAdapter{svc: taskSvc}
@@ -96,10 +103,7 @@ func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Log
 	manager.SetScriptMessageHandler(scriptHandler)
 	manager.SetRepositoryProvider(repoAdapter)
 
-	// Create recreator for orchestrator to use during session resume
-	recreator := worktree.NewRecreator(manager)
-
-	return manager, recreator, cleanup, nil
+	return manager, cleanup, nil
 }
 
 // environmentDestroyerAdapter implements taskservice.EnvironmentDestroyer by
@@ -107,12 +111,17 @@ func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Log
 // Manager (for worktrees). Branch is preserved on worktree removal so unpushed
 // work is never silently dropped.
 type environmentDestroyerAdapter struct {
-	lifecycle *lifecycle.Manager
-	worktrees *worktree.Manager
+	lifecycle  *lifecycle.Manager
+	worktrees  *worktree.Manager
+	containers *containerOpsDispatch
 }
 
-func (a *environmentDestroyerAdapter) DestroyContainer(ctx context.Context, containerID string) error {
-	return a.lifecycle.DestroyContainer(ctx, containerID)
+func (a *environmentDestroyerAdapter) DestroyKubernetesEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
+	return a.lifecycle.DestroyKubernetesEnvironment(ctx, env)
+}
+
+func (a *environmentDestroyerAdapter) DestroyContainer(ctx context.Context, env *models.TaskEnvironment) error {
+	return a.containers.DestroyContainer(ctx, env)
 }
 
 func (a *environmentDestroyerAdapter) DestroySandbox(ctx context.Context, sandboxID, executionID string) error {
@@ -120,12 +129,39 @@ func (a *environmentDestroyerAdapter) DestroySandbox(ctx context.Context, sandbo
 }
 
 func (a *environmentDestroyerAdapter) DestroyWorktree(ctx context.Context, worktreeID string) error {
-	// removeBranch=false: preserve the branch so unpushed work isn't lost.
-	return a.worktrees.RemoveByID(ctx, worktreeID, false)
+	receipt, err := a.worktrees.RemoveByIDWithReceipt(ctx, worktreeID)
+	if err != nil {
+		return err
+	}
+	if receipt.RetainedReasons[worktree.RetainedActiveReference] > 0 {
+		return fmt.Errorf("worktree %s is still referenced by another task", worktreeID)
+	}
+	return nil
 }
 
-func (a *environmentDestroyerAdapter) GetContainerLiveStatus(ctx context.Context, containerID string) (*taskservice.ContainerLiveStatus, error) {
-	live, err := a.lifecycle.GetContainerLiveStatus(ctx, containerID)
+func (a *environmentDestroyerAdapter) GetContainerLiveStatus(
+	ctx context.Context,
+	env *models.TaskEnvironment,
+) (*taskservice.ContainerLiveStatus, error) {
+	return a.containers.GetContainerLiveStatus(ctx, env)
+}
+
+// lifecycleContainerOps adapts the lifecycle Manager to the dispatch's local
+// container surface, translating the runtime status type here so the dispatch
+// itself does not depend on the runtime tier.
+type lifecycleContainerOps struct {
+	lifecycle *lifecycle.Manager
+}
+
+func (o *lifecycleContainerOps) DestroyContainer(ctx context.Context, containerID string) error {
+	return o.lifecycle.DestroyContainer(ctx, containerID)
+}
+
+func (o *lifecycleContainerOps) GetContainerLiveStatus(
+	ctx context.Context,
+	containerID string,
+) (*taskservice.ContainerLiveStatus, error) {
+	live, err := o.lifecycle.GetContainerLiveStatus(ctx, containerID)
 	if err != nil || live == nil {
 		return nil, err
 	}
@@ -156,10 +192,10 @@ func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context,
 	// For host-side worktrees we can push directly. Container/sandbox workspaces
 	// would require an active agentctl client — not wired yet, surface a clear
 	// error so the user knows to push manually.
-	if env.WorktreePath == "" {
+	worktreePath, branch := firstEnvironmentWorktree(env)
+	if worktreePath == "" {
 		return fmt.Errorf("push-before-reset is not supported for this environment type; please push manually first")
 	}
-	branch := strings.TrimSpace(env.WorktreeBranch)
 	var args []string
 	if branch == "" {
 		args = []string{"push"}
@@ -168,12 +204,12 @@ func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context,
 		// repos whose primary remote isn't called "origin" (e.g. fork
 		// workflows with "upstream"/"github"). Fall back to "origin" only
 		// when no upstream is set, matching the historical behaviour.
-		remote := detectBranchRemote(ctx, env.WorktreePath, branch)
+		remote := detectBranchRemote(ctx, worktreePath, branch)
 		args = []string{"push", remote, branch}
 	}
 	out, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(ctx, subproc.GitInteractive, pushBranchTimeout, func(execCtx context.Context) *exec.Cmd {
 		cmd := subproc.NewGitCommand(execCtx, args...)
-		cmd.Dir = env.WorktreePath
+		cmd.Dir = worktreePath
 		// Disable interactive credential prompts — without this, a missing
 		// credential helper can hang waiting on stdin even with the timeout
 		// above (signal delivery is gated behind the prompt read).
@@ -182,7 +218,7 @@ func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context,
 	})
 	if runErr != nil || execCtxErr != nil {
 		if errors.Is(execCtxErr, context.DeadlineExceeded) {
-			return fmt.Errorf("git push timed out after %s in %s (branch %q); push manually and retry", pushBranchTimeout, env.WorktreePath, branch)
+			return fmt.Errorf("git push timed out after %s in %s (branch %q); push manually and retry", pushBranchTimeout, worktreePath, branch)
 		}
 		if runErr == nil {
 			runErr = execCtxErr
@@ -190,6 +226,17 @@ func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context,
 		return fmt.Errorf("git push failed: %s: %w", strings.TrimSpace(string(out)), runErr)
 	}
 	return nil
+}
+
+// firstEnvironmentWorktree returns the path and branch of the environment's
+// first repository row with a worktree path.
+func firstEnvironmentWorktree(env *models.TaskEnvironment) (string, string) {
+	for _, repo := range env.Repos {
+		if repo != nil && repo.WorktreePath != "" {
+			return repo.WorktreePath, repo.WorktreeBranch
+		}
+	}
+	return "", ""
 }
 
 // defaultGitRemote is the conventional default remote name. Used as the

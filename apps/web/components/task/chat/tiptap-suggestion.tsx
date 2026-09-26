@@ -1,6 +1,7 @@
 "use client";
 
 import { PluginKey } from "@tiptap/pm/state";
+import { exitSuggestion } from "@tiptap/suggestion";
 import type {
   SuggestionOptions,
   SuggestionProps,
@@ -43,6 +44,7 @@ const EMPTY_SLASH_STATE: MenuState<SlashCommand> = {
 
 export type MentionSuggestionCallbacks = {
   getItems: (query: string) => Promise<MentionItem[]>;
+  onSelect: (item: MentionItem) => void;
 };
 
 export const MentionSuggestionPluginKey = new PluginKey("mentionSuggestion");
@@ -95,6 +97,7 @@ export function createMentionSuggestion(
             clientRect: props.clientRect ?? null,
             command: (item: MentionItem) => {
               props.command(mentionItemToAttrs(item));
+              callbacks.onSelect(item);
             },
           });
         },
@@ -107,13 +110,20 @@ export function createMentionSuggestion(
             clientRect: props.clientRect ?? null,
             command: (item: MentionItem) => {
               props.command(mentionItemToAttrs(item));
+              callbacks.onSelect(item);
             },
           });
         },
 
         onKeyDown(kd: SuggestionKeyDownProps) {
           if (kd.event.key === "Escape") {
+            // Claim the key here: once the mention popup is closed, nothing
+            // further up the tree (e.g. a clarification panel's own
+            // Escape-collapses handler) should also react to the same
+            // keypress.
+            kd.event.stopPropagation();
             setMenuState(EMPTY_MENTION_STATE);
+            exitSuggestion(kd.view, MentionSuggestionPluginKey);
             return true;
           }
           return onKeyDown(kd.event);
@@ -240,6 +250,11 @@ export function createSlashSuggestion(
 
         onKeyDown(kd: SuggestionKeyDownProps) {
           if (kd.event.key === "Escape") {
+            // Claim the key here: once the slash-command popup is closed,
+            // nothing further up the tree (e.g. a clarification panel's own
+            // Escape-collapses handler) should also react to the same
+            // keypress.
+            kd.event.stopPropagation();
             setMenuState(EMPTY_SLASH_STATE);
             return true;
           }

@@ -122,6 +122,135 @@ func TestTaskPublication_ActivityRefreshDoesNotOvertakeOrdinaryUpdate(t *testing
 	<-activityDone
 }
 
+type firstTaskReadBarrierRepository struct {
+	repository.TaskRepository
+	firstReadEntered chan struct{}
+	releaseFirstRead chan struct{}
+
+	mu       sync.Mutex
+	getCalls int
+}
+
+func (r *firstTaskReadBarrierRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	task, err := r.TaskRepository.GetTask(ctx, id)
+
+	r.mu.Lock()
+	r.getCalls++
+	firstRead := r.getCalls == 1
+	r.mu.Unlock()
+	if firstRead {
+		close(r.firstReadEntered)
+		<-r.releaseFirstRead
+	}
+	return task, err
+}
+
+func TestPublishTaskUpdatedByID_ReloadsInsideTaskPublicationQueue(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	if err := repo.UpdateTaskState(ctx, "task-1", v1.TaskStateTODO); err != nil {
+		t.Fatalf("initialize task state: %v", err)
+	}
+
+	barrier := &firstTaskReadBarrierRepository{
+		TaskRepository:   svc.tasks,
+		firstReadEntered: make(chan struct{}),
+		releaseFirstRead: make(chan struct{}),
+	}
+	svc.tasks = barrier
+
+	firstDone := make(chan struct{})
+	go func() {
+		svc.PublishTaskUpdatedByID(ctx, "task-1")
+		close(firstDone)
+	}()
+	<-barrier.firstReadEntered
+
+	if err := repo.UpdateTaskState(ctx, "task-1", v1.TaskStateInProgress); err != nil {
+		t.Fatalf("update task state: %v", err)
+	}
+	svc.PublishTaskUpdatedByID(ctx, "task-1")
+
+	close(barrier.releaseFirstRead)
+	<-firstDone
+
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 2 {
+		t.Fatalf("published %d events, want 2", len(published))
+	}
+	states := make([]string, 0, len(published))
+	for _, event := range published {
+		data, ok := event.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("event data type = %T, want map[string]interface{}", event.Data)
+		}
+		state, ok := data["state"].(string)
+		if !ok {
+			t.Fatalf("event state type = %T, want string", data["state"])
+		}
+		states = append(states, state)
+	}
+	if got, want := states[0], string(v1.TaskStateTODO); got != want {
+		t.Fatalf("first published state = %q, want %q", got, want)
+	}
+	if got, want := states[1], string(v1.TaskStateInProgress); got != want {
+		t.Fatalf("last published state = %q, want %q", got, want)
+	}
+}
+
+func TestTaskPublication_PreservesSameSecondActivityOrdering(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	messageAt := time.Date(2026, 8, 18, 10, 20, 0, 100_000_000, time.UTC)
+	taskUpdatedAt := messageAt.Add(800 * time.Millisecond)
+
+	svc.publishTaskEventNow(context.Background(), events.TaskUpdated, &models.Task{
+		ID:          "task-precision",
+		WorkspaceID: "ws-1",
+		CreatedAt:   messageAt.Add(-time.Minute),
+		UpdatedAt:   taskUpdatedAt,
+	}, nil, nil, nil, nil)
+
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 1 {
+		t.Fatalf("published events = %d, want 1", len(published))
+	}
+	data, ok := published[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data type = %T, want map[string]interface{}", published[0].Data)
+	}
+	updatedAt, ok := data["updated_at"].(string)
+	if !ok {
+		t.Fatalf("updated_at type = %T, want string", data["updated_at"])
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, updatedAt)
+	if err != nil {
+		t.Fatalf("parse updated_at %q: %v", updatedAt, err)
+	}
+	if !parsed.Equal(taskUpdatedAt) {
+		t.Fatalf("published updated_at = %s, want %s", parsed, taskUpdatedAt)
+	}
+	if !parsed.After(messageAt) {
+		t.Fatalf("task mutation at %s was not ordered after same-second message at %s", parsed, messageAt)
+	}
+}
+
+func TestTaskPublication_KnownPrimaryWithoutAgentIdentityEmitsExplicitNulls(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	data := make(map[string]interface{})
+	svc.addPrimarySessionEventFields(context.Background(), "task-1", data, &models.TaskSession{
+		ID:    "session-1",
+		State: models.TaskSessionStateRunning,
+	})
+
+	if value, ok := data["primary_agent_profile_id"]; !ok || value != nil {
+		t.Fatalf("primary_agent_profile_id = %#v (present = %t), want explicit null", value, ok)
+	}
+	if value, ok := data["primary_agent_name"]; !ok || value != nil {
+		t.Fatalf("primary_agent_name = %#v (present = %t), want explicit null", value, ok)
+	}
+}
+
 func TestTaskPublication_QueuedActivityOutlivesCallerCancellation(t *testing.T) {
 	svc, eventBus, repo := createTestServiceWithSessionsRepo(t, func(repo *sqliterepo.Repository) repository.SessionRepository {
 		return cancellationAwareSessionRepository{SessionRepository: repo}
@@ -405,6 +534,56 @@ func TestTaskPublication_TaskCreatedAfterTombstoneClearsAndPublishes(t *testing.
 	}
 }
 
+func TestMessageEventChangesPendingActionForAuthorityMutations(t *testing.T) {
+	tests := []struct {
+		name        string
+		eventType   string
+		messageType models.MessageType
+		want        bool
+	}{
+		{name: "ordinary add can establish turn authority", eventType: events.MessageAdded, messageType: models.MessageTypeMessage, want: true},
+		{name: "ordinary delete can remove turn authority", eventType: events.MessageDeleted, messageType: models.MessageTypeAgentPlan, want: true},
+		{name: "ordinary update preserves turn authority", eventType: events.MessageUpdated, messageType: models.MessageTypeMessage, want: false},
+		{name: "clarification add changes pending action", eventType: events.MessageAdded, messageType: models.MessageTypeClarificationRequest, want: true},
+		{name: "clarification update changes pending action", eventType: events.MessageUpdated, messageType: models.MessageTypeClarificationRequest, want: true},
+		{name: "permission delete changes pending action", eventType: events.MessageDeleted, messageType: models.MessageTypePermissionRequest, want: true},
+		{name: "unrelated event", eventType: events.TurnStarted, messageType: models.MessageTypeClarificationRequest, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := messageEventChangesPendingAction(tt.eventType, &models.Message{Type: tt.messageType}); got != tt.want {
+				t.Fatalf("messageEventChangesPendingAction(%s, %s) = %t, want %t", tt.eventType, tt.messageType, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTaskPublication_TaskUpdatedIncludesNullArchivedAtForActiveTasks(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+
+	svc.PublishTaskUpdated(ctx, &models.Task{
+		ID:             "task-1",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+	})
+
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 1 {
+		t.Fatalf("published events = %d, want 1", len(published))
+	}
+	data, _ := published[0].Data.(map[string]interface{})
+	archivedAt, ok := data["archived_at"]
+	if !ok {
+		t.Fatal("task.updated payload omitted archived_at")
+	}
+	if archivedAt != nil {
+		t.Fatalf("active task archived_at = %#v, want nil", archivedAt)
+	}
+}
+
 type failingTaskRepoRepository struct {
 	repository.TaskRepoRepository
 	err error
@@ -502,6 +681,137 @@ func TestPublishTaskUpdated_FallbackRepositoryID(t *testing.T) {
 	}
 	if len(repos) != 1 || repos[0]["repository_id"] != "repo-x" {
 		t.Fatalf("expected repositories payload with repo-x, got %#v", repos)
+	}
+}
+
+func TestPublishTaskUpdatedByIDLoadsCanonicalTask(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-by-id", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "By ID", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	svc.PublishTaskUpdatedByID(ctx, "task-by-id")
+
+	data := singlePublishedEventData(t, eventBus)
+	if got := data["task_id"]; got != "task-by-id" {
+		t.Fatalf("task_id = %v, want task-by-id", got)
+	}
+	if got := data["title"]; got != "By ID" {
+		t.Fatalf("title = %v, want By ID", got)
+	}
+}
+
+func TestPublishTaskUpdated_EmitsAutopilot(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	svc.PublishTaskUpdated(context.Background(), &models.Task{
+		ID: "task-autopilot", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Autopilot: true,
+	})
+
+	data := singlePublishedEventData(t, eventBus)
+	if got, ok := data["autopilot"].(bool); !ok || !got {
+		t.Fatalf("autopilot payload = %#v, want true", data["autopilot"])
+	}
+}
+
+func TestPublishTaskUpdatedEmitsOfficeIdentityExplicitly(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		isFromOffice bool
+	}{
+		{name: "office", isFromOffice: true},
+		{name: "kanban", isFromOffice: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, eventBus, _ := createTestService(t)
+			svc.PublishTaskUpdated(context.Background(), &models.Task{
+				ID: "task-office-identity", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+				IsFromOffice: tc.isFromOffice,
+			})
+
+			data := singlePublishedEventData(t, eventBus)
+			got, ok := data["is_from_office"].(bool)
+			if !ok || got != tc.isFromOffice {
+				t.Fatalf("is_from_office payload = %#v, want %t", data["is_from_office"], tc.isFromOffice)
+			}
+		})
+	}
+}
+
+func TestPublishTaskUpdatedRedactsDeferredLaunchAttribution(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	task := &models.Task{
+		ID: "task-private-attribution", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Metadata: map[string]interface{}{
+			models.MetaKeyDeferredLaunch: map[string]interface{}{
+				models.DeferredLaunchUserIDKey:          "user-private",
+				models.DeferredLaunchRecordRecentUseKey: true,
+			},
+		},
+	}
+
+	svc.PublishTaskUpdated(context.Background(), task)
+
+	data := singlePublishedEventData(t, eventBus)
+	metadata, ok := data["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event metadata = %#v, want a map", data["metadata"])
+	}
+	launch, ok := metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event deferred launch metadata = %#v, want a map", metadata[models.MetaKeyDeferredLaunch])
+	}
+	if _, exists := launch[models.DeferredLaunchUserIDKey]; exists {
+		t.Fatalf("event exposed deferred launch user_id = %v", launch[models.DeferredLaunchUserIDKey])
+	}
+	if _, exists := launch[models.DeferredLaunchRecordRecentUseKey]; exists {
+		t.Fatalf("event exposed deferred launch recency marker = %v", launch[models.DeferredLaunchRecordRecentUseKey])
+	}
+	if got := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})[models.DeferredLaunchUserIDKey]; got != "user-private" {
+		t.Fatalf("redacting the event mutated the source task user_id = %v", got)
+	}
+}
+
+// TestPublishTaskUpdated_EmitsAutoStartFailed regression-tests the WS gap
+// found in Review round 2: setTaskAutoStartFailedMarker /
+// clearTaskAutoStartFailedMarker both call PublishTaskUpdated expecting open
+// clients to see the flip, but publishTaskEventNow hand-builds the payload
+// map and never carried auto_start_failed, so the publishes were dead code
+// and the badge only ever appeared after a reload (REST snapshot).
+func TestPublishTaskUpdated_EmitsAutoStartFailed(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	svc.PublishTaskUpdated(context.Background(), &models.Task{
+		ID: "task-auto-start-failed", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Metadata: map[string]interface{}{models.MetaKeyAutoStartFailed: true},
+	})
+
+	data := singlePublishedEventData(t, eventBus)
+	if got, ok := data["auto_start_failed"].(bool); !ok || !got {
+		t.Fatalf("auto_start_failed payload = %#v, want true", data["auto_start_failed"])
+	}
+}
+
+// TestPublishTaskUpdated_EmitsAutoStartFailedFalseWhenCleared proves the
+// clear path also propagates: a task with no MetaKeyAutoStartFailed key
+// publishes an explicit `false`, not an omitted field, so
+// preserveOmittedField on the frontend does not pin the stale `true` from a
+// previous failure.
+func TestPublishTaskUpdated_EmitsAutoStartFailedFalseWhenCleared(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	svc.PublishTaskUpdated(context.Background(), &models.Task{
+		ID: "task-auto-start-cleared", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+	})
+
+	data := singlePublishedEventData(t, eventBus)
+	got, ok := data["auto_start_failed"].(bool)
+	if !ok {
+		t.Fatalf("auto_start_failed payload missing or wrong type: %#v", data["auto_start_failed"])
+	}
+	if got {
+		t.Fatalf("auto_start_failed payload = true, want false for a task without the marker")
 	}
 }
 

@@ -14,9 +14,8 @@ import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
-import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
-import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
+import { useCompatibleAgentProfiles } from "@/hooks/domains/session/use-compatible-agent-profiles";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { ExecutorProfile } from "@/lib/types/http";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
@@ -26,15 +25,19 @@ import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
 import { useSessionContextChange, useSessionLaunchSubmit } from "./new-session-form-actions";
+import { resolveNewSessionProfileSelection } from "./new-session-profile-selection";
+import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
+import { Trans, useTranslation } from "react-i18next";
 
 export type { HandoffPreset } from "./handoff-types";
 
-const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
+const PROGRAMMATIC_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
 
 type NewSessionDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   taskId: string;
+  workspaceId?: string | null;
   groupId?: string;
   handoff?: HandoffPreset;
 };
@@ -45,9 +48,21 @@ function agentProfileDisplayLabel(profile: AgentProfileOption): string {
 }
 
 function useNewSessionDialogState(taskId: string) {
+  const { t } = useTranslation();
+  const resolvedWorkspaceId = useAppStore((state) =>
+    resolveComposerWorkspaceId({
+      sessionId: null,
+      taskId,
+      quickChatSessions: state.quickChat.sessions,
+      activeWorkflowId: state.kanban.workflowId,
+      activeTasks: state.kanban.tasks,
+      snapshots: Object.values(state.kanbanMulti.snapshots),
+      workflows: state.workflows.items,
+    }),
+  );
   const taskTitle = useAppStore((state) => {
-    const task = state.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return task?.title ?? "Task";
+    const task = state.kanban.tasks.find((entry: { id: string }) => entry.id === taskId);
+    return task?.title ?? t("common:task");
   });
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -79,12 +94,9 @@ function useNewSessionDialogState(taskId: string) {
   });
 
   const sessionProfileId = currentSession?.agent_profile_id ?? "";
-  const profileIsValid = agentProfiles.some((p: { id: string }) => p.id === sessionProfileId);
-  const effectiveDefaultProfileId: string = profileIsValid
-    ? sessionProfileId
-    : (agentProfiles[0]?.id ?? "");
 
   return {
+    resolvedWorkspaceId,
     taskTitle,
     agentProfiles,
     currentSession,
@@ -92,7 +104,6 @@ function useNewSessionDialogState(taskId: string) {
     initialPrompt,
     executorLabel,
     sessionProfileId,
-    effectiveDefaultProfileId,
   };
 }
 
@@ -111,6 +122,7 @@ function activateNewSession(
 }
 
 function useSessionOptions(taskId: string) {
+  const { t } = useTranslation();
   const { sessions, loadSessions } = useTaskSessions(taskId);
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
   useEffect(() => {
@@ -123,10 +135,10 @@ function useSessionOptions(taskId: string) {
     );
     return sorted.map((s, idx) => {
       const profile = agentProfiles.find((p: { id: string }) => p.id === s.agent_profile_id);
-      const name = profile ? agentProfileDisplayLabel(profile) : "Agent";
+      const name = profile ? agentProfileDisplayLabel(profile) : t("task:panelAgent");
       return { id: s.id, label: name, index: idx + 1, agentName: profile?.agent_name };
     });
-  }, [sessions, agentProfiles]);
+  }, [sessions, agentProfiles, t]);
 }
 
 function isMissingCompatibleProfile(
@@ -139,36 +151,11 @@ function isMissingCompatibleProfile(
   return !hasCompatibleProfiles;
 }
 
-function useCompatibleAgentProfiles(
-  agentProfiles: AgentProfileOption[],
-  executorProfile: ExecutorProfile | null,
-): AgentProfileOption[] {
-  const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
-  return useMemo(() => {
-    if (!executorProfile || !authLoaded) return agentProfiles;
-    return agentProfiles.filter((ap) =>
-      isAgentConfiguredOnExecutor(ap, executorProfile, authSpecs),
-    );
-  }, [agentProfiles, executorProfile, authSpecs, authLoaded]);
-}
-
-function useHandoffAutoSummarize(
-  handoff: HandoffPreset | undefined,
-  contextValue: string,
-  onContextChange: (value: string) => void,
-) {
-  const started = useRef(false);
-  useEffect(() => {
-    if (!handoff || started.current) return;
-    started.current = true;
-    void onContextChange(contextValue);
-  }, [handoff, contextValue, onContextChange]);
-}
-
 export function useSessionPromptController(
   promptRef: RefObject<TaskFormInputsHandle | null>,
   taskId: string,
 ) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({ sessionId: null });
   const latestPromptValueRef = useRef("");
@@ -192,7 +179,7 @@ export function useSessionPromptController(
     await enhancePrompt(current, (enhanced) => {
       const delivered = promptResultDelivery.deliver(current, enhanced, generation);
       if (delivered) {
-        toast({ description: "Enhanced prompt applied.", variant: "success" });
+        toast({ description: t("task:enhancedPromptApplied"), variant: "success" });
       }
 
       return delivered;
@@ -214,40 +201,52 @@ function shouldDisableSubmit(isBusy: boolean, hasPrompt: boolean, hasProfiles: b
   return submitPenalty > 0;
 }
 
-function useEnforceCompatibleProfile(
-  hasExecutorProfile: boolean,
-  compatible: AgentProfileOption[],
-  selectedId: string,
-  setSelected: (id: string) => void,
-) {
-  useEffect(() => {
-    if (!hasExecutorProfile) return;
-    if (compatible.some((p) => p.id === selectedId)) return;
-    if (compatible.length > 0) setSelected(compatible[0].id);
-  }, [hasExecutorProfile, compatible, selectedId, setSelected]);
-}
-
 function useSessionProfileSelection({
   agentProfiles,
   executorProfile,
-  defaultProfileId,
-  selectedProfileId,
-  setSelectedProfileId,
+  currentProfileId,
+  handoff,
 }: {
   agentProfiles: AgentProfileOption[];
   executorProfile: ExecutorProfile | null;
-  defaultProfileId: string;
-  selectedProfileId: string;
-  setSelectedProfileId: (value: string) => void;
+  currentProfileId: string;
+  handoff?: HandoffPreset;
 }) {
-  const compatibleAgentProfiles = useCompatibleAgentProfiles(agentProfiles, executorProfile);
-  useEnforceCompatibleProfile(
-    Boolean(executorProfile),
-    compatibleAgentProfiles,
-    selectedProfileId,
-    setSelectedProfileId,
+  const compatibleAgentProfiles = useCompatibleAgentProfiles(
+    agentProfiles,
+    executorProfile,
+    handoff,
   );
-  const profileOptions = useAgentProfileOptions(compatibleAgentProfiles);
+  const recentProfileIds = useAppStore(
+    (state) => state.agentProfileRecentUse?.records.task_session?.profileIds,
+  );
+  const automaticSelection = useMemo(
+    () =>
+      resolveNewSessionProfileSelection({
+        compatibleProfiles: compatibleAgentProfiles,
+        recentProfileIds,
+        currentProfileId,
+        handoffProfileId: handoff?.targetProfileId,
+      }),
+    [compatibleAgentProfiles, currentProfileId, handoff?.targetProfileId, recentProfileIds],
+  );
+  const [selectedProfileId, setSelectedProfileId] = useState(automaticSelection.profileId);
+  const [selectionSource, setSelectionSource] = useState(automaticSelection.source);
+  useEffect(() => {
+    const selectedIsCompatible = compatibleAgentProfiles.some(
+      (profile) => profile.id === selectedProfileId,
+    );
+    if (selectionSource === "manual" && selectedIsCompatible) return;
+    if (
+      selectedProfileId === automaticSelection.profileId &&
+      selectionSource === automaticSelection.source
+    ) {
+      return;
+    }
+    setSelectedProfileId(automaticSelection.profileId);
+    setSelectionSource(automaticSelection.source);
+  }, [automaticSelection, compatibleAgentProfiles, selectedProfileId, selectionSource]);
+  const profileOptions = useAgentProfileOptions(compatibleAgentProfiles, "task_session");
   const hasProfiles = profileOptions.length > 0;
   const noCompatibleProfiles = isMissingCompatibleProfile(
     executorProfile,
@@ -257,13 +256,21 @@ function useSessionProfileSelection({
   const showAgentSelector =
     hasProfiles &&
     (profileOptions.length > 1 ||
-      (!!defaultProfileId && !profileOptions.find((o) => o.value === defaultProfileId)));
+      (!!currentProfileId && !profileOptions.find((o) => o.value === currentProfileId)));
+  const onProfileChange = useCallback((value: string) => {
+    setSelectedProfileId(value);
+    setSelectionSource("manual");
+  }, []);
 
   return {
     profileOptions,
     hasProfiles,
     noCompatibleProfiles,
     showAgentSelector,
+    selectedProfileId,
+    profileExplicit:
+      selectionSource === "handoff" || selectionSource === "recent" || selectionSource === "manual",
+    onProfileChange,
   };
 }
 
@@ -290,6 +297,7 @@ function SessionFormHeader({
   isCreating: boolean;
   onProfileChange: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <EnvironmentBadges executorLabel={executorLabel} worktreeBranch={worktreeBranch} />
@@ -300,13 +308,15 @@ function SessionFormHeader({
       />
       {showAgentSelector && (
         <div className="min-w-0 space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
+          <label className="text-xs font-medium text-muted-foreground">
+            {t("task:agentProfile")}
+          </label>
           <AgentSelector
             options={profileOptions}
             value={selectedProfileId}
             onValueChange={onProfileChange}
             disabled={isCreating}
-            placeholder="Select agent profile"
+            placeholder={t("task:selectAgentProfile")}
             popoverPortal
           />
         </div>
@@ -318,8 +328,8 @@ function SessionFormHeader({
 // eslint-disable-next-line max-lines-per-function
 function NewSessionForm({
   taskId,
-  defaultProfileId,
-  initialProfileId,
+  workspaceId,
+  currentProfileId,
   executorId,
   executorLabel,
   executorProfile,
@@ -331,8 +341,8 @@ function NewSessionForm({
   onClose,
 }: {
   taskId: string;
-  defaultProfileId: string;
-  initialProfileId?: string;
+  workspaceId?: string | null;
+  currentProfileId: string;
   executorId: string;
   executorLabel: string | null;
   executorProfile: ExecutorProfile | null;
@@ -343,15 +353,14 @@ function NewSessionForm({
   handoff?: HandoffPreset;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const handoffInitial = handoff ? buildHandoffInitialState(handoff) : null;
   const { toast } = useToast();
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const { summarize, isSummarizing } = useSummarizeSession();
   const [contextValue, setContextValue] = useState(handoffInitial?.contextValue ?? "blank");
-  const [selectedProfileId, setSelectedProfileId] = useState(
-    handoffInitial?.selectedProfileId ?? initialProfileId ?? defaultProfileId,
-  );
   const [hasPrompt, setHasPrompt] = useState(false);
+  const [hasPendingAttachmentUploads, setHasPendingAttachmentUploads] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const promptRef = useRef<TaskFormInputsHandle | null>(null);
   const busySignal = Number(isCreating) + Number(isSummarizing);
@@ -361,9 +370,8 @@ function NewSessionForm({
   const profileSelection = useSessionProfileSelection({
     agentProfiles,
     executorProfile,
-    defaultProfileId,
-    selectedProfileId,
-    setSelectedProfileId,
+    currentProfileId,
+    handoff,
   });
   const { handleEnhancePrompt, isEnhancingPrompt, pendingResult, applyPending, copyPending } =
     useSessionPromptController(promptRef, taskId);
@@ -375,12 +383,12 @@ function NewSessionForm({
     setContextValue,
     setHasPrompt,
   });
-  useHandoffAutoSummarize(handoff, handoffInitial?.contextValue ?? "blank", handleContextChange);
 
   const handleSubmit = useSessionLaunchSubmit({
     promptRef,
     taskId,
-    selectedProfileId,
+    selectedProfileId: profileSelection.selectedProfileId,
+    profileExplicit: profileSelection.profileExplicit,
     executorId,
     contextValue,
     initialPrompt,
@@ -392,11 +400,9 @@ function NewSessionForm({
     activateSession: activateNewSession,
     setIsCreating,
   });
-  const isSubmitDisabled = shouldDisableSubmit(
-    isBusyState,
-    hasPrompt,
-    profileSelection.hasProfiles,
-  );
+  const isSubmitDisabled =
+    shouldDisableSubmit(isBusyState, hasPrompt, profileSelection.hasProfiles) ||
+    hasPendingAttachmentUploads;
 
   return (
     <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
@@ -408,9 +414,9 @@ function NewSessionForm({
         executorProfileName={executorProfile?.name ?? null}
         showAgentSelector={profileSelection.showAgentSelector}
         profileOptions={profileSelection.profileOptions}
-        selectedProfileId={selectedProfileId}
+        selectedProfileId={profileSelection.selectedProfileId}
         isCreating={isCreating}
-        onProfileChange={setSelectedProfileId}
+        onProfileChange={profileSelection.onProfileChange}
       />
       <ContextSelect
         value={contextValue}
@@ -421,14 +427,18 @@ function NewSessionForm({
       />
       <TaskFormInputs
         isSessionMode
+        taskId={taskId}
+        workspaceId={workspaceId}
         autoFocus
         initialDescription=""
         onDescriptionChange={setHasPrompt}
+        onPendingAttachmentUploadsChange={setHasPendingAttachmentUploads}
         onKeyDown={(event) => {
           if (
             event.key === "Enter" &&
             (event.metaKey || event.ctrlKey) &&
             !isBusyState &&
+            !hasPendingAttachmentUploads &&
             hasPrompt &&
             profileSelection.hasProfiles
           ) {
@@ -441,9 +451,12 @@ function NewSessionForm({
         onEnhancePrompt={handleEnhancePrompt}
         isEnhancingPrompt={isEnhancingPrompt}
         isUtilityConfigured={isUtilityConfigured}
-        onVoiceAutoSend={() => {
-          if (isBusyState || !profileSelection.hasProfiles) return;
-          void handleSubmit(VOICE_SUBMIT_EVENT);
+        onComposerSubmit={() => {
+          if (isBusyState || hasPendingAttachmentUploads || !profileSelection.hasProfiles) {
+            return false;
+          }
+          void handleSubmit(PROGRAMMATIC_SUBMIT_EVENT);
+          return true;
         }}
       />
       <PromptResultRecovery
@@ -459,10 +472,10 @@ function NewSessionForm({
           disabled={isCreating}
           className="cursor-pointer"
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button type="submit" disabled={isSubmitDisabled} className="cursor-pointer">
-          {isCreating ? "Creating..." : "Start Agent"}
+          {isCreating ? t("task:creatingEllipsis") : t("task:startAgent2")}
         </Button>
       </DialogFooter>
     </form>
@@ -478,19 +491,22 @@ function NoAgentBanner({
   hasProfiles: boolean;
   executorProfileName: string | null;
 }) {
+  const { t } = useTranslation();
   if (noCompatibleProfiles) {
     return (
       <p className="text-xs text-center text-muted-foreground">
-        No agent profile is configured for{" "}
-        <span className="text-foreground">“{executorProfileName}”</span>. Configure credentials in
-        Settings → Executors.
+        <Trans i18nKey="task:noAgentProfileConfiguredFor" values={{ name: executorProfileName }}>
+          No agent profile is configured for{" "}
+          <span className="text-foreground">“{executorProfileName}”</span>. Configure credentials in
+          Settings → Executors.
+        </Trans>
       </p>
     );
   }
   if (!hasProfiles) {
     return (
       <p className="text-xs text-center text-muted-foreground">
-        No agent profiles configured. Add one in Settings → Agents first.
+        {t("task:noAgentProfilesConfiguredAddOne")}
       </p>
     );
   }
@@ -511,18 +527,19 @@ export function NewSessionDialog({
   open,
   onOpenChange,
   taskId,
+  workspaceId,
   groupId,
   handoff,
 }: NewSessionDialogProps) {
   const {
     taskTitle,
+    resolvedWorkspaceId,
     agentProfiles,
     currentSession,
     worktreeBranch,
     initialPrompt,
     executorLabel,
     sessionProfileId,
-    effectiveDefaultProfileId,
   } = useNewSessionDialogState(taskId);
   const executorProfile = useTaskExecutorProfile(taskId, open);
   const handoffLabel = handoffProfileLabel(agentProfiles, handoff);
@@ -537,11 +554,15 @@ export function NewSessionDialog({
           <DialogTitle className="min-w-0 wrap-break-word pr-6 text-sm font-medium">
             {handoffLabel ? (
               <>
-                Hand off to <span className="text-foreground">{handoffLabel}</span>
+                <Trans i18nKey="task:handOffToTarget" values={{ label: handoffLabel }}>
+                  Hand off to <span className="text-foreground">{handoffLabel}</span>
+                </Trans>
               </>
             ) : (
               <>
-                New agent in <span className="text-foreground">{taskTitle}</span>
+                <Trans i18nKey="task:newAgentInTask" values={{ title: taskTitle }}>
+                  New agent in <span className="text-foreground">{taskTitle}</span>
+                </Trans>
               </>
             )}
           </DialogTitle>
@@ -549,8 +570,8 @@ export function NewSessionDialog({
         <NewSessionForm
           key={formKey}
           taskId={taskId}
-          defaultProfileId={sessionProfileId}
-          initialProfileId={effectiveDefaultProfileId}
+          workspaceId={workspaceId ?? resolvedWorkspaceId}
+          currentProfileId={sessionProfileId}
           executorId={currentSession?.executor_id ?? ""}
           executorLabel={executorLabel}
           executorProfile={executorProfile}

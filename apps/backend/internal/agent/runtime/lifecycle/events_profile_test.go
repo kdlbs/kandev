@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -36,5 +37,35 @@ func TestAgentEventPayloadCarriesProviderErrorAndAgentID(t *testing.T) {
 	}
 	if payload.ProviderError == nil || payload.ProviderError.ModelID != "kimi-k3" {
 		t.Fatalf("provider error = %+v", payload.ProviderError)
+	}
+}
+
+func TestAgentEventPayloadCarriesRunID(t *testing.T) {
+	payload := newAgentEventPayload(&AgentExecution{
+		ID: "exec-1", WorkspaceID: "ws-1", RunID: "run-1", RunSessionID: "run-session-1", RunAttempt: 2,
+	})
+	if payload.RunID != "run-1" {
+		t.Fatalf("run ID = %q, want run-1", payload.RunID)
+	}
+	if payload.OwnerKind != ExecutionOwnerRun || payload.WorkspaceID != "ws-1" ||
+		payload.RunSessionID != "run-session-1" || payload.RunAttempt != 2 {
+		t.Fatalf("run owner = %#v, want exact run identity", payload)
+	}
+}
+
+func TestAgentEventPayloadCarriesPromptTurnID(t *testing.T) {
+	execution := &AgentExecution{ID: "exec-1", promptTurnID: "turn-1"}
+	payload := newAgentEventPayload(execution)
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	var fields map[string]string
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if fields["turn_id"] != "turn-1" {
+		t.Fatalf("turn_id = %q, want turn-1", fields["turn_id"])
 	}
 }

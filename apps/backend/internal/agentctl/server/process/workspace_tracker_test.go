@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,10 +79,26 @@ func setupTestRepo(t *testing.T) (string, func()) {
 	runGit(t, localDir, "commit", "-m", "Initial commit")
 
 	// Add remote and push
-	runGit(t, localDir, "remote", "add", "origin", remoteDir)
+	runGit(t, localDir, "remote", "add", "origin", localGitRemotePath(remoteDir))
 	runGit(t, localDir, "push", "-u", "origin", "main")
 
 	return localDir, cleanup
+}
+
+// localGitRemotePath keeps temporary repository paths in the form that Git
+// recognizes as local paths on every platform. A raw Windows path such as
+// C:\\Temp\\remote.git can be parsed as an SSH-style host named "C", which
+// leaves a test waiting for network input. Forward slashes keep the drive
+// prefix unambiguous without changing the path returned by Git to callers.
+func localGitRemotePath(path string) string {
+	return filepath.ToSlash(path)
+}
+
+func TestLocalGitRemotePathUsesForwardSlashes(t *testing.T) {
+	remotePath := filepath.Join(t.TempDir(), "remote.git")
+	if got := localGitRemotePath(remotePath); strings.ContainsRune(got, '\\') {
+		t.Fatalf("localGitRemotePath(%q) = %q, want forward slashes", remotePath, got)
+	}
 }
 
 func runGit(t *testing.T, dir string, args ...string) string {
@@ -141,6 +158,7 @@ func TestRunGit_DisablesCommitSigning(t *testing.T) {
 	runGit(t, repoDir, "init", "--initial-branch=main")
 	runGit(t, repoDir, "config", "user.email", "test@test.com")
 	runGit(t, repoDir, "config", "user.name", "Test User")
+	runGit(t, repoDir, "config", "core.hooksPath", os.DevNull)
 	runGit(t, repoDir, "config", "commit.gpgsign", "true")
 	runGit(t, repoDir, "config", "gpg.format", "ssh")
 	runGit(t, repoDir, "config", "user.signingkey", "~/.ssh/id_ed25519.pub")
@@ -279,6 +297,95 @@ func TestGetGitStatus_AheadBehindWithoutUpstream(t *testing.T) {
 	}
 }
 
+func TestGetGitStatus_ReportsUpstreamHeadForHistoryStates(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+	ctx := context.Background()
+
+	runGit(t, repoDir, "checkout", "-b", "feature/pr")
+	runGit(t, repoDir, "push", "-u", "origin", "feature/pr")
+	pushedHead := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+	status, err := wt.getGitStatus(ctx)
+	if err != nil {
+		t.Fatalf("getGitStatus (aligned): %v", err)
+	}
+	if got := remoteHeadFromWire(t, status); got != pushedHead {
+		t.Fatalf("remote_head_commit (aligned) = %q, want %q", got, pushedHead)
+	}
+
+	writeFile(t, repoDir, "local.txt", "local")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "local contribution")
+	status, err = wt.getGitStatus(ctx)
+	if err != nil {
+		t.Fatalf("getGitStatus (local ahead): %v", err)
+	}
+	if got := remoteHeadFromWire(t, status); got != pushedHead {
+		t.Fatalf("remote_head_commit (local ahead) = %q, want %q", got, pushedHead)
+	}
+
+	remoteURL := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin"))
+	providerRoot := t.TempDir()
+	runGit(t, providerRoot, "clone", remoteURL, "provider")
+	providerDir := filepath.Join(providerRoot, "provider")
+	runGit(t, providerDir, "config", "user.email", "provider@test.com")
+	runGit(t, providerDir, "config", "user.name", "Provider User")
+	runGit(t, providerDir, "config", "core.hooksPath", os.DevNull)
+	runGit(t, providerDir, "checkout", "-b", "feature/pr", "origin/feature/pr")
+	writeFile(t, providerDir, "provider.txt", "provider")
+	runGit(t, providerDir, "add", ".")
+	runGit(t, providerDir, "commit", "-m", "provider contribution")
+	providerHead := strings.TrimSpace(runGit(t, providerDir, "rev-parse", "HEAD"))
+	runGit(t, providerDir, "push", "origin", "HEAD:feature/pr")
+	runGit(t, repoDir, "fetch", "origin")
+
+	status, err = wt.getGitStatus(ctx)
+	if err != nil {
+		t.Fatalf("getGitStatus (provider ahead): %v", err)
+	}
+	if got := remoteHeadFromWire(t, status); got != providerHead {
+		t.Fatalf("remote_head_commit (provider ahead) = %q, want %q", got, providerHead)
+	}
+
+	runGit(t, providerDir, "checkout", "--orphan", "rewritten")
+	runGit(t, providerDir, "rm", "-rf", ".")
+	writeFile(t, providerDir, "rewritten.txt", "rewritten")
+	runGit(t, providerDir, "add", ".")
+	runGit(t, providerDir, "commit", "-m", "rewritten contribution")
+	rewrittenHead := strings.TrimSpace(runGit(t, providerDir, "rev-parse", "HEAD"))
+	runGit(t, providerDir, "push", "--force", "origin", "HEAD:feature/pr")
+	runGit(t, repoDir, "fetch", "origin")
+
+	status, err = wt.getGitStatus(ctx)
+	if err != nil {
+		t.Fatalf("getGitStatus (diverged): %v", err)
+	}
+	if got := remoteHeadFromWire(t, status); got != rewrittenHead {
+		t.Fatalf("remote_head_commit (diverged) = %q, want %q", got, rewrittenHead)
+	}
+}
+
+func remoteHeadFromWire(t *testing.T, status types.GitStatusUpdate) string {
+	t.Helper()
+	wire, err := json.Marshal(status)
+	if err != nil {
+		t.Fatalf("marshal git status: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(wire, &payload); err != nil {
+		t.Fatalf("unmarshal git status: %v", err)
+	}
+	value, ok := payload["remote_head_commit"].(string)
+	if !ok {
+		t.Fatalf("remote_head_commit missing from git status: %s", wire)
+	}
+	return value
+}
+
 // TestGetGitStatus_AheadBehindAfterRebase verifies that ahead/behind counts
 // reflect divergence from the base branch (origin/main), not the remote tracking
 // branch. After a rebase, the remote tracking branch has stale SHAs, so comparing
@@ -381,7 +488,7 @@ func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 	writeFile(t, localDir, "README.md", "# Test Repo")
 	runGit(t, localDir, "add", ".")
 	runGit(t, localDir, "commit", "-m", "Initial commit (X)")
-	runGit(t, localDir, "remote", "add", "origin", remoteDir)
+	runGit(t, localDir, "remote", "add", "origin", localGitRemotePath(remoteDir))
 	runGit(t, localDir, "push", "-u", "origin", "main")
 
 	// Record the starting point (commit X)
@@ -389,7 +496,7 @@ func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 	startingSHA = startingSHA[:len(startingSHA)-1]
 
 	// Clone to upstream clone and make commits there (simulating main evolving)
-	runGit(t, upstreamClone, "clone", remoteDir, ".")
+	runGit(t, upstreamClone, "clone", localGitRemotePath(remoteDir), ".")
 	runGit(t, upstreamClone, "config", "user.email", "upstream@test.com")
 	runGit(t, upstreamClone, "config", "user.name", "Upstream User")
 	runGit(t, upstreamClone, "config", "core.hooksPath", "/dev/null") // Disable hooks in test repo

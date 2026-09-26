@@ -1,7 +1,8 @@
 "use client";
 
+import type { RefObject } from "react";
 import { IconChevronRight } from "@tabler/icons-react";
-import type { Icon as TablerIcon } from "@tabler/icons-react";
+import type { DestinationIcon } from "@/lib/navigation/types";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
@@ -11,10 +12,15 @@ type AppSidebarSectionProps = {
   id: string;
   label: string;
   collapsed: boolean;
-  icon: TablerIcon;
+  icon: DestinationIcon;
   children: React.ReactNode;
   /** Optional control rendered between the label and the collapse chevron. */
   headerAction?: React.ReactNode;
+  /** Rendered beside the label only while the accordion is shut. A section that
+   *  starts folded still has to say how much it is hiding, or it reads as empty
+   *  and nobody opens it. Muted by the header, so callers pass content, not
+   *  colour. */
+  collapsedSummary?: React.ReactNode;
   /** By default header actions render only while the section accordion is open.
    *  "always" keeps them visible while the accordion is closed, but has no
    *  effect when the sidebar itself is in collapsed/rail mode. */
@@ -23,6 +29,8 @@ type AppSidebarSectionProps = {
   grow?: boolean;
   /** Initial expansion when the persisted section map does not yet contain this id. */
   defaultExpanded?: boolean;
+  /** Stable focus target for dialogs opened from this section. */
+  headerRef?: RefObject<HTMLButtonElement | null>;
 };
 
 type SectionHeaderProps = {
@@ -30,7 +38,9 @@ type SectionHeaderProps = {
   expanded: boolean;
   headerAction?: React.ReactNode;
   headerActionVisibility: "expanded" | "always";
+  collapsedSummary?: React.ReactNode;
   onToggle: () => void;
+  headerRef?: RefObject<HTMLButtonElement | null>;
 };
 
 function SectionHeader({
@@ -38,19 +48,30 @@ function SectionHeader({
   expanded,
   headerAction,
   headerActionVisibility,
+  collapsedSummary,
   onToggle,
+  headerRef,
 }: SectionHeaderProps) {
   const showHeaderAction = !!headerAction && (expanded || headerActionVisibility === "always");
 
   return (
     <div className="group/section flex items-center px-2 h-7 shrink-0">
       <button
+        ref={headerRef}
         type="button"
         onClick={onToggle}
-        className="flex min-w-0 flex-1 items-center text-left cursor-pointer text-foreground/70 hover:text-foreground transition-colors"
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-left cursor-pointer text-foreground/70 hover:text-foreground transition-colors"
         aria-expanded={expanded}
       >
         <span className="text-[11px] font-semibold uppercase tracking-wider truncate">{label}</span>
+        {!expanded && collapsedSummary != null && (
+          <span
+            className="shrink-0 text-[11px] font-normal tabular-nums text-muted-foreground/70"
+            data-testid="sidebar-section-collapsed-summary"
+          >
+            {collapsedSummary}
+          </span>
+        )}
       </button>
       {showHeaderAction && <div className="shrink-0 mr-1 flex items-center">{headerAction}</div>}
       <button
@@ -76,8 +97,10 @@ export function AppSidebarSection({
   children,
   headerAction,
   headerActionVisibility = "expanded",
+  collapsedSummary,
   grow,
   defaultExpanded = false,
+  headerRef,
 }: AppSidebarSectionProps) {
   const expanded = useAppStore((s) => s.appSidebar.sectionExpanded[id] ?? defaultExpanded);
   const toggleSection = useAppStore((s) => s.toggleAppSidebarSection);
@@ -87,6 +110,7 @@ export function AppSidebarSection({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          ref={headerRef}
           type="button"
           className="flex h-9 w-9 mx-auto items-center justify-center rounded-md text-foreground/70 hover:bg-muted/60 cursor-pointer"
           onClick={() => {
@@ -127,7 +151,9 @@ export function AppSidebarSection({
             expanded={expanded}
             headerAction={headerAction}
             headerActionVisibility={headerActionVisibility}
+            collapsedSummary={collapsedSummary}
             onToggle={handleToggle}
+            headerRef={headerRef}
           />
         )}
         {expanded && (
@@ -151,7 +177,9 @@ export function AppSidebarSection({
         expanded={expanded}
         headerAction={headerAction}
         headerActionVisibility={headerActionVisibility}
+        collapsedSummary={collapsedSummary}
         onToggle={handleToggle}
+        headerRef={headerRef}
       />
       <CollapsibleContent className="sidebar-section-content">
         <div className="flex flex-col gap-0.5">{children}</div>

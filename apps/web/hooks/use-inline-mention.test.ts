@@ -1,11 +1,32 @@
-import { describe, it, expect, vi } from "vitest";
+import { cleanup, renderHook, act } from "@testing-library/react";
+import { afterEach, describe, it, expect, vi } from "vitest";
+
+vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
+  useCustomPrompts: () => ({
+    prompts: [
+      { id: "builtin", name: "changes-walkthrough", content: "walkthrough" },
+      { id: "qa-multi", name: "qa-multi", content: "multi-line content" },
+    ],
+    loaded: true,
+    loading: false,
+  }),
+}));
+
 import {
   makePromptItem,
   detectMentionTrigger,
   filterItems,
+  useInlineMention,
   type MentionItem,
 } from "./use-inline-mention";
 import type { RichTextInputHandle } from "@/components/task/chat/rich-text-input";
+
+const BUG_TEMPLATE_NAME = "bug-template";
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 function makeFakeInput(value: string, caretPos: number): RichTextInputHandle {
   let selStart = caretPos;
@@ -27,9 +48,123 @@ function makeFakeInput(value: string, caretPos: number): RichTextInputHandle {
   };
 }
 
+function makeMutableInput(state: { value: string; caretPos: number }): RichTextInputHandle {
+  return {
+    focus: vi.fn(),
+    blur: vi.fn(),
+    getSelectionStart: () => state.caretPos,
+    getSelectionEnd: () => state.caretPos,
+    setSelectionRange: (start: number) => {
+      state.caretPos = start;
+    },
+    getCaretRect: () => ({ x: 0, y: 0 }) as DOMRect,
+    getValue: () => state.value,
+    setValue: vi.fn(),
+    insertText: vi.fn(),
+    getTextareaElement: () => null,
+  };
+}
+
+describe("useInlineMention scheduling", () => {
+  it("ignores a stale animation frame after a newer input change", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const inputState = { value: "", caretPos: 0 };
+    const inputRef = { current: makeMutableInput(inputState) };
+    const { result, rerender } = renderHook(
+      ({ value }: { value: string }) =>
+        useInlineMention({
+          inputRef,
+          value,
+          onChange: (nextValue) => {
+            inputState.value = nextValue;
+            inputState.caretPos = nextValue.length;
+          },
+          promptInsertMode: "inline",
+        }),
+      { initialProps: { value: "" } },
+    );
+
+    act(() => {
+      inputState.value = "@";
+      inputState.caretPos = 1;
+      result.current.handleChange("@", 1);
+      rerender({ value: "@" });
+    });
+    act(() => {
+      inputState.value = "@qa-mu";
+      inputState.caretPos = 6;
+      result.current.handleChange("@qa-mu", 6);
+      rerender({ value: "@qa-mu" });
+    });
+
+    expect(frames).toHaveLength(2);
+    inputState.caretPos = 1;
+    act(() => {
+      frames[1](0);
+      frames[0](0);
+    });
+
+    expect(result.current.query).toBe("qa-mu");
+    expect(result.current.items.map((item) => item.label)).toEqual(["qa-multi"]);
+  });
+});
+
+describe("useInlineMention Escape", () => {
+  it("claims the key and restores input focus after closing the menu", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const inputState = { value: "@qa", caretPos: 3 };
+    const input = makeMutableInput(inputState);
+    const inputRef = { current: input };
+    const { result } = renderHook(() =>
+      useInlineMention({
+        inputRef,
+        value: inputState.value,
+        onChange: (nextValue) => {
+          inputState.value = nextValue;
+        },
+        promptInsertMode: "inline",
+      }),
+    );
+
+    act(() => result.current.handleChange("@qa", 3));
+    act(() => frames.shift()?.(0));
+    expect(result.current.isOpen).toBe(true);
+
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Escape",
+        preventDefault,
+        stopPropagation,
+      } as unknown as React.KeyboardEvent);
+    });
+
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(stopPropagation).toHaveBeenCalledOnce();
+    expect(result.current.isOpen).toBe(false);
+    expect(frames).toHaveLength(1);
+
+    act(() => frames.shift()?.(0));
+    expect(input.focus).toHaveBeenCalledOnce();
+  });
+});
+
 describe("makePromptItem — context mode (default chat behavior)", () => {
   it("deletes the @query text and calls onPromptSelect", () => {
-    const prompt = { id: "p1", name: "bug-template", content: "Reproduce, isolate, fix." };
+    const prompt = { id: "p1", name: BUG_TEMPLATE_NAME, content: "Reproduce, isolate, fix." };
     const onPromptSelect = vi.fn();
     const item = makePromptItem(prompt, "context", onPromptSelect);
 
@@ -42,7 +177,7 @@ describe("makePromptItem — context mode (default chat behavior)", () => {
     item.onSelect(input, value, triggerStart, onChange);
 
     expect(onChange).toHaveBeenCalledWith("Hello ");
-    expect(onPromptSelect).toHaveBeenCalledWith("p1", "bug-template");
+    expect(onPromptSelect).toHaveBeenCalledWith("p1", BUG_TEMPLATE_NAME);
   });
 
   it("exposes kind 'prompt' and label = prompt name", () => {
@@ -56,7 +191,7 @@ describe("makePromptItem — inline mode (task-create behavior)", () => {
   it("replaces the @query text with the prompt content", () => {
     const prompt = {
       id: "p1",
-      name: "bug-template",
+      name: BUG_TEMPLATE_NAME,
       content: "Reproduce, isolate, fix with a regression test.",
     };
     const onPromptSelect = vi.fn();
@@ -105,6 +240,23 @@ describe("makePromptItem — inline mode (task-create behavior)", () => {
     item.onSelect(input, value, triggerStart, onChange);
 
     expect(onChange).toHaveBeenCalledWith("before XYZ after");
+  });
+});
+
+describe("makePromptItem — reference mode", () => {
+  it("replaces the active query with the saved prompt alias", () => {
+    const prompt = { id: "p1", name: BUG_TEMPLATE_NAME, content: "Reproduce, isolate, fix." };
+    const onPromptSelect = vi.fn();
+    const item = makePromptItem(prompt, "reference", onPromptSelect);
+
+    const value = "Hello @bug after";
+    const input = makeFakeInput(value, "Hello @bug".length);
+    const onChange = vi.fn();
+
+    item.onSelect(input, value, 6, onChange);
+
+    expect(onChange).toHaveBeenCalledWith("Hello @bug-template after");
+    expect(onPromptSelect).not.toHaveBeenCalled();
   });
 });
 

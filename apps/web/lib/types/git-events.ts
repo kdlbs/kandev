@@ -5,6 +5,7 @@ type GitEventBase = {
   session_id: string;
   task_id?: string;
   agent_id?: string;
+  task_environment_id?: string;
   timestamp: string;
 };
 
@@ -14,6 +15,10 @@ export type GitStatusData = {
   remote_branch: string | null;
   head_commit?: string;
   base_commit?: string;
+  comparison_target?: string;
+  comparison_status?: string;
+  comparison_error_code?: string;
+  remote_head_commit?: string;
   modified: string[];
   added: string[];
   deleted: string[];
@@ -21,7 +26,9 @@ export type GitStatusData = {
   renamed: string[];
   ahead: number;
   behind: number;
-  files: Record<string, FileInfo>;
+  remote_ahead: number;
+  remote_behind: number;
+  files?: Record<string, FileInfo>;
   branch_additions?: number;
   branch_deletions?: number;
   /**
@@ -30,6 +37,8 @@ export type GitStatusData = {
    * git status off this name so the changes panel can show all repos at once.
    */
   repository_name?: string;
+  /** True when this status belongs to an initialized Git submodule scope. */
+  is_submodule?: boolean;
 };
 
 // Git commit data
@@ -51,6 +60,7 @@ export type GitCommitData = {
 
 // Git reset data
 export type GitResetData = {
+  repository_name?: string;
   previous_head: string;
   current_head: string;
   deleted_count: number;
@@ -58,6 +68,7 @@ export type GitResetData = {
 
 // Git branch switch data
 export type GitBranchSwitchData = {
+  repository_name?: string;
   previous_branch: string;
   current_branch: string;
   current_head: string;
@@ -81,7 +92,11 @@ export type GitSnapshotData = {
 };
 
 // Individual event variants
-export type GitStatusUpdateEvent = GitEventBase & {
+type GitStatusEventBase = Omit<GitEventBase, "task_environment_id"> & {
+  task_environment_id: string;
+};
+
+export type GitStatusUpdateEvent = GitStatusEventBase & {
   type: "status_update";
   status: GitStatusData;
 };

@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 type stubEnvRepo struct {
@@ -40,6 +41,9 @@ func (s *stubEnvRepo) GetTaskEnvironment(context.Context, string) (*models.TaskE
 func (s *stubEnvRepo) GetTaskEnvironmentByTaskID(context.Context, string) (*models.TaskEnvironment, error) {
 	return s.env, s.getErr
 }
+func (s *stubEnvRepo) GetTaskEnvironmentExistenceByTaskIDs(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
 func (s *stubEnvRepo) UpdateTaskEnvironment(context.Context, *models.TaskEnvironment) error {
 	return nil
 }
@@ -53,19 +57,20 @@ func (s *stubEnvRepo) DeleteTaskEnvironment(context.Context, string) error {
 func (s *stubEnvRepo) DeleteTaskEnvironmentsByTask(context.Context, string) error { return nil }
 
 type stubDestroyer struct {
-	containerCalls       []string
-	sandboxCalls         []string
-	worktreeCalls        []string
-	cancelAfterContainer context.CancelFunc
-	pushCalls            int
-	containerErr         error
-	sandboxErr           error
-	worktreeErr          error
-	pushErr              error
+	containerCalls           []string
+	sandboxCalls             []string
+	worktreeCalls            []string
+	cancelAfterContainer     context.CancelFunc
+	cancelAfterFirstWorktree context.CancelFunc
+	pushCalls                int
+	containerErr             error
+	sandboxErr               error
+	worktreeErr              error
+	pushErr                  error
 }
 
-func (s *stubDestroyer) DestroyContainer(_ context.Context, id string) error {
-	s.containerCalls = append(s.containerCalls, id)
+func (s *stubDestroyer) DestroyContainer(_ context.Context, env *models.TaskEnvironment) error {
+	s.containerCalls = append(s.containerCalls, env.ContainerID)
 	if s.cancelAfterContainer != nil {
 		s.cancelAfterContainer()
 	}
@@ -77,19 +82,53 @@ func (s *stubDestroyer) DestroySandbox(_ context.Context, id, _ string) error {
 }
 func (s *stubDestroyer) DestroyWorktree(_ context.Context, id string) error {
 	s.worktreeCalls = append(s.worktreeCalls, id)
+	if s.cancelAfterFirstWorktree != nil && len(s.worktreeCalls) == 1 {
+		s.cancelAfterFirstWorktree()
+	}
 	return s.worktreeErr
 }
 func (s *stubDestroyer) PushEnvironmentBranch(context.Context, *models.TaskEnvironment) error {
 	s.pushCalls++
 	return s.pushErr
 }
-func (s *stubDestroyer) GetContainerLiveStatus(context.Context, string) (*ContainerLiveStatus, error) {
+func (s *stubDestroyer) GetContainerLiveStatus(context.Context, *models.TaskEnvironment) (*ContainerLiveStatus, error) {
 	return nil, nil
 }
 
 type stubRunningChecker struct {
 	running bool
 	err     error
+}
+
+// @covers AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.4
+func TestCleanupTaskEnvironmentSkipsStaleOwnershipGeneration(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-transferred", TaskID: "detached-child", OwnershipGeneration: 2,
+	}}
+	svc := newResetTestService(t, repo)
+	destroyer := &stubDestroyer{}
+	svc.SetEnvironmentDestroyer(destroyer)
+	worktreeCleaner := &recordingWorktreeCleanup{}
+	svc.SetWorktreeCleanup(worktreeCleaner)
+
+	errs := svc.cleanupDestructiveTaskResources(
+		context.Background(), "former-parent", nil,
+		[]*worktree.Worktree{{ID: "replacement-worktree"}},
+		taskEnvironmentCleanup{
+			env: &models.TaskEnvironment{
+				ID: "env-transferred", TaskID: "former-parent", OwnershipGeneration: 1,
+				ContainerID: "replacement-container",
+			},
+			deleteRow: true,
+		}, nil)
+
+	if len(errs) != 0 {
+		t.Fatalf("cleanup errors = %v, want stale snapshot no-op", errs)
+	}
+	if len(destroyer.containerCalls) != 0 || len(worktreeCleaner.cleaned) != 0 || repo.deleted {
+		t.Fatalf("stale cleanup mutated replacement: container calls %v, worktree calls %v, row deleted %v",
+			destroyer.containerCalls, worktreeCleaner.cleaned, repo.deleted)
+	}
 }
 
 func (s *stubRunningChecker) IsAnySessionRunningForTask(context.Context, string) (bool, error) {
@@ -158,7 +197,7 @@ func TestResetTaskEnvironment_DestroysEachResourceTypeAndDeletesRow(t *testing.T
 		TaskID:      "task-1",
 		ContainerID: "container-abc",
 		SandboxID:   "sandbox-xyz",
-		WorktreeID:  "wt-1",
+		Repos:       []*models.TaskEnvironmentRepo{{WorktreeID: "wt-1"}},
 	}}
 	destroyer := &stubDestroyer{}
 	svc := newResetTestService(t, repo)
@@ -189,7 +228,8 @@ func TestTeardownEnvironmentResources_CancellationStopsBeforeNextResource(t *tes
 	svc.SetEnvironmentDestroyer(destroyer)
 
 	err := svc.teardownEnvironmentResources(ctx, &models.TaskEnvironment{
-		ContainerID: "container-1", SandboxID: "sandbox-1", WorktreeID: "worktree-1",
+		ContainerID: "container-1", SandboxID: "sandbox-1",
+		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "worktree-1"}},
 	})
 
 	if !errors.Is(err, context.Canceled) {
@@ -201,13 +241,81 @@ func TestTeardownEnvironmentResources_CancellationStopsBeforeNextResource(t *tes
 	}
 }
 
+func TestTeardownEnvironmentResources_MultiRepoCancellationStopsBeforeNextWorktree(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	ctx, cancel := context.WithCancel(context.Background())
+	destroyer := &stubDestroyer{cancelAfterFirstWorktree: cancel}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(ctx, &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-first"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-second"},
+		},
+	})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("teardown error = %v, want context cancellation", err)
+	}
+	if len(destroyer.worktreeCalls) != 1 || destroyer.worktreeCalls[0] != "wt-first" {
+		t.Fatalf("expected only the first worktree destroyed before cancellation, got %v", destroyer.worktreeCalls)
+	}
+}
+
+func TestTeardownEnvironmentResources_MultiRepoDestroysEveryWorktree(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	destroyer := &stubDestroyer{}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-primary"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-secondary"},
+			{RepositoryID: "repo-c", WorktreeID: "wt-tertiary"},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"wt-primary", "wt-secondary", "wt-tertiary"}
+	if len(destroyer.worktreeCalls) != len(want) {
+		t.Fatalf("worktree destroy calls = %v, want %v", destroyer.worktreeCalls, want)
+	}
+	for i, id := range want {
+		if destroyer.worktreeCalls[i] != id {
+			t.Errorf("worktree destroy call[%d] = %q, want %q", i, destroyer.worktreeCalls[i], id)
+		}
+	}
+}
+
+func TestTeardownEnvironmentResources_ReposOnlyEnvironmentIsNotEmpty(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	destroyer := &stubDestroyer{}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-a"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-b"},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(destroyer.worktreeCalls) != 2 {
+		t.Fatalf("worktree destroy calls = %v, want 2", destroyer.worktreeCalls)
+	}
+}
+
 func TestTeardownEnvironmentResources_GenericWorktreeFailureRemainsError(t *testing.T) {
 	worktreeErr := errors.New("worktree backend unavailable")
 	svc := newResetTestService(t, &stubEnvRepo{})
 	svc.SetEnvironmentDestroyer(&stubDestroyer{worktreeErr: worktreeErr})
 
 	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
-		WorktreeID: "worktree-1",
+		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "worktree-1"}},
 	})
 
 	if !errors.Is(err, worktreeErr) {
@@ -230,6 +338,33 @@ func TestCleanupTaskEnvironment_CancellationPreservesEnvironmentRow(t *testing.T
 	}
 	if repo.deleted {
 		t.Fatal("environment row deleted after cancellation")
+	}
+}
+
+func TestCleanupDestructiveTaskResources_DoesNotDuplicateBatchWorktreeCleanup(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{ID: "env-1", TaskID: "task-1"}}
+	svc := newResetTestService(t, repo)
+	destroyer := &stubDestroyer{}
+	cleaner := &policyRecordingWorktreeCleanup{}
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetWorktreeCleanup(cleaner)
+	wt := &worktree.Worktree{ID: "wt-once", TaskID: "task-1"}
+
+	errs := svc.cleanupDestructiveTaskResources(
+		context.Background(), "task-1", nil, []*worktree.Worktree{wt},
+		taskEnvironmentCleanup{
+			env:              &models.TaskEnvironment{ID: "env-1", TaskID: "task-1", Repos: []*models.TaskEnvironmentRepo{{WorktreeID: wt.ID}}},
+			preserveBranches: true,
+		}, nil,
+	)
+	if len(errs) != 0 {
+		t.Fatalf("cleanup errors = %v", errs)
+	}
+	if len(destroyer.worktreeCalls) != 0 {
+		t.Fatalf("destroyer worktree calls = %v, want none", destroyer.worktreeCalls)
+	}
+	if cleaner.preservingCalls != 1 {
+		t.Fatalf("batch preserving calls = %d, want 1", cleaner.preservingCalls)
 	}
 }
 
@@ -281,7 +416,7 @@ func TestResetTaskEnvironment_TeardownIsBestEffortAcrossResources(t *testing.T) 
 		ID:          "env-1",
 		TaskID:      "task-1",
 		ContainerID: "container-abc",
-		WorktreeID:  "wt-1",
+		Repos:       []*models.TaskEnvironmentRepo{{WorktreeID: "wt-1"}},
 	}}
 	destroyer := &stubDestroyer{containerErr: errors.New("docker unreachable")}
 	svc := newResetTestService(t, repo)
@@ -305,10 +440,9 @@ func TestResetTaskEnvironment_TeardownIsBestEffortAcrossResources(t *testing.T) 
 
 func TestResetTaskEnvironment_PushBranchFailureAbortsResetBeforeTeardown(t *testing.T) {
 	repo := &stubEnvRepo{env: &models.TaskEnvironment{
-		ID:           "env-1",
-		TaskID:       "task-1",
-		WorktreeID:   "wt-1",
-		WorktreePath: "/tmp/worktree",
+		ID:     "env-1",
+		TaskID: "task-1",
+		Repos:  []*models.TaskEnvironmentRepo{{WorktreeID: "wt-1", WorktreePath: "/tmp/worktree"}},
 	}}
 	destroyer := &stubDestroyer{pushErr: errors.New("remote rejected")}
 	svc := newResetTestService(t, repo)

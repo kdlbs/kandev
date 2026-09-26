@@ -13,6 +13,8 @@ import type {
   GitLabConfig,
   SetGitLabConfigRequest,
   TestGitLabConnectionResult,
+  TaskMRAutomationOptions,
+  TaskMRAutomationPatch,
 } from "@/lib/types/gitlab";
 import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
 
@@ -128,6 +130,29 @@ export async function syncTaskMR(
   });
 }
 
+/** Get a task's MR automation (lifecycle notification) options. */
+export async function getTaskMRAutomation(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<TaskMRAutomationOptions>(
+    `/api/v1/gitlab/tasks/${encodeURIComponent(taskId)}/mr-automation`,
+    options,
+  );
+}
+
+/** Update a task's MR automation (lifecycle notification) options. */
+export async function updateTaskMRAutomation(
+  taskId: string,
+  patch: TaskMRAutomationPatch,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TaskMRAutomationOptions>(
+    `/api/v1/gitlab/tasks/${encodeURIComponent(taskId)}/mr-automation`,
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "PATCH", body: JSON.stringify(patch) },
+    },
+  );
+}
+
 export async function createTaskMR(
   body: { task_id: string; repository_id?: string; mr_url: string },
   workspaceId: string,
@@ -170,12 +195,14 @@ export async function searchUserIssues(params: {
   workspaceId: string;
   filter?: string;
   customQuery?: string;
+  milestone?: string;
   page?: number;
   perPage?: number;
 }) {
   const qs = new URLSearchParams({ workspace_id: params.workspaceId });
   if (params.filter) qs.set("filter", params.filter);
   if (params.customQuery) qs.set("custom_query", params.customQuery);
+  if (params.milestone) qs.set("milestone", params.milestone);
   if (params.page) qs.set("page", String(params.page));
   if (params.perPage) qs.set("per_page", String(params.perPage));
   return fetchJson<IssueSearchPage>(`/api/v1/gitlab/user/issues?${qs.toString()}`, {

@@ -1,0 +1,111 @@
+import { type Locator, type Page } from "@playwright/test";
+import { expect, test } from "../../fixtures/test-base";
+import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+
+const TASK_TITLE = "Mobile auto-hide move source";
+
+async function openMobileMenu(mobile: MobileKanbanPage) {
+  await mobile.viewOptionsButton.click();
+  await mobile.optionsCard.waitFor({ state: "visible" });
+}
+
+async function closeMobileMenu(page: Page, mobile: MobileKanbanPage) {
+  await expect(async () => {
+    if ((await mobile.optionsCard.count()) > 0) {
+      await page.keyboard.press("Escape");
+    }
+    await expect(mobile.optionsCard).toHaveCount(0, { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+}
+
+async function openColumnsMenu(
+  page: Page,
+  mobile: MobileKanbanPage,
+  workflowId: string,
+): Promise<Locator> {
+  const trigger = mobile.optionsCard.getByTestId(`columns-menu-${workflowId}`);
+  await trigger.click();
+  await expect(trigger).toHaveAttribute("data-state", "open");
+  const menu = page.locator('[role="menu"]:visible');
+  await expect(menu).toBeVisible();
+  return menu;
+}
+
+async function expectMinTouchTarget(locator: Locator) {
+  await expect(async () => {
+    const box = await locator.boundingBox();
+    if (!box) throw new Error("touch target has no layout box");
+    expect(box.height).toBeGreaterThanOrEqual(44);
+  }).toPass({ timeout: 5_000 });
+}
+
+test("keeps auto-hide scoped and moves through the mobile card menu", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Mobile auto-hide E2E");
+  const sourceStep = await apiClient.createWorkflowStep(workflow.id, "Source", 0, {
+    is_start_step: true,
+  });
+  const hiddenDestination = await apiClient.createWorkflowStep(workflow.id, "Hidden target", 1);
+  const otherWorkflow = await apiClient.createWorkflow(seedData.workspaceId, "Unaffected workflow");
+  const otherStart = await apiClient.createWorkflowStep(otherWorkflow.id, "Other source", 0, {
+    is_start_step: true,
+  });
+  const otherEmpty = await apiClient.createWorkflowStep(otherWorkflow.id, "Other empty", 1);
+  const task = await apiClient.createTask(seedData.workspaceId, TASK_TITLE, {
+    workflow_id: workflow.id,
+    workflow_step_id: sourceStep.id,
+  });
+  await apiClient.createTask(seedData.workspaceId, "Unaffected task", {
+    workflow_id: otherWorkflow.id,
+    workflow_step_id: otherStart.id,
+  });
+  await apiClient.saveUserSettings({
+    workspace_id: seedData.workspaceId,
+    workflow_filter_id: workflow.id,
+    kanban_hidden_step_ids: {},
+    workflow_ids_with_auto_hide_empty_steps: [],
+  });
+
+  const mobile = new MobileKanbanPage(testPage);
+  await mobile.goto();
+  await openMobileMenu(mobile);
+  await expect(mobile.optionsCard.getByTestId(`columns-menu-${otherWorkflow.id}`)).toHaveCount(0);
+  const columnsMenu = await openColumnsMenu(testPage, mobile, workflow.id);
+
+  const autoHideToggle = columnsMenu.getByTestId(`columns-menu-auto-hide-empty-${workflow.id}`);
+  await expectMinTouchTarget(autoHideToggle);
+  await autoHideToggle.click();
+  await expect(autoHideToggle).toHaveAttribute("aria-checked", "true");
+  await testPage.keyboard.press("Escape");
+  await closeMobileMenu(testPage, mobile);
+
+  await expect(testPage.getByTestId(`kanban-column-${hiddenDestination.id}`)).toHaveCount(0);
+  await mobile.taskCard(task.id).getByRole("button", { name: "More options" }).tap();
+  await testPage.getByTestId("task-context-move-to").tap();
+  await testPage.getByTestId(`task-context-step-${hiddenDestination.id}`).tap();
+  const overflow = await testPage.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  await expect(testPage.locator('[data-testid^="mobile-drop-target-"]')).toHaveCount(0);
+  await expect
+    .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
+    .toBe(hiddenDestination.id);
+  await expect(testPage.getByTestId(`kanban-column-${hiddenDestination.id}`)).toBeVisible();
+
+  const persistedSettings = (await apiClient.getUserSettings()).settings;
+  expect(persistedSettings.workflow_ids_with_auto_hide_empty_steps).toEqual([workflow.id]);
+
+  await apiClient.saveUserSettings({
+    workspace_id: seedData.workspaceId,
+    workflow_filter_id: otherWorkflow.id,
+  });
+  await testPage.reload();
+  await mobile.mobileKanbanLayout().waitFor({ state: "visible" });
+  await expect(mobile.boardNavigator).toContainText("Unaffected workflow");
+  await expect(testPage.getByTestId(`kanban-column-${otherEmpty.id}`)).toHaveCount(1);
+});

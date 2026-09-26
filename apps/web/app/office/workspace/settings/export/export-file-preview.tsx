@@ -1,16 +1,18 @@
 "use client";
 
 import type { ExportFile } from "./export-types";
+import { useTranslation } from "react-i18next";
 
 interface ExportFilePreviewProps {
   file: ExportFile | null;
 }
 
 export function ExportFilePreview({ file }: ExportFilePreviewProps) {
+  const { t } = useTranslation();
   if (!file) {
     return (
       <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-        Select a file to preview
+        {t("office:selectAFileToPreview")}
       </div>
     );
   }

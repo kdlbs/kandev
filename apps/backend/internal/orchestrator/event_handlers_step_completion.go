@@ -2,12 +2,15 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // subscribeStepCompletionEvents wires the ADR 0015 out-of-band subscriber
@@ -59,6 +62,92 @@ func (s *Service) clearPendingStepSignalByID(ctx context.Context, sessionID stri
 	}
 }
 
+// recordAutoStepTransition writes the ADR 0015 audit row for an
+// orchestrator-driven (non-manual) step transition — shared by the engine
+// path (applyEngineTransition, covering on_turn_complete, on_turn_start,
+// and on_children_completed) and the legacy on_turn_complete/on_turn_start
+// path (executeStepTransition), so the two funnels cannot drift apart.
+// The trigger is preserved so on_turn_start and on_children_completed are not
+// reported as completion events. Older rows keep auto_complete for turn
+// completion and remain readable.
+// Nil-safe: no recorder wired, or no session to record against, is a
+// no-op. Runtime writes use the workflow service's bounded worker. Failures
+// are logged and swallowed because this contract is best-effort telemetry.
+func (s *Service) recordAutoStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, signal *models.PendingStepCompletionSignal, triggers ...wfmodels.StepTransitionTrigger) {
+	if s.stepHistoryRecorder == nil || sessionID == "" {
+		return
+	}
+	var metadata map[string]interface{}
+	if signal != nil {
+		metadata = map[string]interface{}{
+			"signal_source":  signal.Source,
+			"signal_summary": signal.Summary,
+		}
+		if handoff := strings.TrimSpace(signal.Handoff); handoff != "" {
+			metadata["signal_handoff"] = handoff
+		}
+		if blockers := strings.TrimSpace(signal.Blockers); blockers != "" {
+			metadata["signal_blockers"] = blockers
+		}
+	}
+	trigger := wfmodels.StepTransitionTriggerAutoComplete
+	if len(triggers) > 0 && triggers[0] != "" {
+		trigger = triggers[0]
+	}
+	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
+		if asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, trigger, nil, metadata) {
+			return
+		}
+		// A full or closed worker must not discard a consumed signal's audit
+		// payload. Fall through to the bounded synchronous write below.
+	}
+	// Test doubles remain synchronous, and production falls back here when its
+	// bounded worker cannot accept the row.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
+	defer cancel()
+	if err := s.stepHistoryRecorder.CreateStepTransition(
+		writeCtx, sessionID, fromStepID, toStepID, trigger, nil, metadata,
+	); err != nil {
+		s.logger.Warn("failed to record auto step transition",
+			zap.String("session_id", sessionID),
+			zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID),
+			zap.Error(err))
+	}
+}
+
+// recordManualStepTransition writes the ADR 0015 audit row for an
+// agent-initiated move_task_kandev call that could not apply inline because
+// the calling session was still RUNNING/STARTING (applyPendingMove, deferred
+// via messagequeue.PendingMove). This is the agent half of
+// StepTransitionTriggerManual — the user/HTTP half is recorded by
+// task/service.MoveTaskWithOptions. Nil-safe and failure-swallowing, same as
+// recordAutoStepTransition.
+func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, actors ...wfmodels.StepTransitionActor) {
+	if s.stepHistoryRecorder == nil || sessionID == "" {
+		return
+	}
+	// Test doubles can remain synchronous. Production workflow service uses the
+	// queue branch below.
+	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
+		if asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, nil, nil) {
+			return
+		}
+		// Fall through when the bounded worker is full or closed.
+	}
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
+	defer cancel()
+	if err := s.stepHistoryRecorder.CreateStepTransition(
+		writeCtx, sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, nil, nil,
+	); err != nil {
+		s.logger.Warn("failed to record manual step transition",
+			zap.String("session_id", sessionID),
+			zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID),
+			zap.Error(err))
+	}
+}
+
 // onStepCompletionSignaled subscribes to events.WorkflowStepCompletionSignaled
 // to handle the case where the agent's `step_complete_kandev` call lands
 // AFTER the turn already ended — at that point processOnTurnCompleteViaEngine
@@ -83,10 +172,31 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	ctx = withWorkflowProfileSwitchGuardHeld(ctx, sessionID, "")
+	if s.isCancelInFlight(sessionID) {
+		s.logger.Debug("deferring workflow step completion signal while cancellation is in progress",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return
+	}
 
+	s.reconcileStepCompletionSignalLocked(ctx, taskID, sessionID, stepID)
+}
+
+// reconcileStepCompletionSignalLocked re-checks a pending step-completion
+// signal against the task's current state and, if still valid, drives the
+// transition. Callers must already hold sessionID's cancelInFlight guard —
+// this is the case for onStepCompletionSignaled's bus subscriber; for the
+// turn-failure settle point in handleRecoverableFailureLocked, which gives
+// the ADR 0015 reconciler a second chance when the turn never reached a
+// successful processOnTurnCompleteViaEngine call; and for the stuck-session
+// watchdog, which gives it that same second chance when a turn never
+// reaches turn-end or a failure event at all.
+func (s *Service) reconcileStepCompletionSignalLocked(ctx context.Context, taskID, sessionID, stepID string) {
+	ctx = withWorkflowProfileSwitchGuardHeld(ctx, sessionID, "")
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		s.logger.Warn("onStepCompletionSignaled: failed to load session",
+		s.logger.Warn("reconcileStepCompletionSignalLocked: failed to load session",
 			zap.String("session_id", sessionID), zap.Error(err))
 		return
 	}
@@ -99,12 +209,12 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
-		s.logger.Warn("onStepCompletionSignaled: failed to load task",
+		s.logger.Warn("reconcileStepCompletionSignalLocked: failed to load task",
 			zap.String("task_id", taskID), zap.Error(err))
 		return
 	}
 	if task.WorkflowStepID != stepID {
-		s.logger.Debug("onStepCompletionSignaled: signal stale (step changed)",
+		s.logger.Debug("reconcileStepCompletionSignalLocked: signal stale (step changed)",
 			zap.String("signal_step", stepID), zap.String("current_step", task.WorkflowStepID))
 		// Only clear the bag when its current contents are themselves
 		// stale (matching THIS subscriber's stepID). Re-load the session

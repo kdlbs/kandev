@@ -42,7 +42,7 @@ export async function assertMixedAttachmentLayout({
   const textPath = path.join(testInfo.outputDir, "notes.txt");
   fs.writeFileSync(textPath, "plain text attachment");
 
-  const fileInput = testPage.locator('input[type="file"]');
+  const fileInput = testPage.getByTestId("chat-input-editor-shell").locator('input[type="file"]');
   // The chat input appends each change event to React attachment state.
   await fileInput.setInputFiles(imagePath);
   const imagePreview = testPage.getByText(/Image \(/);
@@ -55,7 +55,7 @@ export async function assertMixedAttachmentLayout({
 
   const fileAttachment = testPage.getByTestId("message-file-attachment", { exact: true });
   const imageAttachment = testPage.getByRole("button", { name: "Open Attachment 1" });
-  await expect(fileAttachment).toHaveText("notes.txt");
+  await expect(fileAttachment).toContainText("notes.txt");
   const [fileBox, imageBox] = await Promise.all([
     fileAttachment.boundingBox(),
     imageAttachment.boundingBox(),

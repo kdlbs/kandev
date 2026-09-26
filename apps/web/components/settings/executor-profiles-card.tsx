@@ -5,17 +5,55 @@ import { useRouter } from "@/lib/routing/client-router";
 import { IconTrash, IconPlus, IconChevronRight } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
+import { Card, CardContent } from "@kandev/ui/card";
 import { deleteExecutorProfile, listExecutorProfiles } from "@/lib/api/domains/settings-api";
 import { ExecutorProfileDialog } from "@/components/settings/executor-profile-dialog";
 import { useAppStore } from "@/components/state-provider";
 import type { ExecutorProfile } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
+import { settingsActionClassName } from "@/components/settings/settings-control";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 
 type ExecutorProfilesCardProps = {
   executorId: string;
   profiles: ExecutorProfile[];
 };
+
+const executorProfileDeleteActionClassName = settingsActionClassName(
+  "p-0 text-destructive hover:text-destructive cursor-pointer",
+);
+
+function ExecutorProfilesHeader({
+  title,
+  description,
+  actionLabel,
+  onCreate,
+}: {
+  title: string;
+  description: string;
+  actionLabel: string;
+  onCreate: () => void;
+}) {
+  return (
+    <SettingsCardHeader
+      title={title}
+      description={description}
+      actions={
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onCreate}
+          className={settingsActionClassName("cursor-pointer")}
+        >
+          <IconPlus className="h-4 w-4 mr-1" />
+          {actionLabel}
+        </Button>
+      }
+    />
+  );
+}
 
 export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesCardProps) {
   const { t } = useTranslation();
@@ -42,9 +80,9 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
   const handleProfileCreated = useCallback(
     (profile: ExecutorProfile) => {
       refreshProfiles();
-      router.push(`/settings/executor/${executorId}/profile/${profile.id}`);
+      router.push(executorProfileSettingsPath(profile.id));
     },
-    [executorId, refreshProfiles, router],
+    [refreshProfiles, router],
   );
 
   const handleDelete = useCallback(
@@ -63,20 +101,12 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
   return (
     <>
       <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>{t("executors:profiles")}</CardTitle>
-              <CardDescription>
-                {t("executors:differentConfigurationsForThisExecutorEach")}
-              </CardDescription>
-            </div>
-            <Button variant="outline" size="sm" onClick={handleCreate} className="cursor-pointer">
-              <IconPlus className="h-4 w-4 mr-1" />
-              {t("executors:add")}
-            </Button>
-          </div>
-        </CardHeader>
+        <ExecutorProfilesHeader
+          title={t("executors:profiles")}
+          description={t("executors:differentConfigurationsForThisExecutorEach")}
+          actionLabel={t("executors:add")}
+          onCreate={handleCreate}
+        />
         <CardContent>
           {profiles.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("executors:noProfilesConfigured")}</p>
@@ -86,14 +116,12 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
                 <div
                   key={profile.id}
                   className="flex items-center justify-between rounded-md border px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
-                  onClick={() =>
-                    router.push(`/settings/executor/${executorId}/profile/${profile.id}`)
-                  }
+                  onClick={() => router.push(executorProfileSettingsPath(profile.id))}
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-sm font-medium truncate">{profile.name}</span>
                     {profile.prepare_script && (
-                      <Badge variant="outline" className="text-xs flex-shrink-0">
+                      <Badge variant="outline" className={`${SETTINGS_TYPOGRAPHY.meta} shrink-0`}>
                         {t("executors:prepareScriptBadge")}
                       </Badge>
                     )}
@@ -101,9 +129,11 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <Button
                       variant="ghost"
-                      size="sm"
+                      size="icon"
                       onClick={(e) => handleDelete(e, profile.id)}
-                      className="h-7 w-7 p-0 text-destructive hover:text-destructive cursor-pointer"
+                      aria-label={t("executors:deleteProfile")}
+                      data-testid="executor-profile-delete-button"
+                      className={executorProfileDeleteActionClassName}
                     >
                       <IconTrash className="h-3.5 w-3.5" />
                     </Button>

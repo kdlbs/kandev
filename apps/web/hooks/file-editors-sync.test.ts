@@ -89,6 +89,47 @@ describe("buildGitFileSignature", () => {
     } as FileInfo);
     expect(before).not.toBe(after);
   });
+
+  it("changes when only a mixed-change facet changes", () => {
+    const base = {
+      path: PATH,
+      status: "modified" as const,
+      staged: false,
+      diff: "combined",
+      staged_change: { status: "modified" as const, diff: "staged one" },
+      unstaged_change: { status: "modified" as const, diff: "unstaged" },
+    };
+
+    expect(buildGitFileSignature(base)).not.toBe(
+      buildGitFileSignature({
+        ...base,
+        staged_change: { status: "modified", diff: "staged two" },
+      }),
+    );
+  });
+});
+
+it("clears symlink identity when unchanged content becomes a regular file", async () => {
+  vi.clearAllMocks();
+  const updateFileState = vi.fn();
+  seedOpenFile({
+    content: "v1",
+    originalContent: "v1",
+    originalHash: "h:2:v1",
+    resolvedPath: "target",
+  });
+  mockRequestFileContent.mockResolvedValueOnce({ content: "v1", is_binary: false });
+  await syncOpenFileFromWorkspace({
+    client: FAKE_CLIENT,
+    sessionId: SESSION_ID,
+    fileKey: PATH,
+    path: PATH,
+    updateFileState,
+  });
+  expect(updateFileState).toHaveBeenCalledWith(
+    PATH,
+    expect.objectContaining({ resolvedPath: undefined }),
+  );
 });
 
 describe("syncOpenFileFromWorkspace", () => {
@@ -168,7 +209,12 @@ describe("syncOpenFileFromWorkspace", () => {
   });
 
   it("is a no-op when remote content matches the editor buffer", async () => {
-    seedOpenFile({ content: "v1", originalContent: "v1", originalHash: "h:2:v1" });
+    seedOpenFile({
+      resolvedPath: PATH,
+      content: "v1",
+      originalContent: "v1",
+      originalHash: "h:2:v1",
+    });
     mockRequestFileContent.mockResolvedValueOnce({
       content: "v1",
       is_binary: false,

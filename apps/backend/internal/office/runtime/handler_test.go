@@ -13,6 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -20,6 +22,8 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/projects"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 type handlerHarness struct {
@@ -29,7 +33,9 @@ type handlerHarness struct {
 	status     *recordingTaskStatusUpdater
 	projects   *recordingProjectManager
 	tasks      *handlerTaskCreator
+	runs       *recordingRunSpawner
 	runEvents  *recordingRunEvents
+	decisions  *recordingDecisionRecorder
 	agentSvc   *agents.AgentService
 	repository *sqlite.Repository
 }
@@ -109,6 +115,7 @@ func (r *handlerTaskCreator) CreateOfficeTaskAsAgent(
 	assigneeAgentID string,
 	_ string,
 	_ string,
+	_ string,
 ) (string, error) {
 	r.calls++
 	r.rootWorkspaces = append(r.rootWorkspaces, workspaceID)
@@ -122,6 +129,7 @@ func (r *handlerTaskCreator) CreateOfficeSubtaskAsAgent(
 	_ string,
 	_ string,
 	assigneeAgentID string,
+	_ string,
 	_ string,
 	_ string,
 ) (string, error) {
@@ -172,7 +180,7 @@ func TestRuntimeHandler_PostCommentUsesRuntimeToken(t *testing.T) {
 		t.Fatalf("comments = %d, want 1", len(h.comments.comments))
 	}
 	comment := h.comments.comments[0]
-	if comment.TaskID != "task-1" || comment.AuthorID != "agent-1" || comment.AuthorType != "agent" {
+	if comment.TaskID != "task-1" || comment.AuthorID != "agent-1" || comment.AuthorType != "agent" || comment.Source != "agent" {
 		t.Fatalf("comment identity = %#v", comment)
 	}
 	assertActionRunEvent(t, h.runEvents, "post_comment", "task", "task-1")
@@ -234,6 +242,88 @@ func TestRuntimeHandler_CreateAgentBindsSnakeCasePayload(t *testing.T) {
 		t.Fatalf("snake-case fields did not bind: %+v", body.Agent)
 	}
 	assertActionRunEvent(t, h.runEvents, "create_agent", "agent", body.Agent.ID)
+}
+
+// TestRuntimeHandler_SpawnAgentRunAcceptsRegistryReason exercises the
+// AC-OFFICE-LAUNCH-SAFETY-004.3 registry check's positive path through the
+// real HTTP route (POST /runtime/agents/:id/runs), not just the Actions
+// layer: a registry-member reason reaches the run spawner and the caller
+// gets 202 Accepted.
+func TestRuntimeHandler_SpawnAgentRunAcceptsRegistryReason(t *testing.T) {
+	h := newRuntimeHandlerHarness(t, Capabilities{CanSpawnAgentRun: true})
+
+	resp := h.request(t, http.MethodPost, "/runtime/agents/agent-1/runs", map[string]interface{}{
+		"reason": string(shared.RunReasonHeartbeat),
+	})
+
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusAccepted, resp.Body.String())
+	}
+	if len(h.runs.calls) != 1 || h.runs.calls[0].Reason != string(shared.RunReasonHeartbeat) {
+		t.Fatalf("run spawner calls = %+v, want one call for reason %q", h.runs.calls, shared.RunReasonHeartbeat)
+	}
+}
+
+// TestRuntimeHandler_SpawnAgentRunRejectsReasonOutsideRegistryAndLogsRunEvent
+// pins AC-OFFICE-LAUNCH-SAFETY-004.3 end to end through the HTTP route: a
+// reason outside shared.WakeReasonRegistry (the empty string included)
+// must be rejected with 400, must never reach the run spawner, and must be
+// recorded as a denied run event — the same observable contract already
+// proven for errTaskTitleRequired/ErrProjectRequired on other actions.
+func TestRuntimeHandler_SpawnAgentRunRejectsReasonOutsideRegistryAndLogsRunEvent(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reason string
+	}{
+		{name: "unregistered reason", reason: "whatever-reason-the-agent-invents"},
+		{name: "empty reason", reason: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRuntimeHandlerHarness(t, Capabilities{CanSpawnAgentRun: true})
+
+			resp := h.request(t, http.MethodPost, "/runtime/agents/agent-1/runs", map[string]interface{}{
+				"reason": tc.reason,
+			})
+
+			if resp.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusBadRequest, resp.Body.String())
+			}
+			if len(h.runs.calls) != 0 {
+				t.Fatalf("run spawner called for reason outside the registry: %+v", h.runs.calls)
+			}
+			assertDeniedRunEvent(t, h.runEvents, "spawn_agent_run", "agent", "agent-1")
+		})
+	}
+}
+
+func TestRuntimeHandler_SpawnAgentRunReturnsPolicyRefusal(t *testing.T) {
+	h := newRuntimeHandlerHarness(t, Capabilities{CanSpawnAgentRun: true})
+	h.runs.err = &runsservice.RefusalError{
+		Gate:   runsservice.RefusalCausationDepth,
+		Reason: "causation depth exceeds configured limit",
+	}
+
+	resp := h.request(t, http.MethodPost, "/runtime/agents/agent-1/runs", map[string]interface{}{
+		"reason": string(shared.RunReasonHeartbeat),
+	})
+
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusConflict, resp.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+		Gate  string `json:"gate"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Error != "run enqueue refused" || body.Gate != string(runsservice.RefusalCausationDepth) {
+		t.Fatalf("response = %#v, want a safe policy refusal", body)
+	}
+	assertDeniedRunEvent(t, h.runEvents, "spawn_agent_run", "agent", "agent-1")
+	if got := h.runEvents.events[0].payload["error"]; got != "run enqueue refused" {
+		t.Fatalf("denied event error = %#v, want sanitized refusal", got)
+	}
 }
 
 func TestRuntimeHandler_ListProjectsUsesTokenWorkspace(t *testing.T) {
@@ -355,6 +445,23 @@ func TestRuntimeHandler_CreateTaskUsesRuntimeToken(t *testing.T) {
 	if resp.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusCreated, resp.Body.String())
 	}
+}
+
+func TestRuntimeHandler_CreateTaskRequiresProjectWhenWorkspaceHasProjects(t *testing.T) {
+	h := newRuntimeHandlerHarness(t, Capabilities{CanCreateTasks: true})
+	h.projects.projects = []*models.Project{{ID: "project-1", WorkspaceID: "ws-1"}}
+
+	resp := h.request(t, http.MethodPost, "/runtime/tasks", map[string]interface{}{
+		"title": "Runtime task",
+	})
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusBadRequest, resp.Body.String())
+	}
+	if h.tasks.calls != 0 {
+		t.Fatalf("task creator called without a project selection: %d", h.tasks.calls)
+	}
+	assertDeniedRunEvent(t, h.runEvents, "create_task", "task", "")
 }
 
 func TestRuntimeHandler_CreateTaskWithParentRequiresSubtaskCapability(t *testing.T) {
@@ -722,6 +829,56 @@ func TestRuntimeHandler_UpdateTaskStatusReturnsInternalErrorForOperationalFailur
 	if resp.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusInternalServerError, resp.Body.String())
 	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Error != runtimeInternalErrorMessage {
+		t.Fatalf("error = %q, want stable internal error", body.Error)
+	}
+}
+
+func TestRuntimeHandler_LogsInternalErrorWithoutExposingCause(t *testing.T) {
+	core, observed := observer.New(zap.ErrorLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create test logger: %v", err)
+	}
+	h := newRuntimeHandlerHarnessWithLogger(t, Capabilities{
+		CanUpdateTaskStatus: true,
+	}.WithTaskScope("task-1"), log)
+	underlyingErr := errors.New("update task state: database unavailable")
+	h.status.err = underlyingErr
+
+	resp := h.request(t, http.MethodPost, "/runtime/tasks/task-1/status", map[string]string{
+		"status": "done",
+	})
+
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusInternalServerError, resp.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Error != runtimeInternalErrorMessage {
+		t.Fatalf("error = %q, want stable internal error", body.Error)
+	}
+	entries := observed.All()
+	if len(entries) != 1 {
+		t.Fatalf("error log entries = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.Message != "office runtime action failed" {
+		t.Fatalf("log message = %q, want runtime action failure", entry.Message)
+	}
+	if got := fmt.Sprint(entry.ContextMap()["error"]); got != underlyingErr.Error() {
+		t.Fatalf("logged error = %q, want %q", got, underlyingErr.Error())
+	}
 }
 
 func TestRuntimeHandler_UpdateTaskStatusAuditsWrappedAuthorizationFailure(t *testing.T) {
@@ -744,12 +901,28 @@ func newRuntimeHandlerHarness(t *testing.T, caps Capabilities) *handlerHarness {
 	return newRuntimeHandlerHarnessWithProjectManager(t, caps, nil)
 }
 
+func newRuntimeHandlerHarnessWithLogger(t *testing.T, caps Capabilities, log *logger.Logger) *handlerHarness {
+	return newRuntimeHandlerHarnessWithProjectManagerAndLogger(t, caps, nil, log)
+}
+
 func newRuntimeHandlerHarnessWithProjectManager(
 	t *testing.T,
 	caps Capabilities,
 	projectManagerFactory func(*sqlite.Repository) ProjectManager,
 ) *handlerHarness {
+	return newRuntimeHandlerHarnessWithProjectManagerAndLogger(t, caps, projectManagerFactory, logger.Default())
+}
+
+func newRuntimeHandlerHarnessWithProjectManagerAndLogger(
+	t *testing.T,
+	caps Capabilities,
+	projectManagerFactory func(*sqlite.Repository) ProjectManager,
+	log *logger.Logger,
+) *handlerHarness {
 	t.Helper()
+	if log == nil {
+		log = logger.Default()
+	}
 	gin.SetMode(gin.TestMode)
 	db, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -763,7 +936,7 @@ func newRuntimeHandlerHarnessWithProjectManager(
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
-	agentSvc := agents.NewAgentService(repo, logger.Default(), nil)
+	agentSvc := agents.NewAgentService(repo, log, nil)
 	agentSvc.SetAuth(agents.NewAgentAuth("runtime-handler-test-key"))
 	agent := &models.AgentInstance{
 		ID:          "agent-1",
@@ -785,12 +958,14 @@ func newRuntimeHandlerHarnessWithProjectManager(
 	comments := &handlerCommentWriter{}
 	status := &recordingTaskStatusUpdater{}
 	tasks := &handlerTaskCreator{}
+	runs := &recordingRunSpawner{}
 	projects := &recordingProjectManager{}
 	var projectManager ProjectManager = projects
 	if projectManagerFactory != nil {
 		projectManager = projectManagerFactory(repo)
 	}
 	runEvents := &recordingRunEvents{}
+	decisions := &recordingDecisionRecorder{}
 	router := gin.New()
 	RegisterRoutes(router.Group(""), NewHandler(
 		agentSvc,
@@ -800,10 +975,14 @@ func newRuntimeHandlerHarnessWithProjectManager(
 			TaskStatus:    status,
 			Agents:        agentSvc,
 			Projects:      projectManager,
+			Runs:          runs,
 			AgentModifier: agentSvc,
 		}),
 		nil,
 		runEvents,
+		decisions,
+		log,
+		nil,
 	))
 	return &handlerHarness{
 		router:     router,
@@ -812,7 +991,9 @@ func newRuntimeHandlerHarnessWithProjectManager(
 		status:     status,
 		projects:   projects,
 		tasks:      tasks,
+		runs:       runs,
 		runEvents:  runEvents,
+		decisions:  decisions,
 		agentSvc:   agentSvc,
 		repository: repo,
 	}

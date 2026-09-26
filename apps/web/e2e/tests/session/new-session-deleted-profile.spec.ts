@@ -4,7 +4,7 @@ import { openTaskSession } from "../../helpers/session";
 
 /**
  * Stop the running session via the tab context menu (session.stop → CANCELLED state),
- * then wait for the FailedSessionBanner to appear.
+ * then wait for the recoverable session banner to appear.
  *
  * Note: clicking the cancel-agent-button sends `agent.cancel` which only cancels
  * the current turn and transitions to WAITING_FOR_INPUT (not CANCELLED/FAILED).
@@ -19,7 +19,7 @@ async function stopRunningSession(session: SessionPage) {
   await session.rightClickFirstSessionTab();
   await session.contextMenuItem("Stop").click();
 
-  // Wait for the FailedSessionBanner's resume button to appear (isFailed = FAILED | CANCELLED)
+  // Wait for the recoverable banner's resume button to appear (isFailed = FAILED | CANCELLED)
   await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
 }
 
@@ -113,7 +113,7 @@ test.describe("New session with deleted agent profile", () => {
     // 5. Wait for the resume button to become disabled (confirms store updated)
     await expect(session.recoveryResumeButton()).toBeDisabled({ timeout: 10_000 });
 
-    // 6. Click "Start fresh session" in the FailedSessionBanner — when the
+    // 6. Click "Start fresh session" in the recoverable banner. When the
     //    profile is missing this opens the new session dialog instead of
     //    triggering an immediate fresh_start recover.
     await session.recoveryFreshButton().click();

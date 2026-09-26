@@ -2,8 +2,10 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +18,15 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+const defaultRemoteContributionPreflightTimeout = 2 * time.Minute
+
+func (m *Manager) contributionPreflightTimeout() time.Duration {
+	if m.remoteContributionPreflightTimeout > 0 {
+		return m.remoteContributionPreflightTimeout
+	}
+	return defaultRemoteContributionPreflightTimeout
+}
 
 // startPassthroughExecution dispatches a passthrough-routed execution to the
 // resume or fresh launch path. profileInfo may be nil — see routePassthrough's
@@ -37,6 +48,9 @@ func (m *Manager) startPassthroughExecution(ctx context.Context, execution *Agen
 			return fmt.Errorf("resolve profile for passthrough execution %q: %w", execution.ID, err)
 		}
 		profileInfo = resolved
+	}
+	if err := validatePassthroughProvider(profileInfo); err != nil {
+		return err
 	}
 	return m.startPassthroughSession(ctx, execution, profileInfo)
 }
@@ -74,16 +88,51 @@ func (m *Manager) routePassthrough(ctx context.Context, execution *AgentExecutio
 // StartAgentProcess configures and starts the agent subprocess for an execution.
 // This must be called after Launch() to actually start the agent (e.g., auggie, codex).
 // The command is built internally based on the execution's agent profile.
-func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (retErr error) {
+func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
+	}
+	if execution.SessionID == "" {
+		return m.startAgentProcess(ctx, executionID)
+	}
+	_, err := m.doCoalescedExecution(ctx, execution.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+		return nil, m.startAgentProcess(sharedCtx, executionID)
+	})
+	return err
+}
+
+func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (retErr error) {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
+	if err := execution.contextResetAdmissionError(); err != nil {
+		return err
+	}
+	if err := m.admitExecutionOwner(ctx, &LaunchRequest{
+		Owner:          execution.Owner,
+		OwnerAdmission: execution.OwnerAdmission,
+	}); err != nil {
+		return err
+	}
+	defer func() {
+		retErr = wrapBootstrapFailure(execution, retErr)
+	}()
+	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionAgent); err != nil {
+		return err
 	}
 	activityClaim, err := m.ensureExecutionActivity(ctx, executionID, activity.KindExecutionPreparing)
 	if err != nil {
 		return err
 	}
 	operationCtx := activityClaim.Context(ctx)
+	operationRelease, err := execution.acquireContextResetOperation(operationCtx)
+	if err != nil {
+		activityClaim.Release()
+		return err
+	}
+	defer operationRelease()
 	defer func() {
 		if retErr != nil {
 			activityClaim.Release()
@@ -113,29 +162,54 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 	if isPassthrough {
 		return m.startPassthroughExecution(operationCtx, execution, profileInfo)
 	}
-
-	if execution.agentctl == nil {
+	execution.beginStartupAttemptWithID(ResumeAttemptIDFromContext(operationCtx))
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	releaseClient()
+	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 
 	// Check if we're reconnecting to an existing running agent process.
 	// When the existing process is still alive inside a remote executor (e.g., Sprites),
 	// we skip subprocess launch and go directly to ACP session initialization.
-	reuseExisting, _ := execution.Metadata["reuse_existing_process"].(bool)
+	reuseExisting := execution.metadataBool(MetadataKeyReuseExistingProcess)
 
 	if !reuseExisting && execution.AgentCommand == "" {
 		return fmt.Errorf("execution %q has no agent command configured", executionID)
 	}
 
 	// Wait for agentctl to be ready
-	if err := execution.agentctl.WaitForReady(operationCtx, 60*time.Second); err != nil {
+	client, releaseClient = execution.AcquireAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("execution %q has no agentctl client", executionID)
+	}
+	err = client.WaitForReady(operationCtx, 60*time.Second)
+	releaseClient()
+	if err != nil {
 		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
 		return fmt.Errorf("agentctl not ready: %w", err)
+	}
+	err = m.preflightRemoteContributionPushes(operationCtx, execution)
+	if err != nil {
+		m.updateExecutionError(executionID, "contribution push preflight failed: "+err.Error())
+		return err
 	}
 
 	taskDescription := getTaskDescriptionFromMetadata(execution)
 	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
 
+	execution.remoteInstanceLifecycleMu.Lock()
+	if err := m.admitExecutionOwner(operationCtx, &LaunchRequest{
+		Owner:          execution.Owner,
+		OwnerAdmission: execution.OwnerAdmission,
+	}); err != nil {
+		execution.remoteInstanceLifecycleMu.Unlock()
+		return err
+	}
+	if err := m.ensureLaunchSessionStillActive(operationCtx, execution.SessionID, executionAdmissionAgent); err != nil {
+		execution.remoteInstanceLifecycleMu.Unlock()
+		return err
+	}
 	var bootCommand string
 	if reuseExisting {
 		// Agent subprocess is already running inside the remote executor.
@@ -155,6 +229,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 		var err error
 		bootCommand, err = m.configureAndStartAgent(operationCtx, execution, approvalPolicy)
 		if err != nil {
+			execution.remoteInstanceLifecycleMu.Unlock()
 			return err
 		}
 
@@ -163,12 +238,105 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 			zap.String("task_id", execution.TaskID),
 			zap.String("command", bootCommand))
 	}
+	execution.remoteInstanceLifecycleMu.Unlock()
 
-	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription)
+	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription, approvalPolicy)
+}
+
+func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, execution *AgentExecution) error {
+	preflightCtx, cancel := context.WithTimeout(ctx, m.contributionPreflightTimeout())
+	defer cancel()
+
+	if execution == nil {
+		return nil
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return nil
+	}
+	bindings, err := remoteContributionsFromMetadata(execution.MetadataSnapshot())
+	if err != nil {
+		return err
+	}
+	if len(bindings) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(bindings))
+	for key := range bindings {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		result, err := client.GitPushPreflight(preflightCtx, key, agentctl.PushOptions{})
+		if err != nil {
+			return &BootstrapFailure{
+				Operation: bootstrapOperation(execution),
+				Code:      classifyBootstrapCause(err),
+				Detail:    bootstrapFailureDetail(classifyBootstrapCause(err)),
+				Cause:     fmt.Errorf("repository %q: %w", contributionPreflightDisplayLabel(key), err),
+			}
+		}
+		if result == nil || !result.Success {
+			if execution.isResumedSession && result != nil &&
+				result.PreflightReason == agentctl.GitPushPreflightHistoryUpdateRequired {
+				continue
+			}
+			message := "remote contribution push is not writable"
+			code := models.AgentErrorCauseCodeUnknown
+			if result != nil && result.Error != "" {
+				message = result.Error
+				code = classifyBootstrapCauseCode(result.ErrorCode)
+			}
+			return &BootstrapFailure{
+				Operation: bootstrapOperation(execution),
+				Code:      code,
+				Detail:    bootstrapFailureDetail(code),
+				Cause:     fmt.Errorf("repository %q: %s", contributionPreflightDisplayLabel(key), message),
+			}
+		}
+	}
+	return nil
+}
+
+func classifyBootstrapCauseCode(code string) string {
+	if isKnownBootstrapCauseCode(code) {
+		return code
+	}
+	return models.AgentErrorCauseCodeUnknown
+}
+
+func classifyBootstrapCause(err error) string {
+	if err == nil {
+		return models.AgentErrorCauseCodeUnknown
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return models.AgentErrorCauseCodeTimeout
+	}
+	normalized := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(normalized, "authentication"), strings.Contains(normalized, "login"):
+		return models.AgentErrorCauseCodeAuthenticationRequired
+	case strings.Contains(normalized, "permission denied"), strings.Contains(normalized, "access denied"):
+		return models.AgentErrorCauseCodePermissionDenied
+	case strings.Contains(normalized, "destination"), strings.Contains(normalized, "push url"):
+		return models.AgentErrorCauseCodeDestinationInvalid
+	case strings.Contains(normalized, "could not resolve host"), strings.Contains(normalized, "unable to access"), strings.Contains(normalized, "connection refused"):
+		return models.AgentErrorCauseCodeTransportUnavailable
+	default:
+		return models.AgentErrorCauseCodeUnknown
+	}
+}
+
+func contributionPreflightDisplayLabel(key string) string {
+	if strings.TrimSpace(key) == "" {
+		return "default repository"
+	}
+	return key
 }
 
 // pollAgentStderr polls the agent's stderr buffer every 2 seconds and updates the boot message.
-func (m *Manager) pollAgentStderr(execution *AgentExecution, client *agentctl.Client, msg *models.Message, stopCh chan struct{}) {
+func (m *Manager) pollAgentStderr(execution *AgentExecution, msg *models.Message, stopCh chan struct{}) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -181,7 +349,13 @@ func (m *Manager) pollAgentStderr(execution *AgentExecution, client *agentctl.Cl
 		case <-ticker.C:
 			baseCtx := execution.SessionTraceContext()
 			ctx, cancel := context.WithTimeout(baseCtx, 5*time.Second)
+			client, releaseClient := execution.AcquireAgentCtlClient()
+			if client == nil {
+				cancel()
+				continue
+			}
 			lines, err := client.GetAgentStderr(ctx)
+			releaseClient()
 			cancel()
 			if err != nil {
 				m.logger.Debug("failed to poll agent stderr", zap.Error(err))
@@ -204,7 +378,7 @@ func (m *Manager) pollAgentStderr(execution *AgentExecution, client *agentctl.Cl
 }
 
 // finalizeBootMessage stops the polling goroutine and updates the boot message with final status.
-func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Message, stopCh chan struct{}, client *agentctl.Client, status string) {
+func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Message, stopCh chan struct{}, status string) {
 	if msg == nil || m.bootMessageService == nil {
 		return
 	}
@@ -215,10 +389,16 @@ func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Mes
 	}
 
 	// Final stderr fetch
-	if client != nil && execution != nil {
+	if execution != nil {
 		baseCtx := execution.SessionTraceContext()
 		ctx, cancel := context.WithTimeout(baseCtx, 5*time.Second)
-		lines, err := client.GetAgentStderr(ctx)
+		client, releaseClient := execution.AcquireAgentCtlClient()
+		var lines []string
+		var err error
+		if client != nil {
+			lines, err = client.GetAgentStderr(ctx)
+			releaseClient()
+		}
 		cancel()
 		if err == nil && len(lines) > 0 {
 			msg.Content = strings.Join(lines, "\n")
@@ -243,6 +423,24 @@ func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Mes
 // buildEnvForExecution builds environment variables for any runtime.
 // This is the unified method used by the runtime interface.
 func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, req *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo) (map[string]string, error) {
+	if req.EnvironmentFinalized {
+		env := cloneStringMap(req.Env)
+		if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
+			return nil, err
+		}
+		return env, nil
+	}
+	if req.EnvironmentResolutionRequired {
+		env, err := m.resolveStrictEnvironment(ctx, executionID, req, agentConfig, profileInfo)
+		if err != nil {
+			return nil, err
+		}
+		if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
+			return nil, err
+		}
+		return env, nil
+	}
+
 	env := make(map[string]string)
 
 	// Copy request environment
@@ -250,10 +448,18 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 		env[k] = v
 	}
 
+	// partial=true: a broken secret reference on one profile env var drops that
+	// var (with a warn log) rather than blanking the agent's whole environment
+	// at session launch (AC-004.1). Required keys (the OpenAI-compatible
+	// provider key) are checked fail-closed upstream in resolveProviderGatewayAuth.
 	if profileInfo != nil {
-		m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
+		if err := m.mergeAgentProfileEnvFromInfoWithPartial(ctx, profileInfo, env, true); err != nil {
+			return nil, fmt.Errorf("resolve agent profile environment: %w", err)
+		}
 	} else {
-		m.mergeAgentProfileEnv(ctx, executionProfileID(req), env)
+		if err := m.mergeAgentProfileEnvWithPartial(ctx, executionProfileID(req), env, true); err != nil {
+			return nil, fmt.Errorf("resolve agent profile environment: %w", err)
+		}
 	}
 
 	// Add standard variables for recovery after backend restart
@@ -338,11 +544,18 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	ctx, cancel := appctx.Detached(context.Background(), m.stopCh, 60*time.Second)
 	defer cancel()
 
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		m.updateExecutionError(execution.ID, "agentctl client is unavailable")
+		return
+	}
 	m.logger.Debug("waiting for agentctl to be ready",
 		zap.String("execution_id", execution.ID),
-		zap.String("url", execution.agentctl.BaseURL()))
+		zap.String("url", client.BaseURL()))
 
-	if err := execution.agentctl.WaitForReady(ctx, 60*time.Second); err != nil {
+	err := client.WaitForReady(ctx, 60*time.Second)
+	releaseClient()
+	if err != nil {
 		m.logger.Error("agentctl not ready",
 			zap.String("execution_id", execution.ID),
 			zap.Duration("duration", time.Since(opStart)),
@@ -369,6 +582,17 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	// default slow poll mode even though the frontend already sent focus,
 	// and git state updates take up to 30s to reach the UI.
 	m.flushCachedPollMode(execution.SessionID)
+	// Seed the workspace's per-repo base-branch map. LaunchRequest metadata
+	// only carries it on the full launch path, so workspaces created by an
+	// agent starting on an already-prepared workspace, or by lazy recovery
+	// after a restart, would otherwise have none — and their branch diff stat
+	// would silently fall back to an integration branch.
+	client, releaseClient = execution.AcquireAgentCtlClient()
+	if client != nil {
+		m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
+		m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
+		releaseClient()
+	}
 	// Use the timeout context for event publishing instead of a fresh Background context
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
 }

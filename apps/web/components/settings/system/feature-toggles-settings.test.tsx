@@ -92,6 +92,21 @@ describe("FeatureTogglesSettings", () => {
     expect(updateRuntimeFlagMock).toHaveBeenCalledWith(initial.key, true);
   });
 
+  it("offers the restart action when the supervisor supports restart", () => {
+    render(
+      <TooltipProvider>
+        <FeatureTogglesSettings
+          initialFlags={[flagState()]}
+          restartCapability={{ supported: true, mode: "supervisor", adapter: "supervisor" }}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByText("Restart required")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Restart" })).not.toBeNull();
+    expect(screen.queryByText(/terminal or service manager/)).toBeNull();
+  });
+
   it("shows restart support details without offering restart when unsupported", () => {
     render(
       <TooltipProvider>

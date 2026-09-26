@@ -172,7 +172,7 @@ func TestListDirectory_ParentEmptyAtFilesystemRoot(t *testing.T) {
 
 func TestCreateDirectoryRejectsInvalidOrExistingChild(t *testing.T) {
 	svc := &Service{}
-	parent := t.TempDir()
+	parent := trustedTempDir(t)
 	existing := filepath.Join(parent, "existing")
 	if err := os.Mkdir(existing, 0o755); err != nil {
 		t.Fatalf("Mkdir existing: %v", err)

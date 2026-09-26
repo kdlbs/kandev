@@ -21,6 +21,10 @@ func (r fixedStartStepResolver) ResolveFirstStep(context.Context, string) (strin
 	return r.stepID, nil
 }
 
+func (r fixedStartStepResolver) ResolveAutoStartStep(context.Context, string) (string, error) {
+	return r.stepID, nil
+}
+
 func TestCreateTask_QueuesFullWIPStepWithoutFeeder(t *testing.T) {
 	svc, events, repo := createTestService(t)
 	ctx := context.Background()
@@ -35,10 +39,11 @@ func TestCreateTask_QueuesFullWIPStepWithoutFeeder(t *testing.T) {
 		t.Fatalf("seed occupant: %v", err)
 	}
 
-	queued, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	queuedResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow", WorkflowStepID: "review-step",
 		Title: "Rejected", Description: "must not persist",
 	})
+	queued := queuedResult.Task
 	if err != nil {
 		t.Fatalf("error=%v, want queued success", err)
 	}
@@ -75,10 +80,11 @@ func TestCreateTask_ResolvedStartStepUsesWIPAdmission(t *testing.T) {
 		t.Fatalf("seed occupant: %v", err)
 	}
 
-	queued, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	queuedResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
 		Title: "Rejected resolved start", Description: "must not persist",
 	})
+	queued := queuedResult.Task
 	if err != nil {
 		t.Fatalf("error=%v, want queued success", err)
 	}
@@ -121,10 +127,11 @@ func TestCreateTask_PullsUnstartedFeederTaskIntoAvailableWIPStep(t *testing.T) {
 		"review-step":  {ID: "review-step", WorkflowID: "wip-workflow", Name: "Review", WIPLimit: 2, PullFromStepID: "waiting-step"},
 	}})
 
-	created, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	createdResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow", WorkflowStepID: "waiting-step",
 		Title: "Unstarted review task",
 	})
+	created := createdResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -156,10 +163,11 @@ func TestCreateTask_FeederTaskStaysWhenWIPStepFull(t *testing.T) {
 		t.Fatalf("seed occupant: %v", err)
 	}
 
-	created, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	createdResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow", WorkflowStepID: "waiting-step",
 		Title: "Should stay in feeder",
 	})
+	created := createdResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}

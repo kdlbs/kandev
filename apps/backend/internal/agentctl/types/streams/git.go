@@ -16,6 +16,12 @@ type GitStatusUpdate struct {
 	// state on this name.
 	RepositoryName string `json:"repository_name,omitempty"`
 
+	// IsSubmodule identifies initialized Git submodule repositories. The
+	// frontend uses this explicit boundary metadata when rendering review
+	// scope headers; repository names alone cannot distinguish submodules
+	// from sibling repositories.
+	IsSubmodule bool `json:"is_submodule,omitempty"`
+
 	// Modified contains paths of modified files.
 	Modified []string `json:"modified"`
 
@@ -59,11 +65,25 @@ type GitStatusUpdate struct {
 	// empty.
 	RemoteBehind int `json:"remote_behind"`
 
+	// RemoteHeadCommit is the locally observed tip of RemoteBranch. It is
+	// captured with RemoteAhead and RemoteBehind so consumers can compare the
+	// checkout with an upstream snapshot without confusing it with the base.
+	RemoteHeadCommit string `json:"remote_head_commit,omitempty"`
+
 	// HeadCommit is the current HEAD commit SHA.
 	HeadCommit string `json:"head_commit,omitempty"`
 
 	// BaseCommit is the base branch HEAD commit SHA (for comparison/diff).
 	BaseCommit string `json:"base_commit,omitempty"`
+
+	// ComparisonTarget is the credential-free provider target display identity
+	// used when an explicit cross-repository comparison is active.
+	ComparisonTarget string `json:"comparison_target,omitempty"`
+	// ComparisonStatus is "ready" or "unavailable" for an explicit target.
+	ComparisonStatus string `json:"comparison_status,omitempty"`
+	// ComparisonErrorCode is a bounded machine-readable failure code. Raw Git
+	// and provider errors never enter the workspace stream.
+	ComparisonErrorCode string `json:"comparison_error_code,omitempty"`
 
 	// Files contains detailed information about each changed file.
 	Files map[string]FileInfo `json:"files,omitempty"`
@@ -77,8 +97,37 @@ type GitStatusUpdate struct {
 	BranchDeletions int `json:"branch_deletions,omitempty"`
 }
 
+// FileChangeFacet is one layer of a mixed file change. A mixed path can have
+// one change between HEAD and the index plus another between the index and the
+// working tree.
+type FileChangeFacet struct {
+	// IsSymlink describes the destination entry, or the source for a deletion.
+	IsSymlink *bool `json:"is_symlink,omitempty"`
+
+	// Status indicates the layer status: "modified", "added", "deleted", or "renamed".
+	Status string `json:"status"`
+
+	// Additions is the number of added lines in this layer.
+	Additions int `json:"additions,omitempty"`
+
+	// Deletions is the number of deleted lines in this layer.
+	Deletions int `json:"deletions,omitempty"`
+
+	// OldPath is the original path for a rename in this layer.
+	OldPath string `json:"old_path,omitempty"`
+
+	// Diff contains the unified diff content for this layer.
+	Diff string `json:"diff,omitempty"`
+
+	// DiffSkipReason explains why this layer's diff was omitted or truncated.
+	DiffSkipReason string `json:"diff_skip_reason,omitempty"`
+}
+
 // FileInfo represents detailed information about a file's git status.
 type FileInfo struct {
+	// IsSymlink describes the destination entry, or the source for a deletion.
+	IsSymlink *bool `json:"is_symlink,omitempty"`
+
 	// Path is the file path relative to workspace root.
 	Path string `json:"path"`
 
@@ -104,6 +153,12 @@ type FileInfo struct {
 	// DiffSkipReason explains why diff content was omitted or truncated.
 	// Values: "too_large", "binary", "truncated", "budget_exceeded".
 	DiffSkipReason string `json:"diff_skip_reason,omitempty"`
+
+	// StagedChange and UnstagedChange preserve the two layers when the same
+	// path has both index and working-tree changes. Single-layer paths keep the
+	// compact legacy fields above and omit both facets.
+	StagedChange   *FileChangeFacet `json:"staged_change,omitempty"`
+	UnstagedChange *FileChangeFacet `json:"unstaged_change,omitempty"`
 }
 
 // GitCommitNotification is sent when a new commit is detected in the workspace.

@@ -14,6 +14,12 @@ import {
 import { Input } from "@kandev/ui/input";
 import { Trans, useTranslation } from "react-i18next";
 import type { StorageQuarantineEntry, StorageQuarantinePurgeScope } from "@/lib/types/system";
+import {
+  settingsActionClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
+
+const storageActionClassName = settingsActionClassName("cursor-pointer");
 
 /**
  * `phrase` is a sentinel, never copy: the user must type it verbatim and the
@@ -57,19 +63,19 @@ function ConfirmationDialog(props: ConfirmationDialogProps) {
         <Input
           value={confirmation}
           onChange={(event) => setConfirmation(event.target.value)}
-          className="h-11"
+          className={settingsControlClassName()}
           aria-label={t("system:storageTypeToConfirmAria", { phrase: props.phrase })}
           data-testid={`${props.actionTestId}-confirmation`}
         />
         <AlertDialogFooter>
-          <AlertDialogCancel className="min-h-11 cursor-pointer">
+          <AlertDialogCancel className={storageActionClassName}>
             {t("common:cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             variant={props.destructive ? "destructive" : "default"}
             disabled={confirmation !== props.phrase}
             onClick={props.onConfirm}
-            className="min-h-11 cursor-pointer"
+            className={storageActionClassName}
             data-testid={props.actionTestId}
           >
             {props.actionLabel}
@@ -113,6 +119,38 @@ export function ExternalGoCacheDialog({
       actionLabel={t("system:storageAdoptCache")}
       actionTestId="storage-go-cache-adopt-confirm"
     />
+  );
+}
+
+export function TemporaryArtifactsDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+}: Pick<ConfirmationDialogProps, "open" | "onOpenChange" | "onConfirm">) {
+  const { t } = useTranslation();
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("system:storageTemporaryArtifactsDialogTitle")}</AlertDialogTitle>
+          <AlertDialogDescription className="text-left">
+            {t("system:storageTemporaryArtifactsDialogDescription")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className={storageActionClassName}>
+            {t("common:cancel")}
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={onConfirm}
+            className={storageActionClassName}
+            data-testid="storage-temporary-artifacts-confirm"
+          >
+            {t("system:storageTemporaryArtifactsDialogAction")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

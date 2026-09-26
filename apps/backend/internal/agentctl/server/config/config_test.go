@@ -1,26 +1,249 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/pkg/agent"
 )
+
+func TestLoadWithStartupUsesExplicitManagedValues(t *testing.T) {
+	t.Setenv("KANDEV_ACP_IDLE_TIMEOUT", "bad")
+	t.Setenv("KANDEV_ACP_IDLE_REAPER_INTERVAL", "bad")
+	t.Setenv("KANDEV_ACP_NOTIF_QUEUE", "1024")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://inherited:4318")
+
+	startup := commonconfig.AgentctlStartupConfig{
+		Configured:                true,
+		IdleTimeout:               2 * time.Hour,
+		IdleReaperInterval:        3 * time.Minute,
+		NotificationQueueCapacity: 4096,
+		OTLPEndpoint:              "http://configured:4318",
+		PromptCancelJoinTimeout:   12 * time.Second,
+	}
+	cfg, err := LoadWithStartup(startup)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if cfg.IdleTimeout != startup.IdleTimeout || cfg.IdleReaperInterval != startup.IdleReaperInterval {
+		t.Fatalf("managed durations = %s/%s, want %s/%s", cfg.IdleTimeout, cfg.IdleReaperInterval, startup.IdleTimeout, startup.IdleReaperInterval)
+	}
+	if cfg.NotificationQueueCapacity != startup.NotificationQueueCapacity {
+		t.Fatalf("managed queue capacity = %d, want %d", cfg.NotificationQueueCapacity, startup.NotificationQueueCapacity)
+	}
+	if cfg.OTLPEndpoint != startup.OTLPEndpoint {
+		t.Fatalf("managed OTLP endpoint = %q, want %q", cfg.OTLPEndpoint, startup.OTLPEndpoint)
+	}
+	if cfg.PromptCancelJoinTimeout != startup.PromptCancelJoinTimeout {
+		t.Fatalf("managed prompt cancel join timeout = %s, want %s", cfg.PromptCancelJoinTimeout, startup.PromptCancelJoinTimeout)
+	}
+}
+
+// TestLoadWithStartupPropagatesAgentSurvivalEnabled pins that
+// Config.AgentSurvivalEnabled is copied directly from the managed contract in
+// both directions -- unlike UnownedPeriod/DetachedEventLimit, false is not
+// "unresolved" here (a managed launch always sets Configured=true), so it
+// must not be treated as "keep agentctl's own default".
+func TestLoadWithStartupPropagatesAgentSurvivalEnabled(t *testing.T) {
+	base := commonconfig.AgentctlStartupConfig{
+		Configured:                true,
+		IdleReaperInterval:        time.Minute,
+		NotificationQueueCapacity: 4096,
+	}
+
+	enabled := base
+	enabled.AgentSurvivalEnabled = true
+	cfg, err := LoadWithStartup(enabled)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if !cfg.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = false, want true when the startup contract enables it")
+	}
+
+	disabled := base
+	disabled.AgentSurvivalEnabled = false
+	cfg, err = LoadWithStartup(disabled)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if cfg.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = true, want false when the startup contract disables it")
+	}
+}
+
+// TestLoadWithoutStartupLeavesAgentSurvivalDisabled pins that a legacy/direct
+// (unmanaged) launch -- Load(), no startup contract -- never engages the
+// capability, matching AC-EXECUTORS-SURVIVAL-005.2's "defaults disabled".
+func TestLoadWithoutStartupAcceptsTruthyE2ESelector(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "1")
+	t.Setenv("KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT", "12s")
+	if got := Load().PromptCancelJoinTimeout; got != 12*time.Second {
+		t.Fatalf("prompt cancel join timeout = %s, want 12s", got)
+	}
+}
+
+func TestLoadWithoutStartupLeavesAgentSurvivalDisabled(t *testing.T) {
+	cfg := Load()
+	if cfg.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = true from Load() with no startup contract, want false")
+	}
+}
+
+func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
+	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
+		McpProviders: []string{" GITLAB ", "unsupported", "github", "github"},
+	})
+
+	want := []string{"github", "gitlab"}
+	if !reflect.DeepEqual(cfg.McpProviders, want) {
+		t.Fatalf("McpProviders = %v, want %v", cfg.McpProviders, want)
+	}
+}
+
+// TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability covers
+// AC-TASKS-MCP-TOOL-NAMES-001.5 at the agentctl instance boundary.
+func TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability(t *testing.T) {
+	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
+		NamespacesMCPToolsByServer: true,
+	})
+	if !cfg.NamespacesMCPToolsByServer {
+		t.Fatal("InstanceConfig did not retain NamespacesMCPToolsByServer")
+	}
+}
+
+func TestInjectedKandevMCPProvenance(t *testing.T) {
+	workDir := t.TempDir()
+	base := &Config{Defaults: InstanceDefaults{
+		Protocol:     agent.ProtocolACP,
+		AgentCommand: "agent --acp",
+		WorkDir:      workDir,
+	}}
+	input := []McpServerConfig{
+		{Name: "kandev", Type: "stdio", Command: "spoofed-kandev"},
+		{Name: "third-party", Type: "http", URL: "https://mcp.example.test/mcp"},
+	}
+
+	cfg := base.NewInstanceConfig(43210, &InstanceOverrides{
+		Env:        []string{},
+		McpServers: input,
+	})
+	if !cfg.InjectedKandevMCP {
+		t.Fatal("positive-port instance must retain injected Kandev provenance")
+	}
+	if len(cfg.McpServers) != 3 {
+		t.Fatalf("McpServers = %+v, want injected HTTP/SSE plus third-party", cfg.McpServers)
+	}
+	if cfg.McpServers[0].Name != "kandev" || cfg.McpServers[0].Type != "http" || cfg.McpServers[0].URL != "http://localhost:43210/mcp" {
+		t.Fatalf("HTTP injection = %+v", cfg.McpServers[0])
+	}
+	if cfg.McpServers[1].Name != "kandev" || cfg.McpServers[1].Type != "sse" || cfg.McpServers[1].URL != "http://localhost:43210/sse" {
+		t.Fatalf("SSE injection = %+v", cfg.McpServers[1])
+	}
+	if cfg.McpServers[2].Name != "third-party" {
+		t.Fatalf("unrelated MCP server was not preserved: %+v", cfg.McpServers)
+	}
+
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal InstanceConfig: %v", err)
+	}
+	var serialized map[string]any
+	if err := json.Unmarshal(encoded, &serialized); err != nil {
+		t.Fatalf("unmarshal InstanceConfig: %v", err)
+	}
+	if _, present := serialized["InjectedKandevMCP"]; present {
+		t.Fatalf("provenance marker leaked into serialized config: %s", encoded)
+	}
+
+	withoutPort := base.NewInstanceConfig(0, &InstanceOverrides{
+		Env:        []string{},
+		McpServers: input,
+	})
+	if withoutPort.InjectedKandevMCP {
+		t.Fatal("zero-port instance must not claim injected Kandev provenance")
+	}
+}
 
 func TestCollectAgentEnvKeepsGitHubCLIShimAheadOfProfilePath(t *testing.T) {
 	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_URL", "https://kandev.example/api/github/credentials/resolve")
 	t.Setenv("KANDEV_GITHUB_CLI_SHIM_DIR", "/kandev/shims")
-	env := CollectAgentEnv(map[string]string{"PATH": "/profile/bin:/usr/bin"})
+	// The profile path is joined with the platform separator rather than a
+	// literal ":" so SplitList sees two entries on Windows too — hardcoding the
+	// Unix separator made this fail there with the shim ahead of one unsplit entry.
+	profilePath := strings.Join([]string{"/profile/bin", "/usr/bin"}, string(os.PathListSeparator))
+	env := CollectAgentEnv(map[string]string{pathEnvKey: profilePath})
 	want := strings.Join([]string{"/kandev/shims", "/profile/bin", "/usr/bin"}, string(os.PathListSeparator))
-	if got := envSliceValue(env, "PATH"); got != want {
+	if got := envSliceValue(env, pathEnvKey); got != want {
 		t.Fatalf("PATH = %q, want %q", got, want)
 	}
 }
 
+// Windows hands the search path down as "Path". Writing "PATH" used to leave
+// that untouched and add a second variable holding only the shim directory, so
+// `cmd /c npx …` resolved against the shim dir alone and the agent died with
+// "'npx' is not recognized". Both branches are exercised through the parameter
+// rather than runtime.GOOS so the regression is caught on every runner.
+func TestSearchPathKey(t *testing.T) {
+	inherited := map[string]string{"Path": "/node/bin"}
+	if got := searchPathKey(inherited, true); got != "Path" {
+		t.Fatalf("searchPathKey(case-insensitive) = %q, want the inherited %q", got, "Path")
+	}
+	if got := searchPathKey(inherited, false); got != pathEnvKey {
+		t.Fatalf("searchPathKey(case-sensitive) = %q, want %q — a Unix \"Path\" is a different variable", got, pathEnvKey)
+	}
+
+	both := map[string]string{pathEnvKey: "/exact", "Path": "/variant"}
+	if got := searchPathKey(both, true); got != pathEnvKey {
+		t.Fatalf("searchPathKey with both keys = %q, want the exact match to win", got)
+	}
+}
+
+func TestPrependPathEntryExtendsTheKeyItFound(t *testing.T) {
+	env := map[string]string{
+		pathEnvKey: strings.Join([]string{"/node/bin", "/usr/bin"}, string(os.PathListSeparator)),
+	}
+
+	prependPathEntry(env, "/kandev/shims", false)
+
+	want := strings.Join([]string{"/kandev/shims", "/node/bin", "/usr/bin"}, string(os.PathListSeparator))
+	if env[pathEnvKey] != want {
+		t.Fatalf("PATH = %q, want %q", env[pathEnvKey], want)
+	}
+	if len(env) != 1 {
+		t.Fatalf("prependPathEntry left %d variables, want the one it extended: %v", len(env), env)
+	}
+}
+
+// The regression itself: an environment carrying only the Windows-style "Path"
+// must have that entry extended, not shadowed by a freshly created "PATH"
+// holding the shim directory alone.
+func TestPrependPathEntryExtendsInheritedWindowsPathKey(t *testing.T) {
+	env := map[string]string{
+		"Path": strings.Join([]string{"/node/bin", "/usr/bin"}, string(os.PathListSeparator)),
+	}
+
+	prependPathEntry(env, "/kandev/shims", true)
+
+	if _, duplicated := env[pathEnvKey]; duplicated {
+		t.Fatalf("prependPathEntry added a second search-path variable: %v", env)
+	}
+	want := strings.Join([]string{"/kandev/shims", "/node/bin", "/usr/bin"}, string(os.PathListSeparator))
+	if env["Path"] != want {
+		t.Fatalf("Path = %q, want %q", env["Path"], want)
+	}
+}
+
 func TestCollectAgentEnvGitHubCLIShimSurvivesLoginShell(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		t.Skip("Bash login-shell behavior is Unix-specific")
 	}
 	shimDir := filepath.Join(t.TempDir(), "managed github shim")
@@ -52,7 +275,8 @@ func TestCollectAgentEnvGitHubCLIShimSurvivesLoginShell(t *testing.T) {
 		"KANDEV_GITHUB_CLI_BASH_ENV":          bashEnv,
 		"BASH_ENV":                            parentBashEnv,
 		"KANDEV_BASH_HOOK_MARKER":             marker,
-		"PATH":                                "/usr/bin:/bin",
+		"HOME":                                t.TempDir(),
+		pathEnvKey:                            "/usr/bin:/bin",
 	})
 	if err != nil {
 		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
@@ -80,7 +304,7 @@ func TestCollectAgentEnvGitHubCLIShimSurvivesLoginShell(t *testing.T) {
 }
 
 func TestCollectAgentEnvResolvesParameterizedBashEnv(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		t.Skip("Bash startup behavior is Unix-specific")
 	}
 	shimDir := t.TempDir()
@@ -120,7 +344,7 @@ func TestCollectAgentEnvResolvesParameterizedBashEnv(t *testing.T) {
 }
 
 func TestCollectAgentEnvAvoidsManagedBashEnvSelfSourcing(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		t.Skip("Bash startup behavior is Unix-specific")
 	}
 	startupEnv := filepath.Join(t.TempDir(), "managed-bash-env.sh")
@@ -168,7 +392,7 @@ func TestCollectAgentEnvLeavesGitHubStartupHookUntouchedWithoutBroker(t *testing
 		"KANDEV_GITHUB_CLI_SHIM_DIR": " /managed/shims ",
 		"KANDEV_GITHUB_CLI_BASH_ENV": startupEnv,
 		"BASH_ENV":                   parentBashEnv,
-		"PATH":                       "/usr/bin:/bin",
+		pathEnvKey:                   "/usr/bin:/bin",
 	})
 	if err != nil {
 		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
@@ -179,7 +403,7 @@ func TestCollectAgentEnvLeavesGitHubStartupHookUntouchedWithoutBroker(t *testing
 	if got := envSliceValue(env, "KANDEV_GITHUB_PARENT_BASH_ENV"); got != "" {
 		t.Fatalf("parent Bash environment = %q, want unset without broker", got)
 	}
-	if got := envSliceValue(env, "PATH"); got != "/usr/bin:/bin" {
+	if got := envSliceValue(env, pathEnvKey); got != "/usr/bin:/bin" {
 		t.Fatalf("PATH = %q, want unchanged without broker", got)
 	}
 }
@@ -208,6 +432,97 @@ func TestCollectAgentEnvPreservesParentIndexedGitConfig(t *testing.T) {
 	}
 	if got := envSliceValue(env, "GIT_CONFIG_KEY_2"); got != "credential.https://github.com.helper" {
 		t.Fatalf("GIT_CONFIG_KEY_2 = %q, want managed helper", got)
+	}
+}
+
+func TestCollectAgentEnvHostGHBridge(t *testing.T) {
+	clearParentIndexedGitConfig(t)
+	ghPath := filepath.Join(t.TempDir(), "host tools", "gh")
+	if err := os.MkdirAll(filepath.Dir(ghPath), 0o700); err != nil {
+		t.Fatalf("create fake gh directory: %v", err)
+	}
+	const ghScript = `#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "git-credential" ]; then
+  cat >/dev/null
+  printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"
+  exit 0
+fi
+exit 2
+`
+	if err := os.WriteFile(ghPath, []byte(ghScript), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "notes.augment.mergeStrategy")
+	t.Setenv("GIT_CONFIG_VALUE_0", "union")
+	t.Setenv("GIT_CONFIG_KEY_1", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_1", "/Users/cfl12/.locstat/git/hooks")
+
+	env, err := CollectAgentEnvWithError(map[string]string{
+		"GH_TOKEN":            "late-profile-token",
+		"HOME":                filepath.Join(t.TempDir(), "home"),
+		"PATH":                "/usr/bin:/bin",
+		"GIT_CONFIG_COUNT":    "1",
+		"GIT_CONFIG_KEY_0":    "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0":  "!'" + ghPath + "' auth git-credential",
+		"GIT_CONFIG_NOSYSTEM": "1",
+	})
+	if err != nil {
+		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_COUNT"); got != "3" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 3", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_0"); got != "notes.augment.mergeStrategy" || envSliceValue(env, "GIT_CONFIG_VALUE_0") != "union" {
+		t.Fatalf("inherited Git config entry 0 = (%q, %q)", got, envSliceValue(env, "GIT_CONFIG_VALUE_0"))
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_1"); got != "core.hooksPath" || envSliceValue(env, "GIT_CONFIG_VALUE_1") != "/Users/cfl12/.locstat/git/hooks" {
+		t.Fatalf("inherited Git config entry 1 = (%q, %q)", got, envSliceValue(env, "GIT_CONFIG_VALUE_1"))
+	}
+
+	command := exec.Command("git", "credential", "fill")
+	command.Env = env
+	command.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=acme/widgets\n\n")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git credential fill failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "password=late-profile-token") {
+		t.Fatalf("credential output = %q, want late profile token", output)
+	}
+}
+
+func TestCollectAgentEnvIgnoresParentIndexedGitConfigBeyondCount(t *testing.T) {
+	// Hosts inherit indexed entries from a parent that later lowered
+	// GIT_CONFIG_COUNT. Git ignores the leftovers, so instance creation must
+	// too instead of failing every task start.
+	clearParentIndexedGitConfig(t)
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_0", "/opt/locstat/hooks")
+	t.Setenv("GIT_CONFIG_KEY_1", "notes.augment.mergeStrategy")
+	t.Setenv("GIT_CONFIG_VALUE_1", "cat_sort_uniq")
+
+	env, err := CollectAgentEnvWithError(map[string]string{
+		"GIT_CONFIG_COUNT":   "1",
+		"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0": "!agentctl git-credential",
+	})
+	if err != nil {
+		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
+	}
+
+	if got := envSliceValue(env, "GIT_CONFIG_COUNT"); got != "2" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 2", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_0"); got != "core.hooksPath" {
+		t.Fatalf("GIT_CONFIG_KEY_0 = %q, want core.hooksPath", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_1"); got != "credential.https://github.com.helper" {
+		t.Fatalf("GIT_CONFIG_KEY_1 = %q, want managed helper", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_2"); got != "" {
+		t.Fatalf("GIT_CONFIG_KEY_2 = %q, want stray parent entry dropped", got)
 	}
 }
 
@@ -368,6 +683,62 @@ func TestConsumeNonce(t *testing.T) {
 			t.Fatalf("expected empty when no nonce configured, got %q", token)
 		}
 	})
+}
+
+func TestBootstrapNonceDiagnosticsSurviveNonceBurn(t *testing.T) {
+	t.Setenv("AGENTCTL_BOOTSTRAP_NONCE", "nonce-abc123")
+
+	cfg, err := LoadWithStartup(commonconfig.AgentctlStartupConfig{
+		Configured:                true,
+		IdleTimeout:               time.Hour,
+		IdleReaperInterval:        time.Minute,
+		NotificationQueueCapacity: 4096,
+	})
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+
+	if !cfg.BootstrapNonceConfigured() {
+		t.Fatal("BootstrapNonceConfigured() = false, want true when AGENTCTL_BOOTSTRAP_NONCE is set")
+	}
+	wantFingerprint := commonconfig.NonceFingerprint("nonce-abc123")
+	if got := cfg.BootstrapNonceFingerprint(); got != wantFingerprint {
+		t.Fatalf("BootstrapNonceFingerprint() = %q, want %q", got, wantFingerprint)
+	}
+
+	if token := cfg.ConsumeNonce("nonce-abc123"); token == "" {
+		t.Fatal("ConsumeNonce() with the correct nonce returned empty")
+	}
+
+	// The whole point of tracking these separately from BootstrapNonce: a
+	// rejected handshake after the nonce was burned must still be able to
+	// report that bootstrap mode was configured, and with which fingerprint.
+	if !cfg.BootstrapNonceConfigured() {
+		t.Fatal("BootstrapNonceConfigured() = false after nonce burn, want true (must survive burning)")
+	}
+	if got := cfg.BootstrapNonceFingerprint(); got != wantFingerprint {
+		t.Fatalf("BootstrapNonceFingerprint() after nonce burn = %q, want %q (must survive burning)", got, wantFingerprint)
+	}
+}
+
+func TestBootstrapNonceDiagnosticsUnconfigured(t *testing.T) {
+	t.Setenv("AGENTCTL_BOOTSTRAP_NONCE", "")
+	cfg, err := LoadWithStartup(commonconfig.AgentctlStartupConfig{
+		Configured:                true,
+		IdleTimeout:               time.Hour,
+		IdleReaperInterval:        time.Minute,
+		NotificationQueueCapacity: 4096,
+	})
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+
+	if cfg.BootstrapNonceConfigured() {
+		t.Fatal("BootstrapNonceConfigured() = true, want false when AGENTCTL_BOOTSTRAP_NONCE is unset")
+	}
+	if got := cfg.BootstrapNonceFingerprint(); got != "" {
+		t.Fatalf("BootstrapNonceFingerprint() = %q, want empty when bootstrap nonce mode was never configured", got)
+	}
 }
 
 func TestGenerateSelfToken(t *testing.T) {

@@ -1,5 +1,7 @@
 import type { StateCreator } from "zustand";
 import type { OfficeSlice, OfficeSliceState } from "./types";
+import type { WorkspacePauseOutcome } from "./pause-types";
+import { normalizeOfficeTask, normalizeTaskStatus } from "@/lib/api/domains/office-task-normalize";
 
 export const defaultTaskFilters = {
   statuses: [] as string[],
@@ -11,18 +13,18 @@ export const defaultTaskFilters = {
 
 export const defaultOfficeState: OfficeSliceState = {
   office: {
-    agentProfiles: [],
+    agentProfilesByWorkspaceId: {},
     skills: [],
-    projects: [],
+    projectsByWorkspaceId: {},
     approvals: [],
     activity: [],
     costSummary: null,
     budgetPolicies: [],
     routines: [],
-    inboxItems: [],
-    inboxCount: 0,
+    inboxItemsByWorkspaceId: {},
+    inboxCountByWorkspaceId: {},
     runs: [],
-    dashboard: null,
+    dashboardByWorkspaceId: {},
     tasks: {
       items: [],
       filters: {
@@ -50,33 +52,44 @@ export const defaultOfficeState: OfficeSliceState = {
     providerHealth: { byWorkspace: {} },
     runAttempts: { byRunId: {} },
     agentRouting: { byAgentId: {} },
+    taskQuorum: { byTaskId: {} },
+    pause: { record: null, status: "unknown", requestSeq: 0, appliedSeq: 0 },
   },
 };
 
 type ImmerSet = StateCreator<OfficeSlice, [["zustand/immer", never]], [], OfficeSlice>;
 type SetFn = Parameters<ImmerSet>[0];
 
+type AgentProfiles = OfficeSlice["office"]["agentProfilesByWorkspaceId"][string];
+
 function createAgentActions(set: SetFn) {
   return {
-    setOfficeAgentProfiles: (agents: OfficeSlice["office"]["agentProfiles"]) =>
+    setOfficeAgentProfiles: (workspaceId: string, agents: AgentProfiles) =>
       set((draft) => {
-        draft.office.agentProfiles = agents;
+        draft.office.agentProfilesByWorkspaceId[workspaceId] = agents;
       }),
-    addOfficeAgentProfile: (agent: OfficeSlice["office"]["agentProfiles"][number]) =>
+    addOfficeAgentProfile: (workspaceId: string, agent: AgentProfiles[number]) =>
       set((draft) => {
-        draft.office.agentProfiles.push(agent);
+        const list = draft.office.agentProfilesByWorkspaceId[workspaceId] ?? [];
+        list.push(agent);
+        draft.office.agentProfilesByWorkspaceId[workspaceId] = list;
       }),
     updateOfficeAgentProfile: (
+      workspaceId: string,
       id: string,
-      patch: Partial<OfficeSlice["office"]["agentProfiles"][number]>,
+      patch: Partial<AgentProfiles[number]>,
     ) =>
       set((draft) => {
-        const idx = draft.office.agentProfiles.findIndex((a) => a.id === id);
-        if (idx >= 0) Object.assign(draft.office.agentProfiles[idx], patch);
+        const list = draft.office.agentProfilesByWorkspaceId[workspaceId];
+        if (!list) return;
+        const idx = list.findIndex((a) => a.id === id);
+        if (idx >= 0) Object.assign(list[idx], patch);
       }),
-    removeOfficeAgentProfile: (id: string) =>
+    removeOfficeAgentProfile: (workspaceId: string, id: string) =>
       set((draft) => {
-        draft.office.agentProfiles = draft.office.agentProfiles.filter((a) => a.id !== id);
+        const list = draft.office.agentProfilesByWorkspaceId[workspaceId];
+        if (!list) return;
+        draft.office.agentProfilesByWorkspaceId[workspaceId] = list.filter((a) => a.id !== id);
       }),
   };
 }
@@ -103,33 +116,50 @@ function createSkillActions(set: SetFn) {
   };
 }
 
+type Projects = OfficeSlice["office"]["projectsByWorkspaceId"][string];
+
 function createProjectActions(set: SetFn) {
   return {
-    setProjects: (projects: OfficeSlice["office"]["projects"]) =>
+    setProjects: (workspaceId: string, projects: Projects) =>
       set((draft) => {
-        draft.office.projects = projects;
+        draft.office.projectsByWorkspaceId[workspaceId] = projects;
       }),
-    addProject: (project: OfficeSlice["office"]["projects"][number]) =>
+    addProject: (workspaceId: string, project: Projects[number]) =>
       set((draft) => {
-        draft.office.projects.push(project);
+        const list = draft.office.projectsByWorkspaceId[workspaceId] ?? [];
+        list.push(project);
+        draft.office.projectsByWorkspaceId[workspaceId] = list;
       }),
-    updateProject: (id: string, patch: Partial<OfficeSlice["office"]["projects"][number]>) =>
+    updateProject: (workspaceId: string, id: string, patch: Partial<Projects[number]>) =>
       set((draft) => {
-        const idx = draft.office.projects.findIndex((p) => p.id === id);
-        if (idx >= 0) Object.assign(draft.office.projects[idx], patch);
+        const list = draft.office.projectsByWorkspaceId[workspaceId];
+        if (!list) return;
+        const idx = list.findIndex((p) => p.id === id);
+        if (idx >= 0) Object.assign(list[idx], patch);
       }),
-    removeProject: (id: string) =>
+    removeProject: (workspaceId: string, id: string) =>
       set((draft) => {
-        draft.office.projects = draft.office.projects.filter((p) => p.id !== id);
+        const list = draft.office.projectsByWorkspaceId[workspaceId];
+        if (!list) return;
+        draft.office.projectsByWorkspaceId[workspaceId] = list.filter((p) => p.id !== id);
       }),
   };
+}
+
+type StoredTask = OfficeSlice["office"]["tasks"]["items"][number];
+
+// Normalizes a freshly-ingested task's status, keeping the raw pre-
+// normalization value on `rawStatus` for the few consumers that need a
+// sub-state the canonical union collapses (see OfficeTask.rawStatus).
+function normalizeIngestedTask(task: StoredTask): StoredTask {
+  return normalizeOfficeTask(task);
 }
 
 function createTaskActions(set: SetFn) {
   return {
     setTasks: (tasks: OfficeSlice["office"]["tasks"]["items"]) =>
       set((draft) => {
-        draft.office.tasks.items = tasks;
+        draft.office.tasks.items = tasks.map(normalizeIngestedTask);
       }),
     appendTasks: (tasks: OfficeSlice["office"]["tasks"]["items"]) =>
       set((draft) => {
@@ -137,18 +167,28 @@ function createTaskActions(set: SetFn) {
         const existing = new Set(draft.office.tasks.items.map((t) => t.id));
         for (const t of tasks) {
           if (!existing.has(t.id)) {
-            draft.office.tasks.items.push(t);
+            draft.office.tasks.items.push(normalizeIngestedTask(t));
             existing.add(t.id);
           }
         }
       }),
-    patchTaskInStore: (
-      taskId: string,
-      patch: Partial<OfficeSlice["office"]["tasks"]["items"][number]>,
-    ) =>
+    patchTaskInStore: (taskId: string, patch: Partial<StoredTask>) =>
       set((draft) => {
         const idx = draft.office.tasks.items.findIndex((t) => t.id === taskId);
-        if (idx >= 0) Object.assign(draft.office.tasks.items[idx], patch);
+        if (idx < 0) return;
+        if (patch.status === undefined) {
+          Object.assign(draft.office.tasks.items[idx], patch);
+          return;
+        }
+        // `patch.rawStatus` is only already set when the caller is restoring
+        // a full prior snapshot (see useOptimisticTaskMutation's rollback) —
+        // preserve it rather than re-deriving from the (already-canonical)
+        // snapshot status.
+        Object.assign(draft.office.tasks.items[idx], {
+          ...patch,
+          rawStatus: patch.rawStatus ?? patch.status,
+          status: normalizeTaskStatus(patch.status),
+        });
       }),
     setTaskFilters: (filters: Partial<OfficeSlice["office"]["tasks"]["filters"]>) =>
       set((draft) => {
@@ -182,6 +222,11 @@ function createTaskActions(set: SetFn) {
 }
 
 function createMiscActions(set: SetFn) {
+  // Per-store closure state for batching setOfficeRefetchTrigger calls; see
+  // that action below.
+  let pendingRefetchTypes: string[] = [];
+  let refetchFlushScheduled = false;
+
   return {
     setApprovals: (approvals: OfficeSlice["office"]["approvals"]) =>
       set((draft) => {
@@ -203,21 +248,27 @@ function createMiscActions(set: SetFn) {
       set((draft) => {
         draft.office.routines = routines;
       }),
-    setInboxItems: (items: OfficeSlice["office"]["inboxItems"]) =>
+    setInboxItems: (
+      workspaceId: string,
+      items: OfficeSlice["office"]["inboxItemsByWorkspaceId"][string],
+    ) =>
       set((draft) => {
-        draft.office.inboxItems = items;
+        draft.office.inboxItemsByWorkspaceId[workspaceId] = items;
       }),
-    setInboxCount: (count: number) =>
+    setInboxCount: (workspaceId: string, count: number) =>
       set((draft) => {
-        draft.office.inboxCount = count;
+        draft.office.inboxCountByWorkspaceId[workspaceId] = count;
       }),
     setRuns: (runs: OfficeSlice["office"]["runs"]) =>
       set((draft) => {
         draft.office.runs = runs;
       }),
-    setDashboard: (data: OfficeSlice["office"]["dashboard"]) =>
+    setDashboard: (
+      workspaceId: string,
+      data: OfficeSlice["office"]["dashboardByWorkspaceId"][string],
+    ) =>
       set((draft) => {
-        draft.office.dashboard = data;
+        draft.office.dashboardByWorkspaceId[workspaceId] = data;
       }),
     setMeta: (meta: OfficeSlice["office"]["meta"]) =>
       set((draft) => {
@@ -227,10 +278,28 @@ function createMiscActions(set: SetFn) {
       set((draft) => {
         draft.office.isLoading = loading;
       }),
-    setOfficeRefetchTrigger: (type: string) =>
-      set((draft) => {
-        draft.office.refetchTrigger = { type, timestamp: Date.now() };
-      }),
+    // Same-tick calls (e.g. `task:<id>` immediately followed by `dashboard`
+    // for one WS event) are buffered and flushed as a single trigger object
+    // in a microtask. Without this, React's automatic batching of the
+    // resulting store updates only ever lets a listener observe the *last*
+    // write in the tick — any earlier type in the same burst is silently
+    // dropped for a listener whose effect hasn't run in between the two
+    // `set()` calls.
+    setOfficeRefetchTrigger: (type: string) => {
+      if (!pendingRefetchTypes.includes(type)) {
+        pendingRefetchTypes.push(type);
+      }
+      if (refetchFlushScheduled) return;
+      refetchFlushScheduled = true;
+      queueMicrotask(() => {
+        const types = pendingRefetchTypes;
+        pendingRefetchTypes = [];
+        refetchFlushScheduled = false;
+        set((draft) => {
+          draft.office.refetchTrigger = { types, timestamp: Date.now() };
+        });
+      });
+    },
   };
 }
 
@@ -302,6 +371,71 @@ function createRoutingActions(set: SetFn) {
       set((draft) => {
         draft.office.agentRouting.byAgentId[agentId] = data;
       }),
+    setTaskQuorum: (
+      taskId: string,
+      quorum: OfficeSlice["office"]["taskQuorum"]["byTaskId"][string],
+    ) =>
+      set((draft) => {
+        draft.office.taskQuorum.byTaskId[taskId] = quorum;
+      }),
+  };
+}
+
+// Implements the workspace kill switch's "Frontend state" input table
+// (docs/specs/office/system-design/workspace-kill-switch-02.md). All four
+// GET/POST outcomes funnel through one guarded apply so the two
+// supersession guards — workspace_id match and tag freshness — cover every
+// outcome including the failure rows (F51), not only the success rows.
+function createPauseActions(set: SetFn) {
+  return {
+    // Every issued GET or POST bumps the one shared counter and takes the
+    // new value as its tag, so requests are ordered by when they were
+    // issued rather than by when their response lands.
+    beginPauseRequest: (): number => {
+      let tag = 0;
+      set((draft) => {
+        draft.office.pause.requestSeq += 1;
+        tag = draft.office.pause.requestSeq;
+      });
+      return tag;
+    },
+    // Mount, and every change of selected workspace: status `unknown`,
+    // clear the record. The caller issues the read separately.
+    resetPauseState: () =>
+      set((draft) => {
+        draft.office.pause.status = "unknown";
+        draft.office.pause.record = null;
+      }),
+    applyPauseResponse: (
+      tag: number,
+      responseWorkspaceId: string,
+      activeWorkspaceId: string | null,
+      outcome: WorkspacePauseOutcome,
+    ): boolean => {
+      let applied = false;
+      set((draft) => {
+        const pause = draft.office.pause;
+        if (responseWorkspaceId !== activeWorkspaceId || tag <= pause.appliedSeq) return;
+        applied = true;
+        pause.appliedSeq = tag;
+        switch (outcome.kind) {
+          case "read-success":
+          case "mutate-success":
+            pause.status = "known";
+            pause.record = outcome.paused ? outcome.record : null;
+            return;
+          case "read-failure":
+            // Status `unknown`; the record is not cleared, so a pause
+            // already read stays on screen (marked stale by the caller).
+            pause.status = "unknown";
+            return;
+          case "mutate-failure":
+            // Status and record unchanged; the caller surfaces the failure.
+            return;
+        }
+      });
+      return applied;
+    },
   };
 }
 
@@ -313,4 +447,5 @@ export const createOfficeSlice: ImmerSet = (set) => ({
   ...createTaskActions(set),
   ...createMiscActions(set),
   ...createRoutingActions(set),
+  ...createPauseActions(set),
 });

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getProviderHealth } from "@/lib/api/domains/office-extended-api";
 import type { ProviderHealth } from "@/lib/state/slices/office/types";
+import { t } from "@/lib/i18n";
 
 export type UseProviderHealthResult = {
   health: ProviderHealth[];
@@ -34,7 +35,7 @@ export function useProviderHealth(workspaceName: string | null): UseProviderHeal
       setProviderHealth(workspaceName, res.health ?? []);
       setFetched(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load provider health");
+      setError(e instanceof Error ? e.message : t("office:failedToLoadProviderHealth"));
     } finally {
       setIsLoading(false);
     }

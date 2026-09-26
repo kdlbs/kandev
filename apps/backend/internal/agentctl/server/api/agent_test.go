@@ -7,11 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -39,10 +41,43 @@ func newTestServer(t *testing.T) *Server {
 	log := newTestLogger()
 	cfg := &config.InstanceConfig{
 		Port:    0,
-		WorkDir: "/tmp/test",
+		WorkDir: t.TempDir(),
 	}
 	procMgr := process.NewManager(cfg, log)
 	return NewServer(cfg, procMgr, nil, nil, log)
+}
+
+func prepareVscodeTestServer(t *testing.T) *Server {
+	t.Helper()
+	t.Setenv(apiTestVscodeFixtureEnv, "1")
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: t.TempDir(), VscodeCommand: os.Args[0]}
+	procMgr := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := procMgr.StopVscode(ctx); err != nil {
+			t.Errorf("StopVscode() cleanup error = %v", err)
+		}
+	})
+	return NewServer(cfg, procMgr, nil, nil, log)
+}
+
+func waitForVscodeStatus(t *testing.T, server *Server, want process.VscodeStatus) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		info := server.procMgr.VscodeInfo()
+		if info.Status == want {
+			return
+		}
+		if info.Status == process.VscodeStatusError || info.Status == process.VscodeStatusStopped {
+			t.Fatalf("VS Code status = %q (%s), want %q", info.Status, info.Error, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	info := server.procMgr.VscodeInfo()
+	t.Fatalf("VS Code status = %q (%s), want %q", info.Status, info.Error, want)
 }
 
 func TestHandleAgentConfigure_PrefersPresentStructuredArgs(t *testing.T) {
@@ -179,6 +214,7 @@ func TestHandleAgentStreamRequest_DispatchesCorrectActions(t *testing.T) {
 		"agent.cancel",
 		"agent.permissions.respond",
 		"agent.stderr",
+		"agent.background.probe",
 	}
 
 	for _, action := range actions {
@@ -382,6 +418,62 @@ func TestHandleWSPrompt_NoAdapter(t *testing.T) {
 	}
 	if !strings.Contains(errPayload.Message, "agent not running") {
 		t.Errorf("expected 'agent not running', got %q", errPayload.Message)
+	}
+}
+
+// TestHandleWSPrompt_SanitizesACPActionURLError is a regression test for the
+// structured ACP service-failure path: RequestError.Error() serializes Data
+// (action_url and any other raw provider fields), so the sanitized provider
+// message must be the only text that reaches the error event and downstream
+// persisted/UI error surfaces.
+func TestHandleWSPrompt_SanitizesACPActionURLError(t *testing.T) {
+	s := newTestServer(t)
+	prompted := make(chan uint64, 1)
+	const wantURL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"
+	s.procMgr.SetAdapterForTest(&promptErrorAdapter{
+		sessionID: "session-123",
+		err: &acp.RequestError{
+			Code:    -32603,
+			Message: "AI_APICallError: 5-hour usage limit reached: " + wantURL,
+			Data: map[string]any{
+				"action_url": wantURL,
+				"raw_secret": "provider-internal-value",
+			},
+		},
+		prompted: prompted,
+	})
+
+	msg, _ := ws.NewRequest("req-1", "agent.prompt", PromptRequest{
+		Text:             "hello",
+		PromptGeneration: 42,
+	})
+	resp := s.handleWSPrompt(context.Background(), msg)
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("expected response type, got %q", resp.Type)
+	}
+
+	select {
+	case event := <-s.procMgr.GetUpdates():
+		if event.Type != adapter.EventTypeError {
+			t.Fatalf("event type = %q, want error", event.Type)
+		}
+		if strings.Contains(event.Error, "https://") ||
+			strings.Contains(event.Error, "wrk_") ||
+			strings.Contains(event.Error, "raw_secret") ||
+			strings.Contains(event.Error, "provider-internal-value") {
+			t.Fatalf("error message leaks raw ACP data: %q", event.Error)
+		}
+		if !strings.Contains(event.Error, "usage limit reached") {
+			t.Fatalf("error message lost the sanitized copy: %q", event.Error)
+		}
+		if event.ProviderError == nil {
+			t.Fatal("expected a provider error diagnostic")
+		}
+		if event.ProviderError.RemediationURL != wantURL {
+			t.Fatalf("remediation URL = %q, want %q", event.ProviderError.RemediationURL, wantURL)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected an error event")
 	}
 }
 
@@ -726,6 +818,45 @@ func TestHandleWSPermissionRespond_BadPayload(t *testing.T) {
 	}
 	if errPayload.Code != ws.ErrorCodeNotFound {
 		t.Errorf("expected NOT_FOUND code, got %q", errPayload.Code)
+	}
+}
+
+func TestHandleWSPermissionListReturnsTypedEmptyResult(t *testing.T) {
+	s := newTestServer(t)
+	msg, _ := ws.NewRequest("req-list", "agent.permissions.list", nil)
+
+	resp := s.handleAgentStreamRequest(context.Background(), msg)
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("expected response, got %+v", resp)
+	}
+	var result map[string]any
+	if err := resp.ParsePayload(&result); err != nil {
+		t.Fatal(err)
+	}
+	permissions, ok := result["permissions"].([]any)
+	if !ok || len(permissions) != 0 || result["total"] != float64(0) {
+		t.Fatalf("unexpected list result: %+v", result)
+	}
+}
+
+func TestHandleWSPermissionResolveReturnsStableNotFoundCode(t *testing.T) {
+	s := newTestServer(t)
+	msg, _ := ws.NewRequest("req-resolve", "agent.permissions.resolve", map[string]string{
+		"request_id": "missing-request",
+		"pending_id": "missing-pending",
+		"option_id":  "allow-once",
+	})
+
+	resp := s.handleAgentStreamRequest(context.Background(), msg)
+	if resp.Type != ws.MessageTypeError {
+		t.Fatalf("expected error, got %+v", resp)
+	}
+	var payload ws.ErrorPayload
+	if err := resp.ParsePayload(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Details["permission_code"] != streams.PermissionErrorNotFound {
+		t.Fatalf("permission_code = %v, want %q", payload.Details["permission_code"], streams.PermissionErrorNotFound)
 	}
 }
 

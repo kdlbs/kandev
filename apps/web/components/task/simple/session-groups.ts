@@ -12,6 +12,7 @@ export type SessionGroup = {
   id: string;
   representative: TaskSession;
   group: TaskSession[];
+  /** A catalog KEY (see `deriveRoleChip`), not resolved copy. */
   roleChip: string | null;
 };
 
@@ -32,8 +33,10 @@ function deriveRoleChip(
   approvers: string[],
 ): string | null {
   if (!agentProfileId) return null;
-  if (approvers.includes(agentProfileId)) return "Approver";
-  if (reviewers.includes(agentProfileId)) return "Reviewer";
+  // Catalog keys, not copy: this helper runs outside a hook scope and the
+  // chip has to re-resolve when the locale changes.
+  if (approvers.includes(agentProfileId)) return "task:roleApprover";
+  if (reviewers.includes(agentProfileId)) return "task:roleReviewer";
   return null;
 }
 

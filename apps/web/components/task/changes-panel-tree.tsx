@@ -26,6 +26,11 @@ type TreeNode = {
 function buildChangesTree(files: ChangedFile[]): TreeNode[] {
   const root: TreeNode = { name: "", path: "", isDir: true, children: [] };
   for (const file of files) {
+    // Defensive: a malformed entry (e.g. a legacy DB-snapshot replay without
+    // a path field) must not crash the whole route — skip it. Callers already
+    // backfill `path` from the map key, so this only fires on data that is
+    // broken at the source.
+    if (!file.path) continue;
     const parts = file.path.split("/");
     let current = root;
     for (let i = 0; i < parts.length; i++) {
@@ -81,7 +86,7 @@ type ChangesTreeProps = {
   onEditFile: (path: string, repo?: string) => void;
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
-  onDiscard: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   variant: "unstaged" | "staged";
   /** Shared with the parent FileListSection so the BulkActionBar reflects
    *  selections made in tree mode. */
@@ -176,11 +181,12 @@ type RepoTreeGroupProps = {
   onEditFile: (path: string, repo?: string) => void;
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
-  onDiscard: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   primaryLabel: string;
   secondaryLabel?: string;
   onRepoAction?: (repo: string) => void;
   onRepoSecondaryAction?: (repo: string) => void;
+  disabled?: boolean;
   multiSelect: ReturnType<typeof useMultiSelect>;
 };
 
@@ -197,6 +203,7 @@ export function RepoTreeGroup(props: RepoTreeGroupProps) {
     secondaryLabel,
     onRepoAction,
     onRepoSecondaryAction,
+    disabled = false,
   } = props;
   const label = displayName || repositoryName || "Repository";
   const stop = (e: React.MouseEvent) => e.stopPropagation();
@@ -232,6 +239,7 @@ export function RepoTreeGroup(props: RepoTreeGroupProps) {
                 variant="ghost"
                 className="h-5 text-[10px] px-1.5 cursor-pointer"
                 data-testid="repo-group-action"
+                disabled={disabled}
                 onClick={() => onRepoAction(repositoryName)}
               >
                 {primaryLabel}
@@ -243,6 +251,7 @@ export function RepoTreeGroup(props: RepoTreeGroupProps) {
                 variant="ghost"
                 className="h-5 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
                 data-testid="repo-group-secondary-action"
+                disabled={disabled}
                 onClick={() => onRepoSecondaryAction(repositoryName)}
               >
                 {secondaryLabel}

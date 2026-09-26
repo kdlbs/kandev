@@ -18,6 +18,7 @@ func TestRegisterRoutesRejectsMutationWithoutInterimSettingsInterlock(t *testing
 	}
 
 	router := gin.New()
+	useSyntheticSettingsIdentity(router)
 	NewHandlers(nil, nil, log, "test-interlock").registerHTTP(router)
 
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader("{"))
@@ -38,6 +39,7 @@ func TestRegisterRoutesProtectsEveryStateChangingAgentSettingsRoute(t *testing.T
 	}
 
 	router := gin.New()
+	useSyntheticSettingsIdentity(router)
 	NewHandlers(nil, nil, log, "test-interlock").registerHTTP(router)
 	requests := []struct {
 		method string
@@ -52,6 +54,7 @@ func TestRegisterRoutesProtectsEveryStateChangingAgentSettingsRoute(t *testing.T
 		{method: http.MethodPost, path: "/api/v1/agent-update/agent-1"},
 		{method: http.MethodPatch, path: "/api/v1/agent-profiles/profile-1"},
 		{method: http.MethodDelete, path: "/api/v1/agent-profiles/profile-1"},
+		{method: http.MethodPost, path: "/api/v1/agent-profiles/profile-1/duplicate"},
 		{method: http.MethodPost, path: "/api/v1/agent-profiles/profile-1/mcp-config"},
 	}
 

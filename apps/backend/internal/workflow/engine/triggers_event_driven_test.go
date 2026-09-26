@@ -42,6 +42,11 @@ func (s *triggerStore) LoadPreviousStep(_ context.Context, _ string, _ int) (Ste
 func (s *triggerStore) ApplyTransition(_ context.Context, _, _, _, _ string, _ Trigger) error {
 	return nil
 }
+func (s *triggerStore) ApplyTransitionIfAtStep(
+	_ context.Context, _, _, _, _ string, _ Trigger,
+) (bool, error) {
+	return true, nil
+}
 func (s *triggerStore) PersistData(_ context.Context, _ string, _ map[string]any) error { return nil }
 func (s *triggerStore) IsOperationApplied(_ context.Context, op string) (bool, error) {
 	return s.applied[op], nil

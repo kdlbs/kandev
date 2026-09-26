@@ -267,6 +267,42 @@ func TestCredentialResolverUsesLegacyOnlyForMigratedSource(t *testing.T) {
 	}
 }
 
+func TestLegacyResolverUsesServiceRateTracker(t *testing.T) {
+	store := newTestStore(t)
+	seedConnectionWorkspaces(t, store, "workspace-legacy-rate-limit")
+	connection := &WorkspaceConnection{
+		WorkspaceID:          "workspace-legacy-rate-limit",
+		Source:               ConnectionSourceLegacyShared,
+		GitHubHost:           defaultGitHubHost,
+		Status:               ConnectionStatusActive,
+		CredentialGeneration: 1,
+	}
+	if err := store.UpsertWorkspaceConnection(context.Background(), connection); err != nil {
+		t.Fatalf("seed workspace connection: %v", err)
+	}
+
+	service := NewService(nil, AuthMethodNone, nil, store, nil, testLogger(t))
+	legacy := NewPATClient("legacy-token")
+	legacy.username = "legacy-user"
+	service.resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+		return legacy, AuthMethodPAT, nil
+	})
+
+	resolved, err := service.resolver.Resolve(context.Background(), ResolveCredentialRequest{
+		WorkspaceID: connection.WorkspaceID,
+		Purpose:     CredentialPurposeAutomation,
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if resolved.RateTracker != service.rateTracker {
+		t.Fatalf("resolved tracker = %p, want service tracker %p", resolved.RateTracker, service.rateTracker)
+	}
+	if legacy.rateTracker != service.rateTracker {
+		t.Fatalf("legacy client tracker = %p, want service tracker %p", legacy.rateTracker, service.rateTracker)
+	}
+}
+
 func TestCredentialResolverNamedCLIUsesSelectedLogin(t *testing.T) {
 	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
 		"work": {WorkspaceID: "work", Source: ConnectionSourceGHCLI, GitHubHost: "github.com", Login: "work-user", Status: ConnectionStatusActive, CredentialGeneration: 2},

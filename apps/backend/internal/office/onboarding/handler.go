@@ -91,5 +91,6 @@ func (h *Handler) importFromFS(c *gin.Context) {
 	c.JSON(http.StatusOK, OnboardingImportFSResponse{
 		WorkspaceIDs:  result.WorkspaceIDs,
 		ImportedCount: result.ImportedCount,
+		Warnings:      result.Warnings,
 	})
 }

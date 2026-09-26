@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -16,7 +18,7 @@ func TestRemoteExecutorsIgnoreLegacyHostGHTokenSelection(t *testing.T) {
 		name    string
 		resolve func([]string) []string
 	}{
-		{name: "ssh", resolve: (&SSHExecutor{logger: newTestLogger()}).resolveGHToken},
+		{name: executorTypeSSH, resolve: (&SSHExecutor{logger: newTestLogger()}).resolveGHToken},
 		{name: "sprites", resolve: (&SpritesExecutor{logger: newTestLogger()}).resolveGHToken},
 	}
 	for _, tt := range tests {
@@ -39,7 +41,7 @@ func TestRemoteExecutorsResolveExplicitGitHubTokenSecret(t *testing.T) {
 		name    string
 		resolve func(context.Context, *ExecutorCreateRequest, remoteauth.Catalog)
 	}{
-		{name: "ssh", resolve: (&SSHExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets},
+		{name: executorTypeSSH, resolve: (&SSHExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets},
 		{name: "sprites", resolve: (&SpritesExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets},
 	}
 	for _, tt := range tests {
@@ -165,7 +167,7 @@ func TestBuildSSHEnvInitScript(t *testing.T) {
 			t.Fatalf("buildSSHEnvInitScript: %v", err)
 		}
 		// Each line is a POSIX shell assignment; the line break separates
-		// entries so `. /dev/stdin` under `set -a` exports each one.
+		// entries so evaluating stdin under `set -a` exports each one.
 		if got != "FOO='bar baz'\n" {
 			t.Errorf("buildSSHEnvInitScript = %q, want \"FOO='bar baz'\\n\"", got)
 		}
@@ -214,6 +216,76 @@ func TestStartRemoteAgentctlRejectsInvalidEnvBeforeSSHLaunch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid SSH environment variable key") {
 		t.Errorf("startRemoteAgentctl error = %q", err)
+	}
+}
+
+func TestRetryRemoteAgentctlPortRetriesBindCollisions(t *testing.T) {
+	ports := []int{41001, 41002, 41003}
+	nextPort := 0
+	attempts := 0
+
+	port, pid, err := retryRemoteAgentctlPort(
+		func() int {
+			port := ports[nextPort]
+			nextPort++
+			return port
+		},
+		func(port int) (int, error) {
+			attempts++
+			if attempts < 3 {
+				return 0, fmt.Errorf("%w: %d", errSSHAgentctlPortInUse, port)
+			}
+			return 1234, nil
+		},
+	)
+
+	if err != nil {
+		t.Fatalf("retryRemoteAgentctlPort: %v", err)
+	}
+	if port != 41003 || pid != 1234 || attempts != 3 {
+		t.Fatalf("result = port %d pid %d attempts %d, want 41003/1234/3", port, pid, attempts)
+	}
+}
+
+func TestRetryRemoteAgentctlPortDoesNotRetryOtherFailures(t *testing.T) {
+	attempts := 0
+	wantErr := errors.New("remote launch failed")
+	_, _, err := retryRemoteAgentctlPort(
+		func() int { return 41001 },
+		func(int) (int, error) {
+			attempts++
+			return 0, wantErr
+		},
+	)
+
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("retryRemoteAgentctlPort error = %v, want %v", err, wantErr)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+}
+
+func TestRemoteAgentctlStopCommandWaitsAndEscalatesBeforeCleanup(t *testing.T) {
+	command := remoteAgentctlStopCommand("/tmp/session with space", 1234)
+
+	wantOrder := []string{
+		"if kill 1234 2>/dev/null; then",
+		"while kill -0 1234",
+		"kill -9 1234",
+		"remote agentctl pid 1234 is still running",
+		"rm -rf '/tmp/session with space'",
+	}
+	previous := -1
+	for _, fragment := range wantOrder {
+		index := strings.Index(command, fragment)
+		if index <= previous {
+			t.Fatalf("command fragment %q is missing or out of order:\n%s", fragment, command)
+		}
+		previous = index
+	}
+	if strings.Contains(command, "kill 1234 2>/dev/null || true") || strings.Contains(command, "kill -9 1234 2>/dev/null || true") {
+		t.Fatalf("stop command must not suppress kill failures:\n%s", command)
 	}
 }
 

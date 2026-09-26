@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import {
   createContext,
   createElement,
@@ -11,21 +13,25 @@ import {
   useState,
   type HTMLAttributes,
   type ReactNode,
+  type Ref,
 } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown, { type ExtraProps, type Components } from "react-markdown";
 import rehypeRaw from "rehype-raw";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import rehypeSanitize from "rehype-sanitize";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconCode, IconMessagePlus } from "@tabler/icons-react";
 import {
   MarkdownTaskContext,
+  rehypePlugins,
   remarkPlugins,
   markdownComponents,
 } from "@/components/shared/markdown-components";
+import { ResizableMarkdownTable } from "@/components/shared/resizable-markdown-table";
 import { cn, toRelativePath } from "@/lib/utils";
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
+import { FileViewerDownloadButton } from "@/components/task/file-viewer-header";
 import { EditorCommentPopover } from "@/components/task/editor-comment-popover";
 import { CommentViewPopover } from "@/components/task/comment-view-popover";
 import { useMarkdownPreviewComments } from "@/hooks/domains/comments/use-markdown-preview-comments";
@@ -35,14 +41,18 @@ import {
   type SourceLineRange,
 } from "@/lib/markdown/source-line-ranges";
 import { commentsBeginInRange, commentsOverlapRange } from "@/lib/markdown/preview-comments";
+import { markdownMathSanitizeSchema } from "@/lib/markdown/math-sanitize-schema";
+import { MATH_SOURCE_CLASS, rehypeMathSource } from "@/lib/markdown/rehype-math-source";
 import type { DiffComment } from "@/lib/state/slices/comments";
 import {
   ExternalVcsFileLink,
   useExternalVcsFileStatus,
 } from "@/components/editors/external-vcs-file-link";
+import { useTranslation } from "react-i18next";
 
 interface MarkdownPreviewToolbarProps {
   path: string;
+  isSymlink?: boolean;
   worktreePath?: string;
   commentCount: number;
   commentsEnabled: boolean;
@@ -51,11 +61,13 @@ interface MarkdownPreviewToolbarProps {
   repositoryId?: string | null;
   repositoryName?: string;
   showExternalVcsLink: boolean;
+  onDownload?: () => void;
   onTogglePreview: () => void;
 }
 
 function MarkdownPreviewToolbar({
   path,
+  isSymlink,
   worktreePath,
   commentCount,
   commentsEnabled,
@@ -64,15 +76,18 @@ function MarkdownPreviewToolbar({
   repositoryId,
   repositoryName,
   showExternalVcsLink,
+  onDownload,
   onTogglePreview,
 }: MarkdownPreviewToolbarProps) {
+  const { t } = useTranslation();
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
   return (
     <PanelHeaderBarSplit
       left={
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-mono">{toRelativePath(path, worktreePath)}</span>
-          <span className="text-xs text-muted-foreground/60">Preview</span>
+        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <span className="truncate font-mono">{toRelativePath(path, worktreePath)}</span>
+          <SymlinkIndicator isSymlink={isSymlink} showLabel />
+          <span className="text-xs text-muted-foreground/60">{t("task:preview")}</span>
         </div>
       }
       right={
@@ -89,12 +104,11 @@ function MarkdownPreviewToolbar({
               size="sm"
             />
           )}
+          <FileViewerDownloadButton onDownload={onDownload} />
           {commentsEnabled && commentCount > 0 && (
             <div className="flex items-center gap-1 px-2 py-1 text-xs text-primary">
               <IconMessagePlus className="h-3.5 w-3.5" />
-              <span>
-                {commentCount} comment{commentCount > 1 ? "s" : ""}
-              </span>
+              <span>{t("task:commentCount", { count: commentCount })}</span>
             </div>
           )}
           <Tooltip>
@@ -103,13 +117,13 @@ function MarkdownPreviewToolbar({
                 size="sm"
                 variant="ghost"
                 onClick={onTogglePreview}
-                className="h-8 w-8 p-0 cursor-pointer text-foreground"
+                className="h-6 w-6 p-0 cursor-pointer text-foreground max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
                 data-testid="markdown-preview-toggle"
               >
                 <IconCode className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Show code</TooltipContent>
+            <TooltipContent>{t("task:showCode")}</TooltipContent>
           </Tooltip>
         </div>
       }
@@ -119,6 +133,7 @@ function MarkdownPreviewToolbar({
 
 interface MarkdownPreviewContentProps {
   path: string;
+  isSymlink?: boolean;
   content: string;
   worktreePath?: string;
   sessionId?: string;
@@ -127,6 +142,7 @@ interface MarkdownPreviewContentProps {
   repositoryName?: string;
   enableComments?: boolean;
   showExternalVcsLink?: boolean;
+  onDownload?: () => void;
   onTogglePreview: () => void;
 }
 
@@ -140,6 +156,7 @@ type PositionedNode = {
 type SourceBlockProps = HTMLAttributes<HTMLElement> &
   ExtraProps & {
     children?: ReactNode;
+    elementRef?: Ref<HTMLElement>;
     node?: PositionedNode;
     tag: keyof HTMLElementTagNameMap;
   };
@@ -179,12 +196,13 @@ function CommentBadge({
 }: {
   onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
       className="markdown-preview-comment-badge"
       data-testid="markdown-preview-comment-badge"
-      aria-label="Edit markdown comment"
+      aria-label={t("task:editMarkdownComment")}
       onClick={onClick}
     >
       <IconMessagePlus className="h-3 w-3" />
@@ -192,7 +210,15 @@ function CommentBadge({
   );
 }
 
-function SourceBlock({ tag, node, children, className, onClick, ...rest }: SourceBlockProps) {
+function SourceBlock({
+  tag,
+  node,
+  children,
+  className,
+  elementRef,
+  onClick,
+  ...rest
+}: SourceBlockProps) {
   const commentContext = useContext(PreviewCommentContext);
   const range = sourceRangeFromNode(node);
   const comments = commentContext?.comments ?? [];
@@ -226,6 +252,7 @@ function SourceBlock({ tag, node, children, className, onClick, ...rest }: Sourc
         className,
       ),
       onClick: handleClick,
+      ref: elementRef,
     },
     children,
     hasCommentBadge && tag !== "pre" ? <CommentBadge onClick={handleBadgeClick} /> : null,
@@ -242,9 +269,15 @@ function SourceBlock({ tag, node, children, className, onClick, ...rest }: Sourc
 
 function MarkdownPreviewTable({ node, children }: MarkdownSourceBlockProps) {
   return (
-    <SourceBlock tag="div" node={node} className="overflow-x-auto">
-      <table>{children}</table>
-    </SourceBlock>
+    <ResizableMarkdownTable
+      renderWrapper={({ children: tableContent, className, elementRef }) => (
+        <SourceBlock tag="div" node={node} className={className} elementRef={elementRef}>
+          {tableContent}
+        </SourceBlock>
+      )}
+    >
+      {children}
+    </ResizableMarkdownTable>
   );
 }
 
@@ -254,8 +287,31 @@ function sourceComponent(tag: keyof HTMLElementTagNameMap) {
   };
 }
 
+function MarkdownPreviewDiv({
+  node,
+  elementRef,
+  className,
+  children,
+  ...rest
+}: MarkdownSourceBlockProps) {
+  if (className?.split(/\s+/u).includes(MATH_SOURCE_CLASS)) {
+    return (
+      <SourceBlock tag="div" node={node} className={className} elementRef={elementRef} {...rest}>
+        {children}
+      </SourceBlock>
+    );
+  }
+
+  return (
+    <div {...rest} className={className}>
+      {children}
+    </div>
+  );
+}
+
 const markdownPreviewComponents: Components = {
   ...markdownComponents,
+  div: (props) => <MarkdownPreviewDiv {...(props as MarkdownSourceBlockProps)} />,
   p: sourceComponent("p"),
   h1: sourceComponent("h1"),
   h2: sourceComponent("h2"),
@@ -280,6 +336,7 @@ function MarkdownPreviewCommentOverlays({
   overlayRoot: HTMLElement | null;
   commentState: MarkdownPreviewCommentState;
 }) {
+  const { t } = useTranslation();
   if (!commentsEnabled || !overlayRoot) return null;
 
   return createPortal(
@@ -298,7 +355,7 @@ function MarkdownPreviewCommentOverlays({
           onClick={commentState.openComposer}
         >
           <IconMessagePlus className="h-3.5 w-3.5" />
-          Comment
+          {t("task:comment")}
         </Button>
       )}
       {commentState.textSelection && (
@@ -341,7 +398,12 @@ export function MarkdownPreviewRenderer({
     <MarkdownTaskContext.Provider value={taskId ?? null}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, defaultSchema]]}
+        rehypePlugins={[
+          rehypeRaw,
+          [rehypeSanitize, markdownMathSanitizeSchema],
+          rehypeMathSource,
+          ...rehypePlugins,
+        ]}
         components={markdownPreviewComponents}
       >
         {content}
@@ -352,6 +414,7 @@ export function MarkdownPreviewRenderer({
 
 export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   path,
+  isSymlink,
   content,
   worktreePath,
   sessionId,
@@ -360,6 +423,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   repositoryName,
   enableComments = false,
   showExternalVcsLink = true,
+  onDownload,
   onTogglePreview,
 }: MarkdownPreviewContentProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -372,6 +436,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
     sessionId,
     taskId,
     repositoryId,
+    repositoryName,
     enabled: commentsEnabled,
     rootRef,
   });
@@ -403,6 +468,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   return (
     <div className="relative flex h-full flex-col" data-testid="markdown-preview">
       <MarkdownPreviewToolbar
+        isSymlink={isSymlink}
         path={path}
         worktreePath={worktreePath}
         commentCount={commentState.comments.length}
@@ -412,6 +478,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
         repositoryId={repositoryId}
         repositoryName={repositoryName}
         showExternalVcsLink={showExternalVcsLink}
+        onDownload={onDownload}
         onTogglePreview={onTogglePreview}
       />
       <div ref={scrollRef} className="flex-1 overflow-auto p-6">

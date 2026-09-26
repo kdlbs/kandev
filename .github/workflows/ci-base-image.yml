@@ -28,6 +28,9 @@ env:
   POSTGRES_DIGEST: sha256:fe03a7605299a34ddf5e4f285dff78c3d7190a576b3c6b46f2fcff69f4bffd54
   POSTGRES_SOURCE: docker.io/library/postgres:16@sha256:fe03a7605299a34ddf5e4f285dff78c3d7190a576b3c6b46f2fcff69f4bffd54
   POSTGRES_TARGET: ghcr.io/kdlbs/kandev-ci:postgres-16
+  POSTGRES_18_DIGEST: sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+  POSTGRES_18_SOURCE: docker.io/library/postgres:18@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+  POSTGRES_18_TARGET: ghcr.io/kdlbs/kandev-ci:postgres-18
 
 jobs:
   build-and-push:
@@ -37,7 +40,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       # Push the built images to GHCR on any `push` to main (the default
       # publish path) or on manual `workflow_dispatch` (used to seed new tag
@@ -48,7 +51,7 @@ jobs:
         if: |
           github.event_name == 'workflow_dispatch'
           || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -69,6 +72,10 @@ jobs:
             --tag "${POSTGRES_TARGET}" \
             "${POSTGRES_SOURCE}"
 
+          docker buildx imagetools create \
+            --tag "${POSTGRES_18_TARGET}" \
+            "${POSTGRES_18_SOURCE}"
+
           mirrored_digest="sha256:$(
             docker buildx imagetools inspect --raw "${POSTGRES_TARGET}" \
               | sha256sum \
@@ -76,6 +83,16 @@ jobs:
           )"
           if [[ "${mirrored_digest}" != "${POSTGRES_DIGEST}" ]]; then
             echo "::error::Postgres mirror digest ${mirrored_digest} does not match ${POSTGRES_DIGEST}"
+            exit 1
+          fi
+
+          mirrored_18_digest="sha256:$(
+            docker buildx imagetools inspect --raw "${POSTGRES_18_TARGET}" \
+              | sha256sum \
+              | cut -d ' ' -f 1
+          )"
+          if [[ "${mirrored_18_digest}" != "${POSTGRES_18_DIGEST}" ]]; then
+            echo "::error::Postgres 18 mirror digest ${mirrored_18_digest} does not match ${POSTGRES_18_DIGEST}"
             exit 1
           fi
 
@@ -99,7 +116,7 @@ jobs:
       # Consumed by the `e2e` shards and `e2e-report`, where the smaller pull
       # is the speedup that pays for the split.
       - name: Build and push runtime
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: .github/docker/ci-base/Dockerfile
@@ -117,7 +134,7 @@ jobs:
       # `cache-from` includes the runtime scope so the shared lower layers
       # only build once across both pushes.
       - name: Build and push build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: .github/docker/ci-base/Dockerfile
@@ -132,6 +149,24 @@ jobs:
             ${{ env.IMAGE_NAME }}:build-sha-${{ steps.tag.outputs.image_tag }}
             ${{ env.IMAGE_NAME }}:build-latest
 
+      # Stage 3: desktop (runtime + Tauri Linux dependencies + Rust).
+      # Consumed by the host-independent desktop smoke job.
+      - name: Build and push desktop
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: .github/docker/ci-base/Dockerfile
+          target: desktop
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+          cache-from: |
+            type=gha,scope=desktop
+            type=gha,scope=runtime
+          cache-to: type=gha,scope=desktop,mode=max
+          tags: |
+            ${{ env.IMAGE_NAME }}:desktop-sha-${{ steps.tag.outputs.image_tag }}
+            ${{ env.IMAGE_NAME }}:desktop-latest
+
       - name: Summarize
         run: |
           {
@@ -139,7 +174,9 @@ jobs:
             echo ""
             echo "- runtime: \`${IMAGE_NAME}:runtime-sha-${IMAGE_TAG}\` / \`runtime-latest\`"
             echo "- build:   \`${IMAGE_NAME}:build-sha-${IMAGE_TAG}\` / \`build-latest\`"
+            echo "- desktop: \`${IMAGE_NAME}:desktop-sha-${IMAGE_TAG}\` / \`desktop-latest\`"
             echo "- postgres: \`${POSTGRES_TARGET}@${POSTGRES_DIGEST}\`"
+            echo "- postgres 18: \`${POSTGRES_18_TARGET}@${POSTGRES_18_DIGEST}\`"
             echo "- pushed:  \`${PUSHED}\`"
           } >> "$GITHUB_STEP_SUMMARY"
         env:

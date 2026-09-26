@@ -96,6 +96,29 @@ func TestWsMergeIntoAbove(t *testing.T) {
 		assert.Equal(t, "entry_not_found", parseError(t, response).Code)
 	})
 
+	t.Run("returns merge_disabled when merging is turned off", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		ctx := context.Background()
+
+		a, _ := svc.QueueMessage(ctx, "s", "t", "first", "", "user-1", false, nil)
+		b, _ := svc.QueueMessage(ctx, "s", "t", "second", "", "user-1", false, nil)
+		svc.SetMergeEnabled(false)
+
+		response, err := handlers.wsMergeIntoAbove(ctx,
+			createTestMessage(t, ws.ActionMessageQueueMerge, map[string]interface{}{
+				"session_id": "s",
+				"entry_id":   b.ID,
+				"user_id":    "user-1",
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, "merge_disabled", parseError(t, response).Code)
+
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 2, status.Count)
+		assert.Equal(t, a.ID, status.Entries[0].ID)
+	})
+
 	t.Run("rejects reserved user_id", func(t *testing.T) {
 		handlers, _ := setupQueueHandlers(t)
 		response, err := handlers.wsMergeIntoAbove(context.Background(),

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -35,12 +36,17 @@ const (
 // exists. Serialising a zero time.Time as "0001-01-01T00:00:00Z" would
 // defeat the frontend's "Never" fallback in database-stats-card.tsx.
 type Stats struct {
-	Driver        string     `json:"driver"`
-	Path          string     `json:"path"`
-	SizeBytes     int64      `json:"size_bytes"`
-	WALSizeBytes  int64      `json:"wal_size_bytes"`
-	SchemaVersion string     `json:"schema_version"`
-	LastBackupAt  *time.Time `json:"last_backup_at"`
+	Driver               string     `json:"driver"`
+	Path                 string     `json:"path"`
+	BackupDirectory      string     `json:"backup_directory"`
+	SizeBytes            int64      `json:"size_bytes"`
+	WALSizeBytes         int64      `json:"wal_size_bytes"`
+	MessageContentBytes  int64      `json:"message_content_bytes"`
+	MessageMetadataBytes int64      `json:"message_metadata_bytes"`
+	MessagePayloadBytes  int64      `json:"message_payload_bytes"`
+	GitSnapshotBytes     int64      `json:"git_snapshot_bytes"`
+	SchemaVersion        string     `json:"schema_version"`
+	LastBackupAt         *time.Time `json:"last_backup_at"`
 }
 
 // ResetDirs lists the on-disk directories factory-reset wipes. The Service
@@ -61,30 +67,48 @@ type ResetDirs struct {
 // quit and relaunch Kandev. The previous syscall.Exec approach was brittle
 // under desktop launchers and `make dev` watchers.
 type Service struct {
-	pool    *db.Pool
-	dataDir string
-	dbPath  string
-	dirs    ResetDirs
-	jobs    *jobs.Tracker
-	log     *logger.Logger
+	pool         *db.Pool
+	databasePath string
+	dirs         ResetDirs
+	jobs         *jobs.Tracker
+	log          *logger.Logger
+
+	// PersistenceUnavailable marks required stores unhealthy before a
+	// destructive maintenance operation leaves the process awaiting restart.
+	PersistenceUnavailable func()
 
 	// OrchestratorShutdown stops the orchestrator and active executions before
 	// the factory-reset job runs. Wired by cmd/kandev. Tests pass a no-op.
 	OrchestratorShutdown func()
+	// DatabaseQuiesce stops database-backed workers before the factory-reset
+	// job snapshots or changes the shared schema. Wired by cmd/kandev.
+	DatabaseQuiesce func() error
 }
 
-// NewService constructs a Service. dataDir is the resolved kandev data
-// directory (the SQLite file lives at <dataDir>/kandev.db, backups under
-// <dataDir>/backups). dirs lists the on-disk subtrees factory-reset wipes.
-func NewService(pool *db.Pool, dataDir string, dirs ResetDirs, j *jobs.Tracker, log *logger.Logger) *Service {
+// NewService constructs a Service for the configured SQLite database path.
+// The sibling backups directory is derived from databasePath. dirs lists the
+// on-disk subtrees factory-reset wipes.
+func NewService(pool *db.Pool, databasePath string, dirs ResetDirs, j *jobs.Tracker, log *logger.Logger) *Service {
 	return &Service{
-		pool:    pool,
-		dataDir: dataDir,
-		dbPath:  filepath.Join(dataDir, "kandev.db"),
-		dirs:    dirs,
-		jobs:    j,
-		log:     log,
+		pool:         pool,
+		databasePath: databasePath,
+		dirs:         dirs,
+		jobs:         j,
+		log:          log,
 	}
+}
+
+func (s *Service) backupsDir() string {
+	return filepath.Join(filepath.Dir(s.databasePath), "backups")
+}
+
+func (s *Service) absoluteBackupsDir() (string, error) {
+	backupDir := s.backupsDir()
+	absolute, err := filepath.Abs(backupDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve backup directory %q: %w", backupDir, err)
+	}
+	return absolute, nil
 }
 
 // Stats returns the current database stats. SQLite size is computed from
@@ -94,8 +118,15 @@ func NewService(pool *db.Pool, dataDir string, dirs ResetDirs, j *jobs.Tracker, 
 func (s *Service) Stats() (Stats, error) {
 	driver := s.databaseDriver()
 	out := Stats{Driver: driver}
+	backupDir := ""
 	if driver == databaseDriverSQLite {
-		out.Path = s.dbPath
+		resolved, err := s.absoluteBackupsDir()
+		if err != nil {
+			return Stats{}, err
+		}
+		backupDir = resolved
+		out.Path = s.databasePath
+		out.BackupDirectory = backupDir
 	}
 
 	if s.pool != nil {
@@ -110,18 +141,71 @@ func (s *Service) Stats() (Stats, error) {
 			return Stats{}, err
 		}
 		out.SchemaVersion = version
+
+		storage, err := readLogicalStorageStats(s.pool.Reader())
+		if err != nil {
+			return Stats{}, err
+		}
+		out.MessageContentBytes = storage.messageContent
+		out.MessageMetadataBytes = storage.messageMetadata
+		out.MessagePayloadBytes = storage.messagePayload
+		out.GitSnapshotBytes = storage.gitSnapshot
 	}
 
 	if driver == databaseDriverSQLite {
-		if wal, err := walSize(s.dbPath); err == nil {
+		if wal, err := walSize(s.databasePath); err == nil {
 			out.WALSizeBytes = wal
 		}
 
-		if last := lastBackupAt(filepath.Join(s.dataDir, "backups")); !last.IsZero() {
+		if last := lastBackupAt(backupDir); !last.IsZero() {
 			out.LastBackupAt = &last
 		}
 	}
+	recordStorageMetrics(out)
 	return out, nil
+}
+
+type logicalStorageStats struct {
+	messageContent  int64
+	messageMetadata int64
+	messagePayload  int64
+	gitSnapshot     int64
+}
+
+// readLogicalStorageStats uses portable LENGTH aggregates as a deterministic
+// fallback when SQLite dbstat or PostgreSQL relation-size extensions are not
+// available. A missing table during early boot or a partial test fixture is
+// reported as zero for that category; database/WAL sizes remain independent.
+func readLogicalStorageStats(db *sqlx.DB) (logicalStorageStats, error) {
+	var out logicalStorageStats
+	queries := []struct {
+		query string
+		dest  *int64
+	}{
+		{`SELECT COALESCE(SUM(LENGTH(content)), 0) FROM task_session_messages`, &out.messageContent},
+		{`SELECT COALESCE(SUM(LENGTH(metadata)), 0) FROM task_session_messages`, &out.messageMetadata},
+		{`SELECT COALESCE(SUM(LENGTH(compressed_content)), 0) FROM task_message_payloads`, &out.messagePayload},
+		{`SELECT COALESCE(SUM(LENGTH(files) + LENGTH(metadata)), 0) FROM task_session_git_snapshots`, &out.gitSnapshot},
+	}
+	for _, metric := range queries {
+		if err := db.QueryRow(metric.query).Scan(metric.dest); err != nil {
+			if isMissingLogicalStorageTableError(err) {
+				continue
+			}
+			return logicalStorageStats{}, fmt.Errorf("read logical storage stats: %w", err)
+		}
+	}
+	return out, nil
+}
+
+func isMissingLogicalStorageTableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no such table") ||
+		strings.Contains(msg, "does not exist") ||
+		strings.Contains(msg, "undefined_table")
 }
 
 func (s *Service) databaseDriver() string {

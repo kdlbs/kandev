@@ -10,11 +10,15 @@ import { EDITOR_FONT_FAMILY, EDITOR_FONT_SIZE } from "@/lib/theme/editor-theme";
 import { CommentForm } from "@/components/diff/comment-form";
 import { CommentDisplay } from "@/components/diff/comment-display";
 import { useEditorViewZoneComments } from "@/hooks/use-editor-view-zone-comments";
+import { useLspStatusPlacement } from "@/hooks/use-lsp-status-placement";
 import { MonacoEditorToolbar } from "./monaco-editor-toolbar";
 import { useMonacoEditorComments } from "./use-monaco-editor-state";
 import { useMonacoEditorLsp, useMonacoDiffDecorations } from "./use-monaco-editor-lsp";
 import { useMonacoWalkthroughRange } from "./use-monaco-walkthrough-range";
+import { useMonacoCursorNavigation } from "./use-monaco-cursor-navigation";
 import { initMonacoThemes } from "./monaco-init";
+import { useTranslation } from "react-i18next";
+import type { FilePreviewKind } from "@/lib/utils/file-types";
 
 initMonacoThemes();
 
@@ -28,13 +32,18 @@ type MonacoCodeEditorProps = {
   isSaving: boolean;
   sessionId?: string;
   worktreePath?: string;
+  isSymlink?: boolean;
   repo?: string;
   enableComments?: boolean;
-  onToggleMarkdownPreview?: () => void;
+  previewKind?: FilePreviewKind;
+  onTogglePreview?: () => void;
+  onPreviewHtml?: () => void;
+  isPublishingHtmlPreview?: boolean;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
+  onDownload?: () => void;
 };
 
 function getMonacoTheme(resolvedTheme: string | undefined): string {
@@ -124,6 +133,9 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
     onSave,
   } = props;
   const contentRef = useRef(content);
+  useEffect(() => {
+    contentRef.current = content;
+  }, [content]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const language = getMonacoLanguage(path);
   const state = useMonacoEditorComments({
@@ -139,10 +151,19 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
   const lsp = useMonacoEditorLsp({
     sessionId,
     worktreePath,
+    repo,
     language,
     path,
     contentRef,
     editorRef: state.editorRef,
+    editorReady: state.editorInstance !== null,
+  });
+  useMonacoCursorNavigation({
+    editor: state.editorInstance,
+    path,
+    worktreePath,
+    repo,
+    sessionId,
   });
   const { diffStats } = useMonacoDiffDecorations({
     originalContent,
@@ -154,9 +175,6 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
     editorRef: state.editorRef,
     diffDecorationsRef: state.diffDecorationsRef,
   });
-  useEffect(() => {
-    contentRef.current = content;
-  }, [content]);
   useEditorViewZoneComments(
     state.editorInstance,
     [state.comments, state.formZoneRange, state.editingCommentId],
@@ -169,7 +187,60 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
   return { contentRef, wrapperRef, language, state, lsp, diffStats, options };
 }
 
-export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
+function EditorLoading() {
+  const { t } = useTranslation();
+  return (
+    <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+      {t("editors:loadingEditor")}
+    </div>
+  );
+}
+
+function MonacoFloatingCommentButton({ state }: { state: EditorState }) {
+  const { t } = useTranslation();
+  if (!state.floatingButtonPos || state.formZoneRange) return null;
+  return (
+    <Button
+      size="sm"
+      variant="secondary"
+      className="floating-comment-btn absolute z-50 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer"
+      style={{ left: state.floatingButtonPos.x + 4, top: state.floatingButtonPos.y + 2 }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={state.handleFloatingButtonClick}
+    >
+      <IconMessagePlus className="h-3.5 w-3.5" />
+      {t("editors:comment")}
+    </Button>
+  );
+}
+
+type MonacoEditorViewProps = {
+  props: MonacoCodeEditorProps;
+  wrapperRef: React.RefObject<HTMLDivElement | null>;
+  editorAreaRef: React.RefObject<HTMLDivElement | null>;
+  language: string;
+  state: EditorState;
+  lsp: ReturnType<typeof useMonacoEditorLsp>;
+  diffStats: { additions: number; deletions: number } | null;
+  options: typeof EDITOR_OPTIONS & { wordWrap: "on" | "off" };
+  resolvedTheme: string | undefined;
+  showLspStatus: boolean;
+  walkthroughRange: ReturnType<typeof useMonacoWalkthroughRange>;
+};
+
+function MonacoEditorView({
+  props,
+  wrapperRef,
+  editorAreaRef,
+  language,
+  state,
+  lsp,
+  diffStats,
+  options,
+  resolvedTheme,
+  showLspStatus,
+  walkthroughRange,
+}: MonacoEditorViewProps) {
   const {
     path,
     content,
@@ -182,19 +253,11 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
     repo,
     enableComments = false,
   } = props;
-  const { resolvedTheme } = useTheme();
-  const { wrapperRef, language, state, lsp, diffStats, options } = useMonacoCodeEditorSetup(props);
-  const editorAreaRef = useRef<HTMLDivElement>(null);
-  const walkthroughRange = useMonacoWalkthroughRange({
-    editor: state.editorInstance,
-    editorAreaRef,
-    path,
-    repo,
-  });
 
   return (
     <div ref={wrapperRef} className="flex h-full flex-col rounded-lg">
       <MonacoEditorToolbar
+        isSymlink={props.isSymlink}
         path={path}
         repositoryName={repo}
         worktreePath={worktreePath}
@@ -209,14 +272,20 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
         hasRemoteUpdate={hasRemoteUpdate}
         hasVcsDiff={Boolean(vcsDiff)}
         lspStatus={lsp.lspStatus}
+        lspProgress={lsp.lspProgress}
         lspLanguage={lsp.lspLanguage}
+        showLspStatus={showLspStatus}
         onToggleLsp={lsp.toggleLsp}
         onToggleWrap={() => state.setWrapEnabled(!state.wrapEnabled)}
         onToggleDiffIndicators={() => state.setShowDiffIndicators(!state.showDiffIndicators)}
         onSave={props.onSave}
         onReloadFromAgent={props.onReloadFromAgent}
         onDelete={props.onDelete}
-        onToggleMarkdownPreview={props.onToggleMarkdownPreview}
+        onDownload={props.onDownload}
+        previewKind={props.previewKind}
+        onTogglePreview={props.onTogglePreview}
+        onPreviewHtml={props.onPreviewHtml}
+        isPublishingHtmlPreview={props.isPublishingHtmlPreview}
       />
       <div className="flex-1 overflow-hidden relative" ref={editorAreaRef}>
         <Editor
@@ -229,11 +298,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
           onMount={state.handleEditorDidMount}
           keepCurrentModel
           options={options}
-          loading={
-            <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-              Loading editor...
-            </div>
-          }
+          loading={<EditorLoading />}
         />
         {walkthroughRange ? (
           <div
@@ -250,20 +315,38 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
             }}
           />
         ) : null}
-        {state.floatingButtonPos && !state.formZoneRange && (
-          <Button
-            size="sm"
-            variant="secondary"
-            className="floating-comment-btn absolute z-50 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer"
-            style={{ left: state.floatingButtonPos.x + 4, top: state.floatingButtonPos.y + 2 }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={state.handleFloatingButtonClick}
-          >
-            <IconMessagePlus className="h-3.5 w-3.5" />
-            Comment
-          </Button>
-        )}
+        <MonacoFloatingCommentButton state={state} />
       </div>
     </div>
+  );
+}
+
+export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
+  const { path, repo } = props;
+  const { wrapperRef, language, state, lsp, diffStats, options } = useMonacoCodeEditorSetup(props);
+  const { resolvedTheme } = useTheme();
+  const lspStatusPlacement = useLspStatusPlacement();
+  const editorAreaRef = useRef<HTMLDivElement>(null);
+  const walkthroughRange = useMonacoWalkthroughRange({
+    editor: state.editorInstance,
+    editorAreaRef,
+    path,
+    repo,
+  });
+
+  return (
+    <MonacoEditorView
+      props={props}
+      wrapperRef={wrapperRef}
+      editorAreaRef={editorAreaRef}
+      language={language}
+      state={state}
+      lsp={lsp}
+      diffStats={diffStats}
+      options={options}
+      resolvedTheme={resolvedTheme}
+      showLspStatus={lspStatusPlacement === "toolbar"}
+      walkthroughRange={walkthroughRange}
+    />
   );
 }

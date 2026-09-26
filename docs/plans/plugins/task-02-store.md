@@ -15,7 +15,7 @@ api_key and an encrypted (recoverable) webhook secret, plus operator config at
 `{id}.config.yml`.
 
 ## Inputs
-- Spec `docs/specs/plugins/spec.md` → "Plugin registration (filesystem-backed)"
+- Spec `docs/specs/plugins/requirements/plugins.md` → "Plugin registration (filesystem-backed)"
   and "Persistence guarantees".
 - **Credential storage refinement (resolves a spec inconsistency — capture in the
   task-15 spec update):**

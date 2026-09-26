@@ -24,7 +24,7 @@ async function readMobileTopbarMetrics(
       node.textContent?.includes(titleText),
     ) as HTMLElement | undefined;
     const title = Array.from(header?.querySelectorAll("span") ?? []).find(
-      (node) => node.textContent?.trim() === titleText,
+      (node) => node.childElementCount === 0 && node.textContent?.trim() === titleText,
     ) as HTMLElement | undefined;
     const actions = header?.querySelector('[data-testid="mobile-topbar-actions"]') as
       | HTMLElement
@@ -51,11 +51,13 @@ async function readMobileTopbarMetrics(
 }
 
 test.describe("Mobile task topbar long title layout", () => {
+  // @covers AC-UI-MOBILE-TASK-CHROME-001.1, AC-UI-MOBILE-TASK-CHROME-001.2,
+  // AC-UI-MOBILE-TASK-CHROME-001.5
   test("truncates long task titles without pushing mobile actions off-screen", async ({
     testPage,
     apiClient,
     seedData,
-  }) => {
+  }, testInfo) => {
     test.setTimeout(90_000);
 
     const task = await apiClient.createTaskWithAgent(
@@ -76,7 +78,15 @@ test.describe("Mobile task topbar long title layout", () => {
 
     const header = testPage.locator("header").filter({ hasText: LONG_TASK_TITLE }).first();
     await expect(header).toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByTestId("mobile-session-menu")).toBeVisible();
+    const taskDrawer = testPage.getByTestId("mobile-task-picker-trigger");
+    await expect(taskDrawer).toBeVisible();
+    await expect(testPage.getByTestId("layout-preset-trigger")).toHaveCount(0);
+    await expect(testPage.getByTestId("mobile-git-actions")).toHaveCount(0);
+
+    const taskDrawerBox = await taskDrawer.boundingBox();
+    expect(taskDrawerBox).not.toBeNull();
+    expect(Math.round(taskDrawerBox!.width)).toBeGreaterThanOrEqual(44);
+    expect(Math.round(taskDrawerBox!.height)).toBeGreaterThanOrEqual(44);
 
     const metrics = await readMobileTopbarMetrics(testPage, LONG_TASK_TITLE);
     expect(metrics).not.toBeNull();
@@ -87,5 +97,6 @@ test.describe("Mobile task topbar long title layout", () => {
     expect(metrics.titleRight).toBeLessThanOrEqual(metrics.actionsLeft + 1);
     expect(metrics.headerLeft).toBeGreaterThanOrEqual(0);
     expect(metrics.actionsRight).toBeLessThanOrEqual(metrics.headerRight + 1);
+    await testPage.screenshot({ path: testInfo.outputPath("long-task-title-phone.png") });
   });
 });

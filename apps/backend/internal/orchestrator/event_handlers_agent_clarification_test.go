@@ -10,10 +10,20 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/stretchr/testify/require"
 )
 
 type repoBackedTurnService struct {
 	repo testRepo
+}
+
+type failingReservedTurnAttemptMarker struct {
+	TurnService
+	err error
+}
+
+func (s failingReservedTurnAttemptMarker) MarkReservedTurnDispatchAttempted(context.Context, *models.Turn) error {
+	return s.err
 }
 
 type testRepo interface {
@@ -22,6 +32,11 @@ type testRepo interface {
 	GetTurn(ctx context.Context, id string) (*models.Turn, error)
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
+	PatchTurnMetadata(
+		ctx context.Context,
+		sessionID, turnID string,
+		updates map[string]interface{},
+	) (bool, time.Time, error)
 }
 
 func (s *repoBackedTurnService) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
@@ -36,6 +51,37 @@ func (s *repoBackedTurnService) StartTurn(ctx context.Context, sessionID string)
 	return turn, nil
 }
 
+func (s *repoBackedTurnService) ReserveTurn(
+	ctx context.Context,
+	sessionID string,
+	_ *models.PromptDispatchRecovery,
+) (*models.Turn, error) {
+	return s.StartTurn(ctx, sessionID)
+}
+
+func (s *repoBackedTurnService) PublishReservedTurn(context.Context, *models.Turn) error { return nil }
+
+func (s *repoBackedTurnService) MarkReservedTurnDispatchAttempted(context.Context, *models.Turn) error {
+	return nil
+}
+
+func (s *repoBackedTurnService) RollbackReservedTurn(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, error) {
+	deleter, ok := s.repo.(interface {
+		DeleteTurnIfUnreferenced(context.Context, string, string) (bool, error)
+	})
+	if !ok {
+		return false, errors.New("test turn repository cannot roll back reserved turns")
+	}
+	return deleter.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
+}
+
+func (s *repoBackedTurnService) ReconcileUnpublishedPromptTurns(context.Context) (int, error) {
+	return 0, nil
+}
+
 func (s *repoBackedTurnService) CompleteTurn(ctx context.Context, turnID string) error {
 	return s.repo.CompleteTurn(ctx, turnID)
 }
@@ -45,11 +91,27 @@ func (s *repoBackedTurnService) GetTurn(ctx context.Context, turnID string) (*mo
 }
 
 func (s *repoBackedTurnService) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	return s.repo.GetActiveTurnBySessionID(ctx, sessionID)
+	turn, err := s.repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return turn, err
 }
 
 func (s *repoBackedTurnService) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 	return s.repo.UpdateTurn(ctx, turn)
+}
+
+func (s *repoBackedTurnService) PatchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+) error {
+	updated, _, err := s.repo.PatchTurnMetadata(ctx, sessionID, turnID, updates)
+	if err == nil && !updated {
+		return sql.ErrNoRows
+	}
+	return err
 }
 
 func (s *repoBackedTurnService) AbandonOpenTurns(ctx context.Context, sessionID string) error {
@@ -240,21 +302,15 @@ func TestHandleAgentCompleted_BlocksOnTurnCompleteWhileClarificationPending(t *t
 			AgentExecutionID: "exec-1",
 		})
 
-		task, err = repo.GetTask(ctx, "t1")
-		if err != nil {
-			t.Fatalf("get task: %v", err)
-		}
-		if task.WorkflowStepID != "step1" {
-			t.Fatalf("expected workflow step to remain step1, got %q", task.WorkflowStepID)
-		}
-
-		session, err = repo.GetTaskSession(ctx, "s1")
-		if err != nil {
-			t.Fatalf("get session: %v", err)
-		}
-		if session.State != models.TaskSessionStateWaitingForInput {
-			t.Fatalf("expected session %q, got %q", models.TaskSessionStateWaitingForInput, session.State)
-		}
+		require.Eventually(t, func() bool {
+			storedTask, taskErr := repo.GetTask(ctx, "t1")
+			storedSession, sessionErr := repo.GetTaskSession(ctx, "s1")
+			return taskErr == nil &&
+				sessionErr == nil &&
+				storedTask.WorkflowStepID == "step1" &&
+				storedSession.State == models.TaskSessionStateWaitingForInput
+		}, 2*time.Second, 10*time.Millisecond,
+			"pending clarification should keep the task at step1 and settle the session waiting for input")
 		turn, err := svc.turnService.GetActiveTurn(ctx, "s1")
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("get active turn: %v", err)

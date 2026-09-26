@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"strings"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 )
@@ -8,8 +10,8 @@ import (
 // WildcardTaskScope grants task mutation access to any task in the run's workspace.
 const WildcardTaskScope = "*"
 
-// Runtime capability keys. These are the stable syscall vocabulary exposed to
-// run tokens, prompts, and runtime API handlers.
+// Runtime capability keys. These are the stable permission vocabulary exposed
+// to run tokens and runtime API handlers.
 const (
 	CapabilityPostComment      = "post_comment"
 	CapabilityUpdateTaskStatus = "update_task_status"
@@ -25,7 +27,14 @@ const (
 	CapabilitySpawnAgentRun    = "spawn_agent_run"
 	CapabilityModifyAgents     = "modify_agents"
 	CapabilityDeleteSkills     = "delete_skills"
+	CapabilityListTasks        = "list_tasks"
+	CapabilityHandoffTask      = "handoff_task"
 )
+
+// AvailableActionRecordStepDecision identifies the advisory runtime decision
+// action that a run prompt may advertise when the agent holds the current
+// workflow seat.
+const AvailableActionRecordStepDecision = "record_step_decision"
 
 // Allows reports whether the named runtime capability is granted.
 func (c Capabilities) Allows(key string) bool {
@@ -42,6 +51,8 @@ func (c Capabilities) Allows(key string) bool {
 		return c.CanCreateAgents
 	case CapabilityListProjects:
 		return c.CanListProjects
+	case CapabilityListTasks:
+		return c.CanListTasks
 	case CapabilityCreateProject:
 		return c.CanCreateProjects
 	case CapabilityRequestApproval:
@@ -58,15 +69,28 @@ func (c Capabilities) Allows(key string) bool {
 		return c.CanModifyAgents
 	case CapabilityDeleteSkills:
 		return c.CanDeleteSkills
+	case CapabilityHandoffTask:
+		return c.CanHandoffTasks
 	default:
 		return false
 	}
 }
 
-// WithTaskScope returns a copy of the capabilities with the given task scope.
+// WithTaskScope returns a copy of the capabilities with the given task
+// scope, discarding empty, whitespace-only, and reserved-sentinel
+// identifiers so the scope never contains an entry that can never match a
+// real task id, and never grants the wildcard scope from a task identifier
+// an untrusted source supplied.
 func (c Capabilities) WithTaskScope(taskIDs ...string) Capabilities {
 	next := c
-	next.AllowedTaskIDs = append([]string(nil), taskIDs...)
+	filtered := make([]string, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		trimmed := strings.TrimSpace(id)
+		if trimmed != "" && trimmed != WildcardTaskScope {
+			filtered = append(filtered, trimmed)
+		}
+	}
+	next.AllowedTaskIDs = filtered
 	return next
 }
 
@@ -79,6 +103,7 @@ func (c Capabilities) AllowedKeys() []string {
 		CapabilityCreateSubtask,
 		CapabilityCreateAgent,
 		CapabilityListProjects,
+		CapabilityListTasks,
 		CapabilityCreateProject,
 		CapabilityRequestApproval,
 		CapabilityReadMemory,
@@ -87,6 +112,7 @@ func (c Capabilities) AllowedKeys() []string {
 		CapabilitySpawnAgentRun,
 		CapabilityModifyAgents,
 		CapabilityDeleteSkills,
+		CapabilityHandoffTask,
 	}
 	out := make([]string, 0, len(keys))
 	for _, key := range keys {
@@ -111,6 +137,7 @@ func FromAgent(agent *models.AgentInstance) Capabilities {
 		CanCreateSubtasks:   shared.HasPermission(perms, shared.PermCanCreateTasks),
 		CanCreateAgents:     shared.HasPermission(perms, shared.PermCanCreateAgents),
 		CanListProjects:     true,
+		CanListTasks:        true,
 		CanCreateProjects:   shared.HasPermission(perms, shared.PermCanCreateProjects),
 		CanRequestApproval:  shared.HasPermission(perms, shared.PermCanApprove),
 		CanReadMemory:       true,
@@ -119,5 +146,6 @@ func FromAgent(agent *models.AgentInstance) Capabilities {
 		CanSpawnAgentRun:    shared.HasPermission(perms, shared.PermCanAssignTasks),
 		CanModifyAgents:     shared.HasPermission(perms, shared.PermCanCreateAgents),
 		CanDeleteSkills:     false,
+		CanHandoffTasks:     shared.HasPermission(perms, shared.PermCanHandoffTasks),
 	}
 }

@@ -1,3 +1,5 @@
+import { retainNativeBlobDownload, revokeNativeBlobDownload } from "./native-blob-download";
+
 export type TriggerFileDownloadParams = {
   fileName: string;
   content: string;
@@ -18,6 +20,26 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
   return buffer;
 }
 
+function downloadBlobViaAnchor(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const nativeDownload = retainNativeBlobDownload(url);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  } catch (error) {
+    if (nativeDownload) revokeNativeBlobDownload(url);
+    else URL.revokeObjectURL(url);
+    throw error;
+  }
+  if (!nativeDownload) {
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+}
+
 /**
  * Trigger a browser download for the given file content by creating a Blob
  * and clicking a temporary anchor. Binary content is expected to be
@@ -31,16 +53,24 @@ export function triggerFileDownload({
   const blob = isBinary
     ? new Blob([base64ToArrayBuffer(content)], { type: "application/octet-stream" })
     : new Blob([content], { type: "text/plain;charset=utf-8" });
+  downloadBlobViaAnchor(blob, fileBasename(fileName));
+}
 
-  const url = URL.createObjectURL(blob);
-  try {
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = fileBasename(fileName);
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+/**
+ * Trigger a browser download for a Blob already in hand (e.g. a fetch
+ * response body), under an explicit file name. Unlike triggerFileDownload,
+ * the name is used as-is rather than reduced to a basename, since callers
+ * pass a download name directly rather than a source path.
+ */
+export function triggerBlobDownload(blob: Blob, fileName: string): void {
+  downloadBlobViaAnchor(blob, fileName);
+}
+
+export function triggerUrlDownload(url: string, fileName: string): void {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }

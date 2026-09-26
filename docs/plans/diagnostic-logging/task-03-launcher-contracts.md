@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-backend-log-sinks"]
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 03: Launcher contracts

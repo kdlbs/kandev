@@ -9,6 +9,10 @@ const makeLocal = (sha: string, message = "msg") => ({
 });
 
 const PR_DATE = "2026-03-29T00:00:00Z";
+const WORKSPACE_ID = "workspace-1";
+const PR_OWNER = "acme";
+const PR_REPO = "widget";
+const REMOTE_SHA = "ccc3333";
 
 const makePR = (sha: string) => ({
   sha,
@@ -49,26 +53,27 @@ const makePRFull = (sha: string, message = "msg", author = "user") => ({
   additions: 5,
   deletions: 2,
   files_changed: 1,
+  workspace_id: WORKSPACE_ID,
+  owner: PR_OWNER,
+  repo: PR_REPO,
 });
 
 describe("mergeCommits", () => {
   it("marks all local commits as unpushed when no PR commits exist", () => {
     const local = [makeLocal("aaa1111", "first"), makeLocal("bbb2222", "second")];
     const result = mergeCommits(local, []);
-    expect(result).toEqual([
+    expect(result).toMatchObject([
       {
         commit_sha: "aaa1111",
-        commit_message: "first",
-        insertions: 1,
-        deletions: 0,
         pushed: false,
+        statsAvailable: true,
+        detailTarget: { source: "local", sha: "aaa1111" },
       },
       {
         commit_sha: "bbb2222",
-        commit_message: "second",
-        insertions: 1,
-        deletions: 0,
         pushed: false,
+        statsAvailable: true,
+        detailTarget: { source: "local", sha: "bbb2222" },
       },
     ]);
   });
@@ -106,23 +111,34 @@ describe("mergeCommits", () => {
     const local = [makeLocal("aaa1111", "first")];
     const pr = [makePRFull("aaa1111bbbccc", "first", "user")];
     const result = mergeCommits(local, pr);
-    expect(result).toEqual([
-      { commit_sha: "aaa1111", commit_message: "first", insertions: 1, deletions: 0, pushed: true },
+    expect(result).toMatchObject([
+      {
+        commit_sha: "aaa1111",
+        pushed: true,
+        statsAvailable: true,
+        detailTarget: { source: "local", sha: "aaa1111" },
+      },
     ]);
   });
 
   it("includes PR-only commits (from other contributors) as pushed", () => {
     const local: ReturnType<typeof makeLocal>[] = [];
-    const pr = [makePRFull("ccc3333", "external fix", "other-dev")];
+    const pr = [makePRFull(REMOTE_SHA, "external fix", "other-dev")];
     const result = mergeCommits(local, pr);
-    expect(result).toEqual([
+    expect(result).toMatchObject([
       {
-        commit_sha: "ccc3333",
+        commit_sha: REMOTE_SHA,
         commit_message: "external fix",
-        insertions: 5,
-        deletions: 2,
         pushed: true,
         committed_at: PR_DATE,
+        statsAvailable: false,
+        detailTarget: {
+          source: "github",
+          sha: REMOTE_SHA,
+          workspaceId: WORKSPACE_ID,
+          owner: PR_OWNER,
+          repo: PR_REPO,
+        },
       },
     ]);
   });
@@ -139,11 +155,13 @@ describe("mergeCommits", () => {
     const local = [makeLocal("aaa1111", "local pushed"), makeLocal("bbb2222", "local only")];
     const pr = [makePRFull("aaa1111fff", "local pushed"), makePRFull("ddd4444", "external")];
     const result = mergeCommits(local, pr);
-    // unpushed first, then pushed (local matched + PR-only)
+    // Unpushed first, then the provider timeline newest-first. The shared
+    // local row stays in its provider position and the provider-only row is
+    // explicitly marked as current PR history.
     expect(result).toHaveLength(3);
     expect(result[0]).toMatchObject({ commit_sha: "bbb2222", pushed: false });
-    expect(result[1]).toMatchObject({ commit_sha: "aaa1111", pushed: true });
-    expect(result[2]).toMatchObject({ commit_sha: "ddd4444", pushed: true });
+    expect(result[1]).toMatchObject({ commit_sha: "ddd4444", pushed: true });
+    expect(result[2]).toMatchObject({ commit_sha: "aaa1111", pushed: true });
   });
 
   it("propagates committed_at from local commits", () => {

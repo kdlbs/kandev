@@ -8,6 +8,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
+import { useTranslation } from "react-i18next";
 
 /**
  * Returns the trimmed dev_script command of the active session's repository,
@@ -38,6 +39,7 @@ export function RepositoryScriptsMenuItems({
   onRunScript: (scriptId: string) => void;
   onRunDevScript: () => void;
 }) {
+  const { t } = useTranslation();
   const repositoryId = useAppStore((s) => {
     const sessionId = s.tasks.activeSessionId;
     if (!sessionId) return null;
@@ -51,7 +53,9 @@ export function RepositoryScriptsMenuItems({
   return (
     <>
       <DropdownMenuSeparator />
-      <DropdownMenuLabel className="text-xs text-muted-foreground">Scripts</DropdownMenuLabel>
+      <DropdownMenuLabel className="text-xs text-muted-foreground">
+        {t("task:scripts")}
+      </DropdownMenuLabel>
       {devScript && (
         <DropdownMenuItem
           onClick={onRunDevScript}
@@ -59,7 +63,7 @@ export function RepositoryScriptsMenuItems({
           data-testid="run-dev-script"
         >
           <IconDeviceDesktop className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-          <span className="truncate">Dev Server</span>
+          <span className="truncate">{t("task:devServer")}</span>
         </DropdownMenuItem>
       )}
       {scripts.map((script) => (

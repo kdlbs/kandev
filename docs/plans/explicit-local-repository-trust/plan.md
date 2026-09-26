@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workspaces/local-repositories.md
+spec: docs/specs/workspaces/requirements/local-repositories.md
 created: 2026-07-20
 status: completed
 ---

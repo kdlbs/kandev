@@ -1,12 +1,30 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { pluginRegistry } from "./registry";
+import type { RepositoryProviderRegistration } from "./types";
+import { i18n } from "@/lib/i18n";
 
 const TASK_SIDEBAR_SLOT = "task-sidebar";
 const TASK_CREATED_ACTION = "task.created";
 const APP_STATUS_LEFT_SLOT = "app-status-bar-left";
-
+const PRIMARY_PLUGIN_ID = "plugin-a";
+const SECONDARY_PLUGIN_ID = "plugin-b";
+const SOURCE_CONTROL_PROVIDER_ID = "source-control";
 function cleanup(...pluginIds: string[]) {
   pluginIds.forEach((id) => pluginRegistry.unregisterPlugin(id));
+}
+function repositoryProvider(
+  id: string,
+  overrides: Partial<RepositoryProviderRegistration> = {},
+): RepositoryProviderRegistration {
+  return {
+    id,
+    label: id,
+    listRepositories: async () => [],
+    matchesURL: () => false,
+    listBranches: async () => [],
+    inspectURL: async () => null,
+    ...overrides,
+  };
 }
 
 describe("pluginRegistry", () => {
@@ -31,6 +49,57 @@ describe("pluginRegistry", () => {
     });
   });
 
+  it("invalidates registration consumers when the host locale changes", async () => {
+    const originalLocale = i18n.language;
+    const listener = vi.fn();
+    const unsubscribe = pluginRegistry.subscribe(listener);
+    try {
+      await i18n.changeLanguage(originalLocale === "pt-pt" ? "en" : "pt-pt");
+      expect(listener).toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+      await i18n.changeLanguage(originalLocale);
+    }
+  });
+
+  it("invalidates consumers when a plugin replaces or removes its translation catalog", () => {
+    const listener = vi.fn();
+    const unsubscribe = pluginRegistry.subscribe(listener);
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    try {
+      scoped.registerTranslations({ en: { greeting: "Hello" } });
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      scoped.registerTranslations({ en: { greeting: "Welcome" } });
+      expect(listener).toHaveBeenCalledTimes(2);
+
+      pluginRegistry.unregisterPlugin("plugin-a");
+      expect(listener).toHaveBeenCalledTimes(3);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("rolls back translations and registrations when a staged atomic commit throws", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    scoped.registerTranslations({ en: { greeting: "Hello" } });
+    scoped.registerNavItem({ id: "nav-rollback", label: "A", path: "/rollback" });
+    expect(i18n.getResourceBundle("en", "plugin-plugin-a")?.greeting).toBe("Hello");
+
+    expect(() =>
+      pluginRegistry.runAtomicMutation(() => {
+        pluginRegistry.unregisterPlugin("plugin-a");
+        scoped.registerNavItem({ id: "nav-committed", label: "A", path: "/committed" });
+        scoped.registerTranslations({ en: { greeting: "Bye" } });
+        throw new Error("staged commit failed");
+      }),
+    ).toThrow("staged commit failed");
+
+    expect(i18n.getResourceBundle("en", "plugin-plugin-a")?.greeting).toBe("Hello");
+    expect(pluginRegistry.getNavItems().map((item) => item.id)).toContain("nav-rollback");
+    expect(pluginRegistry.getNavItems().map((item) => item.id)).not.toContain("nav-committed");
+  });
+
   it("registers and returns a nav item", () => {
     const scoped = pluginRegistry.forPlugin("plugin-a");
 
@@ -41,6 +110,18 @@ describe("pluginRegistry", () => {
       label: "A",
       path: "/plugin-a",
     });
+  });
+
+  it("reports the owning plugin for each nav item", () => {
+    // Nav item ids are plugin-local, so navigation needs the owner to build a
+    // unique identity (`lib/navigation/plugin-destinations.ts`).
+    pluginRegistry.forPlugin("plugin-a").registerNavItem({ id: "nav", label: "A", path: "/a" });
+    pluginRegistry.forPlugin("plugin-b").registerNavItem({ id: "nav", label: "B", path: "/b" });
+
+    expect(pluginRegistry.getNavRegistrations()).toEqual([
+      { pluginId: "plugin-a", id: "nav", label: "A", path: "/a" },
+      { pluginId: "plugin-b", id: "nav", label: "B", path: "/b" },
+    ]);
   });
 
   it("registers and returns a settings route", () => {
@@ -55,6 +136,12 @@ describe("pluginRegistry", () => {
       path: "/settings/plugins/plugin-a",
       Component: Settings,
     });
+  });
+});
+
+describe("pluginRegistry — slots", () => {
+  afterEach(() => {
+    cleanup("plugin-a", "plugin-b");
   });
 
   it("registers a slot component and only returns it for the matching slot", () => {
@@ -125,6 +212,34 @@ describe("pluginRegistry — lifecycle", () => {
     cleanup("plugin-a", "plugin-b");
   });
 
+  it("tracks host lifecycle snapshots without extending the plugin-facing registry", () => {
+    pluginRegistry.markPluginLoading("plugin-a", 3);
+
+    expect(pluginRegistry.getPluginLifecycle("plugin-a")).toEqual({
+      status: "loading",
+      generation: 3,
+    });
+    expect("markPluginLoading" in pluginRegistry.forPlugin("plugin-a")).toBe(false);
+
+    pluginRegistry.markPluginReady("plugin-a", 3);
+
+    expect(pluginRegistry.getPluginLifecycle("plugin-a")).toEqual({
+      status: "ready",
+      generation: 3,
+    });
+  });
+
+  it("does not let an older generation overwrite the current lifecycle", () => {
+    pluginRegistry.markPluginLoading("plugin-a", 4);
+    pluginRegistry.markPluginReady("plugin-a", 3);
+    pluginRegistry.markPluginFailed("plugin-a", 3);
+
+    expect(pluginRegistry.getPluginLifecycle("plugin-a")).toEqual({
+      status: "loading",
+      generation: 4,
+    });
+  });
+
   it("registers a WS handler and only returns it for the matching action", () => {
     const scoped = pluginRegistry.forPlugin("plugin-a");
     const handler = () => {};
@@ -184,6 +299,211 @@ describe("pluginRegistry — lifecycle", () => {
 
     unsubscribe();
     expect(notified).toBe(0);
+  });
+});
+
+describe("pluginRegistry — task panels and task menu actions", () => {
+  afterEach(() => {
+    cleanup("plugin-a", "plugin-b");
+  });
+
+  it("registers a task panel and returns it with its owning pluginId", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    function Notes() {
+      return null;
+    }
+
+    scoped.registerTaskPanel({ id: "notes", title: "Notes", icon: "file-text", Component: Notes });
+
+    expect(pluginRegistry.getTaskPanels()).toEqual([
+      { pluginId: "plugin-a", id: "notes", title: "Notes", icon: "file-text", Component: Notes },
+    ]);
+    expect(pluginRegistry.getTaskPanel("plugin-a", "notes")).toMatchObject({
+      pluginId: "plugin-a",
+      id: "notes",
+    });
+    expect(pluginRegistry.getTaskPanel("plugin-a", "missing")).toBeUndefined();
+  });
+
+  it("registers a task menu action and filters by group", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    const run = vi.fn();
+
+    scoped.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run });
+
+    expect(pluginRegistry.getTaskMenuActions("edit")).toEqual([
+      { pluginId: "plugin-a", id: "enhance", label: "Enhance", group: "edit", run },
+    ]);
+    expect(pluginRegistry.getTaskMenuActions()).toHaveLength(1);
+  });
+
+  it("registers a 'primary' group task menu action separately from 'edit'", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    const editRun = vi.fn();
+    const primaryRun = vi.fn();
+
+    scoped.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run: editRun });
+    scoped.registerTaskMenuAction({
+      id: "quick-tag",
+      label: "Tag",
+      group: "primary",
+      run: primaryRun,
+    });
+
+    expect(pluginRegistry.getTaskMenuActions("edit")).toEqual([
+      { pluginId: "plugin-a", id: "enhance", label: "Enhance", group: "edit", run: editRun },
+    ]);
+    expect(pluginRegistry.getTaskMenuActions("primary")).toEqual([
+      { pluginId: "plugin-a", id: "quick-tag", label: "Tag", group: "primary", run: primaryRun },
+    ]);
+    expect(pluginRegistry.getTaskMenuActions()).toHaveLength(2);
+  });
+
+  it("skips unreadable task menu registrations without hiding healthy actions", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const run = vi.fn();
+    scoped.registerTaskMenuAction({
+      id: "broken-group",
+      label: "Broken group",
+      get group(): never {
+        throw new Error("group failed");
+      },
+      run,
+    });
+    scoped.registerTaskMenuAction({
+      id: "broken-label",
+      get label(): never {
+        throw new Error("label failed");
+      },
+      group: "primary",
+      run,
+    });
+    scoped.registerTaskMenuAction({ id: "healthy", label: "Healthy", group: "primary", run });
+
+    try {
+      expect(pluginRegistry.getTaskMenuActions("primary")).toEqual([
+        { pluginId: "plugin-a", id: "healthy", label: "Healthy", group: "primary", run },
+      ]);
+      expect(pluginRegistry.getTaskMenuActions("primary")).toHaveLength(1);
+      expect(error).toHaveBeenCalledTimes(2);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("bulk-revokes task panels and task menu actions on unregisterPlugin", () => {
+    const scopedA = pluginRegistry.forPlugin("plugin-a");
+    const scopedB = pluginRegistry.forPlugin("plugin-b");
+    function Notes() {
+      return null;
+    }
+
+    scopedA.registerTaskPanel({ id: "notes", title: "Notes", Component: Notes });
+    scopedA.registerTaskMenuAction({
+      id: "enhance",
+      label: "Enhance",
+      group: "edit",
+      run: () => {},
+    });
+    scopedB.registerTaskPanel({ id: "notes", title: "Notes", Component: Notes });
+
+    pluginRegistry.unregisterPlugin("plugin-a");
+
+    expect(pluginRegistry.getTaskPanels()).toEqual([
+      { pluginId: "plugin-b", id: "notes", title: "Notes", icon: undefined, Component: Notes },
+    ]);
+    expect(pluginRegistry.getTaskMenuActions()).toEqual([]);
+  });
+});
+
+describe("pluginRegistry — task filters", () => {
+  afterEach(() => {
+    cleanup("plugin-a", "plugin-b");
+  });
+
+  it("registers a task filter and returns it with its owning pluginId", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    const getOptions = () => [{ value: "bug", label: "Bug" }];
+    const matches = () => true;
+
+    scoped.registerTaskFilter({ id: "tags", label: "Tags", getOptions, matches });
+
+    expect(pluginRegistry.getTaskFilters()).toEqual([
+      { pluginId: "plugin-a", id: "tags", label: "Tags", getOptions, matches },
+    ]);
+  });
+
+  it("returns task filters from multiple plugins in registration order", () => {
+    const scopedA = pluginRegistry.forPlugin("plugin-a");
+    const scopedB = pluginRegistry.forPlugin("plugin-b");
+
+    scopedA.registerTaskFilter({
+      id: "tags",
+      label: "Tags",
+      getOptions: () => [],
+      matches: () => true,
+    });
+    scopedB.registerTaskFilter({
+      id: "priority",
+      label: "Priority",
+      getOptions: () => [],
+      matches: () => true,
+    });
+
+    expect(pluginRegistry.getTaskFilters().map((filter) => filter.id)).toEqual([
+      "tags",
+      "priority",
+    ]);
+  });
+
+  it("bulk-revokes task filters on unregisterPlugin", () => {
+    const scopedA = pluginRegistry.forPlugin("plugin-a");
+    const scopedB = pluginRegistry.forPlugin("plugin-b");
+
+    scopedA.registerTaskFilter({
+      id: "tags",
+      label: "Tags",
+      getOptions: () => [],
+      matches: () => true,
+    });
+    scopedB.registerTaskFilter({
+      id: "priority",
+      label: "Priority",
+      getOptions: () => [],
+      matches: () => true,
+    });
+
+    pluginRegistry.unregisterPlugin("plugin-a");
+
+    expect(pluginRegistry.getTaskFilters().map((filter) => filter.id)).toEqual(["priority"]);
+  });
+});
+
+describe("pluginRegistry — task-list facets", () => {
+  afterEach(() => cleanup("plugin-a", "plugin-b"));
+
+  it("namespaces facet identities and revokes them with their plugin", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    const getValues = () => [{ value: "bug", label: "Bug", color: "#f00" }];
+    scoped.registerTaskListFacet({ id: "tags", label: "Tag", getValues });
+
+    expect(pluginRegistry.getTaskListFacets()).toEqual([
+      { pluginId: "plugin-a", id: "tags", label: "Tag", getValues },
+    ]);
+    pluginRegistry.unregisterPlugin("plugin-a");
+    expect(pluginRegistry.getTaskListFacets()).toEqual([]);
+  });
+
+  it("rejects unsafe and duplicate plugin-local facet ids", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    expect(() =>
+      scoped.registerTaskListFacet({ id: "Not safe", label: "Tag", getValues: () => [] }),
+    ).toThrow("URL-safe");
+    scoped.registerTaskListFacet({ id: "tags", label: "Tag", getValues: () => [] });
+    expect(() =>
+      scoped.registerTaskListFacet({ id: "tags", label: "Tag", getValues: () => [] }),
+    ).toThrow("already registered");
   });
 });
 
@@ -279,5 +599,108 @@ describe("pluginRegistry — keybinding handlers", () => {
 
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+});
+
+function cleanupProviderContracts() {
+  cleanup(PRIMARY_PLUGIN_ID, SECONDARY_PLUGIN_ID);
+}
+
+describe("pluginRegistry — repository provider contracts", () => {
+  afterEach(cleanupProviderContracts);
+
+  it("keeps repository provider ownership with its registering plugin", () => {
+    const provider = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID);
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(provider);
+
+    expect(pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)).toMatchObject({
+      pluginId: PRIMARY_PLUGIN_ID,
+      id: SOURCE_CONTROL_PROVIDER_ID,
+      label: SOURCE_CONTROL_PROVIDER_ID,
+    });
+  });
+
+  it("preserves lazy provider labels so locale changes do not require plugin reload", () => {
+    let label = "Source control";
+    const provider = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID);
+    Object.defineProperty(provider, "label", {
+      enumerable: true,
+      get: () => label,
+    });
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(provider);
+
+    expect(pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)?.label).toBe(
+      "Source control",
+    );
+    label = "Controlo de código-fonte";
+    expect(pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)?.label).toBe(
+      "Controlo de código-fonte",
+    );
+  });
+
+  it("rejects a repository provider not declared for its plugin when declarations are available", () => {
+    pluginRegistry.setDeclaredRepositoryProviderIds(PRIMARY_PLUGIN_ID, ["declared-source-control"]);
+
+    expect(() =>
+      pluginRegistry
+        .forPlugin(PRIMARY_PLUGIN_ID)
+        .registerRepositoryProvider(repositoryProvider("other-source-control")),
+    ).toThrow('does not declare repository provider "other-source-control"');
+  });
+
+  it("rejects duplicate active provider ownership deterministically", () => {
+    pluginRegistry
+      .forPlugin(PRIMARY_PLUGIN_ID)
+      .registerRepositoryProvider(repositoryProvider(SOURCE_CONTROL_PROVIDER_ID));
+
+    expect(() =>
+      pluginRegistry
+        .forPlugin(SECONDARY_PLUGIN_ID)
+        .registerRepositoryProvider(repositoryProvider(SOURCE_CONTROL_PROVIDER_ID)),
+    ).toThrow(
+      `provider "${SOURCE_CONTROL_PROVIDER_ID}" is already owned by "${PRIMARY_PLUGIN_ID}"`,
+    );
+
+    expect(pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)?.pluginId).toBe(
+      PRIMARY_PLUGIN_ID,
+    );
+  });
+
+  it("rejects provider IDs owned by first-party integrations", () => {
+    expect(() =>
+      pluginRegistry
+        .forPlugin(PRIMARY_PLUGIN_ID)
+        .registerRepositoryProvider(repositoryProvider("github")),
+    ).toThrow('provider "github" is reserved by the host');
+  });
+
+  it("rejects non-canonical provider IDs", () => {
+    expect(() =>
+      pluginRegistry
+        .forPlugin(PRIMARY_PLUGIN_ID)
+        .registerRepositoryProvider(repositoryProvider("Bitbucket")),
+    ).toThrow('provider "Bitbucket" must be a canonical lowercase identifier');
+  });
+});
+
+describe("pluginRegistry — task action contracts", () => {
+  afterEach(cleanupProviderContracts);
+
+  it("registers placement-aware task actions and revokes them with their owner", () => {
+    const action = {
+      id: "link-change",
+      label: "Link change request",
+      placement: "link" as const,
+      group: "Link",
+      run: async () => {},
+    };
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerTaskAction(action);
+
+    expect(pluginRegistry.getTaskActions("link")).toEqual([
+      { ...action, pluginId: PRIMARY_PLUGIN_ID },
+    ]);
+
+    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+    expect(pluginRegistry.getTaskActions("link")).toEqual([]);
   });
 });

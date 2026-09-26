@@ -1,5 +1,7 @@
 import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
-import type { DashboardData, OfficeTask } from "@/lib/state/slices/office/types";
+import type { DashboardData } from "@/lib/state/slices/office/types";
+import type { QuorumResponseDTO } from "@/lib/state/slices/office/quorum-types";
+import { normalizeOfficeTask, type OfficeTaskWire } from "./office-task-normalize";
 
 const BASE = "/api/v1/office";
 
@@ -54,8 +56,7 @@ export function exportConfig(workspaceId: string, options?: ApiRequestOptions) {
   );
 }
 
-export const exportConfigZipUrl = (workspaceId: string) =>
-  `${BASE}/workspaces/${workspaceId}/config/export/zip`;
+export * from "./office-config-export";
 
 export function previewImport(
   workspaceId: string,
@@ -80,13 +81,12 @@ export function applyImport(
   bundle: Record<string, unknown>,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<{ result: { created_count: number; updated_count: number } }>(
-    `${BASE}/workspaces/${workspaceId}/config/import`,
-    {
-      ...options,
-      init: { method: "POST", body: JSON.stringify(bundle), ...options?.init },
-    },
-  );
+  return fetchJson<{
+    result: { created_count: number; updated_count: number; warnings?: string[] };
+  }>(`${BASE}/workspaces/${workspaceId}/config/import`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(bundle), ...options?.init },
+  });
 }
 
 // --- Config Sync (FS <-> DB) ---
@@ -131,10 +131,12 @@ export function getOutgoingDiff(workspaceId: string, options?: ApiRequestOptions
 }
 
 export function applyIncomingSync(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ result: { created_count: number; updated_count: number } }>(
-    `${BASE}/workspaces/${workspaceId}/config/sync/import-fs`,
-    { ...options, init: { method: "POST", ...options?.init } },
-  );
+  return fetchJson<{
+    result: { created_count: number; updated_count: number; warnings?: string[] };
+  }>(`${BASE}/workspaces/${workspaceId}/config/sync/import-fs`, {
+    ...options,
+    init: { method: "POST", ...options?.init },
+  });
 }
 
 export function applyOutgoingSync(workspaceId: string, options?: ApiRequestOptions) {
@@ -160,10 +162,10 @@ export type TimelineEvent = {
 };
 
 export function getTask(taskId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ task: OfficeTask; timeline?: TimelineEvent[] }>(
+  return fetchJson<{ task: OfficeTaskWire; timeline?: TimelineEvent[] }>(
     `${BASE}/tasks/${taskId}`,
     options,
-  );
+  ).then((response) => ({ ...response, task: normalizeOfficeTask(response.task) }));
 }
 
 // --- Task mutations (PATCH /tasks/:id) ---
@@ -172,6 +174,8 @@ export type UpdateTaskPayload = {
   status?: string;
   comment?: string;
   assignee_agent_profile_id?: string;
+  /** The human assignee. "" unassigns; omitting the field leaves it alone. */
+  assignee_user_id?: string;
   priority?: string;
   project_id?: string;
   parent_id?: string;
@@ -335,6 +339,15 @@ export function listTaskDecisions(taskId: string, options?: ApiRequestOptions) {
   ).then((res) => res.decisions ?? []);
 }
 
+// --- Task quorum (AC-24b diagnostic read) ---
+
+export function getTaskQuorum(taskId: string, workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<QuorumResponseDTO>(
+    `${BASE}/workspaces/${workspaceId}/tasks/${taskId}/quorum`,
+    options,
+  );
+}
+
 // --- Comments ---
 
 export type TaskCommentResponse = {
@@ -377,10 +390,13 @@ export function searchTasks(
   options?: ApiRequestOptions,
 ) {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
-  return fetchJson<{ tasks: OfficeTask[] }>(
+  return fetchJson<{ tasks: OfficeTaskWire[] }>(
     `${BASE}/workspaces/${workspaceId}/tasks/search?${params.toString()}`,
     options,
-  );
+  ).then((response) => ({
+    ...response,
+    tasks: response.tasks.map(normalizeOfficeTask),
+  }));
 }
 
 // --- Instructions ---
@@ -493,6 +509,7 @@ export function completeOnboarding(data: OnboardingCompletePayload, options?: Ap
 export type ImportFromFSResult = {
   workspaceIds: string[];
   importedCount: number;
+  warnings?: string[];
 };
 
 export function importFromFS(options?: ApiRequestOptions) {
@@ -609,8 +626,6 @@ export function getWorkspaceSettings(workspaceId: string, options?: ApiRequestOp
 export function updateWorkspaceSettings(
   workspaceId: string,
   data: {
-    name?: string;
-    description?: string;
     require_approval_for_new_agents?: boolean;
     require_approval_for_task_completion?: boolean;
     require_approval_for_skill_changes?: boolean;

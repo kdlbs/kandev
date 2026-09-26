@@ -3,11 +3,12 @@
 import { useEffect, useRef, useCallback } from "react";
 import dynamic from "@/lib/routing/client-dynamic";
 import type { BeforeMount, OnMount } from "@monaco-editor/react";
-import { KANDEV_MONACO_DARK } from "@/lib/theme/editor-theme";
+import { EDITOR_FONT_FAMILY, EDITOR_FONT_SIZE, KANDEV_MONACO_DARK } from "@/lib/theme/editor-theme";
 import type { PromptReference } from "@/lib/prompts/expand-prompt-references";
 import {
   createPlaceholderCompletionProvider,
   createPromptMentionCompletionProvider,
+  scopeCompletionProviderToModel,
   type ScriptPlaceholder,
 } from "./script-editor-completions";
 import { useTranslation } from "react-i18next";
@@ -30,56 +31,11 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.
 });
 
 type Monaco = typeof import("monaco-editor");
+type MonacoModel = import("monaco-editor").editor.ITextModel;
 
 export type CompletionProviderFactory = (
   monaco: Monaco,
 ) => import("monaco-editor").languages.CompletionItemProvider;
-
-// Per-language, per-slot singletons so a markdown editor and a shell editor
-// can coexist without their providers fighting over the same global slot.
-// "primary" holds the placeholder/custom completion provider; "mention"
-// holds the @prompt-name mention provider — both can be registered at once.
-type ProviderSlot = "primary" | "mention";
-
-const disposablesByKey: Map<string, { dispose: () => void }> = new Map();
-const instanceCountsByLanguage: Map<string, number> = new Map();
-
-function slotKey(language: string, slot: ProviderSlot) {
-  return `${language}:${slot}`;
-}
-
-function disposeFor(language: string, slot: ProviderSlot) {
-  const key = slotKey(language, slot);
-  const existing = disposablesByKey.get(key);
-  if (existing) {
-    existing.dispose();
-    disposablesByKey.delete(key);
-  }
-}
-
-function swapProvider(
-  monaco: Monaco,
-  language: string,
-  slot: ProviderSlot,
-  factory: CompletionProviderFactory,
-) {
-  disposeFor(language, slot);
-  disposablesByKey.set(
-    slotKey(language, slot),
-    monaco.languages.registerCompletionItemProvider(language, factory(monaco)),
-  );
-}
-
-function unregisterProvider(language: string) {
-  const next = (instanceCountsByLanguage.get(language) ?? 1) - 1;
-  if (next <= 0) {
-    disposeFor(language, "primary");
-    disposeFor(language, "mention");
-    instanceCountsByLanguage.delete(language);
-    return;
-  }
-  instanceCountsByLanguage.set(language, next);
-}
 
 /** Compute editor height from content lines (min 80px, max 400px). */
 export function computeEditorHeight(value: string, minLines = 3): string {
@@ -107,11 +63,94 @@ type ScriptEditorProps = {
    * Saved custom prompts to suggest as `@name` mentions. Registered
    * alongside the placeholder/custom completion provider (independent
    * trigger character, so both can be active at once).
+   * Callers should preserve the array identity when its contents are unchanged
+   * to avoid unnecessary provider re-registration.
    */
   mentionPrompts?: PromptReference[];
   readOnly?: boolean;
   lineNumbers?: "on" | "off";
+  ariaLabel?: string;
+  testId?: string;
 };
+
+type CompletionProviderOptions = Pick<
+  ScriptEditorProps,
+  "language" | "completionProvider" | "placeholders" | "executorType" | "mentionPrompts"
+> & { language: string };
+
+function useCompletionProviders({
+  language,
+  completionProvider,
+  placeholders,
+  executorType,
+  mentionPrompts,
+}: CompletionProviderOptions): OnMount {
+  const monacoRef = useRef<Monaco | null>(null);
+  const modelRef = useRef<MonacoModel | null>(null);
+  const primaryDisposableRef = useRef<{ dispose: () => void } | null>(null);
+  const mentionDisposableRef = useRef<{ dispose: () => void } | null>(null);
+  const primaryRegistrationRef = useRef<() => void>(() => undefined);
+  const mentionRegistrationRef = useRef<() => void>(() => undefined);
+
+  const disposePrimaryProvider = useCallback(() => {
+    primaryDisposableRef.current?.dispose();
+    primaryDisposableRef.current = null;
+  }, []);
+
+  const disposeMentionProvider = useCallback(() => {
+    mentionDisposableRef.current?.dispose();
+    mentionDisposableRef.current = null;
+  }, []);
+
+  const registerPrimaryProvider = useCallback(() => {
+    disposePrimaryProvider();
+    const monaco = monacoRef.current;
+    const model = modelRef.current;
+    const factory = resolveFactory(completionProvider, placeholders, executorType);
+    if (!monaco || !model || !factory) return;
+    primaryDisposableRef.current = monaco.languages.registerCompletionItemProvider(
+      language,
+      scopeCompletionProviderToModel(factory(monaco), model),
+    );
+  }, [completionProvider, disposePrimaryProvider, executorType, language, placeholders]);
+
+  const registerMentionProvider = useCallback(() => {
+    disposeMentionProvider();
+    const monaco = monacoRef.current;
+    const model = modelRef.current;
+    const factory = resolveMentionFactory(mentionPrompts);
+    if (!monaco || !model || !factory) return;
+    mentionDisposableRef.current = monaco.languages.registerCompletionItemProvider(
+      language,
+      scopeCompletionProviderToModel(factory(monaco), model),
+    );
+  }, [disposeMentionProvider, language, mentionPrompts]);
+
+  // Monaco calls onMount only once. Keep its callback pointed at the latest
+  // provider registrations so data that loads before Monaco finishes mounting
+  // is available on the first registration.
+  primaryRegistrationRef.current = registerPrimaryProvider;
+  mentionRegistrationRef.current = registerMentionProvider;
+
+  useEffect(() => {
+    registerPrimaryProvider();
+    return disposePrimaryProvider;
+  }, [disposePrimaryProvider, registerPrimaryProvider]);
+
+  useEffect(() => {
+    registerMentionProvider();
+    return disposeMentionProvider;
+  }, [disposeMentionProvider, registerMentionProvider]);
+
+  const handleMount: OnMount = useCallback((editor, monaco) => {
+    monacoRef.current = monaco;
+    modelRef.current = editor.getModel();
+    primaryRegistrationRef.current();
+    mentionRegistrationRef.current();
+  }, []);
+
+  return handleMount;
+}
 
 export function ScriptEditor({
   value,
@@ -124,96 +163,53 @@ export function ScriptEditor({
   mentionPrompts,
   readOnly = false,
   lineNumbers = "on",
+  ariaLabel,
+  testId,
 }: ScriptEditorProps) {
-  const mountedRef = useRef(false);
-  const monacoRef = useRef<Monaco | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (mountedRef.current) {
-        unregisterProvider(language);
-        mountedRef.current = false;
-      }
-    };
-  }, [language]);
-
-  const ensureProviderRegistered = useCallback(
-    (monaco: Monaco) => {
-      const factory = resolveFactory(completionProvider, placeholders, executorType);
-      const mentionFactory = resolveMentionFactory(mentionPrompts);
-      if (!factory && !mentionFactory) {
-        // Nothing to register. If a previous render had registered providers
-        // for this instance, dispose them now so stale suggestions (e.g. a
-        // deleted prompt list) don't linger while the editor stays mounted.
-        if (mountedRef.current) {
-          disposeFor(language, "primary");
-          disposeFor(language, "mention");
-        }
-        return;
-      }
-      if (!mountedRef.current) {
-        mountedRef.current = true;
-        instanceCountsByLanguage.set(language, (instanceCountsByLanguage.get(language) ?? 0) + 1);
-      }
-      if (factory) {
-        swapProvider(monaco, language, "primary", factory);
-      } else {
-        disposeFor(language, "primary");
-      }
-      if (mentionFactory) {
-        swapProvider(monaco, language, "mention", mentionFactory);
-      } else {
-        disposeFor(language, "mention");
-      }
-    },
-    [completionProvider, placeholders, executorType, mentionPrompts, language],
-  );
-
-  useEffect(() => {
-    if (monacoRef.current) ensureProviderRegistered(monacoRef.current);
-  }, [ensureProviderRegistered]);
-
+  const handleMount = useCompletionProviders({
+    language,
+    completionProvider,
+    placeholders,
+    executorType,
+    mentionPrompts,
+  });
   const handleBeforeMount: BeforeMount = useCallback((monaco) => {
     monaco.editor.defineTheme("kandev-dark", KANDEV_MONACO_DARK);
   }, []);
 
-  const handleMount: OnMount = useCallback(
-    (_editor, monaco) => {
-      monacoRef.current = monaco;
-      ensureProviderRegistered(monaco);
-    },
-    [ensureProviderRegistered],
-  );
-
   return (
-    <MonacoEditor
-      height={height}
-      language={language}
-      value={value}
-      onChange={(v) => onChange(v ?? "")}
-      beforeMount={handleBeforeMount}
-      onMount={handleMount}
-      theme="kandev-dark"
-      options={{
-        minimap: { enabled: false },
-        lineNumbers,
-        wordWrap: "on",
-        fontSize: 13,
-        scrollBeyondLastLine: false,
-        readOnly,
-        bracketPairColorization: { enabled: true },
-        padding: { top: 8, bottom: 8 },
-        renderLineHighlight: "none",
-        overviewRulerLanes: 0,
-        fixedOverflowWidgets: true,
-        wordBasedSuggestions: "off",
-        scrollbar: {
-          vertical: "auto",
-          horizontal: "auto",
-          alwaysConsumeMouseWheel: false,
-        },
-      }}
-    />
+    <div data-testid={testId} className="h-full w-full">
+      <MonacoEditor
+        height={height}
+        language={language}
+        value={value}
+        onChange={(v) => onChange(v ?? "")}
+        beforeMount={handleBeforeMount}
+        onMount={handleMount}
+        theme="kandev-dark"
+        options={{
+          ariaLabel,
+          minimap: { enabled: false },
+          lineNumbers,
+          wordWrap: "on",
+          fontFamily: EDITOR_FONT_FAMILY,
+          fontSize: EDITOR_FONT_SIZE,
+          scrollBeyondLastLine: false,
+          readOnly,
+          bracketPairColorization: { enabled: true },
+          padding: { top: 8, bottom: 8 },
+          renderLineHighlight: "none",
+          overviewRulerLanes: 0,
+          fixedOverflowWidgets: true,
+          wordBasedSuggestions: "off",
+          scrollbar: {
+            vertical: "auto",
+            horizontal: "auto",
+            alwaysConsumeMouseWheel: false,
+          },
+        }}
+      />
+    </div>
   );
 }
 

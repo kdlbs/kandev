@@ -20,13 +20,14 @@ func TestAddBranchToTask_QA_ProberErrorFallsThrough(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
 		Title:          "Probe error",
 		Repositories:   []TaskRepositoryInput{{RepositoryID: "repo-1", BaseBranch: "main"}},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -61,13 +62,14 @@ func TestAddBranchToTask_QA_BadGitHubURLRejected(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
 		Title:          "Bad URL",
 		Repositories:   []TaskRepositoryInput{{RepositoryID: "repo-1", BaseBranch: "main"}},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -104,13 +106,14 @@ func TestAddBranchToTask_QA_RegisteredProviderRepoSkipsProbe(t *testing.T) {
 	})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
 		Title:          "Skip probe",
 		Repositories:   []TaskRepositoryInput{{RepositoryID: "repo-1", BaseBranch: "main"}},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -153,13 +156,14 @@ func TestAddBranchToTask_QA_BackfillsExistingEmptyDefaultBranch(t *testing.T) {
 	})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
 		Title:          "Backfill",
 		Repositories:   []TaskRepositoryInput{{RepositoryID: "repo-1", BaseBranch: "main"}},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -196,13 +200,14 @@ func TestAddBranchToTask_QA_RepositoryIDFastPathIgnoresProbe(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
 		Title:          "Fast path",
 		Repositories:   []TaskRepositoryInput{{RepositoryID: "repo-1", BaseBranch: "main"}},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}

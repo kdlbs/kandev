@@ -1,16 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { usePathname, useRouter } from "@/lib/routing/client-router";
 import { IconPlus, IconRobot, IconSitemap } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
+import {
+  selectOfficeAgentProfiles,
+  selectOfficeInboxItems,
+} from "@/lib/state/slices/office/selectors";
 import { useInOffice } from "@/hooks/use-in-office";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import { listAgentProfiles } from "@/lib/api/domains/office-api";
 import { cn } from "@/lib/utils";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { selectActiveSessionsForAgent } from "@/lib/state/slices/session/selectors";
@@ -28,24 +29,9 @@ type AgentsSectionProps = {
   collapsed: boolean;
 };
 
-const hasStaleOfficeData = ({
-  agentsLength,
-  inboxCount,
-  inboxItemsLength,
-  projectsLength,
-}: {
-  agentsLength: number;
-  inboxCount: number;
-  inboxItemsLength: number;
-  projectsLength: number;
-}) => agentsLength > 0 || inboxItemsLength > 0 || projectsLength > 0 || inboxCount > 0;
-
-function isCurrentWorkspaceResponse(
-  requestWorkspaceId: string | null,
-  activeWorkspaceId: string | null,
-) {
-  return activeWorkspaceId !== null && requestWorkspaceId === activeWorkspaceId;
-}
+// This section owns no fetching: `useOfficeWorkspaceData` (mounted in
+// `AppSidebar`) loads the agents, keyed by workspace, and the selector only
+// ever exposes the active workspace's list — nothing to clear on a switch.
 
 function AgentsSectionHeaderAction({ router }: { router: { push: (path: string) => void } }) {
   const { t } = useTranslation();
@@ -89,63 +75,7 @@ export function AgentsSection({ collapsed }: AgentsSectionProps) {
   const { t } = useTranslation();
   const router = useRouter();
   const inOffice = useInOffice();
-  const store = useAppStoreApi();
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
-  const setProjects = useAppStore((s) => s.setProjects);
-  const setInboxItems = useAppStore((s) => s.setInboxItems);
-  const setInboxCount = useAppStore((s) => s.setInboxCount);
-  const projects = useAppStore((s) => s.office.projects);
-  const inboxItems = useAppStore((s) => s.office.inboxItems);
-  const inboxCount = useAppStore((s) => s.office.inboxCount);
-  const visibleAgents = workspaceId ? agents : [];
-  const fetchSequenceRef = useRef(0);
-
-  const refetchAgents = useCallback(async () => {
-    if (!workspaceId || !inOffice) return;
-    const requestId = ++fetchSequenceRef.current;
-    const requestedWorkspaceId = workspaceId;
-    const res = await listAgentProfiles(requestedWorkspaceId).catch(() => ({ agents: [] }));
-    if (!isCurrentWorkspaceResponse(requestedWorkspaceId, store.getState().workspaces.activeId))
-      return;
-    if (requestId !== fetchSequenceRef.current) return;
-    setOfficeAgentProfiles(res.agents ?? []);
-  }, [inOffice, setOfficeAgentProfiles, store, workspaceId]);
-
-  useEffect(() => {
-    refetchAgents();
-  }, [refetchAgents]);
-
-  useEffect(() => {
-    if (!inOffice || workspaceId) return;
-    if (
-      !hasStaleOfficeData({
-        agentsLength: agents.length,
-        inboxCount,
-        inboxItemsLength: inboxItems.length,
-        projectsLength: projects.length,
-      })
-    )
-      return;
-    setOfficeAgentProfiles([]);
-    setProjects([]);
-    setInboxItems([]);
-    setInboxCount(0);
-  }, [
-    agents.length,
-    inboxCount,
-    inboxItems.length,
-    inOffice,
-    projects.length,
-    setInboxCount,
-    setInboxItems,
-    setOfficeAgentProfiles,
-    setProjects,
-    workspaceId,
-  ]);
-
-  useOfficeRefetch("agents", refetchAgents);
+  const visibleAgents = useAppStore(selectOfficeAgentProfiles);
 
   if (!inOffice) return null;
 
@@ -175,7 +105,7 @@ function AgentRow({ agent }: { agent: AgentProfile }) {
   const isActive = pathname === href;
   const liveCount = useAppStore((s) => selectActiveSessionsForAgent(s, agent.id));
   const errorCount = useAppStore((s) =>
-    s.office.inboxItems.reduce((acc, item) => {
+    selectOfficeInboxItems(s).reduce((acc, item) => {
       if (item.type !== "agent_run_failed") return acc;
       const payloadAgent =
         typeof item.payload?.agent_profile_id === "string" ? item.payload.agent_profile_id : "";

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { NewTaskDialog } from "../components/new-task-dialog";
@@ -11,6 +12,7 @@ import { TasksContent } from "./tasks-content";
 import { getExpandableTaskIds, useIssuesTree } from "./use-tasks-tree";
 import { useServerSearch } from "./use-server-search";
 import { usePaginatedTasks } from "./use-paginated-tasks";
+import { useTranslation } from "react-i18next";
 
 const STORAGE_KEY_PREFIX = "kandev-tasks-filters-";
 const SHOW_SYSTEM_STORAGE_KEY = "kandev-tasks-show-system";
@@ -111,7 +113,7 @@ export function TasksList() {
   const groupBy = useAppStore((s) => s.office.tasks.groupBy);
   const nestingEnabled = useAppStore((s) => s.office.tasks.nestingEnabled);
   const isLoading = useAppStore((s) => s.office.tasks.isLoading);
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
 
   const setTaskFilters = useAppStore((s) => s.setTaskFilters);
   const setTaskViewMode = useAppStore((s) => s.setTaskViewMode);
@@ -123,7 +125,7 @@ export function TasksList() {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [showSystem, setShowSystem] = useShowSystemPref();
-  const { searchResults, triggerSearch } = useServerSearch(workspaceId);
+  const { searchResults, triggerSearch, patchSearchResult } = useServerSearch(workspaceId);
 
   const agentMap = new Map(agents.map((a) => [a.id, a.name]));
 
@@ -202,6 +204,7 @@ export function TasksList() {
         expandedIds={expandedIds}
         onToggleExpand={handleToggleExpand}
         agentMap={agentMap}
+        onTaskPatch={searchResults ? patchSearchResult : undefined}
       />
 
       <LoadMoreButton
@@ -223,6 +226,7 @@ function LoadMoreButton({
   loading: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   if (!visible) return null;
   return (
     <div className="flex justify-center pt-2">
@@ -233,7 +237,7 @@ function LoadMoreButton({
         disabled={loading}
         className="cursor-pointer"
       >
-        {loading ? "Loading…" : "Load more"}
+        {loading ? t("common:loading") : t("office:loadMore")}
       </Button>
     </div>
   );

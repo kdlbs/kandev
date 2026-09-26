@@ -5,6 +5,7 @@ import {
   hasPendingPermissionRequest,
 } from "@/lib/utils/pending-clarification";
 import { aggregateTaskPendingInput } from "@/lib/utils/task-pending-input";
+import { pickFreshestStatusSummary } from "@/lib/task-status-summary";
 
 /** Flat per-session pending flags keyed for shallow comparison so the sidebar
  *  only re-renders when a clarification/permission flag actually flips, not on
@@ -93,6 +94,41 @@ function collectSnapshotTasks(snapshots: WorkflowSnapshotMap, acc: Acc): void {
   }
 }
 
+function activeTaskIsNewer(
+  active: KanbanState["tasks"][number],
+  projected: KanbanState["tasks"][number],
+): boolean {
+  const activeTime = active.updatedAt ? Date.parse(active.updatedAt) : 0;
+  const projectedTime = projected.updatedAt ? Date.parse(projected.updatedAt) : 0;
+  return activeTime >= projectedTime;
+}
+
+function reconcileTaskProjection(
+  active: KanbanState["tasks"][number],
+  projected: AggregatedSidebarTasks["allTasks"][number],
+  activeWorkflowId: string,
+): AggregatedSidebarTasks["allTasks"][number] {
+  const activeTask = {
+    ...active,
+    // Autopilot is immutable after creation. The active slice can be fed by
+    // a partial WS event, so do not let it erase the value from the full
+    // workflow projection.
+    autopilot: active.autopilot ?? projected.autopilot,
+    isFromOffice: active.isFromOffice ?? projected.isFromOffice,
+    _workflowId: activeWorkflowId,
+  };
+  const task = activeTaskIsNewer(active, projected) ? activeTask : projected;
+  const interrupted = task.interrupted ?? projected.interrupted;
+  return {
+    ...task,
+    ...(interrupted === undefined ? {} : { interrupted }),
+    // Workflow snapshots can re-stamp queued_prompt_count at an equal
+    // revision, so treat the snapshot as the incoming reading and the live
+    // projection as the cached fallback.
+    statusSummary: pickFreshestStatusSummary(projected.statusSummary, active.statusSummary),
+  };
+}
+
 function applyActiveKanbanFallback(
   activeWorkflowId: string,
   activeTasks: KanbanState["tasks"],
@@ -112,9 +148,17 @@ function applyActiveKanbanFallback(
   // those leaks don't get re-tagged with the active workflow id.
   const activeStepIds = new Set(activeSteps.map((s) => s.id));
   for (const t of activeTasks) {
-    if (acc.seen.has(t.id)) continue;
     if (activeStepIds.size > 0 && !activeStepIds.has(t.workflowStepId)) continue;
-    acc.tasks.push({ ...t, _workflowId: activeWorkflowId });
+    const existingIndex = acc.tasks.findIndex((task) => task.id === t.id);
+    if (existingIndex >= 0) {
+      acc.tasks[existingIndex] = reconcileTaskProjection(
+        t,
+        acc.tasks[existingIndex],
+        activeWorkflowId,
+      );
+    } else {
+      acc.tasks.push({ ...t, _workflowId: activeWorkflowId });
+    }
     acc.seen.add(t.id);
   }
 }

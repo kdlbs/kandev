@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["01-transcript-threshold-and-controls", "02-pinned-prompt-overflow", "03-e2e-and-pr-assets", "04-directional-edge-state"]
 plan: "plan.md"
-spec: "../../specs/last-prompt-pinning-regressions/spec.md"
+spec: "../../specs/ui/requirements/last-prompt-pinning-regressions.md"
 ---
 
 # Task 05: Make the expanded prompt height proportional and scroll actions stream-safe

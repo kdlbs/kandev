@@ -49,16 +49,24 @@ func (i *storageInventory) LoadWorkspaceInventory(ctx context.Context) (workspac
 			})
 		}
 	}
+	tasks, err := i.taskWorkspaceStates(ctx)
+	if err != nil {
+		return workspaces.Inventory{}, err
+	}
+	inventory.KnownTaskIDs, inventory.ArchivedTaskIDs = taskEligibilitySets(tasks)
 	return inventory, nil
 }
 
 func (i *storageInventory) activeWorktreePaths(ctx context.Context) ([]string, error) {
 	paths := make([]string, 0)
-	query := "SELECT w.worktree_path FROM task_session_worktrees w " +
-		"INNER JOIN task_sessions s ON s.id = w.session_id " +
-		"INNER JOIN tasks t ON t.id = s.task_id " +
-		"WHERE t.archived_at IS NULL AND w.status = 'active' " +
-		"AND w.deleted_at IS NULL AND w.worktree_path <> ''"
+	// Worktrees are task-owned: the inventory reads task_environment_repos
+	// through the owning environment's task row, so a zero-session task
+	// workspace is still protected from storage maintenance.
+	query := "SELECT ter.worktree_path FROM task_environment_repos ter " +
+		"INNER JOIN task_environments te ON te.id = ter.task_environment_id " +
+		"INNER JOIN tasks t ON t.id = te.task_id " +
+		"WHERE t.archived_at IS NULL AND ter.status = 'active' " +
+		"AND ter.deleted_at IS NULL AND ter.worktree_path <> ''"
 	if err := i.reader.SelectContext(ctx, &paths, query); err != nil {
 		return nil, err
 	}
@@ -86,6 +94,32 @@ type activeWorkspaceRow struct {
 	TaskID        string
 	WorkspaceID   string
 	WorkspacePath string
+}
+
+type taskWorkspaceState struct {
+	ID         string     `db:"id"`
+	ArchivedAt *time.Time `db:"archived_at"`
+}
+
+func (i *storageInventory) taskWorkspaceStates(ctx context.Context) ([]taskWorkspaceState, error) {
+	rows := make([]taskWorkspaceState, 0)
+	query := i.reader.Rebind("SELECT id, archived_at FROM tasks")
+	if err := i.reader.SelectContext(ctx, &rows, query); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func taskEligibilitySets(tasks []taskWorkspaceState) (map[string]struct{}, map[string]struct{}) {
+	known := make(map[string]struct{}, len(tasks))
+	archived := make(map[string]struct{})
+	for _, task := range tasks {
+		known[task.ID] = struct{}{}
+		if task.ArchivedAt != nil {
+			archived[task.ID] = struct{}{}
+		}
+	}
+	return known, archived
 }
 
 type containerInventory struct{ reader *sqlx.DB }

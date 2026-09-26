@@ -2,6 +2,8 @@ package sqlite_test
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -35,12 +37,25 @@ func seedTasksTable(t *testing.T, repo *sqlite.Repository, taskID, workspaceID s
 	}
 }
 
+func TestCreateCostTables_DoesNotCreateUnusedSessionIDIndex(t *testing.T) {
+	repo := newTestRepo(t)
+
+	var name string
+	err := repo.ReaderDB().QueryRow(
+		`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'office_cost_events' AND sql LIKE '%session_id%'`,
+	).Scan(&name)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("session_id index = %q, err=%v, want no index", name, err)
+	}
+}
+
 func TestCostEvent_CreateAndList(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
 	seedTasksTable(t, repo, "task-1", "ws-1")
 
+	tokensOut := int64(500)
 	event := &models.CostEvent{
 		SessionID:      "session-1",
 		TaskID:         "task-1",
@@ -48,7 +63,7 @@ func TestCostEvent_CreateAndList(t *testing.T) {
 		Model:          "claude-4-sonnet",
 		Provider:       "anthropic",
 		TokensIn:       1000,
-		TokensOut:      500,
+		TokensOut:      &tokensOut,
 		CostSubcents:   10,
 		OccurredAt:     time.Now().UTC(),
 	}
@@ -65,6 +80,99 @@ func TestCostEvent_CreateAndList(t *testing.T) {
 	}
 	if costs[0].CostSubcents != 10 {
 		t.Errorf("cost_subcents = %d, want 10", costs[0].CostSubcents)
+	}
+	if costs[0].TokensOut == nil || *costs[0].TokensOut != 500 {
+		t.Errorf("tokens_out = %v, want 500", costs[0].TokensOut)
+	}
+}
+
+// TestCostEvent_TokensOutNullRoundTrips confirms a NULL TokensOut (the
+// "never measured" shape — see costContractVersion's v2→v3 doc comment in
+// prompt_usage_cost.go) survives INSERT and SELECT as nil, not a silent 0.
+func TestCostEvent_TokensOutNullRoundTrips(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	seedTasksTable(t, repo, "task-null-out", "ws-null-out")
+
+	event := &models.CostEvent{
+		SessionID:      "session-null-out",
+		TaskID:         "task-null-out",
+		AgentProfileID: "cost-agent-null-out",
+		Model:          "opus",
+		Provider:       "anthropic",
+		TokensIn:       1000,
+		TokensOut:      nil,
+		CostSubcents:   767,
+		Estimated:      true,
+		OccurredAt:     time.Now().UTC(),
+	}
+	if err := repo.CreateCostEvent(ctx, event); err != nil {
+		t.Fatalf("create cost: %v", err)
+	}
+
+	costs, err := repo.ListCostEvents(ctx, "ws-null-out")
+	if err != nil {
+		t.Fatalf("list costs: %v", err)
+	}
+	if len(costs) != 1 {
+		t.Fatalf("cost count = %d, want 1", len(costs))
+	}
+	if costs[0].TokensOut != nil {
+		t.Errorf("tokens_out = %v, want nil (NULL round-trip)", *costs[0].TokensOut)
+	}
+	if costs[0].CostSubcents != 767 {
+		t.Errorf("cost_subcents = %d, want 767 (real money attached to an unmeasured tokens_out row)", costs[0].CostSubcents)
+	}
+}
+
+// TestCreateCostEvent_DuplicateUsageEventID confirms redelivery of the same
+// prompt-usage bus event (same UsageEventID) is reported as
+// ErrDuplicateUsageEvent rather than inserting a second row or a raw driver
+// error, and that unrelated rows with a NULL UsageEventID never collide.
+func TestCreateCostEvent_DuplicateUsageEventID(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	seedTasksTable(t, repo, "task-dup", "ws-dup")
+
+	usageEventID := "usage-evt-1"
+	first := &models.CostEvent{
+		TaskID:       "task-dup",
+		CostSubcents: 10,
+		UsageEventID: &usageEventID,
+		OccurredAt:   time.Now().UTC(),
+	}
+	if err := repo.CreateCostEvent(ctx, first); err != nil {
+		t.Fatalf("create first: %v", err)
+	}
+
+	second := &models.CostEvent{
+		TaskID:       "task-dup",
+		CostSubcents: 10,
+		UsageEventID: &usageEventID,
+		OccurredAt:   time.Now().UTC(),
+	}
+	err := repo.CreateCostEvent(ctx, second)
+	if !errors.Is(err, sqlite.ErrDuplicateUsageEvent) {
+		t.Fatalf("create second (duplicate) err = %v, want ErrDuplicateUsageEvent", err)
+	}
+
+	costs, err := repo.ListCostEvents(ctx, "ws-dup")
+	if err != nil {
+		t.Fatalf("list costs: %v", err)
+	}
+	if len(costs) != 1 {
+		t.Fatalf("cost count = %d, want 1 (duplicate must not insert)", len(costs))
+	}
+
+	// Two rows with no UsageEventID (manual entries, or rows predating this
+	// field) must not collide with each other.
+	for i := 0; i < 2; i++ {
+		if err := repo.CreateCostEvent(ctx, &models.CostEvent{
+			TaskID: "task-dup", CostSubcents: 5, OccurredAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("create nil-usage-event row %d: %v", i, err)
+		}
 	}
 }
 
@@ -84,6 +192,9 @@ func TestCostBreakdowns(t *testing.T) {
 		(id, workspace_id, name, created_at, updated_at)
 		VALUES ('proj-1', 'ws-1', 'Acme Migration',
 		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	// GetCostsByProject attributes by the task's live project_id, not the
+	// event snapshot, so the task itself must carry the assignment.
+	mustExec(t, repo, `UPDATE tasks SET project_id = 'proj-1' WHERE id = 'task-bd'`)
 
 	for i := 0; i < 3; i++ {
 		event := &models.CostEvent{
@@ -150,6 +261,107 @@ func TestCostBreakdowns(t *testing.T) {
 	if byProvider[0].GroupKey != "unknown" || byProvider[0].GroupLabel != "(unknown)" {
 		t.Errorf("by provider = (key=%q,label=%q), want (unknown,(unknown))",
 			byProvider[0].GroupKey, byProvider[0].GroupLabel)
+	}
+}
+
+// TestGetCostsByProject_FollowsLiveReassignment confirms a task's entire
+// cost history moves to a project the moment the task is assigned to it,
+// even though the cost events were recorded before the assignment existed.
+// office_cost_events.project_id is a write-time snapshot (event_subscribers.go)
+// and must never be consulted for attribution; only the task's current
+// project_id is authoritative. This is the regression for the "assigning a
+// finished task to a project doesn't move its cost" report.
+//
+// It also covers the project-budget reads (GetCostForProject,
+// GetCostForProjectSince), which switched from the snapshot filter to the
+// same live tasks.project_id join in the same change. The seeded event's
+// snapshot project_id is left empty (never set on the event below) so these
+// assertions actually discriminate the live join from the old snapshot
+// filter: a snapshot-based implementation would return 0 in both the
+// "before" and "after" case, since the snapshot column never changes.
+func TestGetCostsByProject_FollowsLiveReassignment(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	seedTasksTable(t, repo, "task-reassign", "ws-reassign")
+	mustExec(t, repo, `INSERT INTO office_projects
+		(id, workspace_id, name, created_at, updated_at)
+		VALUES ('proj-reassign', 'ws-reassign', 'Kandev',
+		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+
+	windowStart := time.Now().UTC().Add(-time.Hour)
+
+	// Recorded while the task had no project assigned, so the snapshot
+	// column (office_cost_events.project_id) is empty on this row.
+	event := &models.CostEvent{
+		TaskID:       "task-reassign",
+		CostSubcents: 2013,
+		OccurredAt:   time.Now().UTC(),
+	}
+	if err := repo.CreateCostEvent(ctx, event); err != nil {
+		t.Fatalf("create cost: %v", err)
+	}
+
+	byProject, err := repo.GetCostsByProject(ctx, "ws-reassign")
+	if err != nil {
+		t.Fatalf("by project (before assignment): %v", err)
+	}
+	if len(byProject) != 1 || byProject[0].GroupKey != "" || byProject[0].TotalSubcents != 2013 {
+		t.Fatalf("before assignment: got %+v, want one unassigned row of 2013", byProject)
+	}
+
+	budgetTotal, err := repo.GetCostForProject(ctx, "proj-reassign")
+	if err != nil {
+		t.Fatalf("budget total (before assignment): %v", err)
+	}
+	if budgetTotal != 0 {
+		t.Errorf("budget total (before assignment) = %d, want 0 (task not yet assigned to the project)",
+			budgetTotal)
+	}
+	budgetSince, err := repo.GetCostForProjectSince(ctx, "proj-reassign", windowStart)
+	if err != nil {
+		t.Fatalf("budget since (before assignment): %v", err)
+	}
+	if budgetSince != 0 {
+		t.Errorf("budget since (before assignment) = %d, want 0 (task not yet assigned to the project)",
+			budgetSince)
+	}
+
+	// The user assigns the (already-finished) task to the project. No new
+	// cost event is recorded.
+	mustExec(t, repo, `UPDATE tasks SET project_id = 'proj-reassign' WHERE id = 'task-reassign'`)
+
+	byProject, err = repo.GetCostsByProject(ctx, "ws-reassign")
+	if err != nil {
+		t.Fatalf("by project (after assignment): %v", err)
+	}
+	if len(byProject) != 1 {
+		t.Fatalf("after assignment: got %+v, want a single row", byProject)
+	}
+	if byProject[0].GroupKey != "proj-reassign" || byProject[0].GroupLabel != "Kandev" {
+		t.Errorf("after assignment: got key=%q label=%q, want proj-reassign/Kandev",
+			byProject[0].GroupKey, byProject[0].GroupLabel)
+	}
+	if byProject[0].TotalSubcents != 2013 {
+		t.Errorf("after assignment: total = %d, want 2013 (unchanged, just re-attributed)",
+			byProject[0].TotalSubcents)
+	}
+
+	budgetTotal, err = repo.GetCostForProject(ctx, "proj-reassign")
+	if err != nil {
+		t.Fatalf("budget total (after assignment): %v", err)
+	}
+	if budgetTotal != 2013 {
+		t.Errorf("budget total (after assignment) = %d, want 2013 (budget must count the reassigned event)",
+			budgetTotal)
+	}
+	budgetSince, err = repo.GetCostForProjectSince(ctx, "proj-reassign", windowStart)
+	if err != nil {
+		t.Fatalf("budget since (after assignment): %v", err)
+	}
+	if budgetSince != 2013 {
+		t.Errorf("budget since (after assignment) = %d, want 2013 (budget must count the reassigned event)",
+			budgetSince)
 	}
 }
 
@@ -280,8 +492,13 @@ func TestGetCostForProject(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
+	seedTasksTable(t, repo, "task-proj-y", "ws-proj-y")
+	mustExec(t, repo, `UPDATE tasks SET project_id = 'proj-y' WHERE id = 'task-proj-y'`)
+
 	event := &models.CostEvent{
-		ProjectID:    "proj-y",
+		TaskID: "task-proj-y",
+		// Leave the event snapshot empty so this assertion requires the live
+		// task.project_id join instead of passing from the legacy field.
 		CostSubcents: 25,
 		OccurredAt:   time.Now().UTC(),
 	}
@@ -305,6 +522,7 @@ func TestPeriodAwareRollups(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	seedTasksTable(t, repo, "task-month", "ws-period")
+	mustExec(t, repo, `UPDATE tasks SET project_id = 'proj-period' WHERE id = 'task-month'`)
 
 	now := time.Now().UTC()
 	thisMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { dwell } from "../../helpers/causal-waits";
 
 /**
  * Regression: when workspace preparation takes longer than the file-tree
@@ -50,20 +51,37 @@ test.describe("Long prepare (slow git fetch)", () => {
       await session.waitForLoad();
 
       // While git fetch is sleeping, agentctl cannot become ready. The file
-      // tree must sit in the "waiting" state (the fix: useFileBrowserTree
-      // gates its initial load on agentctlStatus.isReady instead of racing
-      // the 18s retry budget).
+      // tree must either remain in the "waiting" state or reach a loaded tree
+      // if the fetch completes before the waiting indicator paints. The test
+      // must not require a transient render state on fast CI runners.
       const fileTreeWaiting = testPage.getByTestId("file-tree-waiting");
       const fileTreeManual = testPage.getByTestId("file-tree-manual");
-      await expect(fileTreeWaiting).toBeVisible({ timeout: 15_000 });
+      const fileTreeNode = testPage.getByTestId("file-tree-node").first();
+      await expect
+        .poll(
+          async () => {
+            if ((await fileTreeManual.count()) > 0) return "manual";
+            if ((await fileTreeWaiting.count()) > 0) return "waiting";
+            if ((await fileTreeNode.count()) > 0) return "loaded";
+            return "loading";
+          },
+          {
+            timeout: 15_000,
+            message: "the file tree did not remain waiting or load after workspace preparation",
+          },
+        )
+        .toMatch(/^(waiting|loaded)$/);
       await expect(fileTreeManual).toHaveCount(0);
 
-      // Wait past the pre-fix retry budget (1+2+5+10 = 18s). The file tree
-      // must NOT have transitioned to the "manual" (Load Files) state —
-      // that's the regression. On faster CI runners the 22s fetch may already
-      // have completed by the time this assertion runs, so do not require the
-      // waiting state to still be visible here.
-      await testPage.waitForTimeout(19_000);
+      // On faster CI runners the 22s fetch may already have completed by the
+      // time the assertion below runs, so it does not require the waiting state
+      // to still be visible.
+      await dwell(
+        testPage,
+        19_000,
+        "product-timer",
+        "outlasts our own 1+2+5+10s file-tree retry ladder; the regression under test is the tree falling back to its manual state when that budget expires, and the expiry renders nothing to signal it",
+      );
       await expect(fileTreeManual).toHaveCount(0);
 
       // Fetch eventually returns, worktree creation proceeds, agentctl

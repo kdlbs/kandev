@@ -8,17 +8,21 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// ExecutorProfileReader loads the executor profile selected for a session.
-// Implemented by the task repository; wired via SetExecutorProfileReader.
+// ExecutorProfileReader loads session state, task-cleanup admission, and the
+// executor profile selected for a session. Production launch safety requires
+// the task repository implementation wired via SetExecutorProfileReader.
 type ExecutorProfileReader interface {
+	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	HasActiveTaskResourceCleanupJob(ctx context.Context, taskID string) (bool, error)
 	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 }
 
-// SetExecutorProfileReader wires the reader used to expose executor-profile env
-// vars to user shell terminals. Nil → terminals fall back to inheriting only the
-// backend process environment.
+// SetExecutorProfileReader wires launch admission and the reader used to expose
+// executor-profile env vars to user shell terminals. Production must provide a
+// reader; nil is supported by isolated lifecycle tests, and terminals then fall
+// back to inheriting only the backend process environment.
 func (m *Manager) SetExecutorProfileReader(reader ExecutorProfileReader) {
 	m.executorProfileReader = reader
 }
@@ -29,16 +33,16 @@ func (m *Manager) SetExecutorProfileReader(reader ExecutorProfileReader) {
 // launch request), so a user shell terminal opened on the workspace sees the
 // same tokens the agent and the repository setup script do.
 //
-// Resolution is best-effort: a missing reader, session, environment, profile, or
-// secret yields the entries that could be resolved rather than failing the
-// terminal.
-func (m *Manager) ExecutorProfileEnvForSession(ctx context.Context, sessionID, taskEnvironmentID string) map[string]string {
+// Resolution is best-effort for missing profile records. A secret failure is
+// returned so the terminal caller can fail closed instead of starting a shell
+// with an incomplete profile environment.
+func (m *Manager) ExecutorProfileEnvForSession(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error) {
 	if m.executorProfileReader == nil {
-		return nil
+		return nil, nil
 	}
 	profileID := m.terminalExecutorProfileID(ctx, sessionID, taskEnvironmentID)
 	if profileID == "" {
-		return nil
+		return nil, nil
 	}
 	profile, err := m.executorProfileReader.GetExecutorProfile(ctx, profileID)
 	if err != nil {
@@ -47,14 +51,22 @@ func (m *Manager) ExecutorProfileEnvForSession(ctx context.Context, sessionID, t
 			zap.String("task_environment_id", taskEnvironmentID),
 			zap.String("executor_profile_id", profileID),
 			zap.Error(err))
-		return nil
+		return nil, nil
 	}
 	if profile == nil || len(profile.EnvVars) == 0 {
-		return nil
+		return nil, nil
 	}
 	// ExecutorProfile.EnvVars and agent-profile env vars are the same type, so
 	// the secret-revealing resolver is shared.
-	return m.resolveAgentProfileEnvVars(ctx, profile.EnvVars)
+	resolved, err := m.resolveAgentProfileEnvVars(ctx, profile.EnvVars)
+	if err != nil {
+		m.logger.Warn("failed to resolve executor profile environment for terminal",
+			zap.String("session_id", sessionID),
+			zap.String("executor_profile_id", profileID),
+			zap.Error(err))
+		return nil, err
+	}
+	return resolved, nil
 }
 
 // terminalExecutorProfileID picks the executor profile the terminal should

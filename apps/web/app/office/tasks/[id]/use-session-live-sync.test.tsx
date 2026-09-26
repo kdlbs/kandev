@@ -2,16 +2,22 @@ import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSessionLiveSyncSubscriptions } from "./use-session-live-sync";
 
-const mockWebSocketClient = vi.hoisted(() => ({
-  subscribeSession: vi.fn(),
+const clients = vi.hoisted(() => ({
+  active: {
+    subscribeSession: vi.fn(),
+  },
 }));
 
+const mockWebSocketClient = clients.active;
+
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => mockWebSocketClient,
+  getWebSocketClient: () => clients.active,
+  useWebSocketClient: () => clients.active,
 }));
 
 describe("Office session live-sync membership", () => {
   beforeEach(() => {
+    clients.active = mockWebSocketClient;
     mockWebSocketClient.subscribeSession.mockReset();
     mockWebSocketClient.subscribeSession.mockImplementation(() => vi.fn());
   });
@@ -88,5 +94,25 @@ describe("Office session live-sync membership", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(2);
     unmount();
     expect(unsubscribe).toHaveBeenCalledTimes(2);
+  });
+
+  it("replaces mounted subscriptions when the WebSocket client changes", () => {
+    const firstUnsubscribe = vi.fn();
+    const secondClient = { subscribeSession: vi.fn(() => vi.fn()) };
+    mockWebSocketClient.subscribeSession.mockReturnValue(firstUnsubscribe);
+
+    const { rerender } = renderHook(() =>
+      useSessionLiveSyncSubscriptions({
+        connectionStatus: "connected",
+        taskId: "task-1",
+        sessionIds: ["session-a"],
+      }),
+    );
+
+    clients.active = secondClient;
+    rerender();
+
+    expect(firstUnsubscribe).toHaveBeenCalledOnce();
+    expect(secondClient.subscribeSession).toHaveBeenCalledWith("session-a");
   });
 });

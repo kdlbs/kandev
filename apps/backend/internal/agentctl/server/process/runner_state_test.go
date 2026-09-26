@@ -109,12 +109,14 @@ func TestInteractiveRunner_TurnCompleteCallback(t *testing.T) {
 
 	var turnCompleteCalled bool
 	var turnSessionID string
+	var turnProcessID string
 	var mu sync.Mutex
 
-	runner.SetTurnCompleteCallback(func(sessionID string) {
+	runner.SetTurnCompleteCallback(func(sessionID, processID string) {
 		mu.Lock()
 		turnCompleteCalled = true
 		turnSessionID = sessionID
+		turnProcessID = processID
 		mu.Unlock()
 	})
 
@@ -139,6 +141,9 @@ func TestInteractiveRunner_TurnCompleteCallback(t *testing.T) {
 	mu.Lock()
 	if turnCompleteCalled && turnSessionID != "turn-test" {
 		t.Errorf("Turn complete callback received wrong session ID: %q", turnSessionID)
+	}
+	if turnCompleteCalled && turnProcessID == "" {
+		t.Error("Turn complete callback did not include a process ID")
 	}
 	mu.Unlock()
 }

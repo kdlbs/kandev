@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -24,6 +26,24 @@ import (
 
 type failingWorkspaceBootstrapper struct {
 	err error
+}
+
+type failingTransactionalWorkspaceSecretDeleter struct{}
+
+func (failingTransactionalWorkspaceSecretDeleter) DeleteWorkspaceSecrets(context.Context, string) error {
+	return errors.New("legacy cleanup should not be used")
+}
+
+func (failingTransactionalWorkspaceSecretDeleter) DeleteWorkspaceSecretsTx(context.Context, *sqlx.Tx, string) error {
+	return errors.New("injected transactional secret cleanup failure")
+}
+
+type failingWorkspaceSecretDeleter struct {
+	err error
+}
+
+func (f failingWorkspaceSecretDeleter) DeleteWorkspaceSecrets(context.Context, string) error {
+	return f.err
 }
 
 func (b *failingWorkspaceBootstrapper) CreateWorkspaceWithKanban(
@@ -128,6 +148,131 @@ func TestService_CreateRepositoryCanonicalizesExplicitLocalPath(t *testing.T) {
 	}
 	if stored.LocalPath != canonicalPath {
 		t.Fatalf("stored LocalPath = %q, want %q", stored.LocalPath, canonicalPath)
+	}
+}
+
+func TestService_RepositorySecretBindingsValidateScopeAndReplaceAtomically(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-secret-bindings", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	secretDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	crypto, err := secrets.NewMasterKeyProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("master key: %v", err)
+	}
+	secretStore, closeSecrets, err := secrets.Provide(secretDB, secretDB, crypto)
+	if err != nil {
+		t.Fatalf("secret store: %v", err)
+	}
+	t.Cleanup(func() { _ = closeSecrets() })
+	svc.SetSecretStore(secretStore)
+
+	global := &secrets.SecretWithValue{Secret: secrets.Secret{Name: "global"}, Value: "global-value"}
+	workspace := &secrets.SecretWithValue{Secret: secrets.Secret{
+		Name: "workspace", Scope: secrets.ScopeWorkspace, WorkspaceID: "ws-secret-bindings",
+	}, Value: "workspace-value"}
+	if err := secretStore.Create(ctx, global); err != nil {
+		t.Fatalf("create global secret: %v", err)
+	}
+	if err := secretStore.Create(ctx, workspace); err != nil {
+		t.Fatalf("create workspace secret: %v", err)
+	}
+
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-secret-bindings",
+		Name:        "app",
+		SecretBindings: []RepositorySecretBindingInput{
+			{Key: "GLOBAL_TOKEN", SecretID: global.ID},
+			{Key: "WORKSPACE_TOKEN", SecretID: workspace.ID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	if len(created.SecretBindings) != 2 {
+		t.Fatalf("created bindings = %+v, want two", created.SecretBindings)
+	}
+
+	bad, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:    "ws-secret-bindings",
+		Name:           "bad",
+		SecretBindings: []RepositorySecretBindingInput{{Key: "BAD", SecretID: "missing-secret"}},
+	})
+	if err == nil || bad != nil || !errors.Is(err, ErrInvalidRepositorySettings) {
+		t.Fatalf("missing binding result = %v, %+v; want invalid settings", err, bad)
+	}
+
+	clear := []RepositorySecretBindingInput{}
+	updated, err := svc.UpdateRepository(ctx, created.ID, &UpdateRepositoryRequest{SecretBindings: &clear})
+	if err != nil {
+		t.Fatalf("clear bindings: %v", err)
+	}
+	if len(updated.SecretBindings) != 0 {
+		t.Fatalf("bindings after clear = %+v, want empty", updated.SecretBindings)
+	}
+	loaded, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get after clear: %v", err)
+	}
+	if len(loaded.SecretBindings) != 0 {
+		t.Fatalf("persisted bindings after clear = %+v, want empty", loaded.SecretBindings)
+	}
+}
+
+func TestService_ExecutorProfileSecretRefsRequireGlobalScope(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-profile-secrets", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	secretDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	crypto, err := secrets.NewMasterKeyProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("master key: %v", err)
+	}
+	secretStore, closeSecrets, err := secrets.Provide(secretDB, secretDB, crypto)
+	if err != nil {
+		t.Fatalf("secret store: %v", err)
+	}
+	t.Cleanup(func() { _ = closeSecrets() })
+	svc.SetSecretStore(secretStore)
+
+	workspaceSecret := &secrets.SecretWithValue{Secret: secrets.Secret{
+		ID: "workspace-profile-secret", Scope: secrets.ScopeWorkspace, WorkspaceID: "ws-profile-secrets",
+	}, Value: "workspace-value"}
+	if err := secretStore.Create(ctx, workspaceSecret); err != nil {
+		t.Fatalf("create workspace secret: %v", err)
+	}
+	if err := svc.validateGlobalProfileEnvRefs(ctx, []models.ProfileEnvVar{{Key: "TOKEN", SecretID: workspaceSecret.ID}}); err == nil {
+		t.Fatal("workspace secret accepted in executor profile")
+	}
+}
+
+func TestService_ExecutorProfileRejectsBackendOwnedSecretID(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	secretDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	crypto, err := secrets.NewMasterKeyProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("master key: %v", err)
+	}
+	secretStore, closeSecrets, err := secrets.Provide(secretDB, secretDB, crypto)
+	if err != nil {
+		t.Fatalf("secret store: %v", err)
+	}
+	t.Cleanup(func() { _ = closeSecrets() })
+	svc.SetSecretStore(secrets.NewUserVisibleStore(secretStore))
+
+	internal := &secrets.SecretWithValue{Secret: secrets.Secret{
+		ID: "github:user:workspace:user:access", Scope: secrets.ScopeGlobal,
+	}, Value: "backend-owned"}
+	if err := secretStore.Create(ctx, internal); err != nil {
+		t.Fatalf("create internal secret: %v", err)
+	}
+	if err := svc.validateGlobalProfileEnvRefs(ctx, []models.ProfileEnvVar{{Key: "TOKEN", SecretID: internal.ID}}); err == nil {
+		t.Fatal("backend-owned secret ID accepted in executor profile")
 	}
 }
 
@@ -464,6 +609,34 @@ func TestService_FindOrCreateRepositoryMatchesGitHubRepositoryWithoutExplicitHos
 	}
 }
 
+func TestService_FindOrCreateRepositoryNormalizesProviderIdentityWhitespace(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	created, wasCreated, err := svc.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID: "ws-1", Provider: "custom-provider", ProviderHost: "https://forge.example.test",
+		ProviderRepoID: "repo-99", ProviderOwner: "TEAM", ProviderName: "widgets",
+		RemoteURL: "https://forge.example.test/scm/TEAM/widgets.git",
+	})
+	if err != nil || !wasCreated {
+		t.Fatalf("initial FindOrCreateRepository() = %+v, %t, %v", created, wasCreated, err)
+	}
+
+	resolved, duplicateCreated, err := svc.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID: " ws-1 ", Provider: " custom-provider ", ProviderHost: " https://forge.example.test/context ",
+		ProviderRepoID: " repo-99 ", ProviderOwner: " TEAM ", ProviderName: " widgets ",
+		RemoteURL: " https://forge.example.test/scm/TEAM/widgets.git ",
+	})
+	if err != nil {
+		t.Fatalf("second FindOrCreateRepository() error = %v", err)
+	}
+	if duplicateCreated || resolved.ID != created.ID {
+		t.Fatalf("second repository = %q (created=%t), want existing %q", resolved.ID, duplicateCreated, created.ID)
+	}
+}
+
 func TestService_FindOrCreateRepositoryRejectsInvalidLocalPathBackfill(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -505,6 +678,9 @@ func TestService_FindOrCreateRepositoryRejectsInvalidLocalPathBackfill(t *testin
 // errWorkspaceRepo is a WorkspaceRepository that always returns an error from
 // ListWorkspaces. Used to exercise the DB-error path of GetOfficeWorkflowIDs.
 type errWorkspaceRepo struct {
+	// Membership is not exercised by this fake; the embedded default
+	// reports no membership, which is the narrower answer.
+	repository.UnsupportedWorkspaceMembers
 	// embed the real repo for all methods except ListWorkspaces.
 	WorkspaceRepositoryStub
 }
@@ -831,6 +1007,116 @@ func TestService_DeleteWorkspaceDeletesWorkspaceOwnedTasksAndWorkflows(t *testin
 	}
 	if _, err := repo.GetWorkflow(ctx, "wf-keep"); err != nil {
 		t.Fatalf("unrelated workflow should remain: %v", err)
+	}
+}
+
+func TestService_DeleteWorkspaceRemovesStagedAndClaimedAttachmentBytes(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-delete", WorkspaceID: "ws-delete", Title: "Delete attachments"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	attachmentRoot := t.TempDir()
+	attachmentSvc, err := NewAttachmentService(repo, attachmentRoot, nil, commonlogger.Default())
+	if err != nil {
+		t.Fatalf("NewAttachmentService: %v", err)
+	}
+	svc.SetAttachmentService(attachmentSvc)
+
+	stage := func(name string) *models.TaskMessageAttachment {
+		t.Helper()
+		attachment, stageErr := attachmentSvc.Stage(
+			ctx, "owner", "ws-delete", name, "text/plain", "resource", "path", strings.NewReader(name),
+		)
+		if stageErr != nil {
+			t.Fatalf("Stage %s: %v", name, stageErr)
+		}
+		return attachment
+	}
+	staged := stage("staged.txt")
+	claimed := stage("claimed.txt")
+	if err := attachmentSvc.Claim(ctx, "owner", "ws-delete", "task-delete", "session-delete", []string{claimed.ID}); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+
+	for _, attachment := range []*models.TaskMessageAttachment{staged, claimed} {
+		if _, err := os.Stat(filepath.Join(attachmentRoot, "attachments", attachment.StorageKey)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("attachment %s bytes still exist: %v", attachment.ID, err)
+		}
+		if _, err := repo.GetMessageAttachment(ctx, attachment.ID); !errors.Is(err, models.ErrAttachmentNotFound) {
+			t.Fatalf("attachment %s registry row still exists: %v", attachment.ID, err)
+		}
+	}
+}
+
+func TestService_DeleteWorkspaceRollsBackCascadeWhenSecretCleanupFails(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	svc.SetWorkspaceSecretDeleter(failingTransactionalWorkspaceSecretDeleter{})
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-delete", WorkspaceID: "ws-delete", Name: "Doomed"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-delete", WorkspaceID: "ws-delete", WorkflowID: "wf-delete", WorkflowStepID: "step-delete", Title: "Delete task",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err == nil {
+		t.Fatal("DeleteWorkspace succeeded, want secret cleanup failure")
+	}
+	if _, err := repo.GetWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("workspace was deleted after cleanup failure: %v", err)
+	}
+	if _, err := repo.GetTask(ctx, "task-delete"); err != nil {
+		t.Fatalf("task was deleted after cleanup failure: %v", err)
+	}
+	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("events after rolled-back delete = %#v, want none", events)
+	}
+}
+
+func TestService_DeleteWorkspaceKeepsCleanupRunnableWhenSecretDeletionFails(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	secretErr := errors.New("secret deletion unavailable")
+	svc.SetWorkspaceSecretDeleter(failingWorkspaceSecretDeleter{err: secretErr})
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-delete", WorkspaceID: "ws-delete", Title: "Delete task"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); !errors.Is(err, secretErr) {
+		t.Fatalf("DeleteWorkspace error = %v, want secret deletion error", err)
+	}
+	if _, err := repo.GetWorkspace(ctx, "ws-delete"); err == nil {
+		t.Fatal("workspace deletion did not commit")
+	}
+	if _, err := repo.GetTask(ctx, "task-delete"); err == nil {
+		t.Fatal("task deletion did not commit")
+	}
+	var state string
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT state FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger = ?
+	`, "task-delete", models.TaskResourceCleanupTriggerWorkspaceDelete).Scan(&state); err != nil {
+		t.Fatalf("load workspace cleanup job: %v", err)
+	}
+	if state == string(models.TaskResourceCleanupStateCancelled) {
+		t.Fatalf("workspace cleanup state = %q, want runnable state", state)
 	}
 }
 
@@ -1298,6 +1584,41 @@ func (l leakyListTaskRepo) ListTasks(ctx context.Context, workflowID string) ([]
 		return nil, err
 	}
 	return append(real, l.extra...), nil
+}
+
+func (l leakyListTaskRepo) ListTasksByWorkspace(
+	ctx context.Context,
+	workspaceID, workflowID, repositoryID, query string,
+	page, pageSize int,
+	sort string,
+	includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool,
+) ([]*models.Task, int, error) {
+	real, total, err := l.TaskRepository.ListTasksByWorkspace(
+		ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort,
+		includeArchived, includeEphemeral, onlyEphemeral, excludeConfig,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	return append(real, l.extra...), total + len(l.extra), nil
+}
+func (l leakyListTaskRepo) ListTasksForDeletion(
+	ctx context.Context,
+	workspaceID, workflowID string,
+	page, pageSize int,
+) ([]*models.Task, int, error) {
+	lister, ok := l.TaskRepository.(workflowDeleteTaskLister)
+	if !ok {
+		return l.ListTasksByWorkspace(
+			ctx, workspaceID, workflowID, "", "", page, pageSize, "",
+			true, true, false, false,
+		)
+	}
+	real, total, err := lister.ListTasksForDeletion(ctx, workspaceID, workflowID, page, pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	return append(real, l.extra...), total + len(l.extra), nil
 }
 
 // TestService_DeleteWorkflow_SkipsConcurrentlyArchivedTask covers the

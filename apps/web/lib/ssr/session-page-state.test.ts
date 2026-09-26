@@ -48,6 +48,7 @@ const SESSION_ID = "session-1";
 const WORKSPACE_ID = "workspace-office";
 const WORKFLOW_ID = "workflow-1";
 
+/** Builds a Task with default test fields, merged with the given overrides. */
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: TASK_ID,
@@ -58,13 +59,14 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     title: "Office task",
     description: "",
     state: "TODO",
-    priority: 0,
+    priority: "medium",
     created_at: NOW,
     updated_at: NOW,
     ...overrides,
   } as Task;
 }
 
+/** Resets mocks and seeds every API mock with its default hydration response. */
 function mockDefaultHydrationData() {
   vi.clearAllMocks();
   mocks.fetchTask.mockResolvedValue(makeTask());
@@ -87,6 +89,7 @@ function mockDefaultHydrationData() {
   });
 }
 
+/** Builds a completed session object for the test task and session ids. */
 function makeSession() {
   return {
     id: SESSION_ID,
@@ -153,6 +156,27 @@ describe("fetchSessionDataForTask initial hydration", () => {
     expect(hydratedState.turns.bySession[session.id]?.[0]?.metadata).toEqual({
       runtime_config_snapshot: runtimeConfigSnapshot,
     });
+    // SSR-hydrated turn lists are complete snapshots: the session must be
+    // marked loaded so turn-derived UI never mistakes WS-seeded live turns
+    // for the full history or re-fetches unnecessarily.
+    expect(hydratedState.turns.loadedBySession[session.id]).toBe(true);
+  });
+
+  it("leaves the hydration marker absent when the SSR turns fetch fails", async () => {
+    // A rejected optional turns hydration must not mark the session loaded,
+    // so the client hook can fetch turns on first render.
+    const session = makeSession();
+    mocks.listTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
+    mocks.fetchTaskSession.mockResolvedValue({ session });
+    mocks.listSessionTurns.mockRejectedValue(new Error("turns unavailable"));
+    mocks.listTaskSessionMessages.mockResolvedValue(null);
+
+    const result = await fetchSessionDataForTask(TASK_ID);
+    const hydratedState = mergeInitialState(result.initialState);
+
+    expect(hydratedState.turns.bySession[SESSION_ID]).toBeUndefined();
+    expect(hydratedState.turns.loadedBySession[SESSION_ID]).toBeUndefined();
+    expect(hydratedState.turns.loadedBySession).toEqual({});
   });
 
   it("hydrates the persisted model selector before the first render", async () => {

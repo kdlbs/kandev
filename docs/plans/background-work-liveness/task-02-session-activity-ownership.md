@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-acp-detached-lifecycle"]
 plan: "plan.md"
-spec: "../../specs/platform/background-work-liveness.md"
+spec: "../../specs/platform/requirements/background-work-liveness.md"
 ---
 
 # Task 02: Session activity ownership

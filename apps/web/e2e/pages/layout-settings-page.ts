@@ -12,17 +12,17 @@ export class LayoutSettingsPage {
   }
 
   async open(): Promise<void> {
-    await this.page.goto("/settings/general/layouts");
+    await this.page.goto("/settings/preferences/layouts");
     await expect(this.root).toBeVisible();
   }
 
-  async openFromMobileMenu(): Promise<void> {
-    await this.page.goto("/settings/general/terminal");
-    await this.page.getByTestId("settings-mobile-menu-button").click();
-    const menu = this.page.getByTestId("settings-mobile-menu");
-    await expect(menu).toBeVisible();
-    await menu.getByRole("link", { name: "Layouts", exact: true }).click();
-    await expect(this.page).toHaveURL(/\/settings\/general\/layouts$/);
+  /** Reach Layouts the way a phone user does: from the /settings index page. */
+  async openFromSettingsIndex(): Promise<void> {
+    await this.page.goto("/settings");
+    const index = this.page.getByTestId("settings-index");
+    await expect(index).toBeVisible();
+    await index.getByRole("link", { name: /^Layouts\b/ }).click();
+    await expect(this.page).toHaveURL(/\/settings\/preferences\/layouts$/);
     await expect(this.root).toBeVisible();
   }
 

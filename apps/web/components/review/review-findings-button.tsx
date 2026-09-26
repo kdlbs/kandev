@@ -8,6 +8,7 @@ import { openFindingCount } from "@/lib/review/findings";
 import { navigateToFinding } from "@/lib/review/navigation";
 import type { TaskReviewFinding } from "@/lib/types/review";
 import { ReviewFindingsOverview } from "./review-findings-overview";
+import { useTranslation } from "react-i18next";
 
 export type ReviewFindingsButtonProps = {
   findings: TaskReviewFinding[];
@@ -22,6 +23,7 @@ export type ReviewFindingsButtonProps = {
  * there is nothing to navigate to.
  */
 export function ReviewFindingsButton({ findings, onSelectFile }: ReviewFindingsButtonProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const count = openFindingCount(findings);
 
@@ -48,10 +50,10 @@ export function ReviewFindingsButton({ findings, onSelectFile }: ReviewFindingsB
           size="sm"
           variant="outline"
           className="h-6 cursor-pointer gap-1 px-1.5 text-[10px]"
-          aria-label={`Go to ${count} review finding${count === 1 ? "" : "s"}`}
+          aria-label={t("review:goToFindings", { count })}
           data-testid="review-open-count"
         >
-          {count} finding{count === 1 ? "" : "s"}
+          {t("review:findingCount", { count })}
           <IconChevronDown className="h-3 w-3" />
         </Button>
       </PopoverTrigger>

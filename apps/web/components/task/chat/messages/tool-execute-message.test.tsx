@@ -4,6 +4,8 @@ import { sessionId, taskId, type Message } from "@/lib/types/http";
 import type { UseShellCommandOutputResult } from "@/hooks/domains/session/use-shell-command-output";
 import { ToolExecuteMessage } from "./tool-execute-message";
 
+const COMMAND_TEST_ID = "tool-execute-command";
+
 const useShellOutputMock = vi.hoisted(() => vi.fn());
 const runningMessageID = "message-running";
 const outputUpdatedAt = "2026-07-16T12:00:02Z";
@@ -54,6 +56,10 @@ function executeMessage(
   };
 }
 
+function retainedOutputSummary(overrides: ShellOutputSummary = {}): ShellOutputSummary {
+  return { has_output: true, stdout_bytes: 1, ...overrides };
+}
+
 function hookResult(
   overrides: Partial<UseShellCommandOutputResult> = {},
 ): UseShellCommandOutputResult {
@@ -71,18 +77,34 @@ function openOutput() {
 }
 
 describe("ToolExecuteMessage command row", () => {
-  it("keeps the normalized command and working directory visible while output is collapsed", () => {
+  it("hides the output disclosure when the projected summary is empty", () => {
     render(
       <ToolExecuteMessage
-        comment={executeMessage("running", {
-          has_output: true,
-          stdout_bytes: 2048,
+        comment={executeMessage("complete", {
+          exit_code: 0,
+          has_output: false,
+          stdout_bytes: 0,
           stderr_bytes: 0,
         })}
       />,
     );
 
-    const command = screen.getByTestId("tool-execute-command");
+    expect(screen.getByTestId(COMMAND_TEST_ID)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /show command output/i })).toBeNull();
+    expect(useShellOutputMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the normalized command and working directory visible while output is collapsed", () => {
+    render(
+      <ToolExecuteMessage
+        comment={executeMessage(
+          "running",
+          retainedOutputSummary({ stdout_bytes: 2048, stderr_bytes: 0 }),
+        )}
+      />,
+    );
+
+    const command = screen.getByTestId(COMMAND_TEST_ID);
     expect(command.textContent).toBe("printf normalized-command");
     expect(command.className).toContain("whitespace-pre-wrap");
     expect(screen.getByText("/workspace/with/a/long/path")).toBeTruthy();
@@ -98,12 +120,13 @@ describe("ToolExecuteMessage command row", () => {
   it("falls back to message content when the normalized command is absent", () => {
     render(<ToolExecuteMessage comment={executeMessage("complete", {}, "")} />);
 
-    expect(screen.getByTestId("tool-execute-command").textContent).toBe("fallback message content");
+    expect(screen.getByTestId(COMMAND_TEST_ID).textContent).toBe("fallback message content");
   });
 
   it("renders loading and empty snapshot states only after opening", () => {
     useShellOutputMock.mockReturnValue(hookResult({ isLoading: true }));
-    const view = render(<ToolExecuteMessage comment={executeMessage("running")} />);
+    const outputSummary = retainedOutputSummary();
+    const view = render(<ToolExecuteMessage comment={executeMessage("running", outputSummary)} />);
 
     expect(screen.queryByText("Loading command output...")).toBeNull();
     openOutput();
@@ -119,7 +142,7 @@ describe("ToolExecuteMessage command row", () => {
         },
       }),
     );
-    view.rerender(<ToolExecuteMessage comment={executeMessage("running")} />);
+    view.rerender(<ToolExecuteMessage comment={executeMessage("running", outputSummary)} />);
     expect(screen.getByText("No command output yet.")).toBeTruthy();
     expect(screen.queryByText(/Exit code/)).toBeNull();
   });
@@ -142,7 +165,11 @@ describe("ToolExecuteMessage output states", () => {
         },
       }),
     );
-    render(<ToolExecuteMessage comment={executeMessage("complete", { exit_code: 7 })} />);
+    render(
+      <ToolExecuteMessage
+        comment={executeMessage("complete", retainedOutputSummary({ exit_code: 7 }))}
+      />,
+    );
 
     openOutput();
     expect(screen.getByText("standard output")).toBeTruthy();
@@ -164,11 +191,10 @@ describe("ToolExecuteMessage output states", () => {
     );
     render(
       <ToolExecuteMessage
-        comment={executeMessage("cancelled", {
-          has_output: true,
-          stdout_bytes: 999,
-          stdout: "forbidden summary transcript",
-        })}
+        comment={executeMessage(
+          "cancelled",
+          retainedOutputSummary({ stdout_bytes: 999, stdout: "forbidden summary transcript" }),
+        )}
       />,
     );
 
@@ -192,7 +218,7 @@ describe("ToolExecuteMessage output states", () => {
         retry,
       }),
     );
-    render(<ToolExecuteMessage comment={executeMessage("running")} />);
+    render(<ToolExecuteMessage comment={executeMessage("running", retainedOutputSummary())} />);
 
     openOutput();
     expect(screen.getByText("retained transcript")).toBeTruthy();
@@ -213,7 +239,7 @@ describe("ToolExecuteMessage output states", () => {
         error: new Error("network unavailable"),
       }),
     );
-    render(<ToolExecuteMessage comment={executeMessage("running")} />);
+    render(<ToolExecuteMessage comment={executeMessage("running", retainedOutputSummary())} />);
 
     openOutput();
     expect(screen.getByText("Command output unavailable.")).toBeTruthy();
@@ -233,9 +259,45 @@ describe("ToolExecuteMessage cancelled result", () => {
         },
       }),
     );
-    render(<ToolExecuteMessage comment={executeMessage("cancelled", { exit_code: 0 })} />);
+    render(
+      <ToolExecuteMessage
+        comment={executeMessage("cancelled", retainedOutputSummary({ exit_code: 0 }))}
+      />,
+    );
 
     openOutput();
     expect(screen.getByText("Exit code 0").className).toContain("text-muted-foreground");
   });
+});
+
+it("replaces an expanded cached transcript with the removal notice while retaining command and status", () => {
+  const original = executeMessage("complete", retainedOutputSummary({ exit_code: 0 }));
+  useShellOutputMock.mockReturnValue(
+    hookResult({
+      snapshot: {
+        message_id: original.id,
+        status: "complete",
+        updated_at: outputUpdatedAt,
+        output: { stdout: "removed secret output" },
+      },
+    }),
+  );
+  const view = render(<ToolExecuteMessage comment={original} />);
+  openOutput();
+  expect(screen.getByText("removed secret output")).toBeTruthy();
+  view.rerender(
+    <ToolExecuteMessage
+      comment={{
+        ...original,
+        metadata: {
+          ...original.metadata,
+          payload_retention: { version: 1, removed_at: outputUpdatedAt },
+        },
+      }}
+    />,
+  );
+  expect(screen.queryByText("removed secret output")).toBeNull();
+  expect(screen.getByText(/Tool details removed on/)).toBeTruthy();
+  expect(screen.getByTestId(COMMAND_TEST_ID).textContent).toBe("printf normalized-command");
+  expect(screen.getByLabelText("Command succeeded")).toBeTruthy();
 });

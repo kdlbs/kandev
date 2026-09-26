@@ -1,0 +1,284 @@
+---
+title: "Agent-authored Canvases"
+description: "Create, review, promote, edit, recover, and remove isolated web-app canvases."
+status: experimental
+---
+
+# Agent-authored Canvases
+
+This guide explains how users and task agents create and manage isolated web-app canvases for tasks and workspaces.
+
+## Availability
+
+> [!EXPERIMENTAL]
+> Agent-authored canvases are in progress. `features.canvases` is off in every shipped profile, and this page describes the current contract.
+
+An administrator can enable `features.canvases` in **Settings > System > Feature Toggles** or set `KANDEV_FEATURES_CANVASES=true`. Restart Kandev after changing the toggle. The restart is required because the feature changes MCP tool registration and backend composition.
+
+With the flag off, Kandev does not expose canvas tools, routes, events, background work, or navigation. Database migrations can still exist, but Kandev does not read or change canvas data.
+
+## Start a canvas task
+
+When canvases are enabled, open the workspace sidebar and expand **Canvases**.
+If the workspace has no active canvases, select **Set up a canvas**. Kandev
+opens the normal task form on the current page. It starts with an editable
+coordinator-view goal followed by the `@create-canvas` saved-prompt reference.
+
+Choose the agent, executor, workflow, and other task options, then select
+**Start task**. The task uses no repository by default and prefers a local
+executor. The saved-prompt reference appears as an editable chip. Select it to
+preview the current instructions, or remove only that occurrence before you
+submit.
+
+On a phone, open **Settings > Workspace > Canvases** and select **Create
+canvas**. The same full-screen task form and task options are available.
+
+The `@create-canvas` reference keeps the detailed authoring instructions out
+of the visible task description. Customize those instructions in **Settings >
+Prompts**. The task description keeps the text you submitted, while the
+reference is expanded when Kandev launches the task.
+
+## Create a task canvas
+
+1. Open the task that owns the canvas.
+2. Ask the task agent to create a canvas for the current task.
+3. Let the agent read the version-matched canvas authoring skill.
+4. Review the first release after the agent publishes it.
+
+Kandev binds a new task canvas to the current task. The agent cannot choose a different task, workspace, or owner through canvas input. A task can hold up to 10 non-removed task canvases.
+
+The agent creates a packaged static web app. Kandev does not provide a blank canvas builder, native blocks, source upload, or a direct source editor. The authoring skill explains the package layout and the relative `./_kandev/v1` protocol. Kandev does not inject a JavaScript API into the app.
+
+Kandev validates the package before it stores or runs the release. An invalid draft keeps the current active release. A valid release becomes active only after its permissions fit the current grants.
+
+## Use a canvas
+
+A task canvas stays in its creating task until promotion. After the first valid
+release, a new owner-authorized task canvas can use its declared supported
+permissions across the current workspace. This lets the app preview the full
+workspace task list before it appears in workspace navigation. Imported and
+older task canvases keep their existing data scope until an authorized review
+widens it.
+
+A workspace canvas appears in workspace navigation. Promotion changes the
+canvas placement and keeps its identity, active release, state, and release
+history. For a new canvas that already has workspace data access, promotion
+changes placement only. The host review identifies whether it changes data
+access for a legacy canvas.
+
+The app uses relative requests such as `./_kandev/v1/data/tasks` and `./_kandev/v1/state`. Kandev remains the source of truth for task, workflow, and message data. Canvas state stores app-specific shared state. It does not replace Kandev domain data.
+
+A task read includes a read-only summary of that task's dependencies: whether it is blocked, and which tasks it depends on or blocks. Events never carry this summary, so a canvas that displays it refetches the task rather than reading the summary out of the event stream: on a `task.updated`, `task.dependencies_resolved`, or `task.dependency_failed` event for that task or one of its edges, or on a `task.state_changed` event for any task in its cached dependency lists (a predecessor or dependent simply advancing state is not one of the first three events). Kandev refuses an oversized read rather than truncating it silently; the authoring reference has the exact fields and limits.
+
+To show recorded workflow movement, read
+`./_kandev/v1/data/tasks/{task_id}/step-transitions`. It returns retained
+moves newest first and preserves the IDs of removed steps. A task canvas can
+read only its own task. After you promote a canvas to workspace scope, it can
+also read `./_kandev/v1/data/workflows/{workflow_id}/transition-groups` when
+the release has both task and workflow read grants. These groups count
+historical routes, including archived tasks. Use the task list for current
+task counts. [Plugin authoring](plugins-authoring.md) covers the browser and
+backend Host readers.
+
+The host shows canvas controls outside the app frame. The app runs in a
+sandboxed same-origin iframe. Canvas source is trusted with the viewing user's
+ordinary user-session authority:
+
+- The frame allows packaged scripts and forms.
+- The app can use same-origin browser storage and cookies and can access the host DOM.
+- The app still cannot open popups or navigate the top-level page.
+- Use Kandev instance state for small shared values. Keep temporary values in memory.
+- Relative Kandev protocol routes still require the capability URL, release binding,
+  scope checks, and declared grants. A browser cookie does not replace those checks.
+- External network access uses exact HTTPS origins that a user approved.
+- Remote scripts are not allowed. Scripts and styles must come from the package.
+
+The **Releases and permissions** control is available on task and workspace
+canvas hosts. It shows each release's declared reads, writes, events, shared
+state, exact external origins, missing grants, protocol version, and safe
+source provenance. A valid first release from a new owner-created task canvas
+uses its recorded initial permission policy and can activate without a second
+approval. Use the control to review legacy drafts, imported packages, and later
+permission increases. A pending release cannot run until its permissions are
+approved.
+
+The host receives canvas lifecycle notifications through WebSocket. It
+refreshes visible task, workspace, release, and direct-host projections after
+creation, release activation, promotion, archive, restore, or removal. It
+tears down the old iframe before it loads a replacement runtime after an
+authority change. This also limits the lifetime of direct browser requests to
+approved external origins.
+
+The runtime response allows framing from the same Kandev origin. This supports
+custom DNS names, IP addresses, ports, and HTTPS deployments when the parent
+and runtime use the same origin. An unrelated parent, including a nested
+foreign parent, remains blocked. Local launcher and Tauri origins remain exact
+development exceptions. Kandev does not use forwarded host headers to expand
+the policy.
+
+The host mounts the runtime while it is loading and waits for a bounded startup
+acknowledgement before it reveals the app. Kandev injects a host-owned bootstrap
+before the packaged entry scripts. The bootstrap reports a document error or
+checks the relative context route after document load. The host accepts only the
+current frame, current attempt nonce, and protocol version. A frame that does
+not acknowledge within 15 seconds becomes unavailable and shows **Try again**
+and **Releases and permissions** outside the failed frame. Retry creates a new
+runtime binding and startup attempt. This check confirms document and context
+startup; it does not certify application business health.
+
+Kandev calculates effective access from the package declaration, instance grant, trusted data scope, and current caller authorization. A release receives only the intersection of those permissions. See [Security and trust](security.md#isolated-web-applications) for the security boundary.
+
+### Return to a task after publication
+
+When you return to a task, Kandev checks the current task canvas inventory. It can show an eligible canvas published while the task page was closed, reloaded, or disconnected. Kandev remembers a canvas that was already presented in the current browser tab, including a canvas that you closed. Use the existing task panel or phone canvas picker to open it again.
+
+On a phone, Kandev opens one new canvas route at a time. Use Back to return to the task. The route does not open again until a new browser tab offers it.
+
+### Reverse proxy requirements
+
+Keep the runtime document, packaged assets, and host bootstrap responses unmodified. The responses include `Cache-Control: no-store, no-transform`. Exclude the runtime path `/api/v1/plugins/web-apps/runtime/` from analytics injection, HTML rewriting, and similar response transforms. Keep the existing content security policy and capability checks.
+
+If a proxy strips or ignores `no-transform`, canvas startup can fail with **Canvas unavailable** and **Try again**. Restore the proxy rule, then select **Try again**. Republish only when the release itself changed.
+
+## Promote a task canvas
+
+Only a user can promote a task canvas. An agent cannot promote, demote, grant permissions, approve a release, archive, restore, roll back, or remove a canvas.
+
+1. Open the task canvas and choose its promotion action.
+2. Read the review dialog before you continue.
+3. Review every Kandev data read and write, event subscription, shared-state permission, and exact external HTTPS origin.
+4. Confirm the placement change to workspace navigation.
+
+The confirmation includes the active release ID, permission declaration
+digest, and grant generation that you reviewed. If any of these changes before
+confirmation, Kandev rejects the request as stale and requires a new review.
+
+The promotion keeps the canvas identity, active release, state, and release
+history. A workspace canvas then appears in workspace navigation. A new
+owner-authorized task canvas already has workspace data access, so promotion
+changes placement only. A legacy task canvas uses the permission review shown
+by its host. Canceling the review leaves the task canvas unchanged.
+
+If promotion adds a permission, Kandev keeps the current active release until a user approves the new grant. The new release stays pending permission until that review finishes.
+
+## Review permissions and releases
+
+Every published release is immutable. Kandev retains the active release, one prior valid release, and a pending release when one exists.
+
+Use the release review to inspect the manifest, source actor, declared Kandev access, and exact network origins. A release that requests no new access can replace the active release after validation. A release that requests more access stays pending and does not change the active app.
+
+The review selects the pending release first, otherwise the active release, and
+keeps that selection while retained history is available. It shows the created
+date, Active or Previous status, and readable task or session source labels
+when the current user can still access them. Deleted or inaccessible sources
+show a safe unavailable label. Permission groups appear once in plain language;
+new access is marked, unknown permission kinds cannot be approved, and exact
+HTTPS origins remain visible.
+
+On desktop the review uses a wider viewport-bounded dialog with a single
+scrolling middle region and fixed actions. On phones it becomes a full-height
+surface with a scrolling review region and fixed, touch-sized actions. Closing
+the review returns focus to its opener.
+
+Reject a pending release to keep the current app. Use rollback to select the retained prior release. Rollback does not restore grants that a user already revoked. Kandev starts a new permission review if the selected release needs access that is not currently granted.
+
+## Edit a canvas with Quick Chat
+
+1. Open the canvas host controls and choose **Edit**.
+2. Use the new Quick Chat to describe the change.
+3. Review the draft and its validation result.
+4. Publish the draft after its permissions are acceptable.
+
+Kandev starts a normal Quick Chat with a trusted canvas target. The agent receives the canvas identity, manifest, active source, validation result, and current grants. The target is fixed to the selected canvas.
+
+The agent publishes through the canvas release flow. The active release changes
+only after validation and permission review. A new permission request uses the
+same review as promotion. If another edit publishes first, the stale edit is
+rejected and cannot silently replace the newer release. An expired Quick Chat
+does not remove the active or prior release.
+
+## Recover, archive, and remove a canvas
+
+Kandev keeps the active release across page reloads and backend restarts. A missing or changed artifact makes the release unavailable before Kandev runs it. Kandev does not silently replace or execute that artifact.
+
+Use these recovery actions:
+
+- Reload the page after a temporary connection loss. The host reconnects and keeps the last known release.
+- Fix an invalid draft and publish it again. The active release stays available while the draft is invalid.
+- Roll back to the retained prior release after a failed publish.
+- Restore the database and matching artifact directory after a storage loss. See [Canvas artifacts and recovery](operations.md#canvas-artifacts-and-recovery).
+- Archive a canvas to hide it from normal discovery. Restore it from the canvas controls.
+- Remove a task canvas to remove the canvas and its data. Removing a task does not remove a canvas already promoted to a workspace.
+- Remove a workspace canvas to remove its grants, state, tokens, releases, and artifacts after cleanup completes.
+
+Kandev records artifact cleanup before it removes release ownership. A worker completes cleanup after the database transaction and retries it after a restart.
+
+## Limits and device behavior
+
+Kandev allows up to 100 workspace canvas instances across scopes. Archived canvases count toward instance and storage limits. A workspace can retain up to 2 GiB of canvas artifacts. One Kandev installation can retain up to 10 GiB.
+
+On desktop, workspace canvases use the workspace Canvases area. On phones, Kandev opens a full-height canvas route and keeps canvas controls in an inset bottom drawer.
+
+To change the name shown in Kandev, choose **Rename canvas** beside the host
+toolbar title or in the phone actions drawer. Saving changes the canvas name in
+navigation and task pickers. Workspace manage permission is required. Renaming
+does not republish or rename the release package.
+
+## Share and install a canvas
+
+Canvas sharing is manual and release-bound. It does not capture screenshots or
+publish a repository. Screenshots belong to a marketplace registry entry, not
+to the canvas package.
+
+1. Open the canvas host or the workspace canvas list.
+2. Choose **Share canvas**.
+3. Check the active release and fill any required gaps, such as the license or
+   source mode. Kandev preselects static mode only when retained files support
+   it; an unavailable static export is rejected during preparation.
+   Kandev fills known package details from the release; expand **Package
+   details** to review or edit them. It does not choose a license for you.
+4. Choose **Prepare downloads** and review the file inventory, archive sizes,
+   and private-content reminder. Then download the bundle or source archive.
+5. Check the downloaded files for private content before sharing them.
+
+The bundle is an installable `.tar.gz`. The source download is a ZIP of the
+retained project when the release uses project source mode. The preparation is
+temporary and expires after 15 minutes. A release change, lost authorization,
+expiry, or cancellation requires a new preparation. Kandev does not change the
+running canvas while it prepares these files.
+
+For an authorized browser client, `GET /api/v1/canvases/{id}/export-defaults`
+returns the active release ID, editable package metadata, and the names of
+missing required fields. The client must send that release ID as
+`expected_release_id` to `POST /api/v1/canvases/{id}/exports`. A release change
+requires fresh defaults and preparation. `PATCH /api/v1/canvases/{id}` with a
+`title` changes only the canvas instance name.
+
+Recipients can install a bundle from **Settings > Plugins > Canvases** by
+uploading the file or entering an HTTPS direct link. A registry entry provides
+an additional catalog path. Kandev fetches and inspects the exact package,
+shows its manifest and permissions, and requires an explicit confirmation
+before it creates an independent workspace canvas. A registry preview is only
+listing metadata. It does not grant permissions and it is not executed during
+review.
+
+Canvas registry entries use the same ordered `previews` field as plugin
+entries. A canvas entry must contain one to eight objects with an HTTPS `url`
+and non-empty `alt` text. The first object is the cover image. Plugin entries
+may omit `previews` or include up to eight images. Use **Preview images** in the
+catalog to move between images and retry a failed image.
+
+The official registry uses a manually reviewed pull request. Authors publish a
+versioned bundle as a release asset, add the repository and preview URLs to
+`plugin-registry/plugins.yaml`, and wait for the registry workflow to inspect
+the exact asset. Team registries can host an `index.json` with the same shape.
+Direct file and direct-link sharing does not require registry admission.
+
+## Related guides
+
+- [Plugin manifest reference](plugins-manifest.md#isolated-web-applications) defines the `ui.web_apps` manifest fields.
+- [Authoring a plugin](plugins-authoring.md#build-an-isolated-web-application) explains package authoring without an injected JavaScript API.
+- [Configuration](configuration.md#runtime-feature-toggles) explains the feature flag and restart rule.
+- [Security and trust](security.md#isolated-web-applications) explains sandboxing, same-origin trust, capabilities, and network access.
+- [Operations](operations.md#canvas-artifacts-and-recovery) explains the database and artifact backup boundary.
+- [Feature status](feature-status.md) records the public support status.

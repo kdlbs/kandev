@@ -53,7 +53,7 @@ func TestTaskMigrations_NewColumnsExist(t *testing.T) {
 	}
 
 	// Verify session columns (cost_subcents stores hundredths of a cent
-	// per docs/specs/office-costs/spec.md — the column was renamed from
+	// per docs/specs/office/requirements/costs.md — the column was renamed from
 	// cost_cents pre-release; no migration kept).
 	sessionColumns := []string{"cost_subcents", "tokens_in", "tokens_out"}
 	for _, col := range sessionColumns {

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -39,6 +42,71 @@ type fakeRuntimeUpdater struct {
 	invalidatePkg   string
 	refreshCalls    int
 	resolvedPackage string
+}
+
+func TestAgentUpdateJobUsesNativeInstallAndRefresh(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, testExecutableName("opencode")), []byte("native"), 0o755); err != nil {
+		t.Fatalf("write native executable: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	updater := &fakeRuntimeUpdater{
+		current:      hostutility.AgentCapabilities{AgentVersion: "1.0.0"},
+		currentFound: true,
+		target:       "1.1.0",
+		refreshCaps:  hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.1.0"},
+	}
+	store, completed := newUpdateTestStore(updater, newMaintenanceCoordinator(), nil)
+	spec := agents.ManagedNPMRuntimeSpec{
+		Package:      "opencode-ai",
+		ACPArgs:      []string{"acp"},
+		NativeBinary: "opencode",
+	}
+	job, err := store.Enqueue("opencode-acp", spec)
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusSucceeded)
+
+	updater.mu.Lock()
+	defer updater.mu.Unlock()
+	if got, want := updater.runCommand, []string{"npm", "install", "-g", "opencode-ai@1.1.0"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("native update command = %#v, want %#v", got, want)
+	}
+	if got, want := updater.refreshCommand, []string{"opencode", "acp"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("native refresh command = %#v, want %#v", got, want)
+	}
+	if updater.invalidateCalls != 0 {
+		t.Fatalf("native update invalidated npm cache %d times, want 0", updater.invalidateCalls)
+	}
+}
+
+func testExecutableName(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
+}
+
+type sequencedVersionUpdater struct {
+	fakeRuntimeUpdater
+	metadata     RuntimeVersionMetadata
+	metadataErr  error
+	metadataCall int
+}
+
+func (u *sequencedVersionUpdater) ResolveVersions(
+	_ context.Context,
+	_ string,
+) (RuntimeVersionMetadata, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.metadataCall++
+	if u.metadataCall > 1 && u.metadataErr != nil {
+		return RuntimeVersionMetadata{}, u.metadataErr
+	}
+	return u.metadata, nil
 }
 
 type recordingCommandExecutor struct {
@@ -79,6 +147,25 @@ func TestHostRuntimeUpdaterResolvesTargetWithDirectNPMArgv(t *testing.T) {
 	}
 }
 
+func TestHostRuntimeUpdaterResolvesStableVersionCatalogue(t *testing.T) {
+	executor := &recordingCommandExecutor{
+		output: `{"versions":["1.0.1","1.0.2-beta.1","1.0.2"],"dist-tags":{"latest":"1.0.2"}}`,
+	}
+	updater := &hostRuntimeUpdater{executor: executor}
+
+	metadata, err := updater.ResolveVersions(context.Background(), "@example/managed-acp")
+	if err != nil {
+		t.Fatalf("ResolveVersions: %v", err)
+	}
+	if metadata.Latest != "1.0.2" || len(metadata.Versions) != 3 {
+		t.Fatalf("metadata = %#v", metadata)
+	}
+	want := []string{"npm", "view", "@example/managed-acp", "versions", "dist-tags", "--json"}
+	if got := strings.Join(executor.outputCommand, "\x00"); got != strings.Join(want, "\x00") {
+		t.Fatalf("command = %v, want %v", executor.outputCommand, want)
+	}
+}
+
 func TestHostRuntimeUpdaterInvalidatesOnlyManagedNPMExecutionTree(t *testing.T) {
 	cacheRoot := t.TempDir()
 	spec := agents.ManagedNPMRuntimeSpec{Package: "opencode-ai"}
@@ -102,7 +189,7 @@ func TestHostRuntimeUpdaterInvalidatesOnlyManagedNPMExecutionTree(t *testing.T) 
 	if _, err := os.Stat(other); err != nil {
 		t.Fatalf("unrelated cache entry was removed: %v", err)
 	}
-	want := []string{"npm", "config", "get", "cache"}
+	want := []string{"npm", "--prefix", "~/.kandev/managed-npm-runtime", "config", "get", "cache"}
 	if got := strings.Join(executor.outputCommand, "\x00"); got != strings.Join(want, "\x00") {
 		t.Fatalf("command = %v, want %v", executor.outputCommand, want)
 	}
@@ -225,7 +312,7 @@ func waitForUpdateStatus(
 			return &snapshot
 		}
 	}
-	t.Fatalf("job %s finished with status %s, want %v", jobID, snapshot.Status, statuses)
+	t.Fatalf("job %s finished with status %s, error %q, operation %q, want %v", jobID, snapshot.Status, snapshot.Error, snapshot.Operation, statuses)
 	return nil
 }
 
@@ -257,12 +344,12 @@ func TestAgentUpdatePreviewResolvesTrustedCommandWithoutStartingAJob(t *testing.
 		t.Fatalf("versions = %q -> %q", preview.CurrentVersion, preview.TargetVersion)
 	}
 	wantCommand := []string{
-		"npm", "exec", "--yes", "--prefer-online", "--package=@example/managed-acp", "--", "node", "-e", "",
+		"npm", "--prefix", "~/.kandev/managed-npm-runtime", "exec", "--yes", "--prefer-online", "--package=@example/managed-acp", "--", "node", "-e", "",
 	}
 	if got := strings.Join(preview.Command, "\x00"); got != strings.Join(wantCommand, "\x00") {
 		t.Fatalf("command = %q, want %q", got, strings.Join(wantCommand, "\x00"))
 	}
-	if preview.CommandString != `npm exec --yes --prefer-online --package=@example/managed-acp -- node -e ""` {
+	if preview.CommandString != `npm --prefix ~/.kandev/managed-npm-runtime exec --yes --prefer-online --package=@example/managed-acp -- node -e ""` {
 		t.Fatalf("command string = %q", preview.CommandString)
 	}
 
@@ -273,6 +360,43 @@ func TestAgentUpdatePreviewResolvesTrustedCommandWithoutStartingAJob(t *testing.
 	}
 	if updater.runCalls != 0 || updater.refreshCalls != 0 {
 		t.Fatalf("preview mutated runtime: update=%d refresh=%d", updater.runCalls, updater.refreshCalls)
+	}
+}
+
+func TestAgentUpdatePreviewUseDefaultClassifiesResetAndShowsEffectiveVersions(t *testing.T) {
+	updater := &recoveryRuntimeUpdater{
+		metadata: RuntimeVersionMetadata{Versions: []string{"1.0.0", "1.1.0"}, Latest: "1.1.0"},
+		current: hostutility.AgentCapabilities{
+			Status:       hostutility.StatusOK,
+			AgentVersion: "1.0.0",
+		},
+		currentFound: true,
+	}
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values["managed-acp\x00@example/managed-acp"] = managedruntime.Selection{
+		Package: "@example/managed-acp",
+		Version: "1.0.0",
+	}
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec: agents.ManagedNPMRuntimeSpec{
+			Package:        "@example/managed-acp",
+			DefaultVersion: "1.1.0",
+		},
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetRuntimeUpdater(updater)
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+
+	preview, err := ctrl.PreviewAgentUpdateUseDefault(context.Background(), ag.ID())
+	if err != nil {
+		t.Fatalf("PreviewAgentUpdateUseDefault: %v", err)
+	}
+	if preview.Operation != string(managedruntime.OperationUseDefault) {
+		t.Fatalf("operation = %q, want use_default", preview.Operation)
+	}
+	if preview.DefaultVersion != "1.1.0" || preview.EffectiveVersion != "1.0.0" || preview.TargetVersion != "1.1.0" {
+		t.Fatalf("versions = default %q, effective %q, target %q", preview.DefaultVersion, preview.EffectiveVersion, preview.TargetVersion)
 	}
 }
 
@@ -316,6 +440,124 @@ func TestAgentUpdatePreviewRejectsUnsupportedAndResolutionFailure(t *testing.T) 
 	}
 }
 
+func TestAgentUpdatePreviewSurfacesSelectionStoreFailure(t *testing.T) {
+	updater := &fakeRuntimeUpdater{target: "1.1.0"}
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.err = errors.New("selection store locked")
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec:      managedRuntimeSpec(),
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetRuntimeUpdater(updater)
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+
+	_, err := ctrl.PreviewAgentUpdate(context.Background(), ag.ID())
+	if !errors.Is(err, ErrRuntimeUpdatePreviewFailed) {
+		t.Fatalf("PreviewAgentUpdate error = %v, want %v", err, ErrRuntimeUpdatePreviewFailed)
+	}
+	if !strings.Contains(err.Error(), "selection store locked") {
+		t.Fatalf("PreviewAgentUpdate error = %v, want selection error", err)
+	}
+}
+
+func TestEnqueueAgentUpdateReusesActiveJobBeforeMetadataResolution(t *testing.T) {
+	metadataErr := errors.New("registry unavailable")
+	updater := &sequencedVersionUpdater{
+		fakeRuntimeUpdater: fakeRuntimeUpdater{
+			current:      hostutility.AgentCapabilities{AgentVersion: "1.0.0"},
+			currentFound: true,
+			refreshCaps:  hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.1.0"},
+			runStarted:   make(chan struct{}),
+			releaseRun:   make(chan struct{}),
+		},
+		metadata:    RuntimeVersionMetadata{Versions: []string{"1.0.0", "1.1.0"}, Latest: "1.1.0"},
+		metadataErr: metadataErr,
+	}
+	hub := newUpdateTerminalBroadcaster()
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec:      managedRuntimeSpec(),
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetRuntimeUpdater(updater)
+	ctrl.updateJobStore = NewAgentUpdateJobStore(
+		hub,
+		zap.NewNop(),
+		updater,
+		newMaintenanceCoordinator(),
+		nil,
+	)
+
+	first, err := ctrl.EnqueueAgentUpdate(context.Background(), ag.ID(), "1.1.0")
+	if err != nil {
+		t.Fatalf("first EnqueueAgentUpdate: %v", err)
+	}
+	select {
+	case <-updater.runStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first update did not reach the running phase")
+	}
+
+	second, err := ctrl.EnqueueAgentUpdate(context.Background(), ag.ID(), "1.1.0")
+	if err != nil {
+		t.Fatalf("second EnqueueAgentUpdate: %v", err)
+	}
+	if second.JobID != first.JobID {
+		t.Fatalf("job IDs differ: %s != %s", second.JobID, first.JobID)
+	}
+	updater.mu.Lock()
+	metadataCalls := updater.metadataCall
+	updater.mu.Unlock()
+	if metadataCalls != 1 {
+		t.Fatalf("metadata calls = %d, want one initial validation", metadataCalls)
+	}
+
+	close(updater.releaseRun)
+	waitForUpdateStatus(t, hub.completed, first.JobID, dto.AgentUpdateJobStatusSucceeded)
+}
+
+func TestEnqueueAgentUpdateDoesNotCreateJobForAlreadyActiveHealthyTarget(t *testing.T) {
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values["managed-acp\x00@example/managed-acp"] = managedruntime.Selection{
+		Package: "@example/managed-acp",
+		Version: "1.1.0",
+	}
+	updater := &recoveryRuntimeUpdater{
+		metadata: RuntimeVersionMetadata{Versions: []string{"1.1.0"}, Latest: "1.1.0"},
+		current: hostutility.AgentCapabilities{
+			Status:       hostutility.StatusOK,
+			AgentVersion: "1.1.0",
+		},
+		currentFound: true,
+	}
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec:      managedRuntimeSpec(),
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+	ctrl.SetJobBroadcaster(newUpdateTerminalBroadcaster())
+	ctrl.SetRuntimeUpdater(updater)
+
+	result, err := ctrl.EnqueueAgentUpdate(context.Background(), ag.ID(), "1.1.0")
+	if err != nil {
+		t.Fatalf("EnqueueAgentUpdate: %v", err)
+	}
+	if result.JobID != "" {
+		t.Fatalf("no-op response job ID = %q, want no persisted job", result.JobID)
+	}
+	if result.Operation != string(managedruntime.OperationUpToDate) {
+		t.Fatalf("no-op operation = %q, want up_to_date", result.Operation)
+	}
+	if jobs := ctrl.ListAgentUpdateJobs(); len(jobs) != 0 {
+		t.Fatalf("retained jobs = %d, want none", len(jobs))
+	}
+	if updater.runCalls != 0 || len(updater.probe) != 0 {
+		t.Fatalf("no-op mutated updater: runs=%d probes=%d", updater.runCalls, len(updater.probe))
+	}
+}
+
 func TestAgentUpdateJobResolvesUpdatesRefreshesAndStreams(t *testing.T) {
 	updater := &fakeRuntimeUpdater{
 		current:      hostutility.AgentCapabilities{AgentVersion: "1.0.0"},
@@ -337,8 +579,8 @@ func TestAgentUpdateJobResolvesUpdatesRefreshesAndStreams(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusSucceeded)
-	if final.CurrentVersion != "1.0.0" || final.TargetVersion != "1.1.0" {
-		t.Fatalf("versions = %q -> %q, want 1.0.0 -> 1.1.0", final.CurrentVersion, final.TargetVersion)
+	if final.CurrentVersion != "1.1.0" || final.TargetVersion != "1.1.0" {
+		t.Fatalf("versions = %q -> %q, want 1.1.0 -> 1.1.0", final.CurrentVersion, final.TargetVersion)
 	}
 	if final.Output != "npm prepared runtime\n" {
 		t.Fatalf("Output = %q", final.Output)
@@ -354,11 +596,11 @@ func TestAgentUpdateJobResolvesUpdatesRefreshesAndStreams(t *testing.T) {
 	if updater.resolvedPackage != "@example/managed-acp" {
 		t.Fatalf("resolved package = %q", updater.resolvedPackage)
 	}
-	wantUpdate := "npm exec --yes --prefer-online --package=@example/managed-acp -- node -e "
+	wantUpdate := "npm --prefix ~/.kandev/managed-npm-runtime exec --yes --prefer-online --package=@example/managed-acp -- node -e "
 	if got := strings.Join(updater.runCommand, " "); got != wantUpdate {
 		t.Fatalf("update command = %q, want %q", got, wantUpdate)
 	}
-	wantRefresh := "npx --yes --prefer-offline @example/managed-acp --acp"
+	wantRefresh := "npx --yes --prefer-offline --prefix ~/.kandev/managed-npm-runtime @example/managed-acp@1.1.0 --acp"
 	if got := strings.Join(updater.refreshCommand, " "); got != wantRefresh {
 		t.Fatalf("refresh command = %q, want %q", got, wantRefresh)
 	}
@@ -470,6 +712,38 @@ func TestAgentUpdateRepairsExecutionCacheAndRetriesOnce(t *testing.T) {
 	}
 	if updater.invalidateCalls != 1 || updater.invalidatePkg != managedRuntimeSpec().Package {
 		t.Fatalf("cache repair = %d calls for %q", updater.invalidateCalls, updater.invalidatePkg)
+	}
+}
+
+func TestAgentUpdateNpmReleaseAgePolicySkipsCacheRepair(t *testing.T) {
+	updater := &fakeRuntimeUpdater{
+		current:      hostutility.AgentCapabilities{AgentVersion: "0.80.0"},
+		currentFound: true,
+		target:       "0.81.0",
+		runErr:       errors.New("exit status 1"),
+		updateOutput: "npm error code ETARGET\nnpm error notarget No matching version found for @agentclientprotocol/claude-agent-acp@0.81.0 with a date before 9/22/2026, 12:28:47 PM.\n",
+	}
+	store, completed := newUpdateTestStore(updater, newMaintenanceCoordinator(), nil)
+	spec := agents.ManagedNPMRuntimeSpec{
+		Package:        "@agentclientprotocol/claude-agent-acp",
+		DefaultVersion: "0.81.0",
+		ACPArgs:        []string{"acp"},
+	}
+	job, err := store.Enqueue("claude-acp", spec)
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusFailed)
+	if !strings.Contains(final.Error, "release-age policy") {
+		t.Fatalf("Error = %q, want the npm release-age policy failure", final.Error)
+	}
+	if strings.Contains(final.Error, "12:28:47 PM") {
+		t.Fatalf("Error leaked the raw npm date: %q", final.Error)
+	}
+	updater.mu.Lock()
+	defer updater.mu.Unlock()
+	if updater.runCalls != 1 || updater.invalidateCalls != 0 || updater.refreshCalls != 0 {
+		t.Fatalf("policy failure calls: update=%d invalidation=%d refresh=%d, want 1, 0, 0", updater.runCalls, updater.invalidateCalls, updater.refreshCalls)
 	}
 }
 

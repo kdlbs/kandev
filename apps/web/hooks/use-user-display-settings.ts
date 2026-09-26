@@ -6,8 +6,10 @@ import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useEnsureUserSettings } from "@/hooks/use-ensure-user-settings";
-import { repositoryId, type Repository } from "@/lib/types/http";
+import { repositoryId, type Repository, type TaskPriority } from "@/lib/types/http";
+import { TASK_PRIORITY_TOKENS } from "@/lib/tasks/task-priority";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
+import type { KanbanSort } from "@/lib/kanban/kanban-sort";
 
 type DisplaySettings = UserSettingsState;
 
@@ -26,9 +28,68 @@ type CommitPayload = {
   enablePreviewOnClick?: boolean;
   tasksListShowDetails?: boolean;
   kanbanViewMode?: string | null;
+  hiddenWorkflowStepIds?: Record<string, string[]>;
+  workflowIdsWithAutoHideEmptySteps?: string[];
+  kanbanSort?: KanbanSort;
+  kanbanPriorityFilterTokens?: TaskPriority[];
 };
 
-function buildNormalizedSettings(next: CommitPayload, current: DisplaySettings): DisplaySettings {
+export function normalizeWorkflowIds(ids: string[]): string[] {
+  return Array.from(new Set(ids)).sort();
+}
+
+export function normalizeHiddenStepIds(raw: Record<string, string[]>): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+  for (const [workflowId, ids] of Object.entries(raw)) {
+    const sorted = Array.from(new Set(ids)).sort();
+    if (sorted.length > 0) {
+      result[workflowId] = sorted;
+    }
+  }
+  return result;
+}
+
+function hiddenStepIdsEqual(
+  a: Record<string, string[]> | undefined,
+  b: Record<string, string[]> | undefined,
+): boolean {
+  const left = a ?? {};
+  const right = b ?? {};
+  const aKeys = Object.keys(left).sort();
+  const bKeys = Object.keys(right).sort();
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key, i) => {
+    if (key !== bKeys[i]) return false;
+    const aIds = [...left[key]].sort();
+    const bIds = [...right[key]].sort();
+    return aIds.length === bIds.length && aIds.every((id, j) => id === bIds[j]);
+  });
+}
+
+function normalizePriorityFilterTokens(tokens: TaskPriority[]): TaskPriority[] {
+  const selected = new Set(tokens);
+  return TASK_PRIORITY_TOKENS.filter((token) => selected.has(token));
+}
+
+function workflowIdsUnchanged(a: string[] | undefined, b: string[] | undefined): boolean {
+  return normalizeWorkflowIds(a ?? []).join("\0") === normalizeWorkflowIds(b ?? []).join("\0");
+}
+
+function priorityFilterTokensUnchanged(
+  a: TaskPriority[] | undefined,
+  b: TaskPriority[] | undefined,
+): boolean {
+  return (
+    normalizePriorityFilterTokens(a ?? []).join("\0") ===
+    normalizePriorityFilterTokens(b ?? []).join("\0")
+  );
+}
+
+/** @internal Exported for testing the snapshot-not-delta commit semantics. */
+export function buildNormalizedSettings(
+  next: CommitPayload,
+  current: DisplaySettings,
+): DisplaySettings {
   return {
     ...current,
     workspaceId: next.workspaceId,
@@ -37,6 +98,16 @@ function buildNormalizedSettings(next: CommitPayload, current: DisplaySettings):
     preferredShell: next.preferredShell ?? current.preferredShell,
     enablePreviewOnClick: next.enablePreviewOnClick ?? current.enablePreviewOnClick,
     tasksListShowDetails: next.tasksListShowDetails ?? current.tasksListShowDetails,
+    hiddenWorkflowStepIds: normalizeHiddenStepIds(
+      next.hiddenWorkflowStepIds ?? current.hiddenWorkflowStepIds ?? {},
+    ),
+    workflowIdsWithAutoHideEmptySteps: normalizeWorkflowIds(
+      next.workflowIdsWithAutoHideEmptySteps ?? current.workflowIdsWithAutoHideEmptySteps ?? [],
+    ),
+    kanbanSort: next.kanbanSort ?? current.kanbanSort,
+    kanbanPriorityFilterTokens: normalizePriorityFilterTokens(
+      next.kanbanPriorityFilterTokens ?? current.kanbanPriorityFilterTokens ?? [],
+    ),
     loaded: true,
   };
 }
@@ -52,8 +123,32 @@ export function isSettingsUnchanged(
     normalized.enablePreviewOnClick === current.enablePreviewOnClick &&
     normalized.tasksListShowDetails === current.tasksListShowDetails &&
     normalized.repositoryIds.length === current.repositoryIds.length &&
-    normalized.repositoryIds.every((id, index) => id === current.repositoryIds[index])
+    normalized.repositoryIds.every((id, index) => id === current.repositoryIds[index]) &&
+    hiddenStepIdsEqual(normalized.hiddenWorkflowStepIds, current.hiddenWorkflowStepIds) &&
+    workflowIdsUnchanged(
+      normalized.workflowIdsWithAutoHideEmptySteps,
+      current.workflowIdsWithAutoHideEmptySteps,
+    ) &&
+    normalized.kanbanSort === current.kanbanSort &&
+    priorityFilterTokensUnchanged(
+      normalized.kanbanPriorityFilterTokens,
+      current.kanbanPriorityFilterTokens,
+    )
   );
+}
+
+export function buildSettingsUpdatePayload(normalized: DisplaySettings): Record<string, unknown> {
+  return {
+    workspace_id: normalized.workspaceId ?? "",
+    workflow_filter_id: normalized.workflowId ?? "",
+    repository_ids: normalized.repositoryIds,
+    enable_preview_on_click: normalized.enablePreviewOnClick,
+    tasks_list_show_details: normalized.tasksListShowDetails,
+    kanban_hidden_step_ids: normalized.hiddenWorkflowStepIds,
+    workflow_ids_with_auto_hide_empty_steps: normalized.workflowIdsWithAutoHideEmptySteps,
+    kanban_sort: normalized.kanbanSort,
+    kanban_priority_filter_tokens: normalized.kanbanPriorityFilterTokens,
+  };
 }
 
 function persistSettingsPayload(payload: Record<string, unknown>) {
@@ -132,14 +227,7 @@ export function useUserDisplaySettings({
       const normalized = buildNormalizedSettings(next, current);
       if (isSettingsUnchanged(normalized, current)) return;
       setUserSettings(normalized);
-      const payload = {
-        workspace_id: normalized.workspaceId ?? "",
-        workflow_filter_id: normalized.workflowId ?? "",
-        repository_ids: normalized.repositoryIds,
-        enable_preview_on_click: normalized.enablePreviewOnClick,
-        tasks_list_show_details: normalized.tasksListShowDetails,
-      };
-      persistSettingsPayload(payload);
+      persistSettingsPayload(buildSettingsUpdatePayload(normalized));
     },
     [setUserSettings, userSettingsRef],
   );

@@ -10,24 +10,60 @@
  *     entry  -> missing keys are an ERROR (they would render as the raw key)
  *   - every catalog entry is referenced somewhere -> orphans are a WARNING
  *   - `en` and `pseudo` have the same key sets -> drift is an ERROR
+ *   - real locales (anything that is not `en`/`pseudo`, discovered from the
+ *     directory listing rather than named here) -> parity issues are an ERROR
+ *
+ * ## Why real locales gate too
+ *
+ * They did not used to. Gating them meant an ordinary English-only PR failed CI
+ * for work nobody in the merge path could do - #2261 added 13 `en` chat keys and
+ * left `main` red because #2243 had introduced `zh-cn` 20 minutes earlier. So
+ * the pass was advisory, and the cost of that showed up exactly where you would
+ * expect: pt-pt was 312 keys short and zh-hk/zh-tw 415, none of it visible in a
+ * green build.
+ *
+ * The real-locale catalogs are now complete (`pt-pt`, `zh-cn`, `zh-hk`,
+ * `zh-tw`, `ja`), so the failure mode is the other one: a PR that adds an
+ * `en` key and no translation silently re-opens the gap. This gates, and the
+ * cost is that adding user-facing copy means adding it in six languages. That
+ * is the actual cost of shipping those languages.
+ *
+ * ## The identical-to-English check
+ *
+ * The structural pass compares SHAPES, so a catalog copy-pasted wholesale from
+ * `en` passes every part of it. `untranslatedValueIssues` closes that, in two
+ * tiers (see `scripts/lib/i18n-catalogs.mjs`): values the shared `looksLikeCopy`
+ * predicate says are not copy need no explanation, and the prose that survives
+ * it is declared in a `_verbatim.json` registry with a reason. Stale registry
+ * entries are themselves an error, so the files cannot rot into the shrinking
+ * allowlist this was meant not to be.
  *
  * Usage: node scripts/check-i18n-keys.mjs [--strict-orphans]
  */
 import fs from "node:fs";
 import path from "node:path";
 
+import { noLiteralStringOptions } from "../eslint.i18n.options.mjs";
+import {
+  discoverRealLocales,
+  formatParityIssue,
+  formatVerbatimIssue,
+  readLocaleNamespaces,
+  readVerbatimRegistry,
+  realLocaleParityIssues,
+  staleVerbatimEntries,
+  untranslatedValueIssues,
+} from "./lib/i18n-catalogs.mjs";
+import { looksLikeCopy } from "./lib/looks-like-copy.mjs";
+
 const ROOT = path.resolve(import.meta.dirname, "..");
 const LOCALES = path.join(ROOT, "src", "locales");
 const STRICT_ORPHANS = process.argv.includes("--strict-orphans");
 
 function readCatalog(locale) {
-  const dir = path.join(LOCALES, locale);
   const out = new Map(); // "ns:key" -> value
-  if (!fs.existsSync(dir)) return out;
-  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".json"))) {
-    const ns = file.replace(/\.json$/, "");
-    const entries = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
-    for (const [key, value] of Object.entries(entries)) out.set(`${ns}:${key}`, value);
+  for (const [namespace, messages] of readLocaleNamespaces(LOCALES, locale)) {
+    for (const [key, value] of messages) out.set(`${namespace}:${key}`, value);
   }
   return out;
 }
@@ -101,6 +137,40 @@ const enKeys = new Set(en.keys());
 const pseudoKeys = new Set(pseudo.keys());
 const pseudoMissing = [...enKeys].filter((k) => !pseudoKeys.has(k));
 const pseudoExtra = [...pseudoKeys].filter((k) => !enKeys.has(k));
+const sourceNamespaces = readLocaleNamespaces(LOCALES, "en");
+const realLocales = discoverRealLocales(LOCALES);
+const localeNamespaces = new Map(
+  realLocales.map((locale) => [locale, readLocaleNamespaces(LOCALES, locale)]),
+);
+const excludes = noLiteralStringOptions.words?.exclude ?? [];
+const isCopy = (value) => looksLikeCopy(value, excludes);
+const sharedVerbatim = readVerbatimRegistry(LOCALES);
+const ownVerbatim = new Map(
+  realLocales.map((locale) => [locale, readVerbatimRegistry(LOCALES, locale)]),
+);
+const realLocaleIssues = realLocales.flatMap((locale) => [
+  ...realLocaleParityIssues(sourceNamespaces, localeNamespaces.get(locale), locale),
+  ...untranslatedValueIssues(sourceNamespaces, localeNamespaces.get(locale), locale, isCopy, {
+    shared: sharedVerbatim,
+    own: ownVerbatim.get(locale),
+  }),
+]);
+
+// Registry hygiene, so a `_verbatim.json` cannot outlive what it explains.
+const flatLocales = realLocales.map((locale) => ({
+  locale,
+  flat: new Map(
+    [...localeNamespaces.get(locale)].flatMap(([ns, messages]) =>
+      [...messages].map(([key, value]) => [`${ns}:${key}`, value]),
+    ),
+  ),
+}));
+const verbatimIssues = [
+  ...staleVerbatimEntries(sharedVerbatim, en, flatLocales),
+  ...realLocales.flatMap((locale) =>
+    staleVerbatimEntries(ownVerbatim.get(locale), en, flatLocales, locale),
+  ),
+];
 
 let failed = false;
 
@@ -122,6 +192,30 @@ if (pseudoMissing.length || pseudoExtra.length) {
   );
 }
 
+if (realLocaleIssues.length) {
+  failed = true;
+  console.error(`\n✖ ${realLocaleIssues.length} real-locale catalog issue(s):\n`);
+  for (const issue of realLocaleIssues.slice(0, 60)) {
+    console.error(`  ${formatParityIssue(issue)}`);
+  }
+  if (realLocaleIssues.length > 60) {
+    console.error(`  … and ${realLocaleIssues.length - 60} more`);
+  }
+  console.error(
+    `\n  Add the translation, or - if the value is prose that reads the same in\n` +
+      `  that language - declare it in src/locales/<locale>/_verbatim.json with a\n` +
+      `  reason. Brand nouns, acronyms and placeholder-only frames need neither.\n` +
+      `  For zh-tw / zh-hk run: pnpm run i18n:zh-hant\n`,
+  );
+}
+
+if (verbatimIssues.length) {
+  failed = true;
+  console.error(`\n✖ ${verbatimIssues.length} stale verbatim registry entr(ies):\n`);
+  for (const issue of verbatimIssues) console.error(`  ${formatVerbatimIssue(issue)}`);
+  console.error("");
+}
+
 if (orphans.length) {
   const label = STRICT_ORPHANS ? "✖" : "⚠";
   console[STRICT_ORPHANS ? "error" : "warn"](
@@ -133,9 +227,14 @@ if (orphans.length) {
 }
 
 if (!failed) {
+  // Say only what was actually gated. The previous wording claimed "pseudo and
+  // zh-cn in sync", which was misleading twice over: it implied a real locale
+  // gates the build, and it read as "translated" for a check that cannot see
+  // English left inside a translated value.
+  const gated = realLocales.length ? ` ${realLocales.join(", ")} complete.` : "";
   console.log(
     `✓ i18n keys OK — ${used.size} key(s) referenced, ${en.size} en entr(ies), ` +
-      `${orphans.length} orphan(s), pseudo in sync.`,
+      `${orphans.length} orphan(s), pseudo in sync.${gated}`,
   );
 }
 process.exit(failed ? 1 : 0);

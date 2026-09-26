@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
@@ -21,12 +22,15 @@ import (
 )
 
 type fakeMessengerTaskSvc struct {
-	primary    *taskmodels.TaskSession
-	primaryErr error
-	byID       map[string]*taskmodels.TaskSession
-	created    *taskmodels.Message
-	deleted    []string
-	waitErr    error
+	primary                  *taskmodels.TaskSession
+	primaryErr               error
+	byID                     map[string]*taskmodels.TaskSession
+	created                  *taskmodels.Message
+	deleted                  []string
+	waitErr                  error
+	idempotentMessagePresent bool
+	deleteRequiresLiveCtx    bool
+	deleteErr                error
 }
 
 func (f *fakeMessengerTaskSvc) GetTaskSession(_ context.Context, id string) (*taskmodels.TaskSession, error) {
@@ -46,10 +50,37 @@ func (f *fakeMessengerTaskSvc) CreateMessage(_ context.Context, req *taskservice
 	return f.created, nil
 }
 
-func (f *fakeMessengerTaskSvc) DeleteMessage(_ context.Context, id string) error {
+func (f *fakeMessengerTaskSvc) CreateMessageIdempotent(_ context.Context, id string, req *taskservice.CreateMessageRequest) (*taskmodels.Message, error) {
+	f.created = &taskmodels.Message{ID: id, TaskSessionID: req.TaskSessionID, TaskID: req.TaskID, Content: req.Content}
+	f.idempotentMessagePresent = true
+	return f.created, nil
+}
+
+func (f *fakeMessengerTaskSvc) GetMessageWithPromptIndex(_ context.Context, id string) (*taskmodels.Message, error) {
+	if f.idempotentMessagePresent && f.created != nil && f.created.ID == id {
+		return f.created, nil
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (f *fakeMessengerTaskSvc) DeleteMessage(ctx context.Context, id string) error {
+	if f.deleteRequiresLiveCtx && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	f.deleted = append(f.deleted, id)
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	if f.created != nil && f.created.ID == id {
+		f.idempotentMessagePresent = false
+	}
 	return nil
 }
+
+type acceptedPromptError struct{ err error }
+
+func (e acceptedPromptError) Error() string              { return e.err.Error() }
+func (acceptedPromptError) DetachedResumeAccepted() bool { return true }
 
 func (f *fakeMessengerTaskSvc) WaitForSessionReady(_ context.Context, _ string) error {
 	return f.waitErr
@@ -60,11 +91,19 @@ type fakeMessengerOrch struct {
 	startCalls          int
 	promptCalls         int
 	resumeCalls         int
+	queueStatusCalls    int
+	queueStatusCtx      context.Context
 	promptErr           error
 	promptFailFirstOnly bool
+	promptHook          func()
 }
 
 func (f *fakeMessengerOrch) GetMessageQueue() *messagequeue.Service { return f.queue }
+
+func (f *fakeMessengerOrch) PublishQueueStatusEvent(ctx context.Context, _ string) {
+	f.queueStatusCalls++
+	f.queueStatusCtx = ctx
+}
 
 func (f *fakeMessengerOrch) StartCreatedSession(_ context.Context, _, _, _, _ string, _, _, _ bool, _ []v1.MessageAttachment, _ []v1.EntityReference) (*orchexecutor.TaskExecution, error) {
 	f.startCalls++
@@ -73,6 +112,9 @@ func (f *fakeMessengerOrch) StartCreatedSession(_ context.Context, _, _, _, _ st
 
 func (f *fakeMessengerOrch) PromptTask(_ context.Context, _, _, _, _ string, _ bool, _ []v1.MessageAttachment, _ bool) (*orchestrator.PromptResult, error) {
 	f.promptCalls++
+	if f.promptHook != nil {
+		f.promptHook()
+	}
 	retriedAfterResume := f.promptFailFirstOnly && f.promptCalls > 1
 	if f.promptErr != nil && !retriedAfterResume {
 		return nil, f.promptErr
@@ -107,6 +149,20 @@ func TestPluginsMessenger_RunningSessionQueues(t *testing.T) {
 	require.Equal(t, 1, orch.queue.GetStatus(context.Background(), "s1").Count, "message should be enqueued")
 	require.Nil(t, tasks.created, "queued path records via the queue, not CreateMessage")
 	require.Zero(t, orch.startCalls+orch.promptCalls)
+	require.Equal(t, 1, orch.queueStatusCalls, "queued message should publish queue status")
+}
+
+func TestPluginsMessenger_QueueStatusSurvivesCancelledRequest(t *testing.T) {
+	tasks := &fakeMessengerTaskSvc{primary: &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateRunning}}
+	orch := &fakeMessengerOrch{}
+	a := newMessengerAdapter(t, tasks, orch)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := a.SendMessage(ctx, "t1", "", "do the thing", "plugin:p")
+	require.NoError(t, err)
+	require.NotNil(t, orch.queueStatusCtx)
+	require.NoError(t, orch.queueStatusCtx.Err(), "queue status publication must not inherit a cancelled request")
 }
 
 func TestPluginsMessenger_CreatedSessionStarts(t *testing.T) {
@@ -177,6 +233,56 @@ func TestPluginsMessenger_PromptFailureDeletesRecordedMessage(t *testing.T) {
 	_, err := a.SendMessage(context.Background(), "t1", "", "nope", "plugin:p")
 	require.Error(t, err)
 	require.Equal(t, []string{"msg-1"}, tasks.deleted, "a failed dispatch must not leave an orphan message")
+}
+
+func TestPluginsMessenger_IdempotentFailureDeletesMessageAfterRequestCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	tasks := &fakeMessengerTaskSvc{
+		primary:               &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateWaitingForInput, AgentExecutionID: "exec-1"},
+		deleteRequiresLiveCtx: true,
+	}
+	orch := &fakeMessengerOrch{
+		promptErr:  errors.New("dispatch boom"),
+		promptHook: cancel,
+	}
+	a := newMessengerAdapter(t, tasks, orch)
+
+	_, err := a.StartOrPromptIdempotent(ctx, "t1", tasks.primary, "nope", "plugin:p", "occurrence-message")
+	require.Error(t, err)
+	require.False(t, tasks.idempotentMessagePresent, "a failed dispatch must not leave an idempotent message that suppresses the retry")
+}
+
+func TestPluginsMessenger_IdempotentRetryReconcilesMarkerAfterDeleteFailure(t *testing.T) {
+	tasks := &fakeMessengerTaskSvc{
+		primary:   &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateWaitingForInput, AgentExecutionID: "exec-1"},
+		deleteErr: errors.New("marker store unavailable"),
+	}
+	orch := &fakeMessengerOrch{promptErr: errors.New("dispatch boom")}
+	a := newMessengerAdapter(t, tasks, orch)
+
+	_, err := a.StartOrPromptIdempotent(context.Background(), "t1", tasks.primary, "wake", "plugin:p", "occurrence-message")
+	require.Error(t, err)
+	require.True(t, tasks.idempotentMessagePresent, "a failed marker delete leaves a reconciliable pending delivery")
+
+	tasks.deleteErr = nil
+	orch.promptErr = nil
+	status, err := a.StartOrPromptIdempotent(context.Background(), "t1", tasks.primary, "wake", "plugin:p", "occurrence-message")
+	require.NoError(t, err)
+	require.Equal(t, "sent", status)
+	require.Equal(t, 2, orch.promptCalls, "retry must deliver instead of treating the orphan marker as success")
+	require.Len(t, tasks.deleted, 2, "retry removes the stale marker before recording its new dispatch")
+}
+
+func TestPluginsMessenger_IdempotentAcceptedPromptErrorKeepsOccurrenceMarker(t *testing.T) {
+	tasks := &fakeMessengerTaskSvc{primary: &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateWaitingForInput, AgentExecutionID: "exec-1"}}
+	orch := &fakeMessengerOrch{promptErr: acceptedPromptError{err: errors.New("publication failed after acceptance")}}
+	a := newMessengerAdapter(t, tasks, orch)
+
+	status, err := a.StartOrPromptIdempotent(context.Background(), "t1", tasks.primary, "wake", "plugin:p", "occurrence-message")
+	require.NoError(t, err, "accepted prompt must not be replayed")
+	require.Equal(t, "sent", status)
+	require.True(t, tasks.idempotentMessagePresent, "accepted prompt marker must remain durable")
+	require.Empty(t, tasks.deleted, "accepted prompt marker must not be compensated away")
 }
 
 func TestPluginsMessenger_ExplicitSessionMustBelongToTask(t *testing.T) {

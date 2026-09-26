@@ -15,10 +15,17 @@ import {
   DropdownMenuSubTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
+import { isHealthyAgentProfile } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
-import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import {
+  isAgentConfiguredOnExecutor,
+  shouldFilterHandoffByHostHealth,
+} from "@/lib/agent-executor-compat";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
+import { useTranslation } from "react-i18next";
 
 export type HandoffProfile = {
   id: string;
@@ -40,33 +47,60 @@ function profileDisplayLabel(profile: AgentProfileOption): { label: string; agen
 export function useHandoffProfiles(taskId: string, enabled = true): HandoffProfile[] {
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
   const executorProfile = useTaskExecutorProfile(taskId, enabled);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
 
   return useMemo(() => {
-    return agentProfiles.map((profile) => {
-      const { label, agentName } = profileDisplayLabel(profile);
-      let disabled = false;
-      if (executorProfile && authLoaded) {
-        disabled = !isAgentConfiguredOnExecutor(profile, executorProfile, authSpecs);
-      }
-      return { id: profile.id, label, agentName, disabled };
-    });
-  }, [agentProfiles, executorProfile, authSpecs, authLoaded]);
+    const filterByHostHealth = shouldFilterHandoffByHostHealth(executorProfile);
+    return agentProfiles
+      .filter((profile) => isSelectableAgentProfile(profile, dynamicRoutingEnabled))
+      .filter((profile) => !filterByHostHealth || isHealthyAgentProfile(profile))
+      .map((profile) => {
+        const { label, agentName } = profileDisplayLabel(profile);
+        let disabled = false;
+        if (executorProfile && authLoaded) {
+          disabled = !isAgentConfiguredOnExecutor(profile, executorProfile, authSpecs);
+        }
+        return { id: profile.id, label, agentName, disabled };
+      });
+  }, [agentProfiles, dynamicRoutingEnabled, executorProfile, authSpecs, authLoaded]);
+}
+
+/**
+ * True when at least one selectable (enabled) agent profile is configured,
+ * regardless of its agent's capability health. Distinguishes "no profiles
+ * configured" from "profiles exist but every agent is currently unhealthy" so
+ * the Handoff empty state can point at the actual remedy (agent install/auth)
+ * instead of profile creation.
+ */
+export function useHasSelectableAgentProfiles(): boolean {
+  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
+  return useMemo(
+    () => agentProfiles.some((profile) => isSelectableAgentProfile(profile, dynamicRoutingEnabled)),
+    [agentProfiles, dynamicRoutingEnabled],
+  );
 }
 
 function HandoffProfileList({
   profiles,
+  hasSelectableProfiles,
   onSelectProfile,
   Item,
 }: {
   profiles: HandoffProfile[];
+  hasSelectableProfiles: boolean;
   onSelectProfile: (profileId: string) => void;
   Item: typeof ContextMenuItem | typeof DropdownMenuItem;
 }) {
+  const { t } = useTranslation();
   if (profiles.length === 0) {
+    const emptyMessageKey = hasSelectableProfiles
+      ? "task:noAgentProfilesReadyForHandoff"
+      : "task:noAgentProfilesConfigured";
     return (
       <Item disabled className="text-xs text-muted-foreground">
-        No agent profiles configured
+        {t(emptyMessageKey)}
       </Item>
     );
   }
@@ -75,7 +109,7 @@ function HandoffProfileList({
       key={profile.id}
       className="cursor-pointer"
       disabled={profile.disabled}
-      title={profile.disabled ? "Not configured for this executor" : undefined}
+      title={profile.disabled ? t("task:notConfiguredForThisExecutor") : undefined}
       data-testid={`handoff-profile-${profile.id}`}
       onSelect={() => onSelectProfile(profile.id)}
     >
@@ -96,8 +130,10 @@ type HandoffMenuProps = {
 };
 
 export function HandoffContextMenuSub({ taskId, disabled, onSelectProfile }: HandoffMenuProps) {
+  const { t } = useTranslation();
   const [submenuOpen, setSubmenuOpen] = useState(false);
   const profiles = useHandoffProfiles(taskId, submenuOpen);
+  const hasSelectableProfiles = useHasSelectableAgentProfiles();
   const submenuDisabled = disabled || (profiles.length > 0 && profiles.every((p) => p.disabled));
 
   return (
@@ -107,11 +143,12 @@ export function HandoffContextMenuSub({ taskId, disabled, onSelectProfile }: Han
         disabled={submenuDisabled}
         data-testid="session-handoff-submenu"
       >
-        Handoff
+        {t("task:handoff")}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-48">
         <HandoffProfileList
           profiles={profiles}
+          hasSelectableProfiles={hasSelectableProfiles}
           onSelectProfile={onSelectProfile}
           Item={ContextMenuItem}
         />
@@ -121,8 +158,10 @@ export function HandoffContextMenuSub({ taskId, disabled, onSelectProfile }: Han
 }
 
 export function HandoffDropdownMenuSub({ taskId, disabled, onSelectProfile }: HandoffMenuProps) {
+  const { t } = useTranslation();
   const [submenuOpen, setSubmenuOpen] = useState(false);
   const profiles = useHandoffProfiles(taskId, submenuOpen);
+  const hasSelectableProfiles = useHasSelectableAgentProfiles();
   const submenuDisabled = disabled || (profiles.length > 0 && profiles.every((p) => p.disabled));
 
   return (
@@ -132,11 +171,12 @@ export function HandoffDropdownMenuSub({ taskId, disabled, onSelectProfile }: Ha
         disabled={submenuDisabled}
         data-testid="session-handoff-submenu"
       >
-        Handoff
+        {t("task:handoff")}
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-48">
         <HandoffProfileList
           profiles={profiles}
+          hasSelectableProfiles={hasSelectableProfiles}
           onSelectProfile={onSelectProfile}
           Item={DropdownMenuItem}
         />

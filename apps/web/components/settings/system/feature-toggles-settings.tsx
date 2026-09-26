@@ -20,7 +20,7 @@ import { useSettingsSaveContributor } from "../settings-save-provider";
 
 type Props = {
   initialFlags: RuntimeFlagState[];
-  restartCapability: RestartCapability | null;
+  restartCapability: RestartCapability | null | undefined;
 };
 
 let bootstrapRuntimeFlagsRequest: ReturnType<typeof fetchRuntimeFlags> | null = null;
@@ -200,27 +200,27 @@ function RestartRequiredAlert({
   restarting,
   onRestart,
 }: {
-  capability: RestartCapability | null;
+  capability: RestartCapability | null | undefined;
   restarting: boolean;
   onRestart: () => void;
 }) {
   const { t } = useTranslation();
-  const supported = capability?.supported === true;
+  const loading = capability === undefined;
+  const supported = !loading && capability?.supported === true;
   return (
     <Alert className="border-border/70 bg-muted/30">
       <IconRotateClockwise className="h-4 w-4 text-muted-foreground" />
       <AlertTitle className="flex items-center gap-2">
         {t("system:restartRequired")}
-        <RestartSupportInfo supported={supported} reason={capability?.reason} />
+        {!loading && <RestartSupportInfo supported={supported} reason={capability?.reason} />}
       </AlertTitle>
       <AlertDescription className="flex flex-col gap-3 text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
         <span>
           {t("system:restartPendingChanges")}
-          {!supported && ` ${t("system:restartManualHint")}`}
+          {!loading && !supported && ` ${t("system:restartManualHint")}`}
         </span>
-        {supported && (
+        {!loading && supported && (
           <Button
-            size="sm"
             onClick={onRestart}
             disabled={restarting}
             className="w-full cursor-pointer sm:w-auto"

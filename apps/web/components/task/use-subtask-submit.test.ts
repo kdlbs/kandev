@@ -3,15 +3,21 @@ import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
+import type { FileAttachment } from "./chat/file-attachment";
 
-const { mockCreateTask, mockReplaceTaskUrl, mockSetActiveTask, mockSetActiveSession } = vi.hoisted(
-  () => ({
-    mockCreateTask: vi.fn(),
-    mockReplaceTaskUrl: vi.fn(),
-    mockSetActiveTask: vi.fn(),
-    mockSetActiveSession: vi.fn(),
-  }),
-);
+const {
+  mockCreateTask,
+  mockReplaceTaskUrl,
+  mockSetActiveTask,
+  mockSetActiveSession,
+  mockHasPendingAttachmentUploads,
+} = vi.hoisted(() => ({
+  mockCreateTask: vi.fn(),
+  mockReplaceTaskUrl: vi.fn(),
+  mockSetActiveTask: vi.fn(),
+  mockSetActiveSession: vi.fn(),
+  mockHasPendingAttachmentUploads: vi.fn(),
+}));
 
 const mockToast = vi.fn();
 const mockEnhancePrompt = vi.fn();
@@ -37,11 +43,16 @@ vi.mock("@/lib/links", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({ setActiveTask: mockSetActiveTask, setActiveSession: mockSetActiveSession }),
+    selector({
+      setActiveTask: mockSetActiveTask,
+      setActiveSession: mockSetActiveSession,
+    }),
 }));
 
 vi.mock("@/components/task-create-dialog-helpers", () => ({
   buildRepositoriesPayload: vi.fn(() => []),
+  hasPendingAttachmentUploads: (...args: Parameters<typeof mockHasPendingAttachmentUploads>) =>
+    mockHasPendingAttachmentUploads(...args),
   toMessageAttachments: vi.fn(() => []),
 }));
 
@@ -237,14 +248,17 @@ function makeSubmitOptions(
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- subtask submission cases share one hook harness.
 describe("useSubtaskSubmit", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockHasPendingAttachmentUploads.mockReturnValue(false);
     mockCreateTask.mockResolvedValue({ id: CREATED_TASK_ID, session_id: CREATED_SESSION_ID });
   });
 
   it("sends the auto-title contract without a title", async () => {
-    const opts = makeSubmitOptions({ autoTitle: true });
+    const onClose = vi.fn();
+    const opts = makeSubmitOptions({ autoTitle: true, onClose });
     const { result } = renderHook(() => useSubtaskSubmit(opts));
 
     await act(async () => {
@@ -259,6 +273,56 @@ describe("useSubtaskSubmit", () => {
     expect(mockSetActiveTask).toHaveBeenCalledWith(CREATED_TASK_ID);
     expect(mockSetActiveSession).toHaveBeenCalledWith(CREATED_TASK_ID, CREATED_SESSION_ID);
     expect(mockReplaceTaskUrl).toHaveBeenCalledWith(CREATED_TASK_ID);
+    expect(onClose.mock.invocationCallOrder[0]).toBeLessThan(
+      mockReplaceTaskUrl.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("sends the autopilot creation flag for a subtask", async () => {
+    const opts = makeSubmitOptions({ autopilot: true });
+    const { result } = renderHook(() => useSubtaskSubmit(opts));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+    });
+
+    expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({ autopilot: true }));
+  });
+
+  it("passes fresh-branch metadata when a local executor uses a policy row", async () => {
+    const buildRepositoriesPayload = await import("@/components/task-create-dialog-helpers");
+    const opts = makeSubmitOptions({
+      isLocalExecutor: true,
+      fs: {
+        useRemote: false,
+        remoteRepos: [],
+        prInfoByUrl: {},
+        repositories: [
+          {
+            key: "row-1",
+            repositoryId: "repo-1",
+            branch: "main",
+            branchPolicyId: "policy-1",
+          },
+        ],
+        discoveredRepositories: [],
+        agentProfileId: "",
+        executorProfileId: "local-profile",
+        freshBranchEnabled: true,
+      } as unknown as Parameters<typeof useSubtaskSubmit>[0]["fs"],
+    });
+    const { result } = renderHook(() => useSubtaskSubmit(opts));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+    });
+
+    expect(buildRepositoriesPayload.buildRepositoriesPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isLocalExecutor: true,
+        freshBranch: { confirmDiscard: false, consentedDirtyFiles: [] },
+      }),
+    );
   });
 
   it("requires a title when auto-title mode is omitted", async () => {
@@ -295,6 +359,30 @@ describe("useSubtaskSubmit", () => {
     });
 
     expect(mockCreateTask).not.toHaveBeenCalled();
+  });
+
+  it("does not create while an attachment upload is pending", async () => {
+    mockHasPendingAttachmentUploads.mockReturnValue(true);
+    const pendingAttachment = {
+      id: "pending-attachment",
+      file: new File(["pending"], "pending.txt"),
+      data: "",
+      mimeType: "text/plain",
+      fileName: "pending.txt",
+      size: 7,
+      isImage: false,
+      deliveryMode: "path",
+    } satisfies FileAttachment;
+    const opts = makeSubmitOptions({ attachments: [pendingAttachment] });
+    const { result } = renderHook(() => useSubtaskSubmit(opts));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+    });
+
+    expect(mockHasPendingAttachmentUploads).toHaveBeenCalledWith([pendingAttachment]);
+    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(opts.setIsCreating).not.toHaveBeenCalled();
   });
 
   it("cleans up the creating state after a request failure", async () => {

@@ -1,8 +1,14 @@
+/* eslint-disable max-lines -- queue ghost behavior is covered in one focused suite. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueuedGhostMessage, canMergeEntry, canMergeWithAbove } from "./queued-ghost-message";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
+import {
+  ClarificationEscapeGuardProvider,
+  type ClarificationEscapeGuardEntry,
+  type ClarificationEscapeGuardRegistry,
+} from "@/hooks/use-clarification-escape-guard";
 import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
@@ -10,6 +16,7 @@ import type { QueuedMessage } from "@/lib/state/slices/session/types";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  triggerFileDownload.mockReset();
 });
 
 vi.mock("@kandev/ui/tooltip", () => ({
@@ -26,8 +33,15 @@ const ATTACHMENT_1_ALT = "Attachment 1";
 const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
 const FULL_SIZE_ATTACHMENT_1_ALT = "Full size Attachment 1";
 const MERGE_TESTID = "queue-entry-merge";
+const EDIT_TESTID = "queue-entry-edit";
+const REMOVE_TESTID = "queue-entry-remove";
 const EDIT_TITLE = "Edit queued message";
 const MERGE_TITLE = "Merge with above";
+
+const QUEUE_EDIT_TEXTAREA_TESTID = "queue-edit-textarea";
+const { triggerFileDownload } = vi.hoisted(() => ({ triggerFileDownload: vi.fn() }));
+
+vi.mock("@/lib/utils/file-download", () => ({ triggerFileDownload }));
 
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
@@ -79,6 +93,191 @@ function renderWithProviders(node: React.ReactNode) {
   );
 }
 
+function withEscapeGuardRegistry(node: React.ReactNode) {
+  const holder: { entry: ClarificationEscapeGuardEntry } = { entry: null };
+  const registry: ClarificationEscapeGuardRegistry = {
+    register: (_id, predicate) => {
+      holder.entry = { test: predicate };
+    },
+    unregister: () => {
+      holder.entry = null;
+    },
+  };
+  render(
+    <ClarificationEscapeGuardProvider value={registry}>{node}</ClarificationEscapeGuardProvider>,
+  );
+  return holder;
+}
+
+describe("QueuedGhostMessage reorder handle", () => {
+  const HANDLE_TESTID = "queue-grab-handle";
+
+  function renderRow(
+    overrides: Partial<QueuedMessage> = {},
+    props: Partial<React.ComponentProps<typeof QueuedGhostMessage>> = {},
+  ) {
+    return render(
+      <QueuedGhostMessage
+        entry={entry(overrides)}
+        canEdit={false}
+        onSave={vi.fn()}
+        onRemove={vi.fn()}
+        {...props}
+      />,
+    );
+  }
+
+  it("renders a dotted grab handle with localized labels", () => {
+    renderRow();
+    const handle = screen.getByTestId(HANDLE_TESTID);
+    expect(handle.getAttribute("aria-label")).toBe("Reorder queued message");
+    expect(handle.getAttribute("aria-roledescription")).toBe("sortable");
+    // 2x3 dot grid reads as a dotted grip.
+    expect(handle.querySelectorAll('[aria-hidden="true"] span').length).toBe(6);
+  });
+
+  it("shows the handle without hovering on a fine pointer", () => {
+    renderRow();
+    const handle = screen.getByTestId(HANDLE_TESTID);
+    // A mounted handle is an always-visible drag affordance on every pointer.
+    expect(handle.className).toContain("opacity-100");
+    expect(handle.className).not.toContain("opacity-0");
+    expect(handle.className).not.toContain("group-hover:opacity-100");
+  });
+
+  it("keeps the fine-pointer grip small and unobtrusive", () => {
+    renderRow();
+    const handle = screen.getByTestId(HANDLE_TESTID);
+    expect(handle.className).toContain("left-1");
+    expect(handle.className).toContain("h-3 w-3");
+    expect(handle.className).toContain("border-0");
+    expect(handle.className).toContain("bg-transparent");
+    expect(handle.className).toContain("shadow-none");
+    const grip = handle.querySelector('[aria-hidden="true"]')!;
+    expect(grip.className).toContain("gap-0.5");
+    const dot = handle.querySelector('[aria-hidden="true"] span')!;
+    expect(dot.className).toContain("h-px w-px");
+  });
+
+  it("attaches the coarse-pointer handle to the box edge in the background", () => {
+    renderRow();
+    const handle = screen.getByTestId(HANDLE_TESTID);
+    // Coarse pointers: flush at the left edge, behind the content (z-0, no
+    // chip surface) so the dots read as part of the box edge.
+    expect(handle.className).toContain("[@media(pointer:coarse)]:left-0");
+    expect(handle.className).toContain("[@media(pointer:coarse)]:z-0");
+    expect(handle.className).toContain("[@media(pointer:coarse)]:bg-transparent");
+    expect(handle.className).toContain("[@media(pointer:coarse)]:shadow-none");
+    expect(handle.className).toContain("[@media(pointer:coarse)]:h-11");
+    expect(handle.className).toContain("[@media(pointer:coarse)]:w-11");
+  });
+
+  it("keeps the position label painted above the handle and pointer-transparent", () => {
+    renderRow();
+    // The label/icon cluster sits above the background handle (relative) and
+    // passes touches through to it (pointer-events-none).
+    const label = screen.getByLabelText("Position #1");
+    const cluster = label.parentElement!;
+    expect(cluster.className).toContain("relative");
+    expect(cluster.className).toContain("pointer-events-none");
+  });
+
+  it("centers the position, sender icon, and message content", () => {
+    renderRow();
+    const row = screen.getByTestId("queue-entry");
+    expect(row.className).toContain("items-center");
+    expect(row.className).not.toContain("items-start");
+    const label = screen.getByLabelText("Position #1");
+    expect(label.parentElement!.className).not.toContain("mt-0.5");
+  });
+
+  it("disables the handle while reordering is unavailable", () => {
+    renderRow({}, { canDrag: false });
+    const handle = screen.getByTestId(HANDLE_TESTID) as HTMLButtonElement;
+    expect(handle.disabled).toBe(true);
+    expect(handle.className).toContain("cursor-not-allowed");
+  });
+
+  it("hides the handle while the row is being edited", () => {
+    renderRow({ queued_by: "user-1" }, { canEdit: true });
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+    expect(screen.queryByTestId(HANDLE_TESTID)).toBeNull();
+  });
+});
+describe("QueuedGhostMessage lease lifecycle", () => {
+  it("leaves edit mode when its lease is lost", () => {
+    const queuedEntry = entry({ queued_by: "user-1" });
+    const view = render(
+      <QueuedGhostMessage
+        entry={queuedEntry}
+        canEdit
+        editLeaseActive
+        onSave={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+    expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID)).toBeTruthy();
+
+    view.rerender(
+      <QueuedGhostMessage
+        entry={queuedEntry}
+        canEdit
+        editLeaseActive={false}
+        onSave={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId(QUEUE_EDIT_TEXTAREA_TESTID)).toBeNull();
+  });
+  it("passes the acquired edit token to delayed save completion", async () => {
+    let resolveSave!: () => void;
+    const onSave = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const onEditComplete = vi.fn();
+
+    renderWithProviders(
+      <QueuedGhostMessage
+        entry={entry()}
+        canEdit
+        onEditStart={async () => "edit-1"}
+        onSave={onSave}
+        onEditComplete={onEditComplete}
+        onRemove={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+    await waitFor(() => expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID)).toBeTruthy());
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID), {
+      target: { value: "updated" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+
+    resolveSave();
+    await waitFor(() => expect(onEditComplete).toHaveBeenCalledWith("edit-1", true));
+  });
+});
+
+describe("QueuedGhostMessage Escape handling", () => {
+  it("claims Escape at dialog capture time while editing", () => {
+    const holder = withEscapeGuardRegistry(
+      <QueuedGhostMessage entry={entry()} canEdit onSave={async () => {}} onRemove={() => {}} />,
+    );
+
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+
+    expect(holder.entry?.test(new KeyboardEvent("keydown", { key: "Escape" }))).toBe(true);
+  });
+});
+
 describe("QueuedGhostMessage workflow badge", () => {
   it("renders workflow metadata as a workflow step badge", () => {
     render(
@@ -120,7 +319,60 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
     expect(img.src).toBe(`data:image/png;base64,${PNG_BASE64}`);
     expect(trigger.className).toContain("cursor-pointer");
   });
+});
 
+describe("QueuedGhostMessage queued attachment sources", () => {
+  it("renders staged image descriptors through the authenticated content URL", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry({
+          attachments: [
+            {
+              type: "image",
+              attachment_id: "attachment-staged-1",
+              mime_type: "image/png",
+              name: "diagram.png",
+            },
+          ],
+        })}
+        canEdit
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL }));
+
+    expect(screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT).getAttribute("src")).toContain(
+      "/api/v1/attachments/attachment-staged-1/content",
+    );
+  });
+
+  it("does not render a broken image when an image has no source", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry({
+          content: "",
+          attachments: [
+            {
+              type: "image",
+              mime_type: "image/png",
+              name: "missing.png",
+            },
+          ],
+        })}
+        canEdit
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: OPEN_ATTACHMENT_1_LABEL })).toBeNull();
+    expect(screen.getByText("missing.png")).toBeTruthy();
+  });
+});
+
+describe("QueuedGhostMessage attachment thumbnails", () => {
   it("renders a file chip for non-image (resource) attachments", () => {
     render(
       <QueuedGhostMessage
@@ -240,7 +492,7 @@ describe("QueuedGhostMessage entity references", () => {
     );
 
     fireEvent.click(screen.getByTitle(EDIT_TITLE));
-    fireEvent.change(screen.getByTestId("queue-edit-textarea"), { target: { value: edited } });
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID), { target: { value: edited } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(edited, [issue, task]));
@@ -263,12 +515,32 @@ describe("QueuedGhostMessage entity references", () => {
     );
 
     fireEvent.click(screen.getByTitle(EDIT_TITLE));
-    fireEvent.change(screen.getByTestId("queue-edit-textarea"), {
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID), {
       target: { value: "reference removed" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith("reference removed", []));
+  });
+
+  it("allows clearing text while retaining attachments", async () => {
+    const attachments = [{ type: "resource", data: "ZmlsZQ==", mime_type: "text/plain" }];
+    const onSave = vi.fn(async () => {});
+
+    renderWithProviders(
+      <QueuedGhostMessage
+        entry={entry({ attachments })}
+        canEdit
+        onSave={onSave}
+        onRemove={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle(EDIT_TITLE));
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("", [], attachments));
   });
 });
 
@@ -344,6 +616,59 @@ describe("QueuedGhostMessage merge control", () => {
   });
 });
 
+describe("QueuedGhostMessage row actions", () => {
+  it("shows Remove independently when an entry is not editable", () => {
+    const onRemove = vi.fn();
+    render(
+      <QueuedGhostMessage
+        entry={entry({ queued_by: "agent" })}
+        canEdit={false}
+        canRemove
+        onSave={async () => {}}
+        onRemove={onRemove}
+      />,
+    );
+
+    expect(screen.queryByTestId(EDIT_TESTID)).toBeNull();
+    fireEvent.click(screen.getByTestId(REMOVE_TESTID));
+    expect(onRemove).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Edit independent from Remove", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry()}
+        canEdit
+        canRemove={false}
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId(EDIT_TESTID)).toBeTruthy();
+    expect(screen.queryByTestId(REMOVE_TESTID)).toBeNull();
+  });
+
+  it("keeps compact desktop controls but provides coarse-pointer visibility and 44px targets", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry({ queued_by: "workflow" })}
+        canEdit={false}
+        canRemove
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    const remove = screen.getByTestId(REMOVE_TESTID);
+    expect(remove.className).toContain("h-6");
+    expect(remove.className).toContain("w-6");
+    expect(remove.className).toContain("[@media(pointer:coarse)]:h-11");
+    expect(remove.className).toContain("[@media(pointer:coarse)]:w-11");
+    expect(remove.parentElement?.className).toContain("[@media(pointer:coarse)]:opacity-100");
+  });
+});
+
 describe("canMergeEntry / canMergeWithAbove gating", () => {
   it("treats user entries as mergeable", () => {
     expect(canMergeEntry(entry({ queued_by: "user-1" }))).toBe(true);
@@ -360,6 +685,19 @@ describe("canMergeEntry / canMergeWithAbove gating", () => {
 
   it("treats server entries as non-mergeable", () => {
     expect(canMergeEntry(entry({ queued_by: "server" }))).toBe(false);
+  });
+
+  it("rejects entries carrying plan-comment admission identity", () => {
+    expect(
+      canMergeEntry(
+        entry({ queued_by: "user-1", metadata: { client_queue_id: "comment-request" } }),
+      ),
+    ).toBe(false);
+    expect(
+      canMergeEntry(
+        entry({ queued_by: "user-1", metadata: { plan_comment_refs: [{ id: "c1" }] } }),
+      ),
+    ).toBe(false);
   });
 
   it("allows user behind user owned by the caller", () => {
@@ -432,5 +770,36 @@ describe("canMergeEntry / canMergeWithAbove gating", () => {
     const above = entry({ id: "q-a", queued_by: "user-1" });
     const below = entry({ id: "q-b", queued_by: "server" });
     expect(canMergeWithAbove(below, above)).toBe(false);
+  });
+});
+
+describe("QueuedGhostMessage bounded previews", () => {
+  it("bounds the display while keeping complete download and edit values", async () => {
+    const content = Array.from({ length: 240 }, (_, index) => `queued-${index}`).join("\n");
+    const onSave = vi.fn(async (_content: string) => undefined);
+
+    renderWithProviders(
+      <QueuedGhostMessage entry={entry({ content })} canEdit onSave={onSave} onRemove={vi.fn()} />,
+    );
+
+    const preview = screen.getByTestId("queue-entry-text");
+    expect(preview.textContent).not.toContain("queued-239");
+    fireEvent.click(screen.getByTestId("bounded-message-preview-download"));
+    expect(triggerFileDownload).toHaveBeenCalledWith({
+      fileName: "kandev-queued-message.txt",
+      content,
+      isBinary: false,
+    });
+
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+    const textarea = screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID) as HTMLTextAreaElement;
+    expect(textarea.value).toBe(content);
+
+    const editedContent = `${content}\nedited`;
+    fireEvent.change(textarea, { target: { value: editedContent } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0]?.[0]).toBe(editedContent);
   });
 });

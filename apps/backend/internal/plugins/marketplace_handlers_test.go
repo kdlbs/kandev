@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -85,8 +86,7 @@ func TestMarketplaceSourceCRUD(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc, _, _ := newTestService(t)
 	attachMarketplaceWithSource(t, svc, "https://official.example/index.json")
-	router := gin.New()
-	RegisterRoutes(router, svc, nil, testLogger(t))
+	router := registerAdminPluginRoutes(t, svc)
 
 	// List returns the built-in source.
 	list := doRequest(router, http.MethodGet, "/api/plugins/marketplace/sources", "", nil)
@@ -124,8 +124,7 @@ func TestMarketplaceDeleteBuiltinReturns409(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc, _, _ := newTestService(t)
 	attachMarketplaceWithSource(t, svc, "https://official.example/index.json")
-	router := gin.New()
-	RegisterRoutes(router, svc, nil, testLogger(t))
+	router := registerAdminPluginRoutes(t, svc)
 
 	sources, err := svc.Marketplace().Sources()
 	if err != nil {
@@ -135,4 +134,111 @@ func TestMarketplaceDeleteBuiltinReturns409(t *testing.T) {
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("delete builtin: want 409, got %d", rec.Code)
 	}
+}
+
+func TestMarketplaceSourceMutationsRejectMemberBeforePersistence(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	attachMarketplaceWithSource(t, svc, "https://official.example/index.json")
+	router := registerMemberPluginRoutes(t, svc)
+
+	before, err := svc.Marketplace().Sources()
+	if err != nil {
+		t.Fatalf("sources before add: %v", err)
+	}
+	add := doRequest(router, http.MethodPost, "/api/plugins/marketplace/sources",
+		`{"name":"Member","url":"https://member.example/index.json"}`,
+		map[string]string{"Content-Type": "application/json"})
+	requireMemberForbidden(t, add.Code, add.Body.String())
+	after, err := svc.Marketplace().Sources()
+	if err != nil {
+		t.Fatalf("sources after add: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Errorf("member added marketplace source: before=%d after=%d", len(before), len(after))
+	}
+
+	operatorSource, err := svc.Marketplace().AddSource("Operator", "https://operator.example/index.json")
+	if err != nil {
+		t.Fatalf("add operator fixture: %v", err)
+	}
+	patch := doRequest(router, http.MethodPatch, "/api/plugins/marketplace/sources/"+operatorSource.ID,
+		`{"name":"Member renamed","enabled":false}`,
+		map[string]string{"Content-Type": "application/json"})
+	requireMemberForbidden(t, patch.Code, patch.Body.String())
+	assertMarketplaceSource(t, svc, operatorSource.ID, "Operator", true)
+
+	del := doRequest(router, http.MethodDelete, "/api/plugins/marketplace/sources/"+operatorSource.ID, "", nil)
+	requireMemberForbidden(t, del.Code, del.Body.String())
+	assertMarketplaceSource(t, svc, operatorSource.ID, "Operator", true)
+}
+
+func TestMarketplaceRefreshRejectsMemberBeforeInvalidatingCache(t *testing.T) {
+	server, fetches := countingFixtureIndexServer(t)
+	svc, _, _ := newTestService(t)
+	attachMarketplaceWithSource(t, svc, server.URL)
+	router := registerMemberPluginRoutes(t, svc)
+
+	first := doRequest(router, http.MethodGet, "/api/plugins/marketplace", "", nil)
+	if first.Code != http.StatusOK {
+		t.Fatalf("initial catalog status = %d, want 200", first.Code)
+	}
+	refresh := doRequest(router, http.MethodPost, "/api/plugins/marketplace/refresh", "", nil)
+	requireMemberForbidden(t, refresh.Code, refresh.Body.String())
+	second := doRequest(router, http.MethodGet, "/api/plugins/marketplace", "", nil)
+	if second.Code != http.StatusOK {
+		t.Fatalf("second catalog status = %d, want 200", second.Code)
+	}
+	if got := fetches.Load(); got != 1 {
+		t.Errorf("catalog fetches = %d, want 1; member refresh invalidated cache", got)
+	}
+}
+
+func TestMarketplaceRefreshAllowsAdmin(t *testing.T) {
+	server, fetches := countingFixtureIndexServer(t)
+	svc, _, _ := newTestService(t)
+	attachMarketplaceWithSource(t, svc, server.URL)
+	router := registerAdminPluginRoutes(t, svc)
+
+	if rec := doRequest(router, http.MethodGet, "/api/plugins/marketplace", "", nil); rec.Code != http.StatusOK {
+		t.Fatalf("initial catalog status = %d, want 200", rec.Code)
+	}
+	if rec := doRequest(router, http.MethodPost, "/api/plugins/marketplace/refresh", "", nil); rec.Code != http.StatusOK {
+		t.Fatalf("refresh status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := doRequest(router, http.MethodGet, "/api/plugins/marketplace", "", nil); rec.Code != http.StatusOK {
+		t.Fatalf("second catalog status = %d, want 200", rec.Code)
+	}
+	if got := fetches.Load(); got != 2 {
+		t.Fatalf("catalog fetches = %d, want 2 after admin refresh", got)
+	}
+}
+
+func assertMarketplaceSource(t *testing.T, svc *Service, id, name string, enabled bool) {
+	t.Helper()
+	sources, err := svc.Marketplace().Sources()
+	if err != nil {
+		t.Fatalf("sources: %v", err)
+	}
+	for _, source := range sources {
+		if source.ID == id {
+			if source.Name != name || source.Enabled != enabled {
+				t.Errorf("source = %+v, want name=%q enabled=%v", source, name, enabled)
+			}
+			return
+		}
+	}
+	t.Errorf("source %q was deleted", id)
+}
+
+func countingFixtureIndexServer(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var fetches atomic.Int32
+	body := `{"schema_version":1,"generated_at":"2026-07-18T00:00:00Z",` +
+		`"source":{"name":"Kandev Official","url":""},"plugins":[]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches.Add(1)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+	return server, &fetches
 }

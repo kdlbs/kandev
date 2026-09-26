@@ -7,19 +7,24 @@ import {
   assertLocatorWithinViewportX,
   assertNoDocumentHorizontalOverflow,
 } from "../../helpers/layout-assertions";
-import { GITLAB_HOST, GITLAB_PROJECT, seedGitLabReview } from "../../helpers/gitlab";
+import { GITLAB_HOST, GITLAB_PROJECT, gitLabMR, seedGitLabReview } from "../../helpers/gitlab";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { GitLabPage } from "../../pages/gitlab-page";
 import { GitLabSettingsPage } from "../../pages/gitlab-settings-page";
 import { KanbanPage } from "../../pages/kanban-page";
+import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 
 async function expectTouchTarget(locator: ReturnType<GitLabPage["mrRow"]>, label: string) {
   const box = await locator.boundingBox();
   expect(box, `${label} has no bounding box`).not.toBeNull();
   if (!box) return;
-  expect(box.width, `${label} width`).toBeGreaterThanOrEqual(44);
-  expect(box.height, `${label} height`).toBeGreaterThanOrEqual(44);
+  // Chromium can report a CSS 44px box as 43.9999 after device-scale
+  // conversion. Compare whole CSS pixels so floating-point noise does not
+  // turn a conforming touch target into a retry-only failure.
+  expect(Math.round(box.width), `${label} width`).toBeGreaterThanOrEqual(44);
+  expect(Math.round(box.height), `${label} height`).toBeGreaterThanOrEqual(44);
 }
 
 async function seedMultiRepoGitLabTask(
@@ -34,6 +39,7 @@ async function seedMultiRepoGitLabTask(
     provider_host: GITLAB_HOST,
     provider_owner: "platform",
     provider_name: "kandev",
+    pull_before_worktree: false,
   });
   const secondaryRepoDir = path.join(tmpDir, "repos", "mobile-gitlab-secondary");
   fs.mkdirSync(secondaryRepoDir, { recursive: true });
@@ -50,6 +56,7 @@ async function seedMultiRepoGitLabTask(
       provider_host: GITLAB_HOST,
       provider_owner: "platform",
       provider_name: "docs",
+      pull_before_worktree: false,
     },
   );
   return apiClient.createTask(seedData.workspaceId, "Mobile contextual GitLab link", {
@@ -60,6 +67,157 @@ async function seedMultiRepoGitLabTask(
 }
 
 test.describe("Mobile GitLab parity", () => {
+  let previousSavedPresets: unknown;
+  test.afterEach(async ({ apiClient }) => {
+    if (previousSavedPresets === undefined) return;
+    const restored = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      gitlab_saved_presets: previousSavedPresets,
+    });
+    previousSavedPresets = undefined;
+    expect(restored.ok).toBe(true);
+  });
+
+  test("confirms saved-query deletion in the existing filter sheet", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    const phoneViewport = { width: 393, height: 640 };
+    await testPage.setViewportSize(phoneViewport);
+    await seedGitLabReview(apiClient, seedData.workspaceId, 121, "Mobile saved-query review");
+    previousSavedPresets = (await apiClient.getUserSettings()).settings.gitlab_saved_presets ?? [];
+    const saved = {
+      id: "mobile-gitlab-saved",
+      kind: "mr",
+      label: "Release review queue",
+      customQuery: "release",
+      projectFilter: "",
+      milestone: "",
+      preset: "",
+      createdAt: "2026-09-10T00:00:00Z",
+    };
+    const neighbors = Array.from({ length: 8 }, (_, index) => ({
+      ...saved,
+      id: `mobile-gitlab-neighbor-${index}`,
+      label: `Other review queue ${index}`,
+    }));
+    const seeded = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      gitlab_saved_presets: [...neighbors, saved],
+    });
+    expect(seeded.ok).toBe(true);
+    const gitlab = new GitLabPage(testPage);
+    await gitlab.goto();
+    await gitlab.mobileFiltersButton.tap();
+    // @covers AC-UI-MOBILE-CONFIRMATION-001.8
+    await expect(gitlab.mobileSidebar).toHaveAttribute("data-vaul-drawer-direction", "bottom");
+    await waitForFiniteAnimations(gitlab.mobileSidebar);
+    const originalHeight = (await gitlab.mobileSidebar.boundingBox())!.height;
+    const sheetId = await gitlab.mobileSidebar.getAttribute("id");
+    const trigger = gitlab.mobileSidebar.getByTestId("gitlab-saved-delete-mobile-gitlab-saved");
+    await trigger.scrollIntoViewIfNeeded();
+    const scrollArea = gitlab.mobileSidebar.getByTestId("integration-filters-scroll");
+    const scrollTop = await scrollArea.evaluate((element) => element.scrollTop);
+    expect(scrollTop).toBeGreaterThan(0);
+    await testPage.screenshot({ path: testInfo.outputPath("bottom-query-filters.png") });
+    await trigger.tap();
+    const confirmation = gitlab.mobileSidebar.getByTestId("saved-task-view-delete-confirmation");
+    await expect(confirmation).toHaveAccessibleName("Delete Release review queue?");
+    const compactBounds = await expectContentSizedBottomConfirmation(
+      gitlab.mobileSidebar,
+      confirmation,
+    );
+    expect(compactBounds.height).toBeLessThan(originalHeight);
+    await expect(testPage.getByText("Kandev update available", { exact: true })).toBeHidden();
+    await testPage.screenshot({
+      path: testInfo.outputPath("compact-saved-query-confirmation.png"),
+    });
+    await testInfo.attach("confirmation-geometry", {
+      body: JSON.stringify({ originalHeight, compactBounds }),
+      contentType: "application/json",
+    });
+    await expect(gitlab.mobileSidebar).toHaveAttribute("id", sheetId!);
+    await expect(testPage.getByRole("dialog")).toHaveCount(1);
+    await confirmation.getByRole("button", { name: "Back" }).tap();
+    await expect(trigger).toBeFocused();
+    await waitForFiniteAnimations(gitlab.mobileSidebar);
+    expect((await gitlab.mobileSidebar.boundingBox())!.height).toBeCloseTo(originalHeight, 0);
+    expect(await scrollArea.evaluate((element) => element.scrollTop)).toBe(scrollTop);
+    await trigger.tap();
+    await expect(confirmation).toBeVisible();
+    await testPage.setViewportSize({ width: 768, height: 800 });
+    await expect(confirmation).toHaveCount(0);
+    await expect(gitlab.mobileSidebar).toHaveAttribute("data-side", "right");
+    expect((await apiClient.getUserSettings()).settings.gitlab_saved_presets).toEqual([
+      ...neighbors,
+      saved,
+    ]);
+    await testPage.setViewportSize(phoneViewport);
+    await expect(gitlab.mobileSidebar).toHaveAttribute("data-vaul-drawer-direction", "bottom");
+    await expect(confirmation).toHaveCount(0);
+    await trigger.tap();
+    const removed = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/api/v1/user/settings") &&
+        response.request().method() === "PATCH" &&
+        response.ok(),
+    );
+    await confirmation.getByTestId("saved-task-view-delete-confirm").tap();
+    await removed;
+    await expect(trigger).toHaveCount(0);
+    await expect(gitlab.mobileSidebar).toBeVisible();
+    expect((await apiClient.getUserSettings()).settings.gitlab_saved_presets).toEqual(neighbors);
+  });
+  test("opens the exact linked MR selected from a multi-MR topbar", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const primaryIID = 109;
+    const selectedIID = 110;
+    const selectedTitle = "Selected mobile GitLab review";
+    await seedGitLabReview(apiClient, seedData.workspaceId, primaryIID, "Primary mobile review");
+    await seedGitLabReview(apiClient, seedData.workspaceId, selectedIID, selectedTitle);
+    await apiClient.mockGitLabAddMRs(seedData.workspaceId, GITLAB_PROJECT, [
+      gitLabMR(primaryIID, "Primary mobile review"),
+      gitLabMR(selectedIID, selectedTitle),
+    ]);
+    await apiClient.updateRepository(seedData.repositoryId, {
+      provider: "gitlab",
+      provider_host: GITLAB_HOST,
+      provider_owner: "platform",
+      provider_name: "kandev",
+      pull_before_worktree: false,
+    });
+
+    const gitlab = new GitLabPage(testPage);
+    await gitlab.goto();
+    await gitlab.startMRTask(primaryIID);
+    const taskId = new URL(testPage.url()).pathname.match(/^\/t\/([^/]+)$/)?.[1];
+    if (!taskId) throw new Error(`Expected task detail URL, got ${testPage.url()}`);
+    await apiClient.linkTaskGitLabMR(seedData.workspaceId, {
+      task_id: taskId,
+      repository_id: seedData.repositoryId,
+      mr_url: `${GITLAB_HOST}/${GITLAB_PROJECT}/-/merge_requests/${selectedIID}`,
+    });
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+
+    await gitlab.openLinkedMR(selectedIID);
+    const panel = testPage.getByTestId("mr-detail-panel").last();
+    await expect(panel.getByText(selectedTitle, { exact: true })).toBeVisible();
+    const expectedReviewId = ["gitlab", GITLAB_HOST, seedData.repositoryId, String(selectedIID)]
+      .map(encodeURIComponent)
+      .join(":");
+    await expect
+      .poll(() =>
+        testPage.evaluate(
+          "window.__KANDEV_E2E_STORE__?.getState().mobileSession.reviewItemIdBySessionId[window.__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId ?? '']",
+        ),
+      )
+      .toBe(expectedReviewId);
+  });
+
   test("browses, quick launches, reviews, subscribes, and unlinks without overflow", async ({
     testPage,
     apiClient,
@@ -73,6 +231,7 @@ test.describe("Mobile GitLab parity", () => {
       provider_host: GITLAB_HOST,
       provider_owner: "platform",
       provider_name: "kandev",
+      pull_before_worktree: false,
     });
 
     const gitlab = new GitLabPage(testPage);
@@ -143,7 +302,7 @@ test.describe("Mobile GitLab parity", () => {
     await session.waitForLoad();
     await expect(testPage.getByTestId("mr-topbar-button")).toHaveCount(0);
 
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const taskDrawer = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = taskDrawer.getByTestId("sidebar-task-item").filter({ hasText: title });
     await expect(taskRow).toBeVisible({ timeout: 10_000 });
@@ -158,6 +317,7 @@ test.describe("Mobile GitLab parity", () => {
 
     const gitLabItem = testPage.getByRole("menuitem", { name: "GitLab Merge Request" });
     await expect(gitLabItem).toBeVisible();
+    await expect(gitLabItem).toHaveCSS("min-height", "48px");
     await expectTouchTarget(gitLabItem, "GitLab merge request link action");
     const nestedMenu = gitLabItem.locator("xpath=ancestor::*[@role='menu'][1]");
     await nestedMenu.evaluate((element) =>
@@ -277,6 +437,7 @@ test.describe("Mobile GitLab parity", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "GitLab mobile watch settings");
   });
 
+  // @covers AC-UI-MOBILE-TASK-CHROME-001.4
   test("creates and auto-links an MR with GitLab terminology", async ({
     testPage,
     apiClient,
@@ -292,6 +453,7 @@ test.describe("Mobile GitLab parity", () => {
       provider_host: backend.baseUrl,
       provider_owner: "platform",
       provider_name: "kandev",
+      pull_before_worktree: false,
     });
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -315,10 +477,14 @@ test.describe("Mobile GitLab parity", () => {
     ).toBeVisible({
       timeout: 45_000,
     });
-    const actions = testPage.getByTestId("mobile-git-actions");
-    await expectTouchTarget(actions, "mobile Git actions");
-    await actions.tap();
-    await testPage.getByRole("menuitem", { name: "Create MR", exact: true }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
+    const changes = testPage.getByTestId("mobile-changes-panel");
+    const createMR = changes.getByTestId("commits-repo-create-pr");
+    await expect(createMR).toBeVisible();
+    await createMR.tap();
     const dialog = testPage.getByRole("dialog", { name: "Create merge request" });
     await expect(dialog).toBeVisible();
     await assertLocatorWithinViewportX(dialog, "mobile create MR dialog");

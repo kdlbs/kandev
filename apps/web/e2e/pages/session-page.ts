@@ -1,4 +1,8 @@
 import { type Locator, type Page, expect } from "@playwright/test";
+import { FileTreePage } from "./file-tree-page";
+import { NewSessionDialogPage } from "./new-session-dialog-page";
+import { ChangeWorkflowPage } from "./change-workflow-page";
+import { dwell } from "../helpers/causal-waits";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -11,6 +15,8 @@ function sectionLabelToStateTestId(label: string): string {
   return "task-state-backlog";
 }
 
+const TERMINAL_READY_TIMEOUT = 30_000;
+
 export class SessionPage {
   readonly chat: Locator;
   readonly sidebar: Locator;
@@ -20,6 +26,8 @@ export class SessionPage {
   readonly planPanel: Locator;
   readonly stepper: Locator;
   readonly passthroughTerminal: Locator;
+  readonly fileTree: FileTreePage;
+  readonly newSessionDialogPage: NewSessionDialogPage;
 
   constructor(private readonly page: Page) {
     this.chat = page.getByTestId("session-chat");
@@ -30,11 +38,22 @@ export class SessionPage {
     this.planPanel = page.getByTestId("plan-panel");
     this.stepper = page.getByTestId("workflow-stepper");
     this.passthroughTerminal = page.getByTestId("passthrough-terminal");
+    this.fileTree = new FileTreePage(page, this.files, () => this.activeChat());
+    this.newSessionDialogPage = new NewSessionDialogPage(page);
   }
 
   // Port forward dialog locators
   get portForwardButton() {
     return this.page.getByTestId("port-forward-button");
+  }
+  get portForwardingMenuItem() {
+    return this.page.getByTestId("port-forwarding-menu-item");
+  }
+  get mobileSessionMenu() {
+    return this.page.getByTestId("mobile-task-picker-trigger");
+  }
+  get mobilePortForwardingToggle() {
+    return this.page.getByTestId("mobile-port-forwarding-toggle");
   }
   get portForwardDialog() {
     return this.page.getByTestId("port-forward-dialog");
@@ -50,6 +69,50 @@ export class SessionPage {
   }
   portForwardRow(port: number) {
     return this.page.getByTestId(`port-forward-row-${port}`);
+  }
+  portForwardTunnelToggle(port: number) {
+    return this.portForwardRow(port).getByRole("button").first();
+  }
+  portForwardTunnelStart(port: number) {
+    return this.portForwardRow(port).getByRole("button", { name: "Start", exact: true });
+  }
+  portForwardOpenBrowser(port: number) {
+    return this.portForwardRow(port).getByTestId(`port-forward-open-browser-${port}`);
+  }
+  get browserPanel() {
+    return this.page.locator('[data-testid="browser-panel"]:visible').first();
+  }
+  get browserAddressInput() {
+    return this.browserPanel.locator("input").first();
+  }
+
+  async togglePortForwardingPreference(): Promise<void> {
+    await this.addPanelButton().click();
+    await expect(this.portForwardingMenuItem).toBeVisible();
+    // The menu item is rendered before the session's agentctl launcher is
+    // ready, but it is disabled until port forwarding can actually work.
+    // Waiting for enabled avoids force-clicking a no-op during that startup
+    // window, which otherwise leaves the top-bar control absent.
+    await expect(this.portForwardingMenuItem).toBeEnabled({ timeout: 30_000 });
+    const enabling = (await this.portForwardingMenuItem.getAttribute("aria-checked")) !== "true";
+    await this.portForwardingMenuItem.click({ force: true });
+    if (enabling) {
+      await this.portForwardDialog
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .catch(() => undefined);
+    }
+    if (await this.portForwardDialog.isVisible()) {
+      await this.portForwardDialog.getByRole("button", { name: "Close" }).click();
+    }
+    await this.page.keyboard.press("Escape");
+    await expect(this.portForwardingMenuItem).toBeHidden();
+    await expect(this.portForwardDialog).toBeHidden();
+  }
+
+  async enablePortForwarding(): Promise<void> {
+    if (await this.portForwardButton.isVisible()) return;
+    await this.togglePortForwardingPreference();
+    await expect(this.portForwardButton).toBeVisible();
   }
 
   // Chat status bar locators
@@ -102,11 +165,47 @@ export class SessionPage {
     return this.page.locator("[data-testid='session-chat']:visible").first();
   }
 
+  /**
+   * Wait for the session chat panel to be visible.
+   *
+   * When multiple session tabs are open, multiple session-chat panels exist in
+   * the DOM but only the active one is visible. Use :visible to avoid matching
+   * a hidden background panel (which would cause the wait to time out).
+   *
+   * Under CI shard load the freshly-navigated task page can be slow to hydrate:
+   * the SSR boot payload + React mount + WS connect sequence races, and a single
+   * hard `waitFor` occasionally exceeds its budget before the chat panel mounts.
+   * Reloading re-drives SSR hydration and reliably recovers, so instead of one
+   * fixed wait we poll with a bounded reload-and-retry loop (same recovery shape
+   * as `waitForChatIdle`). The fast path stays instant when the chat is already
+   * visible.
+   */
   async waitForLoad(timeout = 15_000) {
-    // When multiple session tabs are open, multiple session-chat panels exist in
-    // the DOM but only the active one is visible. Use :visible to avoid matching
-    // a hidden background panel (which would cause the wait to time out).
-    await this.activeChat().waitFor({ state: "visible", timeout });
+    const chat = this.activeChat();
+    // Fast path: already foregrounded (common case, no reload cost).
+    if (await chat.isVisible()) return;
+
+    const attemptTimeout = Math.min(timeout, Math.max(5_000, Math.floor(timeout / 2)));
+    const start = Date.now();
+    let lastReloadAt = start;
+
+    while (Date.now() - start < timeout) {
+      const remaining = timeout - (Date.now() - start);
+      const now = Date.now();
+      // Re-drive SSR hydration once per attemptTimeout slice while budget remains
+      // for the reloaded page to settle.
+      if (now - lastReloadAt >= attemptTimeout && remaining > attemptTimeout) {
+        lastReloadAt = now;
+        await this.page.reload();
+      }
+      await chat
+        .waitFor({ state: "visible", timeout: Math.min(attemptTimeout, remaining) })
+        .catch(() => undefined);
+      if (await chat.isVisible()) return;
+    }
+
+    // Final bounded check: still throws on a genuinely stuck page.
+    await chat.waitFor({ state: "visible", timeout: attemptTimeout });
   }
 
   /**
@@ -134,31 +233,26 @@ export class SessionPage {
   /**
    * Wait for the chat to be idle (input placeholder visible, agent not busy).
    *
-   * On mobile-chrome (and occasionally desktop), there's a WS subscribe race:
-   * a fresh task auto-starts its agent, the mock agent completes in <1s, and
-   * the session_state transition (RUNNING -> AWAITING_INPUT) can fan out
-   * before the client's WS subscription registers server-side. The client
-   * then sits with `isAgentBusy=true` forever and the idle placeholder
-   * never renders. SSR picks up the right state on the next page load, so
-   * one targeted reload-and-retry is enough to recover.
+   * A fresh task can still miss the first persisted session-state transition
+   * while the page hydrates under CI load. Re-drive SSR hydration periodically
+   * so a stale busy state does not consume the whole idle wait budget.
    *
    * After a backend restart, auto-resume can briefly surface the recovery
    * prompt ("Environment setup failed"); click through it when visible.
-   *
-   * This is the same race the office agent-run-live spec rides out with
-   * `expect.poll`-based re-seeding.
    */
-  async waitForChatIdle(opts: { timeout?: number; attemptTimeout?: number } = {}) {
+  async waitForChatIdle(opts: { timeout?: number; requireEditable?: boolean } = {}) {
     const softTotalTimeout = opts.timeout ?? 45_000;
-    const attemptTimeout =
-      opts.attemptTimeout ?? Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
+    const attemptTimeout = Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
     const pollSlice = 1_500;
     const idle = this.anyIdleInput();
+    const editor = this.activeChat().locator(".tiptap.ProseMirror:visible").first();
+    const isReady = async () =>
+      (await idle.isVisible()) && (!opts.requireEditable || (await editor.isEditable()));
     const start = Date.now();
     let lastReloadAt = start;
 
     while (Date.now() - start < softTotalTimeout) {
-      if (await idle.isVisible()) return;
+      if (await isReady()) return;
 
       const resumeButton = this.recoveryResumeButton();
       if (await resumeButton.isVisible()) {
@@ -171,10 +265,6 @@ export class SessionPage {
 
       const now = Date.now();
       const remaining = Math.max(1, softTotalTimeout - (now - start));
-      // Re-drive SSR hydration once per attemptTimeout slice (not just once):
-      // under CI shard load a single reload isn't always enough for the
-      // idle-input state to hydrate. Only reload while enough budget remains
-      // for the reloaded page to settle.
       if (now - lastReloadAt >= attemptTimeout && remaining > pollSlice) {
         lastReloadAt = now;
         await this.page.reload();
@@ -184,13 +274,23 @@ export class SessionPage {
         continue;
       }
 
-      await idle
-        .waitFor({ state: "visible", timeout: Math.min(pollSlice, remaining) })
-        .catch(() => undefined);
+      const timeout = Math.min(pollSlice, remaining);
+      if (opts.requireEditable) {
+        await expect
+          .poll(isReady, { timeout })
+          .toBe(true)
+          .catch(() => undefined);
+      } else {
+        await idle.waitFor({ state: "visible", timeout }).catch(() => undefined);
+      }
     }
 
     // Final bounded check: still throws on a genuinely stuck session, but gives
     // the last hydration attempt a full attemptTimeout slice to land.
+    if (opts.requireEditable) {
+      await expect.poll(isReady, { timeout: attemptTimeout }).toBe(true);
+      return;
+    }
     await idle.waitFor({ state: "visible", timeout: attemptTimeout });
   }
 
@@ -214,19 +314,31 @@ export class SessionPage {
   }
 
   /**
+   * Return the foreground panel for a test id.
+   *
+   * Dockview keeps background task panels mounted while switching tasks. A
+   * page-level DOM query can therefore read a stale terminal buffer even
+   * though the visible panel has already connected.
+   */
+  private activePanel(testId: string): Locator {
+    return this.page.locator(`[data-testid="${testId}"]:visible`).first();
+  }
+
+  /**
    * Read the text content of an xterm.js terminal buffer.
    * xterm renders to canvas/WebGL so text isn't in the DOM. Uses the
    * __xtermReadBuffer() helper exposed on the terminal container element.
    */
-  private readXtermBuffer(testId: string): Promise<string> {
-    return this.page.evaluate((tid) => {
-      const panel = document.querySelector(`[data-testid="${tid}"]`);
-      if (!panel) return "";
-      const xtermEl = panel.querySelector(".xterm");
+  private async readXtermBuffer(testId: string): Promise<string> {
+    const panel = this.activePanel(testId);
+    if ((await panel.count()) === 0) return "";
+
+    return panel.evaluate((panelElement) => {
+      const xtermEl = panelElement.querySelector(".xterm");
       type XC = HTMLElement & { __xtermReadBuffer?: () => string };
       const container = xtermEl?.parentElement as XC | null | undefined;
       return container?.__xtermReadBuffer?.() ?? "";
-    }, testId);
+    });
   }
 
   /**
@@ -251,7 +363,12 @@ export class SessionPage {
       if ((await this.readXtermBuffer("passthrough-terminal")).includes(text)) {
         throw new Error(`Expected passthrough terminal NOT to contain "${text}", but it was found`);
       }
-      await this.page.waitForTimeout(200);
+      await dwell(
+        this.page,
+        200,
+        "poll-interval",
+        "sampling interval for the stability window above; the assertion is that the text never appears, so the loop keeps re-reading the buffer across real elapsed time",
+      );
     }
   }
 
@@ -286,9 +403,12 @@ export class SessionPage {
     stepId: string,
   ): Promise<void> {
     await this.openSidebarTaskContextMenu(title);
-    await this.page.getByTestId("task-context-send-to-workflow").hover();
-    await this.page.getByTestId(`task-context-workflow-${workflowId}`).hover();
-    await this.page.getByTestId(`task-context-step-${stepId}`).click();
+    await this.page.getByTestId("task-context-change-workflow").click();
+    const changeWorkflow = new ChangeWorkflowPage(this.page);
+    await changeWorkflow.form.waitFor({ state: "visible" });
+    await changeWorkflow.chooseWorkflow(workflowId);
+    await changeWorkflow.chooseStep(stepId);
+    await changeWorkflow.submit();
   }
 
   /**
@@ -343,20 +463,20 @@ export class SessionPage {
 
   /** Chat input placeholder when agent is idle (default mode). */
   idleInput(): Locator {
-    return this.page.locator('[data-placeholder="Continue working on the task..."]');
+    return this.activeChat().locator('[data-placeholder="Continue working on the task..."]');
   }
 
   /** Chat input placeholder when agent is idle in any current mode. */
   anyIdleInput(): Locator {
-    return this.page
+    return this.activeChat()
       .locator('[data-placeholder="Continue working on the task..."]')
-      .or(this.page.locator('[data-placeholder="Continue working on the plan..."]'))
-      .or(this.page.locator('[data-placeholder="Continue working on the file..."]'));
+      .or(this.activeChat().locator('[data-placeholder="Continue working on the plan..."]'))
+      .or(this.activeChat().locator('[data-placeholder="Continue working on the file..."]'));
   }
 
   /** Chat input placeholder when agent is idle (plan mode). */
   planModeInput(): Locator {
-    return this.page.locator('[data-placeholder="Continue working on the plan..."]');
+    return this.activeChat().locator('[data-placeholder="Continue working on the plan..."]');
   }
 
   /**
@@ -370,7 +490,28 @@ export class SessionPage {
 
   /** Clarification overlay (visible when a clarification request is pending). */
   clarificationOverlay(): Locator {
-    return this.page.getByTestId("clarification-overlay");
+    return this.activeChat().getByTestId("clarification-overlay");
+  }
+
+  /**
+   * The persistent bar wrapping the clarification overlay. Stays mounted
+   * (collapsed to a header row) while the bundle is pending, even after the
+   * user dismisses it with Escape or the collapse toggle.
+   */
+  clarificationBar(): Locator {
+    return this.activeChat().getByTestId("clarification-overlay-container");
+  }
+
+  /** Expand/collapse toggle in the clarification bar's header row. */
+  clarificationCollapseToggle(): Locator {
+    // The expanded overlay stays mounted but is hidden when the compact bar
+    // is shown, so scope this locator to the one visible toggle.
+    return this.activeChat().locator('[data-testid="clarification-collapse-toggle"]:visible');
+  }
+
+  /** Shared context shown once above the active clarification question. */
+  clarificationContext(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-context");
   }
 
   /** A specific clarification option button by its text label. */
@@ -383,6 +524,11 @@ export class SessionPage {
   /** Skip (X) button on the clarification overlay. */
   clarificationSkip(): Locator {
     return this.page.getByTestId("clarification-skip");
+  }
+
+  /** Header status shown while a clarification answer is being submitted. */
+  clarificationSubmittingStatus(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-submitting-status");
   }
 
   /** Custom text input on the clarification overlay. */
@@ -512,9 +658,37 @@ export class SessionPage {
     return this.page.getByTestId("reset-context-confirm");
   }
 
-  /** "Resume session" button shown after agent crash. */
+  /** Observe the first visible recovery action, including while it is already resuming. */
   recoveryResumeButton(): Locator {
-    return this.page.getByTestId("recovery-resume-button");
+    return this.activeChat()
+      .getByTestId("recovery-resume-button")
+      .filter({ visible: true })
+      .first();
+  }
+
+  /** Error returned by a manual session recovery action. */
+  recoveryError(): Locator {
+    return this.activeChat().getByTestId("session-recovery-error");
+  }
+
+  /** Explicit action for continuing a conversation on a replacement branch. */
+  recoveryNewBranchButton(): Locator {
+    return this.activeChat().getByTestId("recovery-new-branch-button");
+  }
+
+  /** Read-only workspace restore action shown after a recovery failure. */
+  recoveryRestoreWorkspaceButton(): Locator {
+    return this.activeChat().getByTestId("recovery-restore-workspace-button");
+  }
+
+  /** Non-blocking notice shown after automatic read-only workspace restore. */
+  recoveryReadOnlyNotice(): Locator {
+    return this.activeChat().getByTestId("session-recovery-notice");
+  }
+
+  /** Persisted warning shown after the original branch is replaced. */
+  branchRecreatedWarning(): Locator {
+    return this.activeChat().getByTestId("branch-recreated-warning");
   }
 
   /** "Start fresh session" button shown after agent crash. */
@@ -522,14 +696,29 @@ export class SessionPage {
     return this.page.getByTestId("recovery-fresh-button");
   }
 
+  /** Terminal-state banner shown when the active session has completed. */
+  completedSessionBanner(): Locator {
+    return this.activeChat().getByTestId("completed-session-banner");
+  }
+
+  /** "New Agent" action shown for a completed session. */
+  completedSessionNewAgentButton(): Locator {
+    return this.completedSessionBanner().getByTestId("completed-session-new-agent-button");
+  }
+
+  /** "Resume" action shown for an explicitly completed conversation. */
+  completedSessionResumeButton(): Locator {
+    return this.completedSessionBanner().getByTestId("recovery-resume-button");
+  }
+
   /** "Cancel" button shown on the yellow transient-retry (529 Overloaded) card. */
   recoveryCancelRetryButton(): Locator {
     return this.page.getByTestId("recovery-cancel-retry-button");
   }
 
-  /** The yellow "Provider overloaded — retrying…" status card text. */
+  /** The yellow provider-error retry status card. */
   transientRetryCard(): Locator {
-    return this.chat.getByText(/Provider overloaded — retrying/i);
+    return this.activeChat().getByTestId("transient-retry-card");
   }
 
   /** Context reset divider shown in chat after resetting agent context. */
@@ -542,26 +731,43 @@ export class SessionPage {
    * Hovers to reveal the menu trigger, opens it, clicks "Delete",
    * and confirms the delete dialog.
    */
-  async deleteTaskInSidebar(title: string): Promise<void> {
+  async deleteTaskInSidebar(
+    title: string,
+    options: { discardWorktreeChanges?: boolean; waitForCompletion?: boolean } = {},
+  ): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Delete");
-    const confirmButton = this.page
-      .getByRole("alertdialog")
-      .getByRole("button", { name: "Delete" });
+    const dialog = this.page.getByRole("alertdialog");
+    const confirmButton = dialog.getByRole("button", { name: "Delete" });
+    const discardCheckbox = dialog.getByTestId("delete-discard-worktree-checkbox");
+    if (options.discardWorktreeChanges) {
+      await expect(discardCheckbox).toBeVisible();
+      await discardCheckbox.click();
+      await expect(discardCheckbox).toBeChecked();
+    } else {
+      await expect(confirmButton).toBeEnabled();
+      await expect(discardCheckbox).toHaveCount(0);
+    }
+    await expect(confirmButton).toBeEnabled();
     await confirmButton.click();
+    if (options.waitForCompletion !== false) {
+      await expect(
+        this.page.getByTestId("toast-message").filter({ hasText: "Deleted 1 task." }),
+      ).toBeVisible({ timeout: 15_000 });
+    }
   }
 
   /**
    * Archive a task via the sidebar context menu.
    * Hovers to reveal the menu trigger, opens it, clicks "Archive",
-   * and confirms the archive dialog.
+   * and confirms the local archive surface or cascade dialog.
    */
-  async archiveTaskInSidebar(title: string): Promise<void> {
+  async archiveTaskInSidebar(title: string, options: { cascade?: boolean } = {}): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Archive");
-    // Confirm the archive dialog
-    const confirmButton = this.page
-      .getByRole("alertdialog")
-      .getByRole("button", { name: "Archive" });
-    await confirmButton.click();
+    if (options.cascade) {
+      const cascadeCheckbox = this.page.getByTestId("archive-cascade-checkbox");
+      await cascadeCheckbox.click();
+    }
+    await this.page.getByTestId("archive-task-confirm").click();
   }
 
   /**
@@ -582,7 +788,12 @@ export class SessionPage {
       } catch {
         // Menu was likely detached by a re-render — dismiss and retry
         await this.page.keyboard.press("Escape");
-        await this.page.waitForTimeout(500);
+        await dwell(
+          this.page,
+          500,
+          "unverified",
+          "spacing before the next attempt in this menu-retry loop; the menu was detached mid-render and nothing was identified that signals it is safe to re-open",
+        );
       }
     }
     // Final attempt without catch
@@ -592,7 +803,7 @@ export class SessionPage {
   }
 
   stepperStep(name: string): Locator {
-    return this.page.getByTestId(`workflow-step-${name}`);
+    return this.page.locator(`[data-testid="workflow-step-${name}"][aria-current="step"]`);
   }
 
   /** PR button in the topbar (visible only when a PR is associated). */
@@ -613,17 +824,19 @@ export class SessionPage {
 
   /** Submitted review row scoped by its normalized GitHub author login. */
   prSubmittedReview(author: string): Locator {
-    return this.page.getByTestId(`pr-submitted-review-${author.trim().toLowerCase()}`);
+    return this.page.getByTestId(`change-request-submitted-review-${author.trim().toLowerCase()}`);
   }
 
   /** Pending reviewer row scoped by its normalized GitHub author login. */
   prPendingReviewer(author: string): Locator {
-    return this.page.getByTestId(`pr-pending-reviewer-${author.trim().toLowerCase()}`);
+    return this.page.getByTestId(`change-request-pending-reviewer-${author.trim().toLowerCase()}`);
   }
 
   /** Re-request action scoped by its normalized GitHub author login. */
   prReRequestReviewButton(author: string): Locator {
-    return this.page.getByTestId(`pr-rerequest-review-${author.trim().toLowerCase()}`);
+    return this.page.getByTestId(
+      `change-request-review-action-rerequest-review-${author.trim().toLowerCase()}`,
+    );
   }
 
   // --- PR CI accessors: desktop hover popover + chip + mobile chip drawer ---
@@ -657,6 +870,50 @@ export class SessionPage {
   async tapPRStatusChip(): Promise<void> {
     await this.prStatusChip().tap();
     await expect(this.prStatusChipDrawer()).toBeVisible({ timeout: 5_000 });
+  }
+
+  // --- GitLab MR status chip accessors: mirrors the PR status chip shape
+  // above, including its scoping (spec: gitlab-mr-status-chip, Constraints).
+
+  /** Compact GitLab MR status chip rendered in the chat status bar. */
+  mrStatusChip(): Locator {
+    return this.activeChat().getByTestId("chat-status-bar").getByTestId("mr-status-chip");
+  }
+
+  /** Compact GitLab MR status chip rendered in the passthrough toolbar's status row. */
+  mrStatusChipInPassthrough(): Locator {
+    return this.page.getByTestId("passthrough-status-row").getByTestId("mr-status-chip");
+  }
+
+  /** Mobile bottom-sheet drawer that hosts the chip's MRCIPopover body. */
+  mrStatusChipDrawer(): Locator {
+    return this.page.getByTestId("mr-status-chip-drawer");
+  }
+
+  /** Close button inside the chip's mobile drawer. */
+  mrStatusChipDrawerClose(): Locator {
+    return this.page.getByTestId("mr-status-chip-drawer-close");
+  }
+
+  /**
+   * MRCIPopover body when rendered inside the chip's own disclosure — the
+   * hover popover on a fine pointer, or the drawer on a coarse pointer.
+   * `mr-topbar-popover-inner` is also emitted by MRTopbarButton's own
+   * popover on the same route, so this scopes through the chip's own
+   * wrapper testid (`mr-status-chip-popover` / `mr-status-chip-drawer`)
+   * rather than resolving the inner testid globally.
+   */
+  mrStatusChipPopoverInner(): Locator {
+    return this.page
+      .getByTestId("mr-status-chip-popover")
+      .getByTestId("mr-topbar-popover-inner")
+      .or(this.mrStatusChipDrawer().getByTestId("mr-topbar-popover-inner"));
+  }
+
+  /** Tap the chip and wait for the mobile drawer to be visible. */
+  async tapMRStatusChip(): Promise<void> {
+    await this.mrStatusChip().tap();
+    await expect(this.mrStatusChipDrawer()).toBeVisible({ timeout: 5_000 });
   }
 
   /** Multi-PR aggregate popover content (segmented tabs + selected PR's CI). */
@@ -731,6 +988,11 @@ export class SessionPage {
   /** Footer "updated Ns ago" timestamp text. */
   prPopoverUpdatedAt(): Locator {
     return this.prTopbarPopover().getByTestId("pr-popover-updated-at");
+  }
+
+  /** Footer spinner + "Updating…", shown while a refresh is in flight. */
+  prPopoverUpdating(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-popover-updating");
   }
 
   /** Empty-state row when the PR has no checks yet. */
@@ -808,13 +1070,31 @@ export class SessionPage {
   }
 
   /** Click a dockview tab by its visible label (e.g. "Changes", "Files", "Terminal"). */
-  async clickTab(label: string): Promise<void> {
+  async clickTab(label: string, options: { force?: boolean } = {}): Promise<void> {
     const tab = this.page
       .locator(".dv-default-tab:visible")
       .filter({ hasText: new RegExp(`^${escapeRegExp(label)}(?: \\(\\d+\\))?$`) })
       .first();
     await expect(tab).toBeVisible();
-    await tab.click();
+    await tab.click(options);
+  }
+
+  /** Open the Changes Diff action in its direct or width-aware overflow presentation. */
+  async openChangesDiff(): Promise<void> {
+    const direct = this.changes.getByRole("button", { name: "Diff", exact: true });
+    const overflow = this.changes.getByTestId("panel-header-overflow").first();
+    await expect
+      .poll(async () => (await direct.isVisible()) || (await overflow.isVisible()), {
+        timeout: 15_000,
+        message: "Waiting for the Changes Diff action",
+      })
+      .toBe(true);
+    if (await direct.isVisible()) {
+      await direct.click();
+      return;
+    }
+    await overflow.click();
+    await this.page.getByRole("menuitem", { name: "Diff", exact: true }).click();
   }
 
   /**
@@ -897,8 +1177,8 @@ export class SessionPage {
     return this.page.getByTestId("walkthrough-discard");
   }
 
-  walkthroughDiscardDialog(): Locator {
-    return this.page.getByRole("alertdialog", { name: "Discard walkthrough?" });
+  walkthroughDiscardConfirmation(): Locator {
+    return this.page.locator('[data-testid="walkthrough-discard-confirmation"]:visible');
   }
 
   walkthroughFloating(): Locator {
@@ -931,10 +1211,22 @@ export class SessionPage {
   async expandChangesSection(testId: string): Promise<void> {
     const toggle = this.changes.getByTestId(`${testId}-collapse-toggle`);
     await expect(toggle).toBeVisible({ timeout: 15_000 });
-    if ((await toggle.getAttribute("aria-expanded")) === "false") {
-      await toggle.click();
-      await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    }
+    // TimelineSection re-syncs collapsed state from defaultCollapsed until the
+    // user has toggled. A late git-data update can therefore re-collapse right
+    // after the first click (and can also remount the section). Retry until the
+    // expanded attribute sticks instead of asserting once.
+    await expect
+      .poll(
+        async () => {
+          if ((await toggle.getAttribute("aria-expanded")) === "true") {
+            return true;
+          }
+          await toggle.click();
+          return (await toggle.getAttribute("aria-expanded")) === "true";
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(true);
   }
 
   /** Expand the commits section (collapsed by default in the changes panel). */
@@ -953,8 +1245,8 @@ export class SessionPage {
    * TipTap maps "Mod" to Meta on macOS and Control on Linux/Windows.
    */
   async sendMessage(text: string) {
-    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
-    await expect(editor).toBeEditable();
+    const editor = await this.composerReady();
+    await this.waitForDirectInput();
     await editor.click();
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -966,34 +1258,90 @@ export class SessionPage {
    * don't submit on Ctrl/Cmd+Enter, so mobile specs use this instead.
    */
   async sendMessageViaButton(text: string) {
-    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
-    await expect(editor).toBeEditable();
+    const editor = await this.composerReady();
+    await this.waitForDirectInput();
     await editor.click();
     await editor.fill(text);
-    await this.page.getByTestId("submit-message-button").click();
+    const isTouch = await this.page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
+    if (isTouch) {
+      await this.tapSubmitWhenReady();
+      return;
+    }
+    await this.clickSubmitWhenReady();
   }
 
   /**
-   * Wait for the agent reply containing `text` at the given 0-based match
-   * `index` to be visible after a follow-up prompt. On first timeout, reload
-   * once so SSR re-fetches the persisted turn, then re-assert.
+   * Wait until the composer is in direct-input mode — the idle placeholder
+   * ("Continue working on the task...") visible, not the queue affordance
+   * ("Queue instructions to the agent...").
    *
-   * This rides out the same WS-subscribe race `waitForChatIdle` handles, but
-   * for the reply message itself: a mid-session prompt's response event can be
-   * dropped when the client's WS subscription loses the race with the agent's
-   * reply (common after repeated restart/resume cycles). The reply is persisted
-   * server-side, so a single reload recovers it.
+   * The submit button stays enabled while the session is busy (the queue
+   * affordance lets you type-and-queue), and `composerReady()` only checks
+   * editability, so a send right after a turn completes can race the store's
+   * RUNNING→WAITING_FOR_INPUT transition and silently queue the message
+   * instead of delivering it. Gating the send on the idle placeholder makes
+   * sends to an idle session deterministic: typing only starts once the store
+   * session state is genuinely promptable. Must run on an empty editor — the
+   * placeholder decoration is only rendered while the editor has no content.
    */
+  async waitForDirectInput(timeout = 15_000) {
+    await this.waitForChatIdle({ timeout, requireEditable: true });
+  }
+
+  /** The composer's send/submit button (scoped to the active chat panel). */
+  submitButton(): Locator {
+    return this.activeChat().getByTestId("submit-message-button");
+  }
+
+  /**
+   * Tap the submit button only once it is actually enabled.
+   *
+   * The button renders a spinner and is `disabled` while the composer is in a
+   * transient not-ready state (`isSending`/`isStarting`/`isMoving`) — most
+   * commonly the brief STARTING lifecycle an auto-started session passes through
+   * right after it first goes idle. Acting on the button during that window is a
+   * no-op tap that silently drops the message, so we gate on `toBeEnabled`
+   * (waiting for the `disabled` attribute to clear — a condition, not a longer
+   * fixed delay) before tapping. Mirrors `clickSubmitWhenReady` for desktop.
+   */
+  async tapSubmitWhenReady() {
+    const submit = this.submitButton();
+    await expect(submit).toBeEnabled();
+    await submit.tap();
+  }
+
+  /** Desktop analog of `tapSubmitWhenReady` (uses click instead of tap). */
+  async clickSubmitWhenReady() {
+    const submit = this.submitButton();
+    await expect(submit).toBeEnabled();
+    await submit.click();
+  }
+
+  /**
+   * Resolve the active chat's ProseMirror composer and wait until it is
+   * ready for a normal prompt before returning it.
+   *
+   * TipTap uses `immediatelyRender: false`, so `EditorContent` mounts the
+   * `.tiptap.ProseMirror` node only after the editor instance is created in a
+   * post-mount effect; until then the contenteditable host is absent or still
+   * `contenteditable="false"`. Startup now intentionally leaves that host
+   * editable while the submit button remains disabled, so editability alone
+   * no longer proves that a prompt can be sent. Wait for the idle placeholder
+   * and editable host together, which also handles callers that only waited for
+   * the chat panel to mount.
+   */
+  async composerReady(): Promise<Locator> {
+    await this.waitForChatIdle({ timeout: 30_000, requireEditable: true });
+    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
+    await expect(editor).toBeEditable();
+    return editor;
+  }
+
+  /** Wait for the agent reply containing `text` at the given 0-based match `index`. */
   async expectChatResponseVisible(text: string, index = 0, opts: { timeout?: number } = {}) {
     const timeout = opts.timeout ?? 30_000;
-    const target = () => this.chat.getByText(text, { exact: false }).nth(index);
-    try {
-      await expect(target()).toBeVisible({ timeout });
-    } catch {
-      await this.page.reload();
-      await this.waitForLoad();
-      await expect(target()).toBeVisible({ timeout });
-    }
+    const target = () => this.activeChat().getByText(text, { exact: false }).nth(index);
+    await expect(target()).toBeVisible({ timeout });
   }
 
   /** Toggle plan mode on/off by clicking the plan mode toggle button in the toolbar.
@@ -1008,7 +1356,7 @@ export class SessionPage {
    * than a real bug.
    */
   async togglePlanMode() {
-    const btn = this.page.getByTestId("plan-mode-toggle-button");
+    const btn = this.activeChat().getByTestId("plan-mode-toggle-button");
     await expect(btn).toBeVisible({ timeout: 10_000 });
     await expect(btn).toHaveAttribute("data-plan-available", "true", { timeout: 10_000 });
     await btn.click();
@@ -1019,23 +1367,18 @@ export class SessionPage {
    * disappears — i.e. the WebSocket actually opened for that env terminal.
    * Use this to detect the "terminal hangs forever on Connecting" bug.
    */
-  async expectTerminalConnected(timeout = 15_000): Promise<void> {
-    await this.terminal.getByTestId("passthrough-loading").waitFor({ state: "hidden", timeout });
+  async expectTerminalConnected(timeout = TERMINAL_READY_TIMEOUT): Promise<void> {
+    await this.activePanel("terminal-panel")
+      .getByTestId("passthrough-loading")
+      .waitFor({ state: "hidden", timeout });
   }
 
-  /**
-   * Wait for the terminal shell to be connected (buffer has content from
-   * the prompt), then type a command and press Enter.
-   */
+  /** Wait for the terminal WebSocket to connect, then type a command and press Enter. */
   async typeInTerminal(command: string): Promise<void> {
-    await expect
-      .poll(async () => (await this.readXtermBuffer("terminal-panel")).length > 0, {
-        timeout: 15_000,
-        message: "Waiting for terminal shell to connect",
-      })
-      .toBe(true);
+    await this.expectTerminalConnected();
 
-    const xterm = this.terminal.locator(".xterm");
+    const xterm = this.activePanel("terminal-panel").locator(".xterm");
+    await expect(xterm).toBeVisible();
     await xterm.click();
     await this.page.keyboard.type(command);
     await this.page.keyboard.press("Enter");
@@ -1073,6 +1416,53 @@ export class SessionPage {
     await expect(this.sidebar).toBeVisible();
     await expect(this.chat).not.toBeVisible({ timeout: 5_000 });
     await expect(this.files).not.toBeVisible({ timeout: 5_000 });
+  }
+
+  /**
+   * Move the task to a workflow step through whichever stepper presentation
+   * the responsive top bar selected. Narrow layouts expose the target in the
+   * compact disclosure instead of rendering every step in the top bar.
+   */
+  async moveToWorkflowStep(step: { id: string; name: string }): Promise<void> {
+    const fullStep = this.page
+      .locator(`[data-testid=${JSON.stringify(`workflow-step-${step.name}`)}]:visible`)
+      .first();
+    const compactStepper = this.page.getByTestId("workflow-stepper-minimal");
+    let presentation: "full" | "compact" | undefined;
+    await expect
+      .poll(
+        async () => {
+          if (await fullStep.isVisible()) {
+            presentation = "full";
+            return true;
+          }
+          if (await compactStepper.isVisible()) {
+            presentation = "compact";
+            return true;
+          }
+          return false;
+        },
+        { timeout: 10_000, message: `Waiting for workflow step presentation for ${step.name}` },
+      )
+      .toBe(true);
+
+    if (presentation === "full") {
+      await fullStep.hover();
+      await this.page.getByRole("button", { name: "Move here", exact: true }).click();
+      return;
+    }
+
+    await expect(async () => {
+      const moveButton = this.page.getByTestId(`workflow-step-disclosure-move-${step.id}`);
+      if (!(await moveButton.isVisible())) {
+        await compactStepper.click();
+      }
+      await expect(moveButton).toBeVisible({ timeout: 3_000 });
+      await moveButton.click({ timeout: 3_000 });
+    }).toPass({
+      timeout: 15_000,
+      intervals: [100, 250, 500],
+    });
   }
 
   /**
@@ -1204,9 +1594,20 @@ export class SessionPage {
     return this.page.getByTestId("dockview-add-panel-btn").first();
   }
 
+  /** Open a blank built-in Browser panel from the dockview + menu. */
+  async addBrowserPanel(): Promise<void> {
+    await this.addPanelButton().click();
+    await this.page.getByRole("menuitem", { name: "Browser", exact: true }).click();
+  }
+
   /** "New Session" menu item in the dockview + dropdown. */
   newSessionMenuButton(): Locator {
     return this.page.getByTestId("new-session-button");
+  }
+
+  /** Row in the dockview "+" add-panel menu for a registered plugin task panel. */
+  addPanelPluginItem(pluginId: string, panelId: string): Locator {
+    return this.page.getByTestId(`add-panel-plugin-item-${pluginId}-${panelId}`);
   }
 
   /** Open the new session dialog via the + menu. */
@@ -1363,12 +1764,67 @@ export class SessionPage {
 
   /** Find a tree node by its data-path attribute. */
   fileTreeNode(nodePath: string): Locator {
-    return this.files.locator(`[data-testid="file-tree-node"][data-path="${nodePath}"]`);
+    return this.fileTree.fileTreeNode(nodePath);
+  }
+
+  /** The existing Files viewport that owns tree scrolling. */
+  fileTreeScrollViewport(): Locator {
+    return this.fileTree.fileTreeScrollViewport();
+  }
+
+  /** Visible tree rows, including only rows currently mounted by the tree. */
+  visibleFileTreeNodes(): Locator {
+    return this.fileTree.visibleFileTreeNodes();
+  }
+
+  /** Visible search button in the Files panel. */
+  fileSearchButton(): Locator {
+    return this.fileTree.fileSearchButton();
+  }
+
+  /** Search input shown in the visible Files panel. */
+  fileSearchInput(): Locator {
+    return this.fileTree.fileSearchInput();
+  }
+
+  /** Search result by its task-root-relative path. */
+  fileSearchResult(nodePath: string): Locator {
+    return this.fileTree.fileSearchResult(nodePath);
   }
 
   /** All file tree nodes with data-selected="true". */
   fileTreeSelectedNodes(): Locator {
-    return this.files.locator("[data-selected='true']");
+    return this.fileTree.fileTreeSelectedNodes();
+  }
+
+  /** The desktop context-menu action for the selected file-tree node. */
+  fileTreeAddToChatContextMenuItem(): Locator {
+    return this.fileTree.fileTreeAddToChatContextMenuItem();
+  }
+
+  /** Visible coarse-pointer row action for one file-tree node. */
+  fileTreeNodeActions(nodePath: string): Locator {
+    return this.fileTree.fileTreeNodeActions(nodePath);
+  }
+
+  /** Responsive dropdown opened from a file-tree row action. */
+  fileTreeTouchMenu(): Locator {
+    return this.fileTree.fileTreeTouchMenu();
+  }
+
+  /** Add-to-chat item inside the responsive file-tree dropdown. */
+  fileTreeTouchAddToChatContextItem(): Locator {
+    return this.fileTree.fileTreeTouchAddToChatContextItem();
+  }
+
+  /** Pending composer chip for a file or directory path. */
+  chatContextFile(path: string): Locator {
+    return this.fileTree.chatContextFile(path);
+  }
+
+  /** Context-file badge on a sent user message. */
+  sentMessageContextFile(path: string): Locator {
+    return this.fileTree.sentMessageContextFile(path);
   }
 
   // --- Changes panel multi-select helpers ---
@@ -1461,6 +1917,35 @@ export class SessionPage {
     return this.page.getByTestId("plan-revert-confirm-dialog");
   }
 
+  /** Desktop row-local restore confirmation popover. */
+  revertConfirmPopover(): Locator {
+    return this.page.getByTestId("plan-revision-restore-confirm-popover");
+  }
+
+  revertConfirmPopoverOk(): Locator {
+    return this.revertConfirmPopover().getByTestId("plan-revision-restore-confirm");
+  }
+
+  revertConfirmPopoverCancel(): Locator {
+    return this.revertConfirmPopover().getByRole("button", { name: "Cancel", exact: true });
+  }
+
+  /** Phone row-local restore confirmation. */
+  revertInlineConfirmation(row: Locator): Locator {
+    return row.getByTestId("plan-revision-restore-inline-confirmation");
+  }
+
+  revertInlineConfirm(row: Locator): Locator {
+    return row.getByTestId("plan-revision-restore-confirm");
+  }
+
+  revertInlineCancel(row: Locator): Locator {
+    return this.revertInlineConfirmation(row).getByRole("button", {
+      name: "Cancel",
+      exact: true,
+    });
+  }
+
   revertConfirmOk(): Locator {
     return this.page.getByTestId("plan-revert-confirm-ok");
   }
@@ -1476,7 +1961,10 @@ export class SessionPage {
 
   /** Open the rewind popover and wait for it to render. No-op when already open. */
   async openRewind(): Promise<void> {
-    if (await this.revisionsPopover().isVisible()) return;
+    // Radix keeps the closed content in the DOM during its exit transition,
+    // and mobile can report that content as visible while the trigger is
+    // already closed. The trigger state is the authoritative open signal.
+    if ((await this.rewindButton().getAttribute("aria-expanded")) === "true") return;
     await this.rewindButton().click();
     await expect(this.revisionsPopover()).toBeVisible({ timeout: 5_000 });
   }
@@ -1485,8 +1973,8 @@ export class SessionPage {
   async revertToRevision(n: number): Promise<void> {
     await this.openRewind();
     await this.revertButton(this.revisionRow(n)).click();
-    await expect(this.revertConfirmDialog()).toBeVisible({ timeout: 5_000 });
-    await this.revertConfirmOk().click();
+    await expect(this.revertConfirmPopover()).toBeVisible({ timeout: 5_000 });
+    await this.revertConfirmPopoverOk().click();
   }
 
   // --- Plan revision preview & compare (Phase 6) ---

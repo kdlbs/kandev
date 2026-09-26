@@ -12,7 +12,10 @@ import {
 import { calculateHash, generateUnifiedDiff } from "@/lib/utils/file-diff";
 import { requestFileContent, updateFileContent, deleteFile } from "@/lib/ws/workspace-files";
 import { useToast } from "@/components/toast-provider";
+import { t } from "@/lib/i18n";
 import { getFileTabKey } from "./task-center-panel-file-tabs";
+import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
+import { getFilePreviewKind } from "@/lib/utils/file-types";
 
 export type FileTabRestorationOptions = {
   activeSessionId: string | null;
@@ -49,8 +52,12 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
         originalHash: hash,
         isDirty: false,
         isBinary: response.is_binary,
+        resolvedPath: response.resolved_path,
         repo: savedTab.repo,
-        markdownPreview: savedTab.markdownPreview,
+        renderedPreview:
+          getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
+            ? savedTab.renderedPreview
+            : undefined,
       });
     } catch {
       /* skip failed tabs */
@@ -174,6 +181,24 @@ export function useFileTabRestoration({
   return { restorationInProgressRef };
 }
 
+function updateTabsAfterSave(
+  tabs: OpenFileTab[],
+  fileKey: string,
+  persistedContent: string,
+  originalHash: string,
+): OpenFileTab[] {
+  return tabs.map((tab) =>
+    getFileTabKey(tab) === fileKey
+      ? {
+          ...tab,
+          originalContent: persistedContent,
+          originalHash,
+          isDirty: tab.content !== persistedContent,
+        }
+      : tab,
+  );
+}
+
 export function useFileSaveDelete({
   activeSessionId,
   openFileTabs,
@@ -182,11 +207,13 @@ export function useFileSaveDelete({
   handleCloseFileTab,
 }: FileSaveDeleteOptions) {
   const { toast } = useToast();
+  const openFileTabsRef = useRef(openFileTabs);
+  openFileTabsRef.current = openFileTabs;
 
   const handleFileSave = useCallback(
     async (path: string, repo?: string) => {
       const fileKey = getFileTabKey({ path, repo });
-      const tab = openFileTabs.find((item) => getFileTabKey(item) === fileKey);
+      const tab = openFileTabsRef.current.find((item) => getFileTabKey(item) === fileKey);
       if (!tab || !tab.isDirty) return;
       const client = getWebSocketClient();
       if (!client || !activeSessionId) return;
@@ -201,30 +228,28 @@ export function useFileSaveDelete({
           repo: tab.repo,
         });
         if (response.success && response.new_hash) {
+          const current = openFileTabsRef.current.find((item) => getFileTabKey(item) === fileKey);
+          lspClientManager.saveDocument(
+            activeSessionId,
+            path,
+            tab.repo,
+            tab.content,
+            current?.content ?? tab.content,
+          );
           setOpenFileTabs((prev) =>
-            prev.map((t) =>
-              getFileTabKey(t) === fileKey
-                ? {
-                    ...t,
-                    originalContent: t.content,
-                    originalHash: response.new_hash!,
-                    isDirty: false,
-                  }
-                : t,
-            ),
+            updateTabsAfterSave(prev, fileKey, tab.content, response.new_hash!),
           );
         } else {
           toast({
-            title: "Save failed",
-            description: response.error || "Failed to save file",
+            title: t("editors:saveFailed"),
+            description: response.error || t("editors:failedToSaveFile"),
             variant: "error",
           });
         }
       } catch (error) {
         toast({
-          title: "Save failed",
-          description:
-            error instanceof Error ? error.message : "An error occurred while saving the file",
+          title: t("editors:saveFailed"),
+          description: error instanceof Error ? error.message : t("editors:errorWhileSavingFile"),
           variant: "error",
         });
       } finally {
@@ -235,7 +260,7 @@ export function useFileSaveDelete({
         });
       }
     },
-    [openFileTabs, activeSessionId, toast, setOpenFileTabs, setSavingFiles],
+    [activeSessionId, toast, setOpenFileTabs, setSavingFiles],
   );
 
   const handleFileDelete = useCallback(
@@ -248,16 +273,15 @@ export function useFileSaveDelete({
           handleCloseFileTab(getFileTabKey({ path, repo }));
         } else {
           toast({
-            title: "Delete failed",
-            description: response.error || "Failed to delete file",
+            title: t("editors:deleteFailed"),
+            description: response.error || t("editors:failedToDeleteFile"),
             variant: "error",
           });
         }
       } catch (error) {
         toast({
-          title: "Delete failed",
-          description:
-            error instanceof Error ? error.message : "An error occurred while deleting the file",
+          title: t("editors:deleteFailed"),
+          description: error instanceof Error ? error.message : t("editors:errorWhileDeletingFile"),
           variant: "error",
         });
       }

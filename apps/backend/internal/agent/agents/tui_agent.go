@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -29,6 +30,15 @@ type TUIAgentConfig struct {
 	ModelFlag   Param          // e.g. NewParam("--model", "{model}") — lets users pick a model in profile settings
 	CommandArgs []string       // extra args after Command
 	DetectOpts  []DetectOption // defaults to WithCommand(Command)
+	// MCPStrategy materializes kandev's per-session MCP server (and the
+	// profile's configured servers) into the wrapped CLI's own shape. Nil — the
+	// default — means no injection, which is correct for a TUI tool that is not
+	// an MCP client at all. Resolved from the user's stored strategy key; see
+	// mcpconfig.StrategyByKey for why it is chosen rather than inferred.
+	MCPStrategy mcpconfig.PassthroughMCPStrategy
+	// DisableBracketedPaste selects the paced unframed delivery path for a
+	// terminal that does not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool
 }
 
 // TUIAgent implements Agent + PassthroughAgent for CLI passthrough TUI tools.
@@ -67,14 +77,23 @@ func NewTUIAgent(cfg TUIAgentConfig) *TUIAgent {
 	a := &TUIAgent{
 		StandardPassthrough: StandardPassthrough{
 			Cfg: PassthroughConfig{
-				Supported:       true,
-				Label:           "CLI Passthrough",
-				Description:     cfg.Desc,
-				PassthroughCmd:  NewCommand(cmdArgs...),
-				ModelFlag:       cfg.ModelFlag,
-				IdleTimeout:     cfg.IdleTimeout,
-				BufferMaxBytes:  cfg.BufferMax,
-				WaitForTerminal: cfg.WaitForTerm,
+				Supported:             true,
+				Label:                 "CLI Passthrough",
+				Description:           cfg.Desc,
+				PassthroughCmd:        NewCommand(cmdArgs...),
+				ModelFlag:             cfg.ModelFlag,
+				IdleTimeout:           cfg.IdleTimeout,
+				BufferMaxBytes:        cfg.BufferMax,
+				WaitForTerminal:       cfg.WaitForTerm,
+				MCPStrategy:           cfg.MCPStrategy,
+				DisableBracketedPaste: cfg.DisableBracketedPaste,
+				// Ink-based TUIs (Claude Code and similar) coalesce multi-byte
+				// stdin reads into a paste burst, absorbing a trailing "\r" into
+				// the pasted content instead of dispatching Enter. The submit
+				// byte is therefore a separate delayed keystroke, and the body
+				// travels as a bracketed paste so it arrives whole at any
+				// length. Matches the built-in Claude passthrough agent.
+				SubmitDelay: 150 * time.Millisecond,
 			},
 		},
 		cfg: cfg,
@@ -104,7 +123,24 @@ func (a *TUIAgent) Logo(v LogoVariant) []byte {
 }
 
 func (a *TUIAgent) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	return Detect(ctx, a.cfg.DetectOpts...)
+	result, err := Detect(ctx, a.cfg.DetectOpts...)
+	if err != nil {
+		return result, err
+	}
+	// Derive MCP support from the configured strategy rather than storing it as
+	// an independent flag. Discovery writes this value back over agents.supports_mcp
+	// on every sweep (see controller.upsertAgent), so anything set separately at
+	// creation time is reverted within a boot. Deriving makes that write the
+	// mechanism that keeps the flag correct instead of the thing fighting it,
+	// and makes "supports MCP but has no way to inject it" unrepresentable.
+	result.SupportsMCP = a.cfg.MCPStrategy != nil
+	return result, nil
+}
+
+// MCPStrategy returns the configured passthrough MCP injection strategy, or nil
+// when the agent does no injection.
+func (a *TUIAgent) MCPStrategy() mcpconfig.PassthroughMCPStrategy {
+	return a.cfg.MCPStrategy
 }
 
 func (a *TUIAgent) BuildCommand(_ CommandOptions) Command {

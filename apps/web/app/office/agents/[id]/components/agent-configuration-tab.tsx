@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -9,56 +9,95 @@ import { Badge } from "@kandev/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
+import { ApiError } from "@/lib/api/client";
 import type { AgentProfile, AgentRole } from "@/lib/state/slices/office/types";
 import { AgentRoutingCard } from "./agent-routing-card";
+import { reportsToOptions } from "./reports-to-options";
+import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type AgentConfigurationTabProps = {
   agent: AgentProfile;
 };
 
-const FALLBACK_ROLES: Array<{ id: string; label: string }> = [
-  { id: "ceo", label: "CEO" },
-  { id: "worker", label: "Worker" },
-  { id: "specialist", label: "Specialist" },
-  { id: "assistant", label: "Assistant" },
-  { id: "security", label: "Security" },
-  { id: "qa", label: "QA" },
-  { id: "devops", label: "DevOps" },
+function agentValidationMessage(error: unknown, translate: (key: string) => string): string | null {
+  if (!(error instanceof ApiError) || !error.body || typeof error.body !== "object") return null;
+  const code = "code" in error.body ? error.body.code : null;
+  if (typeof code !== "string") return null;
+  // i18n-exempt: backend validation codes, not user-facing copy.
+  switch (code) {
+    case "agent_ceo_reports_to":
+      return translate("office:agentCeoReportsToError");
+    case "agent_reports_to_invalid":
+      return translate("office:agentReportsToInvalidError");
+    case "agent_reports_to_self":
+      return translate("office:agentReportsToSelfError");
+    case "agent_reports_to_cycle":
+      return translate("office:agentReportsToCycleError");
+    default:
+      return null;
+  }
+}
+
+// Catalog keys, not copy — module scope freezes a `t()` at the boot locale.
+// The record keys are wire values and stay untranslated.
+const FALLBACK_ROLES: Array<{ id: string; labelKey: string }> = [
+  { id: "ceo", labelKey: "office:roleCeo" },
+  { id: "worker", labelKey: "office:roleWorker" },
+  { id: "specialist", labelKey: "office:roleSpecialist" },
+  { id: "assistant", labelKey: "office:roleAssistant" },
+  { id: "security", labelKey: "office:roleSecurity" },
+  { id: "qa", labelKey: "office:roleQa" },
+  { id: "devops", labelKey: "office:roleDevops" },
 ];
 
-const FALLBACK_EXECUTOR_TYPES: Array<{ id: string; label: string }> = [
-  { id: "local_pc", label: "Local (standalone)" },
-  { id: "local_docker", label: "Local Docker" },
-  { id: "sprites", label: "Sprites (remote sandbox)" },
+const FALLBACK_EXECUTOR_TYPES: Array<{ id: string; labelKey: string }> = [
+  { id: "local_pc", labelKey: "office:localStandalone" },
+  { id: "local_docker", labelKey: "office:localDocker" },
+  { id: "sprites", labelKey: "office:spritesRemoteSandbox" },
 ];
 
-const CAPABILITY_LABELS: Record<string, string> = {
-  post_comment: "Post comment",
-  update_task_status: "Update task status",
-  create_subtask: "Create subtask",
-  create_agent: "Create agent",
-  request_approval: "Request approval",
-  read_memory: "Read memory",
-  write_memory: "Write memory",
-  list_skills: "List skills",
-  spawn_agent_run: "Spawn run",
-  modify_agents: "Modify agents",
-  delete_skills: "Delete skills",
+const CAPABILITY_LABEL_KEYS: Record<string, string> = {
+  post_comment: "office:capabilityPostComment",
+  update_task_status: "office:capabilityUpdateTaskStatus",
+  create_subtask: "office:capabilityCreateSubtask",
+  create_agent: "office:capabilityCreateAgent",
+  request_approval: "office:capabilityRequestApproval",
+  read_memory: "office:capabilityReadMemory",
+  write_memory: "office:capabilityWriteMemory",
+  list_skills: "office:capabilityListSkills",
+  spawn_agent_run: "office:capabilitySpawnAgentRun",
+  modify_agents: "office:capabilityModifyAgents",
+  delete_skills: "office:capabilityDeleteSkills",
 };
 
 type FormState = {
   name: string;
   role: AgentRole;
+  reportsTo: string;
   budgetMonthlyCents: number;
   maxConcurrentSessions: number;
   executorType: string;
 };
 
+type FormField = keyof FormState;
+
+const FORM_FIELDS: FormField[] = [
+  "name",
+  "role",
+  "reportsTo",
+  "budgetMonthlyCents",
+  "maxConcurrentSessions",
+  "executorType",
+];
+
 function initialForm(agent: AgentProfile): FormState {
   return {
     name: agent.name,
     role: agent.role,
+    reportsTo: agent.role === "ceo" ? "" : (agent.reportsTo ?? ""),
     budgetMonthlyCents: agent.budgetMonthlyCents,
     maxConcurrentSessions: agent.maxConcurrentSessions,
     executorType: agent.executorPreference?.type ?? "",
@@ -66,49 +105,23 @@ function initialForm(agent: AgentProfile): FormState {
 }
 
 export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
+  const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
-  const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
-  const allOfficeAgents = useAppStore((s) => s.office.agentProfiles);
+  const allOfficeAgents = useAppStore(selectOfficeAgentProfiles);
 
-  const roles = meta?.roles.map((r) => ({ id: r.id, label: r.label })) ?? FALLBACK_ROLES;
+  const roles =
+    meta?.roles.map((r) => ({ id: r.id, label: r.label })) ??
+    FALLBACK_ROLES.map((r) => ({ id: r.id, label: t(r.labelKey) }));
   const executorTypes =
-    meta?.executorTypes.map((e) => ({ id: e.id, label: e.label })) ?? FALLBACK_EXECUTOR_TYPES;
+    meta?.executorTypes.map((e) => ({ id: e.id, label: e.label })) ??
+    FALLBACK_EXECUTOR_TYPES.map((e) => ({ id: e.id, label: t(e.labelKey) }));
 
-  const [form, setForm] = useState<FormState>(() => initialForm(agent));
-  const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const { form, saving, dirty, patch, handleSave } = useAgentConfigurationForm(agent);
 
-  const patch = useCallback((p: Partial<FormState>) => {
-    setForm((prev) => ({ ...prev, ...p }));
-    setDirty(true);
-  }, []);
-
-  const reportsToAgent = useMemo(
-    () => allOfficeAgents.find((a) => a.id === agent.reportsTo),
-    [allOfficeAgents, agent.reportsTo],
+  const reportsToChoices = useMemo(
+    () => (form.role === "ceo" ? [] : reportsToOptions(allOfficeAgents, agent.id)),
+    [allOfficeAgents, agent.id, form.role],
   );
-
-  const handleSave = useCallback(async () => {
-    setSaving(true);
-    try {
-      const update: Partial<AgentProfile> = {
-        name: form.name,
-        role: form.role,
-        budgetMonthlyCents: form.budgetMonthlyCents,
-        maxConcurrentSessions: form.maxConcurrentSessions,
-        executorPreference: form.executorType ? { type: form.executorType } : undefined,
-      };
-      const saved = await updateAgentProfile(agent.id, update);
-      updateStore(agent.id, saved);
-      setForm(initialForm(saved));
-      setDirty(false);
-      toast.success("Agent configuration updated");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to update agent");
-    } finally {
-      setSaving(false);
-    }
-  }, [agent.id, form, updateStore]);
 
   return (
     <div className="space-y-4 mt-4" data-testid="agent-configuration-tab">
@@ -116,9 +129,11 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
         name={form.name}
         role={form.role}
         roles={roles}
-        reportsToName={reportsToAgent?.name ?? "None"}
+        reportsTo={form.reportsTo}
+        reportsToChoices={reportsToChoices}
         onNameChange={(v) => patch({ name: v })}
-        onRoleChange={(v) => patch({ role: v })}
+        onRoleChange={(v) => patch(v === "ceo" ? { role: v, reportsTo: "" } : { role: v })}
+        onReportsToChange={(v) => patch({ reportsTo: v })}
       />
       <CapabilityPreviewCard agent={agent} role={form.role} />
       <OrchestrationCard
@@ -134,7 +149,7 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
       {dirty && (
         <div className="flex justify-end">
           <Button onClick={handleSave} disabled={saving} className="cursor-pointer">
-            {saving ? "Saving..." : "Save Configuration"}
+            {saving ? t("office:saving") : t("office:saveConfiguration")}
           </Button>
         </div>
       )}
@@ -142,21 +157,140 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
   );
 }
 
+function reconcileForm(
+  previousForm: FormState,
+  nextForm: FormState,
+  dirtyFields: Set<FormField>,
+): FormState {
+  const reconciled = { ...previousForm };
+  for (const field of FORM_FIELDS) {
+    if (!dirtyFields.has(field)) {
+      Object.assign(reconciled, { [field]: nextForm[field] });
+    }
+  }
+  return reconciled;
+}
+
+function buildAgentUpdate(
+  form: FormState,
+  canonical: FormState,
+  dirtyFields: Set<FormField>,
+): Partial<AgentProfile> {
+  function valueFor<T extends FormField>(field: T): FormState[T] {
+    return dirtyFields.has(field) ? form[field] : canonical[field];
+  }
+
+  const executorType = valueFor("executorType");
+  return {
+    name: valueFor("name"),
+    role: valueFor("role"),
+    reportsTo: valueFor("reportsTo"),
+    budgetMonthlyCents: valueFor("budgetMonthlyCents"),
+    maxConcurrentSessions: valueFor("maxConcurrentSessions"),
+    executorPreference: executorType ? { type: executorType } : undefined,
+  };
+}
+
+function useAgentConfigurationForm(agent: AgentProfile) {
+  const { t } = useTranslation();
+  const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
+  const [form, setForm] = useState<FormState>(() => initialForm(agent));
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const dirtyFieldsRef = useRef<Set<FormField>>(new Set());
+  const previousAgentRef = useRef(agent);
+  const activeAgentIdRef = useRef(agent.id);
+  const saveRequestRef = useRef(0);
+  const editGenerationRef = useRef(0);
+
+  activeAgentIdRef.current = agent.id;
+
+  useEffect(() => {
+    const previousAgent = previousAgentRef.current;
+    previousAgentRef.current = agent;
+    const nextForm = initialForm(agent);
+
+    if (previousAgent.id !== agent.id) {
+      dirtyFieldsRef.current.clear();
+      setForm(nextForm);
+      setDirty(false);
+      setSaving(false);
+      return;
+    }
+
+    if (dirtyFieldsRef.current.size === 0) {
+      setForm(nextForm);
+      return;
+    }
+
+    setForm((previousForm) => reconcileForm(previousForm, nextForm, dirtyFieldsRef.current));
+  }, [agent]);
+
+  const patch = useCallback((p: Partial<FormState>) => {
+    editGenerationRef.current += 1;
+    for (const field of Object.keys(p) as FormField[]) {
+      dirtyFieldsRef.current.add(field);
+    }
+    setForm((prev) => ({ ...prev, ...p }));
+    setDirty(true);
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    const targetAgentId = agent.id;
+    const requestId = saveRequestRef.current + 1;
+    saveRequestRef.current = requestId;
+    const canonical = initialForm(agent);
+    const dirtyFields = dirtyFieldsRef.current;
+    const editGeneration = editGenerationRef.current;
+
+    setSaving(true);
+    try {
+      const update = buildAgentUpdate(form, canonical, dirtyFields);
+      const saved = await updateAgentProfile(targetAgentId, update);
+      updateStore(agent.workspaceId, targetAgentId, saved);
+      if (
+        activeAgentIdRef.current !== targetAgentId ||
+        saveRequestRef.current !== requestId ||
+        editGenerationRef.current !== editGeneration
+      ) {
+        return;
+      }
+      dirtyFieldsRef.current.clear();
+      setForm(initialForm(saved));
+      setDirty(false);
+      toast.success(t("office:agentConfigurationUpdated"));
+    } catch (err) {
+      toast.error(
+        agentValidationMessage(err, t) ??
+          (err instanceof Error ? err.message : t("office:failedToUpdateAgent")),
+      );
+    } finally {
+      if (activeAgentIdRef.current === targetAgentId && saveRequestRef.current === requestId) {
+        setSaving(false);
+      }
+    }
+  }, [agent, form, t, updateStore]);
+
+  return { form, saving, dirty, patch, handleSave };
+}
+
 function CapabilityPreviewCard({ agent, role }: { agent: AgentProfile; role: AgentRole }) {
+  const { t } = useTranslation();
   const capabilities = effectiveCapabilities(agent, role);
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">Runtime capabilities</CardTitle>
+        <CardTitle className="text-sm">{t("office:runtimeCapabilities")}</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Effective actions this agent can request during Office runs.
+          {t("office:effectiveActionsThisAgentCanRequest")}
         </p>
       </CardHeader>
       <CardContent>
         <div className="flex flex-wrap gap-2" data-testid="agent-capability-preview">
           {capabilities.map((key) => (
             <Badge key={key} variant="secondary">
-              {CAPABILITY_LABELS[key] ?? key}
+              {/* `?? key` keeps an unmapped wire capability visible. */}
+              {CAPABILITY_LABEL_KEYS[key] ? t(CAPABILITY_LABEL_KEYS[key]) : key}
             </Badge>
           ))}
         </div>
@@ -180,35 +314,82 @@ function effectiveCapabilities(agent: AgentProfile, role: AgentRole): string[] {
   if (permissions.can_spawn_agent_run === true) allowed.add("spawn_agent_run");
   if (permissions.can_modify_agents === true) allowed.add("modify_agents");
   if (permissions.can_delete_skills === true) allowed.add("delete_skills");
-  return Object.keys(CAPABILITY_LABELS).filter((key) => allowed.has(key));
+  return Object.keys(CAPABILITY_LABEL_KEYS).filter((key) => allowed.has(key));
+}
+
+function ReportsToField({
+  reportsTo,
+  choices,
+  disabled,
+  onChange,
+}: {
+  reportsTo: string;
+  choices: Array<{ id: string; name: string }>;
+  disabled: boolean;
+  onChange: (v: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex-1">
+      <Label htmlFor="cfg-reports-to">{t("office:reportsTo")}</Label>
+      <Select
+        value={reportsTo || "__none__"}
+        disabled={disabled}
+        onValueChange={(v) => onChange(v === "__none__" ? "" : v)}
+      >
+        <SelectTrigger
+          id="cfg-reports-to"
+          className={controlSizingClassName("standard", "mt-1 w-full cursor-pointer")}
+        >
+          <SelectValue placeholder={t("office:noneTopLevel")} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__" className="cursor-pointer">
+            {t("office:none")}
+          </SelectItem>
+          {choices.map((c) => (
+            <SelectItem key={c.id} value={c.id} className="cursor-pointer">
+              {c.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground mt-1">{t("office:whichAgentManagesThisOne")}</p>
+    </div>
+  );
 }
 
 function IdentityCard({
   name,
   role,
   roles,
-  reportsToName,
+  reportsTo,
+  reportsToChoices,
   onNameChange,
   onRoleChange,
+  onReportsToChange,
 }: {
   name: string;
   role: AgentRole;
   roles: Array<{ id: string; label: string }>;
-  reportsToName: string;
+  reportsTo: string;
+  reportsToChoices: Array<{ id: string; name: string }>;
   onNameChange: (v: string) => void;
   onRoleChange: (v: AgentRole) => void;
+  onReportsToChange: (v: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">Identity</CardTitle>
+        <CardTitle className="text-sm">{t("office:identity")}</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Name, role, and reporting structure for this agent.
+          {t("office:nameRoleAndReportingStructureFor")}
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
         <div>
-          <Label htmlFor="cfg-name">Name</Label>
+          <Label htmlFor="cfg-name">{t("office:name")}</Label>
           <Input
             id="cfg-name"
             value={name}
@@ -216,11 +397,13 @@ function IdentityCard({
             className="mt-1"
           />
         </div>
-        <div className="flex gap-4">
+        <div className="flex flex-col gap-4 md:flex-row">
           <div className="flex-1">
-            <Label>Role</Label>
+            <Label>{t("office:role")}</Label>
             <Select value={role} onValueChange={(v) => onRoleChange(v as AgentRole)}>
-              <SelectTrigger className="mt-1 cursor-pointer">
+              <SelectTrigger
+                className={controlSizingClassName("standard", "mt-1 w-full cursor-pointer")}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -232,13 +415,12 @@ function IdentityCard({
               </SelectContent>
             </Select>
           </div>
-          <div className="flex-1">
-            <Label>Reports to</Label>
-            <Input value={reportsToName} disabled className="mt-1" />
-            <p className="text-xs text-muted-foreground mt-1">
-              Edit org chart from the agents list.
-            </p>
-          </div>
+          <ReportsToField
+            reportsTo={reportsTo}
+            choices={reportsToChoices}
+            disabled={role === "ceo"}
+            onChange={onReportsToChange}
+          />
         </div>
       </CardContent>
     </Card>
@@ -262,18 +444,19 @@ function OrchestrationCard({
   onMaxConcurrentChange: (v: number) => void;
   onExecutorChange: (v: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">Orchestration</CardTitle>
+        <CardTitle className="text-sm">{t("office:orchestration")}</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Budget cap, concurrency, and execution environment.
+          {t("office:budgetCapConcurrencyAndExecutionEnvironment")}
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex gap-4">
           <div className="flex-1">
-            <Label>Monthly budget ($)</Label>
+            <Label>{t("office:monthlyBudget")}</Label>
             <Input
               type="number"
               min={0}
@@ -283,7 +466,7 @@ function OrchestrationCard({
             />
           </div>
           <div className="flex-1">
-            <Label>Max concurrent sessions</Label>
+            <Label>{t("office:maxConcurrentSessions")}</Label>
             <Input
               type="number"
               min={1}
@@ -295,17 +478,17 @@ function OrchestrationCard({
           </div>
         </div>
         <div>
-          <Label>Executor preference</Label>
+          <Label>{t("office:executorPreference")}</Label>
           <Select
             value={executorType || "__inherit__"}
             onValueChange={(v) => onExecutorChange(v === "__inherit__" ? "" : v)}
           >
             <SelectTrigger className="mt-1 cursor-pointer">
-              <SelectValue placeholder="Inherit from project/workspace" />
+              <SelectValue placeholder={t("office:inheritFromProjectWorkspace")} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__inherit__" className="cursor-pointer">
-                Inherit
+                {t("office:inherit")}
               </SelectItem>
               {executorTypes.map((et) => (
                 <SelectItem key={et.id} value={et.id} className="cursor-pointer">

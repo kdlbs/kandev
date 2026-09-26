@@ -1,0 +1,202 @@
+/**
+ * The app's first-party navigation catalog: one declaration per top-level
+ * destination, in the order surfaces should offer them.
+ *
+ * Why this exists: each surface used to hardcode its own list. Adding a
+ * destination meant editing three unrelated files, and forgetting one silently
+ * dropped it from that surface — `/stats` was reachable only from the
+ * desktop-only sidebar footer and a keyboard-only palette command, so it had no
+ * phone entry point at all. `core-destinations.test.ts` now fails when a
+ * first-class route has no manifest entry, or when a destination is missing from
+ * the mobile menu without a recorded reason.
+ *
+ * What this manifest currently drives: the sidebar's integrations section and
+ * footer insight buttons, the sidebar and mobile plugin nav groups, the shared
+ * `AppNavSections` block (the mobile nav sheet and the kanban drawer's global
+ * tail), the topbar's home crumb (via `homeDestinationHref`), and the command
+ * palette's Navigation group.
+ *
+ * What it does not drive yet (deliberately, see the notes below): the sidebar's
+ * primary nav, action-shaped controls (New task, Inbox, quick chat, the
+ * settings gear, the Office↔Kanban switch), the settings tree, and Office's own
+ * navigation section — the latter two travel as `pageNav` through `PageShell`
+ * instead of flattening into this catalog.
+ */
+import {
+  IconBrandGithub,
+  IconBrandGitlab,
+  IconChartBar,
+  IconColumns,
+  IconHexagon,
+  IconHome,
+  IconList,
+  IconSettings,
+  IconTicket,
+} from "@tabler/icons-react";
+import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
+import { linkToTaskOverview, linkToTasks, linkToThreads } from "@/lib/links";
+import { resolveHomeHref } from "./workspace-home";
+import { EVERYWHERE, MENU_AND_PALETTE, SIDEBAR_AND_MENU } from "./surface-policy";
+import type { Destination, NavContext } from "./types";
+
+/**
+ * Where "home" is for the current mode and workspace — the office dashboard
+ * inside Office, the chosen workspace home otherwise. Exported so the
+ * topbar's home crumb (`useHomeAffordance`) and the manifest's home entry
+ * resolve one rule and cannot disagree.
+ */
+export function homeDestinationHref(ctx: NavContext): string {
+  return resolveHomeHref(ctx);
+}
+
+/**
+ * Not listed here, on purpose:
+ * - Home/Inbox/New task in the sidebar's primary nav and the Office↔Kanban
+ *   toggle — those carry badge counts, quick-chat launches, or `localStorage`
+ *   side effects. They are actions, not plain destinations; folding actions in
+ *   is a follow-up that should reuse the command registry.
+ * - `/settings/<section>` deep links (the palette's Settings group) — those are
+ *   shortcuts into one destination, not destinations of their own.
+ * - `/login`, `/setup`, `/invite` — pre-auth routes, intentionally unlisted.
+ */
+export const APP_DESTINATIONS: Destination[] = [
+  {
+    id: "home",
+    labelKey: "sidebar:home",
+    icon: IconHome,
+    section: "primary",
+    href: homeDestinationHref,
+    // The sidebar owns desktop Home; shared navigation and listing menus
+    // expose the same destination on phones.
+    surfaces: MENU_AND_PALETTE,
+    palette: {
+      id: "nav-home",
+      labelKey: "common:commandGoToHome",
+      keywordsKey: "common:commandGoToHomeKeywords",
+      // Existing startup choices retain the palette's workspace-less overview.
+      href: (ctx) =>
+        ctx.startupPage === "threads" ? homeDestinationHref(ctx) : linkToTaskOverview(),
+    },
+  },
+  {
+    id: "tasks",
+    labelKey: "sidebar:tasks",
+    icon: IconList,
+    section: "primary",
+    href: (ctx) => linkToTasks(ctx.workspaceId ?? undefined),
+    // The sidebar's Tasks section still owns this on desktop; the mobile menu
+    // offers it for shells without kanban's View toggle.
+    surfaces: MENU_AND_PALETTE,
+    palette: {
+      id: "nav-tasks",
+      labelKey: "common:commandGoToAllTasks",
+      keywordsKey: "common:commandGoToAllTasksKeywords",
+      href: "/tasks",
+    },
+  },
+  {
+    id: "threads",
+    labelKey: "kanban:threads",
+    icon: IconColumns,
+    section: "primary",
+    href: (ctx) => linkToThreads(ctx.workspaceId ?? undefined),
+    // Same reasoning as Tasks: the View toggle owns this on a kanban shell, so
+    // the menu and palette exist for the shells that have no toggle.
+    surfaces: MENU_AND_PALETTE,
+    palette: {
+      id: "nav-threads",
+      labelKey: "common:commandGoToThreads",
+      keywordsKey: "common:commandGoToThreadsKeywords",
+      href: "/threads",
+    },
+  },
+  {
+    id: "stats",
+    labelKey: "sidebar:stats",
+    icon: IconChartBar,
+    section: "insights",
+    href: "/stats",
+    surfaces: EVERYWHERE,
+    palette: {
+      id: "nav-stats",
+      labelKey: "common:commandGoToStats",
+      keywordsKey: "common:commandGoToStatsKeywords",
+    },
+  },
+  {
+    id: "settings",
+    labelKey: "common:settings",
+    icon: IconSettings,
+    section: "utilities",
+    href: "/settings",
+    // The sidebar's gear also toggles the sidebar's settings takeover, so it
+    // stays bespoke; this entry serves the mobile menu and the palette.
+    surfaces: MENU_AND_PALETTE,
+    // No href override: the command lands on `/settings`, which resolves to the
+    // page you were last on (desktop) or the settings index (phone). It used to
+    // point at `/settings/general` to skip the card grid that `/settings`
+    // rendered; that grid is gone and `/settings/general` only redirects now.
+    palette: {
+      id: "nav-settings",
+      labelKey: "common:commandGoToSettings",
+      keywordsKey: "common:commandGoToSettingsKeywords",
+    },
+  },
+  {
+    id: "azure-devops",
+    label: "Azure DevOps",
+    icon: AzureDevOpsIcon,
+    section: "integrations",
+    href: "/azure-devops",
+    // Integrations other than GitHub have no palette command yet: the palette
+    // needs "Go to <product>" copy, and adding it means new catalog keys. Adding
+    // `palette` here plus an override block is all it takes.
+    surfaces: SIDEBAR_AND_MENU,
+    requires: "azure-devops",
+  },
+  {
+    id: "github",
+    label: "GitHub",
+    icon: IconBrandGithub,
+    section: "integrations",
+    href: "/github",
+    surfaces: EVERYWHERE,
+    requires: "github",
+    palette: {
+      id: "nav-github",
+      labelKey: "common:commandGoToGitHubDashboard",
+      keywordsKey: "common:commandGoToGitHubDashboardKeywords",
+      // The GitHub command predates per-workspace availability checks and has
+      // always been listed unconditionally; the dashboard itself explains how to
+      // connect. Kept as-is so this refactor changes no behavior.
+      ignoreRequires: true,
+    },
+  },
+  {
+    id: "gitlab",
+    label: "GitLab",
+    icon: IconBrandGitlab,
+    section: "integrations",
+    href: "/gitlab",
+    surfaces: SIDEBAR_AND_MENU,
+    requires: "gitlab",
+  },
+  {
+    id: "jira",
+    label: "Jira",
+    icon: IconTicket,
+    section: "integrations",
+    href: "/jira",
+    surfaces: SIDEBAR_AND_MENU,
+    requires: "jira",
+  },
+  {
+    id: "linear",
+    label: "Linear",
+    icon: IconHexagon,
+    section: "integrations",
+    href: "/linear",
+    surfaces: SIDEBAR_AND_MENU,
+    requires: "linear",
+  },
+];

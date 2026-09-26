@@ -76,3 +76,12 @@ func (d *Dispatcher) HasHandler(action string) bool {
 	_, ok := d.handlers[action]
 	return ok
 }
+
+// HandlerCount returns the number of unique actions currently registered.
+// It is intended for diagnostics and registration bookkeeping; the handler
+// map itself remains private.
+func (d *Dispatcher) HandlerCount() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return len(d.handlers)
+}

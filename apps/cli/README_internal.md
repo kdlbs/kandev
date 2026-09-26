@@ -7,7 +7,7 @@ flowchart TD
     A["kandev"] --> B["CLI parses arguments"]
     B --> C{"Install channel?"}
 
-    C -->|Homebrew / manual| H["bin/kandev native launcher"]
+    C -->|Homebrew / Scoop / manual| H["bin/kandev native launcher"]
     C -->|npm / npx| D["bin/cli.js native shim"]
 
     D --> D1{"KANDEV_BUNDLE_DIR set?"}
@@ -28,19 +28,20 @@ flowchart TD
 
 This package provides the `kandev` CLI launcher. The runtime bundle (Go backend, agentctl, and static Vite web assets) is **installed by the package manager** — there is no first-run download.
 
-Two install channels share the same release artifacts:
+Three native bundle consumers share the same release artifacts:
 
 - **npm/npx**: `kandev@X.Y.Z` declares `optionalDependencies` for `@kdlbs/runtime-{platform}@X.Y.Z`. npm 7+ filters by `os`/`cpu` and installs only the matching one.
 - **Homebrew**: `kdlbs/homebrew-kandev` formula downloads the GitHub release tarball into the Cellar and installs `bin/kandev` as the public command.
+- **Scoop**: `kdlbs/scoop-kandev` manifest downloads the Windows x64 GitHub release tarball and exposes `bin\kandev.exe` as the public command.
 
-Both channels resolve to a native runtime bundle. Homebrew/manual bundles contain `bin/kandev` and `bin/agentctl`; npm runtime packages also include the platform-matched binaries. The public command remains `kandev`; the hidden backend mode is `kandev __backend`.
+All three consumers resolve to a native runtime bundle. Homebrew/Scoop/manual bundles contain the platform launcher and `bin/agentctl`; npm runtime packages also include the platform-matched binaries. The public command remains `kandev`; the hidden backend mode is `kandev __backend`.
 
 ## Artifact shapes
 
 The GitHub release bundle and the npm runtime package are **different shapes** because they serve different consumers:
 
 ```
-# GitHub release bundle (used by Homebrew + manual installs)
+# GitHub release bundle (used by Homebrew + Scoop + manual installs)
 kandev/
 └── bin/{kandev,agentctl,agentctl-linux-amd64,agentctl-darwin-arm64,agentctl-darwin-amd64}
 
@@ -66,15 +67,14 @@ For desktop release builds, `scripts/release/prepare-desktop-runtime.sh` extract
 
 ## CLI Options
 
-| Option                     | Description                                                |
-| -------------------------- | ---------------------------------------------------------- |
-| `--version`, `-V`          | Print CLI version and exit                                 |
-| `--port`, `--backend-port` | Backend port                                               |
-| `--web-internal-port`      | Override internal Vite dev web port                        |
-| `--verbose`, `-v`          | Show info logs                                             |
-| `--debug`                  | Show debug logs + agent message dumps                      |
-| `--runtime-version <tag>`  | **Advanced/debug**: download a specific GitHub runtime tag |
-| `--help`, `-h`             | Show help                                                  |
+| Option                     | Description                                         |
+| -------------------------- | --------------------------------------------------- |
+| `--version`, `-V`          | Print CLI version and exit                          |
+| `--port`, `--backend-port` | Backend port                                        |
+| `--web-internal-port`      | Override internal Vite dev web port (dev mode only) |
+| `--verbose`, `-v`          | Show info logs                                      |
+| `--debug`                  | Show debug logs + agent message dumps               |
+| `--help`, `-h`             | Show help                                           |
 
 ## Updates (package-manager owned)
 
@@ -82,6 +82,7 @@ The CLI no longer self-updates. Updates flow through the install channel:
 
 ```bash
 brew upgrade kandev                  # Homebrew
+scoop update kandev                   # Scoop
 npm install -g kandev@latest         # npm global
 npx kandev@latest                    # always pulls latest
 ```
@@ -107,14 +108,7 @@ If the runtime package or bundle is missing, the shim prints an actionable runti
 
 ## Local Development
 
-```bash
-# Run CLI in dev mode (uses tsx)
-pnpm -C apps/cli dev
-
-# Run with arguments
-pnpm -C apps/cli dev -- start
-pnpm -C apps/cli dev -- --port 9000
-```
+This package is a publish-only shim; there is no TypeScript source anymore. The native Go launcher owns every launch mode (`dev`, `start`, `run`, `service`), so `make dev` and friends exec `apps/backend/bin/kandev` directly.
 
 ## Release
 
@@ -126,13 +120,13 @@ Releases run entirely in GitHub Actions. From the GHA UI:
 4. Optionally tick `dry_run` to validate without publishing.
 5. Click **Run workflow**.
 
-The workflow does everything: version bump, CHANGELOG, PR, merge, tag, runtime bundles, desktop artifacts, npm publish, Homebrew tap update. See [/.github/workflows/release.yml](../../.github/workflows/release.yml).
+The workflow does everything: version bump, CHANGELOG, PR, merge, tag, runtime bundles, desktop artifacts, npm publish, Homebrew tap update, and Scoop bucket update. See [/.github/workflows/release.yml](../../.github/workflows/release.yml).
 
-Single SemVer flow: `apps/cli/package.json` version, git tag, npm packages, Homebrew formula, GitHub runtime tarballs, and desktop artifacts are all bumped to the same `X.Y.Z`.
+Single SemVer flow: `apps/cli/package.json` version, git tag, npm packages, Homebrew formula, Scoop manifest, GitHub runtime tarballs, and desktop artifacts are all bumped to the same `X.Y.Z`.
 
 Versioning:
 
-- One SemVer `X.Y.Z` for everything (npm, GitHub tag, Homebrew formula)
+- One SemVer `X.Y.Z` for everything (npm, GitHub tag, Homebrew formula, Scoop manifest)
 - Git tag format: `vX.Y.Z`
 - Legacy `vM.m` tags normalized to `M.m.0` during migration; new releases always use `vX.Y.Z`
 
@@ -156,7 +150,7 @@ Versioning:
 | Windows (x64)         | `@kdlbs/runtime-win32-x64`                  | `kandev-windows-x64.tar.gz` |
 | Windows (ARM64)       | Falls back to `windows-x64` (x64 emulation) |                             |
 
-Note: `platform.ts` uses internal naming (`macos`, `windows`); npm `os` field uses npm conventions (`darwin`, `win32`). `runtime.ts` maps between the two.
+Note: the shim's platform naming (`macos`, `windows` internally) differs from the npm `os` field conventions (`darwin`, `win32`); `platformPackage()` in `native-shim.js` maps between the two.
 
 ## npm requirements
 

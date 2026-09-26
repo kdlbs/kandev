@@ -18,10 +18,17 @@
  * This mirrors `golangci-lint run --new-from-rev` in .pre-commit-config.yaml, so
  * it is the same contract the Go side already enforces.
  *
- * NOTE: this raises the floor, it does not seal the box. The rule only sees plain
- * literals and template literals in JSX — `confirm()` arguments and copy returned
- * from plain `.ts` helpers stay invisible. The pseudo-locale remains the
- * completeness check (docs/i18n.md).
+ * Two detectors run over the same lines, because one rule cannot see all of it:
+ *
+ *   - `i18next/no-literal-string`, which inspects literals in JSX.
+ *   - `findNonJsxCopy`, which inspects the positions that rule structurally
+ *     cannot: config tables, plain helpers, parameter defaults and toast/setter
+ *     arguments. Without it a brand-new file could hold a whole screen's copy in
+ *     a `const ROWS = [...]` and pass (docs/i18n.md, "The guard has blind spots").
+ *
+ * This raises the floor, it does not seal the box: copy assembled at runtime from
+ * fragments is still invisible, and the pseudo-locale remains the completeness
+ * check (docs/i18n.md).
  *
  * Usage:
  *   node scripts/check-new-code-i18n.mjs [--base <ref-or-sha>]
@@ -32,6 +39,7 @@
  * explicit one is floored at that same fork point (see lib/git-base.mjs), because
  * a base sha captured when a PR opened goes stale the moment main moves.
  */
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { ESLint } from "eslint";
@@ -39,6 +47,8 @@ import { ESLint } from "eslint";
 import { changedFiles, webDiff } from "./lib/changed-files.mjs";
 import { lineInRanges, parseAddedLineRanges } from "./lib/diff-ranges.mjs";
 import { REPO_ROOT, resolveBase, toPosixPath, WEB_DIR } from "./lib/git-base.mjs";
+import { findNonJsxCopy } from "./lib/nonjsx-copy.mjs";
+import { noLiteralStringOptions } from "../eslint.i18n.options.mjs";
 
 const resolved = resolveBase();
 if (resolved.skip) {
@@ -71,16 +81,52 @@ const results = await eslint.lintFiles(targets.map((f) => path.join(REPO_ROOT, f
 
 const addedSet = new Set(added);
 const violations = [];
+const record = (repoPath, whole, line, text) => {
+  if (!whole && !lineInRanges(addedRanges.get(repoPath), line)) return;
+  violations.push({ repoPath, whole, line, text });
+};
+
 for (const result of results) {
   const repoPath = toPosixPath(path.relative(REPO_ROOT, result.filePath));
-  const whole = addedSet.has(repoPath);
-  const ranges = addedRanges.get(repoPath);
   for (const message of result.messages) {
     if (message.ruleId !== "i18next/no-literal-string") continue;
-    if (!whole && !lineInRanges(ranges, message.line)) continue;
-    violations.push({ repoPath, whole, line: message.line, text: message.message });
+    record(repoPath, addedSet.has(repoPath), message.line, message.message);
   }
 }
+
+// The same lines, judged for the copy the eslint rule cannot see. Scoped to the
+// change exactly like the rule above, so an un-migrated file's existing config
+// tables stay somebody else's migration.
+const excludes = noLiteralStringOptions.words?.exclude ?? [];
+for (const repoPath of targets) {
+  if (!/\.tsx?$/.test(repoPath) || /\.(test|spec|d)\.tsx?$/.test(repoPath)) continue;
+  const source = readFileSync(path.join(REPO_ROOT, repoPath), "utf8");
+  const { findings, markersWithoutReason } = findNonJsxCopy(source, {
+    filename: repoPath,
+    excludes,
+  });
+  for (const finding of findings) {
+    record(
+      repoPath,
+      addedSet.has(repoPath),
+      finding.line,
+      `Hardcoded copy in a non-JSX position [${finding.kind}]: ${JSON.stringify(finding.value)}`,
+    );
+  }
+  // A reasonless `// i18n-exempt` still SILENCES the findings around it, so
+  // dropping this list would let new code opt out of the check by writing the
+  // marker and nothing else — the one hole the mandatory reason exists to close.
+  for (const line of markersWithoutReason) {
+    record(
+      repoPath,
+      addedSet.has(repoPath),
+      line,
+      "i18n-exempt marker with no reason — write `// i18n-exempt: <why this is not copy>`",
+    );
+  }
+}
+
+violations.sort((a, b) => a.repoPath.localeCompare(b.repoPath) || a.line - b.line);
 
 if (violations.length === 0) {
   console.log(

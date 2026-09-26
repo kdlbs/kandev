@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { usePathname, useSearchParams } from "@/lib/routing/client-router";
+import { useTranslation } from "react-i18next";
 
 type AppErrorBoundaryProps = {
   scope: "root" | "route";
@@ -35,34 +36,37 @@ class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundary
 }
 
 function RootErrorFallback() {
+  const { t } = useTranslation();
   return (
     <div
       role="alert"
       className="flex min-h-dvh w-full items-center justify-center bg-background p-6 text-foreground"
     >
       <ErrorRecoveryContent
-        title="Kandev couldn’t load."
-        description="Reload the application to try again."
+        title={t("common:kandevCouldNotLoad")}
+        description={t("common:reloadTheApplicationToTryAgain")}
       />
     </div>
   );
 }
 
 function RouteErrorFallback() {
+  const { t } = useTranslation();
   return (
     <div
       role="alert"
       className="flex h-full min-h-0 w-full items-center justify-center p-6 text-foreground"
     >
       <ErrorRecoveryContent
-        title="This page couldn’t load."
-        description="You can use the navigation or reload to try again."
+        title={t("common:thisPageCouldNotLoad")}
+        description={t("common:youCanUseTheNavigationOr")}
       />
     </div>
   );
 }
 
 function ErrorRecoveryContent({ title, description }: { title: string; description: string }) {
+  const { t } = useTranslation();
   return (
     <div className="flex max-w-sm flex-col items-center gap-3 text-center">
       <p className="text-base font-medium">{title}</p>
@@ -72,7 +76,7 @@ function ErrorRecoveryContent({ title, description }: { title: string; descripti
         className="min-h-11 cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
         onClick={() => window.location.reload()}
       >
-        Reload
+        {t("common:reload")}
       </button>
     </div>
   );

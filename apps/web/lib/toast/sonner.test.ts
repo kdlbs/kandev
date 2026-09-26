@@ -28,7 +28,7 @@ vi.mock("@/lib/api/domains/frontend-error-log-api", () => ({
   scheduleFrontendErrorReport: mocks.report,
 }));
 
-import { toast } from "./sonner";
+import { createPluginToast, toast } from "./sonner";
 
 describe("reporting Sonner seam", () => {
   beforeEach(() => {
@@ -48,6 +48,58 @@ describe("reporting Sonner seam", () => {
       source: "sonner",
       title: "Failed to save",
       description: "The backend rejected the update",
+      error: undefined,
+    });
+  });
+
+  // A plugin error toast is the plugin's problem, not a kandev application
+  // error. Reporting it would file an Error-level backend log entry per
+  // occurrence — every 60s for a polling plugin — with no way to tell it
+  // apart from a real one. (The backend also rejects any source outside
+  // "sonner" | "toast-provider" with 400, so attributing it there is not
+  // available without a cross-stack change.)
+  it("does not file a frontend error report for a plugin toast", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const pluginToast = createPluginToast("kandev-plugin-github-status");
+
+    const result = pluginToast.error("Poll failed");
+
+    expect(result).toBe("toast-id");
+    expect(mocks.upstreamError).toHaveBeenCalledOnce();
+    expect(mocks.report).not.toHaveBeenCalled();
+    expect(mocks.order).toEqual(["delegate"]);
+    consoleError.mockRestore();
+  });
+
+  it("logs a plugin toast error to the console with plugin attribution", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const pluginToast = createPluginToast("kandev-plugin-github-status");
+
+    pluginToast.error("Poll failed");
+
+    expect(consoleError).toHaveBeenCalledWith(
+      '[plugins] toast.error from "kandev-plugin-github-status":',
+      "Poll failed",
+    );
+    consoleError.mockRestore();
+  });
+
+  it("leaves non-error plugin toast methods delegating straight to sonner", () => {
+    const pluginToast = createPluginToast("kandev-plugin-github-status");
+
+    pluginToast.success("Synced");
+
+    expect(mocks.report).not.toHaveBeenCalled();
+  });
+
+  it("keeps reporting for first-party call sites", () => {
+    toast.error("Real app failure");
+
+    expect(mocks.report).toHaveBeenCalledOnce();
+    expect(mocks.report).toHaveBeenCalledWith({
+      source: "sonner",
+      title: "Real app failure",
+      description: undefined,
       error: undefined,
     });
   });

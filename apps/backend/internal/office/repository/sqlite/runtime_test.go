@@ -115,7 +115,7 @@ func TestUpdateRuntimeLastRunFinished(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	if err := repo.UpsertAgentRuntime(ctx, "agent-1", "idle", ""); err != nil {
+	if err := repo.UpsertAgentRuntime(ctx, "agent-1", "paused", "budget"); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 
@@ -134,5 +134,50 @@ func TestUpdateRuntimeLastRunFinished(t *testing.T) {
 	diff := state.LastRunFinishedAt.Sub(now)
 	if diff < -time.Second || diff > time.Second {
 		t.Errorf("last_run_finished_at off by %v", diff)
+	}
+	if state.Status != "paused" {
+		t.Errorf("status = %q after UpdateRuntimeLastRunFinished, want paused", state.Status)
+	}
+	if state.PauseReason != "budget" {
+		t.Errorf("pause_reason = %q after UpdateRuntimeLastRunFinished, want budget", state.PauseReason)
+	}
+}
+
+// TestUpdateRuntimeLastRunFinished_CreatesRowWhenMissing is the regression
+// test for the "43 of 44 agents" defect: agents that never went through
+// onboarding's UpsertAgentRuntime call have no office_agent_runtime row, so
+// a bare UPDATE affects 0 rows and the stamp is silently lost. The write
+// must create the row instead of assuming one already exists.
+func TestUpdateRuntimeLastRunFinished_CreatesRowWhenMissing(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if state, err := repo.GetAgentRuntime(ctx, "agent-no-row"); err != nil {
+		t.Fatalf("get before update: %v", err)
+	} else if state != nil {
+		t.Fatalf("expected no runtime row before update, got %+v", state)
+	}
+
+	now := time.Now().UTC()
+	if err := repo.UpdateRuntimeLastRunFinished(ctx, "agent-no-row", now); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	state, err := repo.GetAgentRuntime(ctx, "agent-no-row")
+	if err != nil {
+		t.Fatalf("get after update: %v", err)
+	}
+	if state == nil {
+		t.Fatal("expected the runtime row to be created")
+	}
+	if state.LastRunFinishedAt == nil {
+		t.Fatal("expected non-nil last_run_finished_at")
+	}
+	diff := state.LastRunFinishedAt.Sub(now)
+	if diff < -time.Second || diff > time.Second {
+		t.Errorf("last_run_finished_at off by %v", diff)
+	}
+	if state.Status != "idle" {
+		t.Errorf("status = %q, want idle default", state.Status)
 	}
 }

@@ -319,6 +319,41 @@ function insertCodeFenceNodes(
   }
 }
 
+/**
+ * Rich content pasted from outside the editor should paste as plain text, the
+ * way Ctrl+Shift+V does. The chat composer has no link or styling marks, so the
+ * default HTML parse keeps a browser hyperlink's visible title and silently
+ * drops its URL. Copies made inside the editor (mentions, code blocks) carry
+ * ProseMirror's `data-pm-slice` attribute; those are left to the default handler
+ * so their nodes round-trip. The check matches the attribute form
+ * (`data-pm-slice="`) so prose that merely mentions the token is still stripped.
+ */
+function shouldStripPastedFormatting(clipboardData: DataTransfer): boolean {
+  const html = clipboardData.getData("text/html");
+  if (!html) return false;
+  return !html.includes('data-pm-slice="');
+}
+
+/**
+ * When the clipboard payload is a single hyperlink (e.g. a link copied from a
+ * browser page), return its href. Such a copy's plain text is often the link's
+ * title rather than the URL, so preferring the href preserves the real URL.
+ * Returns null when the payload is not exactly one link, so the caller falls
+ * back to the plain text. The parsed HTML is only read for its href attribute,
+ * never rendered.
+ */
+function singleLinkHref(html: string): string | null {
+  if (!/<a(?=[\t\n\f\r />])/iu.test(html)) return null;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const anchors = doc.querySelectorAll("a[href]");
+  if (anchors.length !== 1) return null;
+  const href = anchors[0].getAttribute("href")?.trim();
+  if (!href) return null;
+  const payloadText = (doc.body.textContent ?? "").replace(/\s+/gu, " ").trim();
+  const linkText = (anchors[0].textContent ?? "").replace(/\s+/gu, " ").trim();
+  return payloadText === linkText ? href : null;
+}
+
 export function handleEditorPaste(
   view: import("@tiptap/pm/view").EditorView,
   event: ClipboardEvent,
@@ -340,8 +375,27 @@ export function handleEditorPaste(
     }
   }
 
-  // 2. Markdown code fence paste
   const text = clipboardData?.getData("text/plain");
+
+  // 2. Strip formatting from externally pasted rich content. This runs before
+  // the code-fence branch so external HTML is not misread as a markdown code
+  // block. A single copied hyperlink pastes its href (the plain text is often
+  // the link title, not the URL); other rich content pastes as plain text.
+  // Either keeps the URL that the default HTML parse would otherwise drop.
+  // `pasteText` fires a synthetic empty-clipboard paste, so this handler
+  // re-enters once, no-ops, and ProseMirror inserts the text with its own
+  // inline/block handling.
+  if (clipboardData && shouldStripPastedFormatting(clipboardData)) {
+    const replacement = singleLinkHref(clipboardData.getData("text/html")) ?? text;
+    if (replacement) {
+      event.preventDefault();
+      view.pasteText(replacement);
+      return true;
+    }
+  }
+
+  // 3. Markdown code fence paste (plain-text or internal pastes; external rich
+  // content was handled above).
   if (text && text.includes("```")) {
     const segments = parseCodeFences(text);
     if (segments.some((s) => s.type === "code")) {

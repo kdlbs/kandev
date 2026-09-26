@@ -6,6 +6,7 @@ import { makeGitEnv } from "../../helpers/git-helper";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
+import { dwell } from "../../helpers/causal-waits";
 
 useRegularMode();
 
@@ -45,7 +46,12 @@ test.describe("Create task repository tooltip", () => {
 
     const tooltip = testPage.getByRole("tooltip").filter({ hasText: longRepoDir });
     expect(await trigger.evaluate((element) => element.matches(":hover"))).toBe(true);
-    await testPage.waitForTimeout(300);
+    await dwell(
+      testPage,
+      300,
+      "negative-assertion",
+      "selecting from the menu must not leave a tooltip open even though the trigger is still hovered; there is no event for a tooltip that must never open, so a regression needs Radix's open delay to elapse to have room to appear",
+    );
     await expect(tooltip).toBeHidden();
 
     await testPage.mouse.move(0, 0);
@@ -103,7 +109,10 @@ test.describe("Create task repository tooltip", () => {
       repository.id,
     );
 
-    await testPage.waitForTimeout(300);
+    // Selecting from the menu must settle to "no tooltip" before the re-hover
+    // below, or the assertion could pass on a leftover tooltip from the first
+    // hover. Assert that closed state directly instead of sleeping toward it.
+    await expect(testPage.getByRole("tooltip")).toBeHidden();
     await testPage.mouse.move(0, 0);
     await trigger.hover();
     await expect(testPage.getByRole("tooltip").filter({ hasText: repositoryDir })).toBeVisible();

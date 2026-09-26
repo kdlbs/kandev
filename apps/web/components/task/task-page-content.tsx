@@ -7,7 +7,6 @@ import Link from "@/components/routing/app-link";
 import { useTranslation } from "react-i18next";
 import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
-import type { KanbanState } from "@/lib/state/slices";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSessionAgent } from "@/hooks/domains/session/use-session-agent";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
@@ -18,8 +17,11 @@ import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-se
 import { useExternalVcsFileLinkHydration } from "@/hooks/domains/workspace/use-external-vcs-file-link";
 import { fetchTask } from "@/lib/api";
 import { linkToTaskOverview } from "@/lib/links";
-import { useTasks } from "@/hooks/use-tasks";
+import { useWorkflowSnapshotById } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { useWorkflowStepsById } from "@/hooks/domains/kanban/use-workflow-steps-by-id";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useTaskCanvasesStateForTask } from "@/hooks/domains/task/use-task-canvases";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import type { Layout } from "react-resizable-panels";
 import {
@@ -27,10 +29,12 @@ import {
   buildArchivedValue,
   hasResolvedTaskDetails,
   resolveEffectiveTask,
+  resolveLatestTaskProjection,
   resolveTaskContentState,
   syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
+import { TaskRemovalBoundary } from "@/components/task/task-removal-boundary";
 import { GridSpinner } from "@/components/grid-spinner";
 
 type TaskPageContentProps = {
@@ -45,23 +49,16 @@ type TaskPageContentProps = {
   officeTaskHref?: string | null;
 };
 
-export function useWorkflowStepsMapped() {
-  const kanbanSteps = useAppStore((state) => state.kanban.steps);
-  return useMemo(
-    () =>
-      kanbanSteps.map((s) => ({
-        id: s.id,
-        name: s.title,
-        color: s.color,
-        position: s.position,
-        events: s.events,
-        allow_manual_move: s.allow_manual_move,
-        prompt: s.prompt,
-        is_start_step: s.is_start_step,
-        agent_profile_id: s.agent_profile_id,
-      })),
-    [kanbanSteps],
-  );
+export function useWorkflowStepsMapped(workflowId: string | null | undefined) {
+  return useWorkflowStepsById(workflowId);
+}
+
+function useTaskWorkflowSnapshot(task: Task | null) {
+  useWorkflowSnapshotById(task?.workspace_id ?? null, task?.workflow_id ?? null);
+}
+
+function getTaskArchivedState(task: Task | null): boolean | null {
+  return task ? task.archived_at != null : null;
 }
 
 export function useSessionPanelState(effectiveSessionId: string | null | undefined) {
@@ -80,8 +77,10 @@ export function useSessionPanelState(effectiveSessionId: string | null | undefin
   const sessionWorkflowStepId = useAppStore((state) => {
     const taskId = state.tasks.activeTaskId;
     if (!taskId) return null;
-    const task = state.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return (task?.workflowStepId as string) ?? null;
+    return (
+      resolveLatestTaskProjection(taskId, state.kanban.tasks, state.kanbanMulti.snapshots)
+        ?.workflowStepId ?? null
+    );
   });
   const previewOpen = useAppStore((state) =>
     effectiveSessionId ? (state.previewPanel.openBySessionId[effectiveSessionId] ?? false) : false,
@@ -184,18 +183,16 @@ export function TaskLoadErrorState() {
   );
 }
 
-function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
+export function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
   const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
   const [taskLoadError, setTaskLoadError] = useState<unknown | null>(null);
   const activeTaskIdRef = useRef(activeTaskId);
-  const kanbanTask = useAppStore((state) =>
-    activeTaskId
-      ? (state.kanban.tasks.find(
-          (item: KanbanState["tasks"][number]) => item.id === activeTaskId,
-        ) ?? null)
-      : null,
-  );
+  const connectionStatus = useAppStore((state) => state.connection.status);
+  const previousConnectionStatus = useRef(connectionStatus);
   const effectiveTaskId = activeTaskId ?? initialTask?.id ?? null;
+  const kanbanTask = useAppStore((state) =>
+    resolveLatestTaskProjection(effectiveTaskId, state.kanban.tasks, state.kanbanMulti.snapshots),
+  );
   const task = useMemo(
     () => resolveEffectiveTask(taskDetails, initialTask, kanbanTask, effectiveTaskId),
     [taskDetails, initialTask, kanbanTask, effectiveTaskId],
@@ -205,8 +202,6 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
     taskDetailsId: taskDetails?.id ?? null,
     initialTaskId: initialTask?.id ?? null,
   });
-  useTasks(task?.workflow_id ?? null);
-
   useEffect(() => {
     activeTaskIdRef.current = activeTaskId;
   }, [activeTaskId]);
@@ -235,19 +230,29 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
     void loadTaskDetails();
   }, [activeTaskId, taskDetails?.id, loadTaskDetails]);
 
+  useEffect(() => {
+    const reconnected =
+      previousConnectionStatus.current !== "connected" && connectionStatus === "connected";
+    previousConnectionStatus.current = connectionStatus;
+    if (reconnected) void loadTaskDetails();
+  }, [connectionStatus, loadTaskDetails]);
+
   useForegroundRefresh(loadTaskDetails, Boolean(activeTaskId), activeTaskId);
 
-  const onTaskUnarchived = useCallback((taskId: string) => {
-    setTaskDetails((current) =>
-      current?.id === taskId ? { ...current, archived_at: null } : current,
-    );
-  }, []);
+  const onTaskUnarchived = useCallback(
+    (taskId: string) => {
+      if (activeTaskId !== taskId) return;
+      void loadTaskDetails();
+    },
+    [activeTaskId, loadTaskDetails],
+  );
 
   return {
     task,
     kanbanTask,
     taskLoadError: hasTaskDetails ? null : taskLoadError,
     onTaskUnarchived,
+    refreshTask: loadTaskDetails,
   };
 }
 
@@ -260,6 +265,12 @@ function useTaskPageData(
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const setActiveSessionAuto = useAppStore((state) => state.setActiveSessionAuto);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
+  const previousRouteTaskId = useRef<string | null | undefined>(undefined);
+  // Route synchronization must see the current selection when route data or
+  // delayed session hydration changes, but a sidebar selection must not
+  // retrigger it and overwrite the session chosen by task selection.
+  const activeTaskIdForSyncRef = useRef(activeTaskId);
+  activeTaskIdForSyncRef.current = activeTaskId;
 
   // Validate that activeSessionId belongs to activeTaskId to prevent showing
   // messages from an unrelated session when navigating to a task without sessions.
@@ -270,21 +281,31 @@ function useTaskPageData(
     return session?.task_id === activeTaskId ? sid : null;
   });
 
-  const { task, taskLoadError, onTaskUnarchived } = useTaskDetails(activeTaskId, initialTask);
+  const { task, taskLoadError, onTaskUnarchived, refreshTask } = useTaskDetails(
+    activeTaskId,
+    initialTask,
+  );
 
   const agent = useSessionAgent(task);
-  const ensureSession = useEnsureTaskSession(task);
+  const ensureSession = useEnsureTaskSession({
+    id: task?.id,
+    workflowStepId: task?.workflow_step_id,
+    workflowId: task?.workflow_id,
+  });
   const initialSessionId = sessionId ?? agent.taskSessionId ?? null;
   const effectiveSessionId = validatedActiveSessionId ?? initialSessionId;
 
   useEffect(() => {
-    syncActiveTaskSession({
+    const applied = syncActiveTaskSession({
       initialTaskId: initialTask?.id,
       fallbackTaskId,
       initialSessionId,
+      activeTaskId: activeTaskIdForSyncRef.current,
+      previousRouteTaskId: previousRouteTaskId.current,
       setActiveSessionAuto,
       setActiveTask,
     });
+    if (applied) previousRouteTaskId.current = initialTask?.id ?? fallbackTaskId;
   }, [initialTask?.id, fallbackTaskId, initialSessionId, setActiveSessionAuto, setActiveTask]);
 
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
@@ -306,10 +327,11 @@ function useTaskPageData(
     repositories: effectiveRepositories,
     ensureSession,
     onTaskUnarchived,
+    refreshTask,
   };
 }
 
-export function TaskPageContent({
+function TaskPageContentLive({
   task: initialTask,
   taskId: initialTaskId = null,
   sessionId = null,
@@ -323,6 +345,7 @@ export function TaskPageContent({
   const [isMounted, setIsMounted] = useState(false);
   const [showDebugOverlay, setShowDebugOverlay] = useState(false);
   const { isMobile } = useResponsiveBreakpoint();
+  const canvasesEnabled = useFeature("canvases");
   const connectionStatus = useAppStore((state) => state.connection.status);
 
   const {
@@ -334,13 +357,21 @@ export function TaskPageContent({
     repositories,
     ensureSession,
     onTaskUnarchived,
+    refreshTask,
   } = useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
+  useTaskWorkflowSnapshot(task);
+  const taskCanvasesState = useTaskCanvasesStateForTask(task, canvasesEnabled);
   useExternalVcsFileLinkHydration(task, repositories);
 
-  const workflowSteps = useWorkflowStepsMapped();
+  const workflowSteps = useWorkflowStepsMapped(task?.workflow_id);
   const sessionPanel = useSessionPanelState(effectiveSessionId);
   const agentctlStatus = useSessionAgentctl(effectiveSessionId);
-  const resumption = useSessionResumption(task?.id ?? null, effectiveSessionId);
+  const resumption = useSessionResumption(
+    task?.id ?? null,
+    effectiveSessionId,
+    getTaskArchivedState(task),
+    { onTaskArchiveConflict: refreshTask },
+  );
   const merged = useMergedAgentState(agent, resumption, sessionPanel, effectiveSessionId, task);
   const archivedValue = useMemo(() => buildArchivedValue(task, repository), [task, repository]);
   // Mark this session as actively focused so the backend lifts polling to fast.
@@ -366,7 +397,6 @@ export function TaskPageContent({
       task={task}
       effectiveSessionId={effectiveSessionId ?? null}
       repository={repository}
-      agent={agent}
       merged={merged}
       resumption={resumption}
       sessionPanel={sessionPanel}
@@ -384,6 +414,18 @@ export function TaskPageContent({
       officeTaskHref={officeTaskHref}
       ensureSession={ensureSession}
       onTaskUnarchived={onTaskUnarchived}
+      taskCanvases={taskCanvasesState.canvases}
+      taskCanvasesStatus={taskCanvasesState.status}
     />
+  );
+}
+
+export function TaskPageContent(props: TaskPageContentProps) {
+  const taskId = props.taskId ?? props.task?.id ?? null;
+
+  return (
+    <TaskRemovalBoundary taskId={taskId}>
+      <TaskPageContentLive {...props} />
+    </TaskRemovalBoundary>
   );
 }

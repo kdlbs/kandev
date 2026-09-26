@@ -14,14 +14,15 @@ import {
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { Textarea } from "@kandev/ui/textarea";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
 import { useWorkflows } from "@/hooks/use-workflows";
-import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
+import { STEP_DEFAULT, resolveProfileId } from "@/lib/watcher-profile-default";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import type {
   CreateIssueWatchRequest,
   CreateReviewWatchRequest,
@@ -38,6 +39,9 @@ import {
 } from "./watch-form";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
+import { gitlabIssueWatchPlaceholders } from "./issue-watch-placeholders";
+import { gitlabReviewWatchPlaceholders } from "./review-watch-placeholders";
 
 type Watch = ReviewWatch | IssueWatch;
 type CreateRequest = CreateReviewWatchRequest | CreateIssueWatchRequest;
@@ -98,6 +102,12 @@ function useDialogData(workspaceId: string, workflowId: string) {
   useWorkflows(workspaceId, true);
   const workflows = useAppStore((state) => state.workflows.items).filter((item) => !item.hidden);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
+  const selectableAgentProfiles = useMemo(
+    () =>
+      agentProfiles.filter((profile) => isSelectableAgentProfile(profile, dynamicRoutingEnabled)),
+    [agentProfiles, dynamicRoutingEnabled],
+  );
   const executors = useAppStore((state) => state.executors.items);
   const executorProfiles = useMemo(
     () =>
@@ -107,7 +117,13 @@ function useDialogData(workspaceId: string, workflowId: string) {
     [executors],
   );
   const { steps, loading } = useWorkflowSteps(workflowId);
-  return { workflows, agentProfiles, executorProfiles, steps, stepsLoading: loading };
+  return {
+    workflows,
+    agentProfiles: selectableAgentProfiles,
+    executorProfiles,
+    steps,
+    stepsLoading: loading,
+  };
 }
 
 function FilterFields({ kind, form, setForm }: FormFieldsProps) {
@@ -129,6 +145,7 @@ function FilterFields({ kind, form, setForm }: FormFieldsProps) {
           // Sample namespace/project paths, i.e. the shape of the GitLab data the
           // field accepts. Not copy — a translated "group" would stop being a
           // usable example.
+          // eslint-disable-next-line i18next/no-literal-string -- example project paths
           placeholder="group/api, group/web"
         />
       </div>
@@ -144,6 +161,7 @@ function FilterFields({ kind, form, setForm }: FormFieldsProps) {
             onChange={(event) => setForm((current) => ({ ...current, labels: event.target.value }))}
             // Sample GitLab label names — user data, like the labels the user
             // will actually type here.
+            // eslint-disable-next-line i18next/no-literal-string -- example label names
             placeholder="bug, priority::high"
           />
         </div>
@@ -168,6 +186,7 @@ function FilterFields({ kind, form, setForm }: FormFieldsProps) {
           }
           // A literal GitLab API query parameter. It is submitted to GitLab
           // verbatim, so it is protocol, not copy.
+          // eslint-disable-next-line i18next/no-literal-string -- GitLab API query parameter
           placeholder="state=opened"
           className="font-mono text-xs"
         />
@@ -202,7 +221,12 @@ type FormFieldsProps = {
 
 function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
   const { t } = useTranslation();
+  const stepDefaultLabel = t("common:useStepDefaultOption");
   const data = useDialogData(form.workspaceId, form.workflowId);
+  const placeholders = useMemo(
+    () => (kind === "review" ? gitlabReviewWatchPlaceholders(t) : gitlabIssueWatchPlaceholders(t)),
+    [kind, t],
+  );
   return (
     <div className="space-y-4">
       <SectionTitle>{t("gitlab:taskAutomation")}</SectionTitle>
@@ -244,9 +268,9 @@ function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
           onChange={(value) =>
             setForm((current) => ({ ...current, agentProfileId: resolveProfileId(value) }))
           }
-          placeholder={STEP_DEFAULT_LABEL}
+          placeholder={stepDefaultLabel}
           items={[
-            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            { id: STEP_DEFAULT, label: stepDefaultLabel },
             ...data.agentProfiles.map((item) => ({ id: item.id, label: item.label })),
           ]}
         />
@@ -257,9 +281,9 @@ function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
           onChange={(value) =>
             setForm((current) => ({ ...current, executorProfileId: resolveProfileId(value) }))
           }
-          placeholder={STEP_DEFAULT_LABEL}
+          placeholder={stepDefaultLabel}
           items={[
-            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            { id: STEP_DEFAULT, label: stepDefaultLabel },
             ...data.executorProfiles.map((item) => ({ id: item.id, label: item.name })),
           ]}
         />
@@ -267,11 +291,18 @@ function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
       <div className="space-y-1.5">
         <Label htmlFor={`${kind}-watch-prompt`}>{t("gitlab:taskPrompt")}</Label>
         <p className="text-xs text-muted-foreground">{t("gitlab:promptSentToTheSelectedAgent")}</p>
-        <Textarea
-          id={`${kind}-watch-prompt`}
+        <SettingsPromptEditor
           value={form.prompt}
-          onChange={(event) => setForm((current) => ({ ...current, prompt: event.target.value }))}
-          rows={5}
+          onChange={(value) => setForm((current) => ({ ...current, prompt: value }))}
+          placeholders={placeholders}
+          promptReferences
+          ariaLabel={t("gitlab:taskPrompt")}
+          testId={`${kind}-watch-prompt-editor`}
+          help={
+            <p className="text-xs text-muted-foreground">
+              {t("gitlab:promptSentToTheSelectedAgent")}
+            </p>
+          }
         />
       </div>
     </div>
@@ -409,17 +440,13 @@ export function GitLabWatchDialog({
           <ScheduleFields kind={kind} form={form} setForm={setForm} />
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            className="min-h-11 cursor-pointer sm:min-h-9"
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
             {t("common:cancel")}
           </Button>
           <Button
             onClick={() => void save()}
             disabled={!payload || saving}
-            className="min-h-11 cursor-pointer sm:min-h-9"
+            className="cursor-pointer"
           >
             {saveLabel}
           </Button>

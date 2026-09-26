@@ -1,9 +1,10 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Activity page", () => {
   test("activity page renders", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office/workspace/activity");
-    await expect(testPage.getByRole("heading", { name: /Activity/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Activity/i, {
       timeout: 10_000,
     });
   });

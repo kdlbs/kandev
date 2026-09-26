@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-backend-issue-workflow"]
 plan: "plan.md"
-spec: "../../specs/improve-kandev/spec.md"
+spec: "../../specs/workspaces/requirements/improve-kandev.md"
 ---
 
 # Task 03: Dialog persistence, workflow selection, and mobile entry

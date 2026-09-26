@@ -7,15 +7,22 @@ Use these IDs when a tool requires task_id or session_id.
 
 Available tools:
 - ask_user_question_kandev: Ask the user one or more clarifying questions in a single call. Required: questions (1-4 items, each with prompt and 2-6 labeled options). Optional: context.
-- create_task_plan_kandev: Save an implementation plan for the current task. Required: task_id, content. Optional: title.
-- get_task_plan_kandev: Retrieve the current task plan, including user edits. Required: task_id.
-- update_task_plan_kandev: Update the current task plan. Required: task_id, content. Optional: title.
+- create_task_plan_kandev: Save an implementation plan. This replaces existing content only with the current expected_version; use edit_task_plan_kandev for a local change or update_task_plan_kandev with mode="append" for a new section. Required: task_id, content. Optional: title, expected_version, allow_truncation.
+- get_task_plan_kandev: Retrieve the current task plan, including user edits and the current version. Required: task_id.
+- update_task_plan_kandev: Update the current task plan. Use mode="replace" with expected_version for the whole document, or mode="append" for a new section without reading first. Required: task_id, content. Optional: title, mode, expected_version, allow_truncation.
+- edit_task_plan_kandev: Apply one exact text edit with a current expected_version. The old text must occur exactly once; surrounding bytes and line endings are preserved. Required: task_id, expected_version, old_text, new_text. Optional: allow_truncation.
+- list_task_plan_revisions_kandev: List bounded metadata for the task plan's revisions without content. Optional: task_id, before_revision_number, limit.
+- get_task_plan_revision_kandev: Read one exact task-plan revision, including its unchanged content and revision_version. Required: task_id, revision_id.
+- restore_task_plan_revision_kandev: Restore one task-plan revision as a new revision. Requires expected_version and expected_revision_version. Required: task_id, revision_id, expected_version, expected_revision_version.
 - delete_task_plan_kandev: Delete the current task plan. Required: task_id.
-- list_related_tasks_kandev: List parent, child, sibling, blocker, and blocked tasks. Optional: task_id (defaults to the current task).
+- show_rich_output_kandev: When user asks for chart/graph/plot/file preview/KPI/metrics with data: call now. Do not implement the display as ASCII/SVG/HTML or with another app. Else prose; small text table: Markdown. Send version=1,title,blocks (1-4). Inline: {"type":"chart","chart_type":"bar","title":"T","summary":"S","labels":["A","B"],"series":[{"label":"Count","values":[42,27]}]}. CSV line: {"type":"chart","chart_type":"line","title":"T","summary":"S","csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}}. Metrics: {"type":"metrics","items":[{"label":"Passed","value":"38"}]}. Paths workspace-relative. Kandev owns axes/legends/tooltips/layout. Label series with units.
+- list_related_tasks_kandev: List parent, child, sibling, blocker, and blocked tasks. Optional: task_id (defaults to the current task), verbose (include task descriptions; omitted by default).
 - list_task_documents_kandev: List documents on an accessible related task. Required: task_id.
 - get_task_document_kandev: Read one document on an accessible related task. Required: task_id, document_key.
 - write_task_document_kandev: Create or replace a document on the current task or an ancestor. Required: task_id, document_key, content. Optional: title, type.
+- step_complete_kandev: Signal that every requirement for the current workflow step is satisfied when the step requires an explicit signal. Required: summary.
+{step_complete_instruction}
 
-Office state changes are performed through `$KANDEV_CLI kandev ...`, subject to this agent's runtime permissions. Use the injected Office skills for exact commands and do not search for additional Kandev MCP tools. Workspace administration is outside this run.
+Office state changes are performed through `$KANDEV_CLI kandev ...`, subject to this agent's runtime permissions. Use the injected Office skills for exact commands and do not search for additional Kandev MCP tools beyond those listed above. Workspace administration is outside this run.
 
 IMPORTANT: You MUST use these MCP tools when instructed to create plans, ask questions, or exchange task documents. Use `$KANDEV_CLI` for authorized Office mutations.

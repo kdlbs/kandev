@@ -6,12 +6,14 @@ import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { listActivity } from "@/lib/api/domains/office-api";
 import type { ActivityEntry } from "@/lib/state/slices/office/types";
 import { ActivityFeed } from "./activity-feed";
+import { useTranslation } from "react-i18next";
 
 type ActivityPageClientProps = {
   initialActivity: ActivityEntry[];
 };
 
 export function ActivityPageClient({ initialActivity }: ActivityPageClientProps) {
+  const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const setActivity = useAppStore((s) => s.setActivity);
 
@@ -38,7 +40,9 @@ export function ActivityPageClient({ initialActivity }: ActivityPageClientProps)
   if (!activeWorkspaceId) {
     return (
       <div className="p-6">
-        <p className="text-sm text-muted-foreground">Select a workspace to view activity.</p>
+        <p className="text-sm text-muted-foreground">
+          {t("office:selectAWorkspaceToViewActivity")}
+        </p>
       </div>
     );
   }

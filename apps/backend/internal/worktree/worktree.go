@@ -1,6 +1,13 @@
 package worktree
 
-import "time"
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/kandev/kandev/internal/repoclone"
+	"github.com/kandev/kandev/internal/task/models"
+)
 
 // SyncProgressStatus represents the status of a base-branch sync progress event.
 type SyncProgressStatus string
@@ -8,14 +15,17 @@ type SyncProgressStatus string
 const (
 	SyncProgressRunning   SyncProgressStatus = "running"
 	SyncProgressCompleted SyncProgressStatus = "completed"
+	SyncProgressFailed    SyncProgressStatus = "failed"
 )
 
 // SyncProgressEvent reports pre-worktree base-branch synchronization progress.
 type SyncProgressEvent struct {
-	StepName string
-	Status   SyncProgressStatus
-	Output   string
-	Error    string
+	StepName      string
+	Status        SyncProgressStatus
+	Output        string
+	Error         string
+	Warning       string
+	WarningDetail string
 }
 
 // SyncProgressCallback is called when base-branch sync status changes.
@@ -33,12 +43,22 @@ type Worktree struct {
 	// Multiple worktrees can exist for the same task (one per agent session).
 	TaskID string `json:"task_id"`
 
+	// TaskDirName is the stable task-root identity used by filesystem
+	// ownership checks. It remains unchanged when a task environment changes
+	// owners, so it is intentionally not part of the public JSON contract.
+	TaskDirName string `json:"-"`
+
+	// TaskEnvironmentID is the task environment that owns this worktree.
+	// Physical worktree records live on task_environment_repos; sessions
+	// reference the environment through task_sessions.task_environment_id.
+	TaskEnvironmentID string `json:"task_environment_id,omitempty"`
+
 	// RepositoryID is the ID of the repository this worktree belongs to.
 	RepositoryID string `json:"repository_id"`
 
 	// BranchSlug, when set, disambiguates two worktrees that share a
 	// (SessionID, RepositoryID) pair on different branches. Stored on
-	// task_session_worktrees so reuse lookups can scope by branch and not
+	// task_environment_repos so reuse lookups can scope by branch and not
 	// collapse multi-branch tasks down to a single worktree.
 	BranchSlug string `json:"branch_slug,omitempty"`
 
@@ -52,8 +72,34 @@ type Worktree struct {
 	// Branch is the Git branch name checked out in this worktree.
 	Branch string `json:"branch"`
 
+	// CleanupHeadOID is the immutable checkout identity captured by the durable
+	// task-cleanup snapshot. It is intentionally internal: ordinary worktree
+	// callers do not need to provide it, while durable cleanup uses it to fail
+	// closed if the recorded path or branch advanced before teardown.
+	CleanupHeadOID string `json:"-"`
+
+	// CleanupHeadOIDUnavailable indicates that the current durable cleanup
+	// snapshot intentionally omitted this worktree's commit identity. It is
+	// internal provenance, so it is rebuilt when a snapshot is loaded.
+	CleanupHeadOIDUnavailable bool `json:"-"`
+
+	// BranchCompactedAt records that exact-SHA local-ref deletion completed.
+	// A nil value keeps an interrupted archived candidate eligible for retry.
+	BranchCompactedAt *time.Time `json:"-"`
 	// BaseBranch is the branch this worktree was created from.
 	BaseBranch string `json:"base_branch"`
+
+	// BranchOwner identifies whether Kandev created the local branch ref. Only
+	// refs with BranchOwnerManaged are candidates for terminal compaction.
+	BranchOwner string `json:"-"`
+
+	// IntegrationRef is the exact intended base/integration branch captured at
+	// materialization time. Cleanup never guesses this value from branch names.
+	IntegrationRef string `json:"-"`
+
+	// RecoveryHeadSHA is the exact commit used to recreate a safely compacted
+	// managed branch after archive/unarchive.
+	RecoveryHeadSHA string `json:"-"`
 
 	// Status indicates the current state of the worktree.
 	// Valid values: active, merged, deleted
@@ -79,10 +125,9 @@ type Worktree struct {
 	// Shown as collapsible content alongside the user-friendly FetchWarning.
 	FetchWarningDetail string `json:"fetch_warning_detail,omitempty"`
 
-	// BaseBranchFallbackWarning is set when the requested BaseBranch did not
-	// exist in the repository and the worktree was created from a fallback
-	// branch (typically the repository's default_branch) instead. Empty when
-	// the original BaseBranch was used.
+	// BaseBranchFallbackWarning is set when the requested base was unavailable
+	// or could not be refreshed and the worktree used a verified local fallback.
+	// Empty when the requested base was used after a successful refresh.
 	BaseBranchFallbackWarning string `json:"base_branch_fallback_warning,omitempty"`
 
 	// BaseBranchFallbackDetail mirrors FetchWarningDetail: a longer message
@@ -116,11 +161,31 @@ type Worktree struct {
 
 // CreateRequest contains the parameters for creating a new worktree.
 type CreateRequest struct {
+	CheckoutOptions *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
 	// TaskID is the unique task identifier (required).
 	TaskID string
 
 	// SessionID is the task session identifier (required for persistence).
 	SessionID string
+
+	// TaskEnvironmentID, when known, is the environment that owns the
+	// worktree. The store falls back to resolving it from SessionID. During
+	// initial launch materialization the environment does not exist yet and
+	// persistence is deferred to the executor's environment transaction.
+	TaskEnvironmentID string
+
+	// ReuseRequired makes this an attach-only request. The supplied WorktreeID
+	// must identify an active, valid worktree owned by this task/environment.
+	// It is deliberately distinct from ordinary resume/recovery: no lookup
+	// miss, invalid directory, or mismatched canonical record may create or
+	// recreate a worktree in this mode.
+	ReuseRequired bool
+
+	// AllowBranchReplacement explicitly permits recovery to create a new branch
+	// when the persisted worktree branch no longer exists. It is only set by the
+	// user-selected resume-new-branch action; ordinary resume keeps the original
+	// branch and returns ErrBranchUnrecoverable.
+	AllowBranchReplacement bool
 
 	// TaskTitle is the human-readable task title (optional).
 	// If provided, it will be used to generate semantic worktree/branch names.
@@ -136,6 +201,19 @@ type CreateRequest struct {
 	// BaseBranch is the branch to base the worktree on (required).
 	// Typically "main" or "master".
 	BaseBranch string
+
+	// RecoveryClaim carries the durable environment authority through the
+	// recovery publication CAS. It is internal state and is never serialized
+	// into a user-facing request.
+	RecoveryClaim *models.TaskEnvironmentRecoveryClaim
+
+	// RecoveryOperationID lets all repository slots in one admission share the
+	// same restart-safe recovery record identity.
+	RecoveryOperationID string
+
+	// IntegrationRef is the verified branch against which terminal cleanup may
+	// prove a managed branch fully integrated. Empty fails closed.
+	IntegrationRef string
 
 	// FallbackBaseBranch is an optional branch to retry with when BaseBranch
 	// does not exist in the repository. Typically populated with the
@@ -157,6 +235,16 @@ type CreateRequest struct {
 	// uniformly without needing to add the fork as a remote.
 	PRNumber int
 
+	// QualifiedPRBase is the validated provider target for a PR-linked
+	// checkout. Its exact repository and branch take precedence over all
+	// branch-only fallback behavior.
+	QualifiedPRBase *models.PRBase
+
+	// RemoteContribution identifies an existing provider contribution whose
+	// source branch must be fetched from its own remote and verified by SHA.
+	RemoteContribution      *models.RemoteContribution
+	ContributionDestination *models.ContributionDestination
+
 	// WorktreeBranchPrefix is the prefix to use for the worktree branch name.
 	// If empty, the default prefix is used.
 	WorktreeBranchPrefix string
@@ -170,6 +258,34 @@ type CreateRequest struct {
 
 	// PullBeforeWorktree indicates whether to pull from remote before creating the worktree.
 	PullBeforeWorktree bool
+
+	// RemoteSyncHandled means the caller already refreshed origin through an
+	// authenticated provider seam. Worktree creation must use local/remote-
+	// tracking refs only and must not perform another network operation.
+	RemoteSyncHandled bool
+
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until this request needs to materialize or recreate a worktree. A valid
+	// reusable worktree must bypass it. On success, Create marks the refresh as
+	// handled before selecting local refs.
+	RefreshRepository func(context.Context) error
+
+	// RefreshRepositoryWithState is the typed variant used by managed clones.
+	// Only RemoteRefStateEmpty permits local empty-remote bootstrap; unknown
+	// state remains fail-closed and follows the ordinary refresh rules.
+	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
+
+	// RemoteRefState is the result of the authenticated remote advertisement
+	// used for this materialization.
+	RemoteRefState repoclone.RemoteRefState
+
+	// These fields are manager-internal state used when a provider refresh
+	// fails after a local base was verified. They keep the original refresh
+	// policy for checkout-branch materialization while preventing a second
+	// unauthenticated base refresh.
+	baseRefreshFallback        bool
+	baseRefreshFallbackWarning string
+	baseRefreshFallbackDetail  string
 
 	// WorktreeID is the ID of an existing worktree to reuse (optional).
 	// If provided and valid, the existing worktree is returned instead of creating a new one.
@@ -197,7 +313,7 @@ type CreateRequest struct {
 	BranchSlug string
 
 	// BranchIdentitySlug, when non-empty, is the stable branch key used for
-	// reuse lookup, cache keys, and persisted task_session_worktrees rows. It
+	// reuse lookup, cache keys, and persisted task_environment_repos rows. It
 	// may differ from BranchSlug when the primary branch keeps the flat path.
 	BranchIdentitySlug string
 
@@ -209,6 +325,9 @@ type CreateRequest struct {
 	// Transient per Create; never persisted on the Worktree record, so
 	// secrets stay out of the DB.
 	ScriptEnv map[string]string
+
+	// CheckoutEnv contains only managed Git credentials and their scoped configuration.
+	CheckoutEnv map[string]string
 
 	// OnSyncProgress receives progress updates for pre-worktree branch sync.
 	OnSyncProgress SyncProgressCallback
@@ -231,6 +350,20 @@ func (r *CreateRequest) Validate() error {
 	if r.RepositoryPath == "" {
 		return ErrRepoNotGit
 	}
+	if err := r.validateRemoteContribution(); err != nil {
+		return err
+	}
+	if err := r.normalizeQualifiedPRBase(); err != nil {
+		return err
+	}
+	if err := models.ValidatePRBaseContributionIdentity(r.QualifiedPRBase, r.RemoteContribution); err != nil {
+		return fmt.Errorf("qualified PR base and contribution identity mismatch: %w", err)
+	}
+	if r.ContributionDestination != nil {
+		if err := r.ContributionDestination.Validate(); err != nil {
+			return fmt.Errorf("invalid contribution destination: %w", err)
+		}
+	}
 	if r.BaseBranch == "" {
 		// Defence-in-depth: prefer the explicit FallbackBaseBranch (typically
 		// the repository's default_branch carried by the caller) over an
@@ -240,6 +373,55 @@ func (r *CreateRequest) Validate() error {
 			return ErrInvalidBaseBranch
 		}
 		r.BaseBranch = r.FallbackBaseBranch
+	}
+	return nil
+}
+
+func (r *CreateRequest) normalizeQualifiedPRBase() error {
+	if r.QualifiedPRBase == nil {
+		return nil
+	}
+	if err := r.QualifiedPRBase.Validate(); err != nil {
+		return fmt.Errorf("invalid qualified PR base: %w", err)
+	}
+	target := r.QualifiedPRBase.Target
+	if r.BaseBranch == "" {
+		r.BaseBranch = target.TargetBranch
+	}
+	if r.BaseBranch != target.TargetBranch {
+		return ErrInvalidBaseBranch
+	}
+	if r.PRNumber == 0 {
+		r.PRNumber = target.Number
+	}
+	if r.PRNumber != target.Number {
+		return fmt.Errorf("PR number does not match qualified base")
+	}
+	if r.CheckoutBranch == "" {
+		r.CheckoutBranch = target.HeadBranch
+	}
+	if r.CheckoutBranch != target.HeadBranch {
+		return fmt.Errorf("checkout branch does not match qualified PR head")
+	}
+	return nil
+}
+
+func (r *CreateRequest) validateRemoteContribution() error {
+	if r.RemoteContribution == nil {
+		return nil
+	}
+	if err := r.RemoteContribution.Validate(); err != nil {
+		return fmt.Errorf("invalid remote contribution: %w", err)
+	}
+	if r.BaseBranch == "" {
+		r.BaseBranch = r.RemoteContribution.BaseBranch
+	} else if r.BaseBranch != r.RemoteContribution.BaseBranch {
+		return ErrInvalidBaseBranch
+	}
+	if r.CheckoutBranch == "" {
+		r.CheckoutBranch = r.RemoteContribution.HeadBranch
+	} else if r.CheckoutBranch != r.RemoteContribution.HeadBranch {
+		return fmt.Errorf("checkout branch does not match remote contribution")
 	}
 	return nil
 }

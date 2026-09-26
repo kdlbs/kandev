@@ -4,10 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { Repository, Executor, ExecutorProfile } from "@/lib/types/http";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
-import {
-  discoverRepositoriesAction,
-  getLocalRepositoryStatusAction,
-} from "@/app/actions/workspaces";
+import { getLocalRepositoryStatusAction } from "@/app/actions/workspaces";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import type {
@@ -21,6 +18,8 @@ import {
 } from "@/components/task-create-dialog-autopick";
 import { useRepositoryAutoSelectEffect } from "@/components/task-create-dialog-repository-autopick";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { t } from "@/lib/i18n";
+import { useRepositoryDiscovery } from "@/hooks/domains/workspace/use-repository-discovery";
 
 // Re-export autopick hooks for callers that imported them from this module.
 export { useWorkflowAgentProfileEffect };
@@ -54,6 +53,7 @@ export function useWorkflowStepsEffect(
             workflowId: effectiveWorkflowId,
             position: s.position,
             is_start_step: s.is_start_step,
+            prompt: s.prompt,
             events: s.events,
           })),
         );
@@ -74,41 +74,33 @@ export function useDiscoverReposEffect(
   repositoriesLoading: boolean,
   toast: ReturnType<typeof useToast>["toast"],
 ) {
-  const {
-    discoverReposLoaded,
-    discoverReposLoading,
-    setDiscoveredRepositories,
-    setDiscoverReposLoading,
-    setDiscoverReposLoaded,
-  } = fs;
+  const discovery = useRepositoryDiscovery(workspaceId, open && !repositoriesLoading);
+  const { setDiscoveredRepositories, setDiscoverReposLoading, setDiscoverReposLoaded } = fs;
+  const reportedErrorRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!open || !workspaceId || repositoriesLoading || discoverReposLoaded || discoverReposLoading)
-      return;
-    void Promise.resolve()
-      .then(() => setDiscoverReposLoading(true))
-      .then(() => discoverRepositoriesAction(workspaceId))
-      .then((r) => {
-        setDiscoveredRepositories(r.repositories);
-      })
-      .catch((e) => {
-        toast({
-          title: "Failed to discover repositories",
-          description: e instanceof Error ? e.message : "Request failed",
-          variant: "error",
-        });
-        setDiscoveredRepositories([]);
-      })
-      .finally(() => {
-        setDiscoverReposLoading(false);
-        setDiscoverReposLoaded(true);
+    if (!open || !workspaceId || repositoriesLoading) return;
+    setDiscoveredRepositories(discovery.repositories);
+    setDiscoverReposLoading(discovery.isLoading || discovery.isRefreshing);
+    setDiscoverReposLoaded(discovery.hasSnapshot || discovery.error !== null);
+    if (discovery.error && reportedErrorRef.current !== discovery.error.message) {
+      reportedErrorRef.current = discovery.error.message;
+      toast({
+        title: t("task:failedToDiscoverRepositories"),
+        description: discovery.error.message || t("common:requestFailed"),
+        variant: "error",
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }
   }, [
-    discoverReposLoaded,
-    discoverReposLoading,
+    discovery.error,
+    discovery.hasSnapshot,
+    discovery.isLoading,
+    discovery.isRefreshing,
+    discovery.repositories,
     open,
-    fs.discoveredRepositories.length,
     repositoriesLoading,
+    setDiscoveredRepositories,
+    setDiscoverReposLoaded,
+    setDiscoverReposLoading,
     toast,
     workspaceId,
   ]);
@@ -191,6 +183,10 @@ function pickDefaultExecutorId(
       ? executors.filter((e: Executor) => e.type !== "worktree")
       : executors;
   if (eligible.length === 0) return null;
+  if (preferLocalExecutor) {
+    const directLocal = eligible.find((e) => isDirectLocalExecutorType(e.type));
+    if (directLocal) return directLocal.id;
+  }
   const defId = workspaceDefaults?.default_executor_id ?? null;
   if (defId && eligible.some((e: Executor) => e.id === defId)) return defId;
   if (noRepository || preferLocalExecutor) {
@@ -460,19 +456,23 @@ export function useDefaultSelectionsEffect(
   open: boolean,
   sel: StoreSelections,
   workflows: Array<{ id: string; agent_profile_id?: string }>,
+  editingTaskExecutorProfileId?: string | null,
 ) {
   const { executors, workspaceDefaults } = sel;
   const {
     executorId,
     executorProfileId,
     setExecutorId,
-    setExecutorProfileId,
+    setExecutorProfileIdFromSeed,
     noRepository,
+    preferLocalExecutor: presetPrefersLocalExecutor,
     useRemote,
     repositories,
   } = fs;
   const preferLocalExecutor =
-    !noRepository && !useRemote && repositories.some((row) => Boolean(row.localPath));
+    !useRemote &&
+    (presetPrefersLocalExecutor ||
+      (!noRepository && repositories.some((row) => Boolean(row.localPath))));
   const executorAutopickContext = useMemo(
     () => ({
       executors,
@@ -491,6 +491,19 @@ export function useDefaultSelectionsEffect(
       preferLocalExecutor,
     ],
   );
+  const hasStoredEditingExecutorProfile = Boolean(editingTaskExecutorProfileId);
+  // Seed the picker from the task's own stored runner (edit mode only)
+  // before any create-mode "resolve a default" autopick runs: a task that
+  // already has a stored runner is seeded from that stored value, not from
+  // the create-mode default-resolution path. Gating the autopick effect's
+  // own `open` (below) rather than adding a state-machine flag keeps this
+  // race-free: the two effects cannot both compute a pick for the same
+  // render.
+  useEffect(() => {
+    if (!open || executorProfileId || !editingTaskExecutorProfileId) return;
+    setExecutorProfileIdFromSeed(editingTaskExecutorProfileId);
+  }, [open, executorProfileId, editingTaskExecutorProfileId, setExecutorProfileIdFromSeed]);
+
   useAgentProfileAutopickEffect(fs, open, sel, workflows);
   useExecutorIdAutopickEffect({
     open,
@@ -499,10 +512,10 @@ export function useDefaultSelectionsEffect(
     setExecutorId,
   });
   useExecutorProfileAutopickEffect({
-    open,
+    open: open && !hasStoredEditingExecutorProfile,
     executorProfileId,
     context: executorAutopickContext,
-    setExecutorProfileId,
+    setExecutorProfileId: setExecutorProfileIdFromSeed,
   });
 
   // Derive executorId from the selected executor profile
@@ -553,7 +566,7 @@ export function useGitHubUrlErrorEffect(fs: DialogFormState, open: boolean) {
     }
     const parsed = parseGitHubAnyUrl(trimmed);
     if (!parsed) {
-      setGitHubUrlError("Invalid GitHub URL — expected github.com/owner/repo or .../pull/123");
+      setGitHubUrlError(t("task:invalidGitHubUrl"));
       return;
     }
     setGitHubUrlError(null);
@@ -561,8 +574,15 @@ export function useGitHubUrlErrorEffect(fs: DialogFormState, open: boolean) {
 }
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
-  const { open, workspaceId, workflowId, effectiveWorkflowId, repositories, repositoriesLoading } =
-    args;
+  const {
+    open,
+    workspaceId,
+    workflowId,
+    effectiveWorkflowId,
+    repositories,
+    repositoriesLoading,
+    editingTaskExecutorProfileId,
+  } = args;
   const {
     agentProfiles,
     compatibleAgentProfiles,
@@ -578,6 +598,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
     lastUsedAgentProfileId: args.lastUsedAgentProfileId,
     authLoaded,
     userSettingsLoaded: args.userSettingsLoaded,
+    effectiveWorkflowId,
   });
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories, {
     lastUsedRepositoryId: args.lastUsedRepositoryId,
@@ -598,8 +619,10 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
       userSettingsLoaded: args.userSettingsLoaded,
       lastUsedAgentProfileId: args.lastUsedAgentProfileId,
       lastUsedExecutorProfileId: args.lastUsedExecutorProfileId,
+      effectiveWorkflowId,
     },
     workflows,
+    editingTaskExecutorProfileId,
   );
   useGitHubUrlErrorEffect(fs, open);
 }

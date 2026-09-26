@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-unlink-contract"]
 plan: "plan.md"
-spec: "../../specs/tasks/link-existing-task-github-issue.md"
+spec: "../../specs/tasks/requirements/link-existing-task-github-issue.md"
 ---
 
 # Task 02: Frontend Multi-PR Unlink UI

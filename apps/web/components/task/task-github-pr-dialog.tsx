@@ -1,25 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Button } from "@kandev/ui/button";
+import { useMemo, type RefObject } from "react";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@kandev/ui/dialog";
-import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
-import { useToast } from "@/components/toast-provider";
+import { TaskChangeRequestLinkForm } from "@/components/integrations/task-change-request-link-form";
 import { createTaskPR } from "@/lib/api/domains/github-api";
+import { createFocusReturnHandler } from "@/lib/dialog-focus-return";
 import type { Repository } from "@/lib/types/http";
 import {
   githubReposForTask,
   pullRequestPayload,
   type TaskPullRequestLinkTarget,
 } from "./task-github-pr-url";
+import { useTranslation } from "react-i18next";
+
+/** URL shape the user types verbatim — protocol, not copy. Passed into the
+ * placeholder message as an interpolation value so it survives translation. */
+const GITHUB_PR_URL_EXAMPLE = "github.com/owner/repo/pull/1471";
 
 type TaskGitHubPRDialogProps = {
   workspaceId: string | null;
@@ -27,6 +29,9 @@ type TaskGitHubPRDialogProps = {
   onOpenChange: (open: boolean) => void;
   task: TaskPullRequestLinkTarget;
   repositories: Repository[];
+  /** Element to return keyboard focus to on close (AC-TASKS-TASK-ACTIONS-MENU-001.12).
+   * Omitted callers keep Radix's default restore-to-previously-focused-element behavior. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 };
 
 export function TaskGitHubPRDialog({
@@ -35,99 +40,59 @@ export function TaskGitHubPRDialog({
   onOpenChange,
   task,
   repositories,
+  focusReturnRef,
 }: TaskGitHubPRDialogProps) {
-  const { toast } = useToast();
-  const [input, setInput] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { t } = useTranslation();
   const githubRepos = useMemo(() => githubReposForTask(task, repositories), [task, repositories]);
   const inferredRepo = githubRepos.length === 1 ? githubRepos[0] : null;
   const placeholder = inferredRepo
-    ? "#1471 or github.com/owner/repo/pull/1471"
-    : "github.com/owner/repo/pull/1471";
+    ? t("task:githubPrRefPlaceholder", { example: GITHUB_PR_URL_EXAMPLE })
+    : GITHUB_PR_URL_EXAMPLE;
 
-  useEffect(() => {
-    if (open) {
-      setInput("");
-      setError(null);
-    }
-  }, [open]);
-
-  const submit = async () => {
+  const submit = async (reference: string) => {
     if (!workspaceId) {
-      setError("Select a workspace before linking a GitHub pull request.");
-      return;
+      throw new Error(t("task:selectWorkspaceBeforeLinkingPr"));
     }
-    if (!input.trim()) {
-      setError("Enter a GitHub pull request URL or number.");
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
-    try {
-      const payload = pullRequestPayload(input, githubRepos);
-      await createTaskPR({
-        workspace_id: workspaceId,
-        task_id: task.id,
-        pr_url: payload.pr_url,
-        ...(payload.repository_id ? { repository_id: payload.repository_id } : {}),
-      });
-      toast({ description: "GitHub pull request linked", variant: "success" });
-      onOpenChange(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to link GitHub pull request.");
-    } finally {
-      setSubmitting(false);
-    }
+    const payload = pullRequestPayload(reference, githubRepos);
+    await createTaskPR({
+      workspace_id: workspaceId,
+      task_id: task.id,
+      pr_url: payload.pr_url,
+      ...(payload.repository_id ? { repository_id: payload.repository_id } : {}),
+    });
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
+      <DialogContent
+        className="w-[calc(100vw-2rem)] sm:max-w-lg"
+        onCloseAutoFocus={createFocusReturnHandler(focusReturnRef)}
+      >
         <DialogHeader>
-          <DialogTitle>Link GitHub pull request</DialogTitle>
+          <DialogTitle>{t("task:linkGithubPullRequest")}</DialogTitle>
           <DialogDescription>
             {inferredRepo
-              ? `Use a full pull request URL or number for ${inferredRepo.owner}/${inferredRepo.repo}.`
-              : "Use a full GitHub pull request URL for this task."}
+              ? t("task:useAFullPullRequestUrl", {
+                  owner: inferredRepo.owner,
+                  repo: inferredRepo.repo,
+                })
+              : t("task:useAFullGithubPullRequest")}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-2">
-          <Label htmlFor="task-github-pr-input">Pull request</Label>
-          <Input
-            id="task-github-pr-input"
-            data-testid="task-github-pr-input"
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder={placeholder}
-            disabled={submitting}
-          />
-          {error && (
-            <p className="text-xs text-destructive" data-testid="task-github-pr-error">
-              {error}
-            </p>
-          )}
-        </div>
-        <DialogFooter className="gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="cursor-pointer"
-            onClick={() => onOpenChange(false)}
-            disabled={submitting}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            className="cursor-pointer"
-            onClick={submit}
-            disabled={submitting}
-            data-testid="task-github-pr-submit"
-          >
-            {submitting ? "Saving" : "Save"}
-          </Button>
-        </DialogFooter>
+        <TaskChangeRequestLinkForm
+          inputLabel={t("task:pullRequest")}
+          placeholder={placeholder}
+          emptyError={t("task:enterGithubPrUrlOrNumber")}
+          failureMessage={t("task:failedToLinkGithubPullRequest")}
+          successMessage={t("task:githubPullRequestLinked")}
+          inputTestId="task-github-pr-input"
+          errorTestId="task-github-pr-error"
+          submitTestId="task-github-pr-submit"
+          resetKey={open}
+          onSubmit={submit}
+          onCancel={() => onOpenChange(false)}
+          onSuccess={() => onOpenChange(false)}
+        />
       </DialogContent>
     </Dialog>
   );

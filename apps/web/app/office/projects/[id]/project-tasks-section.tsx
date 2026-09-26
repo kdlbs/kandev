@@ -2,16 +2,19 @@
 
 import { useEffect, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { listTasks } from "@/lib/api/domains/office-tasks-api";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { TaskRow } from "../../tasks/task-row";
+import { useTranslation } from "react-i18next";
 
 type ProjectTasksSectionProps = {
   projectId: string;
+  workspaceId: string;
 };
 
-export function ProjectTasksSection({ projectId }: ProjectTasksSectionProps) {
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+export function ProjectTasksSection({ projectId, workspaceId }: ProjectTasksSectionProps) {
+  const { t } = useTranslation();
   const appendTasks = useAppStore((s) => s.appendTasks);
   // Select stable references; derive the filtered list and the agent-name
   // lookup via useMemo. Returning a freshly `.filter()`'d array or a
@@ -19,7 +22,7 @@ export function ProjectTasksSection({ projectId }: ProjectTasksSectionProps) {
   // getSnapshot caching guard because every render produced a new
   // reference.
   const allTasks = useAppStore((s) => s.office.tasks.items);
-  const agentProfiles = useAppStore((s) => s.office.agentProfiles);
+  const agentProfiles = useAppStore(selectOfficeAgentProfiles);
 
   // Fetch tasks for this project once on mount. The list is merged into
   // the global store via appendTasks so other consumers (the Tasks page,
@@ -56,13 +59,13 @@ export function ProjectTasksSection({ projectId }: ProjectTasksSectionProps) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Tasks</h2>
+        <h2 className="text-sm font-semibold">{t("office:tasks")}</h2>
         <span className="text-xs text-muted-foreground">
-          {sorted.length} {sorted.length === 1 ? "task" : "tasks"}
+          {t("office:taskCount", { count: sorted.length })}
         </span>
       </div>
       {sorted.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No tasks in this project yet.</p>
+        <p className="text-xs text-muted-foreground">{t("office:noTasksInThisProjectYet")}</p>
       ) : (
         <div className="border border-border rounded-md divide-y divide-border/60 overflow-hidden">
           {sorted.map((task) => (

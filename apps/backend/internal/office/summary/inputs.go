@@ -25,7 +25,10 @@ type Repo interface {
 // LoadInputs assembles a BuildInputs from the database for a freshly
 // completed taskless run. Caller passes the run row (we read its
 // result_json + workspace via the agent profile join), the agent
-// profile id, and the scope key (e.g. "heartbeat" or "routine:<id>").
+// profile id, and the scope key persisted on the run:
+// "routine:<routine_id>" for a routine-dispatched wake, or
+// "agent:<agent_profile_id>" otherwise. The legacy "heartbeat" scope is
+// retired.
 //
 // Best-effort: any sub-query that fails is logged-by-virtue-of being
 // silently dropped, so a partial summary always wins over no summary.
@@ -187,7 +190,7 @@ func loadActivityStats(
 		FROM tasks
 		WHERE workspace_id = ?
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0 AND COALESCE(origin,'') != 'automation_run'
 	`), workspaceID).Scan(&stats.InProgress, &stats.OpenTasks)
 
 	return stats
@@ -207,7 +210,7 @@ func loadBlockers(ctx context.Context, reader *sqlx.DB, workspaceID string) []Bl
 		WHERE workspace_id = ?
 		  AND state = 'BLOCKED'
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0 AND COALESCE(origin,'') != 'automation_run'
 		ORDER BY updated_at DESC
 		LIMIT 10
 	`), workspaceID)

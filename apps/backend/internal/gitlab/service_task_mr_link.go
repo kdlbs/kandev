@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 var (
@@ -157,6 +158,11 @@ func bracketedHostname(hostname string) string {
 
 // AssociateExistingMRByURL validates a workspace-owned task/repository pair,
 // fetches the configured-host MR, and idempotently persists its association.
+// `repositoryID` is repositories.ID (or empty to auto-resolve the task's
+// single repository) — the same id space AssociatePRWithTask uses on the
+// GitHub side. A row id from task_repositories instead fails closed here
+// (ValidateTaskMRRepositoryIdentity / ResolveTaskMRRepository reject it)
+// rather than silently duplicating the association.
 func (s *Service) AssociateExistingMRByURL(
 	ctx context.Context,
 	workspaceID, taskID, repositoryID, mrURL string,
@@ -193,6 +199,7 @@ func (s *Service) AssociateExistingMRByURL(
 	if err := store.UpsertTaskMR(ctx, association); err != nil {
 		return nil, fmt.Errorf("upsert task MR: %w", err)
 	}
+	s.reconcileComparisonTarget(ctx, taskID, client.Host(), status.MR)
 	s.publishTaskMRUpdated(ctx, workspaceID, association)
 	return association, nil
 }
@@ -285,7 +292,38 @@ func (s *Service) UnlinkTaskMR(ctx context.Context, workspaceID, associationID s
 	if store == nil {
 		return errors.New("gitlab store not configured")
 	}
-	return store.DeleteTaskMRForWorkspace(ctx, workspaceID, associationID)
+	association, lookupErr := store.GetTaskMRByID(ctx, associationID)
+	if lookupErr != nil {
+		return lookupErr
+	}
+	if association != nil && s.comparisonTargetObserver != nil && association.RepositoryID != "" {
+		if err := s.comparisonTargetObserver.RemoveComparisonTargetForChange(
+			ctx,
+			association.TaskID,
+			association.RepositoryID,
+			taskmodels.ComparisonTargetProviderGitLab,
+			taskmodels.ComparisonTargetKindMergeRequest,
+			association.MRIID,
+		); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("GitLab comparison target detach cleanup failed",
+					zap.String("task_id", association.TaskID), zap.Int("mr_iid", association.MRIID), zap.Error(err))
+			}
+			return err
+		}
+	}
+	if err := store.DeleteTaskMRForWorkspace(ctx, workspaceID, associationID); err != nil {
+		return err
+	}
+	if s.eventBus != nil && association != nil {
+		event := bus.NewEvent(events.GitLabTaskMRDeleted, eventSource, &TaskMRDeletedEvent{
+			WorkspaceID: workspaceID, TaskID: association.TaskID, AssociationID: association.ID,
+		})
+		if err := s.eventBus.Publish(ctx, events.GitLabTaskMRDeleted, event); err != nil {
+			s.logger.Debug("failed to publish GitLab task MR deletion event", zap.Error(err))
+		}
+	}
+	return nil
 }
 
 func taskMRFromStatus(taskID, repositoryID, host, projectPath string, status *MRStatus) *TaskMR {
@@ -294,18 +332,91 @@ func taskMRFromStatus(taskID, repositoryID, host, projectPath string, status *MR
 	return &TaskMR{
 		TaskID: taskID, RepositoryID: repositoryID, Host: host,
 		ProjectPath: projectPath, MRIID: mr.IID, MRURL: mr.WebURL, MRTitle: mr.Title,
-		HeadBranch: mr.HeadBranch, BaseBranch: mr.BaseBranch, AuthorUsername: mr.AuthorUsername,
+		HeadBranch: mr.HeadBranch, HeadSHA: mr.HeadSHA, BaseBranch: mr.BaseBranch, BaseSHA: mr.BaseSHA, AuthorUsername: mr.AuthorUsername,
 		State: mr.State, ApprovalState: status.ApprovalState, PipelineState: status.PipelineState,
 		MergeStatus: status.MergeStatus, Draft: mr.Draft, ApprovalCount: status.ApprovalCount,
 		RequiredApprovals: status.RequiredApprovals, PipelineJobsTotal: status.PipelineJobsTotal,
 		PipelineJobsPass: status.PipelineJobsPassing, CreatedAt: mr.CreatedAt, MergedAt: mr.MergedAt,
 		ClosedAt: mr.ClosedAt, LastSyncedAt: &now,
+		DetailedMergeStatus: status.DetailedMergeStatus, ReviewerCount: status.ReviewerCount,
+		UnapprovedReviewers: status.UnapprovedReviewers,
+		// UnresolvedDiscussions is deliberately NOT taken from status (it is
+		// always 0 there — GetMRStatus skips discussions, see MRStatus's type
+		// doc). The auto-fix/auto-merge evaluation pass persists it separately
+		// via Store.UpdateTaskMRUnresolvedDiscussions for automation-subscribed
+		// MRs only; overwriting it here on every lifecycle sync would clobber
+		// that value back to 0 on the very next poll.
 	}
 }
 
-type taskMRUpdatedEvent struct {
-	WorkspaceID string `json:"workspace_id"`
+// TaskMRUpdatedEvent is the payload published on events.GitLabTaskMRUpdated.
+// Exported (not just the embedded *TaskMR) so orchestrator-side consumers —
+// notably the MR lifecycle automation pass — can type-assert event.Data
+// without reaching into an unexported gitlab-package type.
+type TaskMRUpdatedEvent struct {
+	WorkspaceID    string       `json:"workspace_id"`
+	Reviewers      []MRReviewer `json:"reviewers"`
+	ReviewersValid bool         `json:"reviewers_valid,omitempty"`
 	*TaskMR
+}
+
+// GetWorkspaceID implements the websocket broadcaster's workspace-routing
+// interface (internal/gateway/websocket.extractWorkspaceID). Without it, the
+// broadcaster's map-only field extractor cannot see WorkspaceID on this
+// struct payload and always treats the event as workspace-unknown.
+func (e *TaskMRUpdatedEvent) GetWorkspaceID() string {
+	if e == nil {
+		return ""
+	}
+	return e.WorkspaceID
+}
+
+// TaskMRDeletedEvent identifies one task-MR association removed from active
+// task surfaces. The upstream merge request remains unchanged.
+type TaskMRDeletedEvent struct {
+	WorkspaceID   string `json:"workspace_id"`
+	TaskID        string `json:"task_id"`
+	AssociationID string `json:"association_id"`
+}
+
+// GetWorkspaceID lets the websocket broadcaster route the deletion to the
+// owning workspace.
+func (e TaskMRDeletedEvent) GetWorkspaceID() string { return e.WorkspaceID }
+
+// publishTaskMRLifecycleSyncEvent publishes a TaskMRUpdatedEvent after the
+// poller's lifecycle sync pass refreshes a linked MR (AC22). Unlike
+// publishTaskMRUpdated (an HTTP/link-flow caller that already has a trusted
+// workspace ID), this path resolves the workspace itself — a lookup failure
+// skips publishing rather than emitting an event the websocket layer could
+// broadcast instance-wide; the next poll retries.
+func (s *Service) publishTaskMRLifecycleSyncEvent(
+	ctx context.Context, mr *TaskMR, reviewers []MRReviewer, reviewersValid bool,
+) {
+	if mr == nil {
+		return
+	}
+	s.mu.RLock()
+	eventBus := s.eventBus
+	store := s.store
+	s.mu.RUnlock()
+	if eventBus == nil || store == nil {
+		return
+	}
+	workspaceID, err := store.WorkspaceIDForTask(ctx, mr.TaskID)
+	if err != nil {
+		s.logger.Debug("gitlab: resolve workspace for MR lifecycle sync event",
+			zap.String("task_id", mr.TaskID), zap.Error(err))
+		return
+	}
+	event := bus.NewEvent(events.GitLabTaskMRUpdated, eventSource, &TaskMRUpdatedEvent{
+		WorkspaceID:    workspaceID,
+		Reviewers:      reviewers,
+		ReviewersValid: reviewersValid,
+		TaskMR:         mr,
+	})
+	if err := eventBus.Publish(ctx, events.GitLabTaskMRUpdated, event); err != nil {
+		s.logger.Debug("publish GitLab task MR lifecycle sync event", zap.Error(err))
+	}
 }
 
 func (s *Service) publishTaskMRUpdated(ctx context.Context, workspaceID string, association *TaskMR) {
@@ -315,7 +426,7 @@ func (s *Service) publishTaskMRUpdated(ctx context.Context, workspaceID string, 
 	if eventBus == nil {
 		return
 	}
-	event := bus.NewEvent(events.GitLabTaskMRUpdated, eventSource, &taskMRUpdatedEvent{
+	event := bus.NewEvent(events.GitLabTaskMRUpdated, eventSource, &TaskMRUpdatedEvent{
 		WorkspaceID: workspaceID,
 		TaskMR:      association,
 	})

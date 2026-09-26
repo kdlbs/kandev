@@ -1,6 +1,7 @@
 import { createTwoFilesPatch } from "diff";
 
 import { djb2Hash } from "./hash";
+import { t } from "@/lib/i18n";
 
 /**
  * Generate a unified diff between original and modified content
@@ -52,27 +53,6 @@ export async function calculateHash(content: string): Promise<string> {
 }
 
 /**
- * Calculate diff stats (additions and deletions)
- * @param diff - Unified diff string
- * @returns Object with additions and deletions count
- */
-export function calculateDiffStats(diff: string): { additions: number; deletions: number } {
-  const lines = diff.split("\n");
-  let additions = 0;
-  let deletions = 0;
-
-  for (const line of lines) {
-    if (line.startsWith("+") && !line.startsWith("+++")) {
-      additions++;
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
-      deletions++;
-    }
-  }
-
-  return { additions, deletions };
-}
-
-/**
  * Format diff stats for display
  * @param additions - Number of additions
  * @param deletions - Number of deletions
@@ -86,5 +66,5 @@ export function formatDiffStats(additions: number, deletions: number): string {
   if (deletions > 0) {
     parts.push(`-${deletions}`);
   }
-  return parts.join(" ") || "No changes";
+  return parts.join(" ") || t("task:noChanges");
 }

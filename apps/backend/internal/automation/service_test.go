@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -122,6 +124,25 @@ func TestCreateAutomation_AcceptsValidRepositoryIDs(t *testing.T) {
 	if len(a.RepositoryIDs) != 2 || a.RepositoryIDs[0] != "repo-a" || a.RepositoryIDs[1] != "repo-b" {
 		t.Fatalf("expected repository_ids [repo-a repo-b], got %v", a.RepositoryIDs)
 	}
+	if len(a.Repositories) != 2 || a.Repositories[0].BaseBranch != "main" || a.Repositories[1].BaseBranch != "main" {
+		t.Fatalf("expected legacy IDs to resolve repository default branches, got %#v", a.Repositories)
+	}
+}
+
+func TestCreateAutomation_PreservesExplicitRepositoryBaseBranch(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetRepositoryLookup(&fakeRepositoryLookup{repos: map[string]string{"repo-a": "ws-a"}})
+
+	a, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
+		Name: "x", WorkspaceID: "ws-a",
+		Repositories: []AutomationRepository{{RepositoryID: "repo-a", BaseBranch: "release/2"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := a.Repositories[0].BaseBranch; got != "release/2" {
+		t.Fatalf("base branch = %q, want release/2", got)
+	}
 }
 
 func TestUpdateAutomation_RejectsForeignRepositoryID(t *testing.T) {
@@ -225,6 +246,50 @@ func TestService_DeleteRun_TaskNotFound_StillDeletesRun(t *testing.T) {
 	}
 }
 
+func TestService_DeleteRun_PreservesVisibleAutomationTask(t *testing.T) {
+	svc := newTestService(t)
+	deleter := &fakeTaskDeleter{}
+	svc.SetTaskDeleter(deleter)
+	svc.SetTaskOriginLookup(&fakeTaskOriginLookup{results: map[string]fakeOriginResult{
+		"visible-task": {workspaceID: "ws-1", isAutomationRun: false, ok: true},
+	}})
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "visible", Enabled: true}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	run := &AutomationRun{
+		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTaskCreated,
+		TaskID: "visible-task", TriggerData: json.RawMessage(`{}`),
+	}
+	require.NoError(t, svc.store.CreateRun(ctx, run))
+
+	require.NoError(t, svc.DeleteRun(ctx, run.ID))
+	require.Empty(t, deleter.deleted)
+}
+
+func TestService_DeleteAutomation_PreservesVisibleAutomationTasks(t *testing.T) {
+	svc := newTestService(t)
+	deleter := &fakeTaskDeleter{}
+	svc.SetTaskDeleter(deleter)
+	svc.SetTaskOriginLookup(&fakeTaskOriginLookup{results: map[string]fakeOriginResult{
+		"visible-task": {workspaceID: "ws-1", isAutomationRun: false, ok: true},
+	}})
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "visible", Enabled: true}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	require.NoError(t, svc.store.CreateRun(ctx, &AutomationRun{
+		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusSucceeded,
+		TaskID: "visible-task", TriggerData: json.RawMessage(`{}`),
+	}))
+
+	require.NoError(t, svc.DeleteAutomation(ctx, a.ID))
+	require.Empty(t, deleter.deleted)
+	jobs, err := svc.store.ListCleanupJobs(ctx)
+	require.NoError(t, err)
+	require.Empty(t, jobs)
+}
+
 func TestService_DeleteAllRuns_CallsTaskDeleterForEach(t *testing.T) {
 	svc := newTestService(t)
 	deleter := &fakeTaskDeleter{}
@@ -270,6 +335,32 @@ func TestService_DeleteAllRuns_CallsTaskDeleterForEach(t *testing.T) {
 	if len(runs) != 0 {
 		t.Errorf("expected 0 runs, got %d", len(runs))
 	}
+}
+
+func TestService_DeleteAllRuns_PreservesVisibleAutomationTasks(t *testing.T) {
+	svc := newTestService(t)
+	deleter := &fakeTaskDeleter{}
+	svc.SetTaskDeleter(deleter)
+	svc.SetTaskOriginLookup(&fakeTaskOriginLookup{results: map[string]fakeOriginResult{
+		"hidden-task":  {workspaceID: "ws-1", isAutomationRun: true, ok: true},
+		"visible-task": {workspaceID: "ws-1", isAutomationRun: false, ok: true},
+	}})
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "visible delete-all", Enabled: true}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	for _, taskID := range []string{"hidden-task", "visible-task"} {
+		require.NoError(t, svc.store.CreateRun(ctx, &AutomationRun{
+			AutomationID: a.ID,
+			TriggerType:  TriggerTypeScheduled,
+			Status:       RunStatusSucceeded,
+			TaskID:       taskID,
+			TriggerData:  json.RawMessage(`{}`),
+		}))
+	}
+
+	require.NoError(t, svc.DeleteAllRuns(ctx, a.ID))
+	require.Equal(t, []string{"hidden-task"}, deleter.deleted)
 }
 
 func TestService_DeleteAllRuns_TaskNotFound_StillClearsRuns(t *testing.T) {
@@ -509,6 +600,15 @@ func TestWorkspaceAuthorizerGatesAccess(t *testing.T) {
 	if _, err := svc.ListRuns(ctx, a.ID, 10); !errors.Is(err, denied) {
 		t.Fatalf("ListRuns: %v", err)
 	}
+	if _, err := svc.ListWorkspaceRuns(ctx, "ws-a", 10); !errors.Is(err, denied) {
+		t.Fatalf("ListWorkspaceRuns: %v", err)
+	}
+	if _, err := svc.ListAutomationSummaries(ctx, "ws-a"); !errors.Is(err, denied) {
+		t.Fatalf("ListAutomationSummaries: %v", err)
+	}
+	if _, err := svc.GetAutomationSummary(ctx, a.ID); !errors.Is(err, denied) {
+		t.Fatalf("GetAutomationSummary: %v", err)
+	}
 	if _, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{Name: "x", WorkspaceID: "ws-a", WorkflowID: "wf", WorkflowStepID: "s"}); !errors.Is(err, denied) {
 		t.Fatalf("CreateAutomation: %v", err)
 	}
@@ -516,5 +616,112 @@ func TestWorkspaceAuthorizerGatesAccess(t *testing.T) {
 	// A workspace the caller is allowed for still works.
 	if _, err := svc.ListAutomations(ctx, "ws-owned"); err != nil {
 		t.Fatalf("allowed workspace list: %v", err)
+	}
+}
+
+// Workflow and workflow step are optional for every automation: no automation
+// run is placed on a board, so no automation needs a starting column. Creation
+// used to reject this outright for the (now withdrawn) task execution mode.
+func TestCreateAutomation_SucceedsWithoutWorkflowOrStep(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	a, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		WorkspaceID:       "ws-1",
+		Name:              "nightly report",
+		Prompt:            "summarise yesterday",
+		AgentProfileID:    "agent-1",
+		ExecutorProfileID: "exec-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateAutomation without workflow: %v", err)
+	}
+	if a.WorkflowID != "" || a.WorkflowStepID != "" {
+		t.Fatalf("expected no workflow placement, got %q/%q", a.WorkflowID, a.WorkflowStepID)
+	}
+	if !a.Enabled || a.MaxConcurrentRuns != 1 {
+		t.Fatalf("expected an enabled automation with the default concurrency, got %+v", a)
+	}
+
+	// It must round-trip through the store too — the read path no longer
+	// projects the withdrawn execution_mode column.
+	got, err := svc.GetAutomation(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("GetAutomation: %v", err)
+	}
+	if got == nil || got.Name != "nightly report" {
+		t.Fatalf("expected the stored automation back, got %+v", got)
+	}
+}
+
+// execution_mode is accepted and ignored on input — an old client that still
+// sends it must not break, and the value must not come back out.
+func TestCreateAutomation_IgnoresExecutionModeOnTheWire(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	var req CreateAutomationRequest
+	raw := `{"workspace_id":"ws-1","name":"legacy client","execution_mode":"run"}`
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatalf("decode legacy payload: %v", err)
+	}
+	a, err := svc.CreateAutomation(ctx, &req)
+	if err != nil {
+		t.Fatalf("CreateAutomation with legacy execution_mode: %v", err)
+	}
+
+	encoded, err := json.Marshal(a)
+	if err != nil {
+		t.Fatalf("marshal automation: %v", err)
+	}
+	if strings.Contains(string(encoded), "execution_mode") {
+		t.Fatalf("execution_mode must be omitted from responses, got %s", string(encoded))
+	}
+}
+
+// GetAutomation reports a missing row as (nil, nil). A stale id — a bookmarked
+// page for a deleted automation, a client retrying after a delete — used to
+// dereference that nil and panic the backend on an ordinary not-found.
+func TestAuthorizeAutomation_MissingAutomationIsNotFoundNotAPanic(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	svc.SetWorkspaceAuthorizer(func(context.Context, string) error { return nil })
+
+	for name, call := range map[string]func() error{
+		"ListRuns":             func() error { _, err := svc.ListRuns(ctx, "gone", 10); return err },
+		"GetAutomationSummary": func() error { _, err := svc.GetAutomationSummary(ctx, "gone"); return err },
+		"DeleteAllRuns":        func() error { return svc.DeleteAllRuns(ctx, "gone") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			if !errors.Is(err, ErrAutomationNotFound) {
+				t.Fatalf("expected ErrAutomationNotFound, got %v", err)
+			}
+		})
+	}
+}
+
+// The destructive run operations authorize themselves rather than relying on
+// the WS handler to remember: a new caller must not be able to skip the check.
+func TestDeleteAllRuns_RefusesAForeignWorkspace(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	a, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		Name: "sweep", WorkspaceID: "ws-owned", WorkflowID: "wf", WorkflowStepID: "s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	denied := errors.New("denied")
+	svc.SetWorkspaceAuthorizer(func(_ context.Context, workspaceID string) error {
+		if workspaceID == "ws-owned" {
+			return denied
+		}
+		return nil
+	})
+
+	if err := svc.DeleteAllRuns(ctx, a.ID); !errors.Is(err, denied) {
+		t.Fatalf("expected the workspace check to refuse, got %v", err)
 	}
 }

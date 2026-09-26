@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconAdjustments, IconCheck, IconPlus } from "@tabler/icons-react";
 import {
@@ -15,6 +17,7 @@ import { MAX_SIDEBAR_VIEWS } from "@/lib/state/slices/ui/sidebar-view-builtins";
 import { SidebarFilterPopover } from "@/components/task/sidebar-filter/sidebar-filter-popover";
 import { useSidebarViewPopover } from "@/components/task/sidebar-filter/use-sidebar-view-popover";
 import { cn } from "@/lib/utils";
+import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
 
 const TRIGGER_BUTTON_CLASS = cn(
   "flex h-5 items-center justify-center rounded-sm px-1.5 cursor-pointer",
@@ -22,10 +25,11 @@ const TRIGGER_BUTTON_CLASS = cn(
 );
 
 export function TasksViewPicker() {
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const { t } = useTranslation();
-  const views = useAppStore((s) => s.sidebarViews.views);
-  const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
-  const draft = useAppStore((s) => s.sidebarViews.draft);
+  const views = useAppStore((s) => selectSidebarViews(s).views);
+  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
+  const draft = useAppStore((s) => selectSidebarViews(s).draft);
   const setActiveView = useAppStore((s) => s.setSidebarActiveView);
   const openPopoverAfterPickerCloseRef = useRef(false);
   const {
@@ -37,12 +41,11 @@ export function TasksViewPicker() {
     newViewDisabledReason,
   } = useSidebarViewPopover();
 
-  const activeView = useMemo(
-    () => views.find((v) => v.id === activeViewId) ?? views[0],
-    [views, activeViewId],
-  );
+  const activeView = views.find((view) => view.id === activeViewId) ?? views[0];
   const hasDraft = !!draft && draft.baseViewId === activeViewId;
-  const activeLabel = activeView?.name ?? t("sidebar:viewAll");
+  const activeLabel = activeView ? sidebarViewName(activeView, t) : t("sidebar:viewAll");
+
+  if (!workspaceId) return null;
 
   return (
     <div className="flex items-center gap-0.5">
@@ -81,7 +84,7 @@ export function TasksViewPicker() {
                 className="cursor-pointer gap-2 text-xs"
               >
                 <IconCheck className={cn("h-3.5 w-3.5", isActive ? "opacity-100" : "opacity-0")} />
-                <span className="truncate">{view.name}</span>
+                <span className="truncate">{sidebarViewName(view, t)}</span>
               </DropdownMenuItem>
             );
           })}
@@ -96,6 +99,7 @@ export function TasksViewPicker() {
         </DropdownMenuContent>
       </DropdownMenu>
       <SidebarFilterPopover
+        key={workspaceId}
         open={open}
         onOpenChange={onOpenChange}
         renameRequestedViewId={renameRequestedViewId}

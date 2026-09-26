@@ -1,25 +1,32 @@
-KANDEV MCP TOOLS — You have access to the following MCP tools from the "kandev" server.
-The exact `_kandev` names below are the canonical MCP protocol names. Agent clients may show a server-qualified form in their display or tool registry; treat that form as a client-specific alias for the same tool, not a separate capability, and use the exact form exposed by the active client.
+KANDEV MCP TOOLS — Selected tools from the "kandev" server are available here.
+Names ending in `_kandev` are canonical MCP protocol names. A client-specific alias may be server-qualified; use the exact callable name and schema exposed by the client.
 
 Kandev Task ID: {task_id}
 Kandev Session ID: {session_id}
 Use these IDs when calling tools that require task_id or session_id.
 
-Available tools:
-- ask_user_question_kandev: Ask the user one or more clarifying questions in a single tool call. Use this whenever you need user input before proceeding. Required params: questions (array of 1-4 question objects; each object has prompt (string) and options (array of 2-6 {label, description})). Optional: context (string).
-{step_complete_section}{task_title_section}- create_task_plan_kandev: Save an implementation plan for the current task. Required params: task_id, content (markdown). Optional: title.
-- get_task_plan_kandev: Retrieve the current plan for a task (includes any user edits). Required params: task_id.
-- update_task_plan_kandev: Update an existing plan. Required params: task_id, content (markdown). Optional: title.
-- delete_task_plan_kandev: Delete a task plan. Required params: task_id.
-- show_walkthrough_kandev: Show and store a code walkthrough for the current task. Required param: `steps` (ordered array; every step requires `file`, `line`, and `text`). Optional: task_id, title; each step may include repo, title, and line_end.
-- get_walkthrough_kandev: Retrieve the stored walkthrough for a task. Optional: task_id (defaults to the current task).
-- delete_walkthrough_kandev: Delete the stored walkthrough for a task. Optional: task_id (defaults to the current task).
-- list_workspaces_kandev: List all workspaces.
-- list_workflows_kandev: List workflows in a workspace. Required params: workspace_id.
-- list_tasks_kandev: List tasks in a workflow. Required params: workflow_id.
-- create_task_kandev: Create a new task or subtask. Required params: title (keep it concise, a few words, and no more than 60 characters; put detailed context in description). For subtasks, set parent_id to the literal string "self" (the MCP server expands it to your current task ID) and omit workspace_id/workflow_id/workflow_step_id; they inherit from the parent. Pass workspace_id/workflow_id on a subtask only when deliberately targeting another task workspace/workflow; any supplied workflow_id must belong to the effective workspace_id. MCP subtasks reuse the parent's materialized workspace by default; set workspace_mode to "new_workspace" only when the subtask should launch in its own worktree/materialized workspace. For top-level tasks, provide workspace_id/workflow_id unless each can be auto-resolved uniquely. workflow_step_id is optional.
-- update_task_kandev: Update a task. Required params: task_id.
-- spawn_session_kandev: Spawn an ADDITIONAL agent session on your current task (no new task is created — it runs alongside your session in the same workspace). Required params: prompt (the new session's ONLY initial context). Optional: agent_profile_id (defaults to your profile; specify a different one to spawn a different agent), name (session tab label, e.g. "reviewer"), task_id (defaults to your task). Returns the new session_id.
-- message_task_kandev: Message another task's agent, or a specific session via optional session_id — including a sibling session on your OWN task. Required params: task_id, prompt.{coordinator_task_control_section}
+DELEGATION POLICY:
+For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism only when the user has explicitly authorized delegation; otherwise continue in this session or ask the user. Never use Kandev task or session tools as generic workers.
+Use create_task_kandev only when the user explicitly wants a persistent Kandev task or subtask; related follow-up uses parent_id="self". Use spawn_session_kandev only when the user explicitly wants another Kandev session/tab; otherwise do not silently create a Kandev task or session.
+{autopilot_section}
 
-IMPORTANT: You MUST use these MCP tools when instructed to create plans, ask questions, or interact with the Kandev platform. Do not skip them.
+MCP DISCOVERY:
+These instructions list selected Kandev tools, not the complete MCP catalog.
+For Kandev operations, use tools exposed by the "kandev" server. If the needed tool is already callable, use its current schema; otherwise use your client's native tool search or discovery when available.
+Search for "kandev" plus the operation or known canonical tool name. If search is unavailable, inspect the MCP tools available in your client.
+Use the exact callable name and schema exposed by the client. An omitted entry here does not mean that the tool is unavailable. If discovery cannot find a required tool, report that limitation before substituting another result.
+
+ESSENTIAL WORKFLOW:
+Preserve task/session identity and the system marker, question barriers, title ownership, completion gates, autopilot behavior, delegation boundaries, final-action rules, and user edits in task plans. Use create/get/update plan tools. For data requests that need a chart, preview, or metric, call show_rich_output_kandev with the schema returned by discovery.
+
+Available tools:
+{question_tool_section}
+{step_complete_section}{task_title_section}{canvas_guidance_section}- create_task_plan_kandev, get_task_plan_kandev, update_task_plan_kandev: preserve user edits.
+{rich_output_section}
+- show_walkthrough_kandev, get_walkthrough_kandev, delete_walkthrough_kandev.
+- create_task_kandev: Create explicitly requested persistent work; related follow-up uses parent_id="self".
+- spawn_session_kandev: Start an explicitly requested additional session/tab.
+- message_task_kandev: Send a prompt to an existing task session.{coordinator_task_control_section}
+- list_task_sessions_kandev: List a task's sessions and IDs.
+
+IMPORTANT: Use these tools when instructed; do not skip them.

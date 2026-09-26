@@ -12,9 +12,13 @@ type TaskCreateLastUsedPatch = {
   branch?: string | null;
   agent_profile_id?: string | null;
   executor_profile_id?: string | null;
+  workspace_id?: string | null;
+  workflow_id?: string | null;
 };
 
 type TaskCreateLastUsedPayload = {
+  workspace_id?: string;
+  workflow_id?: string;
   repositories?: Array<{
     repository_id?: string;
     base_branch?: string;
@@ -59,7 +63,7 @@ export function findDirectLocalExecutorProfile(
 
 type CreatedLocalRepositoryForm = Pick<
   DialogFormState,
-  "updateRepository" | "setExecutorId" | "setExecutorProfileId"
+  "repositories" | "updateRepository" | "setExecutorId" | "setExecutorProfileId"
 >;
 
 export function applyCreatedLocalRepository({
@@ -75,20 +79,25 @@ export function applyCreatedLocalRepository({
   repository: Repository;
   workspaceId: string;
   upsertWorkspaceRepository: (workspaceId: string, repository: Repository) => void;
-  executorSelection: DirectLocalExecutorSelection;
+  executorSelection: DirectLocalExecutorSelection | null;
 }) {
+  upsertWorkspaceRepository(workspaceId, repository);
+  if (!fs.repositories.some((row) => row.key === rowKey)) return;
+  const selection = fs.repositories.length === 1 ? executorSelection : null;
   fs.updateRepository(rowKey, {
     repositoryId: repository.id,
     localPath: undefined,
     branch: "main",
+    branchPolicyId: undefined,
   });
-  fs.setExecutorId(executorSelection.executorId);
-  fs.setExecutorProfileId(executorSelection.executorProfileId);
-  upsertWorkspaceRepository(workspaceId, repository);
+  if (selection) {
+    fs.setExecutorId(selection.executorId);
+    fs.setExecutorProfileId(selection.executorProfileId);
+  }
   syncTaskCreateLastUsed({
     repository_id: repository.id,
     branch: "main",
-    executor_profile_id: executorSelection.executorProfileId,
+    ...(selection ? { executor_profile_id: selection.executorProfileId } : {}),
   });
 }
 
@@ -136,6 +145,13 @@ function taskCreateLastUsedSettingsMatchQueue(
 ) {
   return Object.entries(lastQueuedLastUsed).every(([key, value]) => {
     if (value === undefined) return true;
+    if (key === "workflowIdsByWorkspace") {
+      const queued = value as Record<string, string>;
+      const synced = settings?.workflowIdsByWorkspace ?? {};
+      return Object.entries(queued).every(([workspaceId, workflowId]) => {
+        return synced[workspaceId] === workflowId;
+      });
+    }
     return settings?.[key as keyof TaskCreateLastUsedState] === value;
   });
 }
@@ -148,6 +164,10 @@ function mapTaskCreateLastUsedPatch(
     branch: pending.branch,
     agentProfileId: pending.agent_profile_id,
     executorProfileId: pending.executor_profile_id,
+    workflowIdsByWorkspace:
+      pending.workspace_id && pending.workflow_id
+        ? { [pending.workspace_id]: pending.workflow_id }
+        : undefined,
   };
 }
 
@@ -158,10 +178,8 @@ function compactTaskCreateLastUsedState(state: Partial<TaskCreateLastUsedState>)
 }
 
 export function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
-  lastQueuedLastUsed = {
-    ...lastQueuedLastUsed,
-    ...compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(patch)),
-  };
+  const mapped = compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(patch));
+  lastQueuedLastUsed = mergeTaskCreateLastUsedState(lastQueuedLastUsed, mapped);
   lastUsedDebug("overlay-updated", { patch, queued: lastQueuedLastUsed });
 }
 
@@ -174,13 +192,33 @@ export function queueTaskCreateLastUsedFromPayload(
   payload: TaskCreateLastUsedPayload | null | undefined,
 ) {
   if (!payload) return;
+  const previousWorkflowIdsByWorkspace = lastQueuedLastUsed.workflowIdsByWorkspace;
+  lastQueuedLastUsed = previousWorkflowIdsByWorkspace
+    ? { workflowIdsByWorkspace: previousWorkflowIdsByWorkspace }
+    : {};
   const firstWorkspaceRepo = payload.repositories?.find((repo) => repo.repository_id);
-  replaceQueuedTaskCreateLastUsed({
+  syncTaskCreateLastUsed({
+    workspace_id: payload.workspace_id,
+    workflow_id: payload.workflow_id,
     repository_id: firstWorkspaceRepo?.repository_id,
     branch: firstWorkspaceRepo ? taskCreateLastUsedPayloadBranch(firstWorkspaceRepo) : undefined,
     agent_profile_id: payload.agent_profile_id,
     executor_profile_id: payload.executor_profile_id,
   });
+}
+
+function mergeTaskCreateLastUsedState(
+  previous: Partial<TaskCreateLastUsedState>,
+  patch: Partial<TaskCreateLastUsedState>,
+): Partial<TaskCreateLastUsedState> {
+  const merged = { ...previous, ...patch };
+  if (patch.workflowIdsByWorkspace) {
+    merged.workflowIdsByWorkspace = {
+      ...(previous.workflowIdsByWorkspace ?? {}),
+      ...patch.workflowIdsByWorkspace,
+    };
+  }
+  return merged;
 }
 
 function taskCreateLastUsedPayloadBranch(
@@ -229,8 +267,20 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
       const wasLocalPath = Boolean(fs.repositories.find((row) => row.key === key)?.localPath);
       const isLocalPath = !isWorkspaceRepo && Boolean(value);
       const patch: Partial<TaskRepoRow> = isWorkspaceRepo
-        ? { repositoryId: value, localPath: undefined, branch: "" }
-        : { repositoryId: undefined, localPath: value, branch: "" };
+        ? {
+            repositoryId: value,
+            localPath: undefined,
+            branch: "",
+            baseBranch: undefined,
+            branchPolicyId: undefined,
+          }
+        : {
+            repositoryId: undefined,
+            localPath: value,
+            branch: "",
+            baseBranch: undefined,
+            branchPolicyId: undefined,
+          };
       fs.updateRepository(key, patch);
       if (wasLocalPath !== isLocalPath) {
         fs.setExecutorId("");
@@ -250,13 +300,25 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
 
   const handleRowBranchChange = useCallback(
     (key: string, value: string) => {
-      fs.updateRepository(key, { branch: value });
+      fs.updateRepository(key, { branch: value, branchPolicyId: undefined });
       syncTaskCreateLastUsed({ branch: value });
     },
     [fs],
   );
 
-  return { handleRowRepositoryChange, handleRowBranchChange };
+  const handleRowPolicyChange = useCallback(
+    (key: string, policyId: string, baseBranch: string) => {
+      fs.updateRepository(key, {
+        branch: baseBranch,
+        baseBranch,
+        branchPolicyId: policyId,
+      });
+      syncTaskCreateLastUsed({ branch: baseBranch });
+    },
+    [fs],
+  );
+
+  return { handleRowRepositoryChange, handleRowBranchChange, handleRowPolicyChange };
 }
 
 function useProfileAndNameHandlers(fs: DialogFormState) {
@@ -283,7 +345,10 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
     [fs],
   );
   const handleWorkflowChange = useCallback(
-    (value: string) => fs.setSelectedWorkflowId(value),
+    (value: string) => {
+      fs.setSelectedWorkflowId(value);
+      fs.setWorkflowAgentOverrides({});
+    },
     [fs],
   );
   return {
@@ -313,6 +378,7 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
     // useRemote when flipping the other way.
     if (next) {
       fs.setNoRepository(false);
+      fs.setPreferLocalExecutor(false);
       syncTaskCreateLastUsed({ repository_id: null, branch: null });
     }
     clearFreshBranch(fs);
@@ -336,19 +402,22 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
   const handleToggleNoRepository = useCallback(() => {
     const next = !fs.noRepository;
     fs.setNoRepository(next);
+    // Clear the executor selection in both directions so the destination
+    // source mode can resolve its own policy. None mode will re-pick Local;
+    // Repo mode will re-pick the workspace default or Worktree fallback.
+    fs.setExecutorId("");
+    fs.setExecutorProfileId("");
+    fs.setPreferLocalExecutor(false);
+    fs.setWorkspacePath("");
     if (next) {
       fs.setUseRemote(false);
-      // Clear the executor selection so the auto-fill effect re-picks a
-      // non-worktree default (worktree is unworkable in no-repo mode).
-      fs.setExecutorId("");
-      fs.setExecutorProfileId("");
+      // None mode excludes Worktree, so its auto-fill effect picks a
+      // non-worktree default.
       syncTaskCreateLastUsed({
         repository_id: null,
         branch: null,
         executor_profile_id: null,
       });
-    } else {
-      fs.setWorkspacePath("");
     }
   }, [fs]);
 
@@ -385,7 +454,7 @@ export function useDialogHandlers(
   );
   const handleLocalRepositoryCreated = useCallback(
     (rowKey: string, repository: Repository) => {
-      if (!context?.workspaceId || !directLocalExecutorSelection) return;
+      if (!context?.workspaceId) return;
       applyCreatedLocalRepository({
         fs,
         rowKey,
@@ -394,7 +463,9 @@ export function useDialogHandlers(
         upsertWorkspaceRepository: context.upsertWorkspaceRepository,
         executorSelection: directLocalExecutorSelection,
       });
-      clearFreshBranch(fs);
+      if (fs.repositories.length === 1 && fs.repositories.some((row) => row.key === rowKey)) {
+        clearFreshBranch(fs);
+      }
     },
     [context, directLocalExecutorSelection, fs],
   );

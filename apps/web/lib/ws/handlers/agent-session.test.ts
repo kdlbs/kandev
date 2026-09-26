@@ -11,6 +11,9 @@ import type {
   TaskSessionCancellationChangedPayload,
   TaskSessionStateChangedPayload,
 } from "@/lib/types/backend";
+const QUEUE_STATUS_ACTION = `message.queue.status_changed`;
+const CURRENT_INCARNATION = `incarnation-2`;
+const CURRENT_STATUS_EPOCH = `status-epoch-1`;
 
 function makeStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
@@ -19,6 +22,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
       activeSessionId: null,
       pinnedSessionId: null,
       lastSessionByTaskId: {},
+      resumeSkippedSessionIds: {},
     },
     taskSessions: { items: {} },
     taskSessionsByTask: { itemsByTaskId: {} },
@@ -28,10 +32,15 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     setActiveSession: vi.fn(),
     setActiveSessionAuto: vi.fn(),
     setSessionAgentctlStatus: vi.fn(),
+    setResumeSkipped: vi.fn(),
+    clearLaunchWarning: vi.fn(),
     setSessionFailureNotification: vi.fn(),
     setContextWindow: vi.fn(),
     clearContextWindow: vi.fn(),
+    queue: { bySessionId: {}, metaBySessionId: {} },
+    setQueueEntries: vi.fn(),
     clearLegacyGitStatusEntry: vi.fn(),
+    bumpSessionGitCheckoutGeneration: vi.fn(),
     bumpSessionCommitsRefetch: vi.fn(),
     bumpWorkspaceFilesRefresh: vi.fn(),
     reconcileWorkspaceSourcesAdopted: vi.fn(),
@@ -46,12 +55,293 @@ function makeStore(overrides: Record<string, unknown> = {}) {
   } as unknown as StoreApi<AppState>;
 }
 
+describe("message.queue.status_changed handler", () => {
+  it("stores the backend-owned Auto-run policy", () => {
+    const setQueueEntries = vi.fn();
+    const store = makeStore({ setQueueEntries });
+    const handler = registerTaskSessionHandlers(store)[QUEUE_STATUS_ACTION]!;
+
+    handler({
+      id: "queue-status-1",
+      type: "notification",
+      action: QUEUE_STATUS_ACTION,
+      payload: {
+        session_id: "s-1",
+        entries: [],
+        count: 0,
+        max: 10,
+        merge_enabled: true,
+        auto_run: false,
+      },
+    } as never);
+
+    expect(setQueueEntries).toHaveBeenCalledWith("s-1", [], {
+      count: 0,
+      max: 10,
+      mergeEnabled: true,
+      autoRun: false,
+    });
+  });
+
+  it("preserves a known OFF policy when an older publisher omits policy fields", () => {
+    const setQueueEntries = vi.fn();
+    const store = makeStore({
+      setQueueEntries,
+      queue: {
+        bySessionId: { "s-1": [] },
+        metaBySessionId: {
+          "s-1": { count: 1, max: 10, mergeEnabled: false, autoRun: false },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[QUEUE_STATUS_ACTION]!;
+
+    handler({
+      id: "queue-status-compat",
+      type: "notification",
+      action: QUEUE_STATUS_ACTION,
+      payload: { session_id: "s-1", entries: [], count: 0, max: 10 },
+    } as never);
+
+    expect(setQueueEntries).toHaveBeenCalledWith("s-1", [], {
+      count: 0,
+      max: 10,
+      mergeEnabled: false,
+      autoRun: false,
+    });
+  });
+
+  it("preserves the known queue capacity when an older publisher omits max", () => {
+    const setQueueEntries = vi.fn();
+    const store = makeStore({
+      setQueueEntries,
+      queue: {
+        bySessionId: { "s-1": [] },
+        metaBySessionId: {
+          "s-1": { count: 1, max: 10, mergeEnabled: true, autoRun: true },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)["message.queue.status_changed"]!;
+
+    handler({
+      id: "queue-status-capacity-compat",
+      type: "notification",
+      action: "message.queue.status_changed",
+      payload: { session_id: "s-1", entries: [], count: 0 },
+    } as never);
+
+    expect(setQueueEntries).toHaveBeenCalledWith("s-1", [], {
+      count: 0,
+      max: 10,
+      mergeEnabled: true,
+      autoRun: true,
+    });
+  });
+});
+function makeIncarnationPolicyStore(setQueueEntries: ReturnType<typeof vi.fn>) {
+  return makeStore({
+    setQueueEntries,
+    taskSessions: {
+      items: {
+        "s-1": {
+          id: "s-1",
+          task_id: "task-1",
+          queue_incarnation_id: CURRENT_INCARNATION,
+        },
+      },
+    },
+    queue: {
+      bySessionId: { "s-1": [] },
+      metaBySessionId: {
+        "s-1": {
+          count: 0,
+          max: 10,
+          mergeEnabled: true,
+          autoRun: true,
+          taskId: "task-1",
+          sessionIncarnationId: CURRENT_INCARNATION,
+          statusEpoch: CURRENT_STATUS_EPOCH,
+          statusGeneration: 4,
+          autoMergeAvailable: true,
+          autoMergeEnabled: false,
+          autoMergeSource: "session",
+          autoMergeRevision: 1,
+        },
+      },
+    },
+  });
+}
+
+it("rejects delayed legacy queue status after an incarnated session refetch", () => {
+  const setQueueEntries = vi.fn();
+  const store = makeStore({
+    setQueueEntries,
+    taskSessions: {
+      items: {
+        "s-1": {
+          id: "s-1",
+          task_id: "task-1",
+          queue_incarnation_id: CURRENT_INCARNATION,
+        },
+      },
+    },
+    queue: { bySessionId: {}, metaBySessionId: {} },
+  });
+  const handler = registerTaskSessionHandlers(store)[QUEUE_STATUS_ACTION]!;
+
+  handler({
+    id: "delayed-legacy-status",
+    type: "notification",
+    action: QUEUE_STATUS_ACTION,
+    payload: {
+      session_id: "s-1",
+      entries: [{ id: "stale-entry", content: "stale" }],
+      count: 1,
+      max: 10,
+      auto_run: false,
+    },
+  } as never);
+
+  expect(setQueueEntries).not.toHaveBeenCalled();
+});
+
+it("applies only the current incarnation's newest Auto-merge policy", () => {
+  const setQueueEntries = vi.fn();
+  const store = makeIncarnationPolicyStore(setQueueEntries);
+  const handler = registerTaskSessionHandlers(store)[QUEUE_STATUS_ACTION]!;
+
+  handler({
+    id: "stale-incarnation",
+    type: "notification",
+    action: QUEUE_STATUS_ACTION,
+    payload: {
+      task_id: "task-1",
+      session_id: "s-1",
+      session_incarnation_id: "incarnation-1",
+      status_epoch: "incarnation-1",
+      status_generation: 99,
+      entries: [],
+      count: 0,
+      max: 10,
+      auto_merge_available: true,
+      auto_merge_enabled: true,
+      auto_merge_source: "global",
+      auto_merge_revision: 8,
+    },
+  } as never);
+  expect(setQueueEntries).not.toHaveBeenCalled();
+
+  handler({
+    id: "new-status",
+    type: "notification",
+    action: QUEUE_STATUS_ACTION,
+    payload: {
+      task_id: "task-1",
+      session_id: "s-1",
+      session_incarnation_id: CURRENT_INCARNATION,
+      status_epoch: CURRENT_STATUS_EPOCH,
+      status_generation: 5,
+      entries: [],
+      count: 0,
+      max: 10,
+      merge_enabled: true,
+      auto_run: true,
+      auto_merge_available: true,
+      auto_merge_enabled: true,
+      auto_merge_source: "session",
+      auto_merge_revision: 2,
+    },
+  } as never);
+  expect(setQueueEntries).toHaveBeenCalledWith(
+    "s-1",
+    [],
+    expect.objectContaining({
+      sessionIncarnationId: CURRENT_INCARNATION,
+      statusGeneration: 5,
+      autoMergeAvailable: true,
+      autoMergeEnabled: true,
+      autoMergeSource: "session",
+      autoMergeRevision: 2,
+    }),
+  );
+});
+
+it("establishes a new backend status epoch and rejects delayed retired events", () => {
+  const setQueueEntries = vi.fn();
+  const store = makeIncarnationPolicyStore(setQueueEntries);
+  const handler = registerTaskSessionHandlers(store)[QUEUE_STATUS_ACTION]!;
+
+  handler({
+    id: "new-backend-epoch",
+    type: "notification",
+    action: QUEUE_STATUS_ACTION,
+    payload: {
+      task_id: "task-1",
+      session_id: "s-1",
+      session_incarnation_id: CURRENT_INCARNATION,
+      status_epoch: "status-epoch-2",
+      status_generation: 1,
+      entries: [{ id: "current-entry", content: "current" }],
+      count: 1,
+      max: 10,
+      merge_enabled: true,
+      auto_run: false,
+      auto_merge_available: true,
+      auto_merge_enabled: true,
+      auto_merge_source: "session",
+      auto_merge_revision: 2,
+    },
+  } as never);
+  expect(setQueueEntries).toHaveBeenCalledWith(
+    "s-1",
+    [{ id: "current-entry", content: "current" }],
+    expect.objectContaining({
+      statusEpoch: "status-epoch-2",
+      statusGeneration: 1,
+      retiredStatusEpochs: [CURRENT_STATUS_EPOCH],
+    }),
+    { establishStatusEpoch: true },
+  );
+
+  store.getState().queue.metaBySessionId["s-1"] = {
+    ...store.getState().queue.metaBySessionId["s-1"],
+    statusEpoch: "status-epoch-2",
+    statusGeneration: 1,
+    retiredStatusEpochs: [CURRENT_STATUS_EPOCH],
+  };
+  handler({
+    id: "delayed-retired-backend-epoch",
+    type: "notification",
+    action: QUEUE_STATUS_ACTION,
+    payload: {
+      task_id: "task-1",
+      session_id: "s-1",
+      session_incarnation_id: CURRENT_INCARNATION,
+      status_epoch: CURRENT_STATUS_EPOCH,
+      status_generation: 99,
+      entries: [{ id: "stale-entry", content: "stale" }],
+      count: 1,
+      max: 10,
+      merge_enabled: true,
+      auto_run: false,
+      auto_merge_available: true,
+      auto_merge_enabled: true,
+      auto_merge_source: "session",
+      auto_merge_revision: 2,
+    },
+  } as never);
+
+  expect(setQueueEntries).toHaveBeenCalledTimes(1);
+});
+
 const STATE_CHANGED_EVENT = "session.state_changed";
 const ACTIVITY_EVENT = "session.activity_changed";
 const CANCELLATION_EVENT = "session.cancellation_changed";
 const RECOVERABLE_ERROR_MESSAGE = "peer disconnected before response";
 const RECOVERABLE_ERROR_AT = "2026-06-14T14:06:40Z";
 const TASK_ROOT = "/task-root";
+const IDLE_AT = "2026-08-17T07:00:00Z";
 
 function makeMessage(payload: TaskSessionStateChangedPayload) {
   return {
@@ -62,11 +352,7 @@ function makeMessage(payload: TaskSessionStateChangedPayload) {
   };
 }
 
-function makeActivityMessage(
-  payload: Omit<TaskSessionActivityChangedPayload, "active_subagent_count"> & {
-    active_subagent_count?: number;
-  },
-) {
+function makeActivityMessage(payload: TaskSessionActivityChangedPayload) {
   return {
     id: "m",
     type: "notification" as const,
@@ -131,6 +417,7 @@ function assertRealStoreActivityRouting() {
   expect(deriveSessionInputMode(store.getState().taskSessions.items["s-2"])).toBe("direct");
 }
 
+// eslint-disable-next-line max-lines-per-function -- state transition contracts use the shared store fixture.
 describe("session.state_changed handler", () => {
   let store: ReturnType<typeof makeStore>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -162,6 +449,35 @@ describe("session.state_changed handler", () => {
       taskId: "t-1",
       message: "container crashed",
     });
+  });
+
+  it("classifies stamped typed failures as launch failures without actions", () => {
+    store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
+      },
+    });
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "FAILED",
+        error_message: "pull request is closed",
+        session_metadata: {
+          last_agent_error: {
+            message: "pull request is closed",
+            code: "pr_already_closed",
+            stamp: "closed-pr-stamp",
+          },
+        },
+      }),
+    );
+
+    expect(store.getState().setSessionFailureNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ isLaunchFailure: true }),
+    );
   });
 
   it("does not set failure notification when session is already FAILED", () => {
@@ -222,6 +538,61 @@ describe("session.state_changed handler", () => {
     );
 
     expect(store.getState().setSessionFailureNotification).not.toHaveBeenCalled();
+  });
+
+  it("marks a closed quick chat from an active-to-settled event using old_state", () => {
+    const markQuickChatUnseenIdle = vi.fn();
+    const recordQuickChatSettled = vi.fn(() => true);
+    store = makeStore({
+      quickChat: {
+        isOpen: false,
+        activeSessionId: null,
+        sessions: [{ sessionId: "s-1", workspaceId: "workspace-1" }],
+      },
+      markQuickChatUnseenIdle,
+      recordQuickChatSettled,
+      taskSessions: { items: {} },
+    });
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        old_state: "RUNNING",
+        new_state: "IDLE",
+        updated_at: IDLE_AT,
+      }),
+    );
+
+    expect(recordQuickChatSettled).toHaveBeenCalledWith("s-1", IDLE_AT);
+    expect(markQuickChatUnseenIdle).toHaveBeenCalledWith("s-1", "workspace-1");
+  });
+
+  it("does not mark an active-to-settled event for a session outside quick chat", () => {
+    const markQuickChatUnseenIdle = vi.fn();
+    const recordQuickChatSettled = vi.fn(() => true);
+    store = makeStore({
+      quickChat: { isOpen: false, activeSessionId: null, sessions: [] },
+      markQuickChatUnseenIdle,
+      recordQuickChatSettled,
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING" } },
+      },
+    });
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "IDLE",
+        updated_at: IDLE_AT,
+      }),
+    );
+
+    expect(recordQuickChatSettled).toHaveBeenCalledWith("s-1", IDLE_AT);
+    expect(markQuickChatUnseenIdle).not.toHaveBeenCalled();
   });
 });
 
@@ -332,12 +703,14 @@ describe("session.workspace_sources.updated handler", () => {
   it("adopts the workspace root and bumps the Files refresh key", () => {
     const setTaskSession = vi.fn();
     const bumpWorkspaceFilesRefresh = vi.fn();
+    const bumpSessionGitCheckoutGeneration = vi.fn();
     const store = makeStore({
       taskSessions: {
         items: { "s-1": { id: "s-1", task_id: "t-1", state: "IDLE", worktree_path: "/old" } },
       },
       setTaskSession,
       bumpWorkspaceFilesRefresh,
+      bumpSessionGitCheckoutGeneration,
     });
 
     const handler = registerTaskSessionHandlers(store)["session.workspace_sources.updated"]!;
@@ -345,6 +718,7 @@ describe("session.workspace_sources.updated handler", () => {
       id: "msg-workspace-sources",
       type: "notification",
       action: "session.workspace_sources.updated",
+      timestamp: "2026-07-23T10:03:00.000Z",
       payload: { task_id: "t-1", session_id: "s-1", workspace_path: "/new" },
     } as never);
 
@@ -352,7 +726,13 @@ describe("session.workspace_sources.updated handler", () => {
       expect.objectContaining({ id: "s-1", worktree_path: "/old", workspace_path: "/new" }),
     );
     expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
-    expect(store.getState().reconcileWorkspaceSourcesAdopted).toHaveBeenCalledWith(["s-1"]);
+    expect(bumpSessionGitCheckoutGeneration).toHaveBeenCalledWith("s-1");
+    // The server-issued envelope timestamp is forwarded as the adoption
+    // boundary so the client clock can never retire legitimate turns.
+    expect(store.getState().reconcileWorkspaceSourcesAdopted).toHaveBeenCalledWith(
+      ["s-1"],
+      "2026-07-23T10:03:00.000Z",
+    );
   });
 
   it("does not clear the workspace root when a partial event omits it", () => {
@@ -1088,9 +1468,72 @@ describe("session.state_changed → agentctl ready fallback", () => {
     );
   });
 
+  it("settles the matching workspace restore when agentctl becomes ready", () => {
+    const attempt = {
+      taskId: "t-1",
+      sessionId: "s-1",
+      environmentId: "env-1",
+      revision: 2,
+      status: "pending",
+    };
+    const completeWorkspaceRestoration = vi.fn(() => true);
+    const bumpWorkspaceFilesRefresh = vi.fn();
+    const store = makeStore({
+      environmentIdBySessionId: { "s-1": "env-1" },
+      workspaceRestoration: { byEnvironmentId: { "env-1": attempt } },
+      completeWorkspaceRestoration,
+      bumpWorkspaceFilesRefresh,
+    });
+    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: "session.agentctl_ready",
+      timestamp: TS,
+      payload: { task_id: "t-1", session_id: "s-1", task_environment_id: "env-1" },
+    });
+
+    expect(completeWorkspaceRestoration).toHaveBeenCalledWith(attempt);
+    expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
+  });
+
+  it("settles the matching workspace restore with sanitized agentctl error details", () => {
+    const attempt = {
+      taskId: "t-1",
+      sessionId: "s-1",
+      environmentId: "env-1",
+      revision: 2,
+      status: "pending",
+    };
+    const failWorkspaceRestoration = vi.fn();
+    const store = makeStore({
+      environmentIdBySessionId: { "s-1": "env-1" },
+      workspaceRestoration: { byEnvironmentId: { "env-1": attempt } },
+      failWorkspaceRestoration,
+    });
+    const handler = registerTaskSessionHandlers(store)["session.agentctl_error"]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: "session.agentctl_error",
+      timestamp: TS,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        task_environment_id: "env-1",
+        error_message: "backend\u0000failure",
+      },
+    });
+
+    expect(failWorkspaceRestoration).toHaveBeenCalledWith(attempt, "backendfailure");
+  });
+
   it("preserves the primary worktree when a sibling agentctl_ready arrives", () => {
     const upsertTaskSessionFromEvent = vi.fn();
     const setTaskSession = vi.fn();
+    const bumpSessionGitCheckoutGeneration = vi.fn();
     const store = makeStore({
       taskSessions: {
         items: {
@@ -1109,6 +1552,7 @@ describe("session.state_changed → agentctl ready fallback", () => {
       sessionWorktreesBySessionId: { itemsBySessionId: { "s-1": ["primary-worktree"] } },
       setSessionAgentctlStatus: vi.fn(),
       setTaskSession,
+      bumpSessionGitCheckoutGeneration,
       upsertTaskSessionFromEvent,
       setWorktree: vi.fn(),
       setSessionWorktrees: vi.fn(),
@@ -1151,6 +1595,7 @@ describe("session.state_changed → agentctl ready fallback", () => {
         workspace_path: TASK_ROOT,
       }),
     );
+    expect(bumpSessionGitCheckoutGeneration).toHaveBeenCalledWith("s-1");
   });
 
   it("does not call upsertTaskSessionFromEvent when agentctl payload omits task_environment_id", () => {
@@ -1341,6 +1786,142 @@ describe("session.activity_changed handler — fine-grained busy signal", () => 
   });
 });
 
+// task-05's publishParkedTransition shares this wire event but omits
+// `foreground_activity` entirely (unlike the ADR-0049 flip, which always
+// sends it, explicit null included). A naive `payload.foreground_activity
+// ?? null` default would clobber a live busy signal on every parked-only
+// event.
+describe("session.activity_changed handler — parked-only payload shape", () => {
+  it("does not clobber a live foreground_activity on a parked-only event", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING", foreground_activity: "generating" },
+        },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: ACTIVITY_EVENT,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        parked_on_background_work: true,
+        revision: 3,
+        parked_epoch: 100,
+      },
+    });
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      foreground_activity: "generating",
+      parked_on_background_work: true,
+      revision: 3,
+      parked_epoch: 100,
+    });
+  });
+
+  it("applies parked_on_background_work/revision/parked_epoch from a parked-only event", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "WAITING_FOR_INPUT" } },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: ACTIVITY_EVENT,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        parked_on_background_work: true,
+        revision: 1,
+        parked_epoch: 100,
+      },
+    });
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      parked_on_background_work: true,
+      revision: 1,
+      parked_epoch: 100,
+      foreground_activity: undefined,
+    });
+  });
+});
+
+// ResetAgentContext transitions a parked session WAITING_FOR_INPUT ->
+// STARTING before the backend's clearParkedOnSessionStateLeft publishes the
+// parked-only clear; the backend's own projection is already false by then,
+// so the later STARTING -> WAITING_FOR_INPUT settle never republishes.
+describe("session.activity_changed handler — parked-only clear during STARTING", () => {
+  it("applies a parked-only clear while the session reports STARTING", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "STARTING",
+            parked_on_background_work: true,
+          },
+        },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: ACTIVITY_EVENT,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        parked_on_background_work: false,
+        revision: 2,
+        parked_epoch: 100,
+      },
+    });
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      parked_on_background_work: false,
+      revision: 2,
+    });
+  });
+
+  it("still rejects a foreground-activity event while the session reports STARTING", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler(
+      makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "background" }),
+    );
+
+    expect(upsert).not.toHaveBeenCalled();
+  });
+});
+
 describe("session.state_changed carries and resets the busy substate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1478,5 +2059,32 @@ describe("session activity explicit-null contract", () => {
 
     expect(store.getState().taskSessions.items["s-1"].foreground_activity).toBe("background");
     expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
+  });
+});
+
+describe("session.state_changed resume-skipped clearing", () => {
+  let store: ReturnType<typeof makeStore>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let handler: (msg: any) => void;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "WAITING_FOR_INPUT" } },
+      },
+    });
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+  });
+
+  it("clears the resume-skipped marker on a RUNNING transition", () => {
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "RUNNING" }));
+    expect(store.getState().setResumeSkipped).toHaveBeenCalledWith("s-1", false);
+    expect(store.getState().clearLaunchWarning).toHaveBeenCalledWith("s-1");
+  });
+
+  it("does NOT clear the marker on a STARTING transition (failed resumes keep the retry button)", () => {
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "STARTING" }));
+    expect(store.getState().setResumeSkipped).not.toHaveBeenCalled();
   });
 });

@@ -1,15 +1,8 @@
 "use client";
 
-import { memo, useRef, useState, type ReactNode } from "react";
-import {
-  IconGitPullRequest,
-  IconCheck,
-  IconX,
-  IconClock,
-  IconChevronDown,
-  IconAlertTriangle,
-} from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
+import { memo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { IconChevronDown } from "@tabler/icons-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -27,78 +20,64 @@ import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import {
   aggregatePRStatusColor,
   getPRStatusColor,
-  hasPRChecksInProgressForDisplay,
-  hasPRChecksPassedWithoutReviewWaitForDisplay,
-  isPRDraft,
-  isPRAwaitingReview,
+  hasAnyPRMergeConflict,
+  hasPRMergeConflict,
+  getPRStatusAccessibleLabels,
   isPRReadyToMerge,
-  isPRWaitingOnBranchProtection,
 } from "@/components/github/pr-task-icon";
+import { PRStatusGlyph } from "@/components/github/pr-status-glyph";
 import { prIdentitySlug, prTaskKey } from "@/components/github/pr-utils";
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import { useAppStore } from "@/components/state-provider";
+import {
+  ChangeRequestTopbarButton,
+  ChangeRequestTopbarContent,
+} from "@/components/integrations/change-request-status-chrome";
 import type { TaskPR } from "@/lib/types/github";
 
 const POPOVER_OPEN_DELAY_MS = 150;
 const POPOVER_CLOSE_DELAY_MS = 150;
 type TriggerRef = { current: HTMLButtonElement | null };
 
+function prTopbarAccessibleStatus(pr: TaskPR, t: ReturnType<typeof useTranslation>["t"]): string {
+  const parts = [
+    t("github:pullRequestStatus", { number: pr.pr_number }),
+    ...getPRStatusAccessibleLabels(pr, t),
+  ];
+  if (hasPRMergeConflict(pr)) parts.push(t("github:conflicts"));
+  return parts.join(", ");
+}
+
+function multiPRAccessibleStatus(prs: TaskPR[], t: ReturnType<typeof useTranslation>["t"]): string {
+  const parts = [
+    `${prs.length} ${t("github:prs")}`,
+    ...new Set(prs.flatMap((pr) => getPRStatusAccessibleLabels(pr, t))),
+  ];
+  if (hasAnyPRMergeConflict(prs)) parts.push(t("github:conflicts"));
+  return parts.join(", ");
+}
+
 function focusAfterCollapse(triggerRef?: TriggerRef) {
-  if (!triggerRef) return;
-  setTimeout(() => triggerRef.current?.focus(), 0);
+  if (triggerRef) setTimeout(() => triggerRef.current?.focus(), 0);
 }
 
-// Badge for the hard merge blockers that must beat ready/awaiting-review:
-// conflicts (red) and behind-base (amber). Mirrors openMergeBlockerColor so
-// the badge agrees with the pill colour. Returns null otherwise. ("blocked"
-// is handled later, after awaiting-review.)
-function mergeBlockerBadge(pr: TaskPR): ReactNode | null {
-  if (pr.state !== "open") return null;
-  if (pr.mergeable_state === "dirty") {
-    return <IconAlertTriangle className="h-3 w-3 text-red-500" />;
-  }
-  if (pr.mergeable_state === "behind") {
-    return <IconAlertTriangle className="h-3 w-3 text-yellow-500" />;
-  }
-  return null;
-}
-
-function PRStatusIcon({ pr }: { pr: TaskPR }) {
-  // Terminal states take priority
-  if (pr.state === "merged") {
-    return <IconCheck className="h-3 w-3 text-purple-500" />;
-  }
-  if (pr.state === "closed") {
-    return <IconX className="h-3 w-3 text-muted-foreground" />;
-  }
-  // Review/check states only matter for open PRs
-  if (pr.checks_state === "failure" || pr.review_state === "changes_requested") {
-    return <IconX className="h-3 w-3 text-red-500" />;
-  }
-  if (isPRDraft(pr)) {
-    return <IconGitPullRequest className="h-3 w-3 text-muted-foreground" />;
-  }
-  const blockerBadge = mergeBlockerBadge(pr);
-  if (blockerBadge) return blockerBadge;
-  if (isPRReadyToMerge(pr)) {
-    return <IconCheck className="h-3 w-3 text-emerald-400" />;
-  }
-  // Check awaiting-review before the plain approved check so an approved PR
-  // with pending reviewers (1 of N required) doesn't read as fully approved.
-  if (isPRAwaitingReview(pr)) {
-    return <IconClock className="h-3 w-3 text-sky-400" />;
-  }
-  if (isPRWaitingOnBranchProtection(pr)) {
-    return <IconClock className="h-3 w-3 text-muted-foreground" />;
-  }
-  if (hasPRChecksPassedWithoutReviewWaitForDisplay(pr)) {
-    return <IconCheck className="h-3 w-3 text-green-500" />;
-  }
-  if (hasPRChecksInProgressForDisplay(pr) || pr.review_state === "pending") {
-    return <IconClock className="h-3 w-3 text-yellow-500" />;
-  }
-  return null;
+function PRMultiButtonContent({ prs, colorClassName }: { prs: TaskPR[]; colorClassName: string }) {
+  const { t } = useTranslation();
+  return (
+    <ChangeRequestTopbarContent
+      label={`${prs.length} ${t("github:prs")}`}
+      colorClassName={colorClassName}
+      leadingIcon={
+        <PRStatusGlyph
+          size="topbar"
+          colorClassName={colorClassName}
+          hasMergeConflicts={hasAnyPRMergeConflict(prs)}
+        />
+      }
+      dropdown={<IconChevronDown className="h-3 w-3 text-muted-foreground" />}
+    />
+  );
 }
 
 export const PRTopbarButton = memo(function PRTopbarButton() {
@@ -144,11 +123,13 @@ function PRSingleButton({
   triggerRef,
 }: {
   pr: TaskPR;
-  refreshTaskPR: () => void;
+  refreshTaskPR: () => void | Promise<void>;
   triggerRef?: TriggerRef;
 }) {
+  const { t } = useTranslation();
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
-  const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
+  const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} - ${pr.pr_title}`;
+  const statusText = prTopbarAccessibleStatus(pr, t);
   const {
     usesTouchDrawer,
     open,
@@ -163,15 +144,13 @@ function PRSingleButton({
   // single subscription warms both.
 
   const button = (
-    <Button
+    <ChangeRequestTopbarButton
       ref={triggerRef}
       data-testid="pr-topbar-button"
       data-pr-number={pr.pr_number}
       data-pr-state={pr.state}
       data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
-      size="sm"
-      variant="outline"
-      className="cursor-pointer gap-1.5 px-2"
+      aria-label={statusText}
       onMouseOver={onTriggerEnter}
       onMouseEnter={onTriggerEnter}
       onMouseMove={onTriggerEnter}
@@ -187,10 +166,18 @@ function PRSingleButton({
         onOpenChange(false);
       }}
     >
-      <IconGitPullRequest className={`h-4 w-4 ${getPRStatusColor(pr)}`} />
-      <span className="text-xs font-medium">#{pr.pr_number}</span>
-      <PRStatusIcon pr={pr} />
-    </Button>
+      <ChangeRequestTopbarContent
+        label={`#${pr.pr_number}`}
+        colorClassName={getPRStatusColor(pr)}
+        leadingIcon={
+          <PRStatusGlyph
+            size="topbar"
+            colorClassName={getPRStatusColor(pr)}
+            hasMergeConflicts={hasPRMergeConflict(pr)}
+          />
+        }
+      />
+    </ChangeRequestTopbarButton>
   );
 
   if (usesTouchDrawer) {
@@ -228,14 +215,12 @@ function PRMultiButton({
   triggerRef,
 }: {
   prs: TaskPR[];
-  refreshTaskPR: () => void;
+  refreshTaskPR: () => void | Promise<void>;
   onRemovePR: (associationId: string) => Promise<void>;
   triggerRef?: TriggerRef;
 }) {
-  // Click still drives the dropdown (the explicit "jump to this PR's panel"
-  // affordance, and the only interaction on touch). Hover adds the aggregate
-  // CI popover with a tab per PR — desktop only, suppressed on touch where
-  // there is no hover.
+  const { t } = useTranslation();
+  // Click opens the dropdown; desktop hover opens aggregate CI details.
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const {
     usesTouchDrawer,
@@ -249,21 +234,18 @@ function PRMultiButton({
   const [menuOpen, setMenuOpen] = useState(false);
   const aggColor = aggregatePRStatusColor(prs);
 
-  // The trigger is the click target for the dropdown AND the hover anchor for
-  // the popover. On desktop we wrap it in a PopoverAnchor so all the asChild
+  // The trigger is the dropdown target and hover anchor. On desktop the asChild
   // layers (Tooltip → Popover → Dropdown) collapse onto the single Button and
   // the popover positions against it. While the dropdown is open the hover
   // popover is closed and hover re-opens are suppressed, so the two overlays
   // never stack.
   const triggerButton = (
     <DropdownMenuTrigger asChild>
-      <Button
+      <ChangeRequestTopbarButton
         ref={triggerRef}
         data-testid="pr-topbar-button"
         data-pr-count={prs.length}
-        size="sm"
-        variant="outline"
-        className="cursor-pointer gap-1.5 px-2"
+        aria-label={multiPRAccessibleStatus(prs, t)}
         onMouseOver={menuOpen ? undefined : onTriggerEnter}
         onMouseEnter={menuOpen ? undefined : onTriggerEnter}
         onMouseMove={menuOpen ? undefined : onTriggerEnter}
@@ -275,10 +257,8 @@ function PRMultiButton({
         onFocus={menuOpen ? undefined : onTriggerEnter}
         onBlur={onTriggerLeave}
       >
-        <IconGitPullRequest className={`h-4 w-4 ${aggColor}`} />
-        <span className="text-xs font-medium">{prs.length} PRs</span>
-        <IconChevronDown className="h-3 w-3 text-muted-foreground" />
-      </Button>
+        <PRMultiButtonContent prs={prs} colorClassName={aggColor} />
+      </ChangeRequestTopbarButton>
     </DropdownMenuTrigger>
   );
 
@@ -293,7 +273,9 @@ function PRMultiButton({
         <TooltipTrigger asChild>
           {usesTouchDrawer ? triggerButton : <PopoverAnchor asChild>{triggerButton}</PopoverAnchor>}
         </TooltipTrigger>
-        <TooltipContent>{prs.length} pull requests linked to this task — open one</TooltipContent>
+        <TooltipContent>
+          {t("github:pullRequestsLinkedToTask", { count: prs.length })}
+        </TooltipContent>
       </Tooltip>
       <MultiPRMenuContent prs={prs} />
     </DropdownMenu>
@@ -331,10 +313,11 @@ function PRMultiButton({
 }
 
 function MultiPRMenuContent({ prs }: { prs: TaskPR[] }) {
+  const { t } = useTranslation();
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   return (
     <DropdownMenuContent align="end" className="w-72">
-      <DropdownMenuLabel className="text-xs">Pull requests</DropdownMenuLabel>
+      <DropdownMenuLabel className="text-xs">{t("github:pullRequests")}</DropdownMenuLabel>
       <DropdownMenuSeparator />
       {prs.map((pr) => (
         <DropdownMenuItem
@@ -342,15 +325,19 @@ function MultiPRMenuContent({ prs }: { prs: TaskPR[] }) {
           onClick={() => addPRPanel(prTaskKey(pr))}
           className="cursor-pointer gap-2"
           data-testid={`pr-topbar-menu-item-${prIdentitySlug(pr)}`}
+          aria-label={`${pr.repo}, ${prTopbarAccessibleStatus(pr, t)}`}
         >
-          <IconGitPullRequest className={`h-4 w-4 shrink-0 ${getPRStatusColor(pr)}`} />
+          <PRStatusGlyph
+            size="topbar"
+            colorClassName={getPRStatusColor(pr)}
+            hasMergeConflicts={hasPRMergeConflict(pr)}
+          />
           <div className="flex flex-col min-w-0 flex-1">
             <span className="text-xs font-medium">
               {pr.repo} #{pr.pr_number}
             </span>
             <span className="text-[11px] text-muted-foreground truncate">{pr.pr_title}</span>
           </div>
-          <PRStatusIcon pr={pr} />
         </DropdownMenuItem>
       ))}
     </DropdownMenuContent>

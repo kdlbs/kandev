@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/subtask-completion-trigger.md"
+spec: "../../specs/tasks/requirements/subtask-completion-trigger.md"
 ---
 
 # Task 01: Backend child completion repository
@@ -36,7 +36,7 @@ None.
 
 ## Inputs
 
-- Spec: `docs/specs/tasks/subtask-completion-trigger.md`, sections `What`,
+- Spec: `docs/specs/tasks/requirements/subtask-completion-trigger.md`, sections `What`,
   `Data model`, `Scenarios`.
 - Existing patterns: `TaskRepository.ListChildren`,
   `office/repository/sqlite.AreAllChildrenTerminal`, and

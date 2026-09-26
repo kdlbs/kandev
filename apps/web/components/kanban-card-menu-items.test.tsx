@@ -1,13 +1,104 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, render, renderHook, screen, fireEvent } from "@testing-library/react";
+import { IconFlag } from "@tabler/icons-react";
+import type { StoreApi } from "zustand";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
+import { pluginRegistry } from "@/lib/plugins/registry";
+import type { PluginTaskMenuContext, TaskMenuSubItemRegistration } from "@/lib/plugins/types";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/store";
 import {
+  buildCardPluginEntries,
   buildKanbanCardMenuEntries,
   KanbanCardDropdownMenuItems,
+  useKanbanCardMoveTargets,
   type KanbanCardMenuEntry,
 } from "./kanban-card-menu-items";
 
+function renderNodeText(node: ReactNode): string {
+  return render(<>{node}</>).container.textContent ?? "";
+}
+
+const PluginBitbucketIcon = () => null;
+const WORKFLOW_ONE_NAME = "Workflow 1";
+
 // Regression: React synthetic events bubble through the fiber tree from a Radix portal; without stopPropagation the parent Card's onClick fires instead of the confirm dialog.
+/**
+ * A card builds its dropdown and context variants from one render with the
+ * same plugin inputs, so the plugin contributions must be built once: each
+ * plugin's `items()` is a callback into a foreign bundle, and evaluating it
+ * twice per render for identical children is the API's own documented
+ * anti-pattern ("memoize anything expensive").
+ */
+describe("buildCardPluginEntries", () => {
+  const PLUGIN_ID = "kandev-plugin-tags";
+  const CONTEXT: PluginTaskMenuContext = {
+    workspaceId: "ws-1",
+    taskId: "task-1",
+    taskTitle: "Fix the bug",
+    workflowStepId: "step-1",
+    presentation: "desktop",
+  };
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  function registerItemsAction(items: () => readonly TaskMenuSubItemRegistration[]) {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "add-tag",
+      label: "Add tag",
+      group: "primary",
+      items,
+      run: vi.fn(),
+    });
+  }
+
+  it("evaluates a plugin action's items() once when both variants share the result", () => {
+    const items = vi.fn(() => [{ id: "more", label: "More tags", run: vi.fn() }]);
+    registerItemsAction(items);
+
+    const pluginEntries = buildCardPluginEntries({ pluginMenuContext: CONTEXT });
+    const dropdown = buildKanbanCardMenuEntries({
+      workflows: [],
+      stepsByWorkflowId: {},
+      pluginMenuContext: CONTEXT,
+      pluginEntries,
+    });
+    const contextMenu = buildKanbanCardMenuEntries({
+      workflows: [],
+      stepsByWorkflowId: {},
+      pluginMenuContext: CONTEXT,
+      pluginEntries,
+    });
+
+    expect(items).toHaveBeenCalledTimes(1);
+    const fromDropdown = dropdown.find(
+      (entry) => entry.key === `plugin-primary-${PLUGIN_ID}:add-tag`,
+    );
+    const fromContext = contextMenu.find(
+      (entry) => entry.key === `plugin-primary-${PLUGIN_ID}:add-tag`,
+    );
+    expect(fromDropdown).toBeDefined();
+    expect(fromContext).toBe(fromDropdown);
+  });
+
+  it("still builds its own contributions when a caller passes none", () => {
+    const items = vi.fn(() => [{ id: "more", label: "More tags", run: vi.fn() }]);
+    registerItemsAction(items);
+
+    const entries = buildKanbanCardMenuEntries({
+      workflows: [],
+      stepsByWorkflowId: {},
+      pluginMenuContext: CONTEXT,
+    });
+
+    expect(items).toHaveBeenCalledTimes(1);
+    expect(entries.some((entry) => entry.key === `plugin-primary-${PLUGIN_ID}:add-tag`)).toBe(true);
+  });
+});
+
 describe("KanbanCardDropdownMenuItems — click propagation", () => {
   function renderWithParent(entries: KanbanCardMenuEntry[], parentOnClick: () => void) {
     return render(
@@ -131,6 +222,158 @@ describe("buildKanbanCardMenuEntries — external issue links", () => {
 
     expect(itemLabels(linkMenu)).toEqual(["GitHub Pull Request", "GitHub Issue", "Jira Ticket"]);
   });
+
+  it("adds registered Link actions to the native Link submenu", () => {
+    const entries = buildKanbanCardMenuEntries({
+      workflows: [],
+      stepsByWorkflowId: {},
+      onLinkPullRequest: vi.fn(),
+      pluginLinkActions: [
+        {
+          id: "bitbucket-pull-request",
+          label: "Bitbucket Pull Request",
+          icon: PluginBitbucketIcon,
+          onSelect: vi.fn(),
+        },
+      ],
+    } as never);
+
+    const linkMenu = entries.find((entry) => entry.kind === "submenu" && entry.key === "link");
+    expect(itemLabels(linkMenu)).toContain("Bitbucket Pull Request");
+    const bitbucket =
+      linkMenu?.kind === "submenu"
+        ? linkMenu.children.find(
+            (entry) => entry.kind === "item" && entry.key === "link-plugin-bitbucket-pull-request",
+          )
+        : undefined;
+    expect(bitbucket?.kind).toBe("item");
+    if (bitbucket?.kind === "item") {
+      expect((bitbucket.icon as { type?: unknown })?.type).toBe(PluginBitbucketIcon);
+    }
+  });
+});
+
+describe("buildKanbanCardMenuEntries — !onEdit does not disable plugin edit actions", () => {
+  const PLUGIN_ID = "kandev-plugin-notes";
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  it("disables Edit task but leaves a visible plugin action enabled when onEdit is absent", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "enhance",
+      label: "Enhance notes",
+      group: "edit",
+      run: vi.fn(),
+    });
+
+    const entries = buildKanbanCardMenuEntries({
+      workflows: [],
+      stepsByWorkflowId: {},
+      // onEdit intentionally omitted — a card with no edit handler wired up.
+    });
+
+    const editMenu = entries.find((entry) => entry.key === "edit");
+    expect(editMenu?.kind).toBe("submenu");
+    if (editMenu?.kind !== "submenu") return;
+
+    const editTask = editMenu.children.find(
+      (child) => child.kind === "item" && child.key === "edit-task",
+    );
+    const pluginAction = editMenu.children.find(
+      (child) => child.kind === "item" && child.key === `plugin-edit-${PLUGIN_ID}:enhance`,
+    );
+
+    expect(editTask?.kind === "item" && editTask.disabled).toBe(true);
+    expect(pluginAction?.kind === "item" && pluginAction.disabled).toBeFalsy();
+  });
+});
+
+describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => {
+  const PLUGIN_ID = "kandev-plugin-tags";
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  function entryKeys(entries: KanbanCardMenuEntry[]) {
+    return entries.map((entry) => entry.key);
+  }
+
+  it("renders a 'primary' group action as a flat item after the move group and before Archive", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "quick-tag",
+      label: "Quick tag",
+      icon: PluginBitbucketIcon,
+      group: "primary",
+      run: vi.fn(),
+    });
+
+    const entries = buildKanbanCardMenuEntries({
+      currentWorkflowId: "wf-1",
+      workflows: [
+        { id: "wf-1", name: WORKFLOW_ONE_NAME },
+        { id: "wf-2", name: "Workflow 2" },
+      ],
+      stepsByWorkflowId: {
+        "wf-1": [
+          { id: "s1", title: "Step 1" },
+          { id: "s2", title: "Step 2" },
+        ],
+        "wf-2": [{ id: "s3", title: "Step 3" }],
+      },
+      onChangeWorkflow: vi.fn(),
+      onLinkPullRequest: vi.fn(),
+      onArchive: vi.fn(),
+    });
+
+    const keys = entryKeys(entries);
+    const changeWorkflowIndex = keys.indexOf("change-workflow");
+    const primaryIndex = keys.indexOf(`plugin-primary-${PLUGIN_ID}:quick-tag`);
+    const archiveIndex = keys.indexOf("archive");
+
+    expect(changeWorkflowIndex).toBeGreaterThanOrEqual(0);
+    expect(primaryIndex).toBeGreaterThanOrEqual(0);
+    expect(archiveIndex).toBeGreaterThanOrEqual(0);
+    expect(changeWorkflowIndex).toBeLessThan(primaryIndex);
+    expect(primaryIndex).toBeLessThan(archiveIndex);
+
+    const primaryEntry = entries[primaryIndex];
+    expect(primaryEntry.kind).toBe("item");
+    if (primaryEntry.kind === "item") {
+      expect(primaryEntry.label).toBe("Quick tag");
+      expect((primaryEntry.icon as { type?: unknown })?.type).toBe(PluginBitbucketIcon);
+    }
+  });
+
+  it("does not add a 'primary' entry when visible(context) returns false", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "quick-tag",
+      label: "Quick tag",
+      group: "primary",
+      visible: () => false,
+      run: vi.fn(),
+    });
+
+    const entries = buildKanbanCardMenuEntries({ workflows: [], stepsByWorkflowId: {} });
+
+    expect(entryKeys(entries)).not.toContain(`plugin-primary-${PLUGIN_ID}:quick-tag`);
+  });
+
+  it("leaves the 'edit' group submenu unaffected by 'primary' group registrations", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "quick-tag",
+      label: "Quick tag",
+      group: "primary",
+      run: vi.fn(),
+    });
+
+    const entries = buildKanbanCardMenuEntries({ workflows: [], stepsByWorkflowId: {} });
+    const editMenu = entries.find((entry) => entry.key === "edit");
+
+    expect(editMenu?.kind).toBe("item");
+  });
 });
 
 describe("buildKanbanCardMenuEntries — detach", () => {
@@ -160,5 +403,288 @@ describe("buildKanbanCardMenuEntries — detach", () => {
     });
 
     expect(entries.some((entry) => entry.key === "detach")).toBe(false);
+  });
+});
+
+describe("buildKanbanCardMenuEntries — priority action", () => {
+  const baseArgs = {
+    workflows: [],
+    stepsByWorkflowId: {},
+  };
+
+  function priorityChildren(entries: KanbanCardMenuEntry[]) {
+    const priorityEntry = entries.find((entry) => entry.key === "priority");
+    if (priorityEntry?.kind !== "submenu") throw new Error("expected a priority submenu");
+    return priorityEntry.children;
+  }
+
+  it("presents exactly the four priority tokens in severity order, each by its localized label", () => {
+    const entries = buildKanbanCardMenuEntries({ ...baseArgs, onSelectPriority: vi.fn() });
+    const children = priorityChildren(entries);
+
+    expect(children.map((child) => child.key)).toEqual([
+      "priority-critical",
+      "priority-high",
+      "priority-medium",
+      "priority-low",
+    ]);
+    expect(
+      children.map((child) => renderNodeText(child.kind === "item" ? child.label : undefined)),
+    ).toEqual(["Critical", "High", "Medium", "Low"]);
+  });
+
+  it("includes the priority icon on the card menu setting", () => {
+    const entries = buildKanbanCardMenuEntries({ ...baseArgs, onSelectPriority: vi.fn() });
+    const priorityEntry = entries.find((entry) => entry.key === "priority");
+
+    expect(priorityEntry?.kind).toBe("submenu");
+    if (priorityEntry?.kind !== "submenu") return;
+    expect((priorityEntry.icon as { type?: unknown })?.type).toBe(IconFlag);
+  });
+
+  it("marks the task's current priority and leaves all four selectable", () => {
+    const entries = buildKanbanCardMenuEntries({
+      ...baseArgs,
+      currentPriority: "high",
+      onSelectPriority: vi.fn(),
+    });
+    const children = priorityChildren(entries);
+
+    for (const child of children) {
+      if (child.kind !== "item") throw new Error("expected item entries");
+      // Reselecting the current priority must stay enabled, unlike a
+      // move-to-current-step entry which disables the current step.
+      expect(child.disabled).toBeFalsy();
+      if (child.key === "priority-high") {
+        expect(renderNodeText(child.trailing)).toBe("Current");
+      } else {
+        expect(renderNodeText(child.trailing)).toBe("");
+      }
+    }
+  });
+
+  it.each([undefined, null, "", "not-a-real-token"])(
+    "indicates no token as current when the held priority is %s",
+    (currentPriority) => {
+      const entries = buildKanbanCardMenuEntries({
+        ...baseArgs,
+        currentPriority,
+        onSelectPriority: vi.fn(),
+      });
+      const children = priorityChildren(entries);
+
+      for (const child of children) {
+        if (child.kind !== "item") throw new Error("expected item entries");
+        expect(child.trailing).toBeUndefined();
+      }
+    },
+  );
+
+  it("invokes onSelectPriority with the selected token, including reselecting the current one", () => {
+    const onSelectPriority = vi.fn();
+    const entries = buildKanbanCardMenuEntries({
+      ...baseArgs,
+      currentPriority: "critical",
+      onSelectPriority,
+    });
+    const children = priorityChildren(entries);
+    const criticalEntry = children.find((child) => child.key === "priority-critical");
+    if (criticalEntry?.kind !== "item") throw new Error("expected an item entry");
+
+    criticalEntry.onSelect?.();
+
+    expect(onSelectPriority).toHaveBeenCalledWith("critical");
+  });
+});
+
+describe("useKanbanCardMoveTargets — explicit steps (AC-TASKS-TASK-ACTIONS-MENU-002.3b)", () => {
+  const WORKFLOW_ID = "wf-1";
+  const TASK_ID = "task-1";
+  const HIDDEN_STEP_ID = "step-hidden";
+
+  function wrapper({ children }: { children: React.ReactNode }) {
+    return (
+      <StateProvider
+        initialState={
+          {
+            kanbanMulti: {
+              snapshots: {
+                [WORKFLOW_ID]: {
+                  workflowId: WORKFLOW_ID,
+                  workflowName: WORKFLOW_ONE_NAME,
+                  steps: [
+                    { id: "step-a", title: "Todo", color: "blue", position: 0 },
+                    { id: HIDDEN_STEP_ID, title: "Hidden step", color: "gray", position: 1 },
+                    { id: "step-b", title: "Done", color: "green", position: 2 },
+                  ],
+                  tasks: [
+                    {
+                      id: TASK_ID,
+                      workflowId: WORKFLOW_ID,
+                      workflowStepId: "step-a",
+                      title: "Task 1",
+                      position: 0,
+                    },
+                  ],
+                },
+              },
+              isLoading: false,
+            },
+          } as never
+        }
+      >
+        {children}
+      </StateProvider>
+    );
+  }
+
+  it("uses the caller's explicit steps as-is for the current workflow's entry", () => {
+    const explicitSteps = [{ id: HIDDEN_STEP_ID, title: "Hidden step", color: "gray" }];
+    const { result } = renderHook(() => useKanbanCardMoveTargets(TASK_ID, explicitSteps), {
+      wrapper,
+    });
+
+    const stepIds = result.current.stepsByWorkflowId[WORKFLOW_ID].map((step) => step.id);
+    expect(stepIds).toEqual([HIDDEN_STEP_ID]);
+  });
+});
+
+describe("useKanbanCardMoveTargets — card hot path has no kanban.tasks/hiddenWorkflowStepIds subscription", () => {
+  const WORKFLOW_ID = "wf-1";
+  const TASK_ID = "task-1";
+  const CARD_STEPS = [{ id: "step-a", title: "Todo", color: "blue" }];
+
+  let capturedStore: StoreApi<AppState> | null = null;
+
+  function StoreCapture() {
+    capturedStore = useAppStoreApi();
+    return null;
+  }
+
+  function wrapper({ children }: { children: React.ReactNode }) {
+    return (
+      <StateProvider
+        initialState={
+          {
+            kanban: { tasks: [] },
+            kanbanMulti: {
+              snapshots: {
+                [WORKFLOW_ID]: {
+                  workflowId: WORKFLOW_ID,
+                  workflowName: WORKFLOW_ONE_NAME,
+                  steps: [{ id: "step-a", title: "Todo", color: "blue", position: 0 }],
+                  tasks: [
+                    {
+                      id: TASK_ID,
+                      workflowId: WORKFLOW_ID,
+                      workflowStepId: "step-a",
+                      title: "Task 1",
+                      position: 0,
+                    },
+                  ],
+                },
+              },
+              isLoading: false,
+            },
+            userSettings: { hiddenWorkflowStepIds: {} },
+          } as never
+        }
+      >
+        <StoreCapture />
+        {children}
+      </StateProvider>
+    );
+  }
+
+  // The card's own render path already knows its workflow's steps (it passes
+  // `steps` explicitly), so this hook must not force every card to re-render
+  // on unrelated `kanban.tasks`/`hiddenWorkflowStepIds` writes just to serve
+  // the preview/detail surfaces' fallback (system design: card hook keeps its
+  // original subscription set).
+  it("does not recompute when kanban.tasks or hiddenWorkflowStepIds change while the caller passes explicit steps", () => {
+    capturedStore = null;
+    let renderCount = 0;
+    const { result } = renderHook(
+      () => {
+        renderCount++;
+        return useKanbanCardMoveTargets(TASK_ID, CARD_STEPS);
+      },
+      { wrapper },
+    );
+
+    expect(result.current.currentWorkflowId).toBe(WORKFLOW_ID);
+    const countAfterMount = renderCount;
+
+    act(() => {
+      capturedStore!.setState((state) => ({
+        kanban: {
+          ...state.kanban,
+          tasks: [
+            ...state.kanban.tasks,
+            {
+              id: "other-task",
+              workflowId: WORKFLOW_ID,
+              workflowStepId: "step-a",
+              title: "Other",
+              position: 1,
+            },
+          ],
+        },
+      }));
+    });
+    expect(renderCount).toBe(countAfterMount);
+
+    act(() => {
+      capturedStore!.setState((state) => ({
+        userSettings: {
+          ...state.userSettings,
+          hiddenWorkflowStepIds: { [WORKFLOW_ID]: ["step-a"] },
+        },
+      }));
+    });
+    expect(renderCount).toBe(countAfterMount);
+  });
+});
+
+describe("buildKanbanCardMenuEntries — move-only disabled state", () => {
+  it("disables move entries without disabling unrelated task actions", () => {
+    const entries = buildKanbanCardMenuEntries({
+      currentWorkflowId: "wf-1",
+      currentStepId: "step-1",
+      workflows: [
+        { id: "wf-1", name: WORKFLOW_ONE_NAME },
+        { id: "wf-2", name: "Workflow 2" },
+      ],
+      stepsByWorkflowId: {
+        "wf-1": [
+          { id: "step-1", title: "Step 1" },
+          { id: "step-2", title: "Step 2" },
+        ],
+        "wf-2": [{ id: "step-3", title: "Step 3" }],
+      },
+      moveDisabled: true,
+      onEdit: vi.fn(),
+      onSelectPriority: vi.fn(),
+      onMoveToStep: vi.fn(),
+      onChangeWorkflow: vi.fn(),
+      onLinkPullRequest: vi.fn(),
+      onArchive: vi.fn(),
+      onDelete: vi.fn(),
+    });
+
+    const entry = (key: string) => entries.find((candidate) => candidate.key === key);
+    const disabled = (key: string) => {
+      const candidate = entry(key);
+      return candidate?.kind === "item" || candidate?.kind === "submenu"
+        ? candidate.disabled
+        : undefined;
+    };
+    expect(disabled("edit")).toBe(false);
+    expect(disabled("priority")).toBe(false);
+    expect(disabled("move-to")).toBe(true);
+    expect(disabled("change-workflow")).toBe(true);
+    expect(disabled("link")).toBe(false);
+    expect(disabled("archive")).toBe(false);
+    expect(disabled("delete")).toBe(false);
   });
 });

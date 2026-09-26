@@ -1,0 +1,45 @@
+package backendapp
+
+import (
+	"encoding/json"
+	"testing"
+
+	userdto "github.com/kandev/kandev/internal/user/dto"
+)
+
+func TestMapUserSettingsStateIncludesAppStatusBarVisibility(t *testing.T) {
+	var response userdto.UserSettingsResponse
+	if err := json.Unmarshal([]byte(`{"settings":{"app_status_bar_enabled":false,"revision":42}}`), &response); err != nil {
+		t.Fatalf("decode user settings response: %v", err)
+	}
+	state := mapUserSettingsState(response, "workspace-1")
+
+	got, ok := state["appStatusBarEnabled"].(bool)
+	if !ok || got {
+		t.Fatalf("appStatusBarEnabled = %#v, want false", state["appStatusBarEnabled"])
+	}
+	if revision, ok := state["revision"].(int64); !ok || revision != 42 {
+		t.Fatalf("revision = %#v, want int64(42)", state["revision"])
+	}
+}
+func TestMapUserSettingsStateIncludesResolveSessionHostnames(t *testing.T) {
+	var response userdto.UserSettingsResponse
+	if err := json.Unmarshal([]byte(`{"settings":{"resolve_session_hostnames":true}}`), &response); err != nil {
+		t.Fatalf("decode user settings response: %v", err)
+	}
+	state := mapUserSettingsState(response, "workspace-1")
+	if got, ok := state["resolveSessionHostnames"].(bool); !ok || !got {
+		t.Fatalf("resolveSessionHostnames = %#v, want true", state["resolveSessionHostnames"])
+	}
+}
+
+func TestMapUserSettingsStateIncludesSidebarHoverSettings(t *testing.T) {
+	var response userdto.UserSettingsResponse
+	if err := json.Unmarshal([]byte(`{"settings":{"sidebar_hover_enabled":false,"sidebar_hover_delay_ms":0}}`), &response); err != nil {
+		t.Fatal(err)
+	}
+	state := mapUserSettingsState(response, "workspace-1")
+	if state["sidebarHoverEnabled"] != false || state["sidebarHoverDelayMs"] != 0 {
+		t.Fatalf("hover boot fields: %v, %v", state["sidebarHoverEnabled"], state["sidebarHoverDelayMs"])
+	}
+}

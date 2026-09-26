@@ -2,24 +2,21 @@
 
 import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { IconEdit, IconTrash, IconLock } from "@tabler/icons-react";
+import { IconLock } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
-import { Textarea } from "@kandev/ui/textarea";
+import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
+import { PromptRowActions } from "@/components/settings/prompt-row-actions";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
+import { SettingsGroup } from "@/components/settings/settings-group";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import { useToast } from "@/components/toast-provider";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { createPrompt, deletePrompt, updatePrompt } from "@/lib/api";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { useRequest } from "@/lib/http/use-request";
 import { t } from "@/lib/i18n";
 import type { CustomPrompt } from "@/lib/types/http";
@@ -36,6 +33,10 @@ function errorMessage(error: unknown): string {
   // A thrown Error carries the backend's diagnostic, which stays English by
   // design; only the missing-payload fallback is copy.
   return error instanceof Error ? error.message : t("common:requestFailed");
+}
+
+function getPromptPreview(content: string) {
+  return content.split(/\r?\n/)[0] ?? "";
 }
 
 async function runPromptSave(
@@ -79,15 +80,14 @@ function PromptCreateForm({ formState, onFormChange, onCancel, isBusy }: PromptC
         disabled={isBusy}
         data-settings-dirty={nameIsDirty}
       />
-      <Textarea
+      <SettingsPromptEditor
         value={formState.content}
-        onChange={(event) => onFormChange({ content: event.target.value })}
-        placeholder={t("settings:promptContentPlaceholder")}
-        rows={5}
-        className="resize-y max-h-60 overflow-auto"
-        data-testid="prompt-content-input"
-        disabled={isBusy}
-        data-settings-dirty={contentIsDirty}
+        onChange={(value) => onFormChange({ content: value })}
+        promptReferences
+        readOnly={isBusy}
+        testId="prompt-content-input"
+        isDirty={contentIsDirty}
+        dirtyLevel="field"
       />
       <div className="flex items-center gap-2">
         <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
@@ -106,9 +106,13 @@ type PromptListItemProps = {
   onFormChange: (patch: Partial<PromptFormState>) => void;
   onStartEditing: (prompt: CustomPrompt) => void;
   onOpenDelete: (prompt: CustomPrompt) => void;
+  onDeleteCancel: () => void;
+  onDeleteConfirm: () => void;
   onCancel: () => void;
   isBusy: boolean;
   showCreate: boolean;
+  isFinePointer: boolean;
+  isDeleteTarget: boolean;
 };
 
 function PromptListItem({
@@ -119,14 +123,16 @@ function PromptListItem({
   onFormChange,
   onStartEditing,
   onOpenDelete,
+  onDeleteCancel,
+  onDeleteConfirm,
   onCancel,
   isBusy,
   showCreate,
+  isFinePointer,
+  isDeleteTarget,
 }: PromptListItemProps) {
   const { t } = useTranslation();
-  const getPromptPreview = (content: string) => {
-    return content.split(/\r?\n/)[0] ?? "";
-  };
+  const deleteAnchorRef = useRef<HTMLButtonElement | null>(null);
   const nameIsDirty = isEditing && formState.name !== prompt.name;
   const contentIsDirty = isEditing && formState.content !== prompt.content;
 
@@ -148,28 +154,28 @@ function PromptListItem({
             </Badge>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onStartEditing(prompt)}
-            disabled={isBusy || showCreate}
-            className="cursor-pointer"
-            data-testid="prompt-edit-button"
-          >
-            <IconEdit className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onOpenDelete(prompt)}
-            disabled={isBusy}
-            className="cursor-pointer"
-          >
-            <IconTrash className="h-4 w-4" />
-          </Button>
-        </div>
+        <PromptRowActions
+          prompt={prompt}
+          deleteAnchorRef={deleteAnchorRef}
+          onStartEditing={onStartEditing}
+          onOpenDelete={onOpenDelete}
+          isBusy={isBusy}
+          showCreate={showCreate}
+          isFinePointer={isFinePointer}
+          isDeleteTarget={isDeleteTarget}
+        />
       </div>
+      <PromptDeleteConfirmation
+        promptId={prompt.id}
+        promptName={prompt.name}
+        open={isDeleteTarget}
+        isFinePointer={isFinePointer}
+        anchorRef={deleteAnchorRef}
+        isBusy={isBusy}
+        onClose={onDeleteCancel}
+        onCancel={onDeleteCancel}
+        onConfirm={onDeleteConfirm}
+      />
       {isEditing ? (
         <div className="space-y-3">
           <Input
@@ -180,15 +186,15 @@ function PromptListItem({
             disabled={isBusy}
             data-settings-dirty={nameIsDirty}
           />
-          <Textarea
+          <SettingsPromptEditor
             value={formState.content}
-            onChange={(event) => onFormChange({ content: event.target.value })}
-            placeholder={t("settings:promptContentPlaceholder")}
-            rows={5}
-            className="resize-y max-h-60 overflow-auto"
-            data-testid="prompt-content-input"
-            disabled={isBusy}
-            data-settings-dirty={contentIsDirty}
+            onChange={(value) => onFormChange({ content: value })}
+            promptReferences
+            excludedPromptIds={[prompt.id]}
+            readOnly={isBusy}
+            testId="prompt-content-input"
+            isDirty={contentIsDirty}
+            dirtyLevel="field"
           />
           <div className="flex items-center gap-2">
             <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
@@ -214,9 +220,13 @@ type PromptListContentProps = {
   onFormChange: (patch: Partial<PromptFormState>) => void;
   onStartEditing: (prompt: CustomPrompt) => void;
   onOpenDelete: (prompt: CustomPrompt) => void;
+  onDeleteCancel: () => void;
+  onDeleteConfirm: () => void;
   onCancel: () => void;
   isBusy: boolean;
   showCreate: boolean;
+  isFinePointer: boolean;
+  deleteTargetId: string | null;
 };
 
 function PromptListContent({
@@ -228,9 +238,13 @@ function PromptListContent({
   onFormChange,
   onStartEditing,
   onOpenDelete,
+  onDeleteCancel,
+  onDeleteConfirm,
   onCancel,
   isBusy,
   showCreate,
+  isFinePointer,
+  deleteTargetId,
 }: PromptListContentProps) {
   const { t } = useTranslation();
   if (!promptsLoaded) {
@@ -259,56 +273,16 @@ function PromptListContent({
           onFormChange={onFormChange}
           onStartEditing={onStartEditing}
           onOpenDelete={onOpenDelete}
+          onDeleteCancel={onDeleteCancel}
+          onDeleteConfirm={onDeleteConfirm}
           onCancel={onCancel}
           isBusy={isBusy}
           showCreate={showCreate}
+          isFinePointer={isFinePointer}
+          isDeleteTarget={deleteTargetId === prompt.id}
         />
       ))}
     </>
-  );
-}
-
-type DeletePromptDialogProps = {
-  deleteTarget: CustomPrompt | null;
-  onClose: () => void;
-  onConfirm: () => void;
-  isBusy: boolean;
-};
-
-function DeletePromptDialog({ deleteTarget, onClose, onConfirm, isBusy }: DeletePromptDialogProps) {
-  const { t } = useTranslation();
-  // The prompt's own name is user data; only the no-target fallback is copy.
-  const targetLabel = deleteTarget ? `@${deleteTarget.name}` : t("settings:promptDeleteThisPrompt");
-  return (
-    <Dialog
-      open={Boolean(deleteTarget)}
-      onOpenChange={(open) => {
-        if (!open) {
-          onClose();
-        }
-      }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t("settings:promptDelete")}</DialogTitle>
-          <DialogDescription>
-            <Trans i18nKey="settings:promptDeleteDescription" values={{ name: targetLabel }}>
-              This will permanently remove{" "}
-              <span className="font-medium text-foreground">{targetLabel}</span>. This action cannot
-              be undone.
-            </Trans>
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
-            {t("settings:cancel")}
-          </Button>
-          <Button type="button" variant="destructive" onClick={onConfirm} disabled={isBusy}>
-            {t("settings:promptDelete")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -445,9 +419,8 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     setDeleteTarget(null);
   };
   const confirmDelete = () => {
-    if (!deleteTarget) return;
-    deleteRequest.run(deleteTarget.id).catch(toastError(t("settings:promptDeleteFailed")));
-    closeDeleteDialog();
+    if (!deleteTarget || isBusy) return;
+    return deleteRequest.run(deleteTarget.id).catch(toastError(t("settings:promptDeleteFailed")));
   };
 
   return {
@@ -484,6 +457,7 @@ export function getPromptDraftMeta(
 
 export function PromptsSettings() {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   const state = usePromptsState();
   const {
     editingId,
@@ -528,58 +502,58 @@ export function PromptsSettings() {
       onSave={showCreate ? handleCreate : handleUpdate}
       onDiscard={resetForm}
     >
-      <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
-        <Trans i18nKey="settings:promptMentionHelp" values={{ token: PROMPT_MENTION_TOKEN }}>
-          Use <span className="font-medium text-foreground">{PROMPT_MENTION_TOKEN}</span> in the
-          chat input to insert a prompt’s content. Prompts are matched by name and expanded in
-          place.
-        </Trans>
-      </div>
-      <div className="space-y-6 mt-4">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-foreground">
-            {t("settings:promptsCustomHeading")}
+      <div className="space-y-6">
+        <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
+          <Trans i18nKey="settings:promptMentionHelp" values={{ token: PROMPT_MENTION_TOKEN }}>
+            Use <span className="font-medium text-foreground">{PROMPT_MENTION_TOKEN}</span> in the
+            chat input to insert a prompt’s content. Prompts are matched by name and expanded in
+            place.
+          </Trans>
+        </div>
+        <SettingsGroup
+          title={t("settings:promptsCustomHeading")}
+          contentClassName="space-y-6 divide-y-0"
+          action={
+            <Button
+              onClick={startCreate}
+              disabled={isBusy || isEditing || showCreate}
+              className={settingsActionClassName()}
+              data-testid="prompt-create-button"
+            >
+              {t("settings:promptAdd")}
+            </Button>
+          }
+        >
+          {showCreate && (
+            <PromptCreateForm
+              formState={formState}
+              onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
+              onCancel={resetForm}
+              isBusy={isBusy}
+            />
+          )}
+
+          <div className="space-y-3">
+            <PromptListContent
+              promptsLoaded={promptsLoaded}
+              prompts={prompts}
+              editingId={editingId}
+              editingRef={editingRef}
+              formState={formState}
+              onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
+              onStartEditing={startEditing}
+              onOpenDelete={openDeleteDialog}
+              onDeleteCancel={closeDeleteDialog}
+              onDeleteConfirm={confirmDelete}
+              onCancel={resetForm}
+              isBusy={isBusy}
+              showCreate={showCreate}
+              isFinePointer={isFinePointer}
+              deleteTargetId={deleteTarget?.id ?? null}
+            />
           </div>
-          <Button
-            onClick={startCreate}
-            disabled={isBusy || isEditing || showCreate}
-            data-testid="prompt-create-button"
-          >
-            {t("settings:promptAdd")}
-          </Button>
-        </div>
-
-        {showCreate && (
-          <PromptCreateForm
-            formState={formState}
-            onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
-            onCancel={resetForm}
-            isBusy={isBusy}
-          />
-        )}
-
-        <div className="space-y-3">
-          <PromptListContent
-            promptsLoaded={promptsLoaded}
-            prompts={prompts}
-            editingId={editingId}
-            editingRef={editingRef}
-            formState={formState}
-            onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
-            onStartEditing={startEditing}
-            onOpenDelete={openDeleteDialog}
-            onCancel={resetForm}
-            isBusy={isBusy}
-            showCreate={showCreate}
-          />
-        </div>
+        </SettingsGroup>
       </div>
-      <DeletePromptDialog
-        deleteTarget={deleteTarget}
-        onClose={closeDeleteDialog}
-        onConfirm={confirmDelete}
-        isBusy={isBusy}
-      />
     </SettingsPageTemplate>
   );
 }

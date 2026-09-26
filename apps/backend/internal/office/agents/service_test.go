@@ -156,6 +156,86 @@ func TestCreateAgentInstance_PreservesExplicitSystemSkills(t *testing.T) {
 	assertSkillSlugMembership(t, stored.DesiredSkills, "kandev-projects", false)
 }
 
+func TestCreateAgentInstance_RejectsCEOWithManager(t *testing.T) {
+	svc, repo := newTestAgentService(t)
+	manager := createAndGetAgent(t, svc, repo, &models.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "Manager",
+		Role:        models.AgentRoleWorker,
+	})
+
+	err := svc.CreateAgentInstance(context.Background(), &models.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "CEO",
+		Role:        models.AgentRoleCEO,
+		ReportsTo:   manager.ID,
+	})
+	if !errors.Is(err, ErrAgentCEOReportsTo) {
+		t.Fatalf("CreateAgentInstance error = %v, want %v", err, ErrAgentCEOReportsTo)
+	}
+}
+
+func TestUpdateAgentInstance_RejectsCEOWithManager(t *testing.T) {
+	svc, repo := newTestAgentService(t)
+	ceo := createAndGetAgent(t, svc, repo, &models.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "CEO",
+		Role:        models.AgentRoleCEO,
+	})
+	ceo.ReportsTo = "manager-id"
+
+	err := svc.UpdateAgentInstance(context.Background(), ceo)
+	if !errors.Is(err, ErrAgentCEOReportsTo) {
+		t.Fatalf("UpdateAgentInstance error = %v, want %v", err, ErrAgentCEOReportsTo)
+	}
+}
+
+func TestCreateAgentInstance_RejectsCrossWorkspaceManager(t *testing.T) {
+	svc, repo := newTestAgentService(t)
+	foreign := createAndGetAgent(t, svc, repo, &models.AgentInstance{
+		WorkspaceID: "ws-other",
+		Name:        "Foreign manager",
+		Role:        models.AgentRoleWorker,
+	})
+
+	err := svc.CreateAgentInstance(context.Background(), &models.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "Worker",
+		Role:        models.AgentRoleWorker,
+		ReportsTo:   foreign.ID,
+	})
+	if !errors.Is(err, ErrAgentReportsToInvalid) {
+		t.Fatalf("CreateAgentInstance error = %v, want %v", err, ErrAgentReportsToInvalid)
+	}
+}
+
+func TestUpdateAgentInstance_RejectsReportingCycle(t *testing.T) {
+	svc, repo := newTestAgentService(t)
+	ceo := createAndGetAgent(t, svc, repo, &models.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "CEO",
+		Role:        models.AgentRoleCEO,
+	})
+	manager := createAndGetAgent(t, svc, repo, &models.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "Manager",
+		Role:        models.AgentRoleWorker,
+		ReportsTo:   ceo.ID,
+	})
+	worker := createAndGetAgent(t, svc, repo, &models.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "Worker",
+		Role:        models.AgentRoleWorker,
+		ReportsTo:   manager.ID,
+	})
+	manager.ReportsTo = worker.ID
+
+	err := svc.UpdateAgentInstance(context.Background(), manager)
+	if !errors.Is(err, ErrAgentReportsToCycle) {
+		t.Fatalf("UpdateAgentInstance error = %v, want %v", err, ErrAgentReportsToCycle)
+	}
+}
+
 func createAndGetAgent(
 	t *testing.T,
 	svc *AgentService,

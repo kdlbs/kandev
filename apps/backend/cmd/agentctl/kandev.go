@@ -99,24 +99,26 @@ func handleResponse(body []byte, status int, err error) int {
 	return 1
 }
 
-// getWithParams performs a GET request with query parameters. It handles
-// client creation, required env var check, path building, and response output.
-func getWithParams(basePath, requiredEnvName, requiredEnvVal string, params map[string]string) int {
-	client, err := newKandevClient()
-	if err != nil {
-		cliError("%v", err)
-		return 1
-	}
+// getWithParams performs a GET request with query parameters, requiring
+// requiredEnvVal to be set first. See getWithQuery for the variant with no
+// required-env check.
+func getWithParams(basePath, requiredEnvName, requiredEnvVal string, values url.Values) int {
 	if requiredEnvVal == "" {
 		cliError("%s must be set", requiredEnvName)
 		return 1
 	}
-	values := url.Values{}
-	for k, v := range params {
-		if v == "" {
-			continue
-		}
-		values.Set(k, v)
+	return getWithQuery(basePath, values)
+}
+
+// getWithQuery performs a GET request with query parameters. It handles
+// client creation, path building, and response output. values is carried
+// as url.Values (built with Add) rather than a map so a repeatable
+// parameter can hold more than one value for the same key.
+func getWithQuery(basePath string, values url.Values) int {
+	client, err := newKandevClient()
+	if err != nil {
+		cliError("%v", err)
+		return 1
 	}
 	q := ""
 	if encoded := values.Encode(); encoded != "" {

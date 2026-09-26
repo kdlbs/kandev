@@ -16,7 +16,8 @@ decision: "../../decisions/2026-08-01-architecture-lint-budgets.md"
   `internal/backendapp/**`; the current composition-root import passes and the
   checked-in scheduler baseline is empty.
 - Production Go imports of `internal/office` from `internal/runs/**` fail,
-  while the exact three current findings pass only through the exact baseline.
+  while the refreshed baseline preserves 11 exact edges across 8 files. The
+  original August baseline contained three entries.
 - Tests prove aliased/block imports, test and generated-file exclusions,
   baseline regression, deterministic diagnostics, and actionable ownership
   messages.
@@ -58,3 +59,8 @@ Sequential. The rule registry and shared fixture are shared with Task 02.
 - `python3 scripts/lint-architecture.py --all` — passed with no diagnostics.
 - `git diff --check` — passed.
 - No generated artifacts or external side effects.
+- Refreshed on `5c3dc31b2b65b35ff3121f3b5400c6c99dfb67d9`: 11 distinct
+  path/import edges across 8 production files (8 models imports and 3 shared
+  imports); scheduler-owner remains zero.
+- Combined suite: `python3 scripts/lint-architecture.test.py` — 62 tests passed.
+- Full scan and baseline bootstrap comparison against `origin/main` passed.

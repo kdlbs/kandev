@@ -1,0 +1,20 @@
+package pinfixtures
+
+// Shape (c): two distinct receiver types define a method with the same bare
+// name. A detector keyed on fn.Name.Name alone collapses RepoA.updateTaskTx
+// and RepoB.updateTaskTx into a single "updateTaskTx" entry — if one of them
+// were already registered (as the real package's *Repository.updateTaskTx
+// is), the other's genuinely distinct mutator would be silently absorbed
+// and reported clean.
+type RepoA struct{}
+type RepoB struct{}
+
+func (r *RepoA) updateTaskTx(step, id string) error {
+	_, err := r.exec("UPDATE tasks SET workflow_step_id = ? WHERE id = ?", step, id)
+	return err
+}
+
+func (r *RepoB) updateTaskTx(step, id string) error {
+	_, err := r.exec("UPDATE tasks SET workflow_step_id = ? WHERE id = ?", step, id)
+	return err
+}

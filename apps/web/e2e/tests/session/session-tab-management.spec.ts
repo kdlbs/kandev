@@ -1,10 +1,18 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+import { dwell } from "../../helpers/causal-waits";
+
+/** Wire action the kanban WS handler consumes when a task moves step. */
+const TASK_UPDATED_ACTION = "task.updated";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -118,9 +126,15 @@ test.describe("Session tab management — close behavior", () => {
     await expect(dialog).toBeVisible({ timeout: 5_000 });
     await expect(dialog).toContainText("Delete session?");
     await dialog.getByRole("button", { name: "Delete" }).click();
+    await expect(
+      testPage.getByTestId("toast-message").filter({ hasText: "Deleting session" }),
+    ).toHaveCount(0);
 
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
+    await expect(
+      testPage.getByText("Deleting session successful", { exact: false }),
+    ).not.toBeVisible();
 
     const { sessions } = await apiClient.listTaskSessions(task.id);
     expect(sessions.map((s) => s.id)).toEqual([session2Id]);
@@ -173,15 +187,21 @@ test.describe("Session tab management — close behavior", () => {
 
     await session.sessionTabBySessionId(session1Id).click({ button: "right" });
     await session.contextMenuItem("Delete").click();
-    const dialog = session.alertDialog();
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
-    await dialog.getByRole("button", { name: "Delete" }).click();
+    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(session.alertDialog()).toHaveCount(0);
+    await confirmation.getByTestId("session-delete-confirm").click();
 
     // Tab disappears…
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
 
     // …and stays gone — useAutoSessionTab must not recreate it.
-    await testPage.waitForTimeout(800);
+    await dwell(
+      testPage,
+      800,
+      "negative-assertion",
+      "the regression is a tab being recreated after removal; a recreation that must never happen has no event, so the check needs real elapsed time to mean anything",
+    );
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible();
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
 
@@ -208,8 +228,10 @@ test.describe("Session tab management — close behavior", () => {
 
     await session.sessionTabBySessionId(session1Id).click({ button: "right" });
     await session.contextMenuItem("Delete").click();
-    await expect(session.alertDialog()).toBeVisible({ timeout: 5_000 });
-    await session.alertDialog().getByRole("button", { name: "Delete" }).click();
+    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(session.alertDialog()).toHaveCount(0);
+    await confirmation.getByTestId("session-delete-confirm").click();
 
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 5_000 });
@@ -220,6 +242,266 @@ test.describe("Session tab management — close behavior", () => {
     // Backend must reflect the deletion — exactly one session remains.
     const { sessions } = await apiClient.listTaskSessions(task.id);
     expect(sessions.map((s) => s.id)).toEqual([session2Id]);
+  });
+
+  test("deleting the active shared-environment session keeps Changes data visible", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+
+    const { task, session, session1Id, session2Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Delete Active Session Keeps Changes",
+    );
+    const worktreePath = seedData.repositoryPath;
+    const worktreeBranch = execFileSync("git", ["branch", "--show-current"], {
+      cwd: worktreePath,
+      encoding: "utf8",
+    }).trim();
+    expect(worktreeBranch).toBeTruthy();
+
+    const localChange = "session-delete-change.txt";
+    const remoteChange = "remote-session-delete-change.ts";
+    const localChangePath = path.join(worktreePath, localChange);
+    fs.writeFileSync(localChangePath, "keep this change visible\n");
+
+    try {
+      await apiClient.mockGitHubReset();
+      await apiClient.mockGitHubSetUser("test-user");
+      await apiClient.mockGitHubAddPRs([
+        {
+          number: 3157,
+          title: "Keep Changes visible after session deletion",
+          state: "open",
+          head_branch: worktreeBranch,
+          base_branch: "main",
+          author_login: "test-user",
+          repo_owner: "testorg",
+          repo_name: "testrepo",
+          additions: 1,
+          deletions: 0,
+        },
+      ]);
+      await apiClient.mockGitHubAddPRFiles("testorg", "testrepo", 3157, [
+        {
+          filename: remoteChange,
+          status: "added",
+          additions: 1,
+          deletions: 0,
+          patch: "@@ -0,0 +1 @@\n+export const kept = true;",
+        },
+      ]);
+      await apiClient.mockGitHubAssociateTaskPR({
+        task_id: task.id,
+        workspace_id: seedData.workspaceId,
+        repository_id: seedData.repositoryId,
+        owner: "testorg",
+        repo: "testrepo",
+        pr_number: 3157,
+        pr_url: "https://github.com/testorg/testrepo/pull/3157",
+        pr_title: "Keep Changes visible after session deletion",
+        head_branch: worktreeBranch,
+        base_branch: "main",
+        author_login: "test-user",
+        additions: 1,
+        deletions: 0,
+      });
+
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.sessionTabBySessionId(session1Id).click();
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+      await session.expandPRChangesSection();
+      await expect(
+        session.prFilesSection().locator(`[data-changes-file="${remoteChange}"]`),
+      ).toBeVisible({ timeout: 20_000 });
+
+      await session.sessionTabBySessionId(session1Id).click({ button: "right" });
+      await session.contextMenuItem("Delete").click();
+      const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+      await expect(confirmation).toBeVisible({ timeout: 5_000 });
+      await confirmation.getByTestId("session-delete-confirm").click();
+
+      await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
+      await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 5_000 });
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+      await session.expandPRChangesSection();
+      await expect(
+        session.prFilesSection().locator(`[data-changes-file="${remoteChange}"]`),
+      ).toBeVisible({ timeout: 20_000 });
+    } finally {
+      fs.rmSync(localChangePath, { force: true });
+    }
+  });
+
+  test("keeps dirty Changes status after sibling hydration", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+    // Attach before setup so the capture also observes the reload-driven
+    // subscriptions used by this regression.
+    const traffic = attachGatewayTrafficCapture(testPage);
+    const { session, session1Id, session2Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Sibling Hydration Keeps Changes",
+    );
+    const localChange = "sibling-hydration-change.txt";
+    const localChangePath = path.join(seedData.repositoryPath, localChange);
+    fs.writeFileSync(localChangePath, "keep this change visible\n");
+
+    const receivedGitEvent = (sessionId: string, fromIndex: number) =>
+      traffic.frames
+        .slice(fromIndex)
+        .some(
+          (frame) =>
+            frame.direction === "received" &&
+            frame.action === "session.git.event" &&
+            frame.sessionId === sessionId,
+        );
+
+    try {
+      traffic.frames.length = 0;
+      const beforeReload = traffic.frames.length;
+      await testPage.reload();
+      await session.waitForLoad();
+
+      await session.sessionTabBySessionId(session1Id).click();
+      await expect
+        .poll(() => receivedGitEvent(session1Id, beforeReload), {
+          timeout: 20_000,
+          message: "waiting for the first sibling git-status hydration",
+        })
+        .toBe(true);
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+
+      await session.sessionTabBySessionId(session2Id).click();
+      await expect
+        .poll(() => receivedGitEvent(session2Id, beforeReload), {
+          timeout: 20_000,
+          message: "waiting for the second sibling git-status hydration",
+        })
+        .toBe(true);
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+    } finally {
+      fs.rmSync(localChangePath, { force: true });
+    }
+  });
+
+  test("does not restore removed Changes files after sibling hydration", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+    const traffic = attachGatewayTrafficCapture(testPage);
+    const { session, session1Id, session2Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Sibling Hydration Drops Removed Changes",
+    );
+    const localChange = "sibling-hydration-removed-change.txt";
+    const localChangePath = path.join(seedData.repositoryPath, localChange);
+    fs.writeFileSync(localChangePath, "remove this change\n");
+
+    const environmentFiles = (sessionId: string) =>
+      testPage.evaluate((sid) => {
+        type E2EStoreWindow = Window & {
+          __KANDEV_E2E_STORE__?: {
+            getState: () => {
+              environmentIdBySessionId: Record<string, string>;
+              gitStatus: {
+                byEnvironmentId: Record<string, { files?: Record<string, unknown> } | undefined>;
+              };
+            };
+          };
+        };
+        const state = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState();
+        const environmentId = state?.environmentIdBySessionId[sid];
+        if (!environmentId) return null;
+        return state.gitStatus.byEnvironmentId[environmentId]?.files ?? {};
+      }, sessionId);
+
+    try {
+      await session.sessionTabBySessionId(session1Id).click();
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+
+      await expect
+        .poll(() => environmentFiles(session1Id), {
+          timeout: 20_000,
+          message: "waiting for the added Changes file to enter the environment store",
+        })
+        .toEqual(expect.objectContaining({ [localChange]: expect.anything() }));
+
+      fs.rmSync(localChangePath);
+      // A completed workspace can be in slow polling mode. Force the same
+      // focus-driven refresh a user gets when reopening Changes so the test
+      // waits on the deletion snapshot rather than a background poll tick.
+      await session.clickTab("Files");
+      await session.clickTab("Changes");
+      await expect
+        .poll(
+          async () => {
+            const files = await environmentFiles(session1Id);
+            return files ? Object.hasOwn(files, localChange) : false;
+          },
+          {
+            timeout: 20_000,
+            message: "waiting for the removed Changes file to leave the environment store",
+          },
+        )
+        .toBe(false);
+      await expect(session.changesFileRow(localChange)).not.toBeVisible({ timeout: 10_000 });
+
+      traffic.frames.length = 0;
+      await testPage.reload();
+      await session.waitForLoad();
+
+      const receivedGitEvent = (sessionId: string) =>
+        traffic.frames.some(
+          (frame) =>
+            frame.direction === "received" &&
+            frame.action === "session.git.event" &&
+            frame.sessionId === sessionId,
+        );
+
+      await session.sessionTabBySessionId(session1Id).click();
+      await session.clickTab("Files");
+      await session.clickTab("Changes");
+      await expect
+        .poll(() => receivedGitEvent(session1Id), {
+          timeout: 20_000,
+          message: "waiting for the first sibling git-status hydration after removal",
+        })
+        .toBe(true);
+      await expect(session.changesFileRow(localChange)).not.toBeVisible({ timeout: 10_000 });
+
+      await session.sessionTabBySessionId(session2Id).click();
+      await session.clickTab("Files");
+      await session.clickTab("Changes");
+      await expect
+        .poll(() => receivedGitEvent(session2Id), {
+          timeout: 20_000,
+          message: "waiting for the second sibling git-status hydration after removal",
+        })
+        .toBe(true);
+      await expect(session.changesFileRow(localChange)).not.toBeVisible({ timeout: 10_000 });
+    } finally {
+      fs.rmSync(localChangePath, { force: true });
+    }
   });
 
   test("deleting then immediately switching tasks does not resurrect the tab", async ({
@@ -260,8 +542,10 @@ test.describe("Session tab management — close behavior", () => {
 
     await session.sessionTabBySessionId(session1Id).click({ button: "right" });
     await session.contextMenuItem("Delete").click();
-    await expect(session.alertDialog()).toBeVisible({ timeout: 5_000 });
-    await session.alertDialog().getByRole("button", { name: "Delete" }).click();
+    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(session.alertDialog()).toHaveCount(0);
+    await confirmation.getByTestId("session-delete-confirm").click();
 
     // Wait for backend to confirm deletion (don't wait for tab to disappear).
     await expect
@@ -284,7 +568,12 @@ test.describe("Session tab management — close behavior", () => {
     // that the remaining session tab is present (and the deleted one didn't come
     // back), so gate on the surviving session tab instead.
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(800);
+    await dwell(
+      testPage,
+      800,
+      "negative-assertion",
+      "the deleted tab must not come back after a task round-trip; nothing is rendered to wait for when the expected outcome is that no tab ever appears",
+    );
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible();
   });
 
@@ -338,7 +627,12 @@ test.describe("Session tab management — close behavior", () => {
     await expect(session.sessionTabBySessionId(sessionB1Id)).toBeVisible({ timeout: 10_000 });
 
     // …and neither of task A's session tabs should have followed us in.
-    await testPage.waitForTimeout(800);
+    await dwell(
+      testPage,
+      800,
+      "negative-assertion",
+      "asserts that tabs from another task never leak in, which has no arrival event to wait on",
+    );
     await expect(session.sessionTabBySessionId(sessionA1Id)).not.toBeVisible();
     await expect(session.sessionTabBySessionId(sessionA2Id)).not.toBeVisible();
 
@@ -358,6 +652,10 @@ test.describe("Session tab management — primary session persistence", () => {
     seedData,
   }) => {
     test.setTimeout(150_000);
+
+    // Attach before the first navigation so the capture sees the websocket from
+    // the moment it opens.
+    const traffic = attachGatewayTrafficCapture(testPage);
 
     const { task, session, session1Id, session2Id } = await createTaskWithTwoSessions(
       testPage,
@@ -382,16 +680,59 @@ test.describe("Session tab management — primary session persistence", () => {
       )
       .toBe(true);
 
+    await expect(
+      testPage.getByTestId("toast-message").filter({ hasText: "Set primary" }),
+    ).toHaveCount(0);
+
     await expect(starInTab(session, session2Id)).toBeVisible({ timeout: 5_000 });
     await expect(starInTab(session, session1Id)).not.toBeVisible({ timeout: 5_000 });
 
     // Trigger kanban.update by moving the task to a non-start step.
     const otherStep = seedData.steps.find((s) => s.id !== seedData.startStepId);
     if (!otherStep) throw new Error("Workflow needs at least 2 steps to trigger kanban.update");
+    const taskUpdatesBeforeMove = () =>
+      traffic.frames.filter(
+        (frame) => frame.direction === "received" && frame.action === TASK_UPDATED_ACTION,
+      ).length;
+    const taskUpdatesAtMove = taskUpdatesBeforeMove();
     await apiClient.moveTask(task.id, seedData.workflowId, otherStep.id);
 
-    // Give the WS broadcast time to land.
-    await testPage.waitForTimeout(500);
+    // The kanban.update broadcast is what could wrongly move the star, so wait
+    // for the gateway to actually deliver it instead of budgeting for it.
+    // The move is delivered as `task.updated`, which `lib/ws/handlers/kanban.ts`
+    // consumes -- that handler is what this test is named after, and its
+    // regression was moving the star back to session #1. There is no
+    // `kanban.update` frame on the wire; waiting for one times out. Verified by
+    // dumping every received action after moveTask.
+    await expect
+      .poll(taskUpdatesBeforeMove, {
+        timeout: 15_000,
+        message: `no ${TASK_UPDATED_ACTION} frame was delivered after moveTask`,
+      })
+      .toBeGreaterThan(taskUpdatesAtMove);
+
+    // Observing the frame only proves the gateway delivered it, not that the
+    // handler under test ran. Both assertions below are already true before the
+    // move, so asserting in that gap would pass against the pre-move DOM and
+    // miss the regression entirely. Wait for the handler's own effect on the
+    // store -- the task's step in `kanban.tasks` -- before asserting.
+    await testPage.waitForFunction(
+      ({ taskId, stepId }) => {
+        const store = (
+          window as Window & {
+            __KANDEV_E2E_STORE__?: {
+              getState: () => { kanban: { tasks: Array<{ id: string; workflowStepId: string }> } };
+            };
+          }
+        ).__KANDEV_E2E_STORE__;
+        if (!store) throw new Error("E2E store bridge missing");
+        return (
+          store.getState().kanban.tasks.find((t) => t.id === taskId)?.workflowStepId === stepId
+        );
+      },
+      { taskId: task.id, stepId: otherStep.id },
+      { timeout: 15_000 },
+    );
 
     // Star must still be on session #2 (would jump back to #1 before the kanban.ts fix).
     await expect(starInTab(session, session2Id)).toBeVisible({ timeout: 5_000 });

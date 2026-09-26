@@ -29,10 +29,11 @@ func TestRepositoryLookupAdapterResolvesOnlyTaskLinkedAzureRepository(t *testing
 	if err != nil {
 		t.Fatalf("create repository: %v", err)
 	}
-	task, err := harness.taskSvc.CreateTask(t.Context(), &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(t.Context(), &taskservice.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID, Title: "Azure task", IsEphemeral: true,
 		Repositories: []taskservice.TaskRepositoryInput{{RepositoryID: repository.ID, BaseBranch: "main"}},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}

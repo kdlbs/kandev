@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -20,8 +21,24 @@ func (r *Repository) CreateProject(ctx context.Context, project *models.Project)
 	now := time.Now().UTC()
 	project.CreatedAt = now
 	project.UpdatedAt = now
+	return r.insertProject(ctx, r.db, project)
+}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+// CreateProjectTx is CreateProject scoped to a caller-owned transaction,
+// letting config sync write a new project and its ownership manifest row
+// atomically (AC-OFFICE-CONFIG-SYNC-003.14).
+func (r *Repository) CreateProjectTx(ctx context.Context, tx *sqlx.Tx, project *models.Project) error {
+	if project.ID == "" {
+		project.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	project.CreatedAt = now
+	project.UpdatedAt = now
+	return r.insertProject(ctx, tx, project)
+}
+
+func (r *Repository) insertProject(ctx context.Context, ext sqlx.ExtContext, project *models.Project) error {
+	_, err := ext.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO office_projects (
 			id, workspace_id, name, description, status, lead_agent_profile_id,
 			color, budget_cents, repositories, executor_config, created_at, updated_at
@@ -95,9 +112,60 @@ func (r *Repository) UpdateProject(ctx context.Context, project *models.Project)
 	return err
 }
 
+// ProjectConfigFields is the subset of office_projects columns a config
+// import owns (see UpdateProjectConfigFields).
+type ProjectConfigFields struct {
+	Description    string
+	Color          string
+	BudgetCents    int
+	Repositories   string
+	ExecutorConfig string
+}
+
+// UpdateProjectConfigFields updates only the columns a config import owns
+// (description, color, budget, repositories, executor config), leaving
+// status and lead_agent_profile_id untouched instead of reverting them to
+// a stale read-then-write snapshot.
+func (r *Repository) UpdateProjectConfigFields(
+	ctx context.Context, id string, fields ProjectConfigFields,
+) error {
+	return r.updateProjectConfigFields(ctx, r.db, id, fields)
+}
+
+// UpdateProjectConfigFieldsTx is UpdateProjectConfigFields scoped to a
+// caller-owned transaction.
+func (r *Repository) UpdateProjectConfigFieldsTx(
+	ctx context.Context, tx *sqlx.Tx, id string, fields ProjectConfigFields,
+) error {
+	return r.updateProjectConfigFields(ctx, tx, id, fields)
+}
+
+func (r *Repository) updateProjectConfigFields(
+	ctx context.Context, ext sqlx.ExtContext, id string, fields ProjectConfigFields,
+) error {
+	now := time.Now().UTC()
+	_, err := ext.ExecContext(ctx, r.db.Rebind(`
+		UPDATE office_projects SET
+			description = ?, color = ?, budget_cents = ?,
+			repositories = ?, executor_config = ?, updated_at = ?
+		WHERE id = ?
+	`), fields.Description, fields.Color, fields.BudgetCents,
+		fields.Repositories, fields.ExecutorConfig, now, id)
+	return err
+}
+
 // DeleteProject deletes a project by ID.
 func (r *Repository) DeleteProject(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(
+	return r.deleteProject(ctx, r.db, id)
+}
+
+// DeleteProjectTx is DeleteProject scoped to a caller-owned transaction.
+func (r *Repository) DeleteProjectTx(ctx context.Context, tx *sqlx.Tx, id string) error {
+	return r.deleteProject(ctx, tx, id)
+}
+
+func (r *Repository) deleteProject(ctx context.Context, ext sqlx.ExtContext, id string) error {
+	_, err := ext.ExecContext(ctx, r.db.Rebind(
 		`DELETE FROM office_projects WHERE id = ?`), id)
 	return err
 }

@@ -6,6 +6,7 @@ import { StatusIcon } from "@/app/office/tasks/[id]/status-icon";
 import { topoSort } from "./workflow-sort";
 import type { Task } from "@/app/office/tasks/[id]/types";
 import type { TreeHold } from "@/lib/api/domains/tree-api";
+import { useTranslation } from "react-i18next";
 
 type SubtaskStepperProps = {
   items: Task["children"];
@@ -13,6 +14,7 @@ type SubtaskStepperProps = {
 };
 
 export function SubtaskStepper({ items, activeHold }: SubtaskStepperProps) {
+  const { t } = useTranslation();
   if (items.length === 0) return null;
 
   const sorted = topoSort(items);
@@ -24,11 +26,11 @@ export function SubtaskStepper({ items, activeHold }: SubtaskStepperProps) {
       })
       .map((i) => i.id),
   );
-  const holdLabel = activeHold?.mode === "pause" ? "Paused" : "Cancelled (tree)";
+  const holdLabel = activeHold?.mode === "pause" ? t("task:paused") : t("task:cancelledTree");
 
   return (
     <div className="mt-8" data-testid="subtask-stepper">
-      <h2 className="text-sm font-semibold mb-4">Sub-tasks</h2>
+      <h2 className="text-sm font-semibold mb-4">{t("task:subTasks")}</h2>
       <div className="relative">
         <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
         <div className="space-y-1 pl-10">
@@ -61,7 +63,7 @@ export function SubtaskStepper({ items, activeHold }: SubtaskStepperProps) {
                   <span className="flex-1 truncate">{child.title}</span>
                   {isBlocked && (
                     <Badge variant="outline" className="text-xs shrink-0">
-                      Blocked
+                      {t("task:blocked")}
                     </Badge>
                   )}
                   {activeHold && !isBlocked && (

@@ -1,8 +1,16 @@
 package websocket
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 func TestSessionStreamBroadcaster_FileChangeBatching(t *testing.T) {
@@ -149,5 +157,157 @@ func TestExtractSessionID(t *testing.T) {
 				t.Errorf("extractSessionID(%v) = %q, want %q", tt.data, result, tt.expected)
 			}
 		})
+	}
+}
+
+// TestSessionStreamBroadcaster_SubscribesFallbackSubject pins the subject
+// mapping: RegisterSessionStreamNotifications must subscribe the
+// session_model_fallback wildcard so orchestrator publishes reach the hub.
+func TestSessionStreamBroadcaster_SubscribesFallbackSubject(t *testing.T) {
+	log := testLogger()
+	eventBus := &subscriptionRecordingEventBus{MemoryEventBus: bus.NewMemoryEventBus(log)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	hub := NewHub(nil, log)
+	b := RegisterSessionStreamNotifications(ctx, eventBus, hub, log)
+	_ = b
+
+	for _, subject := range eventBus.subjects {
+		if subject == events.BuildSessionModelFallbackWildcardSubject() {
+			return
+		}
+	}
+	t.Fatalf("session stream broadcaster must subscribe the fallback wildcard subject %q",
+		events.BuildSessionModelFallbackWildcardSubject())
+}
+
+// TestSessionStreamBroadcaster_BroadcastsFallbackNotification verifies a
+// published session_model_fallback event is routed to the session's
+// subscribers as the session.model_fallback action — the payload's
+// GetSessionID must drive extractSessionID (a broken routing key drops the
+// notification silently).
+func TestSessionStreamBroadcaster_BroadcastsFallbackNotification(t *testing.T) {
+	hub := newAccessTestHub(t)
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = RegisterSessionStreamNotifications(ctx, eventBus, hub, testLogger())
+
+	client := registerAccessClient(t, hub, "client-fallback", authn.Identity{UserID: "user-1", Role: authn.RoleMember})
+	raw, err := json.Marshal(map[string]interface{}{"session_id": "session-fallback-1"})
+	if err != nil {
+		t.Fatalf("marshal subscribe payload: %v", err)
+	}
+	client.handleSessionSubscribe(&ws.Message{
+		ID: "1", Type: ws.MessageTypeRequest, Action: ws.ActionSessionSubscribe, Payload: raw,
+	})
+
+	sessionID := "session-fallback-1"
+	_ = eventBus.Publish(ctx, events.BuildSessionModelFallbackSubject(sessionID), bus.NewEvent(
+		events.SessionModelFallbackUpdated,
+		"test",
+		lifecycle.SessionModelFallbackEventPayload{
+			TaskID:        "task-1",
+			SessionID:     sessionID,
+			AgentID:       "a1",
+			FallbackModel: "gpt-5",
+			Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		},
+	))
+
+	// Wait deterministically on the client's send channels (the hub writes
+	// the broadcast there synchronously) instead of polling on a clock.
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case raw := <-client.send:
+			var msg ws.Message
+			if err := json.Unmarshal(raw, &msg); err == nil && msg.Action == ws.ActionSessionModelFallback {
+				return
+			}
+		case raw := <-client.controlSend:
+			var msg ws.Message
+			if err := json.Unmarshal(raw, &msg); err == nil && msg.Action == ws.ActionSessionModelFallback {
+				return
+			}
+		case <-timeout:
+			t.Fatalf("client did not receive %s", ws.ActionSessionModelFallback)
+		}
+	}
+}
+
+// TestSessionStreamBroadcaster_SubscribesLaunchWarningSubject verifies the
+// session stream broadcaster subscribes the session.launch.warning wildcard
+// subject task 05 publishes on. Without this the event never leaves the bus.
+func TestSessionStreamBroadcaster_SubscribesLaunchWarningSubject(t *testing.T) {
+	log := testLogger()
+	eventBus := &subscriptionRecordingEventBus{MemoryEventBus: bus.NewMemoryEventBus(log)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	hub := NewHub(nil, log)
+	b := RegisterSessionStreamNotifications(ctx, eventBus, hub, log)
+	_ = b
+
+	for _, subject := range eventBus.subjects {
+		if subject == events.BuildSessionLaunchWarningWildcardSubject() {
+			return
+		}
+	}
+	t.Fatalf("session stream broadcaster must subscribe the launch warning wildcard subject %q",
+		events.BuildSessionLaunchWarningWildcardSubject())
+}
+
+// TestSessionStreamBroadcaster_BroadcastsLaunchWarningNotification verifies a
+// published session.launch.warning event is routed to the session's
+// subscribers as the session.launch.warning action.
+func TestSessionStreamBroadcaster_BroadcastsLaunchWarningNotification(t *testing.T) {
+	hub := newAccessTestHub(t)
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = RegisterSessionStreamNotifications(ctx, eventBus, hub, testLogger())
+
+	client := registerAccessClient(t, hub, "client-launch-warning", authn.Identity{UserID: "user-1", Role: authn.RoleMember})
+	raw, err := json.Marshal(map[string]interface{}{"session_id": "session-warn-1"})
+	if err != nil {
+		t.Fatalf("marshal subscribe payload: %v", err)
+	}
+	client.handleSessionSubscribe(&ws.Message{
+		ID: "1", Type: ws.MessageTypeRequest, Action: ws.ActionSessionSubscribe, Payload: raw,
+	})
+
+	sessionID := "session-warn-1"
+	_ = eventBus.Publish(ctx, events.BuildSessionLaunchWarningSubject(sessionID), bus.NewEvent(
+		events.SessionLaunchWarning,
+		"test",
+		&lifecycle.LaunchWarningEventPayload{
+			TaskID:     "task-1",
+			SessionID:  sessionID,
+			ExecutorID: "executor-1",
+			Host:       "10.0.0.5",
+			State:      "unreachable",
+			Reason:     "timeout",
+			Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		},
+	))
+
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case raw := <-client.send:
+			var msg ws.Message
+			if err := json.Unmarshal(raw, &msg); err == nil && msg.Action == ws.ActionSessionLaunchWarning {
+				return
+			}
+		case raw := <-client.controlSend:
+			var msg ws.Message
+			if err := json.Unmarshal(raw, &msg); err == nil && msg.Action == ws.ActionSessionLaunchWarning {
+				return
+			}
+		case <-timeout:
+			t.Fatalf("client did not receive %s", ws.ActionSessionLaunchWarning)
+		}
 	}
 }

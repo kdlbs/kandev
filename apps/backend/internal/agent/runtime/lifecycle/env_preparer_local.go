@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/shellexec"
 	"github.com/kandev/kandev/internal/common/subproc"
@@ -29,6 +31,8 @@ import (
 type LocalPreparer struct {
 	logger *logger.Logger
 }
+
+const localGitNetworkTimeout = 30 * time.Second
 
 // NewLocalPreparer creates a new LocalPreparer.
 func NewLocalPreparer(log *logger.Logger) *LocalPreparer {
@@ -59,7 +63,34 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	if workspacePath == "" {
 		workspacePath = req.RepositoryPath
 	}
-	resolvedScript := resolvePreparerSetupScript(req, workspacePath)
+	if req.WorkspaceReuseRequired {
+		step := beginStep("Validate workspace")
+		reportProgress(onProgress, step, 0, 1)
+		info, statErr := os.Stat(workspacePath)
+		if workspacePath == "" || statErr != nil || !info.IsDir() {
+			completeStepError(&step, "required workspace is unavailable")
+			return &EnvPrepareResult{Success: false, Steps: []PrepareStep{step}, ErrorMessage: step.Error, Error: worktree.ErrReuseWorktreeUnavailable, Duration: time.Since(start)}, nil
+		}
+		if req.RepositoryID != "" || req.RepositoryPath != "" {
+			if err := validateLocalRepositoryWorkspace(ctx, workspacePath, req.RepositoryPath); err != nil {
+				completeStepError(&step, "workspace is not the expected Git repository checkout")
+				return &EnvPrepareResult{
+					Success:      false,
+					Steps:        []PrepareStep{step},
+					ErrorMessage: step.Error,
+					Duration:     time.Since(start),
+					Error:        worktree.ErrReuseWorktreeUnavailable,
+				}, fmt.Errorf("validate local repository workspace: %w", err)
+			}
+		}
+		completeStepSuccess(&step)
+		reportProgress(onProgress, step, 0, 1)
+		return &EnvPrepareResult{Success: true, Steps: []PrepareStep{step}, WorkspacePath: workspacePath, Duration: time.Since(start)}, nil
+	}
+	resolvedScript, err := resolvePreparerSetupScript(req, workspacePath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve setup script: %w", err)
+	}
 
 	// CheckoutBranch (PR head) takes priority over BaseBranch when both set.
 	effectiveBranch := req.CheckoutBranch
@@ -83,7 +114,29 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	if req.WorkspacePath == "" && req.RepositoryPath == "" {
 		completeStepError(&step, "no workspace or repository path provided")
 		steps = append(steps, step)
-		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: step.Error, Duration: time.Since(start)}, fmt.Errorf("no workspace path")
+		prepErr := fmt.Errorf("no workspace path")
+		return &EnvPrepareResult{
+			Success:      false,
+			Steps:        steps,
+			ErrorMessage: step.Error,
+			Duration:     time.Since(start),
+			Error:        prepErr,
+		}, prepErr
+	}
+	if req.RepositoryID != "" || req.RepositoryPath != "" {
+		if err := validateLocalRepositoryWorkspace(ctx, workspacePath, req.RepositoryPath); err != nil {
+			completeStepError(&step, "workspace is not the expected Git repository checkout")
+			steps = append(steps, step)
+			reportProgress(onProgress, step, stepIdx, totalSteps)
+			prepErr := fmt.Errorf("validate local repository workspace: %w", err)
+			return &EnvPrepareResult{
+				Success:      false,
+				Steps:        steps,
+				ErrorMessage: step.Error,
+				Duration:     time.Since(start),
+				Error:        worktree.ErrReuseWorktreeUnavailable,
+			}, prepErr
+		}
 	}
 	completeStepSuccess(&step)
 	steps = append(steps, step)
@@ -106,15 +159,28 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 		} else {
 			// User picked a different branch — switch the working tree.
 			step = beginStep("Checkout branch")
-			step.Command = fmt.Sprintf("git fetch origin %s && git checkout %s", effectiveBranch, effectiveBranch)
+			if req.RemoteSyncHandled {
+				step.Command = fmt.Sprintf("git checkout %s", effectiveBranch)
+			} else {
+				step.Command = fmt.Sprintf("git fetch origin %s && git checkout %s", effectiveBranch, effectiveBranch)
+			}
 			reportProgress(onProgress, step, stepIdx, totalSteps)
-			output, err := checkoutBranch(ctx, workspacePath, effectiveBranch, gitCredentialValues(req.Env))
+			output, err := checkoutBranch(
+				ctx, workspacePath, effectiveBranch, gitCredentialValues(req.Env), req.RemoteSyncHandled,
+			)
 			if err != nil {
 				errMsg := fmt.Sprintf("failed to checkout branch %q: %s", effectiveBranch, output)
 				completeStepError(&step, errMsg)
 				steps = append(steps, step)
 				reportProgress(onProgress, step, stepIdx, totalSteps)
-				return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: errMsg, Duration: time.Since(start)}, fmt.Errorf("checkout branch: %w", err)
+				prepErr := fmt.Errorf("checkout branch: %w", err)
+				return &EnvPrepareResult{
+					Success:      false,
+					Steps:        steps,
+					ErrorMessage: errMsg,
+					Duration:     time.Since(start),
+					Error:        prepErr,
+				}, prepErr
 			}
 			step.Output = output
 			completeStepSuccess(&step)
@@ -135,6 +201,87 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 		WorkspacePath: workspacePath,
 		Duration:      time.Since(start),
 	}, nil
+}
+
+func validateLocalRepositoryWorkspace(ctx context.Context, workspacePath, repositoryPath string) error {
+	if _, err := localGitTopLevel(ctx, workspacePath); err != nil {
+		return err
+	}
+	if repositoryPath == "" {
+		return nil
+	}
+	workspaceCommonDir, err := localGitCommonDir(ctx, workspacePath)
+	if err != nil {
+		return err
+	}
+	repositoryCommonDir, err := localGitCommonDir(ctx, repositoryPath)
+	if err != nil {
+		return err
+	}
+	workspaceCommonInfo, err := os.Stat(workspaceCommonDir)
+	if err != nil {
+		return worktree.ErrReuseWorktreeUnavailable
+	}
+	repositoryCommonInfo, err := os.Stat(repositoryCommonDir)
+	if err != nil {
+		return worktree.ErrReuseWorktreeUnavailable
+	}
+	if !workspaceCommonInfo.IsDir() || !repositoryCommonInfo.IsDir() ||
+		!os.SameFile(workspaceCommonInfo, repositoryCommonInfo) {
+		return worktree.ErrReuseWorktreeUnavailable
+	}
+	return nil
+}
+
+func localGitTopLevel(ctx context.Context, path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return "", worktree.ErrReuseWorktreeUnavailable
+	}
+	cmd := subproc.NewGitCommand(ctx, "rev-parse", "--show-toplevel")
+	cmd.Dir = path
+	out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
+	if err != nil {
+		return "", worktree.ErrReuseWorktreeUnavailable
+	}
+	root := strings.TrimSpace(string(out))
+	if root == "" {
+		return "", worktree.ErrReuseWorktreeUnavailable
+	}
+	return root, nil
+}
+
+// localGitCommonDir returns the canonical Git directory shared by a checkout
+// and all of its linked worktrees. Its filesystem identity, rather than its
+// path spelling, proves that a linked worktree belongs to the selected
+// repository while still rejecting an unrelated Git checkout.
+func localGitCommonDir(ctx context.Context, path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return "", worktree.ErrReuseWorktreeUnavailable
+	}
+	cmd := subproc.NewGitCommand(ctx, "rev-parse", "--git-common-dir")
+	cmd.Dir = path
+	out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
+	if err != nil {
+		return "", worktree.ErrReuseWorktreeUnavailable
+	}
+	commonDir := strings.TrimSpace(string(out))
+	if commonDir == "" {
+		return "", worktree.ErrReuseWorktreeUnavailable
+	}
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(path, commonDir)
+	}
+	commonDir, err = filepath.Abs(commonDir)
+	if err != nil {
+		return "", worktree.ErrReuseWorktreeUnavailable
+	}
+	commonDir, err = filepath.EvalSymlinks(commonDir)
+	if err != nil {
+		return "", worktree.ErrReuseWorktreeUnavailable
+	}
+	return filepath.Clean(commonDir), nil
 }
 
 // readCurrentBranchForLocal returns the workspace's currently-checked-out
@@ -173,14 +320,16 @@ func readCurrentBranchForLocal(workDir string) string {
 // Best-effort fetch first so newly-created remote branches are visible, then
 // the checkout. If the local branch doesn't exist but the remote tracking
 // branch does (from the fetch), git creates a local branch tracking it.
-func checkoutBranch(ctx context.Context, workDir, branch string, sensitiveValues []string) (string, error) {
-	fetchCmd := subproc.NewGitCommand(ctx, "fetch", "origin", branch)
-	fetchCmd.Dir = workDir
-	fetchOut, fetchErr := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, fetchCmd)
+func checkoutBranch(
+	ctx context.Context, workDir, branch string, sensitiveValues []string, remoteSyncHandled bool,
+) (string, error) {
+	var fetchOut []byte
+	var fetchErr error
+	if !remoteSyncHandled {
+		fetchOut, fetchErr = runLocalGit(ctx, workDir, "fetch", "origin", branch)
+	}
 
-	cmd := subproc.NewGitCommand(ctx, "checkout", branch)
-	cmd.Dir = workDir
-	out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
+	out, err := runLocalGit(ctx, workDir, "checkout", branch)
 	outStr := redactCheckoutOutput(strings.TrimSpace(string(out)), sensitiveValues)
 	if err != nil {
 		if fetchErr != nil {
@@ -190,6 +339,23 @@ func checkoutBranch(ctx context.Context, workDir, branch string, sensitiveValues
 		return outStr, worktree.ClassifyGitError(outStr, err)
 	}
 	return outStr, nil
+}
+
+func runLocalGit(ctx context.Context, workDir string, args ...string) ([]byte, error) {
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		localGitNetworkTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, args...)
+			cmd.Dir = workDir
+			return cmd
+		},
+	)
+	if runErr == nil {
+		runErr = execCtxErr
+	}
+	return output, runErr
 }
 
 var credentialURLPattern = regexp.MustCompile(`(?i)(https?://)[^\s/@]+@`)
@@ -239,7 +405,10 @@ const setupScriptStreamInterval = 100 * time.Millisecond
 // streaming combined stdout/stderr to onOutput (if non-nil) as it runs.
 // Returns the full accumulated output (trimmed) and any execution error.
 func runSetupScript(ctx context.Context, script, workDir string, env map[string]string, onOutput func(current string)) (string, error) {
-	cmd := shellexec.CommandContext(ctx, shellexec.Bash, script)
+	setupCtx, cancel := context.WithTimeout(ctx, constants.SetupScriptTimeout)
+	defer cancel()
+
+	cmd := shellexec.CommandContext(setupCtx, shellexec.Bash, script)
 	if workDir != "" {
 		cmd.Dir = workDir
 	}

@@ -3,7 +3,11 @@
 import type { ExecutorType } from "./executor";
 import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
-import type { TaskRepository, WorkspaceFolder } from "./http-workspace-sources";
+import type {
+  RepositoryBranchPolicy,
+  TaskRepository,
+  WorkspaceFolder,
+} from "./http-workspace-sources";
 import type {
   AgentProfileId,
   RepositoryId,
@@ -15,6 +19,7 @@ import type {
 import type { OnEnterActionType, StepEvents } from "./workflow-actions";
 import type { EntityReference } from "./entity-reference";
 import type { TaskStatusSummary } from "./task-status-summary";
+import type { AgentGoalReconciliation } from "@/lib/agent-goal";
 
 export type { TaskStatusSummary } from "./task-status-summary";
 
@@ -25,8 +30,24 @@ export type {
   SidebarViewApi,
   SidebarViewDraftApi,
   SidebarTaskPrefsApi,
+  SidebarTaskColorAutomation,
+  SidebarTaskColorAutomationApi,
+  SidebarTaskColor,
+  SidebarTaskColorsApi,
+  SidebarTaskColorPatchApi,
+  SidebarTaskColorDimension,
+  SidebarTaskColorRepositoryTarget,
+  SidebarTaskColorRule,
+  FixedAutomaticTaskColor,
   TaskCreateLastUsedApi,
   AppStatusBarOrderApi,
+  ThreadTaskScopeApi,
+  ThreadViewClauseApi,
+  ThreadViewSortApi,
+  ThreadViewApi,
+  ThreadViewDraftApi,
+  LspStatusLocation,
+  LastSeenDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
   UserSettings,
@@ -34,8 +55,13 @@ export type {
   UserSettingsUpdatePayload,
 } from "./http-user-settings";
 export type {
+  AgentProfileRecentUseApiRecord,
+  AgentProfileRecentUseContext,
+} from "./http-agent-profile-recent-use";
+export type {
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
+  RepositoryBranchPolicy,
   TaskRepository,
   WorkspaceFolder,
   WorkspaceFolderSourceRequest,
@@ -72,6 +98,8 @@ export type TaskState =
   | "FAILED"
   | "CANCELLED";
 
+export type TaskPriority = "critical" | "high" | "medium" | "low";
+
 // Workflow Review Status
 export type WorkflowReviewStatus = "pending" | "approved" | "changes_requested" | "rejected";
 
@@ -100,6 +128,15 @@ export type StepDefinition = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: AgentProfileId;
+  profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+  profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: WorkflowSessionTarget | null;
+  execution_profile_id?: AgentProfileId;
+  route_generation?: number;
+  route_state?: string;
+  route_reason?: string;
+  downstream_acp_session_id?: string;
+  complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -120,6 +157,10 @@ export type WorkflowStep = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+  profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: WorkflowSessionTarget | null;
+  complete_task_on_enter?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /**
@@ -185,6 +226,38 @@ export type TaskSessionState =
 
 export type TaskPendingAction = "clarification" | "permission";
 
+export type TaskPendingActionRevision = {
+  epoch: string;
+  sequence: number;
+};
+
+export type WorkflowProfileSessionStartPolicy = "reuse" | "new";
+export type WorkflowProfileSessionEndPolicy = "complete" | "park";
+export type WorkflowSessionTarget = { kind: "initial" } | { kind: "step"; step_id: string };
+
+export type WorkflowAgentOverrideBinding = {
+  step_id: string;
+  source_profile_id: string;
+  replacement_profile_id: string;
+};
+
+export type WorkflowAgentOverrides = {
+  workflow_id: string;
+  steps: WorkflowAgentOverrideBinding[];
+};
+
+export function normalizeWorkflowProfileSessionStartPolicy(
+  value: unknown,
+): WorkflowProfileSessionStartPolicy {
+  return typeof value === "string" && value.trim() === "new" ? "new" : "reuse";
+}
+
+export function normalizeWorkflowProfileSessionEndPolicy(
+  value: unknown,
+): WorkflowProfileSessionEndPolicy {
+  return typeof value === "string" && value.trim() === "complete" ? "complete" : "park";
+}
+
 /**
  * Fine-grained busy substate of a session (see ADR-0049). Distinguishes
  * a foreground turn that is actively generating from one that is idle, held open
@@ -199,6 +272,8 @@ export type Workflow = {
   workspace_id: WorkspaceId;
   name: string;
   description?: string | null;
+  /** Optional workflow-level agent instructions prepended at every step entry. */
+  prompt?: string;
   workflow_template_id?: string | null;
   agent_profile_id?: AgentProfileId;
   sort_order?: number;
@@ -225,6 +300,14 @@ export type Workspace = {
   name: string;
   description?: string | null;
   owner_id: string;
+  /** "private" (owner + explicit members) or "org" (every non-guest user). */
+  /** The organization unit this workspace sits in; reach follows the tree. */
+  unit_id?: string;
+  /** The requesting user's role here; drives owner-only controls. */
+  viewer_role?: string;
+  /** Scopes the requesting user holds here. The server is authoritative. */
+  scopes?: string[];
+  member_count?: number;
   default_executor_id?: string | null;
   default_environment_id?: string | null;
   default_agent_profile_id?: AgentProfileId | null;
@@ -243,6 +326,7 @@ export type Repository = {
   provider: string;
   provider_repo_id: string;
   provider_host?: string;
+  provider_scope?: string;
   provider_owner: string;
   provider_name: string;
   /** Canonical credential-free clone URL for provider-backed repositories. */
@@ -262,8 +346,39 @@ export type Repository = {
    * suffix. Remote executors always copy the bytes.
    */
   copy_files: string;
+  secret_bindings?: RepositorySecretBinding[];
   created_at: string;
   updated_at: string;
+};
+
+export type RepositorySecretBinding = {
+  key: string;
+  secret_id: string;
+};
+
+/**
+ * A named, reusable group of workspace repositories. Applying one fills the
+ * task-creation repository picker in a single action.
+ *
+ * A set stores an optional base branch for each member. Applying a set copies
+ * that value into the task draft; it never creates a live link to the set.
+ */
+export type RepositorySet = {
+  id: string;
+  workspace_id: WorkspaceId;
+  name: string;
+  description: string;
+  /** Membership in apply order. Always an array, never null. */
+  repositories: RepositorySetItem[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type RepositorySetItem = {
+  repository_id: RepositoryId;
+  position: number;
+  /** Empty or absent means that the task form should use its normal default. */
+  base_branch?: string;
 };
 
 export type RepositoryScript = {
@@ -318,11 +433,15 @@ export type Task = ActiveSubagentCountFields & {
   workspace_id: WorkspaceId;
   workflow_id: WorkflowId;
   workflow_step_id: string;
+  /** Task-only replacements for fixed workflow step agent profiles. */
+  workflow_agent_overrides?: WorkflowAgentOverrides;
   position: number;
   title: string;
   description: string;
+  /** True when the task was created in autopilot mode. Immutable after creation. */
+  autopilot?: boolean;
   state: TaskState;
-  priority: number;
+  priority: TaskPriority;
   wip_admitted?: boolean;
   queued_for_step_id?: string;
   queued_at?: string | null;
@@ -332,26 +451,55 @@ export type Task = ActiveSubagentCountFields & {
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
   task_pending_action?: TaskPendingAction | null;
+  /** True when the task's session was mid-turn when the backend died and has
+   *  not been resumed since (startup reconciliation marker). */
+  interrupted?: boolean;
+  /** True when a workflow step's auto_start_agent on_enter action failed to
+   *  launch a run for this task. */
+  auto_start_failed?: boolean;
+  /** True when this task inherits an archived parent's workspace and can no
+   *  longer materialize or start (see internal/task/models WorkspaceOrphaned). */
+  workspace_orphaned?: boolean;
   /**
    * Task-level MOST-ACTIVE-WINS activity across sessions. "generating" wins,
    * then "background"; null/absent means none is known. The count is the
    * corresponding sum of live subagents.
    */
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * True when the task is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled background
+   * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
+   * Outranked by pending-input and any live foreground_activity.
+   */
+  parked_on_background_work?: boolean;
+  /** Process-local transition generation for parked_on_background_work; used to reject stale snapshots. */
+  parked_revision?: number;
+  /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
+  parked_epoch?: number;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
+  primary_executor_profile_id?: string | null;
   primary_executor_type?: ExecutorType | null;
   primary_executor_name?: string | null;
   primary_agent_name?: string | null;
+  primary_agent_profile_id?: string | null;
   primary_working_directory?: string | null;
   is_remote_executor?: boolean;
   is_ephemeral?: boolean;
+  /**
+   * The human assignee's user id, independent of the agent assignee. Advisory:
+   * it records who owns the task and gates nothing.
+   */
+  assignee_user_id?: string;
   parent_id?: TaskId;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown> | null;
+  /** JSON-encoded normalized task labels from the backend. */
+  labels?: string;
   // Office extensions (mirror TaskDTO Go fields). Empty/undefined for kanban-origin tasks.
   origin?: TaskOrigin;
   project_id?: string;
@@ -360,10 +508,26 @@ export type Task = ActiveSubagentCountFields & {
   // isFromOfficeProjection in the Go task repo for the canonical rule.
   is_from_office?: boolean;
   status_summary?: TaskStatusSummary | null;
+  /** Explicitly clears a cached status summary. Omission keeps partial-response semantics. */
+  status_summary_invalidated?: boolean;
+  /**
+   * Whether the task's executor profile can be switched right now (nothing has
+   * materialized yet). Always present on an enriched read; not gap-filled on
+   * merge (an omitted value reads as ineligible, never as the cached one).
+   */
+  runner_editable?: boolean;
+  /** Machine-readable reason for `runner_editable`; always present alongside it. */
+  runner_ineligible_reason?: string;
 };
 
 // Task origin values mirror models.TaskOrigin* constants in the Go backend.
-export type TaskOrigin = "manual" | "agent_created" | "routine" | "onboarding";
+export type TaskOrigin =
+  | "manual"
+  | "agent_created"
+  | "routine"
+  | "onboarding"
+  | "automation_run"
+  | "automation_task";
 
 // isFromOffice reads the backend-computed flag (predicate lives in SQL at
 // apps/backend/internal/task/repository/sqlite/task.go). Use to gate
@@ -373,6 +537,7 @@ export const isFromOffice = (task: Task | null | undefined): boolean => !!task?.
 export type CreateTaskResponse = Task & {
   session_id?: string;
   agent_execution_id?: string;
+  agent_profile_id?: AgentProfileId;
 };
 
 // Backend workflow step DTO (flat fields, as returned from API)
@@ -389,9 +554,24 @@ export type WorkflowStepDTO = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: AgentProfileId;
+  profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+  profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: WorkflowSessionTarget | null;
   stage_type?: "work" | "review" | "approval" | "custom";
   wip_limit?: number;
   pull_from_step_id?: string | null;
+  complete_task_on_enter: boolean;
+  auto_advance_requires_signal: boolean;
+  cancel_triggers_turn_complete: boolean;
+  /**
+   * Bumped by the reorder endpoint each time this step's task order changes
+   * (REQ-TASKS-KANBAN-TASK-REORDERING-001.25/.37). Seed
+   * `kanbanMulti.orderRevisionByStepId` from this on hydration so a
+   * `task.reordered` WS event received right after page load is not
+   * mistaken for the first order this client has ever seen. Optional only
+   * because older test fixtures omit it; the backend always sends it.
+   */
+  order_revision?: number;
   created_at?: string;
   updated_at?: string;
 };
@@ -400,6 +580,39 @@ export type WorkflowStepDTO = {
 export type MoveTaskResponse = {
   task: Task;
   workflow_step: WorkflowStepDTO;
+  workflow_entry_identity?: string;
+  move_id?: string;
+  entry_options?: {
+    reset_context?: boolean;
+    instructions?: string;
+    skip_step_prompt?: boolean;
+  };
+};
+
+/** Band discriminator for a within-step reorder request. */
+export type ReorderBand = "admitted" | "queued";
+
+/** One task's new position, as carried by every reorder response/event. */
+export type ReorderedTaskPosition = {
+  id: string;
+  position: number;
+};
+
+/**
+ * Success (200) and step_changed conflict (409) bodies for
+ * `PUT /api/v1/workflow-steps/:id/tasks/reorder` share this shape: the
+ * step's full non-hidden task list in both bands, and the revision it was
+ * written at.
+ */
+export type ReorderStepTasksResponse = {
+  workflow_step_id: string;
+  revision: number;
+  tasks: ReorderedTaskPosition[];
+};
+
+/** Body of a rejected reorder request: `step_changed` (409) or `invalid_reorder` (400). */
+export type ReorderStepTasksErrorBody = Partial<ReorderStepTasksResponse> & {
+  code: "step_changed" | "invalid_reorder";
 };
 
 /** A worktree associated with a task session (one per repo on multi-repo tasks). */
@@ -419,9 +632,30 @@ export type TaskSessionWorktree = {
 export type TaskSession = ActiveSubagentCountFields & {
   id: SessionId;
   task_id: TaskId;
+  /** Immutable queue ownership identity; changes when a textual session ID is recreated. */
+  queue_incarnation_id?: string;
+  /** Frontend-only owner for an in-flight optimistic resume projection. */
+  resume_projection_id?: string;
   /** Optional user-supplied label shown on the session tab. */
   name?: string;
   agent_profile_id?: AgentProfileId;
+  /** Logical profile selected by the user; dynamic profiles resolve this to a concrete launch profile. */
+  execution_profile_id?: AgentProfileId;
+  /** Monotonic dynamic-route generation used for stale action rejection. */
+  route_generation?: number;
+  /** Durable dynamic-route state, such as starting, waiting, or action_required. */
+  route_state?: string;
+  /** Stable reason code for the current dynamic-route state. */
+  route_reason?: string;
+  /** Classified provider cause currently driving route recovery. */
+  route_error_code?: string;
+  route_error_class?: "transient" | "hard" | "unclassified" | string;
+  route_catalogue_version?: string;
+  route_retry_ordinal?: number;
+  route_deadline?: string;
+  route_pending_outcome?: "skip" | "stop" | string;
+  /** Downstream ACP session ID for the currently selected concrete candidate. */
+  downstream_acp_session_id?: string;
   container_id?: string;
   executor_id?: string;
   environment_id?: string;
@@ -442,10 +676,37 @@ export type TaskSession = ActiveSubagentCountFields & {
   cancellation_revision?: number;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * True when the session is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled background
+   * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
+   * Outranked by pending-input and any live foreground_activity.
+   */
+  parked_on_background_work?: boolean;
+  /**
+   * Process-local transition generation for parked_on_background_work; used
+   * to reject stale snapshots. Deliberately named `revision`, not
+   * `parked_revision` — an accepted naming inconsistency with the task-level
+   * carrier (spec round-5 F20).
+   */
+  revision?: number;
+  /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
+  parked_epoch?: number;
+  /**
+   * True when a send right now would be delivered into the still-generating turn
+   * (mid-turn steering) rather than blocked/queued. Live, derived from the
+   * connected agent's negotiated capability plus the runtime flag; never
+   * persisted. The composer uses it to promise delivery, not folding.
+   */
+  supports_steering?: boolean;
   /** Compact pending-input projection used when this session's messages are unloaded. */
   pending_action?: TaskPendingAction | null;
+  /** Cross-channel logical clock for pending_action snapshots. */
+  pending_action_revision?: TaskPendingActionRevision;
   error_message?: string;
   metadata?: Record<string, unknown> | null;
+  /** Frontend-only ordering guard for live ACP goal updates and stale hydration. */
+  goal_reconciliation?: AgentGoalReconciliation;
   agent_profile_snapshot?: Record<string, unknown> | null;
   executor_snapshot?: Record<string, unknown> | null;
   environment_snapshot?: Record<string, unknown> | null;
@@ -512,6 +773,7 @@ export type EditorOption = {
 };
 
 export type EditorsResponse = {
+  folder_opening_available?: boolean;
   editors: EditorOption[];
 };
 
@@ -549,6 +811,16 @@ export type ListTasksResponse = {
   total: number;
 };
 
+export type ListRepositorySetsResponse = {
+  repository_sets: RepositorySet[];
+  total: number;
+};
+
+export type ListRepositoryBranchPoliciesResponse = {
+  repository_branch_policies: RepositoryBranchPolicy[];
+  total: number;
+};
+
 export type ListRepositoriesResponse = {
   repositories: Repository[];
   total: number;
@@ -565,10 +837,27 @@ export type LocalRepository = {
   default_branch?: string;
 };
 
+export type DesktopDiscoveryRoot = {
+  id: string;
+  path: string;
+  display_path: string;
+  state: "connected" | "reconnect_required" | string;
+  last_scan_at?: string;
+  last_failure_at?: string;
+  last_failure_code?: string;
+};
+
 export type RepositoryDiscoveryResponse = {
   roots: string[];
   repositories: LocalRepository[];
   total: number;
+  desktop_runtime?: boolean;
+  root_states?: DesktopDiscoveryRoot[];
+  scan_time?: string;
+  refreshing?: boolean;
+  cached?: boolean;
+  home_confirmation_required?: boolean;
+  failed_roots?: string[];
 };
 
 export type RepositoryPathValidationResponse = {
@@ -699,6 +988,8 @@ export type MessageType =
 
 export type MessageMetadata = Record<string, unknown> & {
   entity_references?: EntityReference[];
+  client_queue_id?: string;
+  queue_admission_ids?: string[];
 };
 
 export type Message = {
@@ -716,6 +1007,10 @@ export type Message = {
   created_at: string;
   /** Authoritative per-message change signal; advances on every content/metadata update. */
   updated_at?: string;
+  /** 1-based ordinal among ALL user messages of the session (ordered by
+   * created_at ascending, ties by id); present only on user messages from an
+   * indexed server payload, omitted on older payloads. */
+  prompt_index?: number;
 };
 
 export type Turn = {
@@ -724,6 +1019,8 @@ export type Turn = {
   task_id: TaskId;
   started_at: string;
   completed_at?: string;
+  execution_profile_id?: AgentProfileId;
+  route_generation?: number;
   metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -743,9 +1040,17 @@ export type WorkflowExportData = {
   workflows: WorkflowPortable[];
 };
 
+export type AgentProfilePortable = {
+  agent_name: string;
+  model?: string;
+  mode?: string;
+};
+
 export type WorkflowPortable = {
   name: string;
   description?: string;
+  prompt?: string;
+  agent_profile?: AgentProfilePortable;
   steps: StepPortable[];
 };
 
@@ -756,13 +1061,72 @@ export type StepPortable = {
   prompt?: string;
   events: StepEvents;
   is_start_step: boolean;
+  show_in_command_panel: boolean;
   allow_manual_move: boolean;
   auto_archive_after_hours?: number;
+  agent_profile?: AgentProfilePortable;
+  profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+  profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: { kind: "initial" } | { kind: "step"; step_position: number } | null;
+  complete_task_on_enter: boolean;
+  auto_advance_requires_signal: boolean;
+  cancel_triggers_turn_complete: boolean;
   wip_limit?: number;
   pull_from_step_position?: number;
 };
 
 export type ImportWorkflowsResult = { created: string[]; skipped: string[] };
+
+export type WorkflowImportProfileCandidate = {
+  id: string;
+  name: string;
+  agent_name: string;
+  model: string;
+  mode: string;
+  updated_at: string;
+};
+
+export type WorkflowImportProfileMatch = {
+  id: string;
+  updated_at: string;
+};
+
+export type WorkflowImportProfileStep = {
+  workflow_index: number;
+  workflow_name: string;
+  step_position: number;
+  step_name: string;
+  requested_profile: AgentProfilePortable;
+  matched_profile?: WorkflowImportProfileMatch;
+};
+
+export type WorkflowImportPreview = {
+  skipped: string[];
+  profiles: WorkflowImportProfileCandidate[];
+  steps: WorkflowImportProfileStep[];
+};
+
+export type WorkflowImportProfileBinding = {
+  workflow_index: number;
+  step_position: number;
+  requested_profile: AgentProfilePortable;
+  profile_id: string;
+  profile_updated_at: string;
+};
+
+export type WorkflowImportProfileConflict = {
+  workflow_index: number;
+  step_position: number;
+  workflow_name: string;
+  step_name: string;
+  reason: "missing_selection" | "unavailable_profile" | "changed_profile" | string;
+};
+
+export type WorkflowImportProfilesRequiredResponse = {
+  code: "workflow_import_profiles_required";
+  error: string;
+  steps: WorkflowImportProfileConflict[];
+};
 
 // Helper function to check if a step has a specific on_enter action
 export function stepHasOnEnterAction(

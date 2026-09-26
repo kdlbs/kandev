@@ -7,10 +7,25 @@ type Snapshot = {
   workflowId: string;
   workflowName: string;
   steps: Array<{ id: string; title: string; color: string; position: number }>;
-  tasks: Array<{ id: string; workflowStepId: string; title: string; position: number }>;
+  tasks: Array<{
+    id: string;
+    workflowStepId: string;
+    title: string;
+    position: number;
+    queuedForStepId?: string;
+    wipAdmitted?: boolean;
+    priority?: string;
+    queuedAt?: string;
+    createdAt?: string;
+    isArchived?: boolean;
+  }>;
 };
 
 type MockState = {
+  taskRemoval: {
+    pendingTokenByTaskId: Record<string, string>;
+    operationsByToken: Record<string, unknown>;
+  };
   kanbanMulti: {
     snapshots: Record<string, Snapshot>;
     isLoading: boolean;
@@ -21,16 +36,35 @@ type MockState = {
     tasks: Array<{ id: string; workflowStepId: string; title: string; position: number }>;
     steps: Array<{ id: string; title: string; color: string; position: number }>;
   };
+  workspaceContextGeneration?: number;
+  workspaceContextRead?: {
+    workspaceId: string | null;
+    generation: number;
+    pending: { workflows: boolean; repositories: boolean; steps: boolean };
+    errors: {
+      workflows: "transient" | null;
+      repositories: "transient" | null;
+      steps: "transient" | null;
+    };
+    snapshotPending: boolean;
+    snapshotError: "transient" | null;
+  };
 };
 
 let mockState: MockState = {
+  taskRemoval: { pendingTokenByTaskId: {}, operationsByToken: {} },
   kanbanMulti: { snapshots: {}, isLoading: false },
   workflows: { items: [] },
   kanban: { workflowId: null, tasks: [], steps: [] },
 };
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
+  useAppStore: (selector: (s: MockState) => unknown) =>
+    selector({
+      ...mockState,
+      workspaces: { activeId: "ws-1" },
+      sidebarViewsByWorkspace: {},
+    } as MockState),
   useAppStoreApi: () => ({ getState: () => mockState }),
 }));
 
@@ -38,34 +72,40 @@ vi.mock("@/hooks/domains/kanban/use-all-workflow-snapshots", () => ({
   useAllWorkflowSnapshots: (workspaceId: string | null) => mockUseAllWorkflowSnapshots(workspaceId),
 }));
 
-import { useWorkspaceSidebarTasks } from "./use-workspace-sidebar-tasks";
+import { mergeSidebarArchivedTasks, useWorkspaceSidebarTasks } from "./use-workspace-sidebar-tasks";
 
 function setMockState(patch: Partial<MockState>) {
   mockState = {
+    taskRemoval: { ...mockState.taskRemoval, ...(patch.taskRemoval ?? {}) },
     kanbanMulti: { ...mockState.kanbanMulti, ...(patch.kanbanMulti ?? {}) },
     workflows: { ...mockState.workflows, ...(patch.workflows ?? {}) },
     kanban: { ...mockState.kanban, ...(patch.kanban ?? {}) },
   };
 }
 
+const defaultStepId = "step-1";
+const defaultStepColor = "bg-blue-500";
+
 function makeSnapshot(
   workflowId: string,
   workflowName: string,
   taskIds: string[],
-  stepId = "step-1",
+  stepId = defaultStepId,
 ): Snapshot {
   return {
     workflowId,
     workflowName,
-    steps: [{ id: stepId, title: "Step 1", color: "bg-blue-500", position: 0 }],
+    steps: [{ id: stepId, title: "Step 1", color: defaultStepColor, position: 0 }],
     tasks: taskIds.map((id, i) => ({ id, workflowStepId: stepId, title: id, position: i })),
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- sidebar projection cases share one state harness
 describe("useWorkspaceSidebarTasks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState = {
+      taskRemoval: { pendingTokenByTaskId: {}, operationsByToken: {} },
       kanbanMulti: { snapshots: {}, isLoading: false },
       workflows: { items: [] },
       kanban: { workflowId: null, tasks: [], steps: [] },
@@ -75,6 +115,29 @@ describe("useWorkspaceSidebarTasks", () => {
   it("fires useAllWorkflowSnapshots with the workspaceId", () => {
     renderHook(() => useWorkspaceSidebarTasks("ws-1"));
     expect(mockUseAllWorkflowSnapshots).toHaveBeenCalledWith("ws-1");
+  });
+
+  it("surfaces a failed workflow snapshot through the shared retry status", () => {
+    setMockState({
+      workflows: { items: [{ id: "wf-A", workspaceId: "ws-1", name: "A" }] },
+    });
+    mockState = {
+      ...mockState,
+      workspaceContextGeneration: 0,
+      workspaceContextRead: {
+        workspaceId: "ws-1",
+        generation: 0,
+        pending: { workflows: false, repositories: false, steps: false },
+        errors: { workflows: null, repositories: null, steps: null },
+        snapshotPending: false,
+        snapshotError: "transient",
+      },
+    };
+
+    const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+
+    expect(result.current.workspaceContextError).toBe("transient");
+    expect(result.current.workspaceContextPending).toBe(false);
   });
 
   it("aggregates tasks from every workflow snapshot scoped to the workspace", () => {
@@ -156,8 +219,8 @@ describe("useWorkspaceSidebarTasks", () => {
       kanbanMulti: { snapshots: {}, isLoading: false },
       kanban: {
         workflowId: "wf-A",
-        tasks: [{ id: "t-a1", workflowStepId: "step-1", title: "A1", position: 0 }],
-        steps: [{ id: "step-1", title: "Step 1", color: "bg-blue-500", position: 0 }],
+        tasks: [{ id: "t-a1", workflowStepId: defaultStepId, title: "A1", position: 0 }],
+        steps: [{ id: defaultStepId, title: "Step 1", color: defaultStepColor, position: 0 }],
       },
     });
 
@@ -167,10 +230,192 @@ describe("useWorkspaceSidebarTasks", () => {
   });
 });
 
+describe("useWorkspaceSidebarTasks reference stability", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockState = {
+      taskRemoval: { pendingTokenByTaskId: {}, operationsByToken: {} },
+      kanbanMulti: { snapshots: {}, isLoading: false },
+      workflows: { items: [] },
+      kanban: { workflowId: null, tasks: [], steps: [] },
+    };
+  });
+
+  it("preserves an unaffected task reference when a sibling task updates", () => {
+    const snapshot = makeSnapshot("wf-A", "Alpha", ["t-a1", "t-a2"]);
+    setMockState({
+      workflows: { items: [{ id: "wf-A", workspaceId: "ws-1", name: "Alpha" }] },
+      kanbanMulti: { snapshots: { "wf-A": snapshot }, isLoading: false },
+    });
+    const view = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+    const unaffectedTask = view.result.current.allTasks[1];
+
+    setMockState({
+      kanbanMulti: {
+        snapshots: {
+          "wf-A": {
+            ...snapshot,
+            tasks: [{ ...snapshot.tasks[0], title: "Updated" }, snapshot.tasks[1]],
+          },
+        },
+        isLoading: false,
+      },
+    });
+    view.rerender();
+
+    expect(view.result.current.allTasks[1]).toBe(unaffectedTask);
+  });
+
+  it("preserves workflow step references when only a task updates", () => {
+    const snapshot = makeSnapshot("wf-A", "Alpha", ["t-a1", "t-a2"]);
+    setMockState({
+      workflows: { items: [{ id: "wf-A", workspaceId: "ws-1", name: "Alpha" }] },
+      kanbanMulti: { snapshots: { "wf-A": snapshot }, isLoading: false },
+    });
+    const view = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+    const previousSteps = view.result.current.stepsByWorkflowId;
+
+    setMockState({
+      kanbanMulti: {
+        snapshots: {
+          "wf-A": {
+            ...snapshot,
+            tasks: [{ ...snapshot.tasks[0], title: "Updated" }, snapshot.tasks[1]],
+          },
+        },
+        isLoading: false,
+      },
+    });
+    view.rerender();
+
+    expect(view.result.current.stepsByWorkflowId).toBe(previousSteps);
+  });
+});
+
+describe("useWorkspaceSidebarTasks WIP queue", () => {
+  beforeEach(() => {
+    mockState = {
+      taskRemoval: { pendingTokenByTaskId: {}, operationsByToken: {} },
+      kanbanMulti: { snapshots: {}, isLoading: false },
+      workflows: { items: [] },
+      kanban: { workflowId: null, tasks: [], steps: [] },
+    };
+  });
+
+  it("derives destination queue positions for sidebar consumers", () => {
+    setMockState({
+      workflows: { items: [{ id: "wf-A", workspaceId: "ws-1", name: "Alpha" }] },
+      kanbanMulti: {
+        snapshots: {
+          "wf-A": {
+            workflowId: "wf-A",
+            workflowName: "Alpha",
+            steps: [{ id: defaultStepId, title: "Review", color: defaultStepColor, position: 0 }],
+            tasks: [
+              {
+                id: "queued-later",
+                workflowStepId: defaultStepId,
+                queuedForStepId: defaultStepId,
+                wipAdmitted: false,
+                priority: "low",
+                queuedAt: "2026-08-12T00:02:00Z",
+                title: "Later",
+                position: 4,
+              },
+              {
+                id: "queued-first",
+                workflowStepId: defaultStepId,
+                queuedForStepId: defaultStepId,
+                wipAdmitted: false,
+                priority: "high",
+                queuedAt: "2026-08-12T00:01:00Z",
+                title: "First",
+                position: 3,
+              },
+            ],
+          },
+        },
+        isLoading: false,
+      },
+    });
+
+    const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+    expect(result.current.wipQueueByTaskId.get("queued-first")).toEqual({
+      position: 1,
+      total: 2,
+      destinationTitle: "Review",
+    });
+    expect(result.current.wipQueueByTaskId.get("queued-later")).toEqual({
+      position: 2,
+      total: 2,
+      destinationTitle: "Review",
+    });
+  });
+
+  it("excludes archived tasks from active queue positions", () => {
+    setMockState({
+      workflows: { items: [{ id: "wf-A", workspaceId: "ws-1", name: "Alpha" }] },
+      kanbanMulti: {
+        snapshots: {
+          "wf-A": {
+            workflowId: "wf-A",
+            workflowName: "Alpha",
+            steps: [{ id: defaultStepId, title: "Review", color: defaultStepColor, position: 0 }],
+            tasks: [
+              {
+                id: "archived-queued",
+                workflowStepId: defaultStepId,
+                queuedForStepId: defaultStepId,
+                wipAdmitted: false,
+                isArchived: true,
+                position: 0,
+                title: "Archived",
+              },
+              {
+                id: "active-queued",
+                workflowStepId: defaultStepId,
+                queuedForStepId: defaultStepId,
+                wipAdmitted: false,
+                position: 1,
+                title: "Active",
+              },
+            ],
+          },
+        },
+        isLoading: false,
+      },
+    });
+
+    const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+    expect(result.current.wipQueueByTaskId.get("active-queued")).toEqual({
+      position: 1,
+      total: 1,
+      destinationTitle: "Review",
+    });
+    expect(result.current.wipQueueByTaskId.has("archived-queued")).toBe(false);
+  });
+});
+
+describe("mergeSidebarArchivedTasks", () => {
+  it("merges only the current workspace's archived tasks and deduplicates IDs", () => {
+    const active = [{ id: "same", _workflowId: "wf-1" }];
+    const archived = [
+      { id: "same", workspaceId: "ws-1", isArchived: true },
+      { id: "archived-1", workspaceId: "ws-1", workflowId: "wf-1", isArchived: true },
+      { id: "other", workspaceId: "ws-2", isArchived: true },
+    ] as never;
+
+    expect(
+      mergeSidebarArchivedTasks(active as never, archived, "ws-1", true).map((t) => t.id),
+    ).toEqual(["same", "archived-1"]);
+  });
+});
+
 describe("useWorkspaceSidebarTasks — loading", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState = {
+      taskRemoval: { pendingTokenByTaskId: {}, operationsByToken: {} },
       kanbanMulti: { snapshots: {}, isLoading: false },
       workflows: { items: [] },
       kanban: { workflowId: null, tasks: [], steps: [] },

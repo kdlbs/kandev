@@ -1,0 +1,23 @@
+name: Setup OpenCode
+description: Install the repository-pinned OpenCode CLI after verifying its archive digest.
+
+runs:
+  using: composite
+  steps:
+    - name: Download and verify OpenCode
+      shell: bash
+      env:
+        OPENCODE_VERSION: v1.18.0
+        OPENCODE_SHA256: a46af88b710248cc55719abd7f8fb482030494d6c9ed63f37aae7c6d6af4fc90
+      run: |
+        set -euo pipefail
+
+        archive="${RUNNER_TEMP}/opencode-${OPENCODE_VERSION}.tar.gz"
+        curl -fsSL \
+          -o "$archive" \
+          "https://github.com/anomalyco/opencode/releases/download/${OPENCODE_VERSION}/opencode-linux-x64.tar.gz"
+        printf '%s  %s\n' "$OPENCODE_SHA256" "$archive" | sha256sum -c -
+        mkdir -p "$HOME/.opencode/bin"
+        tar -xzf "$archive" -C "$HOME/.opencode/bin"
+        chmod +x "$HOME/.opencode/bin/opencode"
+        "$HOME/.opencode/bin/opencode" --version

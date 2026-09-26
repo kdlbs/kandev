@@ -22,12 +22,15 @@ export function useEnsureTaskSession(sessionId: string | null): void {
   // Never re-request a session id this hook has already asked for; a chat whose
   // task was deleted elsewhere would otherwise refetch on every render.
   const requested = useRef<Set<string>>(new Set());
+  const hasSessionRef = useRef(hasSession);
+  hasSessionRef.current = hasSession;
 
   useEffect(() => {
-    if (!sessionId || hasSession || requested.current.has(sessionId)) return;
+    if (!sessionId || hasSessionRef.current || requested.current.has(sessionId)) return;
     requested.current.add(sessionId);
 
     let cancelled = false;
+    let settled = false;
     fetchTaskSession(sessionId)
       .then((response) => {
         if (!cancelled && response.session) setTaskSession(response.session);
@@ -35,10 +38,17 @@ export function useEnsureTaskSession(sessionId: string | null): void {
       .catch(() => {
         // The session may be genuinely gone (deleted on another device); the
         // tab strip drops it on the next event or resync.
+      })
+      .finally(() => {
+        settled = true;
       });
 
     return () => {
       cancelled = true;
+      // If the active tab changed while this request was in flight, allow a
+      // later visit to retry. Keep settled failures marked as requested so a
+      // deleted session does not refetch on every tab switch.
+      if (!settled) requested.current.delete(sessionId);
     };
-  }, [sessionId, hasSession, setTaskSession]);
+  }, [sessionId, setTaskSession]);
 }

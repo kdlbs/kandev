@@ -3,6 +3,7 @@
 import { IconAlertTriangle, IconLoader2 } from "@tabler/icons-react";
 
 import type { PrepareSummary } from "@/lib/prepare/summarize";
+import { useTranslation } from "react-i18next";
 
 export function PrepareStatusSection({ summary }: { summary: PrepareSummary }) {
   if (summary.phase === "idle" || summary.phase === "ready") return null;
@@ -15,6 +16,7 @@ export function PrepareStatusSection({ summary }: { summary: PrepareSummary }) {
 }
 
 function ResumingRow() {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="executor-prepare-status"
@@ -23,14 +25,17 @@ function ResumingRow() {
     >
       <div className="flex items-center gap-2">
         <IconLoader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-        <span className="font-medium text-foreground">Resuming session</span>
+        <span className="font-medium text-foreground">{t("task:resumingSession")}</span>
       </div>
-      <div className="text-xs text-muted-foreground">Reconnecting to the existing environment…</div>
+      <div className="text-xs text-muted-foreground">
+        {t("task:reconnectingToTheExistingEnvironment")}
+      </div>
     </div>
   );
 }
 
 function PreparingRow({ summary }: { summary: PrepareSummary }) {
+  const { t } = useTranslation();
   const stepLabel = summary.current?.name ?? "Preparing...";
   const stepNumber = Math.min(summary.currentIndex + 1, summary.totalSteps);
   return (
@@ -41,11 +46,11 @@ function PreparingRow({ summary }: { summary: PrepareSummary }) {
     >
       <div className="flex items-center gap-2">
         <IconLoader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-        <span className="font-medium text-foreground">Preparing environment</span>
+        <span className="font-medium text-foreground">{t("task:preparingEnvironment")}</span>
       </div>
       <div className="text-xs text-muted-foreground">
         {summary.totalSteps > 0
-          ? `Step ${stepNumber} of ${summary.totalSteps}: ${stepLabel}`
+          ? t("task:stepOf", { stepNumber, totalSteps: summary.totalSteps, stepLabel })
           : stepLabel}
       </div>
       {summary.phase === "preparing_fallback" && summary.fallbackWarning && (
@@ -62,6 +67,7 @@ function PreparingRow({ summary }: { summary: PrepareSummary }) {
 }
 
 function FailedRow({ summary }: { summary: PrepareSummary }) {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="executor-prepare-status"
@@ -70,10 +76,12 @@ function FailedRow({ summary }: { summary: PrepareSummary }) {
     >
       <div className="flex items-center gap-2 text-destructive">
         <IconAlertTriangle className="h-3.5 w-3.5" />
-        <span className="font-medium">Environment preparation failed</span>
+        <span className="font-medium">{t("task:environmentPreparationFailed")}</span>
       </div>
       {summary.failedStep && (
-        <div className="text-xs text-muted-foreground">Failed at: {summary.failedStep.name}</div>
+        <div className="text-xs text-muted-foreground">
+          {t("task:failedAtStep", { step: summary.failedStep.name })}
+        </div>
       )}
       {summary.failedStep?.error && (
         <pre className="text-[11px] text-destructive whitespace-pre-wrap max-h-16 overflow-auto">

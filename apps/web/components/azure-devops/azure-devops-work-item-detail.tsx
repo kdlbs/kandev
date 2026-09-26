@@ -26,7 +26,15 @@ import type {
   AzureDevOpsBoardWorkItem,
   AzureDevOpsWorkItem,
 } from "@/lib/types/azure-devops";
-import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
+import {
+  markdownComponents,
+  rehypePlugins,
+  remarkPlugins,
+} from "@/components/shared/markdown-components";
+import { markdownMathSanitizeSchema } from "@/lib/markdown/math-sanitize-schema";
+import { useTranslation } from "react-i18next";
+import { azureActionDisplayCopy } from "./azure-devops-workspace-defaults";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type BoardContext = {
   board: AzureDevOpsBoard;
@@ -50,17 +58,24 @@ type Props = {
   onStartTask?: (item: AzureDevOpsWorkItem, action?: AzureDevOpsActionPreset) => void;
 };
 
-export function azureDevOpsDetailFields(item: AzureDevOpsWorkItem): Array<[string, string]> {
+export function azureDevOpsDetailFields(
+  item: AzureDevOpsWorkItem,
+  t: (key: string, values?: Record<string, unknown>) => string,
+): Array<[string, string]> {
+  // Row labels are copy; the values are provider data, with copy fallbacks when
+  // Azure DevOps returns nothing.
   return [
-    ["Type", item.type || "Work item"],
-    ["State", item.state || "Unknown"],
-    ["Assignee", item.assignedTo || "Unassigned"],
-    ...(item.areaPath ? [["Area", item.areaPath] as [string, string]] : []),
+    [t("azuredevops:fieldType"), item.type || t("azuredevops:fallbackWorkItem")],
+    [t("azuredevops:fieldState"), item.state || t("azuredevops:fallbackUnknown")],
+    [t("azuredevops:fieldAssignee"), item.assignedTo || t("azuredevops:fallbackUnassigned")],
+    ...(item.areaPath ? [[t("azuredevops:fieldArea"), item.areaPath] as [string, string]] : []),
   ];
 }
 
 function Description({ value }: { value: string }) {
-  if (!value.trim()) return <p className="text-sm text-muted-foreground">No description.</p>;
+  const { t } = useTranslation();
+  if (!value.trim())
+    return <p className="text-sm text-muted-foreground">{t("azuredevops:noDescription")}</p>;
   return (
     <div
       data-testid="azure-work-item-detail-description"
@@ -68,7 +83,7 @@ function Description({ value }: { value: string }) {
     >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={[rehypeRaw, rehypeSanitize]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownMathSanitizeSchema], ...rehypePlugins]}
         components={markdownComponents}
       >
         {value}
@@ -86,29 +101,28 @@ function AssignmentActions({
   saving: boolean;
   onChange: (action: "assign_current_user" | "unassign") => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap gap-2">
       <Button
         type="button"
-        size="sm"
-        className="min-h-11 cursor-pointer"
+        className="cursor-pointer"
         disabled={saving}
         onClick={() => onChange("assign_current_user")}
         data-testid="azure-work-item-assign-current-user"
       >
-        {saving ? "Updating…" : "Assign to me"}
+        {saving ? t("azuredevops:updating") : t("azuredevops:assignToMe")}
       </Button>
       {assignedTo && (
         <Button
           type="button"
-          size="sm"
           variant="outline"
-          className="min-h-11 cursor-pointer"
+          className="cursor-pointer"
           disabled={saving}
           onClick={() => onChange("unassign")}
           data-testid="azure-work-item-unassign"
         >
-          Unassign
+          {t("azuredevops:unassign")}
         </Button>
       )}
     </div>
@@ -128,6 +142,7 @@ function BoardActions({
     columnDone?: boolean,
   ) => Promise<AzureDevOpsBoardWorkItem | undefined>;
 }) {
+  const { t } = useTranslation();
   const [currentItem, setCurrentItem] = useState(context.item);
   const [columnId, setColumnId] = useState(context.item.columnId);
   const [columnDone, setColumnDone] = useState(context.item.columnDone);
@@ -139,12 +154,12 @@ function BoardActions({
   const selected = context.board.columns.find((column) => column.id === columnId);
   return (
     <div className="space-y-2" data-testid="azure-work-item-board-actions">
-      <Label htmlFor="azure-work-item-column">Move to column</Label>
+      <Label htmlFor="azure-work-item-column">{t("azuredevops:moveToColumn")}</Label>
       <div className="flex flex-col gap-2 sm:flex-row">
         <Select value={columnId} onValueChange={setColumnId}>
           <SelectTrigger
             id="azure-work-item-column"
-            className="min-h-11 flex-1"
+            className="flex-1"
             data-testid="azure-work-item-column"
           >
             <SelectValue />
@@ -162,18 +177,18 @@ function BoardActions({
             value={String(columnDone)}
             onValueChange={(value) => setColumnDone(value === "true")}
           >
-            <SelectTrigger className="min-h-11 sm:w-40" data-testid="azure-work-item-column-done">
+            <SelectTrigger className="sm:w-40" data-testid="azure-work-item-column-done">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="false">In progress</SelectItem>
-              <SelectItem value="true">Done</SelectItem>
+              <SelectItem value="false">{t("azuredevops:inProgress")}</SelectItem>
+              <SelectItem value="true">{t("azuredevops:done")}</SelectItem>
             </SelectContent>
           </Select>
         )}
         <Button
           type="button"
-          className="min-h-11 cursor-pointer"
+          className="cursor-pointer"
           disabled={
             saving || (columnId === context.item.columnId && columnDone === context.item.columnDone)
           }
@@ -183,7 +198,7 @@ function BoardActions({
             })
           }
         >
-          Move
+          {t("azuredevops:move")}
         </Button>
       </div>
     </div>
@@ -199,23 +214,27 @@ function QuickActions({
   item: AzureDevOpsWorkItem;
   onStartTask?: (item: AzureDevOpsWorkItem, action?: AzureDevOpsActionPreset) => void;
 }) {
+  const { t } = useTranslation();
   if (!onStartTask || actions.length === 0) return null;
   return (
     <div className="space-y-2" data-testid="azure-work-item-quick-actions">
-      <Label>Task actions</Label>
+      <Label>{t("azuredevops:taskActions")}</Label>
       <div className="flex flex-wrap gap-2">
-        {actions.map((action) => (
-          <Button
-            key={action.id}
-            type="button"
-            variant="outline"
-            className="min-h-11 cursor-pointer"
-            onClick={() => onStartTask(item, action)}
-          >
-            <IconPlus className="h-4 w-4" />
-            {action.label}
-          </Button>
-        ))}
+        {actions.map((action) => {
+          const copy = azureActionDisplayCopy("work_item", action, t);
+          return (
+            <Button
+              key={action.id}
+              type="button"
+              variant="outline"
+              className="cursor-pointer"
+              onClick={() => onStartTask(item, action)}
+            >
+              <IconPlus className="h-4 w-4" />
+              {copy.label}
+            </Button>
+          );
+        })}
       </div>
     </div>
   );
@@ -233,13 +252,14 @@ function DetailBody({
   quickActions: AzureDevOpsActionPreset[];
   onStartTask?: (item: AzureDevOpsWorkItem, action?: AzureDevOpsActionPreset) => void;
 }) {
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const item = state.item;
   if (!item) {
     return (
       <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
-        {state.loading ? "Loading work item…" : "Work item unavailable."}
+        {state.loading ? t("azuredevops:loadingWorkItem") : t("azuredevops:workItemUnavailable")}
       </div>
     );
   }
@@ -269,12 +289,11 @@ function DetailBody({
             {state.error}
             <Button
               type="button"
-              size="sm"
               variant="outline"
-              className="min-h-11 cursor-pointer"
+              className="cursor-pointer"
               onClick={() => void state.refresh()}
             >
-              <IconRefresh className="h-4 w-4" /> Retry
+              <IconRefresh className="h-4 w-4" /> {t("azuredevops:retry")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -285,7 +304,7 @@ function DetailBody({
         </Alert>
       )}
       <div className="grid gap-3 sm:grid-cols-2">
-        {azureDevOpsDetailFields(item).map(([label, value]) => (
+        {azureDevOpsDetailFields(item, t).map(([label, value]) => (
           <div key={label} className="rounded-md border p-3">
             <div className="text-xs text-muted-foreground">{label}</div>
             <div className="break-words text-sm font-medium">{value}</div>
@@ -302,24 +321,24 @@ function DetailBody({
         </div>
       )}
       <section className="space-y-2">
-        <h3 className="text-sm font-semibold">Description</h3>
+        <h3 className="text-sm font-semibold">{t("azuredevops:description")}</h3>
         <Description value={item.description ?? ""} />
       </section>
       {planningFields.length > 0 && (
         <section className="space-y-2">
-          <h3 className="text-sm font-semibold">Planning and effort</h3>
+          <h3 className="text-sm font-semibold">{t("azuredevops:planningAndEffort")}</h3>
           <div className="grid gap-2 sm:grid-cols-2">
             {planningFields.map((field) => (
               <div key={field.referenceName} className="rounded-md bg-muted/40 p-3 text-sm">
                 <div className="text-xs text-muted-foreground">{field.label}</div>
-                <div>{field.value || "—"}</div>
+                <div>{field.value || "-"}</div>
               </div>
             ))}
           </div>
         </section>
       )}
       <section className="space-y-2">
-        <h3 className="text-sm font-semibold">Assignment</h3>
+        <h3 className="text-sm font-semibold">{t("azuredevops:assignment")}</h3>
         <AssignmentActions
           assignedTo={item.assignedTo}
           saving={saving}
@@ -352,23 +371,24 @@ function DetailBody({
       <QuickActions actions={quickActions} item={item} onStartTask={onStartTask} />
       <section className="space-y-2" data-testid="azure-work-item-detail-comments">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">Discussion</h3>
+          <h3 className="text-sm font-semibold">{t("azuredevops:discussion")}</h3>
           <Button
             type="button"
-            size="sm"
             variant="ghost"
-            className="min-h-11 cursor-pointer"
+            className="cursor-pointer"
             onClick={() => void state.retryComments()}
             disabled={state.commentsLoading}
           >
-            <IconRefresh className="h-4 w-4" /> Retry
+            <IconRefresh className="h-4 w-4" /> {t("azuredevops:retry")}
           </Button>
         </div>
         {state.commentsError && <p className="text-sm text-destructive">{state.commentsError}</p>}
         {state.comments.map((comment) => (
           <article key={comment.id} className="rounded-md border p-3">
             <div className="mb-1 text-xs text-muted-foreground">
-              {comment.author.displayName || comment.author.uniqueName || "Azure DevOps"}
+              {comment.author.displayName ||
+                comment.author.uniqueName ||
+                t("azuredevops:fallbackAuthor")}
             </div>
             <div className="whitespace-pre-wrap text-sm">{comment.content}</div>
           </article>
@@ -377,24 +397,26 @@ function DetailBody({
           <Button
             type="button"
             variant="outline"
-            className="min-h-11 w-full cursor-pointer"
+            className="w-full cursor-pointer"
             onClick={state.loadOlderComments}
             disabled={state.commentsLoading}
           >
-            {state.commentsLoading ? "Loading…" : "Load older discussion"}
+            {state.commentsLoading
+              ? t("azuredevops:loading2")
+              : t("azuredevops:loadOlderDiscussion")}
           </Button>
         )}
         {!state.commentsLoading && !state.commentsError && state.comments.length === 0 && (
-          <p className="text-sm text-muted-foreground">No discussion yet.</p>
+          <p className="text-sm text-muted-foreground">{t("azuredevops:noDiscussionYet")}</p>
         )}
       </section>
       <section className="space-y-2">
-        <h3 className="text-sm font-semibold">Linked Kandev tasks</h3>
+        <h3 className="text-sm font-semibold">{t("azuredevops:linkedKandevTasks")}</h3>
         {state.linkedTasksLoading && (
-          <p className="text-sm text-muted-foreground">Loading linked tasks…</p>
+          <p className="text-sm text-muted-foreground">{t("azuredevops:loadingLinkedTasks")}</p>
         )}
         {!state.linkedTasksLoading && state.linkedTasks.length === 0 && (
-          <p className="text-sm text-muted-foreground">No linked tasks.</p>
+          <p className="text-sm text-muted-foreground">{t("azuredevops:noLinkedTasks")}</p>
         )}
         {state.linkedTasks.map((task) => (
           <div key={task.id} className="rounded-md border p-3 text-sm">
@@ -417,9 +439,10 @@ export function AzureDevOpsWorkItemDetail({
   quickActions = [],
   onStartTask,
 }: Props) {
+  const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const state = useAzureDevOpsWorkItemDetail(workspaceId, projectId, initialItem, open);
-  const title = state.item?.title ?? initialItem?.title ?? "Work item";
+  const title = state.item?.title ?? initialItem?.title ?? t("azuredevops:fallbackWorkItem");
   const header = (
     <div className="flex items-start justify-between gap-3 border-b px-4 py-4 sm:px-6">
       <div className="min-w-0">
@@ -437,13 +460,13 @@ export function AzureDevOpsWorkItemDetail({
             type="button"
             variant="ghost"
             size="icon"
-            className="min-h-11 min-w-11 cursor-pointer"
+            className={controlSizingClassName("icon", "cursor-pointer")}
           >
             <a
               href={state.item?.webUrl ?? initialItem?.webUrl}
               target="_blank"
               rel="noreferrer"
-              aria-label="Open work item in Azure DevOps"
+              aria-label={t("azuredevops:openWorkItemInAzureDevops2")}
             >
               <IconExternalLink className="h-4 w-4" />
             </a>
@@ -453,8 +476,8 @@ export function AzureDevOpsWorkItemDetail({
           type="button"
           variant="ghost"
           size="icon"
-          className="min-h-11 min-w-11 cursor-pointer"
-          aria-label="Close work item details"
+          className={controlSizingClassName("icon", "cursor-pointer")}
+          aria-label={t("azuredevops:closeWorkItemDetails")}
           data-testid="azure-work-item-detail-close"
           onClick={() => onOpenChange(false)}
         >
@@ -491,7 +514,7 @@ export function AzureDevOpsWorkItemDetail({
       <DialogContent className="flex max-h-[90dvh] w-[min(900px,95vw)] flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="sr-only">
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>Azure DevOps work-item details</DialogDescription>
+          <DialogDescription>{t("azuredevops:azureDevopsWorkItemDetails")}</DialogDescription>
         </DialogHeader>
         <div data-testid={open ? "azure-work-item-detail" : undefined} className="contents">
           {header}

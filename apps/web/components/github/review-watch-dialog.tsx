@@ -19,6 +19,7 @@ import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CliModeIcon } from "@/components/cli-mode-icon";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import {
@@ -29,7 +30,8 @@ import {
 import { DEFAULT_REVIEW_WATCH_PROMPT } from "@/components/github/review-watch-placeholders";
 import { ReviewWatchPromptField } from "@/components/github/review-watch-prompt-field";
 import { RepoFilterSelector } from "@/components/github/repo-filter-selector";
-import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
+import { STEP_DEFAULT, resolveProfileId } from "@/lib/watcher-profile-default";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import type {
   RepoFilter,
   ReviewWatch,
@@ -194,6 +196,12 @@ function useWatchFormData(workspaceId: string) {
   const allWorkflows = useAppStore((state) => state.workflows.items);
   const workflows = useMemo(() => allWorkflows.filter((w) => !w.hidden), [allWorkflows]);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
+  const selectableAgentProfiles = useMemo(
+    () =>
+      agentProfiles.filter((profile) => isSelectableAgentProfile(profile, dynamicRoutingEnabled)),
+    [agentProfiles, dynamicRoutingEnabled],
+  );
   const executors = useAppStore((state) => state.executors.items);
   const allExecutorProfiles = useMemo(
     () =>
@@ -203,7 +211,7 @@ function useWatchFormData(workspaceId: string) {
     [executors],
   );
 
-  return { workflows, agentProfiles, allExecutorProfiles };
+  return { workflows, agentProfiles: selectableAgentProfiles, allExecutorProfiles };
 }
 
 // --- Section header ---
@@ -433,6 +441,7 @@ function ProfileFields({
   executorProfiles: Array<{ id: string; name: string }>;
 }) {
   const { t } = useTranslation();
+  const stepDefaultLabel = t("common:useStepDefaultOption");
   return (
     <div className="grid grid-cols-2 gap-4">
       <SelectField
@@ -440,9 +449,9 @@ function ProfileFields({
         description={t("github:optionalFallsBackToStepDefault")}
         value={form.agentProfileId || STEP_DEFAULT}
         onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: resolveProfileId(v) }))}
-        placeholder={STEP_DEFAULT_LABEL}
+        placeholder={stepDefaultLabel}
         items={[
-          { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+          { id: STEP_DEFAULT, label: stepDefaultLabel },
           ...agentProfiles.map((p) => ({
             id: p.id,
             label: p.label,
@@ -469,10 +478,10 @@ function ProfileFields({
           }
         >
           <SelectTrigger className="cursor-pointer">
-            <SelectValue placeholder={STEP_DEFAULT_LABEL} />
+            <SelectValue placeholder={stepDefaultLabel} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={STEP_DEFAULT}>{STEP_DEFAULT_LABEL}</SelectItem>
+            <SelectItem value={STEP_DEFAULT}>{stepDefaultLabel}</SelectItem>
             {executorProfiles.map((p) => (
               <SelectItem key={p.id} value={p.id}>
                 {p.name}

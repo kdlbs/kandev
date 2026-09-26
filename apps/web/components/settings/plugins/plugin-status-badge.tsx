@@ -1,14 +1,17 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import type { PluginStatus } from "@/lib/types/plugins";
 
-const STATUS_LABEL: Record<PluginStatus, string> = {
-  active: "Active",
-  error: "Error",
-  disabled: "Disabled",
-  registered: "Registered",
-  uninstalled: "Uninstalled",
+// The map keys are the backend's wire status; only the labels are copy, and
+// they travel as catalog keys so they resolve at render.
+const STATUS_LABEL_KEY: Record<PluginStatus, string> = {
+  active: "plugins:statusActive",
+  error: "plugins:statusError",
+  disabled: "plugins:statusDisabled",
+  registered: "plugins:statusRegistered",
+  uninstalled: "plugins:statusUninstalled",
 };
 
 // green=active, red=error, gray=disabled, amber=registered, per task-20 acceptance.
@@ -21,9 +24,10 @@ const STATUS_CLASS: Record<PluginStatus, string> = {
 };
 
 export function PluginStatusBadge({ status }: { status: PluginStatus }) {
+  const { t } = useTranslation();
   return (
     <Badge variant="outline" className={STATUS_CLASS[status]}>
-      {STATUS_LABEL[status]}
+      {t(STATUS_LABEL_KEY[status])}
     </Badge>
   );
 }

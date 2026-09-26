@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -30,6 +31,25 @@ func newRepoForEntityTests(t *testing.T) *Repository {
 	return repo
 }
 
+func TestRepositoryCloseHonorsDatabaseOwnership(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "owned-close.db")
+	dbConn, err := db.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	repo, err := newRepository(sqlxDB, sqlxDB, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := sqlxDB.Ping(); err == nil {
+		t.Fatal("owned database remains open")
+	}
+}
+
 func seedWorkspace(t *testing.T, repo *Repository, id string) {
 	t.Helper()
 	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{ID: id, Name: id}); err != nil {
@@ -38,6 +58,42 @@ func seedWorkspace(t *testing.T, repo *Repository, id string) {
 }
 
 func strptr(value string) *string { return &value }
+
+func TestListTaskRepositoryProvidersJoinsTaskLinks(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-provider-join")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-provider-join", WorkspaceID: "ws-provider-join", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, repository := range []*models.Repository{
+		{ID: "repo-provider-github", WorkspaceID: "ws-provider-join", Name: "github", Provider: "github"},
+		{ID: "repo-provider-gitlab", WorkspaceID: "ws-provider-join", Name: "gitlab", Provider: " GITLAB "},
+	} {
+		if err := repo.CreateRepository(ctx, repository); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-provider-join", WorkspaceID: "ws-provider-join", WorkflowID: "wf-provider-join", Title: "Task"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, taskRepository := range []*models.TaskRepository{
+		{ID: "task-repo-provider-gitlab", TaskID: "task-provider-join", RepositoryID: "repo-provider-gitlab", Position: 0},
+		{ID: "task-repo-provider-github", TaskID: "task-provider-join", RepositoryID: "repo-provider-github", Position: 1},
+	} {
+		if err := repo.CreateTaskRepository(ctx, taskRepository); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	providers, err := repo.ListTaskRepositoryProviders(ctx, "task-provider-join")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := providers, []string{" GITLAB ", "github"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("task repository providers = %q, want %q", got, want)
+	}
+}
 
 func TestCreateWorkflowRejectsDuplicateHiddenTemplatePerWorkspace(t *testing.T) {
 	repo := newRepoForEntityTests(t)
@@ -260,6 +316,115 @@ func TestRepositoryCopyFiles_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestRepositorySecretBindings_RoundTripReplaceAndCascade(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-secret-bindings")
+
+	entity := &models.Repository{
+		ID:          "repo-secret-bindings",
+		WorkspaceID: "ws-secret-bindings",
+		Name:        "app",
+	}
+	bindings := []models.RepositorySecretBinding{
+		{Key: "NPM_TOKEN", SecretID: "secret-npm"},
+		{Key: "SENTRY_AUTH_TOKEN", SecretID: "secret-sentry"},
+	}
+	if err := repo.CreateRepositoryWithSecretBindings(ctx, entity, bindings); err != nil {
+		t.Fatalf("create repository with bindings: %v", err)
+	}
+
+	got, err := repo.GetRepository(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("get repository: %v", err)
+	}
+	if len(got.SecretBindings) != 2 || got.SecretBindings[0].SecretID == "" {
+		t.Fatalf("get bindings = %+v, want two references", got.SecretBindings)
+	}
+
+	list, err := repo.ListRepositories(ctx, entity.WorkspaceID)
+	if err != nil {
+		t.Fatalf("list repositories: %v", err)
+	}
+	if len(list) != 1 || len(list[0].SecretBindings) != 2 {
+		t.Fatalf("list bindings = %+v, want two references", list)
+	}
+
+	replacement := []models.RepositorySecretBinding{{Key: "NPM_TOKEN", SecretID: "secret-new"}}
+	if err := repo.ReplaceRepositorySecretBindings(ctx, entity.ID, replacement); err != nil {
+		t.Fatalf("replace bindings: %v", err)
+	}
+	got, err = repo.GetRepository(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("get after replace: %v", err)
+	}
+	if len(got.SecretBindings) != 1 || got.SecretBindings[0].SecretID != "secret-new" {
+		t.Fatalf("bindings after replace = %+v", got.SecretBindings)
+	}
+
+	if err := repo.DeleteRepository(ctx, entity.ID); err != nil {
+		t.Fatalf("delete repository: %v", err)
+	}
+	remaining, err := repo.ListRepositorySecretBindings(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("list bindings after delete: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("bindings after delete = %+v, want empty", remaining)
+	}
+}
+
+func TestRepositoryDeleteBindingCleanupFailureRollsBackRepositoryDelete(t *testing.T) {
+	deleteMethods := []struct {
+		name string
+		call func(context.Context, *Repository, string) error
+	}{
+		{name: "unconditional", call: func(ctx context.Context, repo *Repository, id string) error {
+			return repo.DeleteRepository(ctx, id)
+		}},
+		{name: "unreferenced", call: func(ctx context.Context, repo *Repository, id string) error {
+			_, err := repo.DeleteRepositoryIfUnreferenced(ctx, id)
+			return err
+		}},
+		{name: "no active sessions", call: func(ctx context.Context, repo *Repository, id string) error {
+			_, err := repo.DeleteRepositoryIfNoActiveTaskSessions(ctx, id)
+			return err
+		}},
+	}
+	for _, method := range deleteMethods {
+		t.Run(method.name, func(t *testing.T) {
+			repo := newRepoForEntityTests(t)
+			ctx := context.Background()
+			seedWorkspace(t, repo, "ws-delete-"+method.name)
+			entity := &models.Repository{ID: "repo-delete-" + method.name, WorkspaceID: "ws-delete-" + method.name, Name: method.name}
+			if err := repo.CreateRepositoryWithSecretBindings(ctx, entity, []models.RepositorySecretBinding{{Key: "TOKEN", SecretID: "secret-token"}}); err != nil {
+				t.Fatalf("create repository: %v", err)
+			}
+			_, err := repo.db.Exec(`
+				CREATE TRIGGER fail_repository_binding_delete
+				BEFORE DELETE ON repository_secret_bindings
+				BEGIN SELECT RAISE(ABORT, 'injected binding cleanup failure'); END`)
+			if err != nil {
+				t.Fatalf("create failure trigger: %v", err)
+			}
+
+			if err := method.call(ctx, repo, entity.ID); err == nil {
+				t.Fatal("delete succeeded, want injected binding cleanup failure")
+			}
+			if _, err := repo.GetRepository(ctx, entity.ID); err != nil {
+				t.Fatalf("repository was soft-deleted after cleanup failure: %v", err)
+			}
+			bindings, err := repo.ListRepositorySecretBindings(ctx, entity.ID)
+			if err != nil {
+				t.Fatalf("list bindings: %v", err)
+			}
+			if len(bindings) != 1 {
+				t.Fatalf("bindings after failed delete = %#v, want one", bindings)
+			}
+		})
+	}
+}
+
 func TestRepositoryProviderHost_RoundTrip(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
@@ -286,6 +451,31 @@ func TestRepositoryProviderHost_RoundTrip(t *testing.T) {
 	updated, err := repo.GetRepository(ctx, in.ID)
 	if err != nil || updated.ProviderHost != "https://gitlab.internal" {
 		t.Fatalf("updated provider_host = %q, err = %v", updated.ProviderHost, err)
+	}
+}
+
+func TestUpdateRepositoryDefaultBranchUsesExpectedValue(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-default-branch-cas")
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-default-branch-cas", WorkspaceID: "ws-default-branch-cas", Name: "default-branch", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+
+	if err := repo.UpdateRepositoryDefaultBranch(ctx, "repo-default-branch-cas", "main", "trunk"); err != nil {
+		t.Fatalf("update default branch: %v", err)
+	}
+	if err := repo.UpdateRepositoryDefaultBranch(ctx, "repo-default-branch-cas", "main", "develop"); err == nil {
+		t.Fatal("stale expected branch was accepted")
+	}
+	got, err := repo.GetRepository(ctx, "repo-default-branch-cas")
+	if err != nil {
+		t.Fatalf("get repository: %v", err)
+	}
+	if got.DefaultBranch != "trunk" {
+		t.Fatalf("default branch = %q, want trunk", got.DefaultBranch)
 	}
 }
 
@@ -481,10 +671,10 @@ func TestDeleteRepositoryIfNoActiveTaskSessions(t *testing.T) {
 // failures by design).
 func TestRunMigrations_Idempotent(t *testing.T) {
 	repo := newRepoForEntityTests(t)
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("second runMigrations call returned error: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("third runMigrations call returned error: %v", err)
 	}
 }
@@ -501,16 +691,17 @@ func TestRunnerProjectionWorkflowStepColumnsReplayMigration(t *testing.T) {
 	}{
 		{name: "auto_advance_requires_signal", sql: `ALTER TABLE workflow_steps DROP COLUMN auto_advance_requires_signal`},
 		{name: "cancel_triggers_turn_complete", sql: `ALTER TABLE workflow_steps DROP COLUMN cancel_triggers_turn_complete`},
+		{name: "complete_task_on_enter", sql: `ALTER TABLE workflow_steps DROP COLUMN complete_task_on_enter`},
 	}
 	for _, column := range legacyColumns {
 		if _, err := repo.db.Exec(column.sql); err != nil {
 			t.Fatalf("drop legacy workflow_steps.%s: %v", column.name, err)
 		}
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations on legacy workflow_steps schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay runMigrations: %v", err)
 	}
 
@@ -523,11 +714,45 @@ func TestRunnerProjectionWorkflowStepColumnsReplayMigration(t *testing.T) {
 			t.Fatalf("workflow_steps.%s column count = %d, want 1", column, count)
 		}
 	}
-	var autoAdvance, cancelComplete int
-	if err := repo.db.QueryRow(`SELECT auto_advance_requires_signal, cancel_triggers_turn_complete FROM workflow_steps WHERE id = 'legacy-projection-step'`).Scan(&autoAdvance, &cancelComplete); err != nil {
+	var autoAdvance, cancelComplete, completeTask int
+	if err := repo.db.QueryRow(`SELECT auto_advance_requires_signal, cancel_triggers_turn_complete, complete_task_on_enter FROM workflow_steps WHERE id = 'legacy-projection-step'`).Scan(&autoAdvance, &cancelComplete, &completeTask); err != nil {
 		t.Fatalf("read migrated workflow step: %v", err)
 	}
-	if autoAdvance != 0 || cancelComplete != 0 {
-		t.Fatalf("legacy workflow step defaults = (%d, %d), want (0, 0)", autoAdvance, cancelComplete)
+	if autoAdvance != 0 || cancelComplete != 0 || completeTask != 0 {
+		t.Fatalf("legacy workflow step defaults = (%d, %d, %d), want (0, 0, 0)", autoAdvance, cancelComplete, completeTask)
+	}
+}
+
+func TestRunnerProjectionWorkflowSessionEndPolicyDefaultsToPark(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+
+	var endPolicyDefault string
+	if err := repo.db.QueryRow(`SELECT dflt_value FROM pragma_table_info('workflow_steps') WHERE name = 'profile_session_end_policy'`).Scan(&endPolicyDefault); err != nil {
+		t.Fatalf("inspect session end policy default: %v", err)
+	}
+	if endPolicyDefault != "'park'" {
+		t.Fatalf("profile_session_end_policy schema default = %q, want 'park'", endPolicyDefault)
+	}
+}
+
+func TestRunnerProjectionParticipantCreatedAtReplayMigration(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+
+	if _, err := repo.db.Exec(`ALTER TABLE workflow_step_participants DROP COLUMN created_at`); err != nil {
+		t.Fatalf("drop legacy workflow_step_participants.created_at: %v", err)
+	}
+	if err := repo.runMigrations(context.Background()); err != nil {
+		t.Fatalf("runMigrations on legacy workflow_step_participants schema: %v", err)
+	}
+	if err := repo.runMigrations(context.Background()); err != nil {
+		t.Fatalf("replay runMigrations: %v", err)
+	}
+
+	var count int
+	if err := repo.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('workflow_step_participants') WHERE name = 'created_at'`).Scan(&count); err != nil {
+		t.Fatalf("inspect workflow_step_participants.created_at: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("workflow_step_participants.created_at column count = %d, want 1", count)
 	}
 }

@@ -2,15 +2,55 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/githubauth"
+	"github.com/kandev/kandev/internal/task/models"
 	"golang.org/x/crypto/ssh"
 )
+
+type unsupportedDeadlineConn struct{ net.Conn }
+
+func (unsupportedDeadlineConn) SetDeadline(time.Time) error {
+	return errors.New("deadlines are not supported")
+}
+
+func TestHandshakeWithDeadlineClosesConnectionsWhenDeadlinesAreUnsupported(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	defer func() { _ = serverConn.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, _, _, err := handshakeWithDeadline(ctx, unsupportedDeadlineConn{Conn: clientConn}, "test", &ssh.ClientConfig{
+			User:            "test",
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("handshake error = %v, want context deadline exceeded", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		_ = clientConn.Close()
+		<-done
+		t.Fatal("handshake did not stop when its context deadline expired")
+	}
+}
 
 func TestSSHControlRequestUsesBearerToken(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/v1/instances", nil)
@@ -409,6 +449,8 @@ func TestSSHRemoteAgentEnv(t *testing.T) {
 	// req.Env credential keys are forwarded; non-credential keys (HOME/PATH) are not.
 	req := &ExecutorCreateRequest{Env: map[string]string{
 		"CLAUDE_CODE_OAUTH_TOKEN":       tokenFromReq,
+		"NPM_TOKEN":                     "repository-token",
+		"PROFILE_ONLY":                  "profile-value",
 		"HOME":                          nonCredentialHome,
 		"PATH":                          nonCredentialPath,
 		"OPENAI_API_KEY":                openAIKey,
@@ -417,13 +459,19 @@ func TestSSHRemoteAgentEnv(t *testing.T) {
 		"GIT_CONFIG_COUNT":              "1",
 		"GIT_CONFIG_KEY_0":              "credential.https://github.com.helper",
 		"GIT_CONFIG_VALUE_0":            "!agentctl git-credential",
-	}}
+	}, ApprovedSecretEnvKeys: []string{"NPM_TOKEN"}}
 	got := sshRemoteAgentEnv(req)
 	if got["CLAUDE_CODE_OAUTH_TOKEN"] != tokenFromReq {
 		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want %q", got["CLAUDE_CODE_OAUTH_TOKEN"], tokenFromReq)
 	}
 	if got["OPENAI_API_KEY"] != openAIKey {
 		t.Fatalf("OPENAI_API_KEY = %q, want %q", got["OPENAI_API_KEY"], openAIKey)
+	}
+	if got["NPM_TOKEN"] != "repository-token" {
+		t.Fatalf("NPM_TOKEN = %q, want repository-token", got["NPM_TOKEN"])
+	}
+	if _, ok := got["PROFILE_ONLY"]; ok {
+		t.Fatal("unapproved profile key must not be forwarded to the remote agent")
 	}
 	if got[envKeyGitHubCredentialLease] != "opaque-lease" || got["GIT_CONFIG_KEY_0"] == "" {
 		t.Fatalf("managed GitHub broker env was not forwarded: %#v", got)
@@ -462,6 +510,236 @@ func TestSSHRemoteAgentEnvEmpty(t *testing.T) {
 	}
 	if got := sshRemoteAgentEnv(&ExecutorCreateRequest{}); got != nil {
 		t.Fatalf("expected nil for no credentials, got %v", got)
+	}
+}
+
+func TestSSHRemoteContributionEnvUsesScopedGitCredentialHelper(t *testing.T) {
+	req := &ExecutorCreateRequest{Env: map[string]string{
+		envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+		envKeyGitHubCredentialLease:     "lease",
+		"GIT_CONFIG_COUNT":              "1",
+		"GIT_CONFIG_KEY_0":              "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0":            "!agentctl git-credential",
+	}}
+	got := sshRemoteContributionEnv(req, "/home/agent/.kandev/bin/agentctl")
+	if got["GIT_CONFIG_VALUE_0"] != "!/home/agent/.kandev/bin/agentctl git-credential" {
+		t.Fatalf("GitHub helper = %q, want absolute agentctl helper", got["GIT_CONFIG_VALUE_0"])
+	}
+	if got["GIT_CONFIG_COUNT"] != "1" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 1", got["GIT_CONFIG_COUNT"])
+	}
+}
+
+func TestSSHRemoteContributionEnvRewritesPluginCredentialHelper(t *testing.T) {
+	req := &ExecutorCreateRequest{Env: map[string]string{
+		envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+		envKeyGitHubCredentialLease:     "lease",
+		"GIT_CONFIG_COUNT":              "2",
+		"GIT_CONFIG_KEY_0":              "credential.https://bitbucket.example.test.helper",
+		"GIT_CONFIG_VALUE_0":            "",
+		"GIT_CONFIG_KEY_1":              "credential.https://bitbucket.example.test.helper",
+		"GIT_CONFIG_VALUE_1":            githubauth.ManagedGitCredentialHelper,
+	}}
+
+	got := sshRemoteContributionEnv(req, "/home/agent/.kandev/bin/agentctl")
+	if got["GIT_CONFIG_VALUE_1"] != "!/home/agent/.kandev/bin/agentctl git-credential" {
+		t.Fatalf("plugin helper = %q, want absolute agentctl helper", got["GIT_CONFIG_VALUE_1"])
+	}
+	if got["GIT_CONFIG_COUNT"] != "2" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 2", got["GIT_CONFIG_COUNT"])
+	}
+}
+
+func TestBuildSSHCreateInstanceRequestRewritesPluginCredentialHelper(t *testing.T) {
+	req := &ExecutorCreateRequest{Env: map[string]string{
+		envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+		envKeyGitHubCredentialLease:     "lease",
+		"GIT_CONFIG_COUNT":              "2",
+		"GIT_CONFIG_KEY_0":              "credential.https://bitbucket.example.test.helper",
+		"GIT_CONFIG_VALUE_0":            "",
+		"GIT_CONFIG_KEY_1":              "credential.https://bitbucket.example.test.helper",
+		"GIT_CONFIG_VALUE_1":            githubauth.ManagedGitCredentialHelper,
+	}}
+
+	got := buildSSHCreateInstanceRequest(req, "/workspace", "/home/agent/.kandev/bin/agentctl")
+	if got.Env["GIT_CONFIG_VALUE_1"] != "!/home/agent/.kandev/bin/agentctl git-credential" {
+		t.Fatalf("plugin helper = %q, want absolute agentctl helper", got.Env["GIT_CONFIG_VALUE_1"])
+	}
+}
+
+func TestSSHRemoteContributionScriptPinsTargetAndSourceIdentity(t *testing.T) {
+	binding := &models.RemoteContribution{
+		Version:      models.RemoteContributionVersion,
+		Provider:     models.RemoteContributionProviderGitHub,
+		Kind:         models.RemoteContributionKindPullRequest,
+		CanonicalURL: "https://github.com/acme/widget/pull/7",
+		Number:       7,
+		State:        models.RemoteContributionStateOpen,
+		BaseBranch:   "main",
+		HeadBranch:   "feature/remote",
+		HeadSHA:      strings.Repeat("a", 40),
+		SourceRepository: models.RemoteContributionRepository{
+			Host:      "github.com",
+			Path:      "contributor/widget",
+			RemoteURL: "https://github.com/contributor/widget.git",
+		},
+		CollaborationAllowed: true,
+	}
+	script := sshRemoteContributionScript("/remote/task", "https://github.com/acme/widget.git", binding)
+	for _, want := range []string{
+		"remote add origin",
+		"fetch --no-tags origin",
+		binding.SourceRepository.RemoteURL,
+		"contribution_remote='" + binding.ContributionRemoteName() + "'",
+		"refs/heads/feature/remote",
+		strings.Repeat("a", 40),
+		"branch --set-upstream-to",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("SSH contribution script missing %q", want)
+		}
+	}
+	if strings.Contains(script, "untrusted") {
+		t.Fatal("SSH contribution script contains provider-authored content")
+	}
+}
+
+func TestSSHRemoteContributionScriptReusesLocalDescendant(t *testing.T) {
+	root := t.TempDir()
+	targetBare := filepath.Join(root, "target.git")
+	sourceBare := filepath.Join(root, "source.git")
+	targetSeed := filepath.Join(root, "target-seed")
+	sourceSeed := filepath.Join(root, "source-seed")
+	workspace := filepath.Join(root, "workspace")
+	for _, args := range [][]string{
+		{"init", "--bare", "--initial-branch=main", targetBare},
+		{"init", "--bare", "--initial-branch=main", sourceBare},
+		{"init", "--initial-branch=main", targetSeed},
+		{"init", "--initial-branch=main", sourceSeed},
+	} {
+		runSSHContributionGit(t, root, args...)
+	}
+	for _, repo := range []string{targetSeed, sourceSeed} {
+		runSSHContributionGit(t, repo, "config", "user.email", "test@example.com")
+		runSSHContributionGit(t, repo, "config", "user.name", "Test User")
+	}
+	if err := os.WriteFile(filepath.Join(targetSeed, "README.md"), []byte("target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runSSHContributionGit(t, targetSeed, "add", "README.md")
+	runSSHContributionGit(t, targetSeed, "commit", "-m", "target base")
+	runSSHContributionGit(t, targetSeed, "remote", "add", "origin", targetBare)
+	runSSHContributionGit(t, targetSeed, "push", "origin", "main")
+
+	if err := os.WriteFile(filepath.Join(sourceSeed, "README.md"), []byte("source\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runSSHContributionGit(t, sourceSeed, "add", "README.md")
+	runSSHContributionGit(t, sourceSeed, "commit", "-m", "source base")
+	runSSHContributionGit(t, sourceSeed, "checkout", "-b", "feature/remote")
+	if err := os.WriteFile(filepath.Join(sourceSeed, "change.txt"), []byte("contribution\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runSSHContributionGit(t, sourceSeed, "add", "change.txt")
+	runSSHContributionGit(t, sourceSeed, "commit", "-m", "source contribution")
+	sourceSHA := strings.TrimSpace(runSSHContributionGit(t, sourceSeed, "rev-parse", "HEAD"))
+	runSSHContributionGit(t, sourceSeed, "remote", "add", "origin", sourceBare)
+	runSSHContributionGit(t, sourceSeed, "push", "origin", "main", "feature/remote")
+
+	targetURL := "https://github.com/acme/widget.git"
+	sourceURL := "https://github.com/contributor/widget.git"
+	configPath := filepath.Join(root, "gitconfig")
+	config := "[url \"file://" + targetBare + "\"]\n\tinsteadOf = " + targetURL + "\n" +
+		"[url \"file://" + sourceBare + "\"]\n\tinsteadOf = " + sourceURL + "\n"
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", configPath)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	binding := &models.RemoteContribution{
+		Version:      models.RemoteContributionVersion,
+		Provider:     models.RemoteContributionProviderGitHub,
+		Kind:         models.RemoteContributionKindPullRequest,
+		CanonicalURL: "https://github.com/acme/widget/pull/7",
+		Number:       7,
+		State:        models.RemoteContributionStateOpen,
+		BaseBranch:   "main",
+		HeadBranch:   "feature/remote",
+		HeadSHA:      sourceSHA,
+		SourceRepository: models.RemoteContributionRepository{
+			Host: "github.com", Path: "contributor/widget", RemoteURL: sourceURL,
+		},
+		CollaborationAllowed: true,
+	}
+	runSSHContributionScript(t, sshRemoteContributionScript(workspace, targetURL, binding))
+	if got := strings.TrimSpace(runSSHContributionGit(t, workspace, "rev-parse", "HEAD")); got != sourceSHA {
+		t.Fatalf("initial SSH checkout HEAD = %q, want %q", got, sourceSHA)
+	}
+	if got := strings.TrimSpace(runSSHContributionGit(t, workspace, "branch", "--show-current")); got != binding.HeadBranch {
+		t.Fatalf("initial SSH branch = %q, want %q", got, binding.HeadBranch)
+	}
+	wantUpstream := binding.ContributionRemoteName() + "/" + binding.HeadBranch
+	if got := strings.TrimSpace(runSSHContributionGit(t, workspace, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")); got != wantUpstream {
+		t.Fatalf("initial SSH upstream = %q, want %q", got, wantUpstream)
+	}
+
+	runSSHContributionGit(t, workspace, "config", "user.email", "test@example.com")
+	runSSHContributionGit(t, workspace, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(workspace, "agent-change.txt"), []byte("agent change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runSSHContributionGit(t, workspace, "add", "agent-change.txt")
+	runSSHContributionGit(t, workspace, "commit", "-m", "agent contribution")
+	localHEAD := strings.TrimSpace(runSSHContributionGit(t, workspace, "rev-parse", "HEAD"))
+
+	runSSHContributionScript(t, sshRemoteContributionScript(workspace, targetURL, binding))
+	if got := strings.TrimSpace(runSSHContributionGit(t, workspace, "rev-parse", "HEAD")); got != localHEAD {
+		t.Fatalf("resumed SSH checkout HEAD = %q, want local commit %q", got, localHEAD)
+	}
+	if got := strings.TrimSpace(runSSHContributionGit(t, workspace, "branch", "--show-current")); got != binding.HeadBranch {
+		t.Fatalf("resumed SSH branch = %q, want %q", got, binding.HeadBranch)
+	}
+	if got := strings.TrimSpace(runSSHContributionGit(t, workspace, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")); got != wantUpstream {
+		t.Fatalf("resumed SSH upstream = %q, want %q", got, wantUpstream)
+	}
+}
+
+func runSSHContributionScript(t *testing.T, script string) {
+	t.Helper()
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", script)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("SSH contribution script failed: %v\n%s", err, output)
+	}
+}
+
+func runSSHContributionGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.CommandContext(context.Background(), "git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
+	}
+	return string(output)
+}
+
+func TestSSHRemoteAgentEnvApprovedRepositoryKeyCannotReplaceManagedCredential(t *testing.T) {
+	got := sshRemoteAgentEnv(&ExecutorCreateRequest{
+		Env: map[string]string{
+			"ANTHROPIC_API_KEY": "managed-credential",
+			"NPM_TOKEN":         "repository-token",
+		},
+		ApprovedSecretEnvKeys: []string{"ANTHROPIC_API_KEY", "NPM_TOKEN"},
+	})
+	if got["ANTHROPIC_API_KEY"] != "managed-credential" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q, want managed credential", got["ANTHROPIC_API_KEY"])
+	}
+	if got["NPM_TOKEN"] != "repository-token" {
+		t.Fatalf("NPM_TOKEN = %q, want repository token", got["NPM_TOKEN"])
 	}
 }
 
@@ -522,5 +800,94 @@ func TestSSHManagedBrokerResumeForcesFreshAgentctlWithNewLease(t *testing.T) {
 	}
 	if req.Metadata[MetadataKeySSHHost] != "remote.example" {
 		t.Fatal("connection metadata required for fresh SSH launch was removed")
+	}
+}
+
+func TestExpandIdentityAgentOpenSSHSyntax(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AGENT_DIR", filepath.Join(home, "agents"))
+	t.Setenv("LEGACY_AGENT", filepath.Join(home, "legacy.sock"))
+	t.Setenv("SSH_AUTH_SOCK", filepath.Join(home, "env.sock"))
+	target := &SSHTarget{
+		Host: "resolved.internal", Port: 2222, User: "deploy",
+		ProxyJump: "jump-alias", OriginalHost: "prod",
+	}
+
+	cases := map[string]string{
+		"~/.ssh/agent.sock":                   filepath.Join(home, ".ssh", "agent.sock"),
+		"${AGENT_DIR}/%n-%h-%p-%r-%j-%%.sock": filepath.Join(home, "agents", "prod-resolved.internal-2222-deploy-jump-alias-%.sock"),
+		"$LEGACY_AGENT":                       filepath.Join(home, "legacy.sock"),
+		"SSH_AUTH_SOCK":                       filepath.Join(home, "env.sock"),
+		"@abstract-agent":                     "@abstract-agent",
+	}
+	for input, want := range cases {
+		got, err := expandIdentityAgent(input, target)
+		if err != nil {
+			t.Errorf("expandIdentityAgent(%q): %v", input, err)
+		} else if got != want {
+			t.Errorf("expandIdentityAgent(%q) = %q, want %q", input, got, want)
+		}
+	}
+
+	allTokens, err := expandIdentityAgent("%d-%i-%k-%L-%l-%u", target)
+	if err != nil || allTokens == "" || !strings.Contains(allTokens, "prod") {
+		t.Fatalf("all token expansion = %q, %v", allTokens, err)
+	}
+	for _, input := range []string{"${MISSING_IDENTITY_AGENT}", "%C", "%Z", "trailing%"} {
+		if _, err := expandIdentityAgent(input, target); err == nil {
+			t.Errorf("expandIdentityAgent(%q) unexpectedly succeeded", input)
+		}
+	}
+}
+
+func TestExpandIdentityAgentRejectsUnsetLegacyVariable(t *testing.T) {
+	const variable = "MISSING_IDENTITY_AGENT"
+	previous, wasSet := os.LookupEnv(variable)
+	if err := os.Unsetenv(variable); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if wasSet {
+			_ = os.Setenv(variable, previous)
+			return
+		}
+		_ = os.Unsetenv(variable)
+	})
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/fallback.sock")
+
+	got, err := expandIdentityAgent("$"+variable, &SSHTarget{Host: "example.com"})
+	if err == nil {
+		t.Fatalf("expandIdentityAgent() returned %q without an error", got)
+	}
+	if !strings.Contains(err.Error(), variable) {
+		t.Fatalf("error = %v, want missing variable name %q", err, variable)
+	}
+}
+
+func TestExpandIdentityAgentEnvironmentDoesNotReprocessSubstitutedTokens(t *testing.T) {
+	const childEnv = "KANDEV_TEST_EXPAND_IDENTITY_AGENT_ENV"
+	if os.Getenv(childEnv) == "1" {
+		t.Setenv("AGENT", "${AGENT}")
+		got, err := expandIdentityAgentEnvironment("${AGENT}")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "${AGENT}" {
+			t.Fatalf("expanded value = %q, want the substituted token to remain literal", got)
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run", "^TestExpandIdentityAgentEnvironmentDoesNotReprocessSubstitutedTokens$")
+	cmd.Env = append(os.Environ(), childEnv+"=1")
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		t.Fatalf("environment expansion did not terminate")
+	}
+	if err != nil {
+		t.Fatalf("child test failed: %v\n%s", err, output)
 	}
 }

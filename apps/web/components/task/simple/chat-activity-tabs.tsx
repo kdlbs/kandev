@@ -2,7 +2,9 @@
 
 import { useMemo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
+import { CompositorPulse } from "@kandev/ui/compositor-pulse";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { agentTint } from "@/app/office/components/agent-avatar";
 import { TaskChat } from "./task-chat";
 import { TaskActivity } from "./task-activity";
@@ -21,6 +23,9 @@ import type {
   TaskSession,
   TimelineEvent,
 } from "@/app/office/tasks/[id]/types";
+import { useTranslation } from "react-i18next";
+import { TaskLaunchErrorProvider } from "@/components/task/task-launch-error-context";
+import { TaskSharedError } from "@/components/task/task-shared-error";
 
 // TAB_TRIGGER_BASE adds a 1px ring to the active tab on top of
 // shadcn's default bg/text active styling, so the selected tab is
@@ -30,6 +35,7 @@ const TAB_TRIGGER_BASE =
   "cursor-pointer data-[state=active]:ring-1 data-[state=active]:ring-border";
 
 function AgentTabTrigger({ group }: { group: SessionGroup }) {
+  const { t } = useTranslation();
   const live = isGroupLive(group);
   const agentProfileId = group.representative.agentProfileId;
   // Resolve the agent's display name + role from the office store so a
@@ -37,9 +43,9 @@ function AgentTabTrigger({ group }: { group: SessionGroup }) {
   // UUID that lands in `session.agentName` when the session's profile
   // snapshot is empty.
   const resolved = useAppStore((s) =>
-    agentProfileId ? s.office.agentProfiles.find((a) => a.id === agentProfileId) : undefined,
+    agentProfileId ? selectOfficeAgentProfiles(s).find((a) => a.id === agentProfileId) : undefined,
   );
-  const label = resolved?.name || group.representative.agentName || "Agent";
+  const label = resolved?.name || group.representative.agentName || t("task:agent");
   // Apply the per-agent tint only when the tab is active, so the
   // selected state reads clearly. Inactive tabs inherit shadcn's muted
   // styling — same as Chat / Activity — with a small dot in the agent
@@ -59,10 +65,10 @@ function AgentTabTrigger({ group }: { group: SessionGroup }) {
         <span className={`inline-block h-1.5 w-1.5 rounded-full ${agentDot(label)}`} aria-hidden />
         {label}
         {live && (
-          <span
+          <CompositorPulse
             data-testid="agent-tab-live-dot"
             className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-pulse"
-            aria-label="agent running"
+            aria-label={t("task:agentRunning")}
           />
         )}
       </span>
@@ -126,47 +132,61 @@ export function ChatActivityTabs({
   readOnly,
   onCommentsChanged,
 }: ChatActivityTabsProps) {
+  const { t } = useTranslation();
   const officeGroups = useMemo(
     () => groupSessionsForTimeline(sessions, task.reviewers, task.approvers).filter(isOfficeGroup),
     [sessions, task.reviewers, task.approvers],
   );
 
   return (
-    <Tabs defaultValue="chat" className="mt-6">
-      <TabsList>
-        <TabsTrigger value="chat" className={TAB_TRIGGER_BASE}>
-          Chat
-        </TabsTrigger>
-        <TabsTrigger value="activity" className={TAB_TRIGGER_BASE}>
-          Activity
-        </TabsTrigger>
+    <TaskLaunchErrorProvider
+      value={{
+        taskId: task.id,
+        workspaceId: task.workspaceId,
+        statusSummary: task.statusSummary,
+        repositories: task.repositories,
+      }}
+    >
+      <TaskSharedError />
+      <Tabs defaultValue="chat" className="mt-6">
+        <TabsList>
+          <TabsTrigger value="chat" className={TAB_TRIGGER_BASE}>
+            {t("task:chat")}
+          </TabsTrigger>
+          <TabsTrigger value="activity" className={TAB_TRIGGER_BASE}>
+            {t("task:activity")}
+          </TabsTrigger>
+          {officeGroups.map((g) => (
+            <AgentTabTrigger key={g.id} group={g} />
+          ))}
+        </TabsList>
+        <TabsContent value="chat">
+          <ApprovalActionBar task={task} />
+          <TaskChat
+            taskId={task.id}
+            workspaceId={task.workspaceId}
+            statusSummary={task.statusSummary}
+            repositories={task.repositories}
+            comments={comments}
+            timeline={timeline}
+            sessions={sessions}
+            decisions={task.decisions}
+            reviewers={task.reviewers}
+            approvers={task.approvers}
+            scrollParent={scrollParent}
+            readOnly={readOnly}
+            onCommentsChanged={onCommentsChanged}
+            taskTitle={task.title}
+            taskDescription={task.description}
+          />
+        </TabsContent>
+        <TabsContent value="activity">
+          <TaskActivity taskId={task.id} entries={activity} />
+        </TabsContent>
         {officeGroups.map((g) => (
-          <AgentTabTrigger key={g.id} group={g} />
+          <AgentTabContent key={g.id} taskId={task.id} group={g} />
         ))}
-      </TabsList>
-      <TabsContent value="chat">
-        <ApprovalActionBar task={task} />
-        <TaskChat
-          taskId={task.id}
-          comments={comments}
-          timeline={timeline}
-          sessions={sessions}
-          decisions={task.decisions}
-          reviewers={task.reviewers}
-          approvers={task.approvers}
-          scrollParent={scrollParent}
-          readOnly={readOnly}
-          onCommentsChanged={onCommentsChanged}
-          taskTitle={task.title}
-          taskDescription={task.description}
-        />
-      </TabsContent>
-      <TabsContent value="activity">
-        <TaskActivity taskId={task.id} entries={activity} />
-      </TabsContent>
-      {officeGroups.map((g) => (
-        <AgentTabContent key={g.id} taskId={task.id} group={g} />
-      ))}
-    </Tabs>
+      </Tabs>
+    </TaskLaunchErrorProvider>
   );
 }

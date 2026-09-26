@@ -1,15 +1,34 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ToastProvider } from "@/components/toast-provider";
-import { MobileTaskList } from "@/components/task/mobile/session-task-switcher-sheet";
+import {
+  MobileTaskList,
+  useTaskSheetSelectionController,
+} from "@/components/task/mobile/session-task-switcher-sheet";
+import type { MobileTaskListProps } from "@/components/task/mobile/session-task-switcher-sheet";
+import { selectTaskFromSheet } from "@/components/task/mobile/session-task-switcher-sheet-selection";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
+import type { TaskSession } from "@/lib/types/http";
+import { useState } from "react";
+import { DrawerTitle } from "@kandev/ui/drawer";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
+import { TaskSwitcherDrawer } from "./task-switcher-drawer";
 
 const mocks = vi.hoisted(() => ({
   toggleSidebarGroupCollapsed: vi.fn(),
   appState: {
+    workspaces: { activeId: "workspace-1" },
+    repositories: { itemsByWorkspaceId: {} },
     taskPRs: { byTaskId: {} },
+    taskMRs: { byWorkspaceId: {} },
     comments: { byTaskId: {} },
+    userSettings: { sidebarTaskColors: {} },
+    kanban: { tasks: [] },
+    kanbanMulti: { snapshots: {} },
+    taskSessions: { items: {} },
+    taskSessionsByTask: { itemsByTaskId: {} },
+    agentProfiles: { items: [] },
   },
 }));
 
@@ -26,7 +45,10 @@ vi.mock("@/components/state-provider", () => ({
   // TaskNestContextMenuItems (rendered inside the shared context menu) reads
   // the store api via useNestTask; provide a minimal stub so it renders.
   useAppStoreApi: () => ({
-    getState: () => ({ kanbanMulti: { snapshots: {} } }),
+    getState: () => ({
+      kanbanMulti: { snapshots: {} },
+      userSettings: { revision: null, sidebarTaskColors: {} },
+    }),
   }),
 }));
 
@@ -63,6 +85,45 @@ function task(id: string): TaskSwitcherItem {
     workflowStepTitle: "Build",
   };
 }
+
+it("keeps the Tasks drawer as the sole modal during confirmation and restores its list", () => {
+  const previousWidth = window.innerWidth;
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  function Tasks() {
+    const [confirm, setConfirm] = useState(false);
+    return (
+      <TaskSwitcherDrawer open onOpenChange={vi.fn()}>
+        <DrawerTitle>Tasks</DrawerTitle>
+        <input aria-label="Task filter" defaultValue="Work in progress" />
+        <button onClick={() => setConfirm(true)}>Archive target</button>
+        <MobileActionConfirmation
+          open={confirm}
+          onOpenChange={setConfirm}
+          targetKey="task"
+          title="Archive task?"
+          subject="Target"
+          cancelLabel="Cancel"
+          confirmLabel="Archive"
+          onConfirm={vi.fn()}
+        />
+      </TaskSwitcherDrawer>
+    );
+  }
+  const view = render(<Tasks />);
+  try {
+    const drawer = screen.getByRole("dialog", { name: "Tasks" });
+    const input = screen.getByRole("textbox", { name: "Task filter" });
+    fireEvent.click(screen.getByRole("button", { name: "Archive target" }));
+    expect(screen.getByRole("dialog", { name: "Archive task?" })).toBe(drawer);
+    expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+    expect(screen.queryByRole("textbox", { name: "Task filter" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("textbox", { name: "Task filter" })).toBe(input);
+  } finally {
+    view.unmount();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+  }
+});
 
 describe("MobileTaskList", () => {
   beforeEach(() => {
@@ -154,5 +215,135 @@ describe("MobileTaskList", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
 
     expect(onEditTask).toHaveBeenCalledWith(editableTask);
+  });
+});
+
+describe("MobileTaskList move options", () => {
+  it("hands move options to the owning mobile task surface", async () => {
+    const onRequestMoveOptions = vi.fn();
+    const props: MobileTaskListProps = {
+      tasks: [task("movable")],
+      workflows: [{ id: "workflow-1", name: "Workflow" }],
+      stepsByWorkflowId: {
+        "workflow-1": [
+          { id: "step-1", title: "Build" },
+          { id: "step-2", title: "Review" },
+        ],
+      },
+      activeTaskId: null,
+      selectedTaskId: null,
+      onSelectTask: vi.fn(),
+      onArchiveTask: vi.fn(),
+      onDeleteTask: vi.fn(),
+      onDetachTask: vi.fn(),
+      deletingTaskId: null,
+      onRequestMoveOptions,
+    };
+
+    render(
+      <ToastProvider>
+        <MobileTaskList {...props} />
+      </ToastProvider>,
+    );
+
+    const row = screen
+      .getByText("Task movable")
+      .closest<HTMLElement>("[data-testid='sidebar-task-item']");
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row!).getByRole("button", { name: "Task actions" }));
+    const moveTo = await screen.findByTestId("task-context-move-to");
+    fireEvent.pointerMove(moveTo, { pointerType: "mouse" });
+    const step = await screen.findByTestId("task-context-step-step-2");
+    fireEvent.pointerMove(step, {
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByTestId("task-context-step-options-step-2"));
+
+    expect(onRequestMoveOptions).toHaveBeenCalledOnce();
+    expect(onRequestMoveOptions).toHaveBeenCalledWith("movable", "workflow-1", "step-2");
+    expect(screen.queryByTestId("workflow-move-options")).toBeNull();
+  });
+});
+
+describe("SessionTaskSwitcherSheet lifecycle", () => {
+  it("invalidates a deferred selection when responsive remount replaces the sheet", async () => {
+    const phoneTaskId = "task-phone";
+    const tabletTaskId = "task-tablet";
+    let resolveOldLoad: (sessions: TaskSession[]) => void = () => undefined;
+    let resolveNewLoad: (sessions: TaskSession[]) => void = () => undefined;
+    const oldLoad = vi.fn(
+      () =>
+        new Promise<TaskSession[]>((resolve) => {
+          resolveOldLoad = resolve;
+        }),
+    );
+    const newLoad = vi.fn(
+      () =>
+        new Promise<TaskSession[]>((resolve) => {
+          resolveNewLoad = resolve;
+        }),
+    );
+    const setActiveSession = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
+    const state = {
+      lastSessionByTaskId: {},
+      environmentIdBySessionId: {},
+      taskSessionsById: {},
+    };
+    const oldSheet = renderHook(() => useTaskSheetSelectionController());
+
+    selectTaskFromSheet({
+      selectionController: oldSheet.result.current,
+      taskId: phoneTaskId,
+      task: { primarySessionId: "primary-phone", taskPendingAction: "clarification" },
+      state,
+      loadTaskSessionsForTask: oldLoad,
+      setActiveSession,
+      setActiveTask: vi.fn(),
+      navigate,
+      onOpenChange,
+    });
+    oldSheet.unmount();
+
+    const tabletSheet = renderHook(() => useTaskSheetSelectionController());
+    selectTaskFromSheet({
+      selectionController: tabletSheet.result.current,
+      taskId: tabletTaskId,
+      task: { primarySessionId: "primary-tablet", taskPendingAction: "clarification" },
+      state,
+      loadTaskSessionsForTask: newLoad,
+      setActiveSession,
+      setActiveTask: vi.fn(),
+      navigate,
+      onOpenChange,
+    });
+    await act(async () => {
+      resolveNewLoad([
+        {
+          id: "owner-tablet",
+          task_id: tabletTaskId,
+          state: "WAITING_FOR_INPUT",
+          pending_action: "clarification",
+        } as TaskSession,
+      ]);
+    });
+    await act(async () => {
+      resolveOldLoad([
+        {
+          id: "owner-phone",
+          task_id: phoneTaskId,
+          state: "WAITING_FOR_INPUT",
+          pending_action: "clarification",
+        } as TaskSession,
+      ]);
+    });
+
+    expect(setActiveSession).toHaveBeenCalledTimes(1);
+    expect(setActiveSession).toHaveBeenCalledWith(tabletTaskId, "owner-tablet");
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith(tabletTaskId);
+    expect(onOpenChange).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

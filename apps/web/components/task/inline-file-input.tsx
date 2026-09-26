@@ -3,6 +3,7 @@
 import { useRef, useEffect, useCallback } from "react";
 import { Input } from "@kandev/ui/input";
 import { FileIcon } from "@/components/ui/file-icon";
+import { useTranslation } from "react-i18next";
 
 type InlineFileInputProps = {
   depth: number;
@@ -11,6 +12,7 @@ type InlineFileInputProps = {
 };
 
 export function InlineFileInput({ depth, onSubmit, onCancel }: InlineFileInputProps) {
+  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -51,8 +53,9 @@ export function InlineFileInput({ depth, onSubmit, onCancel }: InlineFileInputPr
       <Input
         ref={inputRef}
         type="text"
+        controlSize="none"
         className="h-5 text-xs px-1 py-0 border-muted-foreground/30"
-        placeholder="filename..."
+        placeholder={t("task:filename")}
         onKeyDown={handleKeyDown}
         onBlur={handleBlur}
       />

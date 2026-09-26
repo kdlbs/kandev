@@ -8,14 +8,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/gitlab"
+	"github.com/kandev/kandev/internal/task/service"
 )
-
-// gitlabMRStateOpen mirrors the gitlab package's own normalized "open" state
-// value (GitLab's API returns "opened"; the client normalizes it to "open"
-// before it ever reaches a TaskMR row). Kept as a local constant rather than
-// exported from the gitlab package, matching how event_handlers_github.go's
-// githubPRStateOpen mirrors the github package's vocabulary.
-const gitlabMRStateOpen = "open"
 
 // detectPushAndAssociateMR is the GitLab twin of detectPushAndAssociatePR: on
 // push to a session branch, it looks up the open merge request whose source
@@ -24,6 +18,16 @@ const gitlabMRStateOpen = "open"
 // push (a common `glab mr create` race) still gets picked up.
 func (s *Service) detectPushAndAssociateMR(
 	ctx context.Context, sessionID, taskID, repositoryName, branch string,
+) {
+	if s.gitlabMRLinkService == nil {
+		return
+	}
+	identity := s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, repositoryName)
+	s.detectPushAndAssociateMRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
+}
+
+func (s *Service) detectPushAndAssociateMRWithIdentity(
+	ctx context.Context, sessionID, taskID, repositoryName, branch string, identity pushRepositoryIdentity,
 ) {
 	if s.gitlabMRLinkService == nil {
 		return
@@ -43,11 +47,11 @@ func (s *Service) detectPushAndAssociateMR(
 	if workspaceID == "" {
 		return
 	}
-	owner, repoName, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
-	if owner == "" || repoName == "" || repositoryID == "" {
+	if identity.projectPath == "" || identity.repositoryID == "" {
 		return
 	}
-	projectPath := owner + "/" + repoName
+	projectPath := identity.projectPath
+	repositoryID := identity.repositoryID
 
 	// Already linked for this (task, repository, branch) — don't re-link, but
 	// still make sure the refresh watch exists. AssociateExistingMRByURL (the
@@ -210,19 +214,28 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 	// gitlab.check_session_mr for a GitHub-backed session would install a
 	// bogus GitLab watch keyed off the GitHub repository's owner/name before
 	// AutoLinkMRForBranch's own identity check ever runs.
-	if s.resolvePushRepositoryProvider(ctx, sessionID, taskID, "") != gitlabProviderName {
+	identity := s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, "")
+	if identity.provider != gitlabProviderName {
 		return false, nil
 	}
 
-	owner, repoName, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, "")
-	if owner == "" || repoName == "" || repositoryID == "" {
+	projectPath, repositoryID := identity.projectPath, identity.repositoryID
+	if projectPath == "" || repositoryID == "" {
 		return false, nil
 	}
+
+	// The watch/association write destination is redirected the same way as
+	// push detection (resolveEffectivePushTaskID): this on-demand entry point
+	// is the frontend's manual alternative to that same detection path, so
+	// without the redirect, checking from a shared-worktree subtask would
+	// write gitlab_task_mrs/gitlab_mr_watches under the member instead of the
+	// workspace-group owner, reproducing the multi-binding on demand.
+	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, repositoryID)
+
 	branch := strings.TrimSpace(s.resolvePRWatchBranch(ctx, taskID, sessionID, ""))
 	if branch == "" {
 		return false, nil
 	}
-	projectPath := owner + "/" + repoName
 
 	// Already associated for this exact (repository, branch) — ensure its
 	// watch exists (Create-MR action / manual URL linking writes
@@ -230,8 +243,8 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 	// to (repositoryID, branch) rather than "any MR linked to the task", so a
 	// multi-repo/multi-branch task's on-demand check for one branch isn't
 	// short-circuited by a sibling branch's already-linked MR.
-	if existing := s.gitlabTaskMRFor(ctx, taskID, repositoryID, branch); existing != nil {
-		s.ensureWatchForLinkedMR(ctx, sessionID, taskID, repositoryID, existing)
+	if existing := s.gitlabTaskMRFor(ctx, effectiveTaskID, repositoryID, branch); existing != nil {
+		s.ensureWatchForLinkedMR(ctx, sessionID, effectiveTaskID, repositoryID, existing)
 		return true, nil
 	}
 
@@ -244,13 +257,13 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 	// match) before searching, so the background poller keeps checking this
 	// branch even when no MR is open yet — mirrors CheckSessionPR's
 	// EnsurePRWatchForWorkspace-before-lookup ordering.
-	if _, err := s.gitlabMRLinkService.EnsureMRWatch(ctx, sessionID, taskID, repositoryID, projectPath, 0, branch); err != nil {
+	if _, err := s.gitlabMRLinkService.EnsureMRWatch(ctx, sessionID, effectiveTaskID, repositoryID, projectPath, 0, branch); err != nil {
 		s.logger.Warn("failed to ensure MR watch during check",
 			zap.String("session_id", sessionID), zap.Error(err))
 	}
 
 	assoc, err := s.gitlabMRLinkService.AutoLinkMRForBranch(
-		ctx, workspaceID, sessionID, taskID, repositoryID, projectPath, branch,
+		ctx, workspaceID, sessionID, effectiveTaskID, repositoryID, projectPath, branch,
 	)
 	// A real service/store error (e.g. an unconfigured GitLab connection) is
 	// a backend problem, not "no MR is open on this branch" — propagate it
@@ -264,4 +277,15 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 		return false, nil
 	}
 	return true, nil
+}
+
+// gitLabProjectPathFromRemoteURL derives a GitLab project path
+// ("group/subgroup/project") from a raw git remote URL, reusing
+// service.ParseGitRemoteIdentity so nested subgroups and every ssh/https/scp
+// remote shape stay in sync with the rest of the codebase's identity
+// parsing. Returns "" when the URL is empty, malformed, or has no project
+// segment.
+func gitLabProjectPathFromRemoteURL(remoteURL string) string {
+	_, projectPath := service.ParseGitRemoteIdentity(remoteURL)
+	return projectPath
 }

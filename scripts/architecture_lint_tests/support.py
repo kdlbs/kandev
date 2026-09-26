@@ -21,6 +21,7 @@ ROOT_STATE_RULE = "ARCH-FRONTEND-ROOT-STATE-CAST"
 FRONTEND_STATE_UI_RULE = "ARCH-FRONTEND-STATE-UI-IMPORT"
 RUN_SCHEDULER_OWNER_RULE = "ARCH-RUN-SCHEDULER-OWNER"
 RUNS_OFFICE_RULE = "ARCH-RUNS-OFFICE-IMPORT"
+INBOX_HISTORY_ISOLATION_RULE = "ARCH-INBOX-HISTORY-ISOLATION"
 RUNTIME_IMPORT = "github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 OFFICE_IMPORT = "github.com/kandev/kandev/internal/office/models"
 RULE_FILES = {rule.id: rule.baseline_path.name for rule in RULES}
@@ -30,6 +31,8 @@ class ArchitectureFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.repo = Path(self.tempdir.name)
+        self.test_hooks = self.repo / ".empty-git-hooks"
+        self.test_hooks.mkdir()
         self.git("init", "-q")
         self.git("config", "user.email", "test@example.com")
         self.git("config", "user.name", "Architecture Test")
@@ -40,8 +43,9 @@ class ArchitectureFixture(unittest.TestCase):
         self.tempdir.cleanup()
 
     def git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        # Synthetic history must not depend on machine-wide Git hooks.
         return subprocess.run(
-            ["git", *args],
+            ["git", "-c", f"core.hooksPath={self.test_hooks}", *args],
             cwd=self.repo,
             text=True,
             capture_output=True,
@@ -65,6 +69,7 @@ class ArchitectureFixture(unittest.TestCase):
         frontend_state_ui: list[dict[str, object]] | None = None,
         run_scheduler_owner: list[dict[str, object]] | None = None,
         runs_office: list[dict[str, object]] | None = None,
+        inbox_history_isolation: list[dict[str, object]] | None = None,
     ) -> None:
         entries = {rule.id: [] for rule in RULES}
         entries.update(
@@ -75,6 +80,7 @@ class ArchitectureFixture(unittest.TestCase):
                 FRONTEND_STATE_UI_RULE: frontend_state_ui or [],
                 RUN_SCHEDULER_OWNER_RULE: run_scheduler_owner or [],
                 RUNS_OFFICE_RULE: runs_office or [],
+                INBOX_HISTORY_ISOLATION_RULE: inbox_history_isolation or [],
             }
         )
         for rule in RULES:

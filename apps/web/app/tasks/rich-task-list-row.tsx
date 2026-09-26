@@ -3,21 +3,27 @@
 import { IconAlertCircle, IconSubtask } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
+import { TaskRowMetadata } from "@/components/task/task-row-plugin-slots";
+import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
+import { taskPRInfoFromSummary } from "@/lib/task-pr-info";
 import { useTaskPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import type { Repository, Task } from "@/lib/types/http";
 import { resolveRichTaskRowDetails } from "./rich-task-row-details";
+import { useTranslation } from "react-i18next";
 
 type RichTaskRowDetails = ReturnType<typeof resolveRichTaskRowDetails>;
 
 function ArchivedBadge({ task }: { task: Task }) {
+  const { t } = useTranslation();
   if (!task.archived_at) return null;
   return (
     <Badge
       variant="outline"
       className="shrink-0 border-amber-500/30 px-1.5 py-0 text-[10px] text-amber-500"
     >
-      Archived
+      {t("tasks:archived")}
     </Badge>
   );
 }
@@ -25,32 +31,38 @@ function ArchivedBadge({ task }: { task: Task }) {
 function PrimaryTaskLine({
   task,
   pendingInput,
-  showPullRequest,
+  showContributions,
 }: {
   task: Task;
   pendingInput: PendingInput;
-  showPullRequest: boolean;
+  showContributions: boolean;
 }) {
   return (
     <>
-      {getTaskStateIcon(
-        task.state,
-        "h-4 w-4 shrink-0",
-        pendingInput.clarification,
-        task.foreground_activity,
-        pendingInput.permission,
-      )}
+      {getTaskStateIcon(task.state, "h-4 w-4 shrink-0", {
+        hasPendingClarification: pendingInput.clarification,
+        foregroundActivity: task.foreground_activity,
+        hasPendingPermission: pendingInput.permission,
+        interrupted: task.interrupted,
+        // task.parked_on_background_work — snake_case, per this file's Task type
+        // (lib/types/http.ts), not the camelCase store shape kanban-card-content.tsx
+        // reads. Wrong casing here silently unparks the row (round-5 F19).
+        parkedOnBackgroundWork: task.parked_on_background_work,
+      })}
       <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
         {task.title}
       </span>
-      {showPullRequest && (
+      {showContributions && (
         <span
+          className="inline-flex items-center gap-1"
           onClick={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <PRTaskIcon taskId={task.id} />
+          <PRTaskIcon taskId={task.id} prInfo={taskPRInfoFromSummary(task.status_summary)} />
+          <MRTaskIcon taskId={task.id} />
         </span>
       )}
+      <RegisteredChangeRequestTaskIcon taskId={task.id} />
       <ArchivedBadge task={task} />
     </>
   );
@@ -87,11 +99,12 @@ function RichMetadataBadges({ details }: { details: RichTaskRowDetails }) {
 }
 
 function ReviewAttention({ attention }: { attention: RichTaskRowDetails["reviewAttention"] }) {
+  const { t } = useTranslation();
   if (attention === "approval_required") {
     return (
       <div className="mt-1 flex items-center gap-1 pl-6 text-amber-700 dark:text-amber-600">
         <IconAlertCircle className="h-3.5 w-3.5 shrink-0" />
-        <span className="text-[10px] font-medium">Approval Required</span>
+        <span className="text-[10px] font-medium">{t("tasks:approvalRequired")}</span>
       </div>
     );
   }
@@ -101,7 +114,7 @@ function ReviewAttention({ attention }: { attention: RichTaskRowDetails["reviewA
       className="mt-1 ml-6 border-amber-500 bg-amber-50 px-1.5 py-0 text-[10px] text-amber-600 dark:bg-amber-950/50"
       variant="outline"
     >
-      Changes Requested
+      {t("tasks:changesRequested")}
     </Badge>
   );
 }
@@ -124,9 +137,15 @@ function RichTaskContent({
       style={{ paddingLeft: `${level * 28}px` }}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <PrimaryTaskLine task={task} pendingInput={pendingInput} showPullRequest />
+        <PrimaryTaskLine task={task} pendingInput={pendingInput} showContributions />
       </div>
       <RichMetadataBadges details={details} />
+      <TaskRowMetadata
+        taskId={task.id}
+        workflowStepId={task.workflow_step_id}
+        surface="task-list"
+        className="mt-1 pl-6"
+      />
       {details.description && (
         <p className="mt-1 line-clamp-2 pl-6 text-xs leading-tight text-muted-foreground">
           {details.description}
@@ -153,6 +172,7 @@ export function TaskListRowPrimaryContent({
   const pendingInput = useTaskPendingInput(task.primary_session_id, {
     taskId: task.id,
     taskPendingAction: task.task_pending_action,
+    statusSummary: task.status_summary,
     primarySessionState: task.primary_session_state,
     primarySessionPendingAction: task.primary_session_pending_action,
   });
@@ -169,7 +189,13 @@ export function TaskListRowPrimaryContent({
       data-testid="tasks-list-row-content"
       style={{ paddingLeft: `${level * 28}px` }}
     >
-      <PrimaryTaskLine task={task} pendingInput={pendingInput} showPullRequest={false} />
+      <PrimaryTaskLine task={task} pendingInput={pendingInput} showContributions={false} />
+      <TaskRowMetadata
+        taskId={task.id}
+        workflowStepId={task.workflow_step_id}
+        surface="task-list"
+        className="flex min-w-0 shrink items-center gap-1 overflow-hidden"
+      />
     </div>
   );
 }

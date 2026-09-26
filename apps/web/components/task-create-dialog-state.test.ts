@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { computeDialogDefaultStepId } from "./task-create-dialog-defaults";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { useDialogFormState } from "./task-create-dialog-state";
 import { buildRepositoriesPayload } from "./task-create-dialog-helpers";
 import { TASK_TITLE_MAX_LENGTH } from "@/lib/task-title";
+
+const BITBUCKET_HEAD_BRANCH = "feature/fix";
 
 // `useBranchesByURL` triggers a real network ensure() when given a URL — stub
 // it so the dialog state hook can mount in JSDOM without hitting fetch. The
@@ -186,6 +188,141 @@ describe("useDialogFormState — remoteRepos mode", () => {
       url: "github.com/acme/site",
       branch: "main",
       source: "paste",
+    });
+  });
+
+  it("prefers provider-neutral remoteUrl while retaining githubUrl compatibility", () => {
+    const initialValues = {
+      title: "",
+      remoteUrl: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+      githubUrl: "https://github.com/acme/legacy",
+      branch: "main",
+    };
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null, initialValues));
+
+    expect(result.current.useRemote).toBe(true);
+    expect(result.current.remoteRepos).toEqual([
+      expect.objectContaining({
+        url: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+        branch: "main",
+        source: "paste",
+      }),
+    ]);
+  });
+});
+
+describe("useDialogFormState — workspace changes", () => {
+  it("clears task-specific workflow overrides while the dialog remains open", async () => {
+    const { result, rerender } = renderHook(
+      ({ workspaceId }: { workspaceId: string }) => useDialogFormState(true, workspaceId, null),
+      { initialProps: { workspaceId: "workspace-a" } },
+    );
+
+    act(() => {
+      result.current.setWorkflowAgentOverrides({ source: "replacement" });
+    });
+    expect(result.current.workflowAgentOverrides).toEqual({ source: "replacement" });
+
+    rerender({ workspaceId: "workspace-b" });
+
+    await waitFor(() => expect(result.current.workflowAgentOverrides).toEqual({}));
+  });
+});
+
+describe("useDialogFormState — canvas task preset", () => {
+  it("restores the repository-free source and launch-only local preference", async () => {
+    const { result } = renderHook(() =>
+      useDialogFormState(true, "ws-1", null, {
+        title: "Create a canvas",
+        description: "Build a canvas",
+        noRepository: true,
+        preferLocalExecutor: true,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.noRepository).toBe(true));
+    expect(result.current.workspacePath).toBe("");
+    expect(result.current.preferLocalExecutor).toBe(true);
+    expect(result.current.repositories).toEqual([]);
+    expect(result.current.useRemote).toBe(false);
+  });
+});
+
+describe("useDialogFormState — repository policy snapshots", () => {
+  it("restores a policy-backed repository row without marking it as edited", () => {
+    const { result } = renderHook(() =>
+      useDialogFormState(true, "ws-1", null, {
+        title: "Existing task",
+        repositories: [
+          {
+            id: "task-repo-1",
+            task_id: "task-1",
+            repository_id: "repo-1",
+            base_branch: "main",
+            checkout_branch: "feature/existing",
+            branch_policy_id: "policy-1",
+            branch_policy_name: "Feature branches",
+            branch_policy_base_branch: "main",
+            branch_policy_branch_template: "feature/{title}-{suffix}",
+            branch_policy_pull_request_target: "main",
+            position: 0,
+            created_at: "2026-08-24T10:00:00Z",
+            updated_at: "2026-08-24T10:00:00Z",
+          },
+        ],
+      }),
+    );
+
+    expect(result.current.repositories).toEqual([
+      expect.objectContaining({
+        repositoryId: "repo-1",
+        branch: "main",
+        branchPolicyId: "policy-1",
+      }),
+    ]);
+    expect(result.current.repositoriesDirty).toBe(false);
+
+    act(() => {
+      result.current.updateRepository(result.current.repositories[0]!.key, { branch: "develop" });
+    });
+
+    expect(result.current.repositoriesDirty).toBe(true);
+  });
+});
+
+describe("useDialogFormState — provider-neutral initial values", () => {
+  it("seeds an authorized provider descriptor before asynchronous URL inspection", () => {
+    const initialValues = {
+      title: "",
+      remoteUrl: "https://bitbucket.example.test/projects/PLATFORM/repos/web/pull-requests/42",
+      checkoutBranch: BITBUCKET_HEAD_BRANCH,
+      remoteRepository: {
+        providerId: "bitbucket",
+        providerHost: "https://bitbucket.example.test",
+        ownerOrProject: "PLATFORM",
+        repositoryId: "web-42",
+        repositoryName: "web",
+        cloneUrl: "https://bitbucket.example.test/scm/PLATFORM/web.git",
+        defaultBranch: "trunk",
+        baseBranch: "trunk",
+        headBranch: BITBUCKET_HEAD_BRANCH,
+        pullRequest: { number: 42, title: "Fix" },
+      },
+    };
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null, initialValues));
+
+    expect(result.current.remoteRepos[0]).toMatchObject({
+      url: initialValues.remoteUrl,
+      remoteUrl: "https://bitbucket.example.test/scm/PLATFORM/web.git",
+      provider: "bitbucket",
+      providerHost: "https://bitbucket.example.test",
+      providerRepoId: "web-42",
+      providerOwner: "PLATFORM",
+      providerName: "web",
+      branch: BITBUCKET_HEAD_BRANCH,
+      prNumber: 42,
+      prBaseBranch: "trunk",
+      prHeadBranch: BITBUCKET_HEAD_BRANCH,
     });
   });
 });

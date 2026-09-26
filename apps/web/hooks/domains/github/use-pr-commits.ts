@@ -1,49 +1,33 @@
 "use client";
 
-import { useEffect, useCallback, useState, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { getWebSocketClient } from "@/lib/ws/connection";
-import type { PRCommitInfo } from "@/lib/types/github";
+import { prCommitsResource, type PRCommitsState } from "./pr-commits-resource";
 
-type PRCommitsState = {
-  commits: PRCommitInfo[];
-  loading: boolean;
-  error: string | null;
-};
-type WorkspacePRCommitsState = { workspaceId: string | null; state: PRCommitsState };
+export type KeyedPRCommitsState = PRCommitsState & { sourceKey: string };
 
-const INITIAL_STATE: PRCommitsState = {
-  commits: [],
-  loading: false,
-  error: null,
-};
-
-async function fetchPRCommits(
-  workspaceId: string,
-  owner: string,
-  repo: string,
-  prNumber: number,
-  setState: (s: PRCommitsState) => void,
-) {
-  const client = getWebSocketClient();
-  if (!client) return;
-
-  setState({ commits: [], loading: true, error: null });
-  try {
-    const response = await client.request<{ commits?: PRCommitInfo[] }>("github.pr_commits.get", {
-      workspace_id: workspaceId,
-      owner,
-      repo,
-      number: prNumber,
-    });
-    setState({ commits: response?.commits ?? [], loading: false, error: null });
-  } catch (err) {
-    setState({
-      commits: [],
-      loading: false,
-      error: err instanceof Error ? err.message : "Failed to fetch PR commits",
-    });
+export function resolvePRCommitsView(
+  state: KeyedPRCommitsState,
+  requestedKey: string,
+): PRCommitsState {
+  if (state.sourceKey === requestedKey) {
+    return {
+      commits: state.commits,
+      authoritativeCommits: state.authoritativeCommits,
+      providerHead: state.providerHead,
+      providerCommitsComplete: state.providerCommitsComplete,
+      loading: state.loading,
+      error: state.error,
+    };
   }
+  return {
+    commits: [],
+    authoritativeCommits: [],
+    providerHead: null,
+    providerCommitsComplete: false,
+    loading: requestedKey !== "",
+    error: null,
+  };
 }
 
 /**
@@ -57,41 +41,42 @@ export function usePRCommits(
   refreshKey?: string | null,
 ) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const [result, setResult] = useState<WorkspacePRCommitsState>({
-    workspaceId: null,
-    state: INITIAL_STATE,
-  });
   const hasParams = !!workspaceId && !!owner && !!repo && !!prNumber;
+  const sourceKey = hasParams
+    ? `${workspaceId}/${owner}/${repo}/${prNumber}/${refreshKey ?? ""}`
+    : "";
+  const request = useMemo(
+    () =>
+      hasParams
+        ? {
+            workspaceId,
+            owner,
+            repo,
+            prNumber,
+            sourceKey,
+          }
+        : null,
+    [hasParams, workspaceId, owner, repo, prNumber, sourceKey],
+  );
+  const subscribe = useCallback(
+    (listener: () => void) => prCommitsResource.subscribe(request, listener),
+    [request],
+  );
+  const getSnapshot = useCallback(() => prCommitsResource.getSnapshot(request), [request]);
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const paramsKeyRef = useRef<string>("");
-  const requestIdRef = useRef(0);
 
-  const refresh = useCallback(() => {
-    if (!workspaceId || !owner || !repo || !prNumber) return;
-    const requestId = ++requestIdRef.current;
-    void fetchPRCommits(workspaceId, owner, repo, prNumber, (next) => {
-      if (requestId !== requestIdRef.current) return;
-      setResult({ workspaceId, state: next });
-    });
-  }, [workspaceId, owner, repo, prNumber]);
+  const refresh = useCallback(async () => {
+    if (!request) return null;
+    return prCommitsResource.load(request, true);
+  }, [request]);
 
   useEffect(() => {
-    const key = hasParams ? `${workspaceId}/${owner}/${repo}/${prNumber}/${refreshKey ?? ""}` : "";
-    if (key === paramsKeyRef.current) return;
-    paramsKeyRef.current = key;
-    if (!workspaceId || !owner || !repo || !prNumber) {
-      requestIdRef.current++; // invalidate in-flight responses
-      return;
-    }
-    const requestId = ++requestIdRef.current;
-    void fetchPRCommits(workspaceId, owner, repo, prNumber, (next) => {
-      if (requestId !== requestIdRef.current) return;
-      setResult({ workspaceId, state: next });
-    });
-  }, [workspaceId, owner, repo, prNumber, hasParams, refreshKey]);
+    if (sourceKey === paramsKeyRef.current) return;
+    paramsKeyRef.current = sourceKey;
+    if (!request) return;
+    void prCommitsResource.load(request);
+  }, [request, sourceKey]);
 
-  // Return initial state when params are null to clear stale data
-  if (!hasParams || result.workspaceId !== workspaceId) {
-    return { ...INITIAL_STATE, refresh };
-  }
-  return { ...result.state, refresh };
+  return { ...resolvePRCommitsView({ sourceKey, ...snapshot }, sourceKey), refresh };
 }

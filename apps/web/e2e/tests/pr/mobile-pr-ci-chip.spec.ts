@@ -11,6 +11,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 const OWNER = "acme";
 const REPO = "demo";
@@ -89,8 +90,8 @@ async function seedTaskWithTwoPRs(args: SeedTaskArgs): Promise<string> {
     repo: "api",
     pr_number: 100,
     pr_url: `https://github.com/${OWNER}/api/pull/100`,
-    pr_title: "Follow-up mobile PR",
-    head_branch: "feat/mobile-follow-up",
+    pr_title: "PR events mobile PR",
+    head_branch: "feat/mobile-pr-events",
     base_branch: "main",
     author_login: "test-user",
     state: "open",
@@ -111,6 +112,91 @@ async function openTask(testPage: import("@playwright/test").Page, taskId: strin
 }
 
 test.describe("mobile PR CI chip drawer", () => {
+  test("keeps grouped PR event automations usable without tray overflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const taskId = await seedTaskWithPRAndTodos({
+      apiClient,
+      seedData,
+      title: "Mobile PR event automation tray",
+      prOverrides: {
+        checks_state: "pending",
+        checks_total: 4,
+        checks_passing: 0,
+        review_state: "pending",
+        review_count: 0,
+        pending_review_count: 1,
+      },
+    });
+    await apiClient.updateTaskCIAutomationOptions(taskId, {
+      auto_fix_enabled: true,
+      auto_merge_enabled: true,
+      prompt_on_review_requested: true,
+      prompt_on_merged: true,
+      prompt_on_closed: true,
+    });
+    const session = await openTask(testPage, taskId);
+    const chip = session.prStatusChip();
+
+    await expect(chip).toBeVisible({ timeout: 15_000 });
+    await expect(chip.getByTestId("pr-status-auto-fix-chip")).toContainText("Auto-fix 0/10");
+    await expect(chip.getByTestId("pr-status-auto-merge-chip")).toHaveText("Auto-merge");
+    await expect(chip.getByTestId("pr-status-pr-events-chip")).toHaveText("PR events 3/3");
+    await expect(chip.getByTestId("pr-status-pr-events-chip")).toHaveCount(1);
+
+    const statusBar = session.activeChat().getByTestId("chat-status-bar");
+    await expect(statusBar).toHaveCSS("flex-wrap", "wrap");
+    await expect
+      .poll(
+        async () => {
+          await waitForFiniteAnimations(statusBar);
+          return statusBar.evaluate((element) => {
+            const bar = element.getBoundingClientRect();
+            const visibleChildren = Array.from(element.children).filter((child) => {
+              const style = getComputedStyle(child);
+              const rect = child.getBoundingClientRect();
+              return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0;
+            });
+            const childrenFit = visibleChildren.every((child) => {
+              const rect = child.getBoundingClientRect();
+              return rect.left >= bar.left - 1 && rect.right <= bar.right + 1;
+            });
+            return childrenFit && element.scrollWidth <= element.clientWidth + 1;
+          });
+        },
+        {
+          timeout: 30_000,
+          intervals: [100, 250, 500],
+          message: "Waiting for the mobile chat status bar children to fit within the bar",
+        },
+      )
+      .toBe(true);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await prCapture.screenshot("mobile-pr-pr-events-automation-tray", {
+      caption: "Grouped PR event automation badge in the mobile composer tray",
+    });
+
+    await session.tapPRStatusChip();
+    const drawer = session.prStatusChipDrawer();
+    await expect(
+      drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }),
+    ).toBeVisible();
+    await expect(
+      drawer.getByRole("switch", { name: "Auto-merge or requeue when ready" }),
+    ).toBeVisible();
+    await expect(drawer.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
+    await expect(drawer.getByRole("switch", { name: "PR merged" })).toBeVisible();
+    await expect(drawer.getByRole("switch", { name: "PR closed without merging" })).toBeVisible();
+  });
+
   test("tapping the todo indicator beside the CI chip opens the todo list", async ({
     testPage,
     apiClient,
@@ -170,6 +256,79 @@ test.describe("mobile PR CI chip drawer", () => {
     ).toBeVisible();
     await expect(session.prStatusChipDrawer().getByTestId("pr-review-row")).toContainText(
       "Approved",
+    );
+  });
+
+  test("shows a workflow approval reason and link in the mobile drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const taskId = await seedTaskWithPR({
+      apiClient,
+      seedData,
+      title: "Mobile workflow approval",
+      prOverrides: {
+        head_sha: "mobile-workflow-head",
+        head_repo_owner: "contributor",
+        head_repo_name: "demo-fork",
+        review_state: "approved",
+        mergeable_state: "clean",
+      },
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      workflow_runs: [
+        {
+          id: 700,
+          run_attempt: 1,
+          workflow_id: 900,
+          name: "Run tests",
+          event: "pull_request",
+          status: "completed",
+          conclusion: "action_required",
+          head_sha: "mobile-workflow-head",
+          head_branch: "feat/mobile-drawer",
+          head_repo_owner: "contributor",
+          head_repo_name: "demo-fork",
+          html_url: "https://github.com/acme/demo/actions/runs/700",
+          pull_requests: [
+            {
+              number: PR_NUMBER,
+              head_sha: "mobile-workflow-head",
+              head_branch: "feat/mobile-drawer",
+              head_repo_owner: "contributor",
+              head_repo_name: "demo-fork",
+            },
+          ],
+        },
+      ],
+    });
+
+    let session = await openTask(testPage, taskId);
+    await expect(session.prStatusChip()).toBeVisible({ timeout: 15_000 });
+    await session.tapPRStatusChip();
+    const notice = session.prStatusChipDrawer().getByTestId("pr-workflow-attention");
+    await expect(notice).toContainText("Awaiting maintainer approval");
+    const link = notice.getByTestId("pr-workflow-attention-link");
+    await expect(link).toHaveAttribute("href", "https://github.com/acme/demo/actions/runs/700");
+    const box = await link.boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+    await prCapture.screenshot("mobile-workflow-approval-attention", {
+      caption: "Mobile PR drawer explains a workflow approval gate",
+    });
+
+    await session.prStatusChipDrawerClose().tap();
+    await testPage.reload();
+    session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.tapPRStatusChip();
+    await expect(session.prStatusChipDrawer().getByTestId("pr-workflow-attention")).toContainText(
+      "Awaiting maintainer approval",
     );
   });
 

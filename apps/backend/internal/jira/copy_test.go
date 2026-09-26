@@ -3,6 +3,7 @@ package jira
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -65,5 +66,26 @@ func TestCopyConfigToWorkspace_NothingToCopy(t *testing.T) {
 	f := newSvcFixture(t)
 	if _, err := f.svc.CopyConfigToWorkspace(context.Background(), "ws-empty", "ws-dst"); !errors.Is(err, ErrNothingToCopy) {
 		t.Fatalf("expected ErrNothingToCopy, got %v", err)
+	}
+}
+
+func TestCopyConfigToWorkspace_RejectsOAuthConnection(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	const src = "ws-oauth"
+	if err := f.store.UpsertConfigForWorkspace(ctx, src, &JiraConfig{
+		WorkspaceID: src,
+		SiteURL:     "https://acme.atlassian.net", AuthMethod: AuthMethodOAuth,
+		InstanceType: InstanceTypeCloud, ClientID: "client-1", CloudID: "cloud-1",
+	}); err != nil {
+		t.Fatalf("seed OAuth config: %v", err)
+	}
+	if err := f.secrets.Set(ctx, OAuthAccessTokenKeyForWorkspace(src), "access", "token-a"); err != nil {
+		t.Fatalf("seed OAuth token: %v", err)
+	}
+
+	_, err := f.svc.CopyConfigToWorkspace(ctx, src, "ws-target")
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "oauth") {
+		t.Fatalf("expected an explicit OAuth copy rejection, got %v", err)
 	}
 }

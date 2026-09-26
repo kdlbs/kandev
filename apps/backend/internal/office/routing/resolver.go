@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -15,6 +16,7 @@ import (
 // import dependency on the repo. Values must stay in sync.
 const (
 	healthStateHealthy            = "healthy"
+	healthStateShortRetry         = "short_retry"
 	healthStateDegraded           = "degraded"
 	healthStateUserActionRequired = "user_action_required"
 )
@@ -42,21 +44,10 @@ const (
 	SkipReasonMissingModelMapping = "missing_model_mapping"
 )
 
-// autoRetryableCodes is the allow-list of error codes that mark a
-// degraded provider as "the scheduler will retry on its own." Anything
-// outside this set is user-actionable. Referenced again by Phase 4
-// (block-reason aggregation, wake-up scheduling).
-var autoRetryableCodes = map[string]struct{}{
-	"rate_limited":           {},
-	"quota_limited":          {},
-	"provider_unavailable":   {},
-	"unknown_provider_error": {},
-}
-
-// IsAutoRetryableCode reports whether code is in the auto-retry allow-list.
+// IsAutoRetryableCode derives the legacy Office health hint from the shared
+// catalogue. Unknown and non-provider codes fail closed.
 func IsAutoRetryableCode(code string) bool {
-	_, ok := autoRetryableCodes[code]
-	return ok
+	return routingerr.ClassForCode(routingerr.Code(code)) == routingerr.ClassTransient
 }
 
 // Repo is the narrow interface the resolver needs over the sqlite repo.
@@ -133,8 +124,14 @@ type BlockReason struct {
 // fall through to the existing concrete-profile launch path and ignore
 // the other fields.
 type Resolution struct {
-	Enabled         bool
-	RequestedTier   Tier
+	Enabled       bool
+	RequestedTier Tier
+	// TierSource names the precedence level that supplied
+	// RequestedTier: one of TierSourceWakeReason, TierSourceOverride,
+	// TierSourceRole, TierSourceWorkspace, or "" (only when
+	// RequestedTier is also "", see effectiveTier). This is the sole
+	// carrier of the resolved source — it is not recomputed downstream.
+	TierSource      string
 	ProviderOrder   []ProviderID
 	Candidates      []Candidate
 	SkippedDegraded []SkippedCandidate
@@ -158,7 +155,7 @@ type ResolveOptions struct {
 type healthIndex map[ProviderID]map[string]map[string]models.ProviderHealth
 
 // Resolve runs the resolution algorithm described in
-// docs/specs/office-provider-routing/plan.md §Phase 2.
+// docs/plans/office-execution-profile-routing/plan.md §Phase 2.
 func (r *Resolver) Resolve(
 	ctx context.Context,
 	workspaceID string,
@@ -183,14 +180,23 @@ func (r *Resolver) Resolve(
 	if err != nil {
 		return nil, fmt.Errorf("routing: load agent overrides: %w", err)
 	}
-	tier := effectiveTier(cfg, ov, opts.Reason)
+	tier, tierSource := effectiveTier(cfg, ov, string(agent.Role), opts.Reason)
 	order := effectiveOrder(cfg, ov)
 	if len(order) == 0 {
 		return nil, ErrEmptyOrder
 	}
-	res := &Resolution{Enabled: cfg.Enabled, RequestedTier: tier, ProviderOrder: order}
+	res := &Resolution{
+		Enabled:       cfg.Enabled,
+		RequestedTier: tier,
+		TierSource:    tierSource,
+		ProviderOrder: order,
+	}
+	idx, err := r.loadHealthIndex(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	if !cfg.Enabled {
-		if err := r.evaluateProvider(ctx, workspaceID, res, cfg, nil, order[0], tier, r.clock()); err != nil {
+		if _, err := r.evaluateProvider(ctx, workspaceID, res, cfg, idx, order[0], tier, r.clock(), true); err != nil {
 			return nil, err
 		}
 		if len(res.Candidates) == 0 {
@@ -198,18 +204,22 @@ func (r *Resolver) Resolve(
 		}
 		return res, nil
 	}
-	idx, err := r.loadHealthIndex(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
 	excluded := providerExcludeSet(opts.ExcludeProviders)
 	now := r.clock()
 	for _, pid := range order {
 		if _, skip := excluded[pid]; skip {
 			continue
 		}
-		if err := r.evaluateProvider(ctx, workspaceID, res, cfg, idx, pid, tier, now); err != nil {
+		shortRetry, err := r.evaluateProvider(ctx, workspaceID, res, cfg, idx, pid, tier, now, false)
+		if err != nil {
 			return nil, err
+		}
+		if shortRetry {
+			// A live short-retry cooldown is an owner-scoped wait, not a
+			// reason to switch providers. Stop before considering later
+			// candidates so concurrent Office runs do not create a fallback
+			// stampede while the owning route is cooling down.
+			break
 		}
 	}
 	if len(res.Candidates) == 0 {
@@ -224,8 +234,8 @@ func (r *Resolver) Resolve(
 func (r *Resolver) evaluateProvider(
 	ctx context.Context, workspaceID string,
 	res *Resolution, cfg *WorkspaceConfig, idx healthIndex,
-	pid ProviderID, tier Tier, now time.Time,
-) error {
+	pid ProviderID, tier Tier, now time.Time, shortRetryOnly bool,
+) (bool, error) {
 	prof, ok := cfg.ProviderProfiles[pid]
 	model := prof.TierMap.Model(tier)
 	executionProfileID := prof.ExecutionProfileID(tier)
@@ -234,19 +244,21 @@ func (r *Resolver) evaluateProvider(
 			ProviderID: pid,
 			Reason:     SkipReasonMissingModelMapping,
 		})
-		return nil
+		return false, nil
 	}
 	if r.profiles != nil {
 		resolvedModel, err := r.resolveExecutionProfile(ctx, workspaceID, pid, tier, executionProfileID)
 		if err != nil {
-			return err
+			return false, err
 		}
 		model = resolvedModel
 	}
 	if hit, found := lookupHealth(idx, pid, tier, model); found {
-		if sc, skip := classifyHealthHit(pid, hit, now); skip {
-			res.SkippedDegraded = append(res.SkippedDegraded, sc)
-			return nil
+		if !shortRetryOnly || hit.State == models.ProviderHealthState(healthStateShortRetry) {
+			if sc, skip := classifyHealthHit(pid, hit, now); skip {
+				res.SkippedDegraded = append(res.SkippedDegraded, sc)
+				return sc.State == healthStateShortRetry, nil
+			}
 		}
 	}
 	res.Candidates = append(res.Candidates, Candidate{
@@ -258,7 +270,7 @@ func (r *Resolver) evaluateProvider(
 		Flags:              prof.Flags,
 		Env:                prof.Env,
 	})
-	return nil
+	return false, nil
 }
 
 func (r *Resolver) resolveExecutionProfile(
@@ -373,7 +385,7 @@ func classifyHealthHit(
 		AutoRetry:  IsAutoRetryableCode(row.ErrorCode),
 	}
 	switch string(row.State) {
-	case healthStateDegraded:
+	case healthStateShortRetry, healthStateDegraded:
 		if row.RetryAt == nil || !row.RetryAt.After(now) {
 			return SkippedCandidate{}, false
 		}
@@ -413,21 +425,47 @@ func aggregateBlock(skipped []SkippedCandidate) BlockReason {
 	return br
 }
 
-// effectiveTier resolves the tier for one run.
+// effectiveTier resolves the tier for one run and the precedence level
+// that supplied it (see Resolution.TierSource and PreviewItem.TierSource).
 // Order: 1) wake-reason policy (agent override > workspace policy),
-// 2) agent tier override, 3) workspace default. The reason argument
-// may be empty when the caller has no run context — in that case the
-// wake-reason step is skipped.
-func effectiveTier(cfg *WorkspaceConfig, ov AgentOverrides, reason string) Tier {
+// 2) agent tier override, 3) per-role tier (role's entry in
+// cfg.RoleTiers), 4) workspace default. The reason argument may be
+// empty when the caller has no run context — in that case the
+// wake-reason step is skipped (this is how a preview computation,
+// which never carries a reason, is guaranteed to never report
+// TierSourceWakeReason — see AC-18b). role is the agent's role string;
+// an empty role, or a role absent from (or empty-valued in)
+// cfg.RoleTiers, simply never matches the map lookup and falls through.
+// A non-empty role outside the seven-value enum is explicitly gated by
+// agentRoleSet() (AC-34): role_tiers may persist a matching key for such
+// a role (AC-34b permits it on the read path), so the lookup itself
+// would otherwise match — the enum check exists specifically to stop
+// that from applying. When cfg.DefaultTier is itself empty, the function
+// returns ("", "") rather than (DefaultTier, TierSourceWorkspace): an
+// empty source must never be interpreted as "workspace" (AC-20c). This
+// cannot happen in practice (validateTier rejects an empty default_tier
+// and the column default is non-empty), but the fallthrough is pinned
+// defensively anyway.
+func effectiveTier(cfg *WorkspaceConfig, ov AgentOverrides, role string, reason string) (Tier, string) {
 	if reason != "" {
 		if t := wakeReasonTier(cfg, ov, reason); t != "" {
-			return t
+			return t, TierSourceWakeReason
 		}
 	}
 	if ov.TierSource == TierSourceOverride && ov.Tier != "" {
-		return ov.Tier
+		return ov.Tier, TierSourceOverride
 	}
-	return cfg.DefaultTier
+	if role != "" {
+		if _, known := agentRoleSet()[role]; known {
+			if t, ok := cfg.RoleTiers[role]; ok && t != "" {
+				return t, TierSourceRole
+			}
+		}
+	}
+	if cfg.DefaultTier == "" {
+		return "", ""
+	}
+	return cfg.DefaultTier, TierSourceWorkspace
 }
 
 // wakeReasonTier returns the tier the wake-reason policy assigns for

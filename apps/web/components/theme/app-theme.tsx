@@ -5,13 +5,14 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
 
 type Theme = "light" | "dark" | "system";
-type ResolvedTheme = "light" | "dark";
+export type ResolvedTheme = "light" | "dark";
 
 type ThemeContextValue = {
   theme: Theme;
@@ -93,7 +94,7 @@ export function AppThemeProvider({
     return () => media.removeEventListener("change", listener);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const update = () => applyTheme(attribute, resolvedTheme);
     if (disableTransitionOnChange) {
       withDisabledTransitions(update);

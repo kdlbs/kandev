@@ -439,6 +439,45 @@ func TestResolveDegradedPastRetryIsEligible(t *testing.T) {
 	}
 }
 
+func TestResolveShortRetryCooldownBlocksFallbackUntilDeadline(t *testing.T) {
+	repo := &fakeRepo{
+		cfg: twoProviderCfg(),
+		health: []models.ProviderHealth{
+			{
+				ProviderID: "claude-acp",
+				Scope:      "model",
+				ScopeValue: "sonnet",
+				State:      "short_retry",
+				ErrorCode:  "model_capacity",
+				RetryAt:    timePtr(fixedNow.Add(5 * time.Second)),
+			},
+		},
+	}
+	r := newResolver(t, repo)
+	res, err := r.Resolve(context.Background(), wsID, agentWithOverrides(t, routing.AgentOverrides{}), routing.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("future short retry resolve: %v", err)
+	}
+	if len(res.Candidates) != 0 {
+		t.Fatalf("future short retry candidates = %+v, want no fallback candidates", res.Candidates)
+	}
+	if len(res.SkippedDegraded) != 1 || res.SkippedDegraded[0].Reason != routing.SkipReasonDegraded {
+		t.Fatalf("future short retry skipped = %+v, want one degraded skip", res.SkippedDegraded)
+	}
+	if res.BlockReason.Status != routing.StatusWaitingForCapacity {
+		t.Fatalf("future short retry block status = %q, want waiting_for_provider_capacity", res.BlockReason.Status)
+	}
+
+	repo.health[0].RetryAt = timePtr(fixedNow.Add(-time.Second))
+	res, err = r.Resolve(context.Background(), wsID, agentWithOverrides(t, routing.AgentOverrides{}), routing.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("expired short retry resolve: %v", err)
+	}
+	if len(res.Candidates) != 2 || res.Candidates[0].ProviderID != "claude-acp" {
+		t.Fatalf("expired short retry candidates = %+v, want claude first", res.Candidates)
+	}
+}
+
 func TestResolveUserActionBlocked(t *testing.T) {
 	cfg := &routing.WorkspaceConfig{
 		Enabled:       true,

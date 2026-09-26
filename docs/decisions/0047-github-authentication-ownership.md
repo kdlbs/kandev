@@ -20,7 +20,7 @@
 - Status: accepted
 - Date: 2026-07-19
 - Area: backend, frontend, security
-- Related: [Workspace GitHub Authentication](../specs/integrations/github-authentication.md),
+- Related: [Workspace GitHub Authentication](../specs/integrations/requirements/github-authentication.md),
   [ADR 0030](0030-workspace-scoped-integration-settings.md)
 
 ## Context

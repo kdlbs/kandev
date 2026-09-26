@@ -5,7 +5,7 @@ status: done
 wave: 8
 depends_on: ["14-board-discovery"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 15: Revision-Safe Work-Item Mutations

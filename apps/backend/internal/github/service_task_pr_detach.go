@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
 
@@ -39,6 +40,24 @@ func (s *Service) DetachTaskPR(ctx context.Context, workspaceID, associationID s
 	}
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return nil, err
+	}
+	if s.comparisonTargetObserver != nil && tp.RepositoryID != "" {
+		if err := s.comparisonTargetObserver.RemoveComparisonTargetForChange(
+			ctx,
+			tp.TaskID,
+			tp.RepositoryID,
+			taskmodels.ComparisonTargetProviderGitHub,
+			taskmodels.ComparisonTargetKindPullRequest,
+			tp.PRNumber,
+		); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("comparison target detach cleanup failed",
+					zap.String("task_id", tp.TaskID),
+					zap.Int("pr_number", tp.PRNumber),
+					zap.Error(err))
+			}
+			return nil, err
+		}
 	}
 	if tp.DetachedAt != nil {
 		return tp, nil

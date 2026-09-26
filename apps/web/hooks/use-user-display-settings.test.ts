@@ -1,19 +1,227 @@
 import { describe, expect, it } from "vitest";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
-import { isSettingsUnchanged } from "./use-user-display-settings";
+import {
+  buildNormalizedSettings,
+  buildSettingsUpdatePayload,
+  isSettingsUnchanged,
+  normalizeHiddenStepIds,
+} from "./use-user-display-settings";
+
+const WORKSPACE_ID = "workspace-1";
 
 function settings(tasksListShowDetails: boolean): UserSettingsState {
   return {
     loaded: true,
-    workspaceId: "workspace-1",
+    workspaceId: WORKSPACE_ID,
     workflowId: null,
     repositoryIds: [],
     tasksListShowDetails,
   } as unknown as UserSettingsState;
 }
 
+function settingsWithHidden(hiddenWorkflowStepIds: Record<string, string[]>): UserSettingsState {
+  return {
+    loaded: true,
+    workspaceId: WORKSPACE_ID,
+    workflowId: null,
+    repositoryIds: [],
+    tasksListShowDetails: false,
+    hiddenWorkflowStepIds,
+  } as unknown as UserSettingsState;
+}
+
+function settingsWithAutoHide(workflowIdsWithAutoHideEmptySteps: string[]): UserSettingsState {
+  return {
+    loaded: true,
+    workspaceId: WORKSPACE_ID,
+    workflowId: null,
+    repositoryIds: [],
+    tasksListShowDetails: false,
+    hiddenWorkflowStepIds: {},
+    workflowIdsWithAutoHideEmptySteps,
+  } as unknown as UserSettingsState;
+}
+
+function settingsWithKanbanBoard(
+  kanbanSort: "created_desc" | "priority_desc",
+  kanbanPriorityFilterTokens: string[],
+): UserSettingsState {
+  return {
+    loaded: true,
+    workspaceId: WORKSPACE_ID,
+    workflowId: null,
+    repositoryIds: [],
+    tasksListShowDetails: false,
+    hiddenWorkflowStepIds: {},
+    workflowIdsWithAutoHideEmptySteps: [],
+    kanbanSort,
+    kanbanPriorityFilterTokens,
+  } as unknown as UserSettingsState;
+}
+
 describe("isSettingsUnchanged", () => {
   it("detects a details-only preference change", () => {
     expect(isSettingsUnchanged(settings(true), settings(false))).toBe(false);
+  });
+
+  it("treats reordered hidden step ids for the same workflow as unchanged", () => {
+    const normalized = settingsWithHidden({ "wf-1": ["step-a", "step-b"] });
+    const current = settingsWithHidden({ "wf-1": ["step-b", "step-a"] });
+    expect(isSettingsUnchanged(normalized, current)).toBe(true);
+  });
+
+  it("detects an actual hidden step id change for a workflow", () => {
+    const normalized = settingsWithHidden({ "wf-1": ["step-a"] });
+    const current = settingsWithHidden({ "wf-1": ["step-b"] });
+    expect(isSettingsUnchanged(normalized, current)).toBe(false);
+  });
+
+  it("detects a hidden workflow being added or removed", () => {
+    const normalized = settingsWithHidden({ "wf-1": ["step-a"], "wf-2": ["step-c"] });
+    const current = settingsWithHidden({ "wf-1": ["step-a"] });
+    expect(isSettingsUnchanged(normalized, current)).toBe(false);
+  });
+
+  it("treats both empty hidden-step maps as unchanged", () => {
+    expect(isSettingsUnchanged(settingsWithHidden({}), settingsWithHidden({}))).toBe(true);
+  });
+
+  it("treats reordered auto-hide workflow ids as unchanged", () => {
+    expect(
+      isSettingsUnchanged(
+        settingsWithAutoHide(["wf-b", "wf-a"]),
+        settingsWithAutoHide(["wf-a", "wf-b"]),
+      ),
+    ).toBe(true);
+  });
+
+  it("detects an auto-hide workflow id change", () => {
+    expect(
+      isSettingsUnchanged(settingsWithAutoHide(["wf-a"]), settingsWithAutoHide(["wf-b"])),
+    ).toBe(false);
+  });
+
+  it("detects a board sort token change", () => {
+    expect(
+      isSettingsUnchanged(
+        settingsWithKanbanBoard("priority_desc", []),
+        settingsWithKanbanBoard("created_desc", []),
+      ),
+    ).toBe(false);
+  });
+
+  it("treats a reordered priority filter selection as unchanged", () => {
+    expect(
+      isSettingsUnchanged(
+        settingsWithKanbanBoard("created_desc", ["high", "critical"]),
+        settingsWithKanbanBoard("created_desc", ["critical", "high"]),
+      ),
+    ).toBe(true);
+  });
+
+  it("detects an actual priority filter selection change", () => {
+    expect(
+      isSettingsUnchanged(
+        settingsWithKanbanBoard("created_desc", ["critical"]),
+        settingsWithKanbanBoard("created_desc", ["high"]),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("buildNormalizedSettings — priority filter token order", () => {
+  it("normalizes a selection to priority-rank order, not lexicographic order", () => {
+    // Lexicographically "low" < "medium", but rank order (matching the board
+    // parser and backend normalizer) is critical, high, medium, low.
+    const normalized = buildNormalizedSettings(
+      {
+        workspaceId: WORKSPACE_ID,
+        workflowId: null,
+        repositoryIds: [],
+        kanbanPriorityFilterTokens: ["low", "medium"],
+      },
+      settingsWithKanbanBoard("created_desc", []),
+    );
+    expect(normalized.kanbanPriorityFilterTokens).toEqual(["medium", "low"]);
+  });
+});
+
+describe("normalizeHiddenStepIds", () => {
+  it("dedupes and sorts ids within each workflow", () => {
+    expect(normalizeHiddenStepIds({ "wf-1": ["step-b", "step-a", "step-b"] })).toEqual({
+      "wf-1": ["step-a", "step-b"],
+    });
+  });
+
+  it("drops a workflow entry whose id array becomes empty", () => {
+    expect(normalizeHiddenStepIds({ "wf-1": [], "wf-2": ["step-a"] })).toEqual({
+      "wf-2": ["step-a"],
+    });
+  });
+
+  it("returns an empty object for an empty input", () => {
+    expect(normalizeHiddenStepIds({})).toEqual({});
+  });
+});
+
+describe("buildSettingsUpdatePayload", () => {
+  // Guards the literal wire key: a silent rename here would break persistence
+  // with zero test failures anywhere else, since the E2E persistence spec
+  // drives the real UI and would only catch it after a full round trip.
+  it("sends hidden step ids under the kanban_hidden_step_ids wire key", () => {
+    const normalized = settingsWithHidden({ "wf-1": ["step-a", "step-b"] });
+    expect(buildSettingsUpdatePayload(normalized)).toMatchObject({
+      kanban_hidden_step_ids: { "wf-1": ["step-a", "step-b"] },
+    });
+  });
+
+  it("sends an empty hidden-step map as-is", () => {
+    const normalized = settingsWithHidden({});
+    expect(buildSettingsUpdatePayload(normalized)).toMatchObject({
+      kanban_hidden_step_ids: {},
+    });
+  });
+
+  it("sends the per-workflow auto-hide preference under its wire key", () => {
+    const normalized = settingsWithAutoHide(["wf-b", "wf-a"]);
+    expect(buildSettingsUpdatePayload(normalized)).toMatchObject({
+      workflow_ids_with_auto_hide_empty_steps: ["wf-b", "wf-a"],
+    });
+  });
+
+  it("sends the board sort token and priority filter selection under their wire keys", () => {
+    const normalized = settingsWithKanbanBoard("priority_desc", ["critical", "high"]);
+    expect(buildSettingsUpdatePayload(normalized)).toMatchObject({
+      kanban_sort: "priority_desc",
+      kanban_priority_filter_tokens: ["critical", "high"],
+    });
+  });
+});
+
+describe("buildNormalizedSettings — snapshot-not-delta commit semantics (AC-004.5)", () => {
+  it("carries a sibling field's current-but-possibly-stale value verbatim when only a different field changes", () => {
+    // This client's local state hasn't yet seen a concurrent change another
+    // client made to kanbanPriorityFilterTokens — it still holds ["critical"].
+    const current = settingsWithKanbanBoard("created_desc", ["critical"]);
+
+    // This client changes only kanbanSort; it never touches the priority filter.
+    const normalized = buildNormalizedSettings(
+      {
+        workspaceId: WORKSPACE_ID,
+        workflowId: null,
+        repositoryIds: [],
+        kanbanSort: "priority_desc",
+      },
+      current,
+    );
+
+    // The resulting payload is a full snapshot: it carries this client's
+    // stale copy of the sibling field, not just the field that changed. A
+    // later-committing write built this way would silently overwrite a
+    // concurrent client's still-in-flight change to that sibling field.
+    expect(buildSettingsUpdatePayload(normalized)).toMatchObject({
+      kanban_sort: "priority_desc",
+      kanban_priority_filter_tokens: ["critical"],
+    });
   });
 });

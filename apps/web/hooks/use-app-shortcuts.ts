@@ -7,12 +7,15 @@ import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { isTaskWorkspaceSearchAvailable } from "@/lib/commands/task-workspace-search";
 import { usePathname } from "@/lib/routing/client-router";
+import { isAppSidebarViewport } from "@/hooks/use-responsive-breakpoint";
 
 /**
  * App-root keyboard shortcuts that must fire on every route — not just inside
  * the dockview session editor.
  *
- * Currently handles `TOGGLE_SIDEBAR` (collapse/expand the global AppSidebar).
+ * Currently handles `CONTENT_SEARCH`, `TOGGLE_SIDEBAR` (collapse/expand the
+ * global AppSidebar), and `WORKSPACE_PICKER` (open the sidebar-header workspace
+ * switcher with focus inside the menu).
  * Previously this lived in {@link useEditorKeybinds}, which is mounted only by
  * the dockview desktop layout, so the shortcut was dead on the Kanban board,
  * task list, Office, Settings, etc. Mount this once near the app root (it has
@@ -57,6 +60,20 @@ export function useAppShortcuts() {
         e.preventDefault();
         e.stopPropagation();
         appStore.getState().toggleAppSidebar();
+        return;
+      }
+
+      if (matchesShortcut(e, getShortcut("WORKSPACE_PICKER", overrides))) {
+        // The sidebar is display:none below md (`hidden md:block`), but the
+        // menu portals to document.body — opening it there would float a
+        // detached, focus-trapped menu over the mobile nav. Match the
+        // sidebar's own boundary and let the event through untouched.
+        if (!isAppSidebarViewport()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        // The action expands a collapsed sidebar itself — the picker trigger
+        // renders only in the expanded header.
+        appStore.getState().setWorkspacePickerOpen(true);
       }
     };
 

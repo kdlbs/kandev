@@ -174,6 +174,18 @@ describe("performEnvSwitch", () => {
     expect(params.buildDefault).toHaveBeenCalledWith(params.api);
   });
 
+  it("keeps an explicit route layout on first environment adoption", () => {
+    // The task route can render ?layout=plan before the session's environment
+    // id arrives. First adoption must replay that explicit intent instead of
+    // replacing the plan preset with the effective default layout.
+    const params = makeParams({ oldEnvId: null, initialLayout: "plan" });
+
+    performEnvSwitch(params);
+
+    expect(params.buildDefault).toHaveBeenCalledWith(params.api, "plan");
+    expect(params.api.fromJSON).not.toHaveBeenCalled();
+  });
+
   it("preserves the outgoing session panel's tab index when adding the new session on the fast path", () => {
     // Regression: the fast-path used to call addPanel with only
     // { referenceGroup }, so dockview appended the new session tab to the end

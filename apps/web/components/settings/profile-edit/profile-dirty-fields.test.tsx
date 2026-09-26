@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { McpPolicyCard } from "./mcp-policy-card";
 import { ProfileDetailsCard } from "./profile-details-card";
+import { UserNamespacesCard } from "./docker-sections";
 
 afterEach(cleanup);
 const MCP_POLICY_LABEL = "MCP policy JSON";
@@ -22,7 +23,7 @@ describe("executor profile dirty fields", () => {
       <McpPolicyCard
         mcpPolicy='{"allow_http":true}'
         baselinePolicy='{"allow_http":true}'
-        mcpPolicyError={null}
+        mcpPolicyErrorKey={null}
         onPolicyChange={onChange}
       />,
     );
@@ -33,7 +34,7 @@ describe("executor profile dirty fields", () => {
       <McpPolicyCard
         mcpPolicy='{"allow_http":false}'
         baselinePolicy='{"allow_http":true}'
-        mcpPolicyError={null}
+        mcpPolicyErrorKey={null}
         onPolicyChange={onChange}
       />,
     );
@@ -46,5 +47,20 @@ describe("executor profile dirty fields", () => {
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Edited" } });
     expect(onNameChange).toHaveBeenCalledWith("Edited");
+  });
+
+  it("keeps an already-enabled user namespace switch clean until it changes", () => {
+    const { container, rerender } = render(
+      <UserNamespacesCard enabled baselineEnabled onChange={vi.fn()} />,
+    );
+
+    const toggle = container.querySelector("#allow-user-namespaces");
+    expect(screen.getByRole("switch", { name: "User namespace support" })).toBe(toggle);
+    expect(toggle?.getAttribute(DIRTY_ATTRIBUTE)).toBe("false");
+
+    rerender(<UserNamespacesCard enabled={false} baselineEnabled onChange={vi.fn()} />);
+    expect(container.querySelector("#allow-user-namespaces")?.getAttribute(DIRTY_ATTRIBUTE)).toBe(
+      "true",
+    );
   });
 });

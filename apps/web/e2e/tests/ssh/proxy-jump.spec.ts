@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
+import { buildE2ESSHImage } from "../../fixtures/ssh-image";
 import { startBastionAndTarget, stopBastionAndTarget } from "../../helpers/ssh-bastion";
 import path from "node:path";
 
@@ -12,6 +13,12 @@ import path from "node:path";
  * because it's heavier than the default fixture's single-sshd model.
  */
 test.describe("ssh executor — ProxyJump", () => {
+  test.describe.configure({ timeout: 900_000 });
+
+  test.beforeAll(() => {
+    buildE2ESSHImage();
+  });
+
   test("direct connect (no ProxyJump) succeeds against the bastion's own port", async ({
     apiClient,
     backend,

@@ -6,7 +6,7 @@ wave: 10
 depends_on:
   - "17-final-lifecycle-transition-coverage"
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 18: Lifecycle prompt security remediation
@@ -44,7 +44,7 @@ git diff --check -- docs
 - `apps/backend/internal/orchestrator/messagequeue/`
 - focused backend regression tests
 - `docs/decisions/0051-pr-agent-notifications-extend-task-pr-automation.md`
-- `docs/specs/ui/ci-pr-automation.md`
+- `docs/specs/ui/requirements/ci-pr-automation.md`
 - `docs/plans/ci-pr-automation/`
 - `docs/public/integrations.md`
 

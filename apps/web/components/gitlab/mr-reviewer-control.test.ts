@@ -40,7 +40,7 @@ describe("toggleMemberId", () => {
     const props = {
       workspaceId: "ws",
       host: "https://gitlab.example",
-      label: "Reviewers" as const,
+      kind: "reviewers" as const,
       current: [],
       busy: false,
       onSave: vi.fn().mockResolvedValue(true),

@@ -265,12 +265,23 @@ type stubExecutorProfileReader struct {
 	profile *taskmodels.ExecutorProfile
 }
 
+func (s *stubExecutorProfileReader) GetTask(_ context.Context, id string) (*taskmodels.Task, error) {
+	if s.session == nil {
+		return &taskmodels.Task{ID: id}, nil
+	}
+	return &taskmodels.Task{ID: s.session.TaskID}, nil
+}
+
 func (s *stubExecutorProfileReader) GetTaskSession(_ context.Context, _ string) (*taskmodels.TaskSession, error) {
 	return s.session, nil
 }
 
 func (s *stubExecutorProfileReader) GetTaskEnvironment(_ context.Context, _ string) (*taskmodels.TaskEnvironment, error) {
 	return s.env, nil
+}
+
+func (*stubExecutorProfileReader) HasActiveTaskResourceCleanupJob(context.Context, string) (bool, error) {
+	return false, nil
 }
 
 func (s *stubExecutorProfileReader) GetExecutorProfile(_ context.Context, _ string) (*taskmodels.ExecutorProfile, error) {
@@ -329,6 +340,49 @@ func TestStartUserShellProcessExportsExecutorProfileEnv(t *testing.T) {
 	}
 	if env["FONTAWESOME_NPM_AUTH_TOKEN"] != "fa-secret-value" {
 		t.Fatalf("shell env = %#v, want executor-profile var exported", env)
+	}
+}
+
+func TestStartUserShellProcessFailsClosedOnExecutorProfileSecretFailure(t *testing.T) {
+	log := testTerminalLogger(t)
+	manager := lifecycle.NewManager(
+		nil,
+		bus.NewMemoryEventBus(log),
+		nil,
+		nil,
+		nil,
+		nil,
+		lifecycle.ExecutorFallbackDeny,
+		t.TempDir(),
+		log,
+	)
+	manager.SetExecutorProfileReader(&stubExecutorProfileReader{
+		env: &taskmodels.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-1"},
+		profile: &taskmodels.ExecutorProfile{
+			ID:      "prof-1",
+			EnvVars: []taskmodels.ProfileEnvVar{{Key: "TOKEN", SecretID: "deleted-secret"}},
+		},
+	})
+	handler := NewTerminalHandler(manager, nil, nil, log)
+	runner := process.NewInteractiveRunner(nil, log, 2*1024*1024)
+
+	execution := &lifecycle.AgentExecution{
+		ID:                "exec-1",
+		SessionID:         "session-1",
+		TaskEnvironmentID: "env-1",
+		WorkspacePath:     t.TempDir(),
+	}
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/terminal/environment/env-1?terminalId=term-1", nil)
+
+	processID, status, errMsg := handler.startUserShellProcess(c, execution, "env-1", "term-1", runner)
+	if processID != "" || status != http.StatusServiceUnavailable || errMsg != "executor profile environment unavailable" {
+		t.Fatalf("startUserShellProcess() = (%q, %d, %q), want service unavailable without a process", processID, status, errMsg)
+	}
+	if shells := runner.ListUserShells("env-1"); len(shells) != 0 {
+		t.Fatalf("secret failure started user shells: %#v", shells)
 	}
 }
 

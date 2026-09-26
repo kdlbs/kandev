@@ -1,26 +1,28 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useMemo } from "react";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { BranchSelector } from "@/components/branch-selector";
+import { branchToOption, sortBranches } from "@/components/branch-picker-options";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useBranches } from "@/hooks/domains/workspace/use-repository-branches";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import {
   NO_REPOSITORY,
-  NO_REPOSITORY_LABEL,
   DEFAULT_BRANCH,
-  DEFAULT_BRANCH_LABEL,
   branchPlaceholder,
   resolveBaseBranch,
   resolveRepositoryId,
 } from "@/lib/watcher-repository-default";
+import { useTranslation } from "react-i18next";
 
 type PickItem = { id: string; label: string };
 
 function PickSelect(props: {
   label: string;
   description: string;
-  value: string;
+  value: string | undefined;
   onChange: (v: string) => void;
   placeholder: string;
   items: PickItem[];
@@ -51,6 +53,15 @@ function PickSelect(props: {
   );
 }
 
+function storedBranchFallback(value: string) {
+  const isOriginRef = value.startsWith("origin/");
+  return branchToOption({
+    name: isOriginRef ? value.slice("origin/".length) : value,
+    type: isOriginRef ? "remote" : "local",
+    remote: isOriginRef ? "origin" : undefined,
+  });
+}
+
 /**
  * Shared repository + base-branch picker for the Linear / Jira / Sentry watcher
  * dialogs. Binds the watcher to an optional repository so its tasks run against
@@ -74,43 +85,80 @@ export function WatcherRepositoryFields({
   onRepositoryChange: (repositoryId: string) => void;
   onBaseBranchChange: (baseBranch: string) => void;
 }) {
+  const { t } = useTranslation();
   // forceRefresh: a repo created in settings doesn't update the shared store
   // slice, and the lazy fetch is gated by isLoaded — so without this the picker
   // could miss repositories created since the slice first loaded. The hook owns
   // the fetch (keeps data-flow in the hook layer, not the component).
   const { repositories } = useRepositories(workspaceId, !!workspaceId, true);
   const branchSource = repositoryId ? ({ kind: "id", workspaceId, repositoryId } as const) : null;
-  const { branches, isLoading: branchesLoading } = useBranches(branchSource, !!repositoryId);
-  // A branch name can appear twice (local + remote tracking, e.g. "main" and
-  // origin/"main"), which would emit two <SelectItem value="main"> — Radix then
-  // renders every matching item's text in the trigger ("mainmain") and React
-  // warns on duplicate keys. Dedupe by name so each branch is one option.
-  const uniqueBranchNames = Array.from(new Set(branches.map((b) => b.name)));
+  const {
+    branches,
+    isLoading: branchesLoading,
+    refresh,
+  } = useBranches(branchSource, !!repositoryId);
+  const touchTarget = useTouchDrawer();
+  const baseBranchId = useId();
+  const noRepositoryLabel = t("common:noRepositoryOption");
+  const defaultBranchLabel = t("common:repositoryDefaultBranchOption");
+  const branchPlaceholderLabels = {
+    defaultBranch: defaultBranchLabel,
+    loading: t("common:watcherLoadingBranchesPlaceholder"),
+    pickRepository: t("common:watcherPickRepositoryPlaceholder"),
+  };
+  const branchPlaceholderLabel =
+    branchPlaceholderLabels[branchPlaceholder(repositoryId, branchesLoading)];
+  const branchOptions = useMemo(() => {
+    const seenValues = new Set<string>();
+    const available = sortBranches(branches)
+      .filter((branch) => branch.type !== "remote" || !branch.remote || branch.remote === "origin")
+      .map(branchToOption)
+      .filter((option) => {
+        if (seenValues.has(option.value)) return false;
+        seenValues.add(option.value);
+        return true;
+      });
+    const projectedValues = new Set(available.map((option) => option.value));
+    const storedFallback =
+      baseBranch && !projectedValues.has(baseBranch) ? [storedBranchFallback(baseBranch)] : [];
+    return [{ value: DEFAULT_BRANCH, label: defaultBranchLabel }, ...storedFallback, ...available];
+  }, [baseBranch, branches, defaultBranchLabel]);
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <PickSelect
-        label="Repository"
-        description="Optional — the repository the agent works in."
+        label={t("common:repository")}
+        description={t("common:optionalTheRepositoryTheAgentWorks")}
         value={repositoryId || NO_REPOSITORY}
         onChange={(v) => onRepositoryChange(resolveRepositoryId(v))}
-        placeholder={NO_REPOSITORY_LABEL}
+        placeholder={noRepositoryLabel}
         items={[
-          { id: NO_REPOSITORY, label: NO_REPOSITORY_LABEL },
+          { id: NO_REPOSITORY, label: noRepositoryLabel },
           ...repositories.map((r) => ({ id: r.id, label: r.name })),
         ]}
       />
-      <PickSelect
-        label="Base Branch"
-        description="The base branch the agent starts from."
-        value={baseBranch || DEFAULT_BRANCH}
-        onChange={(v) => onBaseBranchChange(resolveBaseBranch(v))}
-        placeholder={branchPlaceholder(repositoryId, branchesLoading)}
-        items={[
-          { id: DEFAULT_BRANCH, label: DEFAULT_BRANCH_LABEL },
-          ...uniqueBranchNames.map((name) => ({ id: name, label: name })),
-        ]}
-        disabled={!repositoryId || branchesLoading}
-      />
+      <div className="space-y-1.5">
+        <Label htmlFor={baseBranchId}>{t("common:baseBranch")}</Label>
+        <p className="text-xs text-muted-foreground">{t("common:theBaseBranchTheAgentStarts")}</p>
+        <BranchSelector
+          options={branchOptions}
+          value={repositoryId && !branchesLoading ? baseBranch || DEFAULT_BRANCH : ""}
+          onValueChange={(value) => onBaseBranchChange(resolveBaseBranch(value))}
+          disabled={!repositoryId || branchesLoading}
+          placeholder={branchPlaceholderLabel}
+          searchPlaceholder={t("task:searchBranches")}
+          emptyMessage={t("task:noBranchesFound")}
+          ariaLabel={t("common:baseBranch")}
+          dropdownLabel={t("common:baseBranch")}
+          onRefresh={refresh}
+          refreshing={branchesLoading}
+          loading={branchesLoading}
+          touchTarget={touchTarget}
+          triggerId={baseBranchId}
+          testId="watcher-base-branch-selector"
+          dropdownTestId="watcher-base-branch-dropdown"
+          triggerClassName="border border-input bg-background px-3 hover:bg-background"
+        />
+      </div>
     </div>
   );
 }

@@ -1,55 +1,18 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { IconGitMerge, IconGitPullRequestClosed, IconX } from "@tabler/icons-react";
-import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
-import { useToast } from "@/components/toast-provider";
-import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
+import { useAppStore } from "@/components/state-provider";
+import { useTaskArchiveConfirm } from "@/hooks/use-task-archive-confirm";
 import {
   markPRClosedBannerDismissed,
   markPRMergedBannerDismissed,
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
 } from "@/lib/local-storage";
-
-type ArchiveTarget = { title: string; executorType?: string | null };
-
-// Archiving from the terminal-state banners goes through the same confirmation
-// dialog as every other archive surface. Only failures toast; on success the
-// archive-and-switch flow moves the user to the next task.
-function useBannerArchiveConfirm(taskId: string) {
-  const store = useAppStoreApi();
-  const archiveAndSwitch = useArchiveAndSwitchTask();
-  const { toast } = useToast();
-  const [target, setTarget] = useState<ArchiveTarget | null>(null);
-  const [isPending, setIsPending] = useState(false);
-
-  const requestArchive = useCallback(() => {
-    const state = store.getState();
-    const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
-    setTarget({ title: task?.title ?? "this task", executorType: task?.primaryExecutorType });
-  }, [store, taskId]);
-
-  const closeConfirm = useCallback(() => setTarget(null), []);
-
-  const confirmArchive = useCallback(
-    async ({ cascade }: { cascade: boolean }) => {
-      setIsPending(true);
-      try {
-        await archiveAndSwitch(taskId, { cascade });
-      } catch {
-        toast({ description: "Failed to archive task", variant: "error" });
-      } finally {
-        setIsPending(false);
-      }
-    },
-    [archiveAndSwitch, taskId, toast],
-  );
-
-  return { target, requestArchive, closeConfirm, confirmArchive, isPending };
-}
+import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 // Presentational banner shared by PRMergedBanner / PRClosedBanner — an icon, a
 // message, and Archive + Dismiss controls. Colors/icon/testIds are supplied by
@@ -74,43 +37,52 @@ function ArchiveDismissBanner({
   taskId: string;
   onDismiss: () => void;
 }) {
-  const { target, requestArchive, closeConfirm, confirmArchive, isPending } =
-    useBannerArchiveConfirm(taskId);
+  const { t } = useTranslation();
+  const archive = useTaskArchiveConfirm(taskId);
+  const archiveAnchorRef = useRef<HTMLButtonElement>(null);
+  const { isFinePointer } = useResponsiveBreakpoint();
   return (
     <>
-      <div data-testid={`${testIdPrefix}-banner`} className={containerClass}>
+      <div
+        data-testid={`${testIdPrefix}-banner`}
+        className={`${containerClass} ${archive.target && !isFinePointer ? "flex-wrap" : ""}`}
+      >
         {icon}
         <span className="flex-1">{text}</span>
+        {(!archive.target || isFinePointer) && (
+          <button
+            ref={archiveAnchorRef}
+            type="button"
+            data-testid={`${testIdPrefix}-archive-button`}
+            onClick={archive.requestArchive}
+            className={archiveClass}
+          >
+            {t("task:archive")}
+          </button>
+        )}
         <button
           type="button"
-          data-testid={`${testIdPrefix}-archive-button`}
-          onClick={requestArchive}
-          className={archiveClass}
-        >
-          Archive
-        </button>
-        <button
-          type="button"
-          aria-label="Dismiss"
+          aria-label={t("task:dismiss")}
           data-testid={`${testIdPrefix}-dismiss-button`}
           onClick={onDismiss}
           className={dismissClass}
         >
           <IconX className="h-3 w-3" />
         </button>
+        <TaskArchiveConfirmation
+          open={archive.target !== null}
+          anchorRef={archiveAnchorRef}
+          taskId={taskId}
+          taskTitle={archive.target?.title}
+          executorType={archive.target?.executorType}
+          isArchiving={archive.isPending}
+          onOpenChange={(open) => {
+            if (!open) archive.closeConfirm();
+          }}
+          onConfirm={archive.confirmArchive}
+          confirmTestId={`${testIdPrefix}-archive-confirm`}
+        />
       </div>
-      <TaskArchiveConfirmDialog
-        open={target !== null}
-        onOpenChange={(open) => {
-          if (!open) closeConfirm();
-        }}
-        taskTitle={target?.title ?? ""}
-        taskId={taskId}
-        executorType={target?.executorType}
-        isArchiving={isPending}
-        onConfirm={confirmArchive}
-        confirmTestId={`${testIdPrefix}-archive-confirm`}
-      />
     </>
   );
 }

@@ -4,7 +4,9 @@ import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { useTranslation } from "react-i18next";
 
 // Execution policy stage types
 
@@ -105,11 +107,12 @@ function AgentSingleSelect({
   onChange: (id: string) => void;
   placeholder: string;
 }) {
+  const { t } = useTranslation();
   const selected = agents.find((a) => a.id === selectedId);
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="cursor-pointer h-7 text-xs">
+        <Button variant="outline" className="cursor-pointer text-xs">
           {selected?.name ?? placeholder}
         </Button>
       </PopoverTrigger>
@@ -119,7 +122,7 @@ function AgentSingleSelect({
           className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted cursor-pointer"
           onClick={() => onChange("")}
         >
-          None
+          {t("office:none")}
         </button>
         {agents.map((agent) => (
           <button
@@ -144,7 +147,8 @@ type Props = {
 };
 
 export function NewTaskStages({ stages, onUpdate }: Props) {
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const { t } = useTranslation();
+  const agents = useAppStore(selectOfficeAgentProfiles);
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -158,32 +162,32 @@ export function NewTaskStages({ stages, onUpdate }: Props) {
         ) : (
           <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         )}
-        <span className="font-medium">Review stages</span>
-        <span className="text-xs text-muted-foreground ml-auto">optional</span>
+        <span className="font-medium">{t("office:reviewStages")}</span>
+        <span className="text-xs text-muted-foreground ml-auto">{t("office:optional")}</span>
       </button>
 
       {stages.enabled && (
         <div className="px-3 pb-3 pt-1 space-y-2.5 border-t border-border/50">
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground w-20 shrink-0">Reviewers</span>
+            <span className="text-muted-foreground w-20 shrink-0">{t("office:reviewers")}</span>
             <AgentMultiSelect
               agents={agents}
               selectedIds={stages.reviewerIds}
               onChange={(ids) => onUpdate({ reviewerIds: ids })}
-              placeholder="Add reviewers"
+              placeholder={t("office:addReviewers")}
             />
           </div>
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground w-20 shrink-0">Approver</span>
+            <span className="text-muted-foreground w-20 shrink-0">{t("office:approver")}</span>
             <AgentSingleSelect
               agents={agents}
               selectedId={stages.approverId}
               onChange={(id) => onUpdate({ approverId: id })}
-              placeholder="Select approver"
+              placeholder={t("office:selectApprover")}
             />
           </div>
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground w-20 shrink-0">Ship</span>
+            <span className="text-muted-foreground w-20 shrink-0">{t("office:ship")}</span>
             <label className="flex items-center gap-1.5 cursor-pointer">
               <input
                 type="checkbox"
@@ -191,7 +195,7 @@ export function NewTaskStages({ stages, onUpdate }: Props) {
                 onChange={(e) => onUpdate({ autoCommit: e.target.checked })}
                 className="cursor-pointer"
               />
-              <span className="text-xs">Auto-commit after approval</span>
+              <span className="text-xs">{t("office:autoCommitAfterApproval")}</span>
             </label>
           </div>
         </div>

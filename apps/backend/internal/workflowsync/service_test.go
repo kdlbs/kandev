@@ -13,11 +13,11 @@ import (
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
-type fakeClients struct {
+type fakeGitHubClients struct {
 	client github.Client
 }
 
-func (f fakeClients) ListRepoDirectoryForWorkspace(
+func (f fakeGitHubClients) ListRepoDirectoryForWorkspace(
 	ctx context.Context, _ string, owner, repo, path, ref string,
 ) ([]github.RepoContentEntry, error) {
 	if f.client == nil {
@@ -26,7 +26,7 @@ func (f fakeClients) ListRepoDirectoryForWorkspace(
 	return f.client.ListRepoDirectory(ctx, owner, repo, path, ref)
 }
 
-func (f fakeClients) GetRepoFileContentForWorkspace(
+func (f fakeGitHubClients) GetRepoFileContentForWorkspace(
 	ctx context.Context, _ string, owner, repo, path, ref string,
 ) ([]byte, error) {
 	if f.client == nil {
@@ -83,7 +83,7 @@ func setupTestService(t *testing.T, client github.Client) (*Service, *fakeApplie
 	applier := &fakeApplier{}
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	require.NoError(t, err)
-	return NewService(store, fakeClients{client: client}, applier, log), applier
+	return NewService(store, fakeGitHubClients{client: client}, nil, applier, log), applier
 }
 
 func configureWorkspace(t *testing.T, svc *Service, workspaceID string) {

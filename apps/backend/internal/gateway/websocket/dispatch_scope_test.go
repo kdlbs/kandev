@@ -18,8 +18,9 @@ import (
 // dispatchScopeFixture wires a hub whose auth policy grants only user-a's
 // task-a / sess-a and denies everything else.
 type dispatchScopeFixture struct {
-	client  *Client
-	handled *bool
+	client     *Client
+	handled    *bool
+	dispatcher *ws.Dispatcher
 }
 
 func newDispatchScopeFixture(t *testing.T, identity authn.Identity) *dispatchScopeFixture {
@@ -65,7 +66,22 @@ func newDispatchScopeFixture(t *testing.T, identity authn.Identity) *dispatchSco
 	c := newTestClient("c-scope")
 	c.hub = h
 	c.identity = identity
-	return &dispatchScopeFixture{client: c, handled: &handled}
+	return &dispatchScopeFixture{client: c, handled: &handled, dispatcher: dispatcher}
+}
+
+// dispatchAs sends payload under a real action name, so tests can exercise the
+// rules that key off the action rather than only the payload.
+func (f *dispatchScopeFixture) dispatchAs(t *testing.T, action, payload string) {
+	t.Helper()
+	f.dispatcher.RegisterFunc(action, func(context.Context, *ws.Message) (*ws.Message, error) {
+		*f.handled = true
+		return nil, nil
+	})
+	f.client.handleMessage(&ws.Message{
+		Action:  action,
+		Type:    ws.MessageTypeRequest,
+		Payload: json.RawMessage(payload),
+	})
 }
 
 func (f *dispatchScopeFixture) dispatch(t *testing.T, payload string) {
@@ -198,25 +214,30 @@ func TestParseScopedActionRefs(t *testing.T) {
 		wantTask string
 		wantSess string
 		wantEnv  string
+		wantID   string
 	}{
-		{`{"task_id":"t","session_id":"s"}`, true, "t", "s", ""},
-		{`{"task_id":"t"}`, true, "t", "", ""},
-		{`{"session_id":"s"}`, true, "", "s", ""},
-		{`{"task_environment_id":"e"}`, true, "", "", "e"},
-		{`{"task_id":"","task_environment_id":"e"}`, true, "", "", "e"},
-		{`{}`, false, "", "", ""},
-		{`{"task_id":""}`, false, "", "", ""},
-		{`[1,2]`, false, "", "", ""},
-		{``, false, "", "", ""},
+		{`{"task_id":"t","session_id":"s"}`, true, "t", "s", "", ""},
+		{`{"task_id":"t"}`, true, "t", "", "", ""},
+		{`{"session_id":"s"}`, true, "", "s", "", ""},
+		{`{"task_environment_id":"e"}`, true, "", "", "e", ""},
+		{`{"task_id":"","task_environment_id":"e"}`, true, "", "", "e", ""},
+		{`{"id":"t"}`, true, "", "", "", "t"},
+		{`{"id":"t","state":"COMPLETED"}`, true, "", "", "", "t"},
+		{`{}`, false, "", "", "", ""},
+		{`{"task_id":""}`, false, "", "", "", ""},
+		{`{"id":""}`, false, "", "", "", ""},
+		{`[1,2]`, false, "", "", "", ""},
+		{``, false, "", "", "", ""},
 	}
 	for _, tc := range cases {
 		refs, ok := parseScopedActionRefs(json.RawMessage(tc.payload))
 		if ok != tc.wantOK {
 			t.Errorf("payload %q ok = %v, want %v", tc.payload, ok, tc.wantOK)
 		}
-		if refs.TaskID != tc.wantTask || refs.SessionID != tc.wantSess || refs.TaskEnvironmentID != tc.wantEnv {
-			t.Errorf("payload %q refs = %+v, want task=%q session=%q env=%q",
-				tc.payload, refs, tc.wantTask, tc.wantSess, tc.wantEnv)
+		if refs.TaskID != tc.wantTask || refs.SessionID != tc.wantSess ||
+			refs.TaskEnvironmentID != tc.wantEnv || refs.ID != tc.wantID {
+			t.Errorf("payload %q refs = %+v, want task=%q session=%q env=%q id=%q",
+				tc.payload, refs, tc.wantTask, tc.wantSess, tc.wantEnv, tc.wantID)
 		}
 	}
 }
@@ -265,5 +286,109 @@ func TestDispatchScopeAllowsOwnEnvironment(t *testing.T) {
 
 	if !*f.handled {
 		t.Error("handler did not run for the caller's own task environment")
+	}
+}
+
+// A top-level task.<verb> action names its task `id`, not `task_id` — which is
+// how task.state and task.move mutated any user's task with the backstop finding
+// no refs to check and allowing the dispatch.
+//
+// The rule keys off namespace depth rather than a list of action names, so a
+// future task.<verb> is covered without an edit. Deeper namespaces are excluded
+// on purpose: their `id` names a plan, revision or finding, and checking it as a
+// task ID would deny legitimate reads — see the allow cases below.
+func TestDispatchScopeDeniesForeignTaskByIDOnTopLevelTaskActions(t *testing.T) {
+	for _, action := range []string{ws.ActionTaskState, ws.ActionTaskMove, ws.ActionTaskArchive, ws.ActionTaskGet} {
+		t.Run(action, func(t *testing.T) {
+			f := newDispatchScopeFixture(t, realIdentity())
+
+			f.dispatchAs(t, action, `{"id":"task-b","state":"COMPLETED"}`)
+
+			if *f.handled {
+				t.Errorf("handler ran for %s naming a foreign task by id", action)
+			}
+		})
+	}
+}
+
+func TestDispatchScopeAllowsOwnTaskByIDOnTopLevelTaskActions(t *testing.T) {
+	f := newDispatchScopeFixture(t, realIdentity())
+
+	f.dispatchAs(t, ws.ActionTaskState, `{"id":"task-a","state":"COMPLETED"}`)
+
+	if !*f.handled {
+		t.Error("the owner's own task.state was denied; the rule must not be a blanket deny")
+	}
+}
+
+// TestDispatchScopeIgnoresIDOnNestedTaskActions is the regression this rule
+// could plausibly cause: in task.plan.* and task.review.* the `id` is a plan,
+// revision or finding ID, and treating it as a task ID would refuse every read.
+func TestDispatchScopeIgnoresIDOnNestedTaskActions(t *testing.T) {
+	nested := map[string]string{
+		ws.ActionTaskPlanRevisionGet:     `{"id":"revision-7"}`,
+		ws.ActionTaskReviewFindingUpdate: `{"id":"finding-3","status":"resolved"}`,
+		ws.ActionTaskPlanGet:             `{"id":"plan-1"}`,
+	}
+	for action, payload := range nested {
+		t.Run(action, func(t *testing.T) {
+			f := newDispatchScopeFixture(t, realIdentity())
+
+			f.dispatchAs(t, action, payload)
+
+			if !*f.handled {
+				t.Errorf("%s was denied: its id names a nested resource, not a task", action)
+			}
+		})
+	}
+}
+
+// TestDispatchScopeIgnoresIDOnNonTaskActions keeps every other namespace out of
+// the rule — `id` there is a workflow, executor or agent profile.
+func TestDispatchScopeIgnoresIDOnNonTaskActions(t *testing.T) {
+	for _, action := range []string{ws.ActionWorkflowGet, "executor.get", "tasks.something"} {
+		t.Run(action, func(t *testing.T) {
+			f := newDispatchScopeFixture(t, realIdentity())
+
+			f.dispatchAs(t, action, `{"id":"task-b"}`)
+
+			if !*f.handled {
+				t.Errorf("%s was denied; its id does not name a task", action)
+			}
+		})
+	}
+}
+
+// task.create / task.list carry no id, so the rule is a no-op for them.
+func TestDispatchScopeAllowsTopLevelTaskActionsWithoutID(t *testing.T) {
+	f := newDispatchScopeFixture(t, realIdentity())
+
+	f.dispatchAs(t, ws.ActionTaskCreate, `{"workspace_id":"ws-a","title":"New"}`)
+
+	if !*f.handled {
+		t.Error("task.create names no task id and must dispatch")
+	}
+}
+
+func TestIsTopLevelTaskAction(t *testing.T) {
+	cases := map[string]bool{
+		ws.ActionTaskState:               true,
+		ws.ActionTaskMove:                true,
+		ws.ActionTaskGet:                 true,
+		ws.ActionTaskArchive:             true,
+		ws.ActionTaskPlanGet:             false,
+		ws.ActionTaskPlanRevisionGet:     false,
+		ws.ActionTaskReviewFindingUpdate: false,
+		ws.ActionTaskSessionList:         false,
+		ws.ActionWorkflowGet:             false,
+		"task":                           false,
+		"task.":                          true,
+		"tasks.get":                      false,
+		"":                               false,
+	}
+	for action, want := range cases {
+		if got := isTopLevelTaskAction(action); got != want {
+			t.Errorf("isTopLevelTaskAction(%q) = %v, want %v", action, got, want)
+		}
 	}
 }

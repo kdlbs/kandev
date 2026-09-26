@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["16-workspace-app-lifecycle-api"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 17: Frontend Registration Client

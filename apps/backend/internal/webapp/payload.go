@@ -29,13 +29,20 @@ type ActivePluginPayload struct {
 	Name      string   `json:"name"`
 	BundleURL string   `json:"bundleUrl"`
 	StyleURLs []string `json:"styleUrls,omitempty"`
+	// RepositoryProviderIDs is nil only for legacy manifests that omit
+	// repository_providers. A non-nil empty slice is an explicit declaration
+	// that must reach the browser as [] so the plugin registry can deny every
+	// undeclared provider claim.
+	RepositoryProviderIDs *[]string `json:"repositoryProviderIds,omitempty"`
 }
 
 // RuntimeConfig contains browser-facing runtime endpoints for the SPA.
 type RuntimeConfig struct {
-	APIPrefix     string `json:"apiPrefix"`
-	WebSocketPath string `json:"webSocketPath"`
-	Debug         bool   `json:"debug,omitempty"`
+	APIPrefix                         string   `json:"apiPrefix"`
+	WebSocketPath                     string   `json:"webSocketPath"`
+	BootID                            string   `json:"bootId,omitempty"`
+	LSPAutoInstallPreferenceLanguages []string `json:"lspAutoInstallPreferenceLanguages,omitempty"`
+	Debug                             bool     `json:"debug,omitempty"`
 	// NonProduction marks a dev or e2e build. Distinct from Debug (which the SPA
 	// uses for verbose logging): this gates QA-only UI such as the pseudo-locale
 	// option, which the e2e harness needs even though it serves a PRODUCTION
@@ -45,6 +52,22 @@ type RuntimeConfig struct {
 	// before first paint. Sourced from the kandev_locale cookie; defaults to
 	// "en". Also drives the shell's <html lang> so first paint matches.
 	Locale string `json:"locale,omitempty"`
+	// TitlePrefix distinguishes Kandev instances in adjacent browser tabs. It
+	// carries the operator-configured prefix (KANDEV_WEB_TITLE_PREFIX) with
+	// surrounding whitespace trimmed, not the composed title: the shell
+	// rewrites <title> server-side for first paint, and the SPA composes the
+	// same "<prefix> Kandev" for the
+	// /api/v1/app-state boot path, which never renders through the shell.
+	TitlePrefix string `json:"titlePrefix,omitempty"`
+	// NativeFolderPickerAvailable is true only when the desktop shell launched
+	// this backend and can service the narrow native folder-picker command.
+	// Browsers must continue to use the HTTP directory picker.
+	NativeFolderPickerAvailable bool `json:"nativeFolderPickerAvailable,omitempty"`
+	// DesktopRuntime identifies the launch policy selected by the backend
+	// process marker. It is separate from the native picker capability so an
+	// ordinary browser connected to a desktop backend keeps desktop discovery
+	// policy while using the HTTP picker.
+	DesktopRuntime bool `json:"desktopRuntime,omitempty"`
 }
 
 // BootError is a serializable non-fatal boot-data error for partial hydration.

@@ -8,18 +8,20 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	internaldb "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 // revisionSelectCols lists the task_plan_revisions columns in the fixed order used by
 // every SELECT in this file (and by scanRevisionRow / scanRevisionRows).
-const revisionSelectCols = `id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, created_at, updated_at`
+const revisionSelectCols = `id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, workflow_step_id, workflow_step_name, workflow_step_color, created_at, updated_at`
 
 // authorKindAgent matches the task_plan_revisions.author_kind column DEFAULT
 // and is the fallback for unknown values when persisting plan history rows.
 const authorKindAgent = "agent"
 
-const planSelectCols = `id, task_id, title, content, created_by, created_at, updated_at, implementation_started_at, implementation_started_session_id, implementation_started_by`
+const planSelectCols = `id, task_id, title, content, created_by, created_at, updated_at, write_version, comments_revision, implementation_started_at, implementation_started_session_id, implementation_started_by`
 
 // CreateTaskPlan creates a new task plan.
 func (r *Repository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {
@@ -36,11 +38,15 @@ func (r *Repository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) 
 	if plan.CreatedBy == "" {
 		plan.CreatedBy = authorKindAgent
 	}
+	writeVersion := uuid.NewString()
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO task_plans (id, task_id, title, content, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`), plan.ID, plan.TaskID, plan.Title, plan.Content, plan.CreatedBy, plan.CreatedAt, plan.UpdatedAt)
+		INSERT INTO task_plans (id, task_id, title, content, created_by, created_at, updated_at, write_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`), plan.ID, plan.TaskID, plan.Title, plan.Content, plan.CreatedBy, plan.CreatedAt, plan.UpdatedAt, writeVersion)
+	if err == nil {
+		plan.WriteVersion = writeVersion
+	}
 	return err
 }
 
@@ -58,12 +64,13 @@ func (r *Repository) GetTaskPlan(ctx context.Context, taskID string) (*models.Ta
 
 // UpdateTaskPlan updates an existing task plan.
 func (r *Repository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {
-	plan.UpdatedAt = time.Now().UTC()
+	updatedAt := time.Now().UTC()
+	writeVersion := uuid.NewString()
 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_plans SET title = ?, content = ?, created_by = ?, updated_at = ?
+		UPDATE task_plans SET title = ?, content = ?, created_by = ?, updated_at = ?, write_version = ?
 		WHERE task_id = ?
-	`), plan.Title, plan.Content, plan.CreatedBy, plan.UpdatedAt, plan.TaskID)
+	`), plan.Title, plan.Content, plan.CreatedBy, updatedAt, writeVersion, plan.TaskID)
 	if err != nil {
 		return fmt.Errorf("failed to update task plan: %w", err)
 	}
@@ -72,6 +79,8 @@ func (r *Repository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) 
 	if rows == 0 {
 		return fmt.Errorf("task plan not found for task: %s", plan.TaskID)
 	}
+	plan.UpdatedAt = updatedAt
+	plan.WriteVersion = writeVersion
 	return nil
 }
 
@@ -109,7 +118,13 @@ func (r *Repository) MarkTaskPlanImplementationStarted(ctx context.Context, task
 
 // DeleteTaskPlan deletes a task plan by task ID.
 func (r *Repository) DeleteTaskPlan(ctx context.Context, taskID string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_plans WHERE task_id = ?`), taskID)
+	tx, release, err := r.beginPlanCommentTx(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("begin task plan deletion: %w", err)
+	}
+	defer release()
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_plans WHERE task_id = ?`), taskID)
 	if err != nil {
 		return fmt.Errorf("failed to delete task plan: %w", err)
 	}
@@ -117,6 +132,9 @@ func (r *Repository) DeleteTaskPlan(ctx context.Context, taskID string) error {
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("task plan not found for task: %s", taskID)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit task plan deletion: %w", err)
 	}
 	return nil
 }
@@ -136,11 +154,13 @@ func (r *Repository) InsertTaskPlanRevision(ctx context.Context, rev *models.Tas
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_plan_revisions
-			(id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(`+revisionSelectCols+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		rev.ID, rev.TaskID, rev.RevisionNumber, rev.Title, rev.Content,
-		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID, rev.CreatedAt, rev.UpdatedAt)
+		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID,
+		rev.WorkflowStepID, rev.WorkflowStepName, rev.WorkflowStepColor,
+		rev.CreatedAt, rev.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to insert task plan revision: %w", err)
 	}
@@ -199,7 +219,9 @@ func (r *Repository) ListTaskPlanRevisions(ctx context.Context, taskID string, l
 		var revertOf sql.NullString
 		if err := rows.Scan(
 			&rev.ID, &rev.TaskID, &rev.RevisionNumber, &rev.Title, &rev.Content,
-			&rev.AuthorKind, &rev.AuthorName, &revertOf, &rev.CreatedAt, &rev.UpdatedAt,
+			&rev.AuthorKind, &rev.AuthorName, &revertOf,
+			&rev.WorkflowStepID, &rev.WorkflowStepName, &rev.WorkflowStepColor,
+			&rev.CreatedAt, &rev.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan task plan revision: %w", err)
 		}
@@ -213,6 +235,140 @@ func (r *Repository) ListTaskPlanRevisions(ctx context.Context, taskID string, l
 		return nil, fmt.Errorf("iterate task plan revisions: %w", err)
 	}
 	return out, nil
+}
+
+// ObsoletePlanRevisionCandidate identifies a plan revision that is
+// policy-eligible for future pruning by the maintenance command: never the
+// task's current HEAD, never referenced by another revision's revert-of
+// ancestry link, and outside the caller-supplied recency window.
+type ObsoletePlanRevisionCandidate struct {
+	ID             string
+	TaskID         string
+	RevisionNumber int
+	ContentBytes   int64
+}
+
+// ListObsoletePlanRevisionCandidates returns policy-eligible superseded plan
+// revisions for a task. It always protects the current HEAD
+// (MAX(revision_number)) and any revision that some other revision's
+// revert_of_revision_id points to (so revert ancestry - the "restore this
+// earlier plan" chain - is never broken). When keepLastN > 0, it further
+// protects that many of the most recent non-HEAD revisions from being
+// reported, regardless of ancestry. This is a read-only, non-destructive
+// selection: it reports candidates for a later maintenance command to act
+// on, and never deletes or modifies anything itself.
+func (r *Repository) ListObsoletePlanRevisionCandidates(ctx context.Context, taskID string, keepLastN int, limit int) ([]ObsoletePlanRevisionCandidate, error) {
+	query := `
+		SELECT rev.id, rev.task_id, rev.revision_number, LENGTH(rev.content)
+		FROM task_plan_revisions rev
+		WHERE rev.task_id = ?
+		  AND rev.revision_number < (
+			  SELECT MAX(revision_number) FROM task_plan_revisions WHERE task_id = ?
+		  )
+		  AND NOT EXISTS (
+			  SELECT 1 FROM task_plan_revisions child
+			  WHERE child.task_id = rev.task_id AND child.revert_of_revision_id = rev.id
+		  )`
+	args := []interface{}{taskID, taskID}
+	if keepLastN > 0 {
+		query += `
+		  AND rev.id NOT IN (
+			  SELECT recent.id
+			  FROM task_plan_revisions recent
+			  WHERE recent.task_id = ?
+			    AND recent.revision_number < (
+				    SELECT MAX(revision_number) FROM task_plan_revisions WHERE task_id = ?
+				    )
+			  ORDER BY recent.revision_number DESC
+			  ` + sqlLimitClause + `
+		  )`
+		args = append(args, taskID, taskID, keepLastN)
+	}
+	query += ` ORDER BY rev.revision_number ASC`
+	if limit > 0 {
+		query += sqlLimitClause
+		args = append(args, limit)
+	}
+
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list obsolete plan revision candidates: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []ObsoletePlanRevisionCandidate
+	for rows.Next() {
+		var c ObsoletePlanRevisionCandidate
+		if err := rows.Scan(&c.ID, &c.TaskID, &c.RevisionNumber, &c.ContentBytes); err != nil {
+			return nil, fmt.Errorf("failed to scan obsolete plan revision candidate: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate obsolete plan revision candidates: %w", err)
+	}
+	return out, nil
+}
+
+// ListTaskPlanRevisionMetadata returns bounded newest-first revision metadata
+// without loading revision content. beforeRevisionNumber is an exclusive,
+// positive cursor; a non-positive value starts at the newest revision.
+func (r *Repository) ListTaskPlanRevisionMetadata(
+	ctx context.Context, taskID string, beforeRevisionNumber, limit int,
+) ([]*models.TaskPlanRevision, error) {
+	contentBytes := dialect.ByteLength(r.db.DriverName(), "content")
+	query := `SELECT id, task_id, revision_number, title, ` + contentBytes + `, author_kind, author_name, revert_of_revision_id, workflow_step_id, workflow_step_name, workflow_step_color, created_at, updated_at FROM task_plan_revisions WHERE task_id = ?`
+	args := []interface{}{taskID}
+	if beforeRevisionNumber > 0 {
+		query += ` AND revision_number < ?`
+		args = append(args, beforeRevisionNumber)
+	}
+	query += ` ORDER BY revision_number DESC`
+	if limit > 0 {
+		query += sqlLimitClause
+		args = append(args, limit)
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list task plan revision metadata: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []*models.TaskPlanRevision
+	for rows.Next() {
+		rev := &models.TaskPlanRevision{}
+		var contentBytes int64
+		var revertOf sql.NullString
+		if err := rows.Scan(
+			&rev.ID, &rev.TaskID, &rev.RevisionNumber, &rev.Title, &contentBytes,
+			&rev.AuthorKind, &rev.AuthorName, &revertOf,
+			&rev.WorkflowStepID, &rev.WorkflowStepName, &rev.WorkflowStepColor,
+			&rev.CreatedAt, &rev.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan task plan revision metadata: %w", err)
+		}
+		rev.ContentBytes = int(contentBytes)
+		if revertOf.Valid {
+			v := revertOf.String
+			rev.RevertOfRevisionID = &v
+		}
+		out = append(out, rev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate task plan revision metadata: %w", err)
+	}
+	return out, nil
+}
+
+// GetTaskPlanRevisionForTask fetches a revision only when both its ID and
+// owning task match. This prevents cross-task revision identifiers from
+// becoming an information disclosure through agent recovery tools.
+func (r *Repository) GetTaskPlanRevisionForTask(
+	ctx context.Context, taskID, revisionID string,
+) (*models.TaskPlanRevision, error) {
+	return r.scanRevisionRow(r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT `+revisionSelectCols+` FROM task_plan_revisions WHERE task_id = ? AND id = ?`,
+	), taskID, revisionID))
 }
 
 // NextTaskPlanRevisionNumber returns max(revision_number)+1 for a task, or 1 if none exist.
@@ -245,13 +401,18 @@ func (r *Repository) NextTaskPlanRevisionNumber(ctx context.Context, taskID stri
 // author, created_at) are preserved. When nil or empty, a new revision row is inserted with
 // revision_number = MAX(existing)+1 and populated from rev.
 //
-// On success, rev is mutated to reflect the persisted state (ID, RevisionNumber, CreatedAt,
-// UpdatedAt).
+// On success, head contains the authoritative persisted title and created_by values. The rev is
+// mutated to reflect the persisted state (ID, RevisionNumber, CreatedAt, UpdatedAt).
+//
+// preserveTitle and preserveCreatedBy apply only when an existing HEAD row is found (the
+// ON CONFLICT branch): true keeps the row's stored title / created_by instead of overwriting
+// it with head's value. A fresh insert always uses head's value regardless of these flags.
 func (r *Repository) WritePlanRevision(
 	ctx context.Context,
 	head *models.TaskPlan,
 	rev *models.TaskPlanRevision,
 	coalesceLatestID *string,
+	preserveTitle, preserveCreatedBy bool,
 ) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -260,9 +421,16 @@ func (r *Repository) WritePlanRevision(
 	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().UTC()
-	if err := upsertPlanHead(ctx, tx, r.db, head, now); err != nil {
+	if coalesceLatestID == nil || *coalesceLatestID == "" {
+		if err := r.lockTaskForPlanRevision(ctx, tx, rev.TaskID); err != nil {
+			return err
+		}
+	}
+	writeVersion, err := upsertPlanHead(ctx, tx, r.db, head, now, preserveTitle, preserveCreatedBy)
+	if err != nil {
 		return err
 	}
+	rev.Title = head.Title
 	if coalesceLatestID != nil && *coalesceLatestID != "" {
 		if err := mergeRevisionInTx(ctx, tx, r.db, rev, *coalesceLatestID, now); err != nil {
 			return err
@@ -272,7 +440,11 @@ func (r *Repository) WritePlanRevision(
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	head.WriteVersion = writeVersion
+	return nil
 }
 
 func scanPlanRow(row *sql.Row) (*models.TaskPlan, error) {
@@ -288,6 +460,8 @@ func scanPlanRow(row *sql.Row) (*models.TaskPlan, error) {
 		&plan.CreatedBy,
 		&plan.CreatedAt,
 		&plan.UpdatedAt,
+		&plan.WriteVersion,
+		&plan.CommentsRevision,
 		&startedAt,
 		&sessionID,
 		&actor,
@@ -310,7 +484,14 @@ func scanPlanRow(row *sql.Row) (*models.TaskPlan, error) {
 	return plan, nil
 }
 
-func upsertPlanHead(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, head *models.TaskPlan, now time.Time) error {
+func upsertPlanHead(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	head *models.TaskPlan,
+	now time.Time,
+	preserveTitle, preserveCreatedBy bool,
+) (string, error) {
 	if head.ID == "" {
 		head.ID = uuid.New().String()
 	}
@@ -324,18 +505,38 @@ func upsertPlanHead(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, head *models.
 		head.CreatedAt = now
 	}
 	head.UpdatedAt = now
+	writeVersion := uuid.NewString()
 	if _, err := tx.ExecContext(ctx, db.Rebind(`
-		INSERT INTO task_plans (id, task_id, title, content, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO task_plans (id, task_id, title, content, created_by, created_at, updated_at, write_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id) DO UPDATE SET
-			title = excluded.title,
+			title = CASE WHEN ? THEN task_plans.title ELSE excluded.title END,
 			content = excluded.content,
-			created_by = excluded.created_by,
-			updated_at = excluded.updated_at
-	`), head.ID, head.TaskID, head.Title, head.Content, head.CreatedBy, head.CreatedAt, head.UpdatedAt); err != nil {
-		return fmt.Errorf("upsert task plan head: %w", err)
+			created_by = CASE WHEN ? THEN task_plans.created_by ELSE excluded.created_by END,
+			updated_at = excluded.updated_at,
+			write_version = excluded.write_version
+	`), head.ID, head.TaskID, head.Title, head.Content, head.CreatedBy, head.CreatedAt, head.UpdatedAt, writeVersion,
+		preserveTitle, preserveCreatedBy); err != nil {
+		if internaldb.IsForeignKeyViolation(err) {
+			return "", fmt.Errorf("upsert task plan head for task %s: %w", head.TaskID, ErrTaskNotFound)
+		}
+		return "", fmt.Errorf("upsert task plan head: %w", err)
 	}
-	return nil
+	if preserveTitle || preserveCreatedBy {
+		var storedTitle, storedCreatedBy string
+		if err := tx.QueryRowContext(ctx, db.Rebind(`
+			SELECT title, created_by FROM task_plans WHERE task_id = ?
+		`), head.TaskID).Scan(&storedTitle, &storedCreatedBy); err != nil {
+			return "", fmt.Errorf("read preserved task plan metadata: %w", err)
+		}
+		if preserveTitle {
+			head.Title = storedTitle
+		}
+		if preserveCreatedBy {
+			head.CreatedBy = storedCreatedBy
+		}
+	}
+	return writeVersion, nil
 }
 
 func mergeRevisionInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev *models.TaskPlanRevision, latestID string, now time.Time) error {
@@ -353,7 +554,7 @@ func mergeRevisionInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev *model
 	}
 	rev.ID = latestID
 	rev.UpdatedAt = now
-	return nil
+	return readRevisionWorkflowStampInTx(ctx, tx, db, rev)
 }
 
 func insertNewRevisionInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev *models.TaskPlanRevision, now time.Time) error {
@@ -374,14 +575,48 @@ func insertNewRevisionInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev *m
 		rev.CreatedAt = now
 	}
 	rev.UpdatedAt = now
-	if _, err := tx.ExecContext(ctx, db.Rebind(`
+	result, err := tx.ExecContext(ctx, db.Rebind(`
 		INSERT INTO task_plan_revisions
-			(`+revisionSelectCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, workflow_step_id, workflow_step_name, workflow_step_color, created_at, updated_at)
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?,
+			COALESCE(ws.id, ''), COALESCE(ws.name, ''), COALESCE(ws.color, ''), ?, ?
+		FROM tasks AS t
+		LEFT JOIN workflow_steps AS ws ON ws.id = t.workflow_step_id
+		WHERE t.id = ?
 	`),
 		rev.ID, rev.TaskID, rev.RevisionNumber, rev.Title, rev.Content,
-		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID, rev.CreatedAt, rev.UpdatedAt); err != nil {
+		rev.AuthorKind, rev.AuthorName, rev.RevertOfRevisionID,
+		rev.CreatedAt, rev.UpdatedAt, rev.TaskID)
+	if err != nil {
 		return fmt.Errorf("insert plan revision: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count inserted plan revision: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, rev.TaskID)
+	}
+	return readRevisionWorkflowStampInTx(ctx, tx, db, rev)
+}
+
+func (r *Repository) lockTaskForPlanRevision(ctx context.Context, tx *sqlx.Tx, taskID string) error {
+	_, _, found, err := r.readTaskStepInTx(ctx, tx, taskID)
+	if err != nil {
+		return fmt.Errorf("read task for plan revision: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	}
+	return nil
+}
+
+func readRevisionWorkflowStampInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev *models.TaskPlanRevision) error {
+	if err := tx.QueryRowContext(ctx, db.Rebind(`
+		SELECT workflow_step_id, workflow_step_name, workflow_step_color
+		FROM task_plan_revisions WHERE id = ?
+	`), rev.ID).Scan(&rev.WorkflowStepID, &rev.WorkflowStepName, &rev.WorkflowStepColor); err != nil {
+		return fmt.Errorf("read persisted plan revision workflow stamp: %w", err)
 	}
 	return nil
 }
@@ -391,7 +626,9 @@ func (r *Repository) scanRevisionRow(row *sql.Row) (*models.TaskPlanRevision, er
 	var revertOf sql.NullString
 	err := row.Scan(
 		&rev.ID, &rev.TaskID, &rev.RevisionNumber, &rev.Title, &rev.Content,
-		&rev.AuthorKind, &rev.AuthorName, &revertOf, &rev.CreatedAt, &rev.UpdatedAt,
+		&rev.AuthorKind, &rev.AuthorName, &revertOf,
+		&rev.WorkflowStepID, &rev.WorkflowStepName, &rev.WorkflowStepColor,
+		&rev.CreatedAt, &rev.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil

@@ -1,22 +1,37 @@
 import type { MarkerSeverity as MarkerSeverityType, IDisposable } from "monaco-editor";
 import { getBackendConfig } from "@/lib/config";
+import { t } from "@/lib/i18n";
 import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+export type LspUnavailableCause =
+  | "missing_binary"
+  | "auto_install_unsupported"
+  | "workspace_unavailable"
+  | "unsupported_executor"
+  | "capacity";
+
 export type LspStatus =
   | { state: "disabled" }
   | { state: "connecting" }
+  | { state: "reconnecting" }
   | { state: "installing" }
   | { state: "starting" }
   | { state: "ready" }
   | { state: "stopping" }
-  | { state: "unavailable"; reason: string }
+  | { state: "unavailable"; reason: string; cause: LspUnavailableCause }
   | { state: "error"; reason: string };
 
-export type OpenDocument = { version: number; languageId: string };
+export type OpenDocument = {
+  version: number;
+  languageId: string;
+  refCount: number;
+  text: string;
+  pendingClose?: boolean;
+};
 
 export type LSPConnection = {
   ws: WebSocket;
@@ -27,7 +42,8 @@ export type LSPConnection = {
   openDocuments: Map<string, OpenDocument>;
   providerDisposables: IDisposable[];
   serverCapabilities: Record<string, unknown> | null;
-  workspacePath: string | null;
+  workspaceUri: string | null;
+  repositorySubpaths: Set<string>;
 };
 
 // ---------------------------------------------------------------------------
@@ -187,13 +203,58 @@ export function getWsBaseUrl(): string {
 
 /** Map WebSocket close codes to LSP status for pre-bridge failures. */
 export const CLOSE_CODE_STATUS: Record<number, (reason: string) => LspStatus> = {
-  4001: (reason) => ({ state: "unavailable", reason: reason || "Language server not found" }),
-  4002: () => ({ state: "unavailable", reason: "No active workspace" }),
-  4003: (reason) => ({ state: "error", reason: reason || "Install failed" }),
+  4001: () => ({
+    state: "unavailable",
+    reason: t("lsp:languageServerNotFound"),
+    cause: "missing_binary",
+  }),
+  4002: () => ({
+    state: "unavailable",
+    reason: t("lsp:noActiveWorkspace"),
+    cause: "workspace_unavailable",
+  }),
+  4003: () => ({ state: "error", reason: t("lsp:installFailed") }),
+  4004: () => ({
+    state: "unavailable",
+    reason: t("lsp:taskExecutorUnsupported"),
+    cause: "unsupported_executor",
+  }),
+  4005: () => ({
+    state: "unavailable",
+    reason: t("lsp:tooManyLanguageServers"),
+    cause: "capacity",
+  }),
+  4006: () => ({ state: "error", reason: t("lsp:languageServerExited") }),
+  4007: () => ({
+    state: "unavailable",
+    reason: t("lsp:autoInstallUnsupported"),
+    cause: "auto_install_unsupported",
+  }),
+  4008: () => ({ state: "error", reason: t("lsp:languageServerFailedToStart") }),
+  4010: () => ({ state: "disabled" }),
 };
+
+export function getLspUnavailableSetupHint(
+  status: LspStatus,
+  lspLanguage: string | null,
+): string | null {
+  if (status.state !== "unavailable") return null;
+  if (status.cause === "auto_install_unsupported") {
+    if (lspLanguage === "kotlin") return t("lsp:installKotlinLsp");
+    return t("lsp:installLanguageServerManually");
+  }
+  if (status.cause !== "missing_binary") return null;
+  if (lspLanguage === "kotlin") {
+    return t("lsp:installKotlinLsp");
+  }
+  return t("lsp:enableAutoInstall");
+}
 
 /** LSP client capabilities sent during initialization. */
 export const LSP_CLIENT_CAPABILITIES = {
+  window: {
+    workDoneProgress: true,
+  },
   textDocument: {
     synchronization: {
       dynamicRegistration: false,
@@ -202,7 +263,7 @@ export const LSP_CLIENT_CAPABILITIES = {
       willSaveWaitUntil: false,
     },
     completion: {
-      dynamicRegistration: false,
+      dynamicRegistration: true,
       completionItem: {
         snippetSupport: true,
         commitCharactersSupport: true,
@@ -212,11 +273,11 @@ export const LSP_CLIENT_CAPABILITIES = {
       },
       contextSupport: true,
     },
-    hover: { dynamicRegistration: false, contentFormat: ["markdown", "plaintext"] },
-    definition: { dynamicRegistration: false },
-    references: { dynamicRegistration: false },
+    hover: { dynamicRegistration: true, contentFormat: ["markdown", "plaintext"] },
+    definition: { dynamicRegistration: true },
+    references: { dynamicRegistration: true },
     signatureHelp: {
-      dynamicRegistration: false,
+      dynamicRegistration: true,
       signatureInformation: {
         documentationFormat: ["markdown", "plaintext"],
         parameterInformation: { labelOffsetSupport: true },
@@ -224,7 +285,7 @@ export const LSP_CLIENT_CAPABILITIES = {
     },
     publishDiagnostics: { relatedInformation: true },
     semanticTokens: {
-      dynamicRegistration: false,
+      dynamicRegistration: true,
       requests: { full: true },
       tokenTypes: [
         "namespace",
@@ -288,6 +349,7 @@ export function toLspLanguage(monacoLanguage: string): string | null {
     go: "go",
     rust: "rust",
     python: "python",
+    kotlin: "kotlin",
   };
   return map[monacoLanguage] ?? null;
 }

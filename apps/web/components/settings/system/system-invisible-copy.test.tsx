@@ -4,7 +4,11 @@ import { activateLocale, t } from "@/lib/i18n";
 import type { HealthCheckSummary, HealthIssue } from "@/lib/types/health";
 import { HealthIssuesCard } from "./health-issues-card";
 import { JobProgressIndicator } from "./job-progress-indicator";
-import { SystemGroup } from "@/components/app-sidebar/sections/settings/system-group";
+import { SETTINGS_MENU_SECTIONS } from "@/components/app-sidebar/sections/settings/settings-tree";
+
+const SYSTEM_MENU_ITEMS =
+  SETTINGS_MENU_SECTIONS.find((section) => section.id === "system")?.items ?? [];
+const PSEUDO_ACCENTED = /[À-ɏ]/;
 
 afterEach(cleanup);
 
@@ -107,27 +111,31 @@ describe("HealthIssuesCard issue count", () => {
 });
 
 /**
- * `BASE_ITEMS` / `AUTH_ITEMS` are SCREAMING_CASE, which the guard skips
- * entirely: it reported one finding here (`label="System"`) while ten nav
- * labels sat in those two tables. They now resolve at render from `labelKey`.
+ * `BASE_ITEMS` / `AUTH_ITEMS` were SCREAMING_CASE, which the guard skips
+ * entirely. The menu config still is, so the same check applies: every System
+ * row label must resolve through the catalog.
  */
-describe("SystemGroup nav labels", () => {
-  it("renders every System route label through the catalog", () => {
-    render(<SystemGroup pathname="/settings/system/status" expanded />);
-    const labels = [
-      "Status",
-      "Feature Toggles",
-      "Database",
-      "Backups",
-      "Storage",
-      "Logs",
-      "Updates",
-      "About",
-      "Licenses",
-      "Users",
-    ];
-    for (const label of labels) {
-      expect(screen.getByText(label)).toBeTruthy();
+describe("System menu labels", () => {
+  it("renders every System row label through the catalog", () => {
+    const labels = SYSTEM_MENU_ITEMS.map((item) => t(item.labelKey));
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        "Status",
+        "Data & Logs",
+        "Storage",
+        "Feature Toggles",
+        "Updates",
+        "About",
+      ]),
+    );
+  });
+
+  it("looks up the Storage title through the pseudo-locale", async () => {
+    await activateLocale("pseudo");
+    try {
+      expect(t("system:storageTitle")).toMatch(PSEUDO_ACCENTED);
+    } finally {
+      await activateLocale("en");
     }
   });
 });
@@ -140,8 +148,6 @@ describe("SystemGroup nav labels", () => {
  * clean by lint, so this is the check that keeps them migrated.
  */
 describe("copy the guard cannot see, under the pseudo-locale", () => {
-  const ACCENTED = /[À-ɏ]/;
-
   beforeAll(async () => {
     await activateLocale("pseudo");
   });
@@ -155,7 +161,7 @@ describe("copy the guard cannot see, under the pseudo-locale", () => {
         { id: "j1", kind: "vacuum", state, started_at: "2026-08-03T10:00:00Z", message: "" },
       ];
       render(<JobProgressIndicator kind="vacuum" />);
-      expect(screen.getByTestId("system-job-vacuum").textContent).toMatch(ACCENTED);
+      expect(screen.getByTestId("system-job-vacuum").textContent).toMatch(PSEUDO_ACCENTED);
       cleanup();
     }
   });
@@ -168,22 +174,21 @@ describe("copy the guard cannot see, under the pseudo-locale", () => {
    * accents and they do not.
    */
   it("keeps the backup SQL command and path literal inside a translated frame", () => {
+    const path = "/var/lib/kandev/backups";
     const description = t("system:backupsPageDescription", {
       command: "VACUUM INTO",
-      path: "<data-dir>/backups/",
+      path,
     });
     expect(description).toContain("VACUUM INTO");
-    expect(description).toContain("<data-dir>/backups/");
+    expect(description).toContain(path);
     // The surrounding sentence is still translated.
-    expect(description).toMatch(ACCENTED);
+    expect(description).toMatch(PSEUDO_ACCENTED);
   });
 
-  it("accents every System nav label", () => {
-    render(<SystemGroup pathname="/settings/system/status" expanded />);
-    const leaves = document.querySelectorAll("a");
-    expect(leaves.length).toBeGreaterThan(0);
-    for (const leaf of leaves) {
-      expect(leaf.textContent ?? "").toMatch(ACCENTED);
+  it("accents every System menu label", () => {
+    expect(SYSTEM_MENU_ITEMS.length).toBeGreaterThan(0);
+    for (const item of SYSTEM_MENU_ITEMS) {
+      expect(t(item.labelKey)).toMatch(PSEUDO_ACCENTED);
     }
   });
 });

@@ -19,6 +19,7 @@ import {
   PRDescriptionField,
   PRTitleField,
 } from "./vcs-dialog-fields";
+import { useTranslation } from "react-i18next";
 
 type VcsChangeRequestDialogProps = {
   open: boolean;
@@ -32,6 +33,7 @@ type VcsChangeRequestDialogProps = {
   onBodyChange: (value: string) => void;
   draft: boolean;
   onDraftChange: (value: boolean) => void;
+  supportsDraft?: boolean;
   loading: boolean;
   branchPushed: boolean;
   onCreate: () => void;
@@ -44,6 +46,7 @@ type VcsChangeRequestDialogProps = {
 };
 
 export function VcsChangeRequestDialog(props: VcsChangeRequestDialogProps) {
+  const { t } = useTranslation();
   const terms = props.terminology;
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
@@ -52,8 +55,11 @@ export function VcsChangeRequestDialog(props: VcsChangeRequestDialogProps) {
           <DialogTitle className="flex items-center gap-2">
             <IconGitPullRequest className="h-5 w-5" />
             {props.scopedRepo
-              ? `Create ${terms.longName} — ${props.scopedRepo}`
-              : `Create ${terms.longName}`}
+              ? t("integrations:createScoped", {
+                  longName: terms.longName,
+                  scopedRepo: props.scopedRepo,
+                })
+              : t("integrations:createLongName", { longName: terms.longName })}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -79,33 +85,37 @@ export function VcsChangeRequestDialog(props: VcsChangeRequestDialogProps) {
             isUtilityConfigured={props.utilityConfigured}
             terminology={terms}
           />
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="vcs-pr-draft"
-              checked={props.draft}
-              onCheckedChange={(checked) => props.onDraftChange(checked === true)}
-            />
-            <Label htmlFor="vcs-pr-draft" className="text-sm cursor-pointer">
-              Create as draft
-            </Label>
-          </div>
+          {props.supportsDraft !== false ? (
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="vcs-pr-draft"
+                checked={props.draft}
+                onCheckedChange={(checked) => props.onDraftChange(checked === true)}
+              />
+              <Label htmlFor="vcs-pr-draft" className="text-sm cursor-pointer">
+                {t("integrations:createAsDraft")}
+              </Label>
+            </div>
+          ) : null}
         </div>
         <DialogFooter>
           <DialogClose asChild>
             <Button type="button" variant="outline" className="cursor-pointer">
-              Cancel
+              {t("common:cancel")}
             </Button>
           </DialogClose>
           <Button onClick={props.onCreate} disabled={!props.title.trim() || props.loading}>
             {props.loading ? (
               <>
                 <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
-                Creating...
+                {t("integrations:creatingEllipsis")}
               </>
             ) : (
               <>
                 <IconGitPullRequest className="h-4 w-4 mr-2" />
-                {props.branchPushed ? "Retry" : "Create"} {terms.shortName}
+                {props.branchPushed
+                  ? t("integrations:retryShortName", { shortName: terms.shortName })
+                  : t("integrations:createShortName", { shortName: terms.shortName })}
               </>
             )}
           </Button>

@@ -17,6 +17,8 @@ import {
   type SoundPresetId,
 } from "@/lib/notifications/sound";
 import { useSettingsSaveContributor } from "./settings-save-provider";
+import { SettingsGroup } from "./settings-group";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 /**
  * Catalog keys for the preset names, keyed by the preset id — the id is the
@@ -56,18 +58,14 @@ export function NotificationSoundSection({
   });
 
   return (
-    <div
-      className="space-y-4 rounded-md border p-4"
-      data-settings-dirty={isDirty}
+    <SettingsGroup
+      title={t("settings:notificationSound")}
+      description={t("settings:notificationSoundDescription")}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.notificationSound}
+      isDirty={isDirty}
       data-testid="notification-sound-group"
     >
       <div className="flex items-center justify-between gap-4">
-        <div>
-          <div className="text-base font-medium">{t("settings:notificationSound")}</div>
-          <p className="text-sm text-muted-foreground">
-            {t("settings:notificationSoundDescription")}
-          </p>
-        </div>
         <Switch
           checked={prefs.enabled}
           data-settings-dirty={prefs.enabled !== saved.enabled}
@@ -119,6 +117,6 @@ export function NotificationSoundSection({
           </TooltipProvider>
         </div>
       )}
-    </div>
+    </SettingsGroup>
   );
 }

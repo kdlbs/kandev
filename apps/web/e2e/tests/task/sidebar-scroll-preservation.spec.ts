@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { dwell } from "../../helpers/causal-waits";
 
 const OVERLAY_SCROLLBAR_SELECTOR =
   "[data-slot='scroll-area-scrollbar'][data-orientation='vertical']";
@@ -24,22 +25,32 @@ test.describe("sidebar scrolling", () => {
     const appSidebar = testPage.getByTestId("app-sidebar");
     const taskSidebar = testPage.getByTestId("task-sidebar");
     const scrollRoot = taskSidebar.locator("[data-slot='scroll-area']");
-    await expect(taskSidebar.getByText("No tasks yet.")).toBeVisible();
+    const emptyMessage = taskSidebar.locator("[data-slot='task-switcher-empty-state']");
+    await expect(emptyMessage).toHaveText("No tasks yet.");
 
     await expect
       .poll(() => scrollRoot.evaluate((element) => getComputedStyle(element).backgroundColor))
       .toBe("rgba(0, 0, 0, 0)");
 
-    const [navigationBox, taskSidebarBox] = await Promise.all([
-      appSidebar.locator("nav").boundingBox(),
-      taskSidebar.boundingBox(),
-    ]);
+    const [navigationBox, taskSidebarBox, tasksTitleBox, emptyMessageBox, emptyPaddingLeft] =
+      await Promise.all([
+        appSidebar.locator("nav").boundingBox(),
+        taskSidebar.boundingBox(),
+        tasksToggle.locator("span").first().boundingBox(),
+        emptyMessage.boundingBox(),
+        emptyMessage.evaluate((element) => parseFloat(getComputedStyle(element).paddingLeft)),
+      ]);
     expect(navigationBox).not.toBeNull();
     expect(taskSidebarBox).not.toBeNull();
+    expect(tasksTitleBox).not.toBeNull();
+    expect(emptyMessageBox).not.toBeNull();
     expect(taskSidebarBox!.x).toBeCloseTo(navigationBox!.x, 0);
     expect(taskSidebarBox!.x + taskSidebarBox!.width).toBeCloseTo(
       navigationBox!.x + navigationBox!.width,
       0,
+    );
+    expect(Math.abs(emptyMessageBox!.x + emptyPaddingLeft - tasksTitleBox!.x)).toBeLessThanOrEqual(
+      0.5,
     );
   });
 
@@ -257,5 +268,294 @@ test.describe("sidebar scrolling", () => {
     await expect
       .poll(() => scrollContainer.evaluate((el) => el.scrollTop), { timeout: 5_000 })
       .toBeGreaterThan(scrollBefore - 50);
+  });
+
+  test("reveals a command-selected task", async ({ testPage, apiClient, seedData }) => {
+    test.setTimeout(60_000);
+
+    const taskCount = 25;
+    const created: { id: string; title: string }[] = [];
+    for (let index = 0; index < taskCount; index++) {
+      const title = `Command Reveal Task ${String(index).padStart(2, "0")}`;
+      const task = await apiClient.createTask(seedData.workspaceId, title, {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      });
+      created.push({ id: task.id, title });
+    }
+
+    const initialTask = created.at(-1)!;
+    await testPage.goto(`/t/${initialTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const scrollContainer = testPage.getByTestId("task-sidebar-scroll");
+    await expect(scrollContainer).toBeVisible();
+    await expect(session.sidebar.getByTestId("sidebar-task-item")).toHaveCount(taskCount, {
+      timeout: 10_000,
+    });
+    await scrollContainer.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+
+    const dimensions = await scrollContainer.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
+
+    const offscreenTitle = await scrollContainer.evaluate(
+      (element, taskTitles) => {
+        const containerRect = element.getBoundingClientRect();
+        const rows = element.querySelectorAll<HTMLElement>("[data-testid='sidebar-task-item']");
+        for (const row of rows) {
+          const rowRect = row.getBoundingClientRect();
+          const isOutside =
+            rowRect.bottom <= containerRect.top + 1 || rowRect.top >= containerRect.bottom - 1;
+          if (isOutside) {
+            const title = taskTitles.find((candidate) => row.textContent?.includes(candidate));
+            if (title) return title;
+          }
+        }
+        return null;
+      },
+      created.map(({ title }) => title),
+    );
+    if (!offscreenTitle) throw new Error("Expected a rendered task row outside the viewport");
+    const targetTask = created.find(({ title }) => title === offscreenTitle)!;
+    const targetRow = session.sidebarTaskItem(targetTask.title);
+    await expect(targetRow).toBeVisible();
+    const before = await Promise.all([scrollContainer.boundingBox(), targetRow.boundingBox()]);
+    if (!before[0] || !before[1]) throw new Error("Command-selected target has no layout box");
+    expect(
+      before[1].y + before[1].height <= before[0].y + 1 ||
+        before[1].y >= before[0].y + before[0].height - 1,
+      "target task should start outside the task-list viewport",
+    ).toBe(true);
+
+    const documentScrollBefore = await testPage.evaluate(() => ({ scrollX, scrollY }));
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+k`);
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await dialog.getByRole("combobox").fill(targetTask.title);
+    const option = dialog.getByRole("option").filter({ hasText: targetTask.title });
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.click();
+
+    await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.id}$`));
+    await expect(session.activeSidebarTaskItem(targetTask.title).first()).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect(targetRow).toHaveClass(/task-sidebar-row-reveal/, { timeout: 1_000 });
+    await expect
+      .poll(
+        async () => {
+          const [containerBox, rowBox] = await Promise.all([
+            scrollContainer.boundingBox(),
+            targetRow.boundingBox(),
+          ]);
+          if (!containerBox || !rowBox) return false;
+          return (
+            rowBox.y >= containerBox.y - 1 &&
+            rowBox.y + rowBox.height <= containerBox.y + containerBox.height + 1
+          );
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+
+    await expect
+      .poll(() => testPage.evaluate(() => ({ scrollX, scrollY })))
+      .toEqual(documentScrollBefore);
+  });
+
+  test("reveals a command-selected task after a delayed settings navigation blocker", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+
+    const initialSettings = await apiClient.getUserSettings();
+    const initialLayout =
+      initialSettings.settings.changes_panel_layout === "tree" ? "tree" : "flat";
+    const nextLayout = initialLayout === "tree" ? "Flat list" : "Tree";
+    const taskCount = 25;
+    const created: { id: string; title: string }[] = [];
+
+    try {
+      for (let index = 0; index < taskCount; index++) {
+        const title = `Blocked Command Reveal Task ${String(index).padStart(2, "0")}`;
+        const task = await apiClient.createTask(seedData.workspaceId, title, {
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        });
+        created.push({ id: task.id, title });
+      }
+
+      const targetTask = created[0];
+      await testPage.goto("/settings/general/appearance");
+      await expect(
+        testPage.getByRole("heading", { level: 2, name: "Appearance", exact: true }),
+      ).toBeVisible();
+
+      await testPage.getByTestId("changes-panel-layout-select").click();
+      await testPage.getByRole("option", { name: nextLayout }).click();
+      await expect(testPage.getByTestId("settings-floating-save")).toBeVisible();
+
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await testPage.keyboard.press(`${modifier}+k`);
+      const commandDialog = testPage.getByRole("dialog");
+      await expect(commandDialog).toBeVisible({ timeout: 5_000 });
+      await commandDialog.getByRole("combobox").fill(targetTask.title);
+      const option = commandDialog.getByRole("option").filter({ hasText: targetTask.title });
+      await expect(option).toBeVisible({ timeout: 10_000 });
+      await option.click();
+
+      const navigationDialog = testPage.getByRole("alertdialog", {
+        name: "Save changes before leaving?",
+      });
+      await expect(navigationDialog).toBeVisible();
+
+      await dwell(
+        testPage,
+        1_500,
+        "product-timer",
+        "the regression under test is a frame-count reveal budget expiring while the sidebar is absent from the DOM; the budget's expiry is the event and nothing renders to signal it",
+      );
+      await navigationDialog.getByRole("button", { name: "Discard and leave" }).click();
+
+      await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.id}$`));
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      const scrollContainer = testPage.getByTestId("task-sidebar-scroll");
+      const targetRow = session.sidebarTaskItem(targetTask.title);
+      await expect(scrollContainer).toBeVisible();
+      await expect(session.sidebar.getByTestId("sidebar-task-item")).toHaveCount(taskCount, {
+        timeout: 10_000,
+      });
+      await expect(session.activeSidebarTaskItem(targetTask.title).first()).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+
+      await expect
+        .poll(
+          async () => {
+            const [containerBox, rowBox] = await Promise.all([
+              scrollContainer.boundingBox(),
+              targetRow.boundingBox(),
+            ]);
+            if (!containerBox || !rowBox) return false;
+            return (
+              rowBox.y >= containerBox.y - 1 &&
+              rowBox.y + rowBox.height <= containerBox.y + containerBox.height + 1
+            );
+          },
+          { timeout: 10_000 },
+        )
+        .toBe(true);
+    } finally {
+      await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        changes_panel_layout: initialLayout,
+      });
+    }
+  });
+
+  test("reveals a command-selected task that starts above the sidebar viewport", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+
+    const taskCount = 25;
+    const created: { id: string; title: string }[] = [];
+    for (let index = 0; index < taskCount; index++) {
+      const title = `Command Reveal Above Task ${String(index).padStart(2, "0")}`;
+      const task = await apiClient.createTask(seedData.workspaceId, title, {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      });
+      created.push({ id: task.id, title });
+    }
+
+    const initialTask = created.at(-1)!;
+    await testPage.goto(`/t/${initialTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const scrollContainer = testPage.getByTestId("task-sidebar-scroll");
+    await expect(scrollContainer).toBeVisible();
+    await expect(session.sidebar.getByTestId("sidebar-task-item")).toHaveCount(taskCount, {
+      timeout: 10_000,
+    });
+    await scrollContainer.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "false");
+
+    const aboveTitle = await scrollContainer.evaluate(
+      (element, taskTitles) => {
+        const containerRect = element.getBoundingClientRect();
+        const rows = element.querySelectorAll<HTMLElement>("[data-testid='sidebar-task-item']");
+        for (const row of rows) {
+          const rowRect = row.getBoundingClientRect();
+          if (rowRect.bottom <= containerRect.top + 1) {
+            const title = taskTitles.find((candidate) => row.textContent?.includes(candidate));
+            if (title) return title;
+          }
+        }
+        return null;
+      },
+      created.map(({ title }) => title),
+    );
+    if (!aboveTitle) throw new Error("Expected a rendered task row above the viewport");
+    const targetTask = created.find(({ title }) => title === aboveTitle)!;
+    const targetRow = session.sidebarTaskItem(targetTask.title);
+    const before = await Promise.all([scrollContainer.boundingBox(), targetRow.boundingBox()]);
+    if (!before[0] || !before[1]) throw new Error("Command-selected target has no layout box");
+    expect(before[1].y + before[1].height).toBeLessThanOrEqual(before[0].y + 1);
+
+    const documentScrollBefore = await testPage.evaluate(() => ({ scrollX, scrollY }));
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+k`);
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await dialog.getByRole("combobox").fill(targetTask.title);
+    const option = dialog.getByRole("option").filter({ hasText: targetTask.title });
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.click();
+
+    await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.id}$`));
+    await expect(session.activeSidebarTaskItem(targetTask.title).first()).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect
+      .poll(
+        async () => {
+          const [containerBox, rowBox] = await Promise.all([
+            scrollContainer.boundingBox(),
+            targetRow.boundingBox(),
+          ]);
+          if (!containerBox || !rowBox) return false;
+          return (
+            rowBox.y >= containerBox.y - 1 &&
+            rowBox.y + rowBox.height <= containerBox.y + containerBox.height + 1
+          );
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+
+    await expect
+      .poll(() => testPage.evaluate(() => ({ scrollX, scrollY })))
+      .toEqual(documentScrollBefore);
   });
 });

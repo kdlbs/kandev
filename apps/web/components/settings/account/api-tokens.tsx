@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -18,8 +18,13 @@ import { IconCheck, IconCopy, IconKey } from "@tabler/icons-react";
 import { ApiError } from "@/lib/api/client";
 import { listTokens, mintToken, revokeToken, type ApiToken } from "@/lib/api/domains/auth-api";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import { formatDateTime } from "@/lib/i18n/formats";
+import { SettingsErrorText, SettingsFieldLabel } from "@/components/settings/settings-typography";
+import { settingsActionClassName } from "@/components/settings/settings-control";
+import { SettingsGroup } from "@/components/settings/settings-group";
 
 function useTokensList() {
+  const { t } = useTranslation();
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,9 +36,9 @@ function useTokensList() {
       setTokens(res.tokens);
       setLoaded(true);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load tokens.");
+      setError(err instanceof ApiError ? err.message : t("account:failedToLoadTokens"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void reload();
@@ -53,13 +58,12 @@ function MintTokenResult({
   onCopy: () => void;
   onDone: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Token created</DialogTitle>
-        <DialogDescription>
-          This is shown only once — copy it now and store it securely.
-        </DialogDescription>
+        <DialogTitle>{t("account:tokenCreated")}</DialogTitle>
+        <DialogDescription>{t("account:tokenShownOnlyOnce")}</DialogDescription>
       </DialogHeader>
       <div className="flex items-center gap-2">
         <Input
@@ -80,7 +84,7 @@ function MintTokenResult({
       </div>
       <DialogFooter>
         <Button className="cursor-pointer" onClick={onDone} data-dialog-default-action>
-          Done
+          {t("account:done")}
         </Button>
       </DialogFooter>
     </>
@@ -102,19 +106,15 @@ function MintTokenForm({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Create API token</DialogTitle>
-        <DialogDescription>
-          Grants the same access as your account to any script or CLI that uses it. Give it a name
-          so you can recognize it later.
-        </DialogDescription>
+        <DialogTitle>{t("account:createApiToken")}</DialogTitle>
+        <DialogDescription>{t("account:createApiTokenDescription")}</DialogDescription>
       </DialogHeader>
       <div className="flex flex-col gap-1">
-        <label htmlFor="api-tokens-name" className="text-xs text-muted-foreground">
-          Name
-        </label>
+        <SettingsFieldLabel htmlFor="api-tokens-name">{t("account:name")}</SettingsFieldLabel>
         <Input
           id="api-tokens-name"
           data-testid="api-tokens-name"
@@ -122,14 +122,10 @@ function MintTokenForm({
           onChange={(e) => setName(e.target.value)}
         />
       </div>
-      {error && (
-        <p className="text-xs text-destructive" data-testid="api-tokens-mint-error">
-          {error}
-        </p>
-      )}
+      {error && <SettingsErrorText data-testid="api-tokens-mint-error">{error}</SettingsErrorText>}
       <DialogFooter>
         <Button variant="outline" className="cursor-pointer" onClick={onCancel}>
-          Cancel
+          {t("account:cancel")}
         </Button>
         <Button
           className="cursor-pointer"
@@ -137,7 +133,7 @@ function MintTokenForm({
           onClick={onSubmit}
           data-testid="api-tokens-mint-submit"
         >
-          {submitting ? "Creating..." : "Create token"}
+          {submitting ? t("account:creating") : t("account:createToken")}
         </Button>
       </DialogFooter>
     </>
@@ -153,6 +149,7 @@ function MintTokenDialog({
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -174,7 +171,7 @@ function MintTokenDialog({
       setRawToken(res.token);
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not create token.");
+      setError(err instanceof ApiError ? err.message : t("account:couldNotCreateToken"));
     } finally {
       setSubmitting(false);
     }
@@ -216,6 +213,7 @@ function MintTokenDialog({
 }
 
 export function ApiTokens() {
+  const { t } = useTranslation();
   const { tokens, loaded, error, reload } = useTokensList();
   const [mintOpen, setMintOpen] = useState(false);
 
@@ -225,54 +223,50 @@ export function ApiTokens() {
   };
 
   return (
-    <Card data-testid="api-tokens-card">
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-        <CardTitle className="text-base flex items-center gap-2">
-          <IconKey className="h-4 w-4" /> API tokens
-        </CardTitle>
+    <SettingsGroup
+      title={
+        <span className="flex items-center gap-2">
+          <IconKey className="h-4 w-4" /> {t("account:apiTokens")}
+        </span>
+      }
+      description={t("account:apiTokensBlurb")}
+      action={
         <Button
           size="sm"
-          className="cursor-pointer"
+          className={settingsActionClassName("cursor-pointer")}
           onClick={() => setMintOpen(true)}
           data-testid="api-tokens-create"
         >
-          New token
+          {t("account:newToken")}
         </Button>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-xs text-muted-foreground">
-          Personal access tokens authenticate scripts and CLIs as you. Revoke a token immediately if
-          it may have leaked.
-        </p>
-        {error && (
-          <p className="text-xs text-destructive" data-testid="api-tokens-error">
-            {error}
-          </p>
-        )}
+      }
+      data-testid="api-tokens-card"
+      contentClassName="space-y-3 divide-y-0"
+    >
+      <div className="space-y-3">
+        {error && <SettingsErrorText data-testid="api-tokens-error">{error}</SettingsErrorText>}
         {!loaded && !error && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner className="size-4" /> Loading tokens...
+            <Spinner className="size-4" /> {t("account:loadingTokens")}
           </div>
         )}
         {loaded && tokens.length > 0 && (
           <Table data-testid="api-tokens-table">
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Last used</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t("account:name")}</TableHead>
+                <TableHead>{t("account:created")}</TableHead>
+                <TableHead>{t("account:lastUsed")}</TableHead>
+                <TableHead className="text-right">{t("account:actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {tokens.map((token) => (
                 <TableRow key={token.id} data-testid="api-tokens-row">
-                  <TableCell className="text-xs">{token.name}</TableCell>
+                  <TableCell className="text-sm">{token.name}</TableCell>
+                  <TableCell className="text-xs">{formatDateTime(token.created_at)}</TableCell>
                   <TableCell className="text-xs">
-                    {new Date(token.created_at).toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {token.last_used_at ? new Date(token.last_used_at).toLocaleString() : "Never"}
+                    {token.last_used_at ? formatDateTime(token.last_used_at) : t("account:never")}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
@@ -282,7 +276,7 @@ export function ApiTokens() {
                       onClick={() => void onRevoke(token.id)}
                       data-testid="api-tokens-revoke"
                     >
-                      Revoke
+                      {t("account:revoke")}
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -292,11 +286,11 @@ export function ApiTokens() {
         )}
         {loaded && tokens.length === 0 && !error && (
           <p className="text-sm text-muted-foreground" data-testid="api-tokens-empty">
-            No tokens yet.
+            {t("account:noTokensYet")}
           </p>
         )}
-      </CardContent>
+      </div>
       <MintTokenDialog open={mintOpen} onOpenChange={setMintOpen} onCreated={() => void reload()} />
-    </Card>
+    </SettingsGroup>
   );
 }

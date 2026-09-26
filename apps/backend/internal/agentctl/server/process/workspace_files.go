@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/readselector"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/common/workspacepath"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"go.uber.org/zap"
 )
@@ -35,7 +36,11 @@ const (
 
 const maxFileSize = 10 * 1024 * 1024 // 10MB
 
-var errPathTraversal = errors.New("path traversal detected")
+var (
+	// ErrFileNotFound identifies a workspace file that does not exist.
+	ErrFileNotFound  = errors.New("file not found")
+	errPathTraversal = errors.New("path traversal detected")
+)
 
 // workspaceMutationBarrier provides a deterministic synchronization point for
 // filesystem-race regression tests. It is unset in production.
@@ -54,9 +59,16 @@ func isRootOwnershipMarkerPath(path string) bool {
 
 // updateFiles updates the file listing
 func (wt *WorkspaceTracker) updateFiles(ctx context.Context) {
-	files, err := wt.getFileListClass(ctx, subproc.GitBackground)
+	wt.updateFilesClass(ctx, subproc.GitBackground)
+}
+
+func (wt *WorkspaceTracker) updateFilesClass(ctx context.Context, class subproc.GitWorkClass) {
+	files, err := wt.getFileListClass(ctx, class)
 	if err != nil {
-		wt.logger.Debug("failed to get file list", zap.Error(err))
+		wt.recordFilesystemFailure("workspace.file_monitor", workspaceTrigger(ctx, "poll"), err)
+		return
+	}
+	if err := ctx.Err(); err != nil || (wt.cancelCtx != nil && wt.cancelCtx.Err() != nil) {
 		return
 	}
 
@@ -81,8 +93,9 @@ func (wt *WorkspaceTracker) getFileListClass(ctx context.Context, class subproc.
 	// --cached: include tracked files
 	// --others: include untracked files
 	// --exclude-standard: respect .gitignore
+	// --stage: expose tracked file modes so submodule Gitlinks can be excluded
 	out, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(ctx, class, gitCommandTimeout, func(execCtx context.Context) *exec.Cmd {
-		cmd := subproc.NewGitCommand(execCtx, "ls-files", "--cached", "--others", "--exclude-standard")
+		cmd := subproc.NewGitCommand(execCtx, "ls-files", "--cached", "--others", "--exclude-standard", "--stage")
 		cmd.Dir = wt.workDir
 		return cmd
 	})
@@ -94,6 +107,12 @@ func (wt *WorkspaceTracker) getFileListClass(ctx context.Context, class subproc.
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
+		if metadata, path, tracked := strings.Cut(line, "\t"); tracked {
+			if strings.HasPrefix(metadata, "160000 ") {
+				continue
+			}
+			line = strings.TrimSpace(path)
+		}
 		if line == "" || isRootOwnershipMarkerPath(line) {
 			continue
 		}
@@ -108,6 +127,9 @@ func (wt *WorkspaceTracker) getFileListClass(ctx context.Context, class subproc.
 
 // GetFileTree returns the file tree for a given path and depth
 func (wt *WorkspaceTracker) GetFileTree(reqPath string, depth int) (*types.FileTreeNode, error) {
+	if err := workspacepath.ValidateTreePath(reqPath); err != nil {
+		return nil, err
+	}
 	// Resolve the full path with path traversal protection
 	safePath := filepath.Join(wt.workDir, filepath.Clean(reqPath))
 	cleanWorkDir := filepath.Clean(wt.workDir)
@@ -118,6 +140,7 @@ func (wt *WorkspaceTracker) GetFileTree(reqPath string, depth int) (*types.FileT
 	// Check if path exists
 	info, err := os.Stat(safePath)
 	if err != nil {
+		wt.recordFilesystemFailure("workspace.file_tree", "user_select", err)
 		return nil, fmt.Errorf("path not found: %w", err)
 	}
 
@@ -147,6 +170,7 @@ func (wt *WorkspaceTracker) buildFileTreeNode(safePath, relPath string, info os.
 	// Read directory contents
 	entries, err := os.ReadDir(safePath)
 	if err != nil {
+		wt.recordFilesystemFailure("workspace.file_tree", "user_select", err)
 		return node, nil // Return node without children on error
 	}
 
@@ -406,7 +430,7 @@ func (wt *WorkspaceTracker) readResolvedPath(reqPath string) (string, int64, boo
 			// original error so they aren't mislabeled as missing.
 			if cleaned := filepath.Clean(reqPath); filepath.IsAbs(cleaned) {
 				if _, statErr := os.Stat(cleaned); errors.Is(statErr, fs.ErrNotExist) {
-					return "", 0, false, "", fmt.Errorf("file not found: %w", statErr)
+					return "", 0, false, "", fmt.Errorf("%w: %w", ErrFileNotFound, statErr)
 				}
 			}
 			return "", 0, false, "", err
@@ -450,7 +474,10 @@ func readFileContent(safePath string) (string, int64, bool, error) {
 	// codeql[go/path-injection] safePath is canonical containment-validated by resolveSafePath; read-only external paths reach here only through absoluteReadPath validation.
 	info, err := os.Stat(safePath)
 	if err != nil {
-		return "", 0, false, fmt.Errorf("file not found: %w", err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", 0, false, fmt.Errorf("%w: %w", ErrFileNotFound, err)
+		}
+		return "", 0, false, fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	if !info.Mode().IsRegular() {
@@ -893,13 +920,13 @@ type fileSearchCandidate struct {
 const (
 	// fileSearchDefaultLimit applies when the caller passes a non-positive limit.
 	fileSearchDefaultLimit = 20
-	// fileSearchMaxLimit caps the caller-supplied limit before it is used to
-	// pre-allocate the result slice. The limit reaches this code straight from
-	// the `limit` query parameter of GET /api/v1/workspace/search, so without a
-	// ceiling a request like `?limit=2000000000` makes the process reserve
-	// gigabytes for a result set that can never exceed the number of tracked
-	// files. Mirrors the clamp validateContentSearch already applies to
-	// content search.
+	// fileSearchMaxLimit caps how many results one search may return. The limit
+	// reaches this code straight from the `limit` query parameter of
+	// GET /api/v1/workspace/search, so without a ceiling a request like
+	// `?limit=2000000000` would ask for a result set that can never exceed the
+	// number of tracked files. It also bounds the result slice's capacity,
+	// which is sized from this cap rather than from the request. Mirrors the
+	// clamp validateContentSearch already applies to content search.
 	fileSearchMaxLimit = 200
 )
 
@@ -1010,7 +1037,7 @@ func (m *Manager) SearchWorkspaceFileResults(query string, limit int) []types.Fi
 	}
 
 	candidates := make([]fileSearchCandidate, 0)
-	if root != nil && root.RepositoryName() != "" {
+	if root != nil && root.gitIndexPath != "" {
 		candidates = appendTrackerFileSearchCandidates(candidates, root)
 	}
 	for _, tracker := range repositories {
@@ -1100,8 +1127,11 @@ func searchFileCandidates(
 		return len(matches[i].matchPath) < len(matches[j].matchPath)
 	})
 
-	// Return top limit results
-	result := make([]types.FileSearchResult, 0, limit)
+	// Return top limit results. The capacity is derived from values we own —
+	// the matches we actually collected and the hard cap — instead of the
+	// caller-supplied limit, so the allocation size never depends on request
+	// input even indirectly.
+	result := make([]types.FileSearchResult, 0, min(len(matches), fileSearchMaxLimit))
 	for i := 0; i < len(matches) && i < limit; i++ {
 		result = append(result, types.FileSearchResult{
 			RepositoryName: matches[i].repositoryName,

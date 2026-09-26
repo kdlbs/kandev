@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/securityutil"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/watchreset"
 )
@@ -66,6 +67,15 @@ type TaskSessionChecker interface {
 	HasUserAuthoredMessage(ctx context.Context, taskID string) (bool, error)
 }
 
+// TaskAuthorizer scopes task-keyed MR automation access to the task's owning
+// workspace under opt-in auth (AGENTS.md: "New user-facing service entry
+// points must apply scoping"). No identity in ctx (internal callers: the
+// poller, lifecycle evaluator) or auth disabled means unscoped, matching
+// task/service.Service.AuthorizeTaskAccess's own contract.
+type TaskAuthorizer interface {
+	AuthorizeTaskAccess(ctx context.Context, taskID string) error
+}
+
 // RepositoryLookup validates optional watch repository bindings.
 type RepositoryLookup interface {
 	GetRepository(ctx context.Context, id string) (workspaceID, defaultBranch string, ok bool)
@@ -82,35 +92,64 @@ type WatchDependencyValidator interface {
 
 // Service coordinates GitLab integration operations.
 type Service struct {
-	mu                   sync.RWMutex
-	configMutationMu     sync.Mutex
-	host                 string
-	client               Client
-	authMethod           string
-	secrets              SecretProvider
-	secretManager        SecretManager
-	workspaceSecrets     WorkspaceSecretStore
-	workspaceClientFn    WorkspaceClientFactory
-	glabTokenFn          func(context.Context, string) (string, error)
-	workspaceClients     map[string]Client
-	workspaceClientRevs  map[string]int64
-	environmentTokenHost string
-	hostStore            HostStore
-	store                *Store
-	eventBus             bus.EventBus
-	taskDeleter          TaskDeleter
-	cascadeTaskDeleter   watchreset.TaskDeleter
-	taskSessionChecker   TaskSessionChecker
-	repositoryLookup     RepositoryLookup
-	dependencyValidator  WatchDependencyValidator
-	logger               *logger.Logger
+	mu                       sync.RWMutex
+	configMutationMu         sync.Mutex
+	host                     string
+	client                   Client
+	authMethod               string
+	secrets                  SecretProvider
+	secretManager            SecretManager
+	workspaceSecrets         WorkspaceSecretStore
+	workspaceClientFn        WorkspaceClientFactory
+	glabTokenFn              func(context.Context, string) (string, error)
+	workspaceClients         map[string]Client
+	workspaceClientRevs      map[string]int64
+	environmentTokenHost     string
+	hostStore                HostStore
+	store                    *Store
+	eventBus                 bus.EventBus
+	taskEventSubs            []bus.Subscription
+	taskDeleter              TaskDeleter
+	comparisonTargetObserver ComparisonTargetObserver
+	cascadeTaskDeleter       watchreset.TaskDeleter
+	taskSessionChecker       TaskSessionChecker
+	repositoryLookup         RepositoryLookup
+	dependencyValidator      WatchDependencyValidator
+	taskAuthorizer           TaskAuthorizer
+	// workspaceAuthorizer is the per-user workspace access boundary, wired
+	// post-construction via SetWorkspaceAuthorizer. Nil (unit tests, auth
+	// disabled) means unscoped — every workspace is visible, as before auth.
+	workspaceAuthorizer func(context.Context, string) error
+	promptResolver      PromptResolver
+	logger              *logger.Logger
+}
+
+// PromptResolver resolves editable prompt content by name. Mirrors
+// github.PromptResolver — used to resolve the effective MR auto-fix
+// prompt (default template, editable via Settings, or a per-task override).
+type PromptResolver interface {
+	ResolvePromptContent(ctx context.Context, name, fallback string) string
+}
+
+// SetPromptResolver wires the editable prompt service into GitLab automation.
+func (s *Service) SetPromptResolver(resolver PromptResolver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.promptResolver = resolver
+}
+
+func (s *Service) getPromptResolver() PromptResolver {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.promptResolver
 }
 
 // SetEventBus wires the event bus for publishing review/issue/feedback events.
 func (s *Service) SetEventBus(b bus.EventBus) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.eventBus = b
+	s.mu.Unlock()
+	s.subscribeTaskEvents()
 }
 
 // SetTaskDeleter wires the task-deletion dependency used by cleanup sweepers.
@@ -144,6 +183,52 @@ func (s *Service) SetWatchDependencyValidator(validator WatchDependencyValidator
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.dependencyValidator = validator
+}
+
+// SetTaskAuthorizer wires the per-user task-visibility check used to scope
+// the task-keyed MR automation HTTP/MCP surface (AC-review: unauthenticated
+// task ID guessing must not read or write another workspace's switches).
+func (s *Service) SetTaskAuthorizer(authorizer TaskAuthorizer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.taskAuthorizer = authorizer
+}
+
+// authorizeTaskMRAccess denies access to a task-keyed MR automation call when
+// a scoped caller cannot see the task. A nil authorizer (not wired, e.g. in
+// unit tests) or an unscoped caller (internal callers, auth disabled) is a
+// no-op, matching TaskAuthorizer's own contract.
+func (s *Service) authorizeTaskMRAccess(ctx context.Context, taskID string) error {
+	s.mu.RLock()
+	authorizer := s.taskAuthorizer
+	s.mu.RUnlock()
+	if authorizer == nil {
+		return nil
+	}
+	return authorizer.AuthorizeTaskAccess(ctx, taskID)
+}
+
+// SetWorkspaceAuthorizer installs the per-user workspace access boundary
+// applied to ListAllIssueWatches. Wired to taskSvc.AuthorizeWorkspaceAccess so
+// an unscoped list (workspace_id omitted) returns only the caller's own
+// workspaces' watches.
+func (s *Service) SetWorkspaceAuthorizer(authorizer func(context.Context, string) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspaceAuthorizer = authorizer
+}
+
+// authorizeWorkspaceAccess denies access to a workspace a scoped caller
+// cannot reach. A nil authorizer (not wired, e.g. unit tests) or an unscoped
+// caller (internal callers, auth disabled) is a no-op.
+func (s *Service) authorizeWorkspaceAccess(ctx context.Context, workspaceID string) error {
+	s.mu.RLock()
+	authorizer := s.workspaceAuthorizer
+	s.mu.RUnlock()
+	if authorizer == nil {
+		return nil
+	}
+	return authorizer(ctx, workspaceID)
 }
 
 func (s *Service) validateWatchDependencies(ctx context.Context, workspaceID, workflowID, stepID, agentProfileID, executorProfileID string) error {
@@ -204,8 +289,44 @@ func (s *Service) resolveWatchRepository(ctx context.Context, workspaceID, repos
 // task-mr endpoints return empty results and SyncTaskMR is a no-op.
 func (s *Service) SetStore(store *Store) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.store = store
+	s.mu.Unlock()
+	s.subscribeTaskEvents()
+}
+
+func (s *Service) subscribeTaskEvents() {
+	s.mu.Lock()
+	busReady := s.eventBus != nil && s.store != nil && len(s.taskEventSubs) == 0
+	eventBus := s.eventBus
+	s.mu.Unlock()
+	if !busReady {
+		return
+	}
+	sub, err := eventBus.Subscribe(events.TaskDeleted, s.handleTaskDeleted)
+	if err != nil {
+		s.logger.Error("failed to subscribe to task.deleted events", zap.Error(err))
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.taskEventSubs) > 0 {
+		// A concurrent call already subscribed while we were outside the lock.
+		_ = sub.Unsubscribe()
+		return
+	}
+	s.taskEventSubs = append(s.taskEventSubs, sub)
+}
+
+func (s *Service) unsubscribeTaskEvents() {
+	s.mu.Lock()
+	subs := s.taskEventSubs
+	s.taskEventSubs = nil
+	s.mu.Unlock()
+	for _, sub := range subs {
+		if err := sub.Unsubscribe(); err != nil {
+			s.logger.Error("failed to unsubscribe from task event", zap.Error(err))
+		}
+	}
 }
 
 // SetWorkspaceSecretStore wires deterministic per-workspace credential storage.
@@ -503,18 +624,85 @@ func (s *Service) findTokenSecret(ctx context.Context) (bool, string, error) {
 // repositoryID is the task's repository UUID (empty for single-repo tasks).
 // projectPath is the GitLab namespace/path. iid is the MR's per-project id.
 func (s *Service) SyncTaskMR(ctx context.Context, taskID, repositoryID, projectPath string, iid int) (*TaskMR, error) {
-	s.mu.RLock()
-	store := s.store
-	s.mu.RUnlock()
-	if store == nil {
-		return nil, errors.New("gitlab store not configured")
-	}
 	client, err := s.clientForTask(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
 	if client == nil {
 		return nil, ErrNoClient
+	}
+	result, err := s.syncTaskMRWithClient(ctx, client, taskID, repositoryID, projectPath, iid)
+	if err != nil {
+		return nil, err
+	}
+	return result.taskMR, nil
+}
+
+// ErrTaskMRHostMismatch marks every rejection path of the SyncTaskMRStrict
+// host guard below.
+var ErrTaskMRHostMismatch = errors.New("gitlab: workspace host does not match the linked MR's host")
+
+// SyncTaskMRStrict is SyncTaskMR's workspace-scoped-only variant, required
+// for every MR lifecycle-automation call site (AC32 — see
+// clientForTaskStrict's doc comment). Unlike SyncTaskMR, it never falls back
+// to the ambient/legacy Service.Client() singleton, so the lifecycle poller
+// fails closed instead of syncing against the wrong GitLab account when
+// workspace secrets are not yet configured.
+//
+// existingHost must identify the same GitLab origin as the resolved client
+// (compared via sameConfiguredOrigin, so an explicit default port or casing
+// difference still matches). A mismatch means the workspace's GitLab
+// connection changed host since this MR was linked; failing closed here
+// avoids querying (and then emitting lifecycle automation for) an unrelated
+// MR that happens to share the same project path and IID on the new host.
+// An empty existingHost (a legacy row predating this column, or any other
+// unknown-identity case) also fails closed — apps/backend/AGENTS.md's
+// provider-identity rule treats an empty host as unknown identity, not as
+// "skip the check."
+func (s *Service) SyncTaskMRStrict(ctx context.Context, taskID, repositoryID, projectPath string, iid int, existingHost string) (*TaskMR, error) {
+	result, err := s.syncTaskMRStrictWithObservation(ctx, taskID, repositoryID, projectPath, iid, existingHost)
+	if err != nil {
+		return nil, err
+	}
+	return result.taskMR, nil
+}
+
+// taskMRSyncResult keeps reviewer membership from the status response beside
+// the durable task-MR row. The observation is intentionally internal and is
+// only carried to lifecycle evaluation; it is not persisted on TaskMR.
+type taskMRSyncResult struct {
+	taskMR         *TaskMR
+	reviewers      []MRReviewer
+	reviewersValid bool
+}
+
+func (s *Service) syncTaskMRStrictWithObservation(
+	ctx context.Context, taskID, repositoryID, projectPath string, iid int, existingHost string,
+) (*taskMRSyncResult, error) {
+	client, err := s.clientForTaskStrict(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	// validateHost (which sameConfiguredOrigin calls on both sides) defaults
+	// an empty host to DefaultHost, which would make an unknown-identity row
+	// silently pass this check instead of failing closed — reject it here
+	// explicitly, before origin comparison ever runs.
+	if existingHost == "" || !sameConfiguredOrigin(client.Host(), existingHost) {
+		return nil, fmt.Errorf(
+			"%w: workspace host %s, linked MR host %q", ErrTaskMRHostMismatch, client.Host(), existingHost,
+		)
+	}
+	return s.syncTaskMRWithClient(ctx, client, taskID, repositoryID, projectPath, iid)
+}
+
+func (s *Service) syncTaskMRWithClient(
+	ctx context.Context, client Client, taskID, repositoryID, projectPath string, iid int,
+) (*taskMRSyncResult, error) {
+	s.mu.RLock()
+	store := s.store
+	s.mu.RUnlock()
+	if store == nil {
+		return nil, errors.New("gitlab store not configured")
 	}
 	host := client.Host()
 	status, err := client.GetMRStatus(ctx, projectPath, iid)
@@ -527,34 +715,44 @@ func (s *Service) SyncTaskMR(ctx context.Context, taskID, repositoryID, projectP
 	now := time.Now().UTC()
 	mr := status.MR
 	row := &TaskMR{
-		TaskID:            taskID,
-		RepositoryID:      repositoryID,
-		Host:              host,
-		ProjectPath:       projectPath,
-		MRIID:             mr.IID,
-		MRURL:             mr.WebURL,
-		MRTitle:           mr.Title,
-		HeadBranch:        mr.HeadBranch,
-		BaseBranch:        mr.BaseBranch,
-		AuthorUsername:    mr.AuthorUsername,
-		State:             mr.State,
-		ApprovalState:     status.ApprovalState,
-		PipelineState:     status.PipelineState,
-		MergeStatus:       status.MergeStatus,
-		Draft:             mr.Draft,
-		ApprovalCount:     status.ApprovalCount,
-		RequiredApprovals: status.RequiredApprovals,
-		PipelineJobsTotal: status.PipelineJobsTotal,
-		PipelineJobsPass:  status.PipelineJobsPassing,
-		CreatedAt:         mr.CreatedAt,
-		MergedAt:          mr.MergedAt,
-		ClosedAt:          mr.ClosedAt,
-		LastSyncedAt:      &now,
+		TaskID:              taskID,
+		RepositoryID:        repositoryID,
+		Host:                host,
+		ProjectPath:         projectPath,
+		MRIID:               mr.IID,
+		MRURL:               mr.WebURL,
+		MRTitle:             mr.Title,
+		HeadBranch:          mr.HeadBranch,
+		HeadSHA:             mr.HeadSHA,
+		BaseBranch:          mr.BaseBranch,
+		BaseSHA:             mr.BaseSHA,
+		AuthorUsername:      mr.AuthorUsername,
+		State:               mr.State,
+		ApprovalState:       status.ApprovalState,
+		PipelineState:       status.PipelineState,
+		MergeStatus:         status.MergeStatus,
+		Draft:               mr.Draft,
+		ApprovalCount:       status.ApprovalCount,
+		RequiredApprovals:   status.RequiredApprovals,
+		PipelineJobsTotal:   status.PipelineJobsTotal,
+		PipelineJobsPass:    status.PipelineJobsPassing,
+		DetailedMergeStatus: status.DetailedMergeStatus,
+		ReviewerCount:       status.ReviewerCount,
+		UnapprovedReviewers: status.UnapprovedReviewers,
+		CreatedAt:           mr.CreatedAt,
+		MergedAt:            mr.MergedAt,
+		ClosedAt:            mr.ClosedAt,
+		LastSyncedAt:        &now,
 	}
 	if err := store.UpsertTaskMR(ctx, row); err != nil {
 		return nil, fmt.Errorf("upsert task MR: %w", err)
 	}
-	return row, nil
+	s.reconcileComparisonTargetFromSync(ctx, taskID, host, mr)
+	return &taskMRSyncResult{
+		taskMR:         row,
+		reviewers:      append([]MRReviewer(nil), mr.Reviewers...),
+		reviewersValid: true,
+	}, nil
 }
 
 // ListTaskMRsByWorkspace surfaces all MR associations under a workspace,
@@ -578,4 +776,15 @@ func (s *Service) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*Task
 		return nil, nil
 	}
 	return store.ListTaskMRsByTask(ctx, taskID)
+}
+
+// ListTaskMRsByTaskIDs surfaces GitLab MR associations grouped by task ID.
+func (s *Service) ListTaskMRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*TaskMR, error) {
+	s.mu.RLock()
+	store := s.store
+	s.mu.RUnlock()
+	if store == nil {
+		return map[string][]*TaskMR{}, nil
+	}
+	return store.ListTaskMRsByTaskIDs(ctx, taskIDs)
 }

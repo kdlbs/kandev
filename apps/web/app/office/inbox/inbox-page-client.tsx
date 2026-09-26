@@ -1,70 +1,80 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconSearch } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { Input } from "@kandev/ui/input";
 import { toast } from "@/lib/toast/sonner";
-import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { selectOfficeInboxItems } from "@/lib/state/slices/office/selectors";
 import * as officeApi from "@/lib/api/domains/office-api";
+import { loadOfficeAgents, loadOfficeInbox } from "@/hooks/use-office-workspace-data";
 import type { InboxItem } from "@/lib/state/slices/office/types";
 import { InboxItemRow } from "./inbox-item-row";
+import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type TabValue = "mine" | "recent" | "all";
 
 type InboxPageClientProps = {
   initialItems: InboxItem[];
   initialCount: number;
+  initialWorkspaceId?: string | null;
 };
 
-function useInboxData(workspaceId: string | null, initialItems: InboxItem[], initialCount: number) {
+function useInboxData(workspaceId: string | null) {
+  const store = useAppStoreApi();
+  return useCallback(async () => {
+    if (!workspaceId) return;
+    // Mark-fixed changes both the inbox row and the agent pause state. Refresh
+    // both workspace-owned caches through the shared loaders.
+    await Promise.all([
+      loadOfficeInbox(store, workspaceId, { cache: "no-store" }),
+      loadOfficeAgents(store, workspaceId, { cache: "no-store" }),
+    ]);
+  }, [store, workspaceId]);
+}
+
+function useInitialInboxHydration(
+  workspaceId: string | null,
+  initialWorkspaceId: string | null | undefined,
+  initialItems: InboxItem[],
+  initialCount: number,
+) {
   const setInboxItems = useAppStore((s) => s.setInboxItems);
   const setInboxCount = useAppStore((s) => s.setInboxCount);
-  const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
 
+  // Hydrate the SSR payload exactly once: it belongs to the workspace that was
+  // active at SSR time, and re-running on a workspace switch would file it
+  // under the new workspace.
+  const initialHydratedRef = useRef(false);
   useEffect(() => {
-    if (initialItems.length > 0) setInboxItems(initialItems);
-    if (initialCount > 0) setInboxCount(initialCount);
-  }, [initialItems, initialCount, setInboxItems, setInboxCount]);
-
-  const fetchInbox = useCallback(async () => {
-    if (!workspaceId) return;
-    const [inboxRes, agentsRes] = await Promise.all([
-      // Single call returns items + total_count (Stream F of office
-      // optimization). Was getInbox + getInboxCount in parallel.
-      officeApi.getInbox(workspaceId),
-      // Refetch agents alongside inbox so unpause-on-dismiss clears the
-      // sidebar paused badge without waiting on a WS event.
-      officeApi.listAgentProfiles(workspaceId),
-    ]);
-    const items = inboxRes.items ?? [];
-    setInboxItems(items);
-    setInboxCount(inboxRes.total_count ?? items.length);
-    if (Array.isArray(agentsRes.agents)) {
-      setOfficeAgentProfiles(agentsRes.agents);
+    if (
+      initialHydratedRef.current ||
+      !workspaceId ||
+      (initialWorkspaceId !== undefined && initialWorkspaceId !== workspaceId)
+    ) {
+      return;
     }
-  }, [workspaceId, setInboxItems, setInboxCount, setOfficeAgentProfiles]);
-
-  useEffect(() => {
-    void fetchInbox();
-  }, [fetchInbox]);
-
-  return fetchInbox;
+    initialHydratedRef.current = true;
+    if (initialItems.length > 0) setInboxItems(workspaceId, initialItems);
+    if (initialCount > 0) setInboxCount(workspaceId, initialCount);
+  }, [initialCount, initialItems, initialWorkspaceId, setInboxCount, setInboxItems, workspaceId]);
 }
 
 function useApprovalActions(fetchInbox: () => Promise<void>) {
+  const { t } = useTranslation();
   const handleApprove = useCallback(
     async (id: string) => {
       try {
         await officeApi.decideApproval(id, { status: "approved" });
         void fetchInbox();
-        toast.success("Approved");
+        toast.success(t("office:approved"));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to approve");
+        toast.error(err instanceof Error ? err.message : t("office:failedToApprove"));
       }
     },
-    [fetchInbox],
+    [fetchInbox, t],
   );
 
   const handleReject = useCallback(
@@ -72,12 +82,12 @@ function useApprovalActions(fetchInbox: () => Promise<void>) {
       try {
         await officeApi.decideApproval(id, { status: "rejected" });
         void fetchInbox();
-        toast.success("Rejected");
+        toast.success(t("office:rejected"));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to reject");
+        toast.error(err instanceof Error ? err.message : t("office:failedToReject"));
       }
     },
-    [fetchInbox],
+    [fetchInbox, t],
   );
 
   return { handleApprove, handleReject };
@@ -94,25 +104,26 @@ function InboxToolbar({
   onTabChange: (v: TabValue) => void;
   onSearchChange: (v: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Tabs value={tab} onValueChange={(v) => onTabChange(v as TabValue)}>
       <div className="flex items-center justify-between">
         <TabsList>
           <TabsTrigger value="mine" className="cursor-pointer">
-            Mine
+            {t("office:mine")}
           </TabsTrigger>
           <TabsTrigger value="recent" className="cursor-pointer">
-            Recent
+            {t("office:recent")}
           </TabsTrigger>
           <TabsTrigger value="all" className="cursor-pointer">
-            All
+            {t("office:all")}
           </TabsTrigger>
         </TabsList>
         <div className="relative">
           <IconSearch className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
-            placeholder="Search..."
-            className="w-[220px] h-8 pl-8 text-xs"
+            placeholder={t("office:search")}
+            className={controlSizingClassName("standard", "w-[220px] pl-8 text-xs")}
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
           />
@@ -122,16 +133,20 @@ function InboxToolbar({
   );
 }
 
-export function InboxPageClient({ initialItems, initialCount }: InboxPageClientProps) {
+export function InboxPageClient({
+  initialItems,
+  initialCount,
+  initialWorkspaceId,
+}: InboxPageClientProps) {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const inboxItems = useAppStore((s) => s.office.inboxItems);
+  const inboxItems = useAppStore(selectOfficeInboxItems);
   const [tab, setTab] = useState<TabValue>("mine");
   const [search, setSearch] = useState("");
 
-  const fetchInbox = useInboxData(workspaceId, initialItems, initialCount);
+  useInitialInboxHydration(workspaceId, initialWorkspaceId, initialItems, initialCount);
+  const fetchInbox = useInboxData(workspaceId);
   const { handleApprove, handleReject } = useApprovalActions(fetchInbox);
-
-  useOfficeRefetch("inbox", fetchInbox);
 
   const filteredItems = useMemo(() => {
     let items: InboxItem[] = inboxItems;
@@ -163,9 +178,9 @@ export function InboxPageClient({ initialItems, initialCount }: InboxPageClientP
       <div className="border border-border rounded-lg divide-y divide-border overflow-hidden">
         {filteredItems.length === 0 ? (
           <div className="px-4 py-8 text-center">
-            <p className="text-sm text-muted-foreground">All clear.</p>
+            <p className="text-sm text-muted-foreground">{t("office:allClear")}</p>
             <p className="text-xs text-muted-foreground mt-1">
-              Approvals, alerts, and items needing your attention appear here.
+              {t("office:approvalsAlertsAndItemsNeedingYour")}
             </p>
           </div>
         ) : (

@@ -7,7 +7,7 @@ test.describe("Archive confirmation preference on mobile", () => {
     apiClient,
     seedData,
   }) => {
-    await testPage.goto("/settings/general/task-actions");
+    await testPage.goto("/settings/preferences/task-behavior");
     const toggle = testPage.getByRole("switch", { name: "Confirm before archiving tasks" });
     await expect(toggle).toBeChecked();
     await toggle.click();
@@ -39,7 +39,7 @@ test.describe("Archive confirmation preference on mobile", () => {
     await testPage.goto(`/t/${navTask.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = sheet

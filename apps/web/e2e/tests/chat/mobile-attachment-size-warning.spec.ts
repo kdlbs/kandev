@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { openTaskSession, waitForLatestSessionDone } from "../../helpers/session";
 
-const OVERSIZED_FILE_BYTES = 11 * 1024 * 1024;
+const OVERSIZED_FILE_BYTES = 100 * 1024 * 1024 + 1;
 
 test.describe("oversized attachment feedback on mobile", () => {
   test("warns when a pasted file exceeds the attachment limit", async ({
@@ -43,7 +43,7 @@ test.describe("oversized attachment feedback on mobile", () => {
       .getByTestId("toast-message")
       .filter({ hasText: "Attachment is too large" });
     await expect(warning).toContainText(
-      "recording.mov is 11.0 MB. The maximum file size is 10.0 MB.",
+      "recording.mov is 100.0 MB. The maximum file size is 100.0 MB.",
     );
 
     await expect

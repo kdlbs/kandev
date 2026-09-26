@@ -15,6 +15,8 @@ import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { ApiError } from "@/lib/api/client";
 import { createUser } from "@/lib/api/domains/auth-api";
+import { SettingsErrorText, SettingsFieldLabel } from "@/components/settings/settings-typography";
+import { settingsControlClassName } from "@/components/settings/settings-control";
 
 type Props = {
   open: boolean;
@@ -49,9 +51,9 @@ function CreateUserFields({
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-1">
-        <label htmlFor="create-user-display-name" className="text-xs text-muted-foreground">
+        <SettingsFieldLabel htmlFor="create-user-display-name">
           {t("system:createUserDisplayName")}
-        </label>
+        </SettingsFieldLabel>
         <Input
           id="create-user-display-name"
           data-testid="create-user-display-name"
@@ -60,9 +62,9 @@ function CreateUserFields({
         />
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor="create-user-email" className="text-xs text-muted-foreground">
+        <SettingsFieldLabel htmlFor="create-user-email">
           {t("system:createUserEmail")}
-        </label>
+        </SettingsFieldLabel>
         <Input
           id="create-user-email"
           data-testid="create-user-email"
@@ -72,9 +74,9 @@ function CreateUserFields({
         />
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor="create-user-password" className="text-xs text-muted-foreground">
+        <SettingsFieldLabel htmlFor="create-user-password">
           {t("system:createUserPassword")}
-        </label>
+        </SettingsFieldLabel>
         <Input
           id="create-user-password"
           data-testid="create-user-password"
@@ -85,11 +87,15 @@ function CreateUserFields({
         />
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor="create-user-role" className="text-xs text-muted-foreground">
+        <SettingsFieldLabel htmlFor="create-user-role">
           {t("system:createUserRole")}
-        </label>
+        </SettingsFieldLabel>
         <Select value={role} onValueChange={setRole}>
-          <SelectTrigger id="create-user-role" data-testid="create-user-role">
+          <SelectTrigger
+            id="create-user-role"
+            className={settingsControlClassName()}
+            data-testid="create-user-role"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -99,11 +105,7 @@ function CreateUserFields({
           </SelectContent>
         </Select>
       </div>
-      {error && (
-        <p className="text-xs text-destructive" data-testid="create-user-error">
-          {error}
-        </p>
-      )}
+      {error && <SettingsErrorText data-testid="create-user-error">{error}</SettingsErrorText>}
     </div>
   );
 }

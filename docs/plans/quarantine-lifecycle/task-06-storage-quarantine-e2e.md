@@ -7,7 +7,7 @@ depends_on:
   - "04-responsive-quarantine-ui"
   - "05-operator-documentation"
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 06: Storage quarantine E2E

@@ -2,11 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { Message } from "@/lib/types/http";
 
+const useOpenFileAtLine = vi.hoisted(() =>
+  vi.fn((onOpenFile: ((path: string) => void) | undefined) => (path: string) => onOpenFile?.(path)),
+);
+
 // useOpenFileAtLine pulls in Monaco; stub it with a passthrough that forwards the
 // (already selector-stripped) path so we can assert what gets opened.
 vi.mock("@/hooks/use-file-editors", () => ({
-  useOpenFileAtLine: (onOpenFile: ((path: string) => void) | undefined) => (path: string) =>
-    onOpenFile?.(path),
+  useOpenFileAtLine,
 }));
 
 import { ToolReadMessage } from "./tool-read-message";
@@ -21,8 +24,59 @@ function readComment(filePath: string, offset?: number, limit?: number): Message
   } as unknown as Message;
 }
 
+function readCommentWithLines(lineCount?: number): Message {
+  return {
+    id: "m1",
+    metadata: {
+      status: "complete",
+      normalized: {
+        read_file: {
+          file_path: "apps/web/lib/read-selector.ts",
+          output: { line_count: lineCount },
+        },
+      },
+    },
+  } as unknown as Message;
+}
+
 describe("ToolReadMessage", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    useOpenFileAtLine.mockClear();
+  });
+
+  // The header label used to build its own "s" in a template literal, which no
+  // i18n gate could see. It now selects _one/_other; the English must be
+  // unchanged, because e2e specs query this card by its accessible name.
+  it("uses the singular header label for a one-line read", () => {
+    render(<ToolReadMessage comment={readCommentWithLines(1)} />);
+    expect(screen.getByText("Read 1 line")).toBeTruthy();
+    expect(screen.queryByText("Read 1 lines")).toBeNull();
+  });
+
+  it("uses the plural header label for a multi-line read", () => {
+    render(<ToolReadMessage comment={readCommentWithLines(137)} />);
+    expect(screen.getByText("Read 137 lines")).toBeTruthy();
+  });
+
+  it("falls back to the bare 'Read' label when no line count is reported", () => {
+    render(<ToolReadMessage comment={readCommentWithLines(undefined)} />);
+    expect(screen.getByText("Read")).toBeTruthy();
+  });
+
+  it("forwards the message session when opening a file at its read line", () => {
+    const openFile = vi.fn();
+    render(
+      <ToolReadMessage
+        comment={readComment("apps/web/lib/utils.ts", 50)}
+        worktreePath="/workspace"
+        sessionId="requested-session"
+        onOpenFile={openFile}
+      />,
+    );
+
+    expect(useOpenFileAtLine).toHaveBeenCalledWith(openFile, 50, "/workspace", "requested-session");
+  });
 
   it("renders one openable link for a single-file read", () => {
     const openFile = vi.fn();

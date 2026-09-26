@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -9,38 +10,175 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
+	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
+// statusClientClosedRequest is nginx's 499. Go defines no constant for it and
+// no standard 4xx says "the client hung up", which is what actually happened.
+const statusClientClosedRequest = 499
+
+const (
+	moveConflictCodeActiveSession      = "task_move_active_session"
+	moveConflictCodeArchived           = "task_move_archived"
+	moveConflictCodeDifferentWorkspace = "task_move_different_workspace"
+	moveConflictCodeWorkflowStep       = "task_move_workflow_step"
+	moveConflictCodeWIPLimit           = "task_move_wip_limit"
+	moveConflictCodePending            = "task_move_pending"
+	moveConflictCodeWorkflowChange     = "workflow_change_conflict"
+)
+
+// errorDetailKeyErrorCode is the JSON key every machine-readable error detail
+// map keys its code under, so a client can branch on it without parsing the
+// human-readable message.
+const errorDetailKeyErrorCode = "error_code"
+
 func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string) {
+	if isClientDisconnect(err) {
+		abortClientDisconnect(c)
+		return
+	}
+	if status, ok := repositorySelectionHTTPStatus(err); ok {
+		c.JSON(status, taskErrorBody(err))
+		return
+	}
 	if isNotFound(err) {
 		c.JSON(http.StatusNotFound, gin.H{"error": fallback})
+		return
+	}
+	// A scope denial is 403, not 404: workspace.read was already granted, so
+	// existence is known to the caller and there is nothing left to hide.
+	if service.IsForbidden(err) {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+	// A rejected assignee is the caller naming someone who cannot reach the
+	// workspace, not a server fault. Its message is written to be shown.
+	if errors.Is(err, service.ErrAssigneeCannotReachWorkspace) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if errors.Is(err, service.ErrWIPLimitExceeded) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
+	var dirtyWorktreeErr *service.TaskDeleteDirtyWorktreeError
+	if errors.As(err, &dirtyWorktreeErr) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
+		return
+	}
 	if isValidationError(err) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, taskErrorBody(err))
 		return
 	}
 	log.Error("request failed", zap.Error(err))
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
 }
 
+func taskErrorBody(err error) gin.H {
+	body := gin.H{"error": err.Error()}
+	for key, value := range taskErrorDetails(err) {
+		body[key] = value
+	}
+	return body
+}
+
+func taskErrorDetails(err error) map[string]interface{} {
+	var selectionErr *service.RepositorySelectionError
+	if errors.As(err, &selectionErr) {
+		return map[string]interface{}{errorDetailKeyErrorCode: string(selectionErr.Code)}
+	}
+	if errors.Is(err, service.ErrRepositoryBranchPolicyStale) {
+		return map[string]interface{}{errorDetailKeyErrorCode: service.BranchPolicyStaleErrorCode}
+	}
+	var dirtyWorktreeErr *service.TaskDeleteDirtyWorktreeError
+	if errors.As(err, &dirtyWorktreeErr) {
+		return map[string]interface{}{
+			errorDetailKeyErrorCode: service.TaskDeleteDirtyWorktreeErrorCode,
+			"dirty_worktrees":       dirtyWorktreeErr.DirtyWorktrees,
+		}
+	}
+	return nil
+}
+
+func repositorySelectionHTTPStatus(err error) (int, bool) {
+	var selectionErr *service.RepositorySelectionError
+	if !errors.As(err, &selectionErr) {
+		return 0, false
+	}
+	switch selectionErr.Code {
+	case service.RepositorySelectionErrorInvalid:
+		return http.StatusBadRequest, true
+	case service.RepositorySelectionErrorNotFound:
+		return http.StatusNotFound, true
+	case service.RepositorySelectionErrorUnavailable:
+		return http.StatusServiceUnavailable, true
+	default:
+		return http.StatusInternalServerError, true
+	}
+}
+
+func repositorySelectionWSCode(err error) (string, bool) {
+	var selectionErr *service.RepositorySelectionError
+	if !errors.As(err, &selectionErr) {
+		return "", false
+	}
+	switch selectionErr.Code {
+	case service.RepositorySelectionErrorInvalid:
+		return ws.ErrorCodeValidation, true
+	case service.RepositorySelectionErrorNotFound:
+		return ws.ErrorCodeNotFound, true
+	case service.RepositorySelectionErrorUnavailable:
+		return ws.ErrorCodeUnavailable, true
+	default:
+		return ws.ErrorCodeInternalError, true
+	}
+}
+
 func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {
 	switch {
+	case isClientDisconnect(err):
+		abortClientDisconnect(c)
 	case isNotFound(err):
 		c.JSON(http.StatusNotFound, gin.H{"error": "task or workflow not found"})
 	case isMoveConflict(err):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		body := gin.H{"error": err.Error()}
+		if code := moveConflictCode(err); code != "" {
+			body["code"] = code
+		}
+		c.JSON(http.StatusConflict, body)
 	case isValidationError(err):
+		var changeErr *service.WorkflowChangeValidationError
+		if errors.As(err, &changeErr) {
+			body := gin.H{"code": changeErr.Code}
+			if changeErr.SourceProfileID != "" {
+				body["source_profile_id"] = changeErr.SourceProfileID
+			}
+			c.JSON(http.StatusBadRequest, body)
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
 		log.Error("task move failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "task move failed"})
 	}
+}
+
+// isClientDisconnect reports a request the caller abandoned. Handlers derive
+// their context from c.Request.Context(), which the server cancels when the
+// peer goes away, so context.Canceled here means the browser navigated,
+// unmounted a component, or aborted an in-flight fetch. Nothing failed
+// server-side and nobody is left to read a response.
+//
+// DeadlineExceeded is deliberately not included: that is our own timeout
+// firing, and it stays a logged 500.
+func isClientDisconnect(err error) bool {
+	return err != nil && errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+}
+
+func abortClientDisconnect(c *gin.Context) {
+	c.AbortWithStatus(statusClientClosedRequest)
 }
 
 func isNotFound(err error) bool {
@@ -61,15 +199,57 @@ func isNotFound(err error) bool {
 }
 
 func isMoveConflict(err error) bool {
+	return moveConflictCode(err) != ""
+}
+
+// moveEntryOptionsWSError classifies one-shot move-entry validation and
+// conflict failures for the WebSocket move handler, returning a stable
+// error code and the safe error message (which never carries option values).
+func moveEntryOptionsWSError(err error) (string, string, bool) {
+	switch {
+	case errors.Is(err, service.ErrWorkflowChangeConflict):
+		return ws.ErrorCodeConflict, moveConflictCodeWorkflowChange, true
+	case errors.Is(err, workflowmove.ErrMoveConflict):
+		return ws.ErrorCodeConflict, err.Error(), true
+	case errors.Is(err, workflowmove.ErrConflictingInstructions),
+		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange),
+		errors.Is(err, workflowmove.ErrEntryOptionsUnsupported),
+		errors.Is(err, workflowmove.ErrEntryTargetUnavailable):
+		return ws.ErrorCodeValidation, err.Error(), true
+	default:
+		var changeErr *service.WorkflowChangeValidationError
+		if errors.As(err, &changeErr) {
+			return ws.ErrorCodeValidation, changeErr.Code, true
+		}
+		return "", "", false
+	}
+}
+
+func moveConflictCode(err error) string {
 	if err == nil {
-		return false
+		return ""
+	}
+	if errors.Is(err, workflowmove.ErrMoveConflict) {
+		return moveConflictCodePending
+	}
+	if errors.Is(err, service.ErrWorkflowChangeConflict) {
+		return moveConflictCodeWorkflowChange
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "active session") ||
-		strings.Contains(msg, "archived tasks cannot be moved") ||
-		strings.Contains(msg, "different workspace") ||
-		strings.Contains(msg, "does not belong to target workflow") ||
-		strings.Contains(msg, "wip limit exceeded")
+	switch {
+	case strings.Contains(msg, "active session"):
+		return moveConflictCodeActiveSession
+	case strings.Contains(msg, "archived tasks cannot be moved"):
+		return moveConflictCodeArchived
+	case strings.Contains(msg, "different workspace"):
+		return moveConflictCodeDifferentWorkspace
+	case strings.Contains(msg, "does not belong to target workflow"):
+		return moveConflictCodeWorkflowStep
+	case strings.Contains(msg, "wip limit exceeded"):
+		return moveConflictCodeWIPLimit
+	default:
+		return ""
+	}
 }
 
 func isValidationError(err error) bool {
@@ -79,7 +259,19 @@ func isValidationError(err error) bool {
 	if errors.Is(err, service.ErrInvalidParent) || errors.Is(err, service.ErrAutoTitleUnsupportedForOffice) {
 		return true
 	}
+	if errors.Is(err, service.ErrInvalidWorkflowChange) {
+		return true
+	}
 	if errors.Is(err, service.ErrTaskTitleTooLong) {
+		return true
+	}
+	if errors.Is(err, service.ErrExternalIDInvalid) {
+		return true
+	}
+	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||
+		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange) ||
+		errors.Is(err, workflowmove.ErrEntryOptionsUnsupported) ||
+		errors.Is(err, workflowmove.ErrEntryTargetUnavailable) {
 		return true
 	}
 	msg := strings.ToLower(err.Error())

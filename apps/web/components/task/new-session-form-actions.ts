@@ -1,11 +1,18 @@
 import { useCallback, type RefObject } from "react";
 import { launchSession } from "@/lib/services/session-launch-service";
+import { useAppStore } from "@/components/state-provider";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
-import { toMessageAttachments } from "@/components/task-create-dialog-helpers";
+import {
+  hasPendingAttachmentUploads,
+  toMessageAttachments,
+} from "@/components/task-create-dialog-helpers";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { SummarizeSessionResult } from "@/hooks/use-summarize-session";
 import { applySummarizeSessionResult, type SummaryToastFn } from "./session-context-summary";
+import { t } from "@/lib/i18n";
+import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
+import type { AgentProfileRecentUseRecord } from "@/lib/agent-profile-recent-use";
 
 type SessionContextChangeOpts = {
   promptRef: RefObject<TaskFormInputsHandle | null>;
@@ -15,6 +22,23 @@ type SessionContextChangeOpts = {
   setContextValue: (v: string) => void;
   setHasPrompt: (v: boolean) => void;
 };
+
+function launchErrorDescription(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return t("common:unknownError");
+}
+
+function recordTaskSessionProfileUse(
+  profileId: string,
+  applyAgentProfileRecentUse: (
+    context: "task_session",
+    record: AgentProfileRecentUseRecord,
+  ) => void,
+) {
+  recordAgentProfileRecentUseBestEffort("task_session", profileId, (record) =>
+    applyAgentProfileRecentUse("task_session", record),
+  );
+}
 
 export function useSessionContextChange(opts: SessionContextChangeOpts) {
   const { promptRef, initialPrompt, summarize, toast, setContextValue, setHasPrompt } = opts;
@@ -42,6 +66,7 @@ export function useSessionLaunchSubmit({
   promptRef,
   taskId,
   selectedProfileId,
+  profileExplicit,
   executorId,
   contextValue,
   initialPrompt,
@@ -56,6 +81,7 @@ export function useSessionLaunchSubmit({
   promptRef: RefObject<TaskFormInputsHandle | null>;
   taskId: string;
   selectedProfileId: string;
+  profileExplicit: boolean;
   executorId: string;
   contextValue: string;
   initialPrompt: string | null;
@@ -73,6 +99,7 @@ export function useSessionLaunchSubmit({
   ) => void;
   setIsCreating: (creating: boolean) => void;
 }) {
+  const applyAgentProfileRecentUse = useAppStore((state) => state.applyAgentProfileRecentUse);
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -80,30 +107,35 @@ export function useSessionLaunchSubmit({
       const prompt =
         contextValue === "copy_prompt" && !typed && initialPrompt ? initialPrompt : typed;
       if (!prompt) return;
+      const selectedAttachments = promptRef.current?.getAttachments() ?? [];
+      if (hasPendingAttachmentUploads(selectedAttachments)) return;
       setIsCreating(true);
       try {
         const { request } = buildStartRequest(taskId, selectedProfileId, {
           executorId,
           prompt,
-          attachments: toMessageAttachments(promptRef.current?.getAttachments() ?? []),
+          profileExplicit,
+          attachments: toMessageAttachments(selectedAttachments),
         });
         const response = await launchSession(request);
         if (!response.session_id) {
           throw new Error("Session created but no session ID returned");
         }
-        const profile = agentProfiles.find((p) => p.id === selectedProfileId);
+        const effectiveProfileId = response.agent_profile_id ?? selectedProfileId;
+        recordTaskSessionProfileUse(effectiveProfileId, applyAgentProfileRecentUse);
+        const profile = agentProfiles.find((p) => p.id === effectiveProfileId);
         activateSession(
           response.session_id,
           taskId,
-          profile?.label ?? "Agent",
+          profile?.label ?? t("common:agent"),
           groupId,
           setActiveSession,
         );
         onClose();
       } catch (error) {
         toast({
-          title: "Failed to create session",
-          description: error instanceof Error ? error.message : "Unknown error",
+          title: t("task:failedToCreateSession"),
+          description: launchErrorDescription(error),
           variant: "error",
         });
       } finally {
@@ -114,6 +146,7 @@ export function useSessionLaunchSubmit({
       promptRef,
       taskId,
       selectedProfileId,
+      profileExplicit,
       executorId,
       contextValue,
       initialPrompt,
@@ -124,6 +157,7 @@ export function useSessionLaunchSubmit({
       setActiveSession,
       activateSession,
       setIsCreating,
+      applyAgentProfileRecentUse,
     ],
   );
 

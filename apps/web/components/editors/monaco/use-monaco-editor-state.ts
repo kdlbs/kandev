@@ -9,8 +9,8 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { useGutterComments } from "@/hooks/use-gutter-comments";
-import { consumePendingCursorPosition } from "@/hooks/use-file-editors";
 import type { DiffComment } from "@/lib/diff/types";
+import { useTranslation } from "react-i18next";
 
 export type FormZoneRange = {
   startLine: number;
@@ -44,6 +44,7 @@ type UseMonacoEditorStateOpts = {
 
 // eslint-disable-next-line max-lines-per-function
 export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
+  const { t } = useTranslation();
   const { path, repo, enableComments, sessionId, wrapperRef, onChange, onSave, contentRef } = opts;
 
   const [wrapEnabled, setWrapEnabled] = useState(true);
@@ -75,7 +76,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   const updateComment = useCommentsStore((state) => state.updateComment);
   const editingCommentId = useCommentsStore((state) => state.editingCommentId);
   const setEditingComment = useCommentsStore((state) => state.setEditingComment);
-  const comments = useDiffFileComments(sessionId ?? "", path);
+  const comments = useDiffFileComments(sessionId ?? "", path, undefined, repo ?? "");
   const commentedLines = useCommentedLines(comments);
 
   const handleGutterSelectionComplete = useCallback(
@@ -110,11 +111,6 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
       setEditorInstance(editor);
       decorationsRef.current = editor.createDecorationsCollection([]);
       diffDecorationsRef.current = editor.createDecorationsCollection([]);
-      const pendingPos = consumePendingCursorPosition(path, repo);
-      if (pendingPos) {
-        editor.setPosition({ lineNumber: pendingPos.line, column: pendingPos.column });
-        editor.revealLineInCenter(pendingPos.line);
-      }
       if (enableComments && sessionId) {
         disposablesRef.current.push(
           editor.onDidChangeCursorSelection(() => {
@@ -346,6 +342,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
       if (!formZoneRange || !sessionId) return null;
       const comment = buildDiffComment({
         filePath: path,
+        repositoryName: repo ?? "",
         sessionId,
         startLine: formZoneRange.startLine,
         endLine: formZoneRange.endLine,
@@ -369,7 +366,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
       }
       return comment;
     },
-    [formZoneRange, sessionId, path, addComment, clearGutterSelection],
+    [formZoneRange, sessionId, path, repo, addComment, clearGutterSelection],
   );
 
   const handleCommentSubmit = useCallback(
@@ -377,8 +374,8 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
       const comment = createCommentFromForm(annotation);
       if (comment) {
         toast({
-          title: "Comment added",
-          description: "Your comment will be sent with your next message.",
+          title: t("editors:commentAdded"),
+          description: t("editors:commentWillBeSentWithNextMessage"),
         });
       }
     },
@@ -392,13 +389,13 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
         try {
           const { queued } = await runComment(comment);
           toast({
-            title: "Comment sent",
-            description: queued ? "Queued for the agent." : "Sent to the agent.",
+            title: t("editors:commentSent"),
+            description: queued ? t("editors:queuedForTheAgent") : t("editors:sentToTheAgent"),
           });
         } catch {
           toast({
-            title: "Failed to send comment",
-            description: "Please try again.",
+            title: t("editors:failedToSendComment"),
+            description: t("editors:pleaseTryAgain"),
             variant: "error",
           });
         }
@@ -412,13 +409,13 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
       try {
         const { queued } = await runComment(comment);
         toast({
-          title: "Comment sent",
-          description: queued ? "Queued for the agent." : "Sent to the agent.",
+          title: t("editors:commentSent"),
+          description: queued ? t("editors:queuedForTheAgent") : t("editors:sentToTheAgent"),
         });
       } catch {
         toast({
-          title: "Failed to send comment",
-          description: "Please try again.",
+          title: t("editors:failedToSendComment"),
+          description: t("editors:pleaseTryAgain"),
           variant: "error",
         });
       }
@@ -430,7 +427,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
     (commentId: string) => {
       if (!sessionId) return;
       removeComment(commentId);
-      toast({ title: "Comment deleted" });
+      toast({ title: t("editors:commentDeleted") });
     },
     [sessionId, removeComment, toast],
   );
@@ -439,7 +436,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
     (commentId: string, annotation: string) => {
       updateComment(commentId, { text: annotation });
       setEditingComment(null);
-      toast({ title: "Comment updated" });
+      toast({ title: t("editors:commentUpdated") });
     },
     [updateComment, setEditingComment, toast],
   );

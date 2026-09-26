@@ -1,5 +1,7 @@
 "use client";
 
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+
 import { useMemo, useRef } from "react";
 import { IconAdjustments, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -7,16 +9,53 @@ import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import type { CommandItem } from "@/lib/commands/types";
+import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { cn } from "@/lib/utils";
 import { SidebarViewChips } from "./sidebar-view-chips";
 import { SidebarFilterPopover } from "./sidebar-filter-popover";
 import { useSidebarViewPopover } from "./use-sidebar-view-popover";
+import { useTranslation } from "react-i18next";
+import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
+
+// `group` is the command-palette bucket shared with `components/session-commands.tsx`;
+// it is grouping taxonomy rather than this surface's copy, so it migrates with
+// that file. `keywords` are search tokens, not displayed copy.
+function useSidebarCommands(
+  views: SidebarView[],
+  onOpenChange: (open: boolean) => void,
+  setActiveView: (id: string) => void,
+): CommandItem[] {
+  const { t } = useTranslation();
+  return useMemo<CommandItem[]>(() => {
+    const list: CommandItem[] = [
+      {
+        id: "sidebar-open-filter",
+        label: t("task:openSidebarFilters"),
+        group: "Sidebar",
+        keywords: ["filter", "sort", "group", "view", "sidebar"],
+        action: () => onOpenChange(true),
+      },
+    ];
+    for (const view of views) {
+      list.push({
+        id: `sidebar-switch-view-${view.id}`,
+        label: t("task:switchSidebarView", { name: sidebarViewName(view, t) }),
+        group: "Sidebar",
+        keywords: ["view", "switch", "sidebar", sidebarViewName(view, t).toLowerCase()],
+        action: () => setActiveView(view.id),
+      });
+    }
+    return list;
+  }, [t, onOpenChange, views, setActiveView]);
+}
 
 export function SidebarFilterBar() {
+  const { t } = useTranslation();
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
-  const draft = useAppStore((s) => s.sidebarViews.draft);
-  const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
-  const views = useAppStore((s) => s.sidebarViews.views);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const draft = useAppStore((s) => selectSidebarViews(s).draft);
+  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
+  const views = useAppStore((s) => selectSidebarViews(s).views);
   const setActiveView = useAppStore((s) => s.setSidebarActiveView);
   const hasDraft = !!draft && draft.baseViewId === activeViewId;
   const {
@@ -28,28 +67,9 @@ export function SidebarFilterBar() {
     newViewDisabledReason,
   } = useSidebarViewPopover();
 
-  const commands = useMemo<CommandItem[]>(() => {
-    const list: CommandItem[] = [
-      {
-        id: "sidebar-open-filter",
-        label: "Open sidebar filters",
-        group: "Sidebar",
-        keywords: ["filter", "sort", "group", "view", "sidebar"],
-        action: () => onOpenChange(true),
-      },
-    ];
-    for (const view of views) {
-      list.push({
-        id: `sidebar-switch-view-${view.id}`,
-        label: `Switch sidebar view: ${view.name}`,
-        group: "Sidebar",
-        keywords: ["view", "switch", "sidebar", view.name.toLowerCase()],
-        action: () => setActiveView(view.id),
-      });
-    }
-    return list;
-  }, [onOpenChange, views, setActiveView]);
-  useRegisterCommands(commands);
+  useRegisterCommands(useSidebarCommands(views, onOpenChange, setActiveView));
+
+  if (!workspaceId) return null;
 
   return (
     <div
@@ -84,14 +104,17 @@ export function SidebarFilterBar() {
         data-testid="sidebar-new-view"
         data-disabled-reason={newViewDisabledReason ?? undefined}
         aria-label={
-          newViewDisabledReason ? `New view unavailable. ${newViewDisabledReason}` : "New view"
+          newViewDisabledReason
+            ? t("task:newViewUnavailable", { newViewDisabledReason })
+            : t("task:newView")
         }
         title={newViewDisabledReason ?? undefined}
       >
         <IconPlus className="h-3.5 w-3.5" />
-        New view
+        {t("task:newView")}
       </Button>
       <SidebarFilterPopover
+        key={workspaceId}
         open={open}
         onOpenChange={onOpenChange}
         renameRequestedViewId={renameRequestedViewId}
@@ -104,7 +127,7 @@ export function SidebarFilterBar() {
             size="icon"
             className="h-10 w-10 shrink-0 cursor-pointer md:h-6 md:w-6"
             data-testid="sidebar-filter-gear"
-            aria-label="Sidebar filters"
+            aria-label={t("task:sidebarFilters")}
           >
             <IconAdjustments className="h-4 w-4" />
             {hasDraft && (

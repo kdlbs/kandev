@@ -1,15 +1,19 @@
+import { useEffect, useRef } from "react";
+
 /**
- * Pure decision logic for the transcript auto-scroll toggle, shared by the
- * native and Virtuoso message list renderers so the two stay behaviorally
- * consistent. Kept side-effect free for direct unit testing — the renderers
- * own all DOM / Virtuoso imperative calls and just consult these functions.
+ * Pure decision logic for the native transcript auto-scroll toggle, plus small
+ * visibility lifecycle primitives. The renderer owns all DOM calls and just
+ * consults these functions or refs.
  */
 
 /**
  * Distinguishes a genuine prepend (older messages loaded above the current
  * view, e.g. via lazy-loading) from a plain append (a new message arriving
- * at the end) when the rendered item count grows. `useScrollPositionOnPrepend`
- * only needs to compensate scrollTop for the former — compensating an append
+ * at the end) when the rendered item count grows. A one-for-one replacement
+ * of the synthetic task-description row with the stored user prompt is also
+ * a prepend layout update even though its item count stays equal.
+ * `useScrollPositionOnPrepend` only needs to compensate scrollTop for the
+ * former — compensating an append
  * too would drag a scrolled-away user's view down by the height of every new
  * message, fighting the auto-scroll toggle's "stay put while disabled"
  * contract (and, independently of that toggle, jittering anyone who has
@@ -21,28 +25,10 @@ export function isPrependUpdate(params: {
   prevFirstKey: string | null;
   nextFirstKey: string | null;
 }): boolean {
-  if (params.nextItemCount <= params.prevItemCount) return false;
+  if (params.nextItemCount < params.prevItemCount) return false;
   if (params.prevFirstKey === null) return false;
   if (params.nextFirstKey === null) return false;
   return params.nextFirstKey !== params.prevFirstKey;
-}
-
-/**
- * Whether new messages arriving should force-scroll the transcript to the
- * bottom. The native renderer already gates this on `isNearBottom`; auto-scroll
- * being disabled overrides that and suppresses the jump entirely.
- */
-export function shouldAutoScrollOnMessagesChange(enabled: boolean, isNearBottom: boolean): boolean {
-  return enabled && isNearBottom;
-}
-
-/**
- * Whether the agent starting a turn (isWorking transitioning to true) should
- * force-scroll to the bottom. Disabled auto-scroll suppresses this too — while
- * off, nothing should move the view.
- */
-export function shouldAutoScrollOnWorkingStart(enabled: boolean): boolean {
-  return enabled;
 }
 
 // Matches the settle tolerance used elsewhere for "has this scrolled past
@@ -172,14 +158,53 @@ export function createFrameCoalescer(run: () => void): {
   };
 }
 
-const FOLLOW_SMOOTH = "smooth" as const;
+/**
+ * Tracks a hidden-to-visible transition without consuming it until the caller
+ * completes its activation work. This keeps every activation owner aligned on
+ * the same visibility and pending-transition contract.
+ */
+export function useActivationPending(
+  isVisible: boolean,
+  externalActivationToken: number | null = null,
+) {
+  const isVisibleRef = useRef(isVisible);
+  const previousVisibleRef = useRef(isVisible);
+  const previousExternalTokenRef = useRef<number | null>(null);
+  const activationPendingRef = useRef(false);
+  isVisibleRef.current = isVisible;
+
+  useEffect(() => {
+    const becameVisible = !previousVisibleRef.current && isVisible;
+    const externallyActivated =
+      externalActivationToken !== null &&
+      externalActivationToken !== previousExternalTokenRef.current;
+    previousVisibleRef.current = isVisible;
+    previousExternalTokenRef.current = externalActivationToken;
+    activationPendingRef.current = isVisible
+      ? becameVisible || externallyActivated || activationPendingRef.current
+      : false;
+  }, [externalActivationToken, isVisible]);
+
+  return { isVisibleRef, activationPendingRef };
+}
 
 /**
- * Virtuoso `followOutput` resolver: identical to the renderer's original
- * always-on behavior, except disabled auto-scroll unconditionally suppresses
- * following regardless of Virtuoso's own atBottom tracking.
+ * Schedules work after the generic Dockview panel restore's current one-frame
+ * write. The generic restore also guards stale offsets, so this is a bounded
+ * coordination window rather than the sole correctness mechanism.
  */
-export function resolveFollowOutput(enabled: boolean, isAtBottom: boolean): "smooth" | false {
-  if (!enabled) return false;
-  return isAtBottom ? FOLLOW_SMOOTH : false;
+export function scheduleAfterPanelRestore(run: () => void): () => void {
+  let cancelled = false;
+  let secondFrame: number | null = null;
+  const firstFrame = requestAnimationFrame(() => {
+    if (cancelled) return;
+    secondFrame = requestAnimationFrame(() => {
+      if (!cancelled) run();
+    });
+  });
+  return () => {
+    cancelled = true;
+    cancelAnimationFrame(firstFrame);
+    if (secondFrame !== null) cancelAnimationFrame(secondFrame);
+  };
 }

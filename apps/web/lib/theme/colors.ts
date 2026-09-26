@@ -59,6 +59,7 @@ export const DIFF_COLORS = {
 // ---------------------------------------------------------------------------
 // Font stack
 // ---------------------------------------------------------------------------
+// i18n-exempt: CSS font-family stack and metrics, not copy.
 export const FONT = {
   mono: '"Monaspace Neon", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
   size: 12,

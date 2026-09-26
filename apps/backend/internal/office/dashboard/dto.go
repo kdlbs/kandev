@@ -171,6 +171,7 @@ type RunListItem struct {
 	ID                   string  `json:"id"`
 	AgentProfileID       string  `json:"agent_profile_id"`
 	Reason               string  `json:"reason"`
+	CausationID          string  `json:"causation_id,omitempty"`
 	Payload              string  `json:"payload"`
 	Status               string  `json:"status"`
 	CoalescedCount       int     `json:"coalesced_count"`
@@ -277,6 +278,7 @@ type RunDetailResponse struct {
 	ID           string            `json:"id"`
 	IDShort      string            `json:"id_short"`
 	AgentID      string            `json:"agent_id"`
+	AgentName    string            `json:"agent_name,omitempty"`
 	Reason       string            `json:"reason"`
 	Status       string            `json:"status"`
 	CancelReason *string           `json:"cancel_reason,omitempty"`
@@ -306,6 +308,10 @@ type RunDetailResponse struct {
 	// context the run dispatcher built at claim time. Surfaced for
 	// debugging.
 	ContextSnapshot string `json:"context_snapshot,omitempty"`
+	// ContinuationScope is the persisted summary scope selected when
+	// the run was created. It lets run inspection show which
+	// continuation-summary chain the run reads and updates.
+	ContinuationScope string `json:"continuation_scope,omitempty"`
 	// OutputSummary mirrors runs.output_summary — the free-form
 	// agent output captured at run finish. Kept alongside ResultJSON
 	// because legacy adapters populate this and not result_json.
@@ -325,6 +331,9 @@ type RunRuntimeDTO struct {
 
 type RunSkillDTO struct {
 	SkillID          string `json:"skill_id"`
+	DisplayName      string `json:"display_name,omitempty"`
+	Slug             string `json:"slug,omitempty"`
+	LabelSource      string `json:"label_source,omitempty"`
 	Version          string `json:"version"`
 	ContentHash      string `json:"content_hash"`
 	MaterializedPath string `json:"materialized_path"`
@@ -370,14 +379,23 @@ type TaskDTO struct {
 	ParentID               string         `json:"parentId,omitempty"`
 	ProjectID              string         `json:"projectId,omitempty"`
 	AssigneeAgentProfileID string         `json:"assigneeAgentProfileId,omitempty"`
+	AssigneeUserID         string         `json:"assigneeUserId,omitempty"`
 	Labels                 []LabelDTO     `json:"labels"`
 	Children               []*TaskDTO     `json:"children,omitempty"`
 	BlockedBy              []string       `json:"blockedBy,omitempty"`
 	Reviewers              []string       `json:"reviewers"`
 	Approvers              []string       `json:"approvers"`
 	Decisions              []*DecisionDTO `json:"decisions,omitempty"`
-	CreatedAt              string         `json:"createdAt"`
-	UpdatedAt              string         `json:"updatedAt"`
+	// StartedAt/CompletedAt are derived from the task's status-change
+	// activity log, not a persisted column (there is no started_at /
+	// completed_at on the tasks table). Only the detail handler
+	// (taskRowToDTO is called for both list and detail responses, but
+	// the derivation needs the timeline it doesn't have) sets these; see
+	// deriveTaskTimestamps in handler.go.
+	StartedAt   string `json:"startedAt,omitempty"`
+	CompletedAt string `json:"completedAt,omitempty"`
+	CreatedAt   string `json:"createdAt"`
+	UpdatedAt   string `json:"updatedAt"`
 	// IsSystem flags tasks that live in a kandev-managed system
 	// workflow (today: standing coordination; future: routine-fired).
 	// The Office Tasks UI hides these by default and surfaces a small
@@ -441,8 +459,6 @@ type CreateCommentRequest struct {
 
 // UpdateWorkspaceSettingsRequest is the request body for updating workspace settings.
 type UpdateWorkspaceSettingsRequest struct {
-	Name                             *string `json:"name"`
-	Description                      *string `json:"description"`
 	PermissionHandlingMode           *string `json:"permission_handling_mode"`
 	RecoveryLookbackHours            *int    `json:"recovery_lookback_hours"`
 	RequireApprovalForNewAgents      *bool   `json:"require_approval_for_new_agents"`

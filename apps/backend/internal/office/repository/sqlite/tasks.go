@@ -3,21 +3,33 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db/dialect"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // ErrTaskNotFound is returned (wrapped) by repository task lookups when the
 // task row is absent. Callers that must distinguish "row missing" from
-// "lookup failed" should check with errors.Is — this is the positive
-// signal the office GC uses to classify a kandev-managed container as
-// safely removable.
+// "lookup failed" should check with errors.Is.
 var ErrTaskNotFound = errors.New("task not found")
+
+// Automation runs never appear in a task list: they are hidden by their
+// provenance, not by ephemerality (docs/specs/office/requirements/automations-settings.md).
+// is_ephemeral keeps its original quick-chat meaning, so every list read here
+// pairs the two.
+const (
+	notAutomationOriginT    = `COALESCE(t.origin, '') != '` + taskmodels.TaskOriginAutomationRun + `'`
+	andNotAutomationOrigin  = ` AND COALESCE(origin, '') != '` + taskmodels.TaskOriginAutomationRun + `'`
+	andNotAutomationOriginT = " AND " + notAutomationOriginT
+)
 
 // systemTasksJoin is the JOIN onto the workflows table used by every
 // task list/search query that needs to know whether a task lives in a
@@ -82,6 +94,32 @@ func (r *Repository) GetTaskExecutionFields(ctx context.Context, taskID string) 
 	return &fields, nil
 }
 
+// GetTaskMetadata returns the raw metadata map for a task, read directly
+// off the tasks.metadata JSON column for the task-boundary causation
+// carrier (AC-OFFICE-RUN-CAUSATION-001.18). Returns a nil map, not an
+// error, when metadata is empty, absent, or fails to parse — the caller
+// treats a nil map as "no carrier to read" rather than a lookup failure.
+func (r *Repository) GetTaskMetadata(ctx context.Context, taskID string) (map[string]interface{}, error) {
+	var raw sql.NullString
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT metadata FROM tasks WHERE id = ?
+	`), taskID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !raw.Valid || raw.String == "" {
+		return nil, nil
+	}
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(raw.String), &metadata); err != nil {
+		return nil, nil
+	}
+	return metadata, nil
+}
+
 // GetTaskProjectID returns the project_id for a task, or an empty string if unset.
 func (r *Repository) GetTaskProjectID(ctx context.Context, taskID string) (string, error) {
 	var projectID string
@@ -109,6 +147,37 @@ func (r *Repository) UpdateTaskState(ctx context.Context, taskID, state string) 
 	return nil
 }
 
+// UpdateTaskStateIfWorkflowStep updates a task only when its workflow step
+// still matches the value read by the caller. This closes the validation-to-
+// write window for status gates that depend on the current workflow step.
+func (r *Repository) UpdateTaskStateIfWorkflowStep(
+	ctx context.Context, taskID, expectedStepID, state string,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks
+		SET state = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?
+	`), state, taskID, expectedStepID)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		return true, nil
+	}
+
+	var exists int
+	if err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT 1 FROM tasks WHERE id = ?
+	`), taskID).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("task not found: %s", taskID)
+		}
+		return false, err
+	}
+	return false, nil
+}
+
 // UpdateTaskAssignee writes (or clears) the per-task runner participant
 // row for a task. ADR 0005 Wave F replaced the legacy
 // tasks.assignee_agent_profile_id column with a 'runner' row in
@@ -123,21 +192,32 @@ func (r *Repository) UpdateTaskState(ctx context.Context, taskID, state string) 
 // task_id) so the projection's per-task runner clause still resolves it
 // (the (step_id="" / step_id="") match holds because the SELECT joins
 // step_id = task.workflow_step_id which is also "").
-func (r *Repository) UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) error {
+//
+// This is one of the two assignment_generation bump sites (the other is
+// insertTaskTx -> upsertRunnerInTx on create). It increments
+// tasks.assignment_generation unconditionally on every committed call —
+// including a repeat assignment to the agent that already holds the seat,
+// which is a real occurrence, not a no-op — and reads the new value back
+// inside this same transaction before Commit, returning it so callers carry
+// it forward instead of re-reading it later (a later re-read could observe a
+// different, more recent occurrence's value). A read-back failure rolls the
+// whole assignment back rather than commit a write whose generation could
+// not be reported.
+func (r *Repository) UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) (int64, error) {
 	var stepID string
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
 		`SELECT COALESCE(workflow_step_id, '') FROM tasks WHERE id = ?`),
 		taskID).Scan(&stepID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return fmt.Errorf("task not found: %s", taskID)
+			return 0, fmt.Errorf("task not found: %s", taskID)
 		}
-		return err
+		return 0, err
 	}
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -146,7 +226,7 @@ func (r *Repository) UpdateTaskAssignee(ctx context.Context, taskID, assigneeID 
 			DELETE FROM workflow_step_participants
 			WHERE step_id = ? AND task_id = ? AND role = 'runner'
 		`), stepID, taskID); err != nil {
-			return err
+			return 0, err
 		}
 	} else {
 		var existing string
@@ -159,27 +239,38 @@ func (r *Repository) UpdateTaskAssignee(ctx context.Context, taskID, assigneeID 
 			if _, err := tx.ExecContext(ctx, tx.Rebind(
 				`UPDATE workflow_step_participants SET agent_profile_id = ? WHERE id = ?`),
 				assigneeID, existing); err != nil {
-				return err
+				return 0, err
 			}
 		case sql.ErrNoRows:
 			if _, err := tx.ExecContext(ctx, tx.Rebind(`
 				INSERT INTO workflow_step_participants
-				(id, step_id, task_id, role, agent_profile_id, decision_required, position)
-				VALUES (?, ?, ?, 'runner', ?, 0, 0)
-			`), newParticipantUUID(), stepID, taskID, assigneeID); err != nil {
-				return err
+				(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+				VALUES (?, ?, ?, 'runner', ?, 0, 0, ?)
+			`), newParticipantUUID(), stepID, taskID, assigneeID, time.Now().UTC()); err != nil {
+				return 0, err
 			}
 		default:
-			return probeErr
+			return 0, probeErr
 		}
 	}
 
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
-		UPDATE tasks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?
+		UPDATE tasks SET assignment_generation = assignment_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?
 	`), taskID); err != nil {
-		return err
+		return 0, err
 	}
-	return tx.Commit()
+
+	var generation int64
+	if err := tx.QueryRowxContext(ctx, tx.Rebind(
+		`SELECT assignment_generation FROM tasks WHERE id = ?`),
+		taskID).Scan(&generation); err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return generation, nil
 }
 
 // TaskBasicInfo contains the minimal task fields needed for prompt building.
@@ -225,9 +316,14 @@ type TaskSearchResult struct {
 	ParentID               string `db:"parent_id"`
 	ProjectID              string `db:"project_id"`
 	AssigneeAgentProfileID string `db:"assignee_agent_profile_id"`
-	Labels                 string `db:"labels"`
-	CreatedAt              string `db:"created_at"`
-	UpdatedAt              string `db:"updated_at"`
+	// AssigneeUserID is the human assignee. It is only projected by the
+	// queries that need it (detail, workspace list); sqlx leaves it zero
+	// for the others rather than failing, so adding a projection later is
+	// additive.
+	AssigneeUserID string `db:"assignee_user_id"`
+	Labels         string `db:"labels"`
+	CreatedAt      string `db:"created_at"`
+	UpdatedAt      string `db:"updated_at"`
 	// IsSystem is true when the task lives in a kandev-managed system
 	// workflow (e.g. the standing coordination task; future routine
 	// tasks). The Office Tasks UI hides these by default and surfaces
@@ -253,6 +349,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 		"t.workspace_id = ?",
 		"t.archived_at IS NULL",
 		"t.is_ephemeral = 0",
+		notAutomationOriginT,
 	}
 	if !includeSystem && len(sysArgs) > 0 {
 		where = append(where, "COALESCE(w.workflow_template_id,'') NOT IN ("+sysPh+")")
@@ -269,6 +366,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 		       COALESCE(t.parent_id, '') AS parent_id,
 		       COALESCE(t.project_id, '') AS project_id,
 		       ` + RunnerProjection("t") + ` AS assignee_agent_profile_id,
+		       COALESCE(t.assignee_user_id, '') AS assignee_user_id,
 		       COALESCE(t.labels, '[]') AS labels,
 		       t.created_at,
 		       t.updated_at,
@@ -347,7 +445,7 @@ type ListTasksFilteredResult struct {
 func (r *Repository) ListTasksFiltered(
 	ctx context.Context, workspaceID string, opts ListTasksOptions,
 ) (*ListTasksFilteredResult, error) {
-	resolved, err := resolveListTasksOptions(opts)
+	resolved, err := resolveListTasksOptions(opts, r.ro.DriverName())
 	if err != nil {
 		return nil, err
 	}
@@ -408,10 +506,11 @@ type resolvedListTasksOptions struct {
 	limit     int
 	sortField TaskListSortField
 	sortCol   string
+	cursorCol string
 	dir       string
 }
 
-func resolveListTasksOptions(opts ListTasksOptions) (resolvedListTasksOptions, error) {
+func resolveListTasksOptions(opts ListTasksOptions, driver string) (resolvedListTasksOptions, error) {
 	limit := opts.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -424,11 +523,33 @@ func resolveListTasksOptions(opts ListTasksOptions) (resolvedListTasksOptions, e
 	if !ok {
 		return resolvedListTasksOptions{}, fmt.Errorf("invalid sort field: %s", sortField)
 	}
+	cursorCol := "?"
+	if sortField == TaskSortUpdatedAt || sortField == TaskSortCreatedAt {
+		sortCol = dialect.NormalizedMicrosecond(driver, sortCol)
+		// Use the same canonical microsecond key for the bound cursor. The
+		// SQLite expression repeats its input internally, so bind the value
+		// once in a subquery and reference that alias instead of expanding
+		// one placeholder per expression occurrence.
+		if dialect.IsPostgres(driver) {
+			cursorCol = "CAST(? AS timestamp)"
+		} else {
+			cursorCol = fmt.Sprintf(
+				"(SELECT %s FROM (SELECT ? AS cursor_value) AS cursor_bind)",
+				dialect.NormalizedMicrosecond(driver, "cursor_value"),
+			)
+		}
+	}
 	dir := "DESC"
 	if !opts.SortDesc {
 		dir = "ASC"
 	}
-	return resolvedListTasksOptions{limit: limit, sortField: sortField, sortCol: sortCol, dir: dir}, nil
+	return resolvedListTasksOptions{
+		limit:     limit,
+		sortField: sortField,
+		sortCol:   sortCol,
+		cursorCol: cursorCol,
+		dir:       dir,
+	}, nil
 }
 
 func buildTaskWhereClause(
@@ -439,6 +560,7 @@ func buildTaskWhereClause(
 		"t.workspace_id = ?",
 		"t.archived_at IS NULL",
 		"t.is_ephemeral = 0",
+		notAutomationOriginT,
 	}
 	if len(opts.Status) > 0 {
 		ph, vals := bindList(opts.Status)
@@ -467,8 +589,9 @@ func buildTaskWhereClause(
 			op = ">"
 		}
 		parts = append(parts, fmt.Sprintf(
-			"(%s %s ? OR (%s = ? AND t.id %s ?))",
-			resolved.sortCol, op, resolved.sortCol, op,
+			"(%s %s %s OR (%s = %s AND t.id %s ?))",
+			resolved.sortCol, op, resolved.cursorCol,
+			resolved.sortCol, resolved.cursorCol, op,
 		))
 		args = append(args, opts.CursorValue, opts.CursorValue, opts.CursorID)
 	}
@@ -515,6 +638,7 @@ func (r *Repository) GetTaskByID(ctx context.Context, taskID string) (*TaskRow, 
 		       COALESCE(t.parent_id, '') AS parent_id,
 		       COALESCE(t.project_id, '') AS project_id,
 		       `+RunnerProjection("t")+` AS assignee_agent_profile_id,
+		       COALESCE(t.assignee_user_id, '') AS assignee_user_id,
 		       COALESCE(t.labels, '[]') AS labels,
 		       t.created_at,
 		       t.updated_at
@@ -549,7 +673,7 @@ func (r *Repository) ListChildTasks(ctx context.Context, parentID string) ([]*Ta
 		FROM tasks t
 		WHERE t.parent_id = ?
 		  AND t.archived_at IS NULL
-		  AND t.is_ephemeral = 0
+		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC
 	`), parentID)
 	if err != nil {
@@ -573,6 +697,9 @@ func (r *Repository) SearchTasks(ctx context.Context, workspaceID, query string,
 
 // hasFTSTable checks whether the tasks_fts virtual table exists.
 func (r *Repository) hasFTSTable() bool {
+	if dialect.IsPostgres(r.ro.DriverName()) {
+		return false
+	}
 	var exists int
 	err := r.ro.QueryRow(
 		"SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks_fts'",
@@ -620,7 +747,7 @@ func (r *Repository) searchTasksFTS(ctx context.Context, workspaceID, query stri
 		WHERE fts.tasks_fts MATCH ?
 		  AND t.workspace_id = ?
 		  AND t.archived_at IS NULL
-		  AND t.is_ephemeral = 0
+		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY rank
 		LIMIT ?
 	`), ftsQuery, workspaceID, limit)
@@ -651,7 +778,7 @@ func (r *Repository) searchTasksLike(ctx context.Context, workspaceID, query str
 		FROM tasks t
 		WHERE t.workspace_id = ?
 		  AND t.archived_at IS NULL
-		  AND t.is_ephemeral = 0
+		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		  AND (t.title LIKE ? OR t.description LIKE ? OR t.identifier LIKE ?)
 		ORDER BY t.updated_at DESC
 		LIMIT ?
@@ -680,13 +807,17 @@ func scanSearchResults(rows *sqlx.Rows) ([]*TaskSearchResult, error) {
 // the given agent that are in an actionable state (TODO or IN_PROGRESS)
 // and not archived. Resolves the assignee through the runner projection
 // so per-task overrides and step-primary fallbacks both count.
+//
+// Automation runs are excluded: an automation configured against a workflow
+// step resolves to that step's runner, so counting its long-lived run would
+// inflate the agent's load forever and starve it of real work.
 func (r *Repository) CountActionableTasksForAgent(ctx context.Context, agentID string) (int, error) {
 	var count int
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT COUNT(*) FROM tasks t
 		WHERE `+RunnerProjection("t")+` = ?
 		  AND t.state IN ('TODO', 'IN_PROGRESS')
-		  AND t.archived_at IS NULL
+		  AND t.archived_at IS NULL`+andNotAutomationOriginT+`
 	`), agentID).Scan(&count)
 	return count, err
 }
@@ -706,13 +837,42 @@ func (r *Repository) GetCheckoutAgentBySession(ctx context.Context, sessionID st
 	return agentID, nil
 }
 
-// CheckoutTask atomically acquires an exclusive lock on a task for an agent.
-// Returns true if the lock was acquired, false if another agent holds it.
+// CheckoutTask atomically acquires a legacy task lock for an agent.
+// New scheduler launches must use CheckoutTaskForRun so the lock records the
+// exact run that owns it. This compatibility method keeps older callers and
+// migrated rows working without erasing a run-scoped lock.
 func (r *Repository) CheckoutTask(ctx context.Context, taskID, agentID string) (bool, error) {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET checkout_agent_id = ?, checkout_at = datetime('now')
-		WHERE id = ? AND (checkout_agent_id IS NULL OR checkout_agent_id = '' OR checkout_agent_id = ?)
+		UPDATE tasks SET checkout_agent_id = ?, checkout_at = datetime('now'), checkout_run_id = NULL
+		WHERE id = ? AND (
+			checkout_agent_id IS NULL OR checkout_agent_id = '' OR
+			(checkout_agent_id = ? AND (checkout_run_id IS NULL OR checkout_run_id = ''))
+		)
 	`), agentID, taskID, agentID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+// CheckoutTaskForRun atomically acquires an exclusive task lock for a run.
+// A run can renew its own lock, but another run, including one for the same
+// agent, cannot replace the recorded owner.
+func (r *Repository) CheckoutTaskForRun(ctx context.Context, taskID, agentID, runID string) (bool, error) {
+	if runID == "" {
+		return r.CheckoutTask(ctx, taskID, agentID)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET checkout_agent_id = ?, checkout_at = datetime('now'), checkout_run_id = ?
+		WHERE id = ? AND (
+			checkout_agent_id IS NULL OR checkout_agent_id = '' OR
+			(checkout_agent_id = ? AND (checkout_run_id IS NULL OR checkout_run_id = '' OR checkout_run_id = ?))
+		)
+	`), agentID, runID, taskID, agentID, runID)
 	if err != nil {
 		return false, err
 	}
@@ -726,9 +886,84 @@ func (r *Repository) CheckoutTask(ctx context.Context, taskID, agentID string) (
 // ReleaseTaskCheckout releases the exclusive lock on a task.
 func (r *Repository) ReleaseTaskCheckout(ctx context.Context, taskID string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL WHERE id = ?
+		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL, checkout_run_id = NULL WHERE id = ?
 	`), taskID)
 	return err
+}
+
+// ReleaseTaskCheckoutForAgent releases the exclusive lock on a task only if
+// agentID is the current holder. Unlike ReleaseTaskCheckout, a caller that
+// never held the lock (e.g. the loser of a checkout race, or a run for an
+// agent that was never checked out) cannot clear someone else's active
+// checkout out from under them.
+func (r *Repository) ReleaseTaskCheckoutForAgent(ctx context.Context, taskID, agentID string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL, checkout_run_id = NULL
+		WHERE id = ? AND checkout_agent_id = ?
+	`), taskID, agentID)
+	return err
+}
+
+// ReleaseTaskCheckoutForRun releases a task lock only when the run still
+// owns it. The empty-owner fallback is for rows created before
+// checkout_run_id was introduced; all new scheduler rows carry a run ID.
+func (r *Repository) ReleaseTaskCheckoutForRun(ctx context.Context, taskID, agentID, runID string) error {
+	if runID == "" {
+		return r.ReleaseTaskCheckoutForAgent(ctx, taskID, agentID)
+	}
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL, checkout_run_id = NULL
+		WHERE id = ? AND checkout_agent_id = ?
+		  AND (checkout_run_id = ? OR checkout_run_id IS NULL OR checkout_run_id = '')
+	`), taskID, agentID, runID)
+	return err
+}
+
+// ReapStaleCheckouts clears checkout_agent_id/checkout_at/checkout_run_id on tasks whose
+// checkout is older than olderThan and that have no queued or claimed run
+// *belonging to the checkout holder* in flight. This is a backstop for
+// callers that fail to release the checkout on a terminal run transition
+// (an event-subscriber path that crashes before publishing, a run that
+// never reaches a terminal event at all) — releaseTaskCheckoutForRun
+// (internal/office/service) is the primary release path; this only cleans
+// up what that missed. Returns the number of tasks reaped. json_extract is
+// SQLite-flavoured — see CancelRunsForTasks in tree_holds.go for why
+// that's acceptable here.
+//
+// The in-flight check is scoped to the checkout holder's own runs, not any
+// run on the task: a queued run can belong to a different agent that is
+// waiting precisely because this checkout is leaked (see
+// requeueContendedCheckout in scheduler_integration.go, which re-queues a
+// run that lost the checkout race) — task-scoping would let that waiting
+// run permanently suppress the reap it depends on. 'queued' stays in the
+// status list even holder-scoped: recoverStaleClaimedRuns runs immediately
+// before reapStaleCheckouts in the same tick and flips a live agent's own
+// claimed run to queued at 30 minutes, so dropping 'queued' would reap a
+// still-executing holder.
+func (r *Repository) ReapStaleCheckouts(ctx context.Context, olderThan time.Time) (int64, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL, checkout_run_id = NULL
+		WHERE checkout_agent_id IS NOT NULL
+		  AND checkout_agent_id != ''
+		  AND checkout_at IS NOT NULL
+		  AND checkout_at < ?
+		  AND NOT EXISTS (
+		      SELECT 1 FROM runs w
+		      WHERE (
+					(tasks.checkout_run_id IS NOT NULL AND tasks.checkout_run_id != ''
+					 AND w.id = tasks.checkout_run_id)
+					OR (COALESCE(tasks.checkout_run_id, '') = ''
+					 AND json_extract(w.payload, '$.task_id') = tasks.id)
+				  )
+				AND w.agent_profile_id = tasks.checkout_agent_id
+				AND json_extract(w.payload, '$.task_id') = tasks.id
+				AND w.status IN ('queued', 'claimed')
+		  )
+	`), olderThan)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 // UpdateTaskPriority sets the priority TEXT column on a task. Caller is
@@ -743,9 +978,37 @@ func (r *Repository) UpdateTaskProjectID(ctx context.Context, taskID, projectID 
 	return r.execTaskScalar(ctx, taskID, "project_id", projectID)
 }
 
-// UpdateTaskParentID sets the parent_id column. Empty string clears it.
+// UpdateTaskParentID sets the parent_id column and applies the canonical
+// re-parent workspace policy: an inherit_parent subtask whose parent is
+// changing keeps its materialized workspace as shared_group instead of
+// silently inheriting the new parent's. Empty string clears the parent.
+// The metadata normalization is conditioned on the parent actually changing,
+// so a repeated PATCH with the same parent_id is a no-op for workspace
+// semantics.
 func (r *Repository) UpdateTaskParentID(ctx context.Context, taskID, parentID string) error {
-	return r.execTaskScalar(ctx, taskID, "parent_id", parentID)
+	query := `
+		UPDATE tasks
+		SET parent_id = ?,
+			metadata = CASE
+				WHEN parent_id IS NOT ? AND json_valid(metadata) THEN CASE
+					WHEN json_extract(metadata, '$.workspace.mode') = 'inherit_parent'
+					THEN json_set(metadata, '$.workspace.mode', 'shared_group')
+					ELSE metadata
+				END
+				ELSE metadata
+			END,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), parentID, parentID, taskID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	return nil
 }
 
 // taskScalarColumns enumerates the only columns execTaskScalar may target.
@@ -755,7 +1018,6 @@ func (r *Repository) UpdateTaskParentID(ctx context.Context, taskID, parentID st
 var taskScalarColumns = map[string]struct{}{
 	"priority":   {},
 	"project_id": {},
-	"parent_id":  {},
 }
 
 // execTaskScalar updates a single TEXT column on a task and bumps updated_at.
@@ -831,8 +1093,6 @@ func (r *Repository) HasOfficeAdoption(ctx context.Context) (bool, error) {
 	return adopted, err
 }
 
-// ListUnstartedTasks returns TODO tasks with an assignee, not archived,
-// within the lookback window, that have no active run (queued/claimed/finished).
 // CountTasksByWorkspace returns the number of non-archived, non-ephemeral tasks
 // for a workspace.
 func (r *Repository) CountTasksByWorkspace(ctx context.Context, workspaceID string) (int, error) {
@@ -841,32 +1101,47 @@ func (r *Repository) CountTasksByWorkspace(ctx context.Context, workspaceID stri
 		SELECT COUNT(*) FROM tasks
 		WHERE workspace_id = ?
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 	`), workspaceID).Scan(&count)
 	return count, err
 }
 
+// ListUnstartedTasks feeds scheduler recovery, which launches whatever it
+// finds. Automation runs are excluded: they are started once, explicitly, at
+// trigger time, and recovery picking one up would launch it a second time
+// through a lifecycle path that knows nothing about the automation's run row
+// or its concurrency cap. Optional excludedTaskIDs let recovery scan past
+// candidates that it already inspected in the current tick but could not queue.
 func (r *Repository) ListUnstartedTasks(
-	ctx context.Context, lookbackHours int, limit int,
+	ctx context.Context, lookbackHours int, limit int, excludedTaskIDs ...string,
 ) ([]*UnstartedTaskRow, error) {
 	var rows []*UnstartedTaskRow
-	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+	query := `
 		SELECT t.id,
-		       `+RunnerProjection("t")+` AS assignee_agent_profile_id,
+		       ` + RunnerProjection("t") + ` AS assignee_agent_profile_id,
 		       t.workspace_id
 		FROM tasks t
 		WHERE t.state = 'TODO'
-		  AND `+taskrepo.IsFromOfficePredicate("t")+`
-		  AND `+RunnerProjection("t")+` != ''
-		  AND t.archived_at IS NULL
+		  AND ` + taskrepo.IsFromOfficePredicate("t") + `
+		  AND ` + RunnerProjection("t") + ` != ''
+		  AND t.archived_at IS NULL` + andNotAutomationOriginT + `
 		  AND t.created_at >= datetime('now', '-' || ? || ' hours')
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
 		      WHERE json_extract(w.payload, '$.task_id') = t.id
 		        AND w.status IN ('queued', 'claimed', 'finished')
 		  )
-		LIMIT ?
-	`), lookbackHours, limit)
+	`
+	args := []interface{}{lookbackHours}
+	if len(excludedTaskIDs) > 0 {
+		query += " AND t.id NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(excludedTaskIDs)), ",") + ")"
+		for _, taskID := range excludedTaskIDs {
+			args = append(args, taskID)
+		}
+	}
+	query += " ORDER BY t.created_at, t.id LIMIT ?"
+	args = append(args, limit)
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}

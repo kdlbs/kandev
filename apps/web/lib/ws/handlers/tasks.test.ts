@@ -1,98 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { registerTasksHandlers } from "./tasks";
-
-const SESS_OTHER = "sess-other";
-const SESS_DRIFTED = "sess-drifted";
-const SESS_PINNED = "sess-pinned";
-
-type Listener = (state: AppState) => void;
-
-/**
- * Minimal in-memory store for the tasks WS handler tests.
- * The handler reads kanban tasks, kanbanMulti snapshots, and tasks.activeTaskId/activeSessionId,
- * and calls setActiveSession; everything else can stay default.
- */
-function makeStore(initial: Partial<AppState> = {}) {
-  let state = {
-    kanban: { workflowId: "wf1", steps: [], tasks: [] },
-    kanbanMulti: { snapshots: {}, isLoading: false },
-    tasks: {
-      activeTaskId: null,
-      activeSessionId: null,
-      pinnedSessionId: null,
-      lastSessionByTaskId: {},
-    },
-    taskSessionsByTask: { itemsByTaskId: {}, loadedByTaskId: {}, loadingByTaskId: {} },
-    environmentIdBySessionId: {},
-    setActiveSession: vi.fn((taskId: string, sessionId: string | null) => {
-      state = {
-        ...state,
-        tasks: {
-          activeTaskId: taskId,
-          activeSessionId: sessionId,
-          pinnedSessionId: sessionId,
-          lastSessionByTaskId: sessionId
-            ? { ...state.tasks.lastSessionByTaskId, [taskId]: sessionId }
-            : state.tasks.lastSessionByTaskId,
-        },
-      };
-    }),
-    setActiveSessionAuto: vi.fn((taskId: string, sessionId: string | null) => {
-      state = {
-        ...state,
-        tasks: {
-          ...state.tasks,
-          activeTaskId: taskId,
-          activeSessionId: sessionId,
-        },
-      };
-    }),
-    removeTaskFromSidebarPrefs: vi.fn(),
-    setTaskDeletedNotification: vi.fn(),
-    ...initial,
-  } as unknown as AppState;
-
-  const listeners = new Set<Listener>();
-  return {
-    getState: () => state,
-    setState: (updater: AppState | ((s: AppState) => AppState)) => {
-      const next =
-        typeof updater === "function" ? (updater as (s: AppState) => AppState)(state) : updater;
-      state = { ...state, ...next };
-      for (const l of listeners) l(state);
-    },
-    subscribe: (l: Listener) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
-    destroy: vi.fn(),
-    getInitialState: vi.fn(),
-  } as unknown as StoreApi<AppState> & { getState: () => AppState };
-}
-
-function makeTask(id: string, primarySessionId: string | null, workflowId = "wf1") {
-  return {
-    task_id: id,
-    workflow_id: workflowId,
-    workflow_step_id: "step1",
-    title: "Test",
-    description: "",
-    state: "IN_PROGRESS",
-    primary_session_id: primarySessionId,
-    is_ephemeral: false,
-  } as Record<string, unknown>;
-}
-
-function makeMessage(payload: Record<string, unknown>) {
-  return {
-    id: "msg-1",
-    type: "notification" as const,
-    action: "task.updated" as const,
-    payload,
-  } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.updated"]>>[0];
-}
+import {
+  makeStore,
+  makeTask,
+  makeMessage,
+  makeStateChangedMessage,
+  SESS_OTHER,
+  SESS_DRIFTED,
+  SESS_PINNED,
+} from "./tasks.test-helpers";
 
 // Shared setup for the primary-session focus-follow tests: a single task t1
 // whose kanban primary, plus the active/pinned session ids, are the only knobs
@@ -114,6 +31,7 @@ function makeFollowStore(opts: {
       activeSessionId: opts.activeSessionId,
       pinnedSessionId: opts.pinnedSessionId,
       lastSessionByTaskId: {},
+      resumeSkippedSessionIds: {},
     },
     setActiveSessionAuto: opts.setActiveSessionAuto,
   });
@@ -169,6 +87,7 @@ describe("task.updated primary-session focus follow", () => {
         activeSessionId: "sess-old",
         pinnedSessionId: null,
         lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
       },
       setActiveSessionAuto,
     });
@@ -272,6 +191,7 @@ describe("task.updated primary-session focus follow (pinning)", () => {
         activeSessionId: SESS_DRIFTED,
         pinnedSessionId: SESS_PINNED,
         lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
       },
       taskSessions: {
         items: {
@@ -309,6 +229,7 @@ describe("task.updated primary-session focus follow (stale pin cleanup)", () => 
         activeSessionId: SESS_DRIFTED,
         pinnedSessionId: SESS_PINNED,
         lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
       },
       taskSessions: {
         items: {
@@ -338,6 +259,7 @@ describe("task.updated primary-session focus follow (stale pin cleanup)", () => 
         activeSessionId: SESS_DRIFTED,
         pinnedSessionId: SESS_PINNED,
         lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
       },
       taskSessions: {
         items: {
@@ -526,6 +448,7 @@ describe("task.updated repository clearing", () => {
 describe("task.updated executor preservation", () => {
   const executorMetadata = {
     primaryExecutorId: "executor-1",
+    primaryExecutorProfileId: "profile-1",
     primaryExecutorType: "worktree",
     primaryExecutorName: "Worktree",
     isRemoteExecutor: false,
@@ -590,9 +513,78 @@ describe("task.updated executor preservation", () => {
     expect(store.getState().kanban.tasks[0]).toMatchObject({
       primarySessionId: undefined,
       primaryExecutorId: undefined,
+      primaryExecutorProfileId: undefined,
       primaryExecutorType: undefined,
       primaryExecutorName: undefined,
       isRemoteExecutor: false,
     });
+  });
+});
+
+function makeParentTaskStore(parentTaskId: string) {
+  const existingTask = {
+    id: "t1",
+    workflowStepId: "step1",
+    title: "Old title",
+    position: 0,
+    primarySessionId: "session-1",
+    parentTaskId,
+  };
+  return makeStore({
+    kanban: {
+      workflowId: "wf1",
+      steps: [],
+      tasks: [existingTask],
+    } as unknown as AppState["kanban"],
+    kanbanMulti: {
+      isLoading: false,
+      snapshots: {
+        wf1: { workflowId: "wf1", workflowName: "WF1", steps: [], tasks: [existingTask] },
+      },
+    } as unknown as AppState["kanbanMulti"],
+  });
+}
+
+describe("task parent preservation", () => {
+  it("preserves parentTaskId when a partial update omits parent_id", () => {
+    const store = makeParentTaskStore("parent-1");
+
+    registerTasksHandlers(store)["task.updated"]!(
+      makeMessage({
+        ...makeTask("t1", "session-1"),
+        title: "Retitled task",
+      }),
+    );
+    registerTasksHandlers(store)["task.state_changed"]!(
+      makeStateChangedMessage({ ...makeTask("t1", "session-1"), title: "Retitled again" }),
+    );
+
+    const state = store.getState();
+    expect(state.kanban.tasks[0]).toMatchObject({ parentTaskId: "parent-1" });
+    expect(state.kanbanMulti.snapshots.wf1.tasks[0]).toMatchObject({ parentTaskId: "parent-1" });
+  });
+
+  it("clears parentTaskId when the task is explicitly detached (parent_id: null)", () => {
+    const store = makeParentTaskStore("parent-1");
+
+    registerTasksHandlers(store)["task.updated"]!(
+      makeMessage({ ...makeTask("t1", "session-1"), parent_id: null }),
+    );
+
+    const state = store.getState();
+    expect(state.kanban.tasks[0]).toMatchObject({ parentTaskId: undefined });
+    expect(state.kanbanMulti.snapshots.wf1.tasks[0]).toMatchObject({ parentTaskId: undefined });
+  });
+
+  it("adopts an explicit re-parent even while the previous parent is still preserved elsewhere", () => {
+    const store = makeParentTaskStore("parent-old");
+
+    registerTasksHandlers(store)["task.updated"]!(
+      makeMessage({ ...makeTask("t1", "session-1"), parent_id: "parent-new" }),
+    );
+
+    const state = store.getState();
+    expect(state.kanban.tasks[0]).toMatchObject({ parentTaskId: "parent-new" });
+    expect(state.kanbanMulti.snapshots.wf1.tasks[0]).toMatchObject({ parentTaskId: "parent-new" });
   });
 });

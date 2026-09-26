@@ -1,15 +1,13 @@
 import path from "node:path";
+import fs from "node:fs";
 import { type Page, expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import {
-  GitHelper,
-  makeGitEnv,
-  openTaskSession,
-  createStandardProfile,
-} from "../../helpers/git-helper";
+import { watchWs } from "../../helpers/causal-waits";
+import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+import { waitForLatestSessionDone } from "../../helpers/session";
 
 /**
  * Regression: switching from a task with env-scoped panels open (file-editor,
@@ -36,12 +34,16 @@ async function setupTaskWithFilePanel(args: {
     makeGitEnv(args.backendTmpDir),
   );
   const filename = "leak-fixture.ts";
+  // Local-executor specs can leave the worker-scoped seed clone on a task
+  // branch. Make this fixture independent of file execution order.
+  git.exec("git checkout main");
   git.createFile(filename, "// leak fixture\n");
   git.stageAll();
   git.commit("seed leak fixture");
+  git.exec("git push origin main");
 
   const profile = await createStandardProfile(args.apiClient, "panel-leak-source");
-  await args.apiClient.createTaskWithAgent(
+  const task = await args.apiClient.createTaskWithAgent(
     args.seedData.workspaceId,
     "Panel Leak Source",
     profile.id,
@@ -52,13 +54,44 @@ async function setupTaskWithFilePanel(args: {
       repository_ids: [args.seedData.repositoryId],
     },
   );
+  await waitForLatestSessionDone(
+    args.apiClient,
+    task.id,
+    1,
+    "source task did not finish preparing its workspace",
+  );
 
-  const session = await openTaskSession(args.testPage, "Panel Leak Source");
+  let workspacePath = "";
+  await expect
+    .poll(
+      async () => {
+        const environment = await args.apiClient.getTaskEnvironment(task.id);
+        workspacePath = environment?.workspace_path ?? environment?.repos?.[0]?.worktree_path ?? "";
+        return (
+          environment?.status === "ready" &&
+          workspacePath !== "" &&
+          fs.existsSync(path.join(workspacePath, filename))
+        );
+      },
+      {
+        timeout: 45_000,
+        message: "source task environment contains the committed file fixture",
+      },
+    )
+    .toBe(true);
+
+  const gateway = watchWs(args.testPage);
+  await args.testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(args.testPage);
+  await session.waitForLoad();
+  const treeResponse = gateway.waitForResponse("workspace.tree.get");
+  await args.testPage.reload();
+  await session.waitForLoad();
+  await treeResponse;
   await session.clickTab("Files");
   await expect(session.files).toBeVisible({ timeout: 10_000 });
 
-  const node = session.fileTreeNode(filename);
-  await expect(node).toBeVisible({ timeout: 15_000 });
+  const node = await session.fileTree.waitForFileTreeNode(filename, 15_000);
   await node.click();
   // The file-editor panel is env-scoped — exactly the kind that used to leak.
   await expect(args.testPage.getByTestId("preview-tab-file-editor")).toBeVisible({
@@ -87,8 +120,6 @@ const NON_DEFAULT_ENV_SCOPED_COMPONENTS = [
 ];
 
 test.describe("Sessionless task switch — env-scoped panel cleanup", () => {
-  test.describe.configure({ retries: 1 });
-
   test("dropping into a sessionless task releases the previous task's env-scoped panels", async ({
     testPage,
     apiClient,

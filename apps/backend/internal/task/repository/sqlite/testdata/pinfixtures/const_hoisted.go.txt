@@ -1,0 +1,15 @@
+package pinfixtures
+
+// Shape (a): a package-level const holding the mutating SQL, referenced by
+// identifier in the function body. The naive detector only inspects
+// *ast.BasicLit nodes found directly inside a function body, so a literal
+// hoisted to a const and referenced by name puts zero matching BasicLit
+// nodes there — this function is invisible to it.
+const updateStepSQL = "UPDATE tasks SET workflow_step_id = ? WHERE id = ?"
+
+type FixtureRepo struct{}
+
+func (r *FixtureRepo) constHoistedStepMutator(id, step string) error {
+	_, err := r.exec(updateStepSQL, step, id)
+	return err
+}

@@ -25,6 +25,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -123,7 +124,9 @@ func runSSHCommandStdin(ctx context.Context, client *ssh.Client, cmd string, std
 	}
 	defer func() { _ = session.Close() }()
 
-	var outBuf, errBuf bytes.Buffer
+	// Synchronized because the cancellation path below reads these while
+	// session.Run is still going — see syncBuffer.
+	var outBuf, errBuf syncBuffer
 	session.Stdout = &outBuf
 	session.Stderr = &errBuf
 	if stdin != nil {
@@ -141,6 +144,34 @@ func runSSHCommandStdin(ctx context.Context, client *ssh.Client, cmd string, std
 	case err := <-done:
 		return outBuf.String(), errBuf.String(), err
 	}
+}
+
+// syncBuffer is a bytes.Buffer safe for concurrent use by one writer and one
+// reader. It exists for runSSHCommandStdin's cancellation path: that path
+// returns while session.Run is still executing, so golang.org/x/crypto/ssh's
+// stdout/stderr copier goroutines are still writing into these buffers when we
+// read them — a data race on a plain bytes.Buffer, and one that outlives the
+// call, since the copiers keep writing until the remote command actually ends.
+//
+// Deliberately not an io.ReaderFrom: bytes.Buffer implements ReadFrom, and
+// io.Copy prefers it, which would let the copier reach the underlying buffer
+// without taking the lock. Exposing only Write keeps every mutation guarded.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+// String returns a consistent snapshot of whatever the remote has sent so far.
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // detectRemoteInfo runs a tiny probe to learn about the host. The support gate
@@ -432,6 +463,20 @@ func ensureRemoteTaskDir(ctx context.Context, client *ssh.Client, workdirRoot, t
 	return taskDir, nil
 }
 
+// ensureReuseRequiredRemoteTaskDirExists verifies the canonical task directory
+// before a sibling launch creates its session-scoped runtime directory beneath
+// it. Attach-only reuse must never turn a missing workspace into a replacement
+// directory through the later mkdir -p for that session directory.
+func ensureReuseRequiredRemoteTaskDirExists(ctx context.Context, client *ssh.Client, taskDir string) error {
+	if strings.TrimSpace(taskDir) == "" {
+		return fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+	}
+	if _, _, err := runSSHCommand(ctx, client, "test -d "+shellQuote(taskDir)); err != nil {
+		return fmt.Errorf("%w: remote task directory is unavailable", models.ErrWorkspaceReuseUnsafe)
+	}
+	return nil
+}
+
 // ensureRemoteSessionDir creates <taskDir>/.kandev/sessions/<sessionID>/ and
 // returns the absolute remote path. Per-session runtime data (PID file, logs,
 // agentctl socket) lives here.
@@ -440,7 +485,11 @@ func ensureRemoteSessionDir(ctx context.Context, client *ssh.Client, taskDir, se
 		return "", errors.New("ssh: session ID is empty")
 	}
 	sessionDir := taskDir + "/.kandev/sessions/" + sessionID
-	if _, _, err := runSSHCommand(ctx, client, "mkdir -p "+shellQuote(sessionDir)); err != nil {
+	// Change into the canonical directory before creating session-scoped state.
+	// A path-based mkdir -p could recreate taskDir after an attach-only probe
+	// observed it, whereas cd fails if the canonical workspace disappeared.
+	command := "cd -- " + shellQuote(taskDir) + " && mkdir -p -- " + shellQuote(".kandev/sessions/"+sessionID)
+	if _, _, err := runSSHCommand(ctx, client, command); err != nil {
 		return "", fmt.Errorf("ssh: mkdir session dir: %w", err)
 	}
 	return sessionDir, nil
@@ -456,9 +505,8 @@ func ensureRemoteSessionDir(ctx context.Context, client *ssh.Client, taskDir, se
 //	<sessionDir>/agentctl.log   — agentctl's own stdout+stderr
 //
 // agentctl honors AGENTCTL_PORT from its environment (default 39429). We pick
-// a per-session port from a wide ephemeral range; collisions on the remote are
-// vanishingly unlikely and would surface as a clear bind failure that the
-// caller can retry.
+// a per-session port from a wide ephemeral range and retry bind collisions on
+// the remote before failing the launch.
 func startRemoteAgentctl(
 	ctx context.Context,
 	client *ssh.Client,
@@ -466,11 +514,54 @@ func startRemoteAgentctl(
 	env map[string]string,
 	log *logger.Logger,
 ) (port int, pid int, err error) {
-	port = pickRemoteAgentctlPort()
 	envScript, err := buildSSHEnvInitScript(env)
 	if err != nil {
 		return 0, 0, fmt.Errorf("ssh: launch agentctl: %w", err)
 	}
+	return retryRemoteAgentctlPort(pickRemoteAgentctlPort, func(port int) (int, error) {
+		return startRemoteAgentctlOnPort(
+			ctx, client, shell, agentctlBin, workspacePath, sessionDir, envScript, port, log,
+		)
+	})
+}
+
+var errSSHAgentctlPortInUse = errors.New("ssh: remote agentctl port is already in use")
+
+const sshAgentctlPortAttempts = 5
+
+func retryRemoteAgentctlPort(
+	pickPort func() int,
+	start func(port int) (pid int, err error),
+) (port int, pid int, err error) {
+	var lastErr error
+	for range sshAgentctlPortAttempts {
+		port = pickPort()
+		pid, err = start(port)
+		if err == nil {
+			return port, pid, nil
+		}
+		lastErr = err
+		if !errors.Is(err, errSSHAgentctlPortInUse) {
+			// Preserve whatever start() reported (e.g. a live pid on a
+			// ready-timeout) so the caller can still tear down a process that
+			// did start, instead of leaking it.
+			return port, pid, err
+		}
+	}
+	return 0, 0, fmt.Errorf(
+		"ssh: agentctl exhausted %d remote port attempts: %w",
+		sshAgentctlPortAttempts,
+		lastErr,
+	)
+}
+
+func startRemoteAgentctlOnPort(
+	ctx context.Context,
+	client *ssh.Client,
+	shell, agentctlBin, workspacePath, sessionDir, envScript string,
+	port int,
+	log *logger.Logger,
+) (pid int, err error) {
 
 	// Wrap the agentctl exec in a login shell so the spawned process
 	// inherits the user's $PATH (nvm/asdf/brew etc.). Without this, even
@@ -483,7 +574,7 @@ func startRemoteAgentctl(
 	// exactly the same resolved credentials as clone/setup commands.
 	innerScript := fmt.Sprintf(
 		`set -ae
-. /dev/stdin
+`+sshStdinEnvImport+`
 set +a
 set -e
 mkdir -p %[1]s
@@ -502,16 +593,32 @@ echo "$AGENTCTL_PID"
 	)
 	out, stderr, err := runSSHCommandStdin(ctx, client, WrapLoginShell(shell, innerScript), strings.NewReader(envScript))
 	if err != nil {
-		return 0, 0, fmt.Errorf("ssh: launch agentctl: %w (stderr: %s)", err, strings.TrimSpace(stderr))
+		return 0, fmt.Errorf("ssh: launch agentctl: %w (stderr: %s)", err, strings.TrimSpace(stderr))
 	}
 	pid, err = strconv.Atoi(strings.TrimSpace(out))
 	if err != nil {
-		return 0, 0, fmt.Errorf("ssh: agentctl wrapper returned non-numeric pid %q", out)
+		return 0, fmt.Errorf("ssh: agentctl wrapper returned non-numeric pid %q", out)
 	}
 
-	// Poll the on-disk log for the "bound successfully" line; until then the
-	// process is starting up and a port-forward connect would race the bind.
-	deadline := time.Now().Add(sshAgentctlReadyTimeout)
+	return awaitRemoteAgentctlReady(
+		ctx, client, sessionDir, port, pid, sshAgentctlReadyTimeout, sshAgentctlReadyPoll, log,
+	)
+}
+
+// awaitRemoteAgentctlReady polls the on-disk log for the "bound successfully"
+// line; until then the process is starting up and a port-forward connect
+// would race the bind. timeout/poll are parameters (rather than reading the
+// package constants directly) so tests can exercise the timeout path without
+// waiting on the real 30s budget.
+func awaitRemoteAgentctlReady(
+	ctx context.Context,
+	client *ssh.Client,
+	sessionDir string,
+	port, pid int,
+	timeout, poll time.Duration,
+	log *logger.Logger,
+) (int, error) {
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		logOut, _, _ := runSSHCommand(ctx, client,
 			"cat "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
@@ -520,29 +627,71 @@ echo "$AGENTCTL_PID"
 				zap.Int("port", port),
 				zap.Int("pid", pid),
 				zap.String("session_dir", sessionDir))
-			return port, pid, nil
+			return pid, nil
 		}
 		if strings.Contains(logOut, "HTTP server failed to bind") {
-			return 0, 0, fmt.Errorf(
-				"ssh: agentctl failed to bind port %d on remote; log:\n%s", port,
+			return 0, fmt.Errorf(
+				"%w (port %d); log:\n%s", errSSHAgentctlPortInUse, port,
 				lastLines(logOut, sshAgentctlLogTailLines))
 		}
 		// Also catch "exited without binding" via pid check — if the wrapper
-		// exited before logging, kill -0 fails and we fail fast.
-		if !isRemoteAgentctlAlive(ctx, client, pid) {
-			return 0, 0, fmt.Errorf(
+		// exited before logging, kill -0 confirms absence and we fail fast.
+		alive, probeErr := probeRemoteAgentctlLiveness(ctx, client, pid)
+		if !alive {
+			if probeErr != nil {
+				return pid, fmt.Errorf(
+					"ssh: agentctl readiness probe failed: %w; log tail:\n%s",
+					probeErr, lastLines(logOut, sshAgentctlLogTailLines))
+			}
+			return 0, fmt.Errorf(
 				"ssh: agentctl exited before becoming ready; log tail:\n%s",
 				lastLines(logOut, sshAgentctlLogTailLines))
 		}
-		time.Sleep(sshAgentctlReadyPoll)
+		time.Sleep(poll)
 	}
 	tail, _, _ := runSSHCommand(ctx, client,
 		"tail -n 50 "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
-	return 0, 0, fmt.Errorf("ssh: agentctl did not become ready within %v; log tail:\n%s",
-		sshAgentctlReadyTimeout, tail)
+	// The loop above only reaches the deadline after a liveness probe reported
+	// the process alive. That probe is not a permanent guarantee, so describe
+	// it as alive on the last probe before the deadline. Return its pid so the
+	// caller can tear it down instead of leaking it.
+	return pid, fmt.Errorf("ssh: agentctl did not become ready within %v; log tail:\n%s",
+		timeout, tail)
 }
 
 const sshAgentctlLogTailLines = 25
+
+func buildSSHCreateInstanceRequest(
+	req *ExecutorCreateRequest,
+	workspacePath string,
+	agentctlBin string,
+) agentctl.CreateInstanceRequest {
+	return agentctl.CreateInstanceRequest{
+		ID:            req.InstanceID,
+		WorkspacePath: workspacePath,
+		SessionID:     req.SessionID,
+		TaskID:        req.TaskID,
+		Protocol:      req.Protocol,
+		AgentType:     sshAgentTypeFromReq(req),
+		AutoApprovePermissions: autoApprovePermissionsOverride(
+			req.AutoApprovePermissions,
+			req.AutoApprovePermissionsOverride,
+		),
+		McpServers:                 req.McpServers,
+		McpMode:                    req.McpMode,
+		McpProviders:               req.McpProviders,
+		McpProfile:                 req.McpProfile,
+		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
+		RequiresProcessKill:        requiresProcessKillFromReq(req),
+		StripEnv:                   stripEnvFromReq(req),
+		ProviderGatewayAuth:        req.ProviderGatewayAuth,
+		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:        req.RemoteContributions,
+		ContributionDestinations:   req.ContributionDestinations,
+		ComparisonTargets:          req.ComparisonTargets,
+		Env:                        selectedCheckoutAgentEnv(sshRemoteContributionEnv(req, agentctlBin), req.Metadata),
+	}
+}
 
 // createRemoteAgentInstance creates a per-session agent instance on the
 // remote agentctl control server by POSTing to /api/v1/instances over a
@@ -555,28 +704,12 @@ func createRemoteAgentInstance(
 	client *ssh.Client,
 	controlPort int,
 	workspacePath string,
+	agentctlBin string,
 	req *ExecutorCreateRequest,
 	authToken string,
 	log *logger.Logger,
 ) (int, error) {
-	body, err := json.Marshal(agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: workspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     sshAgentTypeFromReq(req),
-		AutoApprovePermissions: autoApprovePermissionsOverride(
-			req.AutoApprovePermissions,
-			req.AutoApprovePermissionsOverride,
-		),
-		McpServers:          req.McpServers,
-		McpMode:             req.McpMode,
-		RequiresProcessKill: requiresProcessKillFromReq(req),
-		StripEnv:            stripEnvFromReq(req),
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		Env:                 sshRemoteAgentEnv(req),
-	})
+	body, err := json.Marshal(buildSSHCreateInstanceRequest(req, workspacePath, agentctlBin))
 	if err != nil {
 		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)
 	}
@@ -636,6 +769,13 @@ func setSSHControlAuthorization(req *http.Request, token string) {
 	}
 }
 
+// errSSHAgentctlHandshakeRejected marks a handshake that reached a listener —
+// this launch's own freshly-started agentctl or a stale one left on the same
+// port — that rejected the nonce. Mirrors the errSSHAgentctlPortInUse idiom:
+// the caller uses errors.Is to decide whether a fresh instance is worth
+// retrying, as opposed to a transport failure or a malformed response.
+var errSSHAgentctlHandshakeRejected = errors.New("ssh: agentctl handshake rejected")
+
 func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort int, nonce string) (string, error) {
 	body, err := json.Marshal(map[string]string{"nonce": nonce})
 	if err != nil {
@@ -653,8 +793,17 @@ func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort
 		return "", fmt.Errorf("ssh: agentctl handshake: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusForbidden {
+		// 403 is exactly ConsumeNonce rejecting the nonce (control_server.go) —
+		// the one case worth a fresh instance and a retry.
+		return "", fmt.Errorf("%w: status %d", errSSHAgentctlHandshakeRejected, resp.StatusCode)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ssh: agentctl handshake returned %d", resp.StatusCode)
+		// Any other non-200 (400/404/500/...) is not the nonce rejection and
+		// must not trigger retryAgentctlHandshake's retry — that would cost
+		// up to sshAgentctlHandshakeAttempts full start-agentctl-and-tear-down
+		// cycles for a failure a fresh instance can't fix.
+		return "", fmt.Errorf("ssh: agentctl handshake: unexpected status %d", resp.StatusCode)
 	}
 	var result struct {
 		Token string `json:"token"`
@@ -663,6 +812,90 @@ func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort
 		return "", errors.New("ssh: agentctl handshake returned no token")
 	}
 	return result.Token, nil
+}
+
+// readRemoteAgentctlLogTail best-effort reads the tail of the current
+// session's agentctl.log, for attaching to a diagnosable error. Errors are
+// swallowed — a missing or unreadable log must not mask the real failure.
+func readRemoteAgentctlLogTail(ctx context.Context, client *ssh.Client, sessionDir string) string {
+	tail, _, _ := runSSHCommand(ctx, client,
+		"tail -n "+strconv.Itoa(sshAgentctlLogTailLines)+" "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
+	return tail
+}
+
+const sshAgentctlHandshakeAttempts = 3
+
+// sshAgentctlHandshakeRetryDelay is the pause between handshake retry
+// attempts. Sized against the operator-measured trigger on the SSH remote:
+// two independent launches within ~15-30s of each other race the picked
+// port's bootstrap nonce, and the loser gets rejected. The prior zero-delay
+// retry burned all sshAgentctlHandshakeAttempts in under a second — well
+// inside that window — so it could not durably escape the race it exists to
+// recover from. Waiting this long between attempts gives a concurrently
+// launching sibling time to finish (or fail) and vacate the port before the
+// next attempt.
+const sshAgentctlHandshakeRetryDelay = 15 * time.Second
+
+// retryAgentctlHandshake calls attempt up to sshAgentctlHandshakeAttempts
+// times, tearing down and retrying only when attempt fails with
+// errSSHAgentctlHandshakeRejected — the observed shape when a handshake
+// reaches a listener other than the agentctl this launch just started (a
+// stale process left on the picked port). Any other failure (bind
+// exhaustion, transport, a malformed response) is terminal and returned
+// immediately after tearing down anything attempt already started (pid > 0).
+// A teardown error is terminal too, because the next attempt would reuse the
+// same session directory while the old process may still own its pid and log.
+// delay is called between attempts (not after the last one) and is injectable
+// so tests can run the retry loop without waiting on the real backoff; ctx
+// cancellation during the wait aborts the retry immediately.
+func retryAgentctlHandshake(
+	ctx context.Context,
+	attempt func() (port, pid int, token string, err error),
+	teardown func(port, pid int) error,
+	delay func(ctx context.Context, d time.Duration) error,
+) (port, pid int, token string, err error) {
+	var lastErr error
+	for i := range sshAgentctlHandshakeAttempts {
+		port, pid, token, err = attempt()
+		if err == nil {
+			return port, pid, token, nil
+		}
+		if pid > 0 {
+			if teardownErr := teardown(port, pid); teardownErr != nil {
+				return 0, 0, "", fmt.Errorf(
+					"ssh: agentctl teardown after attempt %d: %w",
+					i+1, errors.Join(teardownErr, err))
+			}
+		}
+		// teardown removes sessionDir. startRemoteAgentctl recreates it before
+		// each new pid/log pair, so every retry starts with a clean directory.
+		if !errors.Is(err, errSSHAgentctlHandshakeRejected) {
+			return 0, 0, "", err
+		}
+		lastErr = err
+		if i < sshAgentctlHandshakeAttempts-1 {
+			if derr := delay(ctx, sshAgentctlHandshakeRetryDelay); derr != nil {
+				return 0, 0, "", fmt.Errorf("ssh: agentctl handshake retry cancelled: %w", derr)
+			}
+		}
+	}
+	return 0, 0, "", fmt.Errorf(
+		"ssh: agentctl exhausted %d handshake attempts: %w",
+		sshAgentctlHandshakeAttempts, lastErr,
+	)
+}
+
+// sleepOrContextDone blocks for d or until ctx is cancelled, whichever comes
+// first. Shared delay primitive for retryAgentctlHandshake's production caller.
+func sleepOrContextDone(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func remoteControlHTTPClient(client *ssh.Client, controlPort int) *http.Client {
@@ -692,6 +925,23 @@ const (
 	envKeyGoogleAPIKey         = "GOOGLE_API_KEY"
 	envKeyGitHubToken          = "GITHUB_TOKEN"
 	envKeyGHToken              = "GH_TOKEN"
+	envKeyGitLabToken          = "GITLAB_TOKEN"
+	envKeyGitLabHost           = "GITLAB_HOST"
+	envKeyKandevGitLabHost     = "KANDEV_GITLAB_HOST"
+	envKeyMCPTimeout           = "MCP_TIMEOUT"
+	envKeyMCPToolTimeout       = "MCP_TOOL_TIMEOUT"
+	envKeyKandevAPIURL         = "KANDEV_API_URL"
+	envKeyKandevAPIKey         = "KANDEV_API_KEY"
+	envKeyKandevRunToken       = "KANDEV_RUN_TOKEN"
+	envKeyKandevCLI            = "KANDEV_CLI"
+	envKeyKandevAgentID        = "KANDEV_AGENT_ID"
+	envKeyKandevAgentName      = "KANDEV_AGENT_NAME"
+	envKeyKandevWorkspaceID    = "KANDEV_WORKSPACE_ID"
+	envKeyKandevRunID          = "KANDEV_RUN_ID"
+	envKeyKandevTaskID         = "KANDEV_TASK_ID"
+	envKeyKandevWakeReason     = "KANDEV_WAKE_REASON"
+	envKeyKandevWakeCommentID  = "KANDEV_WAKE_COMMENT_ID"
+	envKeyKandevWakePayload    = "KANDEV_WAKE_PAYLOAD_JSON"
 )
 
 var sshRemoteAgentCredentialEnvKeys = []string{
@@ -702,6 +952,28 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 	envKeyGoogleAPIKey,
 	envKeyGitHubToken,
 	envKeyGHToken,
+	envKeyGitLabToken,
+	envKeyGitLabHost,
+	envKeyKandevGitLabHost,
+}
+
+// sshRemoteAgentRuntimeEnvKeys are resolved runtime contract values that must
+// reach the remote agent process after profile and agent precedence is applied.
+var sshRemoteAgentRuntimeEnvKeys = []string{
+	envKeyMCPTimeout,
+	envKeyMCPToolTimeout,
+	envKeyKandevAPIURL,
+	envKeyKandevAPIKey,
+	envKeyKandevRunToken,
+	envKeyKandevCLI,
+	envKeyKandevAgentID,
+	envKeyKandevAgentName,
+	envKeyKandevWorkspaceID,
+	envKeyKandevRunID,
+	envKeyKandevTaskID,
+	envKeyKandevWakeReason,
+	envKeyKandevWakeCommentID,
+	envKeyKandevWakePayload,
 }
 
 // sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each
@@ -723,8 +995,32 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 			env[key] = val
 		}
 	}
+	for _, key := range sshRemoteAgentRuntimeEnvKeys {
+		if val := req.Env[key]; val != "" {
+			env[key] = val
+		}
+	}
 	for key, value := range managedGitHubBrokerEnv(req.Env) {
 		env[key] = value
+	}
+	// GitLab workspace credentials use the indexed Git config helper rather
+	// than a GitHub broker lease. Preserve that credential-free routing shape
+	// for the remote agentctl process as well.
+	copyIndexedGitConfig(req.Env, env)
+
+	for _, key := range req.ApprovedSecretEnvKeys {
+		if !posixSSHEnvIdentifier.MatchString(key) {
+			continue
+		}
+		// Repository approval grants forwarding of an otherwise non-managed
+		// key; it must never replace a credential or broker value selected by
+		// the executor composition boundary.
+		if _, exists := env[key]; exists {
+			continue
+		}
+		if value := req.Env[key]; value != "" {
+			env[key] = value
+		}
 	}
 	if len(env) == 0 {
 		return nil
@@ -751,26 +1047,290 @@ func pickRemoteAgentctlPort() int {
 	return 40000 + mrand.IntN(20000)
 }
 
-// stopRemoteAgentctl best-effort kills a remote agentctl by PID and removes
-// the session runtime dir.
+const sshAgentctlStopPollAttempts = 50
+
+// stopRemoteAgentctl stops a remote agentctl by PID, waits for graceful exit,
+// escalates if necessary, and only then removes the session runtime dir.
 func stopRemoteAgentctl(ctx context.Context, client *ssh.Client, sessionDir string, pid int) error {
-	if pid > 0 {
-		if _, _, err := runSSHCommand(ctx, client, fmt.Sprintf("kill %d 2>/dev/null || true", pid)); err != nil {
-			return err
+	_, _, err := runSSHCommand(ctx, client, remoteAgentctlStopCommand(sessionDir, pid))
+	return err
+}
+
+//nolint:dupword // shell branches contain repeated `fi` tokens.
+func remoteAgentctlStopCommand(sessionDir string, pid int) string {
+	removeSessionDir := removeRemoteDirCommand(sessionDir)
+	if pid <= 0 {
+		return removeSessionDir
+	}
+	return fmt.Sprintf(`if kill %[1]d 2>/dev/null; then
+  attempt=0
+  while kill -0 %[1]d 2>/dev/null && [ "$attempt" -lt %[2]d ]; do
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  if kill -0 %[1]d 2>/dev/null; then
+    if ! kill -9 %[1]d 2>/dev/null && kill -0 %[1]d 2>/dev/null; then
+      echo "failed to terminate remote agentctl pid %[1]d" >&2
+      exit 1
+    fi
+  fi
+else
+  if kill -0 %[1]d 2>/dev/null; then
+    echo "failed to signal remote agentctl pid %[1]d" >&2
+    exit 1
+  fi
+fi
+if kill -0 %[1]d 2>/dev/null; then
+  echo "remote agentctl pid %[1]d is still running" >&2
+  exit 1
+fi
+%[3]s`, pid, sshAgentctlStopPollAttempts, removeSessionDir)
+}
+
+// removeRemoteDirCommand builds the shell command that reclaims a remote
+// session directory on its own, independent of whether a process is stopped.
+func removeRemoteDirCommand(dir string) string {
+	return "rm -rf " + shellQuote(dir)
+}
+
+// verifyRemoteAgentctlIdentity confirms that a pid recovered from persisted
+// executors_running metadata still belongs to the agentctl this row
+// describes, before that pid is signalled. A persisted row can outlive a
+// remote host reboot, at which point the pid is guaranteed stale, and PID
+// reuse by an unrelated process owned by the same SSH user is a real risk on
+// a shared runner — probeRemoteAgentctlLiveness alone only proves *some*
+// process holds the pid, not that it is ours.
+//
+// There are exactly two proven outcomes; everything else is an error.
+//
+//   - (false, nil) — proven abandoned: the pid is gone, or it is held by
+//     something that is not an agentctl under this row's taskDir. Nothing to
+//     signal, and this row's session directory is the caller's to reclaim.
+//   - (true, nil) — proven ours: the remote command line names agentctl with
+//     this row's taskDir as its --workdir, and the session directory's own
+//     pidfile names the same pid. Safe to signal.
+//
+// An error means identity is unproven: an SSH-level fault, a `ps` that failed
+// for any reason other than the pid being absent, or a pidfile that could not
+// be read or disagreed. Unproven is not abandoned — it is equally consistent
+// with "our live agentctl whose directory we cannot read" and with "a
+// directory that now belongs to a newer launch". The caller must therefore
+// signal nothing, remove nothing, and preserve the row, exactly as it would
+// for a failed stop.
+//
+// Note the limit of the pidfile leg: it bounds divergence between the row and
+// its session directory, but it cannot detect PID reuse where the recycled
+// pid equals this row's own persisted pid, because the pidfile and the
+// persisted pid are both written from the same launch.
+func verifyRemoteAgentctlIdentity(ctx context.Context, client *ssh.Client, pid int, sessionDir, taskDir string) (bool, error) {
+	if pid <= 0 {
+		return false, nil
+	}
+	stdout, stderr, err := runSSHCommand(ctx, client, remoteProcessCommandLineCommand(pid))
+	if err != nil {
+		var exitErr *ssh.ExitError
+		if !errors.As(err, &exitErr) {
+			return false, remoteProcessProbeError("ps -p", pid, err, stderr)
+		}
+		if !remotePsProbeConfirmsAbsence(stdout, stderr) {
+			return false, remoteProcessProbeError("ps -p", pid, err, stderr)
+		}
+		return verifyAbandonedRemoteAgentctlDirectory(ctx, client, pid, sessionDir)
+	}
+	if !remoteAgentctlCommandLineMatches(stdout, taskDir) {
+		return verifyAbandonedRemoteAgentctlDirectory(ctx, client, pid, sessionDir)
+	}
+	if err := remoteAgentctlPidFileConfirms(ctx, client, sessionDir, pid); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func verifyAbandonedRemoteAgentctlDirectory(ctx context.Context, client *ssh.Client, pid int, sessionDir string) (bool, error) {
+	filePID, present, err := readRemoteAgentctlPidFile(ctx, client, sessionDir)
+	if err != nil {
+		return false, err
+	}
+	if !present {
+		return false, nil
+	}
+	if filePID != pid {
+		return false, fmt.Errorf("remote pidfile %s/agentctl.pid names pid %d, not %d", sessionDir, filePID, pid)
+	}
+	return false, nil
+}
+
+func remoteProcessCommandLineCommand(pid int) string {
+	// BusyBox ps (used by Alpine-based SSH targets) does not support the
+	// procps/macOS `-p` selector. Prefer the precise selector when available,
+	// then read Linux's per-process argv as a portable fallback. Keep an absent
+	// PID as an empty, non-zero result so remotePsProbeConfirmsAbsence can still
+	// distinguish it from a probe error. If neither mechanism is available,
+	// return stderr and fail closed rather than treating the process as absent.
+	return fmt.Sprintf(`ps -p %[1]d -o command= 2>/dev/null || {
+  if [ ! -d /proc ]; then
+    echo "process identity probe unavailable: ps does not support -p and /proc is absent" >&2
+    exit 2
+  fi
+  if [ -e /proc/%[1]d/cmdline ]; then
+    tr '\000' ' ' < /proc/%[1]d/cmdline
+  else
+    exit 1
+  fi
+}`, pid)
+}
+
+func remoteAgentctlCommandLineMatches(commandLine, taskDir string) bool {
+	line := strings.TrimSpace(commandLine)
+	if line == "" || taskDir == "" || !strings.Contains(line, "agentctl") {
+		return false
+	}
+	return commandLineHasFlagValue(line, "--workdir", taskDir)
+}
+
+// commandLineHasFlagValue reports whether a `ps` command line passes value as
+// the whole value of flag. The value must end at a word boundary: a plain
+// substring test would also accept a sibling directory that merely starts
+// with this row's taskDir, and signalling on that evidence would kill another
+// task's agentctl.
+func commandLineHasFlagValue(line, flag, value string) bool {
+	for _, needle := range []string{flag + " " + value, flag + "=" + value} {
+		for offset := 0; ; {
+			index := strings.Index(line[offset:], needle)
+			if index < 0 {
+				break
+			}
+			end := offset + index + len(needle)
+			if end == len(line) || line[end] == ' ' || line[end] == '\t' {
+				return true
+			}
+			offset = end
 		}
 	}
-	// Leave the task dir intact (mirrors spec); only wipe session runtime.
-	_, _, _ = runSSHCommand(ctx, client, "rm -rf "+shellQuote(sessionDir))
+	return false
+}
+
+// remoteAgentctlPidFileConfirms requires the session directory's own pidfile,
+// written by the launch wrapper at <sessionDir>/agentctl.pid (see
+// startRemoteAgentctlOnPort), to name the pid that is about to be signalled.
+// Only a confirmed match returns nil. A pidfile that cannot be read, does not
+// parse, or names a different pid is an error and never a mismatch verdict,
+// because the caller reclaims the session directory on a mismatch and that
+// directory may belong to a live process.
+func remoteAgentctlPidFileConfirms(ctx context.Context, client *ssh.Client, sessionDir string, pid int) error {
+	filePID, present, err := readRemoteAgentctlPidFile(ctx, client, sessionDir)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return fmt.Errorf("remote agentctl session directory %s disappeared before pidfile verification", sessionDir)
+	}
+	if filePID != pid {
+		return fmt.Errorf("remote pidfile %s/agentctl.pid names pid %d, not %d", sessionDir, filePID, pid)
+	}
 	return nil
 }
 
-// isRemoteAgentctlAlive returns true when a kill -0 on the pid succeeds.
-func isRemoteAgentctlAlive(ctx context.Context, client *ssh.Client, pid int) bool {
-	if pid <= 0 {
-		return false
+func readRemoteAgentctlPidFile(ctx context.Context, client *ssh.Client, sessionDir string) (int, bool, error) {
+	if strings.TrimSpace(sessionDir) == "" {
+		return 0, false, errors.New("remote agentctl pidfile check: no session directory")
 	}
-	_, _, err := runSSHCommand(ctx, client, fmt.Sprintf("kill -0 %d", pid))
-	return err == nil
+	path := sessionDir + "/agentctl.pid"
+	stdout, stderr, err := runSSHCommand(ctx, client, "cat -- "+shellQuote(path))
+	if err != nil {
+		exists, existsErr := remoteSessionDirExists(ctx, client, sessionDir)
+		if existsErr != nil {
+			return 0, false, existsErr
+		}
+		if !exists {
+			return 0, false, nil
+		}
+		if detail := strings.TrimSpace(stderr); detail != "" {
+			return 0, false, fmt.Errorf("remote cat %s failed: %w (stderr: %s)", path, err, detail)
+		}
+		return 0, false, fmt.Errorf("remote cat %s failed: %w", path, err)
+	}
+	content := strings.TrimSpace(stdout)
+	filePID, err := strconv.Atoi(content)
+	if err != nil {
+		return 0, false, fmt.Errorf("remote pidfile %s does not name a pid: %q", path, content)
+	}
+	if filePID <= 0 {
+		return 0, false, fmt.Errorf("remote pidfile %s contains non-positive pid %d", path, filePID)
+	}
+	return filePID, true, nil
+}
+
+func remoteSessionDirExists(ctx context.Context, client *ssh.Client, sessionDir string) (bool, error) {
+	_, stderr, err := runSSHCommand(ctx, client, "test -d "+shellQuote(sessionDir))
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *ssh.ExitError
+	if errors.As(err, &exitErr) && strings.TrimSpace(stderr) == "" {
+		return false, nil
+	}
+	if detail := strings.TrimSpace(stderr); detail != "" {
+		return false, fmt.Errorf("remote test -d %s failed: %w (stderr: %s)", sessionDir, err, detail)
+	}
+	return false, fmt.Errorf("remote test -d %s failed: %w", sessionDir, err)
+}
+
+// probeRemoteAgentctlLiveness distinguishes a completed remote process probe
+// from an SSH failure that leaves the process state unknown.
+func probeRemoteAgentctlLiveness(ctx context.Context, client *ssh.Client, pid int) (bool, error) {
+	if pid <= 0 {
+		return false, nil
+	}
+	_, stderr, err := runSSHCommand(ctx, client, fmt.Sprintf("kill -0 %d", pid))
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *ssh.ExitError
+	if errors.As(err, &exitErr) {
+		if remoteProcessProbeConfirmsAbsence(stderr) {
+			return false, nil
+		}
+		return false, remoteProcessProbeError("kill -0", pid, err, stderr)
+	}
+	return false, err
+}
+
+func remoteProcessProbeConfirmsAbsence(stderr string) bool {
+	message := strings.ToLower(strings.TrimSpace(stderr))
+	return strings.Contains(message, "no such process") ||
+		strings.Contains(message, "no such pid") ||
+		strings.Contains(message, "esrch")
+}
+
+// remotePsProbeConfirmsAbsence distinguishes a `ps -p <pid>` selection miss
+// from a genuine probe fault. Unlike `kill -0`, `ps -p <absent-pid> -o
+// command=` never writes a "no such process" style message — on every
+// observed platform (macOS, procps/Linux) it exits non-zero with both
+// stdout and stderr empty. Treating that shape as confirmed absence keeps
+// this fail-closed: any real stderr content (a busybox/unsupported flag, a
+// permission fault, an SSH-level error) still falls through to an error
+// instead of being read as "process gone".
+func remotePsProbeConfirmsAbsence(stdout, stderr string) bool {
+	if remoteProcessProbeConfirmsAbsence(stderr) {
+		return true
+	}
+	return strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == ""
+}
+
+func remoteProcessProbeError(command string, pid int, err error, stderr string) error {
+	detail := strings.TrimSpace(stderr)
+	if detail == "" {
+		return fmt.Errorf("remote %s %d failed: %w", command, pid, err)
+	}
+	return fmt.Errorf("remote %s %d failed: %w (stderr: %s)", command, pid, err, detail)
+}
+
+// isRemoteAgentctlAlive is the best-effort boolean form used by status and
+// startup polling, where either absence or an unavailable probe means down.
+func isRemoteAgentctlAlive(ctx context.Context, client *ssh.Client, pid int) bool {
+	alive, _ := probeRemoteAgentctlLiveness(ctx, client, pid)
+	return alive
 }
 
 // SSHPortForwarder fans out incoming local-port connections to a remote port

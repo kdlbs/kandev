@@ -1,3 +1,9 @@
+import type { TaskPriority } from "@/lib/types/http";
+import type { TaskRepository } from "@/lib/types/http";
+import type { TaskLaunchRecoveryAction } from "@/lib/types/task-launch-error";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+export type { TaskPriority } from "@/lib/types/http";
+
 /**
  * Local task types for office task detail.
  * These will be replaced by backend-generated types once Wave 3A lands.
@@ -11,8 +17,6 @@ export type TaskStatus =
   | "done"
   | "cancelled"
   | "blocked";
-
-export type TaskPriority = "critical" | "high" | "medium" | "low";
 
 export type TaskRunStatus = "queued" | "claimed" | "finished" | "failed" | "cancelled";
 
@@ -83,15 +87,17 @@ export type TaskSession = {
   updatedAt?: string;
   /** Verbatim error payload populated when state === "FAILED". */
   errorMessage?: string;
+  /** Server metadata (incl. last_agent_error); refreshed by session.state_changed. */
+  metadata?: Record<string, unknown> | null;
   /** Server-resolved tool_call count; powers the "ran N commands" segment
    *  of the timeline entry header without a per-session message fetch. */
   commandCount?: number;
 };
 
 /**
- * RunError is a chat-timeline view of a single FAILED office session.
- * Sourced from TaskSession (no separate API call) — derived in
- * task-chat.tsx for entries.kind === "error".
+ * RunError is a chat-timeline view of one retained Office session failure.
+ * Sourced from TaskSession (no separate API call) and derived in task-chat.tsx
+ * for entries.kind === "error".
  */
 export type RunError = {
   id: string;
@@ -99,6 +105,16 @@ export type RunError = {
   agentProfileId?: string;
   rawPayload: string;
   failedAt: string;
+  /** Adapter-validated provider remediation URL from last_agent_error metadata. */
+  remediationUrl?: string;
+  failureCode?: string;
+  failureDetails?: string;
+  message?: string;
+  recoveryActions?: TaskLaunchRecoveryAction[];
+  taskRepositoryId?: string;
+  errorStamp?: string;
+  /** False when the session error is retained as history after recovery. */
+  isActive?: boolean;
 };
 
 export type TaskLabelLocal = {
@@ -128,10 +144,15 @@ export type Task = {
   title: string;
   description?: string;
   status: TaskStatus;
+  // Pre-normalization backend value (e.g. "SCHEDULING", "WAITING_FOR_INPUT"),
+  // preserved so ExecutionIndicator can distinguish sub-states that `status`
+  // collapses to the same canonical bucket. See OfficeTask.rawStatus.
+  rawStatus?: string;
   priority: TaskPriority;
   labels: TaskLabelLocal[];
   assigneeAgentProfileId?: string;
   assigneeName?: string;
+  assigneeUserId?: string;
   projectId?: string;
   projectName?: string;
   projectColor?: string;
@@ -159,4 +180,6 @@ export type Task = {
   updatedAt: string;
   executionPolicy?: string;
   executionState?: string;
+  statusSummary?: TaskStatusSummary | null;
+  repositories?: TaskRepository[];
 };

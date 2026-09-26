@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   IconMessage,
   IconListCheck,
@@ -9,116 +9,239 @@ import {
   IconTerminal2,
   IconGitMerge,
   IconActivity,
+  IconLayoutGrid,
 } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Badge } from "@kandev/ui/badge";
+import type { Canvas } from "@/lib/api/domains/canvas-api";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { ConnectionIssueSeverity } from "@/lib/types/connection";
 import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-status-item";
+import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
+import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
+import { PluginPanelPicker } from "./plugin-panel-picker";
+import { registrationIsVisible } from "../plugin-task-panel";
 
 type SessionMobileBottomNavProps = {
   activePanel: MobileSessionPanel;
   onPanelChange: (panel: MobileSessionPanel) => void;
+  showPromptHistory?: boolean;
   planBadge?: boolean;
   changesBadge?: number;
   hasReview?: boolean;
   showStatus: boolean;
   onOpenStatus: () => void;
   connectionIssueSeverity?: ConnectionIssueSeverity;
+  taskCanvases?: Canvas[];
+  onOpenCanvas?: (canvasId: string) => void;
+  taskId?: string | null;
+  sessionId?: string | null;
+  sessionKind?: "managed" | "passthrough" | null;
 };
 
 type NavItem = {
   label: string;
   icon: React.ReactNode;
   badge?: React.ReactNode;
+  active?: boolean;
   connectionIssueSeverity?: Exclude<ConnectionIssueSeverity, "none">;
 } & ({ panel: MobileSessionPanel; onClick?: never } | { panel?: never; onClick: () => void });
+
+function hasMobilePluginPanels(
+  taskId: string | null,
+  sessionId: string | null,
+  sessionKind: "managed" | "passthrough" | null,
+): boolean {
+  if (!taskId) return false;
+  return pluginRegistry.getTaskPanels().some(
+    (registration) =>
+      registration.mobileEnabled &&
+      registrationIsVisible(registration, {
+        taskId,
+        sessionId,
+        sessionKind,
+        presentation: "mobile",
+      }),
+  );
+}
+
+function buildMobileNavItems({
+  activePanel,
+  planBadge,
+  changesBadge,
+  hasReview,
+  showStatus,
+  onOpenStatus,
+  onOpenPluginPicker,
+  showPromptHistory,
+  hasTaskCanvases,
+  mobilePluginPanelsAvailable,
+  connectionIssueSeverity,
+  t,
+}: {
+  activePanel: MobileSessionPanel;
+  planBadge: boolean;
+  changesBadge: number;
+  hasReview: boolean;
+  showStatus: boolean;
+  onOpenStatus: () => void;
+  onOpenPluginPicker: () => void;
+  showPromptHistory: boolean;
+  hasTaskCanvases: boolean;
+  connectionIssueSeverity: ConnectionIssueSeverity;
+  t: (key: string) => string;
+  mobilePluginPanelsAvailable: boolean;
+}): NavItem[] {
+  return [
+    {
+      panel: "chat",
+      label: t("task:chat"),
+      icon: <IconMessage className="h-5 w-5" />,
+    },
+    {
+      panel: "plan",
+      label: t("task:plan"),
+      icon: <IconListCheck className="h-5 w-5" />,
+      badge: planBadge ? (
+        <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-500" />
+      ) : undefined,
+    },
+    {
+      panel: "changes",
+      label: t("task:changes"),
+      icon: <IconGitBranch className="h-5 w-5" />,
+      badge:
+        changesBadge > 0 ? (
+          <Badge
+            variant="secondary"
+            className="absolute -top-1 -right-2 h-4 min-w-4 px-1 text-[10px]"
+          >
+            {changesBadge > 99 ? "99+" : changesBadge}
+          </Badge>
+        ) : undefined,
+    },
+    {
+      panel: "files",
+      label: t("task:files"),
+      icon: <IconFolder className="h-5 w-5" />,
+    },
+    ...(hasReview
+      ? [
+          {
+            panel: "review" as const,
+            label: t("task:review"),
+            icon: <IconGitMerge className="h-5 w-5" />,
+          },
+        ]
+      : []),
+    {
+      panel: "terminal",
+      label: t("task:terminal"),
+      icon: <IconTerminal2 className="h-5 w-5" />,
+    },
+    ...(showPromptHistory || hasTaskCanvases || mobilePluginPanelsAvailable
+      ? [
+          {
+            label: t("common:panels"),
+            icon: <IconLayoutGrid className="h-5 w-5" />,
+            active:
+              parsePluginPanelId(activePanel) !== undefined || activePanel === "prompt-history",
+            onClick: onOpenPluginPicker,
+          },
+        ]
+      : []),
+    ...(showStatus
+      ? [
+          {
+            label: t("task:status"),
+            icon: <IconActivity className="h-5 w-5" />,
+            onClick: onOpenStatus,
+            ...(connectionIssueSeverity !== "none" && { connectionIssueSeverity }),
+          },
+        ]
+      : []),
+  ];
+}
 
 export function SessionMobileBottomNav({
   activePanel,
   onPanelChange,
+  showPromptHistory = false,
   planBadge = false,
   changesBadge = 0,
   hasReview = false,
   showStatus,
   onOpenStatus,
   connectionIssueSeverity = "none",
+  taskCanvases = [],
+  onOpenCanvas,
+  taskId = null,
+  sessionId = null,
+  sessionKind = null,
 }: SessionMobileBottomNavProps) {
+  const { t } = useTranslation();
+  usePluginRegistry();
+  const registryVersion = pluginRegistry.getVersion();
+  const [pluginPickerOpen, setPluginPickerOpen] = useState(false);
+  const mobilePluginPanelsAvailable = hasMobilePluginPanels(taskId, sessionId, sessionKind);
   const items: NavItem[] = useMemo(
-    () => [
-      {
-        panel: "chat",
-        label: "Chat",
-        icon: <IconMessage className="h-5 w-5" />,
-      },
-      {
-        panel: "plan",
-        label: "Plan",
-        icon: <IconListCheck className="h-5 w-5" />,
-        badge: planBadge ? (
-          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-500" />
-        ) : undefined,
-      },
-      {
-        panel: "changes",
-        label: "Changes",
-        icon: <IconGitBranch className="h-5 w-5" />,
-        badge:
-          changesBadge > 0 ? (
-            <Badge
-              variant="secondary"
-              className="absolute -top-1 -right-2 h-4 min-w-4 px-1 text-[10px]"
-            >
-              {changesBadge > 99 ? "99+" : changesBadge}
-            </Badge>
-          ) : undefined,
-      },
-      {
-        panel: "files",
-        label: "Files",
-        icon: <IconFolder className="h-5 w-5" />,
-      },
-      ...(hasReview
-        ? [
-            {
-              panel: "review" as const,
-              label: "Review",
-              icon: <IconGitMerge className="h-5 w-5" />,
-            },
-          ]
-        : []),
-      {
-        panel: "terminal",
-        label: "Terminal",
-        icon: <IconTerminal2 className="h-5 w-5" />,
-      },
-      ...(showStatus
-        ? [
-            {
-              label: "Status",
-              icon: <IconActivity className="h-5 w-5" />,
-              onClick: onOpenStatus,
-              ...(connectionIssueSeverity !== "none" && { connectionIssueSeverity }),
-            },
-          ]
-        : []),
+    () =>
+      buildMobileNavItems({
+        activePanel,
+        planBadge,
+        changesBadge,
+        hasReview,
+        showStatus,
+        onOpenStatus,
+        onOpenPluginPicker: () => setPluginPickerOpen(true),
+        showPromptHistory,
+        hasTaskCanvases: taskCanvases.length > 0,
+        mobilePluginPanelsAvailable,
+        connectionIssueSeverity,
+        t,
+      }),
+    [
+      planBadge,
+      changesBadge,
+      hasReview,
+      showStatus,
+      onOpenStatus,
+      connectionIssueSeverity,
+      registryVersion,
+      activePanel,
+      showPromptHistory,
+      taskCanvases.length,
+      mobilePluginPanelsAvailable,
+      t,
     ],
-    [planBadge, changesBadge, hasReview, showStatus, onOpenStatus, connectionIssueSeverity],
   );
 
   return (
     <nav
       className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-border bg-background"
+      data-testid="session-mobile-bottom-nav"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
       {items.map((item) => (
         <MobileNavButton
-          key={item.label}
+          key={item.panel ?? item.label}
           item={item}
           activePanel={activePanel}
           onPanelChange={onPanelChange}
         />
       ))}
+      <PluginPanelPicker
+        open={pluginPickerOpen}
+        onOpenChange={setPluginPickerOpen}
+        onSelect={onPanelChange}
+        showPromptHistory={showPromptHistory}
+        taskCanvases={taskCanvases}
+        onOpenCanvas={onOpenCanvas}
+        taskId={taskId}
+        sessionId={sessionId}
+        sessionKind={sessionKind}
+      />
     </nav>
   );
 }
@@ -139,7 +262,7 @@ function MobileNavButton({
       type="button"
       onClick={item.onClick ?? (() => onPanelChange(item.panel))}
       className={cn(
-        "flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-3 py-2 transition-colors",
+        "flex min-h-11 min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 px-3 py-2 transition-colors",
         mobileNavColorClass(item, activePanel, issueDetails !== null),
       )}
       aria-label={issueDetails?.description}
@@ -171,7 +294,7 @@ function mobileNavColorClass(
   if (hasConnectionIssue) {
     return item.connectionIssueSeverity === "lost" ? "text-destructive" : "text-amber-500";
   }
-  return activePanel === item.panel
+  return activePanel === item.panel || item.active === true
     ? "text-primary"
     : "text-muted-foreground hover:text-foreground";
 }

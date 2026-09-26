@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { LinearIssueDialog } from "./linear-issue-dialog";
 import { extractLinearKey } from "./linear-issue-common";
+import { useTranslation } from "react-i18next";
 
 export { extractLinearKey };
 
@@ -17,6 +18,7 @@ type LinearIssueButtonProps = {
 // LinearIssueButton sits in the task top bar. It extracts a Linear identifier
 // from the task title and opens a full issue dialog on click.
 export function LinearIssueButton({ workspaceId, taskTitle }: LinearIssueButtonProps) {
+  const { t } = useTranslation();
   const identifier = extractLinearKey(taskTitle);
   const [open, setOpen] = useState(false);
 
@@ -36,7 +38,9 @@ export function LinearIssueButton({ workspaceId, taskTitle }: LinearIssueButtonP
             <span className="text-xs font-medium">{identifier}</span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Open Linear issue {identifier}</TooltipContent>
+        <TooltipContent>
+          {t("linear:openLinearIssue")} {identifier}
+        </TooltipContent>
       </Tooltip>
       <LinearIssueDialog
         open={open}

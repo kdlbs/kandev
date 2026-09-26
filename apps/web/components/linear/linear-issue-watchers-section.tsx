@@ -58,7 +58,6 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
 
   const wrappedDelete = useCallback(
     async (w: LinearIssueWatch) => {
-      if (!confirm(t("linear:deleteThisLinearWatcher"))) return;
       try {
         await remove(w.id, w.workspaceId);
         toast({ description: t("linear:watcherDeleted"), variant: "success" });
@@ -213,6 +212,9 @@ export function LinearIssueWatchersSection() {
         onCreate={actions.create}
         onUpdate={(id, req) => {
           const w = editing;
+          // Unreachable-invariant guard: onUpdate only fires while a row is
+          // being edited. A developer diagnostic, not user copy.
+          // eslint-disable-next-line i18next/no-literal-string -- invariant message
           if (!w) throw new Error("update without editing watch");
           return actions.update(id, req, w.workspaceId);
         }}

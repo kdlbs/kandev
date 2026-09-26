@@ -75,3 +75,61 @@ describe("office task actions — appendTasks", () => {
     expect(store.getState().office.tasks.items).toHaveLength(1);
   });
 });
+
+describe("office task actions — status normalization at ingestion", () => {
+  it("normalizes a raw backend status on setTasks and keeps the raw value on rawStatus", () => {
+    const store = makeStore();
+    store.getState().setTasks([makeTask({ status: "CREATED" as OfficeTask["status"] })]);
+    expect(store.getState().office.tasks.items[0].status).toBe("todo");
+    expect(store.getState().office.tasks.items[0].rawStatus).toBe("CREATED");
+  });
+
+  it("normalizes a raw backend status on appendTasks", () => {
+    const store = makeStore();
+    store.getState().appendTasks([makeTask({ status: "COMPLETED" as OfficeTask["status"] })]);
+    expect(store.getState().office.tasks.items[0].status).toBe("done");
+    expect(store.getState().office.tasks.items[0].rawStatus).toBe("COMPLETED");
+  });
+
+  it("preserves a raw sub-state (SCHEDULING) that collapses into the same canonical status", () => {
+    const store = makeStore();
+    store.getState().setTasks([makeTask({ status: "SCHEDULING" as OfficeTask["status"] })]);
+    expect(store.getState().office.tasks.items[0].status).toBe("todo");
+    expect(store.getState().office.tasks.items[0].rawStatus).toBe("SCHEDULING");
+  });
+
+  it("normalizes a raw status patch via patchTaskInStore", () => {
+    const store = makeStore();
+    store.getState().setTasks([makeTask({ id: "task-1", status: "todo" })]);
+    store.getState().patchTaskInStore("task-1", { status: "SCHEDULING" as OfficeTask["status"] });
+    expect(store.getState().office.tasks.items[0].status).toBe("todo");
+    expect(store.getState().office.tasks.items[0].rawStatus).toBe("SCHEDULING");
+  });
+
+  it("leaves rawStatus untouched when a patch omits status", () => {
+    const store = makeStore();
+    store
+      .getState()
+      .setTasks([makeTask({ id: "task-1", status: "SCHEDULING" as OfficeTask["status"] })]);
+    store.getState().patchTaskInStore("task-1", { priority: "high" });
+    expect(store.getState().office.tasks.items[0].rawStatus).toBe("SCHEDULING");
+    expect(store.getState().office.tasks.items[0].priority).toBe("high");
+  });
+
+  it("restores the original rawStatus when patchTaskInStore is given a full prior snapshot (optimistic-mutation rollback)", () => {
+    const store = makeStore();
+    store
+      .getState()
+      .setTasks([makeTask({ id: "task-1", status: "SCHEDULING" as OfficeTask["status"] })]);
+    const snapshot = store.getState().office.tasks.items[0];
+
+    // Simulate an optimistic patch to a different status, then a rollback
+    // via the full prior snapshot — exactly what useOptimisticTaskMutation
+    // does on API failure.
+    store.getState().patchTaskInStore("task-1", { status: "in_review" });
+    store.getState().patchTaskInStore("task-1", snapshot);
+
+    expect(store.getState().office.tasks.items[0].status).toBe("todo");
+    expect(store.getState().office.tasks.items[0].rawStatus).toBe("SCHEDULING");
+  });
+});

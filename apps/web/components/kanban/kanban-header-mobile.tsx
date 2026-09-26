@@ -1,201 +1,148 @@
 "use client";
 
-import { Button } from "@kandev/ui/button";
-import { IconMenu2, IconMessageCircle, IconSearch } from "@tabler/icons-react";
-import Link from "@/components/routing/app-link";
+import { useRef, type MouseEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { PageTopbar } from "@/components/page-topbar";
-import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
-import { MainTopBarPluginActions } from "./main-top-bar-plugin-actions";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
+import { MobileListingContext } from "./mobile-listing-context";
+import { AppNavSheet } from "@/components/navigation/app-nav-sheet";
+import { MobileListingMenuActions } from "./mobile-listing-menu-actions";
 import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
 import { useAppStore } from "@/components/state-provider";
-import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
-import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-status-item";
-import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
-import { workspaceHomeHref } from "@/components/app-sidebar/app-sidebar-workspace-navigation";
-import { cn } from "@/lib/utils";
+import type { TaskListingPage } from "@/lib/task-listing/view-navigation";
 
 type KanbanHeaderMobileProps = {
   workspaceId?: string;
-  currentPage?: "kanban" | "tasks";
-  hideTitle?: boolean;
+  currentPage?: TaskListingPage;
   title: string;
   workspaceLabel: string;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
   tasksListOptions?: TasksListDisplayOptions;
-  showHealthIndicator: boolean;
-  onOpenHealthDialog: () => void;
+  taskListingControls?: ReactNode;
+  mobileListingStatus?: ReactNode;
 };
 
-function MobileBrandLink({ workspaceId }: Pick<KanbanHeaderMobileProps, "workspaceId">) {
-  return (
-    <Link
-      href={workspaceHomeHref(workspaceId ? { id: workspaceId } : undefined)}
-      aria-label="Kandev home"
-      className="relative z-10 shrink-0 cursor-pointer text-[15px] font-semibold leading-none transition-colors hover:text-foreground/80"
-    >
-      Kandev
-    </Link>
-  );
-}
-
-function MobileHeaderActions({
-  workspaceId,
-  workspaceLabel,
-  currentPage,
-  onSearchChange,
-  isSearchOpen,
-  handleOpenQuickChat,
-  toggleSearch,
-  setMenuOpen,
-}: {
-  workspaceId?: string;
-  workspaceLabel: string;
-  currentPage: "kanban" | "tasks";
-  onSearchChange?: (query: string) => void;
-  isSearchOpen: boolean;
-  handleOpenQuickChat: () => void;
-  toggleSearch: () => void;
-  setMenuOpen: (open: boolean) => void;
-}) {
-  const { issueSeverity } = useAppStatusDrawer();
-  const issueDetails = useConnectionIssueCopy(issueSeverity);
-
-  return (
-    <>
-      <MainTopBarPluginActions
-        workspaceId={workspaceId}
-        workspaceLabel={workspaceLabel}
-        currentPage={currentPage}
-      />
-      <TopbarMetrics size="lg" />
-      {workspaceId && (
-        <Button
-          variant="outline"
-          size="icon-lg"
-          onClick={handleOpenQuickChat}
-          className="cursor-pointer"
-          aria-label="Quick Chat"
-          data-testid="mobile-quick-chat-button"
-        >
-          <IconMessageCircle className="h-4 w-4" />
-        </Button>
-      )}
-      {onSearchChange && (
-        <Button
-          variant={isSearchOpen ? "secondary" : "outline"}
-          size="icon-lg"
-          onClick={toggleSearch}
-          className="cursor-pointer"
-          aria-pressed={isSearchOpen}
-          aria-label="Search tasks"
-          data-testid="mobile-search-toggle"
-        >
-          <IconSearch className="h-4 w-4" />
-        </Button>
-      )}
-      <Button
-        variant="outline"
-        size="icon-lg"
-        onClick={() => setMenuOpen(true)}
-        className={cn(
-          "relative cursor-pointer",
-          issueSeverity === "lost" && "text-destructive",
-          issueSeverity === "unstable" && "text-amber-500",
-        )}
-        aria-label={issueDetails ? `${issueDetails.description} Open menu` : "Open menu"}
-        data-connection-severity={issueSeverity === "none" ? undefined : issueSeverity}
-      >
-        <IconMenu2 className="h-4 w-4" />
-        {issueDetails && (
-          <span
-            className={cn(
-              "absolute right-1.5 top-1.5 size-2 rounded-full ring-2 ring-background",
-              issueDetails.dotClass,
-            )}
-            aria-hidden="true"
-          />
-        )}
-      </Button>
-    </>
-  );
-}
+const MODE_LABELS: Record<TaskListingPage, string> = {
+  kanban: "kanban:kanban",
+  tasks: "kanban:list",
+  threads: "threads:title",
+};
 
 export function KanbanHeaderMobile({
   workspaceId,
   currentPage = "kanban",
-  hideTitle = false,
   title,
   workspaceLabel,
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
   tasksListOptions,
-  showHealthIndicator,
-  onOpenHealthDialog,
+  taskListingControls,
+  mobileListingStatus,
 }: KanbanHeaderMobileProps) {
+  const { t } = useTranslation();
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
   const isSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
   const setSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
-  const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
-  const isHome = title === "Home";
+  const openerRef = useRef<HTMLButtonElement | null>(null);
+  const restoreFocusRef = useRef(true);
 
-  const toggleSearch = () => {
+  function openMenu(event: MouseEvent<HTMLButtonElement>) {
+    openerRef.current = event.currentTarget;
+    restoreFocusRef.current = true;
+    setMenuOpen(true);
+  }
+
+  function closeMenuForAction(restoreFocus = false) {
+    restoreFocusRef.current = restoreFocus;
+    setMenuOpen(false);
+  }
+
+  function restoreMenuFocus(event: Event) {
+    event.preventDefault();
+    if (restoreFocusRef.current && openerRef.current?.isConnected) {
+      openerRef.current.focus({ preventScroll: true });
+    }
+  }
+
+  function toggleSearch() {
     const next = !isSearchOpen;
     setSearchOpen(next);
-    // Clear any active query when collapsing so results aren't filtered by a hidden search.
+    // A hidden search must not leave the listing filtered.
     if (!next) onSearchChange?.("");
-  };
+  }
 
   return (
     <>
-      {/* Keep mobile root chrome compact so metrics and actions stay visible. */}
       <PageTopbar
         title={title}
-        backLabel=""
-        leading={<MobileBrandLink workspaceId={workspaceId} />}
+        testId={currentPage === "threads" ? "threads-mobile-topbar" : undefined}
+        titleSlot={
+          <div className="flex min-w-0 items-center">
+            <MobileListingContext
+              context={workspaceLabel}
+              label={t(MODE_LABELS[currentPage])}
+              status={currentPage === "threads" ? <ThreadViewSyncStatus /> : undefined}
+              onClick={openMenu}
+              aria-haspopup="dialog"
+              aria-expanded={isMenuOpen}
+              data-testid="mobile-topbar-page-context"
+            />
+            {mobileListingStatus}
+          </div>
+        }
+        className="h-14 min-h-14"
         showStatusTrigger={false}
-        className="h-10 px-3 py-1"
-        variant="root"
-        leftActions={
-          hideTitle || isHome ? null : (
-            <span className="flex min-w-0 max-w-[38vw] flex-col leading-tight">
-              <span className="truncate text-sm font-medium text-muted-foreground">{title}</span>
-              <span className="truncate text-[10px] text-muted-foreground/60">
-                {workspaceLabel}
-              </span>
-            </span>
-          )
-        }
-        actionsClassName="gap-2"
-        actions={
-          <MobileHeaderActions
-            workspaceId={workspaceId}
-            workspaceLabel={workspaceLabel}
-            currentPage={currentPage}
-            onSearchChange={onSearchChange}
-            isSearchOpen={isSearchOpen}
-            handleOpenQuickChat={handleOpenQuickChat}
-            toggleSearch={toggleSearch}
-            setMenuOpen={setMenuOpen}
-          />
-        }
+        homeAffordance="none"
+        freeWidth="lead"
+        actions={<AppNavSheet />}
       />
       <MobileMenuSheet
+        listingOnly
         open={isMenuOpen}
         onOpenChange={setMenuOpen}
+        onCloseAutoFocus={restoreMenuFocus}
         workspaceId={workspaceId}
         currentPage={currentPage}
         searchQuery={searchQuery}
         onSearchChange={onSearchChange}
         isSearchLoading={isSearchLoading}
         tasksListOptions={tasksListOptions}
-        showHealthIndicator={showHealthIndicator}
-        onOpenHealthDialog={onOpenHealthDialog}
+        listingControls={taskListingControls}
+        pageActions={
+          <MobileListingMenuActions
+            showWorkspaceActions={false}
+            workspaceId={workspaceId}
+            workspaceLabel={workspaceLabel}
+            currentPage={currentPage}
+            open={isMenuOpen}
+            closeMenu={closeMenuForAction}
+            onToggleSearch={onSearchChange ? toggleSearch : undefined}
+            isSearchOpen={isSearchOpen}
+            returnFocusRef={openerRef}
+          />
+        }
       />
     </>
+  );
+}
+
+function ThreadViewSyncStatus() {
+  const { t } = useTranslation();
+  const error = useAppStore((state) => state.threadViews.syncError);
+  if (!error) return null;
+  return (
+    <span
+      role="status"
+      className="shrink-0 text-destructive"
+      data-testid="threads-mobile-view-sync-status"
+    >
+      <IconAlertTriangle aria-hidden="true" className="size-4" />
+      <span className="sr-only">{t("threads:failedToSyncViews")}</span>
+    </span>
   );
 }

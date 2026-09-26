@@ -13,6 +13,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	acptransport "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/server/process/probe"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -59,9 +61,10 @@ type NewSessionRequest struct {
 
 // NewSessionResponse is the response to a new session call
 type NewSessionResponse struct {
-	Success   bool   `json:"success"`
-	SessionID string `json:"session_id,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Success    bool                       `json:"success"`
+	SessionID  string                     `json:"session_id,omitempty"`
+	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
+	Error      string                     `json:"error,omitempty"`
 }
 
 // LoadSessionRequest is a request to load an existing ACP session
@@ -72,9 +75,10 @@ type LoadSessionRequest struct {
 
 // LoadSessionResponse is the response to a load session call
 type LoadSessionResponse struct {
-	Success   bool   `json:"success"`
-	SessionID string `json:"session_id,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Success    bool                       `json:"success"`
+	SessionID  string                     `json:"session_id,omitempty"`
+	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
+	Error      string                     `json:"error,omitempty"`
 }
 
 // PromptRequest is a request to send a prompt to the agent
@@ -82,6 +86,12 @@ type PromptRequest struct {
 	Text             string                 `json:"text"`                  // Simple text prompt
 	Attachments      []v1.MessageAttachment `json:"attachments,omitempty"` // Optional image attachments
 	PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
+	// Steer asks for delivery into a turn that is still generating rather than
+	// waiting for it to end. Honored only when the adapter implements
+	// SteerablePrompter and the connected agent advertised the capability;
+	// otherwise it degrades silently to an ordinary prompt, which is the
+	// specified behavior for an agent that cannot steer.
+	Steer bool `json:"steer,omitempty"`
 }
 
 // PromptResponse is the response to a prompt call
@@ -109,6 +119,20 @@ type AgentStderrResponse struct {
 	Lines []string `json:"lines"`
 }
 
+// BackgroundProbeRequest is a request to sample the agent process's
+// transitive descendant set for background-workload liveness (spec
+// docs/specs/disambiguate-waiting/spec.md, AC-45). It carries no timestamp:
+// the turn start it compares against was already recorded by the adapter.
+type BackgroundProbeRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+// BackgroundProbeResponse carries the probe's three-way outcome — always
+// exactly one of "live", "settled", or "unknown" (AC-45).
+type BackgroundProbeResponse struct {
+	Result string `json:"result"`
+}
+
 // CancelResponse is the response from a cancel request.
 type CancelResponse struct {
 	Success         bool   `json:"success"`
@@ -128,9 +152,34 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	}
 
 	s.logger.Info("agent stream WebSocket connected")
+	streamID := uuid.NewString()
+
+	// This is the agentctl-local "instance is attached" signal
+	// (AC-EXECUTORS-SURVIVAL-001.5/.6): the permission-request notification
+	// site reads it to decide whether to auto-cancel on a five-second
+	// timeout (attached) or park (detached) when its channel is full.
+	s.procMgr.MarkAttached()
+	defer s.procMgr.MarkDetached()
 
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
+
+	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2: terminate this stream if the
+	// control server's credential rotates while it is open, so a prior
+	// holder cannot keep consuming an instance's events past the moment its
+	// credential is superseded. The channel comes from instanceAuth's
+	// context value, captured atomically with the request's own accept
+	// check -- not a fresh Invalidated() call here, which would be a second,
+	// independent lock acquisition racing a concurrent rotation.
+	if invalidated := credentialInvalidatedFromContext(c); invalidated != nil {
+		go func() {
+			select {
+			case <-invalidated:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+	}
 
 	// Use a mutex for writing to the WebSocket
 	var writeMu sync.Mutex
@@ -153,8 +202,11 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	wg.Add(1)
 	go s.runAgentStreamReader(ctx, conn, writeMessage, cancel, &wg)
 	wg.Add(1)
-	go s.runAgentStreamWriter(ctx, conn, updatesCh, mcpRequestCh, writeMessage, &wg)
+	go s.runAgentStreamWriter(ctx, conn, streamID, updatesCh, mcpRequestCh, writeMessage, &wg)
 	wg.Wait()
+	if s.mcpBackendClient != nil {
+		s.mcpBackendClient.FailStreamRequests(streamID, errors.New("agent stream disconnected"))
+	}
 }
 
 // runAgentStreamReader reads MCP responses and agent operation requests from the backend connection.
@@ -200,7 +252,7 @@ func (s *Server) runAgentStreamReader(ctx context.Context, conn *websocket.Conn,
 }
 
 // runAgentStreamWriter sends agent events and MCP requests to the backend connection.
-func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, wg *sync.WaitGroup) {
+func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn, streamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer func() {
 		if err := conn.Close(); err != nil {
@@ -235,8 +287,17 @@ func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn,
 				continue
 			}
 			if err := writeMessage(data); err != nil {
-				s.logger.Debug("failed to write MCP request", zap.Error(err))
+				s.logger.Warn("failed to write MCP request",
+					zap.String("request_id", mcpReq.ID),
+					zap.String("action", mcpReq.Action),
+					zap.Error(err))
+				if s.mcpBackendClient != nil {
+					s.mcpBackendClient.FailRequest(mcpReq.ID, fmt.Errorf("failed to write MCP request to agent stream: %w", err))
+				}
 				return
+			}
+			if s.mcpBackendClient != nil {
+				s.mcpBackendClient.BindRequestToStream(mcpReq.ID, streamID)
 			}
 		}
 	}
@@ -262,8 +323,16 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSCancel(ctx, msg)
 	case "agent.permissions.respond":
 		return s.handleWSPermissionRespond(ctx, msg)
+	case "agent.permissions.list":
+		return s.handleWSPermissionList(msg)
+	case "agent.permissions.resolve":
+		return s.handleWSPermissionResolve(msg)
+	case "agent.permissions.cancel":
+		return s.handleWSPermissionCancel(msg)
 	case "agent.stderr":
 		return s.handleWSStderr(ctx, msg)
+	case "agent.background.probe":
+		return s.handleWSBackgroundProbe(ctx, msg)
 	case "agent.session.set_mode":
 		return s.handleWSSetMode(ctx, msg)
 	case "agent.session.set_model":
@@ -278,6 +347,79 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, fmt.Sprintf("unknown action: %s", msg.Action), nil)
 		return resp
 	}
+}
+
+func (s *Server) handleWSPermissionCancel(msg *ws.Message) *ws.Message {
+	var req streams.PermissionCancelRequest
+	if err := msg.ParsePayload(&req); err != nil || req.RequestID == "" || req.PendingID == "" {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "request_id and pending_id are required", nil)
+		return resp
+	}
+	result, err := s.procMgr.CancelPermission(req.RequestID, req.PendingID)
+	if err == nil {
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, result)
+		return resp
+	}
+	var operationErr *process.PermissionOperationError
+	if !errors.As(err, &operationErr) {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "permission cancellation failed", nil)
+		return resp
+	}
+	code := ws.ErrorCodeConflict
+	switch operationErr.Code {
+	case streams.PermissionErrorNotFound:
+		code = ws.ErrorCodeNotFound
+	case streams.PermissionErrorDeliveryFailed:
+		code = ws.ErrorCodeInternalError
+	}
+	resp, _ := ws.NewError(msg.ID, msg.Action, code, operationErr.Code, map[string]any{"permission_code": operationErr.Code})
+	return resp
+}
+
+func (s *Server) handleWSPermissionList(msg *ws.Message) *ws.Message {
+	permissions := s.procMgr.ListPendingPermissions()
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, streams.PermissionListResponse{
+		Permissions: permissions,
+		Total:       len(permissions),
+	})
+	return resp
+}
+
+func (s *Server) handleWSPermissionResolve(msg *ws.Message) *ws.Message {
+	var req streams.PermissionResolveRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request", nil)
+		return resp
+	}
+	if req.RequestID == "" || req.PendingID == "" || req.OptionID == "" {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "request_id, pending_id, and option_id are required", nil)
+		return resp
+	}
+
+	result, err := s.procMgr.ResolvePermission(req.RequestID, req.PendingID, req.OptionID)
+	if err == nil {
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, result)
+		return resp
+	}
+
+	var operationErr *process.PermissionOperationError
+	if !errors.As(err, &operationErr) {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "permission resolution failed", nil)
+		return resp
+	}
+	code := ws.ErrorCodeConflict
+	switch operationErr.Code {
+	case streams.PermissionErrorNotFound:
+		code = ws.ErrorCodeNotFound
+	case streams.PermissionErrorOptionNotOffered:
+		code = ws.ErrorCodeValidation
+	case streams.PermissionErrorDeliveryFailed:
+		code = ws.ErrorCodeInternalError
+	}
+	resp, _ := ws.NewError(msg.ID, msg.Action, code, operationErr.Code, map[string]any{
+		"permission_code": operationErr.Code,
+	})
+	return resp
 }
 
 func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Message {
@@ -463,8 +605,9 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 	}
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
-		Success:   true,
-		SessionID: sessionID,
+		Success:    true,
+		SessionID:  sessionID,
+		ModelState: sessionModelState(adapter),
 	})
 	return resp
 }
@@ -513,8 +656,9 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, LoadSessionResponse{
-		Success:   true,
-		SessionID: req.SessionID,
+		Success:    true,
+		SessionID:  req.SessionID,
+		ModelState: sessionModelState(adapter),
 	})
 	return resp
 }
@@ -538,6 +682,11 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 		return resp
 	}
 
+	// The retained slot belongs to the previous terminal turn. Clear it before
+	// accepting this prompt so recovery cannot replay an old completion as the
+	// result of the new turn.
+	s.procMgr.ClearTurnOutcome(req.PromptGeneration)
+
 	// Cancel any pending permissions so the agent isn't blocked waiting for
 	// the user to approve a previous tool call while processing the new prompt.
 	s.procMgr.CancelPendingPermissions()
@@ -550,17 +699,29 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	// The prompt completes naturally when the agent process exits (stdin/stdout close),
 	// the user cancels, or agentctl shuts down.
 	go func() {
-		if err := adapter.Prompt(context.Background(), req.Text, req.Attachments, req.PromptGeneration); err != nil {
+		if err := promptOrSteer(context.Background(), adapter, req); err != nil {
 			if acptransport.IsPromptAbandonedAfterCancel(err) {
 				s.logger.Info("async prompt abandoned after cancel; suppressing stale error event",
 					zap.Error(err))
 				return
 			}
-			s.logger.Error("async prompt failed", zap.Error(err))
+			providerID, modelID := providerErrorContext(adapter)
+			providerError := acptransport.ProviderErrorFromError(err, providerID, modelID)
+			// The raw error string is only safe for the correlated stderr
+			// diagnostic (its Error() is the sanitized message). A structured
+			// ACP RequestError serializes its Data — including action_url and
+			// any other raw provider fields — into Error(), so when a safe
+			// provider diagnostic exists it must win for both the event and
+			// the log; never let the raw error cross the boundary.
+			message := err.Error()
+			if providerError != nil {
+				message = providerError.Message
+			}
+			s.logger.Error("async prompt failed", zap.String("error_message", message))
 			s.procMgr.SendErrorEventWithProviderError(
-				err.Error(),
+				message,
 				req.PromptGeneration,
-				acptransport.ProviderErrorFromError(err),
+				providerError,
 			)
 		}
 	}()
@@ -627,6 +788,50 @@ func (s *Server) handleWSPermissionRespond(_ context.Context, msg *ws.Message) *
 func (s *Server) handleWSStderr(_ context.Context, msg *ws.Message) *ws.Message {
 	lines := s.procMgr.GetRecentStderr()
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, AgentStderrResponse{Lines: lines})
+	return resp
+}
+
+// handleWSBackgroundProbe implements agent.background.probe (spec
+// docs/specs/disambiguate-waiting/spec.md, §"Probe transport"). It samples
+// the running agent process's transitive descendant set for a member
+// started at-or-after the turn start recorded for req.SessionID (D3/D5).
+// Anything short of a clean sample — no adapter, an adapter that doesn't
+// record turn starts, or no recorded turn start for this session — reports
+// ResultUnknown rather than an error, since "unknown" is itself one of the
+// three valid response literals (AC-45); only a fully unavailable agent
+// process is a transport-level error, consistent with the other handlers
+// in this file.
+func (s *Server) handleWSBackgroundProbe(_ context.Context, msg *ws.Message) *ws.Message {
+	var req BackgroundProbeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
+		return resp
+	}
+
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+
+	recorder, ok := agentAdapter.(adapter.TurnStartRecorder)
+	if !ok {
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, BackgroundProbeResponse{Result: string(probe.ResultUnknown)})
+		return resp
+	}
+
+	turnStart, ok := recorder.RecordedTurnStart(req.SessionID)
+	if !ok {
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, BackgroundProbeResponse{Result: string(probe.ResultUnknown)})
+		return resp
+	}
+
+	result, err := probe.ProbeBackgroundWorkloads(s.procMgr.AgentPID(), turnStart)
+	if err != nil {
+		s.logger.Warn("background probe failed", zap.String("session_id", req.SessionID), zap.Error(err))
+	}
+
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, BackgroundProbeResponse{Result: string(result)})
 	return resp
 }
 
@@ -749,8 +954,48 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 	}
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
-		Success:   true,
-		SessionID: sessionID,
+		Success:    true,
+		SessionID:  sessionID,
+		ModelState: sessionModelState(agentAdapter),
 	})
 	return resp
+}
+
+func sessionModelState(agentAdapter adapter.AgentAdapter) *streams.SessionModelState {
+	provider, ok := agentAdapter.(adapter.SessionModelStateProvider)
+	if !ok {
+		return nil
+	}
+	return provider.GetSessionModelState()
+}
+
+// providerErrorContext reads the adapter state a generic ACP prompt-error
+// projection needs but cannot derive from the error itself: the negotiated
+// provider identity and the session's settled model identity. An adapter that
+// does not implement the optional interface yields no context, and the
+// projection omits both fields.
+func providerErrorContext(agentAdapter adapter.AgentAdapter) (providerID, modelID string) {
+	provider, ok := agentAdapter.(adapter.ProviderErrorContextProvider)
+	if !ok {
+		return "", ""
+	}
+	return provider.ProviderErrorContext()
+}
+
+// promptOrSteer routes a prompt to the steering path when the caller asked for it
+// and the adapter can actually do it. An adapter that does not implement
+// SteerablePrompter, or a connected agent that never advertised the capability,
+// falls back to the ordinary prompt — the message still reaches the agent, just
+// at the next turn boundary, which is exactly today's behavior.
+func promptOrSteer(
+	ctx context.Context,
+	adpt adapter.AgentAdapter,
+	req PromptRequest,
+) error {
+	if req.Steer {
+		if steerable, ok := adpt.(adapter.SteerablePrompter); ok && steerable.SupportsSteering() {
+			return steerable.PromptSteer(ctx, req.Text, req.Attachments, req.PromptGeneration)
+		}
+	}
+	return adpt.Prompt(ctx, req.Text, req.Attachments, req.PromptGeneration)
 }

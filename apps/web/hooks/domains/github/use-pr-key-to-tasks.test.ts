@@ -16,6 +16,7 @@ afterEach(() => cleanup());
 function makeTaskPR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "kdlbs",
     repo: "kandev",

@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -24,28 +26,40 @@ var launcherShutdownDebug atomic.Bool
 var launcherStatusOutput io.Writer = os.Stderr
 var launcherExit = os.Exit
 
+type gracefulSignalScope string
+
+const (
+	gracefulSignalRootOnly    gracefulSignalScope = "root-only"
+	gracefulSignalTreeWide    gracefulSignalScope = "tree-wide"
+	gracefulSignalUnsupported gracefulSignalScope = "unsupported"
+)
+
 type processSupervisor struct {
 	mu           sync.Mutex
 	children     []*managedProcess
 	shutdownOnce sync.Once
+	shutdownCode int
 }
 
 type managedProcess struct {
-	label    string
-	cmd      *exec.Cmd
-	exitCode int
-	exited   bool
-	mu       sync.Mutex
-	done     chan struct{}
+	label           string
+	cmd             *exec.Cmd
+	gracefulPIDFile string
+	exitCode        int
+	exited          bool
+	mu              sync.Mutex
+	done            chan struct{}
 }
 
 type managedProcessShutdownResult struct {
-	label       string
-	pid         int
-	duration    time.Duration
-	graceful    bool
-	forceKilled bool
-	err         error
+	label           string
+	pid             int
+	duration        time.Duration
+	graceful        bool
+	forceKilled     bool
+	exitStatusKnown bool
+	exitCode        int
+	err             error
 }
 
 type shutdownSummary struct {
@@ -80,13 +94,14 @@ func (s *processSupervisor) add(proc *managedProcess) {
 	shutdownDebugf("supervisor add child pid=%d total_children=%d", proc.cmd.Process.Pid, len(s.children))
 }
 
-func (s *processSupervisor) shutdown(reason string) {
+func (s *processSupervisor) shutdown(reason string) int {
 	s.shutdownOnce.Do(func() {
-		s.runShutdown(reason)
+		s.shutdownCode = s.runShutdown(reason)
 	})
+	return s.shutdownCode
 }
 
-func (s *processSupervisor) runShutdown(reason string) {
+func (s *processSupervisor) runShutdown(reason string) int {
 	s.mu.Lock()
 	children := append([]*managedProcess(nil), s.children...)
 	s.mu.Unlock()
@@ -106,6 +121,7 @@ func (s *processSupervisor) runShutdown(reason string) {
 	wg.Wait()
 	logShutdownComplete(time.Since(start), results)
 	shutdownDebugf("launcher shutdown complete reason=%q", reason)
+	return shutdownExitCode(results)
 }
 
 func (s *processSupervisor) forceKillAll(reason string) []managedProcessShutdownResult {
@@ -134,10 +150,9 @@ func (s *processSupervisor) attachSignals() {
 	go func() {
 		sig := <-ch
 		shutdownDebugf("launcher received signal=%s launcher_pid=%d", sig.String(), os.Getpid())
-		shutdownDone := make(chan struct{})
+		shutdownDone := make(chan int, 1)
 		go func() {
-			s.shutdown("signal " + sig.String())
-			close(shutdownDone)
+			shutdownDone <- s.shutdown("signal " + sig.String())
 		}()
 		select {
 		case nextSig := <-ch:
@@ -148,9 +163,9 @@ func (s *processSupervisor) attachSignals() {
 			logForcedShutdownComplete(time.Since(forceStart), results)
 			signal.Stop(ch)
 			launcherExit(1)
-		case <-shutdownDone:
+		case exitCode := <-shutdownDone:
 			signal.Stop(ch)
-			launcherExit(0)
+			launcherExit(exitCode)
 		}
 	}()
 }
@@ -160,6 +175,12 @@ func startProcess(command string, args []string, cwd string, env []string, quiet
 	cmd.Dir = cwd
 	cmd.Env = env
 	cmd.Stdin = nil
+	gracefulPIDFile := processEnvValue(env, backendPIDFileEnv)
+	if gracefulPIDFile != "" {
+		if err := os.Remove(gracefulPIDFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, nil, fmt.Errorf("remove backend pid file: %w", err)
+		}
+	}
 	configureManagedProcess(cmd)
 	stdout := newLimitedBuffer(capturedOutputLimit)
 	var stdoutSink io.Writer
@@ -173,7 +194,12 @@ func startProcess(command string, args []string, cwd string, env []string, quiet
 		supervisor.mu.Unlock()
 		return nil, nil, err
 	}
-	proc := &managedProcess{label: label, cmd: cmd, done: make(chan struct{})}
+	proc := &managedProcess{
+		label:           label,
+		cmd:             cmd,
+		gracefulPIDFile: gracefulPIDFile,
+		done:            make(chan struct{}),
+	}
 	supervisor.children = append(supervisor.children, proc)
 	childCount := len(supervisor.children)
 	supervisor.mu.Unlock()
@@ -298,42 +324,24 @@ func (p *managedProcess) kill() managedProcessShutdownResult {
 	result.pid = pid
 	select {
 	case <-p.done:
-		result.duration = time.Since(start)
-		result.graceful = true
 		shutdownDebugf("managed process kill skipped; already exited label=%q pid=%d", p.label, pid)
-		return result
+		return p.finishGracefulShutdown(start, pid, result)
 	default:
 	}
+	targetPID, targetReady := p.gracefulTargetPID(pid)
+	scope := managedProcessGracefulScope(targetReady)
 	shutdownDebugf("managed process kill begin label=%q pid=%d grace=%s", p.label, pid, managedProcessShutdownGrace)
-	shutdownDebugf("managed process group SIGTERM requested label=%q pgid=%d", p.label, pid)
-	if err := terminateManagedProcessGroup(pid); err != nil {
-		if errors.Is(err, syscall.ESRCH) {
-			result.duration = time.Since(start)
-			result.graceful = true
-			shutdownDebugf("managed process group already gone label=%q pid=%d", p.label, pid)
-			return result
-		}
-		shutdownDebugf("managed process group SIGTERM failed pid=%d err=%v; killing process", pid, err)
-		shutdownDebugf("managed process SIGKILL requested label=%q pid=%d reason=%q", p.label, pid, "sigterm_failed")
-		_ = p.cmd.Process.Kill()
-		result.forceKilled = true
-		result.err = err
-		if waitForManagedProcessKillDone(p.done, managedProcessForceKillWait) {
-			shutdownDebugf("managed process killed after SIGTERM failure pid=%d", pid)
-		} else {
-			result.err = errors.Join(result.err, fmt.Errorf("timed out waiting for process %d after SIGKILL", pid))
-			shutdownDebugf("managed process kill wait timed out after SIGTERM failure pid=%d", pid)
-		}
-		result.duration = time.Since(start)
-		return result
+	shutdownDebugf("managed process graceful termination requested label=%q scope=%s root_pid=%d target_pid=%d",
+		p.label, scope, pid, targetPID)
+	if err := terminateManagedProcess(pid, targetPID, targetReady); err != nil {
+		return p.handleGracefulTerminationError(start, result, pid, targetPID, scope, err)
 	}
-	shutdownDebugf("managed process group SIGTERM sent pgid=%d", pid)
+	shutdownDebugf("managed process graceful termination sent label=%q scope=%s root_pid=%d target_pid=%d",
+		p.label, scope, pid, targetPID)
 	select {
 	case <-p.done:
-		result.duration = time.Since(start)
-		result.graceful = true
 		shutdownDebugf("managed process exited within grace pid=%d", pid)
-		return result
+		return p.finishGracefulShutdown(start, pid, result)
 	case <-time.After(managedProcessShutdownGrace):
 	}
 	shutdownDebugf("managed process grace expired; sending SIGKILL pgid=%d", pid)
@@ -361,6 +369,78 @@ func (p *managedProcess) kill() managedProcessShutdownResult {
 	return result
 }
 
+func (p *managedProcess) handleGracefulTerminationError(start time.Time, result managedProcessShutdownResult, pid, targetPID int, scope gracefulSignalScope, err error) managedProcessShutdownResult {
+	if errors.Is(err, syscall.ESRCH) {
+		shutdownDebugf("managed process graceful target already gone label=%q scope=%s root_pid=%d target_pid=%d",
+			p.label, scope, pid, targetPID)
+		return p.finishGracefulShutdown(start, pid, result)
+	}
+	shutdownDebugf("managed process graceful termination failed label=%q scope=%s root_pid=%d target_pid=%d err=%v; killing process",
+		p.label, scope, pid, targetPID, err)
+	shutdownDebugf("managed process SIGKILL requested label=%q pid=%d reason=%q", p.label, pid, "sigterm_failed")
+	result.forceKilled = true
+	result.err = err
+	if killErr := killManagedProcessGroup(pid); killErr != nil {
+		_ = p.cmd.Process.Kill()
+		result.err = errors.Join(result.err, killErr)
+	}
+	if waitForManagedProcessKillDone(p.done, managedProcessForceKillWait) {
+		shutdownDebugf("managed process killed after SIGTERM failure pid=%d", pid)
+	} else {
+		result.err = errors.Join(result.err, fmt.Errorf("timed out waiting for process %d after SIGKILL", pid))
+		shutdownDebugf("managed process kill wait timed out after SIGTERM failure pid=%d", pid)
+	}
+	result.duration = time.Since(start)
+	return result
+}
+
+func (p *managedProcess) gracefulTargetPID(rootPID int) (int, bool) {
+	if p.gracefulPIDFile == "" {
+		return rootPID, true
+	}
+	raw, err := os.ReadFile(p.gracefulPIDFile)
+	if err != nil {
+		shutdownDebugf("managed process graceful target unavailable path=%q err=%v; using tree-wide fallback",
+			p.gracefulPIDFile, err)
+		return rootPID, false
+	}
+	targetPID, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || targetPID <= 0 || !isManagedProcessTarget(rootPID, targetPID) {
+		shutdownDebugf("managed process graceful target invalid path=%q value=%q; using tree-wide fallback",
+			p.gracefulPIDFile, strings.TrimSpace(string(raw)))
+		return rootPID, false
+	}
+	return targetPID, true
+}
+
+func (p *managedProcess) finishGracefulShutdown(start time.Time, pid int, result managedProcessShutdownResult) managedProcessShutdownResult {
+	result.duration = time.Since(start)
+	result = p.recordExitStatus(result)
+	result.graceful = true
+	if !managedProcessGroupCleanupSupported() {
+		return result
+	}
+	if err := killManagedProcessGroup(pid); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			shutdownDebugf("managed process descendant group already gone label=%q pid=%d", p.label, pid)
+			return result
+		}
+		result.forceKilled = true
+		result.err = err
+		shutdownDebugf("managed process descendant force cleanup failed label=%q pid=%d err=%v", p.label, pid, err)
+		return result
+	}
+	result.forceKilled = true
+	shutdownDebugf("managed process root exited; descendant process group force cleanup sent label=%q pgid=%d",
+		p.label, pid)
+	return result
+}
+
+func (p *managedProcess) recordExitStatus(result managedProcessShutdownResult) managedProcessShutdownResult {
+	result.exitStatusKnown, result.exitCode = p.Exited()
+	return result
+}
+
 func (p *managedProcess) forceKill(reason string) managedProcessShutdownResult {
 	start := time.Now()
 	result := managedProcessShutdownResult{label: p.label}
@@ -373,10 +453,8 @@ func (p *managedProcess) forceKill(reason string) managedProcessShutdownResult {
 	result.pid = pid
 	select {
 	case <-p.done:
-		result.duration = time.Since(start)
-		result.graceful = true
 		shutdownDebugf("managed process force kill skipped; already exited label=%q pid=%d reason=%q", p.label, pid, reason)
-		return result
+		return p.finishGracefulShutdown(start, pid, result)
 	default:
 	}
 	shutdownDebugf("managed process group SIGKILL requested label=%q pgid=%d reason=%q", p.label, pid, reason)
@@ -414,10 +492,36 @@ func waitForManagedProcessKillDone(done <-chan struct{}, timeout time.Duration) 
 	}
 }
 
-func waitForAppExit(supervisor *processSupervisor, backend *restartableBackend) int {
-	code := <-backend.exitCh
-	supervisor.shutdown("backend exit")
-	return code
+// waitForAppExit blocks until the backend (or, in dev, any extra supervised
+// child such as the Vite dev server) exits, then shuts the whole tree down.
+// A failed tree shutdown overrides a successful app exit so callers cannot
+// mistake forced or uncertain cleanup for a clean stop. Codes below zero mean
+// the child was killed by a signal; for the extra-child path, treat those as 0
+// like the TypeScript launcher's `signal ? 0 : code`.
+func waitForAppExit(supervisor *processSupervisor, backend *restartableBackend, extra ...*managedProcess) int {
+	if len(extra) == 0 {
+		code := <-backend.exitCh
+		if shutdownCode := supervisor.shutdown("backend exit"); shutdownCode != 0 {
+			return shutdownCode
+		}
+		return code
+	}
+	select {
+	case code := <-backend.exitCh:
+		if shutdownCode := supervisor.shutdown("backend exit"); shutdownCode != 0 {
+			return shutdownCode
+		}
+		return code
+	case <-extra[0].done:
+		_, code := extra[0].Exited()
+		if shutdownCode := supervisor.shutdown(extra[0].label + " exit"); shutdownCode != 0 {
+			return shutdownCode
+		}
+		if code < 0 {
+			return 0
+		}
+		return code
+	}
 }
 
 func logForcedShutdownComplete(duration time.Duration, results []managedProcessShutdownResult) {
@@ -431,18 +535,25 @@ func logShutdownComplete(duration time.Duration, results []managedProcessShutdow
 	launcherInfof("graceful shutdown complete (duration=%s, graceful=%d, force_killed=%d, failed=%d)",
 		duration.Round(time.Millisecond), summary.graceful, summary.forceKilled, summary.failed)
 	for _, result := range results {
-		if result.forceKilled || result.err != nil {
-			label := result.label
-			if label == "" {
-				label = "process"
-			}
-			if result.err != nil {
-				launcherInfof("shutdown detail: %s pid=%d required force cleanup after %s: %v",
-					label, result.pid, result.duration.Round(time.Millisecond), result.err)
-				continue
-			}
+		if !result.forceKilled && result.err == nil && result.exitStatusKnown && result.exitCode == 0 {
+			continue
+		}
+		label := result.label
+		if label == "" {
+			label = "process"
+		}
+		if result.err != nil {
+			launcherInfof("shutdown detail: %s pid=%d stop failed after %s: %v",
+				label, result.pid, result.duration.Round(time.Millisecond), result.err)
+		}
+		if result.forceKilled {
 			launcherInfof("shutdown detail: %s pid=%d required SIGKILL after %s",
 				label, result.pid, result.duration.Round(time.Millisecond))
+		}
+		if result.exitStatusKnown && result.exitCode != 0 {
+			launcherInfof("shutdown detail: %s pid=%d exited with code %d", label, result.pid, result.exitCode)
+		} else if !result.exitStatusKnown {
+			launcherInfof("shutdown detail: %s pid=%d exit status was not confirmed", label, result.pid)
 		}
 	}
 }
@@ -453,7 +564,7 @@ func summarizeShutdown(results []managedProcessShutdownResult) shutdownSummary {
 		if result.forceKilled {
 			summary.forceKilled++
 		}
-		if result.err != nil {
+		if result.err != nil || result.exitStatusKnown && result.exitCode != 0 || result.graceful && !result.exitStatusKnown {
 			summary.failed++
 		}
 		if result.graceful {
@@ -461,4 +572,13 @@ func summarizeShutdown(results []managedProcessShutdownResult) shutdownSummary {
 		}
 	}
 	return summary
+}
+
+func shutdownExitCode(results []managedProcessShutdownResult) int {
+	for _, result := range results {
+		if !result.graceful || result.forceKilled || !result.exitStatusKnown || result.exitCode != 0 || result.err != nil {
+			return 1
+		}
+	}
+	return 0
 }

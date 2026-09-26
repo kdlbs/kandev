@@ -274,6 +274,34 @@ func TestStore_ListTaskMRsByTask_ReturnsEmptyForUnknownTask(t *testing.T) {
 	}
 }
 
+func TestStore_ListTaskMRsByTaskIDs_GroupsByTaskAndPreservesRepositoryIdentity(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+	seedTask(t, store, "task-2", "ws-1")
+	if err := store.UpsertTaskMR(ctx, newTestMR("task-1", "repo-canonical", "group/project", 224)); err != nil {
+		t.Fatalf("upsert task-1 MR: %v", err)
+	}
+	if err := store.UpsertTaskMR(ctx, newTestMR("task-2", "repo-fork", "fork/project", 224)); err != nil {
+		t.Fatalf("upsert task-2 MR: %v", err)
+	}
+
+	got, err := store.ListTaskMRsByTaskIDs(ctx, []string{"task-1", "task-2", "missing"})
+	if err != nil {
+		t.Fatalf("ListTaskMRsByTaskIDs: %v", err)
+	}
+	if len(got["task-1"]) != 1 || got["task-1"][0].RepositoryID != "repo-canonical" {
+		t.Fatalf("task-1 MRs = %#v, want canonical repo row", got["task-1"])
+	}
+	if len(got["task-2"]) != 1 || got["task-2"][0].RepositoryID != "repo-fork" {
+		t.Fatalf("task-2 MRs = %#v, want fork repo row", got["task-2"])
+	}
+	if _, ok := got["missing"]; ok {
+		t.Fatal("missing task unexpectedly present in grouped results")
+	}
+}
+
 func TestStore_DeleteTaskMR_RemovesByID(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -288,6 +316,36 @@ func TestStore_DeleteTaskMR_RemovesByID(t *testing.T) {
 	got, _ := store.ListTaskMRsByTask(ctx, "task-1")
 	if len(got) != 0 {
 		t.Errorf("rows after delete = %d, want 0", len(got))
+	}
+}
+
+// TestStore_DeleteTaskMR_CascadesLifecycleCheckpoint is the unlink-cleanup
+// finding: removing an MR link must also remove its lifecycle checkpoint, or
+// re-linking the same MR later would inherit stale observations and could
+// suppress its next lifecycle prompt.
+func TestStore_DeleteTaskMR_CascadesLifecycleCheckpoint(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+
+	tm := newTestMR("task-1", "", "acme/api", 1)
+	if err := store.UpsertTaskMR(ctx, tm); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := store.SetTaskMRObservedState(ctx, "task-1", "", "acme/api", 1, "merged"); err != nil {
+		t.Fatalf("SetTaskMRObservedState: %v", err)
+	}
+
+	if err := store.DeleteTaskMR(ctx, tm.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	state, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "acme/api", 1)
+	if err != nil {
+		t.Fatalf("GetTaskMRLifecycleState: %v", err)
+	}
+	if state != nil {
+		t.Fatalf("expected lifecycle checkpoint removed alongside the MR link, got %+v", state)
 	}
 }
 

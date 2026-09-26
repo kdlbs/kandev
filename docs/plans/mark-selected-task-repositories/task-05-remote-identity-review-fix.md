@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-remote-identity-remediation"]
 plan: "plan.md"
-spec: "../../specs/tasks/multi-branch/spec.md"
+spec: "../../specs/tasks/requirements/multi-branch.md"
 ---
 
 # Task 05: Close Remote identity review gaps

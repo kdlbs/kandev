@@ -11,8 +11,12 @@ import type {
   TierMap,
 } from "@/lib/state/slices/office/types";
 import { providerLabel } from "./provider-order-editor";
+import { TIER_NAME_KEYS } from "../../../lib/label-keys";
+import { useTranslation } from "react-i18next";
 
 const UNMAPPED = "__unmapped__";
+// `label` holds the wire `Tier` id; the visible text resolves through
+// TIER_NAME_KEYS at render so the row is not labelled with an identifier.
 const TIERS: Array<{ key: keyof TierMap; label: Tier }> = [
   { key: "frontier", label: "frontier" },
   { key: "balanced", label: "balanced" },
@@ -29,6 +33,7 @@ type Props = {
 };
 
 export function ProviderTierMapping(props: Props) {
+  const { t } = useTranslation();
   const fieldsetId = useId();
   const available = profilesForProvider(props.executionProfiles, props.providerId);
   const selectedIDs = props.profile.execution_profile_ids ?? props.profile.tier_profile_ids ?? {};
@@ -51,11 +56,11 @@ export function ProviderTierMapping(props: Props) {
             <div key={key} className="min-w-0">
               <div className="flex items-center gap-1 mb-1">
                 <Label htmlFor={selectId} className="text-xs uppercase">
-                  {label}
+                  {t(TIER_NAME_KEYS[label])}
                 </Label>
                 {label === props.defaultTier && value === UNMAPPED && (
                   <Badge variant="destructive" className="text-[10px]">
-                    Required
+                    {t("office:required")}
                   </Badge>
                 )}
               </div>
@@ -69,10 +74,10 @@ export function ProviderTierMapping(props: Props) {
                   className="w-full cursor-pointer"
                   data-testid={`tier-profile-${props.providerId}-${label}`}
                 >
-                  <SelectValue placeholder="Select execution profile" />
+                  <SelectValue placeholder={t("office:selectExecutionProfile")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={UNMAPPED}>Not configured</SelectItem>
+                  <SelectItem value={UNMAPPED}>{t("office:notConfigured")}</SelectItem>
                   {available.map((item) => (
                     <SelectItem key={item.id} value={item.id}>
                       {item.name} · {item.model}
@@ -87,7 +92,7 @@ export function ProviderTierMapping(props: Props) {
       </div>
       {available.length === 0 && (
         <p className="text-xs text-destructive">
-          No active execution profiles are available for this provider.
+          {t("office:noActiveExecutionProfilesAreAvailable")}
         </p>
       )}
     </div>

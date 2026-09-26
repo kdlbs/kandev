@@ -22,8 +22,8 @@ type Props = {
  * arrive. Enabled by default. Disabling freezes the current scroll position
  * (preserved across navigating away and back); re-enabling resumes
  * auto-scroll and catches the view up if the transcript progressed while
- * disabled. See message-list-native.tsx / message-list-virtuoso.tsx for the
- * renderer-side behavior driven by this preference.
+ * disabled. See message-list-native.tsx for the renderer-side behavior driven
+ * by this preference.
  *
  * The icon renders dark green while enabled and reverts to the default
  * muted color when disabled — the color swap alone carries the on/off

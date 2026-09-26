@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
-import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile coarse RUNNING busy signal", () => {
@@ -32,11 +32,14 @@ test.describe("Mobile coarse RUNNING busy signal", () => {
     await expect(testPage.getByText("Kicking off background work")).toBeVisible({
       timeout: 20_000,
     });
-    await testPage.waitForTimeout(500);
+    // No wait is needed here; see busy-signal.spec.ts for the measurement. The
+    // activity_changed frames for the turn land before the marker text is
+    // visible, so the assertions below already run against the post-transition
+    // state and `waitForActiveSessionForegroundActivity` is the real check.
 
     await waitForActiveSessionForegroundActivity(testPage, "generating");
     await expect(session.idleInput()).not.toBeVisible();
-    await expect(testPage.locator('[data-placeholder^="Queue"]')).toBeVisible();
+    await waitForComposerQueueMode(testPage);
 
     const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
     await typeWhileBusy(testPage, editor, "queue this mobile follow-up");
@@ -48,7 +51,7 @@ test.describe("Mobile coarse RUNNING busy signal", () => {
     await expect(session.agentStatus()).toBeVisible();
     await waitForActiveSessionForegroundActivity(testPage, "generating");
     await expect(session.idleInput()).not.toBeVisible();
-    await expect(testPage.locator('[data-placeholder^="Queue"]')).toBeVisible();
+    await waitForComposerQueueMode(testPage);
   });
 });
 
@@ -89,7 +92,7 @@ test.describe.serial("Mobile Claude background prompt handoff experiment", () =>
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
+    const editor = await session.composerReady();
     await editor.tap();
     await editor.fill("/detached-background 20s");
     await testPage.getByTestId("submit-message-button").tap();

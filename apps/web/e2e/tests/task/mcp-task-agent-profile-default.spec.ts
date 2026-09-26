@@ -7,7 +7,7 @@ test.describe("MCP-created task agent profile default", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
 
     const workflow = (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
       (candidate) => candidate.id === seedData.workflowId,
@@ -27,16 +27,13 @@ test.describe("MCP-created task agent profile default", () => {
       default_agent_profile_id: workspaceProfile.id,
     });
 
-    await testPage.goto("/settings/general/task-actions");
-    await expect(testPage.getByText("create_task_kandev", { exact: true })).toBeVisible();
-    await expect(testPage.getByText("spawn_session_kandev", { exact: true })).toBeVisible();
-    const mcpToolHelp = testPage.getByRole("button", {
-      name: "About affected Kandev MCP tools",
-    });
-    await mcpToolHelp.hover();
-    await expect(testPage.getByRole("tooltip")).toContainText(
-      "spawn_session_kandev adds a session to the current task",
-    );
+    await testPage.goto("/settings/preferences/task-behavior");
+    await expect(testPage.getByText("create_task_kandev", { exact: true })).not.toBeVisible();
+    await testPage
+      .getByRole("button", { name: "About Profile for Tasks Created by Agents" })
+      .hover();
+    await expect(testPage.getByRole("tooltip")).toContainText("spawn_session_kandev");
+    await testPage.mouse.move(0, 0);
     const workspaceDefault = testPage.getByRole("radio", {
       name: "Workspace default profile",
     });
@@ -79,7 +76,12 @@ test.describe("MCP-created task agent profile default", () => {
     );
 
     await testPage.goto(`/t/${parent.id}`);
-    await new SessionPage(testPage).waitForLoad();
+    const parentSession = new SessionPage(testPage);
+    await parentSession.waitForLoad();
+    // The MCP call is part of the parent agent turn. Wait for the scripted
+    // turn to finish before polling the task list, otherwise a busy CI worker
+    // can spend the whole assertion window before the call is dispatched.
+    await parentSession.waitForChatIdle({ timeout: 120_000 });
 
     const parentSessions = await apiClient.listTaskSessions(parent.id);
     expect(parentSessions.sessions[0]?.agent_profile_id).toBe(seedData.agentProfileId);
@@ -92,7 +94,7 @@ test.describe("MCP-created task agent profile default", () => {
           subtaskId = tasks.find((task) => task.title === subtaskTitle)?.id;
           return subtaskId;
         },
-        { timeout: 60_000, message: "Omitted-profile MCP subtask should be created" },
+        { timeout: 30_000, message: "Omitted-profile MCP subtask should be created" },
       )
       .toBeTruthy();
 
@@ -102,8 +104,14 @@ test.describe("MCP-created task agent profile default", () => {
           const { sessions } = await apiClient.listTaskSessions(subtaskId!);
           return sessions[0]?.agent_profile_id;
         },
-        { timeout: 30_000, message: "MCP subtask should start with the workspace profile" },
+        { timeout: 60_000, message: "MCP subtask should start with the workspace profile" },
       )
       .toBe(workspaceProfile.id);
+
+    const { sessions: subtaskSessions } = await apiClient.listTaskSessions(subtaskId!);
+    const subtaskRuntime = subtaskSessions[0]?.metadata?.runtime_config_overrides as
+      | { model?: string; mode?: string; config_options?: Record<string, string> }
+      | undefined;
+    expect(subtaskRuntime).toBeUndefined();
   });
 });

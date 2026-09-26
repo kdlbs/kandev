@@ -1,17 +1,18 @@
 "use client";
 
-import { IconBrandGithub } from "@tabler/icons-react";
+import { IconRefresh } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { WorkflowSyncDialog } from "@/components/settings/workflow-sync-dialog";
 import { WorkflowSyncStatusCard } from "@/components/settings/workflow-sync-status-banner";
 import { useWorkflowSync } from "@/hooks/domains/settings/use-workflow-sync";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
-// WorkflowSyncButton is the GitHub Sync entry point, rendered alongside the
-// other workflow actions (Export / Import / Add). The dialog open state lives
-// with the caller so button and section can sit in different parts of the
-// layout.
+// WorkflowSyncButton is the workflow sync entry point (GitHub or GitLab),
+// rendered alongside the other workflow actions (Export / Import / Add). The
+// dialog open state lives with the caller so button and section can sit in
+// different parts of the layout.
 export function WorkflowSyncButton({ onClick }: { onClick: () => void }) {
   const { t } = useTranslation();
   return (
@@ -20,11 +21,11 @@ export function WorkflowSyncButton({ onClick }: { onClick: () => void }) {
       variant="outline"
       size="sm"
       onClick={onClick}
-      className="cursor-pointer"
+      className={settingsActionClassName("cursor-pointer")}
       data-testid="workflow-sync-open"
     >
-      <IconBrandGithub className="h-4 w-4 mr-2" />
-      {t("workflows:githubSync")}
+      <IconRefresh className="h-4 w-4 mr-2" />
+      {t("workflows:syncTitle")}
     </Button>
   );
 }
@@ -35,7 +36,7 @@ type WorkflowSyncSectionProps = {
   onDialogOpenChange: (open: boolean) => void;
 };
 
-// WorkflowSyncSection renders the GitHub-sync state inside the Workflows
+// WorkflowSyncSection renders the workflow-sync state inside the Workflows
 // settings section: the configuration dialog (opened via WorkflowSyncButton
 // in the section's action row) and — once a sync is configured — a compact
 // status card above the workflow list showing what is syncing and how the
@@ -61,7 +62,12 @@ export function WorkflowSyncSection({
           <Separator />
         </div>
       )}
-      <WorkflowSyncDialog open={dialogOpen} onOpenChange={onDialogOpenChange} sync={sync} />
+      <WorkflowSyncDialog
+        key={workspaceId}
+        open={dialogOpen}
+        onOpenChange={onDialogOpenChange}
+        sync={sync}
+      />
     </>
   );
 }

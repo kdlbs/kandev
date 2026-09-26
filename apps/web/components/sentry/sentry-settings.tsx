@@ -7,10 +7,10 @@ import { CardContent } from "@kandev/ui/card";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsCard } from "@/components/settings/settings-card";
-import { useSentryEnabled } from "@/hooks/domains/sentry/use-sentry-enabled";
+import { SentryEnabledControl } from "@/components/sentry/sentry-enabled-control";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
-import { DraftedIntegrationEnabledControl } from "@/components/integrations/drafted-integration-enabled-control";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
   deleteSentryInstance,
   listSentryInstances,
@@ -21,6 +21,7 @@ import { SentryInstanceCard } from "./sentry-instance-card";
 import { SentryInstanceForm } from "./sentry-instance-form";
 import { SentryIssueWatchersSection } from "./sentry-issue-watchers-section";
 import { useTranslation } from "react-i18next";
+import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 // EditMode is the mutually-exclusive form state: at most one add-or-edit form
 // is open at a time.
@@ -74,8 +75,12 @@ type InstanceListProps = {
   instances: SentryConfig[];
   mode: EditMode;
   workspaceId: string;
+  isFinePointer: boolean;
+  confirmingDeleteId: string | null;
   onEdit: (id: string) => void;
   onDelete: (instance: SentryConfig) => void;
+  onDeleteCancel: (instanceId: string) => void;
+  onDeleteConfirm: () => void;
   onSaved: () => void;
   onCancel: () => void;
   onDirtyChange: (isDirty: boolean) => void;
@@ -85,8 +90,12 @@ function InstanceList({
   instances,
   mode,
   workspaceId,
+  isFinePointer,
+  confirmingDeleteId,
   onEdit,
   onDelete,
+  onDeleteCancel,
+  onDeleteConfirm,
   onSaved,
   onCancel,
   onDirtyChange,
@@ -118,16 +127,15 @@ function InstanceList({
             instance={instance}
             onEdit={() => onEdit(instance.id)}
             onDelete={() => onDelete(instance)}
+            isFinePointer={isFinePointer}
+            confirmingDelete={confirmingDeleteId === instance.id}
+            onDeleteCancel={onDeleteCancel}
+            onDeleteConfirm={onDeleteConfirm}
           />
         ),
       )}
     </div>
   );
-}
-
-function EnabledPill() {
-  const { enabled, setEnabled } = useSentryEnabled();
-  return <DraftedIntegrationEnabledControl id="sentry" enabled={enabled} persist={setEnabled} />;
 }
 
 // useDeleteInstance confirms, deletes, and reports the outcome. Split out of
@@ -138,7 +146,6 @@ function useDeleteInstance(workspaceId: string, reload: () => Promise<void>) {
   const { toast } = useToast();
   return useCallback(
     async (instance: SentryConfig) => {
-      if (!confirm(t("sentry:removeInstanceConfirm", { name: instance.name }))) return;
       try {
         await deleteSentryInstance(workspaceId, instance.id);
         toast({ description: t("sentry:instanceRemoved"), variant: "success" });
@@ -165,8 +172,43 @@ function useDeleteInstance(workspaceId: string, reload: () => Promise<void>) {
   );
 }
 
+function useSentryDeleteConfirmation(
+  instances: SentryConfig[],
+  handleDelete: (instance: SentryConfig) => Promise<void>,
+) {
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!confirmingDeleteId || instances.some((instance) => instance.id === confirmingDeleteId)) {
+      return;
+    }
+    setConfirmingDeleteId(null);
+  }, [confirmingDeleteId, instances]);
+
+  const startDelete = useCallback((instance: SentryConfig) => {
+    setConfirmingDeleteId(instance.id);
+  }, []);
+  const cancelDelete = useCallback(() => {
+    setConfirmingDeleteId(null);
+  }, []);
+  const cancelDeleteFor = useCallback((instanceId: string) => {
+    // Popover close events can arrive after another card opens its confirmation.
+    // A stale close must not disarm that newer, instance-scoped action.
+    setConfirmingDeleteId((currentId) => (currentId === instanceId ? null : currentId));
+  }, []);
+  const confirmDelete = useCallback(() => {
+    const instance = instances.find((item) => item.id === confirmingDeleteId);
+    setConfirmingDeleteId(null);
+    if (instance) void handleDelete(instance);
+  }, [confirmingDeleteId, handleDelete, instances]);
+
+  return { confirmingDeleteId, startDelete, cancelDelete, cancelDeleteFor, confirmDelete };
+}
+
+/** Sentry connection card: title/enable toggle plus the list of configured Sentry instances. */
 export function SentryConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   const { instances, loading, reload } = useInstanceList(workspaceId);
   const [mode, setMode] = useState<EditMode>({ kind: "none" });
   const [formDirty, setFormDirty] = useState(false);
@@ -182,6 +224,8 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
   }, [reload]);
 
   const handleDelete = useDeleteInstance(workspaceId, reload);
+  const { confirmingDeleteId, startDelete, cancelDelete, cancelDeleteFor, confirmDelete } =
+    useSentryDeleteConfirmation(instances, handleDelete);
 
   const canAddInstance =
     mode.kind === "none" ||
@@ -189,10 +233,11 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
 
   return (
     <SettingsSection
+      discoveryTargetId={INTEGRATION_SETTINGS_TARGETS.sentry}
       icon={<IconBrandSentry className="h-5 w-5" />}
       title={t("sentry:sentryIntegration")}
       description={t("sentry:sentryIntegrationDescription")}
-      action={<EnabledPill />}
+      action={<SentryEnabledControl workspaceId={workspaceId} />}
     >
       <SettingsCard isDirty={formDirty}>
         <CardContent className="space-y-3 pt-6">
@@ -200,7 +245,10 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
             {t("sentry:instances")}
           </h3>
           {loading && instances.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">
+            <p
+              className="text-sm text-muted-foreground py-4 text-center"
+              data-testid="sentry-instance-list-loading"
+            >
               {t("sentry:loadingEllipsis")}
             </p>
           ) : (
@@ -208,11 +256,16 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
               instances={instances}
               mode={mode}
               workspaceId={workspaceId}
+              isFinePointer={isFinePointer}
+              confirmingDeleteId={confirmingDeleteId}
               onEdit={(id) => {
+                cancelDelete();
                 setFormDirty(false);
                 setMode({ kind: "edit", id });
               }}
-              onDelete={handleDelete}
+              onDelete={startDelete}
+              onDeleteCancel={cancelDeleteFor}
+              onDeleteConfirm={confirmDelete}
               onSaved={handleSaved}
               onCancel={closeForm}
               onDirtyChange={setFormDirty}
@@ -253,6 +306,7 @@ type SentryIntegrationPageProps = {
   workspaceId?: string;
 };
 
+/** Sentry's own settings page: connection card plus issue-watchers section. */
 export function SentryIntegrationPage({ workspaceId }: SentryIntegrationPageProps = {}) {
   return (
     <div className="space-y-8">

@@ -2,21 +2,22 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/workspacepath"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
 // WorkspaceFileHandlers handles workspace file operations
 type WorkspaceFileHandlers struct {
-	lifecycle *lifecycle.Manager
+	lifecycle ExecutionLookup
 	logger    *logger.Logger
 }
 
@@ -27,7 +28,7 @@ type workspaceContentSearchRequest struct {
 }
 
 // NewWorkspaceFileHandlers creates new workspace file handlers
-func NewWorkspaceFileHandlers(lm *lifecycle.Manager, log *logger.Logger) *WorkspaceFileHandlers {
+func NewWorkspaceFileHandlers(lm ExecutionLookup, log *logger.Logger) *WorkspaceFileHandlers {
 	return &WorkspaceFileHandlers{
 		lifecycle: lm,
 		logger:    log.WithFields(zap.String("component", "workspace-file-handlers")),
@@ -62,6 +63,9 @@ func (h *WorkspaceFileHandlers) wsGetFileTree(ctx context.Context, msg *ws.Messa
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
+	if err := workspacepath.ValidateTreePath(req.Path); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 	// Get agent execution for this session
 	execution, err := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)
 	if err != nil {
@@ -69,7 +73,8 @@ func (h *WorkspaceFileHandlers) wsGetFileTree(ctx context.Context, msg *ws.Messa
 	}
 
 	// Get agentctl client
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
 	}
@@ -110,7 +115,8 @@ func (h *WorkspaceFileHandlers) wsGetFileContent(ctx context.Context, msg *ws.Me
 	}
 
 	// Get agentctl client
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
 	}
@@ -118,11 +124,22 @@ func (h *WorkspaceFileHandlers) wsGetFileContent(ctx context.Context, msg *ws.Me
 	// Request file content from agentctl
 	response, err := client.RequestFileContent(ctx, req.Path, req.Repo)
 	if err != nil {
+		if isMissingFileContentError(err) {
+			h.logger.Debug("file not found (expected for deleted or stale files)",
+				zap.String("session_id", req.SessionID),
+				zap.String("path", req.Path))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+		}
 		h.logger.Error("failed to get file content", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to get file content: %v", err), nil)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+func isMissingFileContentError(err error) bool {
+	// The client derives this sentinel from the agentctl file-content 404 status.
+	return errors.Is(err, agentctl.ErrFileNotFound)
 }
 
 // wsGetFileContentAtRef handles workspace.file.get_at_ref action
@@ -155,7 +172,8 @@ func (h *WorkspaceFileHandlers) wsGetFileContentAtRef(ctx context.Context, msg *
 	}
 
 	// Get agentctl client
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
 	}
@@ -208,7 +226,8 @@ func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws
 	}
 
 	// Get agentctl client
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
 	}
@@ -227,7 +246,8 @@ func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws
 // and returns the agentctl client, or an error response.
 func (h *WorkspaceFileHandlers) resolveSessionFileClient(
 	ctx context.Context, msg *ws.Message,
-) (sessionID, path, repo string, client *agentctl.Client, errResp *ws.Message) {
+) (sessionID, path, repo string, client *agentctl.Client, release func(), errResp *ws.Message) {
+	noRelease := func() {}
 	var req struct {
 		SessionID string `json:"session_id"`
 		Path      string `json:"path"`
@@ -236,33 +256,34 @@ func (h *WorkspaceFileHandlers) resolveSessionFileClient(
 
 	if err := msg.ParsePayload(&req); err != nil {
 		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-		return "", "", "", nil, errResp
+		return "", "", "", nil, noRelease, errResp
 	}
 	if req.SessionID == "" {
 		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-		return "", "", "", nil, errResp
+		return "", "", "", nil, noRelease, errResp
 	}
 	if req.Path == "" {
 		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "path is required", nil)
-		return "", "", "", nil, errResp
+		return "", "", "", nil, noRelease, errResp
 	}
 
 	execution, resolveErr := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)
 	if resolveErr != nil {
 		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session: "+resolveErr.Error(), nil)
-		return "", "", "", nil, errResp
+		return "", "", "", nil, noRelease, errResp
 	}
-	c := execution.GetAgentCtlClient()
+	c, releaseClient := execution.AcquireAgentCtlClient()
 	if c == nil {
 		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
-		return "", "", "", nil, errResp
+		return "", "", "", nil, releaseClient, errResp
 	}
-	return req.SessionID, req.Path, req.Repo, c, nil
+	return req.SessionID, req.Path, req.Repo, c, releaseClient, nil
 }
 
 // wsCreateFile handles workspace.file.create action
 func (h *WorkspaceFileHandlers) wsCreateFile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	sessionID, path, repo, client, errResp := h.resolveSessionFileClient(ctx, msg)
+	sessionID, path, repo, client, releaseClient, errResp := h.resolveSessionFileClient(ctx, msg)
+	defer releaseClient()
 	if errResp != nil {
 		return errResp, nil
 	}
@@ -278,7 +299,8 @@ func (h *WorkspaceFileHandlers) wsCreateFile(ctx context.Context, msg *ws.Messag
 
 // wsDeleteFile handles workspace.file.delete action
 func (h *WorkspaceFileHandlers) wsDeleteFile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	sessionID, path, repo, client, errResp := h.resolveSessionFileClient(ctx, msg)
+	sessionID, path, repo, client, releaseClient, errResp := h.resolveSessionFileClient(ctx, msg)
+	defer releaseClient()
 	if errResp != nil {
 		return errResp, nil
 	}
@@ -315,7 +337,8 @@ func (h *WorkspaceFileHandlers) wsSearchFiles(ctx context.Context, msg *ws.Messa
 	}
 
 	// Get agentctl client
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
 	}
@@ -368,7 +391,8 @@ func (h *WorkspaceFileHandlers) wsSearchContent(
 			"No agent found for session: "+err.Error(), nil,
 		)
 	}
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(
 			msg.ID, msg.Action, ws.ErrorCodeInternalError,
@@ -428,7 +452,8 @@ func (h *WorkspaceFileHandlers) wsRenameFile(ctx context.Context, msg *ws.Messag
 	}
 
 	// Get agentctl client
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
 	}

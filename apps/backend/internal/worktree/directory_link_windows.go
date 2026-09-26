@@ -4,6 +4,7 @@ package worktree
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"golang.org/x/sys/windows"
 	"os"
@@ -60,6 +61,30 @@ func isPlatformDirectoryLink(info os.FileInfo, path string) bool {
 		return true
 	}
 	return hasMountPoint(path)
+}
+func platformDirectoryLinkTarget(path string) (string, error) { return os.Readlink(path) }
+func removeInspectedDirectoryLink(link string, inspected os.FileInfo) error {
+	if err := revalidateInspectedDirectoryLink(link, inspected); err != nil {
+		return err
+	}
+	if err := os.Remove(link); err != nil {
+		return fmt.Errorf("repoint owned link: %w", err)
+	}
+	return nil
+}
+func replacePlatformDirectoryLink(link string, inspected os.FileInfo, target, priorTarget string) error {
+	if err := removeInspectedDirectoryLink(link, inspected); err != nil {
+		return err
+	}
+	if err := createPlatformDirectoryLink(target, link); err != nil {
+		if priorTarget != "" {
+			if restoreErr := createPlatformDirectoryLink(priorTarget, link); restoreErr != nil {
+				return errors.Join(fmt.Errorf("create directory link: %w", err), fmt.Errorf("restore prior directory link: %w", restoreErr))
+			}
+		}
+		return fmt.Errorf("create directory link: %w", err)
+	}
+	return nil
 }
 func requirePlatformDirectoryLink(path string) error {
 	info, err := os.Lstat(path)

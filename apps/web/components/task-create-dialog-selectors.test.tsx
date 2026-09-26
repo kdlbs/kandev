@@ -3,12 +3,24 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { ToastProvider } from "@/components/toast-provider";
-import { MAX_FILES, MAX_TOTAL_SIZE, processFile } from "@/components/task/chat/file-attachment";
+import { StateProvider } from "@/components/state-provider";
+import {
+  MAX_FILES,
+  MAX_FILE_SIZE,
+  MAX_TOTAL_SIZE,
+  processFile,
+} from "@/components/task/chat/file-attachment";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { TaskFormInputs } from "./task-create-dialog-selectors";
+import { TaskCreateLaunchPreviewToggle } from "./task-create-dialog-launch-preview-control";
 import type { TaskFormInputsHandle } from "./task-create-dialog-types";
+import type { TaskCreateLaunchPreview } from "./task-create-dialog-launch-preview";
+import type { PluginComposerSlotProps } from "@/lib/plugins/types";
 
 const TOAST_MESSAGE_TEST_ID = "toast-message";
+const LAUNCH_PREVIEW_TOGGLE_TEST_ID = "task-create-launch-preview-toggle";
+const DESCRIPTION_INPUT_TEST_ID = "task-description-input";
+const ORIGINAL_PROMPT = "keep this prompt";
 
 vi.mock("@/components/task/chat/file-attachment", async () => {
   const actual = await vi.importActual<typeof import("@/components/task/chat/file-attachment")>(
@@ -17,51 +29,51 @@ vi.mock("@/components/task/chat/file-attachment", async () => {
   return { ...actual, processFile: vi.fn() };
 });
 
-// Capture the props (notably `onTranscript` / `onAutoSend`) that
-// TaskFormInputs hands the voice button so we can drive transcripts
-// without instantiating the real VoiceInputButton (which subscribes to
-// the user-settings store and instantiates voice engines).
-type VoiceProps = {
-  onTranscript: (text: string) => void;
-  onAutoSend?: () => void;
-  disabled?: boolean;
-};
-const voiceCalls: VoiceProps[] = [];
-vi.mock("@/components/task/chat/voice-input-button", () => ({
-  VoiceInputButton: (props: VoiceProps) => {
-    voiceCalls.push(props);
-    return <button type="button" data-testid="voice-input-button" />;
+// Captures the slot props TaskFormInputs hands its plugin composer action,
+// which is the only way text now reaches the description programmatically.
+const pluginSlotCalls: PluginComposerSlotProps[] = [];
+const mentionMocks = vi.hoisted(() => ({ handleKeyDown: vi.fn() }));
+
+vi.mock("@/components/plugins/plugin-slot", () => ({
+  PluginSlot: ({ slotProps }: { slotProps: PluginComposerSlotProps }) => {
+    pluginSlotCalls.push(slotProps);
+    return null;
   },
 }));
 
 // Inert mention popover — the real hook installs a `keydown` listener that
 // drains React's event queue across re-renders and adds noise to assertions.
-vi.mock("@/hooks/use-task-create-prompt-mention", () => ({
-  useTaskCreatePromptMention: () => ({
+vi.mock("@/hooks/use-task-create-prompt-mention", () => {
+  const useMention = ({ onChange }: { onChange?: (value: string) => void } = {}) => ({
     isOpen: false,
     isLoading: false,
     position: null,
     items: [],
     query: "",
     selectedIndex: 0,
-    handleChange: (_: string) => {},
-    handleKeyDown: (_: React.KeyboardEvent) => {},
+    handleChange: (value: string) => onChange?.(value),
+    handleKeyDown: mentionMocks.handleKeyDown,
     handleSelect: () => {},
     closeMenu: () => {},
     setSelectedIndex: () => {},
-  }),
-}));
+  });
+  return {
+    useTaskCreatePromptMention: useMention,
+    useTaskCreatePromptMentionForInput: useMention,
+  };
+});
 
 afterEach(() => {
   cleanup();
-  voiceCalls.length = 0;
+  pluginSlotCalls.length = 0;
+  mentionMocks.handleKeyDown.mockReset();
   vi.restoreAllMocks();
   vi.mocked(processFile).mockReset();
 });
 
-function lastVoiceProps(): VoiceProps {
-  const last = voiceCalls.at(-1);
-  if (!last) throw new Error("VoiceInputButton was not rendered");
+function lastPluginSlotProps(): PluginComposerSlotProps {
+  const last = pluginSlotCalls.at(-1);
+  if (!last) throw new Error("PluginSlot was not rendered");
   return last;
 }
 
@@ -73,30 +85,148 @@ function Wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderTaskFormInputs(initial: string, strict = false) {
+function RichPromptWrapper({ children }: { children: ReactNode }) {
+  return (
+    <StateProvider initialState={{ prompts: { items: [], loaded: true, loading: false } }}>
+      <Wrapper>{children}</Wrapper>
+    </StateProvider>
+  );
+}
+
+function renderTaskFormInputs(
+  initial: string,
+  strict = false,
+  launchPreview: TaskCreateLaunchPreview | null = null,
+  promptReferencesEnabled = false,
+  onComposerSubmit?: () => boolean | Promise<boolean>,
+) {
   const ref = createRef<TaskFormInputsHandle>();
   const form = (
     <TaskFormInputs
       isSessionMode={false}
       autoFocus={false}
       initialDescription={initial}
+      promptReferencesEnabled={promptReferencesEnabled}
+      onComposerSubmit={onComposerSubmit}
       onDescriptionChange={() => {}}
       onKeyDown={() => {}}
       descriptionValueRef={ref}
+      launchPreview={launchPreview}
     />
   );
-  const utils = render(strict ? <StrictMode>{form}</StrictMode> : form, { wrapper: Wrapper });
-  const textarea = screen.getByTestId("task-description-input") as HTMLTextAreaElement;
+  const wrapper = promptReferencesEnabled ? RichPromptWrapper : Wrapper;
+  const utils = render(strict ? <StrictMode>{form}</StrictMode> : form, { wrapper });
+  const textarea = screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement;
   return { ...utils, textarea, ref };
 }
 
-describe("TaskFormInputs voice-input wiring — rendering", () => {
-  it("renders the voice button inside the prompt toolbar", () => {
-    renderTaskFormInputs("");
-    expect(screen.getByTestId("voice-input-button")).toBeTruthy();
+describe("TaskFormInputs launch prompt preview", () => {
+  const launchPreview: TaskCreateLaunchPreview = {
+    stepId: "step-1",
+    stepName: "In Progress",
+    stepPrompt: "Run {{task_prompt}} for {task_id}",
+  };
+
+  it("toggles a composed read-only preview without changing the draft", () => {
+    const { textarea, ref } = renderTaskFormInputs(ORIGINAL_PROMPT, false, launchPreview);
+    const toggle = screen.getByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID);
+
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle);
+
+    expect(screen.queryByTestId(DESCRIPTION_INPUT_TEST_ID)).toBeNull();
+    expect(screen.getByTestId("task-create-launch-preview-content").textContent).toContain(
+      `Run ${ORIGINAL_PROMPT} for {task_id}`,
+    );
+    expect(ref.current?.getValue()).toBe(ORIGINAL_PROMPT);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(toggle);
+    expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe(
+      ORIGINAL_PROMPT,
+    );
+    expect(textarea).not.toBe(screen.getByTestId(DESCRIPTION_INPUT_TEST_ID));
+    expect(ref.current?.getValue()).toBe(ORIGINAL_PROMPT);
   });
 
-  it("renders the voice button in session mode too", () => {
+  it("does not render a preview toggle without a nonempty step prompt", () => {
+    renderTaskFormInputs(ORIGINAL_PROMPT, false, {
+      ...launchPreview,
+      stepPrompt: "   ",
+    });
+
+    expect(screen.queryByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID)).toBeNull();
+  });
+
+  it("returns to the editor when the launch preview model disappears", () => {
+    const ref = createRef<TaskFormInputsHandle>();
+    const renderForm = (preview: TaskCreateLaunchPreview | null) => (
+      <TaskFormInputs
+        isSessionMode={false}
+        autoFocus={false}
+        initialDescription={ORIGINAL_PROMPT}
+        onDescriptionChange={() => {}}
+        onKeyDown={() => {}}
+        descriptionValueRef={ref}
+        launchPreview={preview}
+      />
+    );
+    const view = render(renderForm(launchPreview), { wrapper: Wrapper });
+
+    fireEvent.click(screen.getByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID));
+    view.rerender(renderForm(null));
+
+    expect(screen.getByTestId(DESCRIPTION_INPUT_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId("task-create-launch-preview-content")).toBeNull();
+    expect(screen.queryByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID)).toBeNull();
+    expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe(
+      ORIGINAL_PROMPT,
+    );
+  });
+});
+
+describe("TaskCreateLaunchPreviewToggle", () => {
+  it("keeps a disabled toggle tooltip trigger focusable", () => {
+    render(
+      <TaskCreateLaunchPreviewToggle
+        active={false}
+        disabled
+        stepName="In Progress"
+        onToggle={() => undefined}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    const toggle = screen.getByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID);
+    expect(toggle.getAttribute("disabled")).not.toBeNull();
+    expect(toggle.getAttribute("aria-label")).toBe(
+      "Preview launch prompt with workflow step prompt: In Progress",
+    );
+    expect(toggle.parentElement?.getAttribute("tabindex")).toBe("0");
+    expect(toggle.parentElement?.classList.contains("inline-flex")).toBe(true);
+  });
+});
+
+describe("TaskFormInputs mention keyboard routing", () => {
+  it("handles Escape in capture before a target listener stops the bubble phase", () => {
+    const { textarea } = renderTaskFormInputs("");
+    const stopAtTarget = (event: KeyboardEvent) => event.stopPropagation();
+    textarea.addEventListener("keydown", stopAtTarget);
+
+    fireEvent.keyDown(textarea, { key: "Escape", bubbles: true, cancelable: true });
+
+    textarea.removeEventListener("keydown", stopAtTarget);
+    expect(mentionMocks.handleKeyDown).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TaskFormInputs plugin composer action — rendering", () => {
+  it("renders the composer slot in task-create mode", () => {
+    renderTaskFormInputs("");
+    expect(lastPluginSlotProps().surface).toBe("task-create");
+  });
+
+  it("renders the composer slot in session mode", () => {
     const ref = createRef<TaskFormInputsHandle>();
     render(
       <TaskFormInputs
@@ -109,32 +239,10 @@ describe("TaskFormInputs voice-input wiring — rendering", () => {
       />,
       { wrapper: Wrapper },
     );
-    expect(screen.getByTestId("voice-input-button")).toBeTruthy();
-    expect(lastVoiceProps()).toBeTruthy();
+    expect(lastPluginSlotProps().surface).toBe("new-session");
   });
 
-  it("forwards onVoiceAutoSend to the voice button", () => {
-    const onVoiceAutoSend = vi.fn();
-    const ref = createRef<TaskFormInputsHandle>();
-    render(
-      <TaskFormInputs
-        isSessionMode={false}
-        autoFocus={false}
-        initialDescription=""
-        onDescriptionChange={() => {}}
-        onKeyDown={() => {}}
-        descriptionValueRef={ref}
-        onVoiceAutoSend={onVoiceAutoSend}
-      />,
-      { wrapper: Wrapper },
-    );
-
-    const { onAutoSend } = lastVoiceProps();
-    onAutoSend?.();
-    expect(onVoiceAutoSend).toHaveBeenCalledTimes(1);
-  });
-
-  it("disables the voice button when the form is disabled", () => {
+  it("reports the form's disabled state to the plugin", () => {
     const ref = createRef<TaskFormInputsHandle>();
     render(
       <TaskFormInputs
@@ -149,17 +257,120 @@ describe("TaskFormInputs voice-input wiring — rendering", () => {
       { wrapper: Wrapper },
     );
 
-    expect(lastVoiceProps().disabled).toBe(true);
+    expect(lastPluginSlotProps().disabled).toBe(true);
+    expect(lastPluginSlotProps().submittable).toBe(false);
   });
 });
 
-describe("TaskFormInputs voice-input wiring — at-cursor splice", () => {
+describe("TaskFormInputs plugin composer submission", () => {
+  it("reports blocked when the native creation path rejects submission", async () => {
+    const ref = createRef<TaskFormInputsHandle>();
+    render(
+      <TaskFormInputs
+        isSessionMode={false}
+        autoFocus={false}
+        initialDescription="prompt"
+        onDescriptionChange={() => {}}
+        onKeyDown={() => {}}
+        descriptionValueRef={ref}
+        onComposerSubmit={() => false}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    await expect(lastPluginSlotProps().composer.submit()).resolves.toEqual({ status: "blocked" });
+  });
+
+  it("reports submitted only when the native creation path accepts submission", async () => {
+    const ref = createRef<TaskFormInputsHandle>();
+    render(
+      <TaskFormInputs
+        isSessionMode={false}
+        autoFocus={false}
+        initialDescription="prompt"
+        onDescriptionChange={() => {}}
+        onKeyDown={() => {}}
+        descriptionValueRef={ref}
+        onComposerSubmit={() => true}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    await expect(lastPluginSlotProps().composer.submit()).resolves.toEqual({ status: "submitted" });
+  });
+});
+
+describe("TaskFormInputs plugin composer chained calls", () => {
+  it("submits a transcript inserted in the same callback, before React re-renders", async () => {
+    // The shape a dictation plugin actually has: insert the transcript and
+    // submit it without yielding. The gate must read the synchronous value,
+    // not the render snapshot, or an empty composer stays "blocked" forever.
+    const onComposerSubmit = vi.fn(() => true);
+    const ref = createRef<TaskFormInputsHandle>();
+    render(
+      <TaskFormInputs
+        isSessionMode={false}
+        autoFocus={false}
+        initialDescription=""
+        onDescriptionChange={() => {}}
+        onKeyDown={() => {}}
+        descriptionValueRef={ref}
+        onComposerSubmit={onComposerSubmit}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    const composer = lastPluginSlotProps().composer;
+    let result: Awaited<ReturnType<typeof composer.submit>> | undefined;
+    await act(async () => {
+      composer.insertText("dictated prompt");
+      result = await composer.submit();
+    });
+
+    expect(result).toEqual({ status: "submitted" });
+    expect(onComposerSubmit).toHaveBeenCalledTimes(1);
+    expect(ref.current?.getValue()).toBe("dictated prompt");
+  });
+
+  it("keeps both transcripts when a plugin inserts twice in one callback", () => {
+    const { textarea } = renderTaskFormInputs("");
+
+    act(() => {
+      lastPluginSlotProps().composer.insertText("first");
+      lastPluginSlotProps().composer.insertText("second");
+    });
+
+    expect(textarea.value).toBe("first second");
+  });
+
+  it("supports rich prompt references for literal plugin insertion and submit", async () => {
+    const onComposerSubmit = vi.fn(() => true);
+    const { ref } = renderTaskFormInputs("", false, null, true, onComposerSubmit);
+    const composer = lastPluginSlotProps().composer;
+    const first = "<p>hello</p> &amp;\n  first";
+    let result: Awaited<ReturnType<typeof composer.submit>> | undefined;
+
+    await act(async () => {
+      composer.insertText(first);
+      composer.insertText("tail");
+      result = await composer.submit();
+    });
+
+    expect(result).toEqual({ status: "submitted" });
+    expect(ref.current?.getValue()).toBe(`${first} tail`);
+    expect(onComposerSubmit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TaskFormInputs plugin composer action — at-cursor splice", () => {
   it("splices the transcript at the caret with a leading space after a word", () => {
     const { textarea } = renderTaskFormInputs("hello world");
     textarea.focus();
     textarea.setSelectionRange(5, 5);
 
-    act(() => lastVoiceProps().onTranscript("there"));
+    act(() => {
+      lastPluginSlotProps().composer.insertText("there");
+    });
 
     expect(textarea.value).toBe("hello there world");
     expect(textarea.selectionStart).toBe(11);
@@ -171,7 +382,9 @@ describe("TaskFormInputs voice-input wiring — at-cursor splice", () => {
     textarea.focus();
     textarea.setSelectionRange(6, 6);
 
-    act(() => lastVoiceProps().onTranscript("world"));
+    act(() => {
+      lastPluginSlotProps().composer.insertText("world");
+    });
 
     expect(textarea.value).toBe("hello world");
     expect(textarea.selectionStart).toBe(11);
@@ -182,7 +395,9 @@ describe("TaskFormInputs voice-input wiring — at-cursor splice", () => {
     textarea.focus();
     textarea.setSelectionRange(6, 11);
 
-    act(() => lastVoiceProps().onTranscript("there"));
+    act(() => {
+      lastPluginSlotProps().composer.insertText("there");
+    });
 
     expect(textarea.value).toBe("hello there");
   });
@@ -192,7 +407,9 @@ describe("TaskFormInputs voice-input wiring — at-cursor splice", () => {
     textarea.focus();
     textarea.setSelectionRange(5, 5);
 
-    act(() => lastVoiceProps().onTranscript("   "));
+    act(() => {
+      lastPluginSlotProps().composer.insertText("   ");
+    });
 
     expect(textarea.value).toBe("hello");
   });
@@ -204,7 +421,9 @@ describe("TaskFormInputs voice-input wiring — at-cursor splice", () => {
     // non-whitespace, so a leading space is prepended.
     textarea.setSelectionRange(8, 8);
 
-    act(() => lastVoiceProps().onTranscript("added"));
+    act(() => {
+      lastPluginSlotProps().composer.insertText("added");
+    });
 
     expect(textarea.value).toBe("line one added\nline two");
     expect(textarea.selectionStart).toBe(14);
@@ -215,7 +434,9 @@ describe("TaskFormInputs voice-input wiring — at-cursor splice", () => {
     textarea.focus();
     textarea.setSelectionRange(0, 0);
 
-    act(() => lastVoiceProps().onTranscript("first\nsecond"));
+    act(() => {
+      lastPluginSlotProps().composer.insertText("first\nsecond");
+    });
 
     expect(textarea.value).toBe("first\nsecond");
   });
@@ -225,7 +446,9 @@ describe("TaskFormInputs voice-input wiring — at-cursor splice", () => {
     textarea.focus();
     textarea.setSelectionRange(5, 5);
 
-    act(() => lastVoiceProps().onTranscript("two"));
+    act(() => {
+      lastPluginSlotProps().composer.insertText("two");
+    });
 
     expect(textarea.value).toBe("line\ntwo");
   });
@@ -300,7 +523,7 @@ describe("TaskFormInputs attachment feedback", () => {
   it("warns when a pasted image exceeds the attachment limit", async () => {
     const { textarea } = renderTaskFormInputs("");
     const image = new File(["image"], "copied-image.png", { type: "image/png" });
-    Object.defineProperty(image, "size", { value: 14 * 1024 * 1024 });
+    Object.defineProperty(image, "size", { value: MAX_FILE_SIZE + 1 });
 
     fireEvent.paste(textarea, {
       clipboardData: {
@@ -313,7 +536,7 @@ describe("TaskFormInputs attachment feedback", () => {
     const warning = await screen.findByTestId(TOAST_MESSAGE_TEST_ID);
     expect(warning.textContent).toContain("Attachment is too large");
     expect(warning.textContent).toContain(
-      "copied-image.png is 14.0 MB. The maximum file size is 10.0 MB.",
+      `copied-image.png is ${formatBytes(MAX_FILE_SIZE + 1)}. The maximum file size is ${formatBytes(MAX_FILE_SIZE)}.`,
     );
   });
 

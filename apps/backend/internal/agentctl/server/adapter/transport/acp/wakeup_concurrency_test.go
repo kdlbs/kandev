@@ -38,11 +38,18 @@ func (f *concurrencyFakeAgent) Prompt(_ context.Context, _ acp.PromptRequest) (a
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 }
 
+// Initialize advertises `_meta.claudeCode.promptQueueing`, mirroring the real
+// claude-agent-acp bridge. Prompt handoff and mid-turn steering are gated on that
+// negotiated advertisement rather than the agent's id, so a fake standing in for
+// that bridge has to advertise it to be eligible.
 func (f *concurrencyFakeAgent) Initialize(_ context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
 	if f.initialized != nil {
 		f.initialized <- params
 	}
-	return acp.InitializeResponse{ProtocolVersion: params.ProtocolVersion}, nil
+	return acp.InitializeResponse{
+		ProtocolVersion:   params.ProtocolVersion,
+		AgentCapabilities: promptQueueingCapabilities(true),
+	}, nil
 }
 
 func (f *concurrencyFakeAgent) NewSession(_ context.Context, _ acp.NewSessionRequest) (acp.NewSessionResponse, error) {

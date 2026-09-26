@@ -5,8 +5,12 @@ import {
   useWorkflowAgentProfileEffect,
   useWorkflowStepsEffect,
 } from "./task-create-dialog-effects";
-import { decideAgentProfileAutopick } from "./task-create-dialog-autopick";
+import {
+  decideAgentProfileAutopick,
+  type AgentProfileAutopickInput,
+} from "./task-create-dialog-autopick";
 import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
+import { readQueuedTaskCreateLastUsedState } from "./task-create-dialog-handlers";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { Workspace } from "@/lib/types/http";
 const STORAGE_KEYS = { LAST_AGENT_PROFILE_ID: "kandev.dialog.lastAgentProfileId" } as const;
@@ -66,6 +70,7 @@ describe("useWorkflowStepsEffect", () => {
           name: "Backlog",
           position: 0,
           is_start_step: false,
+          prompt: "Backlog prompt",
         },
         {
           id: "visible-start",
@@ -93,6 +98,7 @@ describe("useWorkflowStepsEffect", () => {
           title: "Backlog",
           position: 0,
           is_start_step: false,
+          prompt: "Backlog prompt",
           events: undefined,
           workflowId: "visible",
         },
@@ -363,63 +369,87 @@ function makeSel(overrides: Partial<StoreSelections> = {}): StoreSelections {
   };
 }
 
+function decideAutopick(
+  agentProfiles: AgentProfileOption[],
+  compatibleAgentProfiles: AgentProfileOption[],
+  overrides: Partial<AgentProfileAutopickInput> = {},
+) {
+  return decideAgentProfileAutopick({
+    open: true,
+    agentProfileId: "",
+    workflowAgentProfileId: "",
+    workflowHasAgent: false,
+    agentProfiles,
+    compatibleAgentProfiles,
+    authLoaded: true,
+    executorProfileId: "",
+    hasExecutors: false,
+    lastAgentProfileId: null,
+    userSettingsLoaded: true,
+    defaultAgentProfileId: null,
+    ...overrides,
+  });
+}
+
 describe("decideAgentProfileAutopick — user settings deferral", () => {
   it("defers agent auto-pick until user settings have loaded or settled", () => {
     const cursor = makeProfile("cursor");
-    const deferred = decideAgentProfileAutopick({
-      open: true,
-      agentProfileId: "",
-      workflowAgentProfileId: "",
-      workflowHasAgent: false,
-      agentProfiles: [cursor],
-      compatibleAgentProfiles: [cursor],
-      authLoaded: true,
-      executorProfileId: "",
-      hasExecutors: false,
-      lastAgentProfileId: null,
-      userSettingsLoaded: false,
-      defaultAgentProfileId: null,
+    expect(decideAutopick([cursor], [cursor], { userSettingsLoaded: false })).toEqual({
+      kind: "defer",
+      reason: "user-settings-not-loaded",
     });
-
-    expect(deferred).toEqual({ kind: "defer", reason: "user-settings-not-loaded" });
-
-    const picked = decideAgentProfileAutopick({
-      open: true,
-      agentProfileId: "",
-      workflowAgentProfileId: "",
-      workflowHasAgent: false,
-      agentProfiles: [cursor],
-      compatibleAgentProfiles: [cursor],
-      authLoaded: true,
-      executorProfileId: "",
-      hasExecutors: false,
-      lastAgentProfileId: null,
-      userSettingsLoaded: true,
-      defaultAgentProfileId: null,
+    expect(decideAutopick([cursor], [cursor])).toEqual({
+      kind: "pick",
+      source: "first",
+      id: cursor.id,
     });
-
-    expect(picked).toEqual({ kind: "pick", source: "first", id: cursor.id });
   });
 
   it("defers auto-pick while user settings load", () => {
     const cursor = makeProfile("cursor");
+    expect(
+      decideAutopick([cursor], [cursor], {
+        userSettingsLoaded: false,
+        lastAgentProfileId: cursor.id,
+      }),
+    ).toEqual({ kind: "defer", reason: "user-settings-not-loaded" });
+  });
 
-    const deferred = decideAgentProfileAutopick({
-      open: true,
-      agentProfileId: "",
-      workflowAgentProfileId: "",
-      workflowHasAgent: false,
-      agentProfiles: [cursor],
-      compatibleAgentProfiles: [cursor],
-      authLoaded: true,
-      executorProfileId: "",
-      hasExecutors: false,
-      lastAgentProfileId: cursor.id,
-      userSettingsLoaded: false,
-      defaultAgentProfileId: null,
+  it("never picks a disabled profile (last-used, workspace default, or first)", () => {
+    // The compat list is already filtered by useExecutorProfileCompat, so
+    // the disabled profile is absent — the decision must not resurrect it
+    // via the last-used or workspace-default candidates.
+    const enabled = makeProfile("enabled");
+    const disabled = { ...makeProfile("disabled"), enabled: false };
+    const agentProfiles = [disabled, enabled];
+    const compatibleAgentProfiles = [enabled];
+
+    expect(
+      decideAutopick(agentProfiles, compatibleAgentProfiles, { lastAgentProfileId: disabled.id }),
+    ).toEqual({
+      kind: "pick",
+      source: "first",
+      id: enabled.id,
     });
+    expect(
+      decideAutopick(agentProfiles, compatibleAgentProfiles, {
+        defaultAgentProfileId: disabled.id,
+      }),
+    ).toEqual({
+      kind: "pick",
+      source: "first",
+      id: enabled.id,
+    });
+    expect(decideAutopick(agentProfiles, compatibleAgentProfiles)).toEqual({
+      kind: "pick",
+      source: "first",
+      id: enabled.id,
+    });
+  });
 
-    expect(deferred).toEqual({ kind: "defer", reason: "user-settings-not-loaded" });
+  it("treats all-disabled as no compatible profiles", () => {
+    const disabled = { ...makeProfile("disabled"), enabled: false };
+    expect(decideAutopick([disabled], [])).toEqual({ kind: "skip", reason: "no-compatible" });
   });
 });
 
@@ -516,21 +546,6 @@ describe("useDefaultSelectionsEffect — executor-aware agent restoration", () =
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(fs.setAgentProfileId).not.toHaveBeenCalled();
   });
-
-  it("does nothing when agentProfileId is already set (user has explicitly picked)", async () => {
-    const claude = makeProfile("claude");
-    const cursor = makeProfile("cursor");
-    const fs = makeDefaultSelFs({ agentProfileId: claude.id });
-    const sel = makeSel({
-      agentProfiles: [claude, cursor],
-      compatibleAgentProfiles: [cursor],
-    });
-
-    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(fs.setAgentProfileId).not.toHaveBeenCalled();
-  });
 });
 
 describe("useDefaultSelectionsEffect — auth-spec load race", () => {
@@ -612,5 +627,118 @@ describe("useDefaultSelectionsEffect — auth-spec load race", () => {
     rerender({ sel: selAfter });
     await waitFor(() => expect(fs.setAgentProfileId).toHaveBeenCalledWith(cursor.id));
     expect(fs.setAgentProfileId).not.toHaveBeenCalledWith(claude.id);
+  });
+});
+
+const SPRITES_PROFILE_ID = "profile-sprites";
+const ALREADY_SET = { kind: "skip", reason: "already-set" } as const;
+
+describe("decideAgentProfileAutopick — replacing an incompatible selection", () => {
+  const claude = makeProfile("claude");
+  const cursor = makeProfile("cursor");
+  const codex = makeProfile("codex");
+  const selectedOnExecutor = {
+    agentProfileId: claude.id,
+    executorProfileId: SPRITES_PROFILE_ID,
+    hasExecutors: true,
+  };
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.2
+  it("replaces a selection that is absent from a non-empty compatible list", () => {
+    expect(decideAutopick([claude, cursor, codex], [cursor, codex], selectedOnExecutor)).toEqual({
+      kind: "pick",
+      source: "first",
+      id: cursor.id,
+      replaces: claude.id,
+    });
+  });
+
+  it("prefers the last-used profile, then the workspace default, for the replacement", () => {
+    expect(
+      decideAutopick([claude, cursor, codex], [cursor, codex], {
+        ...selectedOnExecutor,
+        lastAgentProfileId: codex.id,
+        defaultAgentProfileId: cursor.id,
+      }),
+    ).toEqual({ kind: "pick", source: "lastId", id: codex.id, replaces: claude.id });
+    expect(
+      decideAutopick([claude, cursor, codex], [cursor, codex], {
+        ...selectedOnExecutor,
+        defaultAgentProfileId: codex.id,
+      }),
+    ).toEqual({ kind: "pick", source: "defId", id: codex.id, replaces: claude.id });
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.3
+  it("keeps a selection that is still compatible", () => {
+    expect(decideAutopick([claude, cursor], [claude, cursor], selectedOnExecutor)).toEqual(
+      ALREADY_SET,
+    );
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.5
+  it("never replaces a workflow-locked selection", () => {
+    expect(
+      decideAutopick([claude, cursor], [cursor], {
+        ...selectedOnExecutor,
+        workflowAgentProfileId: claude.id,
+      }),
+    ).toEqual({ kind: "skip", reason: "workflow-locked" });
+    expect(
+      decideAutopick([claude, cursor], [cursor], { ...selectedOnExecutor, workflowHasAgent: true }),
+    ).toEqual({ kind: "skip", reason: "workflow-has-agent" });
+  });
+
+  it("leaves the selection alone while the catalog, executor, or compatible list is not ready", () => {
+    expect(
+      decideAutopick([claude, cursor], [cursor], { ...selectedOnExecutor, authLoaded: false }),
+    ).toEqual(ALREADY_SET);
+    expect(
+      decideAutopick([claude, cursor], [cursor], { ...selectedOnExecutor, executorProfileId: "" }),
+    ).toEqual(ALREADY_SET);
+    expect(decideAutopick([claude, cursor], [], selectedOnExecutor)).toEqual(ALREADY_SET);
+  });
+});
+
+describe("useDefaultSelectionsEffect — executor switch after an agent was chosen", () => {
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.2
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.8
+  it("replaces an incompatible selection without touching the queued last-used preference", async () => {
+    const claude = makeProfile("claude");
+    const cursor = makeProfile("cursor");
+    const codex = makeProfile("codex");
+    const fs = makeDefaultSelFs({
+      agentProfileId: claude.id,
+      executorProfileId: SPRITES_PROFILE_ID,
+    });
+    const sel = makeSel({
+      agentProfiles: [claude, cursor, codex],
+      compatibleAgentProfiles: [cursor, codex],
+    });
+    const queuedBefore = readQueuedTaskCreateLastUsedState();
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setAgentProfileId).toHaveBeenCalledWith(cursor.id));
+    expect(readQueuedTaskCreateLastUsedState()).toEqual(queuedBefore);
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.3
+  it("keeps a selection that stays compatible with the new executor", async () => {
+    const claude = makeProfile("claude");
+    const cursor = makeProfile("cursor");
+    const fs = makeDefaultSelFs({
+      agentProfileId: cursor.id,
+      executorProfileId: SPRITES_PROFILE_ID,
+    });
+    const sel = makeSel({
+      agentProfiles: [claude, cursor],
+      compatibleAgentProfiles: [cursor],
+    });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fs.setAgentProfileId).not.toHaveBeenCalled();
   });
 });

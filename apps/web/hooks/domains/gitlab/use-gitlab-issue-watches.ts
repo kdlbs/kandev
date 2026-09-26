@@ -15,6 +15,8 @@ import {
 } from "@/lib/api/domains/gitlab-api";
 import { useAppStore } from "@/components/state-provider";
 
+// i18n-exempt: precondition diagnostic for a programmer error; callers branch
+// on the error type, never render this message.
 const WORKSPACE_REQUIRED = "workspaceId required";
 
 function filterByWorkspace<T extends { workspace_id: string }>(

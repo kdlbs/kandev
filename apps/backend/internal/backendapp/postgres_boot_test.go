@@ -76,6 +76,7 @@ func TestPostgresBootInitializesRepositories(t *testing.T) {
 		}
 	})
 	services, agentSettingsController, err := provideServices(
+		context.Background(),
 		cfg,
 		log,
 		repos,
@@ -86,6 +87,54 @@ func TestPostgresBootInitializesRepositories(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("provide services with postgres: %v", err)
+	}
+	if services.PluginsCleanup != nil {
+		t.Cleanup(func() { _ = services.PluginsCleanup() })
+	}
+	if services.GitHub == nil {
+		t.Fatal("GitHub service is unavailable after PostgreSQL boot")
+	}
+	if _, err := services.GitHub.GetWorkspaceSettings(context.Background(), "boot-workspace"); err != nil {
+		t.Fatalf("GitHub persistence is unavailable after PostgreSQL boot: %v", err)
+	}
+	if services.GitLab == nil {
+		t.Fatal("GitLab service is unavailable after PostgreSQL boot")
+	}
+	if _, err := services.GitLab.GetConfigForWorkspace(context.Background(), "boot-workspace"); err != nil {
+		t.Fatalf("GitLab task persistence is unavailable after PostgreSQL boot: %v", err)
+	}
+	if services.Jira == nil {
+		t.Fatal("Jira service is unavailable after PostgreSQL boot")
+	}
+	if _, err := services.Jira.GetConfigForWorkspace(context.Background(), "boot-workspace"); err != nil {
+		t.Fatalf("Jira persistence is unavailable after PostgreSQL boot: %v", err)
+	}
+	if services.Linear == nil {
+		t.Fatal("Linear service is unavailable after PostgreSQL boot")
+	}
+	if _, err := services.Linear.GetConfigForWorkspace(context.Background(), "boot-workspace"); err != nil {
+		t.Fatalf("Linear persistence is unavailable after PostgreSQL boot: %v", err)
+	}
+	if services.Sentry == nil || services.Sentry.Store() == nil {
+		t.Fatal("Sentry persistence is unavailable after PostgreSQL boot")
+	}
+	if _, err := services.Sentry.ListInstances(context.Background(), "boot-workspace"); err != nil {
+		t.Fatalf("Sentry persistence is unavailable after PostgreSQL boot: %v", err)
+	}
+	if services.AzureDevOps == nil {
+		t.Fatal("Azure DevOps service is unavailable after PostgreSQL boot")
+	}
+	if _, err := services.AzureDevOps.GetConfigForWorkspace(context.Background(), "boot-workspace"); err != nil {
+		t.Fatalf("Azure DevOps persistence is unavailable after PostgreSQL boot: %v", err)
+	}
+	if services.WorkflowSync == nil {
+		t.Fatal("workflow sync service is unavailable after PostgreSQL boot")
+	}
+	if _, err := services.WorkflowSync.GetConfigForWorkspace(context.Background(), "boot-workspace"); err != nil {
+		t.Fatalf("workflow sync persistence is unavailable after PostgreSQL boot: %v", err)
+	}
+	if services.Automation == nil || services.Automation.Service == nil {
+		t.Fatal("automation persistence is unavailable after PostgreSQL boot")
 	}
 	if err := runInitialAgentSetup(context.Background(), services.User, agentSettingsController, log); err != nil {
 		t.Fatalf("run initial agent setup with postgres: %v", err)
@@ -164,7 +213,7 @@ func TestParsePostgresConnInfo(t *testing.T) {
 	want := postgresConnInfo{
 		Host:     "postgres",
 		Port:     5433,
-		User:     "kandev",
+		User:     kandevName,
 		Password: "secret",
 		SSLMode:  "require",
 	}

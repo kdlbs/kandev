@@ -16,6 +16,8 @@ import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
+import { SettingsFieldLabel } from "@/components/settings/settings-typography";
+import { settingsControlClassName } from "@/components/settings/settings-control";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
@@ -31,6 +33,7 @@ import type {
 } from "@/lib/types/github";
 import { useTranslation } from "react-i18next";
 import { t as translate } from "@/lib/i18n";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 function splitCSV(value: string): string[] {
   return value
@@ -84,7 +87,7 @@ function RepositoryScopeHelp() {
       type="button"
       variant="ghost"
       size="icon"
-      className="h-11 w-11 cursor-pointer text-muted-foreground sm:h-7 sm:w-7"
+      className={controlSizingClassName("icon", "cursor-pointer text-muted-foreground")}
       aria-haspopup="dialog"
       aria-expanded={open}
       aria-label={t("github:explainRepositoryScope")}
@@ -147,9 +150,7 @@ function RepositoryScopeFields({
     >
       <CardContent className="grid gap-4 py-4 md:grid-cols-[220px_minmax(0,1fr)]">
         <div className="space-y-1.5">
-          <label className="text-sm font-medium" htmlFor="github-scope-mode">
-            {t("github:mode")}
-          </label>
+          <SettingsFieldLabel htmlFor="github-scope-mode">{t("github:mode")}</SettingsFieldLabel>
           <Select
             value={mode}
             onValueChange={(value) => onModeChange(value as GitHubRepoScopeMode)}
@@ -159,6 +160,7 @@ function RepositoryScopeFields({
               id="github-scope-mode"
               data-testid="github-scope-mode"
               data-settings-dirty={mode !== baseline.mode}
+              className={settingsControlClassName()}
             >
               <SelectValue />
             </SelectTrigger>
@@ -171,23 +173,27 @@ function RepositoryScopeFields({
         </div>
         <div className="grid gap-3">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium" htmlFor="github-scope-orgs">
+            <SettingsFieldLabel htmlFor="github-scope-orgs">
               {t("github:organizations")}
-            </label>
+            </SettingsFieldLabel>
             <Input
               id="github-scope-orgs"
               value={orgs}
               data-settings-dirty={orgs !== baseline.orgs}
               onChange={(event) => onOrgsChange(event.target.value)}
               disabled={loading || mode !== "orgs"}
+              // Sample GitHub organization logins, i.e. the shape of the value
+              // this field accepts. A translated `example-org` would stop being
+              // a usable example.
+              // eslint-disable-next-line i18next/no-literal-string -- example org logins
               placeholder="kdlbs, example-org"
               data-testid="github-scope-orgs-input"
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-sm font-medium" htmlFor="github-scope-repos">
+            <SettingsFieldLabel htmlFor="github-scope-repos">
               {t("github:repositories")}
-            </label>
+            </SettingsFieldLabel>
             <Input
               id="github-scope-repos"
               value={repos}
@@ -195,6 +201,9 @@ function RepositoryScopeFields({
               onChange={(event) => onReposChange(event.target.value)}
               disabled={loading || mode !== "repos"}
               aria-invalid={invalidRepos}
+              // Sample `owner/repo` slugs — the format the sibling validation
+              // message describes, not copy.
+              // eslint-disable-next-line i18next/no-literal-string -- example repo slugs
               placeholder="kdlbs/kandev, example/api"
               data-testid="github-scope-repos-input"
             />

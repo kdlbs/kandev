@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -17,16 +18,19 @@ import (
 // Worktree destruction preserves the underlying branch — user data that hasn't been
 // pushed is never deleted by reset.
 type EnvironmentDestroyer interface {
-	DestroyContainer(ctx context.Context, containerID string) error
+	// DestroyContainer tears down the environment's container. It takes the
+	// environment, not a bare container ID: the ID alone does not say which
+	// daemon owns it, and a remote Docker container lives on another host.
+	DestroyContainer(ctx context.Context, env *models.TaskEnvironment) error
 	DestroySandbox(ctx context.Context, sandboxID, executionID string) error
 	DestroyWorktree(ctx context.Context, worktreeID string) error
 	// PushEnvironmentBranch best-effort pushes the current branch of the environment's
 	// workspace to its upstream. Returns an error if the push fails; callers can decide
 	// whether to abort the reset on failure.
 	PushEnvironmentBranch(ctx context.Context, env *models.TaskEnvironment) error
-	// GetContainerLiveStatus returns a real-time snapshot of a Docker container,
-	// or nil when the executor type doesn't have a container layer.
-	GetContainerLiveStatus(ctx context.Context, containerID string) (*ContainerLiveStatus, error)
+	// GetContainerLiveStatus returns a real-time snapshot of the environment's
+	// container, or nil when the executor type doesn't have a container layer.
+	GetContainerLiveStatus(ctx context.Context, env *models.TaskEnvironment) (*ContainerLiveStatus, error)
 }
 
 // ContainerLiveStatus mirrors lifecycle.ContainerLiveStatus for the task service
@@ -74,6 +78,15 @@ type SessionRunningChecker interface {
 	IsAnySessionRunningForTask(ctx context.Context, taskID string) (bool, error)
 }
 
+// taskEnvironmentResetClaimer reserves an environment reset behind the
+// durable cleanup barrier. It is optional so lightweight service test doubles
+// and integrations that do not persist cleanup jobs retain their legacy
+// behavior.
+type taskEnvironmentResetClaimer interface {
+	ClaimTaskEnvironmentReset(ctx context.Context, taskID, environmentID string, expectedGeneration int64, operationID string) (string, error)
+	ReleaseTaskEnvironmentReset(ctx context.Context, jobID string, state models.TaskResourceCleanupState, errStr string) error
+}
+
 // ErrSessionRunning is returned by ResetTaskEnvironment when at least one session
 // on the task is still actively running and the caller must stop it first.
 var ErrSessionRunning = errors.New("active session is running on this task; stop it before resetting the environment")
@@ -104,7 +117,7 @@ func (s *Service) GetTaskEnvironmentLiveStatus(ctx context.Context, taskID strin
 	if env.ContainerID == "" || s.envDestroyer == nil {
 		return nil, nil
 	}
-	return s.envDestroyer.GetContainerLiveStatus(ctx, env.ContainerID)
+	return s.envDestroyer.GetContainerLiveStatus(ctx, env)
 }
 
 // GetSSHLiveStatus returns the SSH-specific runtime info for the task's
@@ -120,7 +133,7 @@ func (s *Service) GetSSHLiveStatus(ctx context.Context, taskID string) (*SSHLive
 	if err != nil || env == nil {
 		return nil, err
 	}
-	if env.ExecutorType != string(models.ExecutorTypeSSH) {
+	if !sshLiveStatusApplies(env.ExecutorType) {
 		return nil, nil
 	}
 	running, err := s.latestRunningForTask(ctx, taskID)
@@ -173,6 +186,20 @@ func (s *Service) latestRunningForTask(ctx context.Context, taskID string) (*mod
 
 // buildSSHLiveStatus projects the SSH metadata keys onto the live-status
 // shape. Pure function so the projection contract is unit-testable.
+// sshLiveStatusApplies reports whether an executor reaches its workspace over
+// SSH, and therefore records connection metadata worth surfacing. Remote
+// Docker qualifies: its daemon is reached over the same transport and its
+// instances carry the same metadata keys, and the environment popover needs
+// the host to describe how to reach the container at all.
+func sshLiveStatusApplies(executorType string) bool {
+	switch models.ExecutorType(executorType) {
+	case models.ExecutorTypeSSH, models.ExecutorTypeRemoteDocker:
+		return true
+	default:
+		return false
+	}
+}
+
 func buildSSHLiveStatus(md map[string]interface{}) *SSHLiveStatus {
 	status := &SSHLiveStatus{
 		Host:          mdString(md, "ssh_host"),
@@ -295,31 +322,69 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 		return ErrSessionRunning
 	}
 
+	var resetJobID string
+	var resetClaimer taskEnvironmentResetClaimer
+	if claimer, ok := s.taskEnvironments.(taskEnvironmentResetClaimer); ok {
+		resetClaimer = claimer
+		resetJobID, err = claimer.ClaimTaskEnvironmentReset(
+			ctx,
+			taskID,
+			env.ID,
+			env.OwnershipGeneration,
+			fmt.Sprintf("task-environment-reset:%s", uuid.NewString()),
+		)
+		if err != nil {
+			return fmt.Errorf("claim environment reset: %w", err)
+		}
+	}
+	releaseReset := func(state models.TaskResourceCleanupState, releaseErr error) {
+		if resetClaimer == nil || resetJobID == "" {
+			return
+		}
+		lastError := ""
+		if releaseErr != nil {
+			lastError = releaseErr.Error()
+		}
+		if err := resetClaimer.ReleaseTaskEnvironmentReset(context.WithoutCancel(ctx), resetJobID, state, lastError); err != nil {
+			s.logger.Warn("failed to finalize task environment reset barrier",
+				zap.String("task_id", taskID),
+				zap.String("env_id", env.ID),
+				zap.String("cleanup_job_id", resetJobID),
+				zap.Error(err))
+		}
+	}
+
 	s.logger.Info("resetting task environment",
 		zap.String("task_id", taskID),
 		zap.String("env_id", env.ID),
 		zap.String("executor_type", env.ExecutorType),
 		zap.String("container_id", env.ContainerID),
 		zap.String("sandbox_id", env.SandboxID),
-		zap.String("worktree_id", env.WorktreeID),
+		zap.Int("worktree_count", len(environmentWorktreeIDs(env))),
 		zap.Bool("push_branch", opts.PushBranch))
 
 	if opts.PushBranch {
 		if s.envDestroyer == nil {
-			return fmt.Errorf("environment destroyer not configured; cannot push branch")
+			err := fmt.Errorf("environment destroyer not configured; cannot push branch")
+			releaseReset(models.TaskResourceCleanupStateFailed, err)
+			return err
 		}
 		if err := s.envDestroyer.PushEnvironmentBranch(ctx, env); err != nil {
+			releaseReset(models.TaskResourceCleanupStateFailed, err)
 			return fmt.Errorf("push branch before reset: %w", err)
 		}
 	}
 
 	if err := s.teardownEnvironmentResources(ctx, env); err != nil {
+		releaseReset(models.TaskResourceCleanupStateFailed, err)
 		return err
 	}
 
 	if err := s.taskEnvironments.DeleteTaskEnvironment(ctx, env.ID); err != nil {
+		releaseReset(models.TaskResourceCleanupStateFailed, err)
 		return fmt.Errorf("delete task environment row: %w", err)
 	}
+	releaseReset(models.TaskResourceCleanupStateSucceeded, nil)
 	s.logger.Info("task environment reset complete",
 		zap.String("task_id", taskID),
 		zap.String("env_id", env.ID))
@@ -333,10 +398,25 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 // On any non-idempotent error, the caller should preserve the row so the user
 // can retry.
 func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.TaskEnvironment) error {
+	return s.teardownEnvironmentResourcesWithWorktrees(ctx, env, true)
+}
+
+func (s *Service) teardownEnvironmentRuntimeResources(ctx context.Context, env *models.TaskEnvironment) error {
+	return s.teardownEnvironmentResourcesWithWorktrees(ctx, env, false)
+}
+
+func (s *Service) teardownEnvironmentResourcesWithWorktrees(
+	ctx context.Context, env *models.TaskEnvironment, includeWorktrees bool,
+) error {
 	if cause := context.Cause(ctx); cause != nil {
 		return cause
 	}
-	if env.ContainerID == "" && env.SandboxID == "" && env.WorktreeID == "" {
+	if err := s.teardownKubernetesEnvironment(ctx, env); err != nil {
+		return err
+	}
+
+	worktreeIDs := environmentWorktreeIDs(env)
+	if !environmentHasResources(env, includeWorktrees, worktreeIDs) {
 		return nil
 	}
 	if s.envDestroyer == nil {
@@ -354,7 +434,7 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 		if err := contextError(); err != nil {
 			return err
 		}
-		if err := s.envDestroyer.DestroyContainer(ctx, env.ContainerID); err != nil {
+		if err := s.envDestroyer.DestroyContainer(ctx, env); err != nil {
 			errs = append(errs, fmt.Errorf("destroy container %s: %w", env.ContainerID, err))
 		}
 	}
@@ -366,18 +446,49 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 			errs = append(errs, fmt.Errorf("destroy sandbox %s: %w", env.SandboxID, err))
 		}
 	}
-	if env.WorktreeID != "" {
-		if err := contextError(); err != nil {
-			return err
-		}
-		if err := s.envDestroyer.DestroyWorktree(ctx, env.WorktreeID); err != nil {
-			if !errors.Is(err, worktree.ErrWorktreeNotFound) {
-				errs = append(errs, fmt.Errorf("destroy worktree %s: %w", env.WorktreeID, err))
-			}
+	if includeWorktrees {
+		var stopErr error
+		errs, stopErr = s.destroyEnvironmentWorktrees(ctx, worktreeIDs, errs)
+		if stopErr != nil {
+			return errors.Join(errors.Join(errs...), stopErr)
 		}
 	}
 	if err := contextError(); err != nil {
 		return err
 	}
 	return errors.Join(errs...)
+}
+
+func environmentHasResources(env *models.TaskEnvironment, includeWorktrees bool, worktreeIDs []string) bool {
+	return env.ContainerID != "" || env.SandboxID != "" || (includeWorktrees && len(worktreeIDs) > 0)
+}
+
+func (s *Service) destroyEnvironmentWorktrees(
+	ctx context.Context, worktreeIDs []string, errs []error,
+) ([]error, error) {
+	for _, worktreeID := range worktreeIDs {
+		if cause := context.Cause(ctx); cause != nil {
+			return errs, cause
+		}
+		if err := s.envDestroyer.DestroyWorktree(ctx, worktreeID); err != nil &&
+			!errors.Is(err, worktree.ErrWorktreeNotFound) {
+			errs = append(errs, fmt.Errorf("destroy worktree %s: %w", worktreeID, err))
+		}
+	}
+	return errs, nil
+}
+
+// environmentWorktreeIDs returns the physical worktree identities recorded on
+// the environment's repository rows.
+func environmentWorktreeIDs(env *models.TaskEnvironment) []string {
+	if env == nil {
+		return nil
+	}
+	var ids []string
+	for _, repo := range env.Repos {
+		if repo != nil && repo.WorktreeID != "" {
+			ids = append(ids, repo.WorktreeID)
+		}
+	}
+	return ids
 }

@@ -147,13 +147,15 @@ test.describe("GitHub review watch reset", () => {
       )
       .toBeTruthy();
 
-    await testPage.goto("/settings/integrations/github");
+    // The watch table is scoped to the routed workspace, and the install-level
+    // path redirects to whichever workspace is active — pin the seed workspace
+    // that owns the watch.
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
 
-    // The settings page aggregates every workspace's watches into a flat
-    // table — find the row for our PR by the repo name it shows, then click
-    // its Reset button. Scoping the testid lookup to the row ensures the
-    // test fails loudly if a future selector change clones the reset button
-    // onto another row.
+    // Find the row for our PR by the repo name it shows, then click its Reset
+    // button. Scoping the testid lookup to the row ensures the test fails
+    // loudly if a future selector change clones the reset button onto another
+    // row.
     const watchRow = testPage.getByRole("row", { name: /testorg\/testrepo/i });
     const resetButton = watchRow.getByTestId("watch-reset-button");
     await expect(resetButton).toBeVisible({ timeout: 10_000 });

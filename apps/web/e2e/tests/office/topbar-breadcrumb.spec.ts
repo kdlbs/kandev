@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Topbar breadcrumb", () => {
   test("issue detail shows task title", async ({ testPage, apiClient, officeSeed }) => {
@@ -11,9 +12,41 @@ test.describe("Topbar breadcrumb", () => {
     });
   });
 
+  test("workbench shows the owning project as a linked crumb on a cold load", async ({
+    testPage,
+    apiClient,
+    officeSeed,
+  }) => {
+    const projectRes = await apiClient.rawRequest(
+      "POST",
+      `/api/v1/office/workspaces/${officeSeed.workspaceId}/projects`,
+      { name: "Crumb Project" },
+    );
+    const projectBody = (await projectRes.json()) as { project?: { id?: string }; id?: string };
+    const projectId = (projectBody.project?.id ?? projectBody.id) as string;
+
+    // createTask() does not forward project_id, so post the body directly.
+    const taskRes = await apiClient.rawRequest("POST", "/api/v1/tasks", {
+      workspace_id: officeSeed.workspaceId,
+      title: "Project Crumb Task",
+      description: "",
+      workflow_id: officeSeed.workflowId,
+      project_id: projectId,
+    });
+    const taskBody = (await taskRes.json()) as { task?: { id?: string }; id?: string };
+    const taskId = (taskBody.task?.id ?? taskBody.id) as string;
+
+    // Cold load: /t/:id boots without the office collections, so the crumb
+    // must come from the workbench's store-miss fetch fallback.
+    await testPage.goto(`/t/${taskId}`);
+    const crumb = testPage.getByTestId("task-topbar").getByRole("link", { name: "Crumb Project" });
+    await expect(crumb).toBeVisible({ timeout: 10_000 });
+    await expect(crumb).toHaveAttribute("href", `/office/projects/${projectId}`);
+  });
+
   test("tasks list shows Tasks heading", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office/tasks");
-    await expect(testPage.getByRole("heading", { name: /Tasks/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Tasks/i, {
       timeout: 10_000,
     });
   });

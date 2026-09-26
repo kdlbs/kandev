@@ -14,7 +14,7 @@ Outbound HTTP to plugins: tool invocation client (kandev→plugin), external web
 reverse proxy, and iframe UI page reverse proxy with header stripping.
 
 ## Inputs
-- Spec `docs/specs/plugins/spec.md` → "Agent tool invocation" (POST
+- Spec `docs/specs/plugins/requirements/plugins.md` → "Agent tool invocation" (POST
   `{base_url}/tools/{name}`, 30s timeout, `{tool_call_id, input, context}` →
   `{output}`), "External webhook proxy" (forward body+headers, add
   `X-Plugin-Id`,`X-Webhook-Key`), and the NEW UI proxy section (GET/POST

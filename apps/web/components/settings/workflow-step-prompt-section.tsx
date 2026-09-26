@@ -1,13 +1,10 @@
 "use client";
 
 import type { WorkflowStep } from "@/lib/types/http";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@kandev/ui/label";
-import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
-import {
-  ScriptEditor,
-  computeEditorHeight,
-} from "@/components/settings/profile-edit/script-editor";
+import { SettingsPromptEditor } from "./settings-prompt-editor";
 import {
   HelpTip,
   stepPromptPlaceholders,
@@ -30,7 +27,7 @@ export function StepPromptSection({
   readOnly: boolean;
 }) {
   const { t } = useTranslation();
-  const { prompts } = useCustomPrompts();
+  const placeholders = useMemo(() => stepPromptPlaceholders(t), [t]);
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
@@ -60,25 +57,21 @@ export function StepPromptSection({
           ))}
         </div>
       )}
-      <div
-        className="overflow-hidden rounded-md border"
-        data-settings-dirty={!savedStep || localPrompt !== (savedStep.prompt ?? "")}
-      >
-        <ScriptEditor
-          value={localPrompt}
-          onChange={(value) => {
-            if (readOnly) return;
-            onLocalPromptChange(value);
-            debouncedUpdatePrompt(value);
-          }}
-          language="markdown"
-          height={computeEditorHeight(localPrompt)}
-          lineNumbers="off"
-          readOnly={readOnly}
-          placeholders={stepPromptPlaceholders(t)}
-          mentionPrompts={prompts}
-        />
-      </div>
+      <SettingsPromptEditor
+        value={localPrompt}
+        onChange={(value) => {
+          if (readOnly) return;
+          onLocalPromptChange(value);
+          debouncedUpdatePrompt(value);
+        }}
+        language="markdown"
+        readOnly={readOnly}
+        placeholders={placeholders}
+        promptReferences
+        testId={`workflow-step-prompt-${step.id}`}
+        isDirty={!savedStep || localPrompt !== (savedStep.prompt ?? "")}
+        dirtyLevel="container"
+      />
       <p className="text-[11px] text-muted-foreground/60">
         {t("workflows:stepPromptUsageHint", {
           open: "{{",

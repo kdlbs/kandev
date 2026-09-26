@@ -27,6 +27,11 @@ import { useSettingsSaveContributor } from "./settings-save-provider";
 import { TERMINAL_FONT_PRESETS } from "@/lib/terminal/terminal-font";
 import type { FontCategory } from "@/lib/terminal/terminal-font";
 import { useTranslation } from "react-i18next";
+import {
+  TERMINAL_FONT_FAMILY_TARGET,
+  TERMINAL_FONT_SIZE_TARGET,
+  TERMINAL_LINKS_TARGET,
+} from "@/lib/settings-discovery/catalog/preferences";
 
 const CUSTOM_VALUE = "__custom__";
 /**
@@ -71,10 +76,11 @@ function FontGroupOptions() {
             </Badge>
           )}
         </SelectLabel>
-        {/* Preset labels are font family names — data, never translated. */}
+        {/* Preset labels are font family names - data, never translated. The
+            one entry naming no typeface carries `labelKey` instead. */}
         {(FONT_GROUPS[category] ?? []).map((preset) => (
           <SelectItem key={preset.value} value={preset.value}>
-            {preset.label}
+            {preset.labelKey ? t(preset.labelKey) : preset.label}
           </SelectItem>
         ))}
       </SelectGroup>
@@ -97,7 +103,11 @@ function TerminalFontSizeCard({
   };
 
   return (
-    <SettingsCard isDirty={isDirty} data-testid="terminal-font-size-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={TERMINAL_FONT_SIZE_TARGET}
+      data-testid="terminal-font-size-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:terminalFontSize")}</CardTitle>
       </CardHeader>
@@ -172,7 +182,11 @@ function TerminalFontCard({
   const selectValue = isCustom ? CUSTOM_VALUE : fontFamily || "default";
 
   return (
-    <SettingsCard isDirty={isDirty} data-testid="terminal-font-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={TERMINAL_FONT_FAMILY_TARGET}
+      data-testid="terminal-font-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:terminalFont")}</CardTitle>
       </CardHeader>
@@ -227,7 +241,11 @@ function TerminalLinksCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard isDirty={isDirty} data-testid="terminal-links-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={TERMINAL_LINKS_TARGET}
+      data-testid="terminal-links-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:terminalLinks")}</CardTitle>
       </CardHeader>

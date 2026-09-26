@@ -410,3 +410,155 @@ func TestWsDeleteAllRuns_RejectsCrossWorkspace(t *testing.T) {
 		t.Errorf("expected the run to survive a rejected cross-workspace delete-all, got %d runs", len(runs))
 	}
 }
+
+// A manual trigger that the concurrency cap turns away must say so. Before
+// this, the handler answered triggered = true for a run that never started,
+// so clicking "trigger" on a busy automation looked identical to a fire.
+func TestWsManualTrigger_ReportsConcurrencyCapSkip(t *testing.T) {
+	svc := newTestService(t)
+	log, _ := logger.NewFromZap(zap.NewNop())
+	ctx := context.Background()
+
+	a := &Automation{
+		WorkspaceID:       "ws-1",
+		Name:              "busy",
+		WorkflowID:        "wf-1",
+		WorkflowStepID:    "s-1",
+		Enabled:           true,
+		MaxConcurrentRuns: 1,
+	}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	// An in-flight run occupies the only slot.
+	if err := svc.store.CreateRun(ctx, &AutomationRun{
+		AutomationID: a.ID,
+		TriggerType:  TriggerTypeScheduled,
+		Status:       RunStatusTaskCreated,
+		TaskID:       "task-in-flight",
+		TriggerData:  json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := ws.NewRequest("req-trigger", ws.ActionAutomationTrigger, map[string]string{"id": a.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := wsManualTrigger(svc, log)(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("expected response, got %v: %s", resp.Type, string(resp.Payload))
+	}
+
+	var payload struct {
+		Triggered bool   `json:"triggered"`
+		Skipped   bool   `json:"skipped"`
+		Reason    string `json:"reason"`
+	}
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Triggered {
+		t.Error("expected triggered = false when the cap turned the trigger away")
+	}
+	if !payload.Skipped {
+		t.Error("expected skipped = true")
+	}
+	if payload.Reason == "" {
+		t.Error("expected a reason the caller can show")
+	}
+}
+
+func TestWsManualTrigger_ReportsAFire(t *testing.T) {
+	svc := newTestService(t)
+	log, _ := logger.NewFromZap(zap.NewNop())
+	ctx := context.Background()
+
+	a := &Automation{
+		WorkspaceID:       "ws-1",
+		Name:              "idle",
+		WorkflowID:        "wf-1",
+		WorkflowStepID:    "s-1",
+		Enabled:           true,
+		MaxConcurrentRuns: 1,
+	}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := ws.NewRequest("req-trigger", ws.ActionAutomationTrigger, map[string]string{"id": a.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := wsManualTrigger(svc, log)(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		Triggered bool   `json:"triggered"`
+		Skipped   bool   `json:"skipped"`
+		Reason    string `json:"reason"`
+	}
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.Triggered || payload.Skipped {
+		t.Fatalf("expected a fire, got triggered=%v skipped=%v reason=%q",
+			payload.Triggered, payload.Skipped, payload.Reason)
+	}
+}
+
+// The Run button stays clickable on a disabled automation. Before this the
+// handler answered triggered=true and moved last_triggered_at for a run the
+// orchestrator would then discard.
+func TestWsManualTrigger_DisabledAutomationIsReportedAsSkipped(t *testing.T) {
+	svc := newTestService(t)
+	log, _ := logger.NewFromZap(zap.NewNop())
+	ctx := context.Background()
+
+	a := &Automation{
+		WorkspaceID: "ws-1", Name: "off", WorkflowID: "wf-1", WorkflowStepID: "s-1",
+		Enabled: false, MaxConcurrentRuns: 1,
+	}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := ws.NewRequest("req-disabled", ws.ActionAutomationTrigger, map[string]string{"id": a.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := wsManualTrigger(svc, log)(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Triggered bool   `json:"triggered"`
+		Skipped   bool   `json:"skipped"`
+		Reason    string `json:"reason"`
+	}
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Triggered || !payload.Skipped {
+		t.Fatalf("expected a skip, got triggered=%v skipped=%v", payload.Triggered, payload.Skipped)
+	}
+	if payload.Reason == "" {
+		t.Error("expected a reason naming the disabled automation")
+	}
+	// A run that never happened must not advance the schedule's own clock.
+	reloaded, err := svc.store.GetAutomation(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.LastTriggeredAt != nil {
+		t.Error("expected last_triggered_at to stay unset for a skipped fire")
+	}
+}
+
+// The editor's own regex accepts expressions robfig/cron rejects. Saving one
+// produced an automation that looked scheduled and never fired.

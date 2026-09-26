@@ -19,9 +19,17 @@ import (
 	"github.com/kandev/kandev/internal/workflow/repository"
 )
 
-func setupTestService(t *testing.T) (*Service, *sqlx.DB) {
+// setupTestService builds a Service against an in-memory SQLite DB. Callers
+// needing to observe log output (e.g. via a zaptest observer core) may pass a
+// logOverride; otherwise a quiet default logger is used.
+func setupTestService(t *testing.T, logOverride ...*logger.Logger) (*Service, *sqlx.DB) {
 	rawDB, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
+	// Pin the pool to one connection: every connection to an in-memory SQLite
+	// DB gets its own database, so a second one (e.g. the async history
+	// writer goroutine racing a test's read) would not see the schema,
+	// causing flaky "no such table" failures.
+	rawDB.SetMaxOpenConns(1)
 	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
 
@@ -36,8 +44,16 @@ func setupTestService(t *testing.T) (*Service, *sqlx.DB) {
 	repo, err := repository.NewWithDB(sqlxDB, sqlxDB, nil)
 	require.NoError(t, err)
 
-	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
-	return NewService(repo, log), sqlxDB
+	log := logOverride
+	var svcLogger *logger.Logger
+	if len(log) > 0 {
+		svcLogger = log[0]
+	} else {
+		svcLogger, _ = logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	}
+	svc := NewService(repo, svcLogger)
+	t.Cleanup(func() { _ = svc.Close() })
+	return svc, sqlxDB
 }
 
 func insertWorkflow(t *testing.T, db *sqlx.DB, id, name string) {
@@ -48,7 +64,13 @@ func insertWorkflow(t *testing.T, db *sqlx.DB, id, name string) {
 
 // mockWorkflowProvider implements WorkflowProvider with in-memory state for tests.
 type mockWorkflowProvider struct {
-	workflows []*taskmodels.Workflow
+	workflows        []*taskmodels.Workflow
+	getWorkflowCalls int
+	deleted          []string
+	// forceUpdateWorkflowErr, when set, makes UpdateWorkflow fail without
+	// mutating state - used to test that a rebind Warn never fires for a
+	// change that was not actually persisted.
+	forceUpdateWorkflowErr error
 }
 
 func (m *mockWorkflowProvider) ListWorkflows(_ context.Context, workspaceID string, includeHidden bool) ([]*taskmodels.Workflow, error) {
@@ -66,6 +88,7 @@ func (m *mockWorkflowProvider) ListWorkflows(_ context.Context, workspaceID stri
 }
 
 func (m *mockWorkflowProvider) GetWorkflow(_ context.Context, id string) (*taskmodels.Workflow, error) {
+	m.getWorkflowCalls++
 	for _, wf := range m.workflows {
 		if wf.ID == id {
 			return wf, nil
@@ -89,6 +112,9 @@ func (m *mockWorkflowProvider) CreateWorkflow(_ context.Context, workspaceID, na
 }
 
 func (m *mockWorkflowProvider) UpdateWorkflow(_ context.Context, workflow *taskmodels.Workflow) error {
+	if m.forceUpdateWorkflowErr != nil {
+		return m.forceUpdateWorkflowErr
+	}
 	for i, wf := range m.workflows {
 		if wf.ID == workflow.ID {
 			m.workflows[i] = workflow
@@ -96,6 +122,17 @@ func (m *mockWorkflowProvider) UpdateWorkflow(_ context.Context, workflow *taskm
 		}
 	}
 	return fmt.Errorf("workflow %s not found", workflow.ID)
+}
+
+func (m *mockWorkflowProvider) DeleteWorkflow(_ context.Context, id string) error {
+	m.deleted = append(m.deleted, id)
+	for i, wf := range m.workflows {
+		if wf.ID == id {
+			m.workflows = append(m.workflows[:i], m.workflows[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("workflow %s not found", id)
 }
 
 func (m *mockWorkflowProvider) addWorkflow(id, workspaceID, name string) {
@@ -572,7 +609,7 @@ func TestExportWorkflow(t *testing.T) {
 
 		export, err := svc.ExportWorkflow(ctx, "wf-1")
 		require.NoError(t, err)
-		assert.Equal(t, models.ExportVersion, export.Version)
+		assert.Equal(t, models.LegacyExportVersion, export.Version)
 		assert.Equal(t, models.ExportType, export.Type)
 		require.Len(t, export.Workflows, 1)
 		assert.Equal(t, "My Pipeline", export.Workflows[0].Name)
@@ -711,6 +748,33 @@ func TestImportWorkflows(t *testing.T) {
 		steps, err := svc.repo.ListStepsByWorkflow(ctx, "imported-Imported WF")
 		require.NoError(t, err)
 		assert.Len(t, steps, 2)
+	})
+
+	t.Run("imports workflow-level prompt", func(t *testing.T) {
+		svc, _, provider := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		export := &models.WorkflowExport{
+			Version: models.ExportVersion,
+			Type:    models.ExportType,
+			Workflows: []models.WorkflowPortable{
+				{
+					Name:   "Prompted WF",
+					Prompt: "If the PR is merged or closed, move the Task to Done.",
+					Steps: []models.StepPortable{
+						{Name: "Todo", Position: 0, Color: "gray"},
+					},
+				},
+			},
+		}
+
+		result, err := svc.ImportWorkflows(ctx, "ws-1", export)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"Prompted WF"}, result.Created)
+
+		wf, err := provider.GetWorkflow(ctx, "imported-Prompted WF")
+		require.NoError(t, err)
+		assert.Equal(t, "If the PR is merged or closed, move the Task to Done.", wf.Prompt)
 	})
 
 	t.Run("normalizes duplicate start steps on import", func(t *testing.T) {
@@ -883,7 +947,7 @@ func TestImportWorkflows(t *testing.T) {
 		svc, _, _ := setupTestServiceWithProvider(t)
 		ctx := context.Background()
 
-		matcher := func(agentName, model, mode string) string {
+		matcher := func(agentName, model, mode, _ string) string {
 			if agentName == "Claude Code" && model == "opus" {
 				return "matched-prof-1"
 			}

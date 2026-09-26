@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"gopkg.in/yaml.v3"
 )
@@ -60,6 +61,32 @@ func TestLoadTemplates_CancelTriggersTurnCompleteDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadTemplates_CompletionPolicyUsesExplicitFinalStepSetting(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+	for _, template := range templates {
+		for _, step := range template.Steps {
+			want := template.ID != "improve-kandev" && template.ID != "report-kandev-issue" &&
+				step.Position == lastTemplatePosition(template.Steps)
+			if step.CompleteTaskOnEnter != want {
+				t.Errorf("template %q step %q completion policy = %t, want %t", template.ID, step.Name, step.CompleteTaskOnEnter, want)
+			}
+		}
+	}
+}
+
+func lastTemplatePosition(steps []models.StepDefinition) int {
+	last := 0
+	for i, step := range steps {
+		if i == 0 || step.Position > last {
+			last = step.Position
+		}
+	}
+	return last
+}
+
 func TestLoadTemplates_AllValid(t *testing.T) {
 	templates, err := LoadTemplates()
 	if err != nil {
@@ -78,6 +105,35 @@ func TestLoadTemplates_AllValid(t *testing.T) {
 		if len(tmpl.Steps) == 0 {
 			t.Errorf("template %q has no steps", tmpl.ID)
 		}
+	}
+}
+
+func TestConvertStep_PreservesAgentProfileAndSessionPolicies(t *testing.T) {
+	var raw templateYAML
+	if err := yaml.Unmarshal([]byte(`
+id: test
+name: Test
+steps:
+  - id: review
+    name: Review
+    agent_profile_id: profile-review
+    profile_session_start_policy: new
+    profile_session_end_policy: park
+`), &raw); err != nil {
+		t.Fatalf("unmarshal template: %v", err)
+	}
+	step, err := convertStep(raw.Steps[0])
+	if err != nil {
+		t.Fatalf("convertStep returned error: %v", err)
+	}
+	if step.AgentProfileID != "profile-review" {
+		t.Fatalf("agent profile ID = %q, want profile-review", step.AgentProfileID)
+	}
+	if step.ProfileSessionStartPolicy != taskmodels.WorkflowProfileSessionStartPolicyNew {
+		t.Fatalf("profile session start policy = %q, want new", step.ProfileSessionStartPolicy)
+	}
+	if step.ProfileSessionEndPolicy != taskmodels.WorkflowProfileSessionEndPolicyPark {
+		t.Fatalf("profile session end policy = %q, want park", step.ProfileSessionEndPolicy)
 	}
 }
 
@@ -270,6 +326,45 @@ func TestLoadTemplates_HiddenFlag(t *testing.T) {
 	}
 }
 
+// TestLoadTemplates_OfficeDefaultWorkStepRequiresSignal verifies that the
+// office-default template's `work` step gates its turn-end auto-advance
+// (Work -> Review) on the ADR 0015 declarative completion signal, now that
+// step_complete_kandev is registered for the Office MCP surface. Without
+// this flag the new signal would be decorative: the step would still
+// advance on bare turn-end regardless of whether the agent called the tool.
+func TestLoadTemplates_OfficeDefaultWorkStepRequiresSignal(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+
+	var officeDefault *models.WorkflowTemplate
+	for _, tmpl := range templates {
+		if tmpl.ID == "office-default" {
+			officeDefault = tmpl
+			break
+		}
+	}
+	if officeDefault == nil {
+		t.Fatal("office-default template not found")
+	}
+
+	var work *models.StepDefinition
+	for i := range officeDefault.Steps {
+		if officeDefault.Steps[i].ID == "work" {
+			work = &officeDefault.Steps[i]
+			break
+		}
+	}
+	if work == nil {
+		t.Fatal("office-default template step \"work\" not found")
+	}
+
+	if got := boolFieldForTest(t, work, "AutoAdvanceRequiresSignal"); !got {
+		t.Error("office-default template step \"work\" must set auto_advance_requires_signal: true")
+	}
+}
+
 func TestLoadTemplates_ReportKandevIssuePromptContract(t *testing.T) {
 	templates, err := LoadTemplates()
 	if err != nil {
@@ -312,6 +407,104 @@ func TestLoadTemplates_ReportKandevIssuePromptContract(t *testing.T) {
 	} {
 		if !strings.Contains(step.Prompt, required) {
 			t.Errorf("issue prompt must contain %q", required)
+		}
+	}
+}
+
+func TestLoadTemplates_ImproveKandevManagedPublicationPromptContract(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+
+	var improve *models.WorkflowTemplate
+	for _, tmpl := range templates {
+		if tmpl.ID == "improve-kandev" {
+			improve = tmpl
+			break
+		}
+	}
+	if improve == nil {
+		t.Fatal("improve-kandev template not found")
+	}
+	if len(improve.Steps) != 3 {
+		t.Fatalf("improve-kandev steps = %d, want 3", len(improve.Steps))
+	}
+
+	prStep := improve.Steps[2]
+	normalizedPrompt := strings.Join(strings.Fields(prStep.Prompt), " ")
+	for _, required := range []string{
+		"Managed workspace credentials",
+		"origin` remains the canonical `kdlbs/kandev`",
+		"ordinary `git push`",
+		"gh pr create --repo kdlbs/kandev --base main",
+		"<fork-owner>:<branch>",
+		"Executor-owned credentials are a separate compatibility path",
+		"Never select this path to recover from a managed preparation failure",
+		"gh repo fork kdlbs/kandev",
+		"executor-owned credentials",
+		"--remote-name=origin",
+	} {
+		if !strings.Contains(normalizedPrompt, required) {
+			t.Errorf("managed publication prompt must contain %q", required)
+		}
+	}
+	managedPrompt := normalizedPrompt
+	if executorSection := strings.Index(managedPrompt, "Executor-owned credentials"); executorSection >= 0 {
+		managedPrompt = managedPrompt[:executorSection]
+	}
+	for _, forbidden := range []string{
+		"gh repo fork",
+		"remote-name=origin",
+		"rename the existing `origin`",
+	} {
+		if strings.Contains(managedPrompt, forbidden) {
+			t.Errorf("managed publication prompt must not contain %q", forbidden)
+		}
+	}
+}
+
+// TestLoadTemplates_PRReviewMRAutomationInstruction verifies that the pr-review
+// template uses the shared automation contract and asks the agent to select the
+// linked provider explicitly before enabling lifecycle notifications.
+func TestLoadTemplates_PRReviewMRAutomationInstruction(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+
+	var prReview *models.WorkflowTemplate
+	for _, tmpl := range templates {
+		if tmpl.ID == "pr-review" {
+			prReview = tmpl
+			break
+		}
+	}
+	if prReview == nil {
+		t.Fatal("pr-review template not found")
+	}
+
+	var review *models.StepDefinition
+	for i := range prReview.Steps {
+		if prReview.Steps[i].ID == "review" {
+			review = &prReview.Steps[i]
+			break
+		}
+	}
+	if review == nil {
+		t.Fatal("pr-review template has no review step")
+	}
+	for _, required := range []string{
+		"get_task_change_requests_kandev",
+		"update_task_change_request_automation_kandev",
+		`target.scope="task"`,
+		`providers`,
+		"prompt_on_review_requested",
+		"prompt_on_merged",
+		"prompt_on_closed",
+	} {
+		if !strings.Contains(review.Prompt, required) {
+			t.Errorf("review prompt must contain %q", required)
 		}
 	}
 }

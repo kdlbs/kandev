@@ -7,6 +7,7 @@ import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-nam
 import type { WorkspaceContentSearchError } from "@/hooks/domains/session/use-workspace-content-search";
 import { groupByRepositoryName, isSingleRepoGroup } from "@/lib/group-by-repo";
 import type { ContentSearchMatchRange, WorkspaceContentSearchResult } from "@/lib/types/backend";
+import { useTranslation } from "react-i18next";
 
 type PreviewPart = { text: string; matched: boolean };
 
@@ -137,44 +138,72 @@ export function WorkspaceContentSearch({
   sessionId,
   onSelect,
 }: WorkspaceContentSearchProps) {
+  const { t } = useTranslation();
   const getRepoDisplayName = useRepoDisplayName(sessionId);
   if (error === "session-unavailable") {
-    return <CommandEmpty>Content search needs an active task session.</CommandEmpty>;
+    return <CommandEmpty>{t("common:contentSearchNeedsAnActiveTask")}</CommandEmpty>;
   }
   if (error === "query-too-long") {
-    return <CommandEmpty>Search queries are limited to 200 characters.</CommandEmpty>;
+    return <CommandEmpty>{t("common:searchQueriesAreLimitedTo200")}</CommandEmpty>;
   }
   if (error === "transport-error") {
-    return <CommandEmpty>Search failed. Edit the query or reopen search to retry.</CommandEmpty>;
+    return <CommandEmpty>{t("common:searchFailedEditTheQueryOr")}</CommandEmpty>;
   }
   if (isSearching && results.length === 0) {
     return (
       <CommandEmpty>
         <IconLoader2 className="mr-2 inline size-3.5 animate-spin text-muted-foreground" />
-        Searching task workspace…
+        {t("common:searchingTaskWorkspace")}
       </CommandEmpty>
     );
   }
-  if (!search.trim()) return <CommandEmpty>Type to search task contents…</CommandEmpty>;
-  if (results.length === 0) return <CommandEmpty>No content matches found.</CommandEmpty>;
+  if (!search.trim()) return <CommandEmpty>{t("common:typeToSearchTaskContents")}</CommandEmpty>;
+  if (results.length === 0) return <CommandEmpty>{t("common:noContentMatchesFound")}</CommandEmpty>;
 
   const groups = groupByRepositoryName(results, (result) => result.repository_name);
   const singleRepo = isSingleRepoGroup(groups);
-  return groups.map((group) => (
-    <CommandGroup
-      key={group.repositoryName}
-      heading={singleRepo ? "Results" : (getRepoDisplayName(group.repositoryName) ?? "Workspace")}
-      forceMount
-      data-testid="content-search-repo-group"
-      data-repository={group.repositoryName}
+  // Results are published as each retry attempt returns, so a populated list
+  // can still be growing. The spec requires the searching state to stay
+  // distinguishable from a finished one, and without this a partial list looks
+  // identical to "that is everything" while another repository is still
+  // starting up.
+  //
+  // It leads the list and sticks to the top of CommandList's own scroll box
+  // (max-h-72 overflow-y-auto): appended after the groups it fell below the
+  // fold as soon as the early matches filled the palette, which is exactly the
+  // case it exists for.
+  const stillSearching = isSearching ? (
+    <div
+      key="content-search-in-progress"
+      data-testid="content-search-in-progress"
+      className="sticky top-0 z-10 flex items-center bg-popover px-2 py-1.5 text-xs text-muted-foreground"
     >
-      {group.items.map((result) => (
-        <SearchResultRow
-          key={getContentSearchResultValue(result)}
-          result={result}
-          onSelect={onSelect}
-        />
-      ))}
-    </CommandGroup>
-  ));
+      <IconLoader2 className="mr-2 inline size-3 animate-spin" />
+      {t("common:searchingTaskWorkspace")}
+    </div>
+  ) : null;
+  return [
+    stillSearching,
+    ...groups.map((group) => (
+      <CommandGroup
+        key={group.repositoryName}
+        heading={
+          singleRepo
+            ? t("common:results")
+            : (getRepoDisplayName(group.repositoryName) ?? t("common:workspace"))
+        }
+        forceMount
+        data-testid="content-search-repo-group"
+        data-repository={group.repositoryName}
+      >
+        {group.items.map((result) => (
+          <SearchResultRow
+            key={getContentSearchResultValue(result)}
+            result={result}
+            onSelect={onSelect}
+          />
+        ))}
+      </CommandGroup>
+    )),
+  ];
 }
