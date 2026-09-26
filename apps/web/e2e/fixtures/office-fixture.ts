@@ -88,6 +88,25 @@ test.beforeEach(async ({ backend, officeApi, officeSeed }) => {
   );
 });
 
+// Seeded claimed runs hold agent capacity after a test ends. Close them before
+// the next test so the worker-scoped CEO cannot leave later routine runs queued.
+test.afterEach(async ({ apiClient, officeApi, officeSeed }) => {
+  const result = await officeApi.listRuns(officeSeed.workspaceId);
+  const runs = Array.isArray(result.runs)
+    ? (result.runs as Array<{ id?: string; agent_profile_id?: string; status?: string }>)
+    : [];
+
+  for (const run of runs) {
+    if (
+      run.id &&
+      run.agent_profile_id === officeSeed.agentId &&
+      (run.status === "queued" || run.status === "claimed")
+    ) {
+      await apiClient.updateRunStatus(run.id, { status: "finished" });
+    }
+  }
+});
+
 // Office's approval gate (apps/backend/internal/office/dashboard/service_tasks.go
 // applyApprovalGate) redirects a "done" write to in_review unless the task is
 // on its workflow's terminal step (last by position). Tests that drive a task
