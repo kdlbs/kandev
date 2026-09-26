@@ -82,8 +82,17 @@ see [Residual](#residual-external-surface).
      passive open never resumes it), and otherwise creates a `CREATED`
      session through `IntentPrepare` with `NoAgentLaunch`, which never starts
      an agent. Its error returns 502 with the task kept as current, so the
-     next open retries only this step. The route returns the session id with
-     the task's archive state (always `false` from this route).
+     next open retries only this step.
+  7. Re-read the coordinator's `conversation_task_id` and compare it to
+     `taskID`. A concurrent context or profile change (steps 2 or 3 of
+     [coordinators](coordinators.md#routes)) can archive exactly this task
+     and clear the reference between step 2's read (the reuse path) or step
+     4's commit (the create path) and this point, in which case they no
+     longer match: return 409, with no task, so the popover's next open
+     retries with the fresh value, the same shape as step 4's own race.
+     Otherwise return the session id with the task's archive state (always
+     `false` from this route, since a task this route would return as
+     archived is returned as 409 instead).
 - `IsRestorableQuickChatTask` excludes origin `coordinator`, so the task never
   becomes a Quick Chat tab; board, list and snapshot queries already exclude
   ephemeral tasks.

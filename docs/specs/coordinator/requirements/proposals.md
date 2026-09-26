@@ -128,11 +128,15 @@ Mockup:
   again.
 - **AC-COORDINATOR-PROPOSALS-002.7:** When the process stops after a claim or
   after the task was created, the next startup or the next approve shall
-  re-check the frozen spec's target step against the eligible-step rule (the
-  frozen spec itself is not re-validated); when the step is still eligible, it
-  shall complete the approval with the same single task using the frozen
-  spec; when the step is no longer eligible, it shall set the proposal
-  `failed` with a descriptive error and create no task. Reading a proposal,
+  first check, by the reserved external id, whether an earlier attempt
+  already created the task (`AC-COORDINATOR-PROPOSALS-002.12`); if so, it
+  shall complete the approval with that task regardless of current
+  eligibility. Otherwise it shall re-check the frozen spec's target step
+  against the eligible-step rule (the frozen spec itself is not
+  re-validated); when the step is still eligible, it shall complete the
+  approval with the same single task using the frozen spec; when the step is
+  no longer eligible, it shall set the proposal `failed` with a descriptive
+  error and create no task. Reading a proposal,
   whether a single get or a list, shall never write. When a startup recovery
   and an approve's stale re-claim race on the same stale claim, exactly one
   shall attempt the recovery, using the spec frozen by the first claim and

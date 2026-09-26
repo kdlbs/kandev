@@ -87,7 +87,10 @@ Mockup:
   `AC-COORDINATOR-COPILOT-001.2` and finds no other task to converge on
   because a context or profile change cleared the reference concurrently, the
   open shall return 409; the popover's next open retries with the fresh
-  value.
+  value. The same applies when a context or profile change archives the task
+  an open is about to return, whether that task was reused or just created,
+  between the open reading it as current and the open's own response: the
+  open shall return 409 rather than a task that is actually archived.
 
 ### REQ-COORDINATOR-COPILOT-002: Attended turns
 

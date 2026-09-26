@@ -151,6 +151,21 @@ those tools read is trustworthy. Mitigating it, for example by surfacing the
 source task link next to the coordinator's paraphrase so a manager can check
 the claim, is not built in phase 1 and is left for a later phase to decide.
 
+### Residual risk: an archive failure leaves the old session running until restart
+
+A coordinator PATCH that changes its context or profile clears
+`conversation_task_id` and then archives the old conversation task through
+`ArchiveTask`, which stops its running turn
+([coordinators design](../specs/coordinator/system-design/coordinators.md#routes)).
+If that archive call itself fails, the PATCH still succeeds: the old task is
+already unreferenced, so it resolves to no coordinator, and the next startup
+pass archives it, but nothing revisits it before then. Between the failed
+archive and the next process restart, the previous agent can keep running
+under the context and profile the manager just replaced. This residual is
+**accepted, unmitigated, for phase 1**: no in-process retry or supervisor
+sweep closes the window, since a manager can still stop the stray session by
+hand from the task, and a full mitigation is left for a later phase.
+
 ## Phase plan
 
 Each phase ships a subset of the final design; no phase redraws what an

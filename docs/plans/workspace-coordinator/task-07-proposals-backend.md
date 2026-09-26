@@ -52,9 +52,10 @@ proposals through the store. Runs in parallel with tasks 02, 03 and 04.
   step that has become a feeder of an auto-start step since propose is
   refused); a failed attempt's `final_spec_json` is the base of the next),
   the create-outcome branches (`Created` then `SettleExternalID`,
-  `FoundSettled`, `FoundUnsettled`, and any other settle error, which sets
-  `task_id` on the `failed` row since the create already produced a real
-  task), reject (from `pending` or `failed`, optional reason), zero-row
+  `FoundSettled`, `FoundUnsettled`, and any other settle error, which returns
+  the error and leaves the row `approving` for the next recovery pass to
+  retry, since the create already produced a real task), reject (from
+  `pending` or `failed`, optional reason), zero-row
   completion re-read (200 with the current row, or 404 when the row is
   gone).
 - Stale-claim recovery at startup and on approve only; a proposal list or get
@@ -136,7 +137,11 @@ approval returns 404 with the task kept; a proposal list or get never writes,
 whatever the caller's scope, and returns rows as stored; the created task gets no
 agent on a step whose `on_enter` has `auto_start_agent` (no
 `auto_start_on_create` marker); crash after claim and after create recover to one
-task; two readers of a stale claim, one wins, keeping the first
+task, including when the target step's eligibility changed during the crash
+window (the stale re-claim's `GetTaskByExternalID` lookup finds the task the
+crashed attempt already created and completes with it instead of failing);
+crash after claim, before create, with eligibility now failing, fails the
+proposal without creating a task; two readers of a stale claim, one wins, keeping the first
 `final_spec_json` and `decided_by`; a stale original claimer's completion and
 failure updates match no row (claim token); edits sent against an `approving`
 row get 409; status is checked before edits (invalid edits against an
@@ -157,9 +162,8 @@ reason (a 501-character reason on an `approved` row gets 409), and a
 that is absent, JSON `null`, `""` or only whitespace stores SQL `NULL` and
 returns `reject_reason: null`, a padded reason is stored trimmed, and a
 non-string reason gets 400; a manager's `pending` list holding two stale
-claims recovers both in list order before answering (both approved, one task
-each), and when one row's recovery hits a store error the list still returns
-200 with that row as stored and the other recovered; HTTP and MCP create
+claims returns 200 with both rows exactly as stored, recovering neither, since
+list and get never write, whatever the caller's scope; HTTP and MCP create
 refuse the prefix, release refuses it, and the flagged internal create
 succeeds; approve and reject by a reader get 403. These tests seed and assert
 only this work order's own tables (coordinators and proposals seeded through

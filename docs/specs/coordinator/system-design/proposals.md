@@ -158,13 +158,22 @@ immediately before step 4's create call, because eligibility can have changed
 in the time between the original claim and this stale re-claim (an
 `on_enter` `auto_start_agent` action added to the target step, or a new
 `pull_from_step_id` feeder link formed into an auto-starting step), and
-recovery must not create the task on a step that is no longer eligible. When
-the recheck fails, the re-claim still commits (the row leaves `approving`
-either way), but recovery sets the proposal `failed` with a descriptive error
-("the target step is no longer eligible") and never calls the task service,
-the same failure shape as the existing case where a frozen spec the task
-service no longer accepts (its workflow was deleted, for example) fails at
-the create in step 4 and sets the proposal `failed` with that error. An
+recovery must not create the task on a step that is no longer eligible. Before
+deciding, it first calls `Service.GetTaskByExternalID(ctx, workspaceID,
+"coordinator-proposal:<id>")` (the same read the create sequence's step-3
+lookup and the REST lookup route already use), because an earlier attempt may
+have created the task and crashed before this claim's completion update ran:
+found, it completes with that task's id exactly as step 4's `FoundSettled` /
+`FoundUnsettled` branches do, whatever the recheck says, satisfying "a crash
+after the claim and a crash after the create recover to one task" even when
+eligibility changed in between; not found, the recheck's answer governs. When
+the recheck fails and no task was found, the re-claim still commits (the row
+leaves `approving` either way), but recovery sets the proposal `failed` with a
+descriptive error ("the target step is no longer eligible") and never calls
+the task service to create one, the same failure shape as the existing case
+where a frozen spec the task service no longer accepts (its workflow was
+deleted, for example) fails at the create in step 4 and sets the proposal
+`failed` with that error. An
 approve request whose body carries edits never reaches the re-claim (step 1
 refuses it with 409), so edits are never silently dropped; recovery callers
 never send edits. A re-claim that commits publishes `coordinator.updated`,

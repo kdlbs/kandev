@@ -126,7 +126,10 @@ until the coordinator or the workspace is deleted
 differs only in leading or trailing whitespace, or a profile id sent back
 unchanged, is therefore not a change and keeps the conversation. A failed
 archive is logged at warn; the task is already unreferenced, so it resolves to
-no coordinator, and the next startup pass archives it.
+no coordinator, and the next startup pass archives it, so the old session can
+keep running under the replaced context or profile until then; this is an
+accepted, unmitigated phase-1 residual (see the [ADR's residual
+risk](../../../decisions/2026-09-26-workspace-coordinator.md#residual-risk-an-archive-failure-leaves-the-old-session-running-until-restart)).
 
 A profile change takes effect only for the *next* conversation: the running
 session was created with the old profile pair, and Kandev does not migrate a

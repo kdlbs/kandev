@@ -74,8 +74,11 @@ Deciding proposals is task 07. Backend only. On the critical path.
   than `ok` from task 01's `profileStatus`; a zero-row update at step 4 whose
   re-read finds `conversation_task_id` NULL (a concurrent context change
   cleared it after the stale read in step 2) deletes the task just created
-  and returns 409; the popover's next open retries with the fresh value
-  (`AC-COORDINATOR-COPILOT-001.9`).
+  and returns 409; the popover's next open retries with the fresh value; a
+  context or profile change that archives the reused-or-just-created task
+  between step 2 (or step 4's commit) and step 6's `EnsureSession` returning
+  is caught by step 7's re-read, which also returns 409 rather than the now-
+  archived task (`AC-COORDINATOR-COPILOT-001.9`).
 - `TaskOriginCoordinator` (task 01's constant) refused at HTTP and MCP task
   create. The `coordinator-proposal:` external-id prefix refusal is task 07's.
 - `ListCoordinatorOriginTasks` in the task repository (SQLite and PostgreSQL)

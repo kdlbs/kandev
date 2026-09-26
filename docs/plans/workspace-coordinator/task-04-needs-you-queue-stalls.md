@@ -179,11 +179,15 @@ cd apps/web && pnpm e2e:run tests/coordinator/needs-you.spec.ts tests/coordinato
 cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-needs-you.spec.ts
 ```
 
-A component test on the item card covers the reader case
-(`AC-COORDINATOR-NEEDS-YOU-002.8`: "a reader sees no decision actions"): with
-a `workspace.manage` viewer the item shows Approve, Edit and Reject, and with
-a `workspace.read` viewer the same item shows its title, description, target
-and "Proposed by" line with no decision actions. Task 02's
+A component test on the item card covers task 04's own share of
+`AC-COORDINATOR-NEEDS-YOU-002.8`: with a `workspace.manage` viewer and with a
+`workspace.read` viewer, the item shows the identical read-only card (title,
+description, target and "Proposed by" line, no decision actions for either
+role), since task 04 renders no Approve, Edit or Reject control at all (see
+"Out of scope" above). The AC's manage-viewer half ("the actions defined by
+proposals.md") lands with task 08, whose own `use-proposals.test.ts`
+component test already covers the `workspace.read`-vs-`workspace.manage`
+contrast on the shared `ProposalCard` directly. Task 02's
 `tests/auth/coordinator-settings-reader.spec.ts` is the coordinator suite's
 one `auth`-project Playwright spec; this reader-gating check does not need a
 second one.
