@@ -39,6 +39,7 @@ const TEST_IDS = vi.hoisted(() => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({ getState: () => ({}) }),
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       taskSessions: { items: sessionRows },

@@ -1,3 +1,4 @@
+import { claimSessionRecovery, usePendingSessionRecovery } from "./session-recovery-pending";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -83,6 +84,8 @@ export function useSessionRecoveryActions({
   errorStamp,
 }: SessionRecoveryActionsOptions) {
   const { t } = useTranslation();
+  const pendingKey = `${taskId}\u0000${sessionId}`;
+  const sharedBusyAction = usePendingSessionRecovery(pendingKey);
   const requestKey = `${taskId}\u0000${sessionId}\u0000${errorStamp ?? ""}`;
   const { beginOperation, isCurrentOperation } = useRecoveryOperationFence(requestKey);
   const [busyAction, setBusyAction] = useState<SessionRecoveryBusyAction>(null);
@@ -110,6 +113,8 @@ export function useSessionRecoveryActions({
 
   const handleRecover = useCallback(
     async (action: SessionRecoveryAction) => {
+      const release = claimSessionRecovery(pendingKey, action);
+      if (!release) return false;
       const operation = beginOperation();
       setBusyAction(action);
       try {
@@ -134,14 +139,17 @@ export function useSessionRecoveryActions({
         setManualRecoveryFailure({ operation: "resume" });
         return false;
       } finally {
+        release();
         if (isCurrentOperation(operation)) setBusyAction(null);
       }
       return true;
     },
-    [beginOperation, isCurrentOperation, sessionId, taskId, t],
+    [beginOperation, isCurrentOperation, pendingKey, sessionId, taskId, t],
   );
 
   const handleRestore = useCallback(async () => {
+    const release = claimSessionRecovery(pendingKey, "restore");
+    if (!release) return;
     const operation = beginOperation();
     setBusyAction("restore");
     setRestoreError(null);
@@ -163,9 +171,10 @@ export function useSessionRecoveryActions({
       setRecoveryNotice(null);
       setManualRecoveryFailure({ operation: "restore_workspace" });
     } finally {
+      release();
       if (isCurrentOperation(operation)) setBusyAction(null);
     }
-  }, [beginOperation, guardDetails, isCurrentOperation, sessionId, taskId, t]);
+  }, [beginOperation, guardDetails, isCurrentOperation, pendingKey, sessionId, taskId, t]);
 
   const handleRetry = useCallback(() => {
     return handleRecover(lastFailedAction ?? "resume");
@@ -176,7 +185,7 @@ export function useSessionRecoveryActions({
   }, [handleRecover]);
 
   return {
-    busyAction,
+    busyAction: sharedBusyAction ?? busyAction,
     recoveryError,
     branchDetails,
     guardDetails,

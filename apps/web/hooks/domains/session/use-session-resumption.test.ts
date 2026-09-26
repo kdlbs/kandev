@@ -334,6 +334,19 @@ describe("resumeWithSilentFallback", () => {
       });
     const { setters, calls } = createSetters();
 
+    setters.workspaceRestoration = {
+      begin: () => ({
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+        environmentId: "env-1",
+        revision: 1,
+        status: "pending",
+        attemptId: "restore-attempt-1",
+      }),
+      complete: () => true,
+      fail: () => true,
+      clear: () => true,
+    };
     await resumeWithSilentFallback(TASK_ID, SESSION_ID, null, setters);
 
     expect(mockRequest).toHaveBeenCalledTimes(2);
@@ -341,6 +354,7 @@ describe("resumeWithSilentFallback", () => {
     expect(calls.errors.at(-1)).toBe("Session recovery failed");
     expect(calls.recoveryFailures.at(-1)).toEqual({
       outcome: "recovery_failed",
+      workspaceAttemptId: "restore-attempt-1",
       resumeError: RESUME_TRANSPORT_ERROR,
       restoreError: WORKSPACE_RESTORE_ERROR,
     });

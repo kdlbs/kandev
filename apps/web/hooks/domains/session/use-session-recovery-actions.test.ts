@@ -155,3 +155,29 @@ describe("useSessionRecoveryActions", () => {
     await waitFor(() => expect(result.current.recoveryError).toBeNull());
   });
 });
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.16
+it("admits one operation across repeated taps and mounted consumers", async () => {
+  const pending = Promise.withResolvers<void>();
+  mocks.requestSessionRecover.mockReturnValue(pending.promise);
+  const first = renderHook(() =>
+    useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
+  );
+  const second = renderHook(() =>
+    useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
+  );
+  let requests: Promise<unknown>[] = [];
+  act(() => {
+    requests = [
+      first.result.current.handleRecover("resume"),
+      first.result.current.handleRecover("resume"),
+      second.result.current.handleRecover("fresh_start"),
+    ];
+  });
+  const calls = mocks.requestSessionRecover.mock.calls.length;
+  await act(async () => {
+    pending.resolve();
+    await Promise.all(requests);
+  });
+  expect(calls).toBe(1);
+});

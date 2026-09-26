@@ -1,10 +1,19 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ActiveSessionRecovery } from "@/lib/active-session-recovery";
 import type { RunError } from "@/app/office/tasks/[id]/types";
 import { WebSocketRequestError } from "@/lib/ws/client";
 import { RunErrorEntry } from "./run-error-entry";
 
-const { requestMock } = vi.hoisted(() => ({ requestMock: vi.fn() }));
+const FAILURE_STAMP = "ordinary-failure-stamp";
+const REMEDIATION_LINK_ID = "remediation-link";
+const RECOVERY_ERROR_ID = "run-error-recovery-error";
+const { requestMock, recoveryContext } = vi.hoisted(() => ({
+  requestMock: vi.fn(),
+  recoveryContext: {
+    value: null as { sessionId: string; model: ActiveSessionRecovery | null; pending: null } | null,
+  },
+}));
 const RUN_ERROR_RESUME_TEST_ID = "run-error-resume-button";
 
 vi.mock("@/components/state-provider", () => ({
@@ -16,8 +25,14 @@ vi.mock("@/lib/state/slices/office/selectors", () => ({
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: requestMock }),
 }));
+vi.mock("@/components/task/chat/session-recovery-context", () => ({
+  useSessionComposerRecovery: () => recoveryContext.value,
+}));
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  recoveryContext.value = null;
+});
 
 function runError(failureCode: string): RunError {
   return {
@@ -27,11 +42,18 @@ function runError(failureCode: string): RunError {
     rawPayload: "provider raw details",
     failedAt: "2026-08-20T10:00:00Z",
     failureCode,
-    errorStamp: "ordinary-failure-stamp",
+    errorStamp: FAILURE_STAMP,
     message: "provider failure",
     remediationUrl: "https://opencode.ai/workspace/demo_workspace/go",
   };
 }
+
+it("keeps run remediation available when the composer has no recovery model", () => {
+  recoveryContext.value = { sessionId: "session-1", model: null, pending: null };
+  render(<RunErrorEntry taskId="task-1" error={runError("provider_auth_required")} />);
+  expect(screen.getByTestId(REMEDIATION_LINK_ID)).toBeTruthy();
+  expect(screen.getByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeTruthy();
+});
 
 describe("RunErrorEntry", () => {
   it("renders managed npm policy failures on the runtime recovery surface", () => {
@@ -64,9 +86,12 @@ describe("RunErrorEntry", () => {
       );
 
       expect(screen.getByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeTruthy();
+
       expect(screen.getByTestId("run-error-fresh-button")).toBeTruthy();
-      expect(screen.queryByTestId("run-error-raw-payload")).toBeNull();
-      expect(screen.getByTestId("remediation-link")).toBeTruthy();
+      expect(
+        screen.getByTestId("run-error-raw-payload").closest("details")?.hasAttribute("open"),
+      ).toBe(false);
+      expect(screen.getByTestId(REMEDIATION_LINK_ID)).toBeTruthy();
       expect(screen.queryByTestId("task-launch-error-entry")).toBeNull();
     },
   );
@@ -89,10 +114,13 @@ describe("RunErrorEntry", () => {
       />,
     );
 
-    screen.getByTestId("run-error-resume-button").click();
+    screen.getByTestId(RUN_ERROR_RESUME_TEST_ID).click();
 
-    expect(await screen.findByText("The saved branch is no longer available.")).toBeTruthy();
+    expect((await screen.findByTestId(RECOVERY_ERROR_ID)).textContent).toContain(
+      "The saved branch is no longer available.",
+    );
     expect(screen.getByTestId("run-error-continue-new-branch-button")).toBeTruthy();
+
     expect(screen.getByTestId("run-error-restore-workspace-button")).toBeTruthy();
   });
 
@@ -108,4 +136,113 @@ describe("RunErrorEntry", () => {
     expect(screen.queryByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeNull();
     expect(screen.queryByTestId("run-error-fresh-button")).toBeNull();
   });
+});
+
+it("explains a non-retryable recovery refusal without offering a bypass", async () => {
+  requestMock.mockRejectedValueOnce(
+    new WebSocketRequestError("blocked", "UNAVAILABLE", {
+      kind: "session_recovery_unstoppable",
+      retryable: false,
+    }),
+  );
+  render(<RunErrorEntry taskId="task-1" error={runError("provider_auth_required")} />);
+  fireEvent.click(screen.getByTestId(RUN_ERROR_RESUME_TEST_ID));
+  const error = await screen.findByTestId(RECOVERY_ERROR_ID);
+  expect(error.querySelector("p")?.textContent).toContain("Restart the backend");
+  expect(screen.queryByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeNull();
+});
+
+it("redacts credential-bearing branch failures in the status line", async () => {
+  requestMock.mockRejectedValueOnce(
+    new WebSocketRequestError("Branch failed: token=run-secret-fixture", "CONFLICT", {
+      kind: "branch_unrecoverable",
+      recovery_action: "resume_new_branch",
+      original_branch: "feature/lost",
+      base_branch: "main",
+    }),
+  );
+  render(
+    <RunErrorEntry
+      taskId="task-1"
+      workspaceId="workspace-1"
+      error={runError("provider_auth_required")}
+    />,
+  );
+  fireEvent.click(screen.getByTestId(RUN_ERROR_RESUME_TEST_ID));
+  await screen.findByTestId(RECOVERY_ERROR_ID);
+  expect(document.body.textContent).not.toContain("run-secret-fixture");
+});
+
+it("keeps an explanation when branch error sanitization removes all content", async () => {
+  requestMock.mockRejectedValueOnce(
+    new WebSocketRequestError("\u001b[31m\u001b[0m", "CONFLICT", {
+      kind: "branch_unrecoverable",
+      recovery_action: "resume_new_branch",
+      original_branch: "feature/lost",
+      base_branch: "main",
+    }),
+  );
+  render(<RunErrorEntry taskId="task-1" error={runError("provider_auth_required")} />);
+  fireEvent.click(screen.getByTestId(RUN_ERROR_RESUME_TEST_ID));
+  const error = await screen.findByTestId(RECOVERY_ERROR_ID);
+  expect(error.querySelector("p")?.textContent).toBe("Failed to resume session");
+});
+
+it("withholds workspace restore for a retryable run recovery guard", async () => {
+  requestMock.mockRejectedValueOnce(
+    new WebSocketRequestError("busy", "CONFLICT", {
+      kind: "session_recovery_in_progress",
+      retryable: true,
+    }),
+  );
+  render(<RunErrorEntry taskId="task-1" error={runError("provider_auth_required")} />);
+  fireEvent.click(screen.getByTestId(RUN_ERROR_RESUME_TEST_ID));
+  await screen.findByTestId(RECOVERY_ERROR_ID);
+  expect(screen.queryByTestId("run-error-restore-workspace-button")).toBeNull();
+});
+
+it("labels a workspace restoration failure separately from a resume failure", async () => {
+  requestMock.mockRejectedValueOnce(new Error("Provider unavailable"));
+  render(<RunErrorEntry taskId="task-1" error={runError("provider_auth_required")} />);
+  fireEvent.click(screen.getByTestId(RUN_ERROR_RESUME_TEST_ID));
+  const restore = await screen.findByTestId("run-error-restore-workspace-button");
+  requestMock.mockRejectedValueOnce(new Error("\u001b[31m\u001b[0m"));
+  fireEvent.click(restore);
+  await screen.findByText("Failed to restore workspace");
+  expect(screen.getByTestId(RECOVERY_ERROR_ID).querySelector("p")?.textContent).toBe(
+    "Failed to restore workspace",
+  );
+});
+
+it.each([
+  { name: "a historical row", isActive: false, errorStamp: FAILURE_STAMP },
+  { name: "a different failure", isActive: true, errorStamp: "another-stamp" },
+  { name: "an unstamped failure", isActive: true, errorStamp: undefined },
+])("preserves $name when another recovery card is present", ({ isActive, errorStamp }) => {
+  recoveryContext.value = {
+    sessionId: "session-1",
+    model: { sessionId: "session-1", stamp: FAILURE_STAMP, kind: "generic" },
+    pending: null,
+  };
+  render(
+    <RunErrorEntry
+      taskId="task-1"
+      error={{ ...runError("provider_auth_required"), isActive, errorStamp }}
+    />,
+  );
+  expect(screen.getByTestId("run-error-raw-payload").textContent).toBe("provider raw details");
+  expect(screen.getByTestId(REMEDIATION_LINK_ID)).toBeTruthy();
+  expect(Boolean(screen.queryByTestId(RUN_ERROR_RESUME_TEST_ID))).toBe(isActive);
+});
+
+it("compacts only the active failure owned by the composer card", () => {
+  recoveryContext.value = {
+    sessionId: "session-1",
+    model: { sessionId: "session-1", stamp: FAILURE_STAMP, kind: "generic" },
+    pending: null,
+  };
+  render(<RunErrorEntry taskId="task-1" error={runError("provider_auth_required")} />);
+  expect(screen.queryByTestId(REMEDIATION_LINK_ID)).toBeNull();
+  expect(screen.queryByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeNull();
+  expect(screen.getByText("provider raw details")).toBeTruthy();
 });

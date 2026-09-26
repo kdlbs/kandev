@@ -57,12 +57,13 @@ test.describe("worktree branch resume recovery", () => {
     await expect(fixture.session.recoveryError()).toBeVisible({ timeout: 30_000 });
     await expect(fixture.session.recoveryError()).toContainText("no longer available");
     await expect(fixture.session.recoveryNewBranchButton()).toBeVisible();
-    await expect(fixture.session.recoveryRestoreWorkspaceButton()).toBeVisible();
+    await expect(testPage.getByTestId("recovery-restore-workspace-button")).toBeVisible();
+    await testPage.keyboard.press("Escape");
     await assertNoDocumentHorizontalOverflow(testPage, "lost branch recovery error");
 
     // A second ordinary attempt remains retryable and must not silently switch
     // the branch or consume the explicit replacement decision.
-    await fixture.session.recoveryResumeButton().click();
+    await testPage.getByTestId("recovery-resume-button").click();
     await expect(fixture.session.recoveryError()).toBeVisible({ timeout: 30_000 });
     await expect
       .poll(

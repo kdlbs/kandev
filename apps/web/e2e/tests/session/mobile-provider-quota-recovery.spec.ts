@@ -54,7 +54,7 @@ test("keeps OpenCode quota recovery touch-safe on mobile", async ({
   const session = new SessionPage(testPage);
   await session.waitForLoad();
 
-  const recovery = session.activeChat().getByTestId("provider-quota-recovery");
+  const recovery = session.activeChat().getByTestId("session-recovery-card");
   await expect(recovery).toBeVisible();
   await expect(
     recovery.getByRole("heading", { name: "OpenCode usage limit reached" }),
@@ -72,17 +72,20 @@ test("keeps OpenCode quota recovery touch-safe on mobile", async ({
   await expect(technicalOutput).not.toContainText("wrk_");
   await expect(technicalOutput).not.toContainText("ses_");
 
-  for (const button of [
-    recovery.getByTestId("provider-quota-archive-button"),
-    recovery.getByTestId("provider-quota-delete-button"),
-  ]) {
-    await expect(button).toBeVisible();
-    await expect(button).toBeInViewport();
-    const box = await button.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThanOrEqual(44);
-  }
+  await expect(recovery.getByTestId("provider-quota-archive-button")).toHaveCount(0);
+  await expect(recovery.getByTestId("provider-quota-delete-button")).toHaveCount(0);
 
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
+  const menuScope = testPage.getByRole("dialog", { name: "Tasks" });
+  const taskRow = menuScope
+    .getByTestId("sidebar-task-item")
+    .filter({ hasText: "OpenCode quota recovery" });
+  await taskRow.getByRole("button", { name: "Task actions" }).click();
+  await expect(testPage.getByRole("menuitem", { name: "Archive", exact: true })).toBeVisible();
+  await expect(testPage.getByRole("menuitem", { name: "Delete", exact: true })).toBeVisible();
+  await testPage.keyboard.press("Escape");
+  await taskRow.tap();
+  await expect(menuScope).not.toBeVisible();
   await assertNoDocumentHorizontalOverflow(testPage, "mobile provider quota recovery");
   await testPage.screenshot({
     path: testInfo.outputPath("provider-quota-recovery-mobile.png"),

@@ -65,11 +65,10 @@ test.describe("New session with deleted agent profile", () => {
     // 5. Wait for the resume button to become disabled (store has updated)
     await expect(session.recoveryResumeButton()).toBeDisabled({ timeout: 10_000 });
 
-    // 6. Hover the span wrapper (tooltip trigger) and verify the tooltip text
-    await testPage.getByTestId("failed-session-resume-wrapper").hover();
-    await expect(testPage.getByRole("tooltip")).toContainText("Agent profile no longer exists", {
-      timeout: 5_000,
-    });
+    // The reason is visible without hovering a disabled control.
+    await expect(
+      testPage.getByTestId("failed-session-banner").getByText("Agent profile no longer exists"),
+    ).toBeVisible();
   });
 
   test("new agent dialog falls back to available profile when original was deleted", async ({

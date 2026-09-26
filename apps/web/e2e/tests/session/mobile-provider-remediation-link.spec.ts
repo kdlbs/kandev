@@ -53,7 +53,7 @@ test("keeps the OpenCode recovery link touch-safe on mobile", async ({
   const session = new SessionPage(testPage);
   await session.waitForLoad();
 
-  const recovery = session.activeChat().getByTestId("provider-quota-recovery");
+  const recovery = session.activeChat().getByTestId("session-recovery-card");
   await expect(recovery).toBeVisible();
 
   const link = recovery.getByTestId("remediation-link");
@@ -81,7 +81,7 @@ test("keeps the OpenCode recovery link touch-safe on mobile", async ({
   await expect(technicalOutput).not.toContainText("wrk_");
   await expect(technicalOutput).not.toContainText("ses_");
 
-  await expect(recovery.getByTestId("provider-quota-archive-button")).toBeInViewport();
+  await expect(recovery.getByTestId("provider-quota-archive-button")).toHaveCount(0);
 
   await assertNoDocumentHorizontalOverflow(testPage, "mobile provider remediation link");
   await testPage.screenshot({

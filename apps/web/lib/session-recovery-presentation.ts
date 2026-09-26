@@ -103,3 +103,26 @@ export function legacyRecoveryMessageMatchesError(
     Number.isNaN(occurredAt) || Number.isNaN(messageCreatedAt) || messageCreatedAt >= occurredAt
   );
 }
+
+export function hasSessionRecoveryMessage(
+  messages: readonly { session_id?: string; metadata?: Record<string, unknown> | null }[],
+  sessionId: string | null | undefined,
+  stamp: string | null | undefined,
+): boolean {
+  if (!sessionId || !stamp) return false;
+  return messages.some(
+    (message) =>
+      message.session_id === sessionId &&
+      message.metadata?.scope !== "task" &&
+      message.metadata?.recovery_actions === true &&
+      (message.metadata?.error_stamp ?? message.metadata?.recovery_stamp) === stamp,
+  );
+}
+
+export function sessionRecoveryOwnerId(
+  failure: SessionRecoveryFailure | null | undefined,
+): string | undefined {
+  return failure?.outcome === "recovery_failed" && failure.workspaceAttemptId
+    ? `session-recovery-owner-${failure.workspaceAttemptId}`
+    : undefined;
+}

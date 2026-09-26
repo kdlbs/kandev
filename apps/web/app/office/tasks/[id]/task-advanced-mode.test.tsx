@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { Task } from "./types";
+import { StateProvider } from "@/components/state-provider";
 import {
   OfficeTopbarChromeProvider,
   useOfficeTopbarChrome,
@@ -73,10 +74,12 @@ function TopbarActions() {
 
 function renderAdvanced(task: Task) {
   render(
-    <OfficeTopbarChromeProvider>
-      <TaskAdvancedMode task={task} onToggleSimple={() => {}} />
-      <TopbarActions />
-    </OfficeTopbarChromeProvider>,
+    <StateProvider>
+      <OfficeTopbarChromeProvider>
+        <TaskAdvancedMode task={task} onToggleSimple={() => {}} />
+        <TopbarActions />
+      </OfficeTopbarChromeProvider>
+    </StateProvider>,
   );
 }
 

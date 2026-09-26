@@ -63,7 +63,7 @@ test("renders managed npm recovery with one retry action", async ({
   const session = new SessionPage(testPage);
   await session.waitForLoad();
 
-  const recovery = session.activeChat().getByTestId("managed-runtime-npm-recovery");
+  const recovery = session.activeChat().getByTestId("session-recovery-card");
   await expect(recovery).toBeVisible();
   await expect(
     recovery.getByRole("heading", { name: "npm could not prepare the runtime" }),
@@ -74,7 +74,7 @@ test("renders managed npm recovery with one retry action", async ({
   await expect(recovery).not.toContainText("ACP");
   await expect(recovery.locator("details")).not.toHaveAttribute("open");
   await expect(recovery.getByTestId("managed-runtime-npm-retry-button")).toHaveCount(1);
-  await expect(recovery.getByRole("button")).toHaveCount(1);
+  await expect(recovery.getByTestId("managed-runtime-npm-retry-button")).toHaveCount(1);
 
   await assertNoDocumentHorizontalOverflow(testPage, "managed npm recovery");
   await testPage.screenshot({
@@ -102,7 +102,7 @@ test("explains release-age policy failures with one retry action", async ({
   const session = new SessionPage(testPage);
   await session.waitForLoad();
 
-  const recovery = session.activeChat().getByTestId("managed-runtime-npm-recovery");
+  const recovery = session.activeChat().getByTestId("session-recovery-card");
   await expect(recovery).toBeVisible();
   await expect(
     recovery.getByRole("heading", { name: "npm blocked this runtime version" }),

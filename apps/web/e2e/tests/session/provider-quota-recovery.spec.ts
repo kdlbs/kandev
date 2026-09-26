@@ -53,7 +53,7 @@ test("renders a localized OpenCode quota recovery card", async ({
   const session = new SessionPage(testPage);
   await session.waitForLoad();
 
-  const recovery = session.activeChat().getByTestId("provider-quota-recovery");
+  const recovery = session.activeChat().getByTestId("session-recovery-card");
   await expect(recovery).toHaveCount(1);
   await expect(
     recovery.getByRole("heading", { name: "OpenCode usage limit reached" }),
@@ -75,16 +75,18 @@ test("renders a localized OpenCode quota recovery card", async ({
   await expect(technicalOutput).not.toContainText("wrk_");
   await expect(technicalOutput).not.toContainText("ses_");
 
-  for (const button of [
-    recovery.getByTestId("provider-quota-archive-button"),
-    recovery.getByTestId("provider-quota-delete-button"),
-  ]) {
-    await expect(button).toBeVisible();
-    const box = await button.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThan(0);
-  }
+  await expect(recovery.getByTestId("provider-quota-archive-button")).toHaveCount(0);
+  await expect(recovery.getByTestId("provider-quota-delete-button")).toHaveCount(0);
 
+  const menuScope = testPage;
+  const taskRow = menuScope
+    .getByTestId("sidebar-task-item")
+    .filter({ hasText: "OpenCode quota recovery" });
+  await taskRow.hover();
+  await taskRow.getByRole("button", { name: "Task actions" }).click();
+  await expect(testPage.getByRole("menuitem", { name: "Archive", exact: true })).toBeVisible();
+  await expect(testPage.getByRole("menuitem", { name: "Delete", exact: true })).toBeVisible();
+  await testPage.keyboard.press("Escape");
   await assertNoDocumentHorizontalOverflow(testPage, "provider quota recovery");
   await testPage.screenshot({
     path: testInfo.outputPath("provider-quota-recovery-desktop.png"),

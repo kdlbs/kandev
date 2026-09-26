@@ -1,5 +1,6 @@
 "use client";
 
+import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { useCallback, type RefObject } from "react";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -369,7 +370,7 @@ export function useSendPassthroughMessage({
         if (conflict?.snapshot) {
           storeApi.getState().setTaskPlanComments(taskId, conflict.snapshot);
         }
-        console.error("Failed to send passthrough message:", error);
+        console.error("Failed to send passthrough message:", sanitizeSessionErrorDetails(error));
         let title = t("task:failedToSendMessage");
         if (isMessageSendError(error)) title = t("task:messageNotSent");
         else if (conflict?.code === "plan_comments_changed") {
@@ -377,7 +378,9 @@ export function useSendPassthroughMessage({
         }
         toast({
           title,
-          ...(isMessageSendError(error) ? { description: error.message } : {}),
+          ...(isMessageSendError(error)
+            ? { description: sanitizeSessionErrorDetails(error, 240) }
+            : {}),
           variant: "error",
         });
         throw error;

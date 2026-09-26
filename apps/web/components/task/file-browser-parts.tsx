@@ -416,6 +416,7 @@ export function SearchResultsList({
 export { FileBrowserToolbar } from "./file-browser-toolbar";
 
 export type FileBrowserContentAreaProps = {
+  sessionId?: string;
   isSearchActive: boolean;
   searchResults: string[] | null;
   isSessionFailed: boolean;

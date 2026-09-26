@@ -1,5 +1,6 @@
 "use client";
 
+import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { useCallback, useState } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
@@ -135,7 +136,7 @@ function pickInputPlaceholder(a: PlaceholderArgs): string {
 /** Shows an error toast for a failed message send, distinguishing a known
  *  send error from an ambiguous connection drop/timeout. */
 function showMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>["toast"]) {
-  console.error("Failed to send message:", error);
+  console.error("Failed to send message:", sanitizeSessionErrorDetails(error));
   if (error instanceof QueueFullError) {
     toast({
       title: t("task:messageNotSent"),
@@ -161,7 +162,7 @@ function showMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>
   if (isMessageSendError(error)) {
     toast({
       title: t("task:messageNotSent"),
-      description: error.message,
+      description: sanitizeSessionErrorDetails(error, 240),
       variant: "error",
     });
     return;

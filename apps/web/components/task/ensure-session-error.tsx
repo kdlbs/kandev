@@ -1,5 +1,8 @@
 "use client";
 
+import { sessionRecoveryOwnerId } from "@/lib/session-recovery-presentation";
+import { RecoveryActions, type RecoveryChoice } from "./recovery-actions";
+import { SessionErrorDetails } from "./session-error-details";
 import Link from "@/components/routing/app-link";
 import { IconAlertTriangle, IconInfoCircle, IconRefresh } from "@tabler/icons-react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
@@ -44,13 +47,14 @@ export function describeEnsureError(
   }
   return {
     title: t("task:couldnTStartASession"),
-    detail: message || t("task:backendRejectedSessionRequest"),
+    detail: t("task:backendRejectedSessionRequest"),
     isAgentProfileMissing: false,
     action: null,
   };
 }
 
 type RecoveryAction = {
+  kind?: RecoveryChoice["kind"];
   label: string;
   onClick: () => void;
   testId: string;
@@ -87,27 +91,16 @@ type BannerProps = {
 function RecoveryFailureDetails({ failure }: { failure: SessionRecoveryFailure }) {
   const { t } = useTranslation();
   if (failure.outcome === "status_unavailable") return null;
+  const detail = [
+    `${t("task:sessionRecoveryResumeAttempt")}: ${failure.resumeError}`,
+    ...(failure.outcome === "recovery_failed"
+      ? [`${t("task:sessionRecoveryRestoreAttempt")}: ${failure.restoreError}`]
+      : []),
+  ].join("\n");
   return (
-    <details className="mt-2 min-w-0 text-xs" data-testid="session-recovery-details">
-      <summary
-        className="block min-h-11 max-w-full cursor-pointer select-none rounded-sm py-3 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        data-testid="session-recovery-details-summary"
-      >
-        {t("task:sessionRecoveryDetails")}
-      </summary>
-      <dl className="mt-2 grid min-w-0 gap-2">
-        <div className="min-w-0">
-          <dt className="font-medium">{t("task:sessionRecoveryResumeAttempt")}</dt>
-          <dd className="mt-0.5 break-words text-muted-foreground">{failure.resumeError}</dd>
-        </div>
-        {failure.outcome === "recovery_failed" ? (
-          <div className="min-w-0">
-            <dt className="font-medium">{t("task:sessionRecoveryRestoreAttempt")}</dt>
-            <dd className="mt-0.5 break-words text-muted-foreground">{failure.restoreError}</dd>
-          </div>
-        ) : null}
-      </dl>
-    </details>
+    <SessionErrorDetails testId="session-recovery-details" label={t("task:sessionRecoveryDetails")}>
+      {detail}
+    </SessionErrorDetails>
   );
 }
 
@@ -127,20 +120,11 @@ function SessionStatusUnavailableNotice({
       <Alert>
         <IconInfoCircle />
         <AlertTitle>{t("task:sessionStatusUnavailable")}</AlertTitle>
-        <AlertDescription>
+        <AlertDescription className="col-start-2 w-full min-w-0">
           <span>{t("task:sessionStatusUnavailableDetail")}</span>
-          <details className="mt-2 min-w-0 text-xs" data-testid="session-status-details">
-            <summary
-              className={cn(
-                "block max-w-full cursor-pointer select-none rounded-sm py-1 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                isFinePointer ? "min-h-7" : "min-h-11 py-3",
-              )}
-              data-testid="session-status-details-summary"
-            >
-              {t("task:details")}
-            </summary>
-            <p className="mt-2 break-words text-muted-foreground">{failure.statusError}</p>
-          </details>
+          <SessionErrorDetails testId="session-status-details" label={t("task:details")}>
+            {failure.statusError}
+          </SessionErrorDetails>
           <Button
             variant="outline"
             size="sm"
@@ -156,6 +140,20 @@ function SessionStatusUnavailableNotice({
       </Alert>
     </div>
   );
+}
+
+function EnsureFailureDetails({
+  failure,
+  error,
+  profileMissing,
+}: {
+  failure: SessionRecoveryFailure | null;
+  error: Error | null;
+  profileMissing: boolean;
+}) {
+  if (failure) return <RecoveryFailureDetails failure={failure} />;
+  if (profileMissing || !error) return null;
+  return <SessionErrorDetails>{error.message}</SessionErrorDetails>;
 }
 
 /** Slim banner for the task page, rendered above the layout. */
@@ -174,14 +172,29 @@ export function EnsureSessionErrorBanner({
   const info = describeEnsureError(error, workspaceId);
   if (!info) return null;
   const failedRecovery = recoveryFailure?.outcome === "recovery_failed" ? recoveryFailure : null;
+  const choices: RecoveryChoice[] = [
+    {
+      kind: "resume",
+      label: t("task:retry"),
+      onClick: onRetry,
+      testId: "ensure-session-error-retry",
+    },
+  ];
+  if (action) choices.push({ ...action, kind: action.kind ?? "restore" });
+  if (secondaryAction)
+    choices.push({ ...secondaryAction, kind: secondaryAction.kind ?? "fresh_start" });
   return (
     <div className={cn(!compact && "px-3 pt-2")} data-testid={testId}>
       <Alert variant="destructive">
         <IconAlertTriangle />
         <AlertTitle>{failedRecovery ? t("task:sessionRecoveryFailed") : info.title}</AlertTitle>
-        <AlertDescription>
+        <AlertDescription className="col-start-2 w-full min-w-0">
           <span>{failedRecovery ? t("task:sessionRecoveryFailedDetail") : info.detail}</span>
-          {failedRecovery ? <RecoveryFailureDetails failure={failedRecovery} /> : null}
+          <EnsureFailureDetails
+            failure={failedRecovery}
+            error={error}
+            profileMissing={info.isAgentProfileMissing}
+          />
           <span className="mt-1 flex flex-wrap items-center gap-2">
             {info.action ? (
               <Link
@@ -192,42 +205,10 @@ export function EnsureSessionErrorBanner({
                 {info.action.label}
               </Link>
             ) : null}
-            {action ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="min-h-11 cursor-pointer px-2 text-xs"
-                onClick={action.onClick}
-                disabled={action.disabled}
-                data-testid={action.testId}
-              >
-                {action.label}
-              </Button>
-            ) : null}
-            {secondaryAction ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="min-h-11 cursor-pointer px-2 text-xs"
-                onClick={secondaryAction.onClick}
-                disabled={secondaryAction.disabled}
-                data-testid={secondaryAction.testId}
-              >
-                {secondaryAction.label}
-              </Button>
-            ) : null}
-            <Button
-              variant="outline"
-              size="sm"
-              className="min-h-11 cursor-pointer px-2 text-xs"
-              onClick={onRetry}
-              disabled={retryDisabled}
-              data-testid="ensure-session-error-retry"
-            >
-              <IconRefresh className="size-3" />
-              {t("task:retry")}
-            </Button>
           </span>
+          {!info.isAgentProfileMissing && (
+            <RecoveryActions actions={choices} busy={retryDisabled} />
+          )}
         </AlertDescription>
       </Alert>
     </div>
@@ -246,7 +227,7 @@ export function SessionRecoveryNotice({
     <div className="px-3 pt-2" data-testid="session-recovery-notice">
       <Alert>
         <IconInfoCircle />
-        <AlertDescription>
+        <AlertDescription className="col-start-2 w-full min-w-0">
           <span>{message}</span>
           {recoveryFailure ? <RecoveryFailureDetails failure={recoveryFailure} /> : null}
         </AlertDescription>
@@ -281,7 +262,7 @@ export function SessionRecoveryFeedback({
     recoveryFailure?.outcome === "workspace_read_only" ? recoveryFailure : null;
   const statusFailure = recoveryFailure?.outcome === "status_unavailable" ? recoveryFailure : null;
   return (
-    <>
+    <div id={sessionRecoveryOwnerId(recoveryFailure)} tabIndex={-1}>
       {statusFailure ? (
         <SessionStatusUnavailableNotice
           failure={statusFailure}
@@ -302,7 +283,7 @@ export function SessionRecoveryFeedback({
       {notice ? (
         <SessionRecoveryNotice message={notice} recoveryFailure={readOnlyRecovery} />
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -323,6 +304,9 @@ export function EnsureSessionErrorEmptyState({
     >
       <span className="font-medium text-foreground">{info.title}</span>
       <span className="max-w-xs text-muted-foreground">{info.detail}</span>
+      {!info.isAgentProfileMissing && error && (
+        <SessionErrorDetails>{error.message}</SessionErrorDetails>
+      )}
       <span className="flex flex-wrap items-center justify-center gap-2">
         {info.action ? (
           <Link
