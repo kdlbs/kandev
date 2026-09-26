@@ -38,6 +38,8 @@ export type LaunchSessionRequest = {
   auto_start?: boolean;
   attachments?: MessageAttachment[];
   activation_source?: LaunchActivationSource;
+  conversation_fork_id?: string;
+  creation_request_id?: string;
 };
 
 export type LaunchSessionResponse = {

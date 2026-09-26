@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { TaskTopBar } from "@/components/task/task-top-bar";
+import { TaskConversationForkProvenance } from "@/components/task/task-conversation-fork-provenance";
 import { TaskLayout } from "@/components/task/task-layout";
 import { DebugOverlay } from "@/components/debug-overlay";
 import { type Repository, type RepositoryScript, type Task } from "@/lib/types/http";
@@ -411,6 +412,15 @@ export function TaskPageInner(props: TaskPageInnerProps) {
               isPassthrough={sessionPanel.isSessionPassthrough}
               isTaskArchived={archivedValue.isArchived}
             />
+            <div
+              className={
+                isMobile
+                  ? "relative top-[calc(3.5rem_+_env(safe-area-inset-top,0px))] z-50 flex shrink-0 justify-end border-b px-3 py-1 empty:hidden"
+                  : "flex shrink-0 justify-end border-b px-3 py-1 empty:hidden"
+              }
+            >
+              <TaskConversationForkProvenance metadata={task.metadata} />
+            </div>
             <TaskPRShortcut taskId={taskProps.taskId} />
             <TaskDebugOverlay entries={debugEntries} />
             {!isMobile && (

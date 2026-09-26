@@ -2,7 +2,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import type { ExecutorProfile } from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import {
+  BASE_PROFILE,
+  DESCRIPTION_INPUT_TEST_ID,
+  FORK_CONTEXT,
+  PLUGIN_COMPOSER_LABEL,
+  TYPED_HANDOFF_PROMPT,
+} from "./new-session-dialog-test-fixtures";
 
 const mockToast = vi.fn();
 const mockSummarize = vi.fn();
@@ -15,19 +21,6 @@ let mockAgentSelectorValue: string | undefined;
 let mockAgentSelectorOnChange: ((value: string) => void) | undefined;
 let mockExecutorProfile: ExecutorProfile | null = null;
 let mockContextSelectValue: string | undefined;
-const PLUGIN_COMPOSER_LABEL = "Plugin composer action";
-const DESCRIPTION_INPUT_TEST_ID = "task-description-input";
-const TYPED_HANDOFF_PROMPT = "typed handoff prompt";
-
-const BASE_PROFILE: AgentProfileOption = {
-  id: "profile-1",
-  label: "Profile 1",
-  agent_name: "agent-1",
-  agent_id: "agent-id-1",
-  cli_passthrough: false,
-  enabled: true,
-};
-
 const mockState = {
   features: { dynamicAgentRouting: true },
   kanban: {
@@ -77,7 +70,22 @@ const mockState = {
 vi.mock("@kandev/ui/dialog", () => ({
   Dialog: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
     open ? <div>{children}</div> : null,
-  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogContent: ({
+    children,
+    onEscapeKeyDown,
+  }: {
+    children: React.ReactNode;
+    onEscapeKeyDown?: (event: { preventDefault: () => void }) => void;
+  }) => (
+    <div>
+      <button
+        type="button"
+        aria-label="Escape dialog"
+        onClick={() => onEscapeKeyDown?.({ preventDefault: vi.fn() })}
+      />
+      {children}
+    </div>
+  ),
   DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -267,29 +275,32 @@ vi.mock("./session-dialog-shared", () => ({
 
 import { NewSessionDialog } from "./new-session-dialog";
 
-// eslint-disable-next-line max-lines-per-function
-describe("NewSessionDialog", () => {
-  afterEach(() => {
-    cleanup();
-    mockState.agentProfiles.items = [BASE_PROFILE];
-    mockState.agentProfileRecentUse = { loaded: true, records: {} };
-    mockExecutorProfile = null;
-    mockAgentSelectorValue = undefined;
-    mockAgentSelectorOnChange = undefined;
-    mockContextSelectValue = undefined;
-  });
+function renderNewSessionDialog(props: Partial<Parameters<typeof NewSessionDialog>[0]> = {}) {
+  return render(<NewSessionDialog open onOpenChange={vi.fn()} taskId="task-1" {...props} />);
+}
 
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockSummarize.mockResolvedValue({ summary: "summary text" });
-    mockBuildStartRequest.mockReturnValue({ request: { task_id: "task-1" } });
-    mockLaunchSession.mockResolvedValue({ session_id: "session-2" });
-    mockRecordRecentUse.mockReset();
-    mockApplyAgentProfileRecentUse.mockReset();
-  });
+afterEach(() => {
+  cleanup();
+  mockState.agentProfiles.items = [BASE_PROFILE];
+  mockState.agentProfileRecentUse = { loaded: true, records: {} };
+  mockExecutorProfile = null;
+  mockAgentSelectorValue = undefined;
+  mockAgentSelectorOnChange = undefined;
+  mockContextSelectValue = undefined;
+});
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockSummarize.mockResolvedValue({ summary: "summary text" });
+  mockBuildStartRequest.mockReturnValue({ request: { task_id: "task-1" } });
+  mockLaunchSession.mockResolvedValue({ session_id: "session-2" });
+  mockRecordRecentUse.mockReset();
+  mockApplyAgentProfileRecentUse.mockReset();
+});
+
+describe("NewSessionDialog initial prompt", () => {
   it("copies the initial prompt on the first copy_prompt action after opening", async () => {
-    render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+    renderNewSessionDialog();
 
     fireEvent.click(screen.getByRole("button", { name: "Copy initial prompt" }));
 
@@ -299,16 +310,59 @@ describe("NewSessionDialog", () => {
       ),
     );
   });
+});
 
-  it("opens handoff with blank context without summarizing", () => {
-    render(
-      <NewSessionDialog
-        open={true}
-        onOpenChange={vi.fn()}
-        taskId="task-1"
-        handoff={{ sourceSessionId: "session-9", targetProfileId: "profile-1" }}
-      />,
+describe("NewSessionDialog conversation forks", () => {
+  it("preserves the instruction when opening preview and forwards fork admission on launch", async () => {
+    const onOpenChange = vi.fn();
+    renderNewSessionDialog({ onOpenChange, conversationFork: FORK_CONTEXT });
+    const prompt = screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement;
+    fireEvent.change(prompt, { target: { value: TYPED_HANDOFF_PROMPT } });
+    const previewButton = screen.getByRole("button", { name: "Preview" });
+    previewButton.focus();
+    fireEvent.click(previewButton);
+    expect(screen.getByTestId("conversation-fork-content").textContent).toContain(
+      "Frozen source history",
     );
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe(
+      TYPED_HANDOFF_PROMPT,
+    );
+    await waitFor(() => expect(document.activeElement).toBe(previewButton));
+    fireEvent.click(screen.getByRole("button", { name: "Start Agent" }));
+
+    await waitFor(() => expect(mockLaunchSession).toHaveBeenCalled());
+    expect(mockBuildStartRequest).toHaveBeenCalledWith(
+      "task-1",
+      "profile-1",
+      expect.objectContaining({ conversationForkId: "fork-1", creationRequestId: "create-1" }),
+    );
+    expect(FORK_CONTEXT.onConsumed).toHaveBeenCalled();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("Escape closes the fork preview and restores focus without closing the creation dialog", async () => {
+    const onOpenChange = vi.fn();
+    renderNewSessionDialog({ onOpenChange, conversationFork: FORK_CONTEXT });
+    const previewButton = screen.getByRole("button", { name: "Preview" });
+    previewButton.focus();
+    fireEvent.click(previewButton);
+    expect(screen.getByTestId("conversation-fork-content")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Escape dialog" }));
+
+    await waitFor(() => expect(screen.queryByTestId("conversation-fork-content")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(previewButton));
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId(DESCRIPTION_INPUT_TEST_ID)).toBeTruthy();
+  });
+});
+
+describe("NewSessionDialog handoff context", () => {
+  it("opens handoff with blank context without summarizing", () => {
+    renderNewSessionDialog({
+      handoff: { sourceSessionId: "session-9", targetProfileId: "profile-1" },
+    });
 
     expect(mockContextSelectValue).toBe("blank");
     expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe("");
@@ -320,14 +374,9 @@ describe("NewSessionDialog", () => {
   });
 
   it("summarizes only after an explicit session selection", async () => {
-    render(
-      <NewSessionDialog
-        open={true}
-        onOpenChange={vi.fn()}
-        taskId="task-1"
-        handoff={{ sourceSessionId: "session-9", targetProfileId: "profile-1" }}
-      />,
-    );
+    renderNewSessionDialog({
+      handoff: { sourceSessionId: "session-9", targetProfileId: "profile-1" },
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Summarize source session" }));
 
@@ -341,14 +390,9 @@ describe("NewSessionDialog", () => {
   });
 
   it("summarizes the explicitly chosen alternate session", async () => {
-    render(
-      <NewSessionDialog
-        open={true}
-        onOpenChange={vi.fn()}
-        taskId="task-1"
-        handoff={{ sourceSessionId: "session-9", targetProfileId: "profile-1" }}
-      />,
-    );
+    renderNewSessionDialog({
+      handoff: { sourceSessionId: "session-9", targetProfileId: "profile-1" },
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Summarize alternate session" }));
 
@@ -379,41 +423,25 @@ describe("NewSessionDialog", () => {
     expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe("");
     expect(mockSummarize).toHaveBeenCalledTimes(1);
   });
+});
 
+describe("NewSessionDialog handoff prompts", () => {
   it("preserves a typed handoff draft across ordinary rerenders", () => {
-    const { rerender } = render(
-      <NewSessionDialog
-        open={true}
-        onOpenChange={vi.fn()}
-        taskId="task-1"
-        handoff={{ sourceSessionId: "session-9", targetProfileId: "profile-1" }}
-      />,
-    );
+    const handoff = { sourceSessionId: "session-9", targetProfileId: "profile-1" };
+    const { rerender } = renderNewSessionDialog({ handoff });
     const prompt = screen.getByTestId(DESCRIPTION_INPUT_TEST_ID);
     fireEvent.change(prompt, { target: { value: TYPED_HANDOFF_PROMPT } });
 
-    rerender(
-      <NewSessionDialog
-        open={true}
-        onOpenChange={vi.fn()}
-        taskId="task-1"
-        handoff={{ sourceSessionId: "session-9", targetProfileId: "profile-1" }}
-      />,
-    );
+    rerender(<NewSessionDialog open onOpenChange={vi.fn()} taskId="task-1" handoff={handoff} />);
 
     expect((prompt as HTMLTextAreaElement).value).toBe(TYPED_HANDOFF_PROMPT);
     expect(mockSummarize).not.toHaveBeenCalled();
   });
 
   it("launches a typed handoff prompt without summarizing", async () => {
-    render(
-      <NewSessionDialog
-        open={true}
-        onOpenChange={vi.fn()}
-        taskId="task-1"
-        handoff={{ sourceSessionId: "session-9", targetProfileId: "profile-1" }}
-      />,
-    );
+    renderNewSessionDialog({
+      handoff: { sourceSessionId: "session-9", targetProfileId: "profile-1" },
+    });
     fireEvent.change(screen.getByTestId(DESCRIPTION_INPUT_TEST_ID), {
       target: { value: TYPED_HANDOFF_PROMPT },
     });
@@ -428,9 +456,11 @@ describe("NewSessionDialog", () => {
     );
     expect(mockSummarize).not.toHaveBeenCalled();
   });
+});
 
+describe("NewSessionDialog composer launch", () => {
   it("submits text a plugin composer action inserted into a blank composer", async () => {
-    render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+    renderNewSessionDialog();
 
     fireEvent.click(screen.getByRole("button", { name: PLUGIN_COMPOSER_LABEL }));
 
@@ -443,7 +473,7 @@ describe("NewSessionDialog", () => {
   });
 
   it("does not mark the initialized profile explicit until the picker changes", async () => {
-    render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+    renderNewSessionDialog();
 
     fireEvent.click(screen.getByRole("button", { name: PLUGIN_COMPOSER_LABEL }));
 
@@ -455,7 +485,9 @@ describe("NewSessionDialog", () => {
       ),
     );
   });
+});
 
+describe("NewSessionDialog profile defaults", () => {
   it("uses the recent task-session profile as an explicit default", async () => {
     const recentProfile = { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" };
     mockState.agentProfiles.items = [BASE_PROFILE, recentProfile];
@@ -470,7 +502,7 @@ describe("NewSessionDialog", () => {
       },
     };
 
-    render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+    renderNewSessionDialog();
 
     await waitFor(() => expect(mockAgentSelectorValue).toBe(recentProfile.id));
     fireEvent.click(screen.getByRole("button", { name: PLUGIN_COMPOSER_LABEL }));
@@ -483,7 +515,9 @@ describe("NewSessionDialog", () => {
       ),
     );
   });
+});
 
+describe("NewSessionDialog profile recency", () => {
   it("does not replace a manual profile choice when recent use changes", async () => {
     const recentProfile = { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" };
     const laterRecentProfile = { ...BASE_PROFILE, id: "profile-3", label: "Profile 3" };
@@ -498,9 +532,7 @@ describe("NewSessionDialog", () => {
         },
       },
     };
-    const { rerender } = render(
-      <NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />,
-    );
+    const { rerender } = renderNewSessionDialog();
 
     await waitFor(() => expect(mockAgentSelectorValue).toBe(recentProfile.id));
     await act(async () => {
@@ -517,7 +549,7 @@ describe("NewSessionDialog", () => {
         },
       },
     };
-    rerender(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+    rerender(<NewSessionDialog open onOpenChange={vi.fn()} taskId="task-1" />);
 
     await waitFor(() => expect(mockAgentSelectorValue).toBe(BASE_PROFILE.id));
   });
@@ -527,7 +559,7 @@ describe("NewSessionDialog", () => {
       BASE_PROFILE,
       { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" },
     ];
-    render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+    renderNewSessionDialog();
 
     await act(async () => {
       mockAgentSelectorOnChange?.("profile-2");
@@ -542,31 +574,33 @@ describe("NewSessionDialog", () => {
       ),
     );
   });
+});
 
+describe("NewSessionDialog disabled profile defaults", () => {
   it("defaults to the first enabled profile when the session profile is disabled", () => {
     mockState.agentProfiles.items = [
       { ...BASE_PROFILE, enabled: false },
       { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" },
     ];
-    render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+    renderNewSessionDialog();
     expect(mockAgentSelectorValue).toBe("profile-2");
   });
+});
 
+describe("NewSessionDialog profile compatibility", () => {
   it("reconciles the selection when the active profile becomes disabled", async () => {
     mockState.agentProfiles.items = [
       BASE_PROFILE,
       { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" },
     ];
-    const { rerender } = render(
-      <NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />,
-    );
+    const { rerender } = renderNewSessionDialog();
     expect(mockAgentSelectorValue).toBe("profile-1");
 
     mockState.agentProfiles.items = [
       { ...BASE_PROFILE, enabled: false },
       { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" },
     ];
-    rerender(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+    rerender(<NewSessionDialog open onOpenChange={vi.fn()} taskId="task-1" />);
 
     await waitFor(() => expect(mockAgentSelectorValue).toBe("profile-2"));
   });
@@ -575,9 +609,7 @@ describe("NewSessionDialog", () => {
     const manualProfile = { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" };
     const fallbackProfile = { ...BASE_PROFILE, id: "profile-3", label: "Profile 3" };
     mockState.agentProfiles.items = [BASE_PROFILE, manualProfile, fallbackProfile];
-    const { rerender } = render(
-      <NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />,
-    );
+    const { rerender } = renderNewSessionDialog();
 
     await act(async () => {
       mockAgentSelectorOnChange?.(manualProfile.id);
@@ -589,11 +621,13 @@ describe("NewSessionDialog", () => {
       { ...manualProfile, enabled: false },
       fallbackProfile,
     ];
-    rerender(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+    rerender(<NewSessionDialog open onOpenChange={vi.fn()} taskId="task-1" />);
 
     await waitFor(() => expect(mockAgentSelectorValue).toBe(BASE_PROFILE.id));
   });
+});
 
+describe("NewSessionDialog incompatible handoff fallback", () => {
   it("uses an implicit fallback when a local handoff target is incompatible", async () => {
     mockExecutorProfile = {
       id: "executor-profile-1",
@@ -610,14 +644,9 @@ describe("NewSessionDialog", () => {
       { ...BASE_PROFILE, id: "profile-2", label: "Profile 2", capability_status: "not_installed" },
     ];
 
-    render(
-      <NewSessionDialog
-        open={true}
-        onOpenChange={vi.fn()}
-        taskId="task-1"
-        handoff={{ sourceSessionId: "session-9", targetProfileId: "profile-2" }}
-      />,
-    );
+    renderNewSessionDialog({
+      handoff: { sourceSessionId: "session-9", targetProfileId: "profile-2" },
+    });
 
     fireEvent.click(screen.getByRole("button", { name: PLUGIN_COMPOSER_LABEL }));
 

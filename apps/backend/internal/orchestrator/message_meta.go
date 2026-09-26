@@ -10,20 +10,21 @@ import (
 // UserMessageMeta holds metadata fields for a user message.
 // Use NewUserMessageMeta to construct and ToMap to serialize.
 type UserMessageMeta struct {
-	PlanMode          bool
-	HasReviewComments bool
-	AutoStart         bool
-	Attachments       []v1.MessageAttachment
-	ContextFiles      []v1.ContextFileMeta
-	EntityReferences  []v1.EntityReference
-	SenderTaskID      string
-	SenderTaskTitle   string
-	SenderSessionID   string
-	SenderSessionName string
-	WorkflowMessage   bool
-	WorkflowStepID    string
-	WorkflowStepName  string
-	WorkflowStepColor string
+	PlanMode           bool
+	HasReviewComments  bool
+	AutoStart          bool
+	Attachments        []v1.MessageAttachment
+	ContextFiles       []v1.ContextFileMeta
+	EntityReferences   []v1.EntityReference
+	SenderTaskID       string
+	SenderTaskTitle    string
+	SenderSessionID    string
+	SenderSessionName  string
+	WorkflowMessage    bool
+	WorkflowStepID     string
+	WorkflowStepName   string
+	WorkflowStepColor  string
+	ConversationForkID string
 }
 
 // NewUserMessageMeta creates a UserMessageMeta builder.
@@ -49,6 +50,13 @@ func (m *UserMessageMeta) WithReviewComments(has bool) *UserMessageMeta {
 // distinguish "the agent ran on its own" from "the user actually engaged".
 func (m *UserMessageMeta) WithAutoStart(enabled bool) *UserMessageMeta {
 	m.AutoStart = enabled
+	return m
+}
+
+// WithConversationForkID records the server-authorized historical context
+// attached to this initial user message.
+func (m *UserMessageMeta) WithConversationForkID(id string) *UserMessageMeta {
+	m.ConversationForkID = id
 	return m
 }
 
@@ -102,7 +110,7 @@ func (m *UserMessageMeta) WithWorkflowStep(stepID, stepName, stepColor string) *
 // Returns nil if no metadata fields are set.
 func (m *UserMessageMeta) ToMap() map[string]interface{} {
 	if !m.PlanMode && !m.HasReviewComments && !m.AutoStart && len(m.Attachments) == 0 &&
-		len(m.ContextFiles) == 0 && len(m.EntityReferences) == 0 && m.SenderTaskID == "" && !m.WorkflowMessage {
+		len(m.ContextFiles) == 0 && len(m.EntityReferences) == 0 && m.SenderTaskID == "" && !m.WorkflowMessage && m.ConversationForkID == "" {
 		return nil
 	}
 	meta := make(map[string]interface{})
@@ -114,6 +122,9 @@ func (m *UserMessageMeta) ToMap() map[string]interface{} {
 	}
 	if m.AutoStart {
 		meta["auto_start"] = true
+	}
+	if m.ConversationForkID != "" {
+		meta["conversation_fork_id"] = m.ConversationForkID
 	}
 	if len(m.Attachments) > 0 {
 		meta["attachments"] = m.Attachments

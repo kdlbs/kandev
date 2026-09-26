@@ -347,6 +347,33 @@ describe("buildCreateTaskPayload priority", () => {
   });
 });
 
+describe("buildCreateTaskPayload conversation fork", () => {
+  const base = {
+    ...AGENT_PAYLOAD_DEFAULTS,
+    trimmedTitle: "Fork task",
+    trimmedDescription: "Continue this work",
+  };
+
+  it("preserves the frozen snapshot and destination request IDs", () => {
+    expect(
+      buildCreateTaskPayload({
+        ...base,
+        conversationForkId: "snapshot-1",
+        creationRequestId: "request-1",
+      }),
+    ).toMatchObject({
+      conversation_fork_id: "snapshot-1",
+      creation_request_id: "request-1",
+    });
+  });
+
+  it("omits fork fields from ordinary task creation", () => {
+    const payload = buildCreateTaskPayload(base);
+    expect(payload.conversation_fork_id).toBeUndefined();
+    expect(payload.creation_request_id).toBeUndefined();
+  });
+});
+
 it("initializes a planning session without navigating when auto-focus is off", () => {
   const currentSessionId = "current-session";
   const backgroundSessionId = "session-plan";

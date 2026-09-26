@@ -1105,8 +1105,72 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
+	if err != nil {
+		return err
+	}
+	if session.ConversationForkAdmission != nil || session.ConversationForkPendingTask {
+		return r.bindConversationForkToCreatedSession(ctx, exec, session)
+	}
+	return nil
+}
 
-	return err
+func (r *Repository) bindConversationForkToCreatedSession(ctx context.Context, exec taskSessionExecutor, session *models.TaskSession) error {
+	tx, ok := exec.(*sqlx.Tx)
+	if !ok {
+		return fmt.Errorf("conversation fork session binding requires a repository transaction")
+	}
+	if err := r.bindExplicitConversationForkSession(ctx, tx, session); err != nil {
+		return err
+	}
+	if !session.ConversationForkPendingTask {
+		return nil
+	}
+	forkID, claimed, err := r.bindPendingConversationForkSessionTx(ctx, tx, session.TaskID, session.ID)
+	if err != nil || !claimed {
+		return err
+	}
+	return r.persistConversationForkSessionMetadata(ctx, tx, session, forkID)
+}
+
+func (r *Repository) bindExplicitConversationForkSession(ctx context.Context, tx *sqlx.Tx, session *models.TaskSession) error {
+	if session.ConversationForkAdmission == nil {
+		return nil
+	}
+	admission := *session.ConversationForkAdmission
+	if admission.DestinationTaskID == "" {
+		admission.DestinationTaskID = session.TaskID
+	}
+	if admission.DestinationSessionID == "" {
+		admission.DestinationSessionID = session.ID
+	}
+	return r.attachConversationForkToDestinationTx(ctx, tx, admission)
+}
+
+func (r *Repository) persistConversationForkSessionMetadata(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	session *models.TaskSession,
+	forkID string,
+) error {
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[models.MetaKeyConversationForkID] = forkID
+	metadataJSON, err := json.Marshal(session.Metadata)
+	if err != nil {
+		return fmt.Errorf("failed to serialize claimed conversation fork metadata: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_sessions SET metadata = ? WHERE id = ?`), string(metadataJSON), session.ID)
+	if err != nil {
+		return fmt.Errorf("persist claimed conversation fork session metadata: %w", err)
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		if err != nil {
+			return fmt.Errorf("count claimed conversation fork session metadata update: %w", err)
+		}
+		return fmt.Errorf("conversation fork session metadata update matched %d rows", changed)
+	}
+	return nil
 }
 
 // verifyTaskRunnerResolutionTx rejects a session built from a task snapshot

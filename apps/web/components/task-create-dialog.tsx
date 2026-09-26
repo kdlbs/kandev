@@ -37,6 +37,7 @@ import { useAppStore } from "@/components/state-provider";
 import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
 import { shouldShowTaskTitleField } from "@/components/task-create-dialog-helpers";
 import { useTaskCreateDialogSetup } from "@/components/task-create-dialog-setup";
+import { ConversationForkControls } from "@/components/task/conversation-fork-controls";
 
 export type { TaskCreateDialogProps } from "@/components/task-create-dialog-types";
 
@@ -119,6 +120,12 @@ function CreateModeBody(props: DialogFormBodyProps) {
         autoFocusDescription={!isTaskStarted && !(showTaskName && taskNameAutoFocus)}
         onComposerSubmit={props.onComposerSubmit}
       />
+      {props.conversationFork && (
+        <ConversationForkControls
+          fork={props.conversationFork}
+          modelId={props.conversationForkModelId}
+        />
+      )}
       <CreateModeAgentSelectors {...props} />
       {props.bottomSlot}
     </>

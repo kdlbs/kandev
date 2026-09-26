@@ -2,6 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -83,12 +86,20 @@ type LaunchSessionRequest struct {
 	ExecutorID        string `json:"executor_id,omitempty"`
 	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
 	Prompt            string `json:"prompt,omitempty"`
-	PlanMode          bool   `json:"plan_mode,omitempty"`
-	WorkflowStepID    string `json:"workflow_step_id,omitempty"`
-	Priority          string `json:"priority,omitempty"`
-	LaunchWorkspace   bool   `json:"launch_workspace,omitempty"`
-	SkipMessageRecord bool   `json:"skip_message_record,omitempty"`
-	AutoStart         bool   `json:"auto_start,omitempty"`
+	// ConversationForkID references an authorized frozen history snapshot for
+	// one new-agent destination. It is accepted only for IntentStart without a
+	// caller-supplied session ID.
+	ConversationForkID string `json:"conversation_fork_id,omitempty"`
+	// CreationRequestID makes a new-agent fork request idempotent across launch
+	// retries. The server fingerprints the remaining launch payload.
+	CreationRequestID           string `json:"creation_request_id,omitempty"`
+	conversationForkFingerprint string `json:"-"`
+	PlanMode                    bool   `json:"plan_mode,omitempty"`
+	WorkflowStepID              string `json:"workflow_step_id,omitempty"`
+	Priority                    string `json:"priority,omitempty"`
+	LaunchWorkspace             bool   `json:"launch_workspace,omitempty"`
+	SkipMessageRecord           bool   `json:"skip_message_record,omitempty"`
+	AutoStart                   bool   `json:"auto_start,omitempty"`
 	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
 	// agent launch, even for passthrough profiles (whose prepare would normally
 	// be eagerly upgraded so the PTY exists). It backs the session.ensure
@@ -233,6 +244,13 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	if err := s.authorizeTaskSessionPair(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, err
 	}
+	response, err := s.prepareConversationForkLaunch(ctx, req, &intent)
+	if err != nil {
+		return nil, err
+	}
+	if response != nil {
+		return response, nil
+	}
 	if response := s.passiveLaunchResponse(ctx, req, intent); response != nil {
 		return response, nil
 	}
@@ -255,6 +273,121 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	default:
 		return nil, fmt.Errorf("unknown intent: %s", intent)
 	}
+}
+
+func (s *Service) prepareConversationForkLaunch(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+	intent *SessionIntent,
+) (*LaunchSessionResponse, error) {
+	if req.ConversationForkID == "" && req.CreationRequestID == "" {
+		return nil, nil
+	}
+	if !validConversationForkLaunchRequest(req, *intent) {
+		return nil, models.ErrConversationForkConflict
+	}
+	fingerprint, err := conversationForkLaunchFingerprint(req)
+	if err != nil {
+		return nil, err
+	}
+	req.conversationForkFingerprint = fingerprint
+	preparer, ok := s.messageCreator.(conversationForkAgentAdmissionPreparer)
+	if !ok {
+		return nil, models.ErrConversationForkSourceUnavailable
+	}
+	_, existing, err := preparer.PrepareConversationForkAgentAdmission(
+		ctx, req.TaskID, req.ConversationForkID, req.CreationRequestID, fingerprint,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if existing.Descriptor.State != "attached" || existing.Descriptor.DestinationSessionID == "" {
+		return nil, nil
+	}
+	response, ready, err := s.existingConversationForkSessionResponse(ctx, req, existing.Descriptor.DestinationSessionID)
+	if err != nil || ready {
+		return response, err
+	}
+	req.SessionID = existing.Descriptor.DestinationSessionID
+	req.Intent = IntentStartCreated
+	*intent = IntentStartCreated
+	req.ConversationForkID = ""
+	req.CreationRequestID = ""
+	return nil, nil
+}
+
+func validConversationForkLaunchRequest(req *LaunchSessionRequest, intent SessionIntent) bool {
+	return intent == IntentStart && req.SessionID == "" && req.ConversationForkID != "" && req.CreationRequestID != "" &&
+		!req.DeferredStart && !req.NoAgentLaunch && !req.AutoStart && req.ActivationSource != LaunchActivationSourceSessionOpen
+}
+
+type conversationForkAgentAdmissionPreparer interface {
+	PrepareConversationForkAgentAdmission(context.Context, string, string, string, string) (models.ConversationForkAdmission, models.ConversationForkDraft, error)
+}
+
+func conversationForkLaunchFingerprint(req *LaunchSessionRequest) (string, error) {
+	copyRequest := *req
+	copyRequest.ConversationForkID = ""
+	copyRequest.CreationRequestID = ""
+	encoded, err := json.Marshal(copyRequest)
+	if err != nil {
+		return "", fmt.Errorf("encode conversation fork launch request: %w", err)
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func (s *Service) existingConversationForkSessionResponse(ctx context.Context, req *LaunchSessionRequest, sessionID string) (*LaunchSessionResponse, bool, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	if session == nil || session.TaskID != req.TaskID {
+		return nil, false, models.ErrConversationForkConflict
+	}
+	if s.executor != nil {
+		if execution, ok := s.executor.GetExecutionBySession(sessionID); ok && execution != nil {
+			return executionToLaunchResponse(req.TaskID, execution), true, nil
+		}
+	}
+	if session.State == models.TaskSessionStateCreated || session.State == models.TaskSessionStateWaitingForInput {
+		return nil, false, nil
+	}
+	if session.State == models.TaskSessionStateFailed || session.State == models.TaskSessionStateCancelled {
+		if err := s.resetConversationForkSessionForRetry(ctx, sessionID, session.State); err != nil {
+			return nil, false, err
+		}
+		req.SkipMessageRecord = true
+		return nil, false, nil
+	}
+	return &LaunchSessionResponse{
+		Success: true, TaskID: req.TaskID, SessionID: sessionID,
+		AgentProfileID: session.AgentProfileID, State: string(session.State),
+	}, true, nil
+}
+
+func (s *Service) resetConversationForkSessionForRetry(
+	ctx context.Context,
+	sessionID string,
+	state models.TaskSessionState,
+) error {
+	changed, _, err := s.repo.UpdateTaskSessionStateIfCurrent(
+		ctx, sessionID, state, models.TaskSessionStateCreated, "",
+	)
+	if err != nil {
+		return fmt.Errorf("reset failed conversation fork session for retry: %w", err)
+	}
+	if changed {
+		return nil
+	}
+	current, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if current == nil || (current.State != models.TaskSessionStateCreated && current.State != models.TaskSessionStateWaitingForInput) {
+		return models.ErrConversationForkConflict
+	}
+	return nil
 }
 
 func validateLaunchActivationSource(source LaunchActivationSource) error {
@@ -440,7 +573,11 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
-		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin},
+		startTaskOptions{
+			ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin,
+			ConversationForkID: req.ConversationForkID, ConversationForkRequestID: req.CreationRequestID,
+			ConversationForkFingerprint: req.conversationForkFingerprint,
+		},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {
 		return s.deferredLaunchResponse(ctx, req, "")

@@ -101,6 +101,10 @@ const (
 	MetaKeyAgentProfileID    = "agent_profile_id"
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
+	// MetaKeyConversationForkID is a server-authored reference to the frozen
+	// historical context admitted with this task. Public create metadata is
+	// stripped before this reference is written.
+	MetaKeyConversationForkID = "conversation_fork_id"
 	// Automation target metadata is written to continuation tasks so a
 	// change from hidden to visible ownership or from repository-backed to
 	// repository-free execution cannot silently reuse the old task.
@@ -1814,6 +1818,9 @@ type Message struct {
 	// PayloadSize is the uncompressed byte size of the externalized payload
 	// referenced by PayloadDigest. Zero when PayloadDigest is empty.
 	PayloadSize int64 `json:"-"`
+	// PayloadUnavailable marks a selected external payload that could not be
+	// rehydrated while compiling a conversation fork.
+	PayloadUnavailable bool `json:"-"`
 }
 
 // ToAPI converts internal Message to API type.
@@ -2022,6 +2029,14 @@ type TaskSession struct {
 	// the session's runner was resolved. It is transient and paired with
 	// TaskRunnerResolvedFromTask for the persistence-time recheck.
 	TaskRunnerProfileAtResolution string `json:"-"`
+	// ConversationForkAdmission is consumed only while the owning repository
+	// transaction inserts this session. It is never serialized or persisted as
+	// client-controlled session metadata.
+	ConversationForkAdmission *ConversationForkAdmission `json:"-"`
+	// ConversationForkPendingTask marks the first session of a task that owns
+	// an already admitted conversation snapshot. The repository binds it to this
+	// session in the same transaction as session creation.
+	ConversationForkPendingTask bool `json:"-"`
 
 	// Workflow-related fields
 	IsPrimary     bool         `json:"is_primary"`              // Whether this is the primary session for the task

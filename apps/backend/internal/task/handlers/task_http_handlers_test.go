@@ -1928,7 +1928,7 @@ func TestCommitFreshBranchUsesPersistedTaskRepositoryIdentity(t *testing.T) {
 	}}
 	repos := []dto.TaskRepositoryInput{{RepositoryID: "real-repo", BaseBranch: "main", LocalPath: decoyRepoPath}}
 
-	if ok := handler.commitFreshBranch(c, "task-1", "Identity", "ws-1", inputs, repos); !ok {
+	if ok := handler.commitFreshBranch(c, "task-1", "Identity", "ws-1", inputs, repos, ""); !ok {
 		t.Fatalf("commitFreshBranch failed: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	if branch := handlerGitCurrentBranch(t, realRepoPath); branch != "feature/identity" {
@@ -1962,7 +1962,7 @@ func TestCommitFreshBranchRollsBackTaskWhenPersistedRepositoriesCannotBeLoaded(t
 	inputs := []httpTaskRepositoryInput{{RepositoryID: "repo-1", FreshBranch: true}}
 	repos := []dto.TaskRepositoryInput{{RepositoryID: "repo-1"}}
 
-	if ok := handler.commitFreshBranch(c, "task-1", "Identity", "ws-1", inputs, repos); ok {
+	if ok := handler.commitFreshBranch(c, "task-1", "Identity", "ws-1", inputs, repos, ""); ok {
 		t.Fatal("commitFreshBranch succeeded despite task repository load error")
 	}
 	if !repo.deletedTask {

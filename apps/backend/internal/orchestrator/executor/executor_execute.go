@@ -1152,6 +1152,10 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	}
 
 	metadata := cloneMetadata(task.Metadata)
+	// Task provenance identifies the destination history for people and
+	// reloads. Only an admitted or atomically claimed session may receive it
+	// as delivery metadata.
+	delete(metadata, models.MetaKeyConversationForkID)
 	runnerResolvedFromTask, taskRunnerProfileID := taskRunnerResolution(
 		task, executorProfileID, taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != ""),
 	)
@@ -1243,6 +1247,16 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 			metadata = make(map[string]interface{})
 		}
 		metadata["executor_profile_id"] = executorProfileID
+	}
+	if forkInput, ok := conversationForkSessionInputFromContext(ctx); ok {
+		if forkInput.admission != nil {
+			session.ConversationForkAdmission = forkInput.admission
+			if session.Metadata == nil {
+				session.Metadata = make(map[string]interface{})
+			}
+			session.Metadata[models.MetaKeyConversationForkID] = forkInput.admission.ForkID
+		}
+		session.ConversationForkPendingTask = forkInput.pendingTask && isTaskInitialSession
 	}
 
 	// Resolve executor configuration

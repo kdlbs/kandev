@@ -38,6 +38,22 @@ function action(scope: Page | Locator): Locator {
  */
 async function expectTouchReachable(page: Page, button: Locator): Promise<void> {
   await expect(button).toBeVisible();
+  await button.evaluate(async (element) => {
+    const animations: Animation[] = [];
+    let ancestor: Element | null = element;
+    while (ancestor) {
+      animations.push(...ancestor.getAnimations());
+      ancestor = ancestor.parentElement;
+    }
+    const finiteRunning = animations.filter((animation) => {
+      const iterations = animation.effect?.getComputedTiming().iterations;
+      return (
+        (animation.playState === "running" || animation.playState === "pending") &&
+        Number.isFinite(iterations)
+      );
+    });
+    await Promise.all(finiteRunning.map((animation) => animation.finished.catch(() => undefined)));
+  });
   const box = await button.boundingBox();
   expect(box, "the action must have a hit box").not.toBeNull();
   expect(box!.width).toBeGreaterThan(0);

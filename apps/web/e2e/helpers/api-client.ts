@@ -1592,6 +1592,14 @@ export class ApiClient {
     return { messageId: result.message_id, turnId: result.turn_id ?? null };
   }
 
+  async getConversationForkContent(forkId: string): Promise<{
+    content: string;
+    content_hash: string;
+    compiler_version: string;
+  }> {
+    return this.request("GET", `/api/v1/conversation-forks/${encodeURIComponent(forkId)}/content`);
+  }
+
   async updateSessionMessage(messageId: string, content: string): Promise<void> {
     await this.request("PATCH", `/api/v1/_test/messages/${messageId}`, { content });
   }

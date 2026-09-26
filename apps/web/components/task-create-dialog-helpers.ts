@@ -213,6 +213,8 @@ export type BuildCreatePayloadArgs = {
   /** Task IDs this task must wait for. */
   blockedBy?: string[];
   priority?: TaskPriority;
+  conversationForkId?: string;
+  creationRequestId?: string;
   /** Task-only replacements for fixed workflow step agent profiles. */
   workflowAgentOverrides?: Record<string, string>;
 };
@@ -258,6 +260,8 @@ type OptionalCreateTaskFields = {
   parent_id?: string;
   workspace_path?: string;
   autopilot?: boolean;
+  conversation_fork_id?: string;
+  creation_request_id?: string;
 };
 
 function buildOptionalCreateTaskFields(args: BuildCreatePayloadArgs): OptionalCreateTaskFields {
@@ -270,6 +274,8 @@ function buildOptionalCreateTaskFields(args: BuildCreatePayloadArgs): OptionalCr
     parent_id: optionalString(args.parentId),
     workspace_path: optionalString(args.workspacePath),
     autopilot: args.autopilot || undefined,
+    conversation_fork_id: optionalString(args.conversationForkId),
+    creation_request_id: optionalString(args.creationRequestId),
   };
 }
 

@@ -30,6 +30,8 @@ import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-r
 import { TaskAutopilotToggle } from "@/components/task-autopilot-toggle";
 import { useRepositorySets } from "@/hooks/domains/workspace/use-repository-sets";
 import { useApplyRepositorySet } from "@/components/task-create-dialog-repository-sets-apply";
+import { ConversationForkControls } from "./conversation-fork-controls";
+import type { ConversationForkFormContext } from "./conversation-fork-types";
 
 export function WorktreeBadge({ show, branch }: { show: boolean; branch: string | null }) {
   const { t } = useTranslation();
@@ -298,6 +300,8 @@ type SubtaskFormBodyProps = {
   sessionOptions: React.ComponentProps<typeof ContextSelect>["sessionOptions"];
   promptZone: React.ReactNode;
   isCreating: boolean;
+  conversationFork?: ConversationForkFormContext;
+  conversationForkModelId?: string;
   isSummarizing: boolean;
   hasPrompt: boolean;
   onClose: () => void;
@@ -430,6 +434,8 @@ export function SubtaskFormBody({
   sessionOptions,
   promptZone,
   isCreating,
+  conversationFork,
+  conversationForkModelId,
   isSummarizing,
   hasPrompt,
   onClose,
@@ -476,6 +482,9 @@ export function SubtaskFormBody({
         isLocalExecutor={isLocalExecutor}
         freshBranchAvailable={freshBranchAvailable}
       />
+      {conversationFork && (
+        <ConversationForkControls fork={conversationFork} modelId={conversationForkModelId} />
+      )}
       <SelectorsRow
         profileOptions={profileOptions}
         executorProfileOptions={executorProfileOptions}

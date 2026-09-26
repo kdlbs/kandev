@@ -134,7 +134,15 @@ func (r *Repository) UpdateWorkspace(ctx context.Context, workspace *models.Work
 
 // DeleteWorkspace deletes a workspace by ID
 func (r *Repository) DeleteWorkspace(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM workspaces WHERE id = ?`), id)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_conversation_forks WHERE workspace_id = ?`), id); err != nil {
+		return fmt.Errorf("delete workspace conversation forks: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM workspaces WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -143,7 +151,7 @@ func (r *Repository) DeleteWorkspace(ctx context.Context, id string) error {
 	if rows == 0 {
 		return workspaceNotFoundError(id)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // DeleteWorkspaceCascade deletes a workspace and its task/workflow rows in one transaction.
@@ -246,6 +254,9 @@ func (r *Repository) deleteWorkspaceCascade(
 	}
 	if err := r.purgeWorkspaceTaskQueuesInTx(ctx, tx, tasks); err != nil {
 		return nil, nil, err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_conversation_forks WHERE workspace_id = ?`), id); err != nil {
+		return nil, nil, fmt.Errorf("delete workspace conversation forks: %w", err)
 	}
 	if cleanup != nil {
 		if err := cleanup(ctx, tx); err != nil {

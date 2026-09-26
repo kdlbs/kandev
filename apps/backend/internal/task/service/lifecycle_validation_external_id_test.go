@@ -107,6 +107,29 @@ func TestCreateTaskWithExternalIDReturnsArchivedTaskUnchanged(t *testing.T) {
 	}
 }
 
+func TestCreateTaskWithExternalIDResolvesBeforeForkValidation(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	wfID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-fork-idempotency")
+	existing, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-fork-idempotency", WorkflowID: wfID, Title: "Existing", ExternalID: "ext-fork-1",
+	})
+	if err != nil {
+		t.Fatalf("create existing task: %v", err)
+	}
+
+	retry, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-fork-idempotency", WorkflowID: wfID, Title: "Retry", ExternalID: "ext-fork-1",
+		ConversationForkID: "expired-or-inaccessible", ConversationForkRequestID: "retry-request",
+	})
+	if err != nil {
+		t.Fatalf("resolve existing task before fork validation: %v", err)
+	}
+	if retry.Outcome != CreateTaskOutcomeFoundUnsettled || retry.Task.ID != existing.Task.ID {
+		t.Fatalf("retry result = %+v, want existing unsettled task %q", retry, existing.Task.ID)
+	}
+}
+
 // TestCreateTaskWithExternalIDAfterDeleteCreatesNewTask pins the "idempotency
 // is scoped to the task's lifetime" contract: once the task holding an
 // identity is deleted, that identity is free and a subsequent create with

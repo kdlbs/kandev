@@ -347,6 +347,7 @@ export function useTaskSubmitHandlers({
   blockedBy,
   editDependencies,
   transformDescriptionBeforeSubmit,
+  conversationFork,
 }: SubmitHandlersDeps) {
   const router = useRouter();
   const autoFocusNewTasks = useAppStore((state) => state.userSettings.autoFocusNewTasks) !== false;
@@ -756,6 +757,8 @@ export function useTaskSubmitHandlers({
           priority,
           workflowAgentOverrides,
           blockedBy,
+          conversationForkId: conversationFork?.snapshot.descriptor.id,
+          creationRequestId: conversationFork?.creationRequestId,
         });
         submittedPayload = payload;
         return payload;
@@ -827,6 +830,7 @@ export function useTaskSubmitHandlers({
       isEditMode,
       workflowAgentOverrides,
       workflowAgentOverridesBlockedReason,
+      conversationFork,
     ],
   );
 
@@ -1064,6 +1068,8 @@ export function useTaskSubmitHandlers({
           priority,
           workflowAgentOverrides,
           blockedBy,
+          conversationForkId: conversationFork?.snapshot.descriptor.id,
+          creationRequestId: conversationFork?.creationRequestId,
         });
         submittedPayload = p;
         return p;
@@ -1115,6 +1121,7 @@ export function useTaskSubmitHandlers({
     blockedBy,
     workflowAgentOverrides,
     workflowAgentOverridesBlockedReason,
+    conversationFork,
   ]);
 
   const editSubmitHandler = isStartedEdit ? handleUpdateWithoutAgent : handleEditSubmit;

@@ -337,6 +337,32 @@ action instead. Both scroll actions keep the transcript at your requested
 position even if the agent streams new replies while the scroll is still in
 progress.
 
+### Fork a conversation
+
+Select **Fork from here** beside an accepted user message or finalized
+assistant message. A user message remains available while its assistant turn is
+active. Choose a destination, then select **Continue**.
+
+The preview includes conversation text through the selected message. Select
+**Start from** to choose a later user message or finalized assistant message.
+Tool evidence stays off
+unless you enable **Include selected tool evidence**. Select the files to copy.
+The preview lists available files and files that Kandev cannot copy. Kandev
+makes separate copies of selected attachments for the destination.
+
+The chip keeps the selected history with your next instruction. Remove the chip
+to leave history out. The token count estimates history size for the selected
+model. Attachments are not measured. This estimate does not block a launch. A
+provider context error uses normal prompt error handling.
+
+A new agent shares the current task execution workspace. A new task uses a
+separate execution workspace and the normal repository and base defaults. A
+child task can share the parent execution workspace or use a separate one.
+History never restores old files.
+
+When you create a task without starting its agent, the task keeps the same
+snapshot. Its first later launch uses that snapshot.
+
 ### Multiple repositories
 
 A task can include several local or remote repository rows. Multi-repository creation supports **Worktree**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. Local/Local PC creation remains unavailable until its initial-launch path can materialize sibling repositories, and Remote Docker is not implemented. Public GitHub and GitLab repositories can be cloned and fetched anonymously. Private repositories and authenticated browse/write features need credentials that can access the selected base branch.

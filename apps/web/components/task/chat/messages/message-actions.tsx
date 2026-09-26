@@ -9,6 +9,7 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconEyeCode,
+  IconGitBranch,
   IconHourglass,
   IconInfoCircle,
   IconStar,
@@ -36,6 +37,7 @@ import {
 } from "@kandev/ui/drawer";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useTranslation } from "react-i18next";
+import { ConversationForkFlow } from "@/components/task/conversation-fork-flow";
 
 const ACTION_BUTTON_SIZE = "h-5 w-5 p-1";
 const ACTION_BUTTON_HOVER = "hover:bg-muted rounded";
@@ -314,6 +316,50 @@ function useMessageTurnAndUsage(message: Message): {
   );
 }
 
+function isForkableMessageBoundary(message: Message, turn: Turn | null): boolean {
+  if (!message.session_id || !message.task_id) return false;
+  if (message.type !== "message" && message.type !== "content") return false;
+  if (message.author_type === "user") return true;
+  return message.author_type === "agent" && !!turn?.completed_at && !!message.content.trim();
+}
+
+function MessageForkAction({
+  message,
+  turn,
+  isOrdinaryTask,
+  usesTouchDrawer,
+}: {
+  message: Message;
+  turn: Turn | null;
+  isOrdinaryTask: boolean;
+  usesTouchDrawer: boolean;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  if (!isOrdinaryTask || !isForkableMessageBoundary(message, turn)) return null;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={cn(
+          usesTouchDrawer ? "min-h-11 min-w-11 p-3" : ACTION_BUTTON_SIZE,
+          ACTION_BUTTON_HOVER,
+          ACTION_BUTTON_TRANSITION,
+          "cursor-pointer",
+        )}
+        title={t("task:conversationForkMessageAction")}
+        aria-label={t("task:conversationForkMessageAction")}
+        data-testid="conversation-fork-message-action"
+      >
+        <IconGitBranch className="h-full w-full" aria-hidden="true" />
+      </button>
+      {open && <ConversationForkFlow open onOpenChange={setOpen} message={message} />}
+    </>
+  );
+}
+
 function MessageMetaInfo({
   showModel,
   sessionConfigText,
@@ -400,6 +446,13 @@ export function MessageActions(props: MessageActionsProps) {
   const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
   const { turn, usageMultiplier } = useMessageTurnAndUsage(message);
+  const isOrdinaryTask = useAppStore((state) => {
+    const task = state.kanban.tasks.find((item) => item.id === message.task_id);
+    const isQuickChat = state.quickChat.sessions.some(
+      (session) => session.sessionId === message.session_id,
+    );
+    return !!task && !task.isFromOffice && !isQuickChat;
+  });
   const usesTouchDrawer = useTouchDrawer();
   const durationSeconds = messageTurnDurationSeconds(message, turn);
   const sessionConfigText = formatMessageSessionConfig(message.metadata, turn?.metadata);
@@ -454,6 +507,12 @@ export function MessageActions(props: MessageActionsProps) {
           })}
         </span>
       )}
+      <MessageForkAction
+        message={message}
+        turn={turn}
+        isOrdinaryTask={isOrdinaryTask}
+        usesTouchDrawer={usesTouchDrawer}
+      />
     </div>
   );
 }

@@ -225,6 +225,7 @@ function useSubmitHandlersWiring({
     workflowAgentOverridesBlockedReason,
     blockedBy: fs.blockedBy,
     editDependencies,
+    conversationFork: props.conversationFork,
   });
 }
 

@@ -16,6 +16,7 @@ import type { Repository } from "@/lib/types/http";
 import type { SubtaskWorkspaceMode, useSubtaskFormState } from "./new-subtask-form-state";
 import { toContextItems, useDialogAttachments } from "./session-dialog-shared";
 import { t } from "@/lib/i18n";
+import type { ConversationForkFormContext } from "./conversation-fork-types";
 
 type UseSubtaskSubmitOpts = {
   fs: ReturnType<typeof useSubtaskFormState>;
@@ -35,6 +36,7 @@ type UseSubtaskSubmitOpts = {
   workspaceMode: SubtaskWorkspaceMode;
   /** Whether the selected executor profile runs directly on the local clone. */
   isLocalExecutor?: boolean;
+  conversationFork?: ConversationForkFormContext;
 };
 
 type CreateSubtaskArgs = {
@@ -53,6 +55,7 @@ type CreateSubtaskArgs = {
   isLocalExecutor: boolean;
   freshBranchEnabled: boolean;
   onClose: () => void;
+  conversationFork?: ConversationForkFormContext;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
 };
@@ -73,6 +76,7 @@ async function createSubtask({
   isLocalExecutor,
   freshBranchEnabled,
   onClose,
+  conversationFork,
   setActiveTask,
   setActiveSession,
 }: CreateSubtaskArgs) {
@@ -105,7 +109,10 @@ async function createSubtask({
     attachments: toMessageAttachments(attachments),
     workspace_mode: workspaceMode,
     autopilot: autopilot || undefined,
+    conversation_fork_id: conversationFork?.snapshot.descriptor.id,
+    creation_request_id: conversationFork?.creationRequestId,
   });
+  conversationFork?.onConsumed();
   const newSessionId = response.session_id ?? response.primary_session_id ?? null;
   // Close the dialog before navigation. Navigation can remount the sidebar
   // that owns the dialog state, which makes a later close update a stale owner.
@@ -139,6 +146,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
     onClose,
     workspaceMode,
     isLocalExecutor = false,
+    conversationFork,
   } = opts;
   const freshBranchEnabled = fs.freshBranchEnabled;
   const { toast } = useToast();
@@ -177,6 +185,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
           isLocalExecutor,
           freshBranchEnabled,
           onClose,
+          conversationFork,
           setActiveTask,
           setActiveSession,
         });
@@ -210,6 +219,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
       freshBranchEnabled,
       setIsCreating,
       onClose,
+      conversationFork,
       toast,
     ],
   );

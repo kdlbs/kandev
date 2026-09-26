@@ -70,6 +70,10 @@ export function buildDialogFormBodyProps(
     onRowBranchChange: handlers.handleRowBranchChange,
     onRowPolicyChange: handlers.handleRowPolicyChange,
     initialDescription: fs.currentDefaults.description,
+    conversationFork: props.conversationFork,
+    conversationForkModelId:
+      setup.agentProfiles.find((profile) => profile.id === computed.effectiveAgentProfileId)
+        ?.model ?? "",
     workspaceId: props.workspaceId,
     onJiraImport: setup.handleJiraImport,
     onLinearImport: setup.handleLinearImport,

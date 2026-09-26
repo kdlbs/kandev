@@ -9,6 +9,15 @@ import {
   type Turn,
 } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
+
+const mockForkFlow = vi.hoisted(() => vi.fn());
+vi.mock("@/components/task/conversation-fork-flow", () => ({
+  ConversationForkFlow: (props: { open: boolean; message: Message }) => {
+    mockForkFlow(props);
+    return props.open ? <div role="dialog" data-testid="conversation-fork-flow" /> : null;
+  },
+}));
+
 import { MessageActions } from "./message-actions";
 
 const TOUCH_DRAWER = vi.hoisted(() => ({ enabled: false }));
@@ -18,6 +27,7 @@ vi.mock("@/hooks/use-compact-task-chrome", () => ({
 }));
 
 const MESSAGE_TIMESTAMP = "2026-07-20T10:15:00Z";
+const COMPLETED_TURN_TIMESTAMP = "2026-07-20T10:15:05Z";
 const MESSAGE_TURN_DURATION_TEST_ID = "message-turn-duration";
 
 function assistantMessage(overrides: Partial<Message> = {}): Message {
@@ -61,7 +71,12 @@ function StoreCapture() {
   return null;
 }
 
-function renderMessageActions(message: Message, messageTurn?: Turn) {
+function renderMessageActions(
+  message: Message,
+  messageTurn?: Turn,
+  task: Partial<AppState["kanban"]["tasks"][number]> = {},
+  isQuickChat = false,
+) {
   render(
     <StateProvider>
       <StoreCapture />
@@ -69,12 +84,38 @@ function renderMessageActions(message: Message, messageTurn?: Turn) {
     </StateProvider>,
   );
 
-  if (!messageTurn) return;
-
   const capturedStore = storeApi;
   if (!capturedStore) throw new Error("App store was not captured");
   act(() => {
-    capturedStore.getState().addTurn(messageTurn);
+    if (messageTurn) capturedStore.getState().addTurn(messageTurn);
+    capturedStore.setState((state) => ({
+      kanban: {
+        ...state.kanban,
+        tasks: [
+          {
+            id: message.task_id,
+            workflowId: "workflow-1",
+            workflowStepId: "step-1",
+            position: 0,
+            title: "Task",
+            ...task,
+          },
+        ],
+      },
+      quickChat: {
+        ...state.quickChat,
+        sessions: isQuickChat
+          ? [
+              {
+                kind: "chat",
+                sessionId: message.session_id,
+                workspaceId: "workspace-1",
+                taskId: message.task_id,
+              },
+            ]
+          : [],
+      },
+    }));
   });
 }
 
@@ -149,13 +190,57 @@ describe("MessageActions action row disclosure", () => {
   it("keeps the action row visible for coarse pointers at tablet widths", () => {
     TOUCH_DRAWER.enabled = true;
 
-    renderMessageActions(userMessage(), turn({ completed_at: "2026-07-20T10:15:05Z" }));
+    renderMessageActions(userMessage(), turn({ completed_at: COMPLETED_TURN_TIMESTAMP }));
 
     const actions = screen.getByTestId(MESSAGE_TURN_DURATION_TEST_ID).parentElement;
     expect(actions).not.toBeNull();
     expect(actions?.className).toContain("opacity-100");
     expect(actions?.className).not.toContain("sm:opacity-0");
     expect(actions?.className).not.toContain("sm:group-hover:opacity-100");
+  });
+});
+
+describe("MessageActions conversation fork", () => {
+  it("opens a fork flow at the selected persisted user message", () => {
+    const message = userMessage();
+    renderMessageActions(message);
+
+    fireEvent.click(screen.getByRole("button", { name: /fork from here/i }));
+
+    expect(screen.getByTestId("conversation-fork-flow")).toBeTruthy();
+    expect(mockForkFlow).toHaveBeenLastCalledWith(expect.objectContaining({ message, open: true }));
+  });
+
+  it("keeps the fork action reachable with a 44-pixel target on touch devices", () => {
+    TOUCH_DRAWER.enabled = true;
+    renderMessageActions(userMessage());
+
+    const action = screen.getByRole("button", { name: /fork from here/i });
+    expect(action.className).toContain("min-h-11");
+    expect(action.className).toContain("min-w-11");
+  });
+
+  it("offers an assistant message only after its turn is complete", () => {
+    renderMessageActions(
+      assistantMessage({ turn_id: "turn-1" }),
+      turn({ completed_at: COMPLETED_TURN_TIMESTAMP }),
+    );
+
+    expect(screen.getByRole("button", { name: /fork from here/i })).toBeTruthy();
+
+    cleanup();
+    renderMessageActions(assistantMessage({ turn_id: "turn-1" }), turn());
+
+    expect(screen.queryByRole("button", { name: /fork from here/i })).toBeNull();
+  });
+
+  it("does not offer a conversation fork for Office or ephemeral tasks", () => {
+    renderMessageActions(userMessage(), undefined, { isFromOffice: true });
+    expect(screen.queryByRole("button", { name: /fork from here/i })).toBeNull();
+
+    cleanup();
+    renderMessageActions(userMessage(), undefined, {}, true);
+    expect(screen.queryByRole("button", { name: /fork from here/i })).toBeNull();
   });
 });
 
@@ -218,7 +303,7 @@ describe("MessageActions favorite toggle", () => {
 
 describe("MessageActions turn duration", () => {
   it("renders the completed user prompt duration with an hourglass", () => {
-    renderMessageActions(userMessage(), turn({ completed_at: "2026-07-20T10:15:05Z" }));
+    renderMessageActions(userMessage(), turn({ completed_at: COMPLETED_TURN_TIMESTAMP }));
 
     const duration = screen.getByTestId(MESSAGE_TURN_DURATION_TEST_ID);
     expect(duration.textContent).toBe("5s");
@@ -243,7 +328,7 @@ describe("MessageActions turn duration", () => {
   it("omits duration for completed agent messages", () => {
     renderMessageActions(
       assistantMessage({ turn_id: "turn-1" }),
-      turn({ completed_at: "2026-07-20T10:15:05Z" }),
+      turn({ completed_at: COMPLETED_TURN_TIMESTAMP }),
     );
 
     expect(screen.queryByTestId(MESSAGE_TURN_DURATION_TEST_ID)).toBeNull();

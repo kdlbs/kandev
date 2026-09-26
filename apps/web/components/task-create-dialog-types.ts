@@ -33,6 +33,7 @@ import type {
 } from "@/components/task-create-dialog-options";
 import type { useToast } from "@/components/toast-provider";
 import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
+import type { ConversationForkFormContext } from "@/components/task/conversation-fork-types";
 
 export type TaskCreateSubmit = (
   payload: Parameters<typeof createTask>[0],
@@ -97,6 +98,8 @@ export interface TaskCreateDialogProps {
   aboveDescriptionSlot?: React.ReactNode;
   extraFormSlot?: React.ReactNode;
   bottomSlot?: React.ReactNode;
+  /** Frozen historical context attached to a task created from a conversation fork. */
+  conversationFork?: ConversationForkFormContext;
   submitBlockedReason?: string | null;
   /** Element to return keyboard focus to on close, confirmed or cancelled.
    * Omitted callers keep Radix's default restore-to-previously-focused-element
@@ -612,6 +615,7 @@ export type SubmitHandlersDeps = {
    * append generated context like bundle file paths.
    */
   transformDescriptionBeforeSubmit?: (description: string) => Promise<string> | string;
+  conversationFork?: ConversationForkFormContext;
 };
 
 import type { JiraTicket } from "@/lib/types/jira";
@@ -633,6 +637,8 @@ export type DialogFormBodyProps = {
   autoTitle?: boolean;
   isTaskStarted: boolean;
   initialDescription: string;
+  conversationFork?: ConversationForkFormContext;
+  conversationForkModelId?: string;
   workspaceId: string | null;
   onJiraImport?: (ticket: JiraTicket) => void;
   onLinearImport?: (issue: LinearIssue) => void;

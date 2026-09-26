@@ -63,6 +63,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
 		r.initConversationSourceSchema,
+		r.initConversationForkSchema,
 		r.cleanupLegacyConversationJournal,
 	}
 	// Every boundary is checked before and after its step. The task repository

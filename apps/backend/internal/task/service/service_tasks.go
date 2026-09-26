@@ -224,7 +224,6 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	if err := s.AuthorizeWorkspaceScope(ctx, req.WorkspaceID, authz.ScopeTaskWrite); err != nil {
 		return CreateTaskResult{}, err
 	}
-
 	externalID, err := NormalizeExternalID(req.ExternalID)
 	if err != nil {
 		return CreateTaskResult{}, err
@@ -234,6 +233,13 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	if found, result, err := s.findTaskByExternalIDIfPresent(ctx, req.WorkspaceID, externalID); found {
 		return result, err
 	}
+	forkAdmission, forkRetry, hasFork, err := s.prepareTaskConversationForkAdmission(ctx, req)
+	if err != nil {
+		return CreateTaskResult{}, err
+	}
+	if forkRetry != nil {
+		return *forkRetry, nil
+	}
 
 	prepared, err := s.prepareTaskForCreation(ctx, req, externalID)
 	if err != nil {
@@ -242,8 +248,16 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 		}
 		return CreateTaskResult{}, err
 	}
+	if forkAdmission != nil {
+		forkAdmission.DestinationTaskID = prepared.task.ID
+	}
 
-	if err := s.createTaskWithCapacity(ctx, prepared.task); err != nil {
+	if err := s.createTaskWithCapacity(ctx, prepared.task, forkAdmission); err != nil {
+		if hasFork {
+			if result, found, readErr := s.findConversationForkTaskRetry(ctx, forkAdmission); found || readErr != nil {
+				return result, readErr
+			}
+		}
 		if found, ok := s.recoverFoundTaskAfterInsertFailure(ctx, req.WorkspaceID, externalID); ok {
 			return found, nil
 		}
@@ -664,7 +678,50 @@ func (s *Service) ReconcileFeederPulls(ctx context.Context, workflowID, feederSt
 	return s.pullTasksFromNewFeederWork(ctx, workflowID, feederStepID)
 }
 
-func (s *Service) createTaskWithCapacity(ctx context.Context, task *models.Task) error {
+func (s *Service) createTaskWithCapacity(ctx context.Context, task *models.Task, fork *models.ConversationForkAdmission) error {
+	if fork != nil {
+		return s.createTaskWithForkCapacity(ctx, task, *fork)
+	}
+	return s.createTaskWithoutForkCapacity(ctx, task)
+}
+
+func (s *Service) createTaskWithForkCapacity(ctx context.Context, task *models.Task, fork models.ConversationForkAdmission) error {
+	creator, ok := s.tasks.(taskrepo.ConversationForkTaskCreator)
+	if !ok {
+		return models.ErrConversationForkSourceUnavailable
+	}
+	if task.IsEphemeral || task.WorkflowStepID == "" || s.workflowStepGetter == nil {
+		return creator.CreateTaskWithConversationFork(ctx, task, fork)
+	}
+	return s.createForkTaskWithWorkflowStepCapacity(ctx, task, fork, creator)
+}
+
+func (s *Service) createForkTaskWithWorkflowStepCapacity(
+	ctx context.Context,
+	task *models.Task,
+	fork models.ConversationForkAdmission,
+	creator taskrepo.ConversationForkTaskCreator,
+) error {
+	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil {
+		return fmt.Errorf("load workflow step %s for task creation: %w", task.WorkflowStepID, err)
+	}
+	if step == nil {
+		return fmt.Errorf("%w: workflow step not found: %s", ErrInvalidTaskWorkflow, task.WorkflowStepID)
+	}
+	if step.WIPLimit <= 0 {
+		return creator.CreateTaskWithConversationFork(ctx, task, fork)
+	}
+	feederStepID, feederLimit, err := s.resolveAdmissionFeeder(ctx, step)
+	if err != nil {
+		return err
+	}
+	return creator.CreateTaskWithWorkflowStepAdmissionAndConversationFork(
+		ctx, task, step.ID, step.WIPLimit, feederStepID, feederLimit, fork,
+	)
+}
+
+func (s *Service) createTaskWithoutForkCapacity(ctx context.Context, task *models.Task) error {
 	if task.IsEphemeral || task.WorkflowStepID == "" {
 		return s.tasks.CreateTask(ctx, task)
 	}
@@ -936,6 +993,13 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		priority = defaultPriority
 	}
 	metadata := protectedTaskMetadataForCreate(req.Metadata, req.TrustedHandoffMetadata)
+	delete(metadata, models.MetaKeyConversationForkID)
+	if req.ConversationForkID != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[models.MetaKeyConversationForkID] = req.ConversationForkID
+	}
 	models.StripOfficeCarrierMetadata(metadata)
 	if len(req.OfficeCarrierMetadata) > 0 {
 		if metadata == nil {

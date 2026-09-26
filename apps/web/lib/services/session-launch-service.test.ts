@@ -6,7 +6,35 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request }),
 }));
 
-import { ensureTaskSession } from "./session-launch-service";
+import { ensureTaskSession, launchSession } from "./session-launch-service";
+
+describe("launchSession conversation fork payload", () => {
+  beforeEach(() => {
+    request.mockReset();
+    request.mockResolvedValue({ success: true, task_id: "t1", state: "RUNNING" });
+  });
+
+  it("sends the frozen fork and creation request ids with the new session", async () => {
+    await launchSession({
+      task_id: "t1",
+      intent: "start",
+      prompt: "Continue the work",
+      conversation_fork_id: "fork-1",
+      creation_request_id: "create-1",
+    });
+
+    expect(request).toHaveBeenCalledWith(
+      "session.launch",
+      expect.objectContaining({
+        task_id: "t1",
+        intent: "start",
+        conversation_fork_id: "fork-1",
+        creation_request_id: "create-1",
+      }),
+      15_000,
+    );
+  });
+});
 
 describe("ensureTaskSession", () => {
   beforeEach(() => {

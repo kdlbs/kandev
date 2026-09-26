@@ -57,6 +57,7 @@ func (s *Service) stallThreshold() time.Duration {
 // updated_at and its newest task_session_messages row, so any state
 // transition or message resets it.
 func (s *Service) runActiveSessionSweep(ctx context.Context, now time.Time) {
+	s.cleanupExpiredConversationForkDraftRows(ctx, now)
 	if s.sessionExecutionRegistry == nil {
 		return
 	}

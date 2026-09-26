@@ -313,7 +313,7 @@ describe("catalog integrity", () => {
   it("loads reviewed overrides in the real CLI pipeline", () => {
     const result = spawnSync(
       process.execPath,
-      ["scripts/convert-zh-cn-to-zh-hant.mjs", "--locale", "all", "--namespace", "system"],
+      ["scripts/convert-zh-cn-to-zh-hant.mjs", "--locale", "all", "--namespace", "workflows"],
       { cwd: path.resolve("."), encoding: "utf8" },
     );
 

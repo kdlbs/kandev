@@ -22,6 +22,7 @@ const SENDER_TITLE = "Fix login bug";
 const SENDER_BADGE_SELECTOR = "[data-testid='sender-task-badge']";
 const MESSAGE_TIMESTAMP = "2026-05-04T00:00:00Z";
 const TURN_MODEL = "gpt-5.6-sol";
+const TARGET_TASK_ID = "task-target";
 const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
@@ -48,7 +49,7 @@ function userMessage(overrides: Partial<Message>): Message {
   return {
     id: "msg-1",
     session_id: toSessionId("sess-1"),
-    task_id: toTaskId("task-target"),
+    task_id: toTaskId(TARGET_TASK_ID),
     author_type: "user",
     content: "hello",
     type: "message",
@@ -86,7 +87,10 @@ function issueReference(overrides: Partial<EntityReference> = {}): EntityReferen
 }
 
 /** Returns a StateProvider wrapper seeding the given kanban tasks and saved prompts. */
-function wrapper(tasks: Array<{ id: string; title: string }> = [], prompts: CustomPrompt[] = []) {
+function wrapper(
+  tasks: Array<{ id: string; title: string; metadata?: Record<string, unknown> }> = [],
+  prompts: CustomPrompt[] = [],
+) {
   /** Renders children inside a StateProvider preloaded with the wrapper's tasks and prompts. */
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
@@ -100,6 +104,7 @@ function wrapper(tasks: Array<{ id: string; title: string }> = [], prompts: Cust
             tasks: tasks.map((t) => ({
               id: t.id,
               title: t.title,
+              metadata: t.metadata,
               workflow_step_id: "",
               priority: "medium",
               parent_id: undefined,
@@ -373,7 +378,7 @@ function renderAgentMessageWithSession(
 ) {
   const taskSession: TaskSession = {
     id: toSessionId("sess-1"),
-    task_id: toTaskId("task-target"),
+    task_id: toTaskId(TARGET_TASK_ID),
     state: "COMPLETED",
     started_at: MESSAGE_TIMESTAMP,
     updated_at: MESSAGE_TIMESTAMP,
@@ -385,7 +390,7 @@ function renderAgentMessageWithSession(
       : {
           id: "turn-1",
           session_id: toSessionId("sess-1"),
-          task_id: toTaskId("task-target"),
+          task_id: toTaskId(TARGET_TASK_ID),
           started_at: MESSAGE_TIMESTAMP,
           metadata: turnMetadata,
           created_at: MESSAGE_TIMESTAMP,
@@ -443,6 +448,64 @@ describe("ChatMessage context file badges", () => {
 
     expect(screen.getByTestId("message-context-directory-icon")).not.toBeNull();
     expect(screen.getByTestId("message-context-file-icon")).not.toBeNull();
+  });
+
+  it("renders destination provenance from server-authored message metadata", () => {
+    const Wrapper = wrapper();
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({ metadata: { conversation_fork_id: "fork-1" } })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.getByTestId("conversation-fork-provenance-trigger").textContent).toContain(
+      "Forked conversation",
+    );
+  });
+
+  it("keeps the new-agent message badge when task provenance refers to another fork", () => {
+    const Wrapper = wrapper([
+      {
+        id: TARGET_TASK_ID,
+        title: "Forked task",
+        metadata: { conversation_fork_id: "prior-fork" },
+      },
+    ]);
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({ metadata: { conversation_fork_id: "fork-1" } })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.getByTestId("conversation-fork-provenance-trigger")).not.toBeNull();
+  });
+
+  it("uses task provenance instead of duplicating the same message badge", () => {
+    const Wrapper = wrapper([
+      { id: TARGET_TASK_ID, title: "Forked task", metadata: { conversation_fork_id: "fork-1" } },
+    ]);
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({ metadata: { conversation_fork_id: "fork-1" } })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.queryByTestId("conversation-fork-provenance-trigger")).toBeNull();
   });
 });
 

@@ -1510,13 +1510,14 @@ func initOfficeServices(
 	// Constructed here, above the Office early return, because
 	// task_usage_events's ledger writer (docs/specs/task-cost-ledger/spec.md
 	// AC-10, AC-26) needs it in every install, not just Office-enabled ones.
-	// SetPricingLookup/SetModelInfoLookup below stay gated - the Office
-	// service and orchestrator model-info surface those Office features
-	// widen only apply when the feature is on.
+	// Office pricing and orchestrator model-info wiring stay gated, while the
+	// task-owned conversation-fork estimate uses the same optional metadata in
+	// every install.
 	modelsdevCachePath := filepath.Join(cfg.ResolvedHomeDir(), "cache", "models-dev.json")
 	pricingLookup := officemodelsdev.New(officemodelsdev.Config{
 		CachePath: modelsdevCachePath,
 	}, log)
+	services.Task.SetConversationForkModelLimitLookup(conversationForkModelLimitAdapter{lookup: pricingLookup})
 
 	// The ledger writer is the sole writer of task_sessions' usage rollup
 	// columns (AC-10) and must run in every install, so it too is

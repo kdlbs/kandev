@@ -1341,6 +1341,30 @@ type messageCreatorAdapter struct {
 	sessionModelCache map[string]string
 }
 
+// PrepareConversationForkAgentAdmission forwards the task service admission
+// check to the orchestrator before it creates a new agent session.
+func (a *messageCreatorAdapter) PrepareConversationForkAgentAdmission(
+	ctx context.Context,
+	taskID, forkID, requestID, fingerprint string,
+) (models.ConversationForkAdmission, models.ConversationForkDraft, error) {
+	return a.svc.PrepareConversationForkAgentAdmission(ctx, taskID, forkID, requestID, fingerprint)
+}
+
+// GetConversationForkForDestination reads the snapshot bound to a destination
+// session through the task service's destination authorization.
+func (a *messageCreatorAdapter) GetConversationForkForDestination(
+	ctx context.Context,
+	taskID, sessionID string,
+) (models.ConversationForkDraft, error) {
+	return a.svc.GetConversationForkForDestination(ctx, taskID, sessionID)
+}
+
+// UpdateMessage forwards the fork provenance update for the accepted first
+// user message to the task service.
+func (a *messageCreatorAdapter) UpdateMessage(ctx context.Context, message *models.Message) error {
+	return a.svc.UpdateMessage(ctx, message)
+}
+
 // getSessionModel resolves the model from the session's agent profile snapshot.
 // Results are cached per session ID to avoid repeated DB queries during streaming.
 func (a *messageCreatorAdapter) getSessionModel(ctx context.Context, sessionID string) string {

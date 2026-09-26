@@ -302,6 +302,9 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 			zap.Error(err))
 		return "", err
 	}
+	if forkID, _ := task.Metadata[models.MetaKeyConversationForkID].(string); forkID != "" {
+		ctx = executor.WithConversationForkSessionInput(ctx, nil, true)
+	}
 	// Resolve agent/executor profile from task metadata if not explicitly provided
 	if agentProfileID == "" {
 		if v, ok := task.Metadata[models.MetaKeyAgentProfileID].(string); ok && v != "" {
@@ -871,6 +874,15 @@ func (s *Service) startCreatedSession(
 			effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
 		}
 	}
+	effectivePrompt, forkContext, forkAttachments, err := s.prepareConversationForkPrompt(ctx, taskID, session, effectivePrompt, skipMessageRecord)
+	if err != nil {
+		return nil, fmt.Errorf("prepare conversation fork prompt: %w", err)
+	}
+	attachments, err = appendConversationForkAttachments(attachments, forkAttachments)
+	if err != nil {
+		return nil, fmt.Errorf("prepare conversation fork attachments: %w", err)
+	}
+	promptReferenceContext = appendTrustedPromptContext(promptReferenceContext, forkContext)
 
 	// Wrap the first prompt with the Kandev MCP system block. See the
 	// matching block in startTask for the rationale (DB stores wrapped form;
@@ -1158,6 +1170,11 @@ func (s *Service) promoteSessionIfTaskHasNoPrimary(ctx context.Context, taskID s
 func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prompt string, skipMessage, planModeActive, autoStart bool, attachments []v1.MessageAttachment) {
 	if !skipMessage {
 		s.recordInitialMessage(ctx, taskID, sessionID, prompt, planModeActive, autoStart, attachments)
+	} else if err := s.stampConversationForkFirstUserMessage(ctx, taskID, sessionID); err != nil {
+		s.logger.Warn("failed to record conversation fork message provenance",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 
 	if planModeActive {
@@ -1211,7 +1228,10 @@ type startTaskOptions struct {
 	// ProfileExplicit marks a non-empty profile selected through an explicit
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// this new session.
-	ProfileExplicit bool
+	ProfileExplicit             bool
+	ConversationForkID          string
+	ConversationForkRequestID   string
+	ConversationForkFingerprint string
 	// Env holds launch-scoped environment variables for the agent runtime.
 	Env map[string]string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
@@ -1377,6 +1397,30 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, err
 		}
 	}
+	var conversationForkAdmission *models.ConversationForkAdmission
+	if opts.ConversationForkID != "" {
+		preparer, ok := s.messageCreator.(conversationForkAgentAdmissionPreparer)
+		if !ok {
+			return nil, models.ErrConversationForkSourceUnavailable
+		}
+		fingerprint := opts.ConversationForkFingerprint
+		if fingerprint == "" || opts.ConversationForkRequestID == "" {
+			return nil, models.ErrConversationForkConflict
+		}
+		admission, existing, err := preparer.PrepareConversationForkAgentAdmission(
+			ctx, taskID, opts.ConversationForkID, opts.ConversationForkRequestID, fingerprint,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if existing.Descriptor.State != "draft" {
+			return nil, models.ErrConversationForkConflict
+		}
+		if _, err := appendConversationForkAttachments(attachments, existing.Descriptor.AttachmentDescriptors); err != nil {
+			return nil, err
+		}
+		conversationForkAdmission = &admission
+	}
 
 	env, route := opts.Env, opts.Route
 	s.logger.Debug("manually starting task",
@@ -1526,6 +1570,10 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return nil, err
+	}
+	pendingTaskFork := conversationForkAdmission == nil && task.Metadata != nil && task.Metadata[models.MetaKeyConversationForkID] != nil
+	if conversationForkAdmission != nil || pendingTaskFork {
+		ctx = executor.WithConversationForkSessionInput(ctx, conversationForkAdmission, pendingTaskFork)
 	}
 	launchErrorStamp := ""
 	if launchError, found := models.LoadTaskLaunchError(task.Metadata); found {
@@ -1700,6 +1748,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		configMode = true
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
 	}
+	effectivePrompt, forkContext, forkAttachments, err := s.prepareConversationForkPrompt(ctx, task.ID, launchSession, effectivePrompt, false)
+	if err != nil {
+		return nil, fmt.Errorf("prepare conversation fork prompt: %w", err)
+	}
+	attachments, err = appendConversationForkAttachments(attachments, forkAttachments)
+	if err != nil {
+		return nil, fmt.Errorf("prepare conversation fork attachments: %w", err)
+	}
+	promptReferenceContext = appendTrustedPromptContext(promptReferenceContext, forkContext)
 	titleOwner := false
 	if !configMode && !isOfficeTask {
 		titleOwner, err = s.ClaimTaskTitleSession(ctx, task.ID, sessionID)
@@ -2608,6 +2665,9 @@ func (s *Service) backfillInitialUserMessageIfMissing(ctx context.Context, taskI
 func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, prompt string, planModeActive, autoStart bool, attachments []v1.MessageAttachment) {
 	if s.messageCreator != nil && (prompt != "" || len(attachments) > 0) {
 		meta := NewUserMessageMeta().WithPlanMode(planModeActive).WithAutoStart(autoStart).WithAttachments(attachments)
+		if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil {
+			meta.WithConversationForkID(conversationForkIDFromSession(session))
+		}
 		if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, s.getActiveTurnID(sessionID), meta.ToMap()); err != nil {
 			s.logger.Error("failed to create initial user message",
 				zap.String("task_id", taskID),

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	commoncosts "github.com/kandev/kandev/internal/common/costs"
+	"github.com/kandev/kandev/internal/office/costs/modelsdev"
 	officeshared "github.com/kandev/kandev/internal/office/shared"
 )
 
@@ -31,4 +32,20 @@ func (a usagePricingAdapter) LookupForModelWithVersion(ctx context.Context, mode
 		CachedWritePerMillion: pricing.CachedWritePerMillion,
 		OutputPerMillion:      pricing.OutputPerMillion,
 	}, version, ok
+}
+
+type conversationForkModelInfoLookup interface {
+	LookupModelInfo(ctx context.Context, modelID string) (modelsdev.ModelInfo, bool)
+}
+
+type conversationForkModelLimitAdapter struct {
+	lookup conversationForkModelInfoLookup
+}
+
+func (a conversationForkModelLimitAdapter) LookupConversationForkContextLimit(ctx context.Context, modelID string) (int64, bool) {
+	if a.lookup == nil {
+		return 0, false
+	}
+	info, ok := a.lookup.LookupModelInfo(ctx, modelID)
+	return info.ContextWindow, ok && info.ContextWindow > 0
 }

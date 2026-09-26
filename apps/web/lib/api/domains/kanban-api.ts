@@ -118,6 +118,8 @@ export async function createTask(
     priority?: TaskPriority;
     project_id?: string;
     metadata?: Record<string, unknown>;
+    conversation_fork_id?: string;
+    creation_request_id?: string;
     /** Office task-handoffs phase 4/5 — workspace policy. */
     workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
     workspace_group_id?: string;

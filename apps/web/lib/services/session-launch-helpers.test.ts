@@ -21,4 +21,17 @@ describe("buildStartRequest", () => {
 
     expect(request.priority).toBe("critical");
   });
+
+  it("keeps conversation fork admission identifiers on the first-session launch", () => {
+    const { request } = buildStartRequest("task-1", "profile-a", {
+      conversationForkId: "fork-1",
+      creationRequestId: "create-1",
+    });
+
+    expect(request).toMatchObject({
+      intent: "start",
+      conversation_fork_id: "fork-1",
+      creation_request_id: "create-1",
+    });
+  });
 });

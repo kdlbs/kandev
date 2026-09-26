@@ -7,6 +7,15 @@ const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const PROMPT_NAME = "e2e-mobile-new-agent-prompt";
 const PROMPT_CONTENT = "Review this task from the mobile launch flow.";
 
+async function expectDialogWithinViewport(session: SessionPage, viewportHeight: number) {
+  await expect
+    .poll(async () => {
+      const box = await session.sessionLaunchDialog().boundingBox();
+      return box !== null && box.y >= 0 && box.y + box.height <= viewportHeight;
+    })
+    .toBe(true);
+}
+
 test.describe("New session dialog on mobile", () => {
   test.afterEach(async ({ apiClient }) => {
     const { prompts } = await apiClient.listPrompts();
@@ -131,6 +140,8 @@ test.describe("New session dialog on mobile", () => {
 
     await newAgent.tap();
     await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
+    await expect(session.newSessionPromptInput()).not.toBeFocused();
+    await expectDialogWithinViewport(session, viewport!.height);
 
     const dialogBox = await session.sessionLaunchDialog().boundingBox();
     expect(dialogBox).not.toBeNull();
@@ -184,11 +195,14 @@ test.describe("New session dialog on mobile", () => {
     await session.waitForLoad();
     await session.openMobileNewSessionDialog();
     await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
+    await expect(session.newSessionPromptInput()).not.toBeFocused();
+
+    const viewport = testPage.viewportSize();
+    expect(viewport).not.toBeNull();
+    await expectDialogWithinViewport(session, viewport!.height);
 
     const dialogBox = await session.sessionLaunchDialog().boundingBox();
-    const viewport = testPage.viewportSize();
     expect(dialogBox).not.toBeNull();
-    expect(viewport).not.toBeNull();
     expect(dialogBox!.x).toBeGreaterThanOrEqual(0);
     expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
     expect(dialogBox!.x + dialogBox!.width).toBeLessThanOrEqual(viewport!.width);

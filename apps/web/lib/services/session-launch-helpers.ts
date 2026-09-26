@@ -24,6 +24,8 @@ export function buildStartRequest(
     autoStart?: boolean;
     profileExplicit?: boolean;
     attachments?: MessageAttachment[];
+    conversationForkId?: string;
+    creationRequestId?: string;
   },
 ): BuildResult {
   return {
@@ -38,6 +40,12 @@ export function buildStartRequest(
       priority: opts?.priority,
       auto_start: opts?.autoStart,
       attachments: opts?.attachments,
+      ...(opts?.conversationForkId
+        ? {
+            conversation_fork_id: opts.conversationForkId,
+            creation_request_id: opts.creationRequestId,
+          }
+        : {}),
       ...(opts?.profileExplicit !== undefined ? { profile_explicit: opts.profileExplicit } : {}),
     },
     layout: opts?.planMode ? "plan" : "default",

@@ -361,6 +361,40 @@ type ConversationSourceRepository interface {
 	ReadConversationTurnsPage(context.Context, models.ConversationTurnPageRequest) (models.ConversationTurnPage, error)
 }
 
+type ConversationForkSourceRepository interface {
+	ReadConversationForkSource(context.Context, models.ConversationForkSourceRequest) (models.ConversationForkSource, error)
+}
+
+type ConversationForkDraftRepository interface {
+	CreateConversationForkDraft(context.Context, *models.ConversationForkDraft) (models.ConversationForkDraft, error)
+	GetConversationForkDraft(context.Context, string, string, time.Time) (models.ConversationForkDraft, error)
+	UpdateConversationForkEstimate(context.Context, string, string, models.ConversationForkEstimate) error
+	DiscardConversationForkDraft(context.Context, string, string) error
+	DeleteExpiredConversationForkDrafts(context.Context, time.Time) ([]models.ConversationForkExpiredDraftAttachments, error)
+}
+
+// ConversationForkDestinationRepository owns destination receipts and the
+// pending first-session binding for admitted snapshots.
+type ConversationForkDestinationRepository interface {
+	GetConversationForkByDestinationRequest(context.Context, string, string) (models.ConversationForkDraft, error)
+	GetPendingConversationForkForTask(context.Context, string, string) (models.ConversationForkDraft, error)
+	GetConversationForkByDestinationSession(context.Context, string, string, string) (models.ConversationForkDraft, error)
+	BindConversationForkToSession(context.Context, models.ConversationForkAdmission) (models.ConversationForkDraft, error)
+	DeleteConversationForksByDestinationTask(context.Context, string) error
+}
+
+type ConversationForkTaskDestinationRepository interface {
+	MarkConversationForkTaskDestinationComplete(context.Context, string, string, string) error
+	RestoreConversationForkTaskDestinationForRollback(context.Context, string) error
+}
+
+// ConversationForkTaskCreator inserts a destination task and attaches its
+// snapshot in the same transaction as task creation and workflow admission.
+type ConversationForkTaskCreator interface {
+	CreateTaskWithConversationFork(context.Context, *models.Task, models.ConversationForkAdmission) error
+	CreateTaskWithWorkflowStepAdmissionAndConversationFork(context.Context, *models.Task, string, int, string, int, models.ConversationForkAdmission) error
+}
+
 // ConversationMutationWriter returns a transient receipt from the same
 // transaction as a source mutation. It is optional during the migration so
 // existing repository fakes and exceptional bulk writers remain operational.

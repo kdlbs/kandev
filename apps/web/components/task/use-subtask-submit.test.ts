@@ -289,6 +289,29 @@ describe("useSubtaskSubmit", () => {
     expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({ autopilot: true }));
   });
 
+  it("attaches the selected fork snapshot with its stable request identity", async () => {
+    const onConsumed = vi.fn();
+    const conversationFork = {
+      snapshot: { descriptor: { id: "fork-snapshot" } },
+      creationRequestId: "fork-request",
+      onConsumed,
+    } as never;
+    const opts = makeSubmitOptions({ conversationFork });
+    const { result } = renderHook(() => useSubtaskSubmit(opts));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+    });
+
+    expect(mockCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation_fork_id: "fork-snapshot",
+        creation_request_id: "fork-request",
+      }),
+    );
+    expect(onConsumed).toHaveBeenCalledOnce();
+  });
+
   it("passes fresh-branch metadata when a local executor uses a policy row", async () => {
     const buildRepositoriesPayload = await import("@/components/task-create-dialog-helpers");
     const opts = makeSubmitOptions({

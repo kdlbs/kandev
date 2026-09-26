@@ -5,6 +5,7 @@ import { IconWand, IconMessageDots, IconFile, IconFolder } from "@tabler/icons-r
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
+import { useAppStore } from "@/components/state-provider";
 import { TASK_DESCRIPTION_SYNTHETIC_ID } from "@/hooks/initial-prompt-preview";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
 import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
@@ -26,6 +27,7 @@ import { entityReferencesFromMetadata } from "@/lib/entity-references/message-re
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { renderUserMessageBody } from "./user-message-body";
+import { ConversationForkProvenance } from "@/components/task/conversation-fork-provenance";
 
 type ChatMessageProps = {
   comment: Message;
@@ -93,6 +95,8 @@ type UserMessageProps = {
   onScrollToMessage?: (messageId: string) => void;
 };
 
+type UserMessageNavigation = ReturnType<typeof useUserMessageNavigation>;
+
 type UserMessageMetadata = WorkflowMessageMetadata & {
   attachments?: UserMessageAttachment[];
   plan_mode?: boolean;
@@ -144,12 +148,14 @@ function UserContextBadges({
   contextFiles,
   senderTask,
   workflowMessage,
+  conversationForkId,
 }: {
   hasPlanMode: boolean;
   hasReviewComments: boolean;
   contextFiles: Array<{ path: string; name: string; is_directory?: boolean }>;
   senderTask: SenderTaskInfo | null;
   workflowMessage: WorkflowStepMessageInfo | null;
+  conversationForkId: string | null;
 }) {
   const { t } = useTranslation();
   if (
@@ -157,12 +163,14 @@ function UserContextBadges({
     !hasReviewComments &&
     contextFiles.length === 0 &&
     !senderTask &&
-    !workflowMessage
+    !workflowMessage &&
+    !conversationForkId
   )
     return null;
   return (
     <div className="flex justify-end gap-1.5 mb-1 flex-wrap">
       {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} />}
+      {conversationForkId && <ConversationForkProvenance forkId={conversationForkId} />}
       {senderTask && <SenderTaskBadge sender={senderTask} />}
       {hasPlanMode && (
         <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/20 px-2 py-0.5 text-[10px] text-slate-400">
@@ -260,6 +268,53 @@ function UserMessageAttachments({
   );
 }
 
+function UserMessageActions({
+  comment,
+  navigation,
+  onScrollToMessage,
+  showRaw,
+  onToggleRaw,
+  hasHiddenPrompts,
+  isFavorite,
+  onToggleFavorite,
+}: {
+  comment: Message;
+  navigation: UserMessageNavigation;
+  onScrollToMessage?: (messageId: string) => void;
+  showRaw: boolean;
+  onToggleRaw: () => void;
+  hasHiddenPrompts: boolean;
+  isFavorite: boolean;
+  onToggleFavorite?: () => void;
+}) {
+  return (
+    <MessageActions
+      message={comment}
+      showCopy={true}
+      showTimestamp={true}
+      showRawToggle={true}
+      hasHiddenPrompts={hasHiddenPrompts}
+      showNavigation={navigation.hasPrevious || navigation.hasNext}
+      isRawView={showRaw}
+      onToggleRaw={onToggleRaw}
+      isFavorite={isFavorite}
+      onToggleFavorite={onToggleFavorite}
+      onNavigatePrev={() => {
+        if (navigation.previousId && onScrollToMessage) {
+          onScrollToMessage(navigation.previousId);
+        }
+      }}
+      onNavigateNext={() => {
+        if (navigation.nextId && onScrollToMessage) {
+          onScrollToMessage(navigation.nextId);
+        }
+      }}
+      hasPrev={navigation.hasPrevious}
+      hasNext={navigation.hasNext}
+    />
+  );
+}
+
 function UserMessageContent({
   comment,
   showRaw,
@@ -277,6 +332,15 @@ function UserMessageContent({
     [comment.metadata],
   );
   const promptMentionComponents = usePromptMentionMarkdownComponents(promptNames, entityReferences);
+  const conversationForkId =
+    typeof comment.metadata?.conversation_fork_id === "string"
+      ? comment.metadata.conversation_fork_id
+      : null;
+  const taskConversationForkId = useAppStore((state) => {
+    const task = state.kanban.tasks.find((item) => item.id === comment.task_id);
+    const forkId = task?.metadata?.conversation_fork_id;
+    return typeof forkId === "string" ? forkId : null;
+  });
   const {
     imageAttachments,
     fileAttachments,
@@ -299,6 +363,11 @@ function UserMessageContent({
           contextFiles={contextFiles}
           senderTask={senderTask}
           workflowMessage={workflowMessage}
+          conversationForkId={
+            conversationForkId && conversationForkId !== taskConversationForkId
+              ? conversationForkId
+              : null
+          }
         />
         <div
           data-testid="user-message-bubble"
@@ -326,29 +395,17 @@ function UserMessageContent({
             onOpenFile,
           })}
         </div>
-        <MessageActions
-          message={comment}
-          showCopy={true}
-          showTimestamp={true}
-          showRawToggle={true}
-          hasHiddenPrompts={hasHiddenPrompts}
-          showNavigation={userNavigation.hasPrevious || userNavigation.hasNext}
-          isRawView={showRaw}
+        <UserMessageActions
+          comment={comment}
+          navigation={userNavigation}
+          onScrollToMessage={onScrollToMessage}
+          showRaw={showRaw}
           onToggleRaw={onToggleRaw}
+          hasHiddenPrompts={hasHiddenPrompts}
           isFavorite={isFavorite}
           onToggleFavorite={
             comment.id === TASK_DESCRIPTION_SYNTHETIC_ID ? undefined : toggleFavorite
           }
-          onNavigatePrev={() => {
-            if (userNavigation.previousId && onScrollToMessage)
-              onScrollToMessage(userNavigation.previousId);
-          }}
-          onNavigateNext={() => {
-            if (userNavigation.nextId && onScrollToMessage)
-              onScrollToMessage(userNavigation.nextId);
-          }}
-          hasPrev={userNavigation.hasPrevious}
-          hasNext={userNavigation.hasNext}
         />
       </div>
     </div>

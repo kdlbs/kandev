@@ -27,6 +27,11 @@ func TestPostgresDeleteTaskWithoutQueueSchema(t *testing.T) {
 	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: taskID}); err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-missing-queue", TaskID: taskID, State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
 
 	if err := repo.DeleteTask(ctx, taskID); err != nil {
 		t.Fatalf("DeleteTask without queue schema: %v", err)

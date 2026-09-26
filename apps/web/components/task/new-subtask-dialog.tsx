@@ -33,12 +33,14 @@ import { useSubtaskPromptZone, useSubtaskSubmit } from "./use-subtask-submit";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { Message, TaskSession } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
+import type { ConversationForkFormContext } from "./conversation-fork-types";
 
 type NewSubtaskDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   parentTaskId: string;
   parentTaskTitle: string;
+  conversationFork?: ConversationForkFormContext;
 };
 
 type ParentTaskContext = {
@@ -348,6 +350,7 @@ type SubtaskFormProps = {
   isOpen: boolean;
   onClose: () => void;
   autoTitle: boolean;
+  conversationFork?: ConversationForkFormContext;
 };
 
 // eslint-disable-next-line max-lines-per-function
@@ -367,6 +370,7 @@ function NewSubtaskForm({
   isOpen,
   onClose,
   autoTitle,
+  conversationFork,
 }: SubtaskFormProps) {
   const { toast } = useToast();
   const isUtilityConfigured = useIsUtilityConfigured();
@@ -440,6 +444,7 @@ function NewSubtaskForm({
     setIsCreating,
     onClose,
     workspaceMode,
+    conversationFork,
   });
   return renderSubtaskFormBody({
     fs,
@@ -480,6 +485,10 @@ function NewSubtaskForm({
       onSubmitShortcut: handleSubmit,
     },
     isCreating,
+    conversationFork,
+    conversationForkModelId: agentProfiles.find(
+      (profile) => profile.id === (fs.agentProfileId || defaultProfileId),
+    )?.model,
     isSummarizing,
     hasPrompt,
     onClose,
@@ -501,6 +510,7 @@ export function NewSubtaskDialog({
   onOpenChange,
   parentTaskId,
   parentTaskTitle,
+  conversationFork,
 }: NewSubtaskDialogProps) {
   const { t } = useTranslation();
   const { sessions: parentSessions } = useTaskSessions(parentTaskId);
@@ -569,6 +579,7 @@ export function NewSubtaskDialog({
           isOpen={open}
           onClose={() => onOpenChange(false)}
           autoTitle={autoTitle}
+          conversationFork={conversationFork}
         />
       </DialogContent>
     </Dialog>
