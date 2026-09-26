@@ -345,7 +345,7 @@ the filename; long filenames wrap.
 
 In **Commits**, each row starts collapsed. Select a row to inspect its files
 inline; the saved flat or tree Changes layout applies to this list. Select
-**Open commit** to open the historical commit detail. Its flat file index can
+the icon labeled **Open commit** to open the historical commit detail. Its flat file index can
 be collapsed independently of the file sections, and selecting an index entry
 opens that file's diff. These controls also work on phones.
 
