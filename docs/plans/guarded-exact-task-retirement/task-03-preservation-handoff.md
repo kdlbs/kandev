@@ -50,10 +50,11 @@ provider tokens stay outside the retirement receipt.
    every manifest row names the same old task and recorded workspace,
    environment, worktree, and repository identity. Missing, malformed, stale,
    foreign, or absent-worktree evidence is `UNKNOWN`.
-2. Require a platform-verified immutable archive-byte receipt that binds the
-   same identities, manifest digest, complete file/link/metadata inventory,
-   and a successful byte rehash. A caller path or source-manifest hash alone
-   is never proof. Its absence is `UNKNOWN/ARCHIVE_BYTES_UNVERIFIED`.
+2. Require a platform-verified immutable archive-byte receipt that binds both
+   the exact old-task ID and replacement-task ID, the manifest digest, complete
+   file/link/metadata inventory, and a successful byte rehash. A caller path
+   or source-manifest hash alone is never proof. Its absence is
+   `UNKNOWN/ARCHIVE_BYTES_UNVERIFIED`.
 3. Obtain a read-only FIFO snapshot for every old-session incarnation. Each
    item contributes its stable entry ID, position, and body hash. The
    replacement must present an ordered intake receipt with the same hashes and
@@ -76,8 +77,9 @@ identity mismatch, stale generation, or unimplemented integration is
 - Source manifest: reject task/workspace/environment/worktree/repository
   mismatch, missing index digest, absent worktree, and a manifest-only claim
   without an immutable archive-byte receipt.
-- Archive receipt: reject a byte-digest mismatch, unverified archive location,
-  incomplete metadata inventory, and unpushed/unreachable commit evidence.
+- Archive receipt: reject a byte-digest or replacement-ID mismatch, unverified
+  archive location, incomplete metadata inventory, and unpushed/unreachable
+  commit evidence.
 - FIFO handoff: assert deterministic `(session incarnation, position, entry
   ID)` ordering; reject changed, omitted, duplicated, reordered, or
   hash-mismatched entries, and reject a receipt without a replacement durable
