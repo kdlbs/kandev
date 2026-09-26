@@ -28,9 +28,11 @@ macOS and document the behavior for contributors.
 ## In scope
 
 - Add target-scoped development environment values to the `desktop-dev`
-  recipe in the root `Makefile`.
+  recipe in the root `Makefile`, including explicit SQLite selection and
+  disabling an inherited E2E profile selector.
 - Add a focused command test that verifies the launched Tauri environment
-  with and without inherited production paths.
+  with and without inherited production paths, PostgreSQL driver, and E2E
+  profile selector.
 - Add contributor guidance for the selected state, logs, profile, rebuild
   behavior, and concurrent `make dev` contention.
 - Run a macOS smoke against the real Tauri app and backend.
@@ -45,7 +47,8 @@ macOS and document the behavior for contributors.
 
 1. A plain `make desktop-dev` selects the checkout's `.kandev-dev` home,
    `data/kandev.db`, `logs`, and dev profile without manual environment setup.
-2. Inherited home and database paths cannot redirect this target, while
+2. Inherited home, database path, and database driver cannot redirect this
+   target, and an inherited E2E selector cannot choose the e2e profile.
    `desktop-build` and installed desktop launches retain their current defaults.
 3. A real macOS launch confirms the backend-selected database and profile; a
    concurrent `make dev` produces the existing single-owner failure.
@@ -56,8 +59,12 @@ From the repository root:
 
 ```bash
 bash scripts/desktop-dev-env.test.sh
+make test-scripts
 node scripts/validate-public-docs.mjs
-git diff --check -- Makefile scripts/desktop-dev-env.test.sh docs/public/contributing.md
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.test.py
+python3 scripts/lint-spec-files.py --all
+git diff --check
 ```
 
 On a macOS development host with port `38430` free, start the app in one
@@ -112,10 +119,13 @@ None.
 ## Results
 
 Implemented the `desktop-dev` environment defaults and contributor guidance.
-The targeted child-environment test, `make test-scripts`, `make build`, public
-documentation validation, and whitespace checks passed. The build reported
-that `codesign`/`rcodesign` is unavailable, so the Darwin helper binaries were
-left unsigned; compilation completed successfully.
+The child-environment test passed for both a clean shell and inherited
+production paths, PostgreSQL driver, and E2E selector. `make test-scripts`,
+spec catalog validation, spec lint tests, full spec lint, public documentation
+validation, and whitespace checks passed. `make build` passed for the web app,
+backend, and bundled runtime helpers. The build reported that
+`codesign`/`rcodesign` is unavailable, so the Darwin helper binaries were left
+unsigned; compilation completed successfully.
 
 The real Tauri launch and shared-home contention smoke remains pending. This
 host is Linux x86_64, and `desktop-runtime` only runs on macOS. Keep this work

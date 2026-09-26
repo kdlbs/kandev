@@ -16,7 +16,9 @@ MAKE
 
 cat >"$PROBE" <<'SH'
 #!/usr/bin/env bash
-printf '%s|%s|%s\n' "$KANDEV_HOME_DIR" "$KANDEV_DATABASE_PATH" "$KANDEV_DEBUG_DEV_MODE"
+printf '%s|%s|%s|%s|%s\n' \
+	"$KANDEV_HOME_DIR" "$KANDEV_DATABASE_PATH" "$KANDEV_DEBUG_DEV_MODE" \
+	"${KANDEV_DATABASE_DRIVER-<unset>}" "${KANDEV_E2E_MOCK-<unset>}"
 SH
 chmod +x "$PROBE"
 
@@ -35,16 +37,18 @@ expect_eq() {
 	fi
 }
 
-expected="${ROOT_DIR}/.kandev-dev|${ROOT_DIR}/.kandev-dev/data/kandev.db|true"
+expected="${ROOT_DIR}/.kandev-dev|${ROOT_DIR}/.kandev-dev/data/kandev.db|true|sqlite|false"
 
 expect_eq "clean environment" "$expected" \
-	"$(probe -u KANDEV_HOME_DIR -u KANDEV_DATABASE_PATH -u KANDEV_DEBUG_DEV_MODE)"
+	"$(probe -u KANDEV_HOME_DIR -u KANDEV_DATABASE_PATH -u KANDEV_DEBUG_DEV_MODE \
+		-u KANDEV_DATABASE_DRIVER -u KANDEV_E2E_MOCK)"
 expect_eq "inherited production paths" "$expected" \
-	"$(probe KANDEV_HOME_DIR=/production/kandev KANDEV_DATABASE_PATH=/production/kandev.db KANDEV_DEBUG_DEV_MODE=false)"
+	"$(probe KANDEV_HOME_DIR=/production/kandev KANDEV_DATABASE_PATH=/production/kandev.db \
+		KANDEV_DEBUG_DEV_MODE=false KANDEV_DATABASE_DRIVER=postgres KANDEV_E2E_MOCK=true)"
 
 desktop_build_recipe="$(env KANDEV_HOME_DIR=/production/kandev KANDEV_DATABASE_PATH=/production/kandev.db KANDEV_DEBUG_DEV_MODE=false \
 	make -C "$ROOT_DIR" --no-print-directory --dry-run MAKE=: desktop-build 2>&1)"
-if printf '%s\n' "$desktop_build_recipe" | grep -Eq '(^|[[:space:]])KANDEV_(HOME_DIR|DATABASE_PATH|DEBUG_DEV_MODE)='; then
+if printf '%s\n' "$desktop_build_recipe" | grep -Eq '(^|[[:space:]])KANDEV_(HOME_DIR|DATABASE_PATH|DATABASE_DRIVER|E2E_MOCK|DEBUG_DEV_MODE)='; then
 	echo "FAIL  desktop-build has no desktop-dev environment assignments" >&2
 	exit 1
 fi

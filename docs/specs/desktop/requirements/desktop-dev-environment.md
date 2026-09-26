@@ -33,11 +33,13 @@ by hand.
   `.kandev-dev/data/kandev.db` database and `.kandev-dev/logs` directory.
 - **AC-DESKTOP-DEV-ENV-001.2:** The same launch shall select the dev runtime
   profile automatically, without requiring the developer to set profile or
-  path variables.
+  path variables. An inherited E2E profile selector shall not change the
+  desktop launch to the e2e profile.
 - **AC-DESKTOP-DEV-ENV-001.3:** If the invoking shell contains inherited
-  `KANDEV_HOME_DIR` or `KANDEV_DATABASE_PATH` values, `make desktop-dev` shall
-  still select the checkout's `.kandev-dev` home and database. It shall not
-  open the database named by those inherited values.
+  `KANDEV_HOME_DIR`, `KANDEV_DATABASE_PATH`, or a non-SQLite database-driver
+  selection, `make desktop-dev` shall still select the checkout's
+  `.kandev-dev` home and local SQLite database. It shall not open another
+  database because of those inherited values.
 - **AC-DESKTOP-DEV-ENV-001.4:** The installed desktop application and
   `make desktop-build` shall retain their existing configuration and default
   user home. The development defaults shall apply only to `make desktop-dev`.

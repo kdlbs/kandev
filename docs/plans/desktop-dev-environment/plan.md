@@ -23,8 +23,9 @@ evidence, and the contributor documentation.
 
 - Default `desktop-dev` to `<checkout>/.kandev-dev`, its SQLite database, and
   the dev profile.
-- Override ambient home and database paths for this target so a task shell
-  cannot redirect desktop development into production state.
+- Override ambient home, database path, database driver, and E2E profile
+  selector for this target so a task shell cannot redirect desktop development
+  into production or test state.
 - Keep `desktop-build`, `desktop-open`, and installed desktop behavior unchanged.
 - Document the desktop development command and its state location.
 
@@ -37,11 +38,12 @@ evidence, and the contributor documentation.
 
 ## Technical approach
 
-In the root `Makefile`, set `KANDEV_HOME_DIR`, `KANDEV_DATABASE_PATH`, and
-`KANDEV_DEBUG_DEV_MODE` on the `desktop-dev` recipe's Tauri invocation. Use
-`$(CURDIR)` to identify the checkout. Keep those values scoped to that recipe,
-after `desktop-runtime` has prepared the local bundle. The existing Tauri
-`desktop_environment` function forwards them to the bundled native launcher,
+In the root `Makefile`, set `KANDEV_HOME_DIR`, `KANDEV_DATABASE_PATH`,
+`KANDEV_DATABASE_DRIVER=sqlite`, `KANDEV_E2E_MOCK=false`, and
+`KANDEV_DEBUG_DEV_MODE=true` on the `desktop-dev` recipe's Tauri invocation.
+Use `$(CURDIR)` to identify the checkout. Keep those values scoped to that
+recipe, after `desktop-runtime` has prepared the local bundle. The existing
+Tauri `desktop_environment` function forwards them to the bundled native launcher,
 and the backend configuration gives those environment values precedence over
 YAML defaults.
 
@@ -55,7 +57,7 @@ alone cannot prove the full process handoff.
 
 | Acceptance criteria | Evidence |
 | --- | --- |
-| AC-DESKTOP-DEV-ENV-001.1 to 001.3 | `scripts/desktop-dev-env.test.sh` checks the effective Tauri child environment; macOS launch smoke checks the backend's selected database, log location, and dev profile. |
+| AC-DESKTOP-DEV-ENV-001.1 to 001.3 | `scripts/desktop-dev-env.test.sh` checks the effective Tauri child environment, including inherited PostgreSQL and E2E selectors; macOS launch smoke checks the backend's selected database, log location, and dev profile. |
 | AC-DESKTOP-DEV-ENV-001.4 | The targeted Make test checks `desktop-build` has no development environment assignment; source inspection confirms installed launches do not use the Make target. |
 | AC-DESKTOP-DEV-ENV-001.5 | macOS smoke starts `make dev` first, then confirms a concurrent `make desktop-dev` reports the existing home-owner failure without opening another database. |
 
@@ -72,10 +74,16 @@ alone cannot prove the full process handoff.
 
 ## Verification results
 
-- `bash scripts/desktop-dev-env.test.sh` — passed for clean and inherited
-  environment values; `desktop-build` remains free of the dev overrides.
+- `bash scripts/desktop-dev-env.test.sh` — passed with a clean environment and
+  inherited production paths, PostgreSQL driver, and E2E selector; the target
+  selects local SQLite and the dev profile, while `desktop-build` remains free
+  of the dev overrides.
 - `make test-scripts` — passed, including the desktop environment test.
 - `node scripts/validate-public-docs.mjs` — passed (47 published pages).
+- `python3 scripts/list-docs.py validate` — passed (305 decisions and 1153
+  specifications).
+- `python3 scripts/lint-spec-files.test.py` — passed (36 tests).
+- `python3 scripts/lint-spec-files.py --all` — passed.
 - `make build` — passed for the web app, backend, and bundled runtime helpers.
 - The macOS app launch and shared-home contention smoke could not run because
   this implementation host is Linux x86_64. Record that smoke in the work order

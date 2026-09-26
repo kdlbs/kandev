@@ -34,13 +34,17 @@ Tauri dev process:
 
 - `KANDEV_HOME_DIR=$(CURDIR)/.kandev-dev`;
 - `KANDEV_DATABASE_PATH=$(CURDIR)/.kandev-dev/data/kandev.db`;
+- `KANDEV_DATABASE_DRIVER=sqlite`;
+- `KANDEV_E2E_MOCK=false`;
 - `KANDEV_DEBUG_DEV_MODE=true`.
 
-The recipe sets the values for the launched process itself, so ambient values
-with the same names cannot redirect this command. `$(CURDIR)` is the absolute
-checkout path when the root Makefile runs; the three values describe one state
-root. The backend reads its dev profile from embedded `profiles.yaml` as usual.
-No separate copy of the profile defaults belongs in Make or Rust.
+The recipe sets these values for the launched process itself, so ambient values
+with the same names cannot redirect the state root, select another database
+driver, or select the e2e profile. `$(CURDIR)` is the absolute checkout path
+when the root Makefile runs; the home and database path describe one state
+root. The backend reads dev-profile settings from embedded `profiles.yaml` as
+usual. The recipe disables the higher-priority E2E selector rather than copying
+profile defaults into Make or Rust.
 
 `apps/desktop/src-tauri/src/backend.rs` already copies the Tauri process
 environment into its child launcher command and only replaces desktop-owned
@@ -55,8 +59,11 @@ The recipe-level values are confined to `make desktop-dev`; they do not become
 global Make exports or inputs to `desktop-build`, `desktop-open`, or installed
 desktop launches. Both `KANDEV_HOME_DIR` and `KANDEV_DATABASE_PATH` are pinned
 because a separate inherited database path would otherwise override the
-repo-local home. Config-file values for those settings remain lower priority
-than the explicit process environment.
+repo-local home. The SQLite driver is also explicit because the database path
+does not select the driver. The E2E selector is set false because the profile
+detector gives it precedence over the dev selector. Config-file values for the
+home and database settings remain lower priority than the explicit process
+environment.
 
 The backend's existing single-owner check handles a simultaneous `make dev`
 against the same `.kandev-dev` home. A collision is an error, not a reason to
@@ -66,9 +73,10 @@ behavior remain unchanged.
 ## Verification
 
 Test the Make target's effective child environment with clean and inherited
-production-path inputs. A macOS launch smoke should then prove that the actual
-backend selected the repo-local SQLite database, wrote its log under the same
-home, and used the dev profile. Confirm `desktop-build` remains unaffected.
+production paths, a PostgreSQL driver, and an enabled E2E selector. A macOS
+launch smoke should then prove that the actual backend selected the repo-local
+SQLite database, wrote its log under the same home, and used the dev profile.
+Confirm `desktop-build` remains unaffected.
 
 ## Related designs
 

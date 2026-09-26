@@ -259,6 +259,8 @@ desktop-runtime:
 .PHONY: desktop-dev
 DESKTOP_DEV_ENV = KANDEV_HOME_DIR="$(CURDIR)/.kandev-dev" \
 	KANDEV_DATABASE_PATH="$(CURDIR)/.kandev-dev/data/kandev.db" \
+	KANDEV_DATABASE_DRIVER=sqlite \
+	KANDEV_E2E_MOCK=false \
 	KANDEV_DEBUG_DEV_MODE=true
 desktop-dev: desktop-runtime
 	@$(DESKTOP_DEV_ENV) \
