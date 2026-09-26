@@ -274,7 +274,7 @@ func TestSyspromptToolNames_ExactlyMatchMCPOfficeMode(t *testing.T) {
 
 	assert.Equal(t, registered, referenced,
 		"Office first-turn context must advertise exactly the ModeOffice tool inventory")
-	assert.Len(t, registered, 15, "Office MCP must expose the complete 15-tool catalog")
+	assert.Len(t, registered, 16, "Office MCP must expose the 16-tool catalog including the GitHub rate-limit snapshot")
 }
 
 func TestDecisionMCPTransportIsAbsentFromOfficeAndKanban(t *testing.T) {

@@ -317,6 +317,7 @@ type Handlers struct {
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation            TaskPRAutomationService
+	githubRateLimits            GitHubRateLimitService
 	taskChangeLinks             TaskChangeLinkService
 	taskChangeRequestReader     TaskChangeRequestReadService
 	taskChangeRequestAutomation TaskChangeRequestAutomationService
@@ -505,6 +506,9 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPGetTaskChangeRequests, h.handleGetTaskChangeRequests)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskChangeRequestAutomation, h.handleUpdateTaskChangeRequestAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
+	if h.githubRateLimits != nil {
+		d.RegisterFunc(ws.ActionMCPGetGitHubRateLimit, h.handleGetGitHubRateLimit)
+	}
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPReportPRAutoFixOutcome, h.handleReportTaskPRAutoFixOutcome)
 	d.RegisterFunc(ws.ActionMCPReportTaskChangeRequestAutoFixOutcome, h.handleReportTaskChangeRequestAutoFixOutcome)

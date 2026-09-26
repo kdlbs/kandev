@@ -56,8 +56,9 @@ type GitLabClientProvider interface {
 // interfaces above, so drift in either package's workspace-routed methods
 // breaks the build rather than surfacing only at DI-wiring time.
 var (
-	_ GitHubClientProvider = (*github.Service)(nil)
-	_ GitLabClientProvider = (*gitlab.Service)(nil)
+	_                      GitHubClientProvider = (*github.Service)(nil)
+	_                      GitLabClientProvider = (*gitlab.Service)(nil)
+	errAutomaticSyncNotDue                      = errors.New("automatic workflow sync is no longer due")
 )
 
 // CredentialFingerprintProvider optionally exposes a non-secret fingerprint
@@ -110,12 +111,31 @@ type Service struct {
 	// than racing an in-flight apply.
 	locks sync.Map // workspaceID → *sync.Mutex
 
+	// automaticMu guards the bounded periodic execution pool and coalesces
+	// queued/active work by workspace. Provider admission can wait for a long
+	// retry window, so pending work must remain in the scheduler queue rather
+	// than becoming one goroutine per workspace.
+	automaticMu       sync.Mutex
+	automaticInFlight map[string]struct{}
+	automaticPool     *automaticScheduler
+	automaticCancel   context.CancelFunc
+	automaticWorkers  int
+
 	// workspaceAuthorizer enforces per-user workspace scoping. Nil (unit
 	// tests, or a caller with no identity in context — internal callers like
 	// the periodic poller) means unscoped, matching every other integration
 	// service's default before auth is wired up.
 	workspaceAuthorizer func(context.Context, string) error
+	now                 func() time.Time
+	jitter              func(time.Duration) time.Duration
 }
+
+type syncMode uint8
+
+const (
+	syncManual syncMode = iota
+	syncAutomatic
+)
 
 // SetWorkspaceAuthorizer installs the per-user workspace access boundary
 // applied before every user-facing config read/write and force sync.
@@ -146,11 +166,15 @@ func NewService(
 	applier Applier, log *logger.Logger,
 ) *Service {
 	return &Service{
-		store:         store,
-		githubClients: githubClients,
-		gitlabClients: gitlabClients,
-		applier:       applier,
-		logger:        log.WithFields(zap.String("component", "workflowsync-service")),
+		store:             store,
+		githubClients:     githubClients,
+		gitlabClients:     gitlabClients,
+		applier:           applier,
+		logger:            log.WithFields(zap.String("component", "workflowsync-service")),
+		now:               time.Now,
+		jitter:            defaultJitter,
+		automaticInFlight: make(map[string]struct{}),
+		automaticWorkers:  automaticSyncWorkerLimit,
 	}
 }
 
@@ -164,7 +188,13 @@ func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string)
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return nil, err
 	}
-	return s.store.GetConfigForWorkspace(ctx, workspaceID)
+	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
+	if err != nil || cfg == nil {
+		return cfg, err
+	}
+	cfg.LastError = safeStoredSyncErrorMessage(cfg.LastError)
+	cfg.PollSuspensionReason = safeStoredSyncErrorMessage(cfg.PollSuspensionReason)
+	return cfg, nil
 }
 
 // SetConfigForWorkspace validates and stores the workspace's config.
@@ -228,16 +258,30 @@ type fetchedFile struct {
 // silent. The outcome (including failures) is recorded on the config row so
 // the UI can surface it.
 func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) (*SyncResult, error) {
+	return s.syncWorkspace(ctx, workspaceID, syncManual)
+}
+
+func (s *Service) syncWorkspace(
+	ctx context.Context,
+	workspaceID string,
+	mode syncMode,
+) (*SyncResult, error) {
+	return s.syncWorkspaceWithForce(ctx, workspaceID, mode, false)
+}
+
+func (s *Service) syncWorkspaceWithForce(
+	ctx context.Context, workspaceID string, mode syncMode, force bool,
+) (*SyncResult, error) {
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return nil, err
 	}
 	lock := s.workspaceLock(workspaceID)
 	lock.Lock()
 	defer lock.Unlock()
-	return s.syncWorkspaceLocked(ctx, workspaceID)
+	return s.syncWorkspaceLocked(ctx, workspaceID, mode, force)
 }
 
-func (s *Service) syncWorkspaceLocked(ctx context.Context, workspaceID string) (*SyncResult, error) {
+func (s *Service) syncWorkspaceLocked(ctx context.Context, workspaceID string, mode syncMode, force bool) (*SyncResult, error) {
 	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -245,9 +289,24 @@ func (s *Service) syncWorkspaceLocked(ctx context.Context, workspaceID string) (
 	if cfg == nil {
 		return nil, ErrNotConfigured
 	}
+	if !s.shouldRunAutomaticSync(cfg, mode, force) {
+		return nil, errAutomaticSyncNotDue
+	}
+	wasRecovering := cfg.ConsecutiveFailures > 0 || cfg.PollSuspended
+	previousFailureClass := cfg.LastErrorClass
+	if mode == syncManual {
+		if err := s.prepareManualSync(ctx, workspaceID, cfg); err != nil {
+			return nil, err
+		}
+	}
+	ctx = syncContext(ctx, cfg, mode)
 
 	files, err := s.fetchFiles(ctx, cfg)
 	if err != nil {
+		var deferred *github.AdmissionDeferredError
+		if errors.As(err, &deferred) {
+			return nil, err
+		}
 		s.recordFailure(ctx, workspaceID, cfg, err)
 		return nil, err
 	}
@@ -262,9 +321,16 @@ func (s *Service) syncWorkspaceLocked(ctx context.Context, workspaceID string) (
 	successState := cfg.circuitState()
 	successState.RecordSuccess()
 	if err := s.store.RecordSyncStatus(
-		ctx, workspaceID, true, "", warnings, contentHash(files), time.Now().UTC(), successState,
+		ctx, workspaceID, true, "", warnings, contentHash(files), s.now().UTC(), successState,
 	); err != nil {
 		return nil, err
+	}
+	if wasRecovering {
+		incWorkflowSyncTransition("recovered", cfg.Provider, previousFailureClass, "")
+		s.logger.Info("workflow sync polling recovered",
+			zap.String("workspace_id", workspaceID),
+			zap.String("provider", cfg.Provider),
+			zap.String("previous_failure_class", previousFailureClass))
 	}
 	return &SyncResult{
 		Created:   applied.Created,
@@ -276,17 +342,33 @@ func (s *Service) syncWorkspaceLocked(ctx context.Context, workspaceID string) (
 }
 
 func (s *Service) recordFailure(ctx context.Context, workspaceID string, cfg *Config, syncErr error) {
-	class := classifySyncErr(syncErr)
-	state := cfg.circuitState()
-	state.RecordFailure(time.Now().UTC(), class, nil)
-	incSyncFailure(cfg.Provider, class)
-	// Clear the hash so the next successful fetch re-applies from scratch.
-	if err := s.store.RecordSyncStatus(
-		ctx, workspaceID, false, syncErr.Error(), nil, "", time.Now().UTC(), state,
-	); err != nil {
+	now := s.now().UTC()
+	directive := buildFailureDirective(cfg, syncErr, now, s.jitter)
+	incSyncFailure(cfg.Provider, directive.circuitClass)
+	if err := s.store.RecordSyncFailure(ctx, workspaceID, safeSyncErrorMessage(syncErr), directive, now); err != nil {
 		s.logger.Warn("failed to record sync failure",
-			zap.String("workspace_id", workspaceID), zap.Error(err))
+			zap.String("workspace_id", cfg.WorkspaceID), zap.Error(err))
+		return
 	}
+	fields := []zap.Field{
+		zap.String("workspace_id", cfg.WorkspaceID),
+		zap.String("provider", cfg.Provider),
+		zap.String("failure_class", directive.class),
+		zap.Bool("poll_suspended", directive.suspended),
+		zap.String("retry_source", string(directive.retrySource)),
+		zap.String("error", safeSyncErrorMessage(syncErr)),
+	}
+	if directive.nextAttemptAt != nil {
+		fields = append(fields, zap.Time("next_attempt_at", *directive.nextAttemptAt))
+	}
+	if directive.suspended && !cfg.PollSuspended {
+		incWorkflowSyncTransition(
+			"suspended", cfg.Provider, directive.class, string(directive.retrySource),
+		)
+		s.logger.Warn("workflow sync polling suspended", fields...)
+		return
+	}
+	s.logger.Warn("workflow sync attempt failed", fields...)
 }
 
 // fetchFiles lists the configured directory and downloads every workflow
@@ -427,15 +509,17 @@ func (s *Service) SyncDueConfigs(ctx context.Context) {
 		s.logger.Warn("failed to list workflow sync configs", zap.Error(err))
 		return
 	}
-	now := time.Now().UTC()
+	now := s.now().UTC()
 	for _, cfg := range configs {
 		if ctx.Err() != nil {
 			return
 		}
 		lock := s.workspaceLock(cfg.WorkspaceID)
-		lock.Lock()
+		if !lock.TryLock() {
+			continue
+		}
 		forceSync := s.refreshCredentialFingerprint(ctx, cfg, now)
-		if cfg.circuitOpen(now) {
+		if cfg.circuitOpen(now) || cfg.PollSuspended {
 			incCircuitSkip(cfg.Provider)
 			lock.Unlock()
 			continue
@@ -448,12 +532,119 @@ func (s *Service) SyncDueConfigs(ctx context.Context) {
 			lock.Unlock()
 			continue
 		}
-		if _, err := s.syncWorkspaceLocked(ctx, cfg.WorkspaceID); err != nil {
-			s.logger.Warn("periodic workflow sync failed",
-				zap.String("workspace_id", cfg.WorkspaceID), zap.Error(err))
-		}
 		lock.Unlock()
+		s.dispatchAutomaticSync(cfg.WorkspaceID, forceSync)
 	}
+}
+
+func (s *Service) dispatchAutomaticSync(workspaceID string, force bool) {
+	s.automaticMu.Lock()
+	if _, ok := s.automaticInFlight[workspaceID]; ok {
+		s.automaticMu.Unlock()
+		return
+	}
+	s.automaticInFlight[workspaceID] = struct{}{}
+	var pool *automaticScheduler
+	if s.automaticPool == nil {
+		poolCtx, cancel := context.WithCancel(context.Background())
+		s.automaticCancel = cancel
+		pool = newAutomaticScheduler(poolCtx, s.automaticWorkers, s.runAutomaticJob, func() {
+			s.automaticPoolIdle(pool)
+		})
+		s.automaticPool = pool
+	} else {
+		pool = s.automaticPool
+	}
+	s.automaticMu.Unlock()
+	if !pool.enqueue(automaticJob{workspaceID: workspaceID, force: force}) {
+		s.finishAutomaticJob(workspaceID)
+	}
+}
+
+func (s *Service) automaticPoolIdle(pool *automaticScheduler) {
+	s.automaticMu.Lock()
+	if s.automaticPool != pool || len(s.automaticInFlight) != 0 {
+		s.automaticMu.Unlock()
+		return
+	}
+	s.automaticPool = nil
+	cancel := s.automaticCancel
+	s.automaticCancel = nil
+	pool.close()
+	s.automaticMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (s *Service) runAutomaticJob(ctx context.Context, job automaticJob) automaticJobResult {
+	jobCtx := github.WithNonBlockingGitHubAdmission(
+		github.WithGitHubWorkClass(ctx, github.WorkClassBackground),
+	)
+	_, err := s.syncWorkspaceWithForce(jobCtx, job.workspaceID, syncAutomatic, job.force)
+	if errors.Is(err, errAutomaticSyncNotDue) {
+		s.finishAutomaticJob(job.workspaceID)
+		return automaticJobResult{}
+	}
+	var deferred *github.AdmissionDeferredError
+	if errors.As(err, &deferred) {
+		return automaticJobResult{
+			wait:    deferred.Wait,
+			discard: func() { s.finishAutomaticJob(job.workspaceID) },
+		}
+	}
+	s.finishAutomaticJob(job.workspaceID)
+	return automaticJobResult{}
+}
+
+func (s *Service) finishAutomaticJob(workspaceID string) {
+	s.automaticMu.Lock()
+	delete(s.automaticInFlight, workspaceID)
+	s.automaticMu.Unlock()
+}
+
+func (s *Service) waitAutomaticSyncs() {
+	s.automaticMu.Lock()
+	pool := s.automaticPool
+	cancel := s.automaticCancel
+	s.automaticPool = nil
+	s.automaticCancel = nil
+	s.automaticInFlight = make(map[string]struct{})
+	s.automaticMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if pool != nil {
+		pool.stop()
+	}
+}
+
+func (s *Service) prepareManualSync(ctx context.Context, workspaceID string, cfg *Config) error {
+	if err := s.store.ResetRecoveryState(ctx, workspaceID, s.now().UTC()); err != nil {
+		return err
+	}
+	cfg.applyCircuitState(authcircuit.State{Fingerprint: cfg.CredentialFingerprint})
+	cfg.LastErrorClass = ""
+	cfg.PollSuspended = false
+	cfg.PollSuspensionReason = ""
+	return nil
+}
+
+func syncContext(ctx context.Context, cfg *Config, mode syncMode) context.Context {
+	if mode == syncAutomatic && cfg.Provider == ProviderGitHub {
+		return github.WithGitHubWorkClass(ctx, github.WorkClassBackground)
+	}
+	return ctx
+}
+
+func (s *Service) shouldRunAutomaticSync(cfg *Config, mode syncMode, force bool) bool {
+	if mode != syncAutomatic {
+		return true
+	}
+	if cfg.circuitOpen(s.now().UTC()) || cfg.PollSuspended || !cfg.PollEnabled {
+		return false
+	}
+	return force || isSyncDue(cfg, s.now().UTC())
 }
 
 // refreshCredentialFingerprint re-derives the workspace's current credential
@@ -473,7 +664,14 @@ func (s *Service) refreshCredentialFingerprint(ctx context.Context, cfg *Config,
 	}
 	state := cfg.circuitState()
 	previousFingerprint := state.Fingerprint
-	if !state.ResetIfFingerprintChanged(fingerprint) {
+	changed := state.ResetIfFingerprintChanged(fingerprint)
+	if !changed && previousFingerprint == "" && cfg.PollSuspended {
+		// A suspended config may have failed before its first fingerprint was
+		// available. Probe once when a credential identity becomes visible.
+		state.RecordSuccess()
+		changed = true
+	}
+	if !changed {
 		cfg.applyCircuitState(state) // still record the first-observed fingerprint
 		if previousFingerprint == "" && state.Fingerprint == fingerprint {
 			if err := s.store.RecordCircuitState(ctx, cfg.WorkspaceID, state); err != nil {
@@ -484,6 +682,9 @@ func (s *Service) refreshCredentialFingerprint(ctx context.Context, cfg *Config,
 		return false
 	}
 	cfg.applyCircuitState(state)
+	cfg.LastErrorClass = ""
+	cfg.PollSuspended = false
+	cfg.PollSuspensionReason = ""
 	incCircuitReset(cfg.Provider, "credential")
 	if err := s.store.RecordCircuitState(ctx, cfg.WorkspaceID, state); err != nil {
 		s.logger.Warn("failed to persist credential-triggered circuit reset",
@@ -518,7 +719,7 @@ func (s *Service) WorkflowSyncCircuitSummary(ctx context.Context) (workflowSyncC
 	now := time.Now().UTC()
 	summary := workflowSyncCircuitSummary{Total: len(configs)}
 	for _, cfg := range configs {
-		if !cfg.circuitOpen(now) {
+		if !cfg.circuitOpen(now) && !cfg.PollSuspended {
 			continue
 		}
 		switch cfg.FailureClass {
@@ -547,8 +748,11 @@ type workflowSyncCircuitSummary struct {
 }
 
 func isSyncDue(cfg *Config, now time.Time) bool {
-	if !cfg.PollEnabled {
+	if !cfg.PollEnabled || cfg.PollSuspended {
 		return false
+	}
+	if cfg.NextAttemptAt != nil {
+		return !now.Before(*cfg.NextAttemptAt)
 	}
 	if cfg.LastSyncedAt == nil {
 		return true

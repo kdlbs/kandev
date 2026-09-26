@@ -247,7 +247,7 @@ func reviewCleanupRecordFingerprint(connectionFingerprint string, watch *ReviewW
 func reviewCleanupFailureMetricClass(err error, class authcircuit.FailureClass) string {
 	var apiErr *GitHubAPIError
 	if errors.As(err, &apiErr) && isGitHubRateLimitAPIError(apiErr) {
-		return "rate_limit"
+		return reviewCleanupMetricClassRateLimit
 	}
 	return string(class)
 }

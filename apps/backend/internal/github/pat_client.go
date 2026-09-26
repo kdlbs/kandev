@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -30,53 +29,28 @@ const accessibleReposAffiliation = "owner,collaborator,organization_member"
 
 // GitHubAPIError represents an error response from the GitHub API with a status code.
 type GitHubAPIError struct {
-	StatusCode int
-	Endpoint   string
-	Body       string
-	RetryAt    *time.Time
+	StatusCode  int
+	Endpoint    string
+	Body        string
+	FailureKind FailureKind
+	Resource    Resource
+	RetryAt     time.Time
+	RetrySource RetrySource
+	Rate        *RateSnapshot
 }
 
 func (e *GitHubAPIError) Error() string {
 	return fmt.Sprintf("GitHub API %s returned %d: %s", e.Endpoint, e.StatusCode, e.Body)
 }
 
+// ProviderRetryAt exposes the classified retry boundary to PR-discovery
+// retry scheduling. It returns nil when the failure carries no retry time.
 func (e *GitHubAPIError) ProviderRetryAt() *time.Time {
-	if e == nil || e.RetryAt == nil {
+	if e == nil || e.RetryAt.IsZero() {
 		return nil
 	}
-	value := *e.RetryAt
+	value := e.RetryAt
 	return &value
-}
-
-// retryAtFromHTTPResponse preserves provider-supplied retry evidence. The
-// later of Retry-After and X-RateLimit-Reset is used so a secondary-limit hint
-// cannot cause discovery to resume before the primary reset.
-func retryAtFromHTTPResponse(resp *http.Response, defaultResource Resource, now time.Time) *time.Time {
-	if resp == nil {
-		return nil
-	}
-	var latest *time.Time
-	if value := strings.TrimSpace(resp.Header.Get("Retry-After")); value != "" {
-		var retryAt time.Time
-		if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
-			retryAt = now.Add(time.Duration(seconds) * time.Second)
-		} else if parsed, parseErr := http.ParseTime(value); parseErr == nil {
-			retryAt = parsed.UTC()
-		}
-		if retryAt.After(now) {
-			latest = &retryAt
-		}
-	}
-	if snapshot, ok := parseRateHeaders(resp, defaultResource); ok && snapshot.ResetAt.After(now) &&
-		(latest == nil || snapshot.ResetAt.After(*latest)) {
-		resetAt := snapshot.ResetAt
-		latest = &resetAt
-	}
-	if latest == nil {
-		return nil
-	}
-	copy := *latest
-	return &copy
 }
 
 // WithRateTracker attaches a rate tracker so response headers are recorded.
@@ -84,6 +58,18 @@ func retryAtFromHTTPResponse(resp *http.Response, defaultResource Resource, now 
 func (c *PATClient) WithRateTracker(t *RateTracker) *PATClient {
 	c.rateTracker = t
 	return c
+}
+
+func (c *PATClient) withRateAdmission(admission *RateAdmission) *PATClient {
+	c.rateAdmission = admission
+	return c
+}
+
+func (c *PATClient) admit(ctx context.Context, endpoint string) (func(), error) {
+	if c.rateAdmission == nil {
+		return func() {}, nil
+	}
+	return c.rateAdmission.acquire(ctx, resourceForEndpoint(endpoint))
 }
 
 // recordRateHeaders feeds rate-limit data from a response into the tracker.
@@ -103,55 +89,28 @@ func (c *PATClient) recordRateHeaders(resp *http.Response, endpoint string) {
 	if headersOK {
 		c.rateTracker.Record(snap)
 	}
-	if !isRateLimitStatus(resp.StatusCode) {
-		return
-	}
-	// On a 429, prefer the real X-RateLimit-Reset over the synthetic 1h
-	// fallback. parseRateHeaders may return ok=true with Remaining>0 if the
-	// secondary-limit response carried stale headers — only skip the
-	// fallback when the headers themselves report exhaustion (Remaining<=0
-	// + future ResetAt). Otherwise fall through to the conservative pause.
-	if headersOK && snap.Exhausted() {
-		return
-	}
-	c.rateTracker.markRateExhausted(defaultResource, time.Time{})
 }
 
-// isRateLimitStatus returns true for status codes GitHub uses to signal
-// primary or secondary rate-limit exhaustion. 403 is documented for both
-// abuse-detection and primary limits when the body indicates so; 429 is
-// secondary limits.
-func isRateLimitStatus(status int) bool {
-	return status == http.StatusTooManyRequests
+func (c *PATClient) apiError(resp *http.Response, endpoint string, body []byte) *GitHubAPIError {
+	failure := classifyGitHubResponse(resp, endpoint, body, time.Now().UTC())
+	incGitHubResponseClassification(failure.Kind, failure.Resource, failure.RetrySource)
+	if c.rateTracker != nil && failure.Kind == FailureSecondaryRateLimit {
+		c.rateTracker.ObserveSecondary(failure.Resource, failure.RetryAt, failure.RetrySource, string(body))
+	}
+	if c.rateTracker != nil && failure.Kind == FailurePrimaryRateLimit {
+		c.rateTracker.ObservePrimary(failure.Resource, failure.RetryAt, failure.RetrySource)
+	}
+	return &GitHubAPIError{
+		StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(body),
+		FailureKind: failure.Kind, Resource: failure.Resource, RetryAt: failure.RetryAt,
+		RetrySource: failure.RetrySource, Rate: failure.Snapshot,
+	}
 }
 
-// maybeMarkRateExhaustedFromBody flags a rate-limit hit when GitHub returned
-// a 403/429 whose body contains the rate-limit prose. The headers may be
-// missing on these responses (esp. secondary limits), so the body is the
-// authoritative signal.
-func (c *PATClient) maybeMarkRateExhaustedFromBody(endpoint string, status int, body []byte) {
-	if c.rateTracker == nil {
-		return
+func (c *PATClient) observeSuccess(endpoint string) {
+	if c.rateTracker != nil {
+		c.rateTracker.ObserveSuccess(resourceForEndpoint(endpoint))
 	}
-	if status != http.StatusForbidden && status != http.StatusTooManyRequests {
-		return
-	}
-	lower := strings.ToLower(string(body))
-	if !strings.Contains(lower, "rate limit") && !strings.Contains(lower, "abuse detection") {
-		return
-	}
-	resource := ResourceCore
-	if strings.HasPrefix(endpoint, "/search/") {
-		resource = ResourceSearch
-	} else if strings.HasPrefix(endpoint, "/graphql") {
-		resource = ResourceGraphQL
-	}
-	// If recordRateHeaders already captured a real reset for this bucket on
-	// the same response, don't clobber it with the synthetic 1h fallback.
-	if existing, ok := c.rateTracker.Snapshot(resource); ok && existing.Exhausted() {
-		return
-	}
-	c.rateTracker.markRateExhausted(resource, time.Time{})
 }
 
 // setGitHubHeaders sets the common Authorization, Accept, and API version headers.
@@ -931,6 +890,11 @@ type gistFileDTO struct {
 // switch to wrapping in `GitHubAPIError`) if the caller needs per-status
 // mapping like the merge endpoint does.
 func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) error {
+	release, err := c.admit(ctx, endpoint)
+	if err != nil {
+		return err
+	}
+	defer release()
 	u := githubAPIBase + endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 	if err != nil {
@@ -948,9 +912,9 @@ func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) erro
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
-		return fmt.Errorf("GitHub API POST %s returned %d: %s", endpoint, resp.StatusCode, string(respBody))
+		return c.apiError(resp, endpoint, respBody)
 	}
+	c.observeSuccess(endpoint)
 	return nil
 }
 
@@ -967,6 +931,11 @@ func (c *PATClient) requestJSON(
 	body []byte,
 	result interface{},
 ) error {
+	release, err := c.admit(ctx, endpoint)
+	if err != nil {
+		return err
+	}
+	defer release()
 	u := githubAPIBase + endpoint
 	req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
 	if err != nil {
@@ -984,9 +953,9 @@ func (c *PATClient) requestJSON(
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
+		return c.apiError(resp, endpoint, respBody)
 	}
+	c.observeSuccess(endpoint)
 	if result == nil {
 		return nil
 	}
@@ -996,6 +965,11 @@ func (c *PATClient) requestJSON(
 // delete sends a DELETE request. 2xx and 404 both return nil-or-typed-error per caller intent.
 // Here we return a typed error on any non-2xx so callers can inspect for 404.
 func (c *PATClient) delete(ctx context.Context, endpoint string) error {
+	release, err := c.admit(ctx, endpoint)
+	if err != nil {
+		return err
+	}
+	defer release()
 	u := githubAPIBase + endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
 	if err != nil {
@@ -1012,9 +986,9 @@ func (c *PATClient) delete(ctx context.Context, endpoint string) error {
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
+		return c.apiError(resp, endpoint, respBody)
 	}
+	c.observeSuccess(endpoint)
 	return nil
 }
 
@@ -1027,6 +1001,11 @@ func (c *PATClient) putJSON(ctx context.Context, endpoint string, body []byte, r
 }
 
 func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}) error {
+	release, err := c.admit(ctx, endpoint)
+	if err != nil {
+		return err
+	}
+	defer release()
 	url := githubAPIBase + endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -1043,14 +1022,21 @@ func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, body)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(body)}
+		return c.apiError(resp, endpoint, body)
+	}
+	if endpoint != rateLimitEndpoint {
+		c.observeSuccess(endpoint)
 	}
 	return json.NewDecoder(resp.Body).Decode(result)
 }
 
 // getPaginated is like get but also returns the "next" link from the Link header, if any.
 func (c *PATClient) getPaginated(ctx context.Context, endpoint string, result interface{}) (string, error) {
+	release, err := c.admit(ctx, endpoint)
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	u := githubAPIBase + endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -1067,9 +1053,9 @@ func (c *PATClient) getPaginated(ctx context.Context, endpoint string, result in
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, body)
-		return "", &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(body)}
+		return "", c.apiError(resp, endpoint, body)
 	}
+	c.observeSuccess(endpoint)
 	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
 		return "", err
 	}

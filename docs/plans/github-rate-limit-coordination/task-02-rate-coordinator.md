@@ -1,0 +1,50 @@
+---
+id: 02-rate-coordinator
+title: Principal-wide request admission
+status: done
+wave: 2
+depends_on: [01-rate-classification]
+plan: plan.md
+requirements:
+  - REQ-INTEGRATIONS-GITHUB-RATE-002
+acceptance_criteria:
+  - AC-INTEGRATIONS-GITHUB-RATE-002.1
+  - AC-INTEGRATIONS-GITHUB-RATE-002.2
+  - AC-INTEGRATIONS-GITHUB-RATE-002.3
+system_design:
+  - ../../specs/integrations/system-design/github-rate-limit-coordination.md
+---
+
+# Task 02: Principal-Wide Request Admission
+
+## Acceptance
+
+- Workspaces with the same upstream principal share one tracker/admission state.
+- Background work is paced, respects the ten-percent reserve, and yields to
+  interactive work without holding capacity while delayed.
+- Provider retry windows block admission and cancellation remains prompt.
+
+## Verification
+
+- `cd apps/backend && go test ./internal/github -run 'Test.*(Coordinator|Admission|Principal|Poller|RateTracker)' -count=1`
+- `cd apps/backend && go test -race ./internal/github -run 'Test.*(Coordinator|Admission)' -count=1`
+
+## Results
+
+- Shared observations and admission by normalized human login or App
+  registration/installation, independently of workspace and credential
+  generation.
+- Direct HTTP, GraphQL, and `gh` execution now enforce retry windows before
+  transport work; automated GitHub pollers use the background work class.
+- Background calls serialize and pace per resource, retain a ten-percent
+  primary reserve, and remain behind active interactive work.
+- Focused and race validation passed with task-local Go caches.
+- Follow-up: a missing-reset primary wait is anchored to the observation time,
+  so background admission reopens after the one-minute fallback expires.
+- Follow-up verification passed: the elapsed-fallback coordinator regression
+  under `go test -race ./internal/github`, and diff-scoped `golangci-lint` found
+  zero issues against base `3aa3233c7833c8f3c034083e10d76999af3a010d`.
+- Review follow-up: a zero-remaining `GET /rate_limit` bucket with a missing,
+  zero, or negative reset now keeps the reset unknown. The shared observer and
+  real PAT request path defer the next background request to the one-minute
+  fallback instead of treating the Unix epoch as a completed reset.

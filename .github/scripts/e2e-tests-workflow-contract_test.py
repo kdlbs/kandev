@@ -284,7 +284,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn('artifact.name === "e2e-timing-profile"', workflow)
         self.assertIn("!artifact.expired", workflow)
 
-    def test_e2e_artifact_downloads_retry_transient_service_failures(self) -> None:
+    def test_e2e_artifact_download_retries_preserve_prepared_workspace(self) -> None:
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
         self.assertTrue(DOWNLOAD_ARTIFACT_RETRY_ACTION.exists())
         self.assertNotIn("uses: actions/download-artifact@", workflow)
@@ -292,6 +292,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
             workflow.count("uses: ./.github/actions/download-artifact-retry"),
             12,
         )
+        self.assertIn("name: e2e-web-build\n          path: apps/web/", workflow)
 
         action = DOWNLOAD_ARTIFACT_RETRY_ACTION.read_text(encoding="utf-8")
         self.assertEqual(action.count("uses: actions/download-artifact@"), 3)
@@ -299,7 +300,6 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn('default: "false"', action)
         for input_name in (
             "name",
-            "path",
             "pattern",
             "merge-multiple",
             "repository",
@@ -311,9 +311,17 @@ cat "${FAKE_DOCKER_MANIFEST}"
                 3,
                 input_name,
             )
+        self.assertEqual(
+            action.count("path: ${{ runner.temp }}/kandev-artifact-retry/${{ inputs.path }}"),
+            3,
+        )
         self.assertIn("sleep 10", action)
         self.assertIn("sleep 30", action)
-        self.assertIn('rm -rf -- "$DOWNLOAD_PATH"', action)
+        self.assertNotIn('rm -rf -- "$DOWNLOAD_PATH"', action)
+        self.assertIn('STAGING_PATH: ${{ runner.temp }}/kandev-artifact-retry/${{ inputs.path }}', action)
+        self.assertIn('rm -rf -- "$STAGING_PATH"', action)
+        self.assertIn('mkdir -p "$DOWNLOAD_PATH"', action)
+        self.assertIn('cp -a "$STAGING_PATH"/. "$DOWNLOAD_PATH"/', action)
         self.assertIn("exit 1", action)
 
     # @covers AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.1
