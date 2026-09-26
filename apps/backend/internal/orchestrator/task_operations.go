@@ -9384,39 +9384,49 @@ func (s *Service) reconcileCancelledSessionState(
 	if session == nil || !requireWaiting {
 		return session, nil
 	}
+	current, err := s.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("reload cancelled session %s before reconciliation: %w", session.ID, err)
+	}
+	if current == nil {
+		return nil, fmt.Errorf("reload cancelled session %s before reconciliation: session not found", session.ID)
+	}
+	if taskID == "" {
+		taskID = current.TaskID
+	}
 	updated := s.updateTaskSessionState(
 		ctx,
 		taskID,
-		session.ID,
+		current.ID,
 		models.TaskSessionStateWaitingForInput,
 		"",
 		true,
-		session,
+		current,
 	)
 	if updated == nil {
-		return nil, fmt.Errorf("persist cancelled session %s as WAITING_FOR_INPUT", session.ID)
+		return nil, fmt.Errorf("persist cancelled session %s as WAITING_FOR_INPUT", current.ID)
 	}
 	if updated.State != models.TaskSessionStateWaitingForInput {
 		return nil, fmt.Errorf(
 			"cancelled session %s persisted as %s, want WAITING_FOR_INPUT",
-			session.ID,
+			current.ID,
 			updated.State,
 		)
 	}
-	authoritative, err := s.repo.GetTaskSession(ctx, session.ID)
+	authoritative, err := s.repo.GetTaskSession(ctx, current.ID)
 	if err != nil {
-		return nil, fmt.Errorf("verify cancelled session %s state: %w", session.ID, err)
+		return nil, fmt.Errorf("verify cancelled session %s state: %w", current.ID, err)
 	}
 	if authoritative == nil {
 		return nil, fmt.Errorf(
 			"cancelled session %s is missing before turn settlement, want WAITING_FOR_INPUT",
-			session.ID,
+			current.ID,
 		)
 	}
 	if authoritative.State != models.TaskSessionStateWaitingForInput {
 		return nil, fmt.Errorf(
 			"cancelled session %s is %s before turn settlement, want WAITING_FOR_INPUT",
-			session.ID,
+			current.ID,
 			authoritative.State,
 		)
 	}

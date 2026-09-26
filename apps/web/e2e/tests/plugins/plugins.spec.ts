@@ -748,7 +748,9 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
 
     await trigger.hover();
     await expect(
-      testPage.getByRole("tooltip").filter({ hasText: "Tooltip inside a plugin modal" }),
+      testPage
+        .locator('[data-slot="tooltip-content"]')
+        .filter({ hasText: "Tooltip inside a plugin modal" }),
     ).toBeVisible();
   });
 
