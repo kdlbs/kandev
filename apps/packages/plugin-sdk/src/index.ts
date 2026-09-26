@@ -16,6 +16,113 @@ export type ElementFactory = (...args: any[]) => HostNode;
 export type Component<Props = {}> = (props: Props) => any;
 export type HostComponent = unknown;
 
+/** A subset of the real host button that preserves pointer capture for plugins. */
+export interface PluginActionElement extends EventTarget {
+  disabled: boolean;
+  click(): void;
+  focus(options?: FocusOptions): void;
+  blur(): void;
+  setPointerCapture(pointerId: number): void;
+  releasePointerCapture(pointerId: number): void;
+  hasPointerCapture(pointerId: number): boolean;
+}
+
+export interface PluginActionEvent<Target extends PluginActionElement = PluginActionElement> {
+  currentTarget: Target;
+  target: EventTarget;
+  preventDefault(): void;
+  stopPropagation(): void;
+}
+
+export interface PluginActionMouseEvent extends PluginActionEvent {
+  button: number;
+  buttons: number;
+  clientX: number;
+  clientY: number;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+}
+
+export interface PluginActionPointerEvent extends PluginActionMouseEvent {
+  pointerId: number;
+  pointerType: string;
+  isPrimary: boolean;
+}
+
+export interface PluginActionKeyboardEvent extends PluginActionEvent {
+  key: string;
+  code: string;
+  repeat: boolean;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+}
+
+export interface PluginActionFocusEvent extends PluginActionEvent {
+  relatedTarget: EventTarget | null;
+}
+
+export type PluginActionEventHandler<Event extends PluginActionEvent> = {
+  bivarianceHack(event: Event): void;
+}["bivarianceHack"];
+
+export type PluginActionRef =
+  | {
+      bivarianceHack(instance: PluginActionElement | null): void;
+    }["bivarianceHack"]
+  | { readonly current: PluginActionElement | null };
+
+/** Props accepted by the host-owned action control in supported plugin slots. */
+export interface PluginActionProps {
+  /** Localized, stable accessible name. */
+  label: string;
+  /** Decorative icon or custom glyph, rendered inside the host-owned icon box. */
+  icon?: HostNode;
+  /** Optional visible value or short label. */
+  text?: string;
+  /** Optional short decorative badge. */
+  badge?: string;
+  tone?: "neutral" | "success" | "warning" | "danger";
+  pressed?: boolean;
+  disabled?: boolean;
+  /** Shows activity feedback but does not disable the action. */
+  busy?: boolean;
+  /** Empty disables the host tooltip. Icon-only actions default to `label`. */
+  tooltip?: string;
+  ref?: PluginActionRef;
+  id?: string;
+  "aria-expanded"?: boolean;
+  "aria-controls"?: string;
+  "aria-haspopup"?: boolean | "menu" | "listbox" | "tree" | "grid" | "dialog";
+  "aria-describedby"?: string;
+  "data-testid"?: string;
+  "data-state"?: string;
+  "data-side"?: "top" | "right" | "bottom" | "left";
+  "data-align"?: "start" | "center" | "end";
+  "data-disabled"?: boolean | string;
+  onClick?: PluginActionEventHandler<PluginActionMouseEvent>;
+  onFocus?: PluginActionEventHandler<PluginActionFocusEvent>;
+  onBlur?: PluginActionEventHandler<PluginActionFocusEvent>;
+  onKeyDown?: PluginActionEventHandler<PluginActionKeyboardEvent>;
+  onPointerDown?: PluginActionEventHandler<PluginActionPointerEvent>;
+  onPointerUp?: PluginActionEventHandler<PluginActionPointerEvent>;
+  onPointerCancel?: PluginActionEventHandler<PluginActionPointerEvent>;
+  onPointerEnter?: PluginActionEventHandler<PluginActionPointerEvent>;
+  onPointerMove?: PluginActionEventHandler<PluginActionPointerEvent>;
+  onPointerLeave?: PluginActionEventHandler<PluginActionPointerEvent>;
+  onLostPointerCapture?: PluginActionEventHandler<PluginActionPointerEvent>;
+  onMouseEnter?: PluginActionEventHandler<PluginActionMouseEvent>;
+  onMouseLeave?: PluginActionEventHandler<PluginActionMouseEvent>;
+}
+
+export interface PluginActionGroupProps {
+  children?: HostNode;
+  label?: string;
+}
+
 export interface PluginIconProps {
   className?: string;
   "aria-hidden"?: boolean | "true" | "false";
@@ -30,11 +137,35 @@ export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-f
 /**
  * Context for the `main-top-bar` slot. Phone listing contributions live in the
  * menu with 44px touch targets; interactions retain the slot's local state.
+ * On phones with task controls, the same plugin's chat-top-bar replaces this
+ * slot once it renders content. Null-rendering task controls retain this
+ * fallback. Listings and archived tasks retain the workspace toolbar.
  */
 export interface MainTopBarSlotProps {
   workspaceId: string | null;
   workspaceLabel?: string;
   currentPage: "kanban" | "tasks";
+  presentation: "desktop" | "mobile";
+}
+
+/**
+ * Context for the `chat-top-bar` slot. Phone task contributions live in the
+ * shared menu; tablet and desktop contributions remain inline in the top bar.
+ * When task controls are present, every registration in this slot renders
+ * instead of the same plugin's main-top-bar registrations in the phone menu.
+ */
+export interface ChatTopBarSlotProps {
+  /** Task the top bar belongs to, or null before one exists. */
+  taskId: string | null;
+  /** Display title of the task, when known. */
+  taskTitle?: string;
+  /** Workspace the task lives in, when known. */
+  workspaceId: string | null;
+  /** Session the top bar is currently bound to, or null before one exists. */
+  activeSessionId: string | null;
+  /** Every Kandev session id on the task, including `activeSessionId`. */
+  sessionIds: string[];
+  /** Host surface that mounted the contribution. */
   presentation: "desktop" | "mobile";
 }
 
@@ -403,12 +534,44 @@ export interface PluginTaskMenuContext {
   presentation: "desktop" | "mobile";
 }
 
+/**
+ * One child of a task menu action that declares `items`. Unlike the parent
+ * action, an item is never registered on its own: it exists only inside its
+ * parent's submenu, so it has no `group`, no `visible`, and its own nesting is
+ * not supported (one level deep).
+ */
+export interface TaskMenuSubItemRegistration {
+  /** Unique within the parent action; contributes to the menu entry's React key. */
+  id: string;
+  label: string;
+  icon?: PluginIcon;
+  disabled?: boolean;
+  run(context: PluginTaskMenuContext): void | Promise<void>;
+}
+
 export interface TaskMenuActionRegistration {
   id: string;
   label: string;
   icon?: PluginIcon;
   group: "edit" | "primary";
   visible?(context: PluginTaskMenuContext): boolean;
+  /**
+   * Declaring this turns the action into a submenu: the host renders `label`
+   * as an unselectable submenu trigger and calls `items(context)` to get its
+   * children, in the returned order. It must be synchronous and cheap: the
+   * host cannot await a menu item, and it builds a card's or row's entries on
+   * every render — a card's dropdown and context variants are built from one
+   * evaluation, whether or not a menu is open — so an implementation that
+   * scans or sorts should memoize on the state it reads.
+   *
+   * `run` then serves as the fallback for a host that predates submenus (it
+   * ignores this field and renders the flat item) and for a build where
+   * `items` yields nothing usable: an empty list, or a throw (caught,
+   * logged, and treated as empty). Either way the action stays reachable
+   * instead of becoming a trigger with no children.
+   */
+  items?(context: PluginTaskMenuContext): readonly TaskMenuSubItemRegistration[];
+  /** A rejection is caught and logged; the menu closes either way. */
   run(context: PluginTaskMenuContext): void | Promise<void>;
 }
 
@@ -497,6 +660,8 @@ interface PluginUIShape {
   AlertTitle: unknown;
   Badge: unknown;
   Button: unknown;
+  Action: Component<PluginActionProps>;
+  ActionGroup: Component<PluginActionGroupProps>;
   Card: unknown;
   CardAction: unknown;
   CardContent: unknown;

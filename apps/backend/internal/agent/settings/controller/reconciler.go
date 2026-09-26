@@ -112,6 +112,20 @@ func (r *ProfileReconciler) Run(ctx context.Context) error {
 	return nil
 }
 
+// logReconcileError logs a reconciler store failure at WARN, except when the
+// error is a context cancellation. The reconcile pass runs off hostUtilityCtx,
+// which is canceled on backend shutdown, so an interrupted store call is
+// expected teardown rather than a fault and is downgraded to DEBUG to keep
+// shutdown logs quiet. Mirrors github.Poller.logCleanupError.
+func (r *ProfileReconciler) logReconcileError(msg string, err error, fields ...zap.Field) {
+	fields = append(fields, zap.Error(err))
+	if errors.Is(err, context.Canceled) {
+		r.log.Debug(msg+" (context canceled during shutdown)", fields...)
+		return
+	}
+	r.log.Warn(msg, fields...)
+}
+
 func (r *ProfileReconciler) ensureVirtualFamilies(ctx context.Context) {
 	for _, ag := range r.registry.List() {
 		if !agents.IsVirtualAgent(ag) {
@@ -120,8 +134,8 @@ func (r *ProfileReconciler) ensureVirtualFamilies(ctx context.Context) {
 		if _, err := r.store.GetAgentByName(ctx, ag.ID()); err == nil {
 			continue
 		} else if !errors.Is(err, sql.ErrNoRows) {
-			r.log.Warn("reconcile: look up virtual agent failed",
-				zap.String("agent_id", ag.ID()), zap.Error(err))
+			r.logReconcileError("reconcile: look up virtual agent failed", err,
+				zap.String("agent_id", ag.ID()))
 			continue
 		}
 		parent := &models.Agent{
@@ -130,8 +144,8 @@ func (r *ProfileReconciler) ensureVirtualFamilies(ctx context.Context) {
 			SupportsMCP: false,
 		}
 		if err := r.store.CreateAgent(ctx, parent); err != nil {
-			r.log.Warn("reconcile: seed virtual agent failed",
-				zap.String("agent_id", ag.ID()), zap.Error(err))
+			r.logReconcileError("reconcile: seed virtual agent failed", err,
+				zap.String("agent_id", ag.ID()))
 			continue
 		}
 		r.log.Info("seeded virtual agent family", zap.String("agent_id", ag.ID()))
@@ -177,7 +191,7 @@ func (r *ProfileReconciler) cleanupOrphans(ctx context.Context) {
 	if err != nil {
 		summary.skipped = true
 		summary.skipReason = "list_agents_failed"
-		r.log.Warn("orphan cleanup: list agents failed", zap.Error(err))
+		r.logReconcileError("orphan cleanup: list agents failed", err)
 		return
 	}
 	summary.dbAgentCount = len(dbAgents)
@@ -220,10 +234,9 @@ func (r *ProfileReconciler) collectOrphanCleanupCandidates(
 		if err != nil {
 			summary.profileListFailureCount++
 			summary.profilesCandidatePartial = true
-			r.log.Warn("orphan cleanup: list profiles failed",
+			r.logReconcileError("orphan cleanup: list profiles failed", err,
 				zap.String("agent_id", dbAgent.ID),
-				zap.String("agent_name", dbAgent.Name),
-				zap.Error(err))
+				zap.String("agent_name", dbAgent.Name))
 			continue
 		}
 		for _, p := range profiles {
@@ -255,8 +268,8 @@ func (r *ProfileReconciler) deleteOrphanCleanupCandidates(
 			zap.String("agent_id", candidate.profile.AgentID),
 			zap.String("agent_name", candidate.agent.Name))
 		if err := r.store.DeleteAgentProfile(ctx, candidate.profile.ID); err != nil {
-			r.log.Warn("orphan cleanup: delete failed",
-				zap.String("profile_id", candidate.profile.ID), zap.Error(err))
+			r.logReconcileError("orphan cleanup: delete failed", err,
+				zap.String("profile_id", candidate.profile.ID))
 			continue
 		}
 		summary.profilesDeletedCount++
@@ -297,15 +310,15 @@ func (r *ProfileReconciler) reconcileAgent(ctx context.Context, ag agents.Agent)
 
 	dbAgent, err := r.ensureDBAgent(ctx, ag)
 	if err != nil {
-		r.log.Warn("reconcile: ensure db agent failed",
-			zap.String("agent_id", agentType), zap.Error(err))
+		r.logReconcileError("reconcile: ensure db agent failed", err,
+			zap.String("agent_id", agentType))
 		return
 	}
 
 	profiles, err := r.store.ListAgentProfiles(ctx, dbAgent.ID)
 	if err != nil {
-		r.log.Warn("reconcile: list profiles failed",
-			zap.String("agent_id", agentType), zap.Error(err))
+		r.logReconcileError("reconcile: list profiles failed", err,
+			zap.String("agent_id", agentType))
 		return
 	}
 
@@ -324,8 +337,8 @@ func (r *ProfileReconciler) reconcileAgent(ctx context.Context, ag agents.Agent)
 		// see its orphan-cleaned rows here.)
 		hadProfiles, err := r.store.HasDeletedAgentProfiles(ctx, dbAgent.ID)
 		if err != nil {
-			r.log.Warn("reconcile: check deleted profiles failed",
-				zap.String("agent_id", agentType), zap.Error(err))
+			r.logReconcileError("reconcile: check deleted profiles failed", err,
+				zap.String("agent_id", agentType))
 			return
 		}
 		if hadProfiles {
@@ -377,18 +390,19 @@ func (r *ProfileReconciler) seedDefaultProfile(
 	caps hostutility.AgentCapabilities,
 ) {
 	profile := &models.AgentProfile{
-		AgentID:          dbAgent.ID,
-		Name:             profileNameFromCaps(ag, caps),
-		AgentDisplayName: ag.DisplayName(),
-		Model:            caps.CurrentModelID,
-		Mode:             caps.CurrentModeID,
-		AllowIndexing:    ag.ID() == "auggie",
-		CLIPassthrough:   false,
-		UserModified:     false,
+		AgentID:              dbAgent.ID,
+		Name:                 profileNameFromCaps(ag, caps),
+		AgentDisplayName:     ag.DisplayName(),
+		Model:                caps.CurrentModelID,
+		Mode:                 caps.CurrentModeID,
+		AllowIndexing:        ag.ID() == "auggie",
+		CLIPassthrough:       false,
+		CursorMCPAuthEnabled: true,
+		UserModified:         false,
 	}
 	if err := r.store.CreateAgentProfile(ctx, profile); err != nil {
-		r.log.Warn("seed default profile failed",
-			zap.String("agent_id", dbAgent.ID), zap.Error(err))
+		r.logReconcileError("seed default profile failed", err,
+			zap.String("agent_id", dbAgent.ID))
 		return
 	}
 	r.log.Info("seeded default profile from probe",
@@ -433,8 +447,8 @@ func (r *ProfileReconciler) healProfile(
 			return
 		}
 		if err := r.store.UpdateAgentProfile(ctx, p); err != nil {
-			r.log.Warn("profile compatibility migration update failed",
-				zap.String("profile_id", p.ID), zap.Error(err))
+			r.logReconcileError("profile compatibility migration update failed", err,
+				zap.String("profile_id", p.ID))
 		}
 		return
 	}
@@ -480,8 +494,8 @@ func (r *ProfileReconciler) healProfile(
 		return
 	}
 	if err := r.store.UpdateAgentProfile(ctx, p); err != nil {
-		r.log.Warn("profile heal update failed",
-			zap.String("profile_id", p.ID), zap.Error(err))
+		r.logReconcileError("profile heal update failed", err,
+			zap.String("profile_id", p.ID))
 	}
 }
 

@@ -56,12 +56,14 @@ type Provider struct {
 
 // Analysis describes the configured cache without changing it.
 type Analysis struct {
-	Path               string `json:"path"`
-	SizeBytes          int64  `json:"size_bytes"`
-	Owned              bool   `json:"owned"`
-	Enabled            bool   `json:"enabled"`
-	UnmanagedPath      string `json:"unmanaged_path,omitempty"`
-	UnmanagedSizeBytes int64  `json:"unmanaged_size_bytes,omitempty"`
+	Path          string `json:"path"`
+	SizeBytes     int64  `json:"size_bytes"`
+	Owned         bool   `json:"owned"`
+	Enabled       bool   `json:"enabled"`
+	UnmanagedPath string `json:"unmanaged_path,omitempty"`
+	// A nil size means that the distinct user cache was not measured. A pointer
+	// preserves an explicitly measured zero in the successful response.
+	UnmanagedSizeBytes *int64 `json:"unmanaged_size_bytes,omitempty"`
 }
 
 // CleanupResult describes one cache rotation.
@@ -154,7 +156,8 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 		return Analysis{}, fmt.Errorf("measure Go cache: %w", err)
 	}
 	analysis.UnmanagedPath = unmanagedPath
-	analysis.UnmanagedSizeBytes = measurements[1].Bytes
+	unmanagedSizeBytes := measurements[1].Bytes
+	analysis.UnmanagedSizeBytes = &unmanagedSizeBytes
 	return analysis, nil
 }
 

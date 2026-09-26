@@ -257,7 +257,9 @@ test.describe("mobile CLI mode: passthrough composer", () => {
       timeout: 5_000,
     });
 
-    await testPage.getByTestId("submit-message-button").tap();
+    const submitButton = composer.getByTestId("submit-message-button");
+    await expect(submitButton).toBeEnabled({ timeout: 10_000 });
+    await submitButton.tap();
     await expect(composer).toBeHidden({ timeout: 10_000 });
 
     await session.expectPassthroughHasText("mobile context e2e", 15_000);
@@ -345,10 +347,18 @@ test.describe("mobile CLI mode: passthrough composer", () => {
     const searchInput = testPage.getByPlaceholder("Search files and prompts...");
     await expect(searchInput).toBeVisible({ timeout: 5_000 });
     await searchInput.fill(promptName);
+    const promptOption = testPage.getByRole("checkbox", { name: promptName });
+    await expect(promptOption).toBeVisible();
     await testPage.getByText(promptName, { exact: true }).tap();
-    await expect(firstComposer.getByText(promptName, { exact: true })).toBeVisible({
-      timeout: 5_000,
-    });
+    await expect(promptOption).toBeChecked();
+    await expect(async () => {
+      await expect(firstComposer.getByTestId("chat-context-button")).toContainText("1", {
+        timeout: 1_000,
+      });
+      await expect(firstComposer.getByText(promptName, { exact: true })).toBeVisible({
+        timeout: 1_000,
+      });
+    }).toPass({ timeout: 15_000, intervals: [250, 500, 1_000] });
 
     fs.mkdirSync(testInfo.outputDir, { recursive: true });
     const attachmentName = "mobile-passthrough-draft.txt";

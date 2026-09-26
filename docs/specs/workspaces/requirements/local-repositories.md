@@ -2,7 +2,7 @@
 status: active
 system: workspaces
 created: 2026-07-20
-updated: 2026-08-30
+updated: 2026-09-25
 owners:
   - kandev
 ---
@@ -55,7 +55,12 @@ that repository discovery does not request access while I am idle.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-002.4:** A desktop user shall start root
   selection from a visible action that opens the native folder picker.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-002.5:** The native folder picker shall
-  start at the user's home and shall allow selection of home or a narrower root.
+  start at an existing local workspace folder under Home when one is available.
+  Otherwise, it shall use the operating system's default location without
+  forcing Home as the initial directory. The user can still navigate to and
+  select Home or a narrower root. The desktop process shall remain responsive
+  to operating-system events while the modal dialog is open. Cancellation
+  shall leave discovery roots unchanged.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-002.6:** Kandev shall scan only roots that
   the desktop user selected or an operator configured.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-002.7:** Selecting a root shall save its
@@ -80,7 +85,12 @@ that repository discovery does not request access while I am idle.
   children. A scan shall include one of these folders when that folder is a root.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-002.15:** On upgrade, a desktop launch shall
   retain all operator-configured roots. An existing implicit-home installation
-  shall show a confirmation action without an automatic home scan.
+  shall show a confirmation action without an automatic home scan. Clicking
+  **Continue Home Discovery** shall save the backend user's canonical Home
+  and start one scan without opening a folder picker. The backend shall add
+  Home only while confirmation is pending. A retry may return an existing
+  Home root without another scan. A stale action after another root was
+  selected shall not add Home.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-002.16:** Desktop discovery roots shall have
   install-wide scope. A workspace-scoped discovery response shall apply the same
   effective roots for each workspace.
@@ -108,9 +118,28 @@ can display a permission dialog after the user leaves the application.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-003.6:** Concurrent requests for the same
   roots shall share one scan.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-003.7:** A failed refresh shall preserve the
-  last successful result and shall expose the failed root and recovery action.
+  last successful result. Failed-root details shall remain in structured backend
+  diagnostics. Repository selectors shall retain their existing manual Refresh
+  action, and saved desktop roots shall retain their explicit recovery actions.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-003.8:** An empty or filtered discovery
   result shall show a visible manual Refresh action.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-003.9:** When a descendant is inaccessible,
+  discovery shall continue through accessible siblings and retain repositories
+  already found. An accessible root shall not require reconnection solely
+  because a descendant is inaccessible.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-003.10:** When at least one root succeeds
+  and another fails, discovery shall return fresh results from every successful
+  root. It shall retain previous results only for failed roots. Successful
+  empty scans shall remove obsolete results from those roots.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-003.11:** When roots fail, browser and phone
+  repository selectors shall keep available repositories selectable and retain
+  their normal manual Refresh action. They shall not render failed-root paths or
+  a failed-root warning. Failed-root details shall remain in structured backend
+  diagnostics. Saved desktop roots shall retain their Reconnect and Remove
+  actions.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-003.12:** A missing clone directory shall
+  not prevent results from other roots from appearing on initial or later scans.
+  Discovery shall not create the directory to recover from this condition.
 
 ### REQ-WORKSPACES-LOCAL-REPOSITORIES-004: Filesystem access diagnostics
 
@@ -280,6 +309,8 @@ the repository record removes that exact durable grant from the workspace.
 - Making Pull, Push, or change-request creation work without a configured remote.
 
 ## Implementation Plans
+
+- [Repository Discovery Failure Recovery](../../../plans/repository-discovery-failure-recovery/plan.md)
 
 - [Explicit Local Repository Trust](../../../plans/explicit-local-repository-trust/plan.md)
 - [Local-only Merge and Rebase](../../../plans/local-only-merge-rebase/plan.md)

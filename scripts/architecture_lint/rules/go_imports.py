@@ -7,6 +7,7 @@ IMPORT_LINE = re.compile(r'^\s*(?:(?:[A-Za-z_][\w]*|\.|_)\s+)?["`]([^"`]+)["`]')
 SINGLE_IMPORT = re.compile(
     r'^\s*import\s+(?:(?:[A-Za-z_][\w]*|\.|_)\s+)?["`]([^"`]+)["`]'
 )
+GENERATED_HEADER = re.compile(r'^\s*//\s*Code generated .* DO NOT EDIT\.\s*$')
 
 
 def import_lines(source: str) -> list[tuple[int, str]]:
@@ -33,3 +34,9 @@ def import_lines(source: str) -> list[tuple[int, str]]:
 
 def is_import_at_or_below(import_path: str, root: str) -> bool:
     return import_path == root or import_path.startswith(root + "/")
+
+
+def is_generated(source: str) -> bool:
+    """Recognize the standard Go generated-code header near the file start."""
+
+    return any(GENERATED_HEADER.match(line) for line in source.splitlines()[:10])

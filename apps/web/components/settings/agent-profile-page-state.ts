@@ -69,6 +69,14 @@ export function shouldSyncProfileSaveResponse(
   return isProfileRevisionNewer(response, currentSaved);
 }
 
+function changedCursorMcpAuthPreference(
+  draft: AgentProfile,
+  savedProfile: AgentProfile,
+): boolean | undefined {
+  const draftValue = draft.cursorMcpAuthEnabled ?? true;
+  return draftValue === (savedProfile.cursorMcpAuthEnabled ?? true) ? undefined : draftValue;
+}
+
 export function useProfileEditorState(
   profile: AgentProfile,
   permissionSettings: Record<string, PermissionSetting>,
@@ -222,6 +230,7 @@ export function useProfileSave({
           config_options: draft.configOptions ?? {},
           ...permissionsToProfilePatch(draft),
           cli_passthrough: draft.cliPassthrough,
+          cursor_mcp_auth_enabled: changedCursorMcpAuthPreference(draft, savedProfile),
           // Omit an unchanged enabled value so a profile editor save cannot
           // resurrect a concurrent list-toggle response from its stale draft.
           enabled:
@@ -230,6 +239,13 @@ export function useProfileSave({
               : undefined,
           cli_flags: draft.cliFlags,
           command_prefix: draft.commandPrefix ?? "",
+          provider_kind: draft.providerKind ?? "",
+          provider_base_url:
+            (draft.providerKind ?? "") === "openai_compatible" ? (draft.providerBaseUrl ?? "") : "",
+          provider_api_key_secret_id:
+            (draft.providerKind ?? "") === "openai_compatible"
+              ? (draft.providerApiKeySecretId ?? "")
+              : "",
           env_vars: draft.envVars ?? [],
         },
         force,

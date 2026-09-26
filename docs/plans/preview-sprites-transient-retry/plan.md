@@ -1,19 +1,22 @@
 ---
-spec: docs/specs/ui/requirements/preview-sprites-transient-retry.md
 created: 2026-07-31
 status: complete
+requirements:
+  - REQ-UI-PREVIEW-SPRITES-TRANSIENT-RETRY-001
+system_design:
+  - ../../specs/ui/system-design/preview-sprites-transient-retry.md
+legacy_specs: []
 ---
 
 # Implementation Plan: Preview Sprites Transient Retry
 
 ## Overview
 
-The failed preview job reached `CreateSprite` after a successful local build,
-then failed on the SDK HTTP client's 30-second timeout. Add bounded,
-context-aware retries inside the preview CLI's get-or-create boundary, where
-the operation is safe to resume and can reconcile an ambiguous create. Keep
-the GitHub Actions workflow unchanged so permanent build or credential errors
-remain visible on their first attempt.
+The failed preview job reached the Sprites control plane after a successful
+local build, then failed on a transient provider error. Add bounded,
+context-aware retries inside the preview CLI's idempotent control-plane
+boundaries. Keep the GitHub Actions workflow unchanged so permanent build or
+credential errors remain visible on their first attempt.
 
 ## Backend
 
@@ -21,12 +24,19 @@ remain visible on their first attempt.
 
 - `apps/backend/cmd/preview/sprite_ops.go`: introduce transient-error
   classification and a bounded backoff helper. Retry discovery and creation
-  with fresh per-attempt contexts; use `Retry-After` from `sprites.APIError`
-  where it is supplied. Re-read the named sprite after a transient create
-  error before another create request.
+  with fresh per-attempt contexts; use positive `Retry-After` values from
+  `sprites.APIError` where supplied, capped at 30 seconds. Re-read the named
+  sprite after a transient create error before another create request.
 - Preserve the existing upload retry independently. Do not broaden retries to
   bundle build, extraction, service deployment, health checking, or GitHub
   metadata updates.
+
+### Public URL configuration
+
+- `apps/backend/cmd/preview/deploy.go`: apply the control-plane retry policy to
+  `UpdateURLSettings` and the following `GetSprite` URL lookup.
+- Repeating the public URL update is safe because each attempt requests the
+  same idempotent public state. Permanent client errors stop before the lookup.
 
 ## Tests
 
@@ -42,12 +52,17 @@ remain visible on their first attempt.
   failures return the final error. **File:**
   `apps/backend/cmd/preview/sprite_ops_test.go`. **How:** table-driven fake
   SDK-backed HTTP test cases, including typed `sprites.APIError` responses.
+- **What:** public URL update and sprite URL lookup recover from transient
+  provider responses while permanent update errors stop immediately. **File:**
+  `apps/backend/cmd/preview/sprite_ops_test.go`. **How:** an HTTP test server
+  drives the real SDK through 500, 502, 200, and 401 responses.
 
 ## Implementation Waves And Parallel Candidates
 
 Wave 1:
 
 - [x] [task-01-sprites-control-plane-retry](task-01-sprites-control-plane-retry.md)
+- [x] [task-02-public-url-control-retry](task-02-public-url-control-retry.md)
 
 ## Risks
 
@@ -55,3 +70,6 @@ Wave 1:
   re-reading the deterministic sprite name is required before retrying it.
 - Retry classification must unwrap SDK errors so wrapped timeout and API errors
   are handled correctly without masking permanent failures.
+- Repeating a public URL update must remain idempotent; do not extend this
+  policy to non-idempotent service or metadata operations without a separate
+  design review.

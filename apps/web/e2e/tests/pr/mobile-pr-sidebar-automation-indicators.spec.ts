@@ -41,7 +41,10 @@ async function seedSidebarAutomation(
     state: "open",
     review_state: "approved",
     checks_state: "success",
-    mergeable_state: "clean",
+    // Keep auto-merge enabled for the indicator, but leave the PR blocked so
+    // the background CI automation cannot merge it before the picker opens.
+    mergeable_state: "dirty",
+    has_merge_conflicts: true,
   });
   await apiClient.updateTaskCIAutomationOptions(targetTask.task_id, {
     repository_id: seedData.repositoryId,
@@ -61,6 +64,12 @@ test.describe("Mobile sidebar PR automation indicators", () => {
   }) => {
     test.setTimeout(120_000);
     const { navigationTaskId, targetTaskId } = await seedSidebarAutomation(apiClient, seedData);
+    await expect
+      .poll(async () => {
+        const pullRequests = await apiClient.listTaskPRs(targetTaskId);
+        return pullRequests[0]?.has_merge_conflicts;
+      })
+      .toBe(true);
 
     await expect
       .poll(
@@ -74,11 +83,12 @@ test.describe("Mobile sidebar PR automation indicators", () => {
       .toMatchObject({
         auto_fix_enabled: true,
         auto_merge_enabled: true,
+        has_merge_conflicts: true,
       });
 
     await testPage.goto(`/t/${navigationTaskId}`);
     await new SessionPage(testPage).waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const targetRow = sheet.locator(`[data-task-row-id="${targetTaskId}"]`);
@@ -87,6 +97,8 @@ test.describe("Mobile sidebar PR automation indicators", () => {
     await expect(icon).toBeVisible();
     await expect(icon.getByTestId("pr-task-automation-auto-fix")).toBeVisible();
     await expect(icon.getByTestId("pr-task-automation-auto-merge")).toBeVisible();
+    await expect(icon).toHaveAttribute("aria-label", /Conflicts/);
+    await expect(icon.getByTestId("pr-merge-conflict-warning")).toBeVisible();
 
     const navigationURL = testPage.url();
     await icon.tap();
@@ -105,7 +117,7 @@ test.describe("Mobile sidebar PR automation indicators", () => {
       )
       .toBe(true);
     await prCapture.screenshot("sidebar-automation-indicators-mobile", {
-      caption: "Mobile task switcher shows touch-sized PR automation indicators and details.",
+      caption: "Mobile task switcher shows conflict and automation indicators with touch details.",
     });
 
     await testPage.keyboard.press("Escape");
@@ -129,6 +141,7 @@ test.describe("Mobile sidebar PR automation indicators", () => {
       review_state: "approved",
       checks_state: "success",
       mergeable_state: "clean",
+      has_merge_conflicts: false,
     });
     await expect
       .poll(async () => {
@@ -140,5 +153,6 @@ test.describe("Mobile sidebar PR automation indicators", () => {
       .toBe(false);
     await expect(icon.getByTestId("pr-task-automation-auto-fix")).toHaveCount(0);
     await expect(icon.getByTestId("pr-task-automation-auto-merge")).toHaveCount(0);
+    await expect(icon.getByTestId("pr-merge-conflict-warning")).toHaveCount(0);
   });
 });

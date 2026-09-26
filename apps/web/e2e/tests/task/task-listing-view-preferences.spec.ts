@@ -62,6 +62,17 @@ test.describe("Task listing display preferences", () => {
       mergeable_state: "clean",
     });
 
+    // This test's first assertion is about the default presentation. Set and
+    // observe the backend value after seeding so an earlier settings update
+    // cannot win a race with the page's initial boot payload.
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      tasks_list_show_details: false,
+    });
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_show_details)
+      .toBe(false);
+
     await testPage.goto("/tasks");
     const row = testPage.getByTestId("tasks-list-row").filter({ hasText: RICH_TASK_TITLE });
     await expect(row).toBeVisible();

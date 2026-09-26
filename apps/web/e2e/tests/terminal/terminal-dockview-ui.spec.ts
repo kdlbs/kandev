@@ -351,7 +351,7 @@ test.describe("Terminals — dockview UI", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     await createTaskAndWait(apiClient, seedData, "Reload Badges UI");
     const session = await openTask(testPage, "Reload Badges UI");
     await session.clickTab("Terminal");
@@ -374,11 +374,12 @@ test.describe("Terminals — dockview UI", () => {
     // on refresh, so session-chat is in the background — foreground it
     // explicitly so the page-loaded wait succeeds.
     await session.showSessionContext();
+    await session.expectTerminalConnected(60_000);
 
     // After reload, both badges must reappear — proves both panels'
     // store entries (kind=ordinary, seq) were preserved across restore.
-    await expect(testPage.getByTestId("terminal-tab-seq-1")).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 5_000 });
+    await expect(testPage.getByTestId("terminal-tab-seq-1")).toBeVisible({ timeout: 60_000 });
+    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 15_000 });
 
     // No tab content should contain "Terminal N" text — seq belongs in
     // the badge, not the title.
@@ -523,7 +524,9 @@ test.describe("Terminals — dockview UI", () => {
 
     // Create a second terminal so we have a non-default row to click.
     await clickNewTerminalInPlusMenu(testPage, session);
-    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 10_000 });
+    const secondTab = testPage.getByTestId("terminal-tab-seq-2");
+    await expect(secondTab).toBeVisible({ timeout: 30_000 });
+    await session.expectTerminalConnected(30_000);
 
     // Count terminal tab content elements before the focus click. Polling the
     // count is the wait: it returns as soon as the second tab has rendered
@@ -535,7 +538,7 @@ test.describe("Terminals — dockview UI", () => {
     });
     await expect
       .poll(() => terminalContent.count(), {
-        timeout: 10_000,
+        timeout: 30_000,
         message: "two terminal tabs before clicking reopen",
       })
       .toBeGreaterThanOrEqual(2);

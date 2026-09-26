@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -319,6 +320,13 @@ type Config struct {
 
 	// NotificationQueueCapacity is the server-resolved ACP inbound queue size.
 	NotificationQueueCapacity int
+
+	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
+	PromptCancelJoinTimeout time.Duration
+
+	// ProviderGatewayAuth authenticates the ACP agent against an
+	// OpenAI-compatible gateway right after initialize.
+	ProviderGatewayAuth *acpprovider.GatewayAuth
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -350,6 +358,8 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		AssumeMcpHttp:             c.AssumeMcpHttp,
 		RequiresProcessKill:       c.RequiresProcessKill,
 		NotificationQueueCapacity: c.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:   c.PromptCancelJoinTimeout,
+		ProviderGatewayAuth:       c.ProviderGatewayAuth,
 	}
 }
 

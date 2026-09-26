@@ -23,7 +23,7 @@ import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { taskPRInfoFromSummary } from "@/lib/task-pr-info";
 import { cn } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
-import type { RepositoryChip, Task } from "@/components/kanban-card";
+import type { KanbanPresentation, RepositoryChip, Task } from "@/components/kanban-card";
 
 export {
   renderSubagentCountChip,
@@ -50,6 +50,7 @@ type DraggableCardState = {
 
 export type KanbanCardShellProps = KanbanCardActionProps &
   DraggableCardState & {
+    presentation?: KanbanPresentation;
     repositoryChips?: RepositoryChip[];
     isSelected?: boolean;
     isMultiSelectMode?: boolean;
@@ -149,7 +150,7 @@ function getKanbanCardShellClassName(
   const { isSelected, isDragging, isPreviewed, isPickedUpForReorder } = state;
   return cn(
     "group max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0",
-    "touch-none md:touch-auto",
+    "touch-auto",
     needsAction(task) && !isSelected && "border-l-2 border-l-amber-500",
     isDragging && "opacity-50 z-50",
     isSelected && "ring-1 ring-primary/60 border-primary/60",
@@ -158,14 +159,28 @@ function getKanbanCardShellClassName(
   );
 }
 
-/** Suppresses dnd-kit's drag/keyboard wiring while multi-select is active. */
+/** Phone cards activate normally; drag pickup belongs to wider presentations. */
 function getDragInteractionProps(
+  isMobile: boolean,
   isMultiSelectMode: boolean | undefined,
   listeners: DraggableSyntheticListeners,
   attributes: DraggableAttributes,
   onKeyDown: ((event: React.KeyboardEvent) => void) | undefined,
 ) {
   if (isMultiSelectMode) return {};
+  if (isMobile) {
+    return {
+      role: "button",
+      tabIndex: 0,
+      onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
+        if (event.target !== event.currentTarget || event.repeat) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          event.currentTarget.click();
+        }
+      },
+    };
+  }
   return { ...listeners, ...attributes, onKeyDown };
 }
 
@@ -195,6 +210,7 @@ function KanbanCardActionSlot({
 
 export function KanbanCardShell({
   task,
+  presentation = "desktop",
   repositoryChips,
   attributes,
   listeners,
@@ -235,9 +251,15 @@ export function KanbanCardShell({
         isPreviewed,
         isPickedUpForReorder,
       })}
-      aria-grabbed={isPickedUpForReorder || undefined}
+      aria-grabbed={(presentation !== "mobile" && isPickedUpForReorder) || undefined}
       onClick={onClick}
-      {...getDragInteractionProps(isMultiSelectMode, listeners, attributes, onKeyDown)}
+      {...getDragInteractionProps(
+        presentation === "mobile",
+        isMultiSelectMode,
+        listeners,
+        attributes,
+        onKeyDown,
+      )}
     >
       <CardContent className="px-2 py-1">
         <div className="flex items-start gap-1.5">
@@ -253,7 +275,7 @@ export function KanbanCardShell({
             <KanbanCardBody
               task={task}
               repositoryChips={repositoryChips ?? []}
-              enableTitleHover
+              enableTitleHover={!isMultiSelectMode}
               actions={
                 <KanbanCardActionSlot
                   isMultiSelectMode={isMultiSelectMode}

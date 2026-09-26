@@ -22,8 +22,10 @@ import { SettingsPageHeader, SETTINGS_TYPOGRAPHY } from "@/components/settings/s
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
 import { ProfileEnvVarsSection } from "@/components/settings/agent-profile-page";
+import { ProviderSection } from "@/components/settings/profile-edit/provider-section";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
 import type { Agent, ModelConfig, PermissionSetting, PassthroughConfig } from "@/lib/types/http";
+import type { SecretListItem } from "@/lib/types/http-secrets";
 import { ProfileMcpConfigCard } from "./profile-mcp-config-card";
 import { profilePermissionValues } from "@/lib/agent-permissions";
 import { DynamicAgentProfileEditor } from "@/components/settings/dynamic-agent-profile-editor";
@@ -42,11 +44,13 @@ function profileFormData(
   return {
     name: profile.name,
     model: profile.model,
+    provider_kind: profile.providerKind ?? "",
     mode: profile.mode ?? "",
     config_options: profile.configOptions ?? {},
     auto_approve: permissions.auto_approve,
     allow_indexing: permissions.allow_indexing,
     cli_passthrough: profile.cliPassthrough ?? false,
+    cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
     cli_flags: profile.cliFlags ?? [],
     command_prefix: profile.commandPrefix ?? "",
   };
@@ -136,6 +140,8 @@ export type ProfileCardItemProps = {
   currentAgentModelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
+  secrets: SecretListItem[];
+  providerSupported: boolean;
   onProfileChange: (profileId: string, patch: Partial<DraftProfile>) => void;
   onProfileMcpChange: (
     profileId: string,
@@ -153,12 +159,15 @@ export function ProfileCardItem({
   currentAgentModelConfig,
   permissionSettings,
   passthroughConfig,
+  secrets,
+  providerSupported,
   onProfileChange,
   onProfileMcpChange,
   onRemoveProfile,
   onToastError,
 }: ProfileCardItemProps) {
   const formProfile = profileFormData(profile, permissionSettings);
+  const providerDraft = { ...profile, providerSupported };
   const baselineProfile = savedProfile
     ? profileFormData(savedProfile, permissionSettings)
     : undefined;
@@ -178,6 +187,9 @@ export function ProfileCardItem({
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           agentName={draftAgent.name}
+          cursorMcpAuthSupported={
+            draftAgent.name === "cursor-acp" || draftAgent.tui_config?.mcp_strategy === "cursor"
+          }
           onRemove={() => onRemoveProfile(profile.id)}
           canRemove={draftAgent.profiles.length > 1}
           lockPassthrough={Boolean(draftAgent.tui_config)}
@@ -188,6 +200,12 @@ export function ProfileCardItem({
           baselineFlags={savedProfile?.cliFlags}
           onChange={(next) => onProfileChange(profile.id, { cliFlags: next })}
           permissionSettings={permissionSettings}
+        />
+        <ProviderSection
+          draft={providerDraft}
+          savedProfile={savedProfile ?? providerDraft}
+          secrets={secrets}
+          onChange={(patch) => onProfileChange(profile.id, patch)}
         />
         <ProfileEnvVarsSection
           envVars={profile.envVars}
@@ -218,6 +236,7 @@ export type ProfilesCardProps = {
   currentAgentModelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
+  secrets: SecretListItem[];
   onAddProfile: () => void;
   onProfileChange: (profileId: string, patch: Partial<DraftProfile>) => void;
   onProfileMcpChange: (
@@ -251,6 +270,60 @@ function DynamicProfileRouteRow({ agent, profile }: { agent: Agent; profile: Dra
   );
 }
 
+function DynamicProfilesCard({
+  isCreateMode,
+  isAgentDirty,
+  draftAgent,
+  dynamicProfiles,
+  onAddProfile,
+  onProfileChange,
+}: {
+  isCreateMode: boolean;
+  isAgentDirty: boolean;
+  draftAgent: DraftAgent;
+  dynamicProfiles: DraftProfile[];
+  onAddProfile: () => void;
+  onProfileChange: (profileId: string, patch: Partial<DraftProfile>) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <SettingsCard isDirty={isAgentDirty}>
+      <SettingsCardHeader
+        title={t("agents:dynamicProfileSettings")}
+        actions={
+          !isCreateMode && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onAddProfile}
+              className={settingsActionClassName("cursor-pointer")}
+            >
+              <IconPlus className="mr-2 h-4 w-4" />
+              {t("agents:addProfile")}
+            </Button>
+          )
+        }
+      />
+      <CardContent className="space-y-6">
+        {dynamicProfiles.map((profile) => (
+          <div key={profile.id}>
+            {profile.isNew ? (
+              <DynamicAgentProfileEditor
+                agent={draftAgent}
+                profile={profile}
+                isCreating={Boolean(profile.isNew)}
+                onDraftChange={(patch) => onProfileChange(profile.id, patch)}
+              />
+            ) : (
+              <DynamicProfileRouteRow agent={draftAgent} profile={profile} />
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </SettingsCard>
+  );
+}
+
 export function ProfilesCard({
   displayName,
   isCreateMode,
@@ -261,6 +334,7 @@ export function ProfilesCard({
   currentAgentModelConfig,
   permissionSettings,
   passthroughConfig,
+  secrets,
   onAddProfile,
   onProfileChange,
   onProfileMcpChange,
@@ -271,43 +345,21 @@ export function ProfilesCard({
   const dynamicProfiles = draftAgent.profiles.filter(
     (profile) => profile.kind === "dynamic" || draftAgent.name === "dynamic",
   );
+  // The provider capability is computed server-side per agent and rides on
+  // saved profiles; a brand-new agent has none yet, so the section appears
+  // after the first save.
+  const providerSupported = (savedAgent?.profiles ?? []).some((p) => p.providerSupported);
 
   if (dynamicProfiles.length > 0) {
     return (
-      <SettingsCard isDirty={isAgentDirty}>
-        <SettingsCardHeader
-          title={t("agents:dynamicProfileSettings")}
-          actions={
-            !isCreateMode && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onAddProfile}
-                className={settingsActionClassName("cursor-pointer")}
-              >
-                <IconPlus className="mr-2 h-4 w-4" />
-                {t("agents:addProfile")}
-              </Button>
-            )
-          }
-        />
-        <CardContent className="space-y-6">
-          {dynamicProfiles.map((profile) => (
-            <div key={profile.id}>
-              {profile.isNew ? (
-                <DynamicAgentProfileEditor
-                  agent={draftAgent}
-                  profile={profile}
-                  isCreating={Boolean(profile.isNew)}
-                  onDraftChange={(patch) => onProfileChange(profile.id, patch)}
-                />
-              ) : (
-                <DynamicProfileRouteRow agent={draftAgent} profile={profile} />
-              )}
-            </div>
-          ))}
-        </CardContent>
-      </SettingsCard>
+      <DynamicProfilesCard
+        isCreateMode={isCreateMode}
+        isAgentDirty={isAgentDirty}
+        draftAgent={draftAgent}
+        dynamicProfiles={dynamicProfiles}
+        onAddProfile={onAddProfile}
+        onProfileChange={onProfileChange}
+      />
     );
   }
 
@@ -342,6 +394,8 @@ export function ProfilesCard({
             currentAgentModelConfig={currentAgentModelConfig}
             permissionSettings={permissionSettings}
             passthroughConfig={passthroughConfig}
+            secrets={secrets}
+            providerSupported={providerSupported}
             onProfileChange={onProfileChange}
             onProfileMcpChange={onProfileMcpChange}
             onRemoveProfile={onRemoveProfile}

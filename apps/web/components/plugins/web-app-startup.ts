@@ -15,13 +15,25 @@ export type WebAppStartupProbe = {
   nonce: string;
 };
 
-export type WebAppStartupResult = {
+type WebAppStartupResultBase = {
   type: typeof WEB_APP_STARTUP_RESULT_TYPE;
   version: typeof WEB_APP_STARTUP_VERSION;
   nonce: string;
-  result: "ready" | "failed";
-  code?: "document_error" | "context_unavailable";
 };
+
+export type WebAppStartupResult =
+  | (WebAppStartupResultBase & { result: "ready" })
+  | (WebAppStartupResultBase & {
+      result: "failed";
+      code: "document_error" | "context_unavailable";
+    });
+
+/**
+ * Every cause the host can distinguish for a failed startup: the two codes
+ * the guest bootstrap reports over the wire, plus a host-observed deadline
+ * with no code at all.
+ */
+export type WebAppStartupFailureReason = "document_error" | "context_unavailable" | "timeout";
 
 export function createWebAppStartupNonce(): string {
   return generateUUID();

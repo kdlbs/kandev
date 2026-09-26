@@ -111,6 +111,7 @@ jobs:
             .github/scripts/resolve-image-digest.sh
             .github/workflows/ci-base-image.yml
             .github/workflows/e2e-tests.yml
+            .github/actions/download-artifact-retry/**
             .github/scripts/changed-paths.py
             !**/*.md
           EVENT_NAME: ${{ github.event_name }}
@@ -340,7 +341,7 @@ jobs:
       - name: Download selected main timing profile
         if: steps.main-timing-run.outputs.run_id != ''
         continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           name: e2e-timing-profile
           path: e2e/previous-profile
@@ -428,10 +429,10 @@ jobs:
     container:
       image: ghcr.io/kdlbs/kandev-ci:runtime-latest
       options: --ipc=host
-    # 35 min covers the serial count-fallback tail and setup overhead. The
-    # first queue runs reached the old 25-minute cap with a healthy 167-test
-    # shard before the main timing profile had bootstrapped.
-    timeout-minutes: 35
+    # 45 min covers the serial count-fallback tail and setup overhead. The
+    # largest current shard has 248 tests and exceeded 35 min under hosted
+    # runner load without a test failure, so the shorter cap cancelled it.
+    timeout-minutes: 45
     # Container jobs default to `sh`; pin to bash.
     defaults:
       run:
@@ -465,7 +466,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Download backend build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           name: e2e-backend-build
           path: apps/backend/bin/
@@ -474,13 +475,13 @@ jobs:
         run: chmod +x apps/backend/bin/*
 
       - name: Download E2E fixture plugin package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           name: e2e-plugin-package
           path: apps/backend/.build/
 
       - name: Download web build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           name: e2e-web-build
           path: apps/web/
@@ -494,7 +495,7 @@ jobs:
         run: echo "E2E_FAIL_ON_FLAKY=1" >> "$GITHUB_ENV"
 
       - name: Download E2E shard manifests
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           name: e2e-shard-manifests
           path: e2e-manifests
@@ -811,7 +812,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Download backend build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           name: e2e-backend-build
           path: apps/backend/bin/
@@ -820,13 +821,13 @@ jobs:
         run: chmod +x apps/backend/bin/*
 
       - name: Download E2E fixture plugin package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           name: e2e-plugin-package
           path: apps/backend/.build/
 
       - name: Download web build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           name: e2e-web-build
           path: apps/web/
@@ -840,7 +841,7 @@ jobs:
         run: echo "E2E_FAIL_ON_FLAKY=1" >> "$GITHUB_ENV"
 
       - name: Download E2E shard manifests
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           name: e2e-shard-manifests
           path: e2e-manifests
@@ -1007,7 +1008,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Download backend build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           name: e2e-backend-build
           path: apps/backend/bin/
@@ -1016,13 +1017,13 @@ jobs:
         run: chmod +x apps/backend/bin/*
 
       - name: Download E2E fixture plugin package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           name: e2e-plugin-package
           path: apps/backend/.build/
 
       - name: Download web build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           name: e2e-web-build
           path: apps/web/
@@ -1213,21 +1214,21 @@ jobs:
           fi
 
       - name: Download blob reports
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           path: apps/web/e2e/blob-reports
           pattern: blob-report-*
           merge-multiple: true
 
       - name: Download E2E shard manifests
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         continue-on-error: true
         with:
           name: e2e-shard-manifests
           path: e2e-manifests
 
       - name: Download selected main timing profile
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         continue-on-error: true
         with:
           name: e2e-selected-main-timing-profile
@@ -1456,7 +1457,7 @@ jobs:
       - name: Download previous flake history
         if: always() && steps.flake-history-run.outputs.run_id != ''
         continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: ./.github/actions/download-artifact-retry
         with:
           name: e2e-flake-history
           path: e2e/previous-flake-history

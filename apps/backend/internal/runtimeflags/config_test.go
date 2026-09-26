@@ -200,6 +200,34 @@ func TestApplyStatesToConfigSetsClaudeMidTurnSteering(t *testing.T) {
 	}
 }
 
+func TestLSPBrowserContinuityFlagContract(t *testing.T) {
+	const key = "features.lspBrowserContinuity"
+	const envVar = "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY"
+	definition, ok := DefinitionByKey(key)
+	if !ok {
+		t.Fatalf("runtime flag definition %q is missing", key)
+	}
+	if definition.EnvVar != envVar {
+		t.Fatalf("EnvVar = %q, want %q", definition.EnvVar, envVar)
+	}
+	if !definition.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+	defaults, err := profiles.FeatureFlagDefaults()
+	if err != nil {
+		t.Fatalf("FeatureFlagDefaults: %v", err)
+	}
+	if got := defaults["lsp_browser_continuity"]; got != "true" {
+		t.Fatalf("profile default = %q, want true", got)
+	}
+
+	cfg := &config.Config{}
+	ApplyStatesToConfig(cfg, []RuntimeFlagState{{Key: key, EffectiveValue: false}})
+	if ValuesFromConfig(cfg)[key] {
+		t.Fatal("explicit false override did not disable LSP browser continuity")
+	}
+}
+
 // TestClaudeMidTurnSteeringIsIndependentOfBackgroundHandoff pins that the two
 // experiments are separately killable: enabling one must not enable the other.
 func TestClaudeMidTurnSteeringIsIndependentOfBackgroundHandoff(t *testing.T) {

@@ -3,8 +3,9 @@ status: draft
 system: platform
 requirements:
   - REQ-PLATFORM-LSP-FILE-INTELLIGENCE-001
+  - REQ-PLATFORM-LSP-FILE-INTELLIGENCE-002
 created: 2026-07-09
-updated: 2026-08-11
+updated: 2026-09-24
 owners:
   - tbd
 ---
@@ -19,6 +20,7 @@ This design preserves the technical source detail for `REQ-PLATFORM-LSP-FILE-INT
 | Requirement | Design section |
 | --- | --- |
 | `REQ-PLATFORM-LSP-FILE-INTELLIGENCE-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-PLATFORM-LSP-FILE-INTELLIGENCE-002` | [Browser-independent leases](#browser-independent-leases) |
 
 ## Migrated source detail
 
@@ -68,14 +70,14 @@ Users inspect and edit code inside Kandev task file tabs, but code navigation an
 - Completion requests translate Monaco invocation, trigger-character, and incomplete-result context into the corresponding LSP enum values and forward the trigger character when present. A server item without `textEdit` receives Monaco's current-word insertion range; explicit LSP `TextEdit` and `InsertReplaceEdit` ranges remain authoritative.
 - Successful Monaco file saves synchronize every matching open language-server document to the newest editor snapshot, then notify servers that requested `textDocument/didSave`. When that live snapshot still matches the persisted snapshot, the persisted text is included only for servers that advertise `includeText`. If editing advanced while persistence was in flight, the newer buffer stays dirty and synchronized and the optional stale save text is omitted so the language server cannot be rewound. Failed saves emit no save notification.
 - V1 task-host support is limited to Local PC and local Docker executors. Remote Docker, SSH, and Sprites report an unsupported-executor state.
-- Each active browser WebSocket owns one language-server process. The browser shares a connection for the same session and language inside one window and closes it after its idle timeout; separate browser windows may own separate processes.
-- The backend caps active LSP WebSocket connections at 8 by default. `KANDEV_LSP_MAX_CONNECTIONS` overrides the cap.
+- Each runtime LSP lease owns one language-server process. Editors in one browser window share an attachment for the same session and language; separate concurrently attached browser windows keep separate leases. An intentional editor-idle timeout releases the lease; tab closure and transport loss detach it for at most one hour.
+- The backend caps active LSP leases, whether attached or detached, at 8 by default. The existing `KANDEV_LSP_MAX_CONNECTIONS` setting remains the compatible operator override for this resource cap. At capacity, admission of a new process releases the least recently detached lease; attached leases cannot be evicted.
 - Language-server processes and npm/Go auto-install commands are owned by the existing agentctl process manager. Instance teardown cancels and drains install work, then reaps full process trees on Unix and Windows before releasing resources.
-- During auto-install, one pending task-host WebSocket read cancels the connection-owned installer context if the browser stops or disconnects. After a successful install, that same read becomes the bridge's first inbound frame so readiness handoff does not race or lose an initialize request.
-- Agentctl must deliver the bounded `installing` status before acquiring auto-install work. If that write fails or times out, it closes the stream without starting the installer because no live consumer can observe or control the operation.
+- During auto-install, the runtime lease retains the task-host WebSocket when the browser detaches. Explicit Stop or task-host teardown cancels installation; the lease consumes the first inbound frame after installation without racing the ready handshake.
+- Agentctl must deliver the bounded `installing` status to the backend lease before acquiring auto-install work. If that write fails or times out, it closes the stream without starting the installer.
 - Kandev-managed npm and release binaries live under the task host's `~/.kandev/lsp-servers`; `gopls` is installed through the task host's Go toolchain. No managed server cache lives inside a checked-out project.
 - LSP JSON-RPC bodies are limited to 16 MiB across stdio and WebSocket transport; stdio headers are bounded separately. Oversized frames close the affected connection instead of allocating unbounded memory.
-- Every task-host LSP WebSocket write has a five-second deadline, including installing, installed, failure, ready, close, and bridged JSON-RPC frames. A stalled browser peer cannot retain the stream handler or its owned language-server process indefinitely.
+- Every task-host LSP WebSocket write has a five-second deadline, including installing, installed, failure, ready, close, and bridged JSON-RPC frames. The backend lease continuously drains that stream, including while no browser is attached; a stalled browser attachment is detached without blocking the server reader.
 - Each browser-to-server stdio frame has a 30-second write cutoff, and stdout-forwarder termination closes stdin immediately. A language server that stops reading cannot leave the bridge handler or its owned process pinned indefinitely.
 - Mobile file viewing does not start language servers in the background.
 
@@ -98,7 +100,7 @@ There is no durable per-task or per-session LSP policy in V1. Manual toolbar sta
 
 `GET /lsp/:sessionId?language=<language>`
 
-The main backend resolves or restores the task execution, checks executor support and global capacity, authenticates to that execution's agentctl instance, and proxies WebSocket frames.
+The main backend resolves or restores the task execution, checks executor support and global capacity, and authenticates to that execution's agentctl instance. With browser continuity enabled, the broker owns the upstream and attaches the browser to a lease; with it disabled, the route retains its current WebSocket proxy behavior.
 
 ### Task-host stream
 
@@ -123,10 +125,11 @@ Application close codes are:
 | `4002` | Session, execution, or agentctl stream unavailable.                        |
 | `4003` | Auto-install failed.                                                       |
 | `4004` | Executor unsupported in V1.                                                |
-| `4005` | Active LSP connection cap reached.                                         |
-| `4006` | Language server exit or unexpected LSP proxy stream failure.               |
+| `4005` | Active LSP lease cap reached.                                              |
+| `4006` | Language server exited unexpectedly.                                       |
 | `4007` | Server binary missing and the task host has no supported installer.        |
 | `4008` | Language-server process failed to start.                                   |
+| `4009` | LSP transport or broker connection failed while the server may still run.  |
 
 The browser translates categorical close statuses from the close code instead of rendering transport prose. A preceding `install_failed` status payload may retain its actionable task-host diagnostic when the stream then closes with `4003`; without that payload, `4003` uses the localized installation-failure fallback. A JSON-RPC initialization rejection preserves the server-provided `error.message`.
 
@@ -134,7 +137,7 @@ The browser translates categorical close statuses from the close code instead of
 
 The browser advertises standard LSP `window.workDoneProgress` support and includes a client-generated `workDoneToken` in `initialize`. This lets servers such as JetBrains Kotlin LSP report project-import phases before the initialize response.
 
-The browser accepts both server-created progress tokens through `window/workDoneProgress/create` and `$/progress` notifications for the initialize token. Tokens can be strings or numbers and are scoped to one browser-owned session, language, and connection generation.
+The broker accepts both server-created progress tokens through `window/workDoneProgress/create` and `$/progress` notifications for the initialize token. Tokens can be strings or numbers and are scoped to one LSP lease and server generation; the attached browser receives the current snapshot.
 
 Supported work-done payloads are:
 
@@ -146,7 +149,7 @@ Supported work-done payloads are:
 
 Percentages are clamped to 0–100 for presentation. Unknown tokens, malformed payloads, and late notifications from a replaced connection are ignored.
 
-No backend or task-host payload transforms are required: both WebSocket proxy hops transport the JSON-RPC body unchanged.
+The broker preserves LSP method semantics while mapping request IDs, tracking progress and diagnostics, and separating browser attachments from the task-host process lifetime.
 
 ## Readiness and progress state
 
@@ -157,17 +160,41 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - Work-done progress is runtime-only activity attached to a live connection. Multiple active tokens are a flat list because LSP defines no parent/child relationship.
 - The oldest active work item is the primary summary; additional active items are shown as a count. Percentages from unrelated work items are never averaged.
 - The most recently ended item can remain visible as “server-reported work finished” for the lifetime of that connection. It is not described as project-wide success.
-- Stop, idle disconnect, crash, socket close, connection replacement, and retry clear all active and completed progress. A replacement generation starts with no inherited work state.
+- Explicit Stop, server crash, or task-host teardown clears active and completed progress. Browser detach leaves progress in the lease; reattachment receives its current snapshot. A new server generation starts without stale progress.
 - Progress activity is scoped to the current editor's session and language. It is not a global task-wide language-server dashboard.
+
+## Browser-independent leases
+
+The backend lease manager owns the browser-to-agentctl upstream stream. It keys a lease by the task execution, language, and an opaque lease ID; it keeps the upstream open and reads it even when no browser is attached. Agentctl still owns and reaps the actual process. The lease is runtime-only and ends on editor-idle release, one-hour detached expiry, explicit Stop, capacity eviction, server exit, execution replacement or stop, or backend shutdown. Backend restart drops runtime-only leases. This boundary follows [ADR-2026-09-23](../../../decisions/2026-09-23-task-owned-lsp-leases.md).
+
+All three orchestrator paths that call `reclaimIdleSession` (the periodic idle reaper and the agent and streaming event handlers) treat an active lease as live task-runtime work, including when no browser is attached and no agent turn is running. The lease thereby keeps the whole Local PC or Docker task host, including agentctl, container, and worktree runtime resources, active. Lease admission and reclaim use the same session lifecycle fence or a generation-checked equivalent, and reclaim rechecks the lease immediately before cleanup. A new lease cannot be admitted onto an execution already being reclaimed. Explicit task stop still wins and closes all leases for that execution. Editor-idle release, detached expiry, and capacity eviction remove the pin when the lease ends.
+
+The existing browser-facing `/lsp/:sessionId` route authorizes the caller before attachment or lease lookup. The browser includes its lease ID when it has one. The backend reattaches to that detached lease if its execution and language still match; otherwise it may claim the newest detached lease for the same execution and language, or create a new one when admission permits. An attached lease is never stolen from another live browser window, including when a duplicated tab copies its `sessionStorage` hint. In that case the new tab receives a separate lease if admitted. The opaque ID is a routing hint, not an access credential, and is never logged. Browser `sessionStorage` can retain it across a tab reload; a new tab can still claim a detached lease without it when its current auto-start or local manual-enable policy requests LSP. A previously attached tab may resume its hinted lease after auto-start is disabled, unless it explicitly stopped LSP. A lease is counted against `limits.lspMaxConnections` from process admission until teardown, including periods without a browser. Reattachment needs no new capacity slot. Admission under a full cap first releases the oldest detached lease, waits for its upstream/process cleanup, and then admits the replacement; if all leases are attached it returns `4005` without starting a process. An evicted hint becomes a fresh start under the current browser policy.
+
+The backend broker is the stable LSP protocol peer. It retains the first `initialize` result, workspace identity, effective per-language configuration, active work progress, dynamic `client/registerCapability` registrations, and per-URI server-facing document-version counters within a 4 MiB state budget. It applies `client/unregisterCapability` and answers both methods while detached; while attached it also forwards effective registration changes so Monaco providers update immediately. The resumed handshake includes the effective registrations so providers match the server's current capabilities. It answers `workspace/configuration` from the latest persisted user settings, scoped to the lease owner, rather than from a detached browser snapshot. A settings-save event updates affected leases and sends `workspace/didChangeConfiguration` even while detached; reattachment also reconciles the latest settings revision before reporting ready. This preserves AC .8 without keeping a browser connection open.
+
+Pending browser-to-server requests are independently bounded to 256 requests, 256 bytes per JSON-RPC ID, and 64 KiB of tracked request state per lease. The broker cancels and returns a timeout error after 30 seconds; detach cancels requests from that browser generation. Request admission stops before forwarding when any bound is exceeded.
+
+The broker continues reading server output while detached, answers supported server-to-client requests, and gives unsupported requests a JSON-RPC method error so they cannot hang indefinitely. It assigns server-facing request IDs and maps them to the current browser attachment generation. Browser `$/cancelRequest` maps to the corresponding server-facing ID; on detach it cancels all that generation's pending browser requests toward the server and rejects late responses. Replies to a detached generation are discarded. A browser close or write timeout detaches that generation without closing the upstream. Explicit Stop or idle release uses an acknowledged control frame: reject pending browser requests, await LSP `shutdown` within a bounded deadline, send `exit`, then close upstream and await agentctl cleanup. Graceful release owns upstream EOF until acknowledgment; failed writes still close the lease. The UI reports Stop complete only after acknowledgment. An unexpected agentctl process exit sends an explicit upstream `4006`; an upstream read failure without confirmed process exit maps to transport `4009`. Invalid WebSocket reserved close codes such as `1005` and `1006` are normalized before forwarding.
+
+On detach, the broker sends `textDocument/didClose` for each open document, clears all diagnostic state, and drops later diagnostic publications for closed documents. It retains no document text. On reattachment, the ready handshake identifies the retained lease and supplies server capabilities, effective dynamic registrations, workspace metadata, and current progress. The browser rebuilds Monaco providers without sending a second LSP `initialize`. It reopens current documents with their current text and sends attachment-ready after handlers are registered. The broker assigns each `didOpen` and `didChange` a strictly increasing server-facing version for that URI over the lease lifetime, independent of browser-local versions, and acknowledges synchronization before the UI reports `ready`. On a resumed lease it forwards `publishDiagnostics` only for a currently open URI after synchronization and only when the publication's version equals the current server-facing version. Unversioned publications cannot be bound to the reopened text and remain hidden for that URI until a fresh server generation; initial connections may still display unversioned diagnostics. Old markers remain clear until a qualifying new publication. Two simultaneously attached windows retain separate leases, request maps, documents, and progress, preserving their current independent unsaved-buffer behavior.
+
+`features.lspBrowserContinuity` (`KANDEV_FEATURES_LSP_BROWSER_CONTINUITY`) is default-on in prod/dev/e2e. Its restart-required runtime toggle remains a kill switch until retirement. When false, backend and frontend use the browser-owned proxy and idle-reclaim path. Normal tests use leases; disabled-path tests set false explicitly.
+
+The browser manager uses bounded reconnect attempts after unexpected transport loss. During those attempts it shows a localized reconnecting state with no stale markers. A lost or expired lease starts a fresh server under the existing auto-start or manual-enable preference and clears the previous generation's progress. A confirmed server process exit uses `4006` and the server-exited state; a broker or proxy transport failure uses `4009` or the browser's abnormal-close signal and offers Retry after automatic attempts fail. The toolbar, fine-pointer status bar, and coarse-pointer tablet drawer share this state. The phone viewer neither creates nor attaches to a lease.
+
+Each detachment arms a one-hour lease deadline independent of LSP progress. Reattachment cancels the deadline before the new attachment becomes visible; a later detachment starts a full new hour. The deadline callback checks the original detachment time and detached state under the lease lock used by attach and termination, so a stale callback cannot close a reattached lease. Expiry closes the upstream and releases its capacity with reason `detached_timeout`; idle reclaim can then release the task host. Task archive and delete continue to stop the runtime through their background cleanup, without waiting for this deadline. Backend shutdown cancels pending deadlines.
+
+The broker logs lease creation, attachment, detachment, reattachment, Stop, idle release, detached expiry, capacity eviction, process exit, and teardown reason with bounded metadata. Dev expvar exposes `lsp_lease_active` and `lsp_lease_detached` gauges, `lsp_lease_evicted_total`, and `lsp_lease_released_total` with a closed `reason` set (`stop`, `editor_idle`, `detached_timeout`, `capacity`, `server_exit`, `runtime_stop`, `backend_stop`). No metric uses task, session, browser, lease, or language IDs as labels. Capacity and active/detached counts are observable without IDs. It releases capacity exactly once on every terminal path and never lets a slow browser block task-host stdout draining.
 
 ## State and persistence
 
 - User settings persist in the existing user-settings store.
 - Manual enablement persists only in browser local storage under the session and language.
-- Processes, open documents, diagnostics, and semantic-token caches are runtime-only.
+- Processes, open documents, capabilities, and progress are runtime-only. The backend lease retains bounded metadata but discards diagnostics on detach; no new durable task or user record is created.
 - Save notifications are runtime-only and follow confirmed workspace persistence; they are not emitted for closed documents, failed writes, or servers that did not request them.
 - A missing server starts only when a supported file is opened and auto-start or a toolbar action requests it.
-- Closing the browser connection stops its process; stopping the task reaps every owned language-server process even if a browser connection remains open.
+- Closing a browser attachment leaves its server lease running for up to one hour. Explicit Stop, intentional editor-idle timeout, and detached expiry release it; capacity admission may evict a detached lease sooner. Stopping the task or its runtime reaps every owned language-server process even if a browser connection remains open.
 
 ## Failure modes
 
@@ -183,7 +210,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **Cold Monaco initialization:** TypeScript built-ins are wrapped before model-scoped LSP suppression is registered; the LSP provider registration guard does not depend on suppression state.
 - **Capacity exceeded:** the UI reports that too many language servers are active; the backend rejects the request before starting or resuming its supported task host.
 - **Process start failure:** agentctl logs the task-host execution error, closes with categorical `4008` and no transport prose, and the UI shows a localized start-failure status with Retry.
-- **Server crash:** the connection closes with categorical `4006`, Monaco providers and markers are cleaned up, and the status shows the localized server-exited message with a Retry action. Only intentional stop or idle teardown returns to Off.
+- **Server crash:** the lease ends with categorical `4006`, Monaco providers and markers are cleaned up, and the status shows the localized server-exited message with a Retry action. Only intentional Stop returns to Off.
 - **Initialize rejection:** when the server rejects the JSON-RPC `initialize` request, the UI preserves its `error.message` instead of stringifying the error object as `[object Object]`.
 - **No progress support or reports:** initialization still shows an indeterminate state and elapsed time; after initialize succeeds, the status surface says the server has not reported background analysis progress.
 - **Initialize response is slow or never arrives:** the UI confirms that the process launched, changes to a long-running initialization warning after 60 seconds, and keeps Stop available. Kandev does not automatically kill a cold project import or claim that the server is indexing.
@@ -192,8 +219,8 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **Cross-file intelligence remains incomplete after ready:** the UI does not claim that the server is still indexing unless a work item is active; the status surface explains that project import, dependencies, or module resolution may require investigation.
 - **Task stop:** agentctl closes process admission and reaps the language-server process tree before releasing task resources.
 - **Instance teardown during auto-install:** agentctl cancels the install, removes an unpublished partial release download, drains the shared cache mutation, and reaps npm/Go descendants before releasing task resources.
-- **Browser disconnect during auto-install:** the task-host read watcher cancels and drains that connection's owned install instead of allowing npm, Go, or release downloads to continue without a consumer.
-- **Unread install status:** if the browser cannot receive the initial `installing` frame, agentctl closes the connection and returns before starting npm, Go, or release install work.
-- **Stalled browser peer:** bounded task-host WebSocket writes fail and enter the existing connection cleanup path, including stopping a language-server process that was started before its ready frame could be delivered.
+- **Browser disconnect during auto-install:** the lease continues a requested installation after browser detach. Explicit Stop or runtime teardown cancels and drains it.
+- **Unread install status:** if the backend lease cannot receive the initial `installing` frame, agentctl closes the stream before starting npm, Go, or release install work.
+- **Stalled browser peer:** bounded writes detach that browser without blocking task-host output or terminating the language-server process.
 - **Stalled language-server stdin:** stdout-forwarder termination releases an active stdin write immediately; otherwise the write cutoff closes stdin and enters owned-process cleanup after 30 seconds.
 - **Unknown language:** no LSP control is shown.

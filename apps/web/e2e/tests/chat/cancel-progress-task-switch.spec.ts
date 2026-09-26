@@ -3,6 +3,19 @@ import { waitForSessionDone, seedIdleSession } from "../../helpers/session";
 import { waitForActiveSessionCancellationPending } from "../../helpers/session-store";
 
 test.describe("Cancel progress across task switches", () => {
+  let releaseBackendEnv: (() => Promise<void>) | undefined;
+
+  test.beforeEach(async ({ backend }) => {
+    releaseBackendEnv = await backend.useEnv({
+      KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT: "12s",
+    });
+  });
+
+  test.afterEach(async () => {
+    await releaseBackendEnv?.();
+    releaseBackendEnv = undefined;
+  });
+
   test("keeps backend-owned cancel progress across task switches", async ({
     testPage,
     apiClient,
@@ -30,16 +43,15 @@ test.describe("Cancel progress across task switches", () => {
     );
 
     const session = await seedIdleSession(testPage, apiClient, seedData, "Cancel progress A");
-    // Reload hydration is covered independently by mobile-cancel-progress-reload.spec.ts.
-    // /sleep keeps this regression focused on the task-navigation remounts with stable cancellation.
-    await session.sendMessage("/sleep 30");
+    // /e2e:cancel-hold keeps an acknowledged backend cancellation pending through task switching.
+    await session.sendMessage("/e2e:cancel-hold");
 
     const activeCancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(activeCancel).toBeVisible({ timeout: 15_000 });
     await activeCancel.click();
     await waitForActiveSessionCancellationPending(testPage, true);
     await expect(activeCancel).toBeDisabled();
-    await expect(activeCancel.getByRole("status", { name: "Loading" })).toBeVisible();
+    await expect(activeCancel.getByRole("status", { name: "Cancelling..." })).toBeVisible();
 
     await expect(session.sidebar.getByText("Cancel progress B", { exact: true })).toBeVisible({
       timeout: 15_000,
@@ -56,7 +68,7 @@ test.describe("Cancel progress across task switches", () => {
     const remountedCancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(remountedCancel).toBeVisible({ timeout: 15_000 });
     await expect(remountedCancel).toBeDisabled();
-    await expect(remountedCancel.getByRole("status", { name: "Loading" })).toBeVisible();
+    await expect(remountedCancel.getByRole("status", { name: "Cancelling..." })).toBeVisible();
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await waitForActiveSessionCancellationPending(testPage, false);

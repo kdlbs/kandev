@@ -11,6 +11,17 @@ import {
 } from "@/lib/state/task-removal";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import {
+  acknowledgeWorkflowSessionFocus,
+  beginWorkflowSessionFocus,
+  bindWorkflowSessionFocus,
+  cancelWorkflowSessionFocus,
+  createWorkflowSessionFocusState,
+  reconcileWorkflowSessionFocus,
+  type WorkflowSessionFocusCancelScope,
+  type WorkflowSessionFocusStart,
+} from "@/lib/state/workflow-session-focus";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
+import {
   WORKSPACE_CONTEXT_COLLECTIONS,
   type WorkspaceContextCollection,
   type WorkspaceContextReadError,
@@ -73,12 +84,16 @@ export const defaultKanbanState: KanbanSliceState = {
     lastSessionByTaskId: {},
     resumeSkippedSessionIds: {},
   },
+  workflowSessionFocus: createWorkflowSessionFocusState(),
   taskRemoval: createTaskRemovalState(),
 };
 
 type KanbanSliceSet = Parameters<
   StateCreator<KanbanSlice, [["zustand/immer", never]], [], KanbanSlice>
 >[0];
+type KanbanSliceGet = Parameters<
+  StateCreator<KanbanSlice, [["zustand/immer", never]], [], KanbanSlice>
+>[1];
 
 type SidebarArchivedTaskActions = Pick<
   KanbanSliceActions,
@@ -153,6 +168,11 @@ type TaskActions = Pick<
   | "setActiveSession"
   | "setActiveSessionAuto"
   | "clearActiveSession"
+  | "beginWorkflowSessionFocus"
+  | "bindWorkflowSessionFocus"
+  | "reconcileWorkflowSessionFocus"
+  | "cancelWorkflowSessionFocus"
+  | "acknowledgeWorkflowSessionFocus"
   | "setResumeSkipped"
   | "beginTaskRemoval"
   | "recordTaskRemovalResult"
@@ -292,10 +312,118 @@ function createWorkspaceContextActions(set: KanbanSliceSet): WorkspaceContextAct
   };
 }
 
-function createTaskActions(set: KanbanSliceSet): TaskActions {
+type FocusLookupState = {
+  taskSessionsByTask?: {
+    itemsByTaskId?: Record<string, Array<{ id: string }>>;
+  };
+  taskSessions?: {
+    items?: Record<string, { id: string; task_id?: string }>;
+  };
+};
+
+type WorkflowSessionFocusActions = Pick<
+  TaskActions,
+  | "beginWorkflowSessionFocus"
+  | "bindWorkflowSessionFocus"
+  | "reconcileWorkflowSessionFocus"
+  | "cancelWorkflowSessionFocus"
+  | "acknowledgeWorkflowSessionFocus"
+>;
+
+function createWorkflowSessionFocusActions(
+  set: KanbanSliceSet,
+  get: KanbanSliceGet,
+): WorkflowSessionFocusActions {
+  const knownSessionIdsForTask = (taskId: string): string[] => {
+    const state = get() as KanbanSlice & FocusLookupState;
+    const ids = new Set(
+      state.taskSessionsByTask?.itemsByTaskId?.[taskId]?.map((session) => session.id) ?? [],
+    );
+    for (const session of Object.values(state.taskSessions?.items ?? {})) {
+      if (session.task_id === taskId) ids.add(session.id);
+    }
+    return [...ids];
+  };
+
+  const taskProjectionForTask = (
+    taskId: string,
+  ): { metadata: unknown; updatedAt?: string; workflowStepId?: string } => {
+    const state = get();
+    const tasks = [
+      ...state.kanban.tasks,
+      ...Object.values(state.kanbanMulti.snapshots).flatMap((snapshot) => snapshot.tasks),
+    ].filter((candidate) => candidate.id === taskId);
+    let task = tasks[0];
+    for (const candidate of tasks.slice(1)) {
+      const selectedTime = parseTurnTimestamp(task?.updatedAt);
+      const candidateTime = parseTurnTimestamp(candidate.updatedAt);
+      if (
+        task === undefined ||
+        (selectedTime === null && candidateTime !== null) ||
+        (candidateTime !== null && selectedTime !== null && candidateTime > selectedTime)
+      ) {
+        task = candidate;
+      }
+    }
+    return {
+      metadata: task?.metadata,
+      updatedAt: task?.updatedAt,
+      workflowStepId: task?.workflowStepId,
+    };
+  };
+
   return {
+    beginWorkflowSessionFocus: (input: WorkflowSessionFocusStart) => {
+      let requestId: number | null = null;
+      set((draft) => {
+        const result = beginWorkflowSessionFocus(draft.workflowSessionFocus, input);
+        draft.workflowSessionFocus = result.state;
+        requestId = result.requestId;
+      });
+      return requestId;
+    },
+    bindWorkflowSessionFocus: (input) =>
+      set((draft) => {
+        draft.workflowSessionFocus = bindWorkflowSessionFocus(draft.workflowSessionFocus, input);
+      }),
+    reconcileWorkflowSessionFocus: (taskId, responseProjection) =>
+      set((draft) => {
+        const liveProjection = taskProjectionForTask(taskId);
+        const result = reconcileWorkflowSessionFocus(draft.workflowSessionFocus, {
+          activeTaskId: draft.tasks.activeTaskId,
+          navigationRevision: draft.taskRemoval.navigationRevision,
+          routeMetadata: liveProjection.metadata,
+          routeUpdatedAt: liveProjection.updatedAt,
+          workflowStepId: liveProjection.workflowStepId,
+          responseProjection,
+          knownSessionIds: knownSessionIdsForTask(taskId),
+        });
+        draft.workflowSessionFocus = result.state;
+        if (!result.sessionId) return;
+        draft.tasks.activeSessionId = result.sessionId;
+        draft.tasks.pinnedSessionId = null;
+        draft.tasks.lastSessionByTaskId[taskId] = result.sessionId;
+      }),
+    cancelWorkflowSessionFocus: (scope?: WorkflowSessionFocusCancelScope) =>
+      set((draft) => {
+        draft.workflowSessionFocus = cancelWorkflowSessionFocus(draft.workflowSessionFocus, scope);
+      }),
+    acknowledgeWorkflowSessionFocus: (requestId) =>
+      set((draft) => {
+        draft.workflowSessionFocus = acknowledgeWorkflowSessionFocus(
+          draft.workflowSessionFocus,
+          requestId,
+        );
+      }),
+  };
+}
+
+function createTaskActions(set: KanbanSliceSet, get: KanbanSliceGet): TaskActions {
+  return {
+    ...createWorkflowSessionFocusActions(set, get),
     setActiveTask: (taskId) =>
       set((draft) => {
+        draft.workflowSessionFocus = cancelWorkflowSessionFocus(draft.workflowSessionFocus);
         draft.taskRemoval = advanceTaskNavigationRevision(draft.taskRemoval);
         draft.tasks.activeTaskId = taskId;
         draft.tasks.activeSessionId = null;
@@ -304,12 +432,16 @@ function createTaskActions(set: KanbanSliceSet): TaskActions {
       }),
     setActiveTaskAuto: (taskId) =>
       set((draft) => {
+        if (draft.tasks.activeTaskId !== taskId) {
+          draft.workflowSessionFocus = cancelWorkflowSessionFocus(draft.workflowSessionFocus);
+        }
         draft.tasks.activeTaskId = taskId;
         draft.tasks.activeSessionId = null;
         draft.tasks.pinnedSessionId = null;
       }),
     setActiveSession: (taskId, sessionId) =>
       set((draft) => {
+        draft.workflowSessionFocus = cancelWorkflowSessionFocus(draft.workflowSessionFocus);
         draft.taskRemoval = advanceTaskNavigationRevision(draft.taskRemoval);
         draft.tasks.activeTaskId = taskId;
         draft.tasks.activeSessionId = sessionId;
@@ -320,6 +452,7 @@ function createTaskActions(set: KanbanSliceSet): TaskActions {
     setActiveSessionAuto: (taskId, sessionId) =>
       set((draft) => {
         if (draft.tasks.activeTaskId !== taskId) {
+          draft.workflowSessionFocus = cancelWorkflowSessionFocus(draft.workflowSessionFocus);
           draft.tasks.pinnedSessionId = null;
         }
         draft.tasks.activeTaskId = taskId;
@@ -347,10 +480,12 @@ function createTaskActions(set: KanbanSliceSet): TaskActions {
       }),
     advanceTaskNavigationRevision: () =>
       set((draft) => {
+        draft.workflowSessionFocus = cancelWorkflowSessionFocus(draft.workflowSessionFocus);
         draft.taskRemoval = advanceTaskNavigationRevision(draft.taskRemoval);
       }),
     clearActiveSession: () =>
       set((draft) => {
+        draft.workflowSessionFocus = cancelWorkflowSessionFocus(draft.workflowSessionFocus);
         draft.tasks.activeSessionId = null;
         draft.tasks.pinnedSessionId = null;
       }),
@@ -374,10 +509,10 @@ export const createKanbanSlice: StateCreator<
   [["zustand/immer", never]],
   [],
   KanbanSlice
-> = (set) => ({
+> = (set, get) => ({
   ...defaultKanbanState,
   ...createSidebarArchivedTaskActions(set),
-  ...createTaskActions(set),
+  ...createTaskActions(set, get),
   ...createWorkspaceContextActions(set),
   resetKanbanWorkspaceContext: () =>
     set((draft) => {

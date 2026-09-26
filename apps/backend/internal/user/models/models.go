@@ -143,6 +143,9 @@ type UserSettings struct {
 	LspServerConfigs                  map[string]map[string]interface{} `json:"lsp_server_configs"`
 	LspStatusLocation                 string                            `json:"lsp_status_location"`
 	SavedLayouts                      []SavedLayout                     `json:"saved_layouts"`
+	SidebarViewsByWorkspace           map[string]SidebarWorkspaceState  `json:"sidebar_views_by_workspace"`
+	SidebarLayoutsByWorkspace         map[string]SidebarLayout          `json:"sidebar_layouts_by_workspace"`
+	SidebarWorkspaceVersion           int                               `json:"sidebar_workspace_version"`
 	SidebarViews                      []SidebarView                     `json:"sidebar_views"`
 	SidebarActiveViewID               string                            `json:"sidebar_active_view_id"`
 	SidebarDraft                      *SidebarViewDraft                 `json:"sidebar_draft"`
@@ -154,6 +157,7 @@ type UserSettings struct {
 	SidebarTaskColors                 map[string]*string                `json:"sidebar_task_colors"`
 	TaskCreateLastUsed                TaskCreateLastUsed                `json:"task_create_last_used"`
 	JiraSavedViews                    json.RawMessage                   `json:"jira_saved_views"`
+	JiraDefaultViewID                 string                            `json:"jira_default_view_id"`
 	JiraTaskPresets                   json.RawMessage                   `json:"jira_task_presets"`
 	GitHubSavedPresets                json.RawMessage                   `json:"github_saved_presets"`
 	GitHubDefaultQueryPresets         json.RawMessage                   `json:"github_default_query_presets"`

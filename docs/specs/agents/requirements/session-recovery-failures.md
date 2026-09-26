@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-09-11
-updated: 2026-09-14
+updated: 2026-09-18
 owners:
   - Kandev
 ---
@@ -50,6 +50,7 @@ results, including the shared recovery owner and phone touch-target checks.
 
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.8:** After manual or automatic recovery, the session error shall remain readable before later messages. It shall retain its original cause and occurrence time after reload.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.9:** Only the current unresolved failure shall offer recovery actions. Pending recovery shall not imply success. A later failure shall not reactivate controls on an older entry.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.10:** A recoverable failure that occurs after agent startup, such as a model provider rejecting a dispatched prompt, shall carry the same bounded, sanitized failure detail in its initially collapsed details disclosure as bootstrap and managed-runtime failures do. The detail shall be sanitized of URLs, credentials, and identifiers, and shall be omitted when sanitization leaves nothing usable, in which case the generic recovery card remains. This lets a user expand a short provider error, such as an invalid tool definition, without the raw detail appearing in the summary line.
 
 ## Session error history amendment
 
@@ -59,10 +60,13 @@ This supersedes the reveal-at-top behavior from the completed startup recovery s
 The task system owns durable history and shared error scope through
 [task error ownership](../../tasks/requirements/task-launch-failure-recovery.md).
 
-## Proposed recovery attempt amendment
+## Recovery attempt isolation
 
-The following requirement is draft. The existing requirements remain active.
-Implementation belongs to the [resume cancellation package](../../../plans/resume-cancellation/plan.md).
+Criteria 007.1 through 007.6 are implemented in the
+[resume cancellation package](../../../plans/resume-cancellation/plan.md).
+The accepted-turn amendment adds criteria 007.7 through 007.9. Its
+implementation and verification are recorded in the
+[resumed turn cancellation package](../../../plans/resumed-turn-cancellation/plan.md).
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007: Isolated recovery attempts
 
@@ -76,6 +80,10 @@ Implementation belongs to the [resume cancellation package](../../../plans/resum
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.4:** A browser disconnect shall not cancel an accepted recovery attempt. Explicit cancellation shall interrupt startup waits and end with success or a visible bounded failure.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.5:** A failed resume before prompt dispatch shall show the existing recovery card with the resume cause. It shall not claim that the agent is busy with a complex task. Reload shall preserve the applicable recovery action and failure details.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.6:** On desktop and phone, users shall be able to cancel startup and retry after cancellation settles. Existing recovery actions, touch targets, keyboard access, and transcript scrolling shall remain available.
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.7:** After the provider accepts a resumed prompt, successful turn cancellation shall preserve the healthy agent process and saved conversation identity. The next message shall use that process without another startup, resume, or recovery error.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.8:** Cancellation concurrent with prompt acceptance shall have one outcome. Before acceptance, cancelled startup shall not dispatch. After acceptance, normal turn cancellation shall own the outcome. An accepted prompt shall not be replayed or reported as cancelled startup because its turn was paused.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.9:** Desktop and phone shall support pause followed by another message during the first resumed turn and later turns. Valid responses and session updates shall continue after each pause. A further resume shall require an independently established loss or stop of the runtime.
 
 ## Out of scope
 

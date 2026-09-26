@@ -2,6 +2,7 @@
 status: draft
 system: workspaces
 created: 2026-08-27
+updated: 2026-09-25
 owners:
   - kandev
 requirements:
@@ -72,9 +73,19 @@ configuration key. If the marker is absent, the backend uses server policy.
 
 ## Desktop folder selection
 
-The desktop bridge adds one origin-checked command. The command opens a native
-directory panel at the current user's home and returns one selected canonical
-directory or a cancellation result.
+The desktop bridge keeps one origin-checked folder-selection command. The
+command opens a native directory panel and returns a selected path,
+cancellation, or a failure. It does not block the Tauri IPC worker while the
+panel is open. The frontend still waits for the result and disables the picker
+trigger to avoid opening a second panel.
+
+The shell checks `Projects`, `Developer`, `src`, `Code`, `workspace`,
+`Development`, and `repos` under the desktop user's Home, in that order. It
+uses the first existing directory that is not a symlink as the initial panel
+location. If none exists, it omits `set_directory` and lets the operating
+system choose its default location. The user can navigate to Home from the
+panel. This avoids forcing the panel to list Home at open on machines without
+a local workspace directory.
 
 The command does not list directories, read files, or accept a caller-provided
 path. The Tauri WebView sends the returned path to the desktop root API. The
@@ -133,8 +144,11 @@ does not copy these roots into SQLite.
 The workspace-scoped discovery endpoint returns repositories for one workspace.
 It does not give workspace scope to the desktop root records.
 
-The repository-discovery cache is keyed by the normalized root set and maximum
-depth. It stores the last successful repositories, scan time, and root state.
+The aggregate repository-discovery cache is keyed by the normalized root set
+and maximum depth. It stores the last successful repositories, scan time, and
+root state. A secondary snapshot cache is keyed by each exact normalized root
+and maximum depth. It survives aggregate invalidation so an unchanged root can
+retain its last successful repositories while a changed root set is scanned.
 One single-flight scan serves concurrent workspace requests for the same key.
 
 ## Upgrade behavior
@@ -149,9 +163,19 @@ The SQLite migration distinguishes an existing database from a new database.
 For an existing database, it records this state only when configured and saved
 roots are both empty. A new database starts in the normal unconfigured state.
 
-The UI then shows Continue Home Discovery. If the user selects this action, the
-native picker opens at Home. Saved repositories remain available during this
-migration.
+The UI then shows Continue Home Discovery. This button calls a dedicated
+backend confirmation action without opening a picker or sending a path from
+the client. The backend checks that desktop Home confirmation is still
+pending, resolves its own current user's Home, and adds that canonical path
+through the existing discovery-root service. The action returns the saved
+root after its first scan. If the pending state is gone and Home is not saved,
+the action rejects the stale request; it does not add Home. If Home is already
+saved, a repeated request returns that root without starting a second scan.
+Saved repositories remain available throughout migration.
+
+This backend action is separate from ordinary folder selection. Sending
+`"~"` to `AddDesktopDiscoveryRoot` is invalid: that service treats it as a
+literal relative directory name, not as the current user's Home.
 
 ## Discovery flow
 
@@ -160,8 +184,46 @@ migration.
 3. The frontend renders saved and cached repositories immediately.
 4. If the surface is active and the snapshot is 30 minutes old, it requests a refresh.
 5. The backend shares an existing scan or starts one scan for the root set.
-6. Success replaces the cache and broadcasts the new snapshot.
-7. Failure preserves the cache and marks only the failed root for recovery.
+6. Each successful root replaces its cached results, including an empty result.
+7. Each failed root retains only its previous results and reports recovery state.
+
+### Partial scan recovery
+
+This section defines AC-WORKSPACES-LOCAL-REPOSITORIES-003.9 through 003.12.
+`repoWalker.visit` distinguishes root errors from descendant errors.
+An inaccessible root fails its scan. An inaccessible descendant produces a
+structured warning and does not terminate traversal of accessible siblings.
+Cancellation and deadline expiry abort the operation without a cache write.
+The existing Home exclusions and explicit-path validation remain unchanged.
+
+`scanRootForRepos` retains repositories found before a descendant error.
+The scan carries the existing runtime and trigger context into descendant
+diagnostics. Warnings identify the denied descendant, not just its root.
+The walker emits at most one warning per denied path during one scan.
+It does not retry denied paths within that scan.
+
+The aggregate `discoveryCacheEntry` retains results by exact normalized scan
+root internally. A secondary per-root snapshot retains each root's last
+successful result independently of the aggregate root-set key. This preserves
+unchanged roots across Add or Reconnect invalidation without borrowing results
+from a different normalized path or maximum depth. `scanDiscoveryRoots`
+replaces successful root entries and retains failed root entries. A root
+without previous results contributes an empty list on failure.
+The response deduplicates the union by repository path. Root membership comes
+from scan provenance, not a path-prefix guess, because effective roots can overlap.
+Cache snapshots and responses copy their slices to prevent concurrent mutation.
+
+The public response keeps its existing fields. `failed_roots` lists current
+root failures. Descendant denials do not mark accessible roots as failed.
+An absent clone root remains a reported root failure, but never replaces fresh
+results from another root. Discovery does not create directories. Failed-root
+paths are diagnostic data and are not rendered by repository selectors.
+
+The aggregate `scan_time` advances only after all roots succeed. During partial
+failure, it retains the previous complete-scan time, or remains absent.
+The coordinator retains automatic-retry suppression for failed snapshots.
+Manual Refresh retries the effective roots through the existing single-flight
+operation. This repair does not introduce background retries.
 
 The shared discovery coordinator owns one activation count in each browser tab.
 An open consumer acquires one activation lease. It releases the lease when the
@@ -187,8 +249,11 @@ Desktop with no effective root shows saved repositories and one action named
 Choose folders to discover repositories. The action explains that the user can
 select Home or a narrower folder.
 
-If migration needs Home confirmation, the surface also shows Continue Home
-Discovery. Cancellation leaves the current choices unchanged.
+If migration needs Home confirmation, the surface also shows a direct
+Continue Home Discovery button. It has a disabled, busy state while the
+backend saves the root and scans. The separate Choose folders action still
+opens the picker. On a narrow viewport, both actions remain separate and
+reachable in the existing scroll region.
 
 An inaccessible saved root shows Reconnect and Remove actions. Reconnect opens
 the native picker again. It does not retry the denied path in the background.
@@ -201,6 +266,19 @@ browser on a desktop backend uses desktop policy and the HTTP folder browser.
 
 Temporary repository choices use the current phone-native picker or drawer
 composition. No native Tauri control appears in a browser or mobile viewport.
+
+`RepositoryDiscoveryControls` remains the desktop root-management surface. It
+does not render failed-root warnings or paths for server, browser, or phone
+selectors. Those selectors keep their available repository choices and their
+normal manual Refresh action. The backend and coordinator retain failed-root
+data for structured diagnostics and automatic-retry suppression, but that data
+is logs-only from the selector's perspective.
+
+Saved desktop roots retain their existing Reconnect and Remove actions. Those
+controls manage explicit saved roots and do not extend to operator-configured
+roots. Phone presentation reuses each existing selector and its scroll owner;
+no warning details or extra scroll owner is added. Desktop actions remain 28
+pixels high. Phone and coarse-pointer actions have at least 44-pixel hit targets.
 
 ## Workspace polling
 
@@ -268,7 +346,8 @@ Suggested event names are:
 
 - Picker cancellation changes no grant and starts no scan.
 - An invalid selected path is rejected without persistence.
-- A partial scan returns the last successful cache and identifies failed roots.
+- A partial scan combines fresh successful roots with cached failed roots.
+- An inaccessible descendant does not discard accessible sibling results.
 - A denied root moves to `reconnect_required` and receives no automatic retry.
 - An unsigned update can change macOS code identity. The UI offers Reconnect and
   does not claim that one consent will survive every update.
@@ -332,6 +411,10 @@ repository trust](../../../decisions/2026-08-28-explicit-submodule-repository-tr
 - Manual macOS QA covers `NSOpenPanel` and real privacy dialogs.
 - Lifecycle tests cover final refresh, paused delivery, startup fallback, focus,
   and new operation activity.
+
+## Implementation plans
+
+- [Repository Discovery Failure Recovery](../../../plans/repository-discovery-failure-recovery/plan.md)
 
 ## Decisions
 

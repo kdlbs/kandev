@@ -21,14 +21,26 @@ An executor determines where Kandev creates a task environment and runs `agentct
 | Worktree      | Supported; normal default                                                       | Dedicated Git worktree on the Kandev host                               | Parallel coding on a trusted machine                                     |
 | Local         | Supported                                                                       | The selected checkout, or an explicit folder for a repository-free task | One controlled task must work in that exact folder                       |
 | Local Docker  | Supported when the global Docker runtime is enabled and its daemon is reachable | `/workspace` in a new Docker container                                  | You need a repeatable container boundary                                 |
-| Kubernetes    | Dependency-bound on cluster access, namespaced RBAC, admission, storage, and streaming support | `/workspace` in one Pod per task session | You need sessions scheduled inside an administrator-managed cluster boundary |
+| Kubernetes    | Dependency-bound on cluster access, namespaced RBAC, admission, storage, and streaming support | `/workspace` in one Pod per task | You need sessions scheduled inside an administrator-managed cluster boundary |
 | Sprites.dev   | Supported, provider-dependent                                                   | `/workspace` in a provider sandbox                                      | You need remote compute and accept provider lifecycle/billing            |
 | SSH           | Supported for repository sources on a trusted host                              | A task folder on a trusted SSH host                                     | You need a remote host with SSH, SFTP, forwarding, and clone credentials |
-| Remote Docker | **Not implemented**                                                             | None                                                                    | Do not select or create this type                                        |
+| Remote Docker | Supported over SSH; local Git sources are not yet rejected (see below) | `/workspace` in a container on a remote Docker daemon | You want a container boundary on one remote machine, including a host that accepts no filesystem writes, and do not run Kubernetes |
 
 `mock_remote` also exists in backend models for tests. It is not a product executor.
 
-Remote Docker deserves explicit treatment: the backend registers the runtime type, but its create and stop methods return `remote_docker runtime is not yet implemented`. The current **Settings > Executors** hub does not offer it. Older routes and stored fields such as `docker_host`, `docker_tls_verify`, and `docker_cert_path` do not make it operational.
+Only administrators can create, edit, or test a Remote Docker executor, and only administrators can build its image. A saved profile grants effective root on the remote host, and a build runs Dockerfile instructions with that daemon's authority.
+
+Remote Docker reaches its daemon over SSH, not over a daemon URL. The profile stores an SSH target, and Kandev rejects any value carrying a scheme, so `tcp://` is excluded by construction. An unsecured daemon port is remote root; `ssh://` needs no extra setup because Docker's SSH transport runs `docker system dial-stdio` over the connection you already have. The older stored fields `docker_host`, `docker_tls_verify`, and `docker_cert_path` are not used by this runtime.
+
+Remote Docker writes nothing to the remote host's filesystem. The `agentctl` helper, the agent's session directory, and the credential and configuration files seeded into it are all delivered into the container through the Docker Engine API, so they live in Docker-managed storage and are removed when the container is. Nothing accumulates in the SSH user's home directory, and archiving or deleting a task removes that agent's credentials with its container.
+
+That makes the remote host's requirements narrow: an SSH account that can run commands (`docker system dial-stdio` and a platform probe) and open TCP forwards, plus access to the Docker socket. Remote Docker needs no SFTP subsystem and no writable home directory, so a minimal or immutable host where Docker is the only management surface is supported. This is the one place Remote Docker is less demanding than SSH, which does require SFTP and a writable workdir root.
+
+If you ran Remote Docker before this change, the remote account may still hold a `~/.kandev` tree from those launches. Kandev removes a task's own `~/.kandev/agent-sessions/<instance-id>/` directory when you archive or delete it. The cached `~/.kandev/bin/agentctl` helper is shared with the SSH executor and is left alone; remove it by hand if no SSH profile targets that host.
+
+The connection test's **Docker daemon** step reports which of three different problems it hit, because each needs a different fix on the remote host. The SSH user cannot use the Docker socket: add that user to the `docker` group there, then test again over a new connection, since group membership applies from the next login. The host has no `docker` command: install the Docker CLI, which the SSH transport needs in addition to the daemon. The CLI ran but no daemon answered: start Docker on that host. Each failure shows the remote's own error alongside the fix.
+
+Choose Remote Docker over a single-node Kubernetes cluster when you want a container per task on one machine and do not otherwise run Kubernetes. Kubernetes covers the same ground and adds resource limits, admission control, and scheduling, but it asks for a storage provisioner, a namespace, RBAC, and a worker image built and pushed to a registry by digest. Remote Docker keeps the Docker executor's Dockerfile-and-build loop, with no registry in the basic case.
 
 ## Embedded VS Code availability
 
@@ -41,9 +53,11 @@ download requirements.
 
 ## Create and select a profile
 
-Open **Settings > Executors**, then choose **Local**, **Worktree**, **Docker**, **Kubernetes**, **Sprites.dev**, or **SSH** under **Create New Profile**. Local and Worktree profiles already exist in a new database.
+Open **Settings > Executors**, then choose **Local**, **Worktree**, **Docker**, **Kubernetes**, **Sprites.dev**, **Remote Docker**, or **SSH** under **Create New Profile**. Local and Worktree profiles already exist in a new database.
 
-![Settings > Executors showing existing Local, Worktree, and Sprites profiles plus Local, Worktree, Docker, Sprites.dev, and SSH profile creation options.](../screenshots/settings-executors.png)
+Open a saved profile from the Executors hub, the Settings tree, an executor profile list, Settings search, or a task's executor disclosure to use the same complete profile editor.
+
+![Settings > Executors showing existing Local and Worktree profiles plus Local, Worktree, Docker, Sprites.dev, Remote Docker, SSH, and Kubernetes profile creation options.](../screenshots/settings-executors.png)
 
 <DocsVideo
   webm="./media/feature-guides/profile-executor-selection.webm"
@@ -160,6 +174,13 @@ exactly match the repository. A broker-aware `gh` shim redeems the primary repos
 each invocation, sets `GH_TOKEN` only on the child `gh` process, and isolates CLI configuration
 from the host.
 
+For Local and Worktree tasks, managed credentials cover Kandev's checkout operations and the
+launched task processes. Per-repository setup scripts still receive executor-profile and repository
+environment bindings, user-configured Git settings, and Kandev's managed build cache, but Kandev
+removes broker leases and generated Git and `gh` helper routing before those scripts start. If a
+repository setup script needs authenticated GitHub access, configure an explicit scoped profile or
+repository credential, or select **Inherit executor Git credentials** and configure the host.
+
 When the workspace uses a GitHub App, the redeemed installation token is minted for that one
 repository. On a multi-repository task, Git can redeem each repository's lease, but App-backed
 `gh` commands are primary-repository scoped. Run cross-repository GitHub API work through Kandev's
@@ -170,6 +191,13 @@ lease matching prevents accidental cross-repository redemption, but the trusted 
 receives a bearer token with all scopes and repositories granted by GitHub. An explicit profile
 `GITHUB_TOKEN` or `GH_TOKEN` bypasses managed broker selection entirely and is the operator's
 unmanaged grant. Personal GitHub tokens and App registration private keys never enter executors.
+
+For Kubernetes tasks using managed Git access, both preparation and the agent's
+commands use the session's current repository leases. Stop/Resume on a retained
+Pod refreshes that access for the resumed agent. Changing task access or replacing
+the GitHub connection takes effect on the next launch or resume; old managed
+leases and generated helpers are not inherited by that new process. Git tokens
+do not need to be added to the worker image or executor profile.
 
 Managed Docker, Kubernetes, Sprites, and SSH launches probe the exact credential-resolution route from inside
 the executor before clone or agent startup and require its `204 No Content` readiness response.
@@ -236,7 +264,7 @@ An idle, non-archived repository-backed task can add sources from its **Files** 
 
 Every repository row records a base branch. Worktree, Docker, SSH, and Sprites may also materialize an existing checkout branch for repository rows. Local/Local PC always uses the repository's current checkout and does not offer or perform a branch switch.
 
-Arbitrary folders are supported only on **Worktree** and **Local/Local PC**. They remain live host paths; Kandev links them into its task workspace and never copies, moves, or deletes their contents. Docker and remote executors do not offer folders and reject a forged folder request. Remote Docker remains unavailable because its runtime is not implemented.
+Arbitrary folders are supported only on **Worktree** and **Local/Local PC**. They remain live host paths; Kandev links them into its task workspace and never copies, moves, or deletes their contents. Docker and remote executors do not offer folders and reject a forged folder request. Remote Docker rejects folders for the same reason as the other remote executors: the daemon cannot read the Kandev host's filesystem. It does **not** yet reject a local Git repository source. The host checkout is never sent to the remote daemon, so nothing wrong is mounted, but the task is created and then fails while running its prepare script. Give the repository a reachable origin, or choose a local executor. The same gap applies to SSH, Kubernetes, and Sprites; see [kdlbs/kandev#3778](https://github.com/kdlbs/kandev/issues/3778).
 
 Source batches are atomic: if validation, cloning, or runtime adoption fails, Kandev removes the new records and Kandev-owned entries while preserving existing task contents. Persisted attachments are reapplied after reload, relaunch, or **Reset Environment**; a previously attached folder that later disappears is reported instead of silently skipped. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 
@@ -271,13 +299,25 @@ At launch Kandev:
 
 The repository workspace itself is not a normal host bind mount. For a local filesystem clone URL, Kandev temporarily mounts that local clone source read-only so the in-container `git clone` can read it. Images need the selected agent's dependencies; they do not need to contain `agentctl`.
 
-The daemon connection comes from global Kandev configuration. At present, the client uses `docker.host` and optional `docker.apiVersion`. The accepted `docker.tlsVerify`, `docker.defaultNetwork`, and `docker.volumeBasePath` settings are not applied by the current Docker client/container manager. Per-executor `docker_host` values are also not used by this runtime.
+The daemon connection comes from global Kandev configuration. At present, the client uses `docker.host` and optional `docker.apiVersion`. The accepted `docker.tlsVerify` and `docker.volumeBasePath` settings are not applied by the current Docker client/container manager. Per-executor `docker_host` values are also not used by this runtime.
 
 The current container manager always selects the Linux/amd64 `agentctl` helper. Use a Linux/amd64-compatible agent image and daemon (native or correctly emulated); native ARM64 agent containers are not yet wired to the released ARM64 helper.
 
 Kandev passes each agent definition's CPU and memory limits to Docker. These are agent implementation defaults, not executor-profile controls. Apply additional daemon, cgroup, storage, and network policy outside Kandev when required.
 
 </details>
+
+### Container networks
+
+Both Docker profiles have a **Container networks** card. It chooses which Docker networks a task container attaches to. Kandev never creates a network; every name must already exist on the daemon that will host the container.
+
+**Primary network** is the network the container is created on, and the one Docker publishes its ports on. Kandev reaches the agent through a published port, so this must be a network that publishes ports. A `macvlan`, `ipvlan`, or `null` network is refused here, as is a network mode such as `host`, `none`, or a `container:` value. A missing network is refused too, and every rejection names the field and the reason before any container is created.
+
+Leaving it empty uses the daemon's own default network, which is what Kandev did before the network was configurable. There is no global setting: a network name only means something on the daemon that owns it, and a Local Docker profile and a Remote Docker profile do not share one.
+
+**Additional networks** are attached after the container is created and before it starts, so the agent sees every interface for its whole life. Any driver is allowed here, which is where a `macvlan` or `ipvlan` network belongs when a task container needs an address on your physical LAN.
+
+**Gateway priority** selects which attachment provides the container's default route; the highest value wins. Set it when a secondary attachment would otherwise capture the default route and break the return path for the agent connection arriving on the primary network. Leave every priority empty to keep Docker's own choice. The field requires Docker 28 or newer; an older daemon ignores it rather than reporting an error.
 
 ### User namespace support
 
@@ -292,7 +332,7 @@ The setting is **off by default**, only available on Docker profiles, and affect
 <details>
 <summary>Docker credential and security details</summary>
 
-Docker profiles can inject resolved environment secrets. For agent file-based authentication, Kandev selectively seeds a per-execution directory under `<KANDEV_HOME_DIR>/agent-sessions/` and mounts that directory at the agent's expected config path. It does not intentionally mount the entire host home.
+Docker profiles can inject resolved environment secrets. For agent file-based authentication, Kandev selectively seeds a per-execution directory under `<KANDEV_HOME_DIR>/agent-sessions/` and mounts that directory at the agent's expected config path. It does not intentionally mount the entire host home. Remote Docker seeds the same files, but delivers them into the container through the Docker Engine API instead of mounting a directory, so nothing is written to either the Kandev host or the remote host.
 
 A container is a useful boundary, not a hostile-code security sandbox. The Docker daemon has host-level power, bind mounts expose their sources, the agent can use every injected secret, and the default image has outbound network access. Kandev does **not** mount the Docker socket into agent containers automatically.
 
@@ -308,7 +348,7 @@ docker ps -a --filter label=kandev.managed=true
 
 > **Cluster authority:** A Kubernetes profile is an administrator-authored Pod template. It can request powerful workload settings, and every injected task credential is available to the main container. Use admission policy, a dedicated namespace, a narrowly scoped API identity, and a separate workload service account.
 
-Kubernetes maps one task session to one namespaced Pod and reaches the injected `agentctl` through a process-local `127.0.0.1` port-forward. The backend can authenticate from an absolute kubeconfig path on the Kandev host or from its own in-cluster service account. It never falls back to a local executor when cluster configuration, admission, exec, or port-forward fails.
+Kubernetes maps one task to one namespaced Pod, with an independent agentctl instance for each session, and reaches the injected `agentctl` through a process-local `127.0.0.1` port-forward. The backend can authenticate from an absolute kubeconfig path on the Kandev host or from its own in-cluster service account. It never falls back to a local executor when cluster configuration, admission, exec, or port-forward fails.
 
 The current experimental matrix validates API and `agentctl` connectivity on Kubernetes 1.34.8 and 1.36.1 and runs the full lifecycle suite on 1.36.1. Other server versions have not yet been validated.
 
@@ -316,13 +356,13 @@ Choose **Settings > Executors > Kubernetes**. Only an administrator can create, 
 
 Opening a saved Kubernetes profile puts the shared cluster connection editor, connection test, and executor-wide active sessions before workload settings. The test uses current unsaved connection and profile values. Administrators edit both resources through one Save/Reset flow, while members see the same hierarchy read-only. Configured executor rows and task settings icons open the selected profile directly; the standalone connection route remains only for an executor with no profiles.
 
-Kubernetes Pod glyphs on Kanban cards and in task lists hydrate from the exact task/session status when they render, before any hover. Fine-pointer hover or keyboard focus shows a compact structured Pod summary; touch opens the same summary in a bottom Drawer without activating the task row. Duplicate indicators for the same session share the current read instead of issuing parallel requests.
+Kubernetes Pod glyphs on Kanban cards and in task lists hydrate from the exact task/session status when they render, before any hover. While the page is visible, mounted indicators refresh automatically every 90 seconds and retry failed reads. Fine-pointer hover or keyboard focus shows a compact structured Pod summary; touch opens the same summary in a bottom Drawer without activating the task row. Duplicate indicators for the same session share the current read instead of issuing parallel requests.
 
 Each executor fixes one namespace and connection configuration. Each profile supplies one strict `core/v1` `PodTemplate`, a main-container name, `linux/amd64` or `linux/arm64`, and one workspace mode:
 
 | Workspace mode | Persistence and ownership |
 |---|---|
-| Managed PVC | Kandev creates one claim for the session, preserves it across ordinary stop, backend restart, and Pod replacement, then deletes it only during terminal or forced cleanup after exact identity checks. |
+| Managed PVC | Kandev creates one claim for the task, preserves it across ordinary stop, backend restart, and Pod replacement, then deletes it only during task archive/delete cleanup after exact identity checks. |
 | `emptyDir` | Fast Pod-scoped storage. It survives a main-container restart but is lost with the Pod, so a missing Pod cannot be recovered. No PVC permission is required. |
 | Existing claim | Kandev verifies and mounts the named claim in the executor namespace. It never creates or deletes that claim. Concurrent-access safety depends on the claim and application. |
 
@@ -336,9 +376,9 @@ an immutable registry digest. The current Kind evidence covers Linux `amd64`
 only. These files are profile inputs, not standalone Pod manifests; Kandev
 continues to own bootstrap, credentials, runtime mounts, and the workspace.
 
-Ordinary Stop, agent restart, main-container restart, and backend restart preserve the Pod and workspace. Resume verifies the recorded name, UID, and complete ownership-label identity, creates a new local port-forward, and reconnects. Every managed create also carries a fresh 256-bit request nonce so an ambiguous API response cannot make Kandev adopt or delete a copied-label object. Archive/delete terminal cleanup or an explicit force cleanup deletes only the exact recorded Pod and, for managed storage, the exact Kandev-created PVC. A same-name object with another UID, ownership identity, or create nonce is left untouched and cleanup fails closed.
+Stop, including force-stop, removes only the selected agentctl instance. Other sessions and the task workspace remain available. Agent, main-container, and backend restarts preserve the Pod and workspace. Resume verifies the recorded name, UID, and complete ownership-label identity, creates a new local port-forward, and reconnects. Every managed create also carries a fresh 256-bit request nonce so an ambiguous API response cannot make Kandev adopt or delete a copied-label object. Task archive/delete cleanup deletes only the exact recorded Pod and, for managed storage, the exact Kandev-created PVC. A same-name object with another UID, ownership identity, or create nonce is left untouched and cleanup fails closed.
 
-Saved executor connection settings are different from the recorded workload snapshot. Current kubeconfig/in-cluster credentials, context, and timeout are used to reach an existing session; changing them can restore or break reconnect and cleanup. Existing sessions continue to target their recorded namespace even if the saved namespace changes, and the saved namespace affects new sessions only. Current Pod template, image, platform, main container, and storage settings also affect new sessions only. If Kandev must replace a missing Pod, it uses the recorded namespace and workload snapshot rather than the edited profile.
+Saved executor connection settings are different from the recorded workload snapshot. Current kubeconfig/in-cluster credentials, context, and timeout are used to reach an existing session; changing them can restore or break reconnect and cleanup. Existing sessions continue to target their recorded namespace even if the saved namespace changes, and the saved namespace affects new task Pods only. Current Pod template, image, platform, main container, and storage settings also affect new task Pods only; additional sessions reuse the task's recorded workload. If Kandev must replace a missing Pod, it uses the recorded namespace and workload snapshot rather than the edited profile.
 
 An executor cannot be deleted or changed into or out of Kubernetes while runtime inventory still references it. Clear the sessions through normal terminal cleanup first; deleting a profile does not mutate or destroy a retained workload.
 
@@ -349,7 +389,7 @@ memory values are requests from the verified Pod spec, not actual usage or
 cost. Stop preserves a resumable Kandev-managed workspace; Archive or Delete
 can remove it. Kandev does not delete an operator-owned existing claim.
 
-See [Kubernetes](k8s.md#configure-the-kubernetes-executor) for kubeconfig and in-cluster setup, the opt-in namespaced RBAC manifest, exact ownership labels, diagnostics, template rules, and recovery guidance.
+All sessions in a task share one credential trust boundary. Same-UID agents can read sibling credentials even when their profiles differ. Operators must trust every attached agent and revoke or rotate exposed credentials after compromise. See [Kubernetes](k8s.md#configure-the-kubernetes-executor) for the trust boundary, kubeconfig and in-cluster setup, the opt-in namespaced RBAC manifest, exact ownership labels, diagnostics, template rules, and recovery guidance.
 
 ## Sprites.dev
 
@@ -432,6 +472,30 @@ The runtime preflights the selected agent command and reports an installation hi
 Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Terminal archive/delete stops run the profile cleanup script first; cleanup is best-effort, so a failure does not block controller teardown. Plain Stop and backend restart skip cleanup and preserve the task workspace for resume. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. Resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller and re-runs preparation.
 
 </details>
+
+### Reachability
+
+A background poller probes each active SSH executor's configured host on
+`executors.sshReachabilityIntervalSeconds` (default 60s; see
+[Configuration](configuration.md)) and records whether the TCP dial and SSH
+handshake succeeded. The result (reachable, unreachable with a failure
+reason, or unknown before the first probe) appears on the executor's
+**Settings > Executors > SSH** page, including the probed host, how long ago
+the last successful probe was (or that none has ever succeeded), and a manual
+**Probe now** action.
+
+If a task launches against a host currently recorded as unreachable, Kandev
+publishes a `session.launch.warning` event for the launched session. The task's
+chat panel shows an inline warning naming the host and the age of the last
+successful probe before the attempt proceeds. The gateway keeps the latest
+warning while the backend is running, so a later session subscriber receives
+it too. Workflow and dependency launches use the same event path.
+
+The probe deliberately does two things and no more: it reports what it
+observed, and it never blocks or delays a launch on that basis. It does not
+retry a failed connection immediately, and it does not move, reconfigure, or
+otherwise repair a host that has become unreachable or changed address;
+fixing the host or the connection settings remains an operator action.
 
 ## Lifecycle and cleanup
 

@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/npmresolution"
 	"go.uber.org/zap"
 )
@@ -31,6 +32,7 @@ import (
 const (
 	openCodeCommand       = "opencode"
 	openCodeACPSubcommand = "acp"
+	kandevAgentGuardPath  = "/usr/local/bin/kandev-agent-guard"
 
 	acpCommandTerminateGrace = 250 * time.Millisecond
 	acpCommandForceKillGrace = 500 * time.Millisecond
@@ -66,9 +68,9 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		return &PromptResponse{Success: false, Error: "work_dir is required for ACP inference"}, nil
 	}
 	model, modelConfigOptions, _ := acpcompat.MigrateCursorModel(req.AgentID, req.Model, nil)
-	resolvedCmd := resolveProbeCommand(cfg.Command[0])
-	if resolvedCmd == "" {
-		return &PromptResponse{Success: false, Error: fmt.Sprintf("command %q is not an allowed ACP command", cfg.Command[0])}, nil
+	resolvedCmd, cmdErr := resolveSpawnCommand(cfg)
+	if cmdErr != "" {
+		return &PromptResponse{Success: false, Error: cmdErr}, nil
 	}
 
 	startTime := time.Now()
@@ -81,24 +83,27 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		zap.String("model", model),
 		zap.Strings("command", args))
 
-	// Use the hard-coded resolvedCmd (not args[0]) so CodeQL can see that
-	// the executable name is not derived from tainted input.
-	//nolint:gosec // resolvedCmd is from a hard-coded allow-list; args[1:] are CLI flags
 	cmdArgs := args[1:]
 	if len(cfg.CommandPrefix) > 0 {
 		args = append(append([]string{}, cfg.CommandPrefix...), args...)
-		resolvedCmd = resolveProbeCommand(args[0])
+		resolvedCmd = resolveACPCommandPrefix(args[0])
 		if resolvedCmd == "" {
 			return &PromptResponse{Success: false, Error: fmt.Sprintf("command prefix %q is not an allowed ACP command", args[0])}, nil
 		}
 		cmdArgs = args[1:]
 	}
 	cmdArgs = append(cmdArgs, cfg.CLIFlags...)
-	// Use the hard-coded resolvedCmd (not args[0]) so CodeQL can see that
-	// the executable name is not derived from tainted input.
+	env := sanitizeEnvForAgent(req.InferenceConfig)
+	if err := managedruntime.PrepareNPMProjectPrefix(cmdArgs); err != nil {
+		return &PromptResponse{Success: false, Error: "managed npm project prefix could not be prepared"}, nil
+	}
+	// Use resolvedCmd (not args[0]) so the executable name the taint tracker
+	// sees is an allow-list literal, a validated command prefix, or the
+	// operator-registered command resolveSpawnCommand documents.
+	//nolint:gosec // resolvedCmd is an allow-list literal, a validated prefix, or an operator-registered command
 	cmd := exec.CommandContext(ctx, resolvedCmd, cmdArgs...)
 	cmd.Dir = workDir
-	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
+	cmd.Env = env
 	configureACPCommand(cmd, e.logger)
 
 	// Same reasoning as the probe: without this the child's own account of why
@@ -133,7 +138,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		e.logger.Warn("ACP inference: dropping unsupported MCP server transport",
 			zap.String("name", name))
 	}
-	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, req.AutoApprovePermissions, mcpServers)
+	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, req.AutoApprovePermissions, mcpServers, cfg.ProviderGatewayAuth)
 	if err != nil {
 		e.logger.Error("ACP inference failed",
 			zap.String("agent_id", req.AgentID),
@@ -141,7 +146,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 			zap.String("stderr", stderr.tail()))
 		return &PromptResponse{
 			Success:    false,
-			Error:      err.Error(),
+			Error:      withUpstreamHint(err, cfg.ProviderGatewayAuth, stderr.tail()),
 			DurationMs: int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
@@ -171,6 +176,7 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	mode string,
 	autoApprovePermissions *bool,
 	mcpServers []acp.McpServer,
+	gatewayAuth *acpprovider.GatewayAuth,
 ) (string, error) {
 	// Collect response text from updates
 	var responseText strings.Builder
@@ -216,10 +222,8 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	// mode — so opting out here would reject the very model ids the rest of
 	// the product hands out.
 	_, err := conn.Initialize(ctx, acp.InitializeRequest{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		ClientCapabilities: acp.ClientCapabilities{
-			Meta: acpcompat.ClientCapabilityMeta(agentID, nil),
-		},
+		ProtocolVersion:    acp.ProtocolVersionNumber,
+		ClientCapabilities: clientCapabilitiesForInference(agentID, gatewayAuth),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-inference",
 			Version: "1.0.0",
@@ -227,6 +231,9 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	})
 	if err != nil {
 		return "", describeACPFailure(ctx, "initialize", err)
+	}
+	if err := applyInferenceGatewayAuth(ctx, conn, gatewayAuth); err != nil {
+		return "", err
 	}
 
 	// Create new session. ACP requires McpServers to be a non-nil slice;
@@ -472,9 +479,9 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	if workDir == "" {
 		return &ProbeResponse{Success: false, Error: "work_dir is required for ACP probe"}, nil
 	}
-	resolvedCmd := resolveProbeCommand(cfg.Command[0])
-	if resolvedCmd == "" {
-		return &ProbeResponse{Success: false, Error: fmt.Sprintf("command %q is not an allowed ACP probe command", cfg.Command[0])}, nil
+	resolvedCmd, cmdErr := resolveSpawnCommand(cfg)
+	if cmdErr != "" {
+		return &ProbeResponse{Success: false, Error: cmdErr}, nil
 	}
 
 	startTime := time.Now()
@@ -487,14 +494,18 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	// Probes intentionally omit the model flag so session/new returns the agent's
 	// default model and the complete availableModels list.
 	args := buildACPCommand(cfg, "")
+	if err := managedruntime.PrepareNPMProjectPrefix(args); err != nil {
+		return &ProbeResponse{Success: false, Error: "managed npm project prefix could not be prepared"}, nil
+	}
 
 	e.logger.Info("starting ACP probe",
 		zap.String("agent_id", req.AgentID),
 		zap.Strings("command", args))
 
-	// Use the hard-coded resolvedCmd (not args[0]) so CodeQL can see that
-	// the executable name is not derived from tainted input.
-	//nolint:gosec // resolvedCmd is from a hard-coded allow-list; args[1:] are CLI flags
+	// Use resolvedCmd (not args[0]) so the allow-list literal is what reaches
+	// exec.Command for every built-in agent, and the one exception is the
+	// operator-defined command resolveSpawnCommand documents.
+	//nolint:gosec // resolvedCmd is an allow-list literal or an operator-registered command
 	cmd := exec.CommandContext(ctx, resolvedCmd, args[1:]...)
 	cmd.Dir = workDir
 	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
@@ -531,7 +542,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	defer cleanup()
 
 	resp, err := e.probeACPSessionWithContext(
-		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions,
+		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions, cfg.ProviderGatewayAuth,
 	)
 	if err != nil {
 		cleanup()
@@ -546,7 +557,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 			zap.String("stderr", stderrTail))
 		return &ProbeResponse{
 			Success:     false,
-			Error:       err.Error(),
+			Error:       withUpstreamHint(err, cfg.ProviderGatewayAuth, stderrTail),
 			FailureCode: managedRuntimeProbeFailureCode(cfg.Command, stderrTail),
 			DurationMs:  int(time.Since(startTime).Milliseconds()),
 		}, nil
@@ -565,17 +576,25 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 
 func managedRuntimeProbeFailureCode(command []string, stderr string) ProbeFailureCode {
 	packageSpec, ok := managedRuntimeProbePackageSpec(command)
-	if !ok || !npmresolution.MatchesExactPackage(stderr, packageSpec) {
+	if !ok {
+		return ""
+	}
+	if npmresolution.MatchesRawReleaseAgePolicy(stderr, packageSpec) {
+		return ProbeFailureManagedRuntimeNPMPolicy
+	}
+	if !npmresolution.MatchesExactPackage(stderr, packageSpec) {
 		return ""
 	}
 	return ProbeFailureManagedRuntimeNPMResolution
 }
 
 func managedRuntimeProbePackageSpec(command []string) (string, bool) {
-	if len(command) < 4 || command[0] != "npx" || command[1] != "--yes" || command[2] != "--prefer-offline" {
+	// Accept only npx --yes --prefer-offline --prefix <fixed-prefix> <exact-spec>.
+	if len(command) < 6 || command[0] != "npx" || command[1] != "--yes" || command[2] != "--prefer-offline" ||
+		command[3] != "--prefix" || command[4] != managedruntime.NPMProjectPrefix {
 		return "", false
 	}
-	packageSpec := command[3]
+	packageSpec := command[5]
 	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
 		return "", false
 	}
@@ -890,6 +909,7 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	model string,
 	mode string,
 	requestedConfigOptions map[string]string,
+	gatewayAuth *acpprovider.GatewayAuth,
 ) (*ProbeResponse, error) {
 	updates := newACPProbeNotificationState(agentID)
 
@@ -913,10 +933,8 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	// session uses, and a model id the UI cannot select. The probe intentionally
 	// omits the live adapter's terminal_output base capability.
 	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		ClientCapabilities: acp.ClientCapabilities{
-			Meta: acpcompat.ClientCapabilityMeta(agentID, nil),
-		},
+		ProtocolVersion:    acp.ProtocolVersionNumber,
+		ClientCapabilities: clientCapabilitiesForInference(agentID, gatewayAuth),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-probe",
 			Version: "1.0.0",
@@ -924,6 +942,9 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	})
 	if err != nil {
 		return nil, describeACPFailure(ctx, "initialize", err)
+	}
+	if err := applyInferenceGatewayAuth(ctx, conn, gatewayAuth); err != nil {
+		return nil, err
 	}
 
 	sessionResp, err := conn.NewSession(ctx, acp.NewSessionRequest{
@@ -1263,6 +1284,44 @@ func resolveProbeCommand(name string) string {
 	return ""
 }
 
+// resolveSpawnCommand returns the executable a probe or inference subprocess
+// should spawn, or a non-empty error message when the command is not permitted.
+//
+// A built-in agent's command is compiled in, so it resolves to the allow-list
+// literal and the taint tracker can follow it to exec.Command unchanged.
+//
+// A custom agent's command cannot: it does not exist until the install
+// operator types it in Settings, so no literal can cover it. Refusing it does
+// not keep that command from running — the session path spawns the same string
+// verbatim (process/manager.go, interactive_lifecycle.go), and agentctl's own
+// piped runner accepts an arbitrary command from its request. It only denies
+// the agent the capability probe, which is where its models and modes come
+// from. The operator who typed the command is the operator who could run it
+// directly on the host.
+func resolveSpawnCommand(cfg *InferenceConfigDTO) (string, string) {
+	command := cfg.Command[0]
+	if cfg.OperatorDefined {
+		return command, ""
+	}
+	resolved := resolveProbeCommand(command)
+	if resolved == "" {
+		return "", fmt.Sprintf("command %q is not an allowed ACP probe command", command)
+	}
+	return resolved, ""
+}
+
+// resolveACPCommandPrefix validates the optional launcher that wraps an
+// already allow-listed ACP agent command. The deployment guard is accepted
+// only at its fixed image path: accepting a matching basename from another
+// directory would let a caller substitute an untrusted wrapper. Existing
+// allow-listed agent commands retain their prior prefix behavior.
+func resolveACPCommandPrefix(name string) string {
+	if name == kandevAgentGuardPath {
+		return kandevAgentGuardPath
+	}
+	return resolveProbeCommand(name)
+}
+
 // stderrTailLimit bounds how much of a spawned agent's stderr reaches the log:
 // enough for an npm failure or the head of a panic, small enough that a chatty
 // agent cannot flood it.
@@ -1327,6 +1386,63 @@ func describeACPFailure(ctx context.Context, phase string, err error) error {
 	default:
 		return fmt.Errorf("ACP %s failed: %w", phase, err)
 	}
+}
+
+// clientCapabilitiesForInference builds the probe/inference client capabilities,
+// advertising the ACP gateway auth capability when a provider gateway is
+// configured so the agent accepts the follow-up authenticate call.
+func clientCapabilitiesForInference(agentID string, gw *acpprovider.GatewayAuth) acp.ClientCapabilities {
+	caps := acp.ClientCapabilities{Meta: acpcompat.ClientCapabilityMeta(agentID, nil)}
+	if gw != nil {
+		caps.Auth = acp.AuthCapabilities{Meta: acpprovider.ClientAuthMeta()}
+	}
+	return caps
+}
+
+// applyInferenceGatewayAuth authenticates an ephemeral probe/inference session
+// against a Kandev-configured OpenAI-compatible provider right after initialize.
+// It is a no-op unless a gateway is configured; a failure aborts rather than
+// letting the subprocess fall back to its built-in vendor endpoint.
+func applyInferenceGatewayAuth(ctx context.Context, conn *acp.ClientSideConnection, gw *acpprovider.GatewayAuth) error {
+	if gw == nil {
+		return nil
+	}
+	if _, err := conn.Authenticate(ctx, acp.AuthenticateRequest{
+		MethodId: acp.AuthMethodId(gw.MethodID),
+		Meta:     gw.Meta,
+	}); err != nil {
+		return fmt.Errorf("OpenAI-compatible provider authentication failed: %w", err)
+	}
+	return nil
+}
+
+// upstreamStatusLineRE matches a recognizable HTTP status line in a child's
+// stderr tail (e.g. "HTTP 401", "status: 403", "429 Too Many Requests"). An
+// allowlist of shapes keeps free-text stderr out of the client payload.
+var upstreamStatusLineRE = regexp.MustCompile(`(?i)\b(?:HTTP[/ ]?[\d.]*\s*)?(?:status[:= ]+)?([45]\d\d)\b(?:\s+[A-Za-z][A-Za-z ]{2,40})?`)
+
+// withUpstreamHint appends a sanitized upstream status indication to a failed
+// probe/inference error when the call was routed through a provider gateway, so
+// a provider 401/403/429 is legible instead of only "peer disconnected". The
+// bearer key and any tmp paths are stripped; nothing is appended when no status
+// line is recognizable.
+func withUpstreamHint(err error, gw *acpprovider.GatewayAuth, stderrTail string) string {
+	msg := err.Error()
+	if gw == nil || stderrTail == "" {
+		return msg
+	}
+	hint := upstreamStatusLineRE.FindString(scrubTmpPaths(stderrTail))
+	hint = strings.TrimSpace(hint)
+	if hint == "" {
+		return msg
+	}
+	return fmt.Sprintf("%s (provider responded: %s)", msg, hint)
+}
+
+var tmpPathRE = regexp.MustCompile(`(?:/tmp|/var/folders|[A-Za-z]:\\[^\s"']*Temp)[^\s"']*`)
+
+func scrubTmpPaths(s string) string {
+	return tmpPathRE.ReplaceAllString(s, "<path>")
 }
 
 // sanitizeEnvForAgent returns a child-process environment with agent-declared

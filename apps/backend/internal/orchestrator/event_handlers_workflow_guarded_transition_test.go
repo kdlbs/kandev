@@ -60,7 +60,7 @@ func TestApplyGuardedTransitionLifecycle_OfficeRejectLeg_DoesNotPromptDeciderSes
 	}
 
 	// The reviewer's own session — the identity RecordParticipantDecision
-	// resolves and passes through as sessionID (AC-16a / officeSessionIdentity).
+	// resolves and passes through as sessionID for participant re-evaluation.
 	// It is a distinct agent from the task's assignee and must never be the
 	// one auto-started into Work.
 	reviewerSession := &models.TaskSession{

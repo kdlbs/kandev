@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -91,6 +92,32 @@ func (r *Repository) GetTaskExecutionFields(ctx context.Context, taskID string) 
 		return nil, err
 	}
 	return &fields, nil
+}
+
+// GetTaskMetadata returns the raw metadata map for a task, read directly
+// off the tasks.metadata JSON column for the task-boundary causation
+// carrier (AC-OFFICE-RUN-CAUSATION-001.18). Returns a nil map, not an
+// error, when metadata is empty, absent, or fails to parse — the caller
+// treats a nil map as "no carrier to read" rather than a lookup failure.
+func (r *Repository) GetTaskMetadata(ctx context.Context, taskID string) (map[string]interface{}, error) {
+	var raw sql.NullString
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT metadata FROM tasks WHERE id = ?
+	`), taskID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !raw.Valid || raw.String == "" {
+		return nil, nil
+	}
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(raw.String), &metadata); err != nil {
+		return nil, nil
+	}
+	return metadata, nil
 }
 
 // GetTaskProjectID returns the project_id for a task, or an empty string if unset.
@@ -418,7 +445,7 @@ type ListTasksFilteredResult struct {
 func (r *Repository) ListTasksFiltered(
 	ctx context.Context, workspaceID string, opts ListTasksOptions,
 ) (*ListTasksFilteredResult, error) {
-	resolved, err := resolveListTasksOptions(opts)
+	resolved, err := resolveListTasksOptions(opts, r.ro.DriverName())
 	if err != nil {
 		return nil, err
 	}
@@ -479,10 +506,11 @@ type resolvedListTasksOptions struct {
 	limit     int
 	sortField TaskListSortField
 	sortCol   string
+	cursorCol string
 	dir       string
 }
 
-func resolveListTasksOptions(opts ListTasksOptions) (resolvedListTasksOptions, error) {
+func resolveListTasksOptions(opts ListTasksOptions, driver string) (resolvedListTasksOptions, error) {
 	limit := opts.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -495,11 +523,33 @@ func resolveListTasksOptions(opts ListTasksOptions) (resolvedListTasksOptions, e
 	if !ok {
 		return resolvedListTasksOptions{}, fmt.Errorf("invalid sort field: %s", sortField)
 	}
+	cursorCol := "?"
+	if sortField == TaskSortUpdatedAt || sortField == TaskSortCreatedAt {
+		sortCol = dialect.NormalizedMicrosecond(driver, sortCol)
+		// Use the same canonical microsecond key for the bound cursor. The
+		// SQLite expression repeats its input internally, so bind the value
+		// once in a subquery and reference that alias instead of expanding
+		// one placeholder per expression occurrence.
+		if dialect.IsPostgres(driver) {
+			cursorCol = "CAST(? AS timestamp)"
+		} else {
+			cursorCol = fmt.Sprintf(
+				"(SELECT %s FROM (SELECT ? AS cursor_value) AS cursor_bind)",
+				dialect.NormalizedMicrosecond(driver, "cursor_value"),
+			)
+		}
+	}
 	dir := "DESC"
 	if !opts.SortDesc {
 		dir = "ASC"
 	}
-	return resolvedListTasksOptions{limit: limit, sortField: sortField, sortCol: sortCol, dir: dir}, nil
+	return resolvedListTasksOptions{
+		limit:     limit,
+		sortField: sortField,
+		sortCol:   sortCol,
+		cursorCol: cursorCol,
+		dir:       dir,
+	}, nil
 }
 
 func buildTaskWhereClause(
@@ -539,8 +589,9 @@ func buildTaskWhereClause(
 			op = ">"
 		}
 		parts = append(parts, fmt.Sprintf(
-			"(%s %s ? OR (%s = ? AND t.id %s ?))",
-			resolved.sortCol, op, resolved.sortCol, op,
+			"(%s %s %s OR (%s = %s AND t.id %s ?))",
+			resolved.sortCol, op, resolved.cursorCol,
+			resolved.sortCol, resolved.cursorCol, op,
 		))
 		args = append(args, opts.CursorValue, opts.CursorValue, opts.CursorID)
 	}
@@ -791,8 +842,9 @@ func (r *Repository) GetCheckoutAgentBySession(ctx context.Context, sessionID st
 // exact run that owns it. This compatibility method keeps older callers and
 // migrated rows working without erasing a run-scoped lock.
 func (r *Repository) CheckoutTask(ctx context.Context, taskID, agentID string) (bool, error) {
+	now := dialect.Now(r.ro.DriverName())
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET checkout_agent_id = ?, checkout_at = datetime('now'), checkout_run_id = NULL
+		UPDATE tasks SET checkout_agent_id = ?, checkout_at = `+now+`, checkout_run_id = NULL
 		WHERE id = ? AND (
 			checkout_agent_id IS NULL OR checkout_agent_id = '' OR
 			(checkout_agent_id = ? AND (checkout_run_id IS NULL OR checkout_run_id = ''))
@@ -815,8 +867,9 @@ func (r *Repository) CheckoutTaskForRun(ctx context.Context, taskID, agentID, ru
 	if runID == "" {
 		return r.CheckoutTask(ctx, taskID, agentID)
 	}
+	now := dialect.Now(r.ro.DriverName())
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET checkout_agent_id = ?, checkout_at = datetime('now'), checkout_run_id = ?
+		UPDATE tasks SET checkout_agent_id = ?, checkout_at = `+now+`, checkout_run_id = ?
 		WHERE id = ? AND (
 			checkout_agent_id IS NULL OR checkout_agent_id = '' OR
 			(checkout_agent_id = ? AND (checkout_run_id IS NULL OR checkout_run_id = '' OR checkout_run_id = ?))
@@ -868,29 +921,12 @@ func (r *Repository) ReleaseTaskCheckoutForRun(ctx context.Context, taskID, agen
 	return err
 }
 
-// ReapStaleCheckouts clears checkout_agent_id/checkout_at/checkout_run_id on tasks whose
-// checkout is older than olderThan and that have no queued or claimed run
-// *belonging to the checkout holder* in flight. This is a backstop for
-// callers that fail to release the checkout on a terminal run transition
-// (an event-subscriber path that crashes before publishing, a run that
-// never reaches a terminal event at all) — releaseTaskCheckoutForRun
-// (internal/office/service) is the primary release path; this only cleans
-// up what that missed. Returns the number of tasks reaped. json_extract is
-// SQLite-flavoured — see CancelRunsForTasks in tree_holds.go for why
-// that's acceptable here.
-//
-// The in-flight check is scoped to the checkout holder's own runs, not any
-// run on the task: a queued run can belong to a different agent that is
-// waiting precisely because this checkout is leaked (see
-// requeueContendedCheckout in scheduler_integration.go, which re-queues a
-// run that lost the checkout race) — task-scoping would let that waiting
-// run permanently suppress the reap it depends on. 'queued' stays in the
-// status list even holder-scoped: recoverStaleClaimedRuns runs immediately
-// before reapStaleCheckouts in the same tick and flips a live agent's own
-// claimed run to queued at 30 minutes, so dropping 'queued' would reap a
-// still-executing holder.
+// ReapStaleCheckouts clears old task checkouts when no queued or claimed run
+// still belongs to the checkout holder. The predicate matches the holder,
+// task ID in the run payload, and checkout_run_id when the row has one.
 func (r *Repository) ReapStaleCheckouts(ctx context.Context, olderThan time.Time) (int64, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "w.payload", "task_id")
+	query := `
 		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL, checkout_run_id = NULL
 		WHERE checkout_agent_id IS NOT NULL
 		  AND checkout_agent_id != ''
@@ -902,13 +938,14 @@ func (r *Repository) ReapStaleCheckouts(ctx context.Context, olderThan time.Time
 					(tasks.checkout_run_id IS NOT NULL AND tasks.checkout_run_id != ''
 					 AND w.id = tasks.checkout_run_id)
 					OR (COALESCE(tasks.checkout_run_id, '') = ''
-					 AND json_extract(w.payload, '$.task_id') = tasks.id)
+					 AND ` + taskIDExpr + ` = tasks.id)
 				  )
 				AND w.agent_profile_id = tasks.checkout_agent_id
-				AND json_extract(w.payload, '$.task_id') = tasks.id
+				AND ` + taskIDExpr + ` = tasks.id
 				AND w.status IN ('queued', 'claimed')
 		  )
-	`), olderThan)
+	`
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), olderThan)
 	if err != nil {
 		return 0, err
 	}
@@ -1042,8 +1079,6 @@ func (r *Repository) HasOfficeAdoption(ctx context.Context) (bool, error) {
 	return adopted, err
 }
 
-// ListUnstartedTasks returns TODO tasks with an assignee, not archived,
-// within the lookback window, that have no active run (queued/claimed/finished).
 // CountTasksByWorkspace returns the number of non-archived, non-ephemeral tasks
 // for a workspace.
 func (r *Repository) CountTasksByWorkspace(ctx context.Context, workspaceID string) (int, error) {
@@ -1061,28 +1096,38 @@ func (r *Repository) CountTasksByWorkspace(ctx context.Context, workspaceID stri
 // finds. Automation runs are excluded: they are started once, explicitly, at
 // trigger time, and recovery picking one up would launch it a second time
 // through a lifecycle path that knows nothing about the automation's run row
-// or its concurrency cap.
+// or its concurrency cap. Optional excludedTaskIDs let recovery scan past
+// candidates that it already inspected in the current tick but could not queue.
 func (r *Repository) ListUnstartedTasks(
-	ctx context.Context, lookbackHours int, limit int,
+	ctx context.Context, lookbackHours int, limit int, excludedTaskIDs ...string,
 ) ([]*UnstartedTaskRow, error) {
 	var rows []*UnstartedTaskRow
-	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+	query := `
 		SELECT t.id,
-		       `+RunnerProjection("t")+` AS assignee_agent_profile_id,
+		       ` + RunnerProjection("t") + ` AS assignee_agent_profile_id,
 		       t.workspace_id
 		FROM tasks t
 		WHERE t.state = 'TODO'
-		  AND `+taskrepo.IsFromOfficePredicate("t")+`
-		  AND `+RunnerProjection("t")+` != ''
-		  AND t.archived_at IS NULL`+andNotAutomationOriginT+`
+		  AND ` + taskrepo.IsFromOfficePredicate("t") + `
+		  AND ` + RunnerProjection("t") + ` != ''
+		  AND t.archived_at IS NULL` + andNotAutomationOriginT + `
 		  AND t.created_at >= datetime('now', '-' || ? || ' hours')
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
 		      WHERE json_extract(w.payload, '$.task_id') = t.id
 		        AND w.status IN ('queued', 'claimed', 'finished')
 		  )
-		LIMIT ?
-	`), lookbackHours, limit)
+	`
+	args := []interface{}{lookbackHours}
+	if len(excludedTaskIDs) > 0 {
+		query += " AND t.id NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(excludedTaskIDs)), ",") + ")"
+		for _, taskID := range excludedTaskIDs {
+			args = append(args, taskID)
+		}
+	}
+	query += " ORDER BY t.created_at, t.id LIMIT ?"
+	args = append(args, limit)
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}

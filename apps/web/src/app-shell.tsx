@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
+import { MobileTaskNavigationProvider } from "@/components/navigation/mobile-task-navigation-provider";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { AppStatusSurfaceProvider } from "@/components/app-status-bar/app-status-surface-provider";
 import { CommandPanel } from "@/components/command-panel";
@@ -93,11 +94,14 @@ export function AppShell({ children }: AppShellProps) {
                         className="flex h-dvh min-h-0 w-full overflow-hidden"
                         data-testid="app-shell"
                         data-window-controls-overlay={titlebar.visible ? "visible" : "hidden"}
+                        data-macos-tauri-overlay={titlebar.macTauriOverlay ? "true" : undefined}
                         style={shellStyle}
                       >
                         <AppSidebar />
                         <AppStatusSurfaceProvider>
-                          <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
+                          <MobileTaskNavigationProvider>
+                            <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
+                          </MobileTaskNavigationProvider>
                         </AppStatusSurfaceProvider>
                       </div>
                     </WorkspaceScopeProvider>

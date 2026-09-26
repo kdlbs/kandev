@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 import { useRouter } from "@/lib/routing/client-router";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -68,7 +69,7 @@ export function SSHCreatePage() {
       const current = store.getState().executors.items;
       const merged = current.some((e) => e.id === next.id) ? current : [...current, next];
       store.getState().setExecutors(merged);
-      router.push(`/settings/executors/${profile.id}`);
+      router.push(executorProfileSettingsPath(profile.id));
     },
     [router, store],
   );

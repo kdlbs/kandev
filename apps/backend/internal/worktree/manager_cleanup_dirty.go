@@ -37,7 +37,7 @@ func (m *Manager) InspectDirtyWorktrees(
 		if wt == nil || strings.TrimSpace(wt.ID) == "" {
 			continue
 		}
-		m.enrichCleanupWorktreeFromCache(wt)
+		m.enrichCleanupWorktreeFromCache(ctx, wt)
 		if strings.TrimSpace(wt.RepositoryPath) == "" || strings.TrimSpace(wt.Path) == "" {
 			return nil, fmt.Errorf("worktree %s is missing repository or worktree path metadata", wt.ID)
 		}
@@ -68,6 +68,16 @@ func (m *Manager) InspectDirtyWorktrees(
 			_ = pathHandle.Close()
 		}
 		if statusErr != nil {
+			stillPresent, presenceErr := cleanupPathPresent(wt.Path)
+			if presenceErr != nil {
+				return nil, fmt.Errorf("recheck worktree cleanup path %s after Git inspection failed: %w", wt.ID, presenceErr)
+			}
+			if !stillPresent {
+				// A concurrent cleanup can remove the checkout after the initial
+				// path check but before Git starts. A missing checkout has no local
+				// changes left to protect, so let task cleanup proceed.
+				continue
+			}
 			return nil, fmt.Errorf("inspect worktree changes for %s: %w", wt.ID, statusErr)
 		}
 		files := parseDirtyWorktreeFiles(status)

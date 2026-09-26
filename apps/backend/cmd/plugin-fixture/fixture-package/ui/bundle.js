@@ -34,7 +34,7 @@
  * a tiny listener set, so it survives across route navigations (the page
  * component unmounts/remounts as the user navigates away and back).
  */
-/* eslint-disable max-lines, max-lines-per-function, sonarjs/no-duplicate-string -- The fixture is the literal self-contained, dependency-free browser bundle exercised and hashed by E2E. */
+/* eslint-disable max-lines, max-lines-per-function -- The fixture is the literal self-contained, dependency-free browser bundle exercised and hashed by E2E. */
 (function () {
   var moduleCount = 0;
   var listeners = new Set();
@@ -70,15 +70,19 @@
     return count;
   }
 
+  var FIXTURE_REPOSITORY_ID = "fixture-repository";
+  var FIXTURE_HELLO_PATH = "/plugins/e2e-hello";
+  var FIXTURE_SIDEBAR_SECTION = "sidebar-footer";
   var PROVIDER_ID = "fixture-source-control";
+  var FIXTURE_ACTION_ICON_PATH = "M5 12h14M12 5v14";
   var PULL_REQUEST_URL =
     "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/42";
   var REPOSITORY_URL = "https://bitbucket.example.test/scm/TEAM/fixture.git";
 
   function fixtureRepository() {
     return {
-      id: "fixture-repository",
-      repositoryId: "fixture-repository",
+      id: FIXTURE_REPOSITORY_ID,
+      repositoryId: FIXTURE_REPOSITORY_ID,
       owner: "TEAM",
       ownerOrProject: "TEAM",
       name: "fixture",
@@ -113,6 +117,14 @@
       var React = host.React;
       var jsx = host.jsx;
       var ui = host.ui;
+
+      function renderActionGroup(actions, label) {
+        if (!actions.length) return null;
+        if (ui.ActionGroup) {
+          return jsx(ui.ActionGroup, { label: label, children: actions });
+        }
+        return jsx(React.Fragment, { children: actions });
+      }
 
       // Reads host.theme once on mount, then tracks it purely through
       // host.onThemeChange — so the readout only stays correct if the
@@ -252,10 +264,27 @@
         return jsx("div", { id: "hello-sidebar" }, "Hello E2E sidebar");
       }
 
+      function FixtureActionGlyph() {
+        return jsx(
+          "svg",
+          {
+            viewBox: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            "aria-hidden": true,
+            "data-testid": "e2e-component-action-glyph",
+          },
+          jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+        );
+      }
+
       function MainTopBarSlot(props) {
         var slotProps = props.slotProps || {};
         var label = "Hello " + slotProps.currentPage;
-        return jsx(
+        var pressedState = React.useState(false);
+        var pressed = pressedState[0];
+        var setPressed = pressedState[1];
+        var legacyButton = jsx(
           ui.Button,
           {
             id: "hello-main-top-bar",
@@ -276,6 +305,206 @@
           ),
           jsx("span", { className: "sr-only" }, label),
         );
+        var standardActions = ui.Action
+          ? [
+              jsx(ui.Action, {
+                label: "Fixture workspace topbar action",
+                icon: jsx(FixtureActionGlyph, {}),
+                pressed: pressed,
+                "data-testid": "e2e-main-topbar-action",
+                onClick: function () {
+                  setPressed(!pressed);
+                },
+              }),
+              jsx(ui.Action, {
+                label: "Fixture workspace status",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+                ),
+                text: "63%",
+                badge: "2",
+                "data-testid": "e2e-main-topbar-value-action",
+              }),
+            ]
+          : [];
+        var standardActionGroup = renderActionGroup(
+          standardActions,
+          "Fixture workspace topbar actions",
+        );
+        return jsx(React.Fragment, { children: [legacyButton, standardActionGroup] });
+      }
+
+      // Keeps source-derived legacy topbar shapes beside standard Actions:
+      // a raw metric button and a plugin-controlled disclosure trigger.
+      function LegacyCompatibilitySlot() {
+        var metricState = React.useState(false);
+        var metricActivated = metricState[0];
+        var setMetricActivated = metricState[1];
+        var disclosureState = React.useState(false);
+        var disclosureOpen = disclosureState[0];
+        var setDisclosureOpen = disclosureState[1];
+        return jsx("div", {
+          className: "inline-flex items-center gap-1",
+          children: [
+            jsx("button", {
+              type: "button",
+              className:
+                "h-7 min-w-12 rounded border border-amber-600 bg-amber-500/10 px-2 text-xs",
+              "aria-label": "Legacy CPU usage",
+              "data-activated": metricActivated,
+              "data-testid": "e2e-legacy-raw-topbar-action",
+              onClick: function () {
+                setMetricActivated(!metricActivated);
+              },
+              children: "CPU 17%",
+            }),
+            jsx("button", {
+              type: "button",
+              className: "h-7 w-7 rounded border border-violet-500 bg-violet-500/10",
+              "aria-label": "Open legacy preview",
+              "aria-expanded": disclosureOpen,
+              "aria-controls": "e2e-legacy-preview-content",
+              "data-testid": "e2e-legacy-preview-trigger",
+              onClick: function () {
+                setDisclosureOpen(!disclosureOpen);
+              },
+              children: "K",
+            }),
+            jsx("div", {
+              id: "e2e-legacy-preview-content",
+              hidden: !disclosureOpen,
+              "data-testid": "e2e-legacy-preview-content",
+              children: "Legacy preview details",
+            }),
+          ],
+        });
+      }
+
+      function ChatTopBarStatus(props) {
+        var slotProps = props.slotProps || {};
+        if (slotProps.presentation !== "mobile") return null;
+        return jsx(
+          "span",
+          {
+            "data-testid": "e2e-chat-top-bar-status",
+            "data-task-id": slotProps.taskId || "",
+            "data-workspace-id": slotProps.workspaceId || "",
+            "data-active-session-id": slotProps.activeSessionId || "",
+            "data-session-ids": (slotProps.sessionIds || []).join(","),
+            "data-presentation": slotProps.presentation || "unknown",
+            className:
+              "min-w-0 max-w-full truncate rounded-md border px-3 py-2 text-xs text-muted-foreground",
+          },
+          "Fixture archive synchronization is ready",
+        );
+      }
+
+      function ChatTopBarAction(props) {
+        var slotProps = props.slotProps || {};
+        var activeState = React.useState(false);
+        var active = activeState[0];
+        var setActive = activeState[1];
+        var standardActions = ui.Action
+          ? [
+              jsx(ui.Action, {
+                label: "Fixture task topbar action",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("circle", { cx: "12", cy: "12", r: "8" }),
+                ),
+                pressed: active,
+                "data-testid": "e2e-chat-top-bar-standard-action",
+                onClick: function () {
+                  setActive(true);
+                },
+              }),
+              jsx(ui.Action, {
+                label: "Fixture task completion status",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+                ),
+                text: "Ready",
+                "data-testid": "e2e-chat-top-bar-value-action",
+              }),
+              ...(slotProps.presentation === "mobile"
+                ? [
+                    jsx(ui.Action, {
+                      key: "phone-overflow-one",
+                      label: "Fixture long task action one",
+                      icon: jsx(
+                        "svg",
+                        {
+                          viewBox: "0 0 24 24",
+                          fill: "none",
+                          stroke: "currentColor",
+                          "aria-hidden": true,
+                        },
+                        jsx("circle", { cx: "12", cy: "12", r: "8" }),
+                      ),
+                      text: "A long fixture value that needs a second row",
+                      "data-testid": "e2e-chat-top-bar-long-value-one",
+                    }),
+                    jsx(ui.Action, {
+                      key: "phone-overflow-two",
+                      label: "Fixture long task action two",
+                      icon: jsx(
+                        "svg",
+                        {
+                          viewBox: "0 0 24 24",
+                          fill: "none",
+                          stroke: "currentColor",
+                          "aria-hidden": true,
+                        },
+                        jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+                      ),
+                      text: "Another long fixture value that needs a second row",
+                      "data-testid": "e2e-chat-top-bar-long-value-two",
+                    }),
+                  ]
+                : []),
+            ]
+          : [];
+        var standardActionGroup = renderActionGroup(standardActions, "Fixture task topbar actions");
+        var legacyMobileButton =
+          slotProps.presentation === "mobile"
+            ? jsx(
+                ui.Button,
+                {
+                  type: "button",
+                  variant: "outline",
+                  className: "cursor-pointer",
+                  "data-testid": "e2e-chat-top-bar-action",
+                  "data-presentation": slotProps.presentation || "unknown",
+                  "data-activated": active ? "true" : "false",
+                  onClick: function () {
+                    setActive(true);
+                  },
+                },
+                active ? "Fixture action complete" : "Run fixture task action",
+              )
+            : null;
+        if (!standardActionGroup && !legacyMobileButton) return null;
+        return jsx(React.Fragment, { children: [standardActionGroup, legacyMobileButton] });
       }
 
       // Debounce delay for the Notes panel's autosave — short, so e2e specs
@@ -575,7 +804,10 @@
 
       function WorkspaceActionsSlot(props) {
         var slotProps = props.slotProps || {};
-        return jsx(
+        var pressedState = React.useState(false);
+        var pressed = pressedState[0];
+        var setPressed = pressedState[1];
+        var legacyButton = jsx(
           "button",
           {
             type: "button",
@@ -594,19 +826,141 @@
           },
           "W",
         );
+        var standardActions = ui.Action
+          ? [
+              jsx(ui.Action, {
+                label: "Fixture sidebar workspace action",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("circle", { cx: "12", cy: "12", r: "8" }),
+                ),
+                pressed: pressed,
+                "data-testid": "e2e-sidebar-standard-action",
+                onClick: function () {
+                  setPressed(!pressed);
+                },
+              }),
+              jsx(ui.Action, {
+                label: "Fixture sidebar workspace status",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+                ),
+                text: "2 tasks",
+                "data-testid": "e2e-sidebar-standard-value-action",
+              }),
+            ]
+          : [];
+        var standardActionGroup = renderActionGroup(
+          standardActions,
+          "Fixture sidebar workspace actions",
+        );
+        return jsx(React.Fragment, { children: [legacyButton, standardActionGroup] });
       }
 
       function StatusSlot(props) {
         var slotProps = props.slotProps || {};
         var id = slotProps.placement === "left" ? "hello-status-left" : "hello-status-right";
-        return jsx(
+        var pressedState = React.useState(false);
+        var pressed = pressedState[0];
+        var setPressed = pressedState[1];
+        var legacyStatus = jsx(
           "span",
-          { id: id },
+          {
+            id: id,
+            className: slotProps.presentation === "mobile-drawer" ? "sr-only" : undefined,
+          },
           "Hello status " +
             String(slotProps.presentation || "unknown") +
             " " +
             String(slotProps.activeTaskId || "no-task"),
         );
+        var actions = ui.Action
+          ? [
+              jsx(ui.Action, {
+                label: "Fixture service status",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("circle", { cx: "12", cy: "12", r: "8" }),
+                ),
+                text: "Online",
+                badge: "2",
+                pressed: pressed,
+                "data-testid":
+                  slotProps.presentation === "bar"
+                    ? "e2e-status-bar-action"
+                    : "e2e-status-drawer-action",
+                onClick: function () {
+                  setPressed(!pressed);
+                },
+              }),
+              jsx(ui.Action, {
+                label: "Fixture status queue",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+                ),
+                text: "2 queued",
+                "data-testid":
+                  slotProps.presentation === "bar"
+                    ? "e2e-status-bar-value-action"
+                    : "e2e-status-drawer-value-action",
+              }),
+            ]
+          : [];
+        if (slotProps.presentation === "mobile-drawer" && ui.Action) {
+          actions.push(
+            jsx(ui.Action, {
+              label: "Refresh status",
+              icon: jsx(
+                "svg",
+                { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "aria-hidden": true },
+                jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+              ),
+              busy: true,
+              "data-testid": "e2e-status-busy-action",
+              onClick: function () {
+                setPressed(true);
+              },
+            }),
+            jsx(ui.Action, {
+              label: "Unavailable status action",
+              icon: jsx(
+                "svg",
+                { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "aria-hidden": true },
+                jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+              ),
+              disabled: true,
+              "data-testid": "e2e-status-disabled-action",
+            }),
+          );
+        }
+        var standardActionGroup = renderActionGroup(actions, "Fixture status actions");
+        return jsx(React.Fragment, { children: [legacyStatus, standardActionGroup] });
       }
 
       // Drives PluginComposerCapability through native composers. Capturing
@@ -626,10 +980,76 @@
         var status = statusState[0];
         var setStatus = statusState[1];
         var capturedRef = React.useRef(null);
+        var pressedState = React.useState(false);
+        var pressed = pressedState[0];
+        var setPressed = pressedState[1];
 
         function record(result) {
           setStatus(result && result.status ? result.status : String(result));
         }
+
+        var standardAction = ui.Action
+          ? jsx(ui.Action, {
+              label: "Fixture composer action",
+              icon: jsx(
+                "svg",
+                {
+                  viewBox: "0 0 24 24",
+                  fill: "none",
+                  stroke: "currentColor",
+                  "aria-hidden": true,
+                },
+                jsx("circle", { cx: "12", cy: "12", r: "8" }),
+              ),
+              pressed: pressed,
+              busy: true,
+              "data-testid": "e2e-standard-composer-action",
+              onClick: function () {
+                setPressed(!pressed);
+                record("standard-action-activated");
+              },
+            })
+          : jsx(
+              "button",
+              {
+                type: "button",
+                "aria-label": "Fixture composer action",
+                "data-testid": "e2e-standard-composer-action",
+                onClick: function () {
+                  setPressed(!pressed);
+                  record("legacy-action-activated");
+                },
+              },
+              "fixture action",
+            );
+        var secondStandardAction = ui.Action
+          ? jsx(ui.Action, {
+              label: "Fixture busy stop action",
+              icon: jsx(
+                "svg",
+                {
+                  viewBox: "0 0 24 24",
+                  fill: "none",
+                  stroke: "currentColor",
+                  "aria-hidden": true,
+                },
+                jsx("path", { d: "M6 6h12v12H6z" }),
+              ),
+              busy: true,
+              "data-testid": "e2e-busy-stop-action",
+              onClick: function () {
+                record("busy-stop-activated");
+              },
+            })
+          : null;
+        var standardActionGroup = ui.ActionGroup
+          ? jsx(
+              ui.ActionGroup,
+              { label: "Fixture composer actions" },
+              standardAction,
+              secondStandardAction,
+            )
+          : jsx("span", null, standardAction, secondStandardAction);
 
         return jsx(
           "span",
@@ -643,6 +1063,7 @@
             "data-submittable": String(Boolean(slotProps.submittable)),
             "data-status": status,
           },
+          standardActionGroup,
           jsx(
             "button",
             {
@@ -731,14 +1152,14 @@
       registry.registerNavItem({
         id: "e2e-hello",
         label: "Hello E2E",
-        path: "/plugins/e2e-hello",
+        path: FIXTURE_HELLO_PATH,
         section: "main",
       });
       registry.registerNavItem({
         id: "e2e-insights-tools",
         label: "E2E Insights Tools",
-        path: "/plugins/e2e-hello",
-        section: "sidebar-footer",
+        path: FIXTURE_HELLO_PATH,
+        section: FIXTURE_SIDEBAR_SECTION,
       });
       // Three more sidebar-footer items so this one plugin install alone
       // produces P = 4 (budget MAX_INLINE_PLUGIN_FOOTER_ITEMS = 3, plus one
@@ -754,24 +1175,27 @@
       registry.registerNavItem({
         id: "e2e-insights-tools-2",
         label: "E2E Overflow Item 2",
-        path: "/plugins/e2e-hello",
-        section: "sidebar-footer",
+        path: FIXTURE_HELLO_PATH,
+        section: FIXTURE_SIDEBAR_SECTION,
       });
       registry.registerNavItem({
         id: "e2e-insights-tools-3",
         label: "E2E Overflow Item 3",
-        path: "/plugins/e2e-hello",
-        section: "sidebar-footer",
+        path: FIXTURE_HELLO_PATH,
+        section: FIXTURE_SIDEBAR_SECTION,
       });
       registry.registerNavItem({
         id: "e2e-insights-tools-4",
         label: "E2E Overflow Item 4",
-        path: "/plugins/e2e-hello",
-        section: "sidebar-footer",
+        path: FIXTURE_HELLO_PATH,
+        section: FIXTURE_SIDEBAR_SECTION,
       });
-      registry.registerRoute("/plugins/e2e-hello", PluginPage);
+      registry.registerRoute(FIXTURE_HELLO_PATH, PluginPage);
       registry.registerComponent("task-sidebar", SidebarSlot);
       registry.registerComponent("main-top-bar", MainTopBarSlot);
+      registry.registerComponent("main-top-bar", LegacyCompatibilitySlot);
+      registry.registerComponent("chat-top-bar", ChatTopBarStatus);
+      registry.registerComponent("chat-top-bar", ChatTopBarAction);
       registry.registerComponent("app-status-bar-left", StatusSlot);
       registry.registerComponent("app-status-bar-right", StatusSlot);
       registry.registerWsHandler("task.created", function () {
@@ -801,7 +1225,7 @@
             providerId: PROVIDER_ID,
             providerHost: "bitbucket.example.test",
             ownerOrProject: "TEAM",
-            repositoryId: "fixture-repository",
+            repositoryId: FIXTURE_REPOSITORY_ID,
             repositoryName: "fixture",
             cloneUrl: REPOSITORY_URL,
             defaultBranch: "main",
@@ -835,7 +1259,7 @@
               title: "Bitbucket Pull Request #42",
               url: PULL_REQUEST_URL,
               connectionScope: "https://bitbucket.example.test",
-              repositoryId: "fixture-repository",
+              repositoryId: FIXTURE_REPOSITORY_ID,
               changeRequestNumber: 42,
               state: "OPEN",
               statusBadge: { label: "Open" },
@@ -847,7 +1271,7 @@
               title: "Bitbucket Pull Request #43",
               url: "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/43",
               connectionScope: "https://bitbucket.example.test",
-              repositoryId: "fixture-repository",
+              repositoryId: FIXTURE_REPOSITORY_ID,
               changeRequestNumber: 43,
               state: "OPEN",
               statusBadge: { label: "Open" },
@@ -967,6 +1391,35 @@
             "task",
             context.taskId,
             "primary-menu-presentation",
+            context.presentation,
+          );
+        },
+      });
+      registry.registerTaskMenuAction({
+        id: "task-shortcuts",
+        label: "Task shortcuts",
+        group: "primary",
+        items: function () {
+          return [
+            {
+              id: "record-presentation",
+              label: "Record menu presentation",
+              run: function (childContext) {
+                return host.storage.set(
+                  "task",
+                  childContext.taskId,
+                  "primary-submenu-presentation",
+                  childContext.presentation,
+                );
+              },
+            },
+          ];
+        },
+        run: function (context) {
+          return host.storage.set(
+            "task",
+            context.taskId,
+            "primary-submenu-presentation",
             context.presentation,
           );
         },

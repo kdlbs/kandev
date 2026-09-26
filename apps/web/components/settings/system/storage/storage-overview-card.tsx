@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kand
 import { Spinner } from "@kandev/ui/spinner";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { IconChartPie, IconTrash } from "@tabler/icons-react";
+import { useLayoutEffect, useRef, type FocusEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   formatDateTime,
@@ -82,6 +83,44 @@ interface ResourceRowProps {
   onRunTemporaryArtifacts: () => void;
 }
 
+function ResourceBar({ resource }: { resource: StorageResource }) {
+  if (resource.sizeBytes === undefined) return null;
+  return (
+    <span
+      className="order-3 block h-2 w-full min-w-0 basis-full overflow-hidden rounded-full bg-muted md:order-none md:col-start-2 md:w-auto md:basis-auto"
+      data-testid={`storage-resource-${resource.id}-bar`}
+      aria-hidden="true"
+    >
+      <span
+        className="block h-full rounded-full bg-primary"
+        data-testid={`storage-resource-${resource.id}-bar-fill`}
+        style={{ width: `${resource.barPercent ?? 0}%` }}
+      />
+    </span>
+  );
+}
+
+interface FocusedStorageTarget {
+  resourceId: string;
+  element: HTMLElement;
+  focusId: string;
+}
+
+function focusedElementAfterReorder(
+  container: HTMLElement,
+  target: FocusedStorageTarget,
+): HTMLElement | null {
+  const resource = Array.from(
+    container.querySelectorAll<HTMLElement>("[data-storage-resource-id]"),
+  ).find((element) => element.dataset.storageResourceId === target.resourceId);
+  if (!resource) return null;
+  return (
+    Array.from(resource.querySelectorAll<HTMLElement>("[data-storage-focus-id]")).find(
+      (element) => element.dataset.storageFocusId === target.focusId,
+    ) ?? null
+  );
+}
+
 function ResourceRow({
   resource,
   goCacheCleanupDisabledReason,
@@ -91,15 +130,35 @@ function ResourceRow({
 }: ResourceRowProps) {
   const { t } = useTranslation();
   return (
-    <AccordionItem value={resource.id} data-testid={`storage-resource-${resource.id}`}>
+    <AccordionItem
+      value={resource.id}
+      data-testid={`storage-resource-${resource.id}`}
+      data-storage-resource-id={resource.id}
+    >
       <AccordionTrigger
-        className="min-h-11 items-center px-3 no-underline"
+        className="min-h-7 cursor-pointer items-center px-3 no-underline max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         data-testid={`storage-resource-${resource.id}-trigger`}
+        data-storage-focus-id="trigger"
       >
-        <span className="min-w-0">
-          <span className="block text-sm">{resource.label}</span>
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 md:grid md:grid-cols-[minmax(0,1fr)_minmax(8rem,16rem)_7rem] md:items-center md:gap-3">
           <span
-            className="block text-xs font-normal text-muted-foreground"
+            className="flex min-w-0 flex-1 flex-wrap items-center gap-2 break-words text-sm"
+            data-testid={`storage-resource-${resource.id}-title`}
+          >
+            <span className="min-w-0 break-words">{resource.label}</span>
+            {resource.partial && (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-normal"
+                data-testid={`storage-resource-${resource.id}-partial`}
+              >
+                {t("system:storageSystemTemporaryPartial")}
+              </Badge>
+            )}
+          </span>
+          <ResourceBar resource={resource} />
+          <span
+            className="flex shrink-0 items-center gap-2 text-xs font-normal text-muted-foreground md:col-start-3 md:block md:min-w-0 md:w-full md:break-words md:text-right"
             data-testid={resource.source ? `storage-analysis-source-${resource.source}` : undefined}
           >
             {resource.value}
@@ -125,6 +184,7 @@ function ResourceRow({
             disabledReason={goCacheCleanupDisabledReason}
             onClick={onRunGoCache}
             data-testid="storage-go-cache-clean"
+            focusId="go-cache-clean"
           >
             <IconTrash className="size-4" /> {t("system:storageCleanGoCache")}
           </StorageActionButton>
@@ -136,6 +196,7 @@ function ResourceRow({
             disabledReason={temporaryArtifactsCleanupDisabledReason}
             onClick={onRunTemporaryArtifacts}
             data-testid="storage-temporary-artifacts-clean"
+            focusId="temporary-artifacts-clean"
           >
             <IconTrash className="size-4" /> {t("system:storageCleanTemporaryArtifacts")}
           </StorageActionButton>
@@ -304,6 +365,9 @@ function StorageOverviewHeader({
       <p className="text-xs text-muted-foreground" data-testid="storage-analysis-scope">
         {t("system:storageAnalysisScope")}
       </p>
+      <p className="text-xs text-muted-foreground" data-testid="storage-analysis-bars-description">
+        {t("system:storageAnalysisBarsDescription")}
+      </p>
       <div className="flex flex-wrap items-center gap-1">
         <AnalysisStatusTime overview={overview} analyzedAt={analyzedAt} />
         <AnalysisTimingDisclosure overview={overview} />
@@ -331,8 +395,63 @@ function StorageOverviewResources({
   onRunGoCache: () => void;
   onRunTemporaryArtifacts: () => void;
 }) {
+  const resourcesRef = useRef<HTMLDivElement | null>(null);
+  const focusedTargetRef = useRef<FocusedStorageTarget | null>(null);
+  const resourceOrderKey = resources.map((resource) => resource.id).join("\u0000");
+
+  const rememberFocusedTarget = (event: FocusEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const container = resourcesRef.current;
+    const resource = target.closest<HTMLElement>("[data-storage-resource-id]");
+    if (!container || !resource || !container.contains(resource)) {
+      focusedTargetRef.current = null;
+      return;
+    }
+    const focusId = target.dataset.storageFocusId;
+    if (!focusId) {
+      focusedTargetRef.current = null;
+      return;
+    }
+    focusedTargetRef.current = {
+      resourceId: resource.dataset.storageResourceId ?? "",
+      element: target,
+      focusId,
+    };
+  };
+
+  const forgetFocusedTargetOutsideResources = (event: FocusEvent<HTMLDivElement>) => {
+    const relatedTarget = event.relatedTarget;
+    if (!(relatedTarget instanceof Node) || !resourcesRef.current?.contains(relatedTarget)) {
+      focusedTargetRef.current = null;
+    }
+  };
+
+  useLayoutEffect(() => {
+    const container = resourcesRef.current;
+    const target = focusedTargetRef.current;
+    if (!container || !target) return;
+    const activeElement = document.activeElement;
+    if (
+      activeElement &&
+      activeElement !== document.body &&
+      (!container.contains(activeElement) || activeElement !== target.element)
+    ) {
+      focusedTargetRef.current = null;
+      return;
+    }
+    const element = focusedElementAfterReorder(container, target);
+    if (element && document.activeElement !== element) element.focus();
+    focusedTargetRef.current = null;
+  }, [resourceOrderKey]);
+
   return (
-    <CardContent className="min-w-0">
+    <CardContent
+      ref={resourcesRef}
+      className="min-w-0"
+      onFocusCapture={rememberFocusedTarget}
+      onBlurCapture={forgetFocusedTargetOutsideResources}
+    >
       <Accordion type="multiple" className="min-w-0">
         {resources.map((resource) => (
           <ResourceRow

@@ -13,6 +13,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO_ROOT / ".github" / "docker" / "ci-base" / "Dockerfile"
 IMAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci-base-image.yml"
 E2E_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "e2e-tests.yml"
+DOWNLOAD_ARTIFACT_RETRY_ACTION = (
+    REPO_ROOT / ".github" / "actions" / "download-artifact-retry" / "action.yml"
+)
 BACKEND_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "backend-tests.yml"
 FRONTEND_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "frontend-tests.yml"
 LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
@@ -201,10 +204,10 @@ cat "${FAKE_DOCKER_MANIFEST}"
         normal_job = job_block(workflow, "e2e", "playwright_image")
 
         self.assertIn(
-            "# 35 min covers the serial count-fallback tail and setup overhead",
+            "# 45 min covers the serial count-fallback tail and setup overhead",
             normal_job,
         )
-        self.assertIn("timeout-minutes: 35", normal_job)
+        self.assertIn("timeout-minutes: 45", normal_job)
         self.assertNotIn("timeout-minutes: 25", normal_job)
 
     # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.1
@@ -280,6 +283,38 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("/artifacts?per_page=100", workflow)
         self.assertIn('artifact.name === "e2e-timing-profile"', workflow)
         self.assertIn("!artifact.expired", workflow)
+
+    def test_e2e_artifact_downloads_retry_transient_service_failures(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+        self.assertTrue(DOWNLOAD_ARTIFACT_RETRY_ACTION.exists())
+        self.assertNotIn("uses: actions/download-artifact@", workflow)
+        self.assertGreaterEqual(
+            workflow.count("uses: ./.github/actions/download-artifact-retry"),
+            12,
+        )
+
+        action = DOWNLOAD_ARTIFACT_RETRY_ACTION.read_text(encoding="utf-8")
+        self.assertEqual(action.count("uses: actions/download-artifact@"), 3)
+        self.assertEqual(action.count("continue-on-error: true"), 3)
+        self.assertIn('default: "false"', action)
+        for input_name in (
+            "name",
+            "path",
+            "pattern",
+            "merge-multiple",
+            "repository",
+            "run-id",
+            "github-token",
+        ):
+            self.assertEqual(
+                action.count(f"{input_name}: ${{{{ inputs.{input_name} }}}}"),
+                3,
+                input_name,
+            )
+        self.assertIn("sleep 10", action)
+        self.assertIn("sleep 30", action)
+        self.assertIn('rm -rf -- "$DOWNLOAD_PATH"', action)
+        self.assertIn("exit 1", action)
 
     # @covers AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.1
     # @covers AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.2

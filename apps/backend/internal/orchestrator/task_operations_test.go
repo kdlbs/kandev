@@ -308,14 +308,10 @@ func TestCreateStartSession_OfficeUnassignedReusesResolvedProfileSession(t *test
 	}
 }
 
-// TestCreateStartSession_ReviewerRunFlagOff is the regression baseline: a
-// review run whose agent (ceo-reviewer) differs from the task's runner seat
-// (pm-runner) lands in the runner's session when features.officeSessionIdentity
-// is off (the default), reproducing the FORBIDDEN bug this task fixes —
-// record_step_decision_kandev resolves the session's AgentProfileID as the
-// decider identity, so the reviewer's own decision is checked against seats
-// the runner (not the reviewer) occupies.
-func TestCreateStartSession_ReviewerRunFlagOff(t *testing.T) {
+// TestCreateStartSession_ReviewerRunUsesParticipantSession verifies that an
+// Office review run uses the reviewer's session even when no feature override
+// is configured.
+func TestCreateStartSession_ReviewerRunUsesParticipantSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()
@@ -360,16 +356,12 @@ func TestCreateStartSession_ReviewerRunFlagOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
-	if session.AgentProfileID != "pm-runner" {
-		t.Fatalf("session owner = %q, want pm-runner (flag off preserves runner-keyed identity)", session.AgentProfileID)
+	if session.AgentProfileID != "ceo-reviewer" {
+		t.Fatalf("session owner = %q, want ceo-reviewer", session.AgentProfileID)
 	}
 }
 
-// TestCreateStartSession_ReviewerRunFlagOnGetsOwnSession is the fix's green
-// case: with features.officeSessionIdentity on, the same reviewer run lands
-// in a session keyed on the run's own agent (ceo-reviewer), not the task's
-// runner seat (pm-runner).
-func TestCreateStartSession_ReviewerRunFlagOnGetsOwnSession(t *testing.T) {
+func TestCreateStartSession_ReviewerRunCreatesOwnSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()
@@ -403,8 +395,6 @@ func TestCreateStartSession_ReviewerRunFlagOnGetsOwnSession(t *testing.T) {
 	}
 
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
-	svc.config.OfficeSessionIdentity = true
-
 	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "ceo-reviewer", "", "", "")
 	if err != nil {
 		t.Fatalf("create start session: %v", err)
@@ -4753,6 +4743,12 @@ type mockMessageCreator struct {
 	thinkingWrites            int
 	toolCallWrites            int
 	toolUpdateWrites          int
+	lastToolUpdateID          string
+	lastToolUpdateTitle       string
+	lastToolUpdateType        string
+	agentPlanUpserts          int
+	lastAgentPlanToolCallID   string
+	lastAgentPlanContent      string
 	userMessageErr            error
 	idempotentUserMessages    map[string]struct{}
 	permissionClaimFn         func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
@@ -4816,8 +4812,25 @@ func (m *mockMessageCreator) CreateToolCallMessage(context.Context, string, stri
 	return nil
 }
 
-func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, string, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+func (m *mockMessageCreator) UpdateToolCallMessage(
+	_ context.Context,
+	_, toolCallID, _, _, _, _, title, _, msgType string,
+	_ *streams.NormalizedPayload,
+) error {
 	m.toolUpdateWrites++
+	m.lastToolUpdateID = toolCallID
+	m.lastToolUpdateTitle = title
+	m.lastToolUpdateType = msgType
+	return nil
+}
+
+func (m *mockMessageCreator) UpsertAgentPlanMessage(
+	_ context.Context,
+	_, sourceToolCallID, _, content, _ string,
+) error {
+	m.agentPlanUpserts++
+	m.lastAgentPlanToolCallID = sourceToolCallID
+	m.lastAgentPlanContent = content
 	return nil
 }
 
@@ -4846,6 +4859,7 @@ func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, con
 func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, messageID, taskID, content, sessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.sessionMessageAttempts++
 	if m.sessionMessageErr != nil {
 		return m.sessionMessageErr
 	}
@@ -4865,6 +4879,9 @@ func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, m
 		metadata:      metadata,
 		requestsInput: requestsInput,
 	})
+	if m.sessionMessageDone != nil {
+		m.sessionMessageOnce.Do(func() { close(m.sessionMessageDone) })
+	}
 	return nil
 }
 

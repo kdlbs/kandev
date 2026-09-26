@@ -4,6 +4,7 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { dwell } from "../../helpers/causal-waits";
 import {
   assertLocatorWithinViewportX,
   assertNoElementHorizontalOverflow,
@@ -25,6 +26,7 @@ import {
   releaseFakeLspInitialization,
   removeFakeKotlinLsp,
 } from "./lsp-e2e-helpers";
+import { SessionPage } from "../../pages/session-page";
 
 const EDITORS_SETTINGS_PATH = "/settings/preferences/terminal-editors";
 const RESERVED_SOURCE_PATH = "Main # query? 100%.kt";
@@ -40,6 +42,12 @@ function isProcessAlive(pid: number): boolean {
     throw error;
   }
 }
+
+test("enables browser continuity in the normal E2E profile", async ({ apiClient }) => {
+  const response = await apiClient.rawRequest("GET", "/api/v1/features");
+  expect(response.ok).toBeTruthy();
+  expect(await response.json()).toMatchObject({ lspBrowserContinuity: true });
+});
 
 test.describe("LSP file intelligence", () => {
   test.describe.configure({ timeout: 90_000 });
@@ -951,34 +959,44 @@ test.describe("LSP file intelligence", () => {
     await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
   });
 
-  test("restores a manual connection after reload and forgets it after stop", async ({
+  test("disconnects the browser-owned server on reload when continuity is disabled", async ({
     testPage,
     apiClient,
     seedData,
     backend,
   }) => {
-    installFakeKotlinLsp(backend);
-    const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
-      title: "Kotlin LSP Manual Persistence",
+    const releaseFeature = await backend.useEnv({
+      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "false",
     });
-    await openDesktopFile(testPage, task.session, task.filePaths[0]);
-    let statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await performLspAction(testPage, "start");
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
-    const storageKey = `kandev-lsp:${task.sessionId}:kotlin`;
-    expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBe("1");
+    try {
+      const featureResponse = await apiClient.rawRequest("GET", "/api/v1/features");
+      expect(featureResponse.ok).toBeTruthy();
+      expect(await featureResponse.json()).toMatchObject({ lspBrowserContinuity: false });
+      installFakeKotlinLsp(backend);
+      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Kotlin LSP Manual Persistence",
+      });
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+      let statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
+      await performLspAction(testPage, "start");
+      await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      const storageKey = `kandev-lsp:${task.sessionId}:kotlin`;
+      expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBe("1");
 
-    await testPage.reload();
-    await openDesktopFile(testPage, task.session, task.filePaths[0]);
-    statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
-    await expect
-      .poll(() => readFakeLspEvents(backend).filter((event) => event.event === "started").length)
-      .toBeGreaterThanOrEqual(2);
+      await testPage.reload();
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+      statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
+      await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      await expect
+        .poll(() => readFakeLspEvents(backend).filter((event) => event.event === "started").length)
+        .toBeGreaterThanOrEqual(2);
 
-    await performLspAction(testPage, "stop");
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
-    expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBeNull();
+      await performLspAction(testPage, "stop");
+      await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
+      expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBeNull();
+    } finally {
+      await releaseFeature();
+    }
   });
 
   test("cleans up a crashed server and reconnects", async ({
@@ -1094,10 +1112,18 @@ test.describe("LSP file intelligence", () => {
     backend,
   }) => {
     installFakeKotlinLsp(backend);
+    const archiveTarget = "Main-archive-cleanup.kt";
     const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
       title: "Kotlin LSP Archive Cleanup",
+      // Keep the target outside the initial virtualized viewport. This proves
+      // the file-opening helper uses the exact search path when a valid row is
+      // not mounted in the tree.
+      filePaths: [
+        archiveTarget,
+        ...Array.from({ length: 48 }, (_, index) => `A-archive-noise-${index}.kt`),
+      ],
     });
-    await openDesktopFile(testPage, task.session, task.filePaths[0]);
+    await openDesktopFile(testPage, task.session, archiveTarget);
     const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
     await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
@@ -1114,6 +1140,375 @@ test.describe("LSP file intelligence", () => {
       "task teardown signal",
     );
     await expect.poll(() => isProcessAlive(started.pid)).toBe(false);
+  });
+
+  test("retains the language server across browser close and reattaches after the reaper interval", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(210_000);
+    const initial = await apiClient.getUserSettings();
+    const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
+      ? (initial.settings.lsp_auto_start_languages as string[])
+      : [];
+    const context = testPage.context();
+
+    try {
+      installFakeKotlinLsp(backend, {
+        keepProgress: true,
+        progress: {
+          title: "Importing Kotlin project",
+          message: "Project model is still warming up",
+          percentage: 42,
+        },
+      });
+      await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        lsp_auto_start_languages: [...new Set([...initialAutoStart, "kotlin"])],
+      });
+      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Kotlin LSP Browser Continuity",
+      });
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+      const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
+      await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+
+      const started = await expectFakeLspEvent(
+        backend,
+        (event) => event.event === "started",
+        "continuity task-host process",
+      );
+      const documentUri = pathToFileURL(path.join(started.cwd!, task.filePaths[0])).href;
+      const modelUri = expectedMonacoModelUri(documentUri, task.sessionId);
+      await expectFakeLspMarkerMessages(testPage, modelUri, ["Fake Kotlin diagnostic"]);
+      const initialInitializeCount = readFakeLspEvents(backend).filter(
+        (event) => event.event === "message" && event.method === "initialize",
+      ).length;
+      expect(initialInitializeCount).toBe(1);
+
+      const turnsBeforeFollowUp = (await apiClient.listSessionTurns(task.sessionId)).turns.length;
+      await apiClient.addUserMessage(task.taskId, task.sessionId, "/e2e:simple-message");
+      await expect
+        .poll(
+          async () => {
+            const { turns } = await apiClient.listSessionTurns(task.sessionId);
+            return (
+              turns.length > turnsBeforeFollowUp &&
+              turns.every((turn) => Boolean(turn.completed_at))
+            );
+          },
+          { timeout: 60_000 },
+        )
+        .toBe(true);
+
+      await testPage.close();
+      await dwell(
+        95_000,
+        "poll-interval",
+        "the detached language-server lease must survive a completed turn and the task-runtime idle-reaper threshold plus scan",
+      );
+      expect(isProcessAlive(started.pid)).toBe(true);
+      expect(readFakeLspEvents(backend).filter((event) => event.event === "started")).toHaveLength(
+        1,
+      );
+
+      const reopenedPage = await context.newPage();
+      await reopenedPage.goto(`/t/${task.taskId}`);
+      const reopenedSession = new SessionPage(reopenedPage);
+      await reopenedSession.waitForLoad(45_000);
+      await openDesktopFile(reopenedPage, reopenedSession, task.filePaths[0]);
+      const reopenedStatus = reopenedPage.locator('[data-testid="lsp-status-button"]:visible');
+      await expect(reopenedStatus).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      await expectFakeLspMarkerMessages(reopenedPage, modelUri, ["Fake Kotlin diagnostic"]);
+      const progress = (await openLspStatus(reopenedPage)).getByTestId("lsp-project-progress");
+      await expect(progress).toHaveAttribute("data-lsp-progress-kind", "active");
+      await expect(progress).toContainText("Importing Kotlin project");
+      await expect(progress).toContainText("Project model is still warming up");
+
+      const events = readFakeLspEvents(backend);
+      expect(events.filter((event) => event.event === "started")).toHaveLength(1);
+      expect(
+        events.filter((event) => event.event === "message" && event.method === "initialize"),
+      ).toHaveLength(initialInitializeCount);
+      expect(
+        events.filter(
+          (event) => event.event === "message" && event.method === "textDocument/didOpen",
+        ),
+      ).toHaveLength(2);
+      await performLspAction(reopenedPage, "stop");
+      await expect(reopenedStatus).toHaveAttribute("data-lsp-state", "disabled");
+      await expect.poll(() => isProcessAlive(started.pid)).toBe(false);
+    } finally {
+      await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        lsp_auto_start_languages: initialAutoStart,
+      });
+    }
+  });
+
+  test("reattaches windows and duplicated tabs to independent language-server leases", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(150_000);
+    const initial = await apiClient.getUserSettings();
+    const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
+      ? (initial.settings.lsp_auto_start_languages as string[])
+      : [];
+    const releaseFeature = await backend.useEnv({
+      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
+    });
+    const context = testPage.context();
+    const secondPage = await context.newPage();
+    const duplicatePage = await context.newPage();
+
+    try {
+      installFakeKotlinLsp(backend);
+      await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        lsp_auto_start_languages: [...new Set([...initialAutoStart, "kotlin"])],
+      });
+      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Independent Kotlin LSP Windows",
+      });
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+      const firstStatus = testPage.locator('[data-testid="lsp-status-button"]:visible');
+      await expect(firstStatus).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+
+      const storageKey = `kandev-lsp-lease:${task.sessionId}:kotlin`;
+      const firstLeaseId = await testPage.evaluate(
+        (key) => sessionStorage.getItem(key),
+        storageKey,
+      );
+      expect(firstLeaseId).toBeTruthy();
+
+      const secondSession = new SessionPage(secondPage);
+      await secondPage.goto(`/t/${task.taskId}`);
+      await secondSession.waitForLoad(45_000);
+      await openDesktopFile(secondPage, secondSession, task.filePaths[0]);
+      const secondStatus = secondPage.locator('[data-testid="lsp-status-button"]:visible');
+      await expect(secondStatus).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+
+      await duplicatePage.addInitScript(
+        ({ key, leaseId }) => window.sessionStorage.setItem(key, leaseId),
+        { key: storageKey, leaseId: firstLeaseId! },
+      );
+      const duplicateSession = new SessionPage(duplicatePage);
+      await duplicatePage.goto(`/t/${task.taskId}`);
+      await duplicateSession.waitForLoad(45_000);
+      await openDesktopFile(duplicatePage, duplicateSession, task.filePaths[0]);
+      const duplicateStatus = duplicatePage.locator('[data-testid="lsp-status-button"]:visible');
+      await expect(duplicateStatus).toHaveAttribute("data-lsp-state", "ready", {
+        timeout: 15_000,
+      });
+
+      await expect
+        .poll(() => readFakeLspEvents(backend).filter((event) => event.event === "started"))
+        .toHaveLength(3);
+      const processes = readFakeLspEvents(backend).filter((event) => event.event === "started");
+      expect(new Set(processes.map((event) => event.pid)).size).toBe(3);
+      expect(processes).toHaveLength(3);
+
+      await performLspAction(testPage, "stop");
+      await expect(firstStatus).toHaveAttribute("data-lsp-state", "disabled");
+      await expect.poll(() => isProcessAlive(processes[0].pid)).toBe(false);
+      await expect(secondStatus).toHaveAttribute("data-lsp-state", "ready");
+      await expect(duplicateStatus).toHaveAttribute("data-lsp-state", "ready");
+      expect(isProcessAlive(processes[1].pid)).toBe(true);
+      expect(isProcessAlive(processes[2].pid)).toBe(true);
+
+      await performLspAction(secondPage, "stop");
+      await expect.poll(() => isProcessAlive(processes[1].pid)).toBe(false);
+      await expect(duplicateStatus).toHaveAttribute("data-lsp-state", "ready");
+      await performLspAction(duplicatePage, "stop");
+      await expect.poll(() => isProcessAlive(processes[2].pid)).toBe(false);
+    } finally {
+      await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        lsp_auto_start_languages: initialAutoStart,
+      });
+      await releaseFeature();
+    }
+  });
+
+  test("evicts a detached lease while keeping all-attached capacity exclusive", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(180_000);
+    const initial = await apiClient.getUserSettings();
+    const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
+      ? (initial.settings.lsp_auto_start_languages as string[])
+      : [];
+    const releaseFeature = await backend.useEnv({
+      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
+      KANDEV_LSP_MAX_CONNECTIONS: "1",
+    });
+    const context = testPage.context();
+    const secondPage = await context.newPage();
+
+    try {
+      installFakeKotlinLsp(backend);
+      await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        lsp_auto_start_languages: [...new Set([...initialAutoStart, "kotlin"])],
+      });
+      const first = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "First Attached Kotlin LSP",
+      });
+      await openDesktopFile(testPage, first.session, first.filePaths[0]);
+      const firstStatus = testPage.locator('[data-testid="lsp-status-button"]:visible');
+      await expect(firstStatus).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      const firstProcess = await expectFakeLspEvent(
+        backend,
+        (event) => event.event === "started",
+        "first attached lease process",
+      );
+
+      const second = await createKotlinTask(secondPage, apiClient, seedData, backend, {
+        title: "Second Attached Kotlin LSP",
+      });
+      await openDesktopFile(secondPage, second.session, second.filePaths[0]);
+      const secondStatus = secondPage.locator('[data-testid="lsp-status-button"]:visible');
+      await expect(secondStatus).toHaveAttribute("data-lsp-state", "unavailable", {
+        timeout: 15_000,
+      });
+      await expect(secondPage.getByText(/Too many language servers are active/)).toBeVisible();
+      expect(isProcessAlive(firstProcess.pid)).toBe(true);
+
+      await testPage.close();
+      await performLspAction(secondPage, "retry");
+      await expect(secondStatus).toHaveAttribute("data-lsp-state", "ready", { timeout: 20_000 });
+      const secondProcess = await expectFakeLspEvent(
+        backend,
+        (event) => event.event === "started" && event.pid !== firstProcess.pid,
+        "replacement process after detached lease eviction",
+      );
+      await expect.poll(() => isProcessAlive(firstProcess.pid)).toBe(false);
+      expect(isProcessAlive(secondProcess.pid)).toBe(true);
+      expect(readFakeLspEvents(backend).filter((event) => event.event === "started")).toHaveLength(
+        2,
+      );
+      await performLspAction(secondPage, "stop");
+      await expect.poll(() => isProcessAlive(secondProcess.pid)).toBe(false);
+    } finally {
+      await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        lsp_auto_start_languages: initialAutoStart,
+      });
+      await releaseFeature();
+    }
+  });
+
+  test("releases the retained language server after the last editor stays idle", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(210_000);
+    const releaseFeature = await backend.useEnv({
+      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
+    });
+
+    try {
+      installFakeKotlinLsp(backend);
+      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Idle Kotlin LSP Release",
+      });
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+      const status = testPage.locator('[data-testid="lsp-status-button"]:visible');
+      await performLspAction(testPage, "start");
+      await expect(status).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      const started = await expectFakeLspEvent(
+        backend,
+        (event) => event.event === "started",
+        "idle-release task-host process",
+      );
+
+      const editorTab = testPage.getByTestId("preview-tab-file-editor");
+      await editorTab.click({ button: "right" });
+      await testPage.getByRole("menuitem", { name: "Close", exact: true }).click();
+      await expect(editorTab).toHaveCount(0);
+      await dwell(
+        125_000,
+        "product-timer",
+        "the LSP client intentionally releases its retained lease after two minutes with no open editor",
+      );
+      await expect.poll(() => isProcessAlive(started.pid)).toBe(false);
+      await expectFakeLspEvent(
+        backend,
+        (event) =>
+          event.pid === started.pid &&
+          (event.event === "exit" || event.event === "signal" || event.event === "stdin ended"),
+        "idle-release process shutdown",
+      );
+    } finally {
+      await releaseFeature();
+    }
+  });
+
+  test("disconnects the old lease and starts fresh analysis after backend restart", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(180_000);
+    const initial = await apiClient.getUserSettings();
+    const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
+      ? (initial.settings.lsp_auto_start_languages as string[])
+      : [];
+    const releaseFeature = await backend.useEnv({
+      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
+    });
+
+    try {
+      installFakeKotlinLsp(backend);
+      await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        lsp_auto_start_languages: [...new Set([...initialAutoStart, "kotlin"])],
+      });
+      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Backend Restart LSP Recovery",
+      });
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+      const status = testPage.locator('[data-testid="lsp-status-button"]:visible');
+      await expect(status).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      const firstProcess = await expectFakeLspEvent(
+        backend,
+        (event) => event.event === "started",
+        "pre-restart language-server process",
+      );
+
+      await backend.restart();
+      await expect.poll(() => isProcessAlive(firstProcess.pid)).toBe(false);
+      const nextTask = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Kotlin LSP After Backend Restart",
+      });
+      await openDesktopFile(testPage, nextTask.session, nextTask.filePaths[0]);
+      await expect(status).toHaveAttribute("data-lsp-state", "ready", { timeout: 20_000 });
+      const secondProcess = await expectFakeLspEvent(
+        backend,
+        (event) => event.event === "started" && event.pid !== firstProcess.pid,
+        "fresh language-server process after backend restart",
+      );
+      expect(isProcessAlive(secondProcess.pid)).toBe(true);
+      expect(readFakeLspEvents(backend).filter((event) => event.event === "started")).toHaveLength(
+        2,
+      );
+      expect(
+        readFakeLspEvents(backend).filter(
+          (event) => event.event === "message" && event.method === "initialize",
+        ),
+      ).toHaveLength(2);
+      await performLspAction(testPage, "stop");
+      await expect.poll(() => isProcessAlive(secondProcess.pid)).toBe(false);
+    } finally {
+      await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        lsp_auto_start_languages: initialAutoStart,
+      });
+      await releaseFeature();
+    }
   });
 
   test("rejects excess connections and succeeds after capacity is released", async ({

@@ -665,8 +665,9 @@ func (c *Controller) ListHistoryBySession(ctx context.Context, req ListHistoryRe
 
 // ImportWorkflowsRequest carries import data.
 type ImportWorkflowsRequest struct {
-	WorkspaceID string                 `json:"workspace_id"`
-	Data        *models.WorkflowExport `json:"data"`
+	WorkspaceID         string                         `json:"workspace_id"`
+	Data                *models.WorkflowExport         `json:"data"`
+	StepProfileBindings []service.ImportProfileBinding `json:"step_profile_bindings,omitempty"`
 }
 
 // ExportWorkflow exports a single workflow.
@@ -684,5 +685,14 @@ func (c *Controller) ExportWorkflows(ctx context.Context, workspaceID string, wo
 
 // ImportWorkflows imports workflows into a workspace.
 func (c *Controller) ImportWorkflows(ctx context.Context, req ImportWorkflowsRequest) (*service.ImportResult, error) {
+	if req.StepProfileBindings != nil {
+		return c.svc.ImportWorkflowsWithBindings(ctx, req.WorkspaceID, req.Data, req.StepProfileBindings)
+	}
 	return c.svc.ImportWorkflows(ctx, req.WorkspaceID, req.Data)
+}
+
+// PreviewImportWorkflows validates a portable document and returns the
+// profile choices required before the browser can persist it.
+func (c *Controller) PreviewImportWorkflows(ctx context.Context, workspaceID string, data *models.WorkflowExport) (*service.ImportProfilePreview, error) {
+	return c.svc.PreviewImportWorkflows(ctx, workspaceID, data)
 }

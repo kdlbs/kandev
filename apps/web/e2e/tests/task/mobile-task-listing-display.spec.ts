@@ -51,8 +51,8 @@ test.describe("Mobile task listing display preferences", () => {
 
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
-    await mobile.mobileMenuButton.click();
-    const menu = testPage.getByRole("dialog", { name: "Menu" });
+    await mobile.viewOptionsButton.click();
+    const menu = testPage.getByRole("dialog", { name: "View options" });
     await menu.getByRole("radio", { name: "List", exact: true }).click();
     await expect(testPage).toHaveURL(/\/tasks/);
     await expect(testPage.getByTestId("tasks-list")).toBeVisible();
@@ -80,8 +80,8 @@ test.describe("Mobile task listing display preferences", () => {
     await testPage.goto("/");
     await taskListLoaded;
     await expect(testPage).toHaveURL(/\/tasks/);
-    await testPage.getByRole("button", { name: "Open menu" }).tap();
-    const tasksMenu = testPage.getByRole("dialog", { name: "Menu" });
+    await testPage.getByTestId("mobile-topbar-page-context").tap();
+    const tasksMenu = testPage.getByRole("dialog", { name: "View options" });
     await expandDisplaySettingsGroup(testPage, "list-rows", "mobile");
     await tasksMenu.getByText("Show task details", { exact: true }).click();
     await expect

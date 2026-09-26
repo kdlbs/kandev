@@ -1,6 +1,6 @@
 "use client";
 
-import type { Message, TaskPendingAction } from "@/lib/types/http";
+import type { ClarificationRequestMetadata, Message, TaskPendingAction } from "@/lib/types/http";
 import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
 import { extractKandevStem } from "./messages/kandev/parse";
 
@@ -132,6 +132,17 @@ export function hasPendingClarification(
   return hasPendingClarificationMessage || pendingAction === "clarification";
 }
 
+export function shouldShowCancelAgent(
+  isWorking: boolean,
+  pendingClarification: Message | null | undefined,
+  sessionId: string | null,
+): boolean {
+  if (!sessionId) return false;
+  if (!pendingClarification) return isWorking;
+  return !(pendingClarification.metadata as ClarificationRequestMetadata | undefined)
+    ?.agent_disconnected;
+}
+
 export type ShellExecPayload = {
   command?: string;
   work_dir?: string;
@@ -181,13 +192,31 @@ export type ToolCallMetadata = {
 
 // Tool names are duplicated across transport fields. Keep one scanner so
 // renderer dispatch and transcript grouping cannot disagree.
+function hasForeignKandevProvider(input: unknown): boolean {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return false;
+  const rawInput = (input as Record<string, unknown>).raw_input;
+  if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) return false;
+  const rawInputRecord = rawInput as Record<string, unknown>;
+  if (!Object.hasOwn(rawInputRecord, "providerIdentifier")) return false;
+  const provider = rawInputRecord.providerIdentifier;
+  return typeof provider !== "string" || provider.trim() !== "kandev";
+}
+
+function legacyKandevToolCandidates(
+  metadata: ToolCallMetadata | undefined,
+  message: Message,
+): Array<string | undefined> {
+  if (hasForeignKandevProvider(metadata?.normalized?.generic?.input)) return [];
+  return [metadata?.tool_name, metadata?.title, message.content || undefined];
+}
+
 export function kandevToolStemOf(message: Message): string | null {
   const metadata = message.metadata as ToolCallMetadata | undefined;
   const normalizedName = metadata?.normalized?.generic?.name;
   const normalizedStem = extractKandevStem(normalizedName);
   if (normalizedStem) return normalizedStem;
   if (normalizedName && /\/|__|\./.test(normalizedName)) return null;
-  const candidates = [metadata?.tool_name, metadata?.title, message.content || undefined];
+  const candidates = legacyKandevToolCandidates(metadata, message);
   for (const candidate of candidates) {
     const stem = extractKandevStem(candidate);
     if (stem) return stem;

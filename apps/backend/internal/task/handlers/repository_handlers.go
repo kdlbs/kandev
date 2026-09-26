@@ -38,6 +38,7 @@ func RegisterRepositoryRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc
 
 func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
+	api.POST("/workspaces/:id/repository-checkout-capabilities", h.httpRepositoryCheckoutCapabilities)
 	api.GET("/workspaces/:id/repositories", h.httpListRepositories)
 	api.POST("/workspaces/:id/repositories", h.httpCreateRepository)
 	api.POST("/workspaces/:id/repositories/initialize-local", h.httpInitializeLocalRepository)
@@ -46,6 +47,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/workspaces/:id/repositories/discovery/refresh", h.httpRefreshDiscovery)
 	api.GET("/repositories/discovery/roots", h.httpListDiscoveryRoots)
 	api.POST("/repositories/discovery/roots", h.httpAddDiscoveryRoot)
+	api.POST("/repositories/discovery/roots/confirm-home", h.httpConfirmHomeDiscovery)
 	api.POST("/repositories/discovery/roots/reconnect", h.httpReconnectDiscoveryRoot)
 	api.DELETE("/repositories/discovery/roots", h.httpRemoveDiscoveryRoot)
 	// Unified branch listing — accepts either ?repository_id= for an imported
@@ -194,6 +196,8 @@ func (h *RepositoryHandlers) writeDiscoveryError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, service.ErrDesktopDiscoveryUnavailable):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	case errors.Is(err, service.ErrHomeDiscoveryConfirmationStale):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	default:
 		h.logger.Error("failed to load repository discovery", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load repository discovery"})
@@ -237,6 +241,20 @@ func (h *RepositoryHandlers) httpAddDiscoveryRoot(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, dto.FromDesktopDiscoveryRoot(*root))
+}
+
+func (h *RepositoryHandlers) httpConfirmHomeDiscovery(c *gin.Context) {
+	root, err := h.service.ConfirmHomeDesktopDiscovery(c.Request.Context())
+	if err != nil {
+		h.writeDiscoveryError(c, err)
+		return
+	}
+	if root == nil {
+		h.logger.Error("desktop Home discovery root was not returned after confirmation")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to confirm Home discovery"})
+		return
+	}
+	c.JSON(http.StatusOK, dto.FromDesktopDiscoveryRoot(*root))
 }
 
 func (h *RepositoryHandlers) httpReconnectDiscoveryRoot(c *gin.Context) {

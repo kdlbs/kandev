@@ -89,7 +89,6 @@
   "selectRepository": "选择仓库",
   "selectTask": "选择任务 {{title}}",
   "selectWorkflow": "选择工作流",
-  "sendToWorkflow": "发送到工作流",
   "selectedFilterCount_one": "{{label}}：已选择 {{count}} 项",
   "selectedFilterCount_other": "{{label}}：已选择 {{count}} 项",
   "sentryIssue": "Sentry 议题",
@@ -101,6 +100,7 @@
   "step": "步骤",
   "subtaskOf": "子任务，父任务为",
   "taskList": "任务列表",
+  "tasksInStep": "{{step}}中的任务",
   "tasksOverWipLimit": "{{label}} 个任务，超出 WIP 限制",
   "theseOptionsAffectThisTaskList": "这些选项仅影响此任务列表。",
   "threads": "对话流",
@@ -128,5 +128,10 @@
   "boardSort": "看板排序",
   "boardSortCreatedDesc": "最新优先",
   "boardSortPriorityDesc": "优先级",
-  "priorityFilter": "优先级筛选"
+  "priorityFilter": "优先级筛选",
+  "bulkSelected_other": "已选择 {{count}} 个",
+  "bulkActions": "操作",
+  "selectTasks": "选择任务",
+  "cancelTaskSelection": "取消选择",
+  "bulkSelected_one": "已选择 {{count}} 个"
 }

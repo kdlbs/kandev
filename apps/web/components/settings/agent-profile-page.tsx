@@ -41,7 +41,9 @@ import {
 } from "@/components/settings/agent-profile-duplicate-action";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
 import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
+import { ProviderSection } from "@/components/settings/profile-edit/provider-section";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { providerConfigInvalidReasonKey } from "@/lib/settings/provider-config-validation";
 
 export {
   ProfileEnvVarsEditor,
@@ -56,6 +58,7 @@ import type {
   PermissionSetting,
   PassthroughConfig,
 } from "@/lib/types/http";
+import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { UtilityAgentReference } from "@/lib/types/agent-profile-errors";
 import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
@@ -94,8 +97,10 @@ function toProfileFormData(
     auto_approve: permissionValues.auto_approve,
     allow_indexing: permissionValues.allow_indexing,
     cli_passthrough: profile.cliPassthrough,
+    cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
     cli_flags: profile.cliFlags ?? [],
     command_prefix: profile.commandPrefix ?? "",
+    provider_kind: profile.providerKind ?? "",
   };
 }
 
@@ -282,6 +287,9 @@ function ProfileSettingsCard({
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           agentName={agent.name}
+          cursorMcpAuthSupported={
+            agent.name === "cursor-acp" || agent.tui_config?.mcp_strategy === "cursor"
+          }
           onModelConfigResolutionPendingChange={onModelConfigResolutionPendingChange}
           lockPassthrough={Boolean(agent.tui_config)}
           hideCustomCLIFlags
@@ -324,7 +332,7 @@ type ProfileEditorBodyProps = {
   modelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
   initialMcpConfig?: AgentProfileMcpConfig | null;
   onToastError: (error: unknown) => void;
   onModelConfigResolutionPendingChange: (pending: boolean) => void;
@@ -364,6 +372,13 @@ function ProfileEditorBody({
         onChange={(next) => updateDraft({ cliFlags: next })}
         permissionSettings={permissionSettings}
         discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "cli-flags")}
+      />
+
+      <ProviderSection
+        draft={draft}
+        savedProfile={savedProfile}
+        secrets={secrets}
+        onChange={updateDraft}
       />
 
       <ProfileEnvVarsSection
@@ -450,14 +465,26 @@ function ProfileEditor({
     toast,
     onUtilityConflict: setUtilityConflict,
   });
+  const providerInvalidKey = providerConfigInvalidReasonKey({
+    providerKind: draft.providerKind,
+    providerBaseUrl: draft.providerBaseUrl,
+    providerApiKeySecretId: draft.providerApiKeySecretId,
+    model: draft.model,
+    cliPassthrough: draft.cliPassthrough,
+  });
   useSettingsSaveContributor({
     id: `agent-profile:${draft.id}`,
     revision: JSON.stringify(draft),
     isDirty,
-    canSave: Boolean(draft.name.trim()) && !modelConfigResolutionPending && !hasExternalConflict,
+    canSave:
+      Boolean(draft.name.trim()) &&
+      !modelConfigResolutionPending &&
+      !hasExternalConflict &&
+      !providerInvalidKey,
     invalidReason: hasExternalConflict
       ? t("agents:profileExternalChangeInvalidReason")
-      : profileSaveInvalidReason(draft.name, modelConfigResolutionPending, t),
+      : (profileSaveInvalidReason(draft.name, modelConfigResolutionPending, t) ??
+        (providerInvalidKey ? t(providerInvalidKey) : undefined)),
     save: () => handleSave(),
     discard: discardProfileDraft,
   });

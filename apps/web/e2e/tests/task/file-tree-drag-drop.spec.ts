@@ -1,14 +1,10 @@
-import { type Page, type Locator } from "@playwright/test";
+import { type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import {
-  GitHelper,
-  makeGitEnv,
-  openTaskSession,
-  createStandardProfile,
-} from "../../helpers/git-helper";
+import { SessionPage } from "../../pages/session-page";
+import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 
 // DnD in file-browser.tsx uses native HTML5 drag events (dragstart, dragover,
 // drop) keyed off React's onDragStart/Over/Drop. Playwright's locator.dragTo()
@@ -21,13 +17,21 @@ import {
 // workaround for testing HTML5 DnD in Playwright and mirrors what the user
 // would do.
 
-async function setupTask(
-  testPage: Page,
-  apiClient: ApiClient,
-  seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string },
-  profileName: string,
-  taskTitle: string,
-) {
+async function setupTask({
+  testPage,
+  apiClient,
+  seedData,
+  profileName,
+  taskTitle,
+  requiredPath,
+}: {
+  testPage: Page;
+  apiClient: ApiClient;
+  seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string };
+  profileName: string;
+  taskTitle: string;
+  requiredPath: string;
+}) {
   const profile = await createStandardProfile(apiClient, profileName);
   const task = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
     description: "/e2e:simple-message",
@@ -40,6 +44,7 @@ async function setupTask(
   // for the environment's durable ready state before the first tree request;
   // otherwise the tree can legitimately snapshot the repository while the
   // agent session is still being attached to it.
+  let workspacePath = "";
   await expect
     .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
       timeout: 30_000,
@@ -47,50 +52,116 @@ async function setupTask(
     })
     .toBe("ready");
 
-  const session = await openTaskSession(testPage, taskTitle);
+  // Environment readiness and repository materialization are separate
+  // transitions. Wait for the exact fixture file in the task worktree before
+  // the first tree snapshot, otherwise a valid early tree can be retained
+  // while the checkout is still being populated.
+  await expect
+    .poll(
+      async () => {
+        const environment = await apiClient.getTaskEnvironment(task.id);
+        const repositoryWorktree = environment?.repos?.find(
+          (repository) => repository.repository_id === seedData.repositoryId,
+        )?.worktree_path;
+        // The environment root and the repository checkout are separate
+        // paths. The executor can publish either path first, and the first
+        // repository snapshot can omit repository_id, so check every
+        // advertised candidate and keep the one that contains the fixture.
+        const candidatePaths = [
+          repositoryWorktree,
+          ...(environment?.repos ?? []).map((repository) => repository.worktree_path),
+          environment?.workspace_path,
+          environment?.worktree_path,
+        ].filter(
+          (candidate, index, paths): candidate is string =>
+            Boolean(candidate) && paths.indexOf(candidate) === index,
+        );
+        workspacePath =
+          candidatePaths.find((candidate) => fs.existsSync(path.join(candidate, requiredPath))) ??
+          "";
+        return workspacePath !== "";
+      },
+      { timeout: 90_000, message: `Waiting for ${requiredPath} in the ${taskTitle} worktree` },
+    )
+    .toBe(true);
+
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
   await session.clickTab("Files");
   return session;
 }
 
-async function dispatchHtmlDnd(testPage: Page, source: Locator, target: Locator) {
-  // Make sure both are attached and visible.
+async function dispatchHtmlDnd(testPage: Page, sourcePath: string, targetPath: string) {
+  // Virtualized trees can unmount the source while the target is revealed.
+  // Keep the browser DataTransfer on the page between the two scrolls so the
+  // source and target do not need to be mounted at the same time.
+  const source = testPage.locator(
+    `[data-testid="file-tree-node"][data-path=${JSON.stringify(sourcePath)}]:visible`,
+  );
+  const target = testPage.locator(
+    `[data-testid="file-tree-node"][data-path=${JSON.stringify(targetPath)}]:visible`,
+  );
+  await expect(source).toBeVisible({ timeout: 30_000 });
   await source.scrollIntoViewIfNeeded();
+  await testPage.evaluate((nodePath) => {
+    const row = Array.from(document.querySelectorAll('[data-testid="file-tree-node"]')).find(
+      (element) =>
+        element.getAttribute("data-path") === nodePath &&
+        element.getBoundingClientRect().width > 0 &&
+        element.getBoundingClientRect().height > 0,
+    );
+    if (!row) throw new Error(`DnD source is not mounted: ${nodePath}`);
+    const dataTransfer = new DataTransfer();
+    const event = new DragEvent("dragstart", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      dataTransfer,
+    });
+    row.dispatchEvent(event);
+    Object.defineProperty(window, "__kandevE2eDataTransfer", {
+      configurable: true,
+      value: dataTransfer,
+    });
+  }, sourcePath);
+
+  await expect(target).toBeVisible({ timeout: 30_000 });
   await target.scrollIntoViewIfNeeded();
-  const sourceHandle = await source.elementHandle();
-  const targetHandle = await target.elementHandle();
-  if (!sourceHandle || !targetHandle) throw new Error("DnD: source/target missing");
-  // Real browsers reuse the same DataTransfer across dragstart -> drop. We
-  // do the whole sequence inside one evaluate() so the instance is shared.
-  // dragover gets explicit preventDefault() because that's the contract
-  // React's onDragOver fulfils when the drop is valid - without it, the
-  // browser would interpret the drop as a navigation attempt for any
-  // text-typed data and unload the page.
   await testPage.evaluate(
-    ([src, dst]) => {
-      const dt = new DataTransfer();
-      const fireOn = (el: Element, type: string) => {
-        const ev = new DragEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          dataTransfer: dt,
-        });
-        el.dispatchEvent(ev);
-        return ev;
+    ({ sourcePath, targetPath: nodePath }) => {
+      const row = Array.from(document.querySelectorAll('[data-testid="file-tree-node"]')).find(
+        (element) =>
+          element.getAttribute("data-path") === nodePath &&
+          element.getBoundingClientRect().width > 0 &&
+          element.getBoundingClientRect().height > 0,
+      );
+      const dataTransfer = (window as Window & { __kandevE2eDataTransfer?: DataTransfer })
+        .__kandevE2eDataTransfer;
+      if (!row || !dataTransfer) throw new Error(`DnD target is not mounted: ${nodePath}`);
+      const fireOn = (element: Element, type: string) => {
+        element.dispatchEvent(
+          new DragEvent(type, { bubbles: true, cancelable: true, composed: true, dataTransfer }),
+        );
       };
-      fireOn(src, "dragstart");
-      fireOn(dst, "dragenter");
-      fireOn(dst, "dragover");
-      fireOn(dst, "drop");
-      // Source may have been removed from the DOM by the optimistic move -
-      // guard the dragend call.
-      if (src.isConnected) fireOn(src, "dragend");
+      fireOn(row, "dragenter");
+      fireOn(row, "dragover");
+      fireOn(row, "drop");
+      const source = Array.from(document.querySelectorAll('[data-testid="file-tree-node"]')).find(
+        (element) => element.getAttribute("data-path") === sourcePath,
+      );
+      if (source) fireOn(source, "dragend");
+      document.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer }));
+      delete (window as Window & { __kandevE2eDataTransfer?: DataTransfer })
+        .__kandevE2eDataTransfer;
     },
-    [sourceHandle, targetHandle] as const,
+    { sourcePath, targetPath },
   );
 }
 
 test.describe("File tree drag and drop", () => {
+  test.describe.configure({ timeout: 180_000 });
+
   test("drag a file into a folder moves it on disk and in the tree", async ({
     testPage,
     apiClient,
@@ -104,20 +175,25 @@ test.describe("File tree drag and drop", () => {
     git.stageAll();
     git.commit("seed dnd");
 
-    const session = await setupTask(testPage, apiClient, seedData, "ft-dnd-move", "FT DnD Move");
+    const session = await setupTask({
+      testPage,
+      apiClient,
+      seedData,
+      profileName: "ft-dnd-move",
+      taskTitle: "FT DnD Move",
+      requiredPath: "movable.ts",
+    });
 
-    const file = session.fileTreeNode("movable.ts");
-    const folder = session.fileTreeNode("target-dir");
-    await expect(file).toBeVisible({ timeout: 15_000 });
-    await expect(folder).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode("movable.ts");
+    await session.fileTree.waitForFileTreeNode("target-dir");
 
-    await dispatchHtmlDnd(testPage, file, folder);
+    await dispatchHtmlDnd(testPage, "movable.ts", "target-dir");
 
     // The file is removed from the root immediately (optimistic update).
     await expect(session.fileTreeNode("movable.ts")).toHaveCount(0, { timeout: 10_000 });
     // Expand the target folder to verify the moved child landed inside.
     // moveNodesInTree does not auto-expand the drop target.
-    await folder.click();
+    await session.fileTreeNode("target-dir").click();
     await expect(session.fileTreeNode("target-dir/movable.ts")).toBeVisible({ timeout: 10_000 });
 
     await expect
@@ -140,27 +216,27 @@ test.describe("File tree drag and drop", () => {
     git.stageAll();
     git.commit("seed selfdir");
 
-    const session = await setupTask(
+    const session = await setupTask({
       testPage,
       apiClient,
       seedData,
-      "ft-dnd-self",
-      "FT DnD Self Reject",
-    );
+      profileName: "ft-dnd-self",
+      taskTitle: "FT DnD Self Reject",
+      requiredPath: "selfdir/leaf.ts",
+    });
 
-    const folder = session.fileTreeNode("selfdir");
-    await expect(folder).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode("selfdir");
 
     // Drop onto self: handleDragOver short-circuits via isDropInvalid so
     // preventDefault is never called, which means the browser would never
     // fire drop in real usage. Dispatching events directly bypasses that
     // guard, but the drop handler also calls isDropInvalid and bails.
-    await dispatchHtmlDnd(testPage, folder, folder);
+    await dispatchHtmlDnd(testPage, "selfdir", "selfdir");
 
     // Tree is unchanged: folder is still at root with its original child.
     await expect(session.fileTreeNode("selfdir")).toBeVisible({ timeout: 5_000 });
     // Expand and confirm the child is still there.
-    await folder.click();
+    await session.fileTreeNode("selfdir").click();
     await expect(session.fileTreeNode("selfdir/leaf.ts")).toBeVisible({ timeout: 10_000 });
 
     // Disk untouched - no self-nested directory created.

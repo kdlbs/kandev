@@ -220,6 +220,27 @@ export type QueueStatusChangedPayload = {
   auto_merge_revision?: number;
 };
 
+export type ConversationChangedOperation = {
+  kind: "upsert" | "remove";
+  entity: "message" | "turn";
+  id: string;
+  message?: Record<string, unknown>;
+  turn?: Record<string, unknown>;
+};
+
+export type ConversationChangedPayload = {
+  protocol_version: 2;
+  scope_id: string;
+  session_id: string;
+  epoch: string;
+  base_revision: string;
+  revision: string;
+  check?: boolean;
+  terminal?: boolean;
+  reset?: boolean;
+  operations: ConversationChangedOperation[];
+};
+
 export type AvailableCommandPayload = {
   name: string;
   description?: string;
@@ -230,6 +251,7 @@ export type SessionBackendMessageMap = {
   "session.message.added": BackendMessage<"session.message.added", MessageAddedPayload>;
   "session.message.updated": BackendMessage<"session.message.updated", MessageAddedPayload>;
   "session.message.deleted": BackendMessage<"session.message.deleted", MessageAddedPayload>;
+  "session.removed": BackendMessage<"session.removed", { session_id: string; task_id?: string }>;
   "session.state_changed": BackendMessage<"session.state_changed", TaskSessionStateChangedPayload>;
   "session.turn_finished": BackendMessage<"session.turn_finished", TaskSessionNotificationPayload>;
   "session.activity_changed": BackendMessage<
@@ -268,6 +290,10 @@ export type SessionBackendMessageMap = {
   "session.turn.removed": BackendMessage<
     "session.turn.removed",
     { id: string; session_id: string; task_id: string }
+  >;
+  "session.conversation.changed": BackendMessage<
+    "session.conversation.changed",
+    ConversationChangedPayload
   >;
   "session.available_commands": BackendMessage<
     "session.available_commands",

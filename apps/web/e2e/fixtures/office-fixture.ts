@@ -1,5 +1,5 @@
 import { type Page } from "@playwright/test";
-import { test as base } from "./test-base";
+import { runWithBackendRecovery, test as base } from "./test-base";
 import { OfficeApiClient } from "../helpers/office-api-client";
 import { ApiClient } from "../helpers/api-client";
 
@@ -60,19 +60,20 @@ export const test = base.extend<{ testPage: Page }, OfficeFixtures>({
   // but onboarding allocates its OWN workspace ID (officeSeed.workspaceId),
   // so per-test office task / session leftovers leak across tests unless we
   // reset the office workspace here as well.
-  testPage: async ({ testPage: basePage, apiClient, officeSeed, seedData }, use) => {
-    if (officeSeed.workspaceId !== seedData.workspaceId) {
-      await apiClient.e2eReset(officeSeed.workspaceId, [
-        seedData.workflowId,
-        officeSeed.workflowId,
-      ]);
-    }
-    await apiClient.saveUserSettings({
-      workspace_id: officeSeed.workspaceId,
-      workflow_filter_id: seedData.workflowId,
-      keyboard_shortcuts: {},
-      enable_preview_on_click: false,
-      sidebar_views: [],
+  testPage: async ({ testPage: basePage, backend, apiClient, officeSeed, seedData }, use) => {
+    await runWithBackendRecovery(backend, async () => {
+      if (officeSeed.workspaceId !== seedData.workspaceId) {
+        await apiClient.e2eReset(officeSeed.workspaceId, [
+          seedData.workflowId,
+          officeSeed.workflowId,
+        ]);
+      }
+      await apiClient.saveUserSettings({
+        workspace_id: officeSeed.workspaceId,
+        workflow_filter_id: seedData.workflowId,
+        keyboard_shortcuts: {},
+        enable_preview_on_click: false,
+      });
     });
     await use(basePage);
   },
@@ -81,8 +82,10 @@ export const test = base.extend<{ testPage: Page }, OfficeFixtures>({
 // Tests in this suite deliberately exercise status transitions. Reset the
 // worker-shared CEO before every test so a previous paused/stopped/working
 // state cannot make the scheduler silently reject the next assignment.
-test.beforeEach(async ({ officeApi, officeSeed }) => {
-  await officeApi.updateAgentStatus(officeSeed.agentId, "idle");
+test.beforeEach(async ({ backend, officeApi, officeSeed }) => {
+  await runWithBackendRecovery(backend, () =>
+    officeApi.updateAgentStatus(officeSeed.agentId, "idle"),
+  );
 });
 
 // Office's approval gate (apps/backend/internal/office/dashboard/service_tasks.go

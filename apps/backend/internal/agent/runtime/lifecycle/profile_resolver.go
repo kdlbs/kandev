@@ -95,7 +95,11 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		CLIFlags:                   profile.CLIFlags,
 		CommandPrefix:              profile.CommandPrefix,
 		EnvVars:                    profile.EnvVars,
+		ProviderKind:               profile.ProviderKind,
+		ProviderBaseURL:            profile.ProviderBaseURL,
+		ProviderAPIKeySecretID:     profile.ProviderAPIKeySecretID,
 		CLIPassthrough:             profile.CLIPassthrough,
+		CursorMCPAuthEnabled:       profile.CursorMCPAuthEnabled,
 		NativeSessionResume:        nativeSessionResume,
 		SupportsMCP:                agent.SupportsMCP,
 	}, nil

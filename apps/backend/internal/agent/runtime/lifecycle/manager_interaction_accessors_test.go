@@ -179,6 +179,29 @@ func TestIsAgentCommandConfigured(t *testing.T) {
 	require.False(t, mgr.IsAgentCommandConfigured("exec-absent"))
 }
 
+func TestHasLiveAgentExecutionIgnoresWorkspaceInfrastructureAndTerminalAgents(t *testing.T) {
+	mgr := newTestManager(t)
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-workspace", SessionID: "session-workspace", Status: v1.AgentStatusRunning,
+	}))
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-agent", SessionID: "session-agent", AgentCommand: "claude",
+		Status: v1.AgentStatusStarting,
+	}))
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-terminal", SessionID: "session-terminal", AgentCommand: "claude",
+		Status: v1.AgentStatusFailed,
+	}))
+
+	require.False(t, mgr.HasLiveAgentExecution("session-workspace"),
+		"workspace-only execution must not shield an orphaned session")
+	require.True(t, mgr.HasLiveAgentExecution("session-agent"),
+		"a configured non-terminal agent execution must shield its session")
+	require.False(t, mgr.HasLiveAgentExecution("session-terminal"),
+		"terminal executions must not shield a session")
+	require.False(t, mgr.HasLiveAgentExecution("session-absent"))
+}
+
 func TestResolveTaskEnvironmentIDPrefersInMemoryExecution(t *testing.T) {
 	mgr := newTestManager(t)
 	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{

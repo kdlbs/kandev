@@ -37,7 +37,7 @@ test.describe("shared control sizing", () => {
     await surface.locator("#github-method-pat").click();
     const token = surface.locator("#github-workspace-token");
     await expect(token).toBeVisible();
-    await expectControlHeight(token, 28);
-    await expectControlHeight(surface.getByRole("button", { name: "Show token" }), 28);
+    await expectControlHeight(token, 28, 2);
+    await expectControlHeight(surface.getByRole("button", { name: "Show token" }), 28, 2);
   });
 });

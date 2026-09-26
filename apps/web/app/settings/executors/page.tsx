@@ -22,6 +22,8 @@ import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { SettingsGroup } from "@/components/settings/settings-group";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 
 type ProfileWithExecutor = ExecutorProfile & {
   executor_type: string;
@@ -81,6 +83,11 @@ const EXECUTOR_TYPES: readonly ExecutorTypeCard[] = [
     brandLabel: "Sprites.dev",
     descriptionKey: "executors:hubDescriptionSprites",
   },
+  {
+    type: "remote_docker",
+    labelKey: "executors:remoteDocker",
+    descriptionKey: "executors:hubDescriptionRemoteDocker",
+  },
   { type: "ssh", brandLabel: "SSH", descriptionKey: "executors:hubDescriptionSsh" },
   {
     type: "k8s",
@@ -114,7 +121,8 @@ function ProfileCard({
   return (
     <Card
       className="group cursor-pointer transition-colors hover:bg-muted/50"
-      onClick={() => router.push(`/settings/executors/${profile.id}`)}
+      data-testid={`executor-profile-card-${profile.id}`}
+      onClick={() => router.push(executorProfileSettingsPath(profile.id))}
     >
       <CardContent className="flex items-center gap-3 p-4">
         <ExecutorIconBadge type={profile.executor_type} />
@@ -271,9 +279,8 @@ export default function ExecutorsHubPage() {
       <Separator />
       {!canManageKubernetes && <KubernetesReadOnlyNotice />}
       {allProfiles.length > 0 && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">{t("executors:profiles")}</h3>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <SettingsGroup title={t("executors:profiles")} contentClassName="space-y-4 divide-y-0">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {allProfiles.map((profile) => (
               <ProfileCard
                 key={profile.id}
@@ -283,10 +290,12 @@ export default function ExecutorsHubPage() {
               />
             ))}
           </div>
-        </div>
+        </SettingsGroup>
       )}
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">{t("executors:createNewProfile")}</h3>
+      <SettingsGroup
+        title={t("executors:createNewProfile")}
+        contentClassName="space-y-4 divide-y-0"
+      >
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {EXECUTOR_TYPES.map((execType) => (
             <CreateTypeCard
@@ -297,7 +306,7 @@ export default function ExecutorsHubPage() {
             />
           ))}
         </div>
-      </div>
+      </SettingsGroup>
       <DeleteProfileDialog
         profileName={profileToDelete?.name}
         open={Boolean(deleteProfileId)}

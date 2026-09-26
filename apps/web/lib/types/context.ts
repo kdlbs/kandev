@@ -1,11 +1,12 @@
 import type {
-  DiffComment,
+  ReviewComment,
   PlanComment,
   PRFeedbackComment,
   WalkthroughComment,
   AgentMessageComment,
 } from "@/lib/state/slices/comments";
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
+import type { TaskPreviewFeedback } from "@/lib/types/http";
 
 type ContextItemBase = {
   id: string;
@@ -38,7 +39,8 @@ export type PromptContextItem = ContextItemBase & {
 export type CommentContextItem = ContextItemBase & {
   kind: "comment";
   filePath: string;
-  comments: DiffComment[];
+  repositoryName?: string;
+  comments: ReviewComment[];
   onRemoveComment: (id: string) => void;
   onOpen?: () => void;
 };
@@ -47,6 +49,12 @@ export type PlanCommentContextItem = ContextItemBase & {
   kind: "plan-comment";
   comments: PlanComment[];
   onOpen: () => void;
+};
+
+export type PreviewFeedbackContextItem = ContextItemBase & {
+  kind: "preview-feedback";
+  items: TaskPreviewFeedback[];
+  onOpen?: () => void;
 };
 
 export type ImageContextItem = ContextItemBase & {
@@ -83,6 +91,7 @@ export type ContextItem =
   | PromptContextItem
   | CommentContextItem
   | PlanCommentContextItem
+  | PreviewFeedbackContextItem
   | ImageContextItem
   | FileAttachmentContextItem
   | PRFeedbackContextItem

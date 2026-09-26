@@ -8,18 +8,17 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { IconTerminal2 } from "@tabler/icons-react";
-import { useAppStoreApi } from "@/components/state-provider";
-import { fetchExecutor, listExecutors, updateExecutor } from "@/lib/api/domains/settings-api";
+import { fetchExecutor } from "@/lib/api/domains/settings-api";
+import { useSaveExecutorConnection } from "@/hooks/domains/settings/use-save-executor-connection";
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
-import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
 import { SSHSessionsCard } from "@/components/settings/ssh-sessions-card";
+import { SSHReachabilityCard } from "@/components/settings/ssh-reachability-card";
 import { listSSHSessions } from "@/lib/api/domains/ssh-api";
 import { getExecutorLabel } from "@/lib/executor-icons";
 import {
   buildSSHExecutorConfig,
   parseSSHExecutorConfig,
 } from "@/app/settings/executors/new/[type]/ssh-config";
-import type { Executor } from "@/lib/types/http";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 
 const EXECUTORS_ROUTE = "/settings/executors";
@@ -121,7 +120,7 @@ function SSHExecutorView({
 }) {
   const initial = parseSSHExecutorConfig(executor.name, executor.config);
   const sessionCount = useRunningSessionCount(executor.id);
-  const handleSave = useSaveExecutor(executor.id, onSaved);
+  const handleSave = useSaveExecutorConnection(executor.id, buildSSHExecutorConfig, onSaved);
 
   return (
     <div className="space-y-8">
@@ -135,6 +134,7 @@ function SSHExecutorView({
         coordinatedSaveId={`ssh-executor:${executor.id}`}
         runningSessionCount={sessionCount}
       />
+      <SSHReachabilityCard executorId={executor.id} />
       <SSHSessionsCard executorId={executor.id} />
     </div>
   );
@@ -187,35 +187,4 @@ function useRunningSessionCount(executorId: string): number {
     };
   }, [executorId]);
   return count;
-}
-
-function useSaveExecutor(executorId: string, onSaved: () => void | Promise<void>) {
-  const store = useAppStoreApi();
-
-  return useCallback(
-    async (cfg: SSHExecutorConfig) => {
-      const config = buildSSHExecutorConfig(cfg);
-      await updateExecutor(executorId, { name: cfg.name, config });
-      // Refresh the store so the executor list reflects the new name + config.
-      try {
-        const fresh = await listExecutors();
-        store.getState().setExecutors(fresh.executors);
-      } catch {
-        // Non-fatal: the local view still reloads via onSaved(). Read the
-        // current snapshot at write time so a WS event that updated the
-        // executor list mid-flight doesn't get overwritten with a stale
-        // captured copy.
-        const current = store.getState().executors.items;
-        store
-          .getState()
-          .setExecutors(
-            current.map((e: Executor) =>
-              e.id === executorId ? { ...e, name: cfg.name, config } : e,
-            ),
-          );
-      }
-      await onSaved();
-    },
-    [executorId, store, onSaved],
-  );
 }

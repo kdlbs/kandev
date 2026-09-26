@@ -10,40 +10,108 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // Inbox item kinds for office-agent-error-handling.
 const (
-	InboxKindAgentRunFailed           = "agent_run_failed"
-	InboxKindAgentPausedAfterFails    = "agent_paused_after_failures"
-	autoPauseReasonPrefix             = "Auto-paused:"
-	RunReasonManualResumeAfterFailure = "manual_resume_after_failure"
+	InboxKindAgentRunFailed        = "agent_run_failed"
+	InboxKindAgentPausedAfterFails = "agent_paused_after_failures"
+	autoPauseReasonPrefix          = "Auto-paused:"
+	// RunReasonManualResumeAfterFailure aliases shared's canonical
+	// declaration (AC-OFFICE-BACKPRESSURE-001.8) — see shared/runreasons.go.
+	RunReasonManualResumeAfterFailure = shared.RunReasonManualResumeAfterFailure
 )
 
+// officeLegacyTransientMaxRetries bounds how many times a classified-transient
+// post-start failure on the legacy (HandleAgentFailure) path is retried
+// before it counts toward auto-pause like any other failure. Shared with
+// the pre-launch retry tier's run.RetryCount rather than a dedicated
+// column: a run that already burned pre-launch retries gets no transient
+// retry here, which under-retries in a rare case but can never lengthen
+// the pre-launch budget.
+const officeLegacyTransientMaxRetries = 2
+
+// officeLegacyTransientBackoff mirrors the first two steps of the routing
+// tier's short-retry backoff (routing_lifecycle.go's officeShortRetryBackoff).
+var officeLegacyTransientBackoff = []time.Duration{
+	5 * time.Second,
+	10 * time.Second,
+}
+
+// AgentFailureEvidence is the lifecycle snapshot for the invocation that
+// produced an agent failure. The legacy retry path requires this evidence to
+// prove that the failure belongs to this run and invocation, and happened
+// before output or effects.
+type AgentFailureEvidence struct {
+	RunID                       string
+	SessionID                   string
+	AgentExecutionID            string
+	PromptGeneration            uint64
+	EvidenceKnown               bool
+	OutputObserved              bool
+	EffectObserved              bool
+	ProviderDiagnosticCandidate bool
+	ProviderDiagnosticText      string
+}
+
 // HandleAgentFailure is the v1 office failure path: every agent error
-// is treated as terminal. The run is marked failed with the verbatim
-// error message, the consecutive-failure counter is incremented, and
-// when it crosses the effective threshold the agent is auto-paused.
-// It also stamps office_agent_runtime.last_run_finished_at the same as
-// the completed/stopped paths, so cooldown_sec paces the agent's next
-// heartbeat-driven fire regardless of why the previous run ended.
+// is treated as terminal, except a classified-transient post-start
+// failure that still has retry budget, which is requeued instead (see
+// tryLegacyTransientRetry). A terminal failure marks the run failed with
+// the verbatim error message, increments the consecutive-failure
+// counter, and auto-pauses the agent once it crosses the effective
+// threshold. It also stamps office_agent_runtime.last_run_finished_at
+// the same as the completed/stopped paths, so cooldown_sec paces the
+// agent's next heartbeat-driven fire regardless of why the previous run
+// ended.
 //
-// No retry is scheduled — the user resolves via Resume session in the
-// chat or Mark fixed in the inbox.
+// Beyond the transient retry above, no other retry is scheduled — the
+// user resolves via Resume session in the chat or Mark fixed in the
+// inbox.
+//
+// tryLegacyTransientRetry runs before MarkRunFailed, not after: every
+// policy cancel (task-tree cancel, workspace pause, participant
+// eviction) guards its write to status IN ('queued','claimed'), and
+// MarkRunFailed always used its own 'claimed' guard, so marking the run
+// 'failed' first and requeuing second would leave a claimed -> failed
+// -> queued window neither guard covers — a cancel landing in that
+// window matches nothing, and the unconditional requeue write would
+// resurrect the run anyway. Classifying and attempting the guarded
+// requeue first means a retry-eligible run never visits 'failed' at
+// all: it goes claimed -> queued directly, or (if a concurrent writer
+// already moved it off 'claimed') the requeue itself no-ops and
+// MarkRunFailed's identical guard below catches it the same way it
+// always has.
 //
 // Returns wrote=false when MarkRunFailed's guarded write was a no-op —
 // the run reached a terminal state through another writer (e.g. a
 // concurrent cancel) between the caller's read and this call — so
 // callers know not to treat a cancelled/already-terminal run as a
-// genuine agent failure (Review round 3, R3-1).
+// genuine agent failure. wrote=false also covers a scheduled transient
+// retry: the run was requeued, not terminalized, so callers must not
+// escalate or publish for it either.
 func (s *Service) HandleAgentFailure(
 	ctx context.Context,
 	run *models.Run,
 	errorMessage string,
+	agentID string,
+	providerError *streams.ProviderError,
+	evidence ...AgentFailureEvidence,
 ) (bool, error) {
+	var failureEvidence AgentFailureEvidence
+	if len(evidence) > 0 {
+		failureEvidence = evidence[0]
+	}
+	if s.tryLegacyTransientRetry(ctx, run, errorMessage, agentID, providerError, failureEvidence) {
+		return false, nil
+	}
+
 	wrote, err := s.repo.MarkRunFailed(ctx, run.ID, errorMessage)
 	if err != nil {
 		return false, fmt.Errorf("mark run failed: %w", err)
@@ -97,6 +165,160 @@ func (s *Service) HandleAgentFailure(
 	}
 
 	return true, nil
+}
+
+// tryLegacyTransientRetry requeues run for another attempt instead of
+// letting HandleAgentFailure treat it as terminal, when the failure
+// classifies as transient (ClassTransient, AutoRetryable, FallbackAllowed)
+// and the run still has legacy-transient retry budget. Called before
+// MarkRunFailed runs at all, so a successful retry never marks the row
+// 'failed' — the requeue write is itself
+// guarded to status = 'claimed', mirroring MarkRunFailed's own guard,
+// so the caller must not also run the terminal-shape/counter/auto-pause
+// accounting below — that is exactly what returning true signals. A
+// false return means either the failure is not retry-eligible, or the
+// guarded requeue lost a race against a concurrent writer (a cancel,
+// pause, or eviction that moved the run off 'claimed' first) — either
+// way the caller falls through to MarkRunFailed, whose identical guard
+// resolves the second case the same way it always has.
+//
+// providerError.Message is preferred over the bare errorMessage when
+// present: a raw agent stderr string ("Overloaded", a bare 429) usually
+// classifies unclassified, while the structured provider error carries
+// the signal the classifier needs.
+//
+// Provider rules are keyed by agent ID (agentID, e.g. "claude-acp"), not
+// providerError.ProviderID — some adapters put a model-provider id there
+// instead, which has no rules of its own. The provider id is substituted
+// only when the agent id itself has no rules and the provider id does,
+// mirroring classifyKanbanFailure's resolution
+// (internal/orchestrator/event_handlers_transient.go). Without this, a
+// provider rate limit — the canonical transient failure this retry exists
+// to cover — falls through the provider-specific rules unmatched and
+// classifies as an unretryable agent_runtime_error instead.
+func (s *Service) tryLegacyTransientRetry(
+	ctx context.Context, run *models.Run, errorMessage string, agentID string,
+	providerError *streams.ProviderError, evidence AgentFailureEvidence,
+) bool {
+	if !legacyTransientRetryEvidenceSafe(run, evidence) {
+		return false
+	}
+	delay, ok := legacyTransientRetryDelay(run)
+	if !ok {
+		return false
+	}
+	classified, ok := classifyLegacyTransientFailure(errorMessage, agentID, providerError, evidence)
+	if !ok {
+		return false
+	}
+
+	retryAt := time.Now().UTC().Add(delay)
+	newRetryCount := run.RetryCount + 1
+
+	wrote, err := s.repo.ScheduleRetryIfClaimed(ctx, run.ID, retryAt, newRetryCount)
+	if err != nil {
+		s.logger.Error("failed to schedule legacy transient retry",
+			zap.String("run_id", run.ID), zap.Error(err))
+		return false
+	}
+	if !wrote {
+		// A concurrent writer (cancel, pause, or eviction) already moved
+		// the run off 'claimed': it is no longer ours to resurrect.
+		// MarkRunFailed's identical guard, called next by the caller,
+		// will see the same thing and no-op the same way.
+		return false
+	}
+	// Release ownership only after the requeue is confirmed durable — the
+	// same ordering as the terminal path below. Releasing first would leave
+	// the run 'claimed' with no checkout or working owner if this write (or
+	// the caller's fallthrough MarkRunFailed) then failed.
+	s.releaseTaskCheckoutForRun(ctx, run)
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+	s.logger.Info("retrying transient post-start failure before it counts toward auto-pause",
+		zap.String("run_id", run.ID),
+		zap.String("code", string(classified.Code)),
+		zap.Int("retry_count", newRetryCount),
+		zap.Duration("delay", delay))
+	return true
+}
+
+func legacyTransientRetryDelay(run *models.Run) (time.Duration, bool) {
+	if run == nil || run.RetryCount >= officeLegacyTransientMaxRetries {
+		return 0, false
+	}
+	if stale, _ := isRetryStale(run); stale {
+		return 0, false
+	}
+	delay := officeLegacyTransientBackoff[run.RetryCount]
+	// A requeued run is re-evaluated by evaluateRunStaleness the next time
+	// it is claimed, which cancels any run with retry_count > 0 once
+	// run.RequestedAt is older than staleRunThreshold. Test the age it will
+	// have on arrival so the backoff cannot move it into that cancellation
+	// window after this handler schedules the retry.
+	if !run.RequestedAt.IsZero() && time.Since(run.RequestedAt)+delay > staleRunThreshold {
+		return 0, false
+	}
+	return delay, true
+}
+
+func classifyLegacyTransientFailure(
+	errorMessage, agentID string,
+	providerError *streams.ProviderError,
+	evidence AgentFailureEvidence,
+) (*routingerr.Error, bool) {
+	message := errorMessage
+	providerID := agentID
+	if providerError != nil {
+		if providerError.Message != "" {
+			message = providerError.Message
+		}
+		if id := providerError.ProviderID; id != "" &&
+			!routingerr.HasProviderRules(providerID) && routingerr.HasProviderRules(id) {
+			providerID = id
+		}
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhaseStreaming,
+		ProviderID: providerID,
+		Stderr:     message,
+	})
+	if !classified.ShouldShortRetry() {
+		return nil, false
+	}
+	if !evidence.ProviderDiagnosticCandidate {
+		return classified, true
+	}
+	diagnostic := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: providerID,
+		Stderr:     evidence.ProviderDiagnosticText,
+	})
+	diagnosticText := normalizeFailureText(evidence.ProviderDiagnosticText)
+	if diagnostic.Confidence != routingerr.ConfHigh || !diagnostic.ShouldShortRetry() ||
+		diagnostic.Code != classified.Code || diagnosticText == "" ||
+		!strings.Contains(normalizeFailureText(message), diagnosticText) {
+		return nil, false
+	}
+	return classified, true
+}
+
+func legacyTransientRetryEvidenceSafe(run *models.Run, evidence AgentFailureEvidence) bool {
+	if run == nil || evidence.RunID == "" || evidence.RunID != run.ID || evidence.SessionID == "" ||
+		evidence.AgentExecutionID == "" || evidence.PromptGeneration == 0 ||
+		!evidence.EvidenceKnown || evidence.OutputObserved || evidence.EffectObserved {
+		return false
+	}
+	if run.SessionID != "" && evidence.SessionID != "" && run.SessionID != evidence.SessionID {
+		return false
+	}
+	if evidence.ProviderDiagnosticCandidate && normalizeFailureText(evidence.ProviderDiagnosticText) == "" {
+		return false
+	}
+	return true
+}
+
+func normalizeFailureText(value string) string {
+	return streams.SanitizeProviderMessage(value)
 }
 
 // RecordAgentSuccess resets the consecutive-failure counter for the
@@ -165,11 +387,6 @@ func (s *Service) MarkAgentPausedFixed(
 		// Both the pause marker and its durable recovery work are gone.
 		return s.repo.DismissInboxItem(ctx, userID, InboxKindAgentPausedAfterFails, agentID)
 	}
-	if err := s.repo.DismissInboxItem(
-		ctx, userID, InboxKindAgentPausedAfterFails, agentID,
-	); err != nil {
-		return fmt.Errorf("dismiss: %w", err)
-	}
 
 	if autoPaused {
 		if err := s.clearAutoPause(ctx, agent); err != nil {
@@ -179,6 +396,15 @@ func (s *Service) MarkAgentPausedFixed(
 			s.logger.Warn("reset counter on unpause failed",
 				zap.String("agent", agentID), zap.Error(err))
 		}
+	}
+	// Dismissed only once the auto-pause this call observed is actually
+	// cleared (or there was none to clear): a refused clearAutoPause
+	// returns above, leaving the inbox entry for a still-active pause
+	// visible and this call retryable instead of silently swallowed.
+	if err := s.repo.DismissInboxItem(
+		ctx, userID, InboxKindAgentPausedAfterFails, agentID,
+	); err != nil {
+		return fmt.Errorf("dismiss: %w", err)
 	}
 	return s.recoverPausedTasks(ctx, agentID, recoveries)
 }
@@ -209,6 +435,7 @@ func (s *Service) loadPauseRecoveries(
 func (s *Service) clearAutoPause(
 	ctx context.Context, agent *models.AgentInstance,
 ) error {
+	originalReason := agent.PauseReason
 	for attempt := 0; attempt < 2; attempt++ {
 		changed, err := s.clearAutoPauseAttempt(ctx, agent)
 		if err != nil {
@@ -224,6 +451,15 @@ func (s *Service) clearAutoPause(
 		}
 		if !strings.HasPrefix(current.PauseReason, autoPauseReasonPrefix) {
 			return nil
+		}
+		// Still paused but with a reason this call never observed means a
+		// newer auto-pause landed between our read and the CAS above.
+		// Retrying against it would clear that newer pause and let the
+		// caller reset the counter and recover tasks from this call's
+		// stale snapshot instead. Abort so the newer pause stays intact
+		// and reachable by a fresh "Mark fixed".
+		if current.Status == models.AgentStatusPaused && current.PauseReason != originalReason {
+			return fmt.Errorf("clear pause reason: a newer auto-pause is in progress")
 		}
 		agent = current
 	}
@@ -242,9 +478,8 @@ func (s *Service) clearAutoPauseAttempt(
 func (s *Service) unpauseAgentIfCurrent(
 	ctx context.Context, agent *models.AgentInstance,
 ) (bool, error) {
-	changed, err := s.repo.UpdateAgentStatusFieldsIfCurrent(
-		ctx, agent.ID, string(models.AgentStatusPaused),
-		string(models.AgentStatusIdle), "",
+	changed, err := s.repo.UnpauseAgentIfCurrent(
+		ctx, agent.ID, agent.PauseReason, string(models.AgentStatusIdle),
 	)
 	if err != nil {
 		return false, fmt.Errorf("unpause agent: %w", err)
@@ -515,11 +750,11 @@ func (s *Service) publishRunFailed(
 		"run_id":               run.ID,
 		"agent_profile_id":     run.AgentProfileID,
 		"task_id":              taskIDFromRunPayload(run.Payload),
-		"error_message":        errorMessage,
 		"consecutive_failures": count,
 		"threshold":            threshold,
 		"finished_at":          time.Now().UTC().Format(time.RFC3339),
 	}
+	data[runEventFieldErrorMessage] = errorMessage
 	_ = s.eb.Publish(ctx, "office.run.failed",
 		bus.NewEvent("office.run.failed", "office-failure", data))
 }

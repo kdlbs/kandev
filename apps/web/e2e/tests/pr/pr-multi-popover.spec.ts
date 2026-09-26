@@ -181,6 +181,53 @@ async function selectOnlyMissingPRFromAddPanel(
 }
 
 test.describe("Multi-PR CI popover", () => {
+  test("aggregate warning and menu rows identify only the conflicted open PR", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Multi PR conflict warning";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associateTwoPRs(apiClient, seedData.workspaceId, seed.taskId);
+    await apiClient.mockGitHubAssociateTaskPR({
+      workspace_id: seedData.workspaceId,
+      task_id: seed.taskId,
+      owner: OWNER,
+      repo: "web",
+      pr_number: 42,
+      pr_url: `https://github.com/${OWNER}/web/pull/42`,
+      pr_title: "Failing web PR",
+      head_branch: "feat/web",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      checks_state: "failure",
+      review_state: "changes_requested",
+      mergeable_state: "dirty",
+      has_merge_conflicts: true,
+    });
+    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const badge = session.prTopbarButton();
+    await expect(badge).toHaveAttribute("data-pr-count", "2");
+    await expect(badge.getByTestId("pr-merge-conflict-warning")).toBeVisible();
+    await expect(badge.locator("svg")).toHaveCount(3);
+
+    await badge.click();
+    const conflicted = testPage.getByTestId(`pr-topbar-menu-item-${OWNER}-web-42`);
+    const passing = testPage.getByTestId(`pr-topbar-menu-item-${OWNER}-api-77`);
+    await expect(conflicted.getByTestId("pr-merge-conflict-warning")).toBeVisible();
+    await expect(passing.getByTestId("pr-merge-conflict-warning")).toHaveCount(0);
+    await passing.click();
+    await expect(session.prDetailPanel()).toBeVisible();
+  });
+
   test("hover opens tabbed popover defaulting to the worst-status PR; tab switch swaps CI detail", async ({
     testPage,
     apiClient,
