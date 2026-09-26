@@ -140,6 +140,85 @@ func TestPostgresCompleteActiveClarificationBundleClaimsOnce(t *testing.T) {
 	}
 }
 
+func TestPostgresReattachActiveClarificationBundleMatchesLifecycleAuthority(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, time.September, 5, 8, 0, 0, 0, time.UTC)
+
+	seedPendingActionSession(t, repo, "task-reattach-pg", "session-reattach-pg")
+	createPendingActionTurn(t, repo, "task-reattach-pg", "session-reattach-pg", "turn-old-reattach-pg", base, base)
+	createClarificationBundleMessage(t, repo, "message-old-reattach-pg", "task-reattach-pg", "session-reattach-pg", "turn-old-reattach-pg", "pending-old-reattach-pg", "q-old", base)
+	setClarificationMessageMetadata(t, repo, "message-old-reattach-pg", func(metadata map[string]interface{}) {
+		metadata["agent_disconnected"] = true
+	})
+	createPendingActionTurn(t, repo, "task-reattach-pg", "session-reattach-pg", "turn-current-reattach-pg", base.Add(time.Minute), base.Add(time.Minute))
+	createClarificationBundleMessage(t, repo, "message-current-reattach-pg", "task-reattach-pg", "session-reattach-pg", "turn-current-reattach-pg", "pending-current-reattach-pg", "q-current", base.Add(time.Minute))
+	setClarificationMessageMetadata(t, repo, "message-current-reattach-pg", func(metadata map[string]interface{}) {
+		metadata["agent_disconnected"] = true
+	})
+	createClarificationBundleMessage(t, repo, "message-live-reattach-pg", "task-reattach-pg", "session-reattach-pg", "turn-current-reattach-pg", "pending-live-reattach-pg", "q-live", base.Add(time.Minute+time.Second))
+	createClarificationBundleMessage(t, repo, "message-answered-reattach-pg", "task-reattach-pg", "session-reattach-pg", "turn-current-reattach-pg", "pending-answered-reattach-pg", "q-answered", base.Add(time.Minute+2*time.Second))
+	setClarificationMessageMetadata(t, repo, "message-answered-reattach-pg", func(metadata map[string]interface{}) {
+		metadata["status"] = clarificationStatusAnswered
+		metadata["agent_disconnected"] = true
+	})
+
+	seedPendingActionSession(t, repo, "task-terminal-reattach-pg", "session-terminal-reattach-pg")
+	createPendingActionTurn(t, repo, "task-terminal-reattach-pg", "session-terminal-reattach-pg", "turn-terminal-reattach-pg", base, base)
+	createClarificationBundleMessage(t, repo, "message-terminal-reattach-pg", "task-terminal-reattach-pg", "session-terminal-reattach-pg", "turn-terminal-reattach-pg", "pending-terminal-reattach-pg", "q-terminal", base)
+	setClarificationMessageMetadata(t, repo, "message-terminal-reattach-pg", func(metadata map[string]interface{}) {
+		metadata["agent_disconnected"] = true
+	})
+	if err := repo.UpdateTaskSessionState(ctx, "session-terminal-reattach-pg", models.TaskSessionStateCompleted, ""); err != nil {
+		t.Fatalf("complete terminal session: %v", err)
+	}
+
+	updated, active, err := repo.ReattachActiveClarificationBundle(ctx, "session-reattach-pg", "pending-current-reattach-pg")
+	if err != nil || !active || len(updated) != 1 {
+		t.Fatalf("reattach current Postgres bundle = active %v rows %d err %v; want true, 1, nil", active, len(updated), err)
+	}
+	if _, detached := updated[0].Metadata["agent_disconnected"]; detached {
+		t.Fatalf("reattached Postgres row retained marker: %#v", updated[0].Metadata)
+	}
+	repeated, active, err := repo.ReattachActiveClarificationBundle(ctx, "session-reattach-pg", "pending-current-reattach-pg")
+	if err != nil || !active || len(repeated) != 0 {
+		t.Fatalf("repeated Postgres reattach = active %v rows %d err %v; want true, 0, nil", active, len(repeated), err)
+	}
+	liveRows, active, err := repo.ReattachActiveClarificationBundle(ctx, "session-reattach-pg", "pending-live-reattach-pg")
+	if err != nil || !active || len(liveRows) != 0 {
+		t.Fatalf("never-detached Postgres bundle = active %v rows %d err %v; want true, 0, nil", active, len(liveRows), err)
+	}
+
+	for _, test := range []struct {
+		name      string
+		sessionID string
+		pendingID string
+		messageID string
+	}{
+		{name: "superseded", sessionID: "session-reattach-pg", pendingID: "pending-old-reattach-pg", messageID: "message-old-reattach-pg"},
+		{name: "answered", sessionID: "session-reattach-pg", pendingID: "pending-answered-reattach-pg", messageID: "message-answered-reattach-pg"},
+		{name: "terminal session", sessionID: "session-terminal-reattach-pg", pendingID: "pending-terminal-reattach-pg", messageID: "message-terminal-reattach-pg"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rows, active, err := repo.ReattachActiveClarificationBundle(ctx, test.sessionID, test.pendingID)
+			if err != nil || active || len(rows) != 0 {
+				t.Fatalf("inactive Postgres reattach = active %v rows %d err %v; want false, 0, nil", active, len(rows), err)
+			}
+			message, err := repo.GetMessage(ctx, test.messageID)
+			if err != nil {
+				t.Fatalf("GetMessage(%s): %v", test.messageID, err)
+			}
+			if detached, _ := message.Metadata["agent_disconnected"].(bool); !detached {
+				t.Fatalf("inactive Postgres row was reattached: %#v", message.Metadata)
+			}
+		})
+	}
+}
+
 func TestPostgresClarificationClaimWaitsForTerminalSessionWrite(t *testing.T) {
 	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 5)
 	repo, err := NewWithDB(db, db, nil)
