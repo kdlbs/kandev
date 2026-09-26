@@ -10,8 +10,8 @@ import (
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/runs/models"
 )
 
 // RefusalGate names the gate that refused an enqueue

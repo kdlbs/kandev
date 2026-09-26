@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
+	runmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // CreateRunTx creates a new run queue entry using a transaction the caller
@@ -29,7 +30,7 @@ import (
 // only ever patches context_snapshot, so every later reader/writer of
 // this run's continuation summary reads the value persisted here instead
 // of re-deriving it against a snapshot that may have drifted.
-func (r *Repository) CreateRunTx(ctx context.Context, tx *sqlx.Tx, req *models.Run) error {
+func (r *Repository) CreateRunTx(ctx context.Context, tx *sqlx.Tx, req *runmodels.Run) error {
 	if req.ID == "" {
 		req.ID = uuid.New().String()
 	}
@@ -63,7 +64,7 @@ func (r *Repository) CreateRunTx(ctx context.Context, tx *sqlx.Tx, req *models.R
 // CreateRun creates a new run queue entry in a transaction owned by this
 // method. See CreateRunTx for the field-defaulting / continuation-scope
 // derivation this delegates to.
-func (r *Repository) CreateRun(ctx context.Context, req *models.Run) error {
+func (r *Repository) CreateRun(ctx context.Context, req *runmodels.Run) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -75,7 +76,7 @@ func (r *Repository) CreateRun(ctx context.Context, req *models.Run) error {
 	return tx.Commit()
 }
 
-func ensureRunDefaults(req *models.Run) {
+func ensureRunDefaults(req *runmodels.Run) {
 	if req.Payload == "" {
 		req.Payload = "{}"
 	}
@@ -216,8 +217,8 @@ func (r *Repository) UpdateRunOutputSummary(ctx context.Context, id, outputSumma
 }
 
 // ListRuns returns run requests filtered by workspace (via agent profile join), ordered by time.
-func (r *Repository) ListRuns(ctx context.Context, workspaceID string) ([]*models.Run, error) {
-	var reqs []*models.Run
+func (r *Repository) ListRuns(ctx context.Context, workspaceID string) ([]*runmodels.Run, error) {
+	var reqs []*runmodels.Run
 	err := r.ro.SelectContext(ctx, &reqs, r.ro.Rebind(`
 		SELECT w.* FROM runs w
 		JOIN agent_profiles a ON a.id = w.agent_profile_id
@@ -228,15 +229,15 @@ func (r *Repository) ListRuns(ctx context.Context, workspaceID string) ([]*model
 		return nil, err
 	}
 	if reqs == nil {
-		reqs = []*models.Run{}
+		reqs = []*runmodels.Run{}
 	}
 	return reqs, nil
 }
 
 // ClaimRun atomically claims the oldest queued run for an agent.
-func (r *Repository) ClaimRun(ctx context.Context, agentInstanceID string) (*models.Run, error) {
+func (r *Repository) ClaimRun(ctx context.Context, agentInstanceID string) (*runmodels.Run, error) {
 	now := time.Now().UTC()
-	var req models.Run
+	var req runmodels.Run
 	err := r.db.QueryRowxContext(ctx, r.db.Rebind(`
 		UPDATE runs
 		SET status = 'claimed', claimed_at = ?
@@ -270,9 +271,9 @@ func (r *Repository) ClaimRun(ctx context.Context, agentInstanceID string) (*mod
 // finished_at overwritten by this transition. Returns (nil, nil) for an
 // unknown id or a run no longer claimed (already terminal by another
 // writer): zero rows changed, so there is nothing to classify.
-func (r *Repository) FinishRun(ctx context.Context, id, status string, outcome *string) (*models.Run, error) {
+func (r *Repository) FinishRun(ctx context.Context, id, status string, outcome *string) (*runmodels.Run, error) {
 	now := time.Now().UTC()
-	var run models.Run
+	var run runmodels.Run
 	err := r.db.QueryRowxContext(ctx, r.db.Rebind(`
 		UPDATE runs SET status = ?, outcome = ?, finished_at = ?
 		WHERE id = ? AND status = 'claimed'
@@ -288,7 +289,7 @@ func (r *Repository) FinishRun(ctx context.Context, id, status string, outcome *
 }
 
 // GetRunByID returns the run row for a given ID. Returns sql.ErrNoRows when unknown.
-func (r *Repository) GetRunByID(ctx context.Context, id string) (*models.Run, error) {
+func (r *Repository) GetRunByID(ctx context.Context, id string) (*runmodels.Run, error) {
 	return getRunByID(ctx, r.ro, id)
 }
 
@@ -296,12 +297,12 @@ func (r *Repository) GetRunByID(ctx context.Context, id string) (*models.Run, er
 // causing-run lookup participates in the single enqueue transaction
 // AC-OFFICE-LAUNCH-SAFETY-003.8 requires instead of racing it on a
 // separate reader connection.
-func (r *Repository) GetRunByIDTx(ctx context.Context, tx *sqlx.Tx, id string) (*models.Run, error) {
+func (r *Repository) GetRunByIDTx(ctx context.Context, tx *sqlx.Tx, id string) (*runmodels.Run, error) {
 	return getRunByID(ctx, tx, id)
 }
 
-func getRunByID(ctx context.Context, exec sqlExecutor, id string) (*models.Run, error) {
-	var run models.Run
+func getRunByID(ctx context.Context, exec sqlExecutor, id string) (*runmodels.Run, error) {
+	var run runmodels.Run
 	err := exec.QueryRowxContext(ctx, exec.Rebind(`
 		SELECT * FROM runs WHERE id = ?
 	`), id).StructScan(&run)
@@ -333,8 +334,8 @@ func (r *Repository) GetRunWorkspaceID(ctx context.Context, runID string) (strin
 // GetClaimedRunByID returns a run only while it is still claimed. Lifecycle
 // events carry this immutable run identity so a delayed predecessor event
 // cannot finish a newer claimed run for the same task and agent.
-func (r *Repository) GetClaimedRunByID(ctx context.Context, id string) (*models.Run, error) {
-	var run models.Run
+func (r *Repository) GetClaimedRunByID(ctx context.Context, id string) (*runmodels.Run, error) {
+	var run runmodels.Run
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT * FROM runs WHERE id = ? AND status = 'claimed'
 	`), id).StructScan(&run)
@@ -475,9 +476,9 @@ func commentIDFromPayload(payload string, wanted map[string]struct{}) string {
 // that as "not a heartbeat completion event".
 func (r *Repository) GetClaimedTasklessRunForAgent(
 	ctx context.Context, agentProfileID string,
-) (*models.Run, error) {
+) (*runmodels.Run, error) {
 	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
-	var req models.Run
+	var req runmodels.Run
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
 		SELECT * FROM runs
 		WHERE agent_profile_id = ?
@@ -504,8 +505,8 @@ func (r *Repository) GetClaimedTasklessRunForAgent(
 // multiple claims fail closed exactly like no claim — the caller then
 // resolves the wake as its own root cause, exactly as if this lookup had
 // never run.
-func (r *Repository) GetClaimedRunForAgent(ctx context.Context, agentProfileID string) (*models.Run, error) {
-	var runs []models.Run
+func (r *Repository) GetClaimedRunForAgent(ctx context.Context, agentProfileID string) (*runmodels.Run, error) {
+	var runs []runmodels.Run
 	if err := r.ro.SelectContext(ctx, &runs, r.ro.Rebind(`
 		SELECT * FROM runs
 		WHERE agent_profile_id = ?
@@ -535,8 +536,8 @@ func (r *Repository) GetClaimedRunForAgent(ctx context.Context, agentProfileID s
 // whichever carries the greatest CausationDepth: whichever claim it really
 // was, the computed child depth is never lower than it should be. Returns
 // sql.ErrNoRows only when the agent holds no claimed run at all.
-func (r *Repository) GetClaimedRunForCausationAttribution(ctx context.Context, agentProfileID string) (*models.Run, error) {
-	var runs []models.Run
+func (r *Repository) GetClaimedRunForCausationAttribution(ctx context.Context, agentProfileID string) (*runmodels.Run, error) {
+	var runs []runmodels.Run
 	if err := r.ro.SelectContext(ctx, &runs, r.ro.Rebind(`
 		SELECT * FROM runs
 		WHERE agent_profile_id = ?
@@ -557,9 +558,9 @@ func (r *Repository) GetClaimedRunForCausationAttribution(ctx context.Context, a
 }
 
 // GetClaimedRunByTaskID returns the claimed run associated with a task payload.
-func (r *Repository) GetClaimedRunByTaskID(ctx context.Context, taskID string) (*models.Run, error) {
+func (r *Repository) GetClaimedRunByTaskID(ctx context.Context, taskID string) (*runmodels.Run, error) {
 	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
-	var req models.Run
+	var req runmodels.Run
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
 		SELECT * FROM runs
 		WHERE status = 'claimed'
@@ -584,9 +585,9 @@ func (r *Repository) GetClaimedRunByTaskID(ctx context.Context, taskID string) (
 // (Review round 4, BLOCKING FINDING 2).
 func (r *Repository) GetClaimedRunByTaskAndAgent(
 	ctx context.Context, taskID, agentProfileID string,
-) (*models.Run, error) {
+) (*runmodels.Run, error) {
 	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
-	var req models.Run
+	var req runmodels.Run
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
 		SELECT * FROM runs
 		WHERE status = 'claimed'
@@ -784,7 +785,7 @@ func (r *Repository) ScheduleRetry(ctx context.Context, runID string, retryAt ti
 		    claimed_at = NULL, finished_at = NULL, session_id = '', error_message = '',
 		    priority_class = CASE WHEN priority_class = ? THEN priority_class ELSE ? END
 		WHERE id = ?
-	`), retryCount, retryAt, models.PriorityClassHuman, models.PriorityClassRecovery, runID)
+	`), retryCount, retryAt, runmodels.PriorityClassHuman, runmodels.PriorityClassRecovery, runID)
 	return err
 }
 
@@ -804,7 +805,7 @@ func (r *Repository) ScheduleRetryIfClaimed(ctx context.Context, runID string, r
 		    claimed_at = NULL, finished_at = NULL, session_id = '', error_message = '',
 		    priority_class = CASE WHEN priority_class = ? THEN priority_class ELSE ? END
 		WHERE id = ? AND status = 'claimed'
-	`), retryCount, retryAt, models.PriorityClassHuman, models.PriorityClassRecovery, runID)
+	`), retryCount, retryAt, runmodels.PriorityClassHuman, runmodels.PriorityClassRecovery, runID)
 	if err != nil {
 		return false, err
 	}
@@ -838,7 +839,7 @@ func (r *Repository) RecoverStale(ctx context.Context, claimedOlderThan time.Tim
 		SET status = 'queued', claimed_at = NULL,
 		    priority_class = CASE WHEN priority_class = ? THEN priority_class ELSE ? END
 		WHERE status = 'claimed' AND claimed_at < ?
-	`), models.PriorityClassHuman, models.PriorityClassRecovery, claimedOlderThan)
+	`), runmodels.PriorityClassHuman, runmodels.PriorityClassRecovery, claimedOlderThan)
 	if err != nil {
 		return 0, err
 	}
@@ -846,8 +847,8 @@ func (r *Repository) RecoverStale(ctx context.Context, claimedOlderThan time.Tim
 }
 
 // ListPendingRunsForTask returns queued runs in retry state for the given task.
-func (r *Repository) ListPendingRunsForTask(ctx context.Context, taskID string) ([]*models.Run, error) {
-	var reqs []*models.Run
+func (r *Repository) ListPendingRunsForTask(ctx context.Context, taskID string) ([]*runmodels.Run, error) {
+	var reqs []*runmodels.Run
 	err := r.ro.SelectContext(ctx, &reqs, r.ro.Rebind(`
 		SELECT * FROM runs
 		WHERE status = 'queued'
@@ -858,7 +859,7 @@ func (r *Repository) ListPendingRunsForTask(ctx context.Context, taskID string) 
 		return nil, err
 	}
 	if reqs == nil {
-		reqs = []*models.Run{}
+		reqs = []*runmodels.Run{}
 	}
 	return reqs, nil
 }
@@ -873,8 +874,8 @@ func (r *Repository) ListPendingRunsForTask(ctx context.Context, taskID string) 
 // Returns sql.ErrNoRows when no such run exists.
 func (r *Repository) FindInflightRunForAgent(
 	ctx context.Context, agentProfileID string,
-) (*models.Run, error) {
-	var run models.Run
+) (*runmodels.Run, error) {
+	var run runmodels.Run
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT * FROM runs
 		WHERE agent_profile_id = ?
@@ -896,11 +897,11 @@ func (r *Repository) FindInflightRunForAgent(
 // expected to derive next_cursor from the last row's requested_at.
 func (r *Repository) ListRunsForAgentPaged(
 	ctx context.Context, agentInstanceID string, cursor time.Time, cursorID string, limit int,
-) ([]*models.Run, error) {
+) ([]*runmodels.Run, error) {
 	if limit <= 0 {
 		limit = 25
 	}
-	var reqs []*models.Run
+	var reqs []*runmodels.Run
 	if cursor.IsZero() {
 		err := r.ro.SelectContext(ctx, &reqs, r.ro.Rebind(`
 			SELECT * FROM runs
@@ -927,7 +928,7 @@ func (r *Repository) ListRunsForAgentPaged(
 		}
 	}
 	if reqs == nil {
-		reqs = []*models.Run{}
+		reqs = []*runmodels.Run{}
 	}
 	return reqs, nil
 }
@@ -951,8 +952,8 @@ type RunCostRollup struct {
 // produced cost events yet.
 func (r *Repository) GetRunWithCosts(
 	ctx context.Context, runID string,
-) (*models.Run, *RunCostRollup, error) {
-	var run models.Run
+) (*runmodels.Run, *RunCostRollup, error) {
+	var run runmodels.Run
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT * FROM runs WHERE id = ?
 	`), runID).StructScan(&run)
