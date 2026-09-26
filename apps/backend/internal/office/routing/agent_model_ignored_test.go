@@ -8,14 +8,9 @@ import (
 	"github.com/kandev/kandev/internal/office/routing"
 )
 
-// ISSUE-9 (Office Beta, 2026-09-25): a Critic agent configured with
-// Model="opus[1m]" but no per-agent tier override ran on Sonnet, and the
-// report read that as the agent's configured model silently losing to
-// routing. It is the shipped, specified precedence (wake_reason >
-// per-agent override > role_tiers > workspace default) — the agent
-// record's own Model column is never consulted by Resolve. These pin
-// that decision so a future change cannot let it leak into a launch
-// unnoticed. See docs/specs/office/requirements/office-agent-tier-routing.md.
+// Resolver regression: agent.Role routes tier selection; agent.Model is
+// never read by Resolve on a routed launch. See:
+// docs/specs/office/requirements/office-agent-tier-routing.md §Decision
 
 // Reproduces the Beta fixture: a specialist agent whose Model field is
 // set, no per-agent override, workspace default tier balanced. Resolve
