@@ -45,7 +45,7 @@ async function seedTaskWithSession(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-  opts: { description?: string; agentProfileId?: string; waitForAgentctlReady?: boolean } = {},
+  opts: { description?: string; agentProfileId?: string; waitForPromptReady?: boolean } = {},
 ): Promise<SessionPage> {
   const description = opts.description ?? "/e2e:simple-message";
   const agentProfileId = opts.agentProfileId ?? seedData.agentProfileId;
@@ -63,7 +63,16 @@ async function seedTaskWithSession(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
-  if (opts.waitForAgentctlReady) {
+  if (opts.waitForPromptReady) {
+    // The composer can stay visible during an active turn. Crash tests must
+    // begin only after the seeded prompt has completed on the backend.
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: `${title} seeded prompt did not reach WAITING_FOR_INPUT`,
+      timeout: 60_000,
+    });
     await waitForSessionAgentctlReady(testPage, task.session_id);
   }
 
@@ -371,7 +380,7 @@ test.describe("Session recovery", () => {
       apiClient,
       seedData,
       "Crash Recovery Fresh Test",
-      { waitForAgentctlReady: true },
+      { waitForPromptReady: true },
     );
 
     // Send /crash to make the agent exit with code 1
@@ -410,7 +419,7 @@ test.describe("Session recovery", () => {
       apiClient,
       seedData,
       "Crash Recovery Resume Test",
-      { waitForAgentctlReady: true },
+      { waitForPromptReady: true },
     );
 
     // Send /crash to make the agent exit with code 1
@@ -476,7 +485,7 @@ test.describe("Session recovery", () => {
         apiClient,
         seedData,
         "Crash Recovery Resume Fails Test",
-        { agentProfileId: profile.id, waitForAgentctlReady: true },
+        { agentProfileId: profile.id, waitForPromptReady: true },
       );
 
       // Crash the agent so the recovery message renders with action buttons.
