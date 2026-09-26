@@ -196,7 +196,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 
 	taskDescription := getTaskDescriptionFromMetadata(execution)
-	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
+	agentDisplayName := m.resolveAgentDisplayName(operationCtx, execution)
 
 	execution.remoteInstanceLifecycleMu.Lock()
 	if err := m.admitExecutionOwner(operationCtx, &LaunchRequest{
@@ -227,7 +227,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 			zap.String("acp_session_id", execution.ACPSessionID))
 
 		var err error
-		bootCommand, err = m.configureAndStartAgent(operationCtx, execution, approvalPolicy)
+		bootCommand, err = m.configureAndStartAgent(operationCtx, execution)
 		if err != nil {
 			execution.remoteInstanceLifecycleMu.Unlock()
 			return err
@@ -240,7 +240,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 	execution.remoteInstanceLifecycleMu.Unlock()
 
-	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription, approvalPolicy)
+	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription)
 }
 
 func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, execution *AgentExecution) error {

@@ -41,10 +41,10 @@ func TestConfigureAgent_SerializesStructuredArgsAndOmitsAbsentFallback(t *testin
 	client := &Client{baseURL: server.URL, httpClient: server.Client()}
 	args := []string{"runner", "two words", "", `C:\tools\agent.exe`}
 	continueArgs := []string{"runner", "continue", "thread id"}
-	if err := client.ConfigureAgent(context.Background(), "runner two words  C:\\tools\\agent.exe", args, nil, "", "runner continue thread id", continueArgs); err != nil {
+	if err := client.ConfigureAgent(context.Background(), "runner two words  C:\\tools\\agent.exe", args, nil, "runner continue thread id", continueArgs); err != nil {
 		t.Fatalf("configure structured args: %v", err)
 	}
-	if err := client.ConfigureAgent(context.Background(), "legacy --flag", nil, nil, "", "", nil); err != nil {
+	if err := client.ConfigureAgent(context.Background(), "legacy --flag", nil, nil, "", nil); err != nil {
 		t.Fatalf("configure legacy fallback: %v", err)
 	}
 

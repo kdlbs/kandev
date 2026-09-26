@@ -840,13 +840,28 @@ func (s *Server) handleWSSetMode(ctx context.Context, msg *ws.Message) *ws.Messa
 		SessionID string `json:"session_id"`
 		ModeID    string `json:"mode_id"`
 	}
-	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+	var result streams.ModeResult
+	resp := s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
 		ms, ok := a.(adapter.ModeSettableAdapter)
 		if !ok {
 			return fmt.Errorf("agent does not support mode switching")
 		}
-		return ms.SetMode(ctx, req.ModeID)
+		var err error
+		result, err = ms.SetMode(ctx, req.ModeID)
+		return err
 	})
+	if resp.Type == ws.MessageTypeError {
+		return resp
+	}
+	// The caller needs the mode the agent ended up in, not the one it asked
+	// for: a clamped mode is otherwise reported as a clean apply.
+	settled, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+		"success":   true,
+		"requested": result.Requested,
+		"effective": result.Effective,
+		"confirmed": result.Confirmed,
+	})
+	return settled
 }
 
 // adapterAction extracts common boilerplate for WS handlers that operate on the agent adapter:

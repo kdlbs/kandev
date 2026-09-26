@@ -253,12 +253,16 @@ func TestGetStatus_FailureModes(t *testing.T) {
 	}
 }
 
-func TestConfigureAgent_SendsCommandEnvAndApprovalPolicy(t *testing.T) {
+// The configure request carries no permission field. approval_policy was sent
+// for years and read by nothing; auto-approval travels on
+// CreateInstanceRequest.AutoApprovePermissions.
+// AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-004.1, .3
+func TestConfigureAgent_SendsCommandAndEnvWithoutPermissionFields(t *testing.T) {
 	srv, got := captureServer(t, jsonResponder(http.StatusOK, `{"success":true}`))
 
 	err := newHTTPOnlyClient(srv.URL).ConfigureAgent(
 		context.Background(), "claude-code acp", nil,
-		map[string]string{"ANTHROPIC_API_KEY": "k"}, "never", "", nil)
+		map[string]string{"ANTHROPIC_API_KEY": "k"}, "", nil)
 	if err != nil {
 		t.Fatalf("ConfigureAgent: %v", err)
 	}
@@ -284,8 +288,8 @@ func TestConfigureAgent_SendsCommandEnvAndApprovalPolicy(t *testing.T) {
 	if sent.Env["ANTHROPIC_API_KEY"] != "k" {
 		t.Errorf("sent env = %v", sent.Env)
 	}
-	if sent.ApprovalPolicy != "never" {
-		t.Errorf("sent approval_policy = %q, want never", sent.ApprovalPolicy)
+	if sent.ApprovalPolicy != "" {
+		t.Errorf("sent approval_policy = %q, want the field absent from the request", sent.ApprovalPolicy)
 	}
 }
 
@@ -294,7 +298,7 @@ func TestConfigureAgentWithEnvironmentRequestsIndexedReplacement(t *testing.T) {
 
 	err := newHTTPOnlyClient(srv.URL).ConfigureAgentWithEnvironment(
 		context.Background(), "claude-code acp", nil,
-		map[string]string{"GIT_CONFIG_COUNT": "1"}, "never", "", nil)
+		map[string]string{"GIT_CONFIG_COUNT": "1"}, "", nil)
 	if err != nil {
 		t.Fatalf("ConfigureAgentWithEnvironment: %v", err)
 	}
@@ -326,7 +330,7 @@ func TestConfigureAgent_FailureModes(t *testing.T) {
 			srv, _ := captureServer(t, jsonResponder(tc.status, tc.body))
 
 			err := newHTTPOnlyClient(srv.URL).ConfigureAgent(
-				context.Background(), "cmd", nil, nil, "", "", nil)
+				context.Background(), "cmd", nil, nil, "", nil)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %v, want %q", err, tc.wantErr)
 			}
@@ -754,7 +758,7 @@ func TestClientHTTPMethods_HonourContextCancellation(t *testing.T) {
 			_, err := c.GetStatus(ctx)
 			return err
 		},
-		"ConfigureAgent":  func() error { return c.ConfigureAgent(ctx, "cmd", nil, nil, "", "", nil) },
+		"ConfigureAgent":  func() error { return c.ConfigureAgent(ctx, "cmd", nil, nil, "", nil) },
 		"SetMcpMode":      func() error { return c.SetMcpMode(ctx, "task") },
 		"SetMcpProviders": func() error { return c.SetMcpProviders(ctx, nil) },
 		"Start": func() error {

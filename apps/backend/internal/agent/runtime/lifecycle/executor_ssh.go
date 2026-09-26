@@ -300,7 +300,9 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		if err != nil {
 			return nil, err
 		}
-		r.maybeUploadCredentials(baseCtx, client, req, platform)
+		if err := r.maybeUploadCredentials(baseCtx, client, req, platform); err != nil {
+			return nil, fmt.Errorf("ssh: prepare initial-mode configuration: %w", err)
+		}
 		if err := r.runPrepareScript(baseCtx, client, taskDir, req, platform, agentctlBin); err != nil {
 			return nil, err
 		}
@@ -1316,7 +1318,7 @@ func (r *SSHExecutor) maybeUploadCredentials(
 	client *ssh.Client,
 	req *ExecutorCreateRequest,
 	platform SSHRemotePlatform,
-) {
+) error {
 	if err := r.uploadCredentials(ctx, client, req, platform); err != nil {
 		r.logger.Warn(
 			"ssh executor: credential upload failed; launch will proceed but agent may not authenticate",
@@ -1324,7 +1326,11 @@ func (r *SSHExecutor) maybeUploadCredentials(
 			zap.String("session_id", req.SessionID),
 			zap.Error(err),
 		)
+		if req.InitialMode != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // preflightAgentBinary probes the remote for the agent's required binary

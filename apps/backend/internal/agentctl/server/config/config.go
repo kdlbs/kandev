@@ -260,11 +260,6 @@ type InstanceConfig struct {
 	// AutoApprovePermissions auto-approves permission requests
 	AutoApprovePermissions bool
 
-	// ApprovalPolicy controls when the agent requests approval.
-	// Valid values: "untrusted" (always), "on-failure", "on-request", "never".
-	// Defaults to "on-request" if empty.
-	ApprovalPolicy string
-
 	// ShellEnabled enables auto-shell feature
 	ShellEnabled bool
 
@@ -755,9 +750,6 @@ func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.AutoApprovePermissions != nil {
 		cfg.AutoApprovePermissions = *overrides.AutoApprovePermissions
 	}
-	if overrides.ApprovalPolicy != "" {
-		cfg.ApprovalPolicy = overrides.ApprovalPolicy
-	}
 }
 
 // InstanceOverrides allows overriding default values when creating an instance
@@ -769,7 +761,6 @@ type InstanceOverrides struct {
 	AutoStart                  *bool
 	Env                        []string
 	AutoApprovePermissions     *bool
-	ApprovalPolicy             string
 	AgentType                  string
 	McpServers                 []McpServerConfig
 	SessionID                  string

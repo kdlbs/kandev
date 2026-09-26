@@ -532,20 +532,31 @@ func (l *Launcher) waitForHealthy(ctx context.Context) error {
 }
 
 // pipeOutput reads from a scanner and logs each line. stdout is diagnostic
-// noise (ACP travels over the socket, not stdout) so it stays at DEBUG.
-// stderr carries the child's own structured logs; rather than flatten every
-// line to WARN — which turns routine child INFO/DEBUG into shutdown noise in
-// the parent log — it is forwarded at the level the child already tagged it
-// with. Lines without a recognizable level fall back to WARN so unstructured
-// panics/tracebacks stay visible.
+// noise (ACP travels over the socket, not stdout).
+// Both streams carry the child's own structured logs — agentctl's logger
+// writes to stdout by default — so a line the child tagged with a level is
+// forwarded at that level rather than flattened. Flattening stdout to DEBUG
+// dropped every agentctl record below the parent's default INFO file level,
+// which left its permission decisions recorded nowhere.
+// A line without a recognizable level falls back to WARN on stderr, where an
+// unstructured panic or traceback must stay visible, and to DEBUG on stdout,
+// where it is passthrough noise.
 func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
 	for scanner.Scan() {
 		line := scanner.Text()
-		if name != "stderr" {
-			l.logger.Debug(line, zap.String("stream", name))
+		level := childLogLevel(line)
+		if level == "" {
+			// An unrecognized line means different things per stream: on stderr
+			// it is a panic or traceback that must stay visible, on stdout it is
+			// passthrough noise.
+			if name == "stderr" {
+				l.logger.Warn(line, zap.String("stream", name))
+			} else {
+				l.logger.Debug(line, zap.String("stream", name))
+			}
 			continue
 		}
-		switch childLogLevel(line) {
+		switch level {
 		case "DEBUG":
 			l.logger.Debug(line, zap.String("stream", name))
 		case "INFO":

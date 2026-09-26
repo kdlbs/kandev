@@ -21,6 +21,7 @@
   "closeRepositoryEditor": "Close repository editor",
   "confirmDelete": "Confirm Delete",
   "copyFiles": "Copy Files",
+  "copyFilesDestination": "Entries land in this repository's worktree root. When a task holds two or more repositories, the agent's working directory is the task root one level above, so a file meant for the agent does not reach it there.",
   "copyFilesHelp": "Gitignored paths copied into new worktrees. Append <0>{{symlink}}</0> to an entry to link it back to the main repo. Use <1>{{escapedSymlink}}</1> for a literal filename ending in <2>{{symlink}}</2>.",
   "copyFilesPathsResolved": "Paths are resolved relative to the repository root and seeded into every new worktree, preserving their relative location. Existing files in the worktree are not overwritten.",
   "copyFilesPatternBraces": "<0>{{braces}}</0> brace alternation, e.g. <1>{{example}}</1>",

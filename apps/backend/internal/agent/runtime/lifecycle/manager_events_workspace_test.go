@@ -1,6 +1,8 @@
 package lifecycle
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 // workspaceEventsHarness drives the workspace-stream callbacks the manager
@@ -265,11 +268,14 @@ func TestPublishPermissionRequestProjectsOptions(t *testing.T) {
 	h := newWorkspaceEventsHarness(t)
 
 	h.mgr.eventPublisher.PublishPermissionRequest(h.exec, agentctl.AgentEvent{
-		PendingID:       "pending-1",
-		ToolCallID:      "tool-1",
-		PermissionTitle: "Run `rm -rf build`",
-		ActionType:      "execute",
-		ActionDetails:   map[string]any{"command": "rm -rf build"},
+		PendingID:              "pending-1",
+		ToolCallID:             "tool-1",
+		AutoApprovedOptionID:   "allow",
+		AutoApprovedOptionKind: "allow_once",
+		AutoApprovalSource:     streams.PermissionDecisionSourceAutoApprove,
+		PermissionTitle:        "Run `rm -rf build`",
+		ActionType:             "execute",
+		ActionDetails:          map[string]any{"command": "rm -rf build"},
 		PermissionOptions: []agentctl.PermissionOption{
 			{OptionID: "allow", Name: "Allow", Kind: "allow_once"},
 			{OptionID: "deny", Name: "Deny", Kind: "reject_once"},
@@ -282,6 +288,9 @@ func TestPublishPermissionRequestProjectsOptions(t *testing.T) {
 	require.True(t, ok, "payload type = %T", got.Event.Data)
 	require.Equal(t, "permission_request", payload.Type)
 	require.Equal(t, "pending-1", payload.PendingID)
+	require.Equal(t, "allow", payload.AutoApprovedOptionID)
+	require.Equal(t, "allow_once", payload.AutoApprovedOptionKind)
+	require.Equal(t, streams.PermissionDecisionSourceAutoApprove, payload.AutoApprovalSource)
 	require.Equal(t, "tool-1", payload.ToolCallID)
 	require.Equal(t, "Run `rm -rf build`", payload.Title)
 	require.Equal(t, "execute", payload.ActionType)
@@ -290,6 +299,44 @@ func TestPublishPermissionRequestProjectsOptions(t *testing.T) {
 		{OptionID: "allow", Name: "Allow", Kind: "allow_once"},
 		{OptionID: "deny", Name: "Deny", Kind: "reject_once"},
 	}, payload.Options, "every option must reach the UI or the dialog renders unusable buttons")
+}
+
+type permissionRetryEventBus struct {
+	*MockEventBusWithTracking
+	attempts    int
+	failThrough int
+}
+
+func (b *permissionRetryEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	b.attempts++
+	if b.attempts <= b.failThrough {
+		return errors.New("temporary publish failure")
+	}
+	return b.MockEventBusWithTracking.Publish(ctx, subject, event)
+}
+
+func TestPublishPermissionRequestRetriesDecisionDelivery(t *testing.T) {
+	tracked := &MockEventBusWithTracking{}
+	eventBus := &permissionRetryEventBus{MockEventBusWithTracking: tracked, failThrough: 1}
+	publisher := NewEventPublisher(eventBus, newTestLogger())
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+
+	err := publisher.PublishPermissionRequest(execution, agentctl.AgentEvent{
+		Type:                   "permission_request",
+		RequestID:              "request-1",
+		PendingID:              "pending-1",
+		AutoApprovedOptionID:   "allow-once",
+		AutoApprovedOptionKind: "allow_once",
+		AutoApprovalSource:     streams.PermissionDecisionSourceAutoApprove,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, eventBus.attempts)
+	require.Len(t, tracked.PublishedEvents, 1)
+	payload, ok := tracked.PublishedEvents[0].Event.Data.(PermissionRequestEventPayload)
+	require.True(t, ok)
+	require.Equal(t, "allow-once", payload.AutoApprovedOptionID)
+	require.Equal(t, "allow_once", payload.AutoApprovedOptionKind)
+	require.Equal(t, streams.PermissionDecisionSourceAutoApprove, payload.AutoApprovalSource)
 }
 
 // TestEventPublisherWithoutBusIsInert pins that a publisher wired without an

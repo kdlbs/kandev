@@ -45,6 +45,7 @@
   "adding": "Adding…",
   "advanced": "Advanced",
   "advancedSettings": "Advanced settings",
+  "sessionModeNotApplied": "Requested {{requested}}, running in {{effective}}. The agent did not confirm the requested mode.",
   "workflowAgents": "Workflow agents",
   "workflowAgentsTaskOnly": "Replace fixed step profiles for this task only.",
   "workflowAgentsAffectedSteps": "Steps: {{steps}}",

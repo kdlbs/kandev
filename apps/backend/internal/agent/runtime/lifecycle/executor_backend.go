@@ -598,6 +598,19 @@ type RemoteInstanceRefresher interface {
 }
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
+type AgentInitialModeRequest struct {
+	// Mode is the Kandev session mode to install before the agent's first turn.
+	Mode string
+	// Delivered is set by the executor only after the agent-visible settings
+	// file has been installed at the directory named in the launch environment.
+	Delivered bool
+	// ConfigDir is the agent-visible configuration directory that received the
+	// mode. It is empty until installation succeeds.
+	ConfigDir string
+	// Reason explains why the executor could not install the requested mode.
+	Reason string
+}
+
 type ExecutorCreateRequest struct {
 	InstanceID string
 	// ExecutorType is retained in execution metadata so recovered sessions can
@@ -637,6 +650,9 @@ type ExecutorCreateRequest struct {
 	// launching profile's OpenAI-compatible provider fields.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
 	AgentConfig         agents.Agent // Agent type info needed by runtimes
+	// InitialMode asks the executor to install the session-owned mode overlay
+	// after selected configuration files and before starting the agent.
+	InitialMode *AgentInitialModeRequest
 	// ManagedRuntimeVersion is the effective exact version resolved for this
 	// launch. Remote executors use it during preflight before agentctl receives
 	// the final command.

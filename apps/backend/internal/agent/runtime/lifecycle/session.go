@@ -643,13 +643,24 @@ func (sm *SessionManager) applyProfileSessionLayers(
 		}
 	}
 	if profileMode != "" {
-		if err := client.SetMode(ctx, acpSessionID, profileMode); err != nil {
+		result, err := client.SetMode(ctx, acpSessionID, profileMode)
+		switch {
+		case err != nil:
 			sm.logger.Warn("failed to set profile mode via ACP",
 				zap.String("execution_id", execution.ID), zap.String("mode", profileMode), zap.Error(err))
-		} else {
+		case result.Applied():
 			profileModeApplied = profileMode
 			sm.logger.Info("set profile mode on ACP session",
 				zap.String("execution_id", execution.ID), zap.String("mode", profileMode))
+		default:
+			// The agent answered but is not in the requested mode, or never
+			// reported one. Recording this as applied is what made a clamped
+			// mode indistinguishable from a working one.
+			sm.logger.Warn("profile mode was not confirmed by the agent",
+				zap.String("execution_id", execution.ID),
+				zap.String("requested_mode", profileMode),
+				zap.String("effective_mode", result.Effective),
+				zap.Bool("confirmed", result.Confirmed))
 		}
 	}
 	sanitizedOptions := profileconfig.SanitizeConfigOptions(profileConfigOptions)
@@ -701,10 +712,18 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 		}
 	}
 	if runtimeMode != "" && runtimeMode != profileMode {
-		if err := client.SetMode(ctx, acpSessionID, runtimeMode); err != nil {
+		result, err := client.SetMode(ctx, acpSessionID, runtimeMode)
+		switch {
+		case err != nil:
 			failed = append(failed, "mode")
 			sm.logger.Warn("failed to set runtime mode via ACP",
 				zap.String("execution_id", execution.ID), zap.String("mode", runtimeMode), zap.Error(err))
+		case !result.Applied():
+			sm.logger.Warn("runtime mode was not confirmed by the agent",
+				zap.String("execution_id", execution.ID),
+				zap.String("requested_mode", runtimeMode),
+				zap.String("effective_mode", result.Effective),
+				zap.Bool("confirmed", result.Confirmed))
 		}
 	}
 	// Fail safe: when the current agent's option catalog is not yet known, we

@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -336,6 +337,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		ContentBlocks:               event.ContentBlocks,
 		Role:                        event.Role,
 		CurrentModeID:               event.CurrentModeID,
+		RequestedModeID:             event.RequestedModeID,
 		AvailableModes:              event.AvailableModes,
 		SupportsImage:               event.SupportsImage,
 		SupportsAudio:               event.SupportsAudio,
@@ -532,9 +534,15 @@ func (p *EventPublisher) PublishFileChange(execution *AgentExecution, notificati
 }
 
 // PublishPermissionRequest publishes a permission request event to the event bus.
-func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, event agentctl.AgentEvent) {
+func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, event agentctl.AgentEvent) error {
 	if p.eventBus == nil {
-		return
+		if event.AutoApprovedOptionID != "" {
+			err := fmt.Errorf("event bus unavailable for automatic permission decision")
+			p.logger.Error("failed to publish permission_request event",
+				permissionRequestLogFields(execution, event, err)...)
+			return err
+		}
+		return nil
 	}
 
 	// Convert options to typed format
@@ -560,24 +568,56 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		Options:       options,
 		ActionType:    event.ActionType,
 		ActionDetails: event.ActionDetails,
+
+		AutoApprovedOptionID:   event.AutoApprovedOptionID,
+		AutoApprovedOptionKind: event.AutoApprovedOptionKind,
+		AutoApprovalSource:     event.AutoApprovalSource,
 	}
 
 	busEvent := bus.NewEvent(events.PermissionRequestReceived, "agent-manager", payload)
 	subject := events.BuildPermissionRequestSubject(execution.SessionID)
 
-	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
-		p.logger.Error("failed to publish permission_request event",
-			zap.String("instance_id", execution.ID),
-			zap.String("task_id", execution.TaskID),
-			zap.String("session_id", execution.SessionID),
-			zap.Error(err))
-	} else {
-		p.logger.Debug("published permission_request event",
-			zap.String("task_id", execution.TaskID),
-			zap.String("session_id", execution.SessionID),
-			zap.String("pending_id", event.PendingID),
-			zap.String("title", event.PermissionTitle))
+	const maxAttempts = 3
+	var publishErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		publishErr = p.eventBus.Publish(context.Background(), subject, busEvent)
+		if publishErr == nil {
+			p.logger.Debug("published permission_request event",
+				zap.String("task_id", execution.TaskID),
+				zap.String("session_id", execution.SessionID),
+				zap.String("pending_id", event.PendingID),
+				zap.String("title", event.PermissionTitle),
+				zap.Int("attempt", attempt))
+			return nil
+		}
+		if attempt < maxAttempts {
+			timer := time.NewTimer(time.Duration(attempt) * 50 * time.Millisecond)
+			<-timer.C
+		}
 	}
+	fields := permissionRequestLogFields(execution, event, publishErr)
+	fields = append(fields, zap.Int("attempts", maxAttempts))
+	p.logger.Error("failed to publish permission_request event", fields...)
+	return publishErr
+}
+
+func permissionRequestLogFields(execution *AgentExecution, event agentctl.AgentEvent, err error) []zap.Field {
+	fields := []zap.Field{
+		zap.String("instance_id", execution.ID),
+		zap.String("task_id", execution.TaskID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("request_id", event.RequestID),
+		zap.String("pending_id", event.PendingID),
+		zap.Error(err),
+	}
+	if event.AutoApprovedOptionID != "" {
+		fields = append(fields,
+			zap.String("auto_approved_option_id", event.AutoApprovedOptionID),
+			zap.String("auto_approved_option_kind", event.AutoApprovedOptionKind),
+			zap.String("auto_approval_source", event.AutoApprovalSource),
+		)
+	}
+	return fields
 }
 
 // PublishShellOutput publishes a shell output event to the event bus.

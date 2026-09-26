@@ -211,12 +211,11 @@ func (m *Manager) startManagedRuntimeRetry(
 	ctx context.Context,
 	execution *AgentExecution,
 	agentConfig agents.Agent,
-	approvalPolicy string,
 	taskDescription string,
 	attachments []MessageAttachment,
 	mcpServers []agentctltypes.McpServer,
 ) (initializationFailed bool, err error) {
-	if _, err := m.configureAndStartAgent(ctx, execution, approvalPolicy); err != nil {
+	if _, err := m.configureAndStartAgent(ctx, execution); err != nil {
 		return false, err
 	}
 	if err := managedRuntimeRecoveryAborted(ctx, m); err != nil {
@@ -267,7 +266,6 @@ func (m *Manager) retryManagedRuntimeStartup(
 	execution *AgentExecution,
 	initErr error,
 	agentConfig agents.Agent,
-	approvalPolicy string,
 	taskDescription string,
 	attachments []MessageAttachment,
 	mcpServers []agentctltypes.McpServer,
@@ -328,7 +326,6 @@ func (m *Manager) retryManagedRuntimeStartup(
 		ctx,
 		execution,
 		agentConfig,
-		approvalPolicy,
 		taskDescription,
 		attachments,
 		mcpServers,

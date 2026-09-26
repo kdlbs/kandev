@@ -60,9 +60,12 @@ type capableAgentAdapter struct {
 	modelState   *streams.SessionModelState
 }
 
-func (a *capableAgentAdapter) SetMode(_ context.Context, modeID string) error {
+func (a *capableAgentAdapter) SetMode(_ context.Context, modeID string) (streams.ModeResult, error) {
 	a.modeID = modeID
-	return a.failWith
+	if a.failWith != nil {
+		return streams.ModeResult{Requested: modeID}, a.failWith
+	}
+	return streams.ModeResult{Requested: modeID, Effective: modeID, Confirmed: true}, nil
 }
 
 func (a *capableAgentAdapter) SetModel(_ context.Context, modelID string) error {

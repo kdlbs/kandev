@@ -68,8 +68,12 @@ const (
 // carried at the top level. When EnvPrepareRequest.Repositories is non-empty,
 // each entry produces one prepared worktree under the shared TaskDirName.
 type RepoPrepareSpec struct {
-	TaskRepositoryID   string
-	RepositoryID       string
+	TaskRepositoryID string
+	RepositoryID     string
+	// CopyFiles is the repository's seeding spec. Carried here only so the
+	// preparer can report a seed the agent cannot reach in a multi-repository
+	// layout; materialization itself still happens in the worktree manager.
+	CopyFiles          string
 	RepositoryPath     string
 	RepoName           string
 	BaseBranch         string

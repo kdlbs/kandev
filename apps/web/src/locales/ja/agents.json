@@ -36,6 +36,7 @@
   "capabilityProbeFailed": "確認に失敗しました。詳細はエージェントのログを確認してください。",
   "capabilityProbing": "エージェント機能を確認中…",
   "changeTierMappingsFirst": "このプロファイルを削除する前に、このワークスペースのティアマッピングを変更してください。",
+  "cliFlagsGoToBridge": "CLI フラグは起動される ACP ブリッジのプロセスに付加されます。ブリッジがラップしているエージェント CLI には渡されません。",
   "everythingInstalled": "利用可能なエージェントとツールはすべてインストール済みです。",
   "expandAgentProfiles": "{{name}} のプロファイルを展開",
   "checkingAuthentication": "認証を確認中",

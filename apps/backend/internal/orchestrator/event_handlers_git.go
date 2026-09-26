@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
@@ -27,6 +28,8 @@ import (
 const gitSnapshotPersistInterval = 30 * time.Second
 
 const gitSnapshotTriggeredByAgentCompleted = "agent_completed"
+
+const automaticPermissionMessageWriteMaxAttempts = 3
 
 // gitSnapshotCacheMaxEntries bounds the in-memory throttle map so a long-lived
 // backend with many sessions can't grow it without limit. When the cache is
@@ -799,38 +802,116 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 		return
 	}
 
-	s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+	// An auto-approved request is a record of a decision Kandev already made,
+	// not a prompt. It still becomes a transcript message so the decision is
+	// auditable, but the session is not waiting on anyone and an automation run
+	// must not be failed for a prompt that was never raised.
+	autoApproved := data.AutoApprovedOptionID != ""
+	var decision *models.PermissionDecision
+	if autoApproved {
+		decision = permissionDecisionFromEvent(data)
+	}
+	if !autoApproved {
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+	}
 
 	if s.messageCreator != nil {
-		_, err := s.messageCreator.CreatePermissionRequestMessage(
-			ctx,
-			data.TaskID,
-			data.TaskSessionID,
-			data.RequestID,
-			data.PendingID,
-			data.ToolCallID,
-			data.Title,
-			s.getActiveTurnID(data.TaskSessionID),
-			data.Options,
-			data.ActionType,
-			data.ActionDetails,
-		)
+		turnID := s.getActiveTurnID(data.TaskSessionID)
+		attempts := 0
+		var err error
+	permissionWrite:
+		for attempt := 1; attempt <= automaticPermissionMessageWriteMaxAttempts; attempt++ {
+			attempts = attempt
+			_, err = s.messageCreator.CreatePermissionRequestMessage(
+				ctx,
+				data.TaskID,
+				data.TaskSessionID,
+				data.RequestID,
+				data.PendingID,
+				data.ToolCallID,
+				data.Title,
+				turnID,
+				data.Options,
+				data.ActionType,
+				data.ActionDetails,
+				decision,
+			)
+			if err == nil || !autoApproved || attempts == automaticPermissionMessageWriteMaxAttempts {
+				break
+			}
+			timer := time.NewTimer(100 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				err = ctx.Err()
+				break permissionWrite
+			case <-timer.C:
+			}
+		}
 		if err != nil {
-			s.logger.Error("failed to create permission request message",
+			message := "failed to create permission request message"
+			fields := []zap.Field{
 				zap.String("task_id", data.TaskID),
 				zap.String("pending_id", data.PendingID),
-				zap.Error(err))
+				zap.Error(err),
+			}
+			if decision != nil {
+				message = "failed to persist automatic permission decision"
+				fields = append(fields,
+					zap.Int("attempts", attempts),
+					zap.String("option_id", decision.OptionID),
+					zap.String("option_kind", decision.OptionKind),
+					zap.String("source", decision.Source),
+				)
+			}
+			s.logger.Error(message, fields...)
 		} else {
 			s.logger.Debug("created permission request message",
 				zap.String("task_id", data.TaskID),
 				zap.String("pending_id", data.PendingID))
 		}
+	} else if decision != nil {
+		s.logger.Error("cannot persist automatic permission decision without a message creator",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.TaskSessionID),
+			zap.String("request_id", data.RequestID),
+			zap.String("pending_id", data.PendingID),
+			zap.String("option_id", decision.OptionID),
+			zap.String("option_kind", decision.OptionKind),
+			zap.String("source", decision.Source))
+	}
+
+	if autoApproved {
+		return
 	}
 
 	// Automation tasks are hidden from the kanban, so there is no UI for the
 	// user to answer a permission prompt. Auto-reject and mark the run failed
 	// so the failure shows up in the automation's Recent Runs.
 	s.failAutomationRunOnPermission(ctx, data)
+}
+
+func permissionDecisionFromEvent(data watcher.PermissionRequestData) *models.PermissionDecision {
+	kind := data.AutoApprovedOptionKind
+	if kind == "" {
+		for _, option := range data.Options {
+			optionID, _ := option["option_id"].(string)
+			optionKind, _ := option["kind"].(string)
+			if optionID == data.AutoApprovedOptionID {
+				kind = optionKind
+				break
+			}
+		}
+	}
+	source := data.AutoApprovalSource
+	if source == "" {
+		source = streams.PermissionDecisionSourceAutoApprove
+	}
+	return &models.PermissionDecision{
+		OptionID:   data.AutoApprovedOptionID,
+		OptionKind: kind,
+		Source:     source,
+	}
 }
 
 // failAutomationRunOnPermission checks whether the permission request belongs

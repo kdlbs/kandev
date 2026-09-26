@@ -183,6 +183,10 @@ type AgentStreamEventData struct {
 	// comes from a subagent. Used for visual nesting in the UI.
 	ParentToolCallID string `json:"parent_tool_call_id,omitempty"`
 
+	// RequestedModeID is set on a session_mode event when the session is not in
+	// the mode Kandev asked for.
+	RequestedModeID string `json:"requested_mode_id,omitempty"`
+
 	// PendingID identifies a permission request (for "permission_cancelled" events).
 	PendingID string `json:"pending_id,omitempty"`
 
@@ -462,18 +466,24 @@ type PermissionOption struct {
 
 // PermissionRequestEventPayload is the payload when an agent requests permission.
 type PermissionRequestEventPayload struct {
-	Type          string                 `json:"type"` // Always "permission_request"
-	Timestamp     string                 `json:"timestamp"`
-	AgentID       string                 `json:"agent_id"`
-	TaskID        string                 `json:"task_id"`
-	SessionID     string                 `json:"session_id"`
-	RequestID     string                 `json:"request_id"`
-	PendingID     string                 `json:"pending_id"`
-	ToolCallID    string                 `json:"tool_call_id"`
-	Title         string                 `json:"title"`
-	Options       []PermissionOption     `json:"options"`
-	ActionType    string                 `json:"action_type"`
-	ActionDetails map[string]interface{} `json:"action_details,omitempty"`
+	Type       string             `json:"type"` // Always "permission_request"
+	Timestamp  string             `json:"timestamp"`
+	AgentID    string             `json:"agent_id"`
+	TaskID     string             `json:"task_id"`
+	SessionID  string             `json:"session_id"`
+	RequestID  string             `json:"request_id"`
+	PendingID  string             `json:"pending_id"`
+	ToolCallID string             `json:"tool_call_id"`
+	Title      string             `json:"title"`
+	Options    []PermissionOption `json:"options"`
+	ActionType string             `json:"action_type"`
+	// AutoApprovedOptionID names the option agentctl already selected. A
+	// nonempty value makes this payload an audit record of an answered
+	// request rather than a prompt awaiting a person.
+	AutoApprovedOptionID   string                 `json:"auto_approved_option_id,omitempty"`
+	AutoApprovedOptionKind string                 `json:"auto_approved_option_kind,omitempty"`
+	AutoApprovalSource     string                 `json:"auto_approval_source,omitempty"`
+	ActionDetails          map[string]interface{} `json:"action_details,omitempty"`
 }
 
 // ShellOutputEventPayload is the payload for shell output events.
@@ -578,7 +588,11 @@ type SessionModeEventPayload struct {
 	AgentID        string                    `json:"agent_id"`
 	CurrentModeID  string                    `json:"current_mode_id"`
 	AvailableModes []streams.SessionModeInfo `json:"available_modes,omitempty"`
-	Timestamp      string                    `json:"timestamp"`
+	// RequestedModeID is set only when the session is not in the mode Kandev
+	// asked for. It lets the UI say which mode was requested instead of
+	// silently showing a different one.
+	RequestedModeID string `json:"requested_mode_id,omitempty"`
+	Timestamp       string `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

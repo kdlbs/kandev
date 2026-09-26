@@ -38,7 +38,6 @@ func (r *SSHExecutor) uploadCredentials(
 ) error {
 	catalog := r.buildRemoteAuthCatalog()
 	r.resolveAuthSecrets(ctx, req, catalog)
-	r.runAuthSetupScripts(ctx, client, req, catalog, platform)
 
 	var fileMethods []remoteauth.Method
 	if credsJSON := getMetadataString(req.Metadata, "remote_credentials"); credsJSON != "" {
@@ -50,7 +49,7 @@ func (r *SSHExecutor) uploadCredentials(
 		fileMethods = selectFileMethods(catalog, selectedMethodIDs, r.logger)
 	}
 	selectedBundles := selectedPortableConfigBundleIDs(req.Metadata)
-	if len(fileMethods) == 0 && len(selectedBundles) == 0 {
+	if len(fileMethods) == 0 && len(selectedBundles) == 0 && req.InitialMode == nil {
 		return nil
 	}
 
@@ -59,16 +58,53 @@ func (r *SSHExecutor) uploadCredentials(
 	if err != nil {
 		return err
 	}
+	targetHome := homeDir
+	if req.InitialMode != nil {
+		var err error
+		targetHome, err = initialModeSessionHome(homeDir, req.InstanceID)
+		if err != nil {
+			return err
+		}
+		plan, err := initialModeFilePlanForRequest(req)
+		if err != nil {
+			return err
+		}
+		if req.Env == nil {
+			req.Env = map[string]string{}
+		}
+		req.Env[plan.delivery.ConfigDirEnvVar] = path.Join(targetHome, plan.dir)
+	}
+	r.runAuthSetupScripts(ctx, client, req, catalog, platform)
 	var uploadErr error
 	if len(fileMethods) > 0 {
-		uploadErr = UploadCredentialFiles(ctx, uploader, fileMethods, homeDir, r.logger)
+		uploadErr = UploadCredentialFiles(ctx, uploader, fileMethods, targetHome, r.logger)
 		if uploadErr != nil {
 			r.logger.Warn("ssh executor: credential files failed; continuing with configuration bundles", zap.Error(uploadErr))
 		}
 	}
 	if len(selectedBundles) > 0 && req.AgentConfig != nil {
-		warnings := UploadPortableConfigBundles(ctx, uploader, req.AgentConfig, selectedBundles, homeDir, r.logger)
+		warnings := UploadPortableConfigBundles(ctx, uploader, req.AgentConfig, selectedBundles, targetHome, r.logger)
 		reportPortableConfigWarnings(req.OnProgress, warnings)
+	}
+	if req.InitialMode != nil {
+		settingsJSON, err := selectedInitialModeSettings(req)
+		if err != nil {
+			return fmt.Errorf("resolve selected settings for initial mode: %w", err)
+		}
+		installedConfigDir, err := installInitialModeRemotely(ctx, uploader, req, targetHome, settingsJSON)
+		if err != nil {
+			return fmt.Errorf("install initial mode in SSH session home: %w", err)
+		}
+		plan, err := initialModeFilePlanForRequest(req)
+		if err != nil {
+			return err
+		}
+		if err := markInitialModeDelivered(req, installedConfigDir, req.Env[plan.delivery.ConfigDirEnvVar]); err != nil {
+			return fmt.Errorf("verify SSH initial mode path: %w", err)
+		}
+	}
+	if req.InitialMode != nil {
+		return nil
 	}
 	return uploadErr
 }

@@ -386,6 +386,7 @@
   "current": "当前",
   "current2": "当前",
   "currentStep": "当前步骤",
+  "sessionModeNotApplied": "已请求 {{requested}}，当前运行于 {{effective}}。智能体未确认所请求的模式。",
   "workflowStepProgressMoving": "正在移动到此步骤",
   "workflowStepProgressPreparing": "正在准备智能体",
   "workflowStepProgressStarting": "正在启动智能体",

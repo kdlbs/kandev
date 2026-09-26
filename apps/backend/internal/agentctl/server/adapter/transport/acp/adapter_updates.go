@@ -403,6 +403,9 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		return a.convertAvailableCommands(sessionID, u.AvailableCommandsUpdate)
 
 	case u.CurrentModeUpdate != nil:
+		if !a.noteCurrentMode(sessionID, string(u.CurrentModeUpdate.CurrentModeId)) {
+			return nil
+		}
 		return &AgentEvent{
 			Type:          streams.EventTypeSessionMode,
 			SessionID:     sessionID,

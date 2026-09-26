@@ -34,6 +34,12 @@ func kubernetesSessionEnvironment(req *ExecutorCreateRequest) map[string]string 
 		}
 	}
 	env["HOME"] = kubernetesSessionHome(req)
+	if req.InitialMode != nil && req.AgentConfig != nil && req.AgentConfig.Runtime() != nil {
+		delivery := req.AgentConfig.Runtime().InitialMode
+		if relativeDir, err := initialModeConfigRelativeDir(delivery); err == nil && delivery.ConfigDirEnvVar != "" {
+			env[delivery.ConfigDirEnvVar] = path.Join(kubernetesSessionHome(req), relativeDir)
+		}
+	}
 	env[kubernetesEnvSessionID] = req.SessionID
 	env[kubernetesEnvTaskID] = req.TaskID
 	env[kubernetesEnvInstanceID] = req.InstanceID

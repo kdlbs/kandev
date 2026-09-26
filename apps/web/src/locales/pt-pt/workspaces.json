@@ -21,6 +21,7 @@
   "closeRepositoryEditor": "Fechar o editor de repositórios",
   "confirmDelete": "Confirmar a eliminação",
   "copyFiles": "Copiar ficheiros",
+  "copyFilesDestination": "As entradas ficam na raiz da árvore de trabalho deste repositório. Quando uma tarefa tem dois ou mais repositórios, o diretório de trabalho do agente é a raiz da tarefa, um nível acima, pelo que um ficheiro destinado ao agente não lhe chega aí.",
   "copyFilesHelp": "Caminhos ignorados pelo Git copiados para os novos worktrees. Acrescente <0>{{symlink}}</0> a uma entrada para a ligar ao repositório principal. Use <1>{{escapedSymlink}}</1> para um nome de ficheiro literal terminado em <2>{{symlink}}</2>.",
   "copyFilesPathsResolved": "Os caminhos são resolvidos relativamente à raiz do repositório e semeados em cada novo worktree, preservando a sua localização relativa. Os ficheiros já existentes no worktree não são substituídos.",
   "copyFilesPatternBraces": "<0>{{braces}}</0> alternância com chavetas, ex.: <1>{{example}}</1>",

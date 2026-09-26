@@ -403,6 +403,9 @@ func TestPreviewAgentCommandEndpoint(t *testing.T) {
 			Supported:     true,
 			Command:       []string{"greywall", "--", "preview-agent-binary", "--verbose"},
 			CommandString: "greywall -- preview-agent-binary --verbose",
+			// The preview names where the flags land. This request is not a
+			// passthrough profile, so they reach the launched bridge process.
+			FlagDestination: dto.FlagDestinationACPBridge,
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("preview = %#v, want %#v", got, want)

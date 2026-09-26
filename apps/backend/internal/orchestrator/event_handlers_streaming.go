@@ -3712,12 +3712,13 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	}
 
 	eventPayload := lifecycle.SessionModeEventPayload{
-		TaskID:         payload.TaskID,
-		SessionID:      sessionID,
-		AgentID:        payload.AgentID,
-		CurrentModeID:  payload.Data.CurrentModeID,
-		AvailableModes: payload.Data.AvailableModes,
-		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+		TaskID:          payload.TaskID,
+		SessionID:       sessionID,
+		AgentID:         payload.AgentID,
+		CurrentModeID:   payload.Data.CurrentModeID,
+		AvailableModes:  payload.Data.AvailableModes,
+		RequestedModeID: payload.Data.RequestedModeID,
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
 	}
 	subject := events.BuildSessionModeSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModeChanged, "orchestrator", eventPayload))

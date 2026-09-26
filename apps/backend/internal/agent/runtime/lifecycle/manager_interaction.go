@@ -402,7 +402,12 @@ func (m *Manager) SetSessionMode(ctx context.Context, executionID, _ string, mod
 	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
 		return fmt.Errorf("execution %q ACP session is not ready", executionID)
 	}
-	return client.SetMode(ctx, execution.ACPSessionID, modeID)
+	result, err := client.SetMode(ctx, execution.ACPSessionID, modeID)
+	if err != nil {
+		return err
+	}
+	m.reportModeOutcome(execution, result)
+	return nil
 }
 
 // SetSessionModeBySessionID changes the session mode for a running agent by session ID.
@@ -521,7 +526,13 @@ func (m *Manager) reapplySessionModeAfterReset(ctx context.Context, execution *A
 	if prev != nil {
 		fallback = prev.CurrentModeID
 	}
-	mode := m.effectiveSessionMode(ctx, execution, fallback)
+	mode, source := m.effectiveSessionModeWithSource(ctx, execution, fallback)
+	if mode != "" {
+		m.logger.Info("restoring session mode after context reset",
+			zap.String("execution_id", execution.ID),
+			zap.String("mode", mode),
+			zap.String("mode_source", string(source)))
+	}
 	if err := m.applySessionModeAfterReset(ctx, execution, newSessionID, mode); err != nil {
 		m.logger.Warn("failed to re-apply session mode after context reset",
 			zap.String("execution_id", execution.ID),
@@ -540,9 +551,11 @@ func (m *Manager) applySessionModeAfterReset(
 	if client == nil || mode == "" {
 		return nil
 	}
-	if err := client.SetMode(ctx, newSessionID, mode); err != nil {
+	result, err := client.SetMode(ctx, newSessionID, mode)
+	if err != nil {
 		return fmt.Errorf("failed to restore session mode %q: %w", mode, err)
 	}
+	m.reportModeOutcome(execution, result)
 	availableModes := []streams.SessionModeInfo(nil)
 	if current := execution.GetModeState(); current != nil {
 		availableModes = current.AvailableModes
@@ -1427,8 +1440,7 @@ func (m *Manager) restartAgentProcess(
 	}
 
 	// 5. Reconfigure and start new agent subprocess
-	approvalPolicy, _ := m.resolveApprovalPolicyAndDisplayName(ctx, execution)
-	if _, err := m.configureAndStartAgent(ctx, execution, approvalPolicy); err != nil {
+	if _, err := m.configureAndStartAgent(ctx, execution); err != nil {
 		m.updateExecutionError(executionID, "failed to restart agent: "+err.Error())
 		return fmt.Errorf("failed to restart agent: %w", err)
 	}

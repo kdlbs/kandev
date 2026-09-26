@@ -500,12 +500,13 @@ export const createSessionRuntimeSlice: StateCreator<
     set((draft) => {
       delete draft.availableCommands.bySessionId[sessionId];
     }),
-  setSessionMode: (sessionId, modeId, availableModes) =>
+  setSessionMode: (sessionId, modeId, availableModes, requestedModeId) =>
     set((draft) => {
       const existing = draft.sessionMode.bySessionId[sessionId];
       draft.sessionMode.bySessionId[sessionId] = {
         currentModeId: modeId,
         availableModes: availableModes ?? existing?.availableModes ?? [],
+        requestedModeId,
       };
     }),
   clearSessionMode: (sessionId) =>

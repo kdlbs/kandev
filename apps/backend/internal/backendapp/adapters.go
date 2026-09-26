@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -1510,7 +1511,7 @@ func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
 }
 
 // CreatePermissionRequestMessage creates a message for a permission request
-func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
 	metadata := map[string]interface{}{
 		"request_id":     requestID,
 		"pending_id":     pendingID,
@@ -1519,8 +1520,12 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		"action_type":    actionType,
 		"action_details": actionDetails,
 	}
+	if decision != nil {
+		metadata["permission_decision"] = decision
+		metadata["status"] = string(models.PermissionStatusApproved)
+	}
 
-	msg, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+	request := &taskservice.CreateMessageRequest{
 		TaskSessionID: sessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
@@ -1528,7 +1533,17 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		AuthorType:    "agent",
 		Type:          "permission_request",
 		Metadata:      metadata,
-	})
+	}
+	var msg *models.Message
+	var err error
+	if requestID == "" {
+		msg, err = a.svc.CreateMessage(ctx, request)
+	} else {
+		// A repeated bus delivery for one provider request must resolve to the
+		// same transcript row instead of creating duplicate audit entries.
+		messageID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("permission:"+taskID+":"+sessionID+":"+requestID)).String()
+		msg, err = a.svc.CreateMessageIdempotent(ctx, messageID, request)
+	}
 	if err != nil {
 		return "", err
 	}

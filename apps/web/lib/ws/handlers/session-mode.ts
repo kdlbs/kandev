@@ -19,11 +19,14 @@ export function registerSessionModeHandlers(store: StoreApi<AppState>): WsHandle
         description: m.description,
       }));
 
+      // Present only when the session is not in the mode Kandev asked for.
+      const requestedModeId = payload.requested_mode_id || undefined;
+
       if (modeId) {
-        store.getState().setSessionMode(sessionId, modeId, availableModes);
+        store.getState().setSessionMode(sessionId, modeId, availableModes, requestedModeId);
       } else {
         // Keep availableModes so the UI still knows what modes exist
-        store.getState().setSessionMode(sessionId, "", availableModes);
+        store.getState().setSessionMode(sessionId, "", availableModes, requestedModeId);
       }
     },
   };

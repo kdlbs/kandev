@@ -98,7 +98,12 @@ type PluginMessageFilter struct {
 
 // Task metadata keys used for deferred agent start (e.g., task.moved → handleTaskMovedNoSession).
 const (
-	MetaKeyAgentProfileID    = "agent_profile_id"
+	MetaKeyAgentProfileID = "agent_profile_id"
+	// MetaKeyAutoStartError records why an asynchronous auto-start failed after
+	// its creating call already returned success. Without it the only evidence
+	// is a backend log line and the task sits in CREATED with no session,
+	// looking exactly like a task nobody asked to start.
+	MetaKeyAutoStartError    = "auto_start_error"
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
 	// Automation target metadata is written to continuation tasks so a
@@ -1668,6 +1673,15 @@ const (
 	// already gone. No ACP outcome ever reaches the wire in this state.
 	PermissionStatusExpired PermissionStatus = "expired"
 )
+
+// PermissionDecision records the option and policy source that resolved a
+// permission request. Human decisions continue to use PermissionResolutionAudit;
+// this metadata shape is also available to other decision sources.
+type PermissionDecision struct {
+	OptionID   string `json:"option_id"`
+	OptionKind string `json:"option_kind"`
+	Source     string `json:"source"`
+}
 
 type PermissionResolutionActorKind string
 

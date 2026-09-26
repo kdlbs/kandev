@@ -2,6 +2,7 @@ package process
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -67,10 +68,29 @@ func injectedKandevPermissionOption(options []adapter.PermissionOption) (adapter
 		streams.PermissionOptionKindAllowAlways,
 	} {
 		for _, option := range options {
-			if option.Kind == allowedKind {
+			if normalizePermissionOptionKind(option.Kind) == allowedKind {
 				return option, true
 			}
 		}
 	}
 	return adapter.PermissionOption{}, false
+}
+
+// normalizePermissionOptionKind folds the surface spelling differences that
+// separate providers produce. A kind Kandev fails to recognize is treated as
+// "not an allow", which turns an approval into a refusal, so the comparison
+// must not depend on casing or surrounding whitespace.
+func normalizePermissionOptionKind(kind streams.PermissionOptionKind) streams.PermissionOptionKind {
+	return streams.PermissionOptionKind(strings.ToLower(strings.TrimSpace(string(kind))))
+}
+
+// isAllowPermissionKind reports whether the provider marked this option as an
+// approval rather than a refusal.
+func isAllowPermissionKind(kind streams.PermissionOptionKind) bool {
+	switch normalizePermissionOptionKind(kind) {
+	case streams.PermissionOptionKindAllowOnce, streams.PermissionOptionKindAllowAlways:
+		return true
+	default:
+		return false
+	}
 }

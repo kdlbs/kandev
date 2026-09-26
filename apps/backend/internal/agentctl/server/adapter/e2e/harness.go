@@ -254,7 +254,6 @@ func buildInstanceConfig(command string, protocol agent.Protocol, workDir string
 		WorkDir:                workDir,
 		AgentEnv:               env,
 		AutoApprovePermissions: autoApprove,
-		ApprovalPolicy:         "never",
 		ShellEnabled:           false,
 		LogLevel:               "debug",
 		LogFormat:              "console",

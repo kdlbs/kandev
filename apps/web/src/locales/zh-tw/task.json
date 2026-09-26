@@ -386,6 +386,7 @@
   "current": "目前",
   "current2": "目前",
   "currentStep": "目前步驟",
+  "sessionModeNotApplied": "已要求 {{requested}}，目前執行於 {{effective}}。代理程式未確認所要求的模式。",
   "workflowStepProgressMoving": "正在移動到此步驟",
   "workflowStepProgressPreparing": "正在準備代理程式",
   "workflowStepProgressStarting": "正在啟動代理程式",

@@ -386,6 +386,7 @@
   "current": "atual",
   "current2": "Atual",
   "currentStep": "Passo atual",
+  "sessionModeNotApplied": "Pedido {{requested}}, a executar em {{effective}}. O agente não confirmou o modo pedido.",
   "workflowStepProgressMoving": "A mover para este passo",
   "workflowStepProgressPreparing": "A preparar o agente",
   "workflowStepProgressStarting": "A iniciar o agente",

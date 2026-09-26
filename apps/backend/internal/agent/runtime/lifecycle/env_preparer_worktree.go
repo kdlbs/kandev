@@ -511,6 +511,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 	if len(worktrees) > 0 {
 		workspacePath = filepath.Dir(worktrees[0].WorktreePath)
 	}
+	steps = append(steps, p.unreachableCopyFilesSeedSteps(specs, worktrees, workspacePath)...)
 
 	res := &EnvPrepareResult{
 		Success:       true,
@@ -683,4 +684,51 @@ func applySyncProgressEvent(step *PrepareStep, event worktree.SyncProgressEvent)
 	case worktree.SyncProgressFailed:
 		completeStepError(step, event.Error)
 	}
+}
+
+// unreachableCopyFilesSeedSteps reports a repository copy_files seed that the
+// agent cannot read in this layout.
+//
+// copy_files always materializes into the repository's own worktree root. For a
+// single repository that is the agent's working directory; for two or more it
+// is one level below the task root the agent actually runs in. A seed meant to
+// configure the agent then lands where the agent never looks, and the resulting
+// session behaves as though the configuration were absent — which reads as a
+// missing permission rather than as a misplaced file.
+// It returns one prepare step per affected repository so the session surfaces
+// the mismatch. A backend log alone left the operator with a session that
+// behaves like a missing permission and no way to see why.
+func (p *WorktreePreparer) unreachableCopyFilesSeedSteps(
+	specs []RepoPrepareSpec, worktrees []RepoWorktreeResult, agentWorkingDir string,
+) []PrepareStep {
+	if len(specs) < 2 || agentWorkingDir == "" {
+		return nil
+	}
+	pathByRepositoryID := make(map[string]string, len(worktrees))
+	for _, wt := range worktrees {
+		pathByRepositoryID[wt.RepositoryID] = wt.WorktreePath
+	}
+	var out []PrepareStep
+	for _, spec := range specs {
+		if strings.TrimSpace(spec.CopyFiles) == "" {
+			continue
+		}
+		destination := pathByRepositoryID[spec.RepositoryID]
+		if p.logger != nil {
+			p.logger.Warn("copy_files seed does not reach the agent working directory",
+				zap.String("repository", spec.RepoName),
+				zap.String("seed_destination", destination),
+				zap.String("agent_working_dir", agentWorkingDir),
+				zap.Int("repository_count", len(specs)))
+		}
+		step := beginStep("Check copy_files reachability for " + spec.RepoName)
+		completeStepSuccess(&step)
+		step.Warning = "Seeded files land in the " + spec.RepoName +
+			" worktree, which is below the agent's working directory."
+		step.WarningDetail = "Seed destination: " + destination +
+			"; agent working directory: " + agentWorkingDir +
+			". The agent does not read this location in a multi-repository task."
+		out = append(out, step)
+	}
+	return out
 }

@@ -110,7 +110,7 @@ type StderrProviderSetter interface {
 // ModeSettableAdapter is an optional interface implemented by adapters that
 // support changing the session mode (e.g., ACP adapters with session/set_mode).
 type ModeSettableAdapter interface {
-	SetMode(ctx context.Context, modeID string) error
+	SetMode(ctx context.Context, modeID string) (streams.ModeResult, error)
 }
 
 // ModelSettableAdapter is an optional interface implemented by adapters that

@@ -189,7 +189,7 @@ func TestAgentSessionSetters_SendExpectedActionAndPayload(t *testing.T) {
 	}{
 		{
 			name:        "set mode",
-			call:        func(c *Client) error { return c.SetMode(context.Background(), "sess-1", "plan") },
+			call:        func(c *Client) error { _, err := c.SetMode(context.Background(), "sess-1", "plan"); return err },
 			wantAction:  "agent.session.set_mode",
 			wantPayload: map[string]any{"session_id": "sess-1", "mode_id": "plan"},
 		},
@@ -253,7 +253,7 @@ func TestAgentSessionSetters_SurfaceStreamErrorFrames(t *testing.T) {
 	}{
 		{
 			name:    "set mode",
-			call:    func(c *Client) error { return c.SetMode(context.Background(), "sess-1", "plan") },
+			call:    func(c *Client) error { _, err := c.SetMode(context.Background(), "sess-1", "plan"); return err },
 			wantErr: "set mode failed: mode not supported",
 		},
 		{
@@ -296,7 +296,7 @@ func TestAgentSessionSetters_IgnoreResponsePayload(t *testing.T) {
 		"success": false, "error": "ignored",
 	}))
 
-	if err := c.SetMode(context.Background(), "sess-1", "plan"); err != nil {
+	if _, err := c.SetMode(context.Background(), "sess-1", "plan"); err != nil {
 		t.Errorf("SetMode = %v, want nil — only error frames are failures here", err)
 	}
 }
@@ -309,7 +309,7 @@ func TestAgentSessionSetters_FailWhenStreamIsNotConnected(t *testing.T) {
 	}
 
 	calls := map[string]func() error{
-		"SetMode":         func() error { return c.SetMode(context.Background(), "s", "m") },
+		"SetMode":         func() error { _, err := c.SetMode(context.Background(), "s", "m"); return err },
 		"SetModel":        func() error { return c.SetModel(context.Background(), "m") },
 		"SetConfigOption": func() error { return c.SetConfigOption(context.Background(), "c", "v") },
 		"Authenticate":    func() error { return c.Authenticate(context.Background(), "oauth") },

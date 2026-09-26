@@ -59,6 +59,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"goal-complete":           scenarioGoalComplete,
 	"goal-clear":              scenarioGoalClear,
 	"goal-long":               scenarioGoalLong,
+	"git-commit-permission":   scenarioGitCommitPermission,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup

@@ -24,12 +24,14 @@ const claudeACPPackage = "@agentclientprotocol/claude-agent-acp"
 // there goes through agentctl's auto-approve channel.
 var claudeACPPermSettings = map[string]PermissionSetting{
 	PermissionKeyDangerouslySkipPermissions: {
-		Supported:   true,
-		Default:     false,
-		Label:       "Skip permission prompts",
-		Description: "Pass --dangerously-skip-permissions so Claude Code does not prompt for tool approvals.",
-		ApplyMethod: PermissionApplyMethodCLIFlag,
-		CLIFlag:     "--dangerously-skip-permissions",
+		Supported:       true,
+		Default:         false,
+		Label:           "Skip permission prompts",
+		Description:     "Pass --dangerously-skip-permissions so Claude Code does not prompt for tool approvals.",
+		ApplyMethod:     PermissionApplyMethodCLIFlag,
+		CLIFlag:         "--dangerously-skip-permissions",
+		PassthroughOnly: true,
+		ACPEquivalent:   "the profile's permission mode (Bypass permissions)",
 	},
 }
 
@@ -139,6 +141,7 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 		Protocol:        agent.ProtocolACP,
 		ProjectSkillDir: ".claude/skills",
 		UserSkillDir:    ".claude/skills",
+		InitialMode:     claudeInitialModeDelivery(),
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
@@ -155,8 +158,9 @@ func (a *ClaudeACP) RemoteAuth() *RemoteAuth {
 				Type:      "env",
 				EnvVar:    "CLAUDE_CODE_OAUTH_TOKEN",
 				SetupHint: "Run `claude setup-token` to generate a long-lived OAuth token",
-				SetupScript: `mkdir -p "${HOME}/.claude"
-cat > "${HOME}/.claude/.credentials.json" <<CREDS
+				SetupScript: `config_dir="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}"
+mkdir -p "$config_dir"
+cat > "$config_dir/.credentials.json" <<CREDS
 {"claudeAiOauth":{"accessToken":"${CLAUDE_CODE_OAUTH_TOKEN}","expiresAt":4102444800000}}
 CREDS
 cat > "${HOME}/.claude.json" <<'JSON'

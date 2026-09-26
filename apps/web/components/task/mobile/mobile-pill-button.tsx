@@ -3,6 +3,7 @@
 import { forwardRef, type ReactNode } from "react";
 import { IconChevronDown } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { cn } from "@/lib/utils";
 
 type MobilePillButtonProps = {
   /** Optional icon to lead with (e.g. folder, terminal). */
@@ -24,6 +25,8 @@ type MobilePillButtonProps = {
   "data-testid"?: string;
   /** Accessible label override. Defaults to `label`. */
   ariaLabel?: string;
+  /** Optional classes for the trigger button. */
+  className?: string;
 };
 
 /**
@@ -32,7 +35,7 @@ type MobilePillButtonProps = {
  */
 export const MobilePillButton = forwardRef<HTMLButtonElement, MobilePillButtonProps>(
   function MobilePillButton(
-    { icon, label, count, compact, fullWidth, isOpen, onClick, ariaLabel, ...rest },
+    { icon, label, count, compact, fullWidth, isOpen, onClick, ariaLabel, className, ...rest },
     ref,
   ) {
     return (
@@ -41,7 +44,11 @@ export const MobilePillButton = forwardRef<HTMLButtonElement, MobilePillButtonPr
         type="button"
         variant="outline"
         size="sm"
-        className={`h-8 px-3 gap-2 cursor-pointer ${fullWidth ? "w-full justify-between" : ""}`}
+        className={cn(
+          "h-8 px-3 gap-2 cursor-pointer",
+          fullWidth && "w-full justify-between",
+          className,
+        )}
         aria-label={ariaLabel ?? label}
         aria-haspopup="dialog"
         aria-expanded={isOpen ?? false}

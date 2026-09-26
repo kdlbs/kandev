@@ -249,6 +249,25 @@ type AgentEvent struct {
 	// PermissionOptions contains the available permission choices.
 	PermissionOptions []PermissionOption `json:"permission_options,omitempty"`
 
+	// RequestedModeID is set on a session_mode event only when Kandev asked for
+	// a mode the agent did not end up in, or could not confirm. It is what makes
+	// a clamped mode distinguishable from an applied one; empty means the
+	// reported mode is exactly what was asked for.
+	RequestedModeID string `json:"requested_mode_id,omitempty"`
+
+	// AutoApprovedOptionID names the option Kandev already selected on the
+	// user's behalf. When set, the request is a record rather than a prompt:
+	// nobody needs to answer it, and the consumer must not treat the session
+	// as waiting for input. Empty for a request that still needs an answer.
+	AutoApprovedOptionID string `json:"auto_approved_option_id,omitempty"`
+
+	// AutoApprovedOptionKind preserves the provider's selected allow semantics
+	// alongside the option ID for durable permission history.
+	AutoApprovedOptionKind string `json:"auto_approved_option_kind,omitempty"`
+
+	// AutoApprovalSource identifies the Kandev policy that selected the option.
+	AutoApprovalSource string `json:"auto_approval_source,omitempty"`
+
 	// ActionType categorizes the action requiring approval.
 	// Use ActionType* constants: "command", "file_write", "file_read", "network", "mcp_tool", "other".
 	ActionType string `json:"action_type,omitempty"`

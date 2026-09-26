@@ -81,6 +81,24 @@ func (r *KubernetesExecutor) materializeKubernetesCredentials(
 		ctx, uploader, req.AgentConfig, selectedPortableConfigBundleIDs(req.Metadata), home, r.logger,
 	)
 	reportPortableConfigWarnings(req.OnProgress, warnings)
+	if req.InitialMode != nil {
+		settingsJSON, err := selectedInitialModeSettings(req)
+		if err != nil {
+			return fmt.Errorf("resolve selected settings for initial mode: %w", err)
+		}
+		installedConfigDir, err := installInitialModeRemotely(ctx, uploader, req, home, settingsJSON)
+		if err != nil {
+			return fmt.Errorf("install initial mode in Kubernetes session home: %w", err)
+		}
+		plan, err := initialModeFilePlanForRequest(req)
+		if err != nil {
+			return err
+		}
+		exportedConfigDir := kubernetesSessionEnvironment(req)[plan.delivery.ConfigDirEnvVar]
+		if err := markInitialModeDelivered(req, installedConfigDir, exportedConfigDir); err != nil {
+			return fmt.Errorf("verify Kubernetes initial mode path: %w", err)
+		}
+	}
 	for _, spec := range catalog.Specs {
 		for _, method := range spec.Methods {
 			if method.Type != authMethodTypeEnv || method.EnvVar == "" || method.SetupScript == "" || req.Env[method.EnvVar] == "" {

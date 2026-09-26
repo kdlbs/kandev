@@ -283,6 +283,11 @@ type RuntimeConfig struct {
 	// final child env after adapter merge; the inference executor strips
 	// them from the one-shot probe/inference subprocess env.
 	StripEnv []string
+	// InitialMode declares how this agent accepts the permission mode it should
+	// start in. An absent declaration means Kandev can only switch the mode
+	// after session/new, which reaches the agent's instruction layer without
+	// necessarily changing what the launched process enforces.
+	InitialMode InitialModeDelivery
 	// NamespacesMCPToolsByServer is true for clients that add the MCP server
 	// name to every tool before presenting it to the model. The per-instance
 	// Kandev MCP server removes that presentation suffix before the client adds
@@ -367,6 +372,18 @@ type PermissionSetting struct {
 	ApplyMethod  string `json:"apply_method,omitempty"`
 	CLIFlag      string `json:"cli_flag,omitempty"`
 	CLIFlagValue string `json:"cli_flag_value,omitempty"`
+
+	// PassthroughOnly marks a CLI flag that only reaches the agent in CLI
+	// passthrough mode. Over ACP the launched process is the bridge, which
+	// forwards no unrecognized argument to the CLI it wraps, so the flag is
+	// appended to a process that ignores it while the UI reports it as
+	// enabled.
+	PassthroughOnly bool `json:"passthrough_only,omitempty"`
+
+	// ACPEquivalent names the control that achieves the same thing over ACP.
+	// It is the actionable half of refusing a passthrough-only flag: a message
+	// that only says "not available here" leaves the user with no next step.
+	ACPEquivalent string `json:"acp_equivalent,omitempty"`
 }
 
 // PassthroughConfig defines configuration for CLI passthrough mode.

@@ -1375,7 +1375,7 @@ func TestEmitInitialModeState(t *testing.T) {
 		CurrentModeId: "architect",
 	}
 
-	a.emitInitialModeState(modes)
+	a.emitInitialModeState("session-mode", modes)
 
 	events := drainEvents(a)
 	if len(events) != 1 {
@@ -1405,7 +1405,7 @@ func TestEmitInitialModeState_CachesAvailableModes(t *testing.T) {
 		},
 	}
 
-	a.emitInitialModeState(modes)
+	a.emitInitialModeState("session-cache", modes)
 	drainEvents(a) // consume the emitted event
 
 	// Verify modes were cached in the adapter

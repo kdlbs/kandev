@@ -21,6 +21,7 @@
   "closeRepositoryEditor": "關閉儲存庫編輯器",
   "confirmDelete": "確認刪除",
   "copyFiles": "複製檔案",
+  "copyFilesDestination": "項目會放入該存放庫工作樹的根目錄。當一個任務包含兩個或更多存放庫時，代理程式的工作目錄是上一層的任務根目錄，因此給代理程式的檔案無法在該處被讀取。",
   "copyFilesHelp": "複製到新工作樹的 gitignored 路徑。在條目後追加 <0>{{symlink}}</0> 可連結回主儲存庫。使用 <1>{{escapedSymlink}}</1> 表示以 <2>{{symlink}}</2> 結尾的字面檔名。",
   "copyFilesPathsResolved": "路徑相對於儲存庫根解析，並植入每個新工作樹，保持相對位置。工作樹中已有檔案不會被覆蓋。",
   "copyFilesPatternBraces": "<0>{{braces}}</0> 大括號交替，例如 <1>{{example}}</1>",

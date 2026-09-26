@@ -465,11 +465,25 @@ type CommandPreviewRequest struct {
 	CommandPrefix      string          `json:"command_prefix,omitempty"`
 }
 
+// Flag destinations reported by CommandPreviewResponse.
+const (
+	// FlagDestinationAgentCLI means the flags reach the agent CLI itself.
+	FlagDestinationAgentCLI = "agent_cli"
+	// FlagDestinationACPBridge means the flags are appended to the launched ACP
+	// bridge process, which forwards no unrecognized argument to the agent CLI.
+	FlagDestinationACPBridge = "acp_bridge"
+)
+
 // CommandPreviewResponse is the response for the command preview endpoint
 type CommandPreviewResponse struct {
 	Supported     bool     `json:"supported"`
 	Command       []string `json:"command"`
 	CommandString string   `json:"command_string"`
+	// FlagDestination names the process the profile's CLI flags are appended
+	// to. Over ACP that is the bridge, not the agent CLI it wraps, and the
+	// difference is the whole reason a flag can look enabled and change
+	// nothing. Values: "agent_cli" or "acp_bridge".
+	FlagDestination string `json:"flag_destination,omitempty"`
 }
 
 // DynamicModelsResponse is the response for the /agent-models/:agentName endpoint.

@@ -291,11 +291,39 @@ func (m *Manager) effectiveSessionRuntimeConfigWithPresence(
 // reverting to the profile default. Falls back to profileMode when no provider
 // is wired, the lookup fails, or no session mode is set. See issue #1183.
 func (m *Manager) effectiveSessionMode(ctx context.Context, execution *AgentExecution, profileMode string) string {
+	mode, _ := m.effectiveSessionModeWithSource(ctx, execution, profileMode)
+	return mode
+}
+
+// ModeSource names which layer supplied the effective session mode.
+type ModeSource string
+
+const (
+	// ModeSourceAgentProfile means the mode came from the agent profile.
+	ModeSourceAgentProfile ModeSource = "agent_profile"
+	// ModeSourceSessionOverride means a persisted session_mode won. It is
+	// written both by the user's mode toggle and by a set_session_mode
+	// workflow action, so a profile mode losing here is expected, not a bug —
+	// but it has to be visible.
+	ModeSourceSessionOverride ModeSource = "session_override"
+	// ModeSourceNone means no layer requested a mode.
+	ModeSourceNone ModeSource = "none"
+)
+
+// effectiveSessionModeWithSource returns the effective mode and the layer that
+// supplied it. Without the source, a profile mode that lost to a persisted
+// override is invisible: the session simply runs in a mode nobody can trace.
+func (m *Manager) effectiveSessionModeWithSource(
+	ctx context.Context, execution *AgentExecution, profileMode string,
+) (string, ModeSource) {
 	info := m.sessionWorkspaceInfo(ctx, execution)
-	if info == nil || info.SessionMode == "" {
-		return profileMode
+	if info != nil && info.SessionMode != "" {
+		return info.SessionMode, ModeSourceSessionOverride
 	}
-	return info.SessionMode
+	if profileMode == "" {
+		return "", ModeSourceNone
+	}
+	return profileMode, ModeSourceAgentProfile
 }
 
 func (m *Manager) sessionWorkspaceInfo(ctx context.Context, execution *AgentExecution) *WorkspaceInfo {

@@ -55,6 +55,7 @@ Scenarios in `scenarioRegistry` can only emit `SessionUpdate` notifications — 
 - `e.startSubagentTool(...)` / `e.completeSubagentTool(...)` — claude-style subagent (Task) frames with the `_meta.claudeCode` Agent marker and result metrics.
 - `e.foregroundIdle()` / `e.launchAsyncSubagentTool(...)` / `e.completeDetachedWork()` — the ADR-0049 busy-signal shapes: the human-origin usage boundary that yields the foreground, Claude's detached Agent launch, and the task-notification boundary that closes detached work.
 - `e.requestPermission(...)` — interactive permission flow for scenarios that need an Allow/Reject decision.
+  `git-commit-permission` is the one that answers the unattended-permission question: it asks for a state-changing Git command and creates the commit only when granted, emitting the resulting SHA so a test can resolve the commit object instead of trusting a status line.
 
 ### Emitting `_meta`-tagged tool calls
 

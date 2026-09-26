@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -136,6 +137,57 @@ func UploadPortableConfigBundles(
 		}
 	}
 	return warnings
+}
+
+// selectedPortableSettingsJSON reads only the selected bundle file that targets
+// the mode settings path. It supplies the bytes used to merge the final remote
+// file after bundle upload; unrelated host settings are never inspected.
+func selectedPortableSettingsJSON(ag agents.Agent, selectedIDs []string, targetPath string) ([]byte, error) {
+	if ag == nil || len(selectedIDs) == 0 || targetPath == "" {
+		return nil, nil
+	}
+	hostHome, err := os.UserHomeDir()
+	if err != nil || hostHome == "" {
+		return nil, nil
+	}
+	catalog := remoteconfig.BuildCatalogForHost([]agents.Agent{ag}, runtime.GOOS, hostHome)
+	targetPath = path.Clean(strings.ReplaceAll(targetPath, "\\", "/"))
+	var selectedSettings []byte
+	for _, bundleID := range selectedIDs {
+		bundle, ok := catalog.FindBundle(bundleID)
+		if !ok {
+			continue
+		}
+		for _, file := range bundle.Files {
+			if path.Clean(strings.ReplaceAll(file.TargetPath, "\\", "/")) != targetPath {
+				continue
+			}
+			data, ok := readSelectedPortableConfigFile(hostHome, file)
+			if ok {
+				selectedSettings = data
+			}
+		}
+	}
+	return selectedSettings, nil
+}
+
+func readSelectedPortableConfigFile(hostHome string, file remoteconfig.File) ([]byte, bool) {
+	if !isSafePortableRelativePath(file.SourcePath) || !isSafePortableRelativePath(file.TargetPath) {
+		return nil, false
+	}
+	sourcePath, err := containedPath(hostHome, filepath.Join(hostHome, filepath.FromSlash(file.SourcePath)))
+	if err != nil {
+		return nil, false
+	}
+	info, reason := portableConfigSourceInfo(hostHome, sourcePath)
+	if reason != "" || info.Size() > portableConfigMaxFileBytes {
+		return nil, false
+	}
+	data, err := readPortableConfigFile(sourcePath, info)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
 }
 
 func uploadPortableConfigFile(
