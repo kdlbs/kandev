@@ -89,19 +89,27 @@ function useStoppedRecoveryChoices(
   return choices;
 }
 
+function stoppedRecoveryCause(
+  actions: SessionRecoveryActions,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (actions.branchDetails) return t("task:branchIsNoLongerAvailable");
+  const message = actions.guardDetails
+    ? sanitizeSessionErrorDetails(actions.recoveryError?.message, 240)
+    : "";
+  return message || t("task:failedToResumeSession");
+}
+
 function StoppedSessionContent(
   props: SessionStoppedBannerProps & { actions: SessionRecoveryActions },
 ) {
   const { t } = useTranslation();
   const profileExists = useSessionProfileExists(props.sessionId);
-  const { busyAction, recoveryError, recoveryNotice, guardDetails, branchDetails } = props.actions;
+  const { busyAction, recoveryError, recoveryNotice, guardDetails } = props.actions;
   const completed = props.mode === "completed";
   const blocked = Boolean(guardDetails && !guardDetails.retryable);
   const choices = useStoppedRecoveryChoices(props, profileExists);
-  const failureMessage = guardDetails
-    ? sanitizeSessionErrorDetails(recoveryError?.message, 240)
-    : t("task:failedToResumeSession");
-  const cause = branchDetails ? t("task:branchIsNoLongerAvailable") : failureMessage;
+  const cause = stoppedRecoveryCause(props.actions, t);
   const Icon = completed ? IconCircleCheck : IconAlertTriangle;
   return (
     <>

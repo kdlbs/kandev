@@ -612,3 +612,15 @@ passed. Backend authorization, task/session correlation, lifecycle locking and
 production diagnostic sanitization were inspected; their contracts are unchanged.
 The optional memoization suggestion remains a documented performance deferral.
 Fresh external reviewer assessment and exact-head CI are pending after delivery.
+
+### Full-review guard fallback
+
+The subsequent full CodeRabbit review reports low merge/security risk and no
+architecture-level concerns. Its remaining stopped-banner empty-sanitization
+finding is fixed with the existing localized failure message. A regression using
+ANSI-only guard diagnostics failed before the change. After extracting the copy
+calculation to stay within the complexity limit, both affected suites passed all
+18 tests and targeted zero-warning lint passed. This is a display fallback only;
+recovery actions, localization keys and desktop/mobile composition are unchanged.
+The preceding browser runs remain applicable to those unchanged contracts.
+Fresh exact-head CI/review verification remains externally pending after delivery.

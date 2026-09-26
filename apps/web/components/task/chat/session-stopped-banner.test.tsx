@@ -56,6 +56,7 @@ vi.mock("react-i18next", () => ({
         "task:retry": "Retry",
         "task:recoveryMoreOptions": MORE_OPTIONS,
         "task:couldnTStartASession": "Session recovery failed",
+        "task:failedToResumeSession": "Failed to resume session",
       })[key] ?? key,
   }),
 }));
@@ -266,3 +267,24 @@ it("redacts a workspace failure after a retryable guard", async () => {
 });
 
 const RESTORE_BUTTON_TEST_ID = "recovery-restore-workspace-button";
+
+it("keeps a localized explanation when guard diagnostics sanitize to empty", () => {
+  render(
+    <BannerHarness
+      mode="recoverable"
+      recoveryActions={{
+        busyAction: null,
+        recoveryError: new Error("\u001b[31m\u001b[0m"),
+        branchDetails: null,
+        guardDetails: { kind: "session_recovery_in_progress", retryable: true },
+        recoveryNotice: null,
+        manualRecoveryFailure: { operation: "resume" },
+        handleRecover: vi.fn().mockResolvedValue(false),
+        handleRestore: vi.fn().mockResolvedValue(undefined),
+        handleRetry: vi.fn().mockResolvedValue(false),
+        handleNewBranch: vi.fn().mockResolvedValue(false),
+      }}
+    />,
+  );
+  expect(screen.getByTestId("session-recovery-error").textContent).toBe("Failed to resume session");
+});
