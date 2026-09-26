@@ -66,7 +66,7 @@ func (m *cursorCloudAgentManager) bindSubmissionCandidate(
 		return operation, errors.New("cursor cloud task is unavailable")
 	}
 	if task.ArchivedAt != nil {
-		if err := m.stopCloud(ctx, binding.ExecutionID, "task_archived", false); err != nil {
+		if err := m.stopCloud(ctx, binding.ExecutionID, "task_archived", "task_archived", false); err != nil {
 			return operation, err
 		}
 		return m.repo.GetManagedAgentLatestOperation(ctx, binding.ID)

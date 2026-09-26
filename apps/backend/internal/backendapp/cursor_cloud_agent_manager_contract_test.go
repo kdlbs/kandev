@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	agentexecutor "github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -163,6 +164,70 @@ func TestCursorCloudLocalPromptFallbackPreservesDispatchCallback(t *testing.T) {
 	if result == nil || result.AgentMessage != "local result" {
 		t.Fatalf("fallback result = %#v, want local result", result)
 	}
+}
+
+func TestCursorCloudLocalStopFallbackPreservesReasonAndForce(t *testing.T) {
+	repo, _, _ := seedCursorCloudCompatibilityBinding(t)
+	log := newTestLogger()
+	runtimeBackend := &cursorCloudStopContractBackend{}
+	registry := lifecycle.NewExecutorRegistry(log)
+	registry.Register(runtimeBackend)
+	lifecycleManager := lifecycle.NewManager(nil, nil, registry, nil, nil, nil,
+		lifecycle.ExecutorFallbackDeny, t.TempDir(), log)
+	for _, executionID := range []string{"local-stop", "local-stop-with-reason"} {
+		if err := lifecycleManager.ExecutionStoreForTesting().Add(&lifecycle.AgentExecution{
+			ID: executionID, SessionID: executionID, RuntimeName: agentexecutor.NameStandalone,
+		}); err != nil {
+			t.Fatalf("seed local lifecycle execution %s: %v", executionID, err)
+		}
+	}
+	manager := &cursorCloudAgentManager{
+		lifecycleAdapter: newLifecycleAdapter(lifecycleManager, nil, log),
+		repo:             repo,
+		enabled:          func() bool { return false },
+	}
+
+	if err := manager.StopAgent(context.Background(), "local-stop", true); err != nil {
+		t.Fatalf("local stop fallback: %v", err)
+	}
+	if err := manager.StopAgentWithReason(context.Background(), "local-stop-with-reason", "recoverable agent failure", true); err != nil {
+		t.Fatalf("local reasoned stop fallback: %v", err)
+	}
+
+	want := []cursorCloudStopCall{
+		{executionID: "local-stop", force: true},
+		{executionID: "local-stop-with-reason", reason: "recoverable agent failure", force: true},
+	}
+	if len(runtimeBackend.calls) != len(want) {
+		t.Fatalf("runtime stop calls = %#v, want %#v", runtimeBackend.calls, want)
+	}
+	for i := range want {
+		if runtimeBackend.calls[i] != want[i] {
+			t.Errorf("runtime stop call %d = %#v, want %#v", i, runtimeBackend.calls[i], want[i])
+		}
+	}
+}
+
+type cursorCloudStopCall struct {
+	executionID string
+	reason      string
+	force       bool
+}
+
+type cursorCloudStopContractBackend struct {
+	lifecycle.ExecutorBackend
+	calls []cursorCloudStopCall
+}
+
+func (*cursorCloudStopContractBackend) Name() agentexecutor.Name { return agentexecutor.NameStandalone }
+
+func (b *cursorCloudStopContractBackend) StopInstance(_ context.Context, instance *lifecycle.ExecutorInstance, force bool) error {
+	b.calls = append(b.calls, cursorCloudStopCall{
+		executionID: instance.InstanceID,
+		reason:      instance.StopReason,
+		force:       force,
+	})
+	return nil
 }
 
 func TestCursorCloudRequestDigestIncludesFrozenSelection(t *testing.T) {

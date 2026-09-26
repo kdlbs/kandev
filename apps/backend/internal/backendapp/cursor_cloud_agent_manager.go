@@ -296,17 +296,17 @@ func (m *cursorCloudAgentManager) CancelAgent(ctx context.Context, sessionID str
 }
 
 func (m *cursorCloudAgentManager) StopAgent(ctx context.Context, executionID string, force bool) error {
-	return m.stopCloud(ctx, executionID, "stopped", force)
+	return m.stopCloud(ctx, executionID, "stopped", "", force)
 }
 
 func (m *cursorCloudAgentManager) StopAgentWithReason(ctx context.Context, executionID, reason string, force bool) error {
-	return m.stopCloud(ctx, executionID, reason, force)
+	return m.stopCloud(ctx, executionID, reason, reason, force)
 }
 
-func (m *cursorCloudAgentManager) stopCloud(ctx context.Context, executionID, reason string, _ bool) error {
+func (m *cursorCloudAgentManager) stopCloud(ctx context.Context, executionID, reason, localReason string, force bool) error {
 	binding, err := m.repo.GetManagedAgentBindingByExecution(ctx, executionID)
 	if errors.Is(err, repository.ErrManagedAgentBindingNotFound) {
-		return m.lifecycleAdapter.StopAgentWithReason(ctx, executionID, reason, false)
+		return m.lifecycleAdapter.StopAgentWithReason(ctx, executionID, localReason, force)
 	}
 	if err != nil {
 		return err
