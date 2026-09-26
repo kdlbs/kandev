@@ -1143,9 +1143,6 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 
 //nolint:cyclop,funlen,gocognit // Session construction keeps its existing validation sequence in one transaction boundary.
 func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute) (string, error) {
-	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
-		return "", err
-	}
 	if agentProfileID == "" {
 		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
 		return "", ErrNoAgentProfileID
@@ -1250,18 +1247,31 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if execConfig.ExecutorID != "" {
 		session.ExecutorID = execConfig.ExecutorID
 	}
+	managedCloud := execConfig.ExecutorType == string(models.ExecutorTypeCursorCloud)
+	if managedCloud {
+		bindWorkspace = false
+		taskEnvironmentID = ""
+		session.TaskEnvironmentID = ""
+		session.WorkspacePath = ""
+	} else {
+		if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
+			return "", err
+		}
+	}
 	// Validate every managed-credential repository binding before persisting
 	// the session row. Doing this after the row exists would leave a
 	// zero-message session behind once launch fails at credential issuance.
-	if err := e.preflightManagedGitCredentials(ctx, task.WorkspaceID, task.ID, execConfig); err != nil {
-		e.logger.Error("managed Git credential preflight failed",
-			zap.String("task_id", task.ID),
-			zap.Error(err))
-		return "", err
+	if !managedCloud {
+		if err := e.preflightManagedGitCredentials(ctx, task.WorkspaceID, task.ID, execConfig); err != nil {
+			e.logger.Error("managed Git credential preflight failed",
+				zap.String("task_id", task.ID),
+				zap.Error(err))
+			return "", err
+		}
 	}
 
 	var recoveryAdmission *worktree.RecoveryAdmission
-	if e.selectedWorktreeRecoveryAdmission != nil {
+	if !managedCloud && e.selectedWorktreeRecoveryAdmission != nil {
 		selectedEnv, envErr := e.resolveEnvironmentForAdmission(ctx, task.ID, taskEnvironmentID)
 		if envErr != nil {
 			return "", envErr
@@ -1319,6 +1329,13 @@ func (e *Executor) createPreparedSession(
 	execConfig executorConfig,
 	workflowRoute *models.WorkflowSessionRoute,
 ) error {
+	if execConfig.ExecutorType == string(models.ExecutorTypeCursorCloud) {
+		session.ExecutorSnapshot = map[string]interface{}{
+			"executor_type":       execConfig.ExecutorType,
+			"executor_id":         execConfig.ExecutorID,
+			"executor_profile_id": session.ExecutorProfileID,
+		}
+	}
 	candidate := &models.TaskEnvironment{
 		TaskID:            session.TaskID,
 		ExecutorType:      execConfig.ExecutorType,
@@ -1550,15 +1567,26 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 			agentProfileID = strings.TrimSpace(session.AgentProfileID)
 		}
 	}
-	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
-		return nil, err
-	}
 	if strings.TrimSpace(executorID) == "" {
 		// PrepareSession already persisted the selected executor. Launch calls
 		// that omit the option must retain that selection so the authoritative
 		// connection config reaches lifecycle instead of falling back to the
 		// workspace default (or an empty config).
 		executorID = strings.TrimSpace(session.ExecutorID)
+	}
+	cloudMetadata := cloneMetadata(session.Metadata)
+	if session.ExecutorProfileID != "" {
+		if cloudMetadata == nil {
+			cloudMetadata = make(map[string]interface{})
+		}
+		cloudMetadata["executor_profile_id"] = session.ExecutorProfileID
+	}
+	selectedExecutor := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, cloudMetadata)
+	if selectedExecutor.ExecutorType == string(models.ExecutorTypeCursorCloud) {
+		return e.launchCursorCloudSession(ctx, task, session, agentProfileID, prompt, opts, selectedExecutor)
+	}
+	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
+		return nil, err
 	}
 	if opts.McpMode == "" {
 		opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, opts.StartAgent)

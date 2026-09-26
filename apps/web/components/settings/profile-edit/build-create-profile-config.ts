@@ -5,8 +5,12 @@ import type {
 } from "@/components/settings/profile-edit/remote-credentials-card";
 import type { AdditionalNetworkRow } from "@/components/settings/profile-edit/use-docker-networks-form-state";
 import { applyDockerNetworks } from "@/components/settings/profile-edit/build-docker-network-config";
+import { buildCursorCloudProfileConfig } from "@/components/settings/profile-edit/cursor-cloud-profile-config";
 
 export type BuildProfileConfigInput = {
+  isCursorCloud: boolean;
+  cursorCloudSecretId: string | null;
+  cursorCloudCallbackUrl: string;
   isRemote: boolean;
   isSprites: boolean;
   isDocker: boolean;
@@ -71,7 +75,20 @@ export function buildProfileConfig(
     }
   }
   applyDockerCreateConfig(config, input);
-  return Object.keys(config).length > 0 ? config : undefined;
+  const finalConfig = applyCursorCloudConfig(config, input);
+  return Object.keys(finalConfig).length > 0 ? finalConfig : undefined;
+}
+
+function applyCursorCloudConfig(
+  config: Record<string, string>,
+  input: BuildProfileConfigInput,
+): Record<string, string> {
+  if (!input.isCursorCloud) return config;
+  return buildCursorCloudProfileConfig(
+    config,
+    input.cursorCloudSecretId,
+    input.cursorCloudCallbackUrl,
+  );
 }
 
 function applyDockerCreateConfig(

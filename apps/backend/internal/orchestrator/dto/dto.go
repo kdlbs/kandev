@@ -58,17 +58,22 @@ type TaskSessionStatusResponse struct {
 	ACPSessionID string `json:"acp_session_id,omitempty"`
 
 	// Executor/runtime info
-	ExecutorID       string                  `json:"executor_id,omitempty"`
-	ExecutorType     string                  `json:"executor_type,omitempty"`
-	ExecutorName     string                  `json:"executor_name,omitempty"`
-	Runtime          agentruntime.Runtime    `json:"runtime,omitempty"`
-	IsRemoteExecutor bool                    `json:"is_remote_executor"`
-	Capabilities     TaskSessionCapabilities `json:"capabilities"`
-	RemoteState      string                  `json:"remote_state,omitempty"`
-	RemoteName       string                  `json:"remote_name,omitempty"`
-	RemoteCreatedAt  string                  `json:"remote_created_at,omitempty"`
-	RemoteCheckedAt  string                  `json:"remote_checked_at,omitempty"`
-	RemoteStatusErr  string                  `json:"remote_status_error,omitempty"`
+	ExecutorID           string                  `json:"executor_id,omitempty"`
+	ExecutorType         string                  `json:"executor_type,omitempty"`
+	ExecutorName         string                  `json:"executor_name,omitempty"`
+	Runtime              agentruntime.Runtime    `json:"runtime,omitempty"`
+	IsRemoteExecutor     bool                    `json:"is_remote_executor"`
+	Capabilities         TaskSessionCapabilities `json:"capabilities"`
+	RemoteState          string                  `json:"remote_state,omitempty"`
+	RemoteName           string                  `json:"remote_name,omitempty"`
+	RemoteCreatedAt      string                  `json:"remote_created_at,omitempty"`
+	RemoteCheckedAt      string                  `json:"remote_checked_at,omitempty"`
+	RemoteStatusErr      string                  `json:"remote_status_error,omitempty"`
+	RemoteRepositoryID   string                  `json:"remote_repository_id,omitempty"`
+	RemoteBranch         string                  `json:"remote_branch,omitempty"`
+	RemotePullRequestURL string                  `json:"remote_pull_request_url,omitempty"`
+	RemoteAgentURL       string                  `json:"remote_agent_url,omitempty"`
+	RemoteHistoryGap     bool                    `json:"remote_history_gap,omitempty"`
 
 	// Worktree info
 	WorktreePath   *string `json:"worktree_path,omitempty"`

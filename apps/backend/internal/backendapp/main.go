@@ -722,7 +722,7 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	sessionCapacityEnvironment := sessioncapacity.ReadEnvironment()
-	orchestratorSvc, msgCreator, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
+	orchestratorSvc, msgCreator, cursorCloudManager, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
 		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
 		repos.SystemSettings, sessionCapacityEnvironment, repos.RequiredStores)
 	if err != nil {
@@ -977,7 +977,7 @@ func startAgentInfrastructure(
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
-		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,
+		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, cursorCloudManager, repoCloner, agentctlBinaryPath,
 		sessionCapacityEnvironment, storageStore, func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers,
 		restoreCleanups, databaseQuiesce, sshReachabilityPoller)
 }
@@ -1040,6 +1040,7 @@ func startGatewayAndServe(
 	agentRegistry *registry.Registry,
 	orchestratorSvc *orchestrator.Service,
 	msgCreator *messageCreatorAdapter,
+	cursorCloudManager *cursorCloudAgentManager,
 	repoCloner *repoclone.Cloner,
 	agentctlBinaryPath string,
 	sessionCapacityEnvironment sessioncapacity.Environment,
@@ -1055,6 +1056,7 @@ func startGatewayAndServe(
 	// WEBSOCKET GATEWAY
 	// ============================================
 	log.Info("Initializing WebSocket Gateway...")
+	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
 	var referenceValidator entityrefs.SubmissionValidator
 	if services.Mentions != nil {
 		referenceValidator = services.Mentions.Submission
@@ -1070,6 +1072,8 @@ func startGatewayAndServe(
 		cfg.ResolvedHomeDir(),
 		func(fn func() error) { addCleanup(fn) },
 		cfg.Features.LSPBrowserContinuity,
+		cfg.Features.CursorCloud,
+		userSecretStore,
 		orchestratorSvc.AcquireSessionLifecycleFence,
 		cfg.Limits.LSPMaxConnections,
 	)
@@ -1389,7 +1393,7 @@ func startGatewayAndServe(
 	// already-bound handler and listeners — no second bind, no window where
 	// the socket is closed and reopened.
 	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
+		lifecycleMgr, eventBus, orchestratorSvc, cursorCloudManager, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
 		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
 	if err != nil {
@@ -2723,6 +2727,7 @@ func buildHTTPServer(
 	lifecycleMgr *lifecycle.Manager,
 	eventBus bus.EventBus,
 	orchestratorSvc *orchestrator.Service,
+	cursorCloudManager *cursorCloudAgentManager,
 	notificationCtrl *notificationcontroller.Controller,
 	msgCreator *messageCreatorAdapter,
 	agentRegistry *registry.Registry,
@@ -2827,6 +2832,7 @@ func buildHTTPServer(
 		officeRepo:                    repos.Office,
 		analyticsRepo:                 repos.Analytics,
 		orchestratorSvc:               orchestratorSvc,
+		cursorCloudManager:            cursorCloudManager,
 		lifecycleMgr:                  lifecycleMgr,
 		loginMgr:                      loginMgr,
 		quickTerminalSvc:              quickTerminalSvc,

@@ -42,6 +42,8 @@ type UseChatInputContainerParams = {
   isFailed: boolean;
   needsRecovery: boolean;
   executorUnavailable: boolean;
+  externallyDisabled?: boolean;
+  externalDisabledReason?: string;
   isAgentBusy: boolean;
   // supportsSteering is true when a send would be delivered into the running
   // turn (mid-turn steering) instead of queued. Drives the composer's
@@ -146,6 +148,8 @@ function computeDerivedState(params: {
   hasAgentCommands: boolean;
   steerPlaceholder: string | undefined;
   canQueueWhileStarting: boolean;
+  externallyDisabled?: boolean;
+  externalDisabledReason?: string;
 }) {
   const hasClarification = !!(params.pendingClarification && params.onClarificationResolved);
   // Keep the editor available during STARTING so the user can prepare a draft.
@@ -159,15 +163,21 @@ function computeDerivedState(params: {
     params.isFailed ||
     params.needsRecovery ||
     params.executorUnavailable;
-  const submitDisabled = isDisabled || startupSubmitDisabled || params.hasPendingAttachmentUploads;
+  const submitDisabled = [
+    isDisabled,
+    startupSubmitDisabled,
+    params.hasPendingAttachmentUploads,
+    params.externallyDisabled,
+  ].some(Boolean);
   // The "agent still being set up" tooltip is only meaningful while a
   // container/sandbox is actively bootstrapping. The brief STARTING
   // transition for local quick-chat sessions doesn't deserve its own
   // tooltip. The disabled send action is sufficient feedback.
   const submitDisabledReason =
-    (isDisabled || startupSubmitDisabled) && params.isPreparingEnvironment
+    params.externalDisabledReason ??
+    ((isDisabled || startupSubmitDisabled) && params.isPreparingEnvironment
       ? t("task:agentStillBeingSetUp")
-      : undefined;
+      : undefined);
   const hasPendingComments = !!(
     params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
   );
@@ -292,6 +302,8 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     isFailed,
     needsRecovery,
     executorUnavailable,
+    externallyDisabled: params.externallyDisabled,
+    externalDisabledReason: params.externalDisabledReason,
     pendingClarification,
     onClarificationResolved,
     pendingCommentsByFile,

@@ -149,13 +149,21 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 	if err == nil && existing != nil {
 		return nil, fmt.Errorf("agent already configured: %s", req.Name)
 	}
-	discoveryResults, err := c.detectAgents(ctx)
-	if err != nil {
-		return nil, err
-	}
-	matched, err := c.findMatchedAvailability(req.Name, discoveryResults)
-	if err != nil {
-		return nil, err
+	var matched *discovery.Availability
+	if req.Name == agents.CursorCloudAgentID {
+		if !c.managedAgentConfigurationAllowed(ctx, req.Name) {
+			return nil, fmt.Errorf("executor type cursor_cloud is unavailable until a configured profile is saved")
+		}
+		matched = &discovery.Availability{Name: agents.CursorCloudAgentID, Available: true}
+	} else {
+		discoveryResults, err := c.detectAgents(ctx)
+		if err != nil {
+			return nil, err
+		}
+		matched, err = c.findMatchedAvailability(req.Name, discoveryResults)
+		if err != nil {
+			return nil, err
+		}
 	}
 	agentConfig, agOk := c.agentRegistry.Get(req.Name)
 	if !agOk {

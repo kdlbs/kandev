@@ -37,6 +37,10 @@ import {
 } from "@/components/settings/profile-edit/remote-credentials-card";
 import { SpritesApiKeyCard } from "@/components/settings/profile-edit/sprites-api-key-card";
 import {
+  CursorCloudProfileSection,
+  useCursorCloudProfileSettings,
+} from "@/components/settings/profile-edit/cursor-cloud-profile-section";
+import {
   DockerSections,
   SpritesSections,
 } from "@/components/settings/profile-edit/profile-runtime-sections";
@@ -68,7 +72,7 @@ import {
   parseRemoteCredentials,
 } from "@/components/settings/profile-edit/executor-profile-baselines";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
-import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
+import { useProfileRemoteAuthState } from "@/components/settings/profile-edit/use-profile-remote-auth-state";
 import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { buildSaveConfig } from "@/components/settings/profile-edit/serialize-executor-config";
 import { useUserNamespacesFormState } from "@/components/settings/profile-edit/use-user-namespaces-form-state";
@@ -98,44 +102,6 @@ function useProfileFromStore(profileId: string) {
   );
   const profile = executor?.profiles?.find((p: ExecutorProfile) => p.id === profileId) ?? null;
   return executor && profile ? { executor, profile } : null;
-}
-
-function useRemoteAuthState(profile: ExecutorProfile) {
-  const [networkPolicyRules, setNetworkPolicyRules] = useState<NetworkPolicyRule[]>(() =>
-    parseNetworkPolicyRules(profile.config),
-  );
-  const [remoteCredentials, setRemoteCredentials] = useState<string[]>(() =>
-    parseRemoteCredentials(profile.config),
-  );
-  const [configBundleIds, setConfigBundleIds] = useState<string[]>(() =>
-    parseAgentConfigBundles(profile.config),
-  );
-  const [agentEnvVars, setAgentEnvVars] = useState<Record<string, string | null>>(() =>
-    parseRemoteAuthSecrets(profile.config),
-  );
-
-  const handleAgentEnvVarChange = useCallback((agentId: string, secretId: string | null) => {
-    setAgentEnvVars((prev) => ({ ...prev, [agentId]: secretId }));
-  }, []);
-
-  const reset = useCallback(() => {
-    setNetworkPolicyRules(parseNetworkPolicyRules(profile.config));
-    setRemoteCredentials(parseRemoteCredentials(profile.config));
-    setConfigBundleIds(parseAgentConfigBundles(profile.config));
-    setAgentEnvVars(parseRemoteAuthSecrets(profile.config));
-  }, [profile.config]);
-
-  return {
-    networkPolicyRules,
-    setNetworkPolicyRules,
-    remoteCredentials,
-    setRemoteCredentials,
-    configBundleIds,
-    setConfigBundleIds,
-    agentEnvVars,
-    handleAgentEnvVarChange,
-    reset,
-  };
 }
 
 function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
@@ -303,7 +269,8 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(() =>
     deriveSpritesSecretId(profile.env_vars),
   );
-  const remoteAuth = useRemoteAuthState(profile);
+  const cursorCloud = useCursorCloudProfileSettings(profile);
+  const remoteAuth = useProfileRemoteAuthState(profile);
   const gitIdentity = useGitIdentityState(runtime.isRemote, profile);
   const mcpPolicyErrorKey = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
 
@@ -331,10 +298,20 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     userNamespaces.resetUserNamespaces();
     resetEnvVars(profile.env_vars);
     setSpritesSecretId(deriveSpritesSecretId(profile.env_vars));
+    cursorCloud.reset();
     remoteAuth.reset();
     gitIdentity.reset();
     dockerNetworks.resetDockerNetworks();
-  }, [dockerNetworks, gitIdentity, profile, remoteAuth, resetEnvVars, runtime, userNamespaces]);
+  }, [
+    cursorCloud.reset,
+    dockerNetworks,
+    gitIdentity,
+    profile,
+    remoteAuth,
+    resetEnvVars,
+    runtime,
+    userNamespaces,
+  ]);
 
   return {
     ...runtime,
@@ -358,6 +335,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     placeholders,
     spritesSecretId,
     setSpritesSecretId,
+    ...cursorCloud,
     networkPolicyRules: remoteAuth.networkPolicyRules,
     setNetworkPolicyRules: remoteAuth.setNetworkPolicyRules,
     remoteCredentials: remoteAuth.remoteCredentials,
@@ -417,6 +395,9 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           onSecretIdChange={form.setSpritesSecretId}
           secrets={secrets}
         />
+      )}
+      {executor.type === "cursor_cloud" && (
+        <CursorCloudProfileSection profile={profile} secrets={secrets} settings={form} />
       )}
       {form.isDocker && (
         <DockerSections
@@ -538,12 +519,14 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
   const spritesTokenMissing = form.isSprites && !form.spritesSecretId;
   const memberReadOnly = form.isKubernetes && !canManageKubernetes;
   const sharedConfig = buildSaveConfig(form, profile.config);
+  const finalConfig =
+    executor.type === "cursor_cloud" ? form.applyToConfig(sharedConfig) : sharedConfig;
   const savePayload = {
     name: form.name.trim(),
     mcp_policy: form.mcpPolicy || undefined,
     config: form.isKubernetes
-      ? replaceKubernetesProfileConfig(sharedConfig, form.kubernetesProfile)
-      : sharedConfig,
+      ? replaceKubernetesProfileConfig(finalConfig, form.kubernetesProfile)
+      : finalConfig,
     prepare_script: form.prepareScript,
     cleanup_script: form.cleanupScript,
     env_vars: form.buildEnvVars(),

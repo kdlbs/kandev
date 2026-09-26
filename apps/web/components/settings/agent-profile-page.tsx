@@ -71,6 +71,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { DynamicAgentProfileEditor } from "@/components/settings/dynamic-agent-profile-editor";
 import { isHandledApiError } from "@/lib/api/client";
+import { useCursorCloudModelConfig } from "@/components/settings/profile-edit/use-cursor-cloud-model-config";
 
 type ProfileEditorProps = {
   agent: Agent;
@@ -424,6 +425,7 @@ function ProfileEditor({
   const { t } = useTranslation();
   const { toast } = useToast();
   const [modelConfigResolutionPending, setModelConfigResolutionPending] = useState(false);
+  const resolvedModelConfig = useCursorCloudModelConfig(agent.id, modelConfig);
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const syncAgentsToStore = useSyncAgentsToStore();
   const { items: secrets } = useSecrets();
@@ -535,7 +537,7 @@ function ProfileEditor({
         savedProfile={savedProfile}
         isDirty={isDirty}
         updateDraft={updateDraft}
-        modelConfig={modelConfig}
+        modelConfig={resolvedModelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
         secrets={secrets}

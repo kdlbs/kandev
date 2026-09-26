@@ -24,6 +24,8 @@ type ComposerPropsArgs = {
   minimalToolbar?: boolean;
   hideAgentControls?: boolean;
   hidePlanMode?: boolean;
+  externallyDisabled?: boolean;
+  externalDisabledReason?: string;
 };
 
 /**
@@ -50,6 +52,8 @@ export function useComposerProps(args: ComposerPropsArgs) {
     minimalToolbar,
     hideAgentControls,
     hidePlanMode,
+    externallyDisabled,
+    externalDisabledReason,
   } = args;
   const { resolvedSessionId, taskId, isAgentBusy, isWorking, needsRecovery, planModeEnabled } =
     panelState;
@@ -109,5 +113,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     minimalToolbar,
     hideAgentControls,
     hidePlanMode,
+    externallyDisabled,
+    externalDisabledReason,
   };
 }

@@ -172,11 +172,11 @@
   "renameCanvas": "重新命名畫布",
   "canvasName": "畫布名稱",
   "renameCanvasInvalid": "請輸入 1 到 200 個字元的名稱。",
-  "renameCanvasFailed": "無法重新命名畫布。請再試一次。",
+  "renameCanvasFailed": "無法重新命名畫布。請重試。",
   "renamingCanvas": "正在儲存名稱…",
-  "loadingShareDefaults": "正在載入分享詳細資料…",
-  "shareDefaultsFailed": "無法載入分享詳細資料。請再試一次。",
+  "loadingShareDefaults": "正在載入分享詳情…",
+  "shareDefaultsFailed": "無法載入分享詳情。請重試。",
   "sharingRelease": "分享 {{name}} 版本 {{version}}",
-  "shareRequiredDetails": "請填寫以下資料",
-  "packageDetails": "套件詳細資料"
+  "shareRequiredDetails": "請填寫以下資訊",
+  "packageDetails": "軟體包詳情"
 }

@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentcontroller "github.com/kandev/kandev/internal/agent/controller"
 	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/registry"
@@ -26,6 +27,7 @@ import (
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	"github.com/kandev/kandev/internal/orchestrator"
 	orchestratorhandlers "github.com/kandev/kandev/internal/orchestrator/handlers"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -123,6 +125,8 @@ func provideGateway(
 	dataDir string,
 	registerCleanup func(func() error),
 	lspContinuityEnabled bool,
+	cursorCloudEnabled bool,
+	secretStore secrets.SecretStore,
 	acquireSessionFence func(string) func(),
 	lspMaxConnections ...int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
@@ -192,6 +196,12 @@ func provideGateway(
 
 	if lifecycleMgr != nil && agentRegistry != nil {
 		agentCtrl := agentcontroller.NewController(lifecycleMgr, agentRegistry)
+		agentCtrl.SetAgentTypeAvailability(func(ctx context.Context, agentID string) bool {
+			if agentID != agents.CursorCloudAgentID {
+				return true
+			}
+			return cursorCloudEnabled && cursorCloudAgentAvailable(ctx, taskSvc, secretStore)
+		})
 		agentHandlers := agenthandlers.NewHandlers(agentCtrl, log)
 		agentHandlers.RegisterHandlers(gateway.Dispatcher)
 

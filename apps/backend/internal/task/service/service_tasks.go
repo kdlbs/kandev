@@ -2465,11 +2465,17 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	// connection.
 	finalizeCtx, cancelFinalize := archivecascade.ContinuationContextUntil(ctx, archiveDeadline)
 	defer cancelFinalize()
+	var postCommitErr error
+	if err := s.beginManagedAgentTerminations(finalizeCtx, sessions); err != nil {
+		wrapped := &CascadePostCommitError{Err: fmt.Errorf("persist managed execution termination after archiving task %s: %w", id, err)}
+		postCommitErr = errors.Join(postCommitErr, wrapped)
+		s.logger.Warn("failed to persist managed execution termination after task archive",
+			zap.String("task_id", id), zap.Error(err))
+	}
 
 	// 3b. Finalize active sessions in the DB and publish their cancellation
 	// events. See finalizeCancelledSessions for the detailed rationale.
 	s.finalizeCancelledSessions(finalizeCtx, id, activeSessions, archiveDeadline, models.SessionArchiveCancelReason)
-	var postCommitErr error
 
 	// 4. Re-read task for updated archived_at field. The archive row is
 	// already durable, so a projection read failure must not skip cleanup.
@@ -2518,6 +2524,31 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 		return postCommitErr
 	}
 	return nil
+}
+
+func (s *Service) beginManagedAgentTerminations(ctx context.Context, sessions []*models.TaskSession) error {
+	managed, ok := s.tasks.(taskrepo.ManagedAgentRepository)
+	if !ok {
+		return nil
+	}
+	var failures []error
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		binding, err := managed.GetManagedAgentBindingBySession(ctx, session.ID)
+		if errors.Is(err, taskrepo.ErrManagedAgentBindingNotFound) {
+			continue
+		}
+		if err != nil {
+			failures = append(failures, fmt.Errorf("read managed execution for session %s: %w", session.ID, err))
+			continue
+		}
+		if err := managed.BeginManagedAgentTermination(ctx, binding.ID, time.Now().UTC()); err != nil {
+			failures = append(failures, fmt.Errorf("persist termination intent for session %s: %w", session.ID, err))
+		}
+	}
+	return errors.Join(failures...)
 }
 
 // markOrphanedInheritParentChildren stamps an orphan marker on archived's
@@ -3033,6 +3064,11 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	if err != nil {
 		return false, fmt.Errorf("list task sessions for delete: %w", err)
 	}
+	if trigger == models.TaskResourceCleanupTriggerDelete {
+		if err := s.resolveManagedAgentsBeforeTaskDelete(operationCtx, sessions); err != nil {
+			return false, err
+		}
+	}
 
 	worktrees, err := s.gatherWorktreesForDelete(operationCtx, id)
 	if err != nil {
@@ -3171,6 +3207,63 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	}
 
 	return true, nil
+}
+
+var ErrManagedAgentDeleteBlocked = errors.New("task deletion is blocked by unresolved Cursor Cloud work")
+
+func (s *Service) resolveManagedAgentsBeforeTaskDelete(ctx context.Context, sessions []*models.TaskSession) error {
+	managed, ok := s.tasks.(taskrepo.ManagedAgentRepository)
+	if !ok {
+		return nil
+	}
+	bindings := make([]*models.ManagedAgentBinding, 0, len(sessions))
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		binding, err := managed.GetManagedAgentBindingBySession(ctx, session.ID)
+		if errors.Is(err, taskrepo.ErrManagedAgentBindingNotFound) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read managed execution before task deletion: %w", err)
+		}
+		if err := s.stopManagedAgentBeforeTaskDelete(ctx, managed, binding); err != nil {
+			return err
+		}
+		bindings = append(bindings, binding)
+	}
+	for _, binding := range bindings {
+		if err := managed.DeleteManagedAgentBindingIfTerminal(ctx, binding.ID); err != nil {
+			if errors.Is(err, taskrepo.ErrManagedAgentActiveOperation) {
+				return ErrManagedAgentDeleteBlocked
+			}
+			return fmt.Errorf("remove terminal managed execution before task deletion: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Service) stopManagedAgentBeforeTaskDelete(
+	ctx context.Context,
+	managed taskrepo.ManagedAgentRepository,
+	binding *models.ManagedAgentBinding,
+) error {
+	operation, err := managed.GetManagedAgentLatestOperation(ctx, binding.ID)
+	if err != nil {
+		return fmt.Errorf("read managed operation before task deletion: %w", err)
+	}
+	if !models.ManagedAgentOperationActive(operation.State) {
+		return nil
+	}
+	if s.executionStopper == nil || s.executionStopper.StopExecution(ctx, binding.ExecutionID, "task_deleted", false) != nil {
+		return ErrManagedAgentDeleteBlocked
+	}
+	operation, err = managed.GetManagedAgentLatestOperation(ctx, binding.ID)
+	if err != nil || models.ManagedAgentOperationActive(operation.State) {
+		return ErrManagedAgentDeleteBlocked
+	}
+	return nil
 }
 
 func (s *Service) deleteTaskStopTargets(ctx context.Context, id string) ([]taskStopTarget, error) {

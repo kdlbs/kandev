@@ -46,6 +46,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		streamGuard = s.lockCancelInFlightGuard(payload.SessionID)
 		defer streamGuard.release()
 	}
+	if payload.Data.Type == agentEventComplete && !s.shouldProcessManagedCompletion(ctx, payload.ManagedAgentOperationID) {
+		return
+	}
 	// Cancellation owns the yielded interval between the guarded preparation
 	// and lifecycle wait. Terminal frames from that captured execution/prompt
 	// remain admissible so the lifecycle manager can drain them; frames from a
@@ -182,7 +185,14 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.handleToolUpdateEvent(ctx, payload)
 
 	case agentEventComplete:
-		s.handleCompleteStreamEventWithGuardRelease(ctx, payload, streamGuard)
+		if s.handleCompleteStreamEventWithGuardRelease(ctx, payload, streamGuard) && payload.ManagedAgentOperationID != "" {
+			if delivery, ok := s.agentManager.(managedAgentCompletionDelivery); ok {
+				if err := delivery.AcknowledgeManagedAgentCompletion(ctx, payload.ManagedAgentOperationID); err != nil {
+					s.logger.Warn("failed to acknowledge managed-agent completion",
+						zap.String("operation_id", payload.ManagedAgentOperationID), zap.Error(err))
+				}
+			}
+		}
 
 	case agentEventError:
 		s.handleAgentErrorEvent(ctx, payload)
@@ -259,6 +269,32 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// human-driven turn where the session already left WAITING_FOR_INPUT.
 		s.applyParkedTransition(ctx, taskID, sessionID, false, "", false, models.TaskSessionStateWaitingForInput)
 	}
+}
+
+type managedAgentCompletionDelivery interface {
+	ManagedAgentCompletionPending(context.Context, string) (bool, error)
+	AcknowledgeManagedAgentCompletion(context.Context, string) error
+}
+
+type managedAgentStreamMessagePublisher interface {
+	PublishManagedAgentStreamMessage(context.Context, string, bool) error
+}
+
+func (s *Service) shouldProcessManagedCompletion(ctx context.Context, operationID string) bool {
+	if operationID == "" {
+		return true
+	}
+	delivery, ok := s.agentManager.(managedAgentCompletionDelivery)
+	if !ok {
+		return true
+	}
+	pending, err := delivery.ManagedAgentCompletionPending(ctx, operationID)
+	if err != nil {
+		s.logger.Warn("failed to read managed-agent completion receipt",
+			zap.String("operation_id", operationID), zap.Error(err))
+		return false
+	}
+	return pending
 }
 
 func (s *Service) responseAttemptResetOwnsCurrentPrompt(
@@ -368,9 +404,9 @@ func (s *Service) completeTurnForStreamEvent(
 	ctx context.Context,
 	payload *lifecycle.AgentStreamEventPayload,
 	capturedTurnIDs ...string,
-) {
+) error {
 	if payload == nil {
-		return
+		return nil
 	}
 	var capturedTurnID string
 	if len(capturedTurnIDs) > 0 {
@@ -388,21 +424,21 @@ func (s *Service) completeTurnForStreamEvent(
 			stale = true
 		}
 		if stale && s.acceptedDispatchInFlight(payload.SessionID) {
-			s.completeTurnForTaskSessionWithSuccessorPolicy(ctx, payload.TaskID, payload.SessionID, true)
-			return
+			return s.completeTurnForTaskSessionWithSuccessorPolicy(ctx, payload.TaskID, payload.SessionID, true)
 		}
 		if err := s.completeTurnForTaskSessionCheckedOwned(ctx, payload.TaskID, payload.SessionID, capturedTurnID); err != nil {
 			s.logger.Warn("failed to complete stream event's captured turn",
 				zap.String("session_id", payload.SessionID),
 				zap.String("turn_id", capturedTurnID),
 				zap.Error(err))
+			return err
 		}
 		if successorTurnID == capturedTurnID {
 			s.clearAcceptedQueuedDispatch(payload.SessionID)
 		}
-		return
+		return nil
 	}
-	s.completeTurnForTaskSessionWithSuccessorPolicy(
+	return s.completeTurnForTaskSessionWithSuccessorPolicy(
 		ctx,
 		payload.TaskID,
 		payload.SessionID,
@@ -461,7 +497,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 				zap.Error(err))
 		}
 	}
-	s.completeTurnForStreamEvent(ctx, payload)
+	_ = s.completeTurnForStreamEvent(ctx, payload)
 }
 
 // handleSessionStatusEvent handles session_status events by storing resume token and creating a status message.
@@ -568,25 +604,29 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 	}
 
 	if s.messageCreator != nil {
-		if err := s.messageCreator.CreateToolCallMessage(
-			ctx,
-			payload.TaskID,
-			payload.Data.ToolCallID,
-			payload.Data.ParentToolCallID, // Pass parent for subagent nesting
-			payload.Data.ToolTitle,
-			payload.Data.ToolStatus,
-			payload.SessionID,
-			s.getActiveTurnID(payload.SessionID),
-			payload.Data.Normalized, // Pass normalized tool data for message metadata
-		); err != nil {
-			s.logger.Error("failed to create tool call message",
-				zap.String("task_id", payload.TaskID),
-				zap.String("tool_call_id", payload.Data.ToolCallID),
-				zap.Error(err))
+		if payload.ManagedAgentOperationID != "" {
+			s.publishManagedAgentStreamMessage(ctx, payload, false)
 		} else {
-			s.logger.Debug("created tool call message",
-				zap.String("task_id", payload.TaskID),
-				zap.String("tool_call_id", payload.Data.ToolCallID))
+			if err := s.messageCreator.CreateToolCallMessage(
+				ctx,
+				payload.TaskID,
+				payload.Data.ToolCallID,
+				payload.Data.ParentToolCallID, // Pass parent for subagent nesting
+				payload.Data.ToolTitle,
+				payload.Data.ToolStatus,
+				payload.SessionID,
+				s.getActiveTurnID(payload.SessionID),
+				payload.Data.Normalized, // Pass normalized tool data for message metadata
+			); err != nil {
+				s.logger.Error("failed to create tool call message",
+					zap.String("task_id", payload.TaskID),
+					zap.String("tool_call_id", payload.Data.ToolCallID),
+					zap.Error(err))
+			} else {
+				s.logger.Debug("created tool call message",
+					zap.String("task_id", payload.TaskID),
+					zap.String("tool_call_id", payload.Data.ToolCallID))
+			}
 		}
 
 		// Allow tool calls to wake session from WAITING_FOR_INPUT.
@@ -660,7 +700,7 @@ func (s *Service) saveAgentTextIfPresent(ctx context.Context, payload *lifecycle
 }
 
 func (s *Service) saveAgentTextForTurn(ctx context.Context, payload *lifecycle.AgentStreamEventPayload, turnID string) {
-	if payload.Data.Text == "" || payload.SessionID == "" {
+	if payload.Data.Text == "" || payload.SessionID == "" || payload.ManagedAgentOperationID != "" {
 		return
 	}
 	if turnID == "" {
@@ -738,12 +778,34 @@ func (s *Service) handleStreamingEventKind(
 			zap.String("session_id", payload.SessionID))
 		return
 	}
+	if payload.ManagedAgentOperationID != "" {
+		s.publishManagedAgentStreamMessage(ctx, payload, payload.Data.IsAppend || payload.Data.MessageUpdated)
+		return
+	}
 	if payload.Data.IsAppend {
 		s.appendStreamingChunk(ctx, kind, messageID, payload.TaskID, payload.Data.Text, appendFn)
 		return
 	}
 	turnID := s.getActiveTurnID(payload.SessionID)
 	s.createStreamingChunk(ctx, kind, messageID, payload.TaskID, payload.Data.Text, payload.SessionID, turnID, createFn)
+}
+
+func (s *Service) publishManagedAgentStreamMessage(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	updated bool,
+) {
+	if s.messageCreator == nil || payload == nil || payload.Data == nil || payload.Data.MessageID == "" {
+		return
+	}
+	publisher, ok := s.messageCreator.(managedAgentStreamMessagePublisher)
+	if !ok {
+		return
+	}
+	if err := publisher.PublishManagedAgentStreamMessage(ctx, payload.Data.MessageID, updated); err != nil {
+		s.logger.Warn("failed to publish persisted managed-agent stream message",
+			zap.String("message_id", payload.Data.MessageID), zap.Error(err))
+	}
 }
 
 // handleMessageStreamingEvent handles streaming message events for real-time text updates.
@@ -870,23 +932,27 @@ func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecyc
 			// create a message (and implicitly a turn) after the turn settled.
 			fallbackMsgType = ""
 		}
-		if err := s.messageCreator.UpdateToolCallMessage(
-			ctx,
-			payload.TaskID,
-			payload.Data.ToolCallID,
-			payload.Data.ParentToolCallID, // Pass parent for subagent nesting
-			status,
-			"", // result - no longer used, tool results in NormalizedPayload
-			payload.SessionID,
-			payload.Data.ToolTitle,  // Include title from update event
-			turnID,                  // Turn ID for fallback creation
-			fallbackMsgType,         // Empty for settled terminal reconciliations
-			payload.Data.Normalized, // Pass normalized tool data for message metadata
-		); err != nil {
-			s.logger.Warn("failed to update tool call message",
-				zap.String("task_id", payload.TaskID),
-				zap.String("tool_call_id", payload.Data.ToolCallID),
-				zap.Error(err))
+		if payload.ManagedAgentOperationID != "" {
+			s.publishManagedAgentStreamMessage(ctx, payload, true)
+		} else {
+			if err := s.messageCreator.UpdateToolCallMessage(
+				ctx,
+				payload.TaskID,
+				payload.Data.ToolCallID,
+				payload.Data.ParentToolCallID, // Pass parent for subagent nesting
+				status,
+				"", // result - no longer used, tool results in NormalizedPayload
+				payload.SessionID,
+				payload.Data.ToolTitle,  // Include title from update event
+				turnID,                  // Turn ID for fallback creation
+				fallbackMsgType,         // Empty for settled terminal reconciliations
+				payload.Data.Normalized, // Pass normalized tool data for message metadata
+			); err != nil {
+				s.logger.Warn("failed to update tool call message",
+					zap.String("task_id", payload.TaskID),
+					zap.String("tool_call_id", payload.Data.ToolCallID),
+					zap.Error(err))
+			}
 		}
 	}
 	s.recordSubagentContextFromFrame(ctx, payload, turnID)
@@ -2934,7 +3000,7 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 	ctx context.Context,
 	payload *lifecycle.AgentStreamEventPayload,
 	streamGuard *lockedCancelInFlightGuard,
-) {
+) bool {
 	s.logger.Debug("handling complete stream event",
 		zap.String("task_id", payload.TaskID),
 		zap.String("session_id", payload.SessionID))
@@ -2943,7 +3009,7 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 	// Load session once up front — used by storeResumeToken, state check, and setSessionWaitingForInput.
 	session, ok := s.loadCompleteEventSession(ctx, payload)
 	if !ok {
-		return
+		return false
 	}
 
 	// Update resume token with latest ACP session ID and message UUID on every turn.
@@ -2963,11 +3029,13 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 
 	if terminalCompleteStream {
 		s.flushTerminalCompleteStream(ctx, payload, session, terminalMarker)
-		return
+		return true
 	}
 
 	s.persistCompleteStreamOutput(ctx, payload, session, completionTurnID)
-	s.completeTurnForStreamEvent(ctx, payload, completionTurnID)
+	if err := s.completeTurnForStreamEvent(ctx, payload, completionTurnID); err != nil {
+		return false
+	}
 
 	// Publish agent turn message event so the office comment bridge can
 	// auto-post the agent's response as a task comment. Published here
@@ -3002,13 +3070,13 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 
 	// Office sessions park at IDLE between scheduler runs; cancelled turns skip that path so the session stays promptable.
 	if s.reconcileCompleteEventRuntime(ctx, payload, session, completionTurnID) {
-		return
+		return true
 	}
 
 	// READY events own workflow transitions and queued prompt execution.
 	// If we're still RUNNING here, avoid racing READY by forcing WAITING/REVIEW.
 	if s.deferCompleteEventStateTransition(payload, session) {
-		return
+		return true
 	}
 
 	// Positive path: this complete event owns the running→WAITING_FOR_INPUT
@@ -3025,6 +3093,7 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 	// task still flips to WAITING — only subtasks (ParentID non-empty)
 	// get the guard.
 	s.setSessionWaitingForInputAfterComplete(ctx, payload, session, streamGuard)
+	return true
 }
 
 func (s *Service) storeCompleteEventResumeToken(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
@@ -3137,6 +3206,9 @@ func (s *Service) deferCompleteEventStateTransition(
 	if session == nil || session.State != models.TaskSessionStateRunning {
 		return false
 	}
+	if isRemoteTerminalCompletion(payload) {
+		return false
+	}
 	// Deferring the running→waiting transition to a READY event. If no READY
 	// follows, the session stays RUNNING and the chat UI keeps showing the
 	// agent as working even though the turn already completed. This is the
@@ -3146,6 +3218,18 @@ func (s *Service) deferCompleteEventStateTransition(
 		zap.String("task_id", payload.TaskID),
 		zap.String("session_id", payload.SessionID))
 	return true
+}
+
+func isRemoteTerminalCompletion(payload *lifecycle.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil {
+		return false
+	}
+	data, ok := payload.Data.Data.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	terminal, _ := data["remote_terminal"].(bool)
+	return terminal
 }
 
 func (s *Service) setSessionWaitingForInputAfterComplete(

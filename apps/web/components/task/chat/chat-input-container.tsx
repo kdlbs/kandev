@@ -111,6 +111,8 @@ type ChatInputContainerProps = {
   isCompleted?: boolean;
   sessionErrorMessage?: string;
   needsRecovery?: boolean;
+  externallyDisabled?: boolean;
+  externalDisabledReason?: string;
   /** The task-owned launch card renders the failed-start recovery. */
   launchErrorOwned?: boolean;
   executorUnavailable?: boolean;
@@ -326,6 +328,8 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       isFailed: p.isFailed,
       needsRecovery: props.needsRecovery ?? false,
       executorUnavailable,
+      externallyDisabled: props.externallyDisabled,
+      externalDisabledReason: props.externalDisabledReason,
       isAgentBusy,
       supportsSteering: props.supportsSteering ?? false,
       hasAgentCommands: p.hasAgentCommands,

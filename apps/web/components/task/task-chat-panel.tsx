@@ -629,6 +629,13 @@ type TaskChatPanelProps = {
   onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
   /** Hide the sessions dropdown (session tabs in dockview replace it) */
   hideSessionsDropdown?: boolean;
+  /** Hide provider-specific composer controls and local workspace affordances. */
+  hideAgentControls?: boolean;
+  /** Render only the text editor and submit/cancel action. */
+  minimalToolbar?: boolean;
+  /** Disable sending while a managed submission is unresolved. */
+  externallyDisabled?: boolean;
+  externalDisabledReason?: string;
   /** Mobile layout renders the task queue above its session picker. */
   hideLaunchQueueStatus?: boolean;
   /** Mobile layout renders the WIP queue above its session picker. */
@@ -1060,6 +1067,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onPendingScrollConsumed,
   hideLaunchQueueStatus = false,
   hideWipQueueStatus = false,
+  hideAgentControls = false,
+  minimalToolbar = false,
+  externallyDisabled = false,
+  externalDisabledReason,
 }: TaskChatPanelProps) {
   const isArchived = useIsTaskArchived();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
@@ -1347,7 +1358,11 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           panelState={panelState}
           isSending={isSending}
           hideSessionsDropdown={hideSessionsDropdown}
-          hidePlanMode={embedded}
+          minimalToolbar={minimalToolbar}
+          hideAgentControls={hideAgentControls}
+          hidePlanMode={embedded || hideAgentControls}
+          externallyDisabled={externallyDisabled}
+          externalDisabledReason={externalDisabledReason}
           showScrollToLastPrompt={showScrollButton}
           onScrollToLastPrompt={scrollToLastPrompt}
           lastPromptScrollDirection={scrollDirection}
@@ -1376,6 +1391,10 @@ type ChatFooterProps = {
   panelState: ReturnType<typeof useChatPanelState>;
   isSending: boolean;
   hideSessionsDropdown?: boolean;
+  minimalToolbar?: boolean;
+  hideAgentControls?: boolean;
+  externallyDisabled?: boolean;
+  externalDisabledReason?: string;
   hidePlanMode?: boolean;
   showScrollToLastPrompt: boolean;
   onScrollToLastPrompt: () => void;
@@ -1405,6 +1424,10 @@ function ChatFooter({
   panelState,
   isSending,
   hideSessionsDropdown,
+  minimalToolbar,
+  hideAgentControls,
+  externallyDisabled,
+  externalDisabledReason,
   hidePlanMode,
   showScrollToLastPrompt,
   onScrollToLastPrompt,
@@ -1435,7 +1458,11 @@ function ChatFooter({
       panelState={panelState}
       isSending={isSending}
       hideSessionsDropdown={hideSessionsDropdown}
+      minimalToolbar={minimalToolbar}
+      hideAgentControls={hideAgentControls}
       hidePlanMode={hidePlanMode}
+      externallyDisabled={externallyDisabled}
+      externalDisabledReason={externalDisabledReason}
       showScrollToLastPrompt={showScrollToLastPrompt}
       onScrollToLastPrompt={onScrollToLastPrompt}
       lastPromptScrollDirection={lastPromptScrollDirection}

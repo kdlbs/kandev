@@ -564,6 +564,7 @@ type Service struct {
 	comments                    CommentRepository
 	taskStateActivity           TaskStateActivityLogger
 	secretStore                 secrets.SecretStore
+	cursorCloudEnabled          bool
 	workspaceSecretDeleter      WorkspaceSecretDeleter
 	baseBranchPusher            AgentBaseBranchPusher
 	comparisonTargetPusher      AgentComparisonTargetPusher
@@ -698,6 +699,12 @@ func (s *Service) AttachmentRepository() repository.AttachmentRepository {
 // Workspace-scoped secret references are rejected before a profile is saved.
 func (s *Service) SetSecretStore(secretStore secrets.SecretStore) {
 	s.secretStore = secretStore
+}
+
+// SetCursorCloudEnabled sets the process-wide admission gate captured at boot.
+// Existing managed bindings use a separate observation and cancellation path.
+func (s *Service) SetCursorCloudEnabled(enabled bool) {
+	s.cursorCloudEnabled = enabled
 }
 
 // SetWorkspaceSecretDeleter wires workspace-secret cleanup to workspace

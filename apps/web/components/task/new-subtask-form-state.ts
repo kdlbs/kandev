@@ -106,6 +106,8 @@ export function useSubtaskFormState(workspaceId: string | null): DialogFormState
       seededExecutorProfileId: null,
       autopilot,
       setAutopilot,
+      autoCreatePR: false,
+      setAutoCreatePR: NOOP,
       discoveredRepositories,
       setDiscoveredRepositories,
       discoverReposLoading,

@@ -23,6 +23,7 @@ An executor determines where Kandev creates a task environment and runs `agentct
 | Local Docker  | Supported when the global Docker runtime is enabled and its daemon is reachable | `/workspace` in a new Docker container                                  | You need a repeatable container boundary                                 |
 | Kubernetes    | Dependency-bound on cluster access, namespaced RBAC, admission, storage, and streaming support | `/workspace` in one Pod per task | You need sessions scheduled inside an administrator-managed cluster boundary |
 | Sprites.dev   | Supported, provider-dependent                                                   | `/workspace` in a provider sandbox                                      | You need remote compute and accept provider lifecycle/billing            |
+| Cursor Cloud  | Experimental; disabled by default                                               | Cursor-hosted agent for one GitHub repository                           | You want managed remote coding without a Kandev-local workspace           |
 | SSH           | Supported for repository sources on a trusted host                              | A task folder on a trusted SSH host                                     | You need a remote host with SSH, SFTP, forwarding, and clone credentials |
 | Remote Docker | Supported over SSH; local Git sources are not yet rejected (see below) | `/workspace` in a container on a remote Docker daemon | You want a container boundary on one remote machine, including a host that accepts no filesystem writes, and do not run Kubernetes |
 
@@ -133,6 +134,65 @@ unadvertised model or rewrite the saved profile model.
 A missing host-probe model remains an advisory warning and does not disable
 profile selection. Portable configuration can improve parity, but it does not
 guarantee equal host and executor model catalogs.
+
+### Cursor Cloud
+
+Cursor Cloud runs an interactive task on Cursor-hosted compute. It does not
+create a Kandev workspace or expose terminal, file editing, LSP, preview, or
+local Git controls. Enable the `features.cursorCloud` toggle and restart
+Kandev before configuring or selecting this executor. The shipped prod, dev,
+and e2e profiles keep it disabled.
+
+Create a **Cursor Cloud** executor profile from **Settings > Executors**. Store
+the Cursor Cloud API key in a Kandev Global secret and select that secret in
+the profile. The key uses the Cursor account's billing and attribution. Anyone
+authorized to use this profile can submit paid work to that account, so limit
+profile access and rotate the key through the secret store.
+
+Set **Managed MCP callback URL** to the HTTPS origin of this Kandev installation
+or to `https://your-domain.example/api/v1/managed-agent-mcp`. The callback must
+be reachable by Cursor Cloud over HTTPS. A reverse proxy must forward this
+route to Kandev and preserve its authorization header. A proxy that requires
+interactive browser sign-in cannot serve as the callback. The profile's
+**Test connection** action checks the key, Cursor API access, and callback URL
+syntax. It does not prove that Cursor Cloud can reach the callback. The live
+smoke test below is required before enabling the feature for an installation.
+
+Use a compatible Cursor Cloud agent profile and choose one GitHub repository
+with a published starting branch or commit. The task dialog discloses that
+Cursor receives the published repository content; local workspace edits stay
+in Kandev and are not uploaded. Cursor creates its own result branch. Kandev
+does not fetch, merge, or push that branch into a local workspace. Automatic
+pull-request creation is a separate task option and is off by default.
+
+Kandev keeps the cloud conversation attached to the task session. Follow-up
+prompts use that conversation. If a request may have reached Cursor but its
+result cannot be identified, Kandev blocks further prompts and asks you to
+resolve the submission. Bind a matching remote run when one exists. Retry only
+after acknowledging that Cursor may perform the same work twice. Stop remains
+pending until Cursor confirms cancellation.
+
+Kandev stores the activity it has already received and recovers remote run
+status after a disconnect or backend restart. Provider stream history can
+expire; Kandev then shows a history-gap notice and retrieves the available
+terminal result. Cursor Cloud keeps its own agent independently of a Kandev
+task archive or deletion. Archive stops known active work when possible but
+does not remove the remote Cursor agent; remove provider-side resources through
+Cursor when needed.
+
+#### Live rollout check
+
+Automated tests use a local mock and never submit paid Cursor work. Before
+enabling the feature on an installation, use a disposable repository and a
+dedicated key. Enable the toggle for that installation and restart Kandev.
+Test the API key, published ref, model, and a callback from an actual cloud
+run. Exercise a Kandev user question and answer, a streamed tool call, a
+follow-up, Stop, and a backend restart during a run. Confirm that the same
+remote conversation resumes without a duplicate prompt, results stay out of
+the local workspace, and the optional pull request follows the user's choice.
+Disable the toggle and confirm that existing history remains readable and new
+work is rejected. Record redacted outcomes, remove the disposable Cursor
+resources, and keep shipped defaults disabled until this check succeeds.
 
 ### Script behavior is runtime-specific
 

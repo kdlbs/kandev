@@ -39,6 +39,7 @@ import {
   type DockerBuildSuccess,
 } from "@/components/settings/profile-edit/docker-sections";
 import { SpritesApiKeyCard } from "@/components/settings/profile-edit/sprites-api-key-card";
+import { CursorCloudConfigCard } from "@/components/settings/profile-edit/cursor-cloud-config-card";
 import { DockerNetworkCard } from "@/components/settings/profile-edit/docker-network-card";
 import { buildProfileConfig } from "@/components/settings/profile-edit/build-create-profile-config";
 import { dockerNetworksInvalidReasonKey } from "@/components/settings/profile-edit/build-docker-network-config";
@@ -230,6 +231,8 @@ function useCreateProfileFormState(executorType: ExecutorType) {
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows([]);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(null);
+  const [cursorCloudSecretId, setCursorCloudSecretId] = useState<string | null>(null);
+  const [cursorCloudCallbackUrl, setCursorCloudCallbackUrl] = useState("");
   const remoteAuth = useCreateRemoteAuthState();
   const [dockerfile, setDockerfile] = useState("");
   const [imageTag, setImageTag] = useState("");
@@ -287,6 +290,10 @@ function useCreateProfileFormState(executorType: ExecutorType) {
     placeholders,
     spritesSecretId,
     setSpritesSecretId,
+    cursorCloudSecretId,
+    setCursorCloudSecretId,
+    cursorCloudCallbackUrl,
+    setCursorCloudCallbackUrl,
     networkPolicyRules: remoteAuth.networkPolicyRules,
     setNetworkPolicyRules: remoteAuth.setNetworkPolicyRules,
     remoteCredentials: remoteAuth.remoteCredentials,
@@ -377,36 +384,18 @@ function CreateProfileSections({
           secrets={secrets}
         />
       )}
-      {form.isDocker && (
-        <>
-          <DockerfileBuildCard
-            dockerfile={form.dockerfile}
-            baselineDockerfile=""
-            onDockerfileChange={form.setDockerfile}
-            imageTag={form.imageTag}
-            baselineImageTag=""
-            onImageTagChange={form.setImageTag}
-            onBuildSuccess={form.recordDockerBuildSuccess}
-          />
-          <DockerNetworkCard
-            primaryNetwork={form.primaryNetwork}
-            onPrimaryNetworkChange={form.setPrimaryNetwork}
-            primaryGwPriority={form.primaryGwPriority}
-            onPrimaryGwPriorityChange={form.setPrimaryGwPriority}
-            additionalNetworks={form.additionalNetworks}
-            onAddAdditionalNetwork={form.addAdditionalNetwork}
-            onUpdateAdditionalNetwork={form.updateAdditionalNetwork}
-            onRemoveAdditionalNetwork={form.removeAdditionalNetwork}
-          />
-          {form.isLocalDocker && (
-            <UserNamespacesCard
-              enabled={form.allowUserNamespaces}
-              baselineEnabled={false}
-              onChange={form.setAllowUserNamespaces}
-            />
-          )}
-        </>
+      {executorType === "cursor_cloud" && (
+        <CursorCloudConfigCard
+          secretId={form.cursorCloudSecretId}
+          baselineSecretId={null}
+          callbackUrl={form.cursorCloudCallbackUrl}
+          baselineCallbackUrl=""
+          secrets={secrets}
+          onSecretIdChange={form.setCursorCloudSecretId}
+          onCallbackUrlChange={form.setCursorCloudCallbackUrl}
+        />
       )}
+      <CreateDockerProfileSection form={form} />
       <CreateRemoteCredentialsSection executorType={executorType} form={form} secrets={secrets} />
       {form.isSprites && (
         <NetworkPoliciesCard
@@ -451,6 +440,44 @@ function CreateProfileSections({
         mcpPolicyErrorKey={form.mcpPolicyErrorKey}
         onPolicyChange={form.setMcpPolicy}
       />
+    </>
+  );
+}
+
+function CreateDockerProfileSection({
+  form,
+}: {
+  form: ReturnType<typeof useCreateProfileFormState>;
+}) {
+  if (!form.isDocker) return null;
+  return (
+    <>
+      <DockerfileBuildCard
+        dockerfile={form.dockerfile}
+        baselineDockerfile=""
+        onDockerfileChange={form.setDockerfile}
+        imageTag={form.imageTag}
+        baselineImageTag=""
+        onImageTagChange={form.setImageTag}
+        onBuildSuccess={form.recordDockerBuildSuccess}
+      />
+      <DockerNetworkCard
+        primaryNetwork={form.primaryNetwork}
+        onPrimaryNetworkChange={form.setPrimaryNetwork}
+        primaryGwPriority={form.primaryGwPriority}
+        onPrimaryGwPriorityChange={form.setPrimaryGwPriority}
+        additionalNetworks={form.additionalNetworks}
+        onAddAdditionalNetwork={form.addAdditionalNetwork}
+        onUpdateAdditionalNetwork={form.updateAdditionalNetwork}
+        onRemoveAdditionalNetwork={form.removeAdditionalNetwork}
+      />
+      {form.isLocalDocker && (
+        <UserNamespacesCard
+          enabled={form.allowUserNamespaces}
+          baselineEnabled={false}
+          onChange={form.setAllowUserNamespaces}
+        />
+      )}
     </>
   );
 }
@@ -516,6 +543,9 @@ function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormS
     name: form.name.trim(),
     mcp_policy: form.mcpPolicy || undefined,
     config: buildProfileConfig({
+      isCursorCloud: form.cursorCloudSecretId !== null || form.cursorCloudCallbackUrl.length > 0,
+      cursorCloudSecretId: form.cursorCloudSecretId,
+      cursorCloudCallbackUrl: form.cursorCloudCallbackUrl,
       isRemote: form.isRemote,
       isSprites: form.isSprites,
       isDocker: form.isDocker,

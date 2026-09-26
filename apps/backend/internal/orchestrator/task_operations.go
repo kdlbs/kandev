@@ -22,6 +22,7 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentruntimekind "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/editors/capabilities"
 	"github.com/kandev/kandev/internal/events"
@@ -617,6 +618,7 @@ func (s *Service) startCreatedSessionWithComposedPrompt(
 }
 
 type startCreatedSessionOptions struct {
+	AutoCreatePR                bool
 	initialCreatePrompt         bool
 	skipTaskDescriptionFallback bool
 	promptAlreadyComposed       bool
@@ -943,6 +945,7 @@ func (s *Service) startCreatedSession(
 		McpMode:        mcpMode,
 		Attachments:    attachments,
 		TurnID:         initialTurnID,
+		AutoCreatePR:   options.AutoCreatePR,
 	}
 	if options.initialCreatePrompt && session.IsPassthrough {
 		launchOptions.OnExecutionAdmitted = func(executionID string) {
@@ -1208,6 +1211,7 @@ func (s *Service) StartTaskWithEnvAndSkills(ctx context.Context, taskID string, 
 // some callers supply. Keeping them in one struct avoids growing startTask's
 // already long positional parameter list for every new orthogonal concern.
 type startTaskOptions struct {
+	AutoCreatePR bool
 	// ProfileExplicit marks a non-empty profile selected through an explicit
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// this new session.
@@ -1784,6 +1788,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		StartAgent:           true,
 		McpMode:              mcpMode,
 		Attachments:          attachments,
+		AutoCreatePR:         opts.AutoCreatePR,
 		Env:                  env,
 		AdditionalSkillSlugs: append([]string(nil), opts.AdditionalSkillSlugs...),
 		RouteOverride:        route,
@@ -3606,10 +3611,22 @@ func (s *Service) sessionAlreadyPromptReady(ctx context.Context, sessionID strin
 	if _, active := s.resumeAttemptStore().current(sessionID); active {
 		return false
 	}
-	probeCtx := context.WithoutCancel(ctx)
-	existing, ok := s.executor.GetExecutionBySession(sessionID)
-	return ok && existing != nil &&
-		(s.agentManager == nil || s.agentManager.IsAgentReadyForPrompt(probeCtx, sessionID))
+	if s.executor != nil {
+		if existing, ok := s.executor.GetExecutionBySession(sessionID); ok && existing != nil {
+			if s.agentManager == nil {
+				return true
+			}
+			return s.agentManager.IsAgentReadyForPrompt(context.WithoutCancel(ctx), sessionID)
+		}
+	}
+	if s.agentManager == nil {
+		return false
+	}
+	remoteStatus, err := s.agentManager.GetRemoteRuntimeStatusBySession(context.WithoutCancel(ctx), sessionID)
+	if err != nil || remoteStatus == nil || remoteStatus.RuntimeName != agentruntimekind.RuntimeCursorCloud {
+		return false
+	}
+	return s.agentManager.IsAgentReadyForPrompt(context.WithoutCancel(ctx), sessionID)
 }
 
 func (s *Service) waitForSharedResumeAttempt(
@@ -4231,6 +4248,15 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		resp.NeedsResume = false
 		return resp, nil
 	}
+	// Managed runtimes can keep a durable conversation prompt-ready after the
+	// provider finishes a turn, even though there is no local agent process to
+	// report as running. Keep the composer available without asking passive page
+	// recovery to launch that conversation again.
+	if running != nil && isActiveSessionState(session.State) && s.agentManager != nil &&
+		s.agentManager.IsAgentReadyForPrompt(context.WithoutCancel(ctx), sessionID) {
+		resp.NeedsResume = false
+		return resp, nil
+	}
 
 	// 3. Session can be resumed if it has a resume token
 	if resumeToken != "" {
@@ -4462,6 +4488,11 @@ func (s *Service) applyRemoteRuntimeStatus(ctx context.Context, sessionID string
 	resp.RemoteState = status.State
 	resp.RemoteName = status.RemoteName
 	resp.RemoteStatusErr = publicRemoteStatusError(status.ErrorMessage)
+	resp.RemoteRepositoryID = status.RepositoryID
+	resp.RemoteBranch = status.Branch
+	resp.RemotePullRequestURL = status.PullRequestURL
+	resp.RemoteAgentURL = status.AgentURL
+	resp.RemoteHistoryGap = status.HistoryGap
 	if status.CreatedAt != nil && !status.CreatedAt.IsZero() {
 		resp.RemoteCreatedAt = status.CreatedAt.UTC().Format(time.RFC3339)
 	}

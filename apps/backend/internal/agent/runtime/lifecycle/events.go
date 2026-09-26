@@ -380,6 +380,15 @@ func (p *EventPublisher) PublishAgentStreamEventPayload(payload *AgentStreamEven
 	}
 }
 
+// PublishAgentStreamEventPayload forwards a pre-built stream event through the
+// manager's configured event publisher.
+func (m *Manager) PublishAgentStreamEventPayload(payload *AgentStreamEventPayload) {
+	if m == nil || m.eventPublisher == nil {
+		return
+	}
+	m.eventPublisher.PublishAgentStreamEventPayload(payload)
+}
+
 func agentStreamSubjectID(ownerKind ExecutionOwnerKind, sessionID, runSessionID string) string {
 	if ownerKind == ExecutionOwnerRun && runSessionID != "" {
 		return runSessionID

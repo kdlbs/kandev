@@ -495,6 +495,7 @@ func newSettingsRouter(t *testing.T, repo store.Repository, hub Broadcaster) *gi
 // TestDuplicateProfileEndpoint_CopiesAndBroadcasts verifies the HTTP endpoint copies a kanban profile and broadcasts agent.profile.created.
 func TestDuplicateProfileEndpoint_CopiesAndBroadcasts(t *testing.T) {
 	repo := newFakeSettingsRepo()
+	seedAgent(repo, "agent-1", "claude_code", false)
 	repo.profiles["source-1"] = &models.AgentProfile{
 		ID:               "source-1",
 		AgentID:          "agent-1",

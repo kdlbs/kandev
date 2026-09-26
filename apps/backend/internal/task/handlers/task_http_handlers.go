@@ -789,6 +789,7 @@ type httpCreateTaskRequest struct {
 	ExecutorID             string                    `json:"executor_id,omitempty"`
 	ExecutorProfileID      string                    `json:"executor_profile_id,omitempty"`
 	PlanMode               bool                      `json:"plan_mode,omitempty"`
+	AutoCreatePR           bool                      `json:"auto_create_pr,omitempty"`
 	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
 	ParentID               string                    `json:"parent_id,omitempty"`
 	WorkspacePath          string                    `json:"workspace_path,omitempty"`
@@ -976,8 +977,9 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		deferredLaunch = map[string]interface{}{
 			"intent": intent, "agent_profile_id": body.AgentProfileID, "executor_id": body.ExecutorID,
 			"executor_profile_id": body.ExecutorProfileID, "prompt": description,
-			"plan_mode":   body.PlanMode,
-			"attachments": body.Attachments,
+			"plan_mode":      body.PlanMode,
+			"auto_create_pr": body.AutoCreatePR,
+			"attachments":    body.Attachments,
 		}
 	}
 
@@ -1585,6 +1587,7 @@ func (h *TaskHandlers) dispatchTaskSession(
 			Prompt:              description,
 			SkipMessageRecord:   false,
 			PlanMode:            body.PlanMode,
+			AutoCreatePR:        body.AutoCreatePR,
 			Attachments:         body.Attachments,
 			InitialCreatePrompt: dispatch.initialCreatePrompt,
 		})

@@ -56,6 +56,22 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 var registrations = []runtimeFlagRegistration{
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.cursorCloud",
+			EnvVar:          "KANDEV_FEATURES_CURSOR_CLOUD",
+			Kind:            KindFeature,
+			Label:           "Cursor Cloud",
+			Description:     "Enables managed Cursor Cloud conversations for configured executor profiles.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Cursor Cloud submits paid work to a remote provider and uses a scoped callback. Enable only after reviewing account billing, authorization, and callback reachability.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CursorCloud },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CursorCloud = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             "features.lspBrowserContinuity",
 			EnvVar:          "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY",
 			Kind:            KindFeature,

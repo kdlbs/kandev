@@ -52,13 +52,24 @@ type CompatReason =
   | "no-methods"
   | "files-match"
   | "env-secret"
-  | "no-creds";
+  | "no-creds"
+  | "managed-pair";
+
+const CURSOR_CLOUD_AGENT_ID = "cursor_cloud";
 
 function evalAgentCompat(
   agent: { agent_name: string },
   executorProfile: Pick<ExecutorProfile, "config" | "executor_type">,
   authSpecs: RemoteAuthSpec[],
 ): { ok: boolean; reason: CompatReason } {
+  if (executorProfile.executor_type === "cursor_cloud") {
+    return agent.agent_name === CURSOR_CLOUD_AGENT_ID
+      ? { ok: true, reason: "managed-pair" }
+      : { ok: false, reason: "managed-pair" };
+  }
+  if (agent.agent_name === CURSOR_CLOUD_AGENT_ID) {
+    return { ok: false, reason: "managed-pair" };
+  }
   if (!executorRequiresAgentCredentials(executorProfile.executor_type)) {
     return { ok: true, reason: "executor-local" };
   }

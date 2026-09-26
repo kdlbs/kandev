@@ -57,17 +57,19 @@ async function createProfiles(
   apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
 ) {
   const { agents } = await apiClient.listAgents();
+  // This test creates ordinary CLI profiles; Cursor Cloud profile setup is executor-scoped.
+  const localProfileAgents = agents.filter(
+    (candidate) => candidate.id !== "dynamic" && candidate.id !== "cursor_cloud",
+  );
   const agent =
-    agents.find((candidate) => candidate.name === "mock-agent") ??
-    agents.find((candidate) => candidate.id !== "dynamic");
+    agents.find((candidate) => candidate.name === "mock-agent") ?? localProfileAgents[0];
   if (!agent) throw new Error("no concrete agents available in test fixtures");
   const agentId = agent.id;
   const profileA = await apiClient.createAgentProfile(agentId, "Handoff Filter Profile A", {
     model: "mock-fast",
   });
   const profileBAgentId =
-    agents.find((candidate) => candidate.id !== "dynamic" && candidate.id !== agentId)?.id ??
-    agentId;
+    localProfileAgents.find((candidate) => candidate.id !== agentId)?.id ?? agentId;
   const profileB = await apiClient.createAgentProfile(profileBAgentId, "Handoff Filter Profile B", {
     model: "mock-slow",
   });

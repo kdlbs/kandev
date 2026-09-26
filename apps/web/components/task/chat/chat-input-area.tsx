@@ -396,6 +396,8 @@ type ChatInputAreaProps = {
   hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
+  externallyDisabled?: boolean;
+  externalDisabledReason?: string;
   placeholderOverride?: string;
   surfaceClassName?: string;
   /** Always-on affordance: scrolls the transcript to the top of the last

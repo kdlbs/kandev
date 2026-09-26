@@ -369,6 +369,7 @@ export function useDialogComputed({
     workflowAgentProfileId,
     effectiveAgentProfileId,
     selectedExecutorProfileName: exec.selectedExecutorProfile?.name ?? null,
+    selectedExecutorType: exec.selectedExecutorProfile?.executor_type ?? null,
     compatibleAgentProfiles: exec.compatibleAgentProfiles,
     authLoaded: exec.authLoaded,
     noCompatibleAgent: exec.noCompatibleAgent,

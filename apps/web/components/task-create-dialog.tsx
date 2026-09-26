@@ -120,6 +120,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onComposerSubmit={props.onComposerSubmit}
       />
       <CreateModeAgentSelectors {...props} />
+      <CursorCloudPRChoice {...props} />
       {props.bottomSlot}
     </>
   );
@@ -177,7 +178,30 @@ function SessionModeBody(props: DialogFormBodyProps) {
         AgentSelectorComponent={AgentSelector}
         ExecutorProfileSelectorComponent={ExecutorProfileSelector}
       />
+      <CursorCloudPRChoice {...props} />
     </>
+  );
+}
+
+function CursorCloudPRChoice(props: DialogFormBodyProps) {
+  const { t } = useTranslation();
+  if (props.selectedExecutorType !== "cursor_cloud") return null;
+  return (
+    <label className="flex min-h-11 items-start gap-3 rounded-md border p-3 text-sm">
+      <input
+        type="checkbox"
+        className="mt-0.5 size-4 accent-primary"
+        checked={props.fs.autoCreatePR}
+        onChange={(event) => props.fs.setAutoCreatePR(event.currentTarget.checked)}
+        disabled={props.isCreatingSession || props.isCreatingTask}
+      />
+      <span className="space-y-1">
+        <span className="block">{t("executors:cursorCloudAutoCreatePR")}</span>
+        <span className="block text-xs text-muted-foreground">
+          {t("executors:cursorCloudPublishedRepoDisclosure")}
+        </span>
+      </span>
+    </label>
   );
 }
 

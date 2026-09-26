@@ -122,6 +122,7 @@ export function buildDialogFormBodyProps(
     selectedAgentProfileName: computed.selectedAgentProfileName,
     effectiveWorkflowName: resolveWorkflowName(setup.workflows, computed.effectiveWorkflowId),
     executorProfileName: computed.selectedExecutorProfileName,
+    selectedExecutorType: computed.selectedExecutorType,
     extraFormSlot: props.extraFormSlot,
     aboveDescriptionSlot: props.aboveDescriptionSlot,
     bottomSlot: props.bottomSlot,

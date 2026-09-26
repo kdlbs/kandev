@@ -173,6 +173,11 @@ func (r *ProfileReconciler) cleanupOrphans(ctx context.Context) {
 		return
 	}
 	enabledAgents := r.registry.ListEnabled()
+	for _, ag := range r.registry.List() {
+		if _, managed := ag.(agents.ManagedRemoteAgent); managed && ag.Enabled() {
+			enabledAgents = append(enabledAgents, ag)
+		}
+	}
 	summary.enabledAgentCount = len(enabledAgents)
 	if len(enabledAgents) == 0 {
 		summary.skipped = true

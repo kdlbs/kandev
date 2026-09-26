@@ -31,6 +31,7 @@
   "common:terminal": "Technical term kept in English across localized developer tooling.",
   "common:terminalNumbered": "Technical term kept in English across localized developer tooling.",
   "executors:dockerfile": "Brand or product name, spelled the same in every language.",
+  "executors:cursorCloudTitle": "Cursor Cloud is the provider's product name.",
   "executors:janeDeveloper": "Example/sample content, not product copy.",
   "executors:sshIdentitySourceAgent": "Nothing but interpolated values and punctuation; there is no prose to translate.",
   "executors:typeKubernetes": "Brand or product name, spelled the same in every language.",

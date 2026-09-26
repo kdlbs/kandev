@@ -31,6 +31,8 @@ type ExecutionOwner = lifecycle.ExecutionOwner
 type OwnerAdmission = lifecycle.OwnerAdmission
 type LaunchRequest = lifecycle.LaunchRequest
 type RouteOverride = lifecycle.RouteOverride
+type ExecutionReference = lifecycle.ExecutionReference
+type AgentStreamEventData = lifecycle.AgentStreamEventData
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
 
 const (
@@ -94,6 +96,10 @@ type LaunchSpec struct {
 	// ExecutorID identifies the executor backend to dispatch on
 	// (e.g. "local_pc", "local_docker", "sprites").
 	ExecutorID string
+
+	// RuntimeName selects a specialized runtime when a router is installed.
+	// Empty keeps the default lifecycle runtime for existing callers.
+	RuntimeName string
 
 	// Workspace describes the workspace the agent operates in.
 	Workspace WorkspaceRef

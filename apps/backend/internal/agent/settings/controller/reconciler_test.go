@@ -1147,8 +1147,8 @@ func TestProfileReconciler_LogsOrphanCleanupSummary(t *testing.T) {
 		t.Fatalf("expected 1 summary log, got %d", len(entries))
 	}
 	fields := entries[0].ContextMap()
-	if fields["db_agent_count"] != int64(2) {
-		t.Errorf("db_agent_count = %v, want 2 including the dynamic virtual family", fields["db_agent_count"])
+	if fields["db_agent_count"] != int64(3) {
+		t.Errorf("db_agent_count = %v, want 3 including dynamic and managed virtual families", fields["db_agent_count"])
 	}
 	if fields["orphan_agent_count"] != int64(1) {
 		t.Errorf("orphan_agent_count = %v, want 1", fields["orphan_agent_count"])
@@ -1161,6 +1161,9 @@ func TestProfileReconciler_LogsOrphanCleanupSummary(t *testing.T) {
 	}
 	if fields["skipped"] != false {
 		t.Errorf("skipped = %v, want false", fields["skipped"])
+	}
+	if _, err := st.GetAgentByName(context.Background(), agents.CursorCloudAgentID); err != nil {
+		t.Errorf("Cursor Cloud agent family was removed by orphan reconciliation: %v", err)
 	}
 }
 

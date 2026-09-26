@@ -434,12 +434,30 @@ type PromptTurnIDSetter interface {
 
 // RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.
 type RemoteRuntimeStatus struct {
-	RuntimeName   agentruntime.Runtime
-	RemoteName    string
-	State         string
-	CreatedAt     *time.Time
-	LastCheckedAt time.Time
-	ErrorMessage  string
+	RuntimeName    agentruntime.Runtime
+	RemoteName     string
+	State          string
+	CreatedAt      *time.Time
+	LastCheckedAt  time.Time
+	ErrorMessage   string
+	RepositoryID   string
+	Branch         string
+	PullRequestURL string
+	AgentURL       string
+	HistoryGap     bool
+}
+
+type ManagedRuntimeLiveness string
+
+const (
+	ManagedRuntimeLivenessLive     ManagedRuntimeLiveness = "live"
+	ManagedRuntimeLivenessTerminal ManagedRuntimeLiveness = "terminal"
+	ManagedRuntimeLivenessAbsent   ManagedRuntimeLiveness = "absent"
+	ManagedRuntimeLivenessUnknown  ManagedRuntimeLiveness = "unknown"
+)
+
+type ManagedRuntimeLivenessProber interface {
+	ProbeManagedRuntimeLiveness(ctx context.Context, executionID string) (ManagedRuntimeLiveness, error)
 }
 
 // RemoteStatusPollRequest contains the fields from ExecutorRunning needed for remote status polling.
@@ -498,6 +516,7 @@ type LaunchAgentRequest struct {
 	Branch               string
 	TaskDescription      string                 // Task description to send via ACP prompt
 	Attachments          []v1.MessageAttachment // Attachments for the initial prompt (images/files)
+	AutoCreatePR         bool                   // Explicit managed-runtime pull-request choice; defaults false.
 	Priority             string
 	Metadata             map[string]interface{}
 	Env                  map[string]string
@@ -676,6 +695,7 @@ type LaunchOptions struct {
 	McpMode             string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
 	McpProfile          *mcpprofile.Context
 	Attachments         []v1.MessageAttachment
+	AutoCreatePR        bool
 	Env                 map[string]string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.

@@ -102,12 +102,15 @@ func TestProvide_MockAgentModes(t *testing.T) {
 			// Check agent count
 			all := reg.List()
 			if tt.wantOnlyMock {
-				if len(all) != 2 {
+				if len(all) != 3 {
 					t.Errorf("only mode: expected mock agent plus virtual families, got %d", len(all))
 				}
 			}
 			if !reg.Exists(agents.DynamicAgentID) {
 				t.Error("dynamic virtual family should always be registered")
+			}
+			if !reg.Exists(agents.CursorCloudAgentID) {
+				t.Error("Cursor Cloud virtual family should always be registered")
 			}
 			if tt.wantDefaultsCount > 0 && len(all) < tt.wantDefaultsCount {
 				t.Errorf("expected at least %d agents, got %d", tt.wantDefaultsCount, len(all))

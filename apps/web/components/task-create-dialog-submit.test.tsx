@@ -153,6 +153,8 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
     isSessionMode: false,
     isEditMode: false,
     autopilot: false,
+    autoCreatePR: false,
+    selectedExecutorType: null,
     priority: "medium",
     workflowAgentOverrides: {},
     isPassthroughProfile: false,

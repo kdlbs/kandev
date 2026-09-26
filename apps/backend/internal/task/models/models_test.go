@@ -108,6 +108,30 @@ func TestIsCompletionFollowUpSessionRequiresTrueBoolean(t *testing.T) {
 	require.False(t, IsCompletionFollowUpSession(nil))
 }
 
+func TestManagedAgentOperationActive(t *testing.T) {
+	tests := []struct {
+		state ManagedAgentSubmissionState
+		want  bool
+	}{
+		{ManagedAgentSubmissionReserved, true},
+		{ManagedAgentSubmissionSubmitting, true},
+		{ManagedAgentSubmissionAccepted, true},
+		{ManagedAgentSubmissionCancelling, true},
+		{ManagedAgentSubmissionUnknown, true},
+		{ManagedAgentSubmissionSucceeded, false},
+		{ManagedAgentSubmissionFailed, false},
+		{ManagedAgentSubmissionCancelled, false},
+		{ManagedAgentSubmissionRejected, false},
+		{ManagedAgentSubmissionRetryAcked, false},
+		{ManagedAgentSubmissionState("unexpected"), false},
+	}
+	for _, test := range tests {
+		t.Run(string(test.state), func(t *testing.T) {
+			require.Equal(t, test.want, ManagedAgentOperationActive(test.state))
+		})
+	}
+}
+
 func TestLoadSessionACPConfigBaselinePreservesEmptyJSONValues(t *testing.T) {
 	baseline, ok := LoadSessionACPConfigBaseline(map[string]interface{}{
 		SessionMetaKeyACPConfigBaseline: map[string]interface{}{
@@ -462,6 +486,7 @@ func TestExecutorTypeRuntime(t *testing.T) {
 		{ExecutorTypeRemoteDocker, agentruntime.RuntimeRemoteDocker},
 		{ExecutorTypeSprites, agentruntime.RuntimeSprites},
 		{ExecutorTypeKubernetes, agentruntime.RuntimeKubernetes},
+		{ExecutorTypeCursorCloud, agentruntime.RuntimeCursorCloud},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.in), func(t *testing.T) {
@@ -495,6 +520,17 @@ func TestKubernetesExecutorClassification(t *testing.T) {
 	}
 	if !IsContainerizedExecutorType(executorType) {
 		t.Fatal("IsContainerizedExecutorType(k8s) = false, want true")
+	}
+}
+
+func TestCursorCloudExecutorClassification(t *testing.T) {
+	t.Parallel()
+
+	if !IsRemoteExecutorType(ExecutorTypeCursorCloud) {
+		t.Fatal("IsRemoteExecutorType(cursor_cloud) = false, want true")
+	}
+	if IsContainerizedExecutorType(ExecutorTypeCursorCloud) {
+		t.Fatal("IsContainerizedExecutorType(cursor_cloud) = true, want false")
 	}
 }
 

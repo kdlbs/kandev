@@ -82,6 +82,7 @@ export interface TaskCreateDialogProps {
     prompt: string;
     agentProfileId: string;
     executorId: string;
+    autoCreatePR?: boolean;
     attachments?: ReturnType<
       typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
     >;
@@ -291,6 +292,7 @@ export type DialogComputedValues = {
   effectiveAgentProfileId: string;
   /** Display name of the currently selected executor profile (null if none). */
   selectedExecutorProfileName: string | null;
+  selectedExecutorType: string | null;
   /** True whenever `agentCompatState` is not `compatible`; gates submission. */
   noCompatibleAgent: boolean;
   /** Compatibility state of the effective agent profile with the selected executor profile. */
@@ -513,6 +515,8 @@ export type DialogFormState = {
   /** Create-mode opt-in. Autopilot is immutable after task creation. */
   autopilot: boolean;
   setAutopilot: (v: boolean) => void;
+  autoCreatePR: boolean;
+  setAutoCreatePR: (v: boolean) => void;
   /** Priority to submit with the created task. Defaults to `medium`. */
   priority: TaskPriority;
   setPriority: (v: TaskPriority) => void;
@@ -525,6 +529,8 @@ export type SubmitHandlersDeps = {
   autoTitle?: boolean;
   /** Create-mode opt-in. The backend fixes this value at task creation. */
   autopilot: boolean;
+  autoCreatePR: boolean;
+  selectedExecutorType: string | null;
   isPassthroughProfile: boolean;
   taskName: string;
   workspaceId: string | null;
@@ -563,6 +569,7 @@ export type SubmitHandlersDeps = {
     prompt: string;
     agentProfileId: string;
     executorId: string;
+    autoCreatePR?: boolean;
     attachments?: ReturnType<
       typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
     >;
@@ -712,6 +719,7 @@ export type DialogFormBodyProps = {
   /** Name of the effective workflow, for the workflow-locked incompatible note. */
   effectiveWorkflowName: string | null;
   executorProfileName: string | null;
+  selectedExecutorType: string | null;
   /** Optional render slot above the description editor. */
   aboveDescriptionSlot?: React.ReactNode;
   /** Optional render slot inside the dialog body (rendered above the chip row). */
