@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -97,11 +98,23 @@ func seedStepCompleteTarget(t *testing.T, repo *sqliterepo.Repository, taskID, s
 func newStepCompleteHandler(t *testing.T, taskSvc *service.Service, repo *sqliterepo.Repository, bus *mcpRecordingEventBus) *Handlers {
 	t.Helper()
 	return &Handlers{
-		taskSvc:     taskSvc,
-		sessionRepo: repo,
-		eventBus:    bus,
-		logger:      testLogger(t).WithFields(),
+		taskSvc:         taskSvc,
+		sessionRepo:     repo,
+		sessionLauncher: &stepCompleteIdentityLauncher{mockSessionLauncher: newMockSessionLauncher()},
+		eventBus:        bus,
+		logger:          testLogger(t).WithFields(),
 	}
+}
+
+type stepCompleteIdentityLauncher struct {
+	*mockSessionLauncher
+}
+
+func (l *stepCompleteIdentityLauncher) CaptureCompletionIntentPromptIdentity(
+	context.Context,
+	string,
+) (string, uint64, error) {
+	return "exec-current", 7, nil
 }
 
 type stepCompleteSessionReadBarrier struct {
@@ -277,10 +290,23 @@ func TestHandleStepComplete_RejectsSignalFromMovedTurn(t *testing.T) {
 // response reports accepted=true with the persisted step_id + signaled_at.
 func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	svc, repo := newTestTaskService(t)
+	workflowCtrl, workflowRepo := newTestWorkflowController(t)
 	seedStepCompleteTarget(t, repo, "task-first", "session-first", "step-1", models.TaskSessionStateRunning)
+	require.NoError(t, workflowRepo.CreateStep(context.Background(), &wfmodels.WorkflowStep{
+		ID: "step-1", WorkflowID: "workflow-first", Name: "First step", Position: 0,
+		AutoAdvanceRequiresSignal: true,
+	}))
+	_, err := repo.CreateTurnWithStepStamp(context.Background(), &models.Turn{
+		ID:            "turn-first",
+		TaskID:        "task-first",
+		TaskSessionID: "session-first",
+		StartedAt:     time.Now().UTC(),
+	})
+	require.NoError(t, err)
 	seedAgentProfileSnapshot(t, repo, "session-first", "claude-first-call")
 	bus := &mcpRecordingEventBus{}
 	h := newStepCompleteHandler(t, svc, repo, bus)
+	h.workflowCtrl = workflowCtrl
 
 	const counterKey = "source=agent;agent_type=claude-first-call"
 	before := readSignalReceivedCounterExact(t, counterKey)
@@ -300,6 +326,10 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
 	assert.Equal(t, true, payload["accepted"])
 	assert.Equal(t, "step-1", payload["step_id"])
+	intentID, ok := payload["completion_intent_id"].(string)
+	require.True(t, ok, "accepted completion must return a durable intent id")
+	assert.Equal(t, true, payload["advances"], "signal-gated completion must preserve main's advances response")
+	assert.NotContains(t, payload, "note")
 	// signaled_at is part of the documented response contract — pin its
 	// presence + RFC3339Nano shape so a future refactor can't silently
 	// drop or rename the field.
@@ -317,6 +347,18 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	assert.Equal(t, models.StepCompletionSourceAgent, bag.Source)
 	assert.Equal(t, "implementation finished", bag.Summary)
 	assert.Equal(t, "tests next", bag.Handoff)
+
+	intent, err := repo.GetCompletionIntent(context.Background(), intentID)
+	require.NoError(t, err)
+	assert.Equal(t, "turn-first", intent.TurnID)
+	assert.Equal(t, "task-first", intent.TaskID)
+	assert.Equal(t, "step-1", intent.WorkflowStepID)
+	assert.Equal(t, "exec-current", intent.AgentExecutionID)
+	assert.Equal(t, int64(7), intent.PromptGeneration)
+	assert.Equal(t, "implementation finished", intent.Summary)
+	assert.Equal(t, models.CompletionIntentStatePending, intent.State)
+	assert.WithinDuration(t, intent.RequestedAt.Add(models.CompletionIntentQuietGrace), intent.EligibleAt, time.Microsecond,
+		"accepted completion intent must wait through the conservative quiet grace")
 
 	// Bus event published with the public payload shape (no handoff/blockers
 	// on the wire — those live in the bag only).

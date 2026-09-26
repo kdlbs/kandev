@@ -1226,6 +1226,7 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 	client := createTestClient(t, mock.server.URL)
 	defer client.Close()
 
+	accepted := make(chan struct{}, 1)
 	execution := &AgentExecution{
 		ID:            "test-exec",
 		TaskID:        "test-task",
@@ -1233,6 +1234,9 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 		WorkspacePath: "/workspace",
 		agentctl:      client,
 		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+		initialPromptAccepted: func() {
+			accepted <- struct{}{}
+		},
 	}
 	dispatched := make(chan struct{}, 1)
 	execution.setInitialPromptDispatchCallbacks(func() { dispatched <- struct{}{} }, nil)
@@ -1259,12 +1263,24 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
+	select {
+	case <-accepted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("initial-prompt acceptance callback was not invoked")
+	}
 
-	// Wait for the prompt to be sent asynchronously
 	select {
 	case <-dispatched:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for initial prompt dispatch callback")
+	}
+
+	// Wait for the prompt to be sent asynchronously. Poll for the recorded
+	// action count instead of a fixed sleep so the check is prompt on fast
+	// runs and safely bounded on slow ones.
+	deadline := time.Now().Add(5 * time.Second)
+	for len(mock.getActionLog()) < 3 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	actions := mock.getActionLog()

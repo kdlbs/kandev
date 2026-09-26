@@ -918,6 +918,29 @@ func newAuthoritativeMemoryQueue(repo *sqliterepo.Repository, log *logger.Logger
 	)
 }
 
+func setupTestRepoWithSQLiteQueue(t *testing.T) (*sqliterepo.Repository, *messagequeue.Service) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
+	if err != nil {
+		t.Fatalf("failed to open test database: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+
+	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
+	if err != nil {
+		t.Fatalf("failed to create test repository: %v", err)
+	}
+	t.Cleanup(func() { _ = cleanup() })
+
+	queueRepo, err := messagequeue.NewSQLiteRepository(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("failed to create SQLite message queue repository: %v", err)
+	}
+	return repo, messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+}
+
 func strPtr(s string) *string { return &s }
 
 // setupTestRepo creates a real in-memory SQLite repository for testing.

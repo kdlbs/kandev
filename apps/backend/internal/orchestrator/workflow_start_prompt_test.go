@@ -484,8 +484,10 @@ func TestWorkflowAsyncStartFailure_PersistedQueueSurvivesRestart(t *testing.T) {
 	// This fixture intentionally uses a queue-only database to verify durable
 	// restart persistence. Entry-fenced admission requires the production
 	// shared task/queue database, so exercise the ordinary queue path here.
-	workflowStartPromptAttemptFromContext(attemptCtx).workflowEntryCaptured = false
-	workflowStartPromptAttemptFromContext(attemptCtx).workflowEntryRequired = false
+	attempt := workflowStartPromptAttemptFromContext(attemptCtx)
+	attempt.workflowEntryCaptured = false
+	attempt.workflowEntryRequired = false
+	attempt.workflowStep.StepID = ""
 
 	if err := queue.SetAutoRun(ctx, "workflow-fence-session", false); err != nil {
 		t.Fatalf("pause queue auto-run: %v", err)

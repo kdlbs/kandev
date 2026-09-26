@@ -56,6 +56,21 @@ func (m *Manager) SetExecutorRunningWriter(w ExecutorRunningWriter) {
 	m.wireKubernetesEnvironmentStore()
 }
 
+// withOfficeAgentProfileIDMetadata copies the Office profile identity onto a
+// snapshot's metadata map so the persisted running row keeps it across
+// persistence round trips. Ordinary launches with no Office identity pass
+// through unchanged.
+func withOfficeAgentProfileIDMetadata(execution *AgentExecution, metadata map[string]interface{}) map[string]interface{} {
+	if execution.OfficeAgentProfileID == "" {
+		return metadata
+	}
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
+	return metadata
+}
+
 // buildRunningFromExecution maps an in-memory execution into the persistence
 // shape. Used at every executionStore.Add success site so the DB row is always
 // derived from the same source of truth as the store.
@@ -64,6 +79,15 @@ func (m *Manager) SetExecutorRunningWriter(w ExecutorRunningWriter) {
 // pre-existing row (a previous run's resume state) so the lifecycle write
 // doesn't clobber data the orchestrator's narrow CAS update wrote earlier.
 func buildRunningFromExecution(execution *AgentExecution, prior *models.ExecutorRunning) *models.ExecutorRunning {
+	generation := execution.promptGenerationSnapshot()
+	return buildRunningFromExecutionWithPromptGeneration(execution, prior, generation)
+}
+
+func buildRunningFromExecutionWithPromptGeneration(
+	execution *AgentExecution,
+	prior *models.ExecutorRunning,
+	promptGeneration uint64,
+) *models.ExecutorRunning {
 	agentctlURL := execution.AgentctlURL()
 	agentctlPort := agentctlPortFromExecution(execution, agentctlURL)
 	pid := agentctlPIDFromExecution(execution)
@@ -74,11 +98,13 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 	}
 
 	metadata := execution.MetadataSnapshot()
-	if execution.OfficeAgentProfileID != "" {
-		if metadata == nil {
-			metadata = make(map[string]interface{})
+	metadata = withOfficeAgentProfileIDMetadata(execution, metadata)
+	persistentMetadata := FilterPersistentMetadata(metadata)
+	if promptGeneration > 0 {
+		if persistentMetadata == nil {
+			persistentMetadata = make(map[string]interface{})
 		}
-		metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
+		persistentMetadata[MetadataKeyPromptGeneration] = promptGeneration
 	}
 	running := &models.ExecutorRunning{
 		ID:                 executionInventorySessionID(execution),
@@ -97,7 +123,7 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		WorktreeID:         getMetadataString(metadata, MetadataKeyWorktreeID),
 		WorktreePath:       getMetadataString(metadata, "worktree_path"),
 		WorktreeBranch:     getMetadataString(metadata, MetadataKeyWorktreeBranch),
-		Metadata:           FilterPersistentMetadata(metadata),
+		Metadata:           persistentMetadata,
 		LastSeenAt:         lastSeenAt,
 	}
 	if officeProfileID := strings.TrimSpace(execution.OfficeAgentProfileID); officeProfileID != "" {
@@ -114,28 +140,33 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		running.Resumable = false
 		running.WorktreePath = execution.WorkspacePath
 	}
-	if prior != nil {
-		if strings.TrimSpace(prior.ExecutorID) != "" {
-			running.ExecutorID = prior.ExecutorID
-		}
-		if prior.ExecutionProfileID == execution.AgentProfileID {
-			running.ResumeToken = prior.ResumeToken
-			running.LastMessageUUID = prior.LastMessageUUID
-		}
-		// Preserve metadata keys the orchestrator owns (context_window, prepare_result, etc.)
-		// by merging prior metadata under our own keys. FilterPersistentMetadata above stripped
-		// transient lifecycle-only keys; the prior row's metadata has the orchestrator-owned
-		// keys we want to carry forward.
-		if running.Metadata == nil {
-			running.Metadata = make(map[string]interface{})
-		}
-		for k, v := range prior.Metadata {
-			if _, ok := running.Metadata[k]; !ok {
-				running.Metadata[k] = v
-			}
+	mergePriorExecutionState(running, execution, prior)
+	return running
+}
+
+func mergePriorExecutionState(running *models.ExecutorRunning, execution *AgentExecution, prior *models.ExecutorRunning) {
+	if prior == nil {
+		return
+	}
+	if strings.TrimSpace(prior.ExecutorID) != "" {
+		running.ExecutorID = prior.ExecutorID
+	}
+	if prior.ExecutionProfileID == execution.AgentProfileID {
+		running.ResumeToken = prior.ResumeToken
+		running.LastMessageUUID = prior.LastMessageUUID
+	}
+	// Preserve metadata keys the orchestrator owns (context_window, prepare_result, etc.)
+	// by merging prior metadata under our own keys. FilterPersistentMetadata above stripped
+	// transient lifecycle-only keys; the prior row's metadata has the orchestrator-owned
+	// keys we want to carry forward.
+	if running.Metadata == nil {
+		running.Metadata = make(map[string]interface{})
+	}
+	for k, v := range prior.Metadata {
+		if _, ok := running.Metadata[k]; !ok {
+			running.Metadata[k] = v
 		}
 	}
-	return running
 }
 
 func agentctlPortFromExecution(execution *AgentExecution, agentctlURL string) int {
@@ -272,21 +303,56 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 func (m *Manager) buildRunningForPersistence(
 	execution *AgentExecution,
 	prior *models.ExecutorRunning,
+	promptGeneration *uint64,
 ) *models.ExecutorRunning {
 	if execution == nil || m.executionStore == nil {
-		return buildRunningFromExecution(execution, prior)
+		var generation uint64
+		if promptGeneration != nil {
+			generation = *promptGeneration
+		} else if execution != nil {
+			generation = execution.promptGenerationSnapshot()
+		}
+		return buildRunningFromExecutionWithPromptGeneration(execution, prior, generation)
 	}
 
 	var running *models.ExecutorRunning
 	if err := m.executionStore.WithRLock(execution.ID, func(tracked *AgentExecution) {
-		running = buildRunningFromExecution(tracked, prior)
+		var generation uint64
+		if promptGeneration != nil {
+			generation = *promptGeneration
+		} else {
+			generation = tracked.promptGenerationSnapshot()
+		}
+		running = buildRunningFromExecutionWithPromptGeneration(tracked, prior, generation)
 	}); err == nil {
 		return running
 	}
-	return buildRunningFromExecution(execution, prior)
+	var generation uint64
+	if promptGeneration != nil {
+		generation = *promptGeneration
+	} else {
+		generation = execution.promptGenerationSnapshot()
+	}
+	return buildRunningFromExecutionWithPromptGeneration(execution, prior, generation)
 }
 
 func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *AgentExecution) error {
+	return m.persistExecutorRunningResultWithPromptGeneration(ctx, execution, nil)
+}
+
+func (m *Manager) persistExecutorRunningWithPromptGeneration(
+	ctx context.Context,
+	execution *AgentExecution,
+	promptGeneration uint64,
+) {
+	_ = m.persistExecutorRunningResultWithPromptGeneration(ctx, execution, &promptGeneration)
+}
+
+func (m *Manager) persistExecutorRunningResultWithPromptGeneration(
+	ctx context.Context,
+	execution *AgentExecution,
+	promptGeneration *uint64,
+) error {
 	if m.runningWriter == nil {
 		// Permitted in tests that don't exercise persistence; logged so a
 		// missed wire-up in production stands out.
@@ -328,7 +394,11 @@ func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *A
 		execution.AgentProfileID = prior.ExecutionProfileID
 	}
 
-	running := m.buildRunningForPersistence(execution, prior)
+	if promptGeneration == nil {
+		generation := execution.promptGenerationSnapshot()
+		promptGeneration = &generation
+	}
+	running := m.buildRunningForPersistence(execution, prior, promptGeneration)
 	// Attach the host-local liveness handle for local/standalone rows. Kept out
 	// of buildRunningFromExecution (a pure mapper) because the PID lives on the
 	// manager, wired from the agentctl launcher at DI. resolveLocalPID returns 0

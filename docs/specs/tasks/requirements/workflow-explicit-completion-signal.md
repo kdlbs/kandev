@@ -102,7 +102,7 @@ Signal-gated Kanban and Office workflows need a reliable distinction between an 
 - `step_complete_kandev` carries no vendor-specific eager-load metadata. Agents use their normal MCP catalog or tool-search mechanism to discover it in Kanban task mode.
 - Creating or loading an ACP session supplies the local Kandev MCP server. After a transient MCP reconnect, the client can list and call `step_complete_kandev` again without a user message or process restart.
 - Kandev does not pin the Claude ACP bridge version as part of this feature. Bridge selection retains the existing unversioned package behavior; diagnostics continue to report the version returned during ACP initialization.
-- Existing idempotency, clarification barriers, and re-open semantics remain unchanged. ADR 0015's planned manual "Mark complete & advance" fallback is not currently implemented and is outside this reliability fix.
+- Existing idempotency, clarification barriers, and re-open semantics remain unchanged. An accepted signal is durably bound to its exact current turn and conservatively reconciled when the provider terminal lifecycle event is missing; see [Administrative Turn Settlement](../../workflow/administrative-turn-settlement/spec.md). ADR 0015's planned manual "Mark complete & advance" fallback is not currently implemented and is outside this reliability fix.
 - The ordinary adjacent-next-step action remains available after an idle turn
   on a signal-gated step whose `on_turn_complete` action is `move_to_next`. It
   uses the existing manual task-move path and does not create a
@@ -148,7 +148,7 @@ The tool uses the standard MCP definition without `anthropic/alwaysLoad`. Client
 
 ## Persistence Guarantees
 
-The pending completion signal continues to use `TaskSession.Metadata` as specified by ADR 0015. Tool catalog state is not persisted; it is reconstructed from the session's MCP mode on new session, load, and reconnect. ACP bridge package resolution remains external to session data.
+The pending completion signal continues to be reflected in `TaskSession.Metadata` for compatibility, while an exact-turn completion intent supplies restart-safe settlement and duplicate suppression. Tool catalog state is not persisted; it is reconstructed from the session's MCP mode on new session, load, and reconnect. ACP bridge package resolution remains external to session data.
 
 ## Scenarios
 

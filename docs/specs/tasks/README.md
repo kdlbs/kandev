@@ -42,6 +42,7 @@ signals, and task-scoped scheduling contracts.
 - [Task completion, conversation follow-ups, and workspace access](requirements/task-completion.md)
 
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
+- [Administrative Turn Settlement](requirements/administrative-turn-settlement.md)
 - [Additional Session Workspace Reuse](requirements/additional-session-workspace-reuse.md)
 - [Task Archive Confirmation](requirements/archive-confirmation.md)
 - [Task removal navigation](requirements/removal-navigation.md)
@@ -85,6 +86,7 @@ signals, and task-scoped scheduling contracts.
 - [Quick Chat Sessions, Persistence, and Expiration](requirements/quick-chat-expiration.md)
 - [Quick Chat Agent Titles](requirements/quick-chat-agent-titles.md)
 - [Quick Chat Repository Context](requirements/quick-chat-repository-context.md)
+- [Recoverable cross-task delivery](requirements/recoverable-cross-task-delivery.md)
 - [Remote Contribution Tasks](requirements/remote-contribution-tasks.md)
 - [Rich task title previews](requirements/rich-task-title-previews.md)
 - [Queued run scheduling](requirements/run-scheduling.md)
@@ -156,6 +158,7 @@ signals, and task-scoped scheduling contracts.
 
 - [Task completion, conversation follow-ups, and workspace access](system-design/task-completion.md)
 
+- [Administrative Turn Settlement](system-design/administrative-turn-settlement.md)
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
