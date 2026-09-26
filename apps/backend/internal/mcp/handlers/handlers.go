@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -3137,33 +3138,46 @@ type taskMessageDispatchResult struct {
 }
 
 type taskMessageReviewRollback struct {
-	taskID           string
-	changed          bool
-	restoreTask      bool
-	taskState        v1.TaskState
-	workflowStepID   string
-	sessions         []taskMessageSessionRollback
-	sessionIDs       map[string]struct{}
-	selectedID       string
-	selectedState    models.TaskSessionState
-	hasSelectedState bool
-	queues           map[string]taskMessageQueueRollback
+	taskID                 string
+	targetSessionID        string
+	changed                bool
+	restoreTask            bool
+	taskState              v1.TaskState
+	workflowStepID         string
+	expectedTaskState      v1.TaskState
+	expectedWorkflowStepID string
+	hasExpectedTaskState   bool
+	sessions               []taskMessageSessionRollback
+	sessionIDs             map[string]struct{}
+	selectedID             string
+	selectedState          models.TaskSessionState
+	hasSelectedState       bool
+	queues                 map[string]taskMessageQueueRollback
 }
 
 type taskMessageSessionRollback struct {
-	sessionID            string
-	taskID               string
-	sessionIncarnationID string
-	state                models.TaskSessionState
-	expectedState        models.TaskSessionState
-	hasExpectedState     bool
-	error                string
-	completedAt          *time.Time
-	isPrimary            bool
-	agentProfileID       string
-	executorProfileID    string
-	agentProfileSnapshot map[string]interface{}
-	metadata             map[string]interface{}
+	sessionID                    string
+	taskID                       string
+	sessionIncarnationID         string
+	state                        models.TaskSessionState
+	expectedState                models.TaskSessionState
+	expectedUpdatedAt            time.Time
+	hasExpectedState             bool
+	allowOwnedRevisionAdvance    bool
+	expectedError                string
+	expectedCompletedAt          *time.Time
+	expectedIsPrimary            bool
+	expectedAgentProfileID       string
+	expectedExecutorProfileID    string
+	expectedAgentProfileSnapshot map[string]interface{}
+	expectedMetadata             map[string]interface{}
+	error                        string
+	completedAt                  *time.Time
+	isPrimary                    bool
+	agentProfileID               string
+	executorProfileID            string
+	agentProfileSnapshot         map[string]interface{}
+	metadata                     map[string]interface{}
 }
 
 type taskMessageQueueRollback struct {
@@ -3180,6 +3194,13 @@ type taskMessageSessionRollbackRepository interface {
 		ctx context.Context,
 		session *models.TaskSession,
 		expected models.TaskSessionState,
+	) (bool, error)
+	UpdateTaskSessionIfCurrentSnapshot(
+		ctx context.Context,
+		session *models.TaskSession,
+		expected models.TaskSessionState,
+		expectedUpdatedAt time.Time,
+		metadata map[string]interface{},
 	) (bool, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	DeleteTaskSession(ctx context.Context, session *models.TaskSession) error
@@ -3263,8 +3284,10 @@ func (r *taskMessageReviewRollback) captureSelectedSession(session *models.TaskS
 	r.hasSelectedState = true
 	for index := range r.sessions {
 		if r.sessions[index].sessionID == session.ID {
-			r.sessions[index].expectedState = session.State
-			r.sessions[index].hasExpectedState = true
+			if session.ID == r.targetSessionID {
+				captureExpectedTaskMessageSession(&r.sessions[index], session)
+				r.sessions[index].allowOwnedRevisionAdvance = true
+			}
 		}
 	}
 }
@@ -3285,8 +3308,10 @@ func (r *taskMessageReviewRollback) captureExpectedSessionStates(
 			(r.sessions[index].sessionIncarnationID != "" && session.QueueIncarnationID != r.sessions[index].sessionIncarnationID) {
 			return messagequeue.ErrSessionIdentityMismatch
 		}
-		r.sessions[index].expectedState = session.State
-		r.sessions[index].hasExpectedState = true
+		if session.ID == r.targetSessionID {
+			captureExpectedTaskMessageSession(&r.sessions[index], session)
+			r.sessions[index].allowOwnedRevisionAdvance = true
+		}
 	}
 	if r.selectedID != "" {
 		selected, err := repo.GetTaskSession(ctx, r.selectedID)
@@ -3314,6 +3339,7 @@ func captureTaskMessageSession(session *models.TaskSession) taskMessageSessionRo
 		sessionIncarnationID: session.QueueIncarnationID,
 		state:                session.State,
 		expectedState:        session.State,
+		expectedUpdatedAt:    session.UpdatedAt,
 		hasExpectedState:     true,
 		error:                session.ErrorMessage,
 		completedAt:          completedAt,
@@ -3325,7 +3351,32 @@ func captureTaskMessageSession(session *models.TaskSession) taskMessageSessionRo
 	if session.Metadata != nil {
 		snapshot.metadata = cloneTaskMessageMetadataMap(session.Metadata)
 	}
+	captureExpectedTaskMessageSession(&snapshot, session)
 	return snapshot
+}
+
+func captureExpectedTaskMessageSession(snapshot *taskMessageSessionRollback, session *models.TaskSession) {
+	if snapshot == nil || session == nil {
+		return
+	}
+	snapshot.expectedState = session.State
+	snapshot.expectedUpdatedAt = session.UpdatedAt
+	snapshot.hasExpectedState = true
+	snapshot.expectedError = session.ErrorMessage
+	snapshot.expectedCompletedAt = cloneTaskMessageTime(session.CompletedAt)
+	snapshot.expectedIsPrimary = session.IsPrimary
+	snapshot.expectedAgentProfileID = session.AgentProfileID
+	snapshot.expectedExecutorProfileID = session.ExecutorProfileID
+	snapshot.expectedAgentProfileSnapshot = cloneTaskMessageMetadataMap(session.AgentProfileSnapshot)
+	snapshot.expectedMetadata = cloneTaskMessageMetadataMap(session.Metadata)
+}
+
+func cloneTaskMessageTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func cloneTaskMessageMetadataMap(metadata map[string]interface{}) map[string]interface{} {
@@ -3411,7 +3462,7 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
 
 	default:
-		return h.dispatchUnpreparedTaskMessage(ctx, taskID, session, prompt, metadata, pinnedTarget)
+		return h.dispatchUnpreparedTaskMessage(ctx, taskID, session, prompt, metadata, pinnedTarget, interruptIfBusy)
 	}
 }
 
@@ -3422,8 +3473,9 @@ func (h *Handlers) dispatchUnpreparedTaskMessage(
 	prompt string,
 	metadata map[string]interface{},
 	pinnedTarget bool,
+	interruptIfBusy bool,
 ) (taskMessageDispatchResult, error) {
-	admission, queued, err := h.beginUnpreparedPeerMessageStart(ctx, taskID, session, prompt, metadata)
+	admission, queued, err := h.beginUnpreparedPeerMessageStart(ctx, taskID, session, prompt, metadata, interruptIfBusy)
 	if err != nil {
 		return taskMessageDispatchResult{}, err
 	}
@@ -3433,7 +3485,7 @@ func (h *Handlers) dispatchUnpreparedTaskMessage(
 	if admission != nil {
 		defer admission.Release()
 	}
-	return h.prepareAndDispatchTaskMessage(ctx, taskID, session, prompt, metadata, pinnedTarget, admission)
+	return h.prepareAndDispatchTaskMessage(ctx, taskID, session, prompt, metadata, pinnedTarget, interruptIfBusy, admission)
 }
 
 func (h *Handlers) beginUnpreparedPeerMessageStart(
@@ -3442,6 +3494,7 @@ func (h *Handlers) beginUnpreparedPeerMessageStart(
 	session *models.TaskSession,
 	prompt string,
 	metadata map[string]interface{},
+	interruptIfBusy bool,
 ) (orchestrator.PeerMessageStartAdmission, *taskMessageDispatchResult, error) {
 	if !h.shouldStartTaskMessageSession(ctx, session) {
 		return nil, nil, nil
@@ -3456,7 +3509,7 @@ func (h *Handlers) beginUnpreparedPeerMessageStart(
 	}
 	admission, err := provider.BeginPeerMessageStart(ctx, identity)
 	if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
-		result, queueErr := h.queueTaskMessageForIdentity(ctx, taskID, session, identity, prompt, metadata)
+		result, queueErr := h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata, interruptIfBusy)
 		if queueErr != nil {
 			return nil, nil, queueErr
 		}
@@ -3475,6 +3528,7 @@ func (h *Handlers) prepareAndDispatchTaskMessage(
 	prompt string,
 	metadata map[string]interface{},
 	pinnedTarget bool,
+	interruptIfBusy bool,
 	admission orchestrator.PeerMessageStartAdmission,
 ) (taskMessageDispatchResult, error) {
 	reviewRollback, err := h.captureTaskMessageReviewRollback(ctx, taskID, session, admission)
@@ -3483,17 +3537,35 @@ func (h *Handlers) prepareAndDispatchTaskMessage(
 	}
 	session, turnStartResult, err := h.prepareSessionForTaskMessage(ctx, taskID, session, pinnedTarget, admission)
 	if err != nil {
-		return h.handleTaskMessagePreparationError(ctx, taskID, session, prompt, metadata, reviewRollback, admission, err)
+		return h.handleTaskMessagePreparationError(ctx, taskID, session, prompt, metadata, reviewRollback, admission, interruptIfBusy, err)
 	}
 	reviewRollback.captureSelectedSession(session)
 	if err := reviewRollback.captureExpectedSessionStates(ctx, h.sessionRepo); err != nil {
 		h.rollbackTaskMessageReview(ctx, taskID, reviewRollback, admission)
 		return taskMessageDispatchResult{}, err
 	}
+	if err := reviewRollback.captureExpectedTaskState(ctx, h.taskSvc); err != nil {
+		h.rollbackTaskMessageReview(ctx, taskID, reviewRollback, admission)
+		return taskMessageDispatchResult{}, err
+	}
 	if turnStartResult.Queued {
 		return h.queueTaskMessageUntilWorkflowPromotion(ctx, taskID, session, prompt, metadata, reviewRollback, admission)
 	}
-	return h.dispatchPreparedTaskMessageWithReviewRollback(ctx, taskID, session, prompt, metadata, admission, reviewRollback)
+	return h.dispatchPreparedTaskMessageWithReviewRollback(ctx, taskID, session, prompt, metadata, admission, interruptIfBusy, reviewRollback)
+}
+
+func (r *taskMessageReviewRollback) captureExpectedTaskState(ctx context.Context, taskSvc *service.Service) error {
+	if r == nil || !r.restoreTask {
+		return nil
+	}
+	task, err := taskSvc.GetTask(ctx, r.taskID)
+	if err != nil {
+		return err
+	}
+	r.expectedTaskState = task.State
+	r.expectedWorkflowStepID = task.WorkflowStepID
+	r.hasExpectedTaskState = true
+	return nil
 }
 
 func (h *Handlers) captureTaskMessageReviewRollback(
@@ -3506,6 +3578,7 @@ func (h *Handlers) captureTaskMessageReviewRollback(
 	if err != nil {
 		return nil, err
 	}
+	reviewRollback.targetSessionID = session.ID
 	if err := reviewRollback.captureSessions(ctx, h.sessionRepo, taskID, session); err != nil {
 		h.rollbackTaskMessageReview(ctx, taskID, &reviewRollback, admission)
 		return nil, err
@@ -3525,15 +3598,18 @@ func (h *Handlers) handleTaskMessagePreparationError(
 	metadata map[string]interface{},
 	reviewRollback *taskMessageReviewRollback,
 	admission orchestrator.PeerMessageStartAdmission,
+	interruptIfBusy bool,
 	prepErr error,
 ) (taskMessageDispatchResult, error) {
 	if errors.Is(prepErr, executor.ErrExecutionAlreadyRunning) && admission != nil {
 		identity := admission.SessionIdentity()
 		releasePeerMessageStartAdmission(admission)
-		return h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata)
+		return h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata, interruptIfBusy)
 	}
-	if admission != nil {
-		_ = reviewRollback.captureExpectedSessionStates(ctx, h.sessionRepo)
+	// Preparation can persist a workflow step before returning an error, so
+	// compensation must compare against the state left by that preparation.
+	if captureErr := reviewRollback.captureExpectedTaskState(ctx, h.taskSvc); captureErr != nil {
+		reviewRollback.hasExpectedTaskState = false
 	}
 	h.rollbackTaskMessageReview(ctx, taskID, reviewRollback, admission)
 	return taskMessageDispatchResult{}, prepErr
@@ -3573,15 +3649,13 @@ func (h *Handlers) dispatchPreparedTaskMessageWithReviewRollback(
 	prompt string,
 	metadata map[string]interface{},
 	admission orchestrator.PeerMessageStartAdmission,
+	interruptIfBusy bool,
 	reviewRollback *taskMessageReviewRollback,
 ) (taskMessageDispatchResult, error) {
-	result, err := h.dispatchPreparedTaskMessageWithAdmission(ctx, taskID, session, prompt, metadata, admission)
+	result, err := h.dispatchPreparedTaskMessageWithAdmissionAndInterrupt(ctx, taskID, session, prompt, metadata, admission, interruptIfBusy)
 	if err != nil {
 		if isUnownedPeerMessageStartError(err) {
 			return taskMessageDispatchResult{}, err
-		}
-		if admission != nil && admission.IsActive() {
-			_ = reviewRollback.captureExpectedSessionStates(ctx, h.sessionRepo)
 		}
 		h.restoreTaskReviewForTaskMessage(ctx, taskID, *reviewRollback)
 	}
@@ -3627,6 +3701,18 @@ func (h *Handlers) dispatchPreparedTaskMessageWithAdmission(
 	metadata map[string]interface{},
 	admission orchestrator.PeerMessageStartAdmission,
 ) (taskMessageDispatchResult, error) {
+	return h.dispatchPreparedTaskMessageWithAdmissionAndInterrupt(ctx, taskID, session, prompt, metadata, admission, false)
+}
+
+func (h *Handlers) dispatchPreparedTaskMessageWithAdmissionAndInterrupt(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	admission orchestrator.PeerMessageStartAdmission,
+	interruptIfBusy bool,
+) (taskMessageDispatchResult, error) {
 	switch session.State {
 	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
 		releasePeerMessageStartAdmission(admission)
@@ -3636,7 +3722,7 @@ func (h *Handlers) dispatchPreparedTaskMessageWithAdmission(
 		return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
 	default:
 		if h.shouldStartTaskMessageSession(ctx, session) {
-			return h.startPreparedPeerTaskMessage(ctx, taskID, session, prompt, metadata, admission)
+			return h.startPreparedPeerTaskMessage(ctx, taskID, session, prompt, metadata, admission, interruptIfBusy)
 		}
 		return h.promptPreparedTaskMessage(ctx, taskID, session, prompt, metadata, admission)
 	}
@@ -3655,8 +3741,9 @@ func (h *Handlers) startPreparedPeerTaskMessage(
 	prompt string,
 	metadata map[string]interface{},
 	admission orchestrator.PeerMessageStartAdmission,
+	interruptIfBusy bool,
 ) (taskMessageDispatchResult, error) {
-	identity, admission, queued, err := h.admitPreparedPeerTaskMessage(ctx, taskID, session, prompt, metadata, admission)
+	identity, admission, queued, err := h.admitPreparedPeerTaskMessage(ctx, taskID, session, prompt, metadata, admission, interruptIfBusy)
 	if err != nil {
 		return taskMessageDispatchResult{}, err
 	}
@@ -3677,7 +3764,7 @@ func (h *Handlers) startPreparedPeerTaskMessage(
 		h.deleteRecordedUserMessageWithoutTurnRollback(ctx, recorded)
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
 			releasePeerMessageStartAdmission(admission)
-			return h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata)
+			return h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata, interruptIfBusy)
 		}
 		if errors.Is(err, messagequeue.ErrSessionIdentityMismatch) {
 			releasePeerMessageStartAdmission(admission)
@@ -3697,6 +3784,7 @@ func (h *Handlers) admitPreparedPeerTaskMessage(
 	prompt string,
 	metadata map[string]interface{},
 	admission orchestrator.PeerMessageStartAdmission,
+	interruptIfBusy bool,
 ) (messagequeue.QueueSessionIdentity, orchestrator.PeerMessageStartAdmission, *taskMessageDispatchResult, error) {
 	identity, err := h.resolveTaskMessageQueueIdentity(ctx, taskID, session)
 	if err != nil {
@@ -3716,7 +3804,7 @@ func (h *Handlers) admitPreparedPeerTaskMessage(
 	}
 	admission, err = provider.BeginPeerMessageStart(ctx, identity)
 	if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
-		result, queueErr := h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata)
+		result, queueErr := h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata, interruptIfBusy)
 		if queueErr != nil {
 			return messagequeue.QueueSessionIdentity{}, nil, nil, queueErr
 		}
@@ -3810,8 +3898,15 @@ func (h *Handlers) queueAfterUnownedPeerStart(
 	identity messagequeue.QueueSessionIdentity,
 	prompt string,
 	metadata map[string]interface{},
+	interruptIfBusy bool,
 ) (taskMessageDispatchResult, error) {
-	result, err := h.queueTaskMessageForIdentity(ctx, taskID, session, identity, prompt, metadata)
+	var result taskMessageDispatchResult
+	var err error
+	if interruptIfBusy {
+		result, err = h.queueAndInterruptTaskMessageForIdentity(ctx, taskID, session, identity, prompt, metadata)
+	} else {
+		result, err = h.queueTaskMessageForIdentity(ctx, taskID, session, identity, prompt, metadata)
+	}
 	if err != nil {
 		return taskMessageDispatchResult{}, &unownedPeerMessageStartError{cause: err}
 	}
@@ -3904,6 +3999,25 @@ func (h *Handlers) queueThenInterruptTaskMessage(ctx context.Context, taskID str
 		identity.SessionIncarnationID != session.QueueIncarnationID {
 		return taskMessageDispatchResult{}, messagequeue.ErrSessionIdentityMismatch
 	}
+	return h.queueAndInterruptTaskMessageForIdentity(ctx, taskID, session, identity, prompt, metadata)
+}
+
+func (h *Handlers) queueAndInterruptTaskMessageForIdentity(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	identity messagequeue.QueueSessionIdentity,
+	prompt string,
+	metadata map[string]interface{},
+) (taskMessageDispatchResult, error) {
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil {
+		return taskMessageDispatchResult{}, errors.New("message queue not available")
+	}
+	if identity.TaskID != taskID || identity.SessionID != session.ID ||
+		(session.QueueIncarnationID != "" && identity.SessionIncarnationID != session.QueueIncarnationID) {
+		return taskMessageDispatchResult{}, messagequeue.ErrSessionIdentityMismatch
+	}
 	queued, dispatched, err := h.sessionLauncher.QueueAndInterruptForPeerMessage(ctx, identity, prompt, metadata)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
@@ -3980,11 +4094,14 @@ func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskI
 		return taskMessageReviewRollback{}, err
 	}
 	rollback := taskMessageReviewRollback{
-		taskID:         taskID,
-		changed:        true,
-		restoreTask:    true,
-		taskState:      task.State,
-		workflowStepID: task.WorkflowStepID,
+		taskID:                 taskID,
+		changed:                true,
+		restoreTask:            true,
+		taskState:              task.State,
+		workflowStepID:         task.WorkflowStepID,
+		expectedTaskState:      task.State,
+		expectedWorkflowStepID: task.WorkflowStepID,
+		hasExpectedTaskState:   true,
 	}
 	if task.State != v1.TaskStateReview {
 		return rollback, nil
@@ -3992,9 +4109,12 @@ func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskI
 	if task.IsFromOffice {
 		return rollback, nil
 	}
-	if _, err := h.taskSvc.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
+	updated, err := h.taskSvc.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress)
+	if err != nil {
 		return taskMessageReviewRollback{}, fmt.Errorf("failed to transition task from REVIEW to IN_PROGRESS for task message: %w", err)
 	}
+	rollback.expectedTaskState = updated.State
+	rollback.expectedWorkflowStepID = updated.WorkflowStepID
 	h.logger.Info("task transitioned from REVIEW to IN_PROGRESS for task message",
 		zap.String("task_id", taskID))
 	return rollback, nil
@@ -4014,6 +4134,11 @@ func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID s
 		return
 	}
 	if rollback.restoreTask {
+		if !rollback.hasExpectedTaskState {
+			h.logger.Warn("skipping task and queue rollback without an owning task state",
+				zap.String("task_id", taskID))
+			return
+		}
 		ownerID, ownerState, ok := rollback.taskRestoreOwner()
 		if !ok {
 			h.logger.Warn("skipping task message rollback without an owning session",
@@ -4029,6 +4154,8 @@ func (h *Handlers) restoreTaskReviewForTaskMessage(ctx context.Context, taskID s
 			taskID,
 			ownerID,
 			ownerState,
+			rollback.expectedTaskState,
+			rollback.expectedWorkflowStepID,
 			taskState,
 			rollback.workflowStepID,
 		)
@@ -4072,6 +4199,16 @@ func (h *Handlers) restoreTaskMessageSessions(ctx context.Context, rollback task
 	repo, ok := h.sessionRepo.(taskMessageSessionRollbackRepository)
 	if !ok {
 		return errors.New("session rollback repository not available")
+	}
+	for _, snapshot := range rollback.sessions {
+		if _, err := loadOwnedTaskMessageSessionSnapshot(ctx, repo, snapshot); err != nil {
+			return err
+		}
+	}
+	if rollback.selectedID != "" {
+		if _, existed := rollback.sessionIDs[rollback.selectedID]; !existed {
+			return fmt.Errorf("task message rollback cannot delete unowned selected session %q", rollback.selectedID)
+		}
 	}
 	for _, snapshot := range rollback.sessions {
 		if err := restoreTaskMessageSessionSnapshot(ctx, repo, snapshot); err != nil {
@@ -4254,21 +4391,12 @@ func (h *Handlers) restoreTaskMessageQueueOwner(ctx context.Context, taskID, sel
 	return nil
 }
 func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSessionRollbackRepository, rollback taskMessageSessionRollback) error {
-	if !rollback.hasExpectedState {
-		return fmt.Errorf("task message rollback has no owning state for session %q", rollback.sessionID)
-	}
-	session, err := repo.GetTaskSession(ctx, rollback.sessionID)
+	session, err := loadOwnedTaskMessageSessionSnapshot(ctx, repo, rollback)
 	if err != nil {
 		return err
 	}
-	if session == nil {
-		return fmt.Errorf("task message rollback session %q is nil", rollback.sessionID)
-	}
-	if session.State == models.TaskSessionStateCancelled {
-		return errTaskMessageRollbackSuperseded
-	}
-	if session.State != rollback.expectedState {
-		return fmt.Errorf("task message rollback lost session %q state ownership", rollback.sessionID)
+	if taskMessageSessionMatchesRollbackSnapshot(session, rollback) {
+		return nil
 	}
 	expectedState := rollback.expectedState
 	session.State = rollback.state
@@ -4278,7 +4406,9 @@ func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSess
 	session.AgentProfileID = rollback.agentProfileID
 	session.ExecutorProfileID = rollback.executorProfileID
 	session.AgentProfileSnapshot = cloneTaskMessageMetadataMap(rollback.agentProfileSnapshot)
-	changed, err := repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
+	changed, err := repo.UpdateTaskSessionIfCurrentSnapshot(
+		ctx, session, expectedState, session.UpdatedAt, cloneTaskMessageMetadataMap(rollback.metadata),
+	)
 	if err != nil {
 		return err
 	}
@@ -4297,10 +4427,69 @@ func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSess
 			return err
 		}
 	}
-	if err := repo.UpdateSessionMetadata(ctx, rollback.sessionID, cloneTaskMessageMetadataMap(rollback.metadata)); err != nil {
-		return err
-	}
 	return nil
+}
+
+func loadOwnedTaskMessageSessionSnapshot(
+	ctx context.Context,
+	repo taskMessageSessionRollbackRepository,
+	rollback taskMessageSessionRollback,
+) (*models.TaskSession, error) {
+	if !rollback.hasExpectedState {
+		return nil, fmt.Errorf("task message rollback has no owning state for session %q", rollback.sessionID)
+	}
+	session, err := repo.GetTaskSession(ctx, rollback.sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, fmt.Errorf("task message rollback session %q is nil", rollback.sessionID)
+	}
+	if session.TaskID != rollback.taskID ||
+		(rollback.sessionIncarnationID != "" && session.QueueIncarnationID != rollback.sessionIncarnationID) {
+		return nil, messagequeue.ErrSessionIdentityMismatch
+	}
+	if session.State == models.TaskSessionStateCancelled {
+		return nil, errTaskMessageRollbackSuperseded
+	}
+	if session.State != rollback.expectedState {
+		return nil, fmt.Errorf("task message rollback lost session %q state ownership", rollback.sessionID)
+	}
+	if !rollback.allowOwnedRevisionAdvance && !session.UpdatedAt.Equal(rollback.expectedUpdatedAt) {
+		return nil, fmt.Errorf("task message rollback lost session %q revision ownership", rollback.sessionID)
+	}
+	if !taskMessageSessionRollbackOwnsCurrentState(session, rollback) {
+		return nil, fmt.Errorf("task message rollback lost session %q field ownership", rollback.sessionID)
+	}
+	return session, nil
+}
+
+func taskMessageSessionRollbackOwnsCurrentState(session *models.TaskSession, rollback taskMessageSessionRollback) bool {
+	return session.ErrorMessage == rollback.expectedError &&
+		equalTaskMessageTime(session.CompletedAt, rollback.expectedCompletedAt) &&
+		session.IsPrimary == rollback.expectedIsPrimary &&
+		session.AgentProfileID == rollback.expectedAgentProfileID &&
+		session.ExecutorProfileID == rollback.expectedExecutorProfileID &&
+		reflect.DeepEqual(session.AgentProfileSnapshot, rollback.expectedAgentProfileSnapshot) &&
+		reflect.DeepEqual(session.Metadata, rollback.expectedMetadata)
+}
+
+func taskMessageSessionMatchesRollbackSnapshot(session *models.TaskSession, rollback taskMessageSessionRollback) bool {
+	return session.State == rollback.state &&
+		session.ErrorMessage == rollback.error &&
+		equalTaskMessageTime(session.CompletedAt, rollback.completedAt) &&
+		session.IsPrimary == rollback.isPrimary &&
+		session.AgentProfileID == rollback.agentProfileID &&
+		session.ExecutorProfileID == rollback.executorProfileID &&
+		reflect.DeepEqual(session.AgentProfileSnapshot, rollback.agentProfileSnapshot) &&
+		reflect.DeepEqual(session.Metadata, rollback.metadata)
+}
+
+func equalTaskMessageTime(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
 }
 
 func (h *Handlers) resolveSessionAfterTaskMessageTurnStart(ctx context.Context, taskID string, submitted *models.TaskSession) (*models.TaskSession, error) {

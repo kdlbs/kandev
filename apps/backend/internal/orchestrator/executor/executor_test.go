@@ -2142,6 +2142,7 @@ func TestRunAgentProcessAsync_CleansUpOnStartFailure(t *testing.T) {
 		taskID, sessionID, _ string,
 		_ models.TaskSessionState,
 		_ string,
+		_ string,
 		errorValue models.LastAgentError,
 	) (bool, models.TaskSessionState, error) {
 		changed, _, err := repo.CommitBootstrapFailureIfCurrentExecution(
@@ -2341,6 +2342,7 @@ func TestHandleAgentProcessStartFailure_CancellationDuringCallbackStopsUnclaimed
 		ctx context.Context,
 		taskID, sessionID, _ string,
 		_ models.TaskSessionState,
+		_ string,
 		_ string,
 		errorValue models.LastAgentError,
 	) (bool, models.TaskSessionState, error) {
@@ -2694,6 +2696,7 @@ func newRunAgentProcessAsyncFailureFixture(t *testing.T) *runAgentProcessAsyncFa
 		ctx context.Context,
 		taskID, sessionID, _ string,
 		_ models.TaskSessionState,
+		_ string,
 		_ string,
 		errorValue models.LastAgentError,
 	) (bool, models.TaskSessionState, error) {

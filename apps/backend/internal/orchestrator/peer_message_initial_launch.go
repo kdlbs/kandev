@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -150,8 +151,8 @@ func (a *peerMessageStartAdmission) IsActive() bool {
 }
 
 // BeginPeerMessageStart acquires lifecycle ownership before a peer message can
-// run on_turn_start. The cancel guard is only acquired non-blockingly because
-// other established paths still enter lifecycle admission while holding it.
+// run on_turn_start. It never waits for the cancel guard while holding
+// lifecycle ownership, preserving the service's global lock order.
 func (s *Service) BeginPeerMessageStart(
 	ctx context.Context,
 	identity messagequeue.QueueSessionIdentity,
@@ -159,15 +160,36 @@ func (s *Service) BeginPeerMessageStart(
 	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
 		return nil, messagequeue.ErrSessionIdentityMismatch
 	}
+	if err := s.authorizeTaskSessionPair(ctx, identity.TaskID, identity.SessionID); err != nil {
+		return nil, err
+	}
+	for {
+		admission, retry, err := s.acquirePeerMessageStartAdmission(ctx, identity)
+		if err != nil {
+			return nil, err
+		}
+		if !retry {
+			return admission, nil
+		}
+	}
+}
+
+func (s *Service) acquirePeerMessageStartAdmission(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+) (PeerMessageStartAdmission, bool, error) {
 	lifecycleUnlock, acquired := s.tryAcquireSessionLifecycleLock(identity.SessionID)
 	if !acquired {
-		return nil, executor.ErrExecutionAlreadyRunning
+		return nil, false, executor.ErrExecutionAlreadyRunning
 	}
 	guard, releaseGuardRef := s.acquireCancelInFlightGuard(identity.SessionID)
 	if !guard.TryLock() {
 		releaseGuardRef()
 		lifecycleUnlock()
-		return nil, executor.ErrExecutionAlreadyRunning
+		if err := s.waitForPeerMessageStartGuard(ctx, identity.SessionID); err != nil {
+			return nil, false, err
+		}
+		return nil, true, nil
 	}
 	admission := &peerMessageStartAdmission{
 		service:         s,
@@ -176,33 +198,70 @@ func (s *Service) BeginPeerMessageStart(
 		cancelGuard:     guard,
 		releaseGuardRef: releaseGuardRef,
 	}
-	if s.currentCancellation(identity.SessionID) != nil {
+	if operation := s.currentCancellation(identity.SessionID); operation != nil {
 		admission.Release()
-		return nil, executor.ErrExecutionAlreadyRunning
+		if err := operation.wait(ctx); err != nil {
+			return nil, false, err
+		}
+		return nil, true, nil
 	}
+	if err := s.validatePeerMessageStartAdmission(ctx, admission); err != nil {
+		admission.Release()
+		return nil, false, err
+	}
+	return admission, false, nil
+}
+
+func (s *Service) validatePeerMessageStartAdmission(
+	ctx context.Context,
+	admission *peerMessageStartAdmission,
+) error {
+	identity := admission.identity
 	session, err := s.repo.GetTaskSession(ctx, identity.SessionID)
 	if err != nil {
-		admission.Release()
-		return nil, fmt.Errorf("failed to get session: %w", err)
+		return fmt.Errorf("failed to get session: %w", err)
 	}
 	if session == nil || session.TaskID != identity.TaskID || session.QueueIncarnationID != identity.SessionIncarnationID {
-		admission.Release()
-		return nil, messagequeue.ErrSessionIdentityMismatch
+		return messagequeue.ErrSessionIdentityMismatch
+	}
+	if isTerminalSessionState(session.State) {
+		return &executor.SessionStateSupersededError{SessionID: session.ID, State: session.State}
 	}
 	if session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning {
-		admission.Release()
-		return nil, executor.ErrExecutionAlreadyRunning
+		return executor.ErrExecutionAlreadyRunning
 	}
 	active, err := s.hasActiveExecutionForPeerMessage(ctx, identity.SessionID)
 	if err != nil {
-		admission.Release()
-		return nil, fmt.Errorf("check existing session execution: %w", err)
+		return fmt.Errorf("check existing session execution: %w", err)
 	}
 	if active {
-		admission.Release()
-		return nil, executor.ErrExecutionAlreadyRunning
+		return executor.ErrExecutionAlreadyRunning
 	}
-	return admission, nil
+	return nil
+}
+
+// waitForPeerMessageStartGuard waits without holding lifecycle ownership, then
+// retries admission so a completed cancellation is observed from durable state.
+func (s *Service) waitForPeerMessageStartGuard(ctx context.Context, sessionID string) error {
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		guard, release := s.acquireCancelInFlightGuard(sessionID)
+		if guard.TryLock() {
+			guard.Unlock()
+			release()
+			return nil
+		}
+		release()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 // StartCreatedSessionForPeerMessage admits a peer message only when it wins

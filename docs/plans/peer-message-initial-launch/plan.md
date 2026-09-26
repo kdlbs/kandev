@@ -88,25 +88,45 @@ Add these tests in the work order's new focused files:
 
 | Test | Criteria | Evidence |
 | --- | --- | --- |
-| `TestPeerMessageInitialLaunch_Delivery` | 001.1, 001.2 | One initial prompt, one later follow-up, preserved attribution |
-| `TestPeerMessageInitialLaunch_AdmissionOrders` | 001.2 | Message before bootstrap, during bootstrap, and after readiness |
-| `TestPeerMessageInitialLaunch_RollbackOwnership` | 001.3 | No stale state, turn, queue, or task restoration |
-| `TestExistingWorkspaceStart_ActiveAgent` | 001.3 | No configuration, description overwrite, new process, or stop |
-| `TestPeerMessageInitialLaunch_FailureOwnership` | 001.3 | Same-execution stale attempt cannot fail or stop its successor |
+| `TestPeerMessageInitialLaunch_Delivery` | 001.1, 001.2 | Losing start queues the follow-up without replacing the active initial turn; Auto-run OFF keeps it pending |
+| `TestPeerMessageInitialLaunch_HandlerKeepsFollowUpQueuedUntilTurnBoundary` | 001.2 | Real handler and blocked runtime retain the follow-up while the initial turn is active and Auto-run is OFF |
+| `TestPeerMessageInitialLaunch_QueuesBeforeWorkflowTurnPreparation` | 001.2 | In-flight initial launch queues before a second on-turn-start transition or mutation |
+| `TestPeerMessageInitialLaunch_PreservesOlderFIFOEntry` | 001.2 | Existing queued work stays ahead of the accepted follow-up |
+| `TestPeerMessageInitialLaunch_QueueRejectionDoesNotRollbackWinningProgress` | 001.3 | Full message handler returns queue-full while preserving the winning RUNNING session, task, turn, metadata, and queue |
+| `TestPeerMessageInitialLaunch_RollbackFencesSameStateSessionProgress` | 001.3 | Same-state session progress prevents stale session, task, and queue restoration |
+| `TestPeerMessageInitialLaunch_RollbackFencesTaskOnlyProgress` | 001.3 | A task state and workflow-step change cannot be rewound when the session row is unchanged |
+| `TestPeerMessageInitialLaunch_RollbackFencesSiblingSessionProgressDuringPreparation` | 001.3 | Failed dispatch preserves a newly selected session and the queue transferred to that owner |
+| `TestHandleMessageTask_DispatchErrorAfterSessionSwitchPreservesNewSessionOwner`, `TestHandleMessageTask_DispatchErrorPreservesNewSessionOwnerOutsideReview`, `TestHandleMessageTask_DispatchErrorAfterExistingSessionSwitchPreservesQueues` | 001.3 | Session-switch failures keep the selected owner, task progression, and transferred queue |
+| `TestHandleMessageTask_ParentInterruptDuringInitialLaunchAdmission` | 001.2 | Losing parent interrupt queues its exact message and interrupts once |
+| `TestStartCreatedSession_ActiveSessionReturnsBusy` | 001.3 | A stale session snapshot cannot launch over a newer active session |
+| `TestStartCreatedSessionForPeerMessage_ContendedLaunchReturnsBusy` | 001.3 | Concurrent peer launch loses admission without waiting or mutation |
+| `TestStartCreatedSessionForPeerMessage_ActiveRuntimeReturnsBusy` | 001.3 | Active runtime is refused before configuration or start |
+| `TestStartCreatedSessionForPeerMessage_RejectsReplacedSessionIdentity` | 001.3 | A replaced session incarnation cannot inherit launch admission |
+| `TestBeginPeerMessageStartWaitsForCancelAndRejectsTerminalSession` | 001.3 | Cancellation guard contention rechecks terminal state before queueing |
+| `TestBeginPeerMessageStartAuthorizesPairBeforeRepositoryRead` | 001.3 | Session authorization precedes repository access |
+| `TestNewServiceSessionStartingCallbackClassifiesRunningCASConflict` | 001.3 | Production `NewService` callback classifies a RUNNING CAS winner as busy |
+| `TestLaunchInitialCreatePromptBusyDoesNotFailLiveSession` | 001.3 | Initial-create failure handling preserves the live launch |
+| `TestScheduleTaskForSessionDoesNotRegressConcurrentInProgress` | 001.3 | A concurrent IN_PROGRESS write cannot be overwritten with SCHEDULING |
+| `TestBootstrapFailureCASMissDoesNotStopSameExecutionRetry` | 001.3 | Stale startup failure cannot stop a same-execution retry |
+| `TestCommitBootstrapFailureIfCurrentAttemptRejectsSameExecutionRetry` | 001.3 | Repository failure CAS rejects a stale session revision |
+| `TestPostgresBootstrapFailureIfCurrentAttemptRejectsSameExecutionRetry` | 001.3 | Environment-gated PostgreSQL failure CAS rejects a stale session revision |
+| `TestExistingWorkspaceStart_ActiveAgent`, `TestExistingWorkspaceStart_PreparedWorkspaceCanStart` | 001.3 | Active work is refused while a prepared workspace without an agent remains startable |
 
-Include Auto-run OFF, genuine owned failure, cancellation, and a prepared
-workspace without an agent. Preserve a waiting older FIFO entry where applicable.
-Each request is accounted for once under existing merge policy. Separate retries
-remain separate submissions; do not assert unsupported global deduplication.
+Genuine owned failure, cancellation, Auto-run OFF, and prepared-workspace cases
+are covered by the tests above and `TestBootstrapFailureProjection`. Preserve a
+waiting older FIFO entry where applicable. Each request is accounted for once
+under existing merge policy. Separate retries remain separate submissions; do
+not assert unsupported global deduplication.
 
 ## End-to-end evidence
 
-Enter through `handleMessageTask` while a real orchestrator launch is blocked
+Enter through `handleMessageTask` while the real orchestrator launch is blocked
 in a controllable runtime collaborator. Use authoritative session storage and
-the actual queue. Assert provider acceptance of the original brief followed by
-the queued message after the first turn ends. Observe configuration/start/stop
-counts and durable session/turn state. A fake launcher that only counts handler
-calls does not reproduce this incident.
+the actual queue. Assert acceptance of the original brief and retention of the
+queued follow-up while the initial turn remains active with Auto-run OFF. The
+existing queue-readiness tests cover dispatch at the later turn boundary.
+Observe durable session and turn state. A fake launcher that only counts
+handler calls does not reproduce this incident.
 
 There are no rendered changes. The backend agent-facing flow provides the
 end-to-end evidence; no browser scenario is required.
@@ -117,16 +137,8 @@ end-to-end evidence; no browser scenario is required.
 
 ## Verification results
 
-Implementation completed on 2026-09-26. Verification passed:
-
-- `go test ./internal/mcp/handlers -run '^TestPeerMessageInitialLaunch_' -count=1`.
-- `go test -race ./internal/mcp/handlers ./internal/orchestrator ./internal/orchestrator/executor ./internal/orchestrator/messagequeue -count=1`.
-- `go test -race ./internal/mcp/handlers -run '^(TestPeerMessageInitialLaunch_QueuesBeforeWorkflowTurnPreparation|TestPeerMessageInitialLaunch_QueueRejectionDoesNotRollbackWinningProgress)$' -count=1`.
-- `go test ./internal/mcp/... -run '^$'`.
-- `make -C apps/backend build` (passed; macOS outputs remained unsigned because codesign tools are unavailable in the environment).
-- `python3 scripts/list-docs.py validate`: 309 decisions and 1185 specifications.
-- `python3 scripts/lint-spec-files.py --all`: passed.
-- `git diff --check`: passed.
+Implementation completed on 2026-09-26. Final fixup verification is recorded in
+Task 01 below and must match the current PR head.
 
 ## Risks
 

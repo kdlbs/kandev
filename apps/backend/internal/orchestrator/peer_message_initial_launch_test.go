@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -68,7 +69,27 @@ func TestStartCreatedSessionForPeerMessage_ContendedLaunchReturnsBusy(t *testing
 	assert.Equal(t, models.TaskSessionStateCreated, current.State)
 }
 
-func TestBeginPeerMessageStartDoesNotWaitForCancelGuard(t *testing.T) {
+func TestScheduleTaskForSessionDoesNotRegressConcurrentInProgress(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-schedule-race", "session-schedule-race", models.TaskSessionStateCreated)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-schedule-race", v1.TaskStateTODO)
+	taskRepo.updateStateIfCurrentInHook = func(taskID string) {
+		taskRepo.mu.Lock()
+		defer taskRepo.mu.Unlock()
+		taskRepo.tasks[taskID].State = v1.TaskStateInProgress
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+
+	require.NoError(t, svc.scheduleTaskForSession(ctx, "task-schedule-race", "session-schedule-race"))
+
+	state, history := coordinatorStopTaskStateSnapshot(taskRepo, "task-schedule-race")
+	assert.Equal(t, v1.TaskStateInProgress, state)
+	assert.Empty(t, history, "the lost scheduling CAS must not write SCHEDULING")
+}
+
+func TestBeginPeerMessageStartWaitsForCancelAndRejectsTerminalSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-guard-contention", "session-guard-contention", models.TaskSessionStateCreated)
@@ -90,18 +111,51 @@ func TestBeginPeerMessageStartDoesNotWaitForCancelGuard(t *testing.T) {
 		completed <- admissionErr
 	}()
 
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-completed:
+			t.Fatalf("peer-message admission returned before cancellation committed: %v", err)
+		default:
+		}
+		unlockLifecycle, acquired := svc.tryAcquireSessionLifecycleLock(session.ID)
+		if acquired {
+			unlockLifecycle()
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateCancelled, "cancelled by coordinator"))
+	guard.release()
+
 	select {
 	case err := <-completed:
-		require.ErrorIs(t, err, executor.ErrExecutionAlreadyRunning)
+		var superseded *executor.SessionStateSupersededError
+		require.ErrorAs(t, err, &superseded)
+		require.Equal(t, models.TaskSessionStateCancelled, superseded.State)
 	case <-time.After(time.Second):
-		t.Fatal("peer-message admission waited for a cancel-in-flight guard")
+		t.Fatal("peer-message admission did not recheck the session after cancellation")
 	}
+}
 
-	releaseLifecycle, acquired := svc.tryAcquireSessionLifecycleLock(session.ID)
-	if acquired {
-		releaseLifecycle()
-	}
-	assert.True(t, acquired, "busy admission must release the lifecycle lock it acquired")
+func TestBeginPeerMessageStartAuthorizesPairBeforeRepositoryRead(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedTaskAndSession(t, baseRepo, "task-auth", "session-auth", models.TaskSessionStateCreated)
+	repo := &peerStartAccessCountingRepository{Repository: baseRepo}
+	svc := NewService(DefaultServiceConfig(), nil, &mockAgentManager{}, newMockTaskRepo(), repo, nil, nil, nil, testLogger())
+	denied := errors.New("session access denied")
+	svc.SetSessionAccessChecker(func(context.Context, string) error { return denied })
+
+	err := func() error {
+		_, beginErr := svc.BeginPeerMessageStart(ctx, messagequeue.QueueSessionIdentity{
+			TaskID: "task-auth", SessionID: "session-auth", SessionIncarnationID: "incarnation-session-auth",
+		})
+		return beginErr
+	}()
+
+	require.ErrorIs(t, err, denied)
+	assert.Zero(t, repo.getTaskSessionCalls.Load(), "denied identity must not reach repository or runtime admission")
 }
 
 func TestStartCreatedSessionForPeerMessage_ActiveRuntimeReturnsBusy(t *testing.T) {
@@ -247,6 +301,16 @@ type newServiceRunningConflictRepository struct {
 	conflicted atomic.Bool
 }
 
+type peerStartAccessCountingRepository struct {
+	*sqliterepo.Repository
+	getTaskSessionCalls atomic.Int32
+}
+
+func (r *peerStartAccessCountingRepository) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
+	r.getTaskSessionCalls.Add(1)
+	return r.Repository.GetTaskSession(ctx, sessionID)
+}
+
 func (r *newServiceRunningConflictRepository) UpdateTaskSessionIfCurrentState(
 	ctx context.Context,
 	session *models.TaskSession,
@@ -263,5 +327,26 @@ func (r *newServiceRunningConflictRepository) UpdateTaskSessionIfCurrentState(
 		}
 		return false, nil
 	}
-	return r.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	base := r.Repository
+	return base.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+}
+
+func (r *newServiceRunningConflictRepository) UpdateTaskSessionIfCurrentStateWithStartAttempt(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, error) {
+	if r.conflicted.CompareAndSwap(false, true) {
+		current, err := r.GetTaskSession(ctx, session.ID)
+		if err != nil {
+			return false, err
+		}
+		current.State = models.TaskSessionStateRunning
+		if err := r.UpdateTaskSession(ctx, current); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	return r.Repository.UpdateTaskSessionIfCurrentStateWithStartAttempt(ctx, session, expected, attemptID)
 }

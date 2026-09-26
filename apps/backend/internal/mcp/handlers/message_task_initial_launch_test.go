@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -67,16 +68,13 @@ func TestPeerMessageInitialLaunch_Delivery(t *testing.T) {
 
 // @covers AC-TASKS-PARENT-CHILD-MESSAGE-INTERRUPT-001.1
 // @covers AC-TASKS-PARENT-CHILD-MESSAGE-INTERRUPT-001.2
-func TestPeerMessageInitialLaunch_HandlerToRuntime(t *testing.T) {
+func TestPeerMessageInitialLaunch_HandlerKeepsFollowUpQueuedUntilTurnBoundary(t *testing.T) {
 	ctx := context.Background()
 	taskSvc, repo := newTestTaskService(t)
 	sender, target, session := seedTaskWithSession(t, taskSvc, repo, models.TaskSessionStateCreated)
 	log := testLogger(t)
 	eventBus := bus.NewMemoryEventBus(log)
 	t.Cleanup(func() { eventBus.Close() })
-	identity := messagequeue.QueueSessionIdentity{
-		TaskID: target.ID, SessionID: session.ID, SessionIncarnationID: session.QueueIncarnationID,
-	}
 	queueRepo := messagequeue.NewMemoryRepositoryWithAuthority(
 		func(ctx context.Context, taskID, sessionID string) (messagequeue.QueueSessionIdentity, error) {
 			current, err := repo.GetTaskSession(ctx, sessionID)
@@ -104,6 +102,7 @@ func TestPeerMessageInitialLaunch_HandlerToRuntime(t *testing.T) {
 		orchestrator.DefaultServiceConfig(), eventBus, agentManager,
 		&mcpReadinessSchedulerTaskRepo{repo: repo}, repo, nil, nil, queue, log,
 	)
+	require.NoError(t, queue.SetAutoRun(ctx, session.ID, false))
 	h := &Handlers{
 		taskSvc: taskSvc, sessionRepo: repo, taskRepo: repo,
 		sessionLauncher: service, logger: log.WithFields(),
@@ -132,6 +131,9 @@ func TestPeerMessageInitialLaunch_HandlerToRuntime(t *testing.T) {
 		t.Fatal("initial launch did not reach the controlled runtime")
 	}
 	require.Contains(t, launchRequest.TaskDescription, "original implementation brief")
+	originalTurn, err := taskSvc.GetActiveTurn(ctx, session.ID)
+	require.NoError(t, err)
+	require.NotNil(t, originalTurn)
 
 	followUpResponse, err := h.handleMessageTask(ctx, makeWSMessage(
 		t, ws.ActionMCPMessageTask,
@@ -169,24 +171,21 @@ func TestPeerMessageInitialLaunch_HandlerToRuntime(t *testing.T) {
 		t.Fatal("initial runtime process did not start")
 	}
 
-	// Model the first turn settling after startup. The same identity is used by
-	// the readiness recheck that drains the accepted follow-up.
-	require.NoError(t, repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateWaitingForInput, ""))
-	require.NoError(t, repo.UpdateExecutorRunningStatus(ctx, session.ID, models.ExecutorRunningStatusRunning))
-	require.NoError(t, repo.UpdateTaskState(ctx, target.ID, v1.TaskStateInProgress))
-	service.CheckQueueAdmissionReadiness(ctx, identity)
-	select {
-	case accepted := <-agentManager.followUpAccepted:
-		assert.Contains(t, accepted, "follow-up during bootstrap")
-	case <-time.After(3 * time.Second):
-		t.Fatal("queued follow-up was not accepted after the initial turn settled")
-	}
-	assert.Zero(t, queue.GetStatus(ctx, session.ID).Count)
+	queued = queue.GetStatus(ctx, session.ID)
+	require.Len(t, queued.Entries, 1, "Auto-run OFF must leave the accepted follow-up pending")
+	assert.Contains(t, queued.Entries[0].Content, "follow-up during bootstrap")
+	assert.Equal(t, sender.ID, queued.Entries[0].Metadata["sender_task_id"])
 
 	messages, err := taskSvc.ListMessages(ctx, session.ID)
 	require.NoError(t, err)
-	require.NotEmpty(t, messages)
-	assert.Equal(t, sender.ID, messages[0].Metadata["sender_task_id"])
+	for _, message := range messages {
+		assert.NotContains(t, message.Content, "follow-up during bootstrap",
+			"the queued follow-up must wait for a turn boundary before becoming a user turn")
+	}
+	activeTurn, err := taskSvc.GetActiveTurn(ctx, session.ID)
+	require.NoError(t, err)
+	require.NotNil(t, activeTurn)
+	assert.Equal(t, originalTurn.ID, activeTurn.ID)
 }
 
 // @covers AC-TASKS-PARENT-CHILD-MESSAGE-INTERRUPT-001.2
@@ -413,6 +412,10 @@ func (m *peerLaunchAgentManager) GetGitStatus(context.Context, string) (*runtime
 	return nil, nil
 }
 
+func (m *peerLaunchAgentManager) GetGitStatusFresh(context.Context, string) (*runtimeagentctl.GitStatusResult, error) {
+	return nil, nil
+}
+
 func (m *peerLaunchAgentManager) IsAgentRunningForSession(context.Context, string) bool {
 	return m.running.Load()
 }
@@ -545,18 +548,19 @@ func TestPeerMessageInitialLaunch_QueueRejectionDoesNotRollbackWinningProgress(t
 	})
 
 	dispatchDone := make(chan struct {
-		result taskMessageDispatchResult
-		err    error
+		response *ws.Message
+		err      error
 	}, 1)
+	message := makeWSMessage(
+		t, ws.ActionMCPMessageTask,
+		senderPayload(target.ID, "follow-up that loses launch admission", sender.ID),
+	)
 	go func() {
-		result, dispatchErr := h.dispatchTaskMessage(
-			ctx, target.ID, session, "follow-up that loses launch admission",
-			map[string]interface{}{"sender_task_id": sender.ID}, false, false,
-		)
+		response, dispatchErr := h.handleMessageTask(ctx, message)
 		dispatchDone <- struct {
-			result taskMessageDispatchResult
-			err    error
-		}{result: result, err: dispatchErr}
+			response *ws.Message
+			err      error
+		}{response: response, err: dispatchErr}
 	}()
 	select {
 	case <-startEntered:
@@ -566,6 +570,9 @@ func TestPeerMessageInitialLaunch_QueueRejectionDoesNotRollbackWinningProgress(t
 
 	winnerSession, err := svc.GetTaskSession(ctx, session.ID)
 	require.NoError(t, err)
+	// The winning start advances the lifecycle while the losing request is
+	// blocked at its start boundary. A stale message snapshot must not restore
+	// CREATED or overwrite the winner's profile and metadata.
 	winnerSession.State = models.TaskSessionStateRunning
 	winnerSession.AgentProfileID = "winning-profile"
 	winnerSession.Metadata = map[string]interface{}{"session_owner_marker": "winning-launch"}
@@ -580,17 +587,16 @@ func TestPeerMessageInitialLaunch_QueueRejectionDoesNotRollbackWinningProgress(t
 	close(releaseStart)
 
 	var outcome struct {
-		result taskMessageDispatchResult
-		err    error
+		response *ws.Message
+		err      error
 	}
 	select {
 	case outcome = <-dispatchDone:
 	case <-time.After(2 * time.Second):
-		t.Fatal("peer-message dispatch did not return after the winning launch advanced")
+		t.Fatal("full message handler did not return after queue rejection")
 	}
-	var queueFull *queueFullDispatchError
-	require.Error(t, outcome.err)
-	assert.ErrorAs(t, outcome.err, &queueFull)
+	require.NoError(t, outcome.err)
+	assertWSError(t, outcome.response, messagequeue.QueueFullErrorCode)
 
 	updatedSession, err := svc.GetTaskSession(ctx, session.ID)
 	require.NoError(t, err)
@@ -612,7 +618,121 @@ func TestPeerMessageInitialLaunch_QueueRejectionDoesNotRollbackWinningProgress(t
 		assert.Equal(t, expectedQueue[i].ID, updatedQueue[i].ID)
 		assert.Equal(t, expectedQueue[i].Content, updatedQueue[i].Content)
 	}
+	assert.Equal(t, expectedQueue, updatedQueue)
 	messages, err := svc.ListMessages(ctx, session.ID)
 	require.NoError(t, err)
 	assert.Empty(t, messages, "a rejected follow-up must not remain as an undispatched user message")
+}
+
+// @covers AC-TASKS-PARENT-CHILD-MESSAGE-INTERRUPT-001.3
+func TestPeerMessageInitialLaunch_RollbackFencesSameStateSessionProgress(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+	initialTurn, err := svc.StartTurn(ctx, session.ID)
+	require.NoError(t, err)
+	task, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateReview
+	task.WorkflowStepID = "before-message"
+	task.Metadata = map[string]interface{}{"owner_marker": "before-message"}
+	require.NoError(t, repo.UpdateTask(ctx, task))
+	session.Metadata = map[string]interface{}{"session_owner_marker": "before-message"}
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, session.ID, session.Metadata))
+	session, err = svc.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	identity, err := orch.queue.ResolveSessionIdentity(ctx, target.ID, session.ID)
+	require.NoError(t, err)
+	older, err := orch.queue.QueueMessageWithMetadataForSession(
+		ctx, identity, "older queued work", "", messagequeue.QueuedByAgent, false, nil,
+		map[string]interface{}{"position": 0},
+	)
+	require.NoError(t, err)
+
+	startEntered := make(chan struct{})
+	releaseStart := make(chan struct{})
+	startErr := errors.New("runtime configuration failed")
+	orch.peerStartFunc = func(
+		_ context.Context,
+		_ messagequeue.QueueSessionIdentity,
+		_, _ string,
+		_, _, _ bool,
+		_ []v1.MessageAttachment,
+		_ []v1.EntityReference,
+	) (*executor.TaskExecution, error) {
+		close(startEntered)
+		<-releaseStart
+		return nil, startErr
+	}
+	t.Cleanup(func() {
+		select {
+		case <-releaseStart:
+		default:
+			close(releaseStart)
+		}
+	})
+	dispatchDone := make(chan error, 1)
+	go func() {
+		_, dispatchErr := h.dispatchTaskMessage(
+			ctx, target.ID, session, "follow-up that loses row ownership",
+			map[string]interface{}{"sender_task_id": sender.ID}, false, false,
+		)
+		dispatchDone <- dispatchErr
+	}()
+	select {
+	case <-startEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("peer message did not reach the controlled launch boundary")
+	}
+
+	winnerSession, err := svc.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	winnerSession.AgentProfileID = "winning-profile"
+	winnerSession.Metadata = map[string]interface{}{"session_owner_marker": "winning-launch"}
+	require.NoError(t, repo.UpdateTaskSession(ctx, winnerSession))
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, session.ID, winnerSession.Metadata))
+	winnerTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	winnerTask.State = v1.TaskStateInProgress
+	winnerTask.WorkflowStepID = "winning-step"
+	winnerTask.Metadata = map[string]interface{}{"owner_marker": "winning-launch"}
+	require.NoError(t, repo.UpdateTask(ctx, winnerTask))
+	winnerQueueEntry, err := orch.queue.QueueMessageWithMetadataForSession(
+		ctx, identity, "winning queued work", "", messagequeue.QueuedByAgent, false, nil,
+		map[string]interface{}{"position": 1},
+	)
+	require.NoError(t, err)
+	close(releaseStart)
+
+	select {
+	case dispatchErr := <-dispatchDone:
+		require.ErrorIs(t, dispatchErr, startErr)
+	case <-time.After(2 * time.Second):
+		t.Fatal("peer-message dispatch did not return after the launch failed")
+	}
+
+	updatedSession, err := svc.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateCreated, updatedSession.State)
+	assert.Equal(t, "winning-profile", updatedSession.AgentProfileID)
+	assert.Equal(t, "winning-launch", updatedSession.Metadata["session_owner_marker"])
+	updatedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateInProgress, updatedTask.State)
+	assert.Equal(t, "winning-step", updatedTask.WorkflowStepID)
+	assert.Equal(t, "winning-launch", updatedTask.Metadata["owner_marker"])
+	activeTurn, err := svc.GetActiveTurn(ctx, session.ID)
+	require.NoError(t, err)
+	require.NotNil(t, activeTurn)
+	assert.Equal(t, initialTurn.ID, activeTurn.ID)
+	queueEntries := orch.queue.GetStatus(ctx, session.ID).Entries
+	require.Len(t, queueEntries, 2)
+	assert.Equal(t, older.ID, queueEntries[0].ID)
+	assert.Equal(t, winnerQueueEntry.ID, queueEntries[1].ID)
+	messages, err := svc.ListMessages(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Empty(t, messages, "a failed follow-up must not remain as an undispatched user message")
 }
