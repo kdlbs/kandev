@@ -118,6 +118,8 @@ export async function createTask(
     priority?: TaskPriority;
     project_id?: string;
     metadata?: Record<string, unknown>;
+    /** Office agent instance to seat as the task's runner at create time. */
+    assignee_agent_profile_id?: string;
     /** Office task-handoffs phase 4/5 — workspace policy. */
     workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
     workspace_group_id?: string;
