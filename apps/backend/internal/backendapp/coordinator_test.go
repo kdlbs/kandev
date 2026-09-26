@@ -2,12 +2,16 @@ package backendapp
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/startup"
@@ -106,5 +110,56 @@ func TestStartCoordinatorBackgroundPass_RunsHooksWithProvidedT0(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for background pass hook")
+	}
+}
+
+// TestRegisterCoordinatorRoutes_DisabledReturns404AndPreservesRows verifies
+// Build decision 15 at the HTTP level (RV-007): with features.coordinator
+// off, initCoordinatorWiring's nil service makes registerCoordinatorRoutes a
+// no-op, so a coordinator route 404s, while rows already in the
+// unconditionally-built store are untouched.
+func TestRegisterCoordinatorRoutes_DisabledReturns404AndPreservesRows(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tracker := newCoordinatorTestTracker(t)
+	pool := newCoordinatorTestPool(t)
+
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, false, newTestLogger())
+	if err != nil {
+		t.Fatalf("initCoordinatorWiring: %v", err)
+	}
+	if svc != nil {
+		t.Fatal("expected a nil service when features.coordinator is disabled")
+	}
+
+	store, err := coordinator.NewStore(pool.Writer(), pool.Reader())
+	if err != nil {
+		t.Fatalf("coordinator.NewStore: %v", err)
+	}
+	seed := &coordinator.Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e"}
+	if err := store.CreateCoordinator(context.Background(), seed); err != nil {
+		t.Fatalf("seed CreateCoordinator: %v", err)
+	}
+
+	router := gin.New()
+	registerCoordinatorRoutes(routeParams{
+		ctx:      context.Background(),
+		router:   router,
+		services: &Services{Coordinator: svc},
+		log:      newTestLogger(),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws-1/coordinators", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d (flag off: routes never registered)", rec.Code, http.StatusNotFound)
+	}
+
+	found, err := store.GetCoordinator(context.Background(), "ws-1", seed.ID)
+	if err != nil {
+		t.Fatalf("GetCoordinator after flag-off route registration: %v", err)
+	}
+	if found.ID != seed.ID {
+		t.Errorf("GetCoordinator().ID = %q, want %q", found.ID, seed.ID)
 	}
 }
