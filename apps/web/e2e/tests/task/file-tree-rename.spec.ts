@@ -86,9 +86,11 @@ test.describe("File tree inline rename", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.exec("git checkout main");
     git.createFile("rename-me.ts", "hello");
     git.stageAll();
     git.commit("seed rename file");
+    git.exec("git push origin main");
 
     const session = await setupTask({
       testPage,
@@ -128,9 +130,11 @@ test.describe("File tree inline rename", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.exec("git checkout main");
     git.createFile("keep-name.ts", "stay");
     git.stageAll();
     git.commit("seed keep file");
+    git.exec("git push origin main");
 
     const session = await setupTask({
       testPage,
@@ -164,18 +168,21 @@ test.describe("File tree inline rename", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.exec("git checkout main");
     git.createFile("blur-original.ts", "blur");
     git.createFile("other.ts", "other");
     git.stageAll();
     git.commit("seed blur file");
+    git.exec("git push origin main");
 
-    const session = await setupTask(
+    const session = await setupTask({
       testPage,
       apiClient,
       seedData,
-      "ft-rename-blur",
-      "FT Rename Blur",
-    );
+      profileName: "ft-rename-blur",
+      taskTitle: "FT Rename Blur",
+      requiredPath: "blur-original.ts",
+    });
 
     const node = session.fileTreeNode("blur-original.ts");
     await expect(node).toBeVisible({ timeout: 15_000 });
@@ -208,17 +215,20 @@ test.describe("File tree inline rename", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.exec("git checkout main");
     git.createFile("noop.ts", "noop");
     git.stageAll();
     git.commit("seed noop");
+    git.exec("git push origin main");
 
-    const session = await setupTask(
+    const session = await setupTask({
       testPage,
       apiClient,
       seedData,
-      "ft-rename-noop",
-      "FT Rename NoOp",
-    );
+      profileName: "ft-rename-noop",
+      taskTitle: "FT Rename NoOp",
+      requiredPath: "noop.ts",
+    });
 
     const node = session.fileTreeNode("noop.ts");
     await expect(node).toBeVisible({ timeout: 15_000 });

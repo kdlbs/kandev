@@ -5,6 +5,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+import { watchWs } from "../../helpers/causal-waits";
 
 // Download is wired in file-context-menu.tsx → useFileOperations.downloadFile →
 // downloadFileContent → triggerFileDownload (Blob + <a download>). We drive
@@ -51,9 +52,14 @@ async function setupTask({
       { timeout: 60_000, message: `Waiting for ${taskTitle} worktree materialization` },
     )
     .toBe(true);
+  const gateway = watchWs(testPage);
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
+  const treeResponse = gateway.waitForResponse("workspace.tree.get");
+  await testPage.reload();
+  await session.waitForLoad();
+  await treeResponse;
   await session.clickTab("Files");
   return session;
 }
@@ -67,11 +73,13 @@ test.describe("File tree Download", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.exec("git checkout main");
     const fileName = "download-me.txt";
     const fileContent = "kandev download test payload";
     git.createFile(fileName, fileContent);
     git.stageAll();
     git.commit("seed download file");
+    git.exec("git push origin main");
 
     const session = await setupTask({
       testPage,
@@ -108,10 +116,12 @@ test.describe("File tree Download", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.exec("git checkout main");
     // Seed a directory (via a file inside it).
     git.createFile("subdir/inside.txt", "child");
     git.stageAll();
     git.commit("seed subdir");
+    git.exec("git push origin main");
 
     const session = await setupTask({
       testPage,

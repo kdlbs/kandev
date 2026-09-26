@@ -256,8 +256,7 @@ workflows:
       expect(implement?.agent_profile_id).toBe(replacement.id);
       expect(review?.session_target).toEqual({ kind: "step", step_id: implement?.id });
 
-      await page.goto(seedData.workspaceId);
-      const importedCard = await page.findWorkflowCard(workflowName);
+      const importedCard = await page.findWorkflowCard(workflowName, { waitForName: true });
       await expect(importedCard).toBeVisible();
     } finally {
       const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
