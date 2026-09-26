@@ -2538,6 +2538,12 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	if intent != nil {
 		response["completion_intent_id"] = intent.ID
 	}
+	if advances, note, ok := h.resolveStepCompletionAdvances(ctx, task.WorkflowStepID); ok {
+		response["advances"] = advances
+		if note != "" {
+			response["note"] = note
+		}
+	}
 	var truncatedFields []string
 	if handoffTruncated {
 		truncatedFields = append(truncatedFields, "handoff")
@@ -2587,6 +2593,27 @@ func (h *Handlers) createCompletionIntent(ctx context.Context, session *models.T
 		adminmetrics.RecordCompletionPending(count)
 	}
 	return stored, nil
+}
+
+// resolveStepCompletionAdvances reports whether the just-recorded signal will
+// actually move the task, alongside the accepted:true response
+// handleStepComplete always returns. accepted only means the signal was
+// durably recorded — a step whose AutoAdvanceRequiresSignal is false never
+// reads it, so the caller can accept a signal that changes nothing. ok is
+// false (both other return values ignored) when the current step cannot be
+// resolved: the caller must never guess this field into existence.
+func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowStepID string) (advances bool, note string, ok bool) {
+	if h.workflowCtrl == nil || workflowStepID == "" {
+		return false, "", false
+	}
+	resp, err := h.workflowCtrl.GetStep(ctx, workflowStepID)
+	if err != nil || resp == nil || resp.Step == nil {
+		return false, "", false
+	}
+	if resp.Step.AutoAdvanceRequiresSignal {
+		return true, "", true
+	}
+	return false, "this step does not advance on a completion signal", true
 }
 
 func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {

@@ -20,6 +20,7 @@ This document is the migrated task-system source for the capability. The source 
 #### Acceptance criteria
 
 - **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001.2:** The `step_complete_kandev` response additively carries `advances` (bool), reporting whether the calling turn's step is currently `auto_advance_requires_signal`, without changing `accepted:true`. When `advances` is `false`, the response also carries a `note` explaining the signal was recorded but will not move the task. When the current step cannot be resolved, both fields are omitted rather than defaulted, so a caller never receives a guessed value.
 
 ### REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-002: Signal-Gated Manual Move Visibility
 
@@ -158,6 +159,9 @@ The pending completion signal continues to be reflected in `TaskSession.Metadata
 - **GIVEN** a signal-gated Office workflow step, **WHEN** its first-turn context is generated, **THEN** the context instructs the agent to call `step_complete_kandev` as the final action.
 - **GIVEN** a task-mode client has connected to Kandev MCP, **WHEN** its MCP connection drops and reconnects, **THEN** the client can list and call `step_complete_kandev` without another user message.
 - **GIVEN** a signal-gated workflow step, **WHEN** the agent finishes without calling the tool, **THEN** the task remains on the current step and no automatic transition runs.
+- **GIVEN** a step with `auto_advance_requires_signal=true`, **WHEN** an agent calls `step_complete_kandev`, **THEN** the response carries `accepted:true` and `advances:true` with no `note`.
+- **GIVEN** a step with `auto_advance_requires_signal=false`, **WHEN** an agent calls `step_complete_kandev`, **THEN** the response carries `accepted:true` and `advances:false` plus a `note` explaining the signal was recorded but will not move the task.
+- **GIVEN** the calling turn's step cannot be resolved (workflow controller unset, or the step ID does not exist), **WHEN** an agent calls `step_complete_kandev`, **THEN** the response omits both `advances` and `note` rather than defaulting either.
 - **GIVEN** a signal-gated workflow step with a configured `move_to_next` move,
   **WHEN** its agent becomes idle without calling the completion tool, **THEN**
   the normal next-step action is visible in task composer surfaces that provide

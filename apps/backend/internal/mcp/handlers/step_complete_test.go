@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -289,7 +290,12 @@ func TestHandleStepComplete_RejectsSignalFromMovedTurn(t *testing.T) {
 // response reports accepted=true with the persisted step_id + signaled_at.
 func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	svc, repo := newTestTaskService(t)
+	workflowCtrl, workflowRepo := newTestWorkflowController(t)
 	seedStepCompleteTarget(t, repo, "task-first", "session-first", "step-1", models.TaskSessionStateRunning)
+	require.NoError(t, workflowRepo.CreateStep(context.Background(), &wfmodels.WorkflowStep{
+		ID: "step-1", WorkflowID: "workflow-first", Name: "First step", Position: 0,
+		AutoAdvanceRequiresSignal: true,
+	}))
 	_, err := repo.CreateTurnWithStepStamp(context.Background(), &models.Turn{
 		ID:            "turn-first",
 		TaskID:        "task-first",
@@ -300,6 +306,7 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	seedAgentProfileSnapshot(t, repo, "session-first", "claude-first-call")
 	bus := &mcpRecordingEventBus{}
 	h := newStepCompleteHandler(t, svc, repo, bus)
+	h.workflowCtrl = workflowCtrl
 
 	const counterKey = "source=agent;agent_type=claude-first-call"
 	before := readSignalReceivedCounterExact(t, counterKey)
@@ -321,6 +328,8 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	assert.Equal(t, "step-1", payload["step_id"])
 	intentID, ok := payload["completion_intent_id"].(string)
 	require.True(t, ok, "accepted completion must return a durable intent id")
+	assert.Equal(t, true, payload["advances"], "signal-gated completion must preserve main's advances response")
+	assert.NotContains(t, payload, "note")
 	// signaled_at is part of the documented response contract — pin its
 	// presence + RFC3339Nano shape so a future refactor can't silently
 	// drop or rename the field.

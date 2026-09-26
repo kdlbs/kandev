@@ -422,6 +422,10 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
     will-change: auto !important;
   }
 
+  [data-radix-popper-content-wrapper]:has(> [data-mobile-review-selector-menu]) {
+    bottom: calc(4rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
   /* The root positioner owns one backdrop outside the scrolling menu.
      Submenus keep that layer, and Radix retains outside-interaction handling. */
   [data-radix-popper-content-wrapper]:has(> .mobile-menu-root)::before {

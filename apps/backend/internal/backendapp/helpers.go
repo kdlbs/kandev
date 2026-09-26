@@ -645,18 +645,34 @@ func appendSessionModelsMessage(sessionID string, session *models.TaskSession, l
 }
 
 func appendSessionModelsMessageFromState(sessionID string, session *models.TaskSession, modelState *lifecycle.CachedModelState, result []*ws.Message) []*ws.Message {
+	snapshot, hasSnapshot := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
+	var replayState lifecycle.CachedModelState
 	if modelState == nil {
-		return result
+		if !hasSnapshot {
+			return result
+		}
+		replayState = lifecycle.CachedModelState{
+			CurrentModelID:       snapshot.CurrentModelID,
+			Models:               snapshot.Models,
+			ConfigOptions:        snapshot.ConfigOptions,
+			ConfigOptionsSettled: snapshot.ConfigOptionsSettled,
+		}
+	} else {
+		replayState = *modelState
+		if len(replayState.Models) == 0 &&
+			len(replayState.ConfigOptions) == 0 &&
+			!replayState.ConfigOptionsSettled {
+			if len(snapshot.Models) > 0 {
+				replayState.Models = snapshot.Models
+				if replayState.CurrentModelID == "" {
+					replayState.CurrentModelID = snapshot.CurrentModelID
+				}
+			}
+		}
 	}
-	snapshot, _ := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
-	replayState := *modelState
-	if len(replayState.Models) == 0 &&
-		len(replayState.ConfigOptions) == 0 &&
-		!replayState.ConfigOptionsSettled &&
-		len(snapshot.Models) > 0 {
-		replayState.Models = snapshot.Models
-	}
-	if replayState.CurrentModelID == "" && len(replayState.Models) == 0 {
+	replayState.ConfigOptionsSettled = replayState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled
+	if replayState.CurrentModelID == "" && len(replayState.Models) == 0 &&
+		len(replayState.ConfigOptions) == 0 && !replayState.ConfigOptionsSettled {
 		return result
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
