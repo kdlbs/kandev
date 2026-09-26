@@ -640,6 +640,22 @@ export class ApiClient {
     return this.request("GET", "/api/v1/agents/available");
   }
 
+  async createCustomTUIAgent(options: {
+    display_name: string;
+    command: string;
+    model?: string;
+    description?: string;
+    mcp_strategy?: string;
+    protocol?: "acp";
+  }): Promise<Agent> {
+    const created = await this.request<{ name: string }>("POST", "/api/v1/agents/tui", options);
+    const { agents } = await this.listAgents();
+    const agent = agents.find((candidate) => candidate.name === created.name);
+    if (!agent)
+      throw new Error(`Custom TUI agent ${created.name} was not returned by the agent list`);
+    return agent;
+  }
+
   /** Removes a custom agent by slug, so a spec that creates one leaves the
    * worker's agent list as it found it. Missing is not an error. */
   async deleteCustomAgentByName(name: string): Promise<void> {
@@ -1242,6 +1258,8 @@ export class ApiClient {
       terminal_font_family?: string;
       terminal_font_size?: number;
       startup_page?: "task_overview" | "last_task" | "threads";
+      sidebar_hover_enabled?: boolean;
+      sidebar_hover_delay_ms?: number;
       sidebar_layouts_by_workspace?: Record<string, { revision: number; [key: string]: unknown }>;
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
@@ -1274,6 +1292,8 @@ export class ApiClient {
     terminal_font_family?: string;
     terminal_font_size?: number;
     startup_page?: "task_overview" | "last_task" | "threads";
+    sidebar_hover_enabled?: boolean;
+    sidebar_hover_delay_ms?: number;
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;
@@ -1447,7 +1467,31 @@ export class ApiClient {
 
   async e2eReset(workspaceId: string, keepWorkflowIds?: string[]): Promise<void> {
     const params = keepWorkflowIds?.length ? `?keep_workflows=${keepWorkflowIds.join(",")}` : "";
-    await this.request("DELETE", `/api/v1/e2e/reset/${workspaceId}${params}`);
+    const path = `/api/v1/e2e/reset/${workspaceId}${params}`;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const response = await this.rawRequest("DELETE", path);
+      if (response.ok) return;
+
+      const body = await response.text();
+      const transientWorktreeInspection =
+        response.status === 500 &&
+        body.includes("exit status 128") &&
+        (body.includes("inspect worktrees before delete") ||
+          body.includes("capture worktree cleanup identities") ||
+          body.includes("capture cleanup identity"));
+      if (!transientWorktreeInspection || attempt === 3) {
+        throw new Error(`API DELETE ${path} failed (${response.status}): ${body}`);
+      }
+
+      // A task cleanup worker can remove a checkout between the reset's
+      // inventory read and its dirty-worktree inspection. Retry the complete
+      // reset after the worker has had time to publish its deletion.
+      await dwell(
+        250 * (attempt + 1),
+        "poll-interval",
+        "retry interval for the E2E reset after a transient worktree inspection race",
+      );
+    }
   }
 
   /**
@@ -2065,6 +2109,7 @@ export class ApiClient {
     review_state?: string;
     checks_state?: string;
     mergeable_state?: string;
+    has_merge_conflicts?: boolean;
     merge_queue_state?: string;
     merge_queue_position?: number | null;
     merge_queue_entry_id?: string;
@@ -2122,6 +2167,7 @@ export class ApiClient {
     review_state: string;
     checks_state: string;
     mergeable_state: string;
+    has_merge_conflicts?: boolean | null;
     merge_queue_state?: string;
     merge_queue_position?: number | null;
     merge_queue_estimated_time_to_merge_seconds?: number | null;
@@ -2628,6 +2674,18 @@ export class ApiClient {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
   }
 
+  async getTaskSession(sessionId: string): Promise<{
+    session: {
+      id: string;
+      task_id: string;
+      agent_profile_id?: string;
+      agent_profile_snapshot?: Record<string, unknown> | null;
+      state: string;
+    };
+  }> {
+    return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
+  }
+
   async getQueueSessionIdentity(
     taskId: string,
     sessionId: string,
@@ -2719,6 +2777,8 @@ export class ApiClient {
 
   async getTask(taskId: string): Promise<{
     id: string;
+    workspace_id?: string;
+    workflow_id?: string;
     title: string;
     description?: string;
     autopilot?: boolean;
@@ -3723,6 +3783,11 @@ export class ApiClient {
 
   async testSSHConnection(req: SSHTestRequest): Promise<SSHTestResult> {
     return this.request("POST", "/api/v1/ssh/test", req);
+  }
+
+  /** Remote Docker connection test: SSH reachability plus the daemon steps. */
+  async testRemoteDockerConnection(req: SSHTestRequest): Promise<SSHTestResult> {
+    return this.request("POST", "/api/v1/remote-docker/test", req);
   }
 
   async listSSHSessions(executorId: string): Promise<SSHSession[]> {

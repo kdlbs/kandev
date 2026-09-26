@@ -222,3 +222,6 @@ agents and prove profile identity plus session reuse.
 ## Implementation plans
 
 - [Delivery package](../../../plans/task-workflow-agent-overrides/plan.md)
+- [Change workflow design](change-workflow.md) proposes explicit destination-map
+  replacement during a move. The legacy dormant-map behavior above remains the
+  contract for moves that omit that new option.

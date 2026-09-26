@@ -4,10 +4,35 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { defaultState } from "@/lib/state/default-state";
+import { pluginRegistry } from "@/lib/plugins/registry";
 import { TaskTopBar } from "./task-top-bar";
 import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  pluginRegistry.unregisterPlugin(TEST_PROVIDER_PLUGIN_ID);
+});
+
+const TEST_PROVIDER_PLUGIN_ID = "task-topbar-repository-provider-test";
+const TEST_PROVIDER_ID = "test_source_control";
+const REMOTE_REPOSITORY_NAME = "agent-orchestrator";
+const REMOTE_REPOSITORY_FULL_NAME = `owner/${REMOTE_REPOSITORY_NAME}`;
+const REMOTE_REPOSITORY_URL = `https://github.com/${REMOTE_REPOSITORY_FULL_NAME}`;
+
+function TestProviderIcon({ className }: { className?: string }) {
+  return <svg className={className} data-testid="registered-provider-icon" />;
+}
+
+function registerTestRepositoryProvider() {
+  pluginRegistry.forPlugin(TEST_PROVIDER_PLUGIN_ID).registerRepositoryProvider({
+    id: TEST_PROVIDER_ID,
+    label: "Test Forge",
+    icon: TestProviderIcon,
+    listRepositories: async () => [],
+    listBranches: async () => [],
+    inspectURL: async () => null,
+  });
+}
 
 vi.mock("@kandev/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -187,6 +212,95 @@ describe("TaskTopBar repository crumb", () => {
     // slash-matching query would happily miss.
     const breadcrumb = screen.getByRole("navigation", { name: "breadcrumb" });
     expect(breadcrumb.querySelector("[title]")).toBeNull();
+  });
+
+  // @covers AC-UI-REMOTE-REPO-TOPBAR-001.1, AC-UI-REMOTE-REPO-TOPBAR-001.2
+  it("links the short remote repository crumb while keeping the task title separate", () => {
+    renderTopBar(
+      <TaskTopBar
+        taskId="task-1"
+        taskTitle={TASK_TITLE}
+        topbarRepository={{
+          displayName: REMOTE_REPOSITORY_NAME,
+          fullName: REMOTE_REPOSITORY_FULL_NAME,
+          provider: "github",
+          browserUrl: REMOTE_REPOSITORY_URL,
+        }}
+      />,
+    );
+
+    const breadcrumb = screen.getByRole("navigation", { name: "breadcrumb" });
+    const repository = within(breadcrumb).getByRole("link", {
+      name: `GitHub repository ${REMOTE_REPOSITORY_FULL_NAME}`,
+    });
+    expect(repository.getAttribute("href")).toBe(REMOTE_REPOSITORY_URL);
+    expect(repository.getAttribute("target")).toBe("_blank");
+    expect(repository.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(
+      repository.querySelector('[data-testid="task-topbar-repository-provider-icon"]'),
+    ).not.toBeNull();
+    expect(screen.getByTestId("task-topbar-title").textContent).toBe(TASK_TITLE);
+  });
+
+  // @covers AC-UI-REMOTE-REPO-TOPBAR-001.4
+  it("shows a static remote repository crumb when its browser URL is unavailable", () => {
+    renderTopBar(
+      <TaskTopBar
+        taskId="task-1"
+        taskTitle={TASK_TITLE}
+        topbarRepository={{
+          displayName: REMOTE_REPOSITORY_NAME,
+          fullName: REMOTE_REPOSITORY_FULL_NAME,
+          provider: "github",
+          browserUrl: null,
+        }}
+      />,
+    );
+
+    const breadcrumb = screen.getByRole("navigation", { name: "breadcrumb" });
+    const repositoryLabel = within(breadcrumb).getByText(REMOTE_REPOSITORY_NAME);
+    expect(repositoryLabel.closest("a")).toBeNull();
+    expect(
+      within(breadcrumb).getByText(`GitHub repository ${REMOTE_REPOSITORY_FULL_NAME}`),
+    ).not.toBeNull();
+    expect(
+      repositoryLabel
+        .closest("li")
+        ?.querySelector('[data-testid="task-topbar-repository-provider-icon"]'),
+    ).not.toBeNull();
+  });
+
+  it("refreshes the provider label and icon after plugin registration changes", () => {
+    renderTopBar(
+      <TaskTopBar
+        taskId="task-1"
+        taskTitle={TASK_TITLE}
+        topbarRepository={{
+          displayName: REMOTE_REPOSITORY_NAME,
+          fullName: REMOTE_REPOSITORY_FULL_NAME,
+          provider: TEST_PROVIDER_ID,
+          browserUrl: `https://code.example.test/${REMOTE_REPOSITORY_FULL_NAME}`,
+        }}
+      />,
+    );
+
+    const findRepositoryLink = (providerLabel: string) =>
+      screen.getByRole("link", {
+        name: `${providerLabel} repository ${REMOTE_REPOSITORY_FULL_NAME}`,
+      });
+
+    expect(findRepositoryLink("Test Source Control")).toBeTruthy();
+    expect(screen.queryByTestId("registered-provider-icon")).toBeNull();
+
+    act(() => registerTestRepositoryProvider());
+
+    expect(findRepositoryLink("Test Forge")).toBeTruthy();
+    expect(screen.getByTestId("registered-provider-icon")).toBeTruthy();
+
+    act(() => pluginRegistry.unregisterPlugin(TEST_PROVIDER_PLUGIN_ID));
+
+    expect(findRepositoryLink("Test Source Control")).toBeTruthy();
+    expect(screen.queryByTestId("registered-provider-icon")).toBeNull();
   });
 });
 

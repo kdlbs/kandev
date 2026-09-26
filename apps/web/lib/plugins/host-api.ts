@@ -126,6 +126,7 @@ import { IntegrationRepositoryFilter } from "@/components/integrations/integrati
 import { IntegrationCursorPagination } from "@/components/integrations/integration-cursor-pagination";
 import { TaskRowIndicator } from "@/components/integrations/task-row-indicator";
 import { IntegrationChangeRequestStatus } from "@/components/integrations/integration-change-request-status";
+import { PluginAction, PluginActionGroup } from "@/components/plugins/plugin-action";
 import { IntegrationIcon } from "@/components/integrations/integration-icon";
 import { TaskChangeRequestLinkForm } from "@/components/integrations/task-change-request-link-form";
 import { IntegrationAuthStatusBanner } from "@/components/integrations/auth-status-banner";
@@ -251,6 +252,8 @@ const PLUGIN_UI: PluginUIApi & Record<string, unknown> = {
   AlertTitle,
   Badge,
   Button,
+  Action: PluginAction,
+  ActionGroup: PluginActionGroup,
   Card,
   CardAction,
   CardContent,

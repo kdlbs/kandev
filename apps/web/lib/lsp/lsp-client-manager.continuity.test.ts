@@ -151,6 +151,27 @@ afterEach(() => {
 });
 
 describe("LSP browser continuity", () => {
+  it("clears document diagnostics when its last editor closes", async () => {
+    const { markersByUri } = createMonacoHarness([DOCUMENT_MODEL_URI]);
+    mocks.registerLspProviders.mockReturnValue([]);
+    const { socket } = await connectContinuityReady();
+    lspClientManager.openDocument(SESSION_ID, "typescript", {
+      uri: DOCUMENT_URI,
+      languageId: "typescript",
+      text: CURRENT_DOCUMENT_TEXT,
+    });
+
+    publishDiagnostic(socket, DOCUMENT_URI, "closed document issue");
+    expect(markerMessages(markersByUri, DOCUMENT_MODEL_URI)).toContain("closed document issue");
+
+    lspClientManager.closeDocument(SESSION_ID, "typescript", DOCUMENT_URI);
+
+    expect(markerMessages(markersByUri, DOCUMENT_MODEL_URI)).toEqual([]);
+
+    publishDiagnostic(socket, DOCUMENT_URI, "late closed document issue");
+    expect(markerMessages(markersByUri, DOCUMENT_MODEL_URI)).toEqual([]);
+  });
+
   it("reattaches without initializing again and waits for current document synchronization", async () => {
     const { markersByUri } = createMonacoHarness([DOCUMENT_MODEL_URI]);
     mocks.registerLspProviders.mockReturnValue([]);
@@ -202,7 +223,7 @@ describe("LSP browser continuity", () => {
 
 describe("LSP document reconnect synchronization", () => {
   it("reopens a document when the editor effect cleans up during a reconnect", async () => {
-    createMonacoHarness([]);
+    const { markersByUri } = createMonacoHarness([DOCUMENT_MODEL_URI]);
     mocks.registerLspProviders.mockReturnValue([]);
     const { socket: firstSocket } = await connectContinuityReady();
     lspClientManager.openDocument(SESSION_ID, "typescript", {
@@ -210,9 +231,14 @@ describe("LSP document reconnect synchronization", () => {
       languageId: "typescript",
       text: CURRENT_DOCUMENT_TEXT,
     });
+    publishDiagnostic(firstSocket, DOCUMENT_URI, "reconnecting document issue");
+    expect(markerMessages(markersByUri, DOCUMENT_MODEL_URI)).toContain(
+      "reconnecting document issue",
+    );
 
     firstSocket.failClosed(4009, "browser transport lost");
     lspClientManager.closeDocument(SESSION_ID, "typescript", DOCUMENT_URI);
+    expect(markerMessages(markersByUri, DOCUMENT_MODEL_URI)).toEqual([]);
     await new Promise((resolve) => setTimeout(resolve, 275));
     const resumedSocket = FakeWebSocket.instances.at(-1);
     if (!resumedSocket || resumedSocket === firstSocket)
@@ -226,11 +252,13 @@ describe("LSP document reconnect synchronization", () => {
     expect(resumedSocket.sent.some((frame) => JSON.parse(frame).method === DID_OPEN_METHOD)).toBe(
       false,
     );
-
     acknowledgeAttachment(resumedSocket);
     await vi.waitFor(() =>
       expect(lspClientManager.getStatus(SESSION_ID, "typescript")).toEqual({ state: "ready" }),
     );
+    publishDiagnostic(resumedSocket, DOCUMENT_URI, "late reconnect diagnostic");
+    expect(markerMessages(markersByUri, DOCUMENT_MODEL_URI)).toEqual([]);
+
     lspClientManager.openDocument(SESSION_ID, "typescript", {
       uri: DOCUMENT_URI,
       languageId: "typescript",

@@ -26,7 +26,11 @@ test.describe("SSH LSP boundary", () => {
     // The SSH fixture's file:// origin belongs to the backend host and is not
     // reachable from the remote container. Create the Kotlin file through the
     // real workspace WebSocket so the assertion exercises the SSH task host.
-    await task.session.clickTab("Files");
+    // Git status events can briefly foreground another right-pane tab after
+    // navigation. Force Files to the foreground and wait for the panel before
+    // opening the new-file menu.
+    await task.session.clickTab("Files", { force: true });
+    await expect(task.session.files).toBeVisible({ timeout: 30_000 });
     const directNewFile = testPage.getByRole("button", { name: "New file" });
     if (await directNewFile.isVisible().catch(() => false)) {
       await directNewFile.click();

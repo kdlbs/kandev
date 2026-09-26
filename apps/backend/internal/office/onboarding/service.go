@@ -37,6 +37,10 @@ type Repository interface {
 	// used by onboarding to write explicit routing.inherit markers on
 	// the freshly created CEO agent.
 	UpdateAgentSettings(ctx context.Context, agentID, settings string) error
+	// GetTaskWorkflowStepID resolves the workflow step currently bound to
+	// a task, used to gate the onboarding task's initial wake to steps
+	// that auto-start an agent.
+	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
 }
 
 // WorkspaceCreator creates a DB workspace row for kanban compatibility.
@@ -64,6 +68,13 @@ type TaskCreator interface {
 // AgentCreator creates a new agent instance with validation.
 type AgentCreator interface {
 	CreateAgentInstance(ctx context.Context, agent *models.AgentInstance) error
+}
+
+// AgentDefaultSkillBackfiller lets onboarding retry default-skill attachment
+// after the new workspace and agent rows are committed. The optional hook
+// covers workspaces created after the backend startup system-skill sync.
+type AgentDefaultSkillBackfiller interface {
+	BackfillDefaultSkillsForWorkspace(ctx context.Context, workspaceID string)
 }
 
 // CoordinatorRoutineInstaller installs the pre-baked coordinator-heartbeat
@@ -126,6 +137,17 @@ type OnboardingService struct {
 	runQueuer        shared.RunQueuer
 	configSyncer     ConfigSyncer
 	routineInstaller CoordinatorRoutineInstaller
+
+	// workflowStepGetter resolves a task's current workflow step so the
+	// onboarding task's initial wake can be gated to steps that auto-start
+	// an agent. Optional — nil fails open (see shared.IsAssignmentWakeEligible).
+	workflowStepGetter shared.AssignmentStepGetter
+}
+
+// SetWorkflowStepGetter wires the workflow step lookup used to gate the
+// onboarding task's initial wake. Left nil, the gate fails open.
+func (s *OnboardingService) SetWorkflowStepGetter(g shared.AssignmentStepGetter) {
+	s.workflowStepGetter = g
 }
 
 // SetCoordinatorRoutineInstaller wires the routines-service hook used
@@ -351,7 +373,12 @@ func (s *OnboardingService) maybeCreateOnboardingTask(
 		s.logger.Warn("create onboarding task failed", zap.Error(err))
 		return ""
 	}
-	if s.runQueuer != nil {
+	// The landing step must accept an auto-started run before this wake is
+	// queued — onboarding never sets StartAgent/PlanMode, so a custom
+	// workflow's start step and auto-start step can genuinely differ. See
+	// shared.IsAssignmentWakeEligible for the fail-open rationale.
+	if s.runQueuer != nil &&
+		shared.IsAssignmentWakeEligible(ctx, s.logger, s.repo, s.workflowStepGetter, taskID, "onboarding.maybe_create_onboarding_task") {
 		// A third task_assigned producer alongside queueTaskAssignedRun; it is
 		// never handed the assigning transaction's generation, so it enqueues
 		// keyless rather than deriving a divergent key.
@@ -568,6 +595,9 @@ func (s *OnboardingService) createOnboardingAgent(ctx context.Context, wsID stri
 	}
 	if err := s.agentCreator.CreateAgentInstance(ctx, agent); err != nil {
 		return "", err
+	}
+	if backfiller, ok := s.agentCreator.(AgentDefaultSkillBackfiller); ok {
+		backfiller.BackfillDefaultSkillsForWorkspace(ctx, wsID)
 	}
 	s.installCoordinatorRoutine(ctx, wsID, agent.ID, agent.Role)
 	return agent.ID, nil

@@ -732,6 +732,7 @@ type associateTaskPRRequest struct {
 	ReviewState                           string     `json:"review_state"`
 	ChecksState                           string     `json:"checks_state"`
 	MergeableState                        string     `json:"mergeable_state"`
+	HasMergeConflicts                     *bool      `json:"has_merge_conflicts,omitempty"`
 	MergeQueueState                       string     `json:"merge_queue_state"`
 	MergeQueuePosition                    *int       `json:"merge_queue_position,omitempty"`
 	MergeQueueEstimatedTimeToMergeSeconds *int       `json:"merge_queue_estimated_time_to_merge_seconds,omitempty"`
@@ -805,6 +806,7 @@ func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR 
 		ReviewState:                           req.ReviewState,
 		ChecksState:                           req.ChecksState,
 		MergeableState:                        req.MergeableState,
+		HasMergeConflicts:                     req.HasMergeConflicts,
 		MergeQueueState:                       req.MergeQueueState,
 		MergeQueuePosition:                    req.MergeQueuePosition,
 		MergeQueueEstimatedTimeToMergeSeconds: req.MergeQueueEstimatedTimeToMergeSeconds,
@@ -863,6 +865,8 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 		BaseBranch:                            req.BaseBranch,
 		AuthorLogin:                           req.AuthorLogin,
 		MergeableState:                        req.MergeableState,
+		HasMergeConflicts:                     req.HasMergeConflicts,
+		HasMergeConflictsObserved:             req.HasMergeConflicts != nil,
 		RepoOwner:                             req.Owner,
 		RepoName:                              req.Repo,
 		Additions:                             req.Additions,
@@ -909,10 +913,11 @@ func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 		return
 	}
 	headSHA := mockHeadSHA(req.Owner, req.Repo, req.PRNumber)
-	// If associateTaskPR ran first, an underlying PR row exists with this
-	// HeadSHA. Otherwise synthesize a minimal one so getPRFeedback's GetPR
-	// call doesn't fail.
-	if pr, err := c.mock.GetPR(ctx.Request.Context(), req.Owner, req.Repo, req.PRNumber); err != nil || pr == nil {
+	// Feedback checks are looked up by the provider PR's head SHA. Create a
+	// minimal PR when no provider row exists yet.
+	if existingHeadSHA, found := c.mock.ensurePRHeadSHA(req.Owner, req.Repo, req.PRNumber, headSHA); found {
+		headSHA = existingHeadSHA
+	} else {
 		c.mock.AddPR(&PR{
 			Number:    req.PRNumber,
 			RepoOwner: req.Owner,
@@ -921,8 +926,6 @@ func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 			CreatedAt: time.Now().UTC(),
 			UpdatedAt: time.Now().UTC(),
 		})
-	} else if pr.HeadSHA != "" {
-		headSHA = pr.HeadSHA
 	}
 	// Replace prior seeded checks/reviews/comments so a follow-up call gives
 	// deterministic state; helpful for tests that drive a "then a check

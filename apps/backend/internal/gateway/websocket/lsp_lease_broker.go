@@ -14,7 +14,13 @@ import (
 const lspShutdownTimeout = 3 * time.Second
 
 func (l *lspLease) gracefulRelease(generation uint64, reason, requestID string) error {
+	text := "language server stopped"
+	if reason == lspLeaseReleaseEditorIdle {
+		text = "language server released after editor idle"
+	}
+	defer l.terminate(websocket.CloseNormalClosure, text, reason)
 	l.mu.Lock()
+	l.expectedUpstreamClose = true
 	requests := make([]lspLeaseClientRequest, 0, len(l.clientRequests))
 	for key, request := range l.clientRequests {
 		if request.generation == generation {
@@ -40,12 +46,6 @@ func (l *lspLease) gracefulRelease(generation uint64, reason, requestID string) 
 	}); err != nil {
 		return err
 	}
-	code := websocket.CloseNormalClosure
-	text := "language server stopped"
-	if reason == lspLeaseReleaseEditorIdle {
-		text = "language server released after editor idle"
-	}
-	l.terminate(code, text, reason)
 	return nil
 }
 

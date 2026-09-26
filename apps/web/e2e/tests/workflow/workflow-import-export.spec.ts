@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow import/export", () => {
@@ -105,14 +106,20 @@ workflows:
     await dialog.locator("textarea").fill(yamlContent);
 
     // Click Import button in dialog
+    const imported = waitForHttp(
+      testPage,
+      "POST",
+      new RegExp(`/api/v1/workspaces/${seedData.workspaceId}/workflows/import$`),
+    );
     await dialog.getByRole("button", { name: "Import" }).click();
+    await imported;
 
     // Dialog should close and toast should appear
     await expect(dialog).not.toBeVisible();
 
-    // Reload to see the imported workflow
-    await page.goto(seedData.workspaceId);
-    const card = await page.findWorkflowCard("Pasted Workflow");
+    // The import refreshes the workflow list in place. Wait for its new name
+    // instead of starting a competing navigation while that refresh settles.
+    const card = await page.findWorkflowCard("Pasted Workflow", { waitForName: true });
     await expect(card).toBeVisible();
     await expect(card.getByText("Open")).toBeVisible();
     await expect(card.getByText("Closed")).toBeVisible();
@@ -256,8 +263,7 @@ workflows:
       expect(implement?.agent_profile_id).toBe(replacement.id);
       expect(review?.session_target).toEqual({ kind: "step", step_id: implement?.id });
 
-      await page.goto(seedData.workspaceId);
-      const importedCard = await page.findWorkflowCard(workflowName);
+      const importedCard = await page.findWorkflowCard(workflowName, { waitForName: true });
       await expect(importedCard).toBeVisible();
     } finally {
       const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);

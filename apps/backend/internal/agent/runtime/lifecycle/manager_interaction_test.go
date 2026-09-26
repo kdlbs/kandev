@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -578,6 +581,116 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	}
 	if !slices.Contains(eventTypes, events.AgentContextReset) {
 		t.Fatalf("expected %q event, got %v", events.AgentContextReset, eventTypes)
+	}
+}
+
+func TestManager_RestartAgentProcessAppliesCursorAuthPreference(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workspace := t.TempDir()
+	cursorHome := filepath.Join(home, ".cursor")
+	projects := filepath.Join(cursorHome, "projects")
+	if err := os.MkdirAll(filepath.Join(projects, "source-project"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projects, "source-project", "mcp-auth.json"), []byte(`{"figma":{"token":"opaque"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := mcpconfig.LinkCursorMCPAuth(workspace, cursorHome); err != nil {
+		t.Fatalf("create existing bridge link: %v", err)
+	}
+
+	mgr := newTestManager(t)
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{
+		ProfileID:            "cursor-profile",
+		AgentName:            "cursor-acp",
+		CursorMCPAuthEnabled: false,
+	}}
+	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.newModelState = restartDefaultModelState()
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	execution := &AgentExecution{
+		ID:             "exec-cursor-restart",
+		TaskID:         "task-1",
+		SessionID:      "session-cursor-restart",
+		AgentProfileID: "cursor-profile",
+		ExecutorType:   "local",
+		ACPSessionID:   "old-session",
+		AgentCommand:   "cursor-acp",
+		Status:         v1.AgentStatusRunning,
+		WorkspacePath:  workspace,
+		agentctl:       client,
+		promptDoneCh:   make(chan PromptCompletionSignal, 1),
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	require.NoError(t, mgr.RestartAgentProcess(ctx, execution.ID))
+
+	destination := cursorMCPAuthDestinationForTest(t, projects, workspace)
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		t.Fatalf("disabled preference was not applied before process restart, lstat err=%v", err)
+	}
+}
+
+func TestManager_PromptOnRunningCursorSessionKeepsLoadedAuthLink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workspace := t.TempDir()
+	cursorHome := filepath.Join(home, ".cursor")
+	projects := filepath.Join(cursorHome, "projects")
+	if err := os.MkdirAll(filepath.Join(projects, "source-project"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projects, "source-project", "mcp-auth.json"), []byte(`{"figma":{"token":"opaque"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := mcpconfig.LinkCursorMCPAuth(workspace, cursorHome); err != nil {
+		t.Fatalf("create existing bridge link: %v", err)
+	}
+
+	mgr := newTestManager(t)
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{
+		ProfileID:            "cursor-profile",
+		AgentName:            "cursor-acp",
+		CursorMCPAuthEnabled: false,
+	}}
+	mock := newRestartMockAgentctlServer(t, false, false)
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil))
+
+	execution := &AgentExecution{
+		ID:                 "exec-cursor-existing",
+		TaskID:             "task-1",
+		SessionID:          "session-cursor-existing",
+		AgentProfileID:     "cursor-profile",
+		ExecutorType:       "local",
+		ACPSessionID:       "existing-session",
+		AgentCommand:       "cursor-acp",
+		AgentID:            "cursor-acp",
+		Status:             v1.AgentStatusRunning,
+		WorkspacePath:      workspace,
+		sessionInitialized: true,
+		agentctl:           client,
+		promptDoneCh:       make(chan PromptCompletionSignal, 1),
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	if _, err := mgr.PromptAgent(ctx, execution.ID, "continue current session", nil, true); err != nil {
+		t.Fatalf("PromptAgent: %v", err)
+	}
+	destination := cursorMCPAuthDestinationForTest(t, projects, workspace)
+	if _, err := os.Readlink(destination); err != nil {
+		t.Fatalf("running session auth link was changed by a prompt: %v", err)
+	}
+	if !slices.Contains(mock.getWSActions(), "agent.prompt") {
+		t.Fatalf("follow-up prompt did not reach running Cursor session: %v", mock.getWSActions())
 	}
 }
 

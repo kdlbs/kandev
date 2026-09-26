@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { ApiError } from "@/lib/api/client";
 import * as officeApi from "@/lib/api/domains/office-api";
+import { triggerBlobDownload } from "@/lib/utils/file-download";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { ExportFileTree } from "./export-file-tree";
 import { ExportFilePreview } from "./export-file-preview";
@@ -270,12 +271,7 @@ export function ExportPreview() {
       ) {
         return;
       }
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = "kandev-config-selected.zip";
-      anchor.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      triggerBlobDownload(blob, "kandev-config-selected.zip");
     } catch (error) {
       setDownloadErrorKey(
         error instanceof ApiError && error.status === 409

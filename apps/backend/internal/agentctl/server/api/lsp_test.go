@@ -106,9 +106,11 @@ func TestRunLSPBridgeClosesStdoutAfterForwarderReturns(t *testing.T) {
 	stdout := newOrderedLSPReadCloser()
 	t.Cleanup(stdout.release)
 	processDone := make(chan struct{})
+	processExited := make(chan struct{})
 	close(processDone)
+	close(processExited)
 	lspProcess := &lspServerProcess{
-		id: "already-stopped", stdin: discardLSPWriteCloser{}, stdout: stdout, done: processDone,
+		id: "already-stopped", stdin: discardLSPWriteCloser{}, stdout: stdout, exited: processExited, done: processDone,
 	}
 	handlerDone := make(chan error, 1)
 	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -158,9 +160,11 @@ func TestRunLSPBridgeForwarderExitUnblocksStdinWrite(t *testing.T) {
 	stdin := newBlockingLSPWriteCloser()
 	stdout := newOrderedLSPReadCloser()
 	processDone := make(chan struct{})
+	processExited := make(chan struct{})
 	close(processDone)
+	close(processExited)
 	lspProcess := &lspServerProcess{
-		id: "already-stopped", stdin: stdin, stdout: stdout, done: processDone,
+		id: "already-stopped", stdin: stdin, stdout: stdout, exited: processExited, done: processDone,
 	}
 	handlerDone := make(chan error, 1)
 	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -231,11 +235,14 @@ func TestWriteLSPStdinWithTimeoutClosesBlockedWrite(t *testing.T) {
 func TestRunLSPBridgeUsesCategoricalCloseWhenServerExits(t *testing.T) {
 	server := newTestServer(t)
 	processDone := make(chan struct{})
+	processExited := make(chan struct{})
 	close(processDone)
+	close(processExited)
 	lspProcess := &lspServerProcess{
 		id:     "exited-server",
 		stdin:  discardLSPWriteCloser{},
 		stdout: io.NopCloser(strings.NewReader("")),
+		exited: processExited,
 		done:   processDone,
 	}
 	handlerDone := make(chan error, 1)
@@ -272,13 +279,63 @@ func TestRunLSPBridgeUsesCategoricalCloseWhenServerExits(t *testing.T) {
 	}
 }
 
+func TestRunLSPBridgeWaitsForConfirmedServerExit(t *testing.T) {
+	server := newTestServer(t)
+	processExited := make(chan struct{})
+	processDone := make(chan struct{})
+	lspProcess := &lspServerProcess{
+		id:     "delayed-exit-confirmation",
+		stdin:  discardLSPWriteCloser{},
+		stdout: io.NopCloser(strings.NewReader("")),
+		exited: processExited,
+		done:   processDone,
+	}
+	handlerDone := make(chan error, 1)
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		conn, err := server.upgrader.Upgrade(writer, request, nil)
+		if err == nil {
+			server.runLSPBridge(conn, "kotlin", lspProcess, nil)
+		}
+		handlerDone <- err
+	}))
+	t.Cleanup(httpServer.Close)
+
+	timer := time.AfterFunc(150*time.Millisecond, func() { close(processExited) })
+	t.Cleanup(func() { timer.Stop() })
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial bridge: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, _, err = conn.ReadMessage()
+	closeErr, ok := err.(*websocket.CloseError)
+	if !ok {
+		t.Fatalf("server exit error = %T %v, want WebSocket close", err, err)
+	}
+	if closeErr.Code != 4006 || closeErr.Text != "" {
+		t.Fatalf("server exit close = %d %q, want 4006 with no reason", closeErr.Code, closeErr.Text)
+	}
+	close(processDone)
+	select {
+	case err := <-handlerDone:
+		if err != nil {
+			t.Fatalf("bridge handler: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("bridge handler did not return")
+	}
+}
+
 func TestRunLSPBridgeUsesTransportCloseWhenProcessMayStillBeRunning(t *testing.T) {
 	server := newTestServer(t)
+	processExited := make(chan struct{})
 	processDone := make(chan struct{})
 	lspProcess := &lspServerProcess{
 		id:     "live-server-with-broken-output",
 		stdin:  discardLSPWriteCloser{},
 		stdout: io.NopCloser(strings.NewReader("")),
+		exited: processExited,
 		done:   processDone,
 	}
 	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -294,7 +351,7 @@ func TestRunLSPBridgeUsesTransportCloseWhenProcessMayStillBeRunning(t *testing.T
 		t.Fatalf("dial bridge: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(lspProcessExitConfirmationTimeout + time.Second))
 	_, _, err = conn.ReadMessage()
 	closeErr, ok := err.(*websocket.CloseError)
 	if !ok {

@@ -132,3 +132,17 @@ func TestPullRequestAggregateStateAcrossPullRequests(t *testing.T) {
 		})
 	}
 }
+
+func TestPullRequestSummaryPreservesConflictAlongsideDraftAndFailingChecks(t *testing.T) {
+	conflicts := true
+	got := BuildFromAuthoritative(RebuildInput{
+		PRObserved: true,
+		PullRequests: []PullRequestInput{
+			{Key: "draft", State: prStateOpen, MergeableState: prStateDraft, HasMergeConflicts: &conflicts},
+			{Key: "failing", State: prStateOpen, ChecksState: prStateFailure},
+		},
+	})
+	if got.PullRequest == nil || !got.PullRequest.HasMergeConflicts {
+		t.Fatalf("conflict lost in aggregate: %+v", got.PullRequest)
+	}
+}

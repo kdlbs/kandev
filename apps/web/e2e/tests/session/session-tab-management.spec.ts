@@ -6,7 +6,6 @@ import path from "node:path";
 import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
 import { dwell } from "../../helpers/causal-waits";
@@ -61,12 +60,10 @@ async function createTaskWithTwoSessions(
     )
     .toBe(true);
 
-  const kanban = new KanbanPage(testPage);
-  await kanban.goto();
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 10_000 });
-  await card.click();
-  await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+  // The task ID is already available from the API response. Go directly to
+  // the session route so this setup does not depend on the board projection
+  // catching up with the task creation.
+  await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();

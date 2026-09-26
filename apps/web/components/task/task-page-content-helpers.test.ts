@@ -22,6 +22,7 @@ import {
 
 type KanbanTask = KanbanState["tasks"][number];
 const ARCHIVED_AT = "2026-07-19T00:00:00Z";
+const FRESH_KANBAN_UPDATED_AT = "2026-07-20T00:00:00Z";
 
 function makeArchivedTaskDetails(overrides: Partial<Task> = {}): Task {
   return {
@@ -94,7 +95,115 @@ describe("buildDebugEntries", () => {
   });
 });
 
-describe("resolveTaskProps", () => {
+describe("resolveTaskProps remote repository topbar projection", () => {
+  // @covers AC-UI-REMOTE-REPO-TOPBAR-001.1, AC-UI-REMOTE-REPO-TOPBAR-001.3
+  it("projects the short identity and safe browser URL for one resolved remote repository", () => {
+    const repository = {
+      id: "repo-1",
+      name: "agent-orchestrator",
+      source_type: "provider",
+      provider: "github",
+      provider_owner: "Untrivial-ai",
+      provider_name: "agent-orchestrator",
+      remote_url: "https://github.com/Untrivial-ai/agent-orchestrator.git/",
+    } as unknown as Repository;
+    const task = {
+      id: "task-1",
+      title: "Explain agent connections",
+      repositories: [{ repository_id: "repo-1" }],
+    } as unknown as Task;
+
+    const props = resolveTaskProps(task, repository);
+
+    expect(props.repositoryLabel).toBe("Untrivial-ai/agent-orchestrator");
+    expect(props.topbarRepository).toEqual({
+      displayName: "agent-orchestrator",
+      fullName: "Untrivial-ai/agent-orchestrator",
+      provider: "github",
+      browserUrl: "https://github.com/Untrivial-ai/agent-orchestrator",
+    });
+  });
+});
+
+describe("resolveTaskProps repository eligibility", () => {
+  // @covers AC-UI-REMOTE-REPO-TOPBAR-001.2, AC-UI-REMOTE-REPO-TOPBAR-001.4
+  it.each([
+    ["a local repository", "local", [{ repository_id: "repo-1" }], "https://github.com/owner/repo"],
+    [
+      "a task with multiple repositories",
+      "provider",
+      [{ repository_id: "repo-1" }, { repository_id: "repo-2" }],
+      "https://github.com/owner/repo",
+    ],
+    [
+      "an unresolved primary repository",
+      "provider",
+      [{ repository_id: "repo-2" }],
+      "https://github.com/owner/repo",
+    ],
+  ])(
+    "does not create a topbar-only link for %s",
+    (_reason, sourceType, taskRepositories, remoteURL) => {
+      const repository = {
+        id: "repo-1",
+        name: "repo",
+        source_type: sourceType,
+        provider: "github",
+        provider_owner: "owner",
+        provider_name: "repo",
+        remote_url: remoteURL,
+      } as unknown as Repository;
+
+      const props = resolveTaskProps(
+        { id: "task-1", title: "Any", repositories: taskRepositories } as unknown as Task,
+        repository,
+      );
+
+      expect(props.topbarRepository).toBeNull();
+    },
+  );
+});
+
+describe("resolveTaskProps safe browser URL", () => {
+  it.each([
+    undefined,
+    "",
+    "git@github.com:owner/repo.git",
+    "http://github.com/owner/repo",
+    "https://user:secret@github.com/owner/repo",
+    "https://github.com/owner/repo?tab=code",
+    "https://github.com/owner/repo#readme",
+    "not a URL",
+  ])("keeps an unsafe or missing remote URL out of browser navigation: %s", (remoteURL) => {
+    const repository = {
+      id: "repo-1",
+      name: "repo",
+      source_type: "provider",
+      provider: "github",
+      provider_owner: "owner",
+      provider_name: "repo",
+      remote_url: remoteURL,
+    } as unknown as Repository;
+
+    const props = resolveTaskProps(
+      {
+        id: "task-1",
+        title: "Any",
+        repositories: [{ repository_id: "repo-1" }],
+      } as unknown as Task,
+      repository,
+    );
+
+    expect(props.topbarRepository).toMatchObject({
+      displayName: "repo",
+      fullName: "owner/repo",
+      provider: "github",
+      browserUrl: null,
+    });
+  });
+});
+
+describe("resolveTaskProps additional metadata", () => {
   it("exposes linked GitHub issue metadata for the top bar", () => {
     const props = resolveTaskProps(
       {
@@ -453,7 +562,10 @@ describe("resolveEffectiveTask archived state", () => {
     const enabled = resolveEffectiveTask(
       base,
       null,
-      makeKanbanTask({ metadata: { port_forwarding_enabled: true } }),
+      makeKanbanTask({
+        metadata: { port_forwarding_enabled: true },
+        updatedAt: FRESH_KANBAN_UPDATED_AT,
+      }),
       "task-1",
     );
     expect(enabled?.metadata).toEqual({ port_forwarding_enabled: true });
@@ -493,7 +605,11 @@ describe("resolveEffectiveTask archived state", () => {
 
   it("prefers live kanban title/state while preserving base-only fields", () => {
     const taskDetails = makeArchivedTaskDetails({ archived_at: null });
-    const kanbanTask = makeKanbanTask({ title: "Live title", state: "IN_PROGRESS" });
+    const kanbanTask = makeKanbanTask({
+      title: "Live title",
+      state: "IN_PROGRESS",
+      updatedAt: FRESH_KANBAN_UPDATED_AT,
+    });
 
     const resolved = resolveEffectiveTask(taskDetails, null, kanbanTask, "task-1");
 

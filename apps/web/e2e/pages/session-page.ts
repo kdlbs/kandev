@@ -1,6 +1,7 @@
 import { type Locator, type Page, expect } from "@playwright/test";
 import { FileTreePage } from "./file-tree-page";
 import { NewSessionDialogPage } from "./new-session-dialog-page";
+import { ChangeWorkflowPage } from "./change-workflow-page";
 import { dwell } from "../helpers/causal-waits";
 
 function escapeRegExp(value: string): string {
@@ -402,9 +403,12 @@ export class SessionPage {
     stepId: string,
   ): Promise<void> {
     await this.openSidebarTaskContextMenu(title);
-    await this.page.getByTestId("task-context-send-to-workflow").hover();
-    await this.page.getByTestId(`task-context-workflow-${workflowId}`).hover();
-    await this.page.getByTestId(`task-context-step-${stepId}`).click();
+    await this.page.getByTestId("task-context-change-workflow").click();
+    const changeWorkflow = new ChangeWorkflowPage(this.page);
+    await changeWorkflow.form.waitFor({ state: "visible" });
+    await changeWorkflow.chooseWorkflow(workflowId);
+    await changeWorkflow.chooseStep(stepId);
+    await changeWorkflow.submit();
   }
 
   /**
@@ -1383,10 +1387,10 @@ export class SessionPage {
   /**
    * Assert the terminal buffer contains the given text.
    */
-  async expectTerminalHasText(text: string): Promise<void> {
+  async expectTerminalHasText(text: string, timeout = 30_000): Promise<void> {
     await expect
       .poll(async () => (await this.readXtermBuffer("terminal-panel")).includes(text), {
-        timeout: 10_000,
+        timeout,
         message: `Expected terminal to contain "${text}"`,
       })
       .toBe(true);
