@@ -353,7 +353,6 @@ func (s *Server) registerConfigExecutorTools() {
 // --- Task config tools ---
 
 func (s *Server) registerConfigTaskTools() {
-	s.registerAssignExactTaskProfileTool()
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_tasks_kandev",
 			mcp.WithDescription("List all tasks in a workflow. Each task includes its associated GitHub pull requests (number, url, title, state) under the \"prs\" field when any exist — use the PR state (open/closed/merged) to find tasks whose work has landed."),

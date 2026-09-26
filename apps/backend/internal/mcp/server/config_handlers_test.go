@@ -187,14 +187,14 @@ func TestCoordinatorHandoffToolIsNotPublished(t *testing.T) {
 	assert.NotContains(t, coordinator.mcpServer.ListTools(), "handoff_coordinator_primary_kandev")
 }
 
-func TestAssignExactTaskProfileToolRequiresConfigOrCoordinatorCapability(t *testing.T) {
+func TestAssignExactTaskProfileToolRequiresCoordinatorCapability(t *testing.T) {
 	backend := &testBackend{}
 	config := New(backend, "test-session", "", 10005, newTestLogger(t), "", false, ModeConfig)
 	external := New(backend, "test-session", "", 10005, newTestLogger(t), "", false, ModeExternal)
 	task := New(backend, "test-session", "", 10005, newTestLogger(t), "", false, ModeTask)
 
-	assert.Contains(t, config.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
-	assert.Contains(t, external.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
+	assert.NotContains(t, config.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
+	assert.NotContains(t, external.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
 	assert.NotContains(t, task.mcpServer.ListTools(), "assign_exact_task_profile_kandev")
 
 	coordinator := NewWithProfile(backend, "session", "task", 10005, newTestLogger(t), "", false,
