@@ -897,10 +897,21 @@ test('GitHub client shares the rate-limit sleep budget across requests', async (
     sleepImpl: async delay => delays.push(delay),
     fetchImpl: async () => {
       calls += 1;
-      if (calls <= 2 || calls === 4) {
+      if (calls === 1) {
         return {
           ok: false,
           status: 429,
+          headers: { 'retry-after': '420' },
+          async text() {
+            return JSON.stringify({ message: 'secondary rate limit' });
+          },
+        };
+      }
+      if (calls === 3) {
+        return {
+          ok: false,
+          status: 429,
+          headers: { 'retry-after': '1' },
           async text() {
             return JSON.stringify({ message: 'secondary rate limit' });
           },
@@ -925,8 +936,8 @@ test('GitHub client shares the rate-limit sleep budget across requests', async (
   await client.getPullRequest(42);
   await assert.rejects(client.getPullRequest(42), /wait-budget-exhausted/);
 
-  assert.equal(calls, 4);
-  assert.deepEqual(delays, [60_000, 120_000]);
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [420_000]);
 });
 
 test('GitHub client retries rate-limited GraphQL error payloads', async () => {
@@ -1093,7 +1104,7 @@ test('GitHub client stops before an explicit wait exceeds the sleep budget', asy
       return {
         ok: false,
         status: 503,
-        headers: { 'retry-after': '181' },
+        headers: { 'retry-after': '421' },
         async text() {
           return JSON.stringify({ message: 'Service Unavailable' });
         },
@@ -1105,7 +1116,48 @@ test('GitHub client stops before an explicit wait exceeds the sleep budget', asy
 
   assert.equal(calls, 1);
   assert.deepEqual(delays, []);
-  assert.equal(logs.some(log => log.includes('next_delay_ms=181000')), true);
+  assert.equal(logs.some(log => log.includes('next_delay_ms=421000')), true);
+});
+
+test('GitHub client honors a long code-search rate-limit delay within the job budget', async () => {
+  let calls = 0;
+  const delays = [];
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    sleepImpl: async delay => delays.push(delay),
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          ok: false,
+          status: 429,
+          headers: { 'retry-after': '344' },
+          async text() {
+            return JSON.stringify({ message: 'API rate limit exceeded' });
+          },
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({
+            incomplete_results: false,
+            items: [],
+            total_count: 0,
+          });
+        },
+      };
+    },
+  });
+
+  const paths = await client.searchCode('REQ-EXAMPLE-001', 'docs/specs');
+
+  assert.deepEqual(paths, []);
+  assert.equal(calls, 2);
+  assert.deepEqual(delays, [344_000]);
 });
 
 test('GitHub client retries transport failures with short exponential backoff', async () => {
@@ -2248,6 +2300,35 @@ test('run reuses the snapshot used for the pending status', async () => {
   assert.equal(result.exitCode, 0);
   assert.equal(metadataCalls, 2);
   assert.deepEqual(statuses.map(status => status.state), ['pending', 'success']);
+});
+
+test('dry-run evaluates coverage and writes a summary without publishing statuses', async () => {
+  const statuses = [];
+  const summaries = [];
+  const client = {
+    async getPullRequest() {
+      return pullRequest(42, SHA_B);
+    },
+    async listFiles() {
+      return [{ filename: 'docs/guide.md', status: 'modified' }];
+    },
+    async createCommitStatus(sha, status) {
+      statuses.push({ sha, ...status });
+    },
+  };
+
+  const result = await validator.run({
+    client,
+    env: { PR_DOCS_DRY_RUN: '1' },
+    event: { pull_request: { number: 42 } },
+    eventName: 'pull_request_target',
+    writeSummary: summary => summaries.push(summary),
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(statuses, []);
+  assert.equal(summaries.length, 1);
+  assert.match(summaries[0], /PR documentation coverage/);
 });
 
 test('workflow dispatch reads the pull-request number from its input', async () => {

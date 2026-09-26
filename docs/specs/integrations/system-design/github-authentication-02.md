@@ -336,7 +336,12 @@ An environment delivery failure must prevent a claim that the refreshed environm
 The agentctl configure boundary has two explicit modes. The existing API mode composes a request-only
 overlay with the instance block, removing only marker-owned bridge entries first. Lifecycle launch and
 Kubernetes restart pass a composed runtime snapshot through this overlay mode; the indexed merge recognizes
-an already-forwarded snapshot and does not append it to itself. Complete-environment mode remains available
+an already-forwarded snapshot and does not append it to itself. The lifecycle side composes that snapshot
+with a `SetExecutionEnv` overlay only when one has been delivered. Without an overlay the snapshot is the
+newest environment the launch composed, and `configureAndStartAgent` forwards it unchanged: composing it
+with an empty overlay removes the managed helper path, broker URL, and lease as obsolete while keeping the
+generated helper entry that expands them, which leaves Git with an empty helper command and a failed HTTPS
+push. Complete-environment mode remains available
 to callers that supply the complete indexed block, including an intentional empty block. Both modes update
 the agent environment, one-shot adapter, workspace tracker, task shells, and task-scoped processes from the
 same canonical slice.

@@ -964,6 +964,7 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	expectedState := session.State
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
+		claimAgentStartAttempt(session)
 	}
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
@@ -1114,10 +1115,6 @@ func (e *Executor) resumeSession(
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return nil, err
 	}
-	if startAgent {
-		e.observeSessionCoresidency(ctx, sessionCoresidencySiteResume, task.ID, session.ID)
-	}
-
 	resumeInitialState := session.State
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
 	completedResume := options.AllowCompletedSessionResume &&
@@ -2390,6 +2387,7 @@ func (e *Executor) persistResumeStateWithOptions(
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
 		session.CompletedAt = nil
+		claimAgentStartAttempt(session)
 		if completedResume {
 			if session.Metadata == nil {
 				session.Metadata = make(map[string]interface{})
@@ -2509,7 +2507,7 @@ func (e *Executor) startAgentProcessOnResumeWithTaskPromotion(
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.String("session_state", string(session.State)))
-	}, false, true)
+	}, false, true, models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]))
 }
 
 func (e *Executor) writeTaskInProgressForRuntime(ctx context.Context, taskID, sessionID string) error {

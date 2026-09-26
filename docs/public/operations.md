@@ -777,11 +777,18 @@ Kandev warns when its live WebSocket connection has not recovered for three seco
 **Settings > System > Feature Toggles** currently exposes:
 
 - **Office mode**: experimental, medium risk, and off in the production profile by default.
-- **Office session identity**: experimental, high risk, and on in every profile by default. The live `(task_id, agent_profile_id)` pair is guarded in-transaction on the Office session creation path, not by a table-level index; pre-existing duplicate rows are retained and resolved by selection. Two Kandev processes must not write the same SQLite file. It gives each Office participant a separate task conversation and requires a restart. Disabling the toggle restores the pre-graduation runner-seat binding and task-active-session decision re-evaluation.
 - **App status bar**: stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins. Urgent WebSocket connectivity warnings still remain visible while the feature is off.
 - **Claude background prompt handoff**: experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
 - **Unread divider**: a per-user setting at **Settings > Preferences > Task Behavior > Conversation**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
 - **Debug mode**: high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
+
+Office session identity is graduated and always active. Each Office participant
+uses its own task conversation, and an agent decision is evaluated against the
+calling session. A live `(task_id, agent_profile_id)` pair is guarded
+in-transaction on the Office session creation path; pre-existing duplicate rows
+are retained and resolved by selection. Two Kandev processes must not write
+the same SQLite file. Its runtime toggle and environment variable are retired,
+so old false values do not disable participant sessions.
 
 Each feature toggle requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.
 

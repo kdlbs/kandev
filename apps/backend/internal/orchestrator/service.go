@@ -70,15 +70,6 @@ type ServiceConfig struct {
 	// turn for an agent that advertised prompt queueing. Independent of
 	// ClaudeBackgroundPromptHandoff, which covers the foreground-idle handoff.
 	ClaudeMidTurnSteering bool
-
-	// OfficeSessionIdentity keys an Office task's session identity on the
-	// run's own agent instead of the task's runner seat. Off by default
-	// because it is an experimental, high-risk, path-scoped change to durable
-	// session identity and existing rows are not migrated. A live
-	// (task_id, agent_profile_id) pair is guarded in-transaction on the
-	// office session creation path, and pre-existing duplicate rows are
-	// deliberately retained and resolved by selection.
-	OfficeSessionIdentity bool
 }
 
 // AttachmentReader is the narrow attachment-store seam needed when the
@@ -3048,6 +3039,18 @@ func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 	return lock.Unlock
 }
 
+func (s *Service) tryAcquireSessionLifecycleLock(sessionID string) (func(), bool) {
+	if sessionID == "" {
+		return nil, false
+	}
+	value, _ := s.sessionLifecycleLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	if !lock.TryLock() {
+		return nil, false
+	}
+	return lock.Unlock, true
+}
+
 // acquireTurnCompletionLock serializes on_turn_complete processing for a
 // single session — see turnCompletionLocks' field comment for the race it
 // closes. A caller with no session ID (defensive callers pass "" rather than
@@ -4108,7 +4111,7 @@ func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID 
 		go func(profileID string) {
 			_, launchErr := s.startCreatedSessionWithComposedPrompt(
 				context.WithoutCancel(ctx), taskID, sessionID, profileID,
-				"", "", true, false, false, false, nil, nil,
+				"", "", "", true, false, false, false, nil, nil,
 			)
 			if launchErr != nil && !errors.Is(launchErr, ErrAgentPromptInProgress) {
 				s.logger.Warn("failed to start session for durable queued prompt",

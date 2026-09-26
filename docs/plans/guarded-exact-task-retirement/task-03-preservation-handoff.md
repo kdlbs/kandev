@@ -1,11 +1,19 @@
 ---
+id: "03-preservation-handoff"
+title: "Design preservation and handoff evidence"
 status: in_progress
-work_package: W03
+wave: 2
+depends_on:
+  - "02-read-only-preview"
+plan: "plan.md"
 requirements:
   - REQ-TASKS-EXACT-RETIREMENT-002
-dependencies:
-  - PR #3905 / b88aea31ad49b2cda40e8ad84452356888e36a42
-  - PR #3155 / 0f76f4fcbd64dde90808e4a48c3d479ef10d9c4f
+acceptance_criteria:
+  - AC-TASKS-EXACT-RETIREMENT-002.1
+  - AC-TASKS-EXACT-RETIREMENT-002.2
+  - AC-TASKS-EXACT-RETIREMENT-002.3
+system_design:
+  - ../../specs/tasks/system-design/guarded-exact-task-retirement.md
 ---
 
 # Task 03: Design preservation and handoff evidence

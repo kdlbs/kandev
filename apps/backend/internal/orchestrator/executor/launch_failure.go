@@ -257,28 +257,33 @@ func (e *Executor) loadBootstrapFailureSession(
 func (e *Executor) bootstrapFailureOwnsSession(
 	ctx context.Context,
 	sessionID, agentExecutionID string,
-) (bool, error) {
+	expectedStartAttemptID string,
+) (bool, bool, error) {
 	if sessionID == "" || agentExecutionID == "" {
-		return true, nil
+		return true, false, nil
 	}
 	session, err := e.loadBootstrapFailureSession(ctx, sessionID)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if session == nil {
-		return false, nil
+		return false, false, nil
 	}
 	if session.AgentExecutionID != "" && session.AgentExecutionID != agentExecutionID {
-		return false, nil
+		return false, true, nil
+	}
+	if expectedStartAttemptID != "" &&
+		models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]) != expectedStartAttemptID {
+		return false, false, nil
 	}
 	if e.agentManager == nil {
-		return true, nil
+		return true, false, nil
 	}
 	liveExecutionID, lookupErr := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if lookupErr == nil && liveExecutionID != "" && liveExecutionID != agentExecutionID {
-		return false, nil
+		return false, true, nil
 	}
-	return true, nil
+	return true, false, nil
 }
 
 // bootstrapFailureExpectation captures the final session observation used by
@@ -287,6 +292,7 @@ func (e *Executor) bootstrapFailureOwnsSession(
 func (e *Executor) bootstrapFailureExpectation(
 	ctx context.Context,
 	sessionID, agentExecutionID string,
+	expectedStartAttemptID string,
 ) (*models.TaskSession, string, bool, error) {
 	session, err := e.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -296,6 +302,10 @@ func (e *Executor) bootstrapFailureExpectation(
 		return nil, "", false, fmt.Errorf("reload session before bootstrap failure commit: session %q is nil", sessionID)
 	}
 	if session.AgentExecutionID != "" && session.AgentExecutionID != agentExecutionID {
+		return session, "", false, nil
+	}
+	if expectedStartAttemptID != "" &&
+		models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]) != expectedStartAttemptID {
 		return session, "", false, nil
 	}
 
@@ -314,9 +324,10 @@ func (e *Executor) bootstrapFailureExpectation(
 func (e *Executor) commitBootstrapFailure(
 	ctx context.Context,
 	taskID, sessionID, agentExecutionID string,
+	expectedStartAttemptID string,
 	errorValue models.LastAgentError,
 ) (bool, models.TaskSessionState, error) {
-	session, expectedStamp, owned, err := e.bootstrapFailureExpectation(ctx, sessionID, agentExecutionID)
+	session, expectedStamp, owned, err := e.bootstrapFailureExpectation(ctx, sessionID, agentExecutionID, expectedStartAttemptID)
 	if err != nil {
 		return false, "", err
 	}
@@ -332,6 +343,19 @@ func (e *Executor) commitBootstrapFailure(
 			agentExecutionID,
 			session.State,
 			expectedStamp,
+			expectedStartAttemptID,
+			errorValue,
+		)
+	}
+	if expectedStartAttemptID != "" {
+		return e.commitBootstrapFailureIfCurrentAttempt(
+			ctx,
+			taskID,
+			sessionID,
+			agentExecutionID,
+			session.State,
+			expectedStamp,
+			expectedStartAttemptID,
 			errorValue,
 		)
 	}
@@ -358,4 +382,27 @@ func (e *Executor) commitBootstrapFailure(
 	return false, session.State, fmt.Errorf(
 		"bootstrap failure requires an execution-fenced repository commit",
 	)
+}
+
+func (e *Executor) commitBootstrapFailureIfCurrentAttempt(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	expectedState models.TaskSessionState,
+	expectedStamp, expectedStartAttemptID string,
+	errorValue models.LastAgentError,
+) (bool, models.TaskSessionState, error) {
+	committer, ok := e.repo.(bootstrapFailureAttemptCommitter)
+	if !ok {
+		return false, expectedState, fmt.Errorf("bootstrap failure requires a startup-attempt-fenced repository commit")
+	}
+	changed, _, err := committer.CommitBootstrapFailureIfCurrentAttempt(
+		ctx, taskID, sessionID, agentExecutionID, expectedState, expectedStamp, expectedStartAttemptID, errorValue,
+	)
+	if err != nil {
+		return false, expectedState, err
+	}
+	if !changed {
+		return false, expectedState, nil
+	}
+	return true, models.TaskSessionStateFailed, nil
 }

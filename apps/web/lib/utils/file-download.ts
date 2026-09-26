@@ -1,3 +1,5 @@
+import { retainNativeBlobDownload, revokeNativeBlobDownload } from "./native-blob-download";
+
 export type TriggerFileDownloadParams = {
   fileName: string;
   content: string;
@@ -20,6 +22,7 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
 
 function downloadBlobViaAnchor(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
+  const nativeDownload = retainNativeBlobDownload(url);
   try {
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -27,8 +30,13 @@ function downloadBlobViaAnchor(blob: Blob, fileName: string): void {
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
-  } finally {
-    URL.revokeObjectURL(url);
+  } catch (error) {
+    if (nativeDownload) revokeNativeBlobDownload(url);
+    else URL.revokeObjectURL(url);
+    throw error;
+  }
+  if (!nativeDownload) {
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 }
 
@@ -56,4 +64,13 @@ export function triggerFileDownload({
  */
 export function triggerBlobDownload(blob: Blob, fileName: string): void {
   downloadBlobViaAnchor(blob, fileName);
+}
+
+export function triggerUrlDownload(url: string, fileName: string): void {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }

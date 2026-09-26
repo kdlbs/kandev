@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
-import { IconAlertCircle, IconAlertTriangle, IconChevronDown } from "@tabler/icons-react";
+import { useEffect, useMemo, useState } from "react";
+import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { useAppStore } from "@/components/state-provider";
+import { SessionErrorDetails } from "@/components/task/session-error-details";
+import { hasSessionRecoveryMessage } from "@/lib/session-recovery-presentation";
+import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { GridSpinner } from "@/components/grid-spinner";
 import { resolveAgentErrorLabelKey } from "./agent-error-label";
 import { useTranslation } from "react-i18next";
@@ -166,42 +169,14 @@ function AgentErrorStatus({
       ? (state.taskSessions.items[sessionId]?.error_message as string | undefined)
       : undefined,
   );
-  const [expanded, setExpanded] = useState(false);
-  const toggle = useCallback(() => setExpanded((value) => !value), []);
-
   const displayLabel = t(resolveAgentErrorLabelKey(errorMessage, config.labelKey));
-  const hasDetails = !!errorMessage;
-  const detailsToggleLabel = expanded
-    ? t("task:hideErrorDetails", { displayLabel })
-    : t("task:showErrorDetails", { displayLabel });
-
   return (
-    <div
-      className="rounded-lg text-xs bg-destructive/10 text-destructive border border-destructive/20"
-      role="status"
-      aria-label={displayLabel}
-    >
-      <button
-        type="button"
-        className={`flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left sm:min-h-0 ${hasDetails ? "cursor-pointer" : ""}`}
-        onClick={hasDetails ? toggle : undefined}
-        disabled={!hasDetails}
-        aria-expanded={hasDetails ? expanded : undefined}
-        aria-label={hasDetails ? detailsToggleLabel : displayLabel}
-      >
-        <IconAlertCircle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-        <span className="min-w-0 break-words font-medium">{displayLabel}</span>
-        {hasDetails && (
-          <IconChevronDown
-            className={`ml-auto h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`}
-          />
-        )}
-      </button>
-      {expanded && errorMessage && (
-        <pre className="max-h-40 max-w-full overflow-y-auto whitespace-pre-wrap break-words px-3 pb-2 text-[11px] text-destructive/80">
-          {errorMessage}
-        </pre>
-      )}
+    <div className="min-w-0 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
+      <div className="flex items-start gap-2">
+        <IconAlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 wrap-anywhere font-medium">{displayLabel}</span>
+      </div>
+      {errorMessage && <SessionErrorDetails>{errorMessage}</SessionErrorDetails>}
     </div>
   );
 }
@@ -299,12 +274,22 @@ export function AgentStatus({
   const hasBackgroundWork = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.foreground_activity === "background" : false,
   );
+  const recoveryOwned = useAppStore((state) => {
+    if (!sessionId) return false;
+    const error = readLastAgentError(state.taskSessions.items[sessionId]?.metadata);
+    return hasSessionRecoveryMessage(
+      state.messages.bySession[sessionId] ?? [],
+      sessionId,
+      error?.stamp,
+    );
+  });
   const config = resolveAgentStatusConfig(sessionState, isWorking, hasBackgroundWork);
   const isRunning = config?.icon === "spinner";
   const agentLabel = useAgentLabel(sessionId, config?.dynamicLabel);
 
   const runningData = useAgentStatusData(sessionId, messages, isRunning);
 
+  if (config?.icon === "error" && recoveryOwned) return null;
   if (config?.icon) {
     const label = agentLabel ? t("task:startingAgent", { agentLabel }) : t(config.labelKey);
     return renderActiveStatus(

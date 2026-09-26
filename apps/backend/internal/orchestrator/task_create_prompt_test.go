@@ -555,7 +555,7 @@ func TestInitialCreatePrompt_QueueReplayTransfersPassthroughEvidence(t *testing.
 	}
 	svc.activeTurns.Store(session.ID, "turn-create-queue-initial")
 
-	afterClaim := svc.queuedMessageAfterClaim(ctx, identity, queued, nil, false, nil)
+	afterClaim := svc.queuedMessageAfterClaim(ctx, identity, queued, nil, false, nil, nil)
 	require.NoError(t, afterClaim())
 	// The production passthrough worker binds this evidence immediately after
 	// PreparePassthroughRunning claims the successor execution. Model that

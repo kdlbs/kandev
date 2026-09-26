@@ -30,10 +30,12 @@ type PipedStartRequest struct {
 // PipedProcess exposes protocol streams while ProcessRunner remains the sole
 // owner of waiting and process-tree teardown.
 type PipedProcess struct {
-	ID      string
-	Stdin   io.WriteCloser
-	Stdout  io.ReadCloser
-	Stderr  io.ReadCloser
+	ID     string
+	Stdin  io.WriteCloser
+	Stdout io.ReadCloser
+	Stderr io.ReadCloser
+	// Exited closes when cmd.Wait confirms the direct process has exited.
+	Exited  <-chan struct{}
 	Done    <-chan struct{}
 	process *commandProcess
 }
@@ -85,6 +87,7 @@ func (r *ProcessRunner) StartPiped(req PipedStartRequest) (*PipedProcess, error)
 		Stdin:   streams.stdinWriter,
 		Stdout:  streams.stdoutReader,
 		Done:    proc.done,
+		Exited:  proc.exited,
 		process: proc,
 	}
 	if req.PipeStderr {
@@ -170,6 +173,7 @@ func (r *ProcessRunner) newPipedCommandProcess(
 		stdin:      stdin,
 		buffer:     newRingBuffer(r.bufferMaxBytes),
 		stopSignal: make(chan struct{}),
+		exited:     make(chan struct{}),
 		done:       make(chan struct{}),
 	}
 }

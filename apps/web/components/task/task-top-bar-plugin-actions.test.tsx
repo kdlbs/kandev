@@ -1,5 +1,6 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { usePluginActionSurface } from "@/components/plugins/plugin-action-surface";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import {
   TaskTopBarPluginActions,
@@ -132,6 +133,38 @@ describe("responsive task top-bar plugin actions", () => {
     expect(wrapper.contains(screen.getByTestId("mobile-plugin-action"))).toBe(true);
     expect(screen.getByTestId("mobile-plugin-action").textContent).toBe("mobile");
   });
+
+  it.each(["desktop", "mobile"] as const)(
+    "provides the topbar action surface for %s",
+    (presentation) => {
+      pluginRegistry.forPlugin("plugin-a").registerComponent(SLOT, () => {
+        const surface = usePluginActionSurface();
+        return (
+          <div
+            data-testid="plugin-action-surface"
+            data-surface={surface?.surface}
+            data-presentation={surface?.presentation}
+          />
+        );
+      });
+
+      render(
+        <TaskTopBarPluginActions
+          sessionId="s1"
+          taskId="t1"
+          workspaceId="w1"
+          presentation={presentation}
+        />,
+      );
+
+      expect(screen.getByTestId("plugin-action-surface").getAttribute("data-surface")).toBe(
+        "topbar",
+      );
+      expect(screen.getByTestId("plugin-action-surface").getAttribute("data-presentation")).toBe(
+        presentation,
+      );
+    },
+  );
 
   it("reacts when the first or last chat-top-bar registration changes", () => {
     function Presence() {

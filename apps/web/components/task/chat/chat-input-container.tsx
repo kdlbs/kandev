@@ -9,6 +9,9 @@ import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/ty
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { TaskPlanCommentRef, TaskPreviewFeedbackRef } from "@/lib/types/http";
 import { useChatInputContainer } from "./use-chat-input-container";
+import { SessionRecoveryCard } from "./session-recovery-card";
+import { useSessionComposerRecovery } from "./session-recovery-context";
+import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { SessionStoppedBanner } from "./session-stopped-banner";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import {
@@ -297,10 +300,15 @@ function useChatPromptEnhancement({
   return { handleEnhancePrompt, isEnhancingPrompt, isUtilityConfigured, promptDelivery };
 }
 
-function useChatInputRecoveryActions(taskId: string | null, sessionId: string | null) {
+function useChatInputRecoveryActions(
+  taskId: string | null,
+  sessionId: string | null,
+  errorStamp?: string,
+) {
   return useSessionRecoveryActions({
     taskId: taskId ?? "",
     sessionId: sessionId ?? "",
+    errorStamp,
   });
 }
 
@@ -340,7 +348,12 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onSubmit: props.onSubmit,
     });
 
-    const recoveryActions = useChatInputRecoveryActions(taskId, sessionId);
+    const composerRecovery = useSessionComposerRecovery(sessionId);
+    const recoveryActions = useChatInputRecoveryActions(
+      taskId,
+      sessionId,
+      composerRecovery?.model?.stamp,
+    );
 
     const promptEnhancement = useChatPromptEnhancement({
       inputRef: s.inputRef,
@@ -357,6 +370,27 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       })
     ) {
       return null;
+    }
+
+    if (composerRecovery?.model && taskId) {
+      return (
+        <>
+          <SessionRecoveryCard
+            model={composerRecovery.model}
+            actions={{
+              ...recoveryActions,
+              busyAction: recoveryActions.busyAction ?? composerRecovery.pending,
+            }}
+            onNewSession={() => s.setShowNewSessionDialog(true)}
+          />
+          <NewSessionDialog
+            open={s.showNewSessionDialog}
+            onOpenChange={s.setShowNewSessionDialog}
+            taskId={taskId}
+            workspaceId={props.workspaceId}
+          />
+        </>
+      );
     }
 
     if (
