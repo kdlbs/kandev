@@ -1,7 +1,10 @@
 ---
-spec: docs/specs/office/requirements/office-seat-read-workflow-scope.md
 created: 2026-09-26
 status: done
+requirements:
+  - REQ-OFFICE-SEAT-READ-SCOPE-001
+system_design:
+  - "../../specs/office/system-design/office-seat-read-workflow-scope-01.md"
 ---
 
 # Implementation Plan: Workflow-scope Office's seat read projections

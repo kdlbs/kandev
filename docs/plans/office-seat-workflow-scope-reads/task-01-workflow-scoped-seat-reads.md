@@ -5,8 +5,8 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/requirements/office-seat-read-workflow-scope.md"
-system_design: "../../specs/office/system-design/office-seat-read-workflow-scope-01.md"
+system_design:
+  - "../../specs/office/system-design/office-seat-read-workflow-scope-01.md"
 requirements:
   - REQ-OFFICE-SEAT-READ-SCOPE-001
 acceptance_criteria:
