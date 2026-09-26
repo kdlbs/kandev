@@ -214,7 +214,7 @@ function PluginRowContent({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <PluginRowIdentity plugin={plugin} needsSetup={needsSetup} update={update} />
 
-          <div className="flex min-w-0 max-w-full items-center gap-2">
+          <div className="flex w-full min-w-0 max-w-full items-center gap-2 sm:w-auto sm:shrink-0">
             {canManage && (
               <PluginRowActions
                 plugin={plugin}
@@ -494,7 +494,7 @@ function PluginRowActions({
   const { isMobile } = useResponsiveBreakpoint();
   const updateEntry = update?.hasUpdate ? update.latest : undefined;
   return (
-    <div className="relative z-10 flex min-w-0 flex-wrap items-center gap-2">
+    <div className="relative z-10 flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:flex-none sm:shrink-0">
       {updateEntry && onUpdate && (
         <PluginUpdateButton
           pluginId={plugin.id}

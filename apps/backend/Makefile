@@ -328,6 +328,7 @@ e2e-plugin-package: e2e-plugin-ui
 	cp -r $(FIXTURE_PACKAGE_DIR)/ui $(FIXTURE_STAGE_DIR)/ui
 	$(GO) build $(GOFLAGS) -o $(FIXTURE_STAGE_DIR)/server/plugin-$(HOST_GOOS)-$(HOST_GOARCH)$(EXE) ./cmd/plugin-fixture
 	$(GO) run ./cmd/plugin-pack -dir $(FIXTURE_STAGE_DIR) -out $(FIXTURE_PACKAGE_OUT) -platform-only
+	$(GO) build $(GOFLAGS) -o .build/plugin-package-verify$(EXE) ./cmd/plugin-package-verify
 	cd ../web && node scripts/write-e2e-plugin-identity.mjs \
 		e2e/fixtures/plugins/prompt-history-plugin/bundle.js \
 		../backend/cmd/plugin-fixture/fixture-package/ui/bundle.js \

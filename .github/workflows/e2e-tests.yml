@@ -396,6 +396,7 @@ jobs:
           name: e2e-plugin-package
           path: |
             apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz
+            apps/backend/.build/plugin-package-verify
             apps/backend/.build/e2e-plugin-identity.json
           retention-days: 1
 
@@ -479,6 +480,9 @@ jobs:
         with:
           name: e2e-plugin-package
           path: apps/backend/.build/
+
+      - name: Make E2E package verifier executable
+        run: chmod +x apps/backend/.build/plugin-package-verify
 
       - name: Download web build
         uses: ./.github/actions/download-artifact-retry
@@ -825,6 +829,9 @@ jobs:
         with:
           name: e2e-plugin-package
           path: apps/backend/.build/
+
+      - name: Make E2E package verifier executable
+        run: chmod +x apps/backend/.build/plugin-package-verify
 
       - name: Download web build
         uses: ./.github/actions/download-artifact-retry
