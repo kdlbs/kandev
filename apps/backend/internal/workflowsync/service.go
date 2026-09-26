@@ -356,7 +356,7 @@ func (s *Service) recordFailure(ctx context.Context, workspaceID string, cfg *Co
 		zap.String("failure_class", directive.class),
 		zap.Bool("poll_suspended", directive.suspended),
 		zap.String("retry_source", string(directive.retrySource)),
-		zap.Error(syncErr),
+		zap.String("error", safeSyncErrorMessage(syncErr)),
 	}
 	if directive.nextAttemptAt != nil {
 		fields = append(fields, zap.Time("next_attempt_at", *directive.nextAttemptAt))

@@ -2,6 +2,9 @@ package workflowsync
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +15,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/github"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type fakeGitHubClients struct {
@@ -146,6 +151,31 @@ func configureWorkspace(t *testing.T, svc *Service, workspaceID string) {
 		RepoName:  "flows",
 	})
 	require.NoError(t, err)
+}
+
+func TestSyncWorkspaceDoesNotLogProviderResponseBody(t *testing.T) {
+	const marker = "private-provider-response-body"
+	core, logs := observer.New(zap.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	svc := NewService(setupTestStore(t), failingGitHubClients{err: &github.GitHubAPIError{
+		StatusCode: http.StatusNotFound, Body: marker, FailureKind: github.FailureMissingResource,
+	}}, nil, &fakeApplier{}, log)
+	configureWorkspace(t, svc, "ws-1")
+
+	_, err = svc.SyncWorkspace(context.Background(), "ws-1")
+	require.Error(t, err)
+	for _, entry := range logs.All() {
+		assert.NotContains(t, entry.Message, marker)
+		assert.NotContains(t, fmt.Sprint(entry.ContextMap()), marker)
+	}
+	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	assert.True(t, cfg.PollSuspended)
+	assert.Equal(t, string(github.FailureMissingResource), cfg.LastErrorClass)
+	assert.Equal(t, 1, cfg.ConsecutiveFailures)
+	assert.Nil(t, cfg.NextRetryAt)
+	assert.False(t, strings.Contains(cfg.PollSuspensionReason, marker))
 }
 
 func seededMockClient() *github.MockClient {
