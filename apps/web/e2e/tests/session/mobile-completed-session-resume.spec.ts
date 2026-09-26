@@ -31,8 +31,7 @@ test.describe("Completed conversation resume on mobile", () => {
     await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
 
     await testPage.getByRole("button", { name: "Files", exact: true }).tap();
-    const fileNode = session.fileTreeNode(RETAINED_WORKSPACE_FILE);
-    await expect(fileNode).toBeVisible({ timeout: 60_000 });
+    const fileNode = await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 60_000);
     await fileNode.tap();
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 15_000 });

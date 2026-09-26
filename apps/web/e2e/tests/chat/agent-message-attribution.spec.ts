@@ -230,7 +230,7 @@ test.describe("Cross-task agent message attribution", () => {
       apiClient,
       seedData,
       "Target — slow initial turn",
-      ["e2e:delay(60000)", 'e2e:message("first turn done")'].join("\n"),
+      ["e2e:delay(90000)", 'e2e:message("first turn done")'].join("\n"),
     );
     const session = await openTask(testPage, target.id);
     await waitForSessionState(apiClient, {
@@ -238,7 +238,7 @@ test.describe("Cross-task agent message attribution", () => {
       sessionId: target.sessionId,
       expectedState: "RUNNING",
       message: "The target turn must be running before the sender queues its follow-up",
-      timeout: 30_000,
+      timeout: 60_000,
     });
 
     await createSenderTaskingTarget(

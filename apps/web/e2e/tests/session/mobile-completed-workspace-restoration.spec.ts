@@ -66,8 +66,7 @@ test.describe("Completed workspace restoration on mobile", () => {
     expect(retryBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     await retry.tap();
 
-    const fileNode = session.fileTreeNode(RETAINED_WORKSPACE_FILE);
-    await expect(fileNode).toBeVisible({ timeout: 60_000 });
+    const fileNode = await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 60_000);
     await fileNode.tap();
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 15_000 });
@@ -130,7 +129,7 @@ test.describe("Completed workspace restoration on mobile", () => {
     await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
     await session.waitForLoad();
     await testPage.getByRole("button", { name: "Files", exact: true }).tap();
-    await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
+    await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 60_000);
     await expect(testPage.getByTestId("workspace-unavailable")).toHaveCount(0);
 
     const finalSessions = await apiClient.listTaskSessions(task.id);

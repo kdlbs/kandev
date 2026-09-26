@@ -1,12 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import type { Locator } from "@playwright/test";
 import {
   RICH_OUTPUT_FILE,
   RICH_OUTPUT_FILE_CONTENT,
   seedRichOutputTask,
 } from "./rich-output-helpers";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+
+async function revealChartPlot(chart: Locator): Promise<void> {
+  await chart.getByTestId("rich-output-chart-plot").scrollIntoViewIfNeeded();
+}
 
 test("renders and persists native rich output with an explicit file preview", async ({
   testPage,
@@ -28,19 +33,15 @@ test("renders and persists native rich output with an explicit file preview", as
   const barChart = richOutput.getByTestId("rich-output-chart-bar");
   await expect(lineChart).toBeVisible();
   await expect(barChart).toBeVisible();
-  await lineChart.scrollIntoViewIfNeeded();
+  await revealChartPlot(lineChart);
   await expect(lineChart.locator(".recharts-xAxis text").first()).toBeVisible();
   await expect(lineChart.locator(".recharts-line-curve")).toHaveAttribute("stroke-dasharray", /\d/);
   await expect(lineChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(lineChart.locator(".recharts-xAxis")).toContainText("Aug 12");
-  // The chart plot is mounted by an IntersectionObserver. Re-issue the
-  // scroll while waiting so the observer sees the chart after its effect
-  // attaches, even when the first scroll happens during initial render.
+  // Re-issue the plot scroll while the observer effect attaches. This avoids
+  // assuming the first scroll happened after the chart registered its target.
   await expect(async () => {
-    await barChart.scrollIntoViewIfNeeded();
-    await barChart.evaluate((element) =>
-      element.scrollIntoView({ block: "center", inline: "nearest" }),
-    );
+    await revealChartPlot(barChart);
     await waitForFiniteAnimations(barChart);
     await expect(barChart.locator("svg")).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 60_000, intervals: [250, 500, 1_000] });
@@ -86,7 +87,7 @@ test("renders and persists native rich output with an explicit file preview", as
   const persisted = session.activeChat().getByTestId("rich-output");
   await expect(persisted.getByTestId("rich-output-chart-line")).toBeVisible();
   await expect(persisted.getByTestId("rich-output-chart-bar")).toBeVisible();
-  await persisted.getByTestId("rich-output-chart-line").scrollIntoViewIfNeeded();
+  await revealChartPlot(persisted.getByTestId("rich-output-chart-line"));
   await expect(
     persisted.getByTestId("rich-output-chart-line").locator(".recharts-xAxis text").first(),
   ).toBeVisible();
@@ -95,7 +96,7 @@ test("renders and persists native rich output with an explicit file preview", as
       .getByTestId("rich-output-chart-line")
       .getByTestId("rich-output-chart-legend-series_0"),
   ).toContainText("p95");
-  await persisted.getByTestId("rich-output-chart-bar").scrollIntoViewIfNeeded();
+  await revealChartPlot(persisted.getByTestId("rich-output-chart-bar"));
   await expect(persisted.getByRole("button", { name: "Errors" })).toHaveAttribute(
     "aria-pressed",
     "true",
