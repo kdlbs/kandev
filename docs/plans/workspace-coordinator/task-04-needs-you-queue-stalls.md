@@ -244,6 +244,54 @@ renders and `spa-routes.tsx` does not register the `/coordinator` route, so
 the absence in the "In scope" summary above is a checked assertion, not an
 inference from other tests.
 
+## Adoption decisions
+
+Recorded when this work order was adopted against main at `dfce4dac0` plus
+task 01's branch. Each one fills a detail the specifications leave to the
+implementation; none changes an acceptance criterion.
+
+1. **Card identifier.** The task DTO already sends `identifier` (for example
+   `KAN-42`); the web `Task` type and `toKanbanTask` do not carry it yet. This
+   task adds `identifier` to both. An item or row shows the identifier, or the
+   task title when the identifier is empty (tasks created before identifiers
+   were assigned).
+2. **Open-task filter in the client.** Ephemeral tasks never reach
+   `kanbanMulti.snapshots` (`useAllWorkflowSnapshots` drops `is_ephemeral`),
+   and the client field for `archived_at` is `isArchived`. `classify` excludes
+   `isArchived === true`. A stall row or a proposal source task whose task id
+   is not in the snapshots is treated as absent: the stall is ignored and the
+   proposal head reads "New task".
+3. **Current step.** The step shown on an item or row is the name of the
+   task's `workflowStepId` in its workflow snapshot's steps; an unknown step id
+   shows no step.
+4. **Agent running now** (stall evidence) is `primary_session.state` in
+   `RUNNING` or `STARTING`; unreadable or absent reads as not running.
+5. **Subscriber lifecycle.** `registerCoordinatorSubscribers` subscribes to
+   `task.stalled` and `workspace.deleted` when it is called (after routes
+   register, so no event after T0 is missed) and returns the startup pruning
+   pass as its hook. Subscriptions are released when the app context ends.
+   The function is only reached when `features.coordinator` is on, so with the
+   flag off nothing subscribes.
+6. **`coordinator.updated` after a stall change** is published once per
+   coordinator of the workspace, ordered by the list order of
+   `AC-COORDINATOR-COORDINATORS-003.1`, each carrying that coordinator's
+   `CountOpenProposals` result. A failed count logs at warn and skips that
+   coordinator's event; the stall row stays written.
+7. **`workspace.deleted`** reads the workspace id from the payload's `id` key.
+   The event is published after the workspace's tasks are deleted, so the
+   conversation tasks are already gone. A new store method deletes the
+   workspace's stall rows, proposals and coordinators in one transaction and
+   succeeds with no rows, which makes a repeated event a no-op. It publishes
+   nothing.
+8. **Screen refresh on `coordinator.updated`.** For the viewed workspace, any
+   `coordinator.updated` replaces that coordinator's badge value and re-reads
+   stalls and the viewed coordinator's pending proposals. Concurrent re-reads
+   are not deduplicated: the response to the latest request wins, and older
+   responses are discarded.
+9. **Age timer.** One 30-second interval per mounted screen re-evaluates
+   `now`; ages render in whole minutes as `<h>h <m>m`, or `<m>m` under an hour,
+   and "0m" for a reference time in the future.
+
 ## Likely files
 
 - `apps/backend/internal/coordinator/{stalls,workspace_deleted}.go` and tests
