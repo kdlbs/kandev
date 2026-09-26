@@ -4,7 +4,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"io"
 	"io/fs"
 	"os"
@@ -54,36 +53,56 @@ func TestLinuxOrphanReapHostSnapshotSkipsProcessGoneAfterEnumeration(t *testing.
 	}
 }
 
-func TestLinuxOrphanReapHostSnapshotRejectsPartialStatData(t *testing.T) {
-	procRoot := t.TempDir()
-	writeProcStatFixture(t, procRoot, 101, "101 (target) S 1 1 1 0\n")
-
-	_, err := snapshotLinuxProc(context.Background(), procRoot, func(string) ([]byte, error) {
-		return nil, io.ErrUnexpectedEOF
-	}, readProcCwdAt)
-	if !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Fatalf("Snapshot error = %v, want incomplete stat data", err)
+func TestLinuxOrphanReapHostSnapshotPreservesUnresolvedAncestry(t *testing.T) {
+	tests := []struct {
+		name      string
+		stat      string
+		readError error
+	}{
+		{name: "partial stat", stat: "101 (target) S 1 1 1 0\n", readError: io.ErrUnexpectedEOF},
+		{name: "permission denied", stat: "101 (target) S 1 1 1 0\n", readError: &fs.PathError{Op: "open", Err: fs.ErrPermission}},
+		{name: "malformed stat", stat: "101 target S 1\n"},
 	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			procRoot := t.TempDir()
+			writeProcStatFixture(t, procRoot, 101, tt.stat)
+			writeProcStatFixture(t, procRoot, 102, "102 (worker) S 101 101 101 0\n")
 
-func TestLinuxOrphanReapHostSnapshotRejectsStatPermissionFailure(t *testing.T) {
-	procRoot := t.TempDir()
-	writeProcStatFixture(t, procRoot, 101, "101 (target) S 1 1 1 0\n")
-
-	_, err := snapshotLinuxProc(context.Background(), procRoot, func(path string) ([]byte, error) {
-		return nil, &fs.PathError{Op: "open", Path: path, Err: fs.ErrPermission}
-	}, readProcCwdAt)
-	if !errors.Is(err, fs.ErrPermission) {
-		t.Fatalf("Snapshot error = %v, want permission denied", err)
-	}
-}
-
-func TestLinuxOrphanReapHostSnapshotRejectsMalformedStat(t *testing.T) {
-	procRoot := t.TempDir()
-	writeProcStatFixture(t, procRoot, 101, "101 target S 1\n")
-
-	if _, err := snapshotLinuxProc(context.Background(), procRoot, os.ReadFile, readProcCwdAt); err == nil {
-		t.Fatal("Snapshot succeeded for malformed stat")
+			workspaceRoot := filepath.Join(procRoot, "workspace")
+			got, err := snapshotLinuxProc(context.Background(), procRoot, func(path string) ([]byte, error) {
+				if path == filepath.Join(procRoot, "101", "stat") && tt.readError != nil {
+					return nil, tt.readError
+				}
+				return os.ReadFile(path)
+			}, func(_ string, pid int) (string, error) {
+				if pid == 102 {
+					return workspaceRoot, nil
+				}
+				return "", fs.ErrPermission
+			})
+			if err != nil {
+				t.Fatalf("Snapshot: %v", err)
+			}
+			if len(got) != 2 {
+				t.Fatalf("process count = %d, want 2: %+v", len(got), got)
+			}
+			if got[0].PID != 101 || got[0].PPID != orphanReapUnresolvedPPID || got[0].Cwd != "" {
+				t.Fatalf("unresolved process = %+v", got[0])
+			}
+			if got[1].PID != 102 || got[1].PPID != 101 {
+				t.Fatalf("descendant = %+v, want parent 101 retained", got[1])
+			}
+			candidates := attributeOrphanReapCandidates(got, []string{workspaceRoot})[workspaceRoot]
+			if len(candidates) != 1 || candidates[0].PID != 102 {
+				t.Fatalf("workspace candidates = %+v, want descendant 102", candidates)
+			}
+			ppidByPID := map[int]int{101: got[0].PPID, 102: got[1].PPID}
+			_, blocked, inconclusive := orphanReapAncestorOwner(102, ppidByPID, nil)
+			if blocked || !inconclusive {
+				t.Fatalf("descendant ownership = blocked %v, inconclusive %v; want fail-closed ancestry", blocked, inconclusive)
+			}
+		})
 	}
 }
 

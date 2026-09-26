@@ -158,14 +158,17 @@ regression suite is unaffected (verified against a merge-base baseline).
 
 ### Process snapshot race regression
 
-The Linux process snapshot regression now covers a process directory that is
-present during enumeration but disappears before its `stat` record is read.
-The scanner skips that unrelated exited PID while still failing closed for
-partial stat data, permission failures, and malformed records.
+The Linux scanner skips a PID whose `stat` file disappears after enumeration.
+For other read or parse errors, it keeps the PID as an unresolved ancestry
+hop with an empty cwd. This PID cannot become a candidate. Descendant
+candidates fail closed, while unrelated candidates remain eligible.
+
+The regression covers partial data, permission errors, and malformed records.
+It also makes sure that a descendant of each unresolved PID cannot pass its
+ownership check.
 
 Verification:
 
-- `go test ./internal/task/service -run 'OrphanReap' -count=1` passed.
-- `go test -race ./internal/task/service -run 'OrphanReap' -count=1` passed.
-- The focused normal and race process-snapshot cases passed.
+- `go test ./internal/task/service -run 'OrphanReap|ProcStat|ProcCwd' -count=1` passed.
+- The same command with `-race` passed.
 - `git diff --check` passed.

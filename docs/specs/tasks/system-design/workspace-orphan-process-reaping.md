@@ -115,12 +115,21 @@ the job once recorded (AC-001.1).
 - **other** (including windows): `errOrphanReapUnsupportedPlatform`, handled
   by the phase as a skip, never a job failure (AC-007.4).
 
+On Linux, a PID whose `/proc/<pid>/stat` entry disappears after enumeration is
+omitted because it cannot contribute a current ancestry hop. If another stat
+read or parse error occurs, the snapshot keeps that PID with
+`orphanReapUnresolvedPPID` and an empty cwd. The PID cannot become a candidate.
+Any candidate below it in the ancestry chain fails closed. If the unresolved
+PID is in the backend's own ancestry, the phase skips every root. This keeps
+unrelated candidates eligible without treating an unknown parent as a chain
+end.
+
 `attributeOrphanReapCandidates` matches each process's cwd to the **longest**
 (deepest) root it falls under (`orphanReapPathWithinRoot`, a
 component-boundary-safe prefix check — `/tasks/task-a` does not match
 `/tasks/task-abc`), so a worktree root nested inside its task directory root
-attributes independently (AC-002.7). A process with an empty/unparsed cwd
-is dropped by the platform reader and never reaches attribution.
+attributes independently (AC-002.7). A process with an empty or unparsed cwd
+never reaches attribution.
 
 ## Ownership
 
