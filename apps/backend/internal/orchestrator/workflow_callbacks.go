@@ -50,6 +50,8 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 			r[engine.ActionQueueRunForEachParticipant] = engine.QueueRunForEachParticipantCallback{
 				Adapter:      svc.engineRunQueue,
 				Participants: svc.engineParticipants,
+				Decisions:    svc.engineDecisions,
+				Logger:       svc.logger,
 			}
 		}
 	}

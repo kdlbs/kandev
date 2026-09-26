@@ -849,9 +849,9 @@ func (s *DashboardService) CreateComment(ctx context.Context, comment *models.Ta
 	if err := s.repo.CreateTaskComment(ctx, comment); err != nil {
 		return err
 	}
-	engineHandled := s.dispatchCommentEngineTrigger(ctx, comment)
-	s.publishCommentCreated(ctx, comment, engineHandled)
-	s.runReactivityForComment(ctx, comment, engineHandled)
+	dispatch := s.dispatchCommentEngineTrigger(ctx, comment)
+	s.publishCommentCreated(ctx, comment, dispatch.handled)
+	s.runReactivityForComment(ctx, comment, dispatch.handled || dispatch.suppressAssigneeWake)
 	return nil
 }
 
