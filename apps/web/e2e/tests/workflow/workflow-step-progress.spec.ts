@@ -170,7 +170,7 @@ test.describe("Workflow step progress", () => {
     await new SessionPage(testPage).waitForLoad();
 
     const stepper = testPage.locator('[data-testid="workflow-stepper"]:visible').first();
-    const targetTrigger = stepper.getByTestId("workflow-step-Review");
+    const targetTrigger = stepper.locator(`[data-workflow-step-id="${targetStep.id}"]`);
     await expect(targetTrigger).toBeVisible();
     await expect(stepper.getByTestId("workflow-stepper-minimal")).toHaveCount(0);
 
