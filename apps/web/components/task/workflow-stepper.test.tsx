@@ -576,6 +576,7 @@ describe("WorkflowStepper compact disclosure options", () => {
 
 describe("WorkflowStepper compact disclosure preview queue", () => {
   it("waits to request previews until a mounted coarse-pointer drawer opens", async () => {
+    const previewQueueTaskId = "task-preview-queue";
     collapsedMock.mockReturnValue(true);
     mocks.touchDrawer = true;
     mocks.forceMountDrawer = true;
@@ -584,7 +585,7 @@ describe("WorkflowStepper compact disclosure preview queue", () => {
       <WorkflowStepper
         steps={DISCLOSURE_STEPS}
         currentStepId="b"
-        taskId={TASK_ID}
+        taskId={previewQueueTaskId}
         workflowId={WORKFLOW_ID}
       />,
     );
