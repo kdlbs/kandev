@@ -7,6 +7,7 @@ package service_test
 // TestQueueTaskAssignedRun_StepEligibility in this package.
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/service"
@@ -15,18 +16,27 @@ import (
 
 func TestOfficeRecoveryHandler_StepEligibility(t *testing.T) {
 	const stepBacklog = "step-backlog-recovery"
+	const stepWork = "step-work-recovery"
 
 	svc := newTestService(t)
 	ctx := context.Background()
 	svc.SetWorkflowStepGetter(&fakeAssignmentStepGetter{steps: map[string]*wfmodels.WorkflowStep{
 		stepBacklog: backlogWorkflowStep(stepBacklog),
+		stepWork:    autoStartWorkflowStep(stepWork),
 	}})
 
 	createTestAgent(t, svc, "ws-1", "worker-office")
-	insertTestTask(t, svc, "task-office-project", "ws-1")
+	for i := 1; i <= 5; i++ {
+		taskID := fmt.Sprintf("task-office-backlog-%d", i)
+		insertTestTask(t, svc, taskID, "ws-1")
+		svc.ExecSQL(t, `UPDATE tasks SET project_id = 'office-project', workflow_step_id = ? WHERE id = ?`,
+			stepBacklog, taskID)
+		setTestTaskAssignee(t, svc, taskID, "worker-office")
+	}
+	insertTestTask(t, svc, "task-office-work", "ws-1")
 	svc.ExecSQL(t, `UPDATE tasks SET project_id = 'office-project', workflow_step_id = ? WHERE id = ?`,
-		stepBacklog, "task-office-project")
-	setTestTaskAssignee(t, svc, "task-office-project", "worker-office")
+		stepWork, "task-office-work")
+	setTestTaskAssignee(t, svc, "task-office-work", "worker-office")
 	svc.ExecSQL(t, `
 		INSERT INTO office_projects (id, workspace_id, name, created_at, updated_at)
 		VALUES ('office-project', 'ws-1', 'Office Project', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -41,7 +51,10 @@ func TestOfficeRecoveryHandler_StepEligibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	if len(runs) != 0 {
-		t.Fatalf("recovery sweep queued %d runs for a backlog-step task, want 0: %#v", len(runs), runs)
+	if len(runs) != 1 {
+		t.Fatalf("recovery sweep queued %d runs, want the eligible task after five ineligible candidates: %#v", len(runs), runs)
+	}
+	if runs[0].AgentProfileID != "worker-office" {
+		t.Fatalf("recovery sweep queued run for agent %q, want worker-office", runs[0].AgentProfileID)
 	}
 }

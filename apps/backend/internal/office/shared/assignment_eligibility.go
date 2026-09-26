@@ -62,6 +62,8 @@ func IsAssignmentWakeEligible(
 		return true
 	}
 	if stepID == "" {
+		log.Info("office.assignment_wake.step_eligible",
+			zap.String("task_id", taskID), zap.String("step_id", stepID), zap.String("source", source))
 		return true
 	}
 	if steps == nil {
@@ -86,5 +88,7 @@ func IsAssignmentWakeEligible(
 			zap.String("task_id", taskID), zap.String("step_id", stepID), zap.String("source", source))
 		return false
 	}
+	log.Info("office.assignment_wake.step_eligible",
+		zap.String("task_id", taskID), zap.String("step_id", stepID), zap.String("source", source))
 	return true
 }

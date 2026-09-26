@@ -293,8 +293,10 @@ suppresses the wake — a reassignment's interrupt of the previous assignee's se
 
 Edge cases: a task with no workflow step bound (`workflow_step_id` empty) is eligible, preserving
 behaviour for tasks outside a workflow. A step lookup failure (repository error, nil step getter, or
-an unresolved step ID) fails open — the wake is still queued — and is logged at Warn; an eligible
-skip is logged at Info (`office.assignment_wake.step_ineligible`, `task_id`, `step_id`, `source`).
+an unresolved step ID) fails open — the wake is still queued — and is logged at Warn. A resolved
+ineligible step logs `office.assignment_wake.step_ineligible` at Info; a resolved eligible step,
+including a task with no bound step, logs `office.assignment_wake.step_eligible` at Info. Both
+outcomes include `task_id`, `step_id`, and `source`.
 This does not change Review/Approval's separate `queue_run_for_each_participant` reviewer/approver
 wake, which the assignee eligibility gate never touches.
 
@@ -323,6 +325,10 @@ Per-candidate guards:
 - Skip if agent is paused or stopped.
 - Skip if a wakeup is already queued for this task (prevents duplicates on concurrent ticks).
 - Skip if the agent's invocation budget is exhausted.
+
+The recovery sweep fills its per-tick dispatch quota with eligible tasks. It excludes every
+candidate inspected during the tick before fetching the next batch, so ineligible tasks cannot
+starve later eligible tasks.
 
 Logged: `recovery_dispatch` per dispatched task, `recovery_sweep_complete` summary entry with `dispatched_count` per sweep.
 

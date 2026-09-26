@@ -38,6 +38,8 @@ completion signal that will actually move the task from one that will not.
 - A task with no workflow step bound is eligible (unchanged behavior).
 - A step lookup failure fails open (queues the wake) and logs at Warn; a clean
   eligible/ineligible resolution logs at Info.
+- Recovery continues past inspected ineligible candidates until it fills the
+  per-tick eligible dispatch quota or no candidates remain.
 - Onboarding's initial task wake is gated by the same predicate; the task is
   still created regardless of eligibility.
 - `step_complete_kandev` additively returns `advances` (bool) and, when false,
@@ -126,3 +128,11 @@ conversation.
   — all packages pass. `go build ./...` clean.
   `go test ./internal/backendapp/... -count=1` green.
   `make lint` (`golangci-lint run ./...`) — `0 issues.`
+
+## Fixup Results
+
+- Added an Info log for clean eligible outcomes, including tasks with no bound
+  workflow step, and added focused tests for both eligible cases.
+- Recovery now excludes inspected candidates before fetching the next batch, so
+  ineligible tasks cannot consume the full per-tick query limit and starve a
+  later eligible task.

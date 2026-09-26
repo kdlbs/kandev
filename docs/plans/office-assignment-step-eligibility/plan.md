@@ -60,8 +60,9 @@ the task's current workflow step's
 same predicate the orchestrator's own auto-start path already uses. Empty
 `workflow_step_id` is eligible (no workflow to respect). A step lookup error,
 nil step getter, or unresolved step ID fails open (queue the wake) with a WARN
-log; an eligible/ineligible outcome that resolves cleanly is logged at Info
-(`office.assignment_wake.step_ineligible`).
+log; a resolved eligible or ineligible outcome is logged at Info with its task,
+step, and source fields (`office.assignment_wake.step_eligible` or
+`office.assignment_wake.step_ineligible`).
 
 ### Producer wiring
 
@@ -71,7 +72,8 @@ log; an eligible/ineligible outcome that resolves cleanly is logged at Info
 - `service/event_subscribers.go`: `queueTaskAssignedRun` checks eligibility
   after the existing `IsFromOffice` guard.
 - `service/scheduler_recovery.go`: `recoverUnstartedTasks` skips ineligible
-  tasks in its per-task loop.
+  tasks and continues fetching candidates until it fills the per-tick eligible
+  quota or no candidates remain.
 - `onboarding/service.go`: `maybeCreateOnboardingTask` checks eligibility
   before queueing the initial wake; the task itself is still created either
   way — only the wake is gated.
@@ -102,7 +104,8 @@ rather than guessing.
   `queueTaskAssignedRun` via task-created/task-updated events: Backlog task
   queues 0 runs, Work task queues 1.
 - `internal/office/service/scheduler_recovery_step_eligibility_test.go` —
-  recovery sweep: Backlog `TODO` task queues 0 runs.
+  recovery sweep: Backlog `TODO` task queues 0 runs, and a Work task after five
+  ineligible candidates still receives the recovery wake.
 - `internal/office/onboarding/assignment_step_eligibility_test.go` — onboarding
   task landing on Backlog skips the wake but still creates the task; landing on
   an auto-start step queues the wake.
