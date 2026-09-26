@@ -23,6 +23,7 @@ export function useSystemInfo() {
       }),
     staleTime: Infinity,
     gcTime: Infinity,
+    networkMode: "always",
     retry: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,

@@ -1,4 +1,5 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { onlineManager } from "@tanstack/react-query";
 import { StrictMode, useEffect, type ReactNode } from "react";
 import type { StoreApi } from "zustand";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -115,10 +116,12 @@ function CapturingProbe() {
 beforeEach(() => {
   config.apiBaseUrl = BACKEND_ORIGIN;
   currentReload = undefined;
+  onlineManager.setOnline(true);
 });
 
 afterEach(() => {
   cleanup();
+  onlineManager.setOnline(true);
   vi.unstubAllGlobals();
 });
 
@@ -227,6 +230,27 @@ async function exposesLoadingErrorsAndExplicitRetry() {
   );
 }
 
+async function attemptsOnceWhileOfflineAndDoesNotResumeOnReconnect() {
+  act(() => onlineManager.setOnline(false));
+  const fetchMock = vi.fn().mockRejectedValue(new TypeError("offline"));
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <TestHarness>
+      <CapturingProbe />
+    </TestHarness>,
+  );
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  await waitFor(() =>
+    expect(screen.getByTestId(QUERY_STATE_TEST_ID).textContent).toContain('"error":"offline"'),
+  );
+
+  act(() => onlineManager.setOnline(true));
+  expect(screen.getByTestId(QUERY_STATE_TEST_ID).textContent).toContain('"isLoading":false');
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+}
+
 async function isolatesAndCancelsRequestsAcrossIdentityChanges() {
   const requests: Array<{
     url: string;
@@ -325,6 +349,10 @@ describe("useSystemInfo Query cache", () => {
   it(
     "exposes loading and errors, then supports an explicit retry",
     exposesLoadingErrorsAndExplicitRetry,
+  );
+  it(
+    "attempts once while offline and does not resume on reconnect",
+    attemptsOnceWhileOfflineAndDoesNotResumeOnReconnect,
   );
   it("cancels and isolates old identity requests", isolatesAndCancelsRequestsAcrossIdentityChanges);
   it(
