@@ -271,6 +271,7 @@ export type TaskPR = {
   review_state: "approved" | "changes_requested" | "pending" | "";
   checks_state: "success" | "failure" | "pending" | "unstable" | "";
   mergeable_state: MergeableState;
+  has_merge_conflicts?: boolean | null;
   review_count: number;
   pending_review_count: number;
   /** Number of approving reviews required by the base branch protection rule.

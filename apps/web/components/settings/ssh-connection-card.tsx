@@ -60,6 +60,11 @@ export interface SSHConnectionCardProps {
   // Existing running sessions for this executor. Triggers the
   // "this won't affect existing sessions" warning on save.
   runningSessionCount?: number;
+  // Endpoint that runs the connection test. Defaults to the SSH executor's
+  // test. The remote Docker executor passes its own, which adds the daemon
+  // and API-version steps on top of the same SSH connection, so both share
+  // this card's test-then-trust flow rather than forking it.
+  testConnection?: (request: SSHTestRequest) => Promise<SSHTestResult>;
 }
 
 interface SSHConnectionState {
@@ -209,7 +214,7 @@ function useSSHConnection(props: SSHConnectionCardProps) {
         identity_file: form.identity_file || undefined,
         proxy_jump: form.proxy_jump || undefined,
       };
-      const res = await testSSHConnection(req);
+      const res = await (props.testConnection ?? testSSHConnection)(req);
       setState((prev) => ({
         ...prev,
         result: res,
@@ -223,7 +228,7 @@ function useSSHConnection(props: SSHConnectionCardProps) {
       const msg = e instanceof Error ? e.message : translate("executors:sshFailedToReachBackend");
       setState((prev) => ({ ...prev, error: msg, testing: false }));
     }
-  }, [form]);
+  }, [form, props.testConnection]);
 
   const canSave = !!result?.success && !!result.fingerprint && trust && !resultStale && !saving;
 
@@ -297,7 +302,10 @@ export function SSHConnectionCard(props: SSHConnectionCardProps) {
           canTest={c.canTest}
           canSave={c.canSave}
           onTest={c.handleTest}
-          onSave={c.handleSave}
+          // handleSave rethrows so the settings save coordinator can react.
+          // This path has no coordinator -- the failure is already in `c.error`
+          // below -- so absorb the rejection rather than leaving it unhandled.
+          onSave={() => void c.handleSave().catch(() => undefined)}
           showSave={!props.coordinatedSaveId}
         />
         {c.error && (
@@ -469,6 +477,26 @@ function TestResultHeader({ success, totalMs }: { success: boolean; totalMs: num
   );
 }
 
+// Remediation copy per backend hint identifier. A hint that is absent from
+// this map renders nothing: it belongs to a backend this build has not caught
+// up with, and the raw identifier is not copy.
+const STEP_HINT_KEYS: Record<string, string> = {
+  remote_user_needs_docker_access: "executors:sshHintRemoteUserNeedsDockerAccess",
+  remote_host_needs_docker_cli: "executors:sshHintRemoteHostNeedsDockerCli",
+  remote_daemon_not_running: "executors:sshHintRemoteDaemonNotRunning",
+};
+
+function StepHint({ hint, slug }: { hint: string; slug: string }) {
+  const { t } = useTranslation();
+  const key = STEP_HINT_KEYS[hint];
+  if (!key) return null;
+  return (
+    <p data-testid={`ssh-test-step-${slug}-hint`} className="text-xs text-muted-foreground">
+      {t(key)}
+    </p>
+  );
+}
+
 function StepRow({ step }: { step: SSHTestStep }) {
   const slug = step.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   return (
@@ -491,10 +519,11 @@ function StepRow({ step }: { step: SSHTestStep }) {
           <p className="text-xs text-muted-foreground truncate font-mono">{step.output}</p>
         )}
         {step.error && (
-          <p data-testid={`ssh-test-step-${slug}-error`} className="text-xs text-red-600 truncate">
+          <p data-testid={`ssh-test-step-${slug}-error`} className="text-xs text-red-600">
             {step.error}
           </p>
         )}
+        {step.hint && <StepHint hint={step.hint} slug={slug} />}
       </div>
     </div>
   );

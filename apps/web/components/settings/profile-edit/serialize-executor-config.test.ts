@@ -29,6 +29,9 @@ function form(overrides: Partial<ExecutorProfileConfigForm> = {}): ExecutorProfi
     isSSH: false,
     sshShell: "",
     sshReclaimTaskDir: false,
+    primaryNetwork: "",
+    primaryGwPriority: "",
+    additionalNetworks: [],
     ...overrides,
   };
 }
@@ -137,5 +140,79 @@ describe("buildSaveConfig ssh_reclaim_task_dir", () => {
     });
 
     expect(config.ssh_reclaim_task_dir).toBeUndefined();
+  });
+});
+
+const DOCKER_PRIMARY_NETWORK = "lab-bridge";
+
+describe("buildSaveConfig docker networks", () => {
+  it("persists the primary network and its gateway priority", () => {
+    const config = buildSaveConfig(
+      form({
+        isDocker: true,
+        primaryNetwork: ` ${DOCKER_PRIMARY_NETWORK} `,
+        primaryGwPriority: " 0 ",
+      }),
+    );
+
+    expect(config.docker_network).toBe(DOCKER_PRIMARY_NETWORK);
+    expect(config.docker_network_gw_priority).toBe("0");
+  });
+
+  it("persists additional networks in order, omitting an unset priority", () => {
+    const config = buildSaveConfig(
+      form({
+        isDocker: true,
+        additionalNetworks: [
+          { name: " lan-macvlan ", gwPriority: "-10" },
+          { name: "metrics-internal", gwPriority: "" },
+        ],
+      }),
+    );
+
+    expect(JSON.parse(config.docker_additional_networks)).toEqual([
+      { name: "lan-macvlan", gw_priority: -10 },
+      { name: "metrics-internal" },
+    ]);
+  });
+
+  it("drops a row the operator added but never named", () => {
+    const config = buildSaveConfig(
+      form({ isDocker: true, additionalNetworks: [{ name: "  ", gwPriority: "3" }] }),
+    );
+
+    expect(config.docker_additional_networks).toBeUndefined();
+  });
+
+  it("persists nothing for a profile that configures no network", () => {
+    const config = buildSaveConfig(form({ isDocker: true }));
+
+    expect(config.docker_network).toBeUndefined();
+    expect(config.docker_network_gw_priority).toBeUndefined();
+    expect(config.docker_additional_networks).toBeUndefined();
+  });
+
+  it("clears stored network keys when the profile is not a Docker profile", () => {
+    const config = buildSaveConfig(
+      form({ isDocker: false, primaryNetwork: DOCKER_PRIMARY_NETWORK }),
+      {
+        docker_network: DOCKER_PRIMARY_NETWORK,
+        docker_network_gw_priority: "0",
+        docker_additional_networks: '[{"name":"lan-macvlan"}]',
+      },
+    );
+
+    expect(config.docker_network).toBeUndefined();
+    expect(config.docker_network_gw_priority).toBeUndefined();
+    expect(config.docker_additional_networks).toBeUndefined();
+  });
+
+  // A priority with no network is refused by the backend, so the editor must
+  // not save one: the operator would get a launch failure for a field the
+  // editor let them leave in an impossible state.
+  it("drops a gateway priority left behind without a primary network", () => {
+    const config = buildSaveConfig(form({ isDocker: true, primaryGwPriority: "5" }));
+
+    expect(config.docker_network_gw_priority).toBeUndefined();
   });
 });

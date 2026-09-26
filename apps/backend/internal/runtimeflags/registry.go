@@ -37,8 +37,10 @@ type runtimeFlagIdentity struct {
 }
 
 const (
-	retiredAppStatusBarKey    = "features.appStatusBar"
-	retiredAppStatusBarEnvVar = "KANDEV_FEATURES_APP_STATUS_BAR"
+	retiredAppStatusBarKey             = "features.appStatusBar"
+	retiredAppStatusBarEnvVar          = "KANDEV_FEATURES_APP_STATUS_BAR"
+	retiredOfficeSessionIdentityKey    = "features.officeSessionIdentity"
+	retiredOfficeSessionIdentityEnvVar = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
 )
 
 // retiredRuntimeFlagIdentities is append-only. When a flag graduates, remove
@@ -48,6 +50,7 @@ const (
 var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: "features.plugins", envVar: "KANDEV_FEATURES_PLUGINS"},
 	{key: retiredAppStatusBarKey, envVar: retiredAppStatusBarEnvVar},
+	{key: retiredOfficeSessionIdentityKey, envVar: retiredOfficeSessionIdentityEnvVar},
 }
 
 var registrations = []runtimeFlagRegistration{
@@ -210,25 +213,6 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.ClaudeMidTurnSteering },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.ClaudeMidTurnSteering = value },
-	},
-	{
-		definition: RuntimeFlagDefinition{
-			Key:         "features.officeSessionIdentity",
-			EnvVar:      "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY",
-			Kind:        KindFeature,
-			Label:       "Office per-agent session identity",
-			Description: "Keys an Office task's session identity on the run's own agent instead of the task's runner seat, and binds an agent's decision re-evaluation to its own calling session.",
-			Stability:   StabilityExperimental,
-			RiskLevel:   RiskHigh,
-			RiskDescription: "Changes durable Office session identity: each participant agent gets its own session per task instead of sharing the runner's, and existing session rows are not migrated. " +
-				"A live (task_id, agent_profile_id) pair is guarded in-transaction on the office session creation path, not by a table-level constraint; pre-existing duplicate rows are deliberately retained and resolved by selection rather than repaired. " +
-				"The guard relies on SQLite's process-local single-writer pool or PostgreSQL's database task-row lock. Two Kandev processes must not write the same SQLite file. " +
-				"Disabling this toggle and restarting reverts to runner-seat binding and task-active-session decision re-evaluation.",
-			RestartRequired: true,
-			Mutable:         true,
-		},
-		read:  func(cfg *config.Config) bool { return cfg.Features.OfficeSessionIdentity },
-		apply: func(cfg *config.Config, value bool) { cfg.Features.OfficeSessionIdentity = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

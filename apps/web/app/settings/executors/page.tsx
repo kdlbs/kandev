@@ -83,6 +83,11 @@ const EXECUTOR_TYPES: readonly ExecutorTypeCard[] = [
     brandLabel: "Sprites.dev",
     descriptionKey: "executors:hubDescriptionSprites",
   },
+  {
+    type: "remote_docker",
+    labelKey: "executors:remoteDocker",
+    descriptionKey: "executors:hubDescriptionRemoteDocker",
+  },
   { type: "ssh", brandLabel: "SSH", descriptionKey: "executors:hubDescriptionSsh" },
   {
     type: "k8s",

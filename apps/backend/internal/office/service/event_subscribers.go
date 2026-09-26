@@ -384,15 +384,12 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 	}
 
 	// Attribute to the agent that actually ran the turn, not the task's
-	// assignee — the two diverge for a reviewer/approver turn. The event
-	// carries the acting agent's own office identity directly
+	// assignee. The event carries the acting agent's office identity directly
 	// (execution.officeProfileID(), captured at launch before step/routing
-	// overrides mutate the profile). The session-row lookup only reflects
-	// the acting agent when features.officeSessionIdentity is on — off by
-	// default in every shipped profile, it stores the assignee for every
-	// participant's session — so it is kept only as a fallback for events
-	// published before this field existed. Final fallback is the assignee,
-	// mirroring handlePromptUsage's log-and-continue fallback below.
+	// overrides mutate the profile). The session-row lookup remains a fallback
+	// for events published before the agent identity field existed. Final
+	// fallback is the assignee, mirroring handlePromptUsage's log-and-continue
+	// fallback below.
 	authorID := fields.AssigneeAgentProfileID
 	if data.AgentProfileID != "" {
 		authorID = data.AgentProfileID
