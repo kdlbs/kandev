@@ -344,6 +344,11 @@ func (s *AgentService) prepareAgentDefaults(agent *models.AgentInstance) {
 	if agent.Status == "" {
 		agent.Status = models.AgentStatusIdle
 	}
+	// persistAgent's canonical-profile write (profileStore.UpdateAgentProfile)
+	// round-trips the whole struct, so an unset Enabled here would overwrite
+	// the row's own DEFAULT 1 with 0 right after insert, permanently failing
+	// ValidateAssigneeAgentProfile for a newly created office agent.
+	agent.Enabled = true
 	// Office names are user-facing identities, not generated profile labels.
 	agent.UserModified = true
 }
