@@ -400,3 +400,19 @@ All seven focused recovery suites pass (97 tests). Typecheck, targeted ESLint,
 architecture, localization and specification checks pass. Prior Kubernetes CI evidence was superseded by a successful run of
 the same restart-recovery case with zero retries (run 36239673423, container
 shard 2, job 108403952098). Current-head CI and renewed reviews remain pending.
+
+### Preview copy announcement CI regression
+
+The recovery announcement adds a second status region inside the task preview.
+The copy-link E2E test assumed that every status region in the preview belonged
+to the copy control, causing a strict-selector failure. The copy announcement
+now exposes a dedicated test identifier, and the test targets it while checking
+that it retains role=status. Behavior, localization, layout and mobile
+interactions are unchanged; no requirement or system-design change is needed.
+
+The original failure reproduced against a fresh build with retries disabled.
+After the selector correction, the two copy-control and eight GitLab MR chip
+E2E cases passed without retries (the latter includes the case that retried in
+CI). All 22 preview component tests and targeted ESLint passed. No GitLab code
+was changed because its reported retry did not reproduce in the full local
+spec. Current-head CI and review verification remain pending after delivery.

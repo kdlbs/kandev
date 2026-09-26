@@ -53,7 +53,7 @@ export function CopyTaskUrlButton({ taskId }: { taskId: string }) {
         </Button>
       </TooltipTrigger>
       <TooltipContent>{tooltipLabel}</TooltipContent>
-      <span role="status" className="sr-only">
+      <span role="status" className="sr-only" data-testid="task-preview-copy-status">
         {copied ? t("task:taskLinkCopied") : ""}
       </span>
     </Tooltip>

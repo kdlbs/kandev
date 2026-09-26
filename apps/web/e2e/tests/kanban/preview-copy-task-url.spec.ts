@@ -45,7 +45,8 @@ test.describe("Preview panel copy task URL control", () => {
     await expect(tooltip).toBeVisible();
     await expect(tooltip).not.toHaveText("Link");
 
-    const status = previewPanel.getByRole("status");
+    const status = previewPanel.getByTestId("task-preview-copy-status");
+    await expect(status).toHaveAttribute("role", "status");
     await expect(status).toHaveText("");
 
     await copyButton.click();
