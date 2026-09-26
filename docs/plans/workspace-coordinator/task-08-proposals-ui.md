@@ -36,7 +36,12 @@ transcript (task 06), on task 07's routes. Completes phase 1.
 ## In scope
 
 - `hooks/domains/coordinator/use-proposals.ts` with sticky settled status; a
-  decision's response applies at once; `coordinator.updated` refreshes.
+  decision's response applies at once; `coordinator.updated` refreshes, and
+  also backfills by id any locally cached proposal the refreshed pending list
+  no longer contains, per
+  [proposals design](../../specs/coordinator/system-design/proposals.md#client-store).
+  The chat transcript's `ProposalCard` fetches its own `proposal_id` by id on
+  mount and on every `coordinator.updated`, independent of the pending list.
 - `ProposalCard` states (UI-03), Edit and Reject forms in place with focus
   handling, the chat card renderer for `propose_task_kandev` with navigation
   to the Needs-you form, decision toasts; six locales.
@@ -93,9 +98,14 @@ mockup's `mockup/e2e/tests/`, outside this repository; see the plan's [Mockup sc
 cd apps/web && pnpm test -- hooks/domains/coordinator/use-proposals.test.ts
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/proposals.spec.ts
-cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/proposals.spec.ts
+cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-proposals.spec.ts
 node scripts/validate-public-docs.mjs
 ```
+
+The `mobile-chrome` project matches on the `mobile-*.spec.ts` filename prefix
+(`apps/web/e2e/playwright.config.ts`), not on project scope, so the 390px
+assertions live in their own `mobile-proposals.spec.ts` file rather than a
+rerun of `proposals.spec.ts` under a different project.
 
 ## Likely files
 
@@ -103,7 +113,7 @@ node scripts/validate-public-docs.mjs
 - `apps/web/app/coordinator/proposal-card/`
 - `apps/web/components/task/chat/` tool-call renderer for `propose_task_kandev`
 - `apps/web/src/locales/*/`
-- `apps/web/e2e/tests/coordinator/proposals.spec.ts`
+- `apps/web/e2e/tests/coordinator/proposals.spec.ts`, `mobile-proposals.spec.ts`
 - `docs/public/coordinator.md`
 
 ## Dependencies

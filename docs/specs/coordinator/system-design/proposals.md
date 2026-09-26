@@ -48,7 +48,7 @@ Table `coordinator_proposals` in the coordinator store:
 | `final_spec_json` | text null | frozen at claim |
 | `claimed_at` | timestamp null | set with `approving` |
 | `claim_token` | text null | UUID generated per claim; fences completion |
-| `task_id` | text null | set with `approved` |
+| `task_id` | text null | set with `approved`; also set on a `failed` row when the task was created but a later step of approval failed (see [Approve](#approve) step 4) |
 | `error` | text null | set with `failed`, at most 1,000 characters |
 | `reject_reason` | text null | at most 500 characters |
 | `decided_by` | text null | user id |
@@ -97,6 +97,13 @@ There is no deduplication key.
 2. Build the candidate spec: the base is `final_spec_json` when the row has
    one (a `failed` attempt), else `spec_json`; merge the edits and validate as
    in propose. 400 leaves the row unchanged. `spec_json` is never rewritten.
+   A `failed` row whose `task_id` is already set (step 4's "any other settle
+   error" branch below already created a task) refuses an edit with 409 and
+   the current row: the frozen spec already produced a real task, so a
+   further edit here would leave the manager believing the change applied
+   when it did not. Retry with no edits continues to step 3 as normal and
+   completes with the existing task (step 4's `CreateTaskOutcomeFoundSettled`
+   or `CreateTaskOutcomeFoundUnsettled` branch).
 3. Claim, with a new UUID `T`: `UPDATE ... SET status='approving',
    claimed_at=now, claim_token=T, final_spec_json=?, decided_by=?, error=NULL
    WHERE id=? AND status IN ('pending','failed')`. When it matches no row, a
@@ -117,8 +124,11 @@ There is no deduplication key.
      release of the prefix is refused): complete with the survivor's id and
      log at warn. An error wrapping `taskrepo.ErrTaskNotFound` (the task was
      deleted while this create ran): fail with "The created task was deleted
-     before approval completed". Any other settle error: fail with it; the
-     task stays, and the next approve's create returns it as Found.
+     before approval completed" and leave `task_id` unset: the task no
+     longer exists, so nothing was in fact created. Any other settle error:
+     fail with it, but this time set `task_id` to the created task's id on
+     the same `failed` update; the task stays, and the next approve's create
+     returns it as Found (step 2 above then requires no edits on that retry).
    - `CreateTaskOutcomeFoundSettled`: an earlier attempt created the task;
      complete with its id.
    - `CreateTaskOutcomeFoundUnsettled`: an earlier attempt created the task
@@ -160,10 +170,35 @@ The create request carries no session request and no
 `auto_start_on_create` marker, and `handleTaskCreated`
 (`internal/orchestrator/event_handlers_workflow.go`) evaluates the target
 step's `on_enter` `auto_start_agent` only for a task carrying that marker
-(`models.HasAutoStartOnCreateIntent`), so no agent starts whatever the step's
-actions are. Step eligibility (validated at propose and again at claim time,
-so a step changed after proposing is caught) remains a product rule: a
-proposal lands only where a manager could place a task by hand.
+(`models.HasAutoStartOnCreateIntent`), so the direct-create path never starts
+an agent whatever the target step's own actions are.
+
+That marker is create-time only: `finalizeCreatedTask`
+(`internal/task/service/service_tasks.go`) also runs feeder/WIP-limit
+reconciliation synchronously after every create (`pullTasksFromNewFeederWork`
+→ `promoteNextQueuedTask` → `promoteSameStepQueuedTask` /
+`promoteFeederQueuedTask`, `internal/task/service/service_workflow.go`), and
+the resulting `task.moved` / `task.queue_promoted` events reach
+`handleTaskMovedNoSession` / `handleTaskQueuePromotedWithAutoStartOnCreateClaimed`
+(`internal/orchestrator/event_handlers_workflow.go`), neither of which checks
+`HasAutoStartOnCreateIntent`, by design, since those handlers represent a
+task entering a step via an ordinary transition, which is meant to auto-start
+regardless of how the task was created. A task created on a step that feeds
+an available auto-start step would therefore auto-start immediately despite
+carrying no marker, defeating this guarantee.
+
+Eligibility closes this at the placement boundary instead of the create-time
+boundary: an **eligible step** (defined in
+[requirements/proposals.md](../requirements/proposals.md#terminology)) is
+also refused when it is a feeder, directly or through a chain of
+`pull_from_step_id` links, of any step with an `on_enter` `auto_start_agent`
+action. Validated at propose and again at claim time (so a step or feeder
+graph changed after proposing is caught), this means a proposal can only ever
+land somewhere a manager could place a task by hand *and leave it there*,
+never somewhere the workflow itself would immediately relocate it into an
+auto-starting step. task-07 implements the feeder-graph walk as part of step
+eligibility; task-01's step-eligibility store method takes the workflow's
+full step graph, not just the candidate step, so it can check reachability.
 
 ### Edits
 
@@ -332,6 +367,30 @@ coordinator. It loads `status=pending` on mount and refetches on
 `coordinator.updated`. A merge never replaces a settled status (`approved`,
 `rejected`) with an unsettled one, so a late list response cannot revive a
 decided card.
+
+A `status=pending` refetch alone cannot satisfy
+`AC-COORDINATOR-PROPOSALS-004.4` for a proposal this client already knows
+about: once it settles, the pending list simply stops containing it, so a
+browser that had it cached as `pending`/`approving` would otherwise keep
+showing that stale state forever instead of the settled one. On each
+`coordinator.updated`, after merging the fresh `status=pending` response, the
+hook also fetches by id (`GET .../proposals/:pid`) every locally cached id
+that response no longer contains, and merges each result the same way (never
+un-settling a settled card). This is bounded by how many ids the client has
+ever locally held for its coordinator, not by the 25-open cap. A Needs-you
+item that settles and was never cached beyond the list is not affected: it is
+correct for it to simply stop being a Needs-you item.
+
+The chat transcript's `ProposalCard` (see [Cards](#cards)) is attached to a
+specific `proposal_id` that can outlive the pending window entirely: a
+reloaded second browser may never have fetched the pending list at the
+moment a proposal it is displaying was still open. It therefore does not rely
+on `use-proposals.ts`'s list-keyed cache: it fetches its own `proposal_id` by
+id on mount and again on every `coordinator.updated` for its coordinator,
+independent of whether that id is in the current pending list, which is what
+lets it show "Approved: <card>" or "Rejected: <reason>"
+(`AC-COORDINATOR-PROPOSALS-005.8`) after a reload with no other proposal
+ever having been listed.
 
 ## Cards
 

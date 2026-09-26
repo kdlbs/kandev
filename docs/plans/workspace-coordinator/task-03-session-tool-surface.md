@@ -98,7 +98,12 @@ Deciding proposals is task 07. Backend only. On the critical path.
   `AC-COORDINATOR-COPILOT-003.1`; `propose_task_kandev` (open-proposal cap
   under a per-coordinator lock) writing through task 01's proposal insert and
   publishing `coordinator.updated`; the `coordinator.propose_task` action; the
-  guard in `coordinator_authorization.go`.
+  guard in `coordinator_authorization.go`. The `list_related_tasks_kandev`
+  handler is wired to call `HandoffService.ListRelated` directly for a
+  coordinator principal, not `ListRelatedForCaller`: the guard has already
+  resolved `task_id` inside the coordinator's workspace, and the ordinary
+  caller-relation check would refuse an unrelated board task
+  (system-design/copilot.md#tool-surface).
 - Fail-closed start checks, including the profile check at session start;
   exact-name auto-approval; `AutoApprovePermissionsOverride=false` on every
   lifecycle path.
@@ -166,8 +171,11 @@ Required Go tests:
   on SQLite and PostgreSQL;
 - a racing coordinator delete during a conversation open returns 404 and
   leaves no task;
-- two racing opens return the same task and one session, and the losing task
-  is deleted; an open of a live task with no session creates one `CREATED`
+- two racing opens against the new `conversation_task_id` conditional-UPDATE
+  return the same task and one session, and the losing task is deleted, on
+  SQLite and PostgreSQL (`KANDEV_TEST_POSTGRES_DSN`), matching task 01's and
+  task 04's dual-dialect coverage of their own conditional-update methods; an
+  open of a live task with no session creates one `CREATED`
   session with no agent; an ensure failure returns 502 and the next open
   retries with the same task; the created task carries no
   `auto_start_on_create` marker, and no agent runs after create or open;
@@ -230,8 +238,10 @@ Required Go tests:
 - Task 01 (store, types, constants, event, flag). While G0 is open the branch
   starts from task 01's branch and rebases onto main after each predecessor
   merges.
-- Open PRs #2756, #2841, #2909, #2974, #3048, #3155 and #3165 also edit
-  `internal/mcp`; whichever lands second rebases.
+- Several open PRs, including #2756, #2841, #2909, #2974, #3048, #3155 and
+  #3165, also edit `internal/mcp`; whichever lands second rebases. This list
+  is not exhaustive and no dependency either way is assumed; the
+  implementation checks main for a name already taken (D7).
 
 ## Risks
 

@@ -25,8 +25,13 @@ Approving creates exactly one ordinary task and never starts an agent.
   "pending proposal count" shown by the badge and carried by
   `coordinator.updated` is the number of open proposals.
 - **Eligible step:** a step of the target workflow that has no
-  `auto_start_agent` on-enter action and is either the workflow's start step
-  or allows manual moves.
+  `auto_start_agent` on-enter action, is either the workflow's start step or
+  allows manual moves, and is not a feeder of any step with an
+  `auto_start_agent` on-enter action, directly or through a chain of
+  feeder (`pull_from_step_id`) links. This last clause exists because a task
+  can reach a feeder's downstream step through automatic WIP/queue
+  promotion, not only through a manual move; see
+  [system-design/proposals.md#no-agent-starts](../system-design/proposals.md#no-agent-starts).
 - **Stale claim:** an `approving` proposal whose claim is older than two
   minutes.
 - Other terms are defined in the [system README](../README.md#terms).
@@ -94,7 +99,10 @@ Mockup:
   and the approving user.
 - **AC-COORDINATOR-PROPOSALS-002.2:** The created task shall be an ordinary task
   of its board, not a coordinator task, and no agent shall start for it,
-  whatever on-enter actions its step has.
+  whatever on-enter actions its step has. Because the step is always an
+  eligible step, it shall also never be a feeder of an auto-starting step, so
+  no automatic queue or WIP-limit promotion following the create can start an
+  agent either.
 - **AC-COORDINATOR-PROPOSALS-002.3:** When a manager approves with edits, the
   system shall merge the edited title, description, workflow, step and
   repository into the spec and validate it as in
@@ -215,9 +223,15 @@ Mockup:
   and **Reject** for managers.
 - **AC-COORDINATOR-PROPOSALS-005.2:** While a proposal is `approving`, the card
   shall say "Approval in progress. Edits are locked." with no actions.
-- **AC-COORDINATOR-PROPOSALS-005.3:** A `failed` proposal card shall say "Could
-  not create the task: <error>. Nothing was created." and keep Approve, Edit and
-  Reject.
+- **AC-COORDINATOR-PROPOSALS-005.3:** A `failed` proposal with no task id shall
+  say "Could not create the task: <error>. Nothing was created." and keep
+  Approve, Edit and Reject. A `failed` proposal that already carries a task id
+  (the task was created but a later step of approval failed) shall instead say
+  "The task was created but could not be finalized: <error>. Open the task, or
+  retry to continue from here." and keep Approve and Reject but not Edit,
+  since the frozen spec already produced a real task; Approve on this row
+  behaves as `AC-COORDINATOR-PROPOSALS-002.12` (completes with the existing
+  task) and refuses any edit with 400.
 - **AC-COORDINATOR-PROPOSALS-005.4:** **Edit** on the Needs-you card shall open
   title, description, workflow, step (eligible steps only) and repository in
   place with **Approve with edits** and **Cancel**; an empty title shall be

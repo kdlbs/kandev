@@ -121,8 +121,13 @@ mockup's `mockup/e2e/tests/`, outside this repository; see the plan's [Mockup sc
 cd apps/web && pnpm test -- hooks/domains/coordinator app/coordinator/copilot
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/copilot.spec.ts tests/config-chat
-cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/copilot.spec.ts
+cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-copilot.spec.ts
 ```
+
+The `mobile-chrome` project matches on the `mobile-*.spec.ts` filename prefix
+(`apps/web/e2e/playwright.config.ts`), not on project scope, so the 390px
+layout assertions live in their own `mobile-copilot.spec.ts` file rather than
+a rerun of `copilot.spec.ts` under a different project.
 
 `tests/coordinator/copilot.spec.ts` includes a permission-request case: the
 mock agent calls one of its own tools, the popover shows Approve and Deny
@@ -136,7 +141,7 @@ auto-approval policy) for a coordinator session.
 - `apps/web/app/coordinator/copilot/`
 - `apps/web/hooks/domains/coordinator/use-copilot.ts` and test
 - `apps/web/src/locales/*/`
-- `apps/web/e2e/tests/coordinator/copilot.spec.ts`
+- `apps/web/e2e/tests/coordinator/copilot.spec.ts`, `mobile-copilot.spec.ts`
 
 ## Dependencies
 

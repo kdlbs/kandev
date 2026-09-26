@@ -104,9 +104,15 @@ mockup's `mockup/e2e/tests/`, outside this repository; see the plan's [Mockup sc
 cd apps/web && pnpm test -- lib/settings/workspace-settings-tabs.test.ts app/settings/workspace
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/settings.spec.ts
-cd apps/web && pnpm e2e:run --project=auth tests/coordinator/settings-reader.spec.ts
-cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/settings.spec.ts
+cd apps/web && pnpm e2e:run --project=auth tests/auth/coordinator-settings-reader.spec.ts
+cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-settings.spec.ts
 ```
+
+The `auth` project's `testMatch` requires an `auth/` path segment
+(`apps/web/e2e/playwright.config.ts`), and the `mobile-chrome` project matches
+on the `mobile-*.spec.ts` filename prefix, not on project scope: the 390px
+assertions live in their own `mobile-settings.spec.ts` file, not a rerun of
+`settings.spec.ts` under a different project.
 
 ## Likely files
 
@@ -115,7 +121,8 @@ cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/settings.s
 - `apps/web/app/settings/workspace/[id]/coordinators/`
 - `apps/web/lib/settings-discovery/catalog/workspaces.ts`
 - `apps/web/src/locales/*/`
-- `apps/web/e2e/tests/coordinator/settings.spec.ts`, `settings-reader.spec.ts`
+- `apps/web/e2e/tests/coordinator/settings.spec.ts`, `mobile-settings.spec.ts`
+- `apps/web/e2e/tests/auth/coordinator-settings-reader.spec.ts`
 
 ## Dependencies
 

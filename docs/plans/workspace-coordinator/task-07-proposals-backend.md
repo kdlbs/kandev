@@ -113,7 +113,13 @@ cd apps/backend && go test ./internal/coordinator/... ./internal/task/... -count
 cd apps/backend && make lint
 ```
 
-Go tests cover: double approve creates one task; edits re-validated (an
+Go tests cover: double approve creates one task, as a sequential simulation
+relying on the CAS's atomicity by construction (`WHERE id=? AND status IN
+('pending','failed')` is a single conditional UPDATE, so a second caller
+always matches zero rows regardless of interleaving) rather than task 03's
+true concurrent-goroutine stress of the row-contention path, since this test
+targets the application logic's branch on the CAS result, not the database
+engine's lock behaviour; edits re-validated (an
 auto-start step refused); each Edits table row (absent unchanged, null 400
 naming the field, empty title or workflow 400, empty step uses the start
 step, empty repository clears it, a changed workflow without a step resets

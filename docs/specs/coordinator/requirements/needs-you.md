@@ -162,11 +162,14 @@ Mockup:
   ascending.
 - **AC-COORDINATOR-NEEDS-YOU-004.3:** A Working row shall show the card, step,
   agent state and last activity. When a task's session is unreadable (its
-  status summary is absent, or it has a primary session with no state) and no
-  earlier group's rule places it (a stall record can, per
-  `AC-COORDINATOR-NEEDS-YOU-001.4`), the task shall be in Other and its row
-  shall show "position underivable: session unreadable" instead of the agent
-  state; a task with no session shall show "No session".
+  status summary is absent, or it has a primary session with no state), the
+  Working, question/permission, error and pull-request rules shall be unable
+  to match it, since each reads a status-summary field, but the stall rule (it
+  can, per `AC-COORDINATOR-NEEDS-YOU-001.4`) and the Done rule (it reads the
+  task's own state, not the status summary) shall still be able to. Only when
+  none of those places it shall the task be in Other, with its row showing
+  "position underivable: session unreadable" instead of the agent state; a
+  task with no session shall show "No session".
 - **AC-COORDINATOR-NEEDS-YOU-004.4:** In review and Ready to merge rows shall
   show the pull request state, unresolved review thread count and CI state of
   the task's primary GitHub pull request; when that pull request's detail is

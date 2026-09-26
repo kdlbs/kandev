@@ -73,7 +73,8 @@ and task state; this design consumes them and adds no task field.
 `classify(tasks, stalls, proposals, now)` returning `{needsYou: Item[],
 queue: {working, inReview, readyToMerge, done, other}, counts}`. It is covered
 by Vitest, one case per group, one per precedence pair, the equal-timestamp
-stall case and the unreadable-session cases with and without a stall row.
+stall case, the unreadable-session cases with and without a stall row, and
+the mixed-validity case below (unreadable session, `state == "COMPLETED"`).
 
 Rules, first match wins, excluding tasks with `archived_at` set or
 `is_ephemeral` true:
@@ -91,14 +92,23 @@ Rules, first match wins, excluding tasks with `archived_at` set or
 
 A task's session is **unreadable** when its `statusSummary` is absent, or
 `primary_session` is present with no `state`. The rules are still evaluated in
-order for it, with every `statusSummary` field read as absent: the question,
-error, pull request, Working and Done rules cannot match, while the stall rule
-matches when a stall row exists, because an absent `last_activity_at` counts
-the stall as current (`AC-COORDINATOR-NEEDS-YOU-001.4`), so such a task is a
-stall item. Without a stall row it lands in Other, and its row shows
-"position underivable: session unreadable" in place of the agent state.
-A task with `primary_session` null has no session, which is not unreadable:
-its row shows "No session".
+order for it, with every `statusSummary`-derived field read as absent: the
+question, error, pull request and Working rules cannot match, since each
+reads a `statusSummary` field (`pending_action`, `active_error`/`task_error`,
+`pull_request`, `primary_session.state`). The Done rule is not one of these:
+it reads the task's own `state` column, which exists independently of the
+session and is never absent, so Done still matches a task whose session is
+unreadable. The stall rule matches when a stall row exists, because an absent
+`last_activity_at` counts the stall as current
+(`AC-COORDINATOR-NEEDS-YOU-001.4`), so such a task is a stall item. A task
+with an unreadable session, no stall row and `state != "COMPLETED"` lands in
+Other, and its row shows "position underivable: session unreadable" in place
+of the agent state. A task with `primary_session` null has no session, which
+is not unreadable: its row shows "No session".
+
+Vitest covers the mixed-validity case: an unreadable session
+(`statusSummary` absent) with `state == "COMPLETED"` classifies as Done, not
+Other.
 
 Each open proposal is an item of kind `proposal`, independent of tasks.
 

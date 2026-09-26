@@ -154,8 +154,13 @@ editing the stored user message.
   workspace-deletion subscriber, proposal service and recovery pass never call
   the session or message services; the startup pass only archives and deletes
   tasks.
-- `message.add` for a coordinator task requires `workspace.manage`; a reader's
-  message is refused before any session action.
+- `message.add` for a coordinator task requires `workspace.manage`, enforced
+  in `Service.authorizeMessageCreate` → `AuthorizeTaskSessionPromptAccess`
+  (`internal/task/service/service_access.go`), the single scope check
+  `Service.CreateMessage` runs before building the message; both the WS
+  `wsAddMessage` handler and any HTTP create-message route call
+  `CreateMessage`, so neither transport can bypass it. A reader's message is
+  refused before any session action.
 - The popover passes `automaticRecovery={false}` to the Quick Chat session
   view, which forwards it to `useSessionResumption` as the new option
   `skipAutomaticRecovery`. With it set, the hook sends no check, resume or
@@ -188,17 +193,34 @@ editing the stored user message.
 ## Tool surface
 
 `registerCoordinatorTools` in `internal/mcp/server` registers exactly these
-seven tools, reusing the existing handlers of the first six:
+seven tools, reusing the existing handlers of the first five (`list_related_tasks_kandev`
+is wired to a coordinator-specific variant, below):
 
 | Tool | Why |
 | --- | --- |
 | `list_tasks_kandev` | positions of the workspace's tasks |
-| `list_related_tasks_kandev` | parent, children and blockers of a stalled or waiting task |
+| `list_related_tasks_kandev` | parent, children and blockers of a stalled or waiting task; see below: a coordinator's ephemeral conversation task has no self/ancestor/descendant/sibling/blocker relation to an arbitrary board task, so this tool cannot use the ordinary caller-relation path |
 | `get_task_conversation_kandev` | what a task's agent last said or asked |
 | `list_workflows_kandev` | target workflow of a proposal |
 | `list_workflow_steps_kandev` | target step of a proposal |
 | `list_repositories_kandev` | repository of a proposal |
 | `propose_task_kandev` | new; sends the `coordinator.propose_task` action |
+
+The ordinary `list_related_tasks_kandev` handler calls
+`HandoffService.ListRelatedForCaller`, which requires the target task to be a
+self/ancestor/descendant/sibling/blocker of the *caller's own task*
+(`internal/task/service/handoff_service.go`); a coordinator's caller task is
+its ephemeral conversation task, which has no such relation to an arbitrary
+board task it wants to inspect, so that path would refuse essentially every
+coordinator call with `ErrAccessDenied`. For a coordinator principal, the
+server instead calls the unexported `ListRelated` directly (the same
+already-ungated method `GetTaskContext` uses for a task the caller already
+owns), passing the requested `task_id` with no caller-relation check. This is
+safe only because the backend guard (below) has already resolved that
+`task_id` inside the coordinator's own workspace before the handler runs:
+workspace membership is the isolation boundary here, not task relation.
+`task_id` still defaults to the coordinator's conversation task when omitted
+(Spec Review round 7, R7-03).
 
 It registers no other tool: in particular no `get_task_plan_kandev`, no plan,
 document or session reads, and no user-question, title, plugin, create, move,

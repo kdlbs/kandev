@@ -44,13 +44,13 @@ requirements govern):
 | D4 | May a coordinator move or archive cards? | No, in every phase. Moving, archiving, deleting and stopping are not on its surface, and it can never merge or move a task to Done. This is a rule about the coordinator actor only; people, workflows and other actors keep their contracts. `product-constraints.md` records the rule. | proposed, G0 |
 | D5 | How it asks a person | Through proposals, in its chat and on Needs you. `ask_user_question_kandev` is not on its surface. | proposed, G0 |
 | D6 | ADR 0004's coordination-task pattern | Not used, and left unchanged. | proposed, G0 |
-| D7 | The plugin's interim path | The v1 fence stays as ADR-2026-08-31 defines it. The seven open PRs that touch `internal/mcp` (#2756, #2841, #2909, #2974, #3048, #3155, #3165) are each left to their own review; phase 1 needs none and blocks none. Whichever lands second rebases. Before adding the `coordinator` surface, mode and origin names, the implementation checks main for a name already taken. | proposed, G0 |
+| D7 | The plugin's interim path | The v1 fence stays as ADR-2026-08-31 defines it. Several open PRs touch `internal/mcp` (including #2756, #2841, #2909, #2974, #3048, #3155, #3165); this list is not exhaustive and each is left to its own review: phase 1 needs none and blocks none. Whichever lands second rebases. Before adding the `coordinator` surface, mode and origin names, the implementation checks main for a name already taken. | proposed, G0 |
 | D8 | Scope and cardinality | Workspace scope. Several coordinators per workspace, each reading the whole workspace until Watches narrows it in phase 2. Each proposal belongs to one coordinator. | proposed, G0 |
 | D9 | Autonomy and approval | Phase 1 is attended: every turn starts from a manager's message. The coordinator's Kandev surface can only read and propose, enforced by the MCP guard and by auto-approving exactly those tools. The agent CLI's own tools are governed by its profile and settings, as in any Kandev chat; see [Residual risk](#residual-risk-the-agents-own-tools). Enforced containment of those tools is a condition of G4, before any unattended turn. | proposed, G0 |
 | D10 | External intake | Phase 4. | proposed, G4 |
 | P | The mockup's phone "Teammate" persona | Not planned. `features.auth` is off in every shipped profile and clarifications have no addressee. | proposed, G0 |
 | D14 | Kandev's Inbox | Keeps its row, count and tabs in every phase. The coordinator keeps its own count. | proposed, G0 |
-| D15 | Approval never starts an agent | A proposal may target only steps without an `auto_start_agent` on-enter action. | proposed, G0 |
+| D15 | Approval never starts an agent | A proposal may target only an eligible step: one without an `auto_start_agent` on-enter action, and not a feeder (directly or transitively) of a step that has one, so an automatic queue/WIP promotion after the create cannot reach an auto-starting step either. | proposed, G0 |
 | F | Flag | `features.coordinator`: `prod` and `dev` `"false"`, `e2e` `"true"`. Dogfooding uses the runtime override. Restart required. | proposed, G0 |
 | N | Name | UI "Coordinator". Specifications say "workspace coordinator", and the Office glossary distinguishes it from Office's coordinator role. | proposed, G0 |
 
@@ -68,10 +68,16 @@ requirements govern):
 This ADR supersedes the product-placement clause of
 [ADR-2026-08-31-generic-plugin-host-boundary](2026-08-31-generic-plugin-host-boundary.md):
 
-- lines 9 to 12 (the Coordinator product moving into a separately released
-  plugin, with its state, tools and UI belonging there);
-- lines 32 to 36 (Coordinator identity, policy, scheduling, state, prompts,
-  tools and UI remaining plugin-owned);
+- lines 9 to 12, up to "Kandev state." (the Coordinator product moving into a
+  separately released plugin, with its state, tools and UI belonging there);
+  the rest of line 12, "The current Host contract is too small for that use
+  case...", starts a new sentence about the pre-existing Host contract and is
+  not part of what this ADR supersedes;
+- lines 32 to 34, up to "remain plugin-owned." (Coordinator identity, policy,
+  scheduling, state, prompts, tools and UI remaining plugin-owned). The next
+  sentence, lines 34 to 36 ("Kandev owns only generic Host contracts..."), is
+  not superseded: it is the generic-Host-contract definition this ADR
+  restates as unchanged below and in Consequences;
 - lines 56 to 57, the sentence "Core must not gain a Coordinator table,
   field, profile, role, principal, grant, setting, tool, or audit vocabulary."
   (the only sentence of that paragraph this ADR supersedes; the plugin
@@ -104,16 +110,30 @@ Kandev does not control the agent CLI's own tools and settings. An agent may
 have a shell on its executor, its own MCP servers, and its own permission
 rules, for example a mode that approves commands without asking. With
 `features.auth` off, Kandev's REST API and external `/mcp` endpoint accept any
-local caller, so an agent with a shell could call them. In phase 1 a
-coordinator is therefore exactly as capable as any Kandev chat on the same
-profile, and no more. What it adds is a surface whose designed writes are
-proposals, and a person present for every turn.
+local caller, so an agent with a shell could call them directly: create a task
+on an auto-starting step without going through `propose_task_kandev` at all,
+or call the approve route on its own pending proposal. Neither bypass needs
+an unattended turn; both are reachable from inside an attended one, since
+"attended" means a person started the turn, not that a person reviews every
+tool call the agent's own CLI makes inside it. In phase 1 a coordinator is
+therefore exactly as capable as any Kandev chat on the same profile, and no
+more; its guarded MCP surface adds a proposal path with a person in the loop,
+but does not remove the agent's pre-existing, larger capability on the same
+host.
 
-This residual is accepted for phase 1 only because turns are attended. Before
-any unattended turn, gate G4 must record enforced containment: an executor
-without a shell or network path to the host, or `features.auth` on with a
-coordinator-scoped token, or an equivalent decided there. The settings page
-says that the profile's auto-approve is ignored for coordinators.
+This residual is **accepted, unmitigated, for phase 1**: nothing in this
+design or in phase 1's containment stops a coordinator's agent from calling
+the Kandev API directly with a shell, and no phase-1 gate closes it. This is
+distinct from gate G4's requirement, which is about a *different* axis:
+before any turn can start **unattended** (no person present at all), G4 must
+record enforced containment: an executor without a shell or network path to
+the host, or `features.auth` on with a coordinator-scoped token, or an
+equivalent decided there. G4's containment, once it lands, will also close
+this attended-turn residual as a side effect, but until then this risk is
+carried, not deferred to a gate that names it. The settings page says that
+the profile's auto-approve is ignored for coordinators; that setting narrows
+what the *Kandev-mediated* surface will auto-run, not what the agent's own
+CLI can do outside it.
 
 ## Phase plan
 

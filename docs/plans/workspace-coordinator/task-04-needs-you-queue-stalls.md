@@ -100,6 +100,10 @@ and 07.
   table adds the rows for the paths owned by the other two (task 04's stall
   and `workspace.deleted` subscribers here), so the table is complete
   regardless of merge order.
+- The `@axe-core/playwright` dependency (new to `apps/web/package.json`) and a
+  shared `apps/web/e2e/helpers/axe.ts` wrapping `AxeBuilder`, used by
+  `mobile-needs-you.spec.ts` below to satisfy
+  `AC-COORDINATOR-NEEDS-YOU-008.2`.
 
 ## Out of scope
 
@@ -172,15 +176,25 @@ cd apps/backend && go test ./internal/coordinator/... ./internal/backendapp/...
 cd apps/web && pnpm test -- lib/coordinator/attention.test.ts
 cd apps/web && pnpm run typecheck && pnpm run i18n:check
 cd apps/web && pnpm e2e:run tests/coordinator/needs-you.spec.ts tests/coordinator/stall.spec.ts tests/coordinator/empty-states.spec.ts
-cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/needs-you.spec.ts
+cd apps/web && pnpm e2e:run --project=mobile-chrome tests/coordinator/mobile-needs-you.spec.ts
 ```
+
+The `mobile-chrome` project matches on the `mobile-*.spec.ts` filename prefix
+(`apps/web/e2e/playwright.config.ts`), not on project scope, so the 390px and
+axe assertions live in their own `mobile-needs-you.spec.ts` file rather than a
+rerun of `needs-you.spec.ts` under a different project. That file also carries
+the accessibility scan required by `AC-COORDINATOR-NEEDS-YOU-008.2`, using the
+`@axe-core/playwright` `AxeBuilder` helper at `apps/web/e2e/helpers/axe.ts`
+(new in this task) and asserting no critical violation on both screens.
 
 The stall spec restarts the e2e backend with
 `KANDEV_TASK_STALL_DETECTION_THRESHOLD` set to seconds and a task holding an
 execution-less active session, so the one-minute sweep publishes
 `task.stalled`. Vitest covers every group, each precedence pair, equal
 timestamps, a missing `last_activity_at`, an absent `statusSummary` with and
-without a stall row (stall item, and Other with "session unreadable"), and the
+without a stall row (stall item, and Other with "session unreadable"), an
+absent `statusSummary` with `state == "COMPLETED"` (Done, not Other: the
+Done rule reads the task's own state, not the status summary), and the
 error why-text with an active error, with only a task error that has a
 preview ("The task failed"), and with only an empty task error.
 
@@ -214,7 +228,8 @@ lists and strip.
 - `apps/web/components/app-sidebar/app-sidebar-primary-nav.tsx`
 - `apps/web/components/navigation/mobile-sidebar-layout-navigation.tsx`
 - `apps/web/src/locales/*/`
-- `apps/web/e2e/tests/coordinator/`
+- `apps/web/e2e/tests/coordinator/`, including `mobile-needs-you.spec.ts`
+- `apps/web/e2e/helpers/axe.ts`
 
 ## Dependencies
 
