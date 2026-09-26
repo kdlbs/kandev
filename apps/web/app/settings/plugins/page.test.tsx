@@ -18,6 +18,7 @@ const {
   disablePluginSpy,
   uninstallPluginSpy,
   installPluginFromUrlSpy,
+  installPluginFromCatalogSpy,
   installPluginUploadSpy,
   listPluginsSpy,
   syncPluginsSpy,
@@ -28,6 +29,7 @@ const {
   disablePluginSpy: vi.fn(),
   uninstallPluginSpy: vi.fn(),
   installPluginFromUrlSpy: vi.fn(),
+  installPluginFromCatalogSpy: vi.fn(),
   installPluginUploadSpy: vi.fn(),
   listPluginsSpy: vi.fn(),
   syncPluginsSpy: vi.fn(),
@@ -52,6 +54,12 @@ vi.mock("@/lib/api/domains/plugins-api", () => ({
     return uninstallPluginSpy(...args);
   },
   installPluginFromUrl: (...args: [string]) => installPluginFromUrlSpy(...args),
+  installPluginFromCatalog: (...args: [unknown]) => installPluginFromCatalogSpy(...args),
+  catalogInstallSelector: (entry: { source_id: string; id: string; version: string }) => ({
+    source_id: entry.source_id,
+    package_id: entry.id,
+    expected_version: entry.version,
+  }),
   installPluginUpload: (...args: [File]) => installPluginUploadSpy(...args),
   syncPlugins: (...args: unknown[]) => syncPluginsSpy(...args),
   // The auto-update controls fetch the instance-wide default on mount and
@@ -187,11 +195,11 @@ function catalogEntry(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   uninstallPluginSpy.mockResolvedValue({ deleted: true });
   installPluginFromUrlSpy.mockResolvedValue({ plugin: installedPlugin() });
+  installPluginFromCatalogSpy.mockResolvedValue({ plugin: installedPlugin() });
   installPluginUploadSpy.mockResolvedValue({ plugin: installedPlugin() });
   syncPluginsSpy.mockResolvedValue(emptySyncResult());
   getMarketplaceCatalogSpy.mockReset();
   getMarketplaceCatalogSpy.mockResolvedValue({ plugins: [], sources: [] });
-  refreshMarketplaceSpy.mockReset();
   refreshMarketplaceSpy.mockResolvedValue({ refreshed: true });
 });
 
@@ -649,7 +657,7 @@ describe("PluginsSettingsPage marketplace update lifecycle", () => {
 
     fireEvent.click(screen.getByTestId(`marketplace-install-${NEW_PLUGIN_ID}`));
 
-    await vi.waitFor(() => expect(installPluginFromUrlSpy).toHaveBeenCalledWith(NEW_PLUGIN_URL));
+    await vi.waitFor(() => expect(installPluginFromCatalogSpy).toHaveBeenCalled());
     await vi.waitFor(() =>
       expect(getMarketplaceCatalogSpy.mock.calls.length).toBeGreaterThanOrEqual(
         callsBeforeInstall + 2,
@@ -660,7 +668,9 @@ describe("PluginsSettingsPage marketplace update lifecycle", () => {
   it("after a successful manual update, the version updates and the update button disappears", async () => {
     setStoreState([activePlugin()]);
     getMarketplaceCatalogSpy.mockResolvedValueOnce({ plugins: [catalogEntry()], sources: [] });
-    installPluginFromUrlSpy.mockResolvedValueOnce({ plugin: activePlugin({ version: "2.0.0" }) });
+    installPluginFromCatalogSpy.mockResolvedValueOnce({
+      plugin: activePlugin({ version: "2.0.0" }),
+    });
     getMarketplaceCatalogSpy.mockResolvedValueOnce({
       plugins: [catalogEntry({ install_state: "installed", installed_version: "2.0.0" })],
       sources: [],
@@ -671,11 +681,7 @@ describe("PluginsSettingsPage marketplace update lifecycle", () => {
 
     fireEvent.click(screen.getByTestId(`plugin-update-${PLUGIN_ID}`));
 
-    await vi.waitFor(() =>
-      expect(installPluginFromUrlSpy).toHaveBeenCalledWith(
-        "https://example.test/acme-tools-2.0.0.tar.gz",
-      ),
-    );
+    await vi.waitFor(() => expect(installPluginFromCatalogSpy).toHaveBeenCalled());
     await vi.waitFor(() => expect(screen.queryByTestId(`plugin-update-${PLUGIN_ID}`)).toBeNull());
     expect(toast.success).toHaveBeenCalledWith(expect.stringContaining(PLUGIN_DISPLAY_NAME));
   });
@@ -683,7 +689,7 @@ describe("PluginsSettingsPage marketplace update lifecycle", () => {
   it("shows an inline error on a failed manual update and keeps the Update button clickable", async () => {
     setStoreState([activePlugin()]);
     getMarketplaceCatalogSpy.mockResolvedValue({ plugins: [catalogEntry()], sources: [] });
-    installPluginFromUrlSpy.mockRejectedValueOnce(new Error("bad checksum"));
+    installPluginFromCatalogSpy.mockRejectedValueOnce(new Error("bad checksum"));
 
     render(<PluginsSettingsPage />);
     await vi.waitFor(() => expect(screen.getByTestId(`plugin-update-${PLUGIN_ID}`)).toBeTruthy());

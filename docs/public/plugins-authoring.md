@@ -88,6 +88,26 @@ An isolated web-app package can omit `runtime`. It contains a static entry
 document and the files that document imports. Use the `ui.web_apps` fields in
 the [manifest reference](plugins-manifest.md#isolated-web-applications).
 
+### Publisher attribution
+
+The `author` field in `manifest.yaml` is declared credit. It is displayed as
+the package's declared author and does not prove who published the package.
+Do not use it to claim Kandev or another publisher.
+
+When you submit a release to the official catalog, Kandev records the exact
+archive digest, repository ownership evidence, release identity, and curated
+catalog source together. The host can show a **Verified publisher** label only
+when those facts match at installation time. **Official Kandev** requires an
+explicitly curated repository owned by `kdlbs`.
+
+Signatures and package checksums have separate meanings. The package checksum
+list establishes that extracted files match the archive's declared file
+hashes. The canonical catalog's archive SHA-256 binds publisher evidence to the
+release bytes. A signature, when present, does not replace that catalog
+evidence. Uploads, direct URLs, custom sources, and legacy installations
+remain unverified until an administrator verifies the exact installed version
+against the canonical catalog.
+
 Kandev injects KANDEV_PLUGIN_DATA_DIR into the subprocess. It is the durable,
 per-plugin directory for arbitrary files or a plugin-owned database:
 

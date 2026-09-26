@@ -31,6 +31,7 @@ import {
   formatCanvasReleaseDate,
 } from "@/lib/canvas-permission-copy";
 import { CanvasPermissionSummary, hasUnsupportedPermissions } from "./canvas-permission-summary";
+import { PluginPublisherIdentity } from "./plugins/plugin-publisher-identity";
 
 const CANVAS_ACTION_FAILED_KEY = "canvases:actionFailed";
 const canvasActionClassName = controlSizingClassName("standard", "cursor-pointer");
@@ -105,6 +106,16 @@ function CanvasReleaseReview({
           </dd>
         </div>
       </dl>
+      <PluginPublisherIdentity
+        identity={release.publisher_identity}
+        author={release.author}
+        compact
+        sourceName={
+          release.publisher_identity?.status === "verified"
+            ? t("plugins:officialSourceName")
+            : undefined
+        }
+      />
       {release.validation_error && <CanvasReleaseValidationError code={release.validation_error} />}
       {permissionGroups.length > 0 ? (
         <div data-testid={`canvas-release-permissions-${release.id}`}>

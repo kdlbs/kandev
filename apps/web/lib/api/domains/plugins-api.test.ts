@@ -10,6 +10,7 @@ import {
   getPlugin,
   getPluginConfig,
   getPluginSettings,
+  installPluginFromCatalog,
   installPluginFromUrl,
   installPluginUpload,
   listPlugins,
@@ -18,6 +19,7 @@ import {
   uninstallPlugin,
   updatePluginConfig,
   updatePluginSettings,
+  verifyPluginPublisher,
 } from "./plugins-api";
 import { ApiError } from "../client";
 
@@ -161,6 +163,53 @@ describe("installPluginFromUrl", () => {
       status: 409,
       message: "version 1.0.0 already installed",
     });
+  });
+});
+
+describe("installPluginFromCatalog", () => {
+  it("POSTs an exact catalog selector without trusting browser publisher fields", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ plugin: plugin({ status: "active" }) }, 201));
+
+    await installPluginFromCatalog({
+      source_id: "official",
+      package_id: PLUGIN_ID,
+      expected_version: "1.0.0",
+      expected_sha256: "a".repeat(64),
+    });
+
+    const [url, init] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(url)).toBe("http://api.test/api/plugins/install");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      catalog: {
+        source_id: "official",
+        package_id: PLUGIN_ID,
+        expected_version: "1.0.0",
+        expected_sha256: "a".repeat(64),
+      },
+    });
+  });
+});
+
+describe("verifyPluginPublisher", () => {
+  it("POSTs the expected installed identity to the admin verification endpoint", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(plugin({ publisher_identity: { status: "verified" } })),
+    );
+
+    const result = await verifyPluginPublisher(PLUGIN_ID, {
+      expected_installation_id: "installation-1",
+      expected_version: "1.0.0",
+    });
+
+    const [url, init] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(url)).toBe(`${PLUGIN_URL}/verify-publisher`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      expected_installation_id: "installation-1",
+      expected_version: "1.0.0",
+    });
+    expect(result.publisher_identity?.status).toBe("verified");
   });
 });
 

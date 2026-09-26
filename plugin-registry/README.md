@@ -15,7 +15,7 @@ the package and GitHub release when the catalog index is built.
 | --- | --- |
 | `plugins.yaml` | The curated pointer list — one entry per plugin or canvas repo. Human-edited via PR. |
 | `schema.json` | JSON Schema (draft 2020-12) that `plugins.yaml` MUST validate against. Enforced in CI. |
-| `build-index.mjs` | Build script (zero-dependency Node) that resolves each entry to a full catalog record and emits `index.json`. |
+| `build-index.mjs` | Build script (zero-dependency Node) that resolves each entry to a full catalog record and emits `index.json` with archive-bound publisher evidence. |
 | `build-index.test.mjs` | `node --test` coverage for the build script's parser and enrichment. |
 
 The generated `index.json` is published to GitHub Pages by the
@@ -32,7 +32,7 @@ asset in the standard Kandev package format:
 - `<id>-<version>.tar.gz` — the required plugin package. The archive contains
   its own generated `checksums.txt`, which the install pipeline verifies.
 - `checksums.txt` — an optional release asset containing the tarball digest.
-  The catalog does not currently populate or enforce it.
+  The generated catalog records the digest of the exact downloaded archive.
 
 The `kdlbs/kandev-plugin-template` starter repo is the recommended way to
 bootstrap a new plugin with the right layout and a release workflow.
@@ -40,6 +40,12 @@ bootstrap a new plugin with the right layout and a release workflow.
 The catalog ranks plugins by **GitHub stars** (with a "recently updated"
 alternative from each repo's last release). Kandev collects **no download or
 usage telemetry** — there is no "most installed" metric, by design.
+
+The generated evidence is bound to the exact archive digest and release
+identity inspected by the index builder. `author` remains package-declared
+credit. Only an explicitly curated `kdlbs` repository in this canonical source
+can produce a verified official publisher projection; custom sources, URL
+overrides, and direct uploads cannot grant that status.
 
 ## Submitting a plugin or canvas to the official catalog
 
@@ -73,7 +79,9 @@ usage telemetry** — there is no "most installed" metric, by design.
    ```
 
    The `id` **MUST match the `id` in your plugin manifest** and be unique across
-   the file. `repo` is `owner/name`. `featured` is a maintainer-only pin and
+   the file. `repo` is `owner/name`. `official: true` is a maintainer-only
+   designation for an explicitly reviewed `kdlbs` repository. It is not inferred
+   from the repository name or author. `featured` is also maintainer-only and
    should be left out of submissions.
 4. **Open a pull request.** The index-build workflow runs on your PR (build +
    tests, no Pages deploy) and resolves your entry against the GitHub API — your

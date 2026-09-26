@@ -274,6 +274,18 @@ versioned bundle as a release asset, add the repository and preview URLs to
 the exact asset. Team registries can host an `index.json` with the same shape.
 Direct file and direct-link sharing does not require registry admission.
 
+Canvas review shows the package's **Publisher**, verification state, **Source**,
+and **Declared author** as separate values. The declared author is package
+metadata and cannot establish identity. A verified canvas release is bound to
+the exact catalog release, repository evidence, and archive digest. An official
+badge requires the canonical HTTPS official catalog and its explicit curation.
+
+Uploads, direct links, custom sources, and legacy canvas receipts show
+**Unverified publisher**. A local edit, export, or import creates content that
+does not inherit the original release's publisher verification. The review and
+receipt keep attribution tied to the imported release, while the package
+integrity digest remains a separate fact.
+
 ## Related guides
 
 - [Plugin manifest reference](plugins-manifest.md#isolated-web-applications) defines the `ui.web_apps` manifest fields.

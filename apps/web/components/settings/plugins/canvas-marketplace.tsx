@@ -16,6 +16,7 @@ import type { MarketplaceCatalog, MarketplaceEntry } from "@/lib/types/plugins";
 import { MarketplaceSourcesDialog } from "./marketplace-sources-dialog";
 import { CanvasInstallDialog } from "./canvas-install-dialog";
 import { CanvasMarketplaceDetail } from "./canvas-marketplace-detail";
+import { PluginPublisherIdentity } from "./plugin-publisher-identity";
 
 const ALL_CATEGORIES = "__all__";
 const CANVAS_ACTION_CLASS = settingsActionClassName("cursor-pointer");
@@ -298,9 +299,11 @@ function CanvasMarketplaceCard({
             <Badge variant="secondary">v{entry.version}</Badge>
           </div>
           <p className="line-clamp-2 text-sm text-muted-foreground">{entry.description}</p>
-          <p className="text-xs text-muted-foreground">
-            {t("plugins:byAuthor", { author: entry.author })}
-          </p>
+          <PluginPublisherIdentity
+            identity={entry.publisher_identity}
+            sourceName={entry.source_name}
+            author={entry.author}
+          />
         </div>
       </button>
       <div className="flex items-center justify-between gap-2 border-t px-4 py-3">

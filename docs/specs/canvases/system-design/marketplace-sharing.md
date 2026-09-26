@@ -22,6 +22,11 @@ workspace instances. This is one vertical contract, including Settings >
 Plugins presentation. Plugins continues to own the manifest, static validator,
 runtime, release artifacts, grants, and catalog machinery.
 
+The [publisher identity design](../../plugins/system-design/publisher-identity.md)
+owns publisher verification for both native plugins and canvases. It extends
+this design's review/receipt attribution and replaces the historical native
+advisory-digest exception. Declared author credit remains package data.
+
 Reuse the [plugin-backed canvas decision](../../../decisions/2026-08-26-plugin-backed-web-app-canvases.md).
 No new runtime or independent marketplace is introduced. The rationale for
 this additive distribution profile fits this design; a separate ADR is not

@@ -65,16 +65,47 @@ usage telemetry, so there is no "most installed" metric; ranking is GitHub
 stars only, and "Recently updated" surfaces new or actively maintained plugins
 that high-star incumbents would otherwise bury.
 
-Click **Install** on a card to install it. This resolves the entry to its
-latest release tarball and runs the same verified install pipeline as
-install-by-URL (`POST /api/plugins/install`), see [Plugins → Installing a
-plugin](plugins.md#installing-a-plugin) for the exact steps and integrity
-checks. A card for a plugin you already have at the latest version shows
-**Installed** instead of an install button.
+Click **Install** on a card to install it. Kandev sends the catalog entry's
+identity and version to the backend, which resolves that selection again and
+downloads the exact current release. The backend then runs the same package
+integrity checks as install-by-URL (`POST /api/plugins/install`) and records the
+publisher evidence only when the package matches the canonical official
+catalog. See [Plugins → Installing a plugin](plugins.md#installing-a-plugin)
+for the install steps and integrity checks. A card for a plugin you already
+have at the latest version shows **Installed** instead of an install button.
 
 Plugin-provided icons render on the cards. A plugin that ships an icon (via the
 manifest's `icon` field) shows it; otherwise the card falls back to a neutral
 letter tile.
+
+### Publisher identity and package provenance
+
+Marketplace cards and install reviews show four separate facts when they are
+available: **Publisher**, its verification state, **Source**, and **Declared
+author**. The declared author comes from the package manifest and is a credit
+line. It cannot establish publisher identity.
+
+The **Verified publisher** label is a host-owned projection. **Official Kandev**
+also requires the release to match an explicitly curated `kdlbs` repository in
+the canonical HTTPS official catalog. A source name, an `official` field, a
+repository URL, a package signature, or a manifest author does not grant this
+status. The package digest is shown separately as an integrity fact.
+
+Packages installed by upload, direct URL, a custom source, or an older record
+show **Unverified publisher**. These installations keep their source and
+declared author visible. A custom source can provide useful discovery metadata,
+but membership in that source cannot grant Kandev verification.
+
+An administrator can select **Verify publisher** on an installed native plugin.
+Kandev needs the exact installed version in the official catalog, downloads the
+catalog package, and compares its complete installed file inventory and bytes.
+Success changes only the stored publisher attribution and keeps the original
+source, version, runtime state, and configuration. An unavailable release or a
+file mismatch leaves the plugin unchanged and offers retry.
+
+Updates use the same fresh catalog resolution. If the candidate publisher
+changes or its evidence becomes unavailable, Kandev keeps the installed
+version and attribution and reports the update failure.
 
 ### Browse and install canvases
 
@@ -200,10 +231,10 @@ asset is required; a second is optional:
 - `<id>-<version>.tar.gz` (**required**); the plugin package. It carries its
   own internal `checksums.txt` covering every packaged file, which the install
   pipeline verifies on extraction.
-- `checksums.txt` (optional); the sha256 of the tarball itself. Advisory
-  provenance: the catalog reserves a `package_sha256` field for it, but the
-  index builder does not populate or enforce the digest yet, so it is included
-  only for forward compatibility.
+- `checksums.txt` (optional); a release-level checksum asset. The catalog
+  records the SHA-256 digest of the exact package archive that it inspected.
+  Kandev verifies that archive digest again before using the catalog's publisher
+  evidence.
 
 The release must pass the standard package integrity gate. The
 [`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template)
@@ -238,7 +269,9 @@ a PR that lists it.
    release package `<id>-<version>.tar.gz` to match, so the index resolves the
    right asset. `categories` here are free-form curation tags for catalog
    filtering (not the manifest's category enum). `featured` is a maintainer-only
-   pin; leave it out of submissions. The pointer-list shape is defined by
+   pin; leave it out of submissions. `official: true` is reserved for an
+   explicitly reviewed repository owned by `kdlbs`; it is not inferred from an
+   author, repository name, or source URL. The pointer-list shape is defined by
    [`plugin-registry/schema.json`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json).
 2. Open a pull request. The registry index-build workflow runs on your PR
    (build + tests, no Pages deploy), resolving your entry against the GitHub API
@@ -273,8 +306,10 @@ simplest way to produce one is to copy the official registry's
 [`build-index.mjs`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/build-index.mjs)
 build script (zero-dependency Node) + GitHub Action resolve each listed repo's
 latest release into a full catalog record and publish the generated
-`index.json` to GitHub Pages. Point kandev at that Pages URL. The document
-shape, the build pipeline, and the source data model are specified in the
+`index.json` to GitHub Pages. Point kandev at that Pages URL. Entries from this
+source are shown as unverified. A package installed from this source remains
+unverified, even when the package also appears in the canonical official HTTPS
+catalog. The document shape, the build pipeline, and the source data model are specified in the
 [plugin marketplace spec](https://github.com/kdlbs/kandev/blob/main/docs/specs/plugins/requirements/marketplace.md).
 
 Related: [Plugins](plugins.md), [Authoring a

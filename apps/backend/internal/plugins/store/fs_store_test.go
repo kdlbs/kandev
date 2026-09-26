@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/provenance"
+	"gopkg.in/yaml.v3"
 )
 
 // testRecord returns a minimal valid installed record for tests.
@@ -55,6 +57,85 @@ func TestFSStore_Save_WritesRecordFile(t *testing.T) {
 	}
 	if got.Status != StatusRegistered {
 		t.Fatalf("Get().Status = %q, want %q", got.Status, StatusRegistered)
+	}
+}
+
+func TestFSStore_PublisherProvenanceRoundTripsAndProjectsIdentity(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+	verifiedAt := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	rec := testRecord("example")
+	rec.PublisherProvenance = &provenance.InstallationProvenance{
+		Origin:             provenance.OriginCatalog,
+		SourceID:           "official",
+		SourceURL:          "https://kdlbs.github.io/kandev/plugins/index.json",
+		PackageID:          rec.ID,
+		Version:            rec.Version,
+		PackageSHA256:      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Publisher:          &provenance.Evidence{SchemaVersion: 1, RepositoryID: "123", OwnerID: "456", Login: "acme", Repository: "acme/example"},
+		VerifiedAt:         &verifiedAt,
+		VerificationMethod: provenance.VerificationArchiveDownload,
+	}
+	if err := s.Save(rec); err != nil {
+		t.Fatalf("Save() unexpected error: %v", err)
+	}
+	got, err := s.Get(rec.ID)
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if got.PublisherProvenance == nil || got.PublisherProvenance.Publisher == nil {
+		t.Fatalf("publisher provenance did not persist: %+v", got.PublisherProvenance)
+	}
+	if got.PublisherIdentity == nil || got.PublisherIdentity.Status != provenance.StatusVerified || got.PublisherIdentity.Login != "acme" {
+		t.Fatalf("publisher identity = %+v, want verified acme identity", got.PublisherIdentity)
+	}
+}
+
+func TestFSStore_LegacyRecordProjectsUnverifiedPublisher(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+	rec := testRecord("legacy")
+	if err := s.Save(rec); err != nil {
+		t.Fatalf("Save() unexpected error: %v", err)
+	}
+	got, err := s.Get(rec.ID)
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if got.PublisherIdentity == nil || got.PublisherIdentity.Status != provenance.StatusUnverified || got.PublisherIdentity.Login != "" {
+		t.Fatalf("legacy publisher identity = %+v, want empty unverified identity", got.PublisherIdentity)
+	}
+}
+
+func TestFSStore_GetSanitizesLegacyPublisherURLs(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+	rec := testRecord("legacy-url")
+	rec.PublisherProvenance = &provenance.InstallationProvenance{
+		Origin:           provenance.OriginURL,
+		SourceURL:        "https://user:secret@example.test/plugin.tar.gz?token=signed#fragment",
+		MatchedSourceURL: "https://user:secret@example.test/index.json?token=signed#fragment",
+		PackageID:        rec.ID,
+		Version:          rec.Version,
+	}
+	data, err := yaml.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal legacy record: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, rec.ID+".yml"), data, 0o600); err != nil {
+		t.Fatalf("write legacy record: %v", err)
+	}
+
+	got, err := s.Get(rec.ID)
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if got.PublisherProvenance.SourceURL != "https://example.test/plugin.tar.gz" ||
+		got.PublisherProvenance.MatchedSourceURL != "https://example.test/index.json" {
+		t.Fatalf("legacy public URLs were not sanitized: %+v", got.PublisherProvenance)
+	}
+	if strings.Contains(string(data), "secret") == false {
+		t.Fatal("test fixture did not contain a credential-bearing URL")
 	}
 }
 

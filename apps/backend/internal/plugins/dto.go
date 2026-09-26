@@ -1,13 +1,31 @@
 package plugins
 
-import "github.com/kandev/kandev/internal/plugins/store"
+import (
+	"encoding/json"
+
+	"github.com/kandev/kandev/internal/plugins/store"
+)
 
 // InstallRequest is the JSON body of POST /api/plugins/install when
 // installing from a URL: {"url": "https://.../plugin-1.0.0.tar.gz"}. The
 // same endpoint also accepts a multipart/form-data upload with a "package"
 // field instead of this body — see Controller.install.
 type InstallRequest struct {
-	URL string `json:"url"`
+	URL     string                  `json:"url"`
+	Catalog *CatalogInstallSelector `json:"catalog"`
+	// These fields exist only to reject attempts to submit host-owned
+	// publisher data. The handler never echoes or stores their values.
+	Publisher         json.RawMessage `json:"publisher"`
+	PublisherIdentity json.RawMessage `json:"publisher_identity"`
+}
+
+// CatalogInstallSelector identifies one exact catalog release. The backend
+// resolves these constraints against a fresh source document.
+type CatalogInstallSelector struct {
+	SourceID        string `json:"source_id"`
+	PackageID       string `json:"package_id"`
+	ExpectedVersion string `json:"expected_version"`
+	ExpectedSHA256  string `json:"expected_sha256"`
 }
 
 // InstallResponse is the body of a successful POST /api/plugins/install.
@@ -39,6 +57,14 @@ type UpdateSettingsRequest struct {
 // inherits the instance-wide default again.
 type SetAutoUpdateRequest struct {
 	AutoUpdate *bool `json:"auto_update"`
+}
+
+// VerifyPublisherRequest identifies the exact installed record an
+// administrator intends to verify. The server ignores all package paths and
+// publisher fields from the client.
+type VerifyPublisherRequest struct {
+	ExpectedInstallationID string `json:"expected_installation_id"`
+	ExpectedVersion        string `json:"expected_version"`
 }
 
 // SyncResult is the body of a successful POST /api/plugins/sync (and the

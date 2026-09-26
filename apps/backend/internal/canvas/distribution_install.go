@@ -10,6 +10,7 @@ import (
 
 	plugininstances "github.com/kandev/kandev/internal/plugins/instances"
 	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/provenance"
 	"github.com/kandev/kandev/internal/plugins/webapp"
 )
 
@@ -77,17 +78,20 @@ type InstallConfirmation struct {
 }
 
 type InstallReceipt struct {
-	PreparationID string    `json:"preparation_id"`
-	UserID        string    `json:"user_id"`
-	CanvasID      string    `json:"canvas_id"`
-	WorkspaceID   string    `json:"workspace_id"`
-	PackageID     string    `json:"package_id"`
-	Version       string    `json:"version"`
-	Digest        string    `json:"sha256"`
-	SourceID      string    `json:"source_id,omitempty"`
-	RepositoryURL string    `json:"repository_url,omitempty"`
-	OriginKind    string    `json:"origin_kind"`
-	CreatedAt     time.Time `json:"created_at"`
+	PreparationID       string                             `json:"preparation_id"`
+	UserID              string                             `json:"user_id"`
+	CanvasID            string                             `json:"canvas_id"`
+	WorkspaceID         string                             `json:"workspace_id"`
+	PackageID           string                             `json:"package_id"`
+	Version             string                             `json:"version"`
+	Digest              string                             `json:"sha256"`
+	ReleaseID           string                             `json:"release_id,omitempty"`
+	SourceID            string                             `json:"source_id,omitempty"`
+	RepositoryURL       string                             `json:"repository_url,omitempty"`
+	OriginKind          string                             `json:"origin_kind"`
+	CreatedAt           time.Time                          `json:"created_at"`
+	PublisherProvenance *provenance.InstallationProvenance `json:"publisher_provenance,omitempty"`
+	PublisherIdentity   *provenance.PublisherIdentity      `json:"publisher_identity"`
 }
 
 type InstallResult struct {
@@ -105,6 +109,7 @@ type InstallRequest struct {
 	ExpectedVersion       string
 	ExpectedDigest        string
 	ExpectedArchiveDigest string
+	PublisherProvenance   *provenance.InstallationProvenance
 	Bundle                []byte
 }
 
@@ -145,16 +150,17 @@ func (s *DistributionService) CancelInstall(ctx context.Context, userID, prepara
 }
 
 type InstallReview struct {
-	PreparationID     string            `json:"preparation_id"`
-	WorkspaceID       string            `json:"workspace_id"`
-	Metadata          InstallMetadata   `json:"metadata"`
-	Digest            string            `json:"sha256"`
-	ArchiveDigest     string            `json:"archive_sha256"`
-	PermissionSummary PermissionSummary `json:"permissions"`
-	OriginKind        string            `json:"origin_kind"`
-	SourceID          string            `json:"source_id,omitempty"`
-	RepositoryURL     string            `json:"repository_url,omitempty"`
-	ExpiresAt         string            `json:"expires_at"`
+	PreparationID     string                        `json:"preparation_id"`
+	WorkspaceID       string                        `json:"workspace_id"`
+	Metadata          InstallMetadata               `json:"metadata"`
+	Digest            string                        `json:"sha256"`
+	ArchiveDigest     string                        `json:"archive_sha256"`
+	PermissionSummary PermissionSummary             `json:"permissions"`
+	OriginKind        string                        `json:"origin_kind"`
+	SourceID          string                        `json:"source_id,omitempty"`
+	RepositoryURL     string                        `json:"repository_url,omitempty"`
+	PublisherIdentity *provenance.PublisherIdentity `json:"publisher_identity"`
+	ExpiresAt         string                        `json:"expires_at"`
 }
 
 type InstallMetadata struct {
@@ -247,19 +253,24 @@ func validateInstallExpectations(request InstallRequest, origin string, pkg *web
 }
 
 func (s *DistributionService) stageInstall(ctx context.Context, request InstallRequest, origin, archive string, pkg *webapp.Package) (InstallReview, error) {
+	publisherProvenance, err := installPublisherProvenance(request.PublisherProvenance, origin, archive, pkg)
+	if err != nil {
+		return InstallReview{}, err
+	}
 	metadata := installMetadata(pkg.Manifest)
 	repositoryURL := sanitizeRepositoryURL(request.RepositoryURL)
 	preparation, err := s.preparations.Create(ctx, Preparation{
 		UserID: request.UserID, WorkspaceID: request.WorkspaceID, PackageID: pkg.Manifest.ID,
 		PackageVersion: pkg.Manifest.Version, PackageDigest: pkg.Digest, PackageArchiveDigest: archive, OriginKind: origin,
 		SourceID: request.SourceID, RepositoryURL: repositoryURL,
-		Metadata: ExportMetadata{PackageID: pkg.Manifest.ID, Version: pkg.Manifest.Version, DisplayName: pkg.Manifest.DisplayName, Description: pkg.Manifest.Description, Author: pkg.Manifest.Author, License: pkg.Manifest.Distribution.License, SourceMode: pkg.Manifest.Distribution.SourceMode, MinKandevVersion: pkg.Manifest.MinKandevVersion, RepoURL: pkg.Manifest.RepoURL},
-		Bundle:   append([]byte(nil), request.Bundle...), Files: distributionInventory(pkg.Files),
+		PublisherProvenance: publisherProvenance,
+		Metadata:            ExportMetadata{PackageID: pkg.Manifest.ID, Version: pkg.Manifest.Version, DisplayName: pkg.Manifest.DisplayName, Description: pkg.Manifest.Description, Author: pkg.Manifest.Author, License: pkg.Manifest.Distribution.License, SourceMode: pkg.Manifest.Distribution.SourceMode, MinKandevVersion: pkg.Manifest.MinKandevVersion, RepoURL: pkg.Manifest.RepoURL},
+		Bundle:              append([]byte(nil), request.Bundle...), Files: distributionInventory(pkg.Files),
 	})
 	if err != nil {
 		return InstallReview{}, err
 	}
-	return InstallReview{PreparationID: preparation.ID, WorkspaceID: request.WorkspaceID, Metadata: metadata, Digest: pkg.Digest, ArchiveDigest: archive, PermissionSummary: ManifestPermissions(pkg.Manifest), OriginKind: origin, SourceID: request.SourceID, RepositoryURL: repositoryURL, ExpiresAt: preparation.ExpiresAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")}, nil
+	return InstallReview{PreparationID: preparation.ID, WorkspaceID: request.WorkspaceID, Metadata: metadata, Digest: pkg.Digest, ArchiveDigest: archive, PermissionSummary: ManifestPermissions(pkg.Manifest), OriginKind: origin, SourceID: request.SourceID, RepositoryURL: repositoryURL, PublisherIdentity: publisherProvenance.Identity(), ExpiresAt: preparation.ExpiresAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")}, nil
 }
 
 // PrepareInstallFromURL downloads one bounded HTTPS bundle and routes the
@@ -300,13 +311,21 @@ func (s *DistributionService) PrepareInstallFromCatalog(ctx context.Context, req
 	if resolver == nil {
 		return InstallReview{}, ErrInstallUnavailable
 	}
-	packageURL, repositoryURL, err := resolver.ResolveCanvasPackage(ctx, request.SourceID, request.PackageID, request.ExpectedVersion, request.ExpectedArchiveDigest)
+	var packageURL, repositoryURL string
+	var publisherProvenance *provenance.InstallationProvenance
+	var err error
+	if richResolver, ok := resolver.(CatalogPublisherResolver); ok {
+		packageURL, repositoryURL, publisherProvenance, err = richResolver.ResolveCanvasPackageWithProvenance(ctx, request.SourceID, request.PackageID, request.ExpectedVersion, request.ExpectedArchiveDigest)
+	} else {
+		packageURL, repositoryURL, err = resolver.ResolveCanvasPackage(ctx, request.SourceID, request.PackageID, request.ExpectedVersion, request.ExpectedArchiveDigest)
+	}
 	if err != nil {
 		return InstallReview{}, err
 	}
 	request.OriginKind = installOriginRegistry
 	request.RepositoryURL = repositoryURL
 	request.ExpectedDigest = ""
+	request.PublisherProvenance = publisherProvenance
 	return s.PrepareInstallFromURL(ctx, request, packageURL)
 }
 
@@ -340,7 +359,8 @@ func (s *DistributionService) ConfirmInstall(ctx context.Context, userID, prepar
 	if err != nil {
 		return InstallResult{}, err
 	}
-	receipt := InstallReceipt{PreparationID: preparation.ID, UserID: userID, WorkspaceID: preparation.WorkspaceID, PackageID: preparation.PackageID, Version: preparation.PackageVersion, Digest: preparation.PackageDigest, SourceID: preparation.SourceID, RepositoryURL: sanitizeRepositoryURL(preparation.RepositoryURL), OriginKind: preparation.OriginKind, CreatedAt: time.Now().UTC()}
+	receipt := InstallReceipt{PreparationID: preparation.ID, UserID: userID, WorkspaceID: preparation.WorkspaceID, PackageID: preparation.PackageID, Version: preparation.PackageVersion, Digest: preparation.PackageDigest, SourceID: preparation.SourceID, RepositoryURL: sanitizeRepositoryURL(preparation.RepositoryURL), OriginKind: preparation.OriginKind, CreatedAt: time.Now().UTC(), PublisherProvenance: preparation.PublisherProvenance.Clone()}
+	receipt.PublisherIdentity = receipt.PublisherProvenance.Identity()
 	return s.installPreparedPackage(ctx, userID, preparation, pkg, receipt)
 }
 
@@ -506,6 +526,42 @@ func installReview(preparation Preparation, pkg *webapp.Package) InstallReview {
 		Metadata: metadata, Digest: pkg.Digest, ArchiveDigest: preparation.PackageArchiveDigest,
 		PermissionSummary: ManifestPermissions(pkg.Manifest), OriginKind: preparation.OriginKind,
 		SourceID: preparation.SourceID, RepositoryURL: sanitizeRepositoryURL(preparation.RepositoryURL),
-		ExpiresAt: preparation.ExpiresAt.UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+		PublisherIdentity: preparation.PublisherProvenance.Identity(),
+		ExpiresAt:         preparation.ExpiresAt.UTC().Format("2006-01-02T15:04:05.000Z07:00"),
 	}
+}
+
+func installPublisherProvenance(input *provenance.InstallationProvenance, origin, archive string, pkg *webapp.Package) (*provenance.InstallationProvenance, error) {
+	if pkg == nil || pkg.Manifest == nil {
+		return nil, ErrInstallInvalid
+	}
+	p := input.Clone()
+	if p == nil {
+		p = &provenance.InstallationProvenance{}
+	}
+	p.Origin = provenanceOrigin(origin)
+	p.PackageID = pkg.Manifest.ID
+	p.Version = pkg.Manifest.Version
+	if p.Publisher != nil {
+		if p.Publisher.PackageSHA256 != "" && !strings.EqualFold(p.Publisher.PackageSHA256, archive) {
+			return nil, ErrPackageDigestMismatch
+		}
+		p.Publisher.PackageSHA256 = archive
+	}
+	p.PackageSHA256 = archive
+	if p.Publisher == nil {
+		p.VerifiedAt = nil
+		p.VerificationMethod = ""
+	}
+	if err := p.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: publisher provenance: %v", ErrInstallInvalid, err)
+	}
+	return p, nil
+}
+
+func provenanceOrigin(origin string) string {
+	if origin == installOriginRegistry {
+		return provenance.OriginCatalog
+	}
+	return origin
 }

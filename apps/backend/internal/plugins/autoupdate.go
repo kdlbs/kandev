@@ -113,6 +113,15 @@ type AutoUpdateFailure struct {
 	Error string `json:"error"`
 }
 
+// autoUpdateExpectation is captured before a catalog download and checked
+// again while the per-plugin lifecycle lock is held. An automatic update may
+// not install over a record that was disabled, opted out, uninstalled, or
+// replaced while the download was in flight.
+type autoUpdateExpectation struct {
+	InstallationID string
+	Version        string
+}
+
 // RunAutoUpdatePass performs one auto-update sweep: it upgrades every currently
 // active, opted-in plugin for which the marketplace catalog reports a newer
 // version. Disabled/errored plugins are intentionally skipped — a plugin only
@@ -179,11 +188,17 @@ func (s *Service) applyAutoUpdates(ctx context.Context, entries []marketplace.Ca
 		// entry must not reach InstallFromURL — Install unconditionally
 		// re-activates, and reactivating a plugin the operator just disabled
 		// would violate the active-and-opted-in-only contract.
-		if !s.eligibleForAutoUpdate(entry.ID) {
+		expectation, eligible := s.captureAutoUpdateExpectation(entry.ID)
+		if !eligible {
 			continue
 		}
 		from := entry.InstalledVersion
-		if _, err := s.InstallFromURL(ctx, entry.PackageURL); err != nil {
+		if _, err := s.installFromCatalog(ctx, CatalogInstallSelector{
+			SourceID:        entry.SourceID,
+			PackageID:       entry.ID,
+			ExpectedVersion: entry.Version,
+			ExpectedSHA256:  entry.PackageSHA256,
+		}, true, expectation); err != nil {
 			outcome.Failed = append(outcome.Failed, AutoUpdateFailure{ID: entry.ID, To: entry.Version, Error: err.Error()})
 			s.log.Warn("plugins: auto-update failed",
 				zap.String("plugin_id", entry.ID), zap.String("from", from),
@@ -202,18 +217,45 @@ func (s *Service) applyAutoUpdates(ctx context.Context, entries []marketplace.Ca
 // gate applied immediately before an auto-update install (see applyAutoUpdates),
 // closing the window between the candidate snapshot / catalog fetch and the
 // install during which an operator may have disabled, uninstalled, or opted the
-// plugin out. Read without holding the lifecycle lock deliberately: the only
-// remaining race is the sub-millisecond gap before InstallFromURL's own
-// download begins, and holding the lock across a multi-second package download
-// would needlessly block concurrent operator actions.
+// plugin out. The returned expectation is checked again after the download
+// under the lifecycle lock, so operator actions can proceed while transport is
+// in flight without allowing a stale package to commit.
 func (s *Service) eligibleForAutoUpdate(id string) bool {
+	_, ok := s.captureAutoUpdateExpectation(id)
+	return ok
+}
+
+func (s *Service) captureAutoUpdateExpectation(id string) (*autoUpdateExpectation, bool) {
+	lock := s.lifecycleLocks.lockFor(id)
+	lock.Lock()
+	defer lock.Unlock()
+
 	def, err := s.AutoUpdateDefault()
 	if err != nil {
-		return false
+		return nil, false
 	}
 	rec, ok := s.registry.Get(id)
 	if !ok {
-		return false
+		return nil, false
 	}
-	return rec.Status == StatusActive && effectiveAutoUpdate(rec.AutoUpdate, def)
+	if rec.Status != StatusActive || !effectiveAutoUpdate(rec.AutoUpdate, def) {
+		return nil, false
+	}
+	return &autoUpdateExpectation{InstallationID: rec.InstallationID, Version: rec.Version}, true
+}
+
+func (s *Service) validateAutomaticUpdateLocked(id string, current *store.Record, hadCurrent bool, expected *autoUpdateExpectation) error {
+	if expected == nil || !hadCurrent || current == nil || current.ID != id ||
+		current.InstallationID != expected.InstallationID || current.Version != expected.Version ||
+		current.Status != StatusActive {
+		return ErrAutomaticUpdateStale
+	}
+	def, err := s.AutoUpdateDefault()
+	if err != nil {
+		return fmt.Errorf("%w: could not read auto-update setting: %v", ErrAutomaticUpdateStale, err)
+	}
+	if !effectiveAutoUpdate(current.AutoUpdate, def) {
+		return ErrAutomaticUpdateStale
+	}
+	return nil
 }

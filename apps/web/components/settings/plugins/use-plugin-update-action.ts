@@ -23,7 +23,7 @@ import type { MarketplaceEntry } from "@/lib/types/plugins";
  * copy's error on the new, perfectly healthy row.
  */
 export function usePluginUpdateAction(
-  marketplaceInstall: (url: string) => Promise<{ ok: boolean; error?: string }>,
+  marketplaceInstall: (entry: MarketplaceEntry) => Promise<{ ok: boolean; error?: string }>,
   reloadUpdates: () => Promise<void>,
   installedIds: ReadonlySet<string>,
   markUpdated?: (pluginId: string) => void,
@@ -60,7 +60,7 @@ export function usePluginUpdateAction(
       clearError(entry.id);
       setUpdatingIds((prev) => new Set(prev).add(entry.id));
       try {
-        const result = await marketplaceInstall(entry.package_url);
+        const result = await marketplaceInstall(entry);
         if (!result.ok) {
           const message = result.error ?? t("plugins:failedToUpdatePlugin", { name: entry.name });
           setErrorsById((prev) => new Map(prev).set(entry.id, message));

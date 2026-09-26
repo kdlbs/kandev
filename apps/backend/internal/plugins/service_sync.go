@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/provenance"
 	"github.com/kandev/kandev/internal/plugins/store"
 )
 
@@ -205,7 +206,13 @@ func (s *Service) registerSideload(id, version string) error {
 		InstallPath:    versionDir,
 		Signed:         false,
 		InstalledAt:    time.Now().UTC(),
+		PublisherProvenance: &provenance.InstallationProvenance{
+			Origin:    provenance.OriginSideload,
+			PackageID: m.ID,
+			Version:   m.Version,
+		},
 	}
+	rec.PublisherIdentity = rec.PublisherProvenance.Identity()
 	if err := s.store.Save(rec); err != nil {
 		return fmt.Errorf("persist sideloaded record: %w", err)
 	}
@@ -254,7 +261,7 @@ func (s *Service) installTarball(ctx context.Context, path string) (string, erro
 	}
 	defer func() { _ = f.Close() }()
 
-	rec, installErr := s.Install(ctx, f)
+	rec, installErr := s.installWithProvenance(ctx, f, &provenance.InstallationProvenance{Origin: provenance.OriginSideload}, false, nil)
 	if rec == nil {
 		return "", installErr
 	}

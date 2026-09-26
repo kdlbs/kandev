@@ -1,6 +1,11 @@
 import { ApiError, fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
-import type { PluginRecord, PluginSettings, SyncResult } from "@/lib/types/plugins";
+import type {
+  MarketplaceEntry,
+  PluginRecord,
+  PluginSettings,
+  SyncResult,
+} from "@/lib/types/plugins";
 
 const BASE = "/api/plugins";
 
@@ -43,6 +48,59 @@ export async function installPluginFromUrl(
       ...(options?.init ?? {}),
       method: "POST",
       body: JSON.stringify({ url }),
+    },
+  });
+}
+
+export type CatalogInstallSelector = {
+  source_id: string;
+  package_id: string;
+  expected_version: string;
+  expected_sha256?: string;
+};
+
+/** Install the exact release selected from the marketplace catalog. */
+export async function installPluginFromCatalog(
+  selector: CatalogInstallSelector,
+  options?: ApiRequestOptions,
+): Promise<InstallResult> {
+  return fetchJson<InstallResult>(`${BASE}/install`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify({ catalog: selector }),
+    },
+  });
+}
+
+/** Build the host-owned selector used by marketplace install and update actions. */
+export function catalogInstallSelector(entry: MarketplaceEntry): CatalogInstallSelector {
+  return {
+    source_id: entry.source_id,
+    package_id: entry.id,
+    expected_version: entry.version,
+    ...(entry.package_sha256 ? { expected_sha256: entry.package_sha256 } : {}),
+  };
+}
+
+export type VerifyPublisherRequest = {
+  expected_installation_id: string;
+  expected_version: string;
+};
+
+/** Verify one already-installed version against its exact official release. */
+export async function verifyPluginPublisher(
+  id: string,
+  request: VerifyPublisherRequest,
+  options?: ApiRequestOptions,
+): Promise<PluginRecord> {
+  return fetchJson<PluginRecord>(`${BASE}/${encodeURIComponent(id)}/verify-publisher`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify(request),
     },
   });
 }

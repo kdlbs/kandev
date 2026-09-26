@@ -28,7 +28,7 @@ function entry(overrides: Partial<MarketplaceEntry> = {}): MarketplaceEntry {
   };
 }
 
-type MarketplaceInstall = (url: string) => Promise<{ ok: boolean; error?: string }>;
+type MarketplaceInstall = (entry: MarketplaceEntry) => Promise<{ ok: boolean; error?: string }>;
 
 // Every id these tests act on is installed unless a case says otherwise.
 const INSTALLED: ReadonlySet<string> = new Set([ENTRY_ID, "a", "b"]);
@@ -73,7 +73,7 @@ describe("usePluginUpdateAction", () => {
     });
 
     expect(result.current.updatingIds.has(ENTRY_ID)).toBe(false);
-    expect(marketplaceInstall).toHaveBeenCalledWith("https://ex/acme-2.0.0.tar.gz");
+    expect(marketplaceInstall).toHaveBeenCalledWith(entry());
     expect(reloadUpdates).toHaveBeenCalledTimes(1);
   });
 
@@ -198,9 +198,9 @@ describe("usePluginUpdateAction — overlapping updates", () => {
   it("keeps every in-flight row marked busy when two updates overlap", async () => {
     const resolvers: Record<string, (v: { ok: boolean }) => void> = {};
     const marketplaceInstall = vi.fn<MarketplaceInstall>(
-      (url: string) =>
+      (candidate: MarketplaceEntry) =>
         new Promise((resolve) => {
-          resolvers[url.includes("/a.") ? "a" : "b"] = resolve;
+          resolvers[candidate.id] = resolve;
         }),
     );
     const { result } = renderHook(() =>

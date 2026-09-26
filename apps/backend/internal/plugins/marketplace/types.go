@@ -9,7 +9,11 @@
 // docs/specs/plugins/requirements/marketplace.md.
 package marketplace
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/plugins/provenance"
+)
 
 // OfficialSourceName / OfficialSourceURL identify the built-in kandev source
 // seeded on first boot. The URL is overridable at boot via
@@ -67,15 +71,19 @@ type IndexEntry struct {
 	// IconURL is an absolute URL to the plugin's icon, resolved by the
 	// registry index-build from the plugin manifest's `icon` path. Empty
 	// when the plugin ships no icon; the UI falls back to a letter tile.
-	IconURL          string             `json:"icon_url"`
-	RepoURL          string             `json:"repo_url"`
-	Version          string             `json:"version"`
-	MinKandevVersion string             `json:"min_kandev_version"`
-	License          string             `json:"license,omitempty"`
-	PackageURL       string             `json:"package_url"`
-	PackageSHA256    string             `json:"package_sha256"`
-	Previews         []Preview          `json:"previews,omitempty"`
-	Permissions      *PermissionSummary `json:"permissions,omitempty"`
+	IconURL          string `json:"icon_url"`
+	RepoURL          string `json:"repo_url"`
+	Version          string `json:"version"`
+	MinKandevVersion string `json:"min_kandev_version"`
+	License          string `json:"license,omitempty"`
+	PackageURL       string `json:"package_url"`
+	PackageSHA256    string `json:"package_sha256"`
+	// Publisher is registry input. It is never trusted by virtue of being
+	// present; CatalogEntry.PublisherIdentity is populated only after the
+	// source transport and evidence tuple pass backend validation.
+	Publisher   *provenance.Evidence `json:"publisher,omitempty"`
+	Previews    []Preview            `json:"previews,omitempty"`
+	Permissions *PermissionSummary   `json:"permissions,omitempty"`
 	// Stars is a pointer so a `null` in index.json (the registry build emits
 	// null when a repo's star lookup failed) stays unknown rather than
 	// decoding to 0 — a known-zero repo and an unknown one must not collapse,
@@ -97,10 +105,22 @@ type IndexDocument struct {
 // its install state relative to local installs.
 type CatalogEntry struct {
 	IndexEntry
-	InstallState     InstallState `json:"install_state"`
-	InstalledVersion string       `json:"installed_version,omitempty"`
-	SourceID         string       `json:"source_id"`
-	SourceName       string       `json:"source_name"`
+	InstallState      InstallState                  `json:"install_state"`
+	InstalledVersion  string                        `json:"installed_version,omitempty"`
+	SourceID          string                        `json:"source_id"`
+	SourceName        string                        `json:"source_name"`
+	PublisherIdentity *provenance.PublisherIdentity `json:"publisher_identity"`
+}
+
+// PluginPackageResolution is the result of a fresh, exact catalog lookup.
+// The caller receives the package URL and host-owned provenance together;
+// request fields alone never create publisher evidence.
+type PluginPackageResolution struct {
+	Entry      IndexEntry
+	Source     SourceRecord
+	PackageURL string
+	Provenance *provenance.InstallationProvenance
+	Publisher  *provenance.PublisherIdentity
 }
 
 // SourceStatus is a configured source plus its live fetch health, returned in

@@ -1,4 +1,5 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
+import type { PublisherIdentity } from "@/lib/types/plugins";
 
 export type CanvasScopeKind = "task" | "workspace";
 export type CanvasStatus = "pending" | "active" | "disabled" | "archived" | "error" | "removed";
@@ -29,6 +30,7 @@ export type CanvasRelease = {
   source_session_name?: string;
   protocol_version?: number;
   created_at?: string;
+  publisher_identity?: PublisherIdentity;
 };
 
 export type Canvas = {

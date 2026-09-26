@@ -3,19 +3,24 @@ package plugins
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/marketplace"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
+	"github.com/kandev/kandev/internal/plugins/provenance"
 	"github.com/kandev/kandev/internal/plugins/store"
 )
 
@@ -46,27 +51,27 @@ const downloadTimeout = 60 * time.Second
 // survive) and restarts the previous version's process, so a failed upgrade
 // attempt never destroys a previously working install.
 func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, error) {
-	result, err := s.extractPackage(r)
+	return s.installWithProvenance(ctx, r, nil, false, nil)
+}
+
+// InstallUploaded preserves the fact that an archive entered through the
+// upload surface while keeping it unverified.
+func (s *Service) InstallUploaded(ctx context.Context, r io.Reader) (*store.Record, error) {
+	return s.installWithProvenance(ctx, r, &provenance.InstallationProvenance{Origin: provenance.OriginUpload}, false, nil)
+}
+
+func (s *Service) installWithProvenance(ctx context.Context, r io.Reader, installProvenance *provenance.InstallationProvenance, automatic bool, expectedAutoUpdate *autoUpdateExpectation) (*store.Record, error) {
+	result, err := s.prepareInstallPackage(r)
 	if err != nil {
 		return nil, err
 	}
 	defer s.releaseExtraction(result.InstallPath)
-	if err := s.checkMinKandevVersion(result.Manifest.MinKandevVersion); err != nil {
-		_ = os.RemoveAll(result.InstallPath)
-		return nil, err
-	}
-	s.warnWebhookAccessIssues(*result.Manifest)
-	s.agentToolInstallMu.Lock()
 	catalogLocked := true
 	defer func() {
 		if catalogLocked {
 			s.agentToolInstallMu.Unlock()
 		}
 	}()
-	if err := s.validateAgentToolInstall(result.Manifest); err != nil {
-		_ = os.RemoveAll(result.InstallPath)
-		return nil, err
-	}
 
 	// The plugin id is only known once pkgtar.Install has parsed the
 	// package's manifest, so the per-plugin lock is acquired here rather
@@ -82,70 +87,20 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
 
-	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
-	if err := s.ensureOwnershipAvailable(result.Manifest); err != nil {
-		// pkgtar.Install has already atomically extracted exactly this new
-		// version before manifest-wide active-owner checks can run. Remove
-		// only that fresh version on rejection; otherwise a failed ownership
-		// check strands it and turns a later valid install into ErrVersionExists.
+	oldRec, hadOldRec, installProvenance, err := s.prepareInstallLocked(result, installProvenance, automatic, expectedAutoUpdate)
+	if err != nil {
 		_ = os.RemoveAll(result.InstallPath)
 		return nil, err
 	}
-	wasRunning := s.runtime != nil && s.runtime.Running(result.Manifest.ID)
-	// Replacing an active plugin is an unload/reload boundary. Its old
-	// credential binding may no longer describe the successor, even when both
-	// package versions declare the same provider, so revoke before stopping the
-	// old runtime and exposing the new record.
-	if hadOldRec && oldRec.Status == StatusActive {
-		if err := s.cancelAutomationDeliveries(oldRec.ID); err != nil {
-			return nil, err
-		}
-		s.revokeGitCredentialProviderLeases(oldRec.RepositoryProviders)
-	}
-	if wasRunning {
-		s.runtime.Stop(result.Manifest.ID)
-	}
-
-	rec := &store.Record{
-		Manifest:    *result.Manifest,
-		Status:      StatusRegistered,
-		InstallPath: result.InstallPath,
-		Signed:      result.Signed,
-		InstalledAt: time.Now().UTC(),
-	}
-	// An in-place upgrade rebuilds the record from the new package's manifest,
-	// so the operator's per-plugin auto-update override (an operator choice,
-	// not a manifest fact) must be carried forward or an auto-update would
-	// silently reset the very toggle that triggered it.
-	if hadOldRec {
-		rec.InstallationID = oldRec.InstallationID
-		rec.AutoUpdate = oldRec.AutoUpdate
-	}
-	if rec.InstallationID == "" {
-		rec.InstallationID = uuid.NewString()
-	}
-	if err := s.store.Save(rec); err != nil {
-		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
-		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
-	}
-	if err := s.reviewInstalledApprovals(rec); err != nil {
-		if hadOldRec {
-			if restoreErr := s.store.Save(oldRec); restoreErr != nil {
-				s.log.Warn("plugins: failed to restore old plugin record after approval review error",
-					zap.String("plugin_id", rec.ID), zap.Error(restoreErr))
-				s.registry.Add(rec)
-				return nil, errors.Join(err, fmt.Errorf("plugins: restore previous plugin record: %w", restoreErr))
-			}
-		} else if deleteErr := s.store.Delete(rec.ID); deleteErr != nil {
-			s.log.Warn("plugins: failed to delete plugin record after approval review error",
-				zap.String("plugin_id", rec.ID), zap.Error(deleteErr))
-			s.registry.Add(rec)
-			return nil, errors.Join(err, fmt.Errorf("plugins: remove failed plugin record: %w", deleteErr))
-		}
-		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
+	wasRunning, err := s.stopPreviousPlugin(result.Manifest.ID, oldRec, hadOldRec)
+	if err != nil {
 		return nil, err
 	}
-	s.registry.Add(rec)
+
+	rec, err := s.persistInstallRecord(result, oldRec, hadOldRec, wasRunning, installProvenance)
+	if err != nil {
+		return nil, err
+	}
 	s.agentToolInstallMu.Unlock()
 	catalogLocked = false
 
@@ -168,6 +123,98 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	return installed, activateErr
 }
 
+func (s *Service) prepareInstallPackage(r io.Reader) (*pkgtar.InstallResult, error) {
+	result, err := s.extractPackage(r)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkMinKandevVersion(result.Manifest.MinKandevVersion); err != nil {
+		_ = os.RemoveAll(result.InstallPath)
+		return nil, err
+	}
+	s.warnWebhookAccessIssues(*result.Manifest)
+	s.agentToolInstallMu.Lock()
+	if err := s.validateAgentToolInstall(result.Manifest); err != nil {
+		s.agentToolInstallMu.Unlock()
+		_ = os.RemoveAll(result.InstallPath)
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Service) stopPreviousPlugin(id string, oldRec *store.Record, hadOldRec bool) (bool, error) {
+	wasRunning := s.runtime != nil && s.runtime.Running(id)
+	// Replacing an active plugin is an unload/reload boundary. Its old
+	// credential binding may no longer describe the successor, even when both
+	// package versions declare the same provider, so revoke before stopping the
+	// old runtime and exposing the new record.
+	if hadOldRec && oldRec.Status == StatusActive {
+		if err := s.cancelAutomationDeliveries(oldRec.ID); err != nil {
+			return false, err
+		}
+		s.revokeGitCredentialProviderLeases(oldRec.RepositoryProviders)
+	}
+	if wasRunning {
+		s.runtime.Stop(id)
+	}
+	return wasRunning, nil
+}
+
+func (s *Service) persistInstallRecord(result *pkgtar.InstallResult, oldRec *store.Record, hadOldRec, wasRunning bool, installProvenance *provenance.InstallationProvenance) (*store.Record, error) {
+	rec := &store.Record{
+		Manifest:            *result.Manifest,
+		Status:              StatusRegistered,
+		InstallPath:         result.InstallPath,
+		Signed:              result.Signed,
+		InstalledAt:         time.Now().UTC(),
+		PublisherProvenance: installProvenance,
+	}
+	rec.PublisherIdentity = installProvenance.Identity()
+	// An in-place upgrade rebuilds the record from the new package's manifest,
+	// so the operator's per-plugin auto-update override (an operator choice,
+	// not a manifest fact) must be carried forward or an auto-update would
+	// silently reset the very toggle that triggered it.
+	if hadOldRec {
+		rec.InstallationID = oldRec.InstallationID
+		rec.AutoUpdate = oldRec.AutoUpdate
+	}
+	if rec.InstallationID == "" {
+		rec.InstallationID = uuid.NewString()
+	}
+	if err := s.store.Save(rec); err != nil {
+		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
+		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
+	}
+	if reviewErr := s.reviewInstalledApprovals(rec); reviewErr != nil {
+		if rollbackErr := s.rollbackApprovalReview(rec, oldRec, hadOldRec); rollbackErr != nil {
+			return nil, errors.Join(reviewErr, rollbackErr)
+		}
+		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
+		return nil, reviewErr
+	}
+	s.registry.Add(rec)
+	return rec, nil
+}
+
+func (s *Service) rollbackApprovalReview(rec, oldRec *store.Record, hadOldRec bool) error {
+	if hadOldRec {
+		if restoreErr := s.store.Save(oldRec); restoreErr != nil {
+			s.log.Warn("plugins: failed to restore old plugin record after approval review error",
+				zap.String("plugin_id", rec.ID), zap.Error(restoreErr))
+			s.registry.Add(rec)
+			return fmt.Errorf("plugins: restore previous plugin record: %w", restoreErr)
+		}
+		return nil
+	}
+	if deleteErr := s.store.Delete(rec.ID); deleteErr != nil {
+		s.log.Warn("plugins: failed to delete plugin record after approval review error",
+			zap.String("plugin_id", rec.ID), zap.Error(deleteErr))
+		s.registry.Add(rec)
+		return fmt.Errorf("plugins: remove failed plugin record: %w", deleteErr)
+	}
+	return nil
+}
+
 func (s *Service) reviewInstalledApprovals(rec *store.Record) error {
 	ledger := s.approvalLedger()
 	if ledger == nil {
@@ -178,6 +225,29 @@ func (s *Service) reviewInstalledApprovals(rec *store.Record) error {
 		return err
 	}
 	return ledger.reviewManifestChange(rec.InstallationID, ManifestCapabilityDigest(rec.Manifest), caps, time.Now().UTC(), true)
+}
+
+func (s *Service) prepareInstallLocked(result *pkgtar.InstallResult, installProvenance *provenance.InstallationProvenance, automatic bool, expectedAutoUpdate *autoUpdateExpectation) (*store.Record, bool, *provenance.InstallationProvenance, error) {
+	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
+	installProvenance = completeProvenance(installProvenance, result.Manifest)
+	if err := validateInstallProvenance(installProvenance); err != nil {
+		return nil, false, nil, err
+	}
+	if automatic {
+		if err := s.validateAutomaticUpdateLocked(result.Manifest.ID, oldRec, hadOldRec, expectedAutoUpdate); err != nil {
+			return nil, false, nil, err
+		}
+		if hadOldRec && publisherChanged(oldRec.PublisherProvenance, installProvenance) {
+			return nil, false, nil, ErrPublisherChanged
+		}
+		if hadOldRec && manifest.CompareVersions(result.Manifest.Version, oldRec.Version) <= 0 {
+			return nil, false, nil, ErrAutomaticUpdateDowngrade
+		}
+	}
+	if err := s.ensureOwnershipAvailable(result.Manifest); err != nil {
+		return nil, false, nil, err
+	}
+	return oldRec, hadOldRec, installProvenance, nil
 }
 
 // extractPackage runs pkgtar.Install and registers the extracted version
@@ -325,7 +395,147 @@ func (s *Service) InstallFromURL(ctx context.Context, url string) (*store.Record
 		return nil, fmt.Errorf("plugins: package exceeds max download size of %d bytes", maxDownloadSize)
 	}
 
-	return s.Install(ctx, bytes.NewReader(data))
+	digest := sha256.Sum256(data)
+	return s.installWithProvenance(ctx, bytes.NewReader(data), &provenance.InstallationProvenance{
+		Origin: provenance.OriginURL,
+		// Keep the raw URL in the transport request above. The provenance
+		// record is a public origin projection and must not retain credentials,
+		// signed query parameters, or fragments.
+		SourceURL:     provenance.SanitizePublicURL(url),
+		PackageSHA256: hex.EncodeToString(digest[:]),
+	}, false, nil)
+}
+
+// ErrPublisherChanged is returned when an automatic update would replace a
+// verified installation with different publisher evidence.
+var ErrPublisherChanged = errors.New("publisher changed during automatic update")
+
+// ErrAutomaticUpdateDowngrade is returned when a fresh catalog resolution
+// no longer represents a version newer than the installed record.
+var ErrAutomaticUpdateDowngrade = errors.New("automatic update would downgrade the installed plugin")
+
+// ErrAutomaticUpdateStale means the operator changed the target installation
+// while an automatic update was downloading its replacement package.
+var ErrAutomaticUpdateStale = errors.New("automatic update target changed during download")
+
+// InstallFromCatalog resolves, downloads, validates, and installs one exact
+// native catalog selection. The package is fully inspected before the
+// existing runtime or record can be changed.
+func (s *Service) InstallFromCatalog(ctx context.Context, selector CatalogInstallSelector) (*store.Record, error) {
+	return s.installFromCatalog(ctx, selector, false, nil)
+}
+
+func (s *Service) installFromCatalog(ctx context.Context, selector CatalogInstallSelector, automatic bool, expectedAutoUpdate *autoUpdateExpectation) (*store.Record, error) {
+	m := s.Marketplace()
+	if m == nil {
+		return nil, fmt.Errorf("plugins: %w", marketplace.ErrCatalogUnavailable)
+	}
+	resolution, err := m.ResolvePluginPackage(ctx, selector.SourceID, selector.PackageID, selector.ExpectedVersion, selector.ExpectedSHA256)
+	if err != nil {
+		return nil, err
+	}
+	data, actualDigest, err := s.downloadPackage(ctx, resolution.PackageURL)
+	if err != nil {
+		return nil, err
+	}
+	if resolution.Entry.PackageSHA256 != "" && !strings.EqualFold(actualDigest, resolution.Entry.PackageSHA256) {
+		return nil, ErrPackageIdentityMismatch
+	}
+	inspection, err := pkgtar.InspectPackage(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("plugins: catalog package validation: %w", err)
+	}
+	if inspection.Manifest.ID != resolution.Entry.ID || inspection.Manifest.Version != resolution.Entry.Version {
+		return nil, ErrPackageIdentityMismatch
+	}
+	installProvenance := resolution.Provenance.Clone()
+	installProvenance.PackageID = inspection.Manifest.ID
+	installProvenance.Version = inspection.Manifest.Version
+	installProvenance.PackageSHA256 = actualDigest
+	return s.installWithProvenance(ctx, bytes.NewReader(data), installProvenance, automatic, expectedAutoUpdate)
+}
+
+func (s *Service) downloadPackage(ctx context.Context, packageURL string) ([]byte, string, error) {
+	if err := validateInstallURL(packageURL); err != nil {
+		return nil, "", fmt.Errorf("plugins: catalog package URL: %w", err)
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, packageURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("plugins: build catalog package request: %w", err)
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("plugins: download catalog package: %w", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", fmt.Errorf("plugins: download catalog package: server responded %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize+1))
+	if err != nil {
+		return nil, "", fmt.Errorf("plugins: read catalog package: %w", err)
+	}
+	if int64(len(data)) > maxDownloadSize {
+		return nil, "", fmt.Errorf("plugins: catalog package exceeds max download size of %d bytes", maxDownloadSize)
+	}
+	digest := sha256.Sum256(data)
+	return data, hex.EncodeToString(digest[:]), nil
+}
+
+func completeProvenance(p *provenance.InstallationProvenance, m *manifest.Manifest) *provenance.InstallationProvenance {
+	if p == nil {
+		p = &provenance.InstallationProvenance{Origin: provenance.OriginUnknown}
+	} else {
+		p = p.Clone()
+	}
+	if p.Origin == "" {
+		p.Origin = provenance.OriginUnknown
+	}
+	if p.PackageID == "" {
+		p.PackageID = m.ID
+	}
+	if p.Version == "" {
+		p.Version = m.Version
+	}
+	return p
+}
+
+func validateInstallProvenance(p *provenance.InstallationProvenance) error {
+	if p == nil {
+		return nil
+	}
+	if p.Publisher != nil && p.Validate() != nil {
+		return fmt.Errorf("plugins: invalid publisher provenance: %w", p.Validate())
+	}
+	return nil
+}
+
+func publisherChanged(old, next *provenance.InstallationProvenance) bool {
+	if old == nil || old.Publisher == nil {
+		return false
+	}
+	if next == nil || next.Publisher == nil {
+		return true
+	}
+	oldSource := old.MatchedSourceID
+	if oldSource == "" {
+		oldSource = old.SourceID
+	}
+	nextSource := next.MatchedSourceID
+	if nextSource == "" {
+		nextSource = next.SourceID
+	}
+	return oldSource != nextSource ||
+		old.Publisher.RepositoryID != next.Publisher.RepositoryID ||
+		old.Publisher.OwnerID != next.Publisher.OwnerID ||
+		!strings.EqualFold(old.Publisher.Login, next.Publisher.Login) ||
+		!strings.EqualFold(old.Publisher.Repository, next.Publisher.Repository) ||
+		old.Publisher.Official != next.Publisher.Official
 }
 
 // validateInstallURL is the sink-level guard InstallFromURL applies before

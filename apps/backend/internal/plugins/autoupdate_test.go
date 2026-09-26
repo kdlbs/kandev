@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -195,6 +197,13 @@ func serveBytes(t *testing.T, body []byte) *httptest.Server {
 // version than the v1.0.0 the tests install locally), served from a local
 // httptest tarball server.
 func newAutoUpdateService(t *testing.T) (*Service, *fakeRuntime, *settingsStore) {
+	packageBytes := testPackage(t, "kandev-plugin-slack", "1.1.0", false).Bytes()
+	return newAutoUpdateServiceWithPackageHandler(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(packageBytes)
+	})
+}
+
+func newAutoUpdateServiceWithPackageHandler(t *testing.T, packageHandler http.HandlerFunc) (*Service, *fakeRuntime, *settingsStore) {
 	t.Helper()
 	svc, _, _, rt := newTestServiceWithDir(t)
 
@@ -212,7 +221,8 @@ func newAutoUpdateService(t *testing.T) (*Service, *fakeRuntime, *settingsStore)
 	}
 	svc.SetSettings(ss)
 
-	pkgSrv := serveBytes(t, testPackage(t, "kandev-plugin-slack", "1.1.0", false).Bytes())
+	pkgSrv := httptest.NewServer(packageHandler)
+	t.Cleanup(pkgSrv.Close)
 	body := `{"schema_version":1,"source":{"name":"Test","url":""},"plugins":[` +
 		`{"id":"kandev-plugin-slack","name":"Slack","version":"1.1.0","package_url":"` +
 		pkgSrv.URL + `/slack.tar.gz"}]}`
@@ -228,6 +238,23 @@ func newAutoUpdateService(t *testing.T) (*Service, *fakeRuntime, *settingsStore)
 	svc.SetMarketplace(marketplace.NewService(srcStore, testLogger(t)))
 
 	return svc, rt, ss
+}
+
+func newBlockedAutoUpdateService(t *testing.T) (*Service, *fakeRuntime, *settingsStore, <-chan struct{}, func()) {
+	t.Helper()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+	var releaseOnce sync.Once
+	releaseDownload := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseDownload)
+	packageBytes := testPackage(t, "kandev-plugin-slack", "1.1.0", false).Bytes()
+	svc, rt, ss := newAutoUpdateServiceWithPackageHandler(t, func(w http.ResponseWriter, _ *http.Request) {
+		startedOnce.Do(func() { close(started) })
+		<-release
+		_, _ = w.Write(packageBytes)
+	})
+	return svc, rt, ss, started, releaseDownload
 }
 
 func TestRunAutoUpdatePassUpgradesActiveOptedInPlugin(t *testing.T) {
@@ -300,6 +327,115 @@ func TestRunAutoUpdatePassSkipsDisabledPlugin(t *testing.T) {
 	rec, _ := svc.Get("kandev-plugin-slack")
 	if rec.Version != "1.0.0" {
 		t.Fatalf("version = %q, want 1.0.0 (disabled plugin must stay put)", rec.Version)
+	}
+}
+
+func TestRunAutoUpdatePassRejectsMutationDuringDownload(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*testing.T, *Service)
+		check  func(*testing.T, *Service, *fakeRuntime)
+	}{
+		{
+			name: "disable",
+			mutate: func(t *testing.T, svc *Service) {
+				t.Helper()
+				if err := svc.Disable("kandev-plugin-slack"); err != nil {
+					t.Fatalf("Disable: %v", err)
+				}
+			},
+			check: func(t *testing.T, svc *Service, _ *fakeRuntime) {
+				t.Helper()
+				rec, err := svc.Get("kandev-plugin-slack")
+				if err != nil || rec.Version != "1.0.0" || rec.Status != StatusDisabled {
+					t.Fatalf("record after disable race = %#v, err=%v", rec, err)
+				}
+			},
+		},
+		{
+			name: "opt out",
+			mutate: func(t *testing.T, svc *Service) {
+				t.Helper()
+				if _, err := svc.SetPluginAutoUpdate("kandev-plugin-slack", bptr(false)); err != nil {
+					t.Fatalf("SetPluginAutoUpdate: %v", err)
+				}
+			},
+			check: func(t *testing.T, svc *Service, _ *fakeRuntime) {
+				t.Helper()
+				rec, err := svc.Get("kandev-plugin-slack")
+				if err != nil || rec.Version != "1.0.0" || rec.AutoUpdate == nil || *rec.AutoUpdate {
+					t.Fatalf("record after opt-out race = %#v, err=%v", rec, err)
+				}
+			},
+		},
+		{
+			name: "uninstall",
+			mutate: func(t *testing.T, svc *Service) {
+				t.Helper()
+				if err := svc.Uninstall(context.Background(), "kandev-plugin-slack"); err != nil {
+					t.Fatalf("Uninstall: %v", err)
+				}
+			},
+			check: func(t *testing.T, svc *Service, rt *fakeRuntime) {
+				t.Helper()
+				if _, err := svc.Get("kandev-plugin-slack"); !errors.Is(err, store.ErrNotFound) {
+					t.Fatalf("Get after uninstall race = %v, want store.ErrNotFound", err)
+				}
+				if rt.Running("kandev-plugin-slack") {
+					t.Fatal("uninstalled plugin was running after stale update")
+				}
+			},
+		},
+		{
+			name: "replacement",
+			mutate: func(t *testing.T, svc *Service) {
+				t.Helper()
+				if _, err := svc.Install(context.Background(), testPackage(t, "kandev-plugin-slack", "1.2.0", false)); err != nil {
+					t.Fatalf("replacement Install: %v", err)
+				}
+			},
+			check: func(t *testing.T, svc *Service, _ *fakeRuntime) {
+				t.Helper()
+				rec, err := svc.Get("kandev-plugin-slack")
+				if err != nil || rec.Version != "1.2.0" {
+					t.Fatalf("record after replacement race = %#v, err=%v", rec, err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, rt, ss, started, release := newBlockedAutoUpdateService(t)
+			installTestPlugin(t, svc, "kandev-plugin-slack")
+			if err := ss.SetAutoUpdateDefault(true); err != nil {
+				t.Fatalf("SetAutoUpdateDefault: %v", err)
+			}
+			finished := make(chan AutoUpdateOutcome, 1)
+			go func() {
+				outcome, err := svc.RunAutoUpdatePass(context.Background())
+				if err != nil {
+					t.Errorf("RunAutoUpdatePass: %v", err)
+				}
+				finished <- outcome
+			}()
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("auto-update did not reach blocked package download")
+			}
+			tc.mutate(t, svc)
+			release()
+			select {
+			case outcome := <-finished:
+				if len(outcome.Updated) != 0 {
+					t.Fatalf("stale update succeeded: %+v", outcome.Updated)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("auto-update did not finish after download release")
+			}
+			tc.check(t, svc, rt)
+		})
 	}
 }
 

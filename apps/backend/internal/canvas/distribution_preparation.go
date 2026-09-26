@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/plugins/provenance"
 )
 
 const (
@@ -49,6 +50,7 @@ type Preparation struct {
 	SourceID             string
 	OriginKind           string
 	RepositoryURL        string
+	PublisherProvenance  *provenance.InstallationProvenance
 	Bundle               []byte
 	Source               []byte
 	Files                []ExportFile
@@ -114,6 +116,7 @@ func (s *PreparationStore) Create(ctx context.Context, input Preparation) (Prepa
 	if err != nil {
 		return Preparation{}, err
 	}
+	input.PublisherProvenance = input.PublisherProvenance.Clone()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.nowLocked()
@@ -131,9 +134,11 @@ func (s *PreparationStore) Create(ctx context.Context, input Preparation) (Prepa
 		return Preparation{}, err
 	}
 	record := &preparationRecord{Preparation: input, BundleBytes: int64(len(input.Bundle)), SourceBytes: int64(len(input.Source))}
+	record.PublisherProvenance = input.PublisherProvenance.Clone()
 	record.Bundle = nil
 	record.Source = nil
 	s.items[input.ID] = record
+	input.PublisherProvenance = input.PublisherProvenance.Clone()
 	return input, nil
 }
 
@@ -146,6 +151,11 @@ func validatePreparationCreate(ctx context.Context, store *PreparationStore, inp
 	}
 	if len(input.Bundle) == 0 && len(input.Source) == 0 {
 		return ErrPreparationInvalid
+	}
+	if input.PublisherProvenance != nil {
+		if err := input.PublisherProvenance.Validate(); err != nil {
+			return fmt.Errorf("%w: publisher provenance: %v", ErrPreparationInvalid, err)
+		}
 	}
 	return nil
 }
@@ -220,7 +230,9 @@ func (s *PreparationStore) Get(ctx context.Context, userID, id string) (Preparat
 	if err != nil {
 		return Preparation{}, err
 	}
-	return record.Preparation, nil
+	preparation := record.Preparation
+	preparation.PublisherProvenance = preparation.PublisherProvenance.Clone()
+	return preparation, nil
 }
 
 func (s *PreparationStore) Open(ctx context.Context, userID, id string, kind ExportKind) ([]byte, error) {

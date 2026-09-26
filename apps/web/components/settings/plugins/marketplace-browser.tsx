@@ -15,13 +15,13 @@ import { MarketplaceSourcesDialog } from "./marketplace-sources-dialog";
 const ALL_CATEGORIES = "__all__";
 
 type MarketplaceBrowserProps = {
-  /** Installs a plugin from its package URL; resolves when the install settles. The result is unused here — failures already toast. */
-  onInstallUrl: (url: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Installs the exact catalog release; resolves when the install settles. */
+  onInstall: (entry: MarketplaceEntry) => Promise<{ ok: boolean; error?: string }>;
   canManage?: boolean;
 };
 
 /** The "Browse" tab: search/filter/sort the catalog and install from it. */
-export function MarketplaceBrowser({ onInstallUrl, canManage = true }: MarketplaceBrowserProps) {
+export function MarketplaceBrowser({ onInstall, canManage = true }: MarketplaceBrowserProps) {
   const [text, setText] = useState("");
   const [category, setCategory] = useState<string>(ALL_CATEGORIES);
   const [sort, setSort] = useState<CatalogQuery["sort"]>("stars");
@@ -44,7 +44,7 @@ export function MarketplaceBrowser({ onInstallUrl, canManage = true }: Marketpla
   const install = async (entry: MarketplaceEntry) => {
     setInstallingId(entry.id);
     try {
-      await onInstallUrl(entry.package_url);
+      await onInstall(entry);
       softReload();
     } finally {
       setInstallingId(null);

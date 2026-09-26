@@ -99,6 +99,9 @@ test.describe("Canvas marketplace", () => {
       const card = testPage.getByTestId(`canvas-marketplace-entry-${CANVAS_ENTRY.id}`);
       await expect(card).toBeVisible();
       await expect(card.locator(`img[alt="${CANVAS_ENTRY.previews[0].alt}"]`)).toBeVisible();
+      await expect(card.getByText("Unverified publisher", { exact: true })).toBeVisible();
+      await expect(card.getByText("Kandev Official", { exact: true }).first()).toBeVisible();
+      await expect(card.getByText(CANVAS_ENTRY.author, { exact: true }).first()).toBeVisible();
       await expect(testPage.getByTestId("canvas-marketplace-search")).toBeVisible();
 
       const marketplace = testPage.getByTestId("canvas-marketplace");
@@ -117,6 +120,7 @@ test.describe("Canvas marketplace", () => {
       await card.getByRole("button").first().click();
       const detail = testPage.getByTestId(`canvas-marketplace-detail-${CANVAS_ENTRY.id}`);
       await expect(detail).toBeVisible();
+      await expect(detail.getByText("Unverified publisher", { exact: true })).toBeVisible();
       await expect(detail.getByLabel("Preview images")).toBeVisible();
       await expect(detail.getByText("tasks")).toBeVisible();
 
