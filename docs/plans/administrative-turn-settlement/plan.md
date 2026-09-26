@@ -105,3 +105,5 @@ The later review remediation serializes the task-step decision with exact-turn
 settlement and guards post-commit workflow evaluation against a later move.
 Focused race-detector regressions for moves on both sides of the commit pass;
 the PostgreSQL behavior test is gated on a configured database in CI.
+The post-commit move path also drains the destination's queued on-entry prompt
+after closing the old turn.

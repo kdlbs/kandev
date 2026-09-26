@@ -149,3 +149,7 @@ serves manual and periodic settlement. Local `go test -race` focused on stale
 settlement and completion-intent repository cases passed, as did spec
 validation. PostgreSQL concurrency coverage is environment-gated and awaits
 the configured CI database.
+
+Post-commit move coverage also queues the destination handoff while the old
+session is still RUNNING. The captured-step guard now drains that prompt after
+closing the old turn, while still skipping destination-step evaluation.

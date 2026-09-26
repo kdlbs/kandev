@@ -77,7 +77,8 @@ intent. A failed write leaves all three durable records unchanged. After
 commit, the normal turn-completed event is published and the reconciler
 releases session ownership. Workflow evaluation also checks the captured step
 before running, so a move immediately after commit cannot complete the
-destination step. A post-commit readback that finds the intent not in a
+destination step; it drains that step's queued on-entry prompt once the old
+turn closes. A post-commit readback that finds the intent not in a
 terminal state refuses with `settlement_not_committed`.
 
 ## Supersession

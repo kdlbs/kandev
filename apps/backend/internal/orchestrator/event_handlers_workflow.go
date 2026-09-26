@@ -7475,6 +7475,9 @@ func (s *Service) processOnTurnCompleteViaEngineWithCauseAtStep(
 		return false
 	}
 	if expectedStepID != "" && task.WorkflowStepID != expectedStepID {
+		// A move after the settlement commit owns the destination handoff.
+		// The source turn is closed, so release its queued on-entry prompt.
+		s.drainQueuedMessageForPromptableSessionLocked(ctx, session.ID)
 		return false
 	}
 
