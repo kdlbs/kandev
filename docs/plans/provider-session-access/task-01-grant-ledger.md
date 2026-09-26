@@ -81,5 +81,11 @@ Grant generation replacement, exact-workspace revocation, non-secret
 lease/audit storage and provider exposure receipts are implemented locally
 with focused race-enabled tests. A negative test preserves the residual
 exposure after failed provider revocation, lease expiry and store reopen.
+Storage now caps leases at five minutes and serializes final exposure
+admission with grant/lease revocation. A losing admission path invokes an
+exact-token revocation callback before a caller could export a bearer; its
+failure is redacted. The active-lease read is inspection only. SQLite race
+tests and an isolated PostgreSQL 16 row-lock regression cover these cases.
 Administrator API, Host admission, automatic audit wiring and PostgreSQL
-coverage remain pending. No credential issuance is enabled.
+coverage beyond the row-lock regression remain pending. No credential issuance
+is enabled.

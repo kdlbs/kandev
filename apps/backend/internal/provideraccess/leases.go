@@ -15,8 +15,11 @@ import (
 
 var (
 	ErrLeaseConflict    = errors.New("provider access lease idempotency conflict")
+	ErrLeaseTooLong     = errors.New("provider access lease exceeds maximum lifetime")
 	ErrGrantUnavailable = errors.New("provider access grant unavailable")
 )
+
+const maxProviderAccessLeaseLifetime = 5 * time.Minute
 
 const leaseColumns = `id, grant_id, grant_generation, scope_key, managed_task_id,
  session_id, target_digest, approval_revision, connection_generation,
@@ -174,9 +177,13 @@ func validateLeaseClaim(claim LeaseClaim) (string, error) {
 			return "", errors.New("complete provider access lease claim is required")
 		}
 	}
+	now := time.Now()
 	if claim.GrantGeneration <= 0 || claim.ApprovalRevision == 0 ||
-		claim.ApprovalRevision > math.MaxInt64 || !claim.ExpiresAt.After(time.Now()) {
+		claim.ApprovalRevision > math.MaxInt64 || !claim.ExpiresAt.After(now) {
 		return "", errors.New("valid provider access lease generation, approval and expiry are required")
+	}
+	if claim.ExpiresAt.After(now.Add(maxProviderAccessLeaseLifetime)) {
+		return "", ErrLeaseTooLong
 	}
 	return key, nil
 }
@@ -188,11 +195,25 @@ func (r leaseRow) matches(claim LeaseClaim, key string) bool {
 		r.ConnectionGeneration == claim.ConnectionGeneration && r.ExpiresAt == claim.ExpiresAt.Unix()
 }
 
-// GetActiveLease returns a lease only while its exact grant generation is live.
+type activeLeaseRow struct {
+	leaseRow
+	PluginInstallationID string `db:"plugin_installation_id"`
+	PluginID             string `db:"plugin_id"`
+	WorkspaceID          string `db:"workspace_id"`
+	ConversationKey      string `db:"conversation_key"`
+	TargetTaskID         string `db:"target_task_id"`
+	RepositoryID         string `db:"repository_id"`
+	Provider             string `db:"provider"`
+	Purpose              string `db:"purpose"`
+}
+
+// GetActiveLease is a single-snapshot inspection read, not final redemption authority.
 func (s *Store) GetActiveLease(ctx context.Context, id string) (*Lease, error) {
-	var row leaseRow
+	var row activeLeaseRow
 	now := time.Now().Unix()
-	err := s.db.GetContext(ctx, &row, s.db.Rebind(`SELECT l.*
+	err := s.db.GetContext(ctx, &row, s.db.Rebind(`SELECT l.*,
+  g.plugin_installation_id, g.plugin_id, g.workspace_id, g.conversation_key,
+  g.target_task_id, g.repository_id, g.provider, g.purpose
   FROM provider_access_leases l JOIN provider_access_grants g ON g.id = l.grant_id
   WHERE l.id = ? AND l.revoked_at IS NULL AND l.expires_at > ?
   AND g.revoked_at IS NULL AND g.expires_at > ? AND g.generation = l.grant_generation`),
@@ -203,9 +224,10 @@ func (s *Store) GetActiveLease(ctx context.Context, id string) (*Lease, error) {
 	if err != nil {
 		return nil, err
 	}
-	grant, err := s.GetGrant(ctx, row.GrantID)
-	if err != nil || grant == nil {
-		return nil, err
-	}
-	return row.lease(grant.Scope()), nil
+	return row.lease(GrantScope{
+		PluginInstallationID: row.PluginInstallationID, PluginID: row.PluginID,
+		WorkspaceID: row.WorkspaceID, ConversationKey: row.ConversationKey,
+		TargetTaskID: row.TargetTaskID, RepositoryID: row.RepositoryID,
+		Provider: row.Provider, Purpose: row.Purpose,
+	}), nil
 }

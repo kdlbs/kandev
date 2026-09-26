@@ -89,6 +89,7 @@ func TestStoreLeaseAdmissionRejectsCrossScopeAndOverlongExpiry(t *testing.T) {
 	store := newGrantTestStore(t)
 	ctx := context.Background()
 	grant := testGrant("grant-1")
+	grant.ExpiresAt = time.Now().UTC().Add(3 * time.Minute)
 	if err := store.ReplaceGrant(ctx, &grant); err != nil {
 		t.Fatal(err)
 	}
@@ -101,6 +102,20 @@ func TestStoreLeaseAdmissionRejectsCrossScopeAndOverlongExpiry(t *testing.T) {
 	claim.ExpiresAt = grant.ExpiresAt.Add(time.Minute)
 	if _, err := store.IssueLease(ctx, claim); !errors.Is(err, ErrGrantUnavailable) {
 		t.Fatalf("overlong lease error = %v", err)
+	}
+}
+
+func TestStoreLeaseAdmissionRejectsLifetimeBeyondFiveMinutes(t *testing.T) {
+	store := newGrantTestStore(t)
+	ctx := context.Background()
+	grant := testGrant("grant-1")
+	if err := store.ReplaceGrant(ctx, &grant); err != nil {
+		t.Fatal(err)
+	}
+	claim := testLeaseClaim(grant)
+	claim.ExpiresAt = time.Now().UTC().Add(6 * time.Minute)
+	if _, err := store.IssueLease(ctx, claim); !errors.Is(err, ErrLeaseTooLong) {
+		t.Fatalf("six-minute lease error = %v, want ErrLeaseTooLong", err)
 	}
 }
 

@@ -23,6 +23,8 @@ type ExposureReceipt struct {
 // ExposureState separates a fenced lease from a bearer revoked by the provider.
 type ExposureState string
 
+var ErrRevocationUnconfirmed = errors.New("provider access token revocation unconfirmed")
+
 const (
 	ExposureUnknown           ExposureState = "unknown"
 	ExposureActive            ExposureState = "exported"
@@ -31,14 +33,68 @@ const (
 	ExposureProviderExpired   ExposureState = "provider_expired"
 )
 
-// RecordExposureReceipt stores a non-secret receipt for one live, exact lease.
-// A future redemption path must write this before returning bearer material.
-func (s *Store) RecordExposureReceipt(ctx context.Context, receipt ExposureReceipt) error {
+// RecordExposureOrRevoke admits the exposure before a future caller exports a
+// freshly minted token. A losing admission race revokes that exact token.
+// The revoker owns token bytes; this store never receives them.
+func (s *Store) RecordExposureOrRevoke(
+	ctx context.Context, receipt ExposureReceipt, revoke func(context.Context) error,
+) error {
+	if revoke == nil {
+		return errors.New("provider access exact-token revoker is required")
+	}
+	err := s.recordExposureReceipt(ctx, receipt)
+	if err == nil {
+		return nil
+	}
+	revokeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if revokeErr := revoke(revokeCtx); revokeErr != nil {
+		// Provider error bodies can contain secrets; preserve only the outcome.
+		return errors.Join(err, ErrRevocationUnconfirmed)
+	}
+	return err
+}
+
+// recordExposureReceipt serializes final admission with grant/lease revocation.
+func (s *Store) recordExposureReceipt(ctx context.Context, receipt ExposureReceipt) error {
 	if err := validateExposureReceipt(receipt); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(`INSERT INTO provider_access_exposures (
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// The no-op writes acquire the same grant-then-lease row locks as revocation.
+	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE provider_access_grants
+  SET updated_at = updated_at WHERE id = ? AND provider = ? AND repository_id = ?
+  AND revoked_at IS NULL AND expires_at > ?`),
+		receipt.GrantID, receipt.Provider, receipt.RepositoryID, now.Unix())
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrGrantUnavailable
+	}
+	result, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE provider_access_leases
+  SET created_at = created_at WHERE id = ? AND grant_id = ?
+  AND revoked_at IS NULL AND expires_at > ?`), receipt.LeaseID, receipt.GrantID, now.Unix())
+	if err != nil {
+		return err
+	}
+	count, err = result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrGrantUnavailable
+	}
+	result, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO provider_access_exposures (
   lease_id, grant_id, provider, provider_principal_id, repository_id,
   permission_profile, provider_expires_at, exported_at)
   SELECT l.id, l.grant_id, g.provider, ?, g.repository_id, ?, ?, ?
@@ -52,14 +108,14 @@ func (s *Store) RecordExposureReceipt(ctx context.Context, receipt ExposureRecei
 	if err != nil {
 		return err
 	}
-	count, err := result.RowsAffected()
+	count, err = result.RowsAffected()
 	if err != nil {
 		return err
 	}
 	if count != 1 {
 		return ErrGrantUnavailable
 	}
-	return nil
+	return tx.Commit()
 }
 
 func validateExposureReceipt(receipt ExposureReceipt) error {

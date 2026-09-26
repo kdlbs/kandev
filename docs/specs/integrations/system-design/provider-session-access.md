@@ -81,6 +81,10 @@ immediately before mutation and after any ambiguous response.
 The lease contains the exact target digest, grant generation, approval
 revision, connection generation, session identity, expiry, and a hash of the
 idempotency key. It exposes only opaque lease ID and non-secret target metadata.
+The persisted lease lifetime is capped at five minutes even when its grant
+lasts longer. Reading a lease for inspection does not authorize redemption;
+final exposure admission locks the grant and lease rows in the same order as
+revocation and rechecks their live generation and expiry before bearer export.
 The plugin owns the provider action ledger: its idempotency key includes grant
 generation, repository, PR/MR head, operation class, and source run/check
 identity. For GitHub CI recovery, it validates a completed failed
@@ -143,6 +147,10 @@ alone makes the bearer residual, not provider-revoked. An unsuccessful
 provider revocation remains residual after Host restart; the Host has no
 persisted token with which to retry exact-token revocation. It becomes
 provider-expired only at the recorded provider expiry.
+If final exposure admission loses a race with grant or lease revocation after
+minting, the caller must attempt to revoke that exact in-memory token before
+returning any bearer. A failed attempt returns only a redacted
+revocation-unconfirmed outcome; provider response text is not surfaced.
 
 All admission and lifecycle paths emit non-secret audit receipts with grant,
 lease, request, plugin installation, workspace, managed task/session, target,
