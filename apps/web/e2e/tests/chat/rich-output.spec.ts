@@ -7,12 +7,57 @@ import {
   seedRichOutputTask,
 } from "./rich-output-helpers";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import type { Page } from "@playwright/test";
+
+async function installImmediateIntersectionObserver(testPage: Page) {
+  await testPage.addInitScript(() => {
+    class ImmediateIntersectionObserver {
+      private readonly callback: IntersectionObserverCallback;
+
+      constructor(callback: IntersectionObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(target: Element) {
+        const bounds = target.getBoundingClientRect();
+        this.callback(
+          [
+            {
+              isIntersecting: true,
+              intersectionRatio: 1,
+              target,
+              boundingClientRect: bounds,
+              intersectionRect: bounds,
+              rootBounds: null,
+              time: performance.now(),
+            } as IntersectionObserverEntry,
+          ],
+          this as unknown as IntersectionObserver,
+        );
+      }
+
+      unobserve() {}
+      disconnect() {}
+      takeRecords(): IntersectionObserverEntry[] {
+        return [];
+      }
+    }
+
+    Object.defineProperty(window, "IntersectionObserver", {
+      configurable: true,
+      value: ImmediateIntersectionObserver,
+    });
+  });
+}
 
 test("renders and persists native rich output with an explicit file preview", async ({
   testPage,
   apiClient,
   seedData,
 }) => {
+  // Unit coverage verifies the lazy intersection gate. Drive the plot as
+  // visible here so this test covers chart data, interaction, and persistence.
+  await installImmediateIntersectionObserver(testPage);
   const session = await seedRichOutputTask({
     page: testPage,
     apiClient,
@@ -114,45 +159,9 @@ test("renders complete chart geometry when device animation is disabled", async 
   apiClient,
   seedData,
 }) => {
+  await installImmediateIntersectionObserver(testPage);
   await testPage.addInitScript(() => {
     window.localStorage.setItem("kandev.settings.richOutputAnimations", "false");
-    // This case checks static Recharts geometry. The lazy plot mount has its
-    // own coverage above; make visibility callbacks immediate here so the
-    // animation assertion cannot race with an inner transcript scroll.
-    class ImmediateIntersectionObserver {
-      private readonly callback: IntersectionObserverCallback;
-
-      constructor(callback: IntersectionObserverCallback) {
-        this.callback = callback;
-      }
-
-      observe(target: Element) {
-        this.callback(
-          [
-            {
-              isIntersecting: true,
-              intersectionRatio: 1,
-              target,
-              boundingClientRect: target.getBoundingClientRect(),
-              intersectionRect: target.getBoundingClientRect(),
-              rootBounds: null,
-              time: performance.now(),
-            } as IntersectionObserverEntry,
-          ],
-          this as unknown as IntersectionObserver,
-        );
-      }
-
-      unobserve() {}
-      disconnect() {}
-      takeRecords(): IntersectionObserverEntry[] {
-        return [];
-      }
-    }
-    Object.defineProperty(window, "IntersectionObserver", {
-      configurable: true,
-      value: ImmediateIntersectionObserver,
-    });
   });
   const session = await seedRichOutputTask({
     page: testPage,

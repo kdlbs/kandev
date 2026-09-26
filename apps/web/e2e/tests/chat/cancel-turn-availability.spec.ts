@@ -79,14 +79,27 @@ test.describe.serial("Cancel turn availability", () => {
     await expect(session.activeChat().getByTestId("submit-message-button")).toBeVisible();
 
     const cancelButton = session.activeChat().getByTestId("cancel-agent-button");
+    const sessionId = await testPage.evaluate(() => {
+      const store = (
+        window as Window & {
+          __KANDEV_E2E_STORE__?: {
+            getState: () => { tasks: { activeSessionId: string | null } };
+          };
+        }
+      ).__KANDEV_E2E_STORE__;
+      return store?.getState().tasks.activeSessionId;
+    });
+    if (!sessionId) throw new Error("The active task session is not available");
     const cancellationPending = gateway.waitForEvent("session.cancellation_changed", {
-      where: (payload) => payload.cancellation_pending === true,
+      where: (payload) => payload.session_id === sessionId && payload.cancellation_pending === true,
     });
     const cancellationSettled = gateway.waitForEvent("session.cancellation_changed", {
-      where: (payload) => payload.cancellation_pending === false,
+      where: (payload) =>
+        payload.session_id === sessionId && payload.cancellation_pending === false,
     });
     await cancelButton.click();
     await cancellationPending;
+    await waitForActiveSessionCancellationPending(testPage, true);
     await expect(cancelButton).toBeDisabled();
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await cancellationSettled;
