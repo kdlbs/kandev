@@ -1594,6 +1594,84 @@ test('GitHub client scopes merge-queue lookup to the target branch', async () =>
   assert.equal(request.variables.branch, 'release/next');
 });
 
+// @covers AC-CI-PR-DOCS-003.2
+test('GitHub client accepts only an explicit absent merge queue as empty', async t => {
+  const createClient = data => new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify(data);
+      },
+    }),
+  });
+
+  await t.test('valid repository with explicit null queue', async () => {
+    const client = createClient({ data: { repository: { mergeQueue: null } } });
+    assert.deepEqual(await client.listMergeQueueEntries('main'), []);
+  });
+
+  await t.test('a queue that disappears during pagination remains an error', async () => {
+    let calls = 0;
+    const client = new validator.GitHubClient({
+      owner: 'kdlbs',
+      repo: 'kandev',
+      token: 'token',
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        async text() {
+          calls += 1;
+          return JSON.stringify(calls === 1
+            ? {
+              data: {
+                repository: {
+                  mergeQueue: {
+                    entries: {
+                      nodes: [],
+                      pageInfo: { hasNextPage: true, endCursor: 'next-page' },
+                    },
+                  },
+                },
+              },
+            }
+            : { data: { repository: { mergeQueue: null } } });
+        },
+      }),
+    });
+
+    await assert.rejects(client.listMergeQueueEntries('main'), /merge queue response is incomplete/);
+    assert.equal(calls, 2);
+  });
+
+  for (const [name, data] of [
+    ['missing response data', {}],
+    ['missing repository', { data: {} }],
+    ['null repository', { data: { repository: null } }],
+    ['missing queue field', { data: { repository: {} } }],
+    ['missing queue entries', { data: { repository: { mergeQueue: {} } } }],
+    ['malformed queue connection', {
+      data: { repository: { mergeQueue: { entries: { nodes: [] } } } },
+    }],
+  ]) {
+    await t.test(name, async () => {
+      const client = createClient(data);
+      await assert.rejects(client.listMergeQueueEntries('main'), /merge queue response is incomplete/);
+    });
+  }
+
+  await t.test('GraphQL errors remain errors', async () => {
+    const client = createClient({
+      data: { repository: { mergeQueue: null } },
+      errors: [{ type: 'FORBIDDEN', message: 'permission denied' }],
+    });
+    await assert.rejects(client.listMergeQueueEntries('main'), /permission denied/);
+  });
+});
+
 test('GitHub client converts a request timeout into a bounded error', async () => {
   let signal;
   const client = new validator.GitHubClient({
@@ -2376,12 +2454,13 @@ test('label removal reevaluates both prefix and full groups for the first queued
     env: {},
     event: { action: 'unlabeled', pull_request: { number: 42 } },
     eventName: 'pull_request_target',
+    writeLog: () => {},
     writeSummary: () => {},
   });
 
   assert.equal(result.exitCode, 1);
   assert.deepEqual(result.result.affectedGroups.map(group => group.headSha), [SHA_B, SHA_C]);
-  assert.deepEqual(statuses.map(status => status.sha), [SHA_B, SHA_B, SHA_B, SHA_B, SHA_C, SHA_C]);
+  assert.deepEqual(statuses.map(status => status.sha), [SHA_B, SHA_B, SHA_B, SHA_C, SHA_C, SHA_B]);
 });
 
 // @covers AC-CI-PR-DOCS-001.1, AC-CI-PR-DOCS-003.1
@@ -2543,6 +2622,7 @@ test('merge-group runs publish one status on the synthetic group head', async ()
       },
     },
     eventName: 'merge_group',
+    writeLog: () => {},
     writeSummary: () => {},
   });
 
@@ -2550,6 +2630,41 @@ test('merge-group runs publish one status on the synthetic group head', async ()
   assert.deepEqual(statuses.map(status => status.state), ['pending', 'success']);
   assert.deepEqual(statuses.map(status => status.sha), [SHA_C, SHA_C]);
   assert.equal(statuses[1].description, 'Every merge-group member satisfies documentation coverage');
+});
+
+test('merge-group runs fail when the queue has no validated member chain', async () => {
+  const statuses = [];
+  const client = {
+    async listMergeQueueEntries() {
+      return [];
+    },
+    async createCommitStatus(sha, status) {
+      statuses.push({ sha, state: status.state });
+    },
+  };
+
+  const result = await validator.run({
+    client,
+    env: {},
+    event: {
+      merge_group: {
+        base_ref: 'refs/heads/main',
+        base_sha: SHA_A,
+        head_sha: SHA_C,
+      },
+    },
+    eventName: 'merge_group',
+    writeLog: () => {},
+    writeSummary: () => {},
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.result.status, 'error');
+  assert.match(result.result.errors.join('; '), /merge-group membership is missing/);
+  assert.deepEqual(statuses, [
+    { sha: SHA_C, state: 'pending' },
+    { sha: SHA_C, state: 'error' },
+  ]);
 });
 
 // @covers AC-CI-PR-DOCS-002.2, AC-CI-PR-DOCS-003.4
@@ -2579,6 +2694,7 @@ test('label-triggered runs reevaluate affected merge groups independently', asyn
     env: {},
     event: { action: 'unlabeled', pull_request: { number: 42 } },
     eventName: 'pull_request_target',
+    writeLog: () => {},
     writeSummary: () => {},
   });
 
@@ -2586,9 +2702,203 @@ test('label-triggered runs reevaluate affected merge groups independently', asyn
   assert.equal(result.result.affectedGroups.length, 1);
   assert.deepEqual(statuses.map(status => status.state), [
     'pending',
-    'failure',
     'pending',
     'failure',
+    'failure',
+  ]);
+});
+
+// @covers AC-CI-PR-DOCS-002.1, AC-CI-PR-DOCS-002.5, AC-CI-PR-DOCS-003.9
+test('label addition with an absent merge queue preserves override success after queue lookup', async () => {
+  const events = [];
+  const github = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({ data: { repository: { mergeQueue: null } } });
+      },
+    }),
+  });
+  const client = {
+    async getPullRequest() {
+      return pullRequest(42, SHA_B, ['no-docs-allow']);
+    },
+    async listFiles() {
+      assert.fail('override should not read changed files');
+    },
+    async listMergeQueueEntries(branch) {
+      events.push(`queue:${branch}`);
+      return github.listMergeQueueEntries(branch);
+    },
+    async createCommitStatus(sha, status) {
+      events.push(`status:${sha}:${status.state}`);
+    },
+  };
+
+  const result = await validator.run({
+    client,
+    env: {},
+    event: { action: 'labeled', pull_request: { number: 42 } },
+    eventName: 'pull_request_target',
+    writeSummary: () => {},
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.result.status, 'override');
+  assert.deepEqual(events, [
+    `status:${SHA_B}:pending`,
+    'queue:main',
+    `status:${SHA_B}:success`,
+  ]);
+});
+
+// @covers AC-CI-PR-DOCS-002.2, AC-CI-PR-DOCS-002.5, AC-CI-PR-DOCS-003.9
+test('label removal evaluates normal coverage and waits for the queue lookup', async () => {
+  const events = [];
+  const logs = [];
+  const github = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({ data: { repository: { mergeQueue: null } } });
+      },
+    }),
+  });
+  const client = {
+    async getPullRequest() {
+      return pullRequest(42, SHA_B);
+    },
+    async listFiles() {
+      return [{ filename: 'apps/backend/runtime.go', status: 'modified' }];
+    },
+    async listMergeQueueEntries(branch) {
+      events.push(`queue:${branch}`);
+      return github.listMergeQueueEntries(branch);
+    },
+    async createCommitStatus(sha, status) {
+      events.push(`status:${sha}:${status.state}`);
+    },
+  };
+
+  const result = await validator.run({
+    client,
+    env: {},
+    event: { action: 'unlabeled', pull_request: { number: 42 } },
+    eventName: 'pull_request_target',
+    writeLog: message => logs.push(message),
+    writeSummary: () => {},
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.result.status, 'missing');
+  assert.deepEqual(logs, [
+    'PR documentation coverage failed (missing): No changed work order covers the triggering paths.',
+  ]);
+  assert.deepEqual(events, [
+    `status:${SHA_B}:pending`,
+    'queue:main',
+    `status:${SHA_B}:failure`,
+  ]);
+});
+
+// @covers AC-CI-PR-DOCS-003.9
+test('queue lookup failure leaves the PR status pending until error and logs a bounded reason', async () => {
+  const statuses = [];
+  const logs = [];
+  const client = {
+    async getPullRequest() {
+      return pullRequest(42, SHA_B, ['no-docs-allow']);
+    },
+    async listMergeQueueEntries() {
+      throw new Error(`GitHub merge queue response is incomplete\nGITHUB_TOKEN=ghp_${'a'.repeat(40)}`);
+    },
+    async createCommitStatus(sha, status) {
+      statuses.push({ sha, state: status.state });
+    },
+  };
+
+  const result = await validator.run({
+    client,
+    env: {},
+    event: { action: 'labeled', pull_request: { number: 42 } },
+    eventName: 'pull_request_target',
+    writeLog: message => logs.push(message),
+    writeSummary: () => {},
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.result.status, 'error');
+  assert.deepEqual(statuses, [
+    { sha: SHA_B, state: 'pending' },
+    { sha: SHA_B, state: 'error' },
+  ]);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /^PR documentation coverage failed \(error\): /);
+  assert.match(logs[0], /GitHub returned an incomplete merge queue response/);
+  assert.equal(logs[0].includes('\n'), false);
+  assert.equal(logs[0].includes('ghp_'), false);
+  assert.equal(logs[0].includes('GITHUB_TOKEN='), false);
+  assert.ok(logs[0].length <= 300);
+});
+
+// @covers AC-CI-PR-DOCS-003.9
+test('an affected group failure does not change the PR-head coverage decision', async () => {
+  const statuses = [];
+  const entries = [
+    {
+      baseCommit: { oid: SHA_A },
+      headCommit: { oid: SHA_B },
+      pullRequest: { number: 42, headRefOid: SHA_B },
+    },
+    {
+      baseCommit: { oid: SHA_B },
+      headCommit: { oid: SHA_C },
+      pullRequest: { number: 43, headRefOid: SHA_C },
+    },
+  ];
+  const client = {
+    async getPullRequest(number) {
+      return number === 42
+        ? pullRequest(42, SHA_B, ['no-docs-allow'])
+        : pullRequest(43, SHA_C);
+    },
+    async listFiles() {
+      return [{ filename: 'apps/backend/runtime.go', status: 'modified' }];
+    },
+    async listMergeQueueEntries() {
+      return entries;
+    },
+    async createCommitStatus(sha, status) {
+      statuses.push({ sha, state: status.state });
+    },
+  };
+
+  const result = await validator.run({
+    client,
+    env: {},
+    event: { action: 'labeled', pull_request: { number: 42 } },
+    eventName: 'pull_request_target',
+    writeLog: () => {},
+    writeSummary: () => {},
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.result.affectedGroups.at(-1).ok, false);
+  assert.deepEqual(statuses, [
+    { sha: SHA_B, state: 'pending' },
+    { sha: SHA_B, state: 'pending' },
+    { sha: SHA_B, state: 'success' },
+    { sha: SHA_C, state: 'pending' },
+    { sha: SHA_C, state: 'failure' },
+    { sha: SHA_B, state: 'success' },
   ]);
 });
 

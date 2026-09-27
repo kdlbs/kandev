@@ -1,6 +1,6 @@
 ---
 status: draft
-last_updated: 2026-09-26
+last_updated: 2026-09-27
 system: ci
 requirements:
   - REQ-CI-PR-DOCS-001
@@ -125,6 +125,10 @@ evaluator input, so they do not start the job.
 Read current PR metadata and labels, not just the event snapshot. Drafts follow the same policy.
 The exact current label `no-docs-allow` returns an override success before expensive file reads.
 Failure to read current metadata or labels is still an infrastructure error.
+For an exact-label transition, the evaluator also checks affected merge groups.
+An explicit `null` merge queue on an otherwise valid repository response means
+the target branch has no queue and contributes no groups. A missing repository,
+GraphQL error, or malformed queue connection remains an infrastructure error.
 
 GitHub repository permissions control who applies the label. No separate author allowlist or title-based exception exists.
 The override is PR-wide and persists across pushes. This is distinct from the revision-specific `ready-to-merge` contract.
@@ -139,6 +143,16 @@ Use a distinct job name to avoid a status/check-name collision.
 Set pending before evaluation; publish success, failure for missing coverage, or error for incomplete data.
 The status target URL points to the run summary, which lists reasons, paths, references, and remediation.
 Also fail the workflow job on policy failure or infrastructure error. Do not post PR comments.
+For label transitions, complete the queue lookup and affected-group updates
+before publishing the PR-head terminal status. Keep the PR's own coverage
+decision separate from each group's policy result: a failing group fails the
+run and receives its group status, while the PR-head status still reflects the
+PR's own result. A failed queue lookup prevents premature PR-head success and
+publishes an infrastructure error there. Preserve the pending status until a
+terminal result is ready.
+Write the result category and a bounded, single-line failure reason to the
+runner log when the job fails. Strip control characters and cap untrusted text;
+never log tokens, request bodies, document contents, or raw API responses.
 On each retry and terminal request failure, write a bounded runner-log
 diagnostic. Include the request class, HTTP status or transport category,
 attempt count, and selected delay or stop reason. Do not log authorization
@@ -183,6 +197,8 @@ Load only trusted base code. Never evaluate coverage against the combined diff, 
 Resolve members using the paginated GraphQL merge queue entries, including each entry's `baseCommit`, `headCommit`, and `pullRequest`.
 Find the entry for the event head and trace the entry commit boundaries back to the event base.
 Require a complete, unambiguous chain; unknown membership produces an error, not success.
+An absent queue is valid for a label-triggered PR run but cannot satisfy a
+`merge_group` event. That event still fails if membership is absent or invalid.
 Evaluate each member's own current PR diff, artifact chain, and labels. Confirm queue identities and member heads again before publication.
 Use the target-branch concurrency key shared with queued label reevaluation and
 never cancel active group evaluation. The group status itself remains on the

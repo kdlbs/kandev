@@ -73,6 +73,7 @@ const RETRY_BASE_DELAY_MS = 250;
 // Keep room in the 10-minute workflow job for API requests and evaluation.
 const MAX_RETRY_SLEEP_MS = 7 * 60_000;
 const SECONDARY_RATE_LIMIT_DELAYS_MS = [60_000, 120_000];
+const MAX_RUN_FAILURE_LOG_LENGTH = 300;
 const NO_DOCS_LABEL = 'no-docs-allow';
 const STATUS_CONTEXT = 'PR documentation coverage';
 const GITHUB_API = 'https://api.github.com';
@@ -1436,7 +1437,16 @@ class GitHubClient {
         repo: this.repo,
         after,
       });
-      const connection = data?.repository?.mergeQueue?.entries;
+      const repository = data?.repository;
+      if (
+        repository
+        && Object.hasOwn(repository, 'mergeQueue')
+        && repository.mergeQueue === null
+        && after === null
+      ) {
+        return [];
+      }
+      const connection = repository?.mergeQueue?.entries;
       if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo) {
         throw new Error('GitHub merge queue response is incomplete');
       }
@@ -2128,6 +2138,37 @@ function statusDescription(result) {
   return 'Coverage evaluation failed';
 }
 
+function runnerFailureLog(result) {
+  const category = String(result?.status ?? 'error').replace(/[^a-z0-9_-]/gi, '').slice(0, 40) || 'error';
+  const firstError = String(result?.errors?.[0] ?? '')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const apiFailure = /GitHub API request failed with HTTP (\d{3})/i.exec(firstError);
+  let reason;
+  if (category === 'missing') {
+    reason = 'No changed work order covers the triggering paths.';
+  } else if (category === 'invalid') {
+    reason = 'Linked delivery documentation is incomplete or invalid.';
+  } else if (category === 'failure') {
+    reason = 'An affected merge group does not satisfy documentation coverage.';
+  } else if (/GitHub merge queue response is incomplete/i.test(firstError)) {
+    reason = 'GitHub returned an incomplete merge queue response.';
+  } else if (/GitHub GraphQL request failed/i.test(firstError)) {
+    reason = 'The GitHub GraphQL request failed.';
+  } else if (apiFailure) {
+    reason = `The GitHub API request failed with HTTP ${apiFailure[1]}.`;
+  } else if (/merge-group membership/i.test(firstError)) {
+    reason = 'Merge-group membership could not be validated.';
+  } else if (category === 'error') {
+    reason = 'Required GitHub data could not be read or validated.';
+  } else {
+    reason = 'Documentation coverage requirements were not satisfied.';
+  }
+  return `PR documentation coverage failed (${category}): ${reason}`
+    .slice(0, MAX_RUN_FAILURE_LOG_LENGTH);
+}
+
 function runUrl(env) {
   if (!env.GITHUB_SERVER_URL || !env.GITHUB_REPOSITORY || !env.GITHUB_RUN_ID) {
     return undefined;
@@ -2190,6 +2231,7 @@ async function run({
   event,
   eventName,
   writeSummary,
+  writeLog = defaultLog,
   publishStatus = env.PR_DOCS_DRY_RUN !== '1' && env.PR_DOCS_DRY_RUN !== 'true',
 } = {}) {
   const effectiveEventName = eventName ?? env.GITHUB_EVENT_NAME;
@@ -2263,20 +2305,19 @@ async function run({
           targetUrl,
         });
       }
-      result = await evaluatePullRequest({
+      const pullRequestResult = await evaluatePullRequest({
         client: apiClient,
         initialPullRequest: current,
         pullNumber,
       });
-      if (publishStatus) {
-        await publishResult(apiClient, result.headSha ?? pendingSha, result, targetUrl);
-      }
 
+      let isLabelTransition = false;
       if (effectiveEventName !== 'workflow_dispatch') {
         const action = effectiveEvent.action;
         if (action === 'labeled' || action === 'unlabeled') {
+          isLabelTransition = true;
           const targetBranch = requireBranchName(
-            result.baseRef ?? current.base?.ref,
+            pullRequestResult.baseRef ?? current.base?.ref,
             'pull-request target branch',
           );
           const entries = await apiClient.listMergeQueueEntries(targetBranch);
@@ -2287,19 +2328,33 @@ async function run({
             targetUrl,
             publishStatus,
           });
+          result = {
+            ...pullRequestResult,
+            affectedGroups: groupResults,
+          };
           if (groupResults.some(groupResult => !groupResult.ok)) {
             result = {
               ...result,
-              affectedGroups: groupResults,
               errors: [
                 ...(result.errors ?? []),
                 'An affected merge group does not satisfy documentation coverage.',
               ],
               ok: false,
-              status: 'failure',
+              status: pullRequestResult.ok ? 'failure' : pullRequestResult.status,
             };
           }
         }
+      }
+      if (!isLabelTransition) {
+        result = pullRequestResult;
+      }
+      if (publishStatus) {
+        await publishResult(
+          apiClient,
+          pullRequestResult.headSha ?? pendingSha,
+          pullRequestResult,
+          targetUrl,
+        );
       }
     }
   } catch (error) {
@@ -2313,6 +2368,9 @@ async function run({
     }
   }
 
+  if (!result.ok && typeof writeLog === 'function') {
+    writeLog(runnerFailureLog(result));
+  }
   await writeRunSummary(resultSummary(result), env, writeSummary);
   return { exitCode: result.ok ? 0 : 1, result };
 }

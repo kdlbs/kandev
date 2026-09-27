@@ -2,7 +2,7 @@
 status: draft
 system: ci
 created: 2026-09-10
-updated: 2026-09-26
+updated: 2026-09-27
 owners:
   - kandev
 ---
@@ -48,6 +48,7 @@ Contributors can write the artifacts manually; use of the repository harness is 
 - **AC-CI-PR-DOCS-002.2:** Adding or removing the label shall reevaluate the current pull request without requiring a new commit. Removal shall restore normal evaluation.
 - **AC-CI-PR-DOCS-002.3:** The label shall remain effective across pushes until removed. The workflow shall not add, remove, or grant permission to apply it.
 - **AC-CI-PR-DOCS-002.4:** The exception shall affect only documentation coverage. Other validation and merge requirements shall remain independent.
+- **AC-CI-PR-DOCS-002.5:** When an exception-label change targets a branch without a configured merge queue, reevaluation shall finish using the pull request's own coverage result without requiring a merge-group result.
 
 ### REQ-CI-PR-DOCS-003: Reliable enforcement
 
@@ -62,6 +63,8 @@ Contributors can write the artifacts manually; use of the repository harness is 
 - **AC-CI-PR-DOCS-003.5:** Required-check rollout shall include evidence that ordinary PRs, label changes, forks, and merge groups report the expected result.
 - **AC-CI-PR-DOCS-003.6:** When a GitHub request has a transient failure, the evaluator shall retry a bounded number of times. It shall honor usable server wait guidance. For a secondary rate limit without usable guidance, it shall wait at least 60 seconds before retrying.
 - **AC-CI-PR-DOCS-003.7:** When a GitHub request has a permanent failure, requires an excessive wait, or exhausts its retries, the result shall be an infrastructure error. The bounded diagnostic shall identify the request class, response status, and retry outcome. It shall not expose credentials or document contents.
+- **AC-CI-PR-DOCS-003.8:** A failed coverage job shall identify its result category and a bounded failure reason in the runner log without exposing credentials or document contents.
+- **AC-CI-PR-DOCS-003.9:** A label-triggered run shall not publish success on the pull request revision before it finishes the affected merge-group lookup and evaluation. If required queue data cannot be read, the pull request revision shall receive an error result. An affected group's policy failure shall remain on that group's status and shall not change the pull request's own coverage decision.
 
 ### REQ-CI-PR-DOCS-004: Request-efficient evaluation
 
@@ -85,3 +88,4 @@ Contributors can write the artifacts manually; use of the repository harness is 
 
 - [PR documentation coverage](../../../plans/pr-documentation-coverage/plan.md)
 - [GitHub API resilience](../../../plans/github-api-resilience/plan.md)
+- [Absent merge queue label reevaluation fix](../../../plans/pr-docs-absent-queue/plan.md)
