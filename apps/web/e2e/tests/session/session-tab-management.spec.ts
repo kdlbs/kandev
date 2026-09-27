@@ -642,6 +642,35 @@ test.describe("Session tab management — close behavior", () => {
   });
 });
 
+test.describe("Session tab management — bulk removal", () => {
+  test("Remove All permanently deletes every persisted task session", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const { task, session, session1Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Remove all sessions",
+    );
+    await session.sessionTabBySessionId(session1Id).click({ button: "right" });
+    await session.contextMenuItem("Remove All").click();
+    const dialog = session.alertDialog();
+    await expect(dialog).toContainText("Remove 2 sessions?");
+    await dialog.getByRole("button", { name: "Remove All" }).click();
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+        timeout: 15_000,
+      })
+      .toBe(0);
+    await testPage.reload();
+    await session.waitForLoad();
+    expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(0);
+  });
+});
+
 test.describe("Session tab management — primary session persistence", () => {
   test("primary star survives a kanban.update broadcast", async ({
     testPage,

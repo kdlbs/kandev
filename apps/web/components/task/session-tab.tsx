@@ -15,6 +15,7 @@ import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
 import { ContextMenu, ContextMenuTrigger } from "@kandev/ui/context-menu";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessions } from "@/hooks/use-task-sessions";
 import {
   useSessionActions,
   isSessionDeletable as isDeletable,
@@ -23,6 +24,8 @@ import { shareableSessionStateClient } from "@/components/task/share/share-butto
 import type { HandoffPreset } from "@/components/task/new-session-dialog";
 import { usableConfigOptions } from "@/components/model-config-selector";
 import { SessionContextMenuItems, SessionTabDialogs } from "./session-tab-menu";
+import { useTaskBulkRemovalController } from "./use-task-bulk-removal-controller";
+import { SessionTabBulkRemovalDialog } from "./session-tab-bulk-removal";
 import type { TaskSessionState } from "@/lib/types/http";
 import {
   markSessionTabUserActivationIntent,
@@ -142,12 +145,20 @@ function useSessionTabActions(
     stop: handleStop,
     resume: handleResume,
     remove: handleDelete,
+    removeById,
   } = useSessionActions({ sessionId, taskId, onDeleted });
   const handleCloseOthers = useCallback(() => {
     const toClose = api.group.panels.filter((p) => p.id !== api.id);
     for (const panel of toClose) containerApi.removePanel(panel);
   }, [api, containerApi]);
-  return { handleSetPrimary, handleStop, handleResume, handleDelete, handleCloseOthers };
+  return {
+    handleSetPrimary,
+    handleStop,
+    handleResume,
+    handleDelete,
+    removeById,
+    handleCloseOthers,
+  };
 }
 
 function useSessionTabUserActivationIntent(
@@ -393,6 +404,136 @@ function SessionTabDialogHost({
   );
 }
 
+type SessionTabContentProps = {
+  props: IDockviewPanelHeaderProps;
+  sessionId: string | undefined;
+  sessionState: TaskSessionState | null;
+  isPrimary: boolean;
+  canShare: boolean;
+  taskId: string | null;
+  tabTitle: string | null;
+  sessionName: string | null;
+  sessionNumber: number | null;
+  sessionCount: number;
+  agentName: string | null;
+  isActive: boolean;
+  showMultiSessionBadges: boolean;
+  showDeleteOnClose: boolean;
+  isDeletingFromTab: boolean;
+  dialogs: ReturnType<typeof useSessionTabDialogState>;
+  actions: ReturnType<typeof useSessionTabActions>;
+  deleteState: ReturnType<typeof useSessionTabDelete>;
+  bulkRemoval: ReturnType<typeof useTaskBulkRemovalController>["bulkRemoval"];
+  onDoubleClick: ReturnType<typeof useTabMaximizeOnDoubleClick>;
+  onCommitRename: (next: string) => void;
+  onCloseTab: () => void;
+  onDelete: (event: Event) => void;
+  onRemoveScope: (scope: "others" | "all") => void;
+  onPointerDownCapture: (event: ReactPointerEvent) => void;
+  onKeyDownCapture: (event: ReactKeyboardEvent) => void;
+  menuDeleteAnchorRef: RefObject<HTMLElement | null>;
+  menuDeleteFocusBoundaryRef: RefObject<HTMLElement | null>;
+};
+
+function SessionTabContent({
+  props,
+  sessionId,
+  sessionState,
+  isPrimary,
+  canShare,
+  taskId,
+  tabTitle,
+  sessionName,
+  sessionNumber,
+  sessionCount,
+  agentName,
+  isActive,
+  showMultiSessionBadges,
+  showDeleteOnClose,
+  isDeletingFromTab,
+  dialogs,
+  actions,
+  deleteState,
+  bulkRemoval,
+  onDoubleClick,
+  onCommitRename,
+  onCloseTab,
+  onDelete,
+  onRemoveScope,
+  onPointerDownCapture,
+  onKeyDownCapture,
+  menuDeleteAnchorRef,
+  menuDeleteFocusBoundaryRef,
+}: SessionTabContentProps) {
+  return (
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger
+          className="flex h-full items-center cursor-pointer select-none"
+          data-testid={sessionId ? `session-tab-${sessionId}` : undefined}
+          onPointerDownCapture={onPointerDownCapture}
+          onKeyDownCapture={onKeyDownCapture}
+          onDoubleClick={onDoubleClick}
+        >
+          <SessionTabBody
+            props={props}
+            isRenaming={dialogs.isRenaming}
+            renameInitial={sessionName || tabTitle || ""}
+            renameSeqBadge={showMultiSessionBadges ? sessionNumber : null}
+            onCommitRename={onCommitRename}
+            onCancelRename={() => dialogs.setIsRenaming(false)}
+            sessionId={sessionId}
+            isPrimary={isPrimary}
+            showMultiSessionBadges={showMultiSessionBadges}
+            sessionNumber={sessionNumber}
+            agentName={agentName}
+            sessionState={sessionState}
+            isActive={isActive}
+            showDeleteOnClose={showDeleteOnClose}
+            isDeleting={isDeletingFromTab}
+            onCloseTab={onCloseTab}
+          />
+        </ContextMenuTrigger>
+        <SessionContextMenuItems
+          sessionState={sessionState}
+          isPrimary={isPrimary}
+          canShare={canShare}
+          taskId={taskId}
+          sessionId={sessionId}
+          actions={{
+            ...actions,
+            handleRemoveOthers: () => onRemoveScope("others"),
+            handleRemoveAll: () => onRemoveScope("all"),
+          }}
+          onDelete={onDelete}
+          onShare={() => dialogs.setShareOpen(true)}
+          onHandoffProfile={dialogs.handleHandoffProfile}
+          onStartRename={() => dialogs.setIsRenaming(true)}
+        />
+      </ContextMenu>
+      <SessionTabDialogHost
+        dialogs={dialogs}
+        deleteState={deleteState}
+        menuDeleteAnchorRef={menuDeleteAnchorRef}
+        menuDeleteFocusBoundaryRef={menuDeleteFocusBoundaryRef}
+        isPrimary={isPrimary}
+        sessionCount={sessionCount}
+        targetName={tabTitle}
+        taskId={taskId}
+        sessionId={sessionId}
+        groupId={props.api.group?.id}
+      />
+      <SessionTabBulkRemovalDialog
+        scope={bulkRemoval.snapshot?.scope ?? null}
+        count={bulkRemoval.snapshot?.targetIds.length ?? 0}
+        pending={bulkRemoval.pending}
+        onCancel={bulkRemoval.cancel}
+        onConfirm={() => void bulkRemoval.confirm()}
+      />
+    </>
+  );
+}
+
 /**
  * Custom dockview tab for session panels.
  * Shows agent logo, index badge, and star for primary; right-click for lifecycle actions.
@@ -411,6 +552,15 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
     sessionCount,
   } = useSessionTabState(sessionId);
   const actions = useSessionTabActions(sessionId, taskId, api, containerApi);
+  const { sessions, isLoading, loadSessions } = useTaskSessions(taskId);
+  const { bulkRemoval, request: handleRemoveScope } = useTaskBulkRemovalController({
+    taskId,
+    sessionId,
+    sessions,
+    isLoading,
+    loadSessions,
+    removeById: (targetId) => actions.removeById(targetId, { feedback: "inline" }),
+  });
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
   const dialogs = useSessionTabDialogState(sessionId);
   const handleCommitRename = useSessionRenameCommitter(sessionId, taskId, sessionName, () =>
@@ -437,59 +587,35 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   );
 
   return (
-    <>
-      <ContextMenu>
-        <ContextMenuTrigger
-          className="flex h-full items-center cursor-pointer select-none"
-          data-testid={sessionId ? `session-tab-${sessionId}` : undefined}
-          onPointerDownCapture={handlePointerDownCapture}
-          onKeyDownCapture={handleKeyDownCapture}
-          onDoubleClick={onDoubleClick}
-        >
-          <SessionTabBody
-            props={props}
-            isRenaming={dialogs.isRenaming}
-            renameInitial={sessionName || tabTitle || ""}
-            renameSeqBadge={showMultiSessionBadges ? sessionNumber : null}
-            onCommitRename={handleCommitRename}
-            onCancelRename={() => dialogs.setIsRenaming(false)}
-            sessionId={sessionId}
-            isPrimary={isPrimary}
-            showMultiSessionBadges={showMultiSessionBadges}
-            sessionNumber={sessionNumber}
-            agentName={agentName}
-            sessionState={sessionState}
-            isActive={isActive}
-            showDeleteOnClose={showDeleteOnClose}
-            isDeleting={isDeletingFromTab}
-            onCloseTab={handleCloseTab}
-          />
-        </ContextMenuTrigger>
-        <SessionContextMenuItems
-          sessionState={sessionState}
-          isPrimary={isPrimary}
-          canShare={canShare}
-          taskId={taskId}
-          sessionId={sessionId}
-          actions={actions}
-          onDelete={handleMenuDelete}
-          onShare={() => dialogs.setShareOpen(true)}
-          onHandoffProfile={dialogs.handleHandoffProfile}
-          onStartRename={() => dialogs.setIsRenaming(true)}
-        />
-      </ContextMenu>
-      <SessionTabDialogHost
-        dialogs={dialogs}
-        deleteState={deleteState}
-        menuDeleteAnchorRef={menuDeleteAnchorRef}
-        menuDeleteFocusBoundaryRef={menuDeleteFocusBoundaryRef}
-        isPrimary={isPrimary}
-        sessionCount={sessionCount}
-        targetName={tabTitle}
-        taskId={taskId}
-        sessionId={sessionId}
-        groupId={api.group?.id}
-      />
-    </>
+    <SessionTabContent
+      props={props}
+      sessionId={sessionId}
+      sessionState={sessionState}
+      isPrimary={isPrimary}
+      canShare={canShare}
+      taskId={taskId}
+      tabTitle={tabTitle}
+      sessionName={sessionName}
+      sessionNumber={sessionNumber}
+      sessionCount={sessionCount}
+      agentName={agentName}
+      isActive={isActive}
+      showMultiSessionBadges={showMultiSessionBadges}
+      showDeleteOnClose={showDeleteOnClose}
+      isDeletingFromTab={isDeletingFromTab}
+      dialogs={dialogs}
+      actions={actions}
+      deleteState={deleteState}
+      bulkRemoval={bulkRemoval}
+      onDoubleClick={onDoubleClick}
+      onCommitRename={handleCommitRename}
+      onCloseTab={handleCloseTab}
+      onDelete={handleMenuDelete}
+      onRemoveScope={handleRemoveScope}
+      onPointerDownCapture={handlePointerDownCapture}
+      onKeyDownCapture={handleKeyDownCapture}
+      menuDeleteAnchorRef={menuDeleteAnchorRef}
+      menuDeleteFocusBoundaryRef={menuDeleteFocusBoundaryRef}
+    />
   );
 }

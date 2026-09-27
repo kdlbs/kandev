@@ -33,6 +33,9 @@ import type { AgentProfileOption } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { MobileSessionDeleteConfirmation } from "./mobile-session-delete-confirmation";
+import { useTaskBulkRemovalController } from "../use-task-bulk-removal-controller";
+import { MobileBulkSessionRemovalConfirmation } from "./mobile-bulk-session-removal-confirmation";
+import { MobileBulkSessionMenuItems } from "./mobile-bulk-session-menu-items";
 
 type SessionRow = {
   id: string;
@@ -152,6 +155,7 @@ function SessionActionsMenu({
   onStop,
   onResume,
   onAskDelete,
+  onRemoveScope,
   onHandoffProfile,
 }: {
   triggerRef: RefObject<HTMLButtonElement | null>;
@@ -162,6 +166,7 @@ function SessionActionsMenu({
   onStop: () => void;
   onResume: () => void;
   onAskDelete: () => void;
+  onRemoveScope: (scope: "others" | "all") => void;
   onHandoffProfile: (profileId: string) => void;
 }) {
   const { t } = useTranslation();
@@ -224,6 +229,7 @@ function SessionActionsMenu({
             {t("task:delete")}
           </DropdownMenuItem>
         )}
+        <MobileBulkSessionMenuItems onRemoveScope={onRemoveScope} />
         {hasLifecycleAction && <DropdownMenuSeparator />}
         <HandoffDropdownMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
       </DropdownMenuContent>
@@ -253,6 +259,7 @@ function SessionRowTrailingActions({
   totalSessions,
   isConfirming,
   onAskDelete,
+  onRemoveScope,
   onCancelDelete,
   onHandoffProfile,
   actions,
@@ -262,6 +269,7 @@ function SessionRowTrailingActions({
   totalSessions: number;
   isConfirming: boolean;
   onAskDelete: () => void;
+  onRemoveScope: (scope: "others" | "all") => void;
   onCancelDelete: () => void;
   onHandoffProfile: (profileId: string) => void;
   actions: ReturnType<typeof useSessionActions>;
@@ -291,6 +299,7 @@ function SessionRowTrailingActions({
           onStop={() => void actions.stop()}
           onResume={() => void actions.resume()}
           onAskDelete={onAskDelete}
+          onRemoveScope={onRemoveScope}
           onHandoffProfile={onHandoffProfile}
         />
       )}
@@ -305,6 +314,7 @@ function SessionRowItem({
   totalSessions,
   isConfirming,
   onAskDelete,
+  onRemoveScope,
   onCancelDelete,
   onSelect,
 }: {
@@ -314,6 +324,7 @@ function SessionRowItem({
   totalSessions: number;
   isConfirming: boolean;
   onAskDelete: () => void;
+  onRemoveScope: (scope: "others" | "all") => void;
   onCancelDelete: () => void;
   onSelect: (sessionId: string) => void;
 }) {
@@ -370,6 +381,7 @@ function SessionRowItem({
           totalSessions={totalSessions}
           isConfirming={isConfirming}
           onAskDelete={onAskDelete}
+          onRemoveScope={onRemoveScope}
           onCancelDelete={onCancelDelete}
           onHandoffProfile={handleHandoffProfile}
           actions={actions}
@@ -402,7 +414,7 @@ function useSessionRows(taskId: string | null) {
     const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
     return task?.primarySessionId ?? null;
   });
-  const { sessions, isLoading } = useTaskSessions(taskId);
+  const { sessions, isLoading, loadSessions } = useTaskSessions(taskId);
   const repositoryLabelsById = useMemo(() => {
     const sessionRepositoryIds = new Set(
       sessions.flatMap((session) => (session.repository_id ? [session.repository_id] : [])),
@@ -421,7 +433,7 @@ function useSessionRows(taskId: string | null) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- i18n.language is the locale trigger
     [sessions, agentProfiles, primarySessionId, repositoryLabelsById, i18n.language],
   );
-  return { rows, isLoading, primarySessionId };
+  return { rows, sessions, isLoading, primarySessionId, loadSessions };
 }
 
 const MobileSessionsList = memo(function MobileSessionsList({
@@ -437,7 +449,16 @@ const MobileSessionsList = memo(function MobileSessionsList({
 }) {
   const { t } = useTranslation();
   const setActiveSession = useAppStore((s) => s.setActiveSession);
-  const { rows, isLoading } = useSessionRows(taskId);
+  const { rows, sessions, isLoading, loadSessions } = useSessionRows(taskId);
+  const bulkActions = useSessionActions({ sessionId: null, taskId });
+  const { bulkRemoval } = useTaskBulkRemovalController({
+    taskId,
+    sessionId: activeSessionId ?? undefined,
+    sessions,
+    isLoading,
+    loadSessions,
+    removeById: (id) => bulkActions.removeById(id, { feedback: "inline" }),
+  });
   const [launchOpen, setLaunchOpen] = useState(false);
   const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
 
@@ -465,6 +486,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
 
   return (
     <div className="flex flex-col gap-2 px-1">
+      <MobileBulkSessionRemovalConfirmation taskId={taskId} bulkRemoval={bulkRemoval} />
       <div className="flex items-center justify-between px-1">
         <span className="text-xs font-medium text-muted-foreground">
           {t("task:sessionCount", { count: rows.length })}
@@ -500,6 +522,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
             totalSessions={rows.length}
             isConfirming={row.id === confirmDeleteSessionId}
             onAskDelete={() => setConfirmDeleteSessionId(row.id)}
+            onRemoveScope={(scope) => bulkRemoval.request(scope, row.id)}
             onCancelDelete={() => setConfirmDeleteSessionId(null)}
             onSelect={handleSelect}
           />

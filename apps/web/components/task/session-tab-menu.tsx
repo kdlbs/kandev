@@ -25,6 +25,45 @@ import type { TaskSessionState } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 import { SessionDeleteDescription } from "./session-delete-description";
 
+export function BulkSessionRemoveDialog({
+  scope,
+  count,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  scope: "others" | "all" | null;
+  count: number;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation();
+  const action = scope === "others" ? t("task:removeOthers") : t("task:removeAll");
+  return (
+    <AlertDialog open={scope !== null} onOpenChange={(open) => !open && onCancel()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("task:removeSessionsTitle", { count })}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("task:removeSessionsDescription", { count })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={pending}>{t("common:cancel")}</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={pending}
+            onClick={onConfirm}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {pending ? t("task:removingSessions", { count }) : action}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 /** Lifecycle callbacks the context menu needs from the owning tab.
  * `handleCloseOthers` is dockview-specific (closing sibling panels) and has
  * no equivalent where tabs are a plain session switcher, so it's optional —
@@ -34,6 +73,8 @@ export type SessionTabMenuActions = {
   handleStop: () => void;
   handleResume: () => void;
   handleCloseOthers?: () => void;
+  handleRemoveOthers?: () => void;
+  handleRemoveAll?: () => void;
 };
 
 export function DeleteSessionDialog({
@@ -202,6 +243,21 @@ export function SessionContextMenuItems({
           <ContextMenuSeparator />
           <ContextMenuItem className="cursor-pointer" onSelect={actions.handleCloseOthers}>
             {t("task:closeOthers")}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            className="cursor-pointer text-destructive focus:text-destructive"
+            onSelect={actions.handleRemoveOthers}
+            disabled={!actions.handleRemoveOthers}
+          >
+            {t("task:removeOthers")}
+          </ContextMenuItem>
+          <ContextMenuItem
+            className="cursor-pointer text-destructive focus:text-destructive"
+            onSelect={actions.handleRemoveAll}
+            disabled={!actions.handleRemoveAll}
+          >
+            {t("task:removeAll")}
           </ContextMenuItem>
         </>
       )}
