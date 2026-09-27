@@ -2,13 +2,21 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverTrigger } from "@kandev/ui/popover";
 import TaskLink from "@/components/routing/task-link";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { cn } from "@/lib/utils";
 import type { AttentionStall, AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
 import { StallEvidenceContent } from "./stall-evidence-content";
 
 function OpenTaskAction({ task }: { task: AttentionTask }) {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   return (
-    <Button asChild variant="outline" size="sm">
+    <Button
+      asChild
+      variant="outline"
+      size="sm"
+      className={cn(!isFinePointer && "min-h-11 min-w-11")}
+    >
       <TaskLink taskId={task.id}>{t("coordinator:openTask")}</TaskLink>
     </Button>
   );
@@ -16,10 +24,11 @@ function OpenTaskAction({ task }: { task: AttentionTask }) {
 
 function ShowEvidenceAction({ task, stall }: { task: AttentionTask; stall: AttentionStall }) {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="sm" className={cn(!isFinePointer && "min-h-11 min-w-11")}>
           {t("coordinator:showEvidence")}
         </Button>
       </PopoverTrigger>
