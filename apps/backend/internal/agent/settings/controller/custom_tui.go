@@ -133,6 +133,7 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 	if err := c.repo.CreateAgent(ctx, agent); err != nil {
 		// Rollback registry on DB failure
 		_ = c.agentRegistry.Unregister(slug)
+		c.InvalidateDiscoveryCache()
 		return nil, err
 	}
 

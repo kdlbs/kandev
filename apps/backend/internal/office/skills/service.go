@@ -307,8 +307,18 @@ func (s *SkillService) ListSkillsFromConfig(ctx context.Context, workspaceID str
 // shows up as an empty System group in the UI, not a 500 from the
 // list endpoint.
 func (s *SkillService) ensureSystemSkillsForWorkspace(ctx context.Context, workspaceID string) {
-	if _, err := SyncSystemSkills(ctx, s.repo, []string{workspaceID}, nil, s.logger); err != nil {
+	report, err := SyncSystemSkills(ctx, s.repo, []string{workspaceID}, nil, s.logger)
+	if err != nil {
 		s.logger.Warn("ensure system skills for workspace failed",
 			zap.String("workspace_id", workspaceID), zap.Error(err))
+		return
+	}
+	if len(report.Inserted) == 0 && len(report.Removed) == 0 {
+		return
+	}
+	if backfiller, ok := s.agents.(interface {
+		BackfillDefaultSkillsForWorkspace(context.Context, string)
+	}); ok {
+		backfiller.BackfillDefaultSkillsForWorkspace(ctx, workspaceID)
 	}
 }

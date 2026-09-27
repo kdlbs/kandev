@@ -43,6 +43,12 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+test("enables browser continuity in the normal E2E profile", async ({ apiClient }) => {
+  const response = await apiClient.rawRequest("GET", "/api/v1/features");
+  expect(response.ok).toBeTruthy();
+  expect(await response.json()).toMatchObject({ lspBrowserContinuity: true });
+});
+
 test.describe("LSP file intelligence", () => {
   test.describe.configure({ timeout: 90_000 });
 
@@ -959,31 +965,38 @@ test.describe("LSP file intelligence", () => {
     seedData,
     backend,
   }) => {
-    const featureResponse = await apiClient.rawRequest("GET", "/api/v1/features");
-    expect(featureResponse.ok).toBeTruthy();
-    expect(await featureResponse.json()).toMatchObject({ lspBrowserContinuity: false });
-    installFakeKotlinLsp(backend);
-    const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
-      title: "Kotlin LSP Manual Persistence",
+    const releaseFeature = await backend.useEnv({
+      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "false",
     });
-    await openDesktopFile(testPage, task.session, task.filePaths[0]);
-    let statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await performLspAction(testPage, "start");
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
-    const storageKey = `kandev-lsp:${task.sessionId}:kotlin`;
-    expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBe("1");
+    try {
+      const featureResponse = await apiClient.rawRequest("GET", "/api/v1/features");
+      expect(featureResponse.ok).toBeTruthy();
+      expect(await featureResponse.json()).toMatchObject({ lspBrowserContinuity: false });
+      installFakeKotlinLsp(backend);
+      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Kotlin LSP Manual Persistence",
+      });
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+      let statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
+      await performLspAction(testPage, "start");
+      await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      const storageKey = `kandev-lsp:${task.sessionId}:kotlin`;
+      expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBe("1");
 
-    await testPage.reload();
-    await openDesktopFile(testPage, task.session, task.filePaths[0]);
-    statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
-    await expect
-      .poll(() => readFakeLspEvents(backend).filter((event) => event.event === "started").length)
-      .toBeGreaterThanOrEqual(2);
+      await testPage.reload();
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+      statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
+      await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      await expect
+        .poll(() => readFakeLspEvents(backend).filter((event) => event.event === "started").length)
+        .toBeGreaterThanOrEqual(2);
 
-    await performLspAction(testPage, "stop");
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
-    expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBeNull();
+      await performLspAction(testPage, "stop");
+      await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
+      expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBeNull();
+    } finally {
+      await releaseFeature();
+    }
   });
 
   test("cleans up a crashed server and reconnects", async ({
@@ -1140,9 +1153,6 @@ test.describe("LSP file intelligence", () => {
     const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
       ? (initial.settings.lsp_auto_start_languages as string[])
       : [];
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
-    });
     const context = testPage.context();
 
     try {
@@ -1233,7 +1243,6 @@ test.describe("LSP file intelligence", () => {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_auto_start_languages: initialAutoStart,
       });
-      await releaseFeature();
     }
   });
 

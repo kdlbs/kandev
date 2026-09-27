@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -419,6 +420,8 @@ func TestPromptSendNowClaimStartsCreatedSessionManually(t *testing.T) {
 
 func TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt(t *testing.T) {
 	ctx := context.Background()
+	const promptReferenceContext = "EXPANDED PROMPT REFERENCES: The message above references saved prompts by @name. " +
+		"Use these expansions as hidden context while preserving the original @mentions.\n\n### @principles\nApply the repository principles."
 	repo := setupTestRepo(t)
 	seedTaskAndSessionWithStep(t, repo, "queued-created", "queued-session", "queued-step")
 	seedExecutorRunning(t, repo, "queued-session", "queued-created", "prepared-exec")
@@ -439,10 +442,12 @@ func TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt(t *testing
 	deferral := models.CeilingDeferral{
 		Kind: models.CeilingLaunchStartCreated,
 		Payload: map[string]interface{}{
-			metaKeySessionID:      "queued-session",
-			metaKeyAgentProfileID: "profile-queued",
-			metaKeyPrompt:         "workflow prompt",
-			"skip_message_record": true,
+			metaKeySessionID:           "queued-session",
+			metaKeyAgentProfileID:      "profile-queued",
+			metaKeyPrompt:              "workflow prompt @principles\n\n" + sysprompt.Wrap(promptReferenceContext),
+			"prompt_already_composed":  true,
+			"prompt_reference_context": promptReferenceContext,
+			"skip_message_record":      true,
 		},
 		Origin:          string(launchOriginAutomatic),
 		ReasonCode:      ceilingReasonRefused,
@@ -480,8 +485,10 @@ func TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt(t *testing
 		}
 		agentMgr.mu.Unlock()
 		if descriptionCalls == 1 {
-			if !strings.Contains(descriptions[0], "workflow prompt") || !strings.Contains(descriptions[0], "pending Continue") {
-				t.Fatalf("created-session launch prompt = %q, want workflow prompt and Continue", descriptions[0])
+			if !strings.Contains(descriptions[0], "workflow prompt @principles") || !strings.Contains(descriptions[0], "pending Continue") ||
+				!strings.Contains(descriptions[0], "Apply the repository principles.") ||
+				strings.Count(descriptions[0], promptReferenceContext) != 1 {
+				t.Fatalf("created-session launch prompt = %q, want workflow prompt, trusted context once, and Continue", descriptions[0])
 			}
 			launched = true
 			break

@@ -7,18 +7,23 @@ const mockSetKanbanMultiLoading = vi.fn();
 const mockSetWorkflowSnapshot = vi.fn();
 const mockSetWorkspaceSnapshotRead = vi.fn();
 const mockFetchWorkflowSnapshot = vi.fn();
+const mockHydrate = vi.fn();
 
 type Workflow = { id: string; workspaceId: string; name: string };
+const NEW_WORKFLOW_ID = "workflow-new";
+const NEW_WORKFLOW_NAME = "Created later";
 type MockState = {
   connection: { status: string };
   workspaces: { activeId: string | null };
   workspaceContextGeneration: number;
   workflows: { items: Workflow[] };
+  kanban: { workflowId: string | null; steps: unknown[]; tasks: unknown[] };
   kanbanMulti: { snapshots: Record<string, unknown>; isLoading: boolean };
   clearKanbanMulti: typeof mockClearKanbanMulti;
   setKanbanMultiLoading: typeof mockSetKanbanMultiLoading;
   setWorkflowSnapshot: typeof mockSetWorkflowSnapshot;
   setWorkspaceSnapshotRead: typeof mockSetWorkspaceSnapshotRead;
+  hydrate: typeof mockHydrate;
 };
 
 let mockState: MockState = {
@@ -26,11 +31,13 @@ let mockState: MockState = {
   workspaces: { activeId: "ws-A" },
   workspaceContextGeneration: 0,
   workflows: { items: [] },
+  kanban: { workflowId: null, steps: [], tasks: [] },
   kanbanMulti: { snapshots: {}, isLoading: false },
   clearKanbanMulti: mockClearKanbanMulti,
   setKanbanMultiLoading: mockSetKanbanMultiLoading,
   setWorkflowSnapshot: mockSetWorkflowSnapshot,
   setWorkspaceSnapshotRead: mockSetWorkspaceSnapshotRead,
+  hydrate: mockHydrate,
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -42,7 +49,7 @@ vi.mock("@/lib/api", () => ({
   fetchWorkflowSnapshot: (...args: unknown[]) => mockFetchWorkflowSnapshot(...args),
 }));
 
-import { useAllWorkflowSnapshots } from "./use-all-workflow-snapshots";
+import { useAllWorkflowSnapshots, useWorkflowSnapshotById } from "./use-all-workflow-snapshots";
 
 function resetMocks(workflows: Workflow[] = []) {
   vi.clearAllMocks();
@@ -52,11 +59,13 @@ function resetMocks(workflows: Workflow[] = []) {
     workspaces: { activeId: workflows[0]?.workspaceId ?? null },
     workspaceContextGeneration: 0,
     workflows: { items: workflows },
+    kanban: { workflowId: null, steps: [], tasks: [] },
     kanbanMulti: { snapshots: {}, isLoading: false },
     clearKanbanMulti: mockClearKanbanMulti,
     setKanbanMultiLoading: mockSetKanbanMultiLoading,
     setWorkflowSnapshot: mockSetWorkflowSnapshot,
     setWorkspaceSnapshotRead: mockSetWorkspaceSnapshotRead,
+    hydrate: mockHydrate,
   };
 }
 
@@ -149,6 +158,95 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
     await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(2));
     expect(mockFetchWorkflowSnapshot.mock.calls[1][0]).toBe("wf-A2");
     expect(mockClearKanbanMulti).not.toHaveBeenCalled();
+  });
+});
+
+describe("useWorkflowSnapshotById", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "workflow-catalog", workspaceId: "ws-A", name: "Catalog workflow" }]);
+  });
+
+  it("loads steps for a workflow missing from the catalog without changing board selection", async () => {
+    mockState.kanban = { workflowId: "workflow-active", steps: [], tasks: [] };
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      workflow: { id: NEW_WORKFLOW_ID, name: NEW_WORKFLOW_NAME },
+      steps: [{ id: "analysis", name: "Analysis", position: 0 }],
+      tasks: [],
+    });
+
+    renderHook(() => useWorkflowSnapshotById("ws-A", NEW_WORKFLOW_ID));
+
+    await waitFor(() =>
+      expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith(NEW_WORKFLOW_ID, {
+        cache: "no-store",
+      }),
+    );
+    await waitFor(() =>
+      expect(mockSetWorkflowSnapshot).toHaveBeenCalledWith(
+        NEW_WORKFLOW_ID,
+        expect.objectContaining({
+          workflowId: NEW_WORKFLOW_ID,
+          workflowName: NEW_WORKFLOW_NAME,
+          steps: [expect.objectContaining({ id: "analysis", title: "Analysis" })],
+        }),
+      ),
+    );
+
+    expect(mockState.kanban.workflowId).toBe("workflow-active");
+    expect(mockHydrate).not.toHaveBeenCalled();
+    expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a failed placeholder fetch after the task page remounts", async () => {
+    mockState.kanbanMulti.snapshots[NEW_WORKFLOW_ID] = {
+      workflowId: NEW_WORKFLOW_ID,
+      workflowName: NEW_WORKFLOW_NAME,
+      steps: [],
+      tasks: [],
+      isPlaceholder: true,
+    };
+    mockSetWorkflowSnapshot.mockImplementationOnce((id: string, snapshot: unknown) => {
+      mockState.kanbanMulti.snapshots[id] = snapshot;
+    });
+    mockFetchWorkflowSnapshot
+      .mockRejectedValueOnce(new Error("temporary fetch failure"))
+      .mockResolvedValueOnce({
+        workflow: { id: NEW_WORKFLOW_ID, name: NEW_WORKFLOW_NAME },
+        steps: [{ id: "analysis", name: "Analysis", position: 0 }],
+        tasks: [],
+      });
+
+    const firstMount = renderHook(() => useWorkflowSnapshotById("ws-A", NEW_WORKFLOW_ID));
+    try {
+      await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1));
+      await waitFor(() =>
+        expect(mockSetWorkflowSnapshot).toHaveBeenCalledWith(
+          NEW_WORKFLOW_ID,
+          expect.objectContaining({ isPlaceholder: false, fetchFailed: true }),
+        ),
+      );
+      firstMount.unmount();
+
+      const secondMount = renderHook(() => useWorkflowSnapshotById("ws-A", NEW_WORKFLOW_ID));
+      try {
+        await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(2));
+        await waitFor(() =>
+          expect(mockSetWorkflowSnapshot).toHaveBeenCalledWith(
+            NEW_WORKFLOW_ID,
+            expect.objectContaining({
+              workflowId: NEW_WORKFLOW_ID,
+              steps: [expect.objectContaining({ id: "analysis", title: "Analysis" })],
+            }),
+          ),
+        );
+      } finally {
+        secondMount.unmount();
+      }
+    } finally {
+      firstMount.unmount();
+      mockFetchWorkflowSnapshot.mockReset();
+      mockFetchWorkflowSnapshot.mockResolvedValue({ steps: [], tasks: [] });
+    }
   });
 });
 

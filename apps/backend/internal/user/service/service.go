@@ -91,6 +91,7 @@ type UpdateUserSettingsRequest struct {
 	SidebarTaskColorPatch             *models.SidebarTaskColorPatch
 	TaskCreateLastUsed                *models.TaskCreateLastUsed
 	JiraSavedViews                    **json.RawMessage
+	JiraDefaultViewID                 *string
 	JiraTaskPresets                   **json.RawMessage
 	GitHubSavedPresets                **json.RawMessage
 	GitHubDefaultQueryPresets         **json.RawMessage
@@ -401,6 +402,9 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.JiraDefaultViewID != nil {
+		settings.JiraDefaultViewID = strings.TrimSpace(*req.JiraDefaultViewID)
+	}
 	if err := applySidebarHoverSettings(settings, req); err != nil {
 		return err
 	}
@@ -1189,6 +1193,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"sidebar_task_colors":                      models.CloneSidebarTaskColors(settings.SidebarTaskColors),
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
+		"jira_default_view_id":                     settings.JiraDefaultViewID,
 		"jira_task_presets":                        settings.JiraTaskPresets,
 		"github_saved_presets":                     settings.GitHubSavedPresets,
 		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,

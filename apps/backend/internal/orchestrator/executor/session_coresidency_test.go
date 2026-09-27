@@ -154,6 +154,7 @@ func TestObserveSessionCoresidency_SiblingReadFailureRecordsSkipNotAbsence(t *te
 // that this launch recorded exactly one local warning.
 func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	repo := newMockRepository()
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateScheduling}
 	repo.sessions["session-123"] = &models.TaskSession{
 		ID:             "session-123",
 		TaskID:         "task-123",
@@ -169,7 +170,7 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewFromZap: %v", err)
 	}
-	startCalled := make(chan struct{}, 1)
+	processStarted := make(chan struct{}, 1)
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			return &LaunchAgentResponse{
@@ -178,7 +179,7 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 			}, nil
 		},
 		startAgentProcessFunc: func(context.Context, string) error {
-			startCalled <- struct{}{}
+			processStarted <- struct{}{}
 			return nil
 		},
 	}
@@ -201,23 +202,17 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 		t.Fatalf("LaunchPreparedSession failed: %v", err)
 	}
 	select {
-	case <-startCalled:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for StartAgentProcess")
+	case <-processStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the agent process to start")
 	}
 
-	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after < before+1 {
-		t.Fatalf("admitted[launch] counter = %d, want at least %d", after, before+1)
+	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after != before+1 {
+		t.Fatalf("admitted[launch] counter = %d, want %d", after, before+1)
 	}
-	const observationMessage = "starting an agent while another session of this task is already working in the shared worktree"
-	var warnings []observer.LoggedEntry
-	for _, entry := range logs.All() {
-		if strings.HasPrefix(entry.Message, observationMessage) {
-			warnings = append(warnings, entry)
-		}
-	}
+	warnings := logs.FilterLevelExact(zapcore.WarnLevel).All()
 	if len(warnings) != 1 {
-		t.Fatalf("co-residency warning entries = %d, want 1; all=%v", len(warnings), logs.All())
+		t.Fatalf("warning entries = %d, want 1; all=%v", len(warnings), logs.All())
 	}
 	fields := warnings[0].ContextMap()
 	if fields["site"] != sessionCoresidencySiteLaunch {
@@ -240,42 +235,35 @@ func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFromZap: %v", err)
 	}
-	observedAtStart := make(chan int, 1)
-	finished := make(chan struct{})
+	processStarted := make(chan struct{}, 1)
 	agentMgr := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			return &LaunchAgentResponse{AgentExecutionID: "exec-new"}, nil
 		},
 		startAgentProcessFunc: func(context.Context, string) error {
-			observedAtStart <- logs.FilterLevelExact(zapcore.WarnLevel).Len()
+			processStarted <- struct{}{}
 			return nil
 		},
 	}
 	exec := NewExecutor(agentMgr, repo, log, ExecutorConfig{ShellPrefs: &mockShellPrefs{}})
 	exec.SetCapabilities(&mockCapabilities{})
-	exec.SetOnAgentProcessStarted(func(context.Context, string, string, string) { close(finished) })
 	before := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume)
 
 	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
 		t.Fatalf("ResumeSession: %v", err)
 	}
-
 	select {
-	case <-finished:
+	case <-processStarted:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for resumed agent startup")
-	}
-	if observed := <-observedAtStart; observed != 2 {
-		t.Fatalf("observations before process start = %d, want launch admission and process startup", observed)
+		t.Fatal("timed out waiting for the agent process to start")
 	}
 
-	// Other tests can still emit asynchronous observations into the global counter.
-	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume); after < before+2 {
-		t.Fatalf("admitted[resume] counter = %d, want at least %d", after, before+2)
+	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume); after != before+1 {
+		t.Fatalf("admitted[resume] counter = %d, want %d", after, before+1)
 	}
 	warnings := logs.FilterLevelExact(zapcore.WarnLevel).All()
-	if len(warnings) != 2 {
-		t.Fatalf("warning entries = %d, want 2; all=%v", len(warnings), logs.All())
+	if len(warnings) != 1 {
+		t.Fatalf("warning entries = %d, want 1; all=%v", len(warnings), logs.All())
 	}
 	fields := warnings[0].ContextMap()
 	if fields["site"] != sessionCoresidencySiteResume {

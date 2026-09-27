@@ -770,6 +770,7 @@ function useCreationComposerPluginActions(args: {
         submittable: !args.disabled && args.description.trim().length > 0,
         composer,
       }}
+      actionSurface={{ surface: "composer", presentation: isMobile ? "mobile" : "desktop" }}
     />
   );
 }

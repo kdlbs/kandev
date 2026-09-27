@@ -229,6 +229,7 @@ class LSPClientManager {
     if (!conn || (!conn.initialized && !conn.reconnecting)) return;
     const documentUri = canonicalFileUri(document.uri);
     if (!documentUri) return;
+    conn.closedDocuments.delete(documentUri);
     this.promoteDocumentModel(sessionId, documentUri, document.text);
     const existing = conn.openDocuments.get(documentUri);
     if (existing) {
@@ -368,6 +369,8 @@ class LSPClientManager {
     if (!document) return;
     document.refCount = Math.max(0, document.refCount - 1);
     if (document.refCount > 0) return;
+    this.editorState.clearDocumentDiagnostics(conn, canonicalUri);
+    conn.closedDocuments.add(canonicalUri);
 
     if (conn.continuityEnabled && conn.reconnecting && !conn.documentsSynced) {
       document.pendingClose = true;

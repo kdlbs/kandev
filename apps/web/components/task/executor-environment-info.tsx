@@ -364,6 +364,30 @@ function Field({
 // truncation is useless. Omit to copy `value` verbatim.
 type FieldRow = { label: string; value: string; copy?: boolean; copyValue?: string };
 
+// containerShellCommand builds the command that reaches the container from
+// the machine the user is on.
+//
+// A remote Docker container lives on the executor's host, so a bare
+// `docker exec` runs against the wrong daemon and fails. Prefix the same
+// command with the SSH hop the executor itself uses. With no known host there
+// is nothing truthful to prefix, so the plain form is still the best answer.
+function containerShellCommand(
+  env: TaskEnvironment,
+  ssh: SSHLiveStatus | null,
+  shortID: string,
+): string {
+  // `sh` rather than `bash`: user-built images may only ship /bin/sh
+  // (busybox/alpine/etc.), and the bootstrap entrypoint already assumes sh.
+  const exec = `docker exec -it ${shortID} sh`;
+  if (env.executor_type !== "remote_docker" || !ssh?.host) return exec;
+
+  const port = ssh.port && ssh.port !== 22 ? `-p ${ssh.port} ` : "";
+  const target = ssh.user ? `${ssh.user}@${ssh.host}` : ssh.host;
+  // `-t`: ssh allocates no terminal when given a command, and `docker exec -t`
+  // refuses to run without one.
+  return `ssh -t ${port}${target} ${exec}`;
+}
+
 function buildFields(
   env: TaskEnvironment,
   container: ContainerLiveStatus | null,
@@ -382,12 +406,9 @@ function buildFields(
   if (env.container_id) {
     const short = env.container_id.slice(0, 12);
     rows.push({ label: t("task:container"), value: short, copy: true });
-    // Use `sh` rather than `bash` — user-built images may only ship
-    // /bin/sh (busybox/alpine/etc.), and the bootstrap entrypoint already
-    // assumes sh-only.
     rows.push({
       label: t("common:shell"),
-      value: `docker exec -it ${short} sh`,
+      value: containerShellCommand(env, ssh, short),
       copy: true,
     });
     if (container?.started_at && container.state === "running") {

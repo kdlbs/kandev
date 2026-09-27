@@ -233,7 +233,9 @@ async function runProfileSessionLifecycleScenario(
       workflow_step_id: inbox.id,
       agent_profile_id: profileA.id,
       repository_ids: [seedData.repositoryId],
-      description: "Run the workflow lifecycle scenario",
+      // Keep the lifecycle assertion independent of natural-language model
+      // response time, especially for the intentionally slower profile B.
+      description: "/e2e:simple-message",
     },
   );
   await apiClient.moveTask(task.id, workflow.id, stepA.id);

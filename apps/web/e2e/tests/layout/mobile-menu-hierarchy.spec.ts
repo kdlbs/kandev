@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { expectTouchControl } from "../../helpers/control-sizing";
 
 // @covers AC-UI-MOBILE-MENU-006.1 AC-UI-MOBILE-MENU-006.2
 for (const route of ["/", "/tasks", "/threads"]) {
@@ -182,7 +183,7 @@ test("translated quick actions fit their phone targets", async ({ testPage }) =>
           (el) => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight,
         ),
       ).toBe(true);
-      expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await expectTouchControl(button);
     }
     await testPage.screenshot({ path: test.info().outputPath(`quick-actions-pt-${width}.png`) });
   }

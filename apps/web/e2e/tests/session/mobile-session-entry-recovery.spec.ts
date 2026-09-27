@@ -30,7 +30,8 @@ test.describe("mobile session entry recovery", () => {
       `Mobile history recovery ${Date.now()}`,
     );
 
-    proxy.dropNextResponses("message.list", 2);
+    if (!task.session_id) throw new Error("created recovery task has no session");
+    proxy.dropNextResponses("message.list", 2, { sessionId: task.session_id });
 
     const session = await openTaskSession(testPage, task.id);
     const chat = session.activeChat();

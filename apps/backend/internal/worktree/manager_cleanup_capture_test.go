@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -120,6 +121,44 @@ func TestCaptureCleanupHeadOIDs_MissingWorktree(t *testing.T) {
 		if _, err := os.Lstat(wt.Path); err == nil && wt.ID != "healthy" {
 			t.Errorf("capture unexpectedly created path for %q", wt.ID)
 		}
+	}
+}
+
+func TestCaptureCleanupHeadOIDs_PathRemovedDuringInspection(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "checkout")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	wantOID := strings.TrimSpace(runGit(t, worktreePath, "rev-parse", "HEAD"))
+
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("locate git: %v", err)
+	}
+	scriptDir := writeFakeGitScript(t, `
+if [ "${1:-}" = "rev-parse" ] && [ "${2:-}" = "--verify" ]; then
+  rm -rf "$PWD"
+  exit 128
+fi
+exec "${KD_REAL_GIT:?}" "$@"
+`)
+	t.Setenv("KD_REAL_GIT", gitPath)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	mgr := newCaptureTestManager(t)
+
+	got, err := mgr.CaptureCleanupHeadOIDs(context.Background(), []*Worktree{{
+		ID:             "disappearing-checkout",
+		RepositoryPath: repoPath,
+		Path:           worktreePath,
+		Branch:         "feature/pr-branch",
+	}})
+	if err != nil {
+		t.Fatalf("CaptureCleanupHeadOIDs() unexpected error: %v", err)
+	}
+	if got["disappearing-checkout"] != wantOID {
+		t.Fatalf("captured identity = %q, want %q", got["disappearing-checkout"], wantOID)
+	}
+	if _, err := os.Lstat(worktreePath); err == nil {
+		t.Fatalf("worktree path %q still exists after simulated concurrent removal", worktreePath)
 	}
 }
 

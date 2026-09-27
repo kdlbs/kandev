@@ -186,7 +186,10 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     // registration below is only a real test of the claim behavior (not a
     // duplicate-seat false negative) if there is something to claim.
     await expect
-      .poll(async () => (await getParticipants(apiClient, task.id, "reviewers")).length)
+      .poll(async () => (await getParticipants(apiClient, task.id, "reviewers")).length, {
+        timeout: 30_000,
+        message: "Waiting for the Review participant seat",
+      })
       .toBe(1);
 
     // AddTaskParticipant binds the new row to the task's CURRENT

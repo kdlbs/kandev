@@ -15,6 +15,15 @@ import (
 
 const allowUserNamespacesProfileConfigKey = "allow_user_namespaces"
 
+// Container network placement keys. Spelled out rather than imported from
+// internal/agent/runtime/lifecycle, which this tier must not depend on
+// directly; the test asserts they still match the runtime's canonical names.
+const (
+	dockerNetworkProfileConfigKey            = "docker_network"
+	dockerNetworkGwPriorityProfileConfigKey  = "docker_network_gw_priority"
+	dockerAdditionalNetworksProfileConfigKey = "docker_additional_networks"
+)
+
 // operatorOnlyConfigKeys are executor profile Config keys that the
 // agent-exposed MCP tools (create_executor_profile, update_executor_profile)
 // must reject. These keys can only be set through the operator HTTP/WS API.
@@ -24,6 +33,15 @@ const allowUserNamespacesProfileConfigKey = "allow_user_namespaces"
 // powerful).
 var operatorOnlyConfigKeys = []string{
 	allowUserNamespacesProfileConfigKey,
+	// Network placement decides what a task container can reach: an internal
+	// network denies egress, a macvlan gives it an address on the operator's
+	// physical LAN. An agent that set these on a profile it creates would be
+	// choosing its own containment. A prepare script cannot cross that
+	// boundary, so the "prepare_script is strictly more powerful" reasoning
+	// above does not cover them.
+	dockerNetworkProfileConfigKey,
+	dockerNetworkGwPriorityProfileConfigKey,
+	dockerAdditionalNetworksProfileConfigKey,
 }
 
 // rejectOperatorConfigKeys returns an error if the config map contains any
