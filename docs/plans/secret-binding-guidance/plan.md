@@ -87,13 +87,15 @@ Both tests cover AC-WORKSPACES-REPOSITORY-SECRETS-001.13. Write the first assert
 
 Completed Task 01 and a follow-up review finding. The desktop and phone browser tests first failed on the missing session-binding explanation. A new assertion then reproduced the removed encryption-at-rest assurance. Both E2E specs pass after the Global descriptions retained that assurance alongside the binding guidance.
 
+PR review follow-up strengthened the shared helper to assert the binding instruction itself in both scopes, so listing binding locations alone cannot satisfy the regression. This is test-only coverage; no product behavior or public contract changed. The desktop and phone specs passed again after the assertions were added.
+
 - `pnpm run i18n:zh-hant` and `pnpm run i18n:pseudo` completed.
 - `pnpm run i18n:check` passed.
 - `pnpm run typecheck` passed.
 - `pnpm run build` passed.
 - `make build` and `make e2e-plugin-package` passed to refresh artifacts after locale generation.
-- `pnpm e2e:run --no-build --project chromium tests/settings/secret-binding-guidance.spec.ts` passed.
-- `pnpm e2e:run --no-build --project mobile-chrome tests/settings/mobile-secret-binding-guidance.spec.ts` passed.
+- `pnpm e2e:run --no-build --project chromium tests/settings/secret-binding-guidance.spec.ts` passed (1 test, including direct binding-instruction assertions).
+- `pnpm e2e:run --no-build --project mobile-chrome tests/settings/mobile-secret-binding-guidance.spec.ts` passed (1 test, including direct binding-instruction assertions).
 
 ## Risks
 

@@ -90,11 +90,13 @@ The Global description currently names only executor profiles. Keep its translat
 
 The desktop and mobile regressions failed on the missing session-binding sentence before the catalog updates, then passed after implementation. A follow-up assertion reproduced the removal of the Global encryption-at-rest assurance; both browser specs pass with that statement restored. Secret values remain hidden and phone content has no horizontal overflow.
 
+PR review follow-up added direct assertions for the binding instruction in both scopes. This is test-only contract coverage; no product behavior or public contract changed. Both focused browser specs passed again with the stronger assertions.
+
 - `pnpm run i18n:zh-hant` passed and generated the Traditional Chinese pair.
 - `pnpm run i18n:pseudo` passed.
 - `pnpm run i18n:check` passed.
 - `pnpm run typecheck` passed.
 - `pnpm run build` passed.
 - `make build` and `make e2e-plugin-package` passed to refresh artifacts after locale generation.
-- `pnpm e2e:run --no-build --project chromium tests/settings/secret-binding-guidance.spec.ts` passed (1 test).
-- `pnpm e2e:run --no-build --project mobile-chrome tests/settings/mobile-secret-binding-guidance.spec.ts` passed (1 test).
+- `pnpm e2e:run --no-build --project chromium tests/settings/secret-binding-guidance.spec.ts` passed (1 test, including the direct Global binding-instruction assertion).
+- `pnpm e2e:run --no-build --project mobile-chrome tests/settings/mobile-secret-binding-guidance.spec.ts` passed (1 test, including the direct Workspace binding-instruction assertion).

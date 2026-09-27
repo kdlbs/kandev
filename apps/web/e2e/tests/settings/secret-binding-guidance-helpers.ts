@@ -11,12 +11,18 @@ export async function expectSecretBindingGuidance(page: Page, scope: SecretGuida
   await expect(description).toBeVisible();
   if (scope === "global") {
     await expect(description).toContainText(/encrypted at rest/i);
+    // Reviewer-requested test-only contract coverage for the binding action, not only its locations.
+    await expect(description).toContainText(
+      /Bind it in an agent profile, executor profile, or repository environment to make it available\./i,
+    );
     await expect(description).toContainText(/agent profile/i);
     await expect(description).toContainText(/executor profile/i);
     await expect(description).toContainText(/repository environment/i);
     return description;
   }
 
+  // Reviewer-requested test-only contract coverage for the workspace binding action.
+  await expect(description).toContainText(/Bind it to a repository in this workspace\./i);
   await expect(description).toContainText(/repository in this workspace/i);
   await expect(description).toContainText(/shared profiles cannot use Workspace secrets/i);
   return description;
