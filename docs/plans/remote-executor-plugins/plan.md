@@ -282,6 +282,12 @@ manifest schema strings with named constants. Plugin packaging, the CI-equivalen
 managed desktop profile E2E passed locally. Final-head remote CI remains pending after the remediation
 push and is recorded in the Kandev task plan.
 
+The final pre-push PR checks also exposed a nondeterministic workflow-step test helper and two E2E
+fixtures that depended on stale or implicit executor-profile selection. Task 10 records the corrections
+and exact local reruns: the workflow helper passes 20 race-enabled repetitions, both exact E2Es pass with
+retries disabled, changed-code Go lint reports zero issues, the backend builds, and the E2E files pass
+Prettier and ESLint. The updated-head CI run remains pending.
+
 ## Risks
 
 - Cross-process allocation cannot be made atomic with SQLite/PostgreSQL. Provider operation recovery is mandatory.

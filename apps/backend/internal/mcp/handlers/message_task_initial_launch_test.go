@@ -345,12 +345,13 @@ func (g *peerMessageWorkflowStepGetter) GetStep(_ context.Context, stepID string
 }
 
 func (g *peerMessageWorkflowStepGetter) GetNextStepByPosition(_ context.Context, workflowID string, position int) (*wfmodels.WorkflowStep, error) {
+	var next *wfmodels.WorkflowStep
 	for _, step := range g.steps {
-		if step.WorkflowID == workflowID && step.Position > position {
-			return step, nil
+		if step.WorkflowID == workflowID && step.Position > position && (next == nil || step.Position < next.Position) {
+			next = step
 		}
 	}
-	return nil, nil
+	return next, nil
 }
 
 func (*peerMessageWorkflowStepGetter) GetPreviousStepByPosition(context.Context, string, int) (*wfmodels.WorkflowStep, error) {

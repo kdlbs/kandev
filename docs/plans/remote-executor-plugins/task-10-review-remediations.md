@@ -190,6 +190,27 @@ A broad multi-package Go test invocation later exceeded its 600-second limit whi
 service regression passed in isolation, and the earlier full-suite and race results above remain recorded
 for the initial five findings.
 
+## PR fixup for the final pre-push checks
+
+The final PR check run exposed two test issues and a backend test-helper race. The backend workflow-step
+fixture iterated a map and could return a non-nearest higher-position step; it now returns the minimum
+higher position. `go test -race ./internal/mcp/handlers -run
+'^TestPeerMessageInitialLaunch_QueuesBeforeWorkflowTurnPreparation$' -count=20` and
+`go test ./internal/plugins/manifest` passed. The manifest schema type check also reuses the existing
+string-type constant to satisfy the exact changed-code lint command.
+
+The repository-secret E2E now pins the worktree profile so it exercises the setup-script path instead of
+the default local reuse path, which skips setup. The mobile policy-subtask E2E now selects the seeded
+local profile already loaded by the UI and scopes the option to the active profile drawer. This avoids
+creating a profile after the page's executor list is cached and avoids retrying a tap against a stale,
+offscreen option. Both exact tests passed with retries disabled:
+
+- `E2E_DEBUG=1 E2E_PORT_OFFSET=28 TMPDIR=/root/k.D6zpBC GOTMPDIR=/root/k.D6zpBC pnpm e2e:run --host --no-build --project chromium e2e/tests/settings/repository-secrets.spec.ts -- --grep "passes the resolved binding to setup and a new local terminal" --retries=0`
+- `E2E_DEBUG=1 E2E_PORT_OFFSET=27 TMPDIR=/root/k.D6zpBC GOTMPDIR=/root/k.D6zpBC pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/task/mobile-sidebar-task-actions.spec.ts -- --grep "creates a policy branch for a local-executor subtask" --retries=0`
+
+The exact CI Go lint command passed with zero issues. `make -C apps/backend build`, Prettier, ESLint,
+`gofmt -l`, and `git diff --check` passed. Updated PR-head CI is pending the fixup push.
+
 ## Dependencies
 
 [Task 02](task-02-authenticated-transport.md), [Task 03](task-03-profile-admission.md),

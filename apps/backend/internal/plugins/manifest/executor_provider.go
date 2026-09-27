@@ -294,7 +294,7 @@ func schemaNumericValue(value any) (float64, bool) {
 
 func executorSchemaPropertyType(prefix string, raw any) (string, error) {
 	typeName, ok := raw.(string)
-	if !ok || (typeName != "string" && typeName != executorSchemaTypeBoolean && typeName != executorSchemaTypeNumber && typeName != executorSchemaTypeInteger) {
+	if !ok || (typeName != automationStringType && typeName != executorSchemaTypeBoolean && typeName != executorSchemaTypeNumber && typeName != executorSchemaTypeInteger) {
 		return "", fmt.Errorf("%s.type must be string, boolean, number, or integer", prefix)
 	}
 	return typeName, nil
@@ -309,7 +309,7 @@ func validateExecutorSchemaSecret(prefix string, property map[string]any, allowS
 	if !ok {
 		return fmt.Errorf("%s.secret must be a boolean", prefix)
 	}
-	if secret && (!allowSecrets || typeName != "string") {
+	if secret && (!allowSecrets || typeName != automationStringType) {
 		return fmt.Errorf("%s cannot declare secret state", prefix)
 	}
 	return nil
@@ -386,7 +386,7 @@ func anySlice(value any) ([]any, bool) {
 
 func scalarMatchesType(value any, typeName string) bool {
 	switch typeName {
-	case "string":
+	case automationStringType:
 		_, ok := value.(string)
 		return ok
 	case executorSchemaTypeBoolean:
