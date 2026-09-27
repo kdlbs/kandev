@@ -78,7 +78,9 @@ describe("bulk session removal", () => {
       ),
     ).toBe(false);
   });
+});
 
+describe("bulk session removal execution", () => {
   it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.5 removes sequentially and leaves a selected other session", async () => {
     const remove = vi.fn<(id: string) => Promise<boolean>>().mockResolvedValue(true);
     const result = await executeBulkSessionRemoval(["hidden", "primary"], remove);
@@ -95,6 +97,31 @@ describe("bulk session removal", () => {
 
     expect(remove.mock.calls.map((call) => call[0])).toEqual(["first", "second"]);
     expect(result).toEqual({ removed: 1, remaining: 2, failed: true });
+  });
+
+  it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.6 rejects a second submit while deletion is pending", async () => {
+    let finishFirst: (value: boolean) => void = () => undefined;
+    const first = new Promise<boolean>((resolve) => {
+      finishFirst = resolve;
+    });
+    const remove = vi.fn<(id: string) => Promise<boolean>>().mockReturnValueOnce(first);
+    const sessions = [taskSession("first", "COMPLETED"), taskSession("second", "COMPLETED")];
+    const hook = renderHook(() => useBulkSessionRemoval({ sessions, isLoading: false, remove }));
+
+    act(() => hook.result.current.request("all", "first"));
+    let submission: ReturnType<typeof hook.result.current.confirm>;
+    act(() => {
+      submission = hook.result.current.confirm();
+    });
+    await act(async () => {
+      expect(await hook.result.current.confirm()).toBeNull();
+    });
+    expect(remove).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      finishFirst(false);
+      await submission;
+    });
+    expect(remove).toHaveBeenCalledTimes(1);
   });
 
   it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.3 refreshes stale Remove All before deleting the promoted primary", async () => {

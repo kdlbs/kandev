@@ -1,6 +1,6 @@
 ---
 created: 2026-09-27
-status: draft
+status: done
 requirements:
   - REQ-TASKS-BULK-SESSION-REMOVAL-001
   - REQ-TASKS-BULK-SESSION-REMOVAL-002
@@ -125,11 +125,16 @@ illustrative and must use existing primitives.
 
 ## Work orders
 
-- [ ] [Task 01: Implement task-scoped bulk session removal](task-01-bulk-session-removal.md)
+- [x] [Task 01: Implement task-scoped bulk session removal](task-01-bulk-session-removal.md)
 
 ## Verification results
 
-Pending.
+Completed. Focused Vitest, typecheck, localization checks, specification and
+public-doc validators, backend/web builds, and the desktop and phone browser
+flows passed. One unrelated task-switching browser case encountered a temporary
+"web app unavailable" fixture response during the full desktop run; its focused
+rerun passed. The phone confirmation screenshot was inspected at the Pixel 5
+viewport.
 
 ## Risks
 

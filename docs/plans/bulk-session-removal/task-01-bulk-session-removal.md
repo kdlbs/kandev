@@ -1,7 +1,7 @@
 ---
 id: "01-bulk-session-removal"
 title: "Implement task-scoped bulk session removal"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -117,4 +117,12 @@ None.
 
 ## Results
 
-Pending.
+Implemented and verified. The client removes persisted task sessions in order,
+keeps the initiating tab until the final delete, revalidates the count before
+submission, blocks duplicate requests, and reports progress and partial failure.
+Desktop and phone controls use the same task-scoped action with six localized
+catalogs. Focused unit tests, typecheck, i18n checks, spec/public-doc checks,
+backend/web builds, and desktop/phone E2E flows passed. The full desktop E2E run
+passed 12 of 13 tests; its unrelated task-switching case hit a temporary
+"web app unavailable" fixture response and passed on focused rerun. The phone
+confirmation screenshot was visually checked.
