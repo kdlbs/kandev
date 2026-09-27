@@ -235,15 +235,22 @@ function useCoordinatorTasksDirect(workspaceId: string | null): UseCoordinatorTa
   const [state, setState] = useState<DirectTasksState>(emptyDirectState);
   const requestRef = useRef(0);
   const [retryNonce, setRetryNonce] = useState(0);
+  const previousWorkspaceIdRef = useRef(workspaceId);
 
   useEffect(() => {
-    // Reset before fetching, not just when `workspaceId` goes null: this
-    // effect's own instance can persist across a route change from one
-    // non-active workspace straight to another (no `key` remounts
+    // Reset only on a genuine `workspaceId` transition, not just when it goes
+    // null: this effect's own instance can persist across a route change from
+    // one non-active workspace straight to another (no `key` remounts
     // `CoordinatorRoute`), so a stale prior workspace's tasks must never
     // survive into the next one, even transiently (mirrors
-    // `use-coordinator-list.ts`'s reset-before-fetch pattern).
-    setState(emptyDirectState());
+    // `use-coordinator-list.ts`'s reset-before-fetch pattern). The effect also
+    // re-runs on a `retryNonce`-only change (a same-workspace `retry()`),
+    // which must NOT reset: that would discard a prior successful load before
+    // the retried fetch even starts, so a retry whose own fetch then fails
+    // would lose data the failure/recovery contract requires it to keep.
+    const workspaceChanged = previousWorkspaceIdRef.current !== workspaceId;
+    previousWorkspaceIdRef.current = workspaceId;
+    if (workspaceChanged) setState(emptyDirectState());
     if (!workspaceId) return;
     const requestId = ++requestRef.current;
     fetchDirectTasksState(workspaceId)

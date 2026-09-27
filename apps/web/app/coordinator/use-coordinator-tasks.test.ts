@@ -342,4 +342,36 @@ describe("useCoordinatorTasks - non-active workspace transitions and partial fai
     expect(result.current.workflowNameById.get("wf-ok")).toBe("OK");
     expect(result.current.loadedAt).toBeDefined();
   });
+
+  // R8 (Review round 5): a same-workspace `retry()` re-runs the fetch effect
+  // via `retryNonce` alone, with `workspaceId` unchanged. That must not reset
+  // state before the retried fetch starts — otherwise a retry whose own
+  // fetch then fails permanently loses the previously-loaded tasks/loadedAt,
+  // violating the documented failure/recovery contract ("a read that fails
+  // again keeps the previous value and loadedAt").
+  it("keeps the prior successful tasks and loadedAt when a same-workspace retry itself fails", async () => {
+    mockListWorkflows.mockResolvedValueOnce({
+      workflows: [{ id: "wf-a", workspace_id: WORKSPACE_ID, name: "A" }],
+      total: 1,
+    });
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      workflow: { id: "wf-a", name: "A" },
+      steps: [{ id: "step-1", name: "Build" }],
+      tasks: [{ id: "t-1", title: "Task 1", workflow_step_id: "step-1" }],
+    });
+
+    const { result } = renderHook(() => useCoordinatorTasks(WORKSPACE_ID));
+    await waitFor(() => expect(result.current.tasks.map((t) => t.id)).toEqual(["t-1"]));
+    const loadedAtBeforeRetry = result.current.loadedAt;
+    expect(loadedAtBeforeRetry).toBeDefined();
+
+    mockListWorkflows.mockRejectedValueOnce(new Error("network error"));
+    act(() => {
+      result.current.retry();
+    });
+
+    await waitFor(() => expect(result.current.error).toBe(true));
+    expect(result.current.tasks.map((t) => t.id)).toEqual(["t-1"]);
+    expect(result.current.loadedAt).toBe(loadedAtBeforeRetry);
+  });
 });
