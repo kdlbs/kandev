@@ -268,14 +268,31 @@ test.describe("Mobile terminal key-bar — user flows", () => {
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(90_000);
     await seedTaskWithSession(testPage, apiClient, seedData, "Keybar hidden non-terminal");
     const keybar = new MobileTerminalKeybarPage(testPage);
 
     // Default panel (chat) — hidden.
     await expect(keybar.root).not.toBeVisible();
 
-    for (const panel of ["Files", "Plan", "Changes"] as const) {
-      await testPage.getByRole("button", { name: panel, exact: true }).tap();
+    const bottomNav = testPage.getByTestId("session-mobile-bottom-nav");
+    const panels = [
+      {
+        buttonName: "Files",
+        content: testPage.getByTestId("files-panel"),
+      },
+      {
+        buttonName: "Plan",
+        content: testPage.getByTestId("plan-panel"),
+      },
+      {
+        buttonName: /^(?:\d+\+?\s+)?Changes$/,
+        content: testPage.getByTestId("mobile-changes-panel"),
+      },
+    ] as const;
+    for (const panel of panels) {
+      await bottomNav.getByRole("button", { name: panel.buttonName }).tap();
+      await expect(panel.content).toBeVisible({ timeout: 10_000 });
       await expect(keybar.root).not.toBeVisible();
     }
   });

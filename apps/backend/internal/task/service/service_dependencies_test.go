@@ -12,8 +12,68 @@ import (
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func TestExactTaskRelationCommandsAreIdempotentAndPreserveCycleRules(t *testing.T) {
+	ctx := context.Background()
+	svc, _, repo := createTestService(t)
+	setupTestTask(t, repo)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-relation-peer", WorkspaceID: "ws-1", WorkflowID: "wf-123",
+		WorkflowStepID: "step-123", Title: "Peer", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("create peer task: %v", err)
+	}
+	blockers := &mockBlockerRepo{}
+	svc.SetBlockerRepository(blockers)
+	task, err := svc.tasks.GetTask(ctx, "task-123")
+	if err != nil {
+		t.Fatalf("get dependent task: %v", err)
+	}
+	peer, err := svc.tasks.GetTask(ctx, "task-relation-peer")
+	if err != nil {
+		t.Fatalf("get related task: %v", err)
+	}
+	request := ExactTaskRelationRequest{
+		WorkspaceID: "ws-1", TaskID: task.ID, RelatedTaskID: peer.ID,
+		ExpectedTaskResourceVersion:    task.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		ExpectedRelatedResourceVersion: peer.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	}
+
+	already, err := svc.AddTaskRelationExact(ctx, request)
+	if err != nil || already {
+		t.Fatalf("first AddTaskRelationExact = already:%t err:%v", already, err)
+	}
+	already, err = svc.AddTaskRelationExact(ctx, request)
+	if err != nil || !already || len(blockers.blockers) != 1 {
+		t.Fatalf("replayed AddTaskRelationExact = already:%t edges:%d err:%v", already, len(blockers.blockers), err)
+	}
+	stale := request
+	stale.ExpectedTaskResourceVersion = "2000-01-01T00:00:00Z"
+	if _, err := svc.AddTaskRelationExact(ctx, stale); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("stale AddTaskRelationExact = %v, want task resource version conflict", err)
+	}
+
+	cycle := ExactTaskRelationRequest{
+		WorkspaceID: "ws-1", TaskID: request.RelatedTaskID, RelatedTaskID: request.TaskID,
+		ExpectedTaskResourceVersion:    request.ExpectedRelatedResourceVersion,
+		ExpectedRelatedResourceVersion: request.ExpectedTaskResourceVersion,
+	}
+	if _, err := svc.AddTaskRelationExact(ctx, cycle); err == nil {
+		t.Fatal("reverse relation unexpectedly created a dependency cycle")
+	}
+
+	already, err = svc.RemoveTaskRelationExact(ctx, request)
+	if err != nil || already || len(blockers.blockers) != 0 {
+		t.Fatalf("first RemoveTaskRelationExact = already:%t edges:%d err:%v", already, len(blockers.blockers), err)
+	}
+	already, err = svc.RemoveTaskRelationExact(ctx, request)
+	if err != nil || !already || len(blockers.blockers) != 0 {
+		t.Fatalf("replayed RemoveTaskRelationExact = already:%t edges:%d err:%v", already, len(blockers.blockers), err)
+	}
+}
 
 // errBlockerRepo wraps a working repo and fails the forward read on demand, so
 // the fail-closed contract can be proven by breaking the store rather than by

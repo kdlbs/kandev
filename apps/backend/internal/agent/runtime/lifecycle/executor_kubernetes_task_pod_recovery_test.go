@@ -29,6 +29,29 @@ func TestKubernetesTaskPodBackendRestartKeepsSessionInstances(t *testing.T) {
 	require.Len(t, f.resources.createdPods, 1)
 }
 
+func TestKubernetesTaskPodBackendRestartRestoresFilteredExecutorIdentity(t *testing.T) {
+	f := newTaskPodFixture(t)
+	a := f.launch(t, 1)
+	f.restartBackend(t)
+
+	req := taskPodRequest(1)
+	req.InstanceID = "resumed-execution"
+	req.PreviousExecutionID = a.InstanceID
+	req.WorkspaceReuseRequired = true
+	req.Metadata = FilterPersistentMetadata(a.Metadata)
+	// The workspace-info projection restores connection settings from the executor record.
+	req.Metadata[MetadataKeyKubernetesAuthMode] = "in_cluster"
+	req.Metadata[MetadataKeyKubernetesConfigNamespace] = "kandev-agents"
+	req.Metadata[MetadataKeyKubernetesRequestTimeoutSeconds] = "30"
+	require.NotContains(t, req.Metadata, "executor_id")
+	require.Equal(t, "profile-1", getMetadataString(req.Metadata, MetadataKeyExecutorProfileID))
+
+	resumed, err := f.runtime.CreateInstance(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, a.Metadata[MetadataKeyKubernetesPodUID], resumed.Metadata[MetadataKeyKubernetesPodUID])
+	require.Equal(t, "executor-1", getMetadataString(resumed.Metadata, "executor_id"))
+}
+
 func TestKubernetesTaskPodRefreshKeepsSiblingSessionIdentity(t *testing.T) {
 	req := taskPodRequest(2)
 	req.Metadata[metadataKubernetesTaskOwned] = true

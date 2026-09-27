@@ -300,7 +300,7 @@ describe("TaskArchiveConfirmation classification", () => {
     expect(screen.getByTestId("task-confirmation-outcome").textContent).toContain("Task One");
 
     const archive = screen.getByTestId(CONFIRM_TEST_ID);
-    expect(archive.className).toContain("min-h-11");
+    expect(archive.className).toContain("[@media(pointer:coarse)]:h-11");
     expect(archive.className).toContain("w-full");
     expect(archive.getAttribute("data-variant")).toBe("default");
 

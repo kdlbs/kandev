@@ -30,6 +30,16 @@ service Plugin {
   // closed without resolving a secret merely to inspect its revision.
   rpc GetGitCredentialBinding(GitCredentialBindingRequest) returns (GitCredentialBindingResponse);
   rpc InvokeAgentTool(AgentToolRequest) returns (AgentToolResponse);
+
+  // Optional remote-executor provider extension. A provider must implement
+  // the complete lifecycle interface before any of these methods are served.
+  rpc ValidateExecutorProfile(ValidateExecutorProfileRequest) returns (ValidateExecutorProfileResponse);
+  rpc ProvisionExecutorEnvironment(ProvisionExecutorEnvironmentRequest) returns (ProvisionExecutorEnvironmentResponse);
+  rpc RecoverExecutorOperation(RecoverExecutorOperationRequest) returns (RecoverExecutorOperationResponse);
+  rpc AttachExecutorEnvironment(AttachExecutorEnvironmentRequest) returns (AttachExecutorEnvironmentResponse);
+  rpc InspectExecutorEnvironment(InspectExecutorEnvironmentRequest) returns (InspectExecutorEnvironmentResponse);
+  rpc ResolveExecutorConnection(ResolveExecutorConnectionRequest) returns (ResolveExecutorConnectionResponse);
+  rpc DestroyExecutorEnvironment(DestroyExecutorEnvironmentRequest) returns (DestroyExecutorEnvironmentResponse);
 }
 
 // Implemented by KANDEV (served back over the go-plugin broker).
@@ -54,6 +64,77 @@ service Plugin {
 // the relevant service (never a repository directly); write handlers call
 // service methods that publish task.* events (never repository.TaskRepository).
 service Host {
+  rpc GetCapabilityContext(GetCapabilityContextRequest) returns (GetCapabilityContextResponse);
+  rpc UpdateTaskExact(UpdateTaskExactRequest) returns (UpdateTaskExactResponse);
+  rpc CreateTaskExact(CreateTaskExactRequest) returns (CreateTaskExactResponse);
+  rpc SetTaskLabelsExact(SetTaskLabelsExactRequest) returns (SetTaskLabelsExactResponse);
+  rpc AssignTaskExact(AssignTaskExactRequest) returns (AssignTaskExactResponse);
+  rpc MoveTaskExact(MoveTaskExactRequest) returns (MoveTaskExactResponse);
+  rpc ArchiveTaskExact(ArchiveTaskExactRequest) returns (ArchiveTaskExactResponse);
+  rpc AddTaskRelationExact(AddTaskRelationExactRequest) returns (AddTaskRelationExactResponse);
+  rpc RemoveTaskRelationExact(RemoveTaskRelationExactRequest) returns (RemoveTaskRelationExactResponse);
+  rpc SendTaskMessageExact(SendTaskMessageExactRequest) returns (SendTaskMessageExactResponse);
+  rpc IssueTaskDirectiveExact(IssueTaskDirectiveExactRequest) returns (IssueTaskDirectiveExactResponse);
+  rpc ResolveTaskDirectiveExact(ResolveTaskDirectiveExactRequest) returns (ResolveTaskDirectiveExactResponse);
+  rpc AcquireTaskManagementClaimExact(AcquireTaskManagementClaimExactRequest) returns (TaskManagementClaimExactResponse);
+  rpc ReleaseTaskManagementClaimExact(ReleaseTaskManagementClaimExactRequest) returns (TaskManagementClaimExactResponse);
+  rpc TransferTaskManagementClaimExact(TransferTaskManagementClaimExactRequest) returns (TaskManagementClaimExactResponse);
+  rpc SetTaskCompletionCriteriaExact(SetTaskCompletionCriteriaExactRequest) returns (TaskCompletionGateExactResponse);
+  rpc VerifyTaskCompletionCriterionExact(VerifyTaskCompletionCriterionExactRequest) returns (TaskCompletionGateExactResponse);
+  rpc ApplyWorkspaceAdministrationExact(ApplyWorkspaceAdministrationExactRequest) returns (WorkspaceAdministrationExactResponse);
+  rpc GetSourceIssueCapabilitiesExact(GetSourceIssueCapabilitiesExactRequest) returns (GetSourceIssueCapabilitiesExactResponse);
+  rpc CommentSourceIssueExact(CommentSourceIssueExactRequest) returns (SourceIssueWritebackExactResponse);
+  rpc TransitionSourceIssueExact(TransitionSourceIssueExactRequest) returns (SourceIssueWritebackExactResponse);
+  rpc EnsureManagedAgentConversationExact(EnsureManagedAgentConversationExactRequest) returns (EnsureManagedAgentConversationExactResponse);
+  rpc GetManagedAgentConversationStatusExact(GetManagedAgentConversationStatusExactRequest) returns (GetManagedAgentConversationStatusExactResponse);
+  rpc ListManagedAgentConversationsExact(ListManagedAgentConversationsExactRequest) returns (ListManagedAgentConversationsExactResponse);
+  rpc SetManagedAgentConversationPausedExact(SetManagedAgentConversationPausedExactRequest) returns (SetManagedAgentConversationPausedExactResponse);
+  rpc DeleteManagedAgentConversationExact(DeleteManagedAgentConversationExactRequest) returns (DeleteManagedAgentConversationExactResponse);
+  // Durable ordered input for retained conversations. Enqueue returns a
+  // receipt before delivery; retries with the same idempotency and occurrence
+  // identity resolve to the same receipt. Dispatch remains immediate and
+  // reports BUSY instead of silently adding work to the queue.
+  rpc EnqueueManagedAgentInputExact(EnqueueManagedAgentInputExactRequest) returns (EnqueueManagedAgentInputExactResponse);
+  rpc GetManagedAgentInputExact(GetManagedAgentInputExactRequest) returns (GetManagedAgentInputExactResponse);
+  rpc ListManagedAgentInputsExact(ListManagedAgentInputsExactRequest) returns (ListManagedAgentInputsExactResponse);
+  rpc CancelManagedAgentInputExact(CancelManagedAgentInputExactRequest) returns (CancelManagedAgentInputExactResponse);
+  rpc DispatchManagedAgentConversationExact(DispatchManagedAgentConversationExactRequest) returns (DispatchManagedAgentConversationExactResponse);
+  rpc ListManagedConversationSchedulesExact(ListManagedConversationSchedulesExactRequest) returns (ListManagedConversationSchedulesExactResponse);
+  rpc CreateManagedConversationScheduleExact(CreateManagedConversationScheduleExactRequest) returns (ManagedConversationScheduleExactResponse);
+  rpc UpdateManagedConversationScheduleExact(UpdateManagedConversationScheduleExactRequest) returns (ManagedConversationScheduleExactResponse);
+  rpc SetManagedConversationScheduleEnabledExact(SetManagedConversationScheduleEnabledExactRequest) returns (ManagedConversationScheduleExactResponse);
+  rpc DeleteManagedConversationScheduleExact(DeleteManagedConversationScheduleExactRequest) returns (HostCommandResult);
+  // Exact task/session execution controls require workspace capability
+  // approval and resource-version/execution-generation fences.
+  rpc EnsureTaskRunExact(EnsureTaskRunExactRequest) returns (EnsureTaskRunExactResponse);
+  rpc StopTaskRunExact(StopTaskRunExactRequest) returns (StopTaskRunExactResponse);
+  rpc RecoverSessionExact(RecoverSessionExactRequest) returns (RecoverSessionExactResponse);
+  rpc CancelPendingTaskTransitionExact(CancelPendingTaskTransitionExactRequest) returns (CancelPendingTaskTransitionExactResponse);
+  rpc GetSessionModeContextExact(GetSessionModeContextExactRequest) returns (GetSessionModeContextExactResponse);
+  rpc SetSessionModeExact(SetSessionModeExactRequest) returns (SetSessionModeExactResponse);
+  // Human interaction responses require a Host-issued single-use receipt from
+  // the authenticated native UI, bound to the exact interaction revision and
+  // response payload.
+  rpc RespondPermissionExact(RespondPermissionExactRequest) returns (RespondPermissionExactResponse);
+  rpc AnswerClarificationExact(AnswerClarificationExactRequest) returns (AnswerClarificationExactResponse);
+  rpc ListWorkspacesExact(ListWorkspacesExactRequest) returns (ListWorkspacesExactResponse);
+  rpc ListWorkflowsExact(ListWorkflowsExactRequest) returns (ListWorkflowsExactResponse);
+  rpc ListWorkflowStepsExact(ListWorkflowStepsExactRequest) returns (ListWorkflowStepsExactResponse);
+  rpc ListTasksExact(ListTasksExactRequest) returns (ListTasksExactResponse);
+  rpc GetTaskExact(GetTaskExactRequest) returns (GetTaskExactResponse);
+  rpc ListSessionsExact(ListSessionsExactRequest) returns (ListSessionsExactResponse);
+  rpc ListPendingInteractionsExact(ListPendingInteractionsExactRequest) returns (ListPendingInteractionsExactResponse);
+  rpc GetInteractionExact(GetInteractionExactRequest) returns (GetInteractionExactResponse);
+  rpc ListSanitizedMessagesExact(ListSanitizedMessagesExactRequest) returns (ListSanitizedMessagesExactResponse);
+  rpc ListTaskInboxExact(ListTaskInboxExactRequest) returns (ListTaskInboxExactResponse);
+  rpc GetTaskDirectiveExact(GetTaskDirectiveExactRequest) returns (GetTaskDirectiveExactResponse);
+  rpc ListTaskDirectivesExact(ListTaskDirectivesExactRequest) returns (ListTaskDirectivesExactResponse);
+  rpc GetTaskRelationsExact(GetTaskRelationsExactRequest) returns (GetTaskRelationsExactResponse);
+  rpc ListTaskRelationsExact(ListTaskRelationsExactRequest) returns (ListTaskRelationsExactResponse);
+  rpc ListPendingTaskTransitionsExact(ListPendingTaskTransitionsExactRequest) returns (ListPendingTaskTransitionsExactResponse);
+  rpc ListChangeRequestEvidenceExact(ListChangeRequestEvidenceExactRequest) returns (ListChangeRequestEvidenceExactResponse);
+  rpc ListTaskUsageExact(ListTaskUsageExactRequest) returns (ListTaskUsageExactResponse);
+
   rpc GetState(GetStateRequest) returns (GetStateResponse);
   rpc SetState(SetStateRequest) returns (SetStateResponse);
   rpc DeleteState(DeleteStateRequest) returns (DeleteStateResponse);
@@ -89,6 +170,10 @@ service Host {
   rpc ListWorkflowTransitionGroups(ListWorkflowTransitionGroupsRequest) returns (ListWorkflowTransitionGroupsResponse);
   rpc ListAgentProfiles(ListAgentProfilesRequest) returns (ListAgentProfilesResponse);
   rpc ListExecutorProfiles(ListExecutorProfilesRequest) returns (ListExecutorProfilesResponse);
+  // Operation-bound callbacks available only to executor-provider plugins.
+  rpc CheckpointExecutorResource(CheckpointExecutorResourceRequest) returns (CheckpointExecutorResourceResponse);
+  rpc ReportExecutorProgress(ReportExecutorProgressRequest) returns (ReportExecutorProgressResponse);
+  rpc ReadExecutorRuntimeArtifact(ReadExecutorRuntimeArtifactRequest) returns (stream ExecutorRuntimeArtifactChunk);
   rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
 
   // Sessions + code stats — capability api_read:sessions. Driven by a real
@@ -146,6 +231,8 @@ service Host {
   rpc MoveTask(MoveTaskRequest) returns (MoveTaskResponse);
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc PreviewPluginOwnedTaskTree(PreviewPluginOwnedTaskTreeRequest) returns (PreviewPluginOwnedTaskTreeResponse);
+  // Legacy v1 compatibility RPC. The current Kandev Host denies deletion
+  // because this method cannot carry a native Human confirmation ticket.
   rpc DeletePluginOwnedTaskTree(DeletePluginOwnedTaskTreeRequest) returns (DeletePluginOwnedTaskTreeResponse);
 
   // Agent conversations — capability agent_conversation. Ensure creates or
@@ -157,17 +244,1090 @@ service Host {
   rpc DispatchAgentConversation(DispatchAgentConversationRequest) returns (DispatchAgentConversationResponse);
   rpc DeleteAgentConversation(DeleteAgentConversationRequest) returns (DeleteAgentConversationResponse);
 
-  // Interaction responses — capability api_write:interactions. Each routes
-  // through the same first-party service the native UI uses, so the agent
-  // unblocks, the durable record turns terminal, and every surface converges
-  // through the normal events. Terminal-once: an interaction that already has
-  // a resolution answers FailedPrecondition rather than dispatching a second
-  // response, and an unknown id answers NotFound — the two outcomes a
-  // reconciling cache needs to distinguish "someone else got there first" from
-  // "I am holding a stale id".
+  // Legacy interaction response methods remain on the wire for source
+  // compatibility. The Host returns PermissionDenied because these requests
+  // cannot carry an observed revision or human response receipt. Use the exact
+  // v2 methods above.
   rpc RespondToPermission(RespondToPermissionRequest) returns (RespondToPermissionResponse);
   rpc AnswerClarification(AnswerClarificationRequest) returns (AnswerClarificationResponse);
   rpc CancelClarification(CancelClarificationRequest) returns (CancelClarificationResponse);
+}
+
+enum HostCommandStatus {
+  HOST_COMMAND_STATUS_UNSPECIFIED = 0;
+  HOST_COMMAND_STATUS_APPLIED = 1;
+  HOST_COMMAND_STATUS_ALREADY_APPLIED = 2;
+  HOST_COMMAND_STATUS_NO_CHANGE = 3;
+  HOST_COMMAND_STATUS_CONFLICT = 4;
+  HOST_COMMAND_STATUS_DENIED = 5;
+  HOST_COMMAND_STATUS_NOT_FOUND = 6;
+  HOST_COMMAND_STATUS_INVALID = 7;
+  HOST_COMMAND_STATUS_UNSUPPORTED = 8;
+  HOST_COMMAND_STATUS_RATE_LIMITED = 9;
+  HOST_COMMAND_STATUS_UNAVAILABLE = 10;
+  HOST_COMMAND_STATUS_PARTIAL = 11;
+  HOST_COMMAND_STATUS_UNCERTAIN = 12;
+}
+
+message HostOperationSupport {
+  string method = 1;
+  string capability_id = 2;
+  string description = 3;
+  bool supported = 4;
+  bool authorized = 5;
+  string unavailable_reason = 6;
+}
+
+message HostCapabilityContext {
+  string installation_id = 1;
+  string workspace_id = 2;
+  string manifest_digest = 3;
+  uint64 approval_revision = 4;
+  string approval_state = 5;
+  repeated HostOperationSupport operations = 6;
+  map<string, uint64> limits = 7;
+  repeated string supported_providers = 8;
+}
+
+message GetCapabilityContextRequest {
+  string workspace_id = 1;
+}
+
+message GetCapabilityContextResponse {
+  HostCapabilityContext context = 1;
+}
+
+message HostCommandReceipt {
+  string receipt_id = 1;
+  string operation_id = 2;
+  HostCommandStatus status = 3;
+  string target_id = 4;
+  string resource_version = 5;
+  uint64 approval_revision = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}
+
+message HostCommandResult {
+  HostCommandStatus status = 1;
+  string reason = 2;
+  HostCommandReceipt receipt = 3;
+}
+
+message UpdateTaskExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string idempotency_key = 4;
+  string expected_resource_version = 5;
+  optional string title = 6;
+  optional string description = 7;
+  optional string state = 8;
+  optional string priority = 9;
+  uint64 approval_revision = 10;
+  string manifest_digest = 11;
+  string management_instance_key = 12;
+  int64 expected_claim_generation = 13;
+}
+
+message UpdateTaskExactResponse {
+  HostCommandResult result = 1;
+  Task task = 2;
+}
+
+message CreateTaskExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string idempotency_key = 3;
+  string external_id = 4;
+  uint64 approval_revision = 5;
+  string manifest_digest = 6;
+  CreateTaskRequest task = 7;
+}
+
+message CreateTaskExactResponse {
+  HostCommandResult result = 1;
+  Task task = 2;
+}
+
+message SetTaskLabelsExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string idempotency_key = 4;
+  string expected_resource_version = 5;
+  repeated string labels = 6;
+  uint64 approval_revision = 7;
+  string manifest_digest = 8;
+  string management_instance_key = 9;
+  int64 expected_claim_generation = 10;
+}
+
+message SetTaskLabelsExactResponse {
+  HostCommandResult result = 1;
+  Task task = 2;
+}
+
+message AssignTaskExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string idempotency_key = 4;
+  string expected_resource_version = 5;
+  string assignee_user_id = 6;
+  uint64 approval_revision = 7;
+  string manifest_digest = 8;
+  string management_instance_key = 9;
+  int64 expected_claim_generation = 10;
+}
+
+message AssignTaskExactResponse {
+  HostCommandResult result = 1;
+  Task task = 2;
+}
+
+message MoveTaskExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string idempotency_key = 4;
+  string expected_resource_version = 5;
+  string workflow_id = 6;
+  string workflow_step_id = 7;
+  int32 position = 8;
+  uint64 approval_revision = 9;
+  string manifest_digest = 10;
+  string management_instance_key = 11;
+  int64 expected_claim_generation = 12;
+}
+
+message MoveTaskExactResponse {
+  HostCommandResult result = 1;
+  Task task = 2;
+}
+
+message ArchiveTaskExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string idempotency_key = 4;
+  string expected_resource_version = 5;
+  uint64 approval_revision = 6;
+  string manifest_digest = 7;
+  string management_instance_key = 8;
+  int64 expected_claim_generation = 9;
+}
+
+message ArchiveTaskExactResponse {
+  HostCommandResult result = 1;
+  Task task = 2;
+}
+
+message AddTaskRelationExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string related_task_id = 4;
+  string idempotency_key = 5;
+  uint64 approval_revision = 6;
+  string manifest_digest = 7;
+  string expected_task_resource_version = 8;
+  string expected_related_resource_version = 9;
+  string management_instance_key = 10;
+  int64 expected_claim_generation = 11;
+}
+
+message AddTaskRelationExactResponse {
+  HostCommandResult result = 1;
+}
+
+message RemoveTaskRelationExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string related_task_id = 4;
+  string idempotency_key = 5;
+  uint64 approval_revision = 6;
+  string manifest_digest = 7;
+  string expected_task_resource_version = 8;
+  string expected_related_resource_version = 9;
+  string management_instance_key = 10;
+  int64 expected_claim_generation = 11;
+}
+
+message RemoveTaskRelationExactResponse {
+  HostCommandResult result = 1;
+}
+
+// SendTaskMessageExact admits one message to the durable task-session FIFO.
+// APPLIED means the Host accepted the queue entry; it does not mean an agent
+// received or acted on the message. Retries use the same idempotency key.
+message SendTaskMessageExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string session_id = 4;
+  string idempotency_key = 5;
+  string expected_task_resource_version = 6;
+  string expected_session_resource_version = 7;
+  string content = 8;
+  uint64 approval_revision = 9;
+  string manifest_digest = 10;
+  string management_instance_key = 11;
+  int64 expected_claim_generation = 12;
+}
+
+message SendTaskMessageExactResponse {
+  HostCommandResult result = 1;
+}
+
+message TaskManagementClaim {
+  string task_id = 1;
+  string workspace_id = 2;
+  string installation_id = 3;
+  string instance_key = 4;
+  int64 generation = 5;
+  string resource_version = 6;
+  string acquired_at = 7;
+  string updated_at = 8;
+  string updated_by_actor = 9;
+  string owner_kind = 10;
+  string owner_actor_id = 11;
+}
+
+message AcquireTaskManagementClaimExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string instance_key = 4;
+  string expected_task_resource_version = 5;
+  string expected_claim_resource_version = 6;
+  string idempotency_key = 7;
+  string reason = 8;
+  uint64 approval_revision = 9;
+  string manifest_digest = 10;
+}
+
+message ReleaseTaskManagementClaimExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string instance_key = 4;
+  string expected_task_resource_version = 5;
+  string expected_claim_resource_version = 6;
+  string idempotency_key = 7;
+  string reason = 8;
+  uint64 approval_revision = 9;
+  string manifest_digest = 10;
+}
+
+message TransferTaskManagementClaimExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string instance_key = 4;
+  string target_installation_id = 5;
+  string target_instance_key = 6;
+  string expected_task_resource_version = 7;
+  string expected_claim_resource_version = 8;
+  string idempotency_key = 9;
+  string reason = 10;
+  uint64 approval_revision = 11;
+  string manifest_digest = 12;
+}
+
+message TaskManagementClaimExactResponse {
+  HostCommandResult result = 1;
+  TaskManagementClaim claim = 2;
+}
+
+// Completion criteria and typed evidence are task-owned. Both commands are
+// revision, task-version, and management-claim fenced. Human weakening and
+// one-move completion overrides remain native UI operations.
+message TaskCompletionEvidenceSubject {
+  string kind = 1;
+  string id = 2;
+  string revision = 3;
+}
+
+message TaskCompletionEvidence {
+  TaskCompletionEvidenceSubject subject = 1;
+  string summary = 2;
+  string reference = 3;
+}
+
+message TaskCompletionCriterion {
+  string id = 1;
+  string description = 2;
+  TaskCompletionEvidenceSubject evidence_subject = 3;
+  int64 criterion_revision = 4;
+  int64 verified_revision = 5;
+  TaskCompletionEvidence evidence = 6;
+  string verifier_kind = 7;
+  string verifier_id = 8;
+  string verified_at = 9;
+}
+
+message TaskCompletionCriterionInput {
+  string id = 1;
+  string description = 2;
+  TaskCompletionEvidenceSubject evidence_subject = 3;
+}
+
+message TaskCompletionBlocker {
+  string criterion_id = 1;
+  string reason = 2;
+}
+
+message TaskCompletionGateSnapshot {
+  string task_id = 1;
+  string workspace_id = 2;
+  int64 revision = 3;
+  repeated TaskCompletionCriterion criteria = 4;
+  repeated TaskCompletionBlocker blockers = 5;
+  bool blocked = 6;
+}
+
+message SetTaskCompletionCriteriaExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string idempotency_key = 4;
+  string expected_task_resource_version = 5;
+  int64 expected_revision = 6;
+  repeated TaskCompletionCriterionInput criteria = 7;
+  uint64 approval_revision = 8;
+  string manifest_digest = 9;
+  string management_instance_key = 10;
+  int64 expected_claim_generation = 11;
+}
+
+message VerifyTaskCompletionCriterionExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string criterion_id = 4;
+  string idempotency_key = 5;
+  string expected_task_resource_version = 6;
+  int64 expected_revision = 7;
+  TaskCompletionEvidence evidence = 8;
+  uint64 approval_revision = 9;
+  string manifest_digest = 10;
+  string management_instance_key = 11;
+  int64 expected_claim_generation = 12;
+}
+
+message TaskCompletionGateExactResponse {
+  HostCommandResult result = 1;
+  TaskCompletionGateSnapshot snapshot = 2;
+}
+
+message ApplyWorkspaceAdministrationExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string idempotency_key = 3;
+  uint64 approval_revision = 4;
+  string manifest_digest = 5;
+  oneof operation {
+    WorkspaceDefaultsUpdateExact workspace_defaults = 10;
+    WorkspaceWorkflowCreateExact workflow_create = 11;
+    WorkspaceWorkflowUpdateExact workflow_update = 12;
+    WorkspaceWorkflowReorderExact workflow_reorder = 13;
+    WorkspaceWorkflowStepCreateExact workflow_step_create = 14;
+    WorkspaceWorkflowStepUpdateExact workflow_step_update = 15;
+    WorkspaceWorkflowStepReorderExact workflow_step_reorder = 16;
+    WorkspaceRepositoryRegisterExact repository_register = 17;
+    WorkspaceRepositoryUpdateExact repository_update = 18;
+  }
+}
+
+message WorkspaceDefaultsUpdateExact {
+  string expected_resource_version = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional string default_executor_id = 4;
+  optional string default_environment_id = 5;
+  optional string default_agent_profile_id = 6;
+  optional string default_config_agent_profile_id = 7;
+}
+
+message WorkspaceWorkflowConfig {
+  string name = 1;
+  string description = 2;
+  string prompt = 3;
+}
+
+message WorkspaceWorkflowCreateExact {
+  string expected_workspace_resource_version = 1;
+  WorkspaceWorkflowConfig configuration = 2;
+}
+
+message WorkspaceWorkflowUpdateExact {
+  string workflow_id = 1;
+  string expected_resource_version = 2;
+  optional string name = 3;
+  optional string description = 4;
+  optional string prompt = 5;
+  optional string agent_profile_id = 6;
+}
+
+message WorkspaceWorkflowReorderExact {
+  string expected_workspace_resource_version = 1;
+  repeated string workflow_ids = 2;
+  repeated string workflow_resource_versions = 3;
+}
+
+message WorkflowTransitionActionConfig {
+  string type = 1;
+  string target_step_id = 2;
+}
+
+message WorkflowStepConfiguration {
+  string id = 1;
+  string workflow_id = 2;
+  string name = 3;
+  int32 position = 4;
+  string stage_type = 5;
+  string color = 6;
+  string prompt = 7;
+  bool allow_manual_move = 8;
+  bool is_start_step = 9;
+  bool show_in_command_panel = 10;
+  int32 auto_archive_after_hours = 11;
+  string agent_profile_id = 12;
+  string profile_session_start_policy = 13;
+  string profile_session_end_policy = 14;
+  int32 wip_limit = 15;
+  string pull_from_step_id = 16;
+  bool auto_advance_requires_signal = 17;
+  bool cancel_triggers_turn_complete = 18;
+  bool complete_task_on_enter = 19;
+  repeated string on_enter_action_types = 20;
+  repeated WorkflowTransitionActionConfig on_turn_start_actions = 21;
+  repeated WorkflowTransitionActionConfig on_turn_complete_actions = 22;
+}
+
+message WorkspaceWorkflowStepCreateExact {
+  string workflow_id = 1;
+  string expected_workflow_resource_version = 2;
+  WorkflowStepConfiguration configuration = 3;
+}
+
+message WorkspaceWorkflowStepUpdateExact {
+  string workflow_id = 1;
+  string step_id = 2;
+  string expected_workflow_resource_version = 3;
+  string expected_step_resource_version = 4;
+  WorkflowStepConfiguration configuration = 5;
+}
+
+message WorkspaceWorkflowStepReorderExact {
+  string workflow_id = 1;
+  string expected_workflow_resource_version = 2;
+  repeated string step_ids = 3;
+  repeated string step_resource_versions = 4;
+}
+
+message WorkspaceRepositoryRegisterExact {
+  string expected_workspace_resource_version = 1;
+  string name = 2;
+  string source_type = 3;
+  string local_path = 4;
+  string provider = 5;
+  string provider_repository_id = 6;
+  string provider_host = 7;
+  string provider_scope = 8;
+  string provider_owner = 9;
+  string provider_name = 10;
+  string remote_url = 11;
+  string default_branch = 12;
+  string worktree_branch_prefix = 13;
+  string worktree_branch_template = 14;
+  optional bool pull_before_worktree = 15;
+}
+
+message WorkspaceRepositoryUpdateExact {
+  string repository_id = 1;
+  string expected_resource_version = 2;
+  optional string name = 3;
+  optional string default_branch = 4;
+  optional string worktree_branch_prefix = 5;
+  optional string worktree_branch_template = 6;
+  optional bool pull_before_worktree = 7;
+}
+
+message WorkspaceAdministrationExactResponse {
+  HostCommandResult result = 1;
+}
+
+message SourceIssueTransition {
+  string target_id = 1;
+  string target_name = 2;
+}
+message ExactSourceIssueCapabilities {
+  string task_id = 1;
+  string task_resource_version = 2;
+  string provider = 3;
+  string source_id = 4;
+  string identifier = 5;
+  string url = 6;
+  string title = 7;
+  string status_id = 8;
+  string status_name = 9;
+  repeated SourceIssueTransition transitions = 10;
+  string resource_version = 11;
+  string observed_at = 12;
+  string workspace_id = 13;
+}
+message GetSourceIssueCapabilitiesExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+}
+message GetSourceIssueCapabilitiesExactResponse {
+  HostCommandResult result = 1;
+  ExactSourceIssueCapabilities item = 2;
+  HostReadReceipt receipt = 3;
+}
+message SourceIssueWritebackReceipt {
+  string receipt_id = 1;
+  string operation_id = 2;
+  string installation_id = 3;
+  string workspace_id = 4;
+  string task_id = 5;
+  string provider = 6;
+  string source_id = 7;
+  string operation = 8;
+  string state = 9;
+  HostCommandStatus status = 10;
+  string reason = 11;
+  string provider_receipt_id = 12;
+  string expected_source_version = 13;
+  string created_at = 14;
+  string updated_at = 15;
+}
+message CommentSourceIssueExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string idempotency_key = 4;
+  string expected_task_resource_version = 5;
+  string expected_source_resource_version = 6;
+  string body = 7;
+  uint64 approval_revision = 8;
+  string manifest_digest = 9;
+}
+message TransitionSourceIssueExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string idempotency_key = 4;
+  string expected_task_resource_version = 5;
+  string expected_source_resource_version = 6;
+  string target_id = 7;
+  uint64 approval_revision = 8;
+  string manifest_digest = 9;
+}
+message SourceIssueWritebackExactResponse {
+  HostCommandResult result = 1;
+  SourceIssueWritebackReceipt receipt = 2;
+}
+
+// IssueTaskDirectiveExact records a short-lived, version-bound directive. Its
+// capability class remains subject to the current workspace approval and
+// managed-agent tool policy; the directive does not grant permission by itself.
+message IssueTaskDirectiveExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string session_id = 4;
+  string capability_class = 5;
+  string instruction_digest = 6;
+  string expected_task_resource_version = 7;
+  string expected_session_resource_version = 8;
+  string expires_at = 9;
+  string idempotency_key = 10;
+  uint64 approval_revision = 11;
+  string manifest_digest = 12;
+}
+
+message IssueTaskDirectiveExactResponse {
+  HostCommandResult result = 1;
+  TaskDirective directive = 2;
+}
+
+message ResolveTaskDirectiveExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string directive_id = 3;
+  string expected_resource_version = 4;
+  string idempotency_key = 5;
+  string resolution = 6;
+  string resolution_digest = 7;
+  uint64 approval_revision = 8;
+  string manifest_digest = 9;
+}
+
+message ResolveTaskDirectiveExactResponse {
+  HostCommandResult result = 1;
+  TaskDirective directive = 2;
+}
+
+message ManagedAgentConversationDescriptor {
+  string installation_id = 1;
+  string task_id = 2;
+  string session_id = 3;
+  string workspace_id = 4;
+  string instance_key = 5;
+  uint64 revision = 6;
+  string agent_profile_id = 7;
+  string executor_id = 8;
+  string executor_profile_id = 9;
+  string base_prompt = 10;
+  string instruction_version = 11;
+  bool desired_paused = 12;
+  string retention_mode = 13;
+  bool detached = 14;
+  repeated string agent_tool_names = 15;
+}
+
+message ManagedAgentConversationSpec {
+  string request_id = 1;
+  string idempotency_key = 2;
+  string workspace_id = 3;
+  string instance_key = 4;
+  uint64 expected_revision = 5;
+  uint64 approval_revision = 6;
+  string manifest_digest = 7;
+  string agent_profile_id = 8;
+  string executor_id = 9;
+  string executor_profile_id = 10;
+  string base_prompt = 11;
+  string instruction_version = 12;
+  repeated string agent_tool_names = 13;
+}
+
+message EnsureManagedAgentConversationExactRequest {
+  ManagedAgentConversationSpec spec = 1;
+}
+
+message EnsureManagedAgentConversationExactResponse {
+  HostCommandResult result = 1;
+  ManagedAgentConversationDescriptor conversation = 2;
+}
+
+message GetManagedAgentConversationStatusExactRequest {
+  string workspace_id = 1;
+  string instance_key = 2;
+  uint64 approval_revision = 3;
+  string manifest_digest = 4;
+}
+
+message GetManagedAgentConversationStatusExactResponse {
+  ManagedAgentConversationDescriptor conversation = 1;
+}
+
+message ListManagedAgentConversationsExactRequest {
+  string workspace_id = 1;
+  uint64 approval_revision = 2;
+  string manifest_digest = 3;
+}
+
+message ListManagedAgentConversationsExactResponse {
+  repeated ManagedAgentConversationDescriptor conversations = 1;
+}
+
+message SetManagedAgentConversationPausedExactRequest {
+  string request_id = 1;
+  string idempotency_key = 2;
+  string workspace_id = 3;
+  string instance_key = 4;
+  uint64 expected_revision = 5;
+  uint64 approval_revision = 6;
+  string manifest_digest = 7;
+  bool paused = 8;
+}
+
+message SetManagedAgentConversationPausedExactResponse {
+  HostCommandResult result = 1;
+  ManagedAgentConversationDescriptor conversation = 2;
+}
+
+message DeleteManagedAgentConversationExactRequest {
+  string request_id = 1;
+  string idempotency_key = 2;
+  string workspace_id = 3;
+  string instance_key = 4;
+  uint64 expected_revision = 5;
+  uint64 approval_revision = 6;
+  string manifest_digest = 7;
+}
+
+message DeleteManagedAgentConversationExactResponse {
+  HostCommandResult result = 1;
+}
+
+enum ManagedAgentInputOrigin {
+  MANAGED_AGENT_INPUT_ORIGIN_UNSPECIFIED = 0;
+  MANAGED_AGENT_INPUT_ORIGIN_HUMAN = 1;
+  MANAGED_AGENT_INPUT_ORIGIN_AUTOMATION = 2;
+  MANAGED_AGENT_INPUT_ORIGIN_PERIODIC = 3;
+  MANAGED_AGENT_INPUT_ORIGIN_INTERACTION = 4;
+}
+
+enum ManagedAgentInputState {
+  MANAGED_AGENT_INPUT_STATE_UNSPECIFIED = 0;
+  MANAGED_AGENT_INPUT_STATE_ACCEPTED = 1;
+  MANAGED_AGENT_INPUT_STATE_RUNNING = 2;
+  MANAGED_AGENT_INPUT_STATE_COMPLETED = 3;
+  MANAGED_AGENT_INPUT_STATE_FAILED = 4;
+  MANAGED_AGENT_INPUT_STATE_CANCELLED = 5;
+  MANAGED_AGENT_INPUT_STATE_UNCERTAIN = 6;
+}
+
+enum ManagedAgentDispatchStatus {
+  MANAGED_AGENT_DISPATCH_STATUS_UNSPECIFIED = 0;
+  MANAGED_AGENT_DISPATCH_STATUS_BUSY = 1;
+  MANAGED_AGENT_DISPATCH_STATUS_STARTED = 2;
+  MANAGED_AGENT_DISPATCH_STATUS_SENT = 3;
+}
+
+message ManagedAgentInputReceipt {
+  string host_input_id = 1;
+  string occurrence_key = 2;
+  uint64 sequence = 3;
+  ManagedAgentInputOrigin origin = 4;
+  string payload = 5;
+  string coalesce_key = 6;
+  uint64 conversation_revision = 7;
+  ManagedAgentInputState state = 8;
+  string created_at = 9;
+  string updated_at = 10;
+  string queue_entry_id = 11;
+  string execution_id = 12;
+  string turn_id = 13;
+  string superseded_by_id = 14;
+}
+
+message EnqueueManagedAgentInputExactRequest {
+  string request_id = 1;
+  string idempotency_key = 2;
+  string workspace_id = 3;
+  string instance_key = 4;
+  uint64 expected_conversation_revision = 5;
+  uint64 approval_revision = 6;
+  string manifest_digest = 7;
+  string occurrence_key = 8;
+  ManagedAgentInputOrigin origin = 9;
+  string payload = 10;
+  string coalesce_key = 11;
+}
+
+message EnqueueManagedAgentInputExactResponse {
+  HostCommandResult result = 1;
+  ManagedAgentInputReceipt input = 2;
+}
+
+message GetManagedAgentInputExactRequest {
+  string workspace_id = 1;
+  string instance_key = 2;
+  string host_input_id = 3;
+  uint64 approval_revision = 4;
+  string manifest_digest = 5;
+}
+
+message GetManagedAgentInputExactResponse {
+  ManagedAgentInputReceipt input = 1;
+}
+
+message ListManagedAgentInputsExactRequest {
+  string workspace_id = 1;
+  string instance_key = 2;
+  uint64 sequence_cursor = 3;
+  uint32 limit = 4;
+  uint64 approval_revision = 5;
+  string manifest_digest = 6;
+}
+
+message ListManagedAgentInputsExactResponse {
+  repeated ManagedAgentInputReceipt inputs = 1;
+  uint64 next_sequence_cursor = 2;
+  bool has_more = 3;
+}
+
+message CancelManagedAgentInputExactRequest {
+  string request_id = 1;
+  string idempotency_key = 2;
+  string workspace_id = 3;
+  string instance_key = 4;
+  string host_input_id = 5;
+  uint64 expected_conversation_revision = 6;
+  // Empty only when cancelling an input that is still accepted. Once running,
+  // callers must supply the exact execution generation they observed.
+  string expected_execution_id = 7;
+  uint64 approval_revision = 8;
+  string manifest_digest = 9;
+}
+
+message CancelManagedAgentInputExactResponse {
+  HostCommandResult result = 1;
+  ManagedAgentInputReceipt input = 2;
+}
+
+message DispatchManagedAgentConversationExactRequest {
+  string request_id = 1;
+  string idempotency_key = 2;
+  string workspace_id = 3;
+  string instance_key = 4;
+  uint64 expected_conversation_revision = 5;
+  uint64 approval_revision = 6;
+  string manifest_digest = 7;
+  string occurrence_key = 8;
+  ManagedAgentInputOrigin origin = 9;
+  string payload = 10;
+  string coalesce_key = 11;
+}
+
+message DispatchManagedAgentConversationExactResponse {
+  HostCommandResult result = 1;
+  ManagedAgentDispatchStatus dispatch_status = 2;
+  ManagedAgentConversationDescriptor conversation = 3;
+}
+
+message ManagedConversationScheduleTrigger {
+  string type = 1;
+  string config_json = 2;
+  bool enabled = 3;
+}
+
+message ManagedConversationSchedule {
+  string id = 1;
+  string workspace_id = 2;
+  string name = 3;
+  string description = 4;
+  string prompt = 5;
+  string plugin_id = 6;
+  string instance_key = 7;
+  uint64 destination_revision = 8;
+  uint64 resource_revision = 9;
+  bool enabled = 10;
+  repeated ManagedConversationScheduleTrigger triggers = 11;
+}
+
+message ListManagedConversationSchedulesExactRequest {
+  string workspace_id = 1;
+  uint64 approval_revision = 2;
+  string manifest_digest = 3;
+}
+
+message ListManagedConversationSchedulesExactResponse {
+  repeated ManagedConversationSchedule schedules = 1;
+}
+
+message CreateManagedConversationScheduleExactRequest {
+  string request_id = 1;
+  string idempotency_key = 2;
+  uint64 approval_revision = 3;
+  string manifest_digest = 4;
+  ManagedConversationSchedule schedule = 5;
+}
+
+message UpdateManagedConversationScheduleExactRequest {
+  string request_id = 1;
+  string idempotency_key = 2;
+  string automation_id = 3;
+  uint64 expected_resource_revision = 4;
+  uint64 approval_revision = 5;
+  string manifest_digest = 6;
+  ManagedConversationSchedule schedule = 7;
+}
+
+message SetManagedConversationScheduleEnabledExactRequest {
+  string request_id = 1;
+  string idempotency_key = 2;
+  string workspace_id = 3;
+  string automation_id = 4;
+  uint64 expected_resource_revision = 5;
+  bool enabled = 6;
+  uint64 approval_revision = 7;
+  string manifest_digest = 8;
+}
+
+message DeleteManagedConversationScheduleExactRequest {
+  string request_id = 1;
+  string idempotency_key = 2;
+  string workspace_id = 3;
+  string automation_id = 4;
+  uint64 expected_resource_revision = 5;
+  uint64 approval_revision = 6;
+  string manifest_digest = 7;
+}
+
+message ManagedConversationScheduleExactResponse {
+  HostCommandResult result = 1;
+  ManagedConversationSchedule schedule = 2;
+}
+
+message EnsureTaskRunExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string idempotency_key = 4;
+  string expected_task_resource_version = 5;
+  uint64 approval_revision = 6;
+  string manifest_digest = 7;
+  string management_instance_key = 8;
+  int64 expected_claim_generation = 9;
+}
+
+message EnsureTaskRunExactResponse {
+  HostCommandResult result = 1;
+  string session_id = 2;
+  string session_state = 3;
+  string execution_id = 4;
+}
+
+message StopTaskRunExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string session_id = 4;
+  string expected_session_resource_version = 5;
+  string expected_execution_id = 6;
+  string idempotency_key = 7;
+  uint64 approval_revision = 8;
+  string manifest_digest = 9;
+  string management_instance_key = 10;
+  int64 expected_claim_generation = 11;
+}
+
+message StopTaskRunExactResponse {
+  HostCommandResult result = 1;
+  bool stopped = 2;
+}
+
+message RecoverSessionExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string session_id = 4;
+  string expected_session_resource_version = 5;
+  string expected_execution_id = 6;
+  string action = 7;
+  string idempotency_key = 8;
+  uint64 approval_revision = 9;
+  string manifest_digest = 10;
+  string management_instance_key = 11;
+  int64 expected_claim_generation = 12;
+}
+
+message RecoverSessionExactResponse {
+  HostCommandResult result = 1;
+  string session_id = 2;
+  string execution_id = 3;
+}
+
+message CancelPendingTaskTransitionExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string transition_id = 4;
+  string expected_resource_version = 5;
+  string idempotency_key = 6;
+  uint64 approval_revision = 7;
+  string manifest_digest = 8;
+  string management_instance_key = 9;
+  int64 expected_claim_generation = 10;
+}
+
+message CancelPendingTaskTransitionExactResponse {
+  HostCommandResult result = 1;
+}
+
+message SessionModeOption {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+}
+
+message GetSessionModeContextExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string session_id = 4;
+  uint64 approval_revision = 5;
+  string manifest_digest = 6;
+  string management_instance_key = 7;
+  int64 expected_claim_generation = 8;
+}
+
+message GetSessionModeContextExactResponse {
+  string session_id = 1;
+  string execution_id = 2;
+  string current_mode_id = 3;
+  repeated SessionModeOption available_modes = 4;
+  string resource_version = 5;
+  string observed_at = 6;
+}
+
+message SetSessionModeExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string session_id = 4;
+  string expected_session_resource_version = 5;
+  string expected_execution_id = 6;
+  string mode_id = 7;
+  string idempotency_key = 8;
+  uint64 approval_revision = 9;
+  string manifest_digest = 10;
+  string management_instance_key = 11;
+  int64 expected_claim_generation = 12;
+}
+
+message SetSessionModeExactResponse {
+  HostCommandResult result = 1;
+  string current_mode_id = 2;
+}
+
+message HumanInteractionResponseReceipt {
+  string id = 1;
+  string interaction_id = 2;
+  string resource_version = 3;
+  string expires_at = 4;
+}
+
+message RespondPermissionExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string interaction_id = 3;
+  string expected_resource_version = 4;
+  string option_id = 5;
+  bool cancelled = 6;
+  string human_response_receipt_id = 7;
+  uint64 approval_revision = 8;
+  string manifest_digest = 9;
+}
+
+message RespondPermissionExactResponse {
+  HostCommandResult result = 1;
+  Interaction interaction = 2;
+}
+
+message AnswerClarificationExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string interaction_id = 3;
+  string expected_resource_version = 4;
+  repeated ClarificationAnswer answers = 5;
+  string human_response_receipt_id = 6;
+  uint64 approval_revision = 7;
+  string manifest_digest = 8;
+}
+
+message AnswerClarificationExactResponse {
+  HostCommandResult result = 1;
+  Interaction interaction = 2;
 }
 
 message Event {
@@ -190,6 +1350,12 @@ message AgentToolContext {
   string session_id = 2;
   string workspace_id = 3;
   string surface = 4;
+  string execution_id = 5;
+  string installation_id = 6;
+  uint64 conversation_revision = 7;
+  uint64 approval_revision = 8;
+  string manifest_digest = 9;
+  repeated string agent_tool_names = 10;
 }
 message AgentToolResponse {
   string text = 1;
@@ -445,6 +1611,7 @@ message Task {
   // depends_on resolves. Always false when blocked_reason is "unknown",
   // regardless of the underlying stored configuration.
   bool start_when_unblocked = 36;
+  string resource_version = 37; // RFC3339Nano task row version for exact writes
 }
 message TaskRepository {
   string id = 1;
@@ -649,6 +1816,193 @@ message ListExecutorProfilesRequest {
 message ListExecutorProfilesResponse {
   repeated ExecutorProfile profiles = 1;
   PageInfo page_info = 2;
+}
+
+// The host derives this authority from the admitted operation. Values from a
+// plugin or browser never grant access to another installation or environment.
+message ExecutorProviderRequestContext {
+  string plugin_id = 1;
+  string installation_id = 2;
+  string provider_key = 3;
+  int32 contract_version = 4;
+  string workspace_id = 5;
+  string task_id = 6;
+  string session_id = 7;
+  string environment_id = 8;
+  string execution_id = 9;
+  string operation_id = 10;
+  string deadline = 11;
+  uint64 environment_generation = 12;
+  string input_digest = 13;
+  uint64 dispatch_generation = 14;
+}
+
+message ExecutorProfileSnapshot {
+  string profile_id = 1;
+  map<string, string> config = 2;
+  // Secret values are transient and scoped to this operation/profile. Never
+  // place them in profile snapshots, checkpoints, or persisted provider state.
+  map<string, string> secret_values = 3;
+}
+
+message ExecutorProviderFieldError {
+  string field = 1;
+  string code = 2;
+  string message_id = 3;
+}
+
+message ExecutorProviderError {
+  string code = 1;
+  string message_id = 2;
+  repeated ExecutorProviderFieldError fields = 3;
+  uint32 retry_after_seconds = 4;
+}
+
+message ExecutorProviderCapabilities {
+  bool terminal = 1;
+  bool files = 2;
+  bool git = 3;
+  bool embedded_editor = 4;
+  bool preview = 5;
+  bool reattach = 6;
+  string retention = 7;
+  uint64 maximum_lifetime_seconds = 8;
+}
+
+message ExecutorResourceDescriptor {
+  string resource_handle = 1;
+  string state_json = 2;
+  string platform = 3;
+  ExecutorProviderCapabilities capabilities = 4;
+  string expires_at = 5;
+  string retention = 6;
+  uint32 state_version = 7;
+}
+
+message ValidateExecutorProfileRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorProfileSnapshot profile = 2;
+}
+
+message ValidateExecutorProfileResponse {
+  repeated ExecutorProviderFieldError field_errors = 1;
+  ExecutorProviderCapabilities capabilities = 2;
+  ExecutorProviderError error = 3;
+}
+
+message ProvisionExecutorEnvironmentRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorProfileSnapshot profile = 2;
+  string bootstrap_json = 3;
+}
+
+message ProvisionExecutorEnvironmentResponse {
+  ExecutorResourceDescriptor resource = 1;
+  ExecutorProviderError error = 2;
+}
+
+message RecoverExecutorOperationRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorProfileSnapshot profile = 2;
+}
+
+message RecoverExecutorOperationResponse {
+  string outcome = 1;
+  ExecutorResourceDescriptor resource = 2;
+  ExecutorProviderError error = 3;
+}
+
+message AttachExecutorEnvironmentRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorResourceDescriptor resource = 2;
+  string expected_runtime_identity = 3;
+}
+
+message AttachExecutorEnvironmentResponse {
+  ExecutorResourceDescriptor resource = 1;
+  ExecutorProviderError error = 2;
+}
+
+message InspectExecutorEnvironmentRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorResourceDescriptor resource = 2;
+}
+
+message InspectExecutorEnvironmentResponse {
+  string state = 1;
+  string reason = 2;
+  string expires_at = 3;
+  ExecutorProviderError error = 4;
+}
+
+message ResolveExecutorConnectionRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorResourceDescriptor resource = 2;
+  string purpose = 3;
+  uint32 runtime_port = 4;
+}
+
+message ExecutorConnectionLease {
+  string base_url = 1;
+  map<string, string> http_headers = 2;
+  map<string, string> websocket_headers = 3;
+  repeated string websocket_subprotocols = 4;
+  string expires_at = 5;
+  string generation = 6;
+}
+
+message ResolveExecutorConnectionResponse {
+  ExecutorConnectionLease lease = 1;
+  ExecutorProviderError error = 2;
+}
+
+message DestroyExecutorEnvironmentRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorResourceDescriptor resource = 2;
+  string cleanup_reason = 3;
+  string cleanup_claim = 4;
+}
+
+message DestroyExecutorEnvironmentResponse {
+  bool confirmed_absent = 1;
+  ExecutorProviderError error = 2;
+}
+
+message CheckpointExecutorResourceRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorResourceDescriptor resource = 2;
+  string phase = 3;
+}
+
+message CheckpointExecutorResourceResponse {
+  bool accepted = 1;
+}
+
+message ReportExecutorProgressRequest {
+  ExecutorProviderRequestContext context = 1;
+  string stage = 2;
+  uint32 completed = 3;
+  uint32 total = 4;
+}
+
+message ReportExecutorProgressResponse {
+  bool accepted = 1;
+}
+
+message ReadExecutorRuntimeArtifactRequest {
+  ExecutorProviderRequestContext context = 1;
+  string artifact_id = 2;
+  string platform = 3;
+}
+
+message ExecutorRuntimeArtifactChunk {
+  string artifact_id = 1;
+  string version = 2;
+  uint64 total_size_bytes = 3;
+  string sha256 = 4;
+  uint32 chunk_index = 5;
+  bytes data = 6;
+  bool final = 7;
 }
 
 message Repository {
@@ -1004,9 +2358,8 @@ message DeletePluginOwnedTaskTreeRequest {
 message DeletePluginOwnedTaskTreeResponse {
   repeated string deleted_task_ids = 1;
 }
-// Attached to a non-OK DeletePluginOwnedTaskTree gRPC status when one or more
-// descendants were already deleted. Callers must reconcile these ids before
-// retrying the remaining idempotent cleanup.
+// Legacy progress detail retained for wire compatibility. The current Kandev
+// Host denies DeletePluginOwnedTaskTree before any task deletion can occur.
 message DeletePluginOwnedTaskTreeProgress {
   repeated string deleted_task_ids = 1;
 }
@@ -1110,3 +2463,193 @@ message AutomationWebhookResponse {
   string event_kind = 2;
   bytes data = 3;
 }
+
+// Exact Host reads are workspace-explicit and use a cursor bound to the
+// installation, capability revision, query, and immutable response snapshot.
+message ExactReadPage {
+  int32 limit = 1;
+  string cursor = 2;
+  string snapshot_version = 3;
+}
+message HostReadReceipt {
+  string installation_id = 1;
+  string workspace_id = 2;
+  uint64 capability_revision = 3;
+  string request_id = 4;
+  string snapshot_version = 5;
+  string observed_at = 6;
+}
+message ExactReadPageInfo {
+  string next_cursor = 1;
+  bool has_more = 2;
+  string snapshot_version = 3;
+  string observed_at = 4;
+  HostReadReceipt receipt = 5;
+}
+message ExactWorkspaceObservation {
+  Workspace workspace = 1;
+  string resource_version = 2;
+  string observed_at = 3;
+}
+message ExactWorkflowObservation {
+  Workflow workflow = 1;
+  string resource_version = 2;
+  string observed_at = 3;
+}
+message ExactWorkflowStepObservation {
+  WorkflowStep step = 1;
+  string resource_version = 2;
+  string observed_at = 3;
+}
+message ExactTaskObservation {
+  Task task = 1;
+  string canonical_status = 2;
+  string semantic_activity = 3;
+  optional string last_meaningful_activity_at = 4;
+  string execution_state = 5;
+  repeated string blocking_reasons = 6;
+  bool status_known = 7;
+  string resource_version = 8;
+  string observed_at = 9;
+}
+message ExactSessionObservation {
+  Session session = 1;
+  string execution_state = 2;
+  string resource_version = 3;
+  string observed_at = 4;
+  // Opaque live execution generation for exact stop/recovery fencing. Empty
+  // when the session has no associated agent execution.
+  string execution_id = 5;
+}
+message ExactInteractionObservation {
+  Interaction interaction = 1;
+  string resource_version = 2;
+  string observed_at = 3;
+}
+message ExactMessageObservation {
+  Message message = 1;
+  string resource_version = 2;
+  string observed_at = 3;
+  string sanitization = 4;
+}
+message TaskRelation {
+  string workspace_id = 1;
+  string source_task_id = 2;
+  string target_task_id = 3;
+  string kind = 4;
+  string source_resource_version = 5;
+  string target_resource_version = 6;
+  string resource_version = 7;
+}
+message TaskInboxItem {
+  string id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string session_id = 4;
+  string kind = 5;
+  string state = 6;
+  string created_at = 7;
+  string resource_version = 8;
+}
+message TaskDirective {
+  string id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string capability_class = 4;
+  string state = 5;
+  string instruction_digest = 6;
+  optional string expires_at = 7;
+  string resource_version = 8;
+}
+message PendingTaskTransition {
+  string id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string from_workflow_id = 4;
+  string from_step_id = 5;
+  string to_workflow_id = 6;
+  string to_step_id = 7;
+  string state = 8;
+  string resource_version = 9;
+  string created_at = 10;
+}
+message ChangeRequestEvidence {
+  string task_id = 1;
+  string provider = 2;
+  string repository_id = 3;
+  string repository_owner = 4;
+  string repository_name = 5;
+  int64 number = 6;
+  string url = 7;
+  string head_revision = 8;
+  string review_state = 9;
+  string checks_state = 10;
+  string mergeable_state = 11;
+  int32 unresolved_review_threads = 12;
+  int32 checks_total = 13;
+  int32 checks_passing = 14;
+  string provider_state = 15; // available | no_evidence | unsupported | unavailable
+  optional string provider_error = 16;
+  optional string fetched_at = 17;
+  string resource_version = 18;
+  string observed_at = 19;
+}
+message TaskUsageObservation {
+  string task_id = 1;
+  optional string session_id = 2;
+  int64 tokens_in = 3;
+  int64 tokens_cached_read = 4;
+  int64 tokens_cached_write = 5;
+  int64 tokens_out = 6;
+  int64 tokens_thought = 7;
+  int64 tokens_total = 8;
+  optional int64 cost_subcents = 9;
+  string currency = 10;
+  int64 event_count = 11;
+  int64 estimated_event_count = 12;
+  int64 unpriced_event_count = 13;
+  bool output_tokens_complete = 14;
+  string observation_state = 15; // observed | no_observations | unavailable
+  optional string cost_unknown_reason = 16;
+  optional string first_event_at = 17;
+  optional string last_event_at = 18;
+  optional int64 elapsed_milliseconds = 19;
+  string resource_version = 20;
+  string observed_at = 21;
+  bool cost_complete = 22;
+}
+
+message ListWorkspacesExactRequest { string request_id = 1; string workspace_id = 2; ExactReadPage page = 3; }
+message ListWorkspacesExactResponse { repeated ExactWorkspaceObservation items = 1; ExactReadPageInfo page_info = 2; }
+message ListWorkflowsExactRequest { string request_id = 1; string workspace_id = 2; ExactReadPage page = 3; }
+message ListWorkflowsExactResponse { repeated ExactWorkflowObservation items = 1; ExactReadPageInfo page_info = 2; }
+message ListWorkflowStepsExactRequest { string request_id = 1; string workspace_id = 2; string workflow_id = 3; ExactReadPage page = 4; }
+message ListWorkflowStepsExactResponse { repeated ExactWorkflowStepObservation items = 1; ExactReadPageInfo page_info = 2; }
+message ListTasksExactRequest { string request_id = 1; string workspace_id = 2; TaskFilter filter = 3; ExactReadPage page = 4; }
+message ListTasksExactResponse { repeated ExactTaskObservation items = 1; ExactReadPageInfo page_info = 2; }
+message GetTaskExactRequest { string request_id = 1; string workspace_id = 2; string task_id = 3; }
+message GetTaskExactResponse { ExactTaskObservation item = 1; HostReadReceipt receipt = 2; }
+message ListSessionsExactRequest { string request_id = 1; string workspace_id = 2; SessionFilter filter = 3; ExactReadPage page = 4; }
+message ListSessionsExactResponse { repeated ExactSessionObservation items = 1; ExactReadPageInfo page_info = 2; }
+message ListPendingInteractionsExactRequest { string request_id = 1; string workspace_id = 2; InteractionFilter filter = 3; ExactReadPage page = 4; }
+message ListPendingInteractionsExactResponse { repeated ExactInteractionObservation items = 1; ExactReadPageInfo page_info = 2; }
+message GetInteractionExactRequest { string request_id = 1; string workspace_id = 2; string interaction_id = 3; }
+message GetInteractionExactResponse { ExactInteractionObservation item = 1; HostReadReceipt receipt = 2; }
+message ListSanitizedMessagesExactRequest { string request_id = 1; string workspace_id = 2; MessageFilter filter = 3; ExactReadPage page = 4; }
+message ListSanitizedMessagesExactResponse { repeated ExactMessageObservation items = 1; ExactReadPageInfo page_info = 2; }
+message ListTaskInboxExactRequest { string request_id = 1; string workspace_id = 2; string task_id = 3; string session_id = 4; ExactReadPage page = 5; }
+message ListTaskInboxExactResponse { repeated TaskInboxItem items = 1; ExactReadPageInfo page_info = 2; }
+message GetTaskDirectiveExactRequest { string request_id = 1; string workspace_id = 2; string directive_id = 3; }
+message GetTaskDirectiveExactResponse { TaskDirective item = 1; HostReadReceipt receipt = 2; }
+message ListTaskDirectivesExactRequest { string request_id = 1; string workspace_id = 2; string task_id = 3; ExactReadPage page = 4; }
+message ListTaskDirectivesExactResponse { repeated TaskDirective items = 1; ExactReadPageInfo page_info = 2; }
+message GetTaskRelationsExactRequest { string request_id = 1; string workspace_id = 2; string task_id = 3; ExactReadPage page = 4; }
+message GetTaskRelationsExactResponse { repeated TaskRelation items = 1; ExactReadPageInfo page_info = 2; }
+message ListTaskRelationsExactRequest { string request_id = 1; string workspace_id = 2; string task_id = 3; ExactReadPage page = 4; }
+message ListTaskRelationsExactResponse { repeated TaskRelation items = 1; ExactReadPageInfo page_info = 2; }
+message ListPendingTaskTransitionsExactRequest { string request_id = 1; string workspace_id = 2; string task_id = 3; ExactReadPage page = 4; }
+message ListPendingTaskTransitionsExactResponse { repeated PendingTaskTransition items = 1; ExactReadPageInfo page_info = 2; }
+message ListChangeRequestEvidenceExactRequest { string request_id = 1; string workspace_id = 2; repeated string task_ids = 3; ExactReadPage page = 4; }
+message ListChangeRequestEvidenceExactResponse { repeated ChangeRequestEvidence items = 1; ExactReadPageInfo page_info = 2; }
+message ListTaskUsageExactRequest { string request_id = 1; string workspace_id = 2; repeated string task_ids = 3; ExactReadPage page = 4; }
+message ListTaskUsageExactResponse { repeated TaskUsageObservation items = 1; ExactReadPageInfo page_info = 2; }

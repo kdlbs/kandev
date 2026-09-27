@@ -361,6 +361,13 @@ func provideGateway(
 					Known:      observationErr == nil && observation.Known,
 				}), nil
 			},
+			LoadCompletionGate: func(ctx context.Context, taskID string) (*statussummary.CompletionGateSummary, error) {
+				gate, err := taskRepo.GetTaskCompletionGate(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+				return statussummary.CompletionGateSummaryFromSnapshot(gate), nil
+			},
 			ResolveWorkspace: func(ctx context.Context, taskID string) (string, error) {
 				task, err := taskRepo.GetTask(ctx, taskID)
 				if err != nil {

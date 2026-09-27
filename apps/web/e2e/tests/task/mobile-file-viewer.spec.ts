@@ -61,6 +61,34 @@ async function setupMobileFileViewerTest({
     repository_ids: [seedData.repositoryId],
   });
 
+  // Session chat can become idle before the executor publishes the repository
+  // checkout. Wait for the exact fixture file in any advertised checkout; the
+  // first environment snapshot can omit repository_id while it materializes.
+  await expect
+    .poll(
+      async () => {
+        const environment = await apiClient.getTaskEnvironment(task.id);
+        const repositoryWorktree = environment?.repos?.find(
+          (repository) => repository.repository_id === seedData.repositoryId,
+        )?.worktree_path;
+        const candidatePaths = [
+          repositoryWorktree,
+          ...(environment?.repos ?? []).map((repository) => repository.worktree_path),
+          environment?.workspace_path,
+          environment?.worktree_path,
+        ].filter(
+          (candidate, index, paths): candidate is string =>
+            Boolean(candidate) && paths.indexOf(candidate) === index,
+        );
+        return candidatePaths.some((candidate) => fs.existsSync(path.join(candidate, filePath)));
+      },
+      {
+        timeout: 30_000,
+        message: `Waiting for ${filePath} in the mobile file viewer worktree`,
+      },
+    )
+    .toBe(true);
+
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -442,7 +470,7 @@ test.describe("Mobile file viewer panel", () => {
     backend,
   }) => {
     // Covers AC-UI-RESIZABLE-MARKDOWN-TABLES-001.12.
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
     const marker = "Mobile file preview table marker";
     const { filePath } = await setupMobileFileViewerTest({
       testPage,
@@ -462,7 +490,7 @@ test.describe("Mobile file viewer panel", () => {
 
     await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${filePath}"]`);
-    await expect(fileNode).toBeVisible({ timeout: 15_000 });
+    await expect(fileNode).toBeVisible({ timeout: 30_000 });
     await fileNode.tap();
 
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");

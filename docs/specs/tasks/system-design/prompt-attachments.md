@@ -1,10 +1,10 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-PROMPT-ATTACHMENTS-001
 created: 2026-09-01
-updated: 2026-09-10
+updated: 2026-09-27
 owners:
   - Kandev team
 ---
@@ -21,8 +21,8 @@ It cannot claim staged files or infer task ownership.
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
+| Requirement                        | Design sections                                                               |
+| ---------------------------------- | ----------------------------------------------------------------------------- |
 | `REQ-TASKS-PROMPT-ATTACHMENTS-001` | Claim admission, materialization and delivery, failure and recovery, security |
 
 ## Components and responsibilities
@@ -196,8 +196,85 @@ Desktop and mobile browser tests open both attachments during preparation,
 reload, then observe one stored initial message after launch. Include failure
 and unavailable-content cases without suppressing existing progress errors.
 
+## Composer workspace resolution
+
+This extension covers AC-TASKS-PROMPT-ATTACHMENTS-001.12 through .17.
+The task system owns upload scope because it owns attachment authorization.
+It reuses the existing attachment API and ADR without changing persistence.
+
+`composer-workspace.ts` currently considers Quick Chat sessions and Kanban
+workflow collections. Both `chat-input-area.tsx` and
+`passthrough-chat-composer.tsx` call it. Office-only task identities can therefore
+resolve to no workspace, even when the Office task has a workspace.
+
+Use one shared composer-scope hook for both consumers. Resolve an exact task ID
+from Office task records and existing task collections. Preserve the existing
+Quick Chat session mapping. A conflicting task-bound identity must not select
+a workspace by collection order. Missing or conflicting scope requires an
+authoritative `fetchTask(taskId)` read through the hook. Once that read starts,
+its pending, resolved, or failed state takes precedence over cached workspace
+records. Deduplicate the read per task, keep a current subscriber through cache
+changes, and ignore responses after the requested task changes or unmounts. A
+failed read leaves scope unresolved with visible recovery until the user retries.
+Do not use the currently selected workspace as a fallback. Cold direct links must
+work without first opening an Office or Kanban list.
+
+`use-chat-input-state.ts` must block message and plan-implementation actions
+whenever any attachment lacks an uploaded attachment ID, independent of
+workspace availability. Retain draft text and files while scope resolves. Show
+localized scope feedback and allow retry after lookup failure. Start pending
+uploads when valid scope arrives. Recover old inline draft bytes as a file and
+upload them before use; an unrecoverable descriptor remains blocked until the
+user removes it. Do not persist bytes for a new pending browser file. Use
+existing upload-error, retry, removal, and best-effort deletion behavior. Never
+convert an incomplete file into an inline-byte submission because scope is
+missing. Keep compatibility for already-ready descriptors and legacy message
+attachments separate.
+
+Capture task/session/workspace identity for asynchronous upload work. A late
+completion must not update a successor draft. Delete an unclaimed late upload
+on a best-effort basis. Clear the attachment collection if the task changes
+while a session ID is reused, and delete its unclaimed descriptors. Session
+changes load only that session's own draft. Draft restoration must not transfer
+files between tasks. Message submission and plan implementation remain blocked
+while any attachment is pending, failed, or otherwise missing its descriptor.
+
+### Surface boundary
+
+Quick Chat, general run transcripts, Office advanced chat, and passthrough chat
+already share the editor. Reuse it rather than introducing another upload hook.
+Office agent run details and per-agent transcript tabs pass `hideInput` and
+remain read-only. The simple Office comment composer is live code. Its
+Markdown/body-only comment API is not a task-session message API. File-backed
+comment claims, retention, and agent delivery require a separate Office design.
+This extension does not claim that comment uploads are fixed.
+
+### Desktop and phone behavior
+
+Keep attachment chips above the editable prompt. Place localized scope or
+upload feedback beside the chips, with retry and removal actions. Sending is
+unavailable while any file is incomplete. Preserve typed text and ready siblings.
+Plan implementation controls use the same incomplete-upload state and remain
+disabled on desktop and phone until every attachment is ready or removed. Keep
+their handlers guarded so direct invocation cannot bypass that state.
+The phone entry remains the existing task Chat view. Reuse the shipped mobile
+session layout and attachment controls. Chips wrap, touch controls remain at
+least 44px, and the transcript retains its existing scroll owner. Keep existing
+safe-area and keyboard handling. No extra drawer or navigation step is needed
+for this short inline action. Desktop controls retain their normal density.
+
+### Evidence and observability
+
+Tests must exercise a real PNG File through paste, HTTP upload, descriptor
+submission, and transcript display. Cover a cold Office route with an unrelated
+active workspace. Deterministic DOM paste proves application handling, not macOS
+clipboard integration. Retain unreadable-image and HTML-image fallback tests.
+Existing upload HTTP errors and localized composer feedback provide diagnostics.
+No new metrics, flags, schema, or backend endpoints are required.
+
 ## Implementation plans
 
+- [Composer attachment scope](../../../plans/composer-attachment-scope/plan.md)
 - [Preparation attachment previews](../../../plans/preparation-attachment-previews/plan.md)
 
 ## Observability

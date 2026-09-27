@@ -13,6 +13,8 @@ import {
   HEALTH_REQUESTED_TIMEOUT_MS,
   ROOT_REQUESTED_TIMEOUT_MS,
   waitForHttp,
+  writeJsonAtomically,
+  createAtomicRecordWriter,
   waitForFile,
   writeFakeRuntime,
   writeReleaseShapedRuntime,
@@ -62,6 +64,28 @@ async function withTempDir(run) {
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+test("atomic instance-record writes serialize concurrent updates without partial JSON", async () => {
+  await withTempDir(async (dir) => {
+    const filePath = join(dir, "instance.json");
+    const saveRecord = createAtomicRecordWriter(filePath);
+    const record = { revision: 0, payload: "x".repeat(32_000) };
+    await saveRecord(record);
+
+    const writes = [];
+    for (let revision = 1; revision <= 20; revision += 1) {
+      record.revision = revision;
+      writes.push(saveRecord(record));
+    }
+    await Promise.all(writes);
+
+    assert.deepEqual(JSON.parse(await readFile(filePath, "utf8")), {
+      revision: 20,
+      payload: "x".repeat(32_000),
+    });
+    assert.deepEqual(await readdir(dir), ["instance.json"]);
+  });
+});
 
 test("waitForFile resolves once the target file appears", async () => {
   await withTempDir(async (dir) => {
@@ -113,6 +137,38 @@ test("waitForFile calls tick on every poll and surfaces a tick failure immediate
       /boom/,
     );
     assert.ok(calls >= 2, `expected at least 2 tick() calls, got ${calls}`);
+  });
+});
+
+test("atomic JSON writes never expose a partial instance record", async () => {
+  await withTempDir(async (dir) => {
+    const target = join(dir, "instance.json");
+    await writeFile(target, JSON.stringify({ revision: 0, payload: "x".repeat(100_000) }));
+
+    let writing = true;
+    let parseErrors = 0;
+    const writer = (async () => {
+      for (let revision = 1; revision <= 300; revision += 1) {
+        await writeJsonAtomically(
+          target,
+          JSON.stringify({ revision, payload: "x".repeat(100_000) }),
+        );
+      }
+      writing = false;
+    })();
+    const readers = Array.from({ length: 4 }, async () => {
+      while (writing) {
+        try {
+          JSON.parse(await readFile(target, "utf8"));
+        } catch (error) {
+          if (error instanceof SyntaxError) parseErrors += 1;
+        }
+      }
+    });
+
+    await Promise.all([writer, ...readers]);
+    assert.equal(parseErrors, 0);
+    assert.equal(JSON.parse(await readFile(target, "utf8")).revision, 300);
   });
 });
 

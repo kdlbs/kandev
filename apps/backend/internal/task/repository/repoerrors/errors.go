@@ -15,6 +15,37 @@ var ErrWorkflowNotFound = errors.New("workflow not found")
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
+// ErrTaskVersionConflict reports an exact task update based on a stale
+// workspace or resource version.
+var ErrTaskVersionConflict = errors.New("task resource version changed")
+
+// ErrTaskManagementClaimConflict reports a claim-version mismatch or a write
+// made with an owner identity/generation that is no longer current.
+var ErrTaskManagementClaimConflict = errors.New("task management claim changed")
+
+// ErrTaskManagementClaimOwned reports that a different plugin instance owns
+// the active task management claim.
+var ErrTaskManagementClaimOwned = errors.New("task management claim already owned")
+
+// ErrTaskCompletionGateBlocked reports an attempted completion with at least
+// one missing, stale, or unverified task-owned criterion.
+var ErrTaskCompletionGateBlocked = errors.New("task completion requirements are not satisfied")
+
+// ErrTaskCompletionCriteriaConflict reports a stale criteria-set revision.
+var ErrTaskCompletionCriteriaConflict = errors.New("task completion criteria changed")
+
+// ErrTaskCompletionEvidenceChanged reports evidence that no longer identifies
+// the criterion's required subject revision.
+var ErrTaskCompletionEvidenceChanged = errors.New("task completion evidence changed")
+
+// ErrTaskCompletionHumanConfirmationRequired reports that removing or changing
+// an unmet criterion needs an explicit native human confirmation.
+var ErrTaskCompletionHumanConfirmationRequired = errors.New("human confirmation required to weaken unmet completion criteria")
+
+// ErrTaskOperationConflict reports reuse of an exact operation identity with
+// a different task or payload.
+var ErrTaskOperationConflict = errors.New("task operation identity conflict")
+
 // ErrNoPrimarySession reports that a task exists but has no primary session.
 // Callers can repair that state without hiding other repository failures.
 var ErrNoPrimarySession = errors.New("no primary session")

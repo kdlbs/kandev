@@ -22,6 +22,11 @@ function fixture() {
     },
   };
 }
+function scrollbarPointer(type: string, y: number): PointerEvent {
+  const event = new MouseEvent(type, { bubbles: true, clientX: 215, clientY: y });
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  return event as PointerEvent;
+}
 beforeEach(() => {
   frames = new Map();
   now = 0;
@@ -91,19 +96,40 @@ describe("continuous growth and content interactions", () => {
     expect(el.scrollTop).toBeGreaterThan(0);
     motion.dispose();
   });
-  it("yields to a scrollbar press and removes its listener", () => {
+  it("yields to upward scrollbar navigation but preserves a downward drag", () => {
     const { el } = fixture();
-    Object.defineProperties(el, { clientWidth: { value: 200 }, offsetWidth: { value: 216 } });
-    vi.spyOn(el, "getBoundingClientRect").mockReturnValue({ left: 10, right: 226 } as DOMRect);
+    Object.defineProperties(el, {
+      clientWidth: { value: 200 },
+      offsetWidth: { value: 216 },
+      scrollTop: { configurable: true, value: 300 },
+    });
+    vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
+      left: 10,
+      right: 226,
+      top: 20,
+      bottom: 220,
+    } as DOMRect);
     const interrupt = vi.fn();
     const motion = createChatScrollMotion(el, () => true, interrupt);
     motion.request();
-    el.dispatchEvent(new MouseEvent("pointerdown", { clientX: 215 }));
+    el.dispatchEvent(scrollbarPointer("pointerdown", 60));
     expect(interrupt).toHaveBeenCalledOnce();
     expect(frames.size).toBe(0);
-    motion.dispose();
-    el.dispatchEvent(new MouseEvent("pointerdown", { clientX: 215 }));
+
+    el.dispatchEvent(scrollbarPointer("pointerdown", 140));
     expect(interrupt).toHaveBeenCalledOnce();
+
+    el.dispatchEvent(scrollbarPointer("pointerdown", 100));
+    el.dispatchEvent(scrollbarPointer("pointermove", 110));
+    expect(interrupt).toHaveBeenCalledOnce();
+    el.dispatchEvent(scrollbarPointer("pointerup", 110));
+
+    el.dispatchEvent(scrollbarPointer("pointerdown", 100));
+    el.dispatchEvent(scrollbarPointer("pointermove", 90));
+    expect(interrupt).toHaveBeenCalledTimes(2);
+    motion.dispose();
+    el.dispatchEvent(scrollbarPointer("pointerdown", 60));
+    expect(interrupt).toHaveBeenCalledTimes(2);
   });
 });
 describe("scroll ownership", () => {
@@ -116,7 +142,9 @@ describe("scroll ownership", () => {
     advance();
     const top = el.scrollTop;
     el.dispatchEvent(
-      type === "keydown" ? new KeyboardEvent(type, { key: "PageUp" }) : new Event(type),
+      type === "keydown"
+        ? new KeyboardEvent(type, { key: "PageUp" })
+        : new WheelEvent(type, { deltaY: -80 }),
     );
     advance();
     expect(el.scrollTop).toBe(top);

@@ -315,6 +315,23 @@ run_docker() {
   [[ "$STRICT" == 1 ]] && strict_flag=(-e KANDEV_E2E_WS_ASSERT=1)
   local container_flag=()
   is_container_project && container_flag=(-e KANDEV_E2E_CONTAINERS=1)
+  local coordinator_mount=() observer_mount=() requires_coordinator=0 requires_observer=0
+  for arg in "${PW_ARGS[@]}"; do
+    case "$arg" in
+      *reference-coordinator*|*coordinator-compatibility*) requires_coordinator=1 ;;
+      *reference-observer*|*coordinator-compatibility*) requires_observer=1 ;;
+    esac
+  done
+  if [[ "$requires_coordinator" == 1 ]]; then
+    [[ -d "$REPO_ROOT/../kandev-plugin-coordinator" ]] \
+      || die "reference coordinator checkout is required at $REPO_ROOT/../kandev-plugin-coordinator"
+    coordinator_mount=(-v "$REPO_ROOT/../kandev-plugin-coordinator:/work/kandev-plugin-coordinator:ro")
+  fi
+  if [[ "$requires_observer" == 1 ]]; then
+    [[ -d "$REPO_ROOT/../kandev-plugin-observer" ]] \
+      || die "reference observer checkout is required at $REPO_ROOT/../kandev-plugin-observer"
+    observer_mount=(-v "$REPO_ROOT/../kandev-plugin-observer:/work/kandev-plugin-observer:ro")
+  fi
   local capture_flag=()
   [[ -n "${CAPTURE_PR_ASSETS:-}" ]] && capture_flag=(-e CAPTURE_PR_ASSETS)
   local pw="git config --global --add safe.directory /work 2>/dev/null; cd /work/apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=\"$PROJECT\" --workers=1"
@@ -324,6 +341,8 @@ run_docker() {
     [[ "$i" != 0 ]] && shardflag="--shard=$i/$SHARDS"
     docker run --rm --ipc=host \
       -v "$REPO_ROOT":/work -w /work/apps/web \
+      ${coordinator_mount[@]+"${coordinator_mount[@]}"} \
+      ${observer_mount[@]+"${observer_mount[@]}"} \
       ${strict_flag[@]+"${strict_flag[@]}"} \
       ${container_flag[@]+"${container_flag[@]}"} \
       ${capture_flag[@]+"${capture_flag[@]}"} \

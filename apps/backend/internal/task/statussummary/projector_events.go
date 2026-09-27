@@ -320,6 +320,9 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restoreLaunchQueue(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreCompletionGate(ctx, taskID, state); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -327,6 +330,8 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.queuedCount = summary.QueuedPromptCount
 	state.launchQueue = cloneLaunchQueue(summary.LaunchQueue)
 	state.launchQueueObserved = summary.LaunchQueue != nil
+	state.completionGate = cloneCompletionGate(summary.CompletionGate)
+	state.completionGateObserved = summary.CompletionGate != nil
 	state.taskPending = summary.PendingAction
 	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -421,7 +426,32 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	if err := p.restoreLaunchQueue(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreCompletionGate(ctx, taskID, state); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (p *Projector) restoreCompletionGate(ctx context.Context, taskID string, state *projectionState) error {
+	if p.loadCompletionGate == nil {
+		return nil
+	}
+	gate, err := p.loadCompletionGate(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load completion gate for task status summary %q: %w", taskID, err)
+	}
+	state.completionGate = cloneCompletionGate(gate)
+	state.completionGateObserved = true
+	return nil
+}
+
+func isCompletionGateRefreshEvent(eventType string) bool {
+	switch eventType {
+	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged, events.GitHubTaskPRUpdated:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Projector) restoreLaunchQueue(ctx context.Context, taskID string, state *projectionState) error {

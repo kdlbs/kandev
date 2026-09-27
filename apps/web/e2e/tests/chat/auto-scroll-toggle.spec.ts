@@ -13,6 +13,7 @@ type E2EMessageStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
     getState: () => {
       messages: { bySession: Record<string, Array<{ content: string }>> };
+      transcriptAutoScroll?: { scrollTopBySessionId: Record<string, number> };
     };
   };
 };
@@ -411,6 +412,18 @@ test.describe("Transcript auto-scroll toggle", () => {
       return el.scrollTop;
     });
     expect(targetScrollTop).toBeGreaterThan(100);
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate(
+            (sessionId) =>
+              (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__?.getState()
+                .transcriptAutoScroll?.scrollTopBySessionId[sessionId],
+            firstSessionId,
+          ),
+        { message: "reader-owned scroll position should persist before disabling follow mode" },
+      )
+      .toBe(targetScrollTop);
     const toggle = firstChat.getByTestId("auto-scroll-toggle-button");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
@@ -419,6 +432,9 @@ test.describe("Transcript auto-scroll toggle", () => {
     await waitForStableActiveSession(testPage, secondSessionId);
     await refreshedSession.sessionTabBySessionId(firstSessionId).click();
     await waitForStableActiveSession(testPage, firstSessionId);
+    await expect(firstChat).toBeVisible({ timeout: 15_000 });
+    await expect(firstList).toBeVisible({ timeout: 15_000 });
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
     await expect
       .poll(
         async () =>
@@ -828,5 +844,66 @@ test.describe("Transcript auto-scroll toggle", () => {
         { timeout: 5_000, message: "re-enabling should catch up to the genuinely new content" },
       )
       .toBeLessThan(10);
+  });
+
+  test("follows a live turn from the bottom, then pauses after a small upward wheel", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.emulateMedia({ reducedMotion: "reduce" });
+    const session = await seedOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Transcript live follow intent",
+    );
+    const list = chatList(testPage);
+    await expect
+      .poll(async () =>
+        list.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight),
+      )
+      .toBeLessThan(5);
+
+    await session.sendMessageViaButton(
+      'e2e:message("LIVE-FOLLOW-START")\ne2e:delay(2500)\ne2e:message("LIVE-FOLLOW-TAIL")',
+    );
+    await expect(
+      session.activeChat().getByText("LIVE-FOLLOW-START", { exact: false }),
+    ).toBeVisible();
+    const runningStatus = list.getByRole("status", { name: "Agent is running" });
+    await expect(runningStatus).toBeVisible({ timeout: 10_000 });
+    await expect
+      .poll(async () =>
+        list.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight),
+      )
+      .toBeLessThan(5);
+    const listBox = await list.boundingBox();
+    const statusBox = await runningStatus.boundingBox();
+    expect(listBox).not.toBeNull();
+    expect(statusBox).not.toBeNull();
+    expect(statusBox!.y).toBeGreaterThanOrEqual(listBox!.y - 1);
+    expect(statusBox!.y + statusBox!.height).toBeLessThanOrEqual(listBox!.y + listBox!.height + 1);
+
+    const startTop = await list.evaluate((element) => element.scrollTop);
+    await list.hover();
+    await testPage.mouse.wheel(0, -30);
+    await expect
+      .poll(async () => startTop - (await list.evaluate((element) => element.scrollTop)))
+      .toBeGreaterThan(5);
+    const readerTop = await list.evaluate((element) => element.scrollTop);
+
+    await expect(session.activeChat().getByText("LIVE-FOLLOW-TAIL", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect
+      .poll(
+        async () => Math.abs((await list.evaluate((element) => element.scrollTop)) - readerTop),
+        {
+          timeout: 2_000,
+          message: "new live output must not pull a reader back to the latest message",
+        },
+      )
+      .toBeLessThanOrEqual(3);
   });
 });

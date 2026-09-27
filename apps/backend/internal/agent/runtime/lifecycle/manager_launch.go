@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -41,6 +42,11 @@ var registeredLaunchRollbackRetryDelays = [...]time.Duration{
 }
 
 var errTaskCleanupActive = errors.New("task cleanup is active")
+
+var (
+	ErrManagedToolPolicyInvalid     = errors.New("managed tool policy is invalid")
+	ErrManagedToolPolicyUnsupported = errors.New("agent does not support managed tool policy")
+)
 
 // resolveAgentProfile resolves the agent profile and returns the agent type name and profile info.
 func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (string, *AgentProfileInfo, error) {
@@ -66,6 +72,55 @@ func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (
 		zap.String("agent_name", profileInfo.AgentName),
 		zap.String("agent_type", profileInfo.AgentName))
 	return profileInfo.AgentName, profileInfo, nil
+}
+
+func (m *Manager) validateManagedToolPolicyAdmission(ctx context.Context, req *LaunchRequest) error {
+	if req == nil || req.McpProfile == nil {
+		return nil
+	}
+	profileContext := req.McpProfile
+	managed := profileContext.Surface == mcpprofile.SurfaceManagedConversation || profileContext.ManagedToolPolicy != nil
+	if !managed {
+		return nil
+	}
+	if profileContext.Surface != mcpprofile.SurfaceManagedConversation || profileContext.ManagedToolPolicy == nil {
+		return ErrManagedToolPolicyInvalid
+	}
+	if err := profileContext.ManagedToolPolicy.Validate(); err != nil {
+		return fmt.Errorf("%w: %v", ErrManagedToolPolicyInvalid, err)
+	}
+	agentTypeName, _, err := m.resolveAgentProfile(ctx, req)
+	if err != nil {
+		return fmt.Errorf("resolve agent for managed tool policy: %w", err)
+	}
+	if m.registry == nil {
+		return fmt.Errorf("%w: agent registry is unavailable", ErrManagedToolPolicyUnsupported)
+	}
+	agentConfig, ok := m.registry.Get(agentTypeName)
+	if !ok {
+		return fmt.Errorf("%w: agent type %q is unavailable", ErrManagedToolPolicyUnsupported, agentTypeName)
+	}
+	return validateManagedToolPolicyProvider(profileContext, agentTypeName, agentConfig.Runtime())
+}
+
+func validateManagedToolPolicyProvider(profileContext *mcpprofile.Context, agentTypeName string, runtime *agents.RuntimeConfig) error {
+	if profileContext == nil {
+		return nil
+	}
+	managed := profileContext.Surface == mcpprofile.SurfaceManagedConversation || profileContext.ManagedToolPolicy != nil
+	if !managed {
+		return nil
+	}
+	if profileContext.Surface != mcpprofile.SurfaceManagedConversation || profileContext.ManagedToolPolicy == nil {
+		return ErrManagedToolPolicyInvalid
+	}
+	if err := profileContext.ManagedToolPolicy.Validate(); err != nil {
+		return fmt.Errorf("%w: %v", ErrManagedToolPolicyInvalid, err)
+	}
+	if runtime == nil || !runtime.SupportsManagedToolPolicy {
+		return fmt.Errorf("%w: %s", ErrManagedToolPolicyUnsupported, agentTypeName)
+	}
+	return nil
 }
 
 func executionProfileID(req *LaunchRequest) string {
@@ -284,6 +339,15 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	metadata := make(map[string]interface{})
 	for k, v := range req.Metadata {
 		metadata[k] = v
+	}
+	delete(metadata, mcpprofile.ManagedToolPolicyMetadataKey)
+	if req.McpProfile != nil && req.McpProfile.ManagedToolPolicy != nil {
+		encoded, err := mcpprofile.MarshalManagedToolPolicy(*req.McpProfile.ManagedToolPolicy)
+		if err != nil {
+			metadata[mcpprofile.ManagedToolPolicyMetadataKey] = map[string]any{"invalid": true}
+		} else {
+			metadata[mcpprofile.ManagedToolPolicyMetadataKey] = encoded
+		}
 	}
 	putPrimaryCheckoutOptions(metadata, req)
 	for k, v := range req.ExecutorConfig {
@@ -1092,7 +1156,22 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		ComparisonTargets:              comparisonTargets,
 		ProviderGatewayAuth:            providerGatewayAuth,
 	}
+	if reqWithWorktree.ExecutorType == string(models.ExecutorTypePluginRemote) {
+		if m.pluginExecutorProfileLoader == nil {
+			return nil, nil, nil, errors.New("plugin executor profile loader is unavailable")
+		}
+		profileID := strings.TrimSpace(getMetadataString(metadata, MetadataKeyExecutorProfileID))
+		profile, loadErr := m.pluginExecutorProfileLoader.ExecutorProviderProfileForLaunch(ctx, profileID, reqWithWorktree.TaskEnvironmentID)
+		if loadErr != nil {
+			return nil, nil, nil, fmt.Errorf("resolve plugin executor profile: %w", loadErr)
+		}
+		if profile == nil {
+			return nil, nil, nil, errors.New("plugin executor profile is unavailable")
+		}
+		execReq.PluginExecutor = &PluginExecutorLaunch{Profile: *profile}
+	}
 	m.wireKubernetesInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
+	m.wirePluginExecutorInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
 
 	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
 	defer launchCancel()
@@ -1101,6 +1180,12 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	}
 
 	m.scheduleSSHLaunchWarning(launchCtx, reqWithWorktree, metadata, reqWithWorktree.SessionID)
+	if execReq.PluginExecutor != nil {
+		if err := m.registerPluginExecutorCallbacks(execReq); err != nil {
+			return nil, nil, nil, err
+		}
+		defer m.unregisterPluginExecutorCallbacks(execReq.InstanceID)
+	}
 
 	execInstance, err := rt.CreateInstance(launchCtx, execReq)
 	if err != nil {
@@ -1386,6 +1471,9 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	if req == nil {
 		return nil, errors.New("launch request is required")
 	}
+	if err := m.validateManagedToolPolicyAdmission(ctx, req); err != nil {
+		return nil, err
+	}
 	if err := m.admitExecutionOwner(ctx, req); err != nil {
 		return nil, err
 	}
@@ -1580,6 +1668,9 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 	if !agentConfig.Enabled() {
 		return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
+	}
+	if err := validateManagedToolPolicyProvider(req.McpProfile, agentTypeName, agentConfig.Runtime()); err != nil {
+		return nil, err
 	}
 	if err := m.prepareManagedGoCacheEnvironment(ctx, req); err != nil {
 		return nil, err
@@ -2423,7 +2514,8 @@ func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution, approvalPolicy string) (string, error) {
 	runtimeSnapshot := execution.RuntimeEnvironment()
-	metadataEnv := runtimeEnvFromMetadata(execution.MetadataSnapshot())
+	metadata := execution.MetadataSnapshot()
+	metadataEnv := runtimeEnvFromMetadata(metadata)
 	var env map[string]string
 	if runtimeSnapshot == nil {
 		env = cloneStringMap(metadataEnv)
@@ -2434,10 +2526,15 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
 			return "", fmt.Errorf("resolve agent profile environment: %w", err)
 		}
+	} else if !hasRuntimeEnvOverlay(metadata) {
+		// Without a SetExecutionEnv overlay the snapshot is the environment
+		// this launch composed, including the managed credential broker
+		// values its helper entries expand. Nothing newer can replace them.
+		env = runtimeSnapshot
 	} else {
 		// SetExecutionEnv carries per-run values such as repository credentials.
 		// Compose them with the launch snapshot without re-reading profile
-		// secrets. Host bridge entries are filtered here, while the normal
+		// secrets. Generated credential entries are filtered here, while the normal
 		// agentctl Configure boundary composes the request with the instance's
 		// canonical environment and preserves inherited user entries.
 		var err error
@@ -2447,6 +2544,7 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 			return "", fmt.Errorf("compose agent environment: %w", err)
 		}
 	}
+	normalizeKubernetesManagedGitEnvironment(execution.RuntimeName, env)
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
 		m.updateExecutionError(execution.ID, "failed to prepare agent env: "+err.Error())
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)
@@ -2476,6 +2574,13 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 		bootCommand = execution.AgentCommand
 	}
 	return bootCommand, nil
+}
+
+// hasRuntimeEnvOverlay reports whether SetExecutionEnv delivered a per-run
+// environment for the next start.
+func hasRuntimeEnvOverlay(metadata map[string]interface{}) bool {
+	_, ok := metadata["runtime_env"]
+	return ok
 }
 
 func runtimeEnvFromMetadata(metadata map[string]interface{}) map[string]string {

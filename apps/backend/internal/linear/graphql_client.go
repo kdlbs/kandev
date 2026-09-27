@@ -437,6 +437,14 @@ mutation SetIssueState($id: String!, $stateId: String!) {
 	}
 }`
 
+const addCommentMutation = `
+mutation CommentCreate($input: CommentCreateInput!) {
+	commentCreate(input: $input) {
+		success
+		comment { id }
+	}
+}`
+
 type setStateData struct {
 	IssueUpdate struct {
 		Success bool `json:"success"`
@@ -456,6 +464,26 @@ func (c *GraphQLClient) SetIssueState(ctx context.Context, issueID, stateID stri
 		return &APIError{StatusCode: http.StatusInternalServerError, Message: "issueUpdate returned success=false"}
 	}
 	return nil
+}
+
+// AddComment adds a Markdown comment to a Linear issue and returns its ID.
+func (c *GraphQLClient) AddComment(ctx context.Context, issueID, body string) (string, error) {
+	var data struct {
+		CommentCreate struct {
+			Success bool `json:"success"`
+			Comment struct {
+				ID string `json:"id"`
+			} `json:"comment"`
+		} `json:"commentCreate"`
+	}
+	vars := map[string]interface{}{"input": map[string]interface{}{"issueId": issueID, "body": body}}
+	if err := c.do(ctx, addCommentMutation, vars, &data); err != nil {
+		return "", err
+	}
+	if !data.CommentCreate.Success {
+		return "", &APIError{StatusCode: http.StatusInternalServerError, Message: "commentCreate returned success=false"}
+	}
+	return data.CommentCreate.Comment.ID, nil
 }
 
 // --- search ---
