@@ -61,6 +61,7 @@ type SidebarTaskPageEntry struct {
 	MatchingCount    int    `json:"matching_count,omitempty"`
 	WIPQueuePosition int    `json:"wip_queue_position,omitempty"`
 	WIPQueueTotal    int    `json:"wip_queue_total,omitempty"`
+	SubtaskCount     int    `json:"subtask_count,omitempty"`
 }
 
 type SidebarTaskPageResult struct {

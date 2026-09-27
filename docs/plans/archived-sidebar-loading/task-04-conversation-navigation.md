@@ -31,6 +31,7 @@ Read existing conversations without agent preparation or browser refresh.
 - Wire real router navigation for archived selections from every sidebar entry point.
 - Scope route loading state and initial data to the route task before rendering.
 - Resolve existing remembered/primary/fallback sessions with validated task ownership.
+- Keep the selected non-primary session in the route during task navigation.
 - Guard ensure while archive state is unknown or archived, including zero-session retries.
 - Keep bounded message hydration, explicit loading/error/retry, and read-only empty states.
 - Add desktop and phone E2E with distinct archived conversations and delayed responses.

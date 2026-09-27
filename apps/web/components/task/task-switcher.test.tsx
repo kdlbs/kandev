@@ -124,6 +124,31 @@ describe("TaskSwitcher — nested subtasks beyond depth 1", () => {
     expect(rootToggle!.textContent).toContain("2");
   });
 
+  it("keeps the expand control for a collapsed tree when descendants are not on the page", () => {
+    const collapsedRoot = item("Root", undefined, { subtaskCount: 2 });
+    const { container } = render(
+      <Providers>
+        <TaskSwitcher
+          grouped={{
+            groups: [{ key: "__all__", label: "All", tasks: [collapsedRoot] }],
+            subTasksByParentId: new Map(),
+          }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onToggleSubtasks={vi.fn()}
+          collapsedSubtaskParentIds={["Root"]}
+        />
+      </Providers>,
+    );
+    const toggle = container.querySelector(
+      "[data-testid='sidebar-subtask-toggle'][data-task-id='Root']",
+    );
+    expect(toggle).not.toBeNull();
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle?.textContent).toContain("2");
+  });
+
   it("omits grab cursor on nested rows when subtask reorder is disabled", () => {
     const { container } = render(
       <Providers>

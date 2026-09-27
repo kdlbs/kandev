@@ -53,7 +53,9 @@ test("phone navigates from an active task to and between archived conversations 
   const documentRequestCount = documentRequests.length;
   await rowA.tap();
   await expect(sheet).toBeHidden();
-  await expect(testPage).toHaveURL(new RegExp(`/t/${archived[0].id}$`));
+  await expect(testPage).toHaveURL(
+    new RegExp(`/t/${archived[0].id}\\?sessionId=${archived[0].sessionId}$`),
+  );
   await expect(session.activeChat().getByText(archived[0].response).last()).toBeVisible({
     timeout: 30_000,
   });
@@ -64,7 +66,9 @@ test("phone navigates from an active task to and between archived conversations 
   await expect(rowB).toBeVisible({ timeout: 20_000 });
   await rowB.tap();
   await expect(sheet).toBeHidden();
-  await expect(testPage).toHaveURL(new RegExp(`/t/${archived[1].id}$`));
+  await expect(testPage).toHaveURL(
+    new RegExp(`/t/${archived[1].id}\\?sessionId=${archived[1].sessionId}$`),
+  );
   await expect(session.activeChat().getByText(archived[1].response).last()).toBeVisible({
     timeout: 30_000,
   });

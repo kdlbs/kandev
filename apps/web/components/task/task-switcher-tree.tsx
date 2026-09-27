@@ -107,9 +107,10 @@ const TaskTreeNode = memo(function TaskTreeNode({
 }: TaskTreeNodeProps) {
   const { t } = useTranslation();
   const subs = ctx.subTasksByParentId.get(task.id);
-  const hasSubs = !!subs?.length;
+  const subtaskCount =
+    task.subtaskCount ?? (subs ? countGroupTasks(subs, ctx.subTasksByParentId) : 0);
+  const hasSubs = subtaskCount > 0 || !!subs?.length;
   const subsHidden = hasSubs && !!ctx.onToggleSubtasks && ctx.collapsedSubs.has(task.id);
-  const subtaskCount = hasSubs ? countGroupTasks(subs, ctx.subTasksByParentId) : 0;
   const handleToggleSubtasks = useCallback(
     () => ctx.onToggleSubtasks?.(task.id),
     [ctx.onToggleSubtasks, task.id],
@@ -151,7 +152,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
     </div>
   );
   const nested =
-    !subsHidden && hasSubs ? (
+    !subsHidden && !!subs?.length ? (
       <TaskTreeLevel parentTaskId={task.id} tasks={subs} depth={depth + 1} ctx={ctx} />
     ) : undefined;
   return (

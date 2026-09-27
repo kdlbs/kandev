@@ -42,6 +42,7 @@ type sidebarPageRow struct {
 	groupPosition int
 	wipPosition   int
 	wipTotal      int
+	subtaskCount  int
 }
 
 type sidebarPageQueryResult struct {
@@ -224,7 +225,8 @@ func scanSidebarPageRows(rows *sql.Rows) (sidebarPageQueryResult, error) {
 		var row sidebarPageRow
 		if err := rows.Scan(&row.taskID, &row.groupKey, &row.groupLabel, &row.workflowName, &row.stepName, &row.stepColor,
 			&row.parentID, &row.parentTitle, &row.groupCount, &row.depth, &row.groupPosition,
-			&row.wipPosition, &row.wipTotal, &result.totalTasks, &result.totalVisible, &result.totalGroups, &result.page); err != nil {
+			&row.wipPosition, &row.wipTotal, &row.subtaskCount,
+			&result.totalTasks, &result.totalVisible, &result.totalGroups, &result.page); err != nil {
 			return sidebarPageQueryResult{}, fmt.Errorf("scan sidebar task row: %w", err)
 		}
 		result.hasSummary = true
@@ -254,8 +256,13 @@ func loadSidebarPageTasks(ctx context.Context, tx *sqlx.Tx, repo *Repository, ro
 	if err != nil {
 		return nil, fmt.Errorf("scan sidebar task page: %w", err)
 	}
+	repositoriesByTaskID, err := listTaskRepositoriesByTaskIDs(ctx, tx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("hydrate sidebar task repositories: %w", err)
+	}
 	byID := make(map[string]*models.Task, len(tasks))
 	for _, task := range tasks {
+		task.Repositories = repositoriesByTaskID[task.ID]
 		byID[task.ID] = task
 	}
 	ordered := make([]*models.Task, 0, len(rows))
@@ -286,32 +293,30 @@ func buildSidebarTaskPageResult(
 	for _, row := range rows {
 		rowsByGroup[row.groupKey] = append(rowsByGroup[row.groupKey], row)
 	}
+	emittedContinuations := make(map[string]struct{})
 	for _, header := range headerRows {
 		groupRows := rowsByGroup[header.groupKey]
-		continuation := false
-		for _, row := range groupRows {
-			if row.groupPosition > 1 {
-				continuation = true
-				break
-			}
-		}
+		continuation := len(groupRows) > 0 && groupRows[0].groupPosition > 1
 		entries = append(entries, models.SidebarTaskPageEntry{
 			Kind: "group", GroupKey: header.groupKey, GroupLabel: header.groupLabel,
 			Continuation: continuation, MatchingCount: header.count,
 		})
 		for _, row := range groupRows {
 			if row.parentID != "" {
-				if _, parentOnPage := pageIDs[row.parentID]; !parentOnPage {
+				_, parentOnPage := pageIDs[row.parentID]
+				_, continuationEmitted := emittedContinuations[row.parentID]
+				if !parentOnPage && !continuationEmitted {
 					entries = append(entries, models.SidebarTaskPageEntry{
 						Kind: "continuation", ParentID: row.parentID, ParentTitle: row.parentTitle, Depth: max(row.depth-1, 0),
 					})
+					emittedContinuations[row.parentID] = struct{}{}
 				}
 			}
 			entries = append(entries, models.SidebarTaskPageEntry{
 				Kind: "task", TaskID: row.taskID, GroupKey: row.groupKey,
 				GroupLabel: row.groupLabel, WorkflowName: row.workflowName, StepName: row.stepName,
 				StepColor: row.stepColor, ParentID: row.parentID, Depth: row.depth,
-				WIPQueuePosition: row.wipPosition, WIPQueueTotal: row.wipTotal,
+				WIPQueuePosition: row.wipPosition, WIPQueueTotal: row.wipTotal, SubtaskCount: row.subtaskCount,
 			})
 		}
 	}

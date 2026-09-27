@@ -297,7 +297,7 @@ describe("useTaskRemoval — bounded fallback query", () => {
 });
 
 describe("useTaskRemoval — recent off-page fallback", () => {
-  it("keeps a recent off-page task ahead of a cached fallback candidate", async () => {
+  it("uses a cached fallback without waiting for an unseen recent task", async () => {
     const oldTask = { id: "task-old", primarySessionId: "sess-old", workspaceId: WORKSPACE_ID };
     const store = makeTaskRemovalStore({
       activeTaskId: TASK_A_ID,
@@ -308,18 +308,6 @@ describe("useTaskRemoval — recent off-page fallback", () => {
       ],
     });
     store.getRecorded().environmentIdBySessionId["sess-old"] = "env-old";
-    const serverTask = makeFallbackTask("Recent off-page fallback");
-    querySidebarTasksMock.mockResolvedValue({
-      query_key: "fallback",
-      page: 1,
-      page_size: 100,
-      total_entries: 1,
-      total_tasks: 1,
-      total_visible_tasks: 1,
-      has_previous: false,
-      has_next: false,
-      entries: [{ kind: "task", task_id: serverTask.id, task: serverTask }],
-    } as SidebarTaskPageResponse);
     setRecentTasks([
       { taskId: OFF_PAGE_TASK_ID, title: "Recent", visitedAt: RECENT_TASK_VISITED_AT },
       { taskId: TASK_A_ID, title: "Removed", visitedAt: REMOVED_TASK_VISITED_AT },
@@ -334,11 +322,9 @@ describe("useTaskRemoval — recent off-page fallback", () => {
       workspaceId: WORKSPACE_ID,
     });
 
-    expect(removal.switchedTaskId).toBe(OFF_PAGE_TASK_ID);
-    expect(store.getRecorded().setActiveSession).toHaveBeenCalledWith(
-      OFF_PAGE_TASK_ID,
-      OFF_PAGE_SESSION_ID,
-    );
+    expect(removal.switchedTaskId).toBe(oldTask.id);
+    expect(querySidebarTasksMock).not.toHaveBeenCalled();
+    expect(store.getRecorded().setActiveSession).toHaveBeenCalledWith(oldTask.id, "sess-old");
   });
 });
 

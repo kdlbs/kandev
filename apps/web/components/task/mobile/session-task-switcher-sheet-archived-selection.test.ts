@@ -99,3 +99,33 @@ describe("selectTaskFromSheet archived tasks", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
+
+describe("selectTaskFromSheet session URL", () => {
+  it("includes the selected existing session when the task has no primary projection", async () => {
+    const taskId = "task-with-session";
+    const sessionId = "existing-session";
+    const navigate = vi.fn();
+
+    selectTaskFromSheet({
+      selectionController: createTaskSheetSelectionController(),
+      taskId,
+      task: {},
+      state: {
+        lastSessionByTaskId: {},
+        environmentIdBySessionId: {},
+        taskSessionsById: {},
+      },
+      loadTaskSessionsForTask: vi.fn(async () => [
+        { id: sessionId, task_id: taskId, state: "COMPLETED" } as TaskSession,
+      ]),
+      setActiveSession: vi.fn(),
+      setActiveTask: vi.fn(),
+      navigate,
+      onOpenChange: vi.fn(),
+    });
+
+    await flushSelection();
+
+    expect(navigate).toHaveBeenCalledWith(taskId, sessionId);
+  });
+});

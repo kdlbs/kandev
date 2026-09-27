@@ -8,6 +8,9 @@ import type { WorkspaceContextReadError } from "@/lib/state/slices/kanban/types"
 import type { AppState } from "@/lib/state/store";
 import type { Task } from "@/lib/types/http";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+import { pickFreshestStatusSummary } from "@/lib/task-status-summary";
+import { useShallow } from "zustand/react/shallow";
 
 export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
   pendingArchiveTaskIds: ReadonlySet<string>;
@@ -129,11 +132,17 @@ function getWorkspaceContextStatus(
 
 function workspacePageTasks(
   entries: NonNullable<ReturnType<typeof useSidebarTaskPage>["response"]>["entries"],
+  statusSummaryByTaskId: Record<string, TaskStatusSummary>,
 ) {
   const tasks: SidebarTask[] = [];
   for (const entry of entries) {
     if (entry.kind !== "task" || !entry.task) continue;
-    tasks.push({ ...toKanbanTask(entry.task as Task), _workflowId: entry.task.workflow_id ?? "" });
+    const task = toKanbanTask(entry.task as Task);
+    tasks.push({
+      ...task,
+      statusSummary: pickFreshestStatusSummary(task.statusSummary, statusSummaryByTaskId[task.id]),
+      _workflowId: entry.task.workflow_id ?? "",
+    });
   }
   return tasks;
 }
@@ -204,7 +213,25 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   );
 
   const pageEntries = page.response?.entries ?? [];
-  const nextPageTasks = useMemo(() => workspacePageTasks(pageEntries), [pageEntries]);
+  const pageTaskIds = useMemo(
+    () =>
+      pageEntries.flatMap((entry) => (entry.kind === "task" && entry.task ? [entry.task.id] : [])),
+    [pageEntries],
+  );
+  const statusSummaryByTaskId = useAppStore(
+    useShallow((state) => {
+      const workspaceSummaries = state.sidebarStatusSummaryByWorkspaceId?.[workspaceId ?? ""] ?? {};
+      return Object.fromEntries(
+        pageTaskIds.flatMap((taskId) =>
+          workspaceSummaries[taskId] ? [[taskId, workspaceSummaries[taskId]]] : [],
+        ),
+      );
+    }),
+  );
+  const nextPageTasks = useMemo(
+    () => workspacePageTasks(pageEntries, statusSummaryByTaskId),
+    [pageEntries, statusSummaryByTaskId],
+  );
   const previousTasksRef = useRef<SidebarTask[]>([]);
   const allTasks = useMemo(() => {
     const tasks = reuseUnchangedTasks(previousTasksRef.current, nextPageTasks);

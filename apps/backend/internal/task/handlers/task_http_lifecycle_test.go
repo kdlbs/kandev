@@ -374,7 +374,7 @@ func TestHTTPQuerySidebarTasksUsesDefaultsAndAuthenticatedPreferences(t *testing
 	repo := &httpTaskRepo{sidebarPage: &models.SidebarTaskPageResult{
 		QueryKey: "key", Page: 1, PageSize: 100, TotalTasks: 1, TotalVisibleTasks: 1,
 		Entries: []models.SidebarTaskPageEntry{{
-			Kind: "task", TaskID: "task-b", WIPQueuePosition: 3, WIPQueueTotal: 7,
+			Kind: "task", TaskID: "task-b", WIPQueuePosition: 3, WIPQueueTotal: 7, SubtaskCount: 4,
 		}},
 		Tasks: []*models.Task{{ID: "task-b", WorkspaceID: "ws-b", Title: "Mine"}},
 	}}
@@ -399,6 +399,7 @@ func TestHTTPQuerySidebarTasksUsesDefaultsAndAuthenticatedPreferences(t *testing
 	require.Contains(t, rec.Body.String(), `"task":{"id":"task-b"`)
 	require.Contains(t, rec.Body.String(), `"wip_queue_position":3`)
 	require.Contains(t, rec.Body.String(), `"wip_queue_total":7`)
+	require.Contains(t, rec.Body.String(), `"subtask_count":4`)
 }
 
 func TestHTTPQuerySidebarTasksRejectsInvalidAndOversizedBodies(t *testing.T) {

@@ -160,7 +160,10 @@ test.describe("Task loading state", () => {
     });
 
     await session.clickTaskInSidebar("Session route sync task A");
-    await expect(testPage).toHaveURL(new RegExp(`/t/${taskA.id}$`), { timeout: 15_000 });
+    await expect(testPage).toHaveURL(
+      new RegExp(`/t/${taskA.id}\\?sessionId=${secondarySessionId}$`),
+      { timeout: 15_000 },
+    );
     await session.waitForLoad();
     await expect
       .poll(async () =>

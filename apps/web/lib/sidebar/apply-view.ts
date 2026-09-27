@@ -463,7 +463,7 @@ function buildIndex(ids: string[]): Map<string, number> {
  * subtasks come first in their stored order; unlisted ones keep their incoming
  * order (which reflects the active sort) afterwards.
  */
-function applySubtaskOrder(
+export function applySubtaskOrder(
   subtasks: TaskSwitcherItem[],
   orderedSubtaskIds: string[],
 ): TaskSwitcherItem[] {

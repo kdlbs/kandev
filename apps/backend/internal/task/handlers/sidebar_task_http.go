@@ -44,6 +44,7 @@ type sidebarTaskPageEntryResponse struct {
 	MatchingCount    int          `json:"matching_count,omitempty"`
 	WIPQueuePosition int          `json:"wip_queue_position,omitempty"`
 	WIPQueueTotal    int          `json:"wip_queue_total,omitempty"`
+	SubtaskCount     int          `json:"subtask_count,omitempty"`
 }
 
 func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
@@ -140,6 +141,7 @@ func (h *TaskHandlers) sidebarTaskPageResponse(c *gin.Context, page *models.Side
 			ParentID: entry.ParentID, ParentTitle: entry.ParentTitle,
 			Continuation: entry.Continuation, MatchingCount: entry.MatchingCount,
 			WIPQueuePosition: entry.WIPQueuePosition, WIPQueueTotal: entry.WIPQueueTotal,
+			SubtaskCount: entry.SubtaskCount,
 		})
 	}
 	return sidebarTaskPageResponse{

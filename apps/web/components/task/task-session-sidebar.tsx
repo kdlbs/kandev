@@ -545,7 +545,12 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
             orderedTaskIds: prefs.orderedTaskIds,
             subtaskOrderByParentId: prefs.subtaskOrderByParentId,
           })
-        : groupSidebarTaskPage(displayTasks, pageEntries, effectiveView.group),
+        : groupSidebarTaskPage(
+            displayTasks,
+            pageEntries,
+            effectiveView.group,
+            prefs.subtaskOrderByParentId,
+          ),
     [
       displayTasks,
       effectiveView,

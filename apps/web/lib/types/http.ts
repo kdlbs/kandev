@@ -842,6 +842,7 @@ export type SidebarTaskPageEntry = {
   matching_count?: number;
   wip_queue_position?: number;
   wip_queue_total?: number;
+  subtask_count?: number;
 };
 
 export type SidebarTaskPageResponse = {

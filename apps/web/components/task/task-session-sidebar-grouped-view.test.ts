@@ -147,3 +147,54 @@ describe("groupSidebarTaskPage", () => {
     expect(grouped.subTasksByParentId.size).toBe(0);
   });
 });
+
+describe("groupSidebarTaskPage child state", () => {
+  it("applies saved sibling order to the bounded page immediately", () => {
+    const parent = task(PARENT_ID, WORKFLOW_A);
+    const first = { ...task("first", WORKFLOW_A), parentTaskId: PARENT_ID };
+    const second = { ...task("second", WORKFLOW_A), parentTaskId: PARENT_ID };
+    const grouped = groupSidebarTaskPage(
+      [parent, first, second],
+      [
+        { kind: "group", group_key: WORKFLOW_A_ID, group_label: WORKFLOW_A },
+        { kind: "task", task_id: PARENT_ID, group_key: WORKFLOW_A_ID },
+        {
+          kind: "task",
+          task_id: "first",
+          group_key: WORKFLOW_A_ID,
+          parent_id: PARENT_ID,
+          depth: 1,
+        },
+        {
+          kind: "task",
+          task_id: "second",
+          group_key: WORKFLOW_A_ID,
+          parent_id: PARENT_ID,
+          depth: 1,
+        },
+      ],
+      "workflow",
+      { [PARENT_ID]: ["second", "first"] },
+    );
+
+    expect(grouped.subTasksByParentId.get(PARENT_ID)?.map((item) => item.id)).toEqual([
+      "second",
+      "first",
+    ]);
+  });
+
+  it("retains server descendant counts for collapsed tasks", () => {
+    const parent = task(PARENT_ID, WORKFLOW_A);
+    const grouped = groupSidebarTaskPage(
+      [parent],
+      [
+        { kind: "group", group_key: WORKFLOW_A_ID, group_label: WORKFLOW_A },
+        { kind: "task", task_id: PARENT_ID, group_key: WORKFLOW_A_ID, subtask_count: 2 },
+      ],
+      "workflow",
+    );
+
+    expect(grouped.groups[0].tasks[0].subtaskCount).toBe(2);
+    expect(grouped.subTasksByParentId.size).toBe(0);
+  });
+});

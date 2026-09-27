@@ -34,7 +34,7 @@ export async function seedArchivedConversations(
   apiClient: ApiClient,
   seedData: SeedData,
   prefix: string,
-): Promise<ArchivedConversation[]> {
+): Promise<SeededConversation[]> {
   const results: SeededConversation[] = [];
   for (const suffix of ["A", "B", "C"]) {
     const title = `${prefix} ${suffix}`;

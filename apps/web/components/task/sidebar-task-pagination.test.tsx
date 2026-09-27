@@ -64,4 +64,21 @@ describe("SidebarTaskPagination", () => {
     expect(onRetry).toHaveBeenCalledOnce();
     expect(onPageChange).toHaveBeenCalledOnce();
   });
+
+  it("keeps refresh recovery visible on a list that does not need paging", () => {
+    const onRetry = vi.fn();
+    render(
+      <SidebarTaskPagination
+        page={response(99)}
+        pending={false}
+        error="network"
+        onPageChange={vi.fn()}
+        onRetry={onRetry}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "sidebar:nextPage" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "sidebar:retry" }));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
 });

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
       operationsByToken: {} as Record<string, unknown>,
     },
     kanbanMulti: { snapshots: {} as Record<string, unknown> },
+    sidebarStatusSummaryByWorkspaceId: {} as Record<string, Record<string, unknown>>,
     workflows: {
       items: [] as Array<{ id: string; workspaceId: string; name: string; hidden?: boolean }>,
     },
@@ -78,6 +79,7 @@ describe("useWorkspaceSidebarTasks", () => {
   beforeEach(() => {
     mocks.state.taskRemoval = { pendingTokenByTaskId: {}, operationsByToken: {} };
     mocks.state.kanbanMulti = { snapshots: {} };
+    mocks.state.sidebarStatusSummaryByWorkspaceId = {};
     mocks.state.workflows = { items: [{ id: "wf-1", workspaceId: "ws-1", name: "Workflow" }] };
     mocks.state.kanban = {
       workflowId: null,
@@ -107,6 +109,22 @@ describe("useWorkspaceSidebarTasks", () => {
     expect(result.current.allTasks.map((item) => item.id)).toEqual(["page-a", "page-b"]);
     expect(result.current.allTasks.map((item) => item._workflowId)).toEqual(["wf-1", "wf-1"]);
     expect(result.current.allTasks).toHaveLength(2);
+  });
+
+  it("overlays newer live status summaries on visible page rows", () => {
+    setPageTasks([task("page-a", { status_summary: { revision: 1, updated_at: "old" } })]);
+    mocks.state.sidebarStatusSummaryByWorkspaceId = {
+      "ws-1": {
+        "page-a": { revision: 2, updated_at: "new", pending_action: "clarification" },
+      },
+    };
+
+    const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+
+    expect(result.current.allTasks[0]?.statusSummary).toMatchObject({
+      revision: 2,
+      pending_action: "clarification",
+    });
   });
 
   it("keeps pending archive state for current rows and adopts the next accepted page", () => {

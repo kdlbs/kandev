@@ -39,7 +39,8 @@ Prove page correctness and query cost before changing the sidebar consumer.
 
 - Register the read-only POST route and typed request/response DTOs.
 - Read authenticated user preferences, validate inputs, and apply query semantics from Task 01.
-- Return at most 100 task rows, bounded row projections, continuation context, totals, and clamped page metadata.
+- Return at most 100 task rows, bounded row projections including filtered descendant counts,
+  continuation context, totals, and clamped page metadata.
 - Keep totals and entries in a consistent read transaction; batch row enrichment after page selection.
 - Add measured indexes through normal migrations only when query-plan evidence requires them.
 - Keep the existing task-list GET endpoint, archive flags, and its callers compatible.

@@ -12,10 +12,7 @@ import { createAbortError, isAbortError } from "@/lib/utils/abort-error";
 import { softNavigate } from "@/lib/routing/client-router";
 import { ownsTaskRemovalDeparture, type TaskRemovalAction } from "@/lib/state/task-removal";
 import { coordinateTaskRemovalBatch } from "./task-removal-coordinator";
-import {
-  loadSidebarFallbackTasks,
-  mergeSidebarFallbackTasks,
-} from "./task-removal-sidebar-fallback";
+import { findSidebarFallbackTask } from "./task-removal-sidebar-fallback";
 import { useToast } from "@/components/toast-provider";
 import { useTranslation } from "react-i18next";
 
@@ -547,13 +544,14 @@ async function switchAfterRemoval(params: {
     loadTaskSessionsForTask,
   } = params;
   const workspaceId = opts?.workspaceId ?? store.getState().workspaces?.activeId;
-  const cachedTasks = collectRemainingTasks(store);
-  const pageTasks = await loadSidebarFallbackTasks(workspaceId);
-  const fallbackTasks = mergeSidebarFallbackTasks(pageTasks, cachedTasks);
-  const candidate = await selectNextTaskAfterRemoval(fallbackTasks, taskId, taskIsLive, {
-    excludedTaskIds,
+  const candidate = await findSidebarFallbackTask({
     workspaceId,
+    taskId,
+    cachedTasks: collectRemainingTasks(store),
+    excludedTaskIds,
     validateTaskAncestry: opts?.validateTaskAncestry,
+    isLive: taskIsLive,
+    selectCandidate: selectNextTaskAfterRemoval,
   });
   if (!candidate) return { candidateFound: false, switchedTaskId: null };
 

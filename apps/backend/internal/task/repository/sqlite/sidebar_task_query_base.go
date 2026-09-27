@@ -276,10 +276,10 @@ func sidebarVisibleCTE(query models.SidebarTaskViewQuery) (string, []any) {
 	if len(query.CollapsedTaskIDs) > 0 {
 		roots := make([]string, len(query.CollapsedTaskIDs))
 		for i, id := range query.CollapsedTaskIDs {
-			roots[i] = "SELECT ? AS id"
+			roots[i] = "(?)"
 			args = append(args, id)
 		}
-		ctes = append(ctes, "collapsed_requested(id) AS ("+strings.Join(roots, " UNION ALL ")+")")
+		ctes = append(ctes, "collapsed_requested(id) AS (VALUES "+strings.Join(roots, ", ")+")")
 		ctes = append(ctes, `collapsed_roots(id) AS (
 			SELECT filtered.id FROM filtered JOIN collapsed_requested requested ON requested.id = filtered.id
 		)`)
@@ -427,6 +427,7 @@ func sidebarPageSelectSQL(groupNone bool) string {
 		COALESCE(tree.parent_id, ''), COALESCE(parent.title, ''),
 		` + groupCountExpr + `, tree.depth, tree.group_position,
 		COALESCE(queue_status.queue_position, 0), COALESCE(queue_status.queue_total, 0),
+		COALESCE(subtask_counts.subtask_count, 0),
 		page_summary.total_tasks, page_summary.total_visible_tasks, page_summary.total_groups, page_options.page
 	FROM page_window page
 	JOIN page_ordered_tree tree ON tree.id = page.id
@@ -435,6 +436,7 @@ func sidebarPageSelectSQL(groupNone bool) string {
 	LEFT JOIN tasks parent ON parent.id = tree.parent_id
 	LEFT JOIN workflows w ON w.id = tree.workflow_id
 	LEFT JOIN workflow_steps ws ON ws.id = tree.workflow_step_id
+	LEFT JOIN page_subtask_counts subtask_counts ON subtask_counts.ancestor_id = tree.id
 	` + groupCountJoin + `
 	LEFT JOIN wip_queue_ranked queue_status ON queue_status.id = tree.id
 	ORDER BY tree.group_order ASC, tree.order_path ASC`

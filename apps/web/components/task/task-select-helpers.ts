@@ -428,7 +428,7 @@ function selectTaskWithPrimarySession(runtime: TaskSelectionRuntime): void {
     selectionGuard.dispose();
     switchToSession(taskId, targetSessionId, oldSessionId);
     void loadTaskSessionsForTask(taskId).catch(() => undefined);
-    navigateToTask(taskId);
+    navigateToTask(taskId, targetSessionId === task.primarySessionId ? undefined : targetSessionId);
     return;
   }
   void loadTaskSessionsForSelection(params, !!taskPendingAction)
@@ -443,7 +443,10 @@ function selectTaskWithPrimarySession(runtime: TaskSelectionRuntime): void {
       });
       if (!resolvedSessionId) return openWithoutSession();
       switchToSession(taskId, resolvedSessionId, currentOldSessionId);
-      navigateToTask(taskId);
+      navigateToTask(
+        taskId,
+        resolvedSessionId === task.primarySessionId ? undefined : resolvedSessionId,
+      );
     })
     .catch((error) => {
       if (isAbortError(error)) return;
@@ -451,7 +454,10 @@ function selectTaskWithPrimarySession(runtime: TaskSelectionRuntime): void {
       if (pendingOwnerHandled()) return;
       if (taskPendingAction) return openWithoutSession();
       switchToSession(taskId, targetSessionId, store.getState().tasks.activeSessionId);
-      navigateToTask(taskId);
+      navigateToTask(
+        taskId,
+        targetSessionId === task.primarySessionId ? undefined : targetSessionId,
+      );
     })
     .finally(selectionGuard.dispose);
 }
@@ -478,7 +484,7 @@ function selectTaskWithoutPrimarySession(runtime: TaskSelectionRuntime): void {
       });
       if (sessionId) {
         switchToSession(taskId, sessionId, currentOldSessionId);
-        navigateToTask(taskId);
+        navigateToTask(taskId, sessionId);
         return;
       }
       if (taskPendingAction) return openWithoutSession();
@@ -491,7 +497,7 @@ function selectTaskWithoutPrimarySession(runtime: TaskSelectionRuntime): void {
         () => !selectionGuard.wasSuperseded(),
       );
       if (switched) {
-        navigateToTask(taskId);
+        navigateToTask(taskId, store.getState().tasks.activeSessionId ?? undefined);
         return;
       }
       if (selectionGuard.wasSuperseded()) return;

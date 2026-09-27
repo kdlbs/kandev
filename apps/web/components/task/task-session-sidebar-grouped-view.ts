@@ -4,7 +4,12 @@ import { useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { getExecutorLabel } from "@/lib/executor-icons";
 import { t } from "@/lib/i18n";
-import { applyView, type GroupedSidebarList, type SidebarGroup } from "@/lib/sidebar/apply-view";
+import {
+  applySubtaskOrder,
+  applyView,
+  type GroupedSidebarList,
+  type SidebarGroup,
+} from "@/lib/sidebar/apply-view";
 import { formatTaskStateLabel } from "@/lib/ui/state-labels";
 import type { SidebarTaskPageEntry } from "@/lib/types/http";
 import type { TaskState } from "@/lib/types/http";
@@ -199,6 +204,7 @@ function appendPageTask(
   taskById: Map<string, TaskSwitcherItem>,
   subTasksByParentId: Map<string, TaskSwitcherItem[]>,
 ): void {
+  task.subtaskCount = entry.subtask_count;
   const parent = entry.parent_id ? taskById.get(entry.parent_id) : undefined;
   if ((entry.depth ?? 0) > 0 && parent && entry.parent_id) {
     const children = subTasksByParentId.get(entry.parent_id) ?? [];
@@ -218,6 +224,7 @@ export function groupSidebarTaskPage(
   tasks: TaskSwitcherItem[],
   entries: SidebarTaskPageEntry[],
   groupKey: GroupedSidebarList["groupKey"],
+  subtaskOrderByParentId: Record<string, string[]> = {},
 ): GroupedSidebarList {
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const groups: SidebarGroup[] = [];
@@ -250,6 +257,10 @@ export function groupSidebarTaskPage(
       matchingCount: entry.matching_count,
     });
     appendPageTask(entry, task, group, taskById, subTasksByParentId);
+  }
+  for (const [parentId, orderedIds] of Object.entries(subtaskOrderByParentId)) {
+    const subtasks = subTasksByParentId.get(parentId);
+    if (subtasks) subTasksByParentId.set(parentId, applySubtaskOrder(subtasks, orderedIds));
   }
   return { groups, subTasksByParentId, groupKey };
 }

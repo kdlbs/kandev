@@ -127,7 +127,7 @@ export async function selectPendingTaskFromSheet(
   } else {
     params.setActiveTask(params.taskId);
   }
-  navigate(params.taskId);
+  navigate(params.taskId, targetSessionId || undefined);
   params.onOpenChange(false);
 }
 
@@ -139,7 +139,7 @@ async function selectTaskWithoutPrimarySession(taskId: string, actions: Selectio
     const sessionId = sessions[0]?.id ?? null;
     if (sessionId) {
       actions.setActiveSession(taskId, sessionId);
-      navigate(taskId);
+      navigate(taskId, sessionId);
       actions.onOpenChange(false);
       return;
     }
@@ -149,7 +149,7 @@ async function selectTaskWithoutPrimarySession(taskId: string, actions: Selectio
       if (!selectionIsCurrent(actions)) return;
       if (response.session_id) {
         actions.setActiveSession(taskId, response.session_id);
-        navigate(taskId);
+        navigate(taskId, response.session_id);
         actions.onOpenChange(false);
         return;
       }
@@ -236,7 +236,10 @@ export function selectTaskFromSheet(
   if (preferredSessionId) {
     params.setActiveSession(taskId, preferredSessionId);
     void params.loadTaskSessionsForTask(taskId).catch(() => undefined);
-    navigate(taskId);
+    navigate(
+      taskId,
+      preferredSessionId === task?.primarySessionId ? undefined : preferredSessionId,
+    );
     params.onOpenChange(false);
     return;
   }

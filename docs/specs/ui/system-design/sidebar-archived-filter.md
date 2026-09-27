@@ -75,8 +75,10 @@ Paginator visibility is `total_visible_tasks > 100`; headings and continuation l
 Use this same endpoint for small and large lists, with no eager-fetch threshold probe.
 Small views return their full task-row set in the first response and hide pagination controls.
 
-Task entries contain identity, parent ID, depth, and the bounded fields needed by the
-existing row renderer. Exclude descriptions, messages, plans, environments, and session lists.
+Task entries contain identity, parent ID, depth, filtered descendant count, and the bounded
+fields needed by the existing row renderer. The count keeps the expand control available when
+collapse or page boundaries omit descendant rows. Exclude descriptions, messages, plans,
+environments, and session lists.
 Keep task status summaries and repository labels within the current row projection contract.
 Group entries carry stable group identity, label data, and full matching counts.
 The client localizes built-in group labels. Repository and workflow names remain data.
@@ -224,6 +226,9 @@ session is present and belongs to this task. Otherwise choose the task's existin
 session, then the first existing session. Hydrate the selected conversation through the
 normal bounded message loader. No environment mapping is required to read archived chat.
 Use a shared pure existing-session resolver so desktop and phone cannot diverge.
+When selecting a non-primary existing session from a task list, include its `sessionId` in
+the SPA route so route hydration preserves that selected conversation. Omit the parameter
+for the primary session.
 
 Pass known archive state into `useEnsureTaskSession`. Unknown archive state blocks ensure;
 archived state always blocks it, including successful zero-session reads and retries.

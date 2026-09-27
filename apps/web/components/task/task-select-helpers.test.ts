@@ -598,6 +598,27 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
     expect(switchToSession).toHaveBeenCalledWith(TASK_ID, LAST, "sess-other-task");
   });
 
+  it("puts a remembered non-primary session in the task route", () => {
+    const LAST = "sess-gpt";
+    const navigateToTask = vi.fn();
+    selectTaskWithLayout({
+      taskId: TASK_ID,
+      task: { primarySessionId: PRIMARY },
+      store: makeKanbanStore({
+        activeSessionId: "sess-other-task",
+        envIds: { "sess-other-task": "env-B", [PRIMARY]: "env-A", [LAST]: "env-A" },
+        lastSessionByTaskId: { [TASK_ID]: LAST },
+      }),
+      switchToSession: vi.fn(),
+      loadTaskSessionsForTask: vi.fn(async () => []),
+      setActiveTask: vi.fn(),
+      setPreparingTaskId: vi.fn(),
+      navigateToTask,
+    });
+
+    expect(navigateToTask).toHaveBeenCalledWith(TASK_ID, LAST);
+  });
+
   it("falls back to primarySessionId when the remembered session has no env mapping", () => {
     const switchToSession = runSelect(
       makeKanbanStore({

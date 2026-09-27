@@ -154,7 +154,12 @@ export function MobileTaskList(props: MobileTaskListProps) {
   const { i18n } = useTranslation();
   const grouped = useMemo(() => {
     if (props.pageEntries !== undefined) {
-      return groupSidebarTaskPage(props.tasks, props.pageEntries, view.group);
+      return groupSidebarTaskPage(
+        props.tasks,
+        props.pageEntries,
+        view.group,
+        subtaskOrderByParentId,
+      );
     }
     return applyView(props.tasks, view, {
       pinnedTaskIds,
