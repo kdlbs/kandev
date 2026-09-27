@@ -402,9 +402,11 @@ func (s *Server) runAgentStreamWriterWithJournalReplay(ctx context.Context, conn
 	}()
 	if s.procMgr != nil {
 		if wakeups := s.procMgr.DeliveryWakeups(); wakeups != nil && deliveryStreamID != "" {
+			activeMCPCh, awaitConfirm := s.gateUnconfirmedStreamRequests(mcpRequestCh)
 			writer := durableAgentStreamWriter{
 				server: s, streamID: streamID, deliveryStreamID: deliveryStreamID,
-				updatesCh: updatesCh, mcpRequestCh: mcpRequestCh,
+				updatesCh: updatesCh, mcpRequestCh: activeMCPCh,
+				gatedMCPRequestCh: mcpRequestCh, awaitConfirm: awaitConfirm,
 				wakeups: wakeups, writeMessage: writeMessage,
 			}
 			writer.run(ctx, after, true)
@@ -454,6 +456,7 @@ func (s *Server) runAgentStreamWriterWithReplay(ctx context.Context, conn *webso
 }
 
 func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.Conn, streamID string, after uint64, deliveryStreamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error) {
+	activeMCPCh, awaitConfirm := s.gateUnconfirmedStreamRequests(mcpRequestCh)
 	for {
 		select {
 		case <-ctx.Done():
@@ -473,8 +476,15 @@ func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.C
 			if !s.writeAgentStreamNotification(notification, writeMessage, false) {
 				return
 			}
-		case mcpReq, ok := <-mcpRequestCh:
+		case <-awaitConfirm:
+			// Confirm lifted the gate (system design part 2 "Sent and not
+			// sent" step 1): start reading requestCh, and stop watching this
+			// episode's AttachedCh so the case never fires again.
+			awaitConfirm = nil
+			activeMCPCh = mcpRequestCh
+		case mcpReq, ok := <-activeMCPCh:
 			if !ok {
+				activeMCPCh = nil
 				mcpRequestCh = nil
 				continue
 			}
@@ -491,8 +501,19 @@ type durableAgentStreamWriter struct {
 	deliveryStreamID string
 	updatesCh        <-chan adapter.AgentEvent
 	mcpRequestCh     <-chan *ws.Message
-	wakeups          <-chan struct{}
-	writeMessage     func([]byte) error
+	// gatedMCPRequestCh is the request channel mcpRequestCh becomes once
+	// awaitConfirm is ready; awaitConfirm is nil when no gate applies.
+	gatedMCPRequestCh <-chan *ws.Message
+	awaitConfirm      <-chan struct{}
+	wakeups           <-chan struct{}
+	writeMessage      func([]byte) error
+}
+
+// liftGate starts reading Kandev requests once confirmation has closed the
+// episode's AttachedCh (system design part 2 "Sent and not sent" step 1).
+func (w *durableAgentStreamWriter) liftGate() {
+	w.mcpRequestCh = w.gatedMCPRequestCh
+	w.awaitConfirm = nil
 }
 
 // run treats the journal as truth. The bounded wake remains buffered while a
@@ -534,6 +555,8 @@ func (w *durableAgentStreamWriter) waitForInput(ctx context.Context, draining *b
 			return false
 		}
 		*draining = true
+	case <-w.awaitConfirm:
+		w.liftGate()
 	case notification, ok := <-w.updatesCh:
 		if !ok {
 			return false
@@ -554,6 +577,11 @@ func (w *durableAgentStreamWriter) waitForInput(ctx context.Context, draining *b
 }
 
 func (w *durableAgentStreamWriter) serviceMCP() bool {
+	select {
+	case <-w.awaitConfirm:
+		w.liftGate()
+	default:
+	}
 	if w.mcpRequestCh == nil {
 		return true
 	}
@@ -621,6 +649,25 @@ func (w *durableAgentStreamWriter) drainPage(
 		return next, false, err
 	}
 	return next, refreshed.HighWater <= next, nil
+}
+
+// gateUnconfirmedStreamRequests implements system design part 2 "Sent and not
+// sent" step 1: the writer reads requestCh only while its stream is current
+// and confirmed, so an unconfirmed reconnect-coordinator stream never carries
+// a Kandev call. It returns the channel the writer's select should read MCP
+// requests from (nil while unconfirmed) and a channel that becomes ready when
+// confirmation lifts the gate (nil when no gating is needed, because this
+// writer's stream is already confirmed or agentctl has no attachment state to
+// consult).
+func (s *Server) gateUnconfirmedStreamRequests(mcpRequestCh <-chan *ws.Message) (activeMCPCh <-chan *ws.Message, awaitConfirm <-chan struct{}) {
+	if s.procMgr == nil {
+		return mcpRequestCh, nil
+	}
+	snapshot := s.procMgr.AttachmentSnapshot()
+	if snapshot.Attached {
+		return mcpRequestCh, nil
+	}
+	return nil, snapshot.AttachedCh
 }
 
 func (s *Server) writeDurableAgentStreamEvent(

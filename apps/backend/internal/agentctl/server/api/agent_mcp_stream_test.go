@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -143,5 +144,94 @@ func TestAgentStreamSupersedeReleasesDeliveredMCPRequestAsUnknownOutcome(t *test
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("delivered MCP request remained blocked after stream supersede")
+	}
+}
+
+// TestAgentStreamWriterGatesRequestChUntilConfirmed covers system design part
+// 2 "Sent and not sent" step 1: the writer reads requestCh only while its
+// stream is current and confirmed, so an unconfirmed reconnect-coordinator
+// stream (opened with attach_id) never carries a Kandev call until the
+// backend confirms it.
+// @covers AC-PLATFORM-DETACHED-AGENT-CONTINUITY-003.1
+func TestAgentStreamWriterGatesRequestChUntilConfirmed(t *testing.T) {
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: t.TempDir()}
+	backend := mcpserver.NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := NewServer(cfg, process.NewManager(cfg, log), nil, backend, log)
+	server := httptest.NewServer(s.router)
+	t.Cleanup(server.Close)
+
+	conn := dialAgentStreamWithAttachID(t, server, "attach-1")
+	t.Cleanup(func() { _ = conn.Close() })
+	if !waitForAttachmentCurrent(t, s, "attach-1") {
+		t.Fatal("stream never became current with attach_id attach-1")
+	}
+
+	// A gorilla/websocket read error is permanent (every later call on the
+	// same Conn returns it again), so a single long-lived reader goroutine
+	// feeds a channel instead of the test using a short read deadline that
+	// would otherwise poison the connection for the post-confirm read below.
+	msgCh := make(chan []byte, 1)
+	go func() {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		msgCh <- data
+	}()
+
+	requestErrCh := make(chan error, 1)
+	go func() {
+		requestErrCh <- backend.RequestPayload(context.Background(), "mcp.tools.call", nil, nil)
+	}()
+
+	select {
+	case <-msgCh:
+		t.Fatal("unconfirmed stream delivered an MCP request before confirm")
+	case err := <-requestErrCh:
+		t.Fatalf("RequestPayload settled before confirm: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	confirmBody, err := json.Marshal(AgentStreamConfirmRequest{AttachID: "attach-1"})
+	if err != nil {
+		t.Fatalf("marshal confirm request: %v", err)
+	}
+	resp, err := http.Post(server.URL+"/api/v1/agent/stream/confirm", "application/json", bytes.NewReader(confirmBody))
+	if err != nil {
+		t.Fatalf("POST confirm: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("confirm status = %d, want 204", resp.StatusCode)
+	}
+
+	var data []byte
+	select {
+	case data = <-msgCh:
+	case err := <-requestErrCh:
+		t.Fatalf("RequestPayload settled before delivering the request: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("MCP request was not delivered after confirm")
+	}
+	var request ws.Message
+	if err := json.Unmarshal(data, &request); err != nil {
+		t.Fatalf("decode MCP request: %v", err)
+	}
+	if request.Type != ws.MessageTypeRequest {
+		t.Fatalf("message type = %q, want request", request.Type)
+	}
+
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close stream: %v", err)
+	}
+	select {
+	case err := <-requestErrCh:
+		if !errors.Is(err, mcpserver.ErrKandevCallOutcomeUnknown) {
+			t.Fatalf("request error = %v, want %v", err, mcpserver.ErrKandevCallOutcomeUnknown)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("delivered MCP request remained blocked after stream close")
 	}
 }

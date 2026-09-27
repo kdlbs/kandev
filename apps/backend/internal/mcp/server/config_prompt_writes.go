@@ -37,6 +37,6 @@ func (s *Server) writeSharedPromptHandler(action string) server.ToolHandlerFunc 
 		if name == "" || strings.TrimSpace(content) == "" {
 			return mcp.NewToolResultError("name and content are required"), nil
 		}
-		return s.forwardToBackend(ctx, action, map[string]interface{}{"name": name, "content": content})
+		return s.forwardToBackend(ctx, req, action, map[string]interface{}{"name": name, "content": content})
 	}
 }
