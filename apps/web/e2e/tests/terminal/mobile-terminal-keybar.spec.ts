@@ -275,13 +275,24 @@ test.describe("Mobile terminal key-bar — user flows", () => {
     // Default panel (chat) — hidden.
     await expect(keybar.root).not.toBeVisible();
 
-    for (const panel of ["Files", "Plan", "Changes"] as const) {
-      const panelButton =
-        panel === "Changes"
-          ? testPage.getByRole("button", { name: /^(?:\d+\s+)?Changes$/ })
-          : testPage.getByRole("button", { name: panel, exact: true });
-      await expect(panelButton).toBeVisible();
-      await panelButton.tap();
+    const bottomNav = testPage.getByTestId("session-mobile-bottom-nav");
+    const panels = [
+      {
+        buttonName: "Files",
+        content: testPage.getByTestId("files-panel"),
+      },
+      {
+        buttonName: "Plan",
+        content: testPage.getByTestId("plan-panel"),
+      },
+      {
+        buttonName: /^(?:\d+\+?\s+)?Changes$/,
+        content: testPage.getByTestId("mobile-changes-panel"),
+      },
+    ] as const;
+    for (const panel of panels) {
+      await bottomNav.getByRole("button", { name: panel.buttonName }).tap();
+      await expect(panel.content).toBeVisible({ timeout: 10_000 });
       await expect(keybar.root).not.toBeVisible();
     }
   });

@@ -13,6 +13,7 @@ type E2EMessageStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
     getState: () => {
       messages: { bySession: Record<string, Array<{ content: string }>> };
+      transcriptAutoScroll?: { scrollTopBySessionId: Record<string, number> };
     };
   };
 };
@@ -411,6 +412,18 @@ test.describe("Transcript auto-scroll toggle", () => {
       return el.scrollTop;
     });
     expect(targetScrollTop).toBeGreaterThan(100);
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate(
+            (sessionId) =>
+              (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__?.getState()
+                .transcriptAutoScroll?.scrollTopBySessionId[sessionId],
+            firstSessionId,
+          ),
+        { message: "reader-owned scroll position should persist before disabling follow mode" },
+      )
+      .toBe(targetScrollTop);
     const toggle = firstChat.getByTestId("auto-scroll-toggle-button");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");

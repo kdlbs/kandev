@@ -44,19 +44,42 @@ const test = base.extend<{ testPage: Page }, AdvancedModeFixtures>({
         taskDescription: "say your name",
       })) as { workspaceId: string; agentId: string; projectId: string; taskId?: string };
 
-      if (!result.taskId) {
+      const taskId = result.taskId;
+      if (!taskId) {
         throw new Error("completeOnboarding did not return a taskId");
       }
 
-      // Wait for the agent runtime to come up. We only need it to have
-      // *started* — the test pages exercise the live session once the
-      // dockview mounts, they don't require a finished turn.
-      await waitForOfficeTaskSessionLive(apiClient, result.taskId);
+      // Wait for the initial launch and turn to settle before advanced mode
+      // asks the runtime to ensure the execution again.
+      await waitForOfficeTaskSessionLive(apiClient, taskId);
+      await expect
+        .poll(
+          async () => {
+            const [{ sessions }, environment] = await Promise.all([
+              apiClient.listTaskSessions(taskId),
+              apiClient.getTaskEnvironment(taskId),
+            ]);
+            const session = sessions[0];
+            const workspacePath =
+              environment?.workspace_path ?? environment?.repos?.[0]?.worktree_path ?? "";
+            return {
+              sessionReady: ["WAITING_FOR_INPUT", "IDLE", "COMPLETED"].includes(
+                session?.state ?? "",
+              ),
+              workspaceReady: workspacePath.length > 0,
+            };
+          },
+          {
+            timeout: 10_000,
+            message: "Office session and workspace should settle before opening advanced mode",
+          },
+        )
+        .toEqual({ sessionReady: true, workspaceReady: true });
 
       await use({
         workspaceId: result.workspaceId,
         agentId: result.agentId,
-        taskId: result.taskId,
+        taskId,
       });
     },
     { scope: "worker" },
@@ -84,9 +107,9 @@ async function enterAdvancedMode(testPage: Page, taskId: string) {
   // re-renders into TaskAdvancedMode with dockview.
   await testPage.goto(`/office/tasks/${taskId}?mode=advanced`);
 
-  // Wait for dockview to render. The page may briefly show simple mode while
-  // sessions load — dockview appears once hasSession becomes true.
-  // The session-chat test-id comes from the dockview chat panel.
+  // A session-chat panel can also be present in simple mode. Wait for the
+  // layout boundary itself before asserting on its dockview panels.
+  await expect(testPage.locator(".dv-dockview")).toBeVisible({ timeout: 30_000 });
   await expect(testPage.getByTestId("session-chat")).toBeVisible({ timeout: 30_000 });
 }
 
@@ -292,6 +315,7 @@ test.describe("Office advanced mode", () => {
 
     // Navigate to advanced mode again — session should still be there
     await testPage.goto(`/office/tasks/${advancedSeed.taskId}?mode=advanced`);
+    await expect(testPage.locator(".dv-dockview")).toBeVisible({ timeout: 20_000 });
     await expect(testPage.getByTestId("session-chat")).toBeVisible({ timeout: 20_000 });
   });
 });

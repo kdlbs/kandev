@@ -39,9 +39,6 @@ test.describe("Commit file navigation", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
-    const session = await openTaskSession(testPage, "Commit File Navigation");
-    await session.waitForChatIdle({ timeout: 30_000 });
-
     const git = new GitHelper(
       path.join(backend.tmpDir, "repos", "e2e-repo"),
       makeGitEnv(backend.tmpDir),
@@ -51,6 +48,12 @@ test.describe("Commit file navigation", () => {
     git.stageAll();
     const sha = git.commit("Add commit navigation files");
     git.createFile("src/navigation-one.ts", "export const one = 2;\n");
+
+    // Seed history before the session mounts and fetches its initial commit
+    // snapshot. Mutating git after that fetch relies on a later event to refresh
+    // the commit feed, which is not part of this navigation test.
+    const session = await openTaskSession(testPage, "Commit File Navigation");
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
@@ -135,9 +138,6 @@ test.describe("Commit file navigation", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
-    const session = await openTaskSession(tabletTestPage, "Tablet Commit File Navigation");
-    await session.waitForChatIdle({ timeout: 30_000 });
-
     const git = new GitHelper(
       path.join(backend.tmpDir, "repos", "e2e-repo"),
       makeGitEnv(backend.tmpDir),
@@ -145,6 +145,9 @@ test.describe("Commit file navigation", () => {
     git.createFile("tablet/navigation.ts", "export const tablet = true;\n");
     git.stageAll();
     const sha = git.commit("Add tablet commit navigation");
+
+    const session = await openTaskSession(tabletTestPage, "Tablet Commit File Navigation");
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });

@@ -59,9 +59,6 @@ test.describe("Mobile commit file navigation", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
-    const session = await openTaskSession(testPage, "Mobile Commit File Navigation");
-    await session.waitForChatIdle({ timeout: 30_000 });
-
     const git = new GitHelper(
       path.join(backend.tmpDir, "repos", "e2e-repo"),
       makeGitEnv(backend.tmpDir),
@@ -71,6 +68,9 @@ test.describe("Mobile commit file navigation", () => {
     git.createFile(filePath, "export const mobile = true;\n");
     git.stageAll();
     const sha = git.commit(commitMessage);
+
+    const session = await openTaskSession(testPage, "Mobile Commit File Navigation");
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     await openMobileChangesPanel(testPage);
     await expandSection(testPage, "commits-section");
