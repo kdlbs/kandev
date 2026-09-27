@@ -96,7 +96,7 @@ func (s *Service) DisableWithResult(id string) (DisableResult, error) {
 			if err := managed.PauseManagedForInstallation(context.Background(), rec.InstallationID); err != nil {
 				_ = s.SetStatus(id, StatusError)
 				s.notifyDeliverer()
-				return fmt.Errorf("plugins: disable could not pause managed conversations: %w", err)
+				return result, fmt.Errorf("plugins: disable could not pause managed conversations: %w", err)
 			}
 		}
 	}
