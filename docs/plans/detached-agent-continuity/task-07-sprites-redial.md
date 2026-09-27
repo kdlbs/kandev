@@ -10,7 +10,8 @@ requirements:
 acceptance_criteria:
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-002.6
 system_design:
-  - ../../specs/platform/system-design/detached-agent-continuity.md
+  - ../../specs/platform/system-design/detached-agent-continuity-01.md
+  - ../../specs/platform/system-design/detached-agent-continuity-02.md
 ---
 
 # Task 07: Sprites redial
@@ -27,8 +28,12 @@ Unblock when an account is available.
 
 ## In scope
 
-- **`RedialRemoteInstance`** in a new `executor_sprites_redial.go`. A sprite
-  that no longer exists yields `ErrRedialTargetGone`.
+- **`RedialRemoteInstance`** in a new `executor_sprites_redial.go`, calling
+  task 04's `verifyRedialIdentity`. A sprite that no longer exists yields
+  `ErrRedialTargetGone` with nothing to reap.
+- **Orphan reap:** when the sprite exists but agentctl is gone, run the
+  `agent.pgid` reap through the sprite command API. `reap_failed` returns
+  `ErrRedialOrphanUnreaped`.
 - **Transport-loss detection:** Sprites has no watchdog today. A proxy error
   or a failed `GetRemoteStatus` enters Disconnected through task 03's branch.
 
@@ -40,7 +45,8 @@ Unblock when an account is available.
 
 1. With a real sprite, a dropped proxy is re-established by the coordinator
    without restarting agentctl.
-2. A deleted sprite yields `ErrRedialTargetGone`.
+2. A deleted sprite yields `ErrRedialTargetGone`. An orphaned agent in a
+   surviving sprite is stopped before the error returns.
 
 ## Verification
 

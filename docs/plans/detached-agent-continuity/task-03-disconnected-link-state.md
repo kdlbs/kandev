@@ -15,7 +15,7 @@ acceptance_criteria:
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-001.6
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-006.6
 system_design:
-  - ../../specs/platform/system-design/detached-agent-continuity.md
+  - ../../specs/platform/system-design/detached-agent-continuity-01.md
 ---
 
 # Task 03: Disconnected link state
@@ -30,20 +30,31 @@ it.
 ## In scope
 
 - **Disconnect branch:** a branch in `handleStreamDisconnectWithAttempt`
-  (`lifecycle/manager_events.go`), placed before the failure path. The
-  conditions are those in the design section "Disconnected link state".
-- **Execution state:** `LinkState` on `AgentExecution`. The prompt-completion
-  waiter stays pending.
-- **Event:** `events.AgentctlDisconnected` (`agentctl.disconnected`), mapped
-  to WS `session.agentctl_disconnected`. The payload is defined in the system
-  design.
-- **Persistence:** `task_sessions.metadata.agent_link`, written on enter and
-  cleared on exit.
+  (`lifecycle/manager_events.go`), placed before both the prompt and the idle
+  failure branches. The conditions are those in the design section
+  "Disconnected link state", including the classification table, the
+  capability gate, and the link generation check.
+- **Capability gate:** read `GET /identity` after the health check at launch
+  and adoption; store `DetachedContinuity` on the execution.
+- **Execution state:** `LinkState`, `LinkGeneration`, and `LinkRevision` on
+  `AgentExecution`, under the execution lock. In the prompt branch the
+  prompt-completion waiter stays pending and no uncertain code is set. In
+  the idle branch nothing waits.
+- **Prompts while Disconnected:** a prompt send returns the typed
+  `ErrAgentLinkDisconnected`. Queued messages stay queued.
+- **Event:** the new `PublishAgentLinkEvent` with `AgentLinkPayload`,
+  published as `events.AgentctlDisconnected` (`agentctl.disconnected`) and
+  mapped to WS `session.agentctl_disconnected`.
+- **Persistence:** the injected `AgentLinkWriter` and the repository method
+  `SetSessionAgentLinkIfNewer`, a single-key update guarded by
+  `link_revision`. Order: memory, then SQL, then event. A write failure is
+  logged and counted and the event still publishes.
 - **Stop:**
-  - Stop while disconnected sets `pending_stop` and marks the session
-    stopped;
+  - Stop while disconnected marks the session stopped and sets link state
+    `stopped_pending_cleanup` with `pending_stop`;
+  - the user Reconnect trigger is removed;
   - admission stays blocked;
-  - the cancel-and-stop is executed by task 04 on reconnect.
+  - the cleanup is executed by task 04.
 - **Marker interface:** `RemoteTransportRedialer` is declared here, empty of
   implementations, so the branch compiles. Task 04 adds the contract body and
   implementations.
@@ -61,14 +72,23 @@ it.
    the session `RUNNING` and the task on its step.
 2. Advancing a fake clock by hours produces no state change, no step move,
    and no replacement launch.
-3. Stop on a Disconnected session records `pending_stop` and blocks
-   admission. A non-redial executor keeps the current failure path.
+3. Stop on a Disconnected session records `stopped_pending_cleanup` and
+   blocks admission. A non-redial executor, an agentctl without
+   `detached-continuity.v1`, and a disconnect classified `terminal` keep the
+   current failure path.
+4. An idle stream loss enters Disconnected, and a prompt send then returns
+   `ErrAgentLinkDisconnected`.
+5. A disconnect callback from an older link generation changes nothing. An
+   `agent_link` write with an older revision is not stored. Each row of the
+   classification table has a test, including an `errors.Join` of a
+   transport error and a #3598 typed error.
 
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestStreamDisconnectEntersDisconnected|TestDisconnectedHasNoTimerExit|TestStopWhileDisconnected|TestNonRedialExecutorStillFails')
+(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestStreamDisconnectEntersDisconnected|TestIdleDisconnectEntersDisconnected|TestDisconnectClassification|TestStaleDisconnectCallbackIgnored|TestCapabilityGate|TestDisconnectedHasNoTimerExit|TestStopWhileDisconnected|TestNonRedialExecutorStillFails')
 (cd apps/backend && go test -race -count=1 ./internal/orchestrator/... -run 'TestAgentLinkMetadataPersisted')
+(cd apps/backend && go test -race -count=1 ./internal/task/repository/sqlite/... -run 'TestSetSessionAgentLinkIfNewer')
 (cd apps/backend && go test -race -count=1 ./internal/gateway/websocket/...)
 make -C apps/backend lint
 ```
@@ -85,8 +105,12 @@ make -C apps/backend lint
 - `apps/backend/internal/events/types.go`,
   `apps/backend/internal/gateway/websocket/task_notifications.go`,
   `apps/backend/pkg/websocket/actions.go`
-- `apps/backend/internal/orchestrator/`: the `agent_link` metadata writer and
-  the stop path
+- `apps/backend/internal/agent/runtime/lifecycle/events.go`:
+  `PublishAgentLinkEvent`
+- `apps/backend/internal/task/repository/sqlite/session.go`:
+  `SetSessionAgentLinkIfNewer`
+- `apps/backend/internal/orchestrator/`: the stop path and the prompt
+  rejection handling
 
 ## Dependencies
 

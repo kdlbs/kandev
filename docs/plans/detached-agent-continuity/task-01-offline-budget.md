@@ -16,7 +16,8 @@ acceptance_criteria:
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.4
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.5
 system_design:
-  - ../../specs/platform/system-design/detached-agent-continuity.md
+  - ../../specs/platform/system-design/detached-agent-continuity-01.md
+  - ../../specs/platform/system-design/detached-agent-continuity-02.md
 ---
 
 # Task 01: Offline budget in agentctl
@@ -30,22 +31,38 @@ from the executor profile.
 
 ## In scope
 
-- **Detach clock in `agentctl/server/process/attachment.go`:**
-  - `MarkDetached` at zero arms the timer;
-  - `MarkAttached` disarms it and clears it;
-  - `WaitSignals` exposes the `budgetExhausted` channel for task 02.
-- **On expiry:**
-  - call the adapter's `Cancel`;
-  - journal `agent_link.offline_budget_exhausted` with its timestamp;
+- **Attachment state in `agentctl/server/process/attachment.go`:** replace
+  the atomic counter with the `attachMu`-guarded state from the design
+  section "Attachment state": count, episode, per-episode `attachedCh` and
+  `exhaustedCh`, `detachedSince`, and the timer. `Snapshot()` implements
+  `AttachmentWaiter` for task 02. `IsAttached` reads under the same mutex.
+- **Detach clock:** detach to zero starts a new episode and arms the timer;
+  attach from zero stops it and closes `attachedCh`; `expire(E)` is a no-op
+  for a stale or already-exhausted episode, and otherwise closes
+  `exhaustedCh` even when no turn runs.
+- **On expiry with an active turn,** outside the lock:
+  - call the adapter's `Cancel` once;
+  - journal `agent_link.offline_budget_exhausted` with `detached_since`,
+    `exhausted_at`, and `cancel_error` when the cancel failed;
   - keep agentctl and the journal running.
 - **Profile override:**
   - `offline_budget_minutes` in `profileConfigAuthoritativeKeys`
-    (`orchestrator/executor/executor_state.go`), validated to 1–1440, with a
-    default of 15;
+    (`orchestrator/executor/executor_state.go`);
+  - validated at profile create and update and again at launch, as the
+    design section "Budget configuration" states: absent or empty means 15,
+    otherwise a base-10 integer from 1 to 1440, else the typed
+    `ErrInvalidOfflineBudget`;
   - carried as `OfflineBudget` through `agentctl.CreateInstanceRequest` and
     `config.InstanceOverrides`.
-- **Reaper bound:** `ownershipperiod.Resolve` never resolves below the
-  largest active instance budget plus 1 minute.
+- **Reaper gate:** the unowned reaper does not shut agentctl down while any
+  instance is detached with an unexpired budget, evaluated each tick from
+  live instance state. The unowned period counts from the later of the last
+  renewal and the latest budget expiry. `ownershipperiod.Resolve` and the
+  reported `unowned_period_ms` do not change.
+- **Capability and close reason:** add `detached-continuity.v1` to
+  `SurvivalCapabilities` (`agentctl/server/api/identity.go`). Close the
+  backend stream with WebSocket close code 1000 and reason `agent_exited` or
+  `agentctl_shutdown` when the stream ends for those reasons.
 - **Orphan record:** on agent start, agentctl writes `agent.pgid` (the
   process group ID from `Manager.AgentPID()` and the process start time) in
   the session directory. It removes the file on agent stop. Tasks 05 and 06
@@ -61,19 +78,25 @@ from the executor profile.
 
 1. A detached instance with a running turn is cancelled exactly once, at the
    budget. A reattach before the budget cancels nothing, and the clock
-   restarts at the next detach.
-2. The profile value reaches the instance config. Out-of-range values are
-   rejected at launch with a typed error.
+   restarts at the next detach. An attach that races expiry either wins
+   (no cancel) or loses (one cancel), never both, under `-race`. Expiry with
+   no turn closes `exhaustedCh` and journals nothing. Each episode gets new
+   channels.
+2. The profile value reaches the instance config. Empty means 15. A
+   non-integer, overflow, or out-of-range value is rejected at profile save
+   and at launch with `ErrInvalidOfflineBudget`.
 3. With agent survival enabled, the unowned reaper cannot stop agentctl
-   before the budget has expired. A permission request parked while detached
+   while an instance created after startup is detached with an unexpired
+   budget, and it can again once that instance is removed. A permission request parked while detached
    stays pending until reattach or until the budget cancels the turn. It is
    never approved or denied automatically.
 
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/agentctl/server/process/... -run 'TestDetachClock|TestOfflineBudget|TestPermissionParkedUntilBudgetCancel|TestAgentPgidRecord')
-(cd apps/backend && go test -race -count=1 ./internal/common/ownershipperiod/... ./internal/orchestrator/executor/... -run 'TestResolveCoversOfflineBudget|TestOfflineBudgetProfileResolution')
+(cd apps/backend && go test -race -count=1 ./internal/agentctl/server/process/... -run 'TestDetachClock|TestOfflineBudget|TestAttachRacesExpiry|TestPermissionParkedUntilBudgetCancel|TestAgentPgidRecord')
+(cd apps/backend && go test -race -count=1 ./cmd/agentctl/... ./internal/orchestrator/executor/... -run 'TestReaperGateHoldsDuringOfflineBudget|TestOfflineBudgetProfileResolution|TestOfflineBudgetProfileValidation')
+(cd apps/backend && go test -race -count=1 ./internal/agentctl/server/api/... -run 'TestIdentityAdvertisesDetachedContinuity|TestStreamCloseReason')
 (cd apps/backend && go test -race -count=1 ./internal/agentctl/server/config/... ./internal/agent/runtime/agentctl/...)
 make -C apps/backend lint
 ```
@@ -91,7 +114,9 @@ make -C apps/backend lint
 - `apps/backend/internal/orchestrator/executor/executor_state.go` and its test
 - `apps/backend/internal/agent/runtime/lifecycle/executor_backend.go`: the
   metadata key constant
-- `apps/backend/internal/common/ownershipperiod/period.go` and its test
+- `apps/backend/cmd/agentctl/unowned_reaper_gate.go` and its test
+- `apps/backend/internal/agentctl/server/api/identity.go` and `agent.go`:
+  capability and close reason
 
 ## Dependencies
 
@@ -102,6 +127,8 @@ the base branch.
 
 - The cancel races a turn that ends naturally at the same moment. Treat
   "no turn running" as a no-op.
+- Replacing the atomic counter touches every `IsAttached` caller, including
+  `sendPermissionNotification`. Keep its overlapping-reconnect semantics.
 - The journal is full at expiry. #3598's typed journal error applies. Still
   cancel the turn.
 
@@ -111,7 +138,7 @@ the base branch.
 
 ## Inputs
 
-- System design sections: Offline budget; Kandev tool calls while detached,
+- System design part 2 sections: Offline budget; Kandev tool calls while detached,
   for the permission note.
 - `docs/specs/platform/system-design/durable-agent-delivery.md`: journal
   event types.

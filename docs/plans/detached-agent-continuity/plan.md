@@ -9,7 +9,8 @@ requirements:
   - REQ-PLATFORM-DETACHED-AGENT-CONTINUITY-005
   - REQ-PLATFORM-DETACHED-AGENT-CONTINUITY-006
 system_design:
-  - ../../specs/platform/system-design/detached-agent-continuity.md
+  - ../../specs/platform/system-design/detached-agent-continuity-01.md
+  - ../../specs/platform/system-design/detached-agent-continuity-02.md
 legacy_specs: []
 ---
 
@@ -50,7 +51,7 @@ The origin incident is recorded in
 - Kandev tool calls that wait while detached, with keepalive and the new
   error texts.
 - The offline budget: agentctl detach clock, per-profile override, and the
-  unowned-reaper bound.
+  unowned-reaper gate.
 - Agent guidance in the system context.
 - Conversation notices and the Disconnected UI on desktop and phone.
 
@@ -70,7 +71,8 @@ The origin incident is recorded in
 ## Technical approach
 
 Symbols and paths are defined in the
-[system design](../../specs/platform/system-design/detached-agent-continuity.md).
+system design, [part 1](../../specs/platform/system-design/detached-agent-continuity-01.md)
+and [part 2](../../specs/platform/system-design/detached-agent-continuity-02.md).
 This section lists the integration points per slice.
 
 - **Offline budget** (task 01):
@@ -80,32 +82,43 @@ This section lists the integration points per slice.
   - `offline_budget_minutes` in `profileConfigAuthoritativeKeys`;
   - `OfflineBudget` in `agentctl.CreateInstanceRequest` and
     `config.InstanceOverrides`;
-  - the lower bound in `ownershipperiod.Resolve`.
+  - the unowned-reaper gate while a budget is unexpired;
+  - the `detached-continuity.v1` capability and the stream close reasons.
 - **Waiting Kandev calls** (task 02):
-  - `ChannelBackendClient.RequestPayload` waits on an `AttachmentWaiter`;
-  - `FailStreamRequests` uses `ErrKandevCallOutcomeUnknown`;
+  - `ChannelBackendClient.RequestPayload` waits on an `AttachmentWaiter`
+    snapshot and never offers a detached call to `requestCh`;
+  - `FailStreamRequests` uses `ErrKandevCallOutcomeUnknown` on every stream
+    end;
+  - launch keeps the harness tool timeout above the budget;
   - one `emitKeepAlivePings` wrapper covers every `RequestPayload` handler;
   - a `connectionLossSection` in `sysprompt.go` and `kandev-context.md`.
 - **Disconnected state** (task 03):
-  - a branch before the failure path in `handleStreamDisconnectWithAttempt`;
-  - `LinkState` on `AgentExecution`;
-  - the held prompt waiter;
-  - `events.AgentctlDisconnected` and its WS mapping;
-  - `task_sessions.metadata.agent_link`;
-  - Stop sets `pending_stop`.
+  - a branch before both failure branches in
+    `handleStreamDisconnectWithAttempt`, with the disconnect classification
+    table and the capability gate;
+  - `LinkState`, `LinkGeneration`, and `LinkRevision` on `AgentExecution`;
+  - the held prompt waiter, and `ErrAgentLinkDisconnected` for prompts;
+  - `PublishAgentLinkEvent` and its WS mapping;
+  - `task_sessions.metadata.agent_link` through `SetSessionAgentLinkIfNewer`;
+  - Stop sets `stopped_pending_cleanup`.
 - **Reconnect coordinator** (task 04):
-  - the `RemoteTransportRedialer` interface and the redial error types;
+  - the `RemoteTransportRedialer` interface, the redial error types, and
+    `verifyRedialIdentity`;
+  - attempt steps with a synchronous replay barrier before the clear;
   - a coordinator in `lifecycle`, single-flight through `remoteRefreshGroup`;
   - an `events.ExecutorReachabilityChanged` subscriber;
   - the backoff timer;
   - the `session.reconnect` WS action;
-  - the Kubernetes adapter over `RefreshRemoteInstance`;
-  - the orchestrator notices.
+  - the Kubernetes adapter over `RefreshRemoteInstance`, with a restart
+    mapped to `ErrRedialTargetGone`;
+  - pending-stop cleanup;
+  - the orchestrator notices, with deterministic message IDs.
 - **Per-executor redials** (tasks 05-07): SSH replaces the lost
   `sshSessionState`, remote Docker retains `targets` on loss, and Sprites
   re-proxies.
 - **UI** (task 08):
-  - `SessionAgentctlStatus` gains `disconnected`;
+  - `SessionAgentctlStatus` gains `disconnected` and
+    `stopped_pending_cleanup`;
   - a `DisconnectedSessionBanner`;
   - card and tooltip indicators;
   - copy in six locales.
@@ -190,24 +203,26 @@ Maps to AC-PLATFORM-DETACHED-AGENT-CONTINUITY-006.2.
 
 | AC | Evidence |
 | --- | --- |
-| 004.1 | `orchestrator/executor/executor_state_test.go` `TestOfflineBudgetProfileResolution` |
+| 004.1 | `orchestrator/executor/executor_state_test.go` `TestOfflineBudgetProfileResolution`, `TestOfflineBudgetProfileValidation` |
 | 004.2, 004.3 | `agentctl/server/process/attachment_test.go` `TestDetachClockCancelsTurnAtBudget` |
-| 004.4 | `attachment_test.go` `TestOfflineBudgetRestartsAfterAttach` |
-| 004.5 | `common/ownershipperiod/period_test.go` `TestResolveCoversOfflineBudget` |
-| 003.1, 003.3 | `mcp/server/backend_client_test.go` `TestRequestPayloadWaitsWhileDetached` |
+| 004.2, 004.4 | `attachment_test.go` `TestOfflineBudgetRestartsAfterAttach`, `TestAttachRacesExpiry` |
+| 004.5 | `cmd/agentctl/unowned_reaper_gate_test.go` `TestReaperGateHoldsDuringOfflineBudget` |
+| 003.1, 003.3 | `mcp/server/backend_client_test.go` `TestRequestPayloadWaitsWhileDetached`, `TestSendRacesDetach` |
+| 003.1 | `lifecycle` `TestToolTimeoutCoversOfflineBudget` |
 | 003.2 | `mcp/server/handlers_test.go` `TestKandevCallKeepAliveWhileWaiting` |
 | 003.4 | `backend_client_test.go` `TestFailStreamRequestsReportsUnknownOutcome` |
 | 003.5 | `agentctl/server/process/manager_permission_test.go` `TestPermissionParkedUntilBudgetCancel` |
 | 004.2, 005.1 | `backend_client_test.go` `TestRequestPayloadBudgetExhaustedText` |
 | 005.2 | `sysprompt/sysprompt_test.go` `TestKandevContextHasConnectionLossSection` |
-| 001.1, 001.2 | `lifecycle/manager_events_disconnect_test.go` `TestStreamDisconnectEntersDisconnected`, `TestDisconnectedHasNoTimerExit` |
-| 001.5, 001.6 | `lifecycle/manager_events_disconnect_test.go` `TestStopWhileDisconnectedCancelsOnReconnect` |
-| 006.6 | `orchestrator/agent_link_test.go` `TestAgentLinkMetadataPersisted` |
+| 001.1, 001.2 | `lifecycle/manager_events_disconnect_test.go` `TestStreamDisconnectEntersDisconnected`, `TestIdleDisconnectEntersDisconnected`, `TestDisconnectClassification`, `TestCapabilityGate`, `TestDisconnectedHasNoTimerExit` |
+| 001.3 | `manager_events_disconnect_test.go` `TestStaleDisconnectCallbackIgnored`; `reconnect_coordinator_test.go` `TestStaleAttemptIgnored` |
+| 001.5, 001.6 | `lifecycle/manager_events_disconnect_test.go` `TestStopWhileDisconnected`; `reconnect_coordinator_test.go` `TestPendingStopCleanup` |
+| 006.6 | `orchestrator/agent_link_test.go` `TestAgentLinkMetadataPersisted`; `task/repository/sqlite` `TestSetSessionAgentLinkIfNewer` |
 | 002.1, 002.2, 002.3 | `lifecycle/reconnect_coordinator_test.go` `TestReconnectOnReachability`, `TestReconnectBackoffSchedule`, `TestUserReconnectCancelsTimer` |
-| 002.4, 002.5 | `reconnect_coordinator_test.go` `TestReconnectSkipsInitializeAndReplays` |
+| 002.4, 002.5 | `reconnect_coordinator_test.go` `TestReconnectSkipsInitializeAndReplays`, `TestRedialIdentity`; `TestKubernetesRedialAdapter` |
 | 001.3, 001.4 | `reconnect_coordinator_test.go` `TestReconnectTargetGoneReconciles` |
-| 001.7 | `agentctl/server/process` `TestAgentPgidRecord` (task 01); `lifecycle/executor_ssh_redial_test.go` `TestSSHOrphanReap`; `executor_remote_docker_redial_test.go` `TestRemoteDockerOrphanReap` |
-| 006.3, 006.4, 006.5 | `orchestrator/agent_link_notices_test.go` `TestReconnectNotices` |
+| 001.7 | `agentctl/server/process` `TestAgentPgidRecord` (task 01); `lifecycle/executor_ssh_redial_test.go` `TestSSHOrphanReap`; `executor_remote_docker_redial_test.go` `TestRemoteDockerOrphanReap`; `reconnect_coordinator_test.go` `TestReconnectOrphanUnreapedReportsNoOutcome` |
+| 006.3, 006.4, 006.5 | `orchestrator/agent_link_notices_test.go` `TestReconnectNotices`, `TestReconnectNoticesIdempotent` |
 | 002.6 | `lifecycle/executor_ssh_redial_test.go`, `executor_remote_docker_redial_test.go`, `executor_kubernetes_redial_test.go`, `executor_sprites_redial_test.go` |
 
 ## E2E tests
@@ -254,9 +269,9 @@ Pending.
 
   Task 04 must not work around either. If #3598 lands without them, file a
   follow-up rather than duplicating them here.
-- **Harness tool timeouts.** Claude declares 2 h. Codex behavior for a
-  long-waiting MCP call is unverified. Task 02 must measure it before relying
-  on the budget.
+- **Harness tool timeouts.** Claude declares 2 h, and launch raises it above
+  the budget. Codex behavior for a long-waiting MCP call is unverified. Task
+  02 must measure it before relying on the budget.
 - **Holding the prompt waiter** (task 03) changes a hot path. A missed exit
   would leave a session RUNNING forever. Task 03's tests must cover every
   exit.

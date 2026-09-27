@@ -17,7 +17,8 @@ acceptance_criteria:
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-001.7
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-006.3
 system_design:
-  - ../../specs/platform/system-design/detached-agent-continuity.md
+  - ../../specs/platform/system-design/detached-agent-continuity-01.md
+  - ../../specs/platform/system-design/detached-agent-continuity-02.md
 ---
 
 # Task 05: SSH redial
@@ -36,17 +37,21 @@ end-to-end proof on a real SSH executor.
   - dial with the recorded target and pinned fingerprint;
   - probe the recorded `pid` with `kill -0`;
   - open a new `StartPortForward`;
-  - check health with the recorded auth token;
+  - run task 04's `verifyRedialIdentity` on the new client;
   - install a new state with a new watchdog under the same InstanceID;
   - return a `RemoteInstanceRefresh` with `ProcessRestarted=false`.
-- **Error mapping:** a dial failure maps to `ErrRedialUnreachable`, and a dead
-  pid or failed health check to `ErrRedialTargetGone`. A host-key mismatch is
-  a hard error.
+- **Error mapping:** a dial failure or a transport error during the identity
+  check maps to `ErrRedialUnreachable`. A dead pid or an identity mismatch
+  goes to the orphan reap, then `ErrRedialTargetGone`. HTTP 401 or 403 is the
+  `auth` error. A host-key mismatch is a hard error.
 - **Orphan reap:** before returning `ErrRedialTargetGone`, read the session's
   `agent.pgid`.
   - If that process group is alive with the recorded start time, send
-    `SIGTERM` to the group, wait 10 s, then send `SIGKILL`.
-  - Report `reaped`, `already_gone`, or `reap_failed`.
+    `SIGTERM` to the group, wait 10 s, send `SIGKILL`, then check again.
+  - Report `reaped` or `already_gone` (file absent, or no matching process)
+    with `ErrRedialTargetGone`.
+  - Report `reap_failed` (still alive, file unreadable, or a command
+    failure) with `ErrRedialOrphanUnreaped`, never `ErrRedialTargetGone`.
   - See the design section "Orphaned agent after agentctl loss".
 - **Guards:** the `CreateInstance` and `ResumeRemoteInstance` lost-entry
   guards (`executor_ssh.go`) must see either the lost or the new entry, never
@@ -66,14 +71,16 @@ end-to-end proof on a real SSH executor.
 2. A dead pid yields `ErrRedialTargetGone`. A host-key mismatch never
    re-pins. With agentctl killed and the agent left running, redial stops the
    agent's process group before returning. A reused PID with a different
-   start time is never signalled.
+   start time is never signalled. A reap that cannot stop the group returns
+   `ErrRedialOrphanUnreaped`. An agentctl on the recorded port with a
+   different journal incarnation fails the identity check.
 3. The containers E2E passes: network cut, then restore, then automatic
    reconnect with no user action.
 
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestSSHRedial|TestSSHTransport|TestSSHOrphanReap')
+(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestSSHRedial|TestSSHTransport|TestSSHOrphanReap|TestSSHRedialIdentityMismatch')
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --project containers tests/ssh/detached-reconnect.spec.ts)
 make -C apps/backend lint
@@ -107,7 +114,8 @@ make -C apps/backend lint
 
 ## Inputs
 
-- System design section: Redial contract, SSH.
+- System design part 1 section: Redial contract, SSH. Part 2 section:
+  Orphaned agent after agentctl loss.
 - `docs/specs/executors/system-design/ssh-transport-liveness.md`.
 
 ## Results

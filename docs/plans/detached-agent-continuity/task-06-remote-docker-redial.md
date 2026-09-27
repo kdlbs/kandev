@@ -13,7 +13,8 @@ acceptance_criteria:
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-002.4
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-001.7
 system_design:
-  - ../../specs/platform/system-design/detached-agent-continuity.md
+  - ../../specs/platform/system-design/detached-agent-continuity-01.md
+  - ../../specs/platform/system-design/detached-agent-continuity-02.md
 ---
 
 # Task 06: Remote Docker redial
@@ -30,15 +31,19 @@ client, and the forward to the same container.
   runs (`executor_remote_docker.go`), keep the instance's entry in `targets`.
 - **`RedialRemoteInstance`:**
   - rebuild through the `reconnect` hook and `reconnectToContainer`;
-  - check agentctl health;
+  - run task 04's `verifyRedialIdentity` on the new client;
   - return a `RemoteInstanceRefresh`.
-- **Error mapping:** a missing container maps to `ErrRedialTargetGone`, and a
-  dial failure to `ErrRedialUnreachable`.
-- **Cleanup:** an explicit stop removes the target, so a stopped instance is
-  never redialed.
+- **Error mapping:** a missing container maps to `ErrRedialTargetGone` with
+  nothing to reap. A dial failure maps to `ErrRedialUnreachable`. An identity
+  mismatch goes to the orphan reap.
+- **Cleanup:** a completed instance stop removes the target, so a stopped
+  instance is never redialed. A stop recorded while Disconnected
+  (`stopped_pending_cleanup`) keeps the target until the cleanup attempt
+  finishes.
 - **Orphan reap:** when agentctl is gone but the container still exists, run
-  the `agent.pgid` reap inside the container through `docker exec` before
-  returning `ErrRedialTargetGone`.
+  the `agent.pgid` reap inside the container through `docker exec`.
+  `reaped` or `already_gone` returns `ErrRedialTargetGone`; `reap_failed`
+  returns `ErrRedialOrphanUnreaped`.
 
 ## Out of scope
 
@@ -50,8 +55,9 @@ client, and the forward to the same container.
 1. After a transport loss, redial reattaches to the running container's
    agentctl without restarting it.
 2. A removed container yields `ErrRedialTargetGone`. A stopped instance is
-   not redialed. An orphaned agent in a surviving container is stopped before
-   the error returns.
+   not redialed, but a stop pending cleanup is. An orphaned agent in a
+   surviving container is stopped before the error returns, and a failed
+   reap returns `ErrRedialOrphanUnreaped`.
 
 ## Verification
 
@@ -82,7 +88,8 @@ make -C apps/backend lint
 
 ## Inputs
 
-- System design section: Redial contract, remote Docker.
+- System design part 1 section: Redial contract, remote Docker. Part 2
+  section: Orphaned agent after agentctl loss.
 - `docs/specs/executors/system-design/remote-docker-executor.md`.
 
 ## Results

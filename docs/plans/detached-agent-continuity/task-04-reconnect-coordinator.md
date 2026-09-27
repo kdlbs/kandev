@@ -22,7 +22,8 @@ acceptance_criteria:
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-006.4
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-006.5
 system_design:
-  - ../../specs/platform/system-design/detached-agent-continuity.md
+  - ../../specs/platform/system-design/detached-agent-continuity-01.md
+  - ../../specs/platform/system-design/detached-agent-continuity-02.md
 ---
 
 # Task 04: Reconnect coordinator and redial contract
@@ -37,28 +38,47 @@ the conversation notices.
 
 ## In scope
 
-- **Redial contract:** the `RemoteTransportRedialer` contract, with
-  `ErrRedialUnreachable` and `ErrRedialTargetGone`.
-- **Kubernetes:** an adapter over `RefreshRemoteInstance`.
+- **Redial contract:** the `RemoteTransportRedialer` contract with
+  `RedialIdentity`, and `ErrRedialUnreachable`, `ErrRedialTargetGone`, and
+  `ErrRedialOrphanUnreaped`. The shared `verifyRedialIdentity` helper
+  (health with the stored token, `detached-continuity.v1`, and a
+  `GetDeliveryStatus` descriptor matching `RedialIdentity`) that tasks 05-07
+  call.
+- **Kubernetes:** an adapter over `RefreshRemoteInstance`. `ProcessRestarted`
+  maps to `Abort` plus `ErrRedialTargetGone`, so the redial path never
+  reaches `prepareRestartedKubernetesAgentctl`. The 60 s loop skips an
+  execution not in link state connected and triggers a `k8s_refresh`
+  attempt instead.
 - **Coordinator in `lifecycle`:**
   - `remoteRefreshGroup` single-flight;
   - a subscriber to `events.ExecutorReachabilityChanged`;
   - a backoff of 5 s doubling to a 300 s cap, with ±20% jitter and unlimited
     attempts;
   - a `session.reconnect` WS action, authorized like `RetrySessionDelivery`.
-- **Attempt steps:** redial, then commit, then
-  `StreamManager.ReconnectAll`, then `reconcileDisconnectedSubmission`, then
-  clear the link state and publish `agentctl.ready` with
-  `reconnected_after_ms`.
-- **Pending stop:** on reconnect, run `agent.cancel` and stop the instance
-  before intake.
-- **Orchestrator notices:**
-  - reconnected after a duration;
-  - turn ended while disconnected (the workflow effect still runs once
-    through `processOnTurnCompleteViaEngineWithCause`);
-  - paused by the offline budget, from the replayed
-    `agent_link.offline_budget_exhausted` event. No queued prompt is
-    dispatched automatically after it.
+- **Attempt steps,** each guarded by the episode generation: redial; pending
+  stop cleanup if the link state is `stopped_pending_cleanup`; commit;
+  `GetDeliveryStatus` and synchronous `ReplayRecoveredDelivery` to its
+  high-water barrier; the new synchronous `StreamManager.ConnectFromCursor`;
+  `reconcileDisconnectedSubmission`; reconnected notice; clear under the
+  lock and publish `agentctl.ready` with `reconnected_after_ms`. Never
+  `StreamManager.ReconnectAll`. The failure table in the design section
+  "Reconnect coordinator" applies.
+- **Pending stop cleanup:** on a refresh, run `agent.cancel` and stop the
+  instance with no stream and no replay; on target gone, nothing to stop;
+  then write `cleared`. On an error, keep `stopped_pending_cleanup` and
+  retry on the next trigger.
+- **Orphan reap failure:** `ErrRedialOrphanUnreaped` keeps the session
+  Disconnected with `orphan_reap_failed` and reports no outcome.
+- **Orchestrator notices** through `CreateSessionMessageIdempotent`, with
+  the name-based message IDs from the design section "Notices":
+  - reconnected after a duration, keyed by session and episode generation,
+    written before the clear;
+  - turn ended while disconnected, keyed by the terminal event's stream and
+    sequence (the workflow effect still runs once through
+    `processOnTurnCompleteViaEngineWithCause`);
+  - paused by the offline budget, keyed by the replayed
+    `agent_link.offline_budget_exhausted` event's stream and sequence. No
+    queued prompt is dispatched automatically after it.
 - **Metrics:** the metrics listed in the system design.
 
 ## Out of scope
@@ -76,13 +96,21 @@ the conversation notices.
    intent. Replayed output appears once and in order, and the notices are
    recorded.
 3. `ErrRedialTargetGone` ends Disconnected through durable delivery
-   reconciliation. Pending stop is executed on reconnect.
+   reconciliation. `ErrRedialOrphanUnreaped` reports no outcome and retries
+   on the next trigger. Pending stop is executed on reconnect, before any
+   stream or replay.
+4. The clear waits for replay to reach the barrier. A transport error during
+   replay keeps Disconnected. A stale attempt result, from an older episode,
+   changes nothing and aborts its staged refresh.
+5. A repeated attempt, replay, or notice write in one episode yields each
+   notice once. A Kubernetes container restart on the redial path returns
+   `ErrRedialTargetGone` and creates no ACP session.
 
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestReconnect|TestUserReconnect|TestKubernetesRedialAdapter')
-(cd apps/backend && go test -race -count=1 ./internal/orchestrator/... -run 'TestReconnectNotices|TestTurnEndedWhileDisconnected|TestBudgetPauseNoAutoDispatch')
+(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestReconnect|TestUserReconnect|TestKubernetesRedialAdapter|TestRedialIdentity|TestStaleAttemptIgnored|TestPendingStopCleanup')
+(cd apps/backend && go test -race -count=1 ./internal/orchestrator/... -run 'TestReconnectNotices|TestReconnectNoticesIdempotent|TestTurnEndedWhileDisconnected|TestBudgetPauseNoAutoDispatch')
 (cd apps/backend && go test -race -count=1 ./internal/executors/reachability/...)
 make -C apps/backend lint
 ```
@@ -93,8 +121,10 @@ make -C apps/backend lint
   and its test
 - `apps/backend/internal/agent/runtime/lifecycle/executor_backend.go`,
   `executor_kubernetes_refresh.go`, `manager_kubernetes_refresh.go`
-- `apps/backend/internal/agent/runtime/lifecycle/streams.go`,
-  `durable_delivery_stream.go`: call sites only
+- `apps/backend/internal/agent/runtime/lifecycle/streams.go`:
+  `ConnectFromCursor`
+- `apps/backend/internal/agent/runtime/lifecycle/durable_delivery_stream.go`:
+  call sites only
 - `apps/backend/internal/orchestrator/`: the notices and the
   `session.reconnect` handler
 - `apps/backend/pkg/websocket/actions.go`

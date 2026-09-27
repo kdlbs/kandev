@@ -17,7 +17,7 @@ acceptance_criteria:
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-001.5
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-002.3
 system_design:
-  - ../../specs/platform/system-design/detached-agent-continuity.md
+  - ../../specs/platform/system-design/detached-agent-continuity-01.md
 ---
 
 # Task 08: Disconnected UI and notices
@@ -30,13 +30,21 @@ survives a reload, and the reconnect notices render in the conversation.
 
 ## In scope
 
-- **`SessionAgentctlStatus.status`** gains `"disconnected"`, with `since`,
-  `host`, `budgetDeadline`, `nextAttemptAt`, and `lastError`. It is set by
-  `session.agentctl_disconnected` in `lib/ws/handlers/agent-session.ts`, and
-  seeded from `agent_link` metadata on load.
+- **`SessionAgentctlStatus.status`** gains `"disconnected"` and
+  `"stopped_pending_cleanup"`, with `since`, `host`, `budgetDeadline`,
+  `nextAttemptAt`, `lastError`, `linkGeneration`, and `linkRevision`. It is
+  set by `session.agentctl_disconnected` and the link payload on
+  `session.agentctl_ready` in `lib/ws/handlers/agent-session.ts`, and seeded
+  from `agent_link` metadata on load. A payload whose `linkRevision` is not
+  newer than the stored one is dropped.
+- **Banner selection** follows the design table: `disconnected` shows
+  `DisconnectedSessionBanner`; `stopped_pending_cleanup` shows the existing
+  `SessionStoppedBanner` with a cleanup line (test ID
+  `stopped-pending-cleanup-line`) and no Reconnect.
 - **`DisconnectedSessionBanner`:**
-  - rendered from `chat-input-container.tsx`, taking precedence over
-    `SessionStoppedBanner`;
+  - rendered from `chat-input-container.tsx`;
+  - the pause time is worded as approximate;
+  - `lastError` renders through the `agentLinkError*` keys;
   - the phone gets it through the shared `ChatInputArea`;
   - test IDs are `disconnected-session-banner`,
     `disconnected-reconnect-button`, and `disconnected-stop-button`;
@@ -57,10 +65,12 @@ survives a reload, and the reconnect notices render in the conversation.
 
 1. A seeded Disconnected session shows UI-01 on desktop and UI-02 on a phone
    without horizontal overflow. Reconnect sends `session.reconnect`, and Stop
-   stops the session.
+   stops the session. After Stop, the stopped banner shows the cleanup line
+   and no Reconnect action.
 2. The card and tooltip show UI-04. A reload keeps the banner.
 3. The UI-03 notices render. The banner clears within 5 s of
-   `session.agentctl_ready`.
+   `session.agentctl_ready`. An older link payload arriving after a newer
+   one changes nothing.
 
 ## ASCII UI preview
 
