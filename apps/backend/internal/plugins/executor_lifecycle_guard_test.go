@@ -244,12 +244,11 @@ func TestPluginExecutorLifecycleInventoryReadFailureIsFailClosed(t *testing.T) {
 
 func prepareExecutorProviderTestRuntime(t *testing.T, runtime *fakeRuntime) {
 	t.Helper()
-	client, server := hcplugin.TestPluginGRPCConn(t, false, map[string]hcplugin.Plugin{
+	client, _ := hcplugin.TestPluginGRPCConn(t, false, map[string]hcplugin.Plugin{
 		pluginsdk.PluginMapKey: &pluginsdk.GRPCPlugin{Impl: &lifecycleExecutorProviderPlugin{}},
 	})
 	t.Cleanup(func() {
 		_ = client.Close()
-		server.Stop()
 	})
 	raw, err := client.Dispense(pluginsdk.PluginMapKey)
 	if err != nil {
