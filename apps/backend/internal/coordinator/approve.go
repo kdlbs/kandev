@@ -103,7 +103,7 @@ func (s *Service) approveApproving(ctx context.Context, workspaceID, coordinator
 	if carriesEdits {
 		return nil, &ProposalConflictError{Proposal: proposal}
 	}
-	cutoff := time.Now().Add(-staleApproveWindow)
+	cutoff := time.Now().UTC().Add(-staleApproveWindow)
 	if proposal.ClaimedAt == nil || !proposal.ClaimedAt.Before(cutoff) {
 		return nil, &ProposalConflictError{Proposal: proposal}
 	}
@@ -260,7 +260,7 @@ func (s *Service) resolveStepEdit(ctx context.Context, candidate ProposalSpec, w
 // short circuit, which skips eligibility and create entirely.
 func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorID, proposalID, decidedBy string, spec ProposalSpec, foundTask *taskmodels.Task) (*Proposal, error) {
 	token := uuid.New().String()
-	now := time.Now()
+	now := time.Now().UTC()
 	matched, err := s.store.ClaimProposal(ctx, proposalID, token, spec, decidedBy, now)
 	if err != nil {
 		return nil, err
@@ -279,7 +279,7 @@ func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorI
 // recovery pass (cutoff = T0, task 08).
 func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coordinatorID, proposalID string, cutoff time.Time) (*Proposal, error) {
 	token := uuid.New().String()
-	now := time.Now()
+	now := time.Now().UTC()
 	matched, err := s.store.ReclaimStale(ctx, proposalID, token, now, cutoff)
 	if err != nil {
 		return nil, err

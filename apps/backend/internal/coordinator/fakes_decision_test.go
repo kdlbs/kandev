@@ -47,7 +47,7 @@ func (f *fakeDecisionTaskService) GetWorkflow(_ context.Context, id string) (*ta
 	}
 	wf, ok := f.workflows[id]
 	if !ok {
-		return nil, repoerrors.ErrWorkspaceNotFound
+		return nil, repoerrors.ErrWorkflowNotFound
 	}
 	return wf, nil
 }

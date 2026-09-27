@@ -95,7 +95,7 @@ func (s *Service) validateProposalSpec(ctx context.Context, workspaceID string, 
 func (s *Service) validateWorkflowInWorkspace(ctx context.Context, workspaceID, workflowID string) error {
 	workflow, err := s.decisionTasks.GetWorkflow(ctx, workflowID)
 	if err != nil {
-		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		if errors.Is(err, repoerrors.ErrWorkflowNotFound) {
 			return &FieldError{Field: ApproveFieldWorkflowID, Message: "workflow not found"}
 		}
 		return err
