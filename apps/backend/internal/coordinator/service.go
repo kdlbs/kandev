@@ -280,3 +280,11 @@ func (s *Service) ListStalls(ctx context.Context, workspaceID string) ([]*Stall,
 func (s *Service) PruneStalls(ctx context.Context, now time.Time) (int64, error) {
 	return s.store.PruneStalls(ctx, now)
 }
+
+// DeleteWorkspaceState deletes a workspace's coordinators, proposals and
+// stall records (coordinators.md#workspace-deletion). Unauthorized: callers
+// are the workspace.deleted subscriber and the E2E reset endpoint, neither of
+// which carries a workspace-scoped request to authorize.
+func (s *Service) DeleteWorkspaceState(ctx context.Context, workspaceID string) error {
+	return s.store.DeleteWorkspaceState(ctx, workspaceID)
+}

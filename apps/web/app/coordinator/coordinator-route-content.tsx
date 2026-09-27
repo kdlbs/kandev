@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useRouter } from "@/lib/routing/client-router";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
-import { selectActiveWorkspace } from "@/lib/state/slices/workspace/selectors";
+import { selectWorkspaceById } from "@/lib/state/slices/workspace/selectors";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import { linkToCoordinatorNeedsYou, linkToCoordinatorQueue } from "@/lib/coordinator/links";
@@ -71,7 +71,7 @@ export function CoordinatorRouteContent({
   const readyCoordinatorId = resolved.status === "ready" ? resolved.coordinator.id : null;
   const attention = useCoordinatorAttention(workspaceId, readyCoordinatorId);
   useWorkspacePRs(workspaceId);
-  const workspace = useAppStore(selectActiveWorkspace);
+  const workspace = useAppStore(selectWorkspaceById(workspaceId));
   const canManage = hasScope(workspace?.scopes, SCOPE.workspaceManage);
 
   if (resolved.status === "loading") {

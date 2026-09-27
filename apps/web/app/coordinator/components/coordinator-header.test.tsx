@@ -1,9 +1,27 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import { CoordinatorHeader } from "./coordinator-header";
 
-afterEach(cleanup);
+let isFinePointer = true;
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({
+    breakpoint: "desktop",
+    isMobile: false,
+    isTablet: false,
+    isDesktop: true,
+    isCompactDesktop: false,
+    isFullDesktop: true,
+    isFinePointer,
+    usesDesktopWorkbench: true,
+  }),
+}));
+
+afterEach(() => {
+  cleanup();
+  isFinePointer = true;
+});
 
 function coordinator(overrides: Partial<Coordinator> = {}): Coordinator {
   return {
@@ -73,5 +91,37 @@ describe("CoordinatorHeader", () => {
     expect(screen.getByRole("link", { name: "Configure" }).getAttribute("href")).toBe(
       "/settings/workspaces/ws-1/coordinators/co-1",
     );
+  });
+
+  it("sizes Configure for touch on a coarse pointer", () => {
+    isFinePointer = false;
+    render(
+      <CoordinatorHeader
+        coordinator={coordinator()}
+        coordinators={[coordinator()]}
+        workspaceId="ws-1"
+        view="needs-you"
+        canManage
+      />,
+    );
+    const configureLink = screen.getByRole("link", { name: "Configure" });
+    expect(configureLink.className).toContain("min-h-11");
+    expect(configureLink.className).toContain("min-w-11");
+  });
+
+  it("does not force touch sizing for Configure on a fine pointer", () => {
+    isFinePointer = true;
+    render(
+      <CoordinatorHeader
+        coordinator={coordinator()}
+        coordinators={[coordinator()]}
+        workspaceId="ws-1"
+        view="needs-you"
+        canManage
+      />,
+    );
+    const configureLink = screen.getByRole("link", { name: "Configure" });
+    expect(configureLink.className).not.toContain("min-h-11");
+    expect(configureLink.className).not.toContain("min-w-11");
   });
 });

@@ -14,7 +14,8 @@ const retryFailedMock = vi.fn();
 
 let resolvedState: ResolvedCoordinatorState;
 let attentionResult: UseCoordinatorAttentionResult;
-let workspaceScopes: string[] | undefined;
+let workspaceItems: Array<{ id: string; scopes: string[] | undefined }>;
+let activeWorkspaceId: string;
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ replace: replaceMock }),
@@ -24,7 +25,7 @@ vi.mock("@/components/state-provider", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   useAppStore: (selector: (s: any) => unknown) =>
     selector({
-      workspaces: { items: [{ id: "ws-1", scopes: workspaceScopes }], activeId: "ws-1" },
+      workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
     }),
 }));
 
@@ -89,7 +90,8 @@ function attention(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  workspaceScopes = [];
+  workspaceItems = [{ id: "ws-1", scopes: [] }];
+  activeWorkspaceId = "ws-1";
   attentionResult = attention();
 });
 
@@ -118,7 +120,7 @@ describe("CoordinatorRouteContent", () => {
 
   it("shows the no-coordinator state, gated by scope for Add a coordinator", () => {
     resolvedState = { status: "no-coordinator" };
-    workspaceScopes = ["workspace.manage"];
+    workspaceItems = [{ id: "ws-1", scopes: ["workspace.manage"] }];
     render(
       <CoordinatorRouteContent workspaceId="ws-1" coordinatorId={null} view="needs-you">
         {() => <div data-testid="ready-content" />}
@@ -185,5 +187,49 @@ describe("CoordinatorRouteContent", () => {
     expect(screen.queryByTestId("coordinator-count-strip")).toBeNull();
     expect(screen.queryByTestId("ready-content")).toBeNull();
     expect(screen.getByText("Could not load this workspace's tasks.")).not.toBeNull();
+  });
+});
+
+describe("CoordinatorRouteContent canManage", () => {
+  it("derives canManage from the route's own workspace, not the globally active workspace", () => {
+    // The active workspace (ws-2) has manage; the route's own workspace
+    // (ws-1) does not. A user who switched their active workspace elsewhere
+    // (or a stale WS-driven activeId) must not gain manage rights on a
+    // coordinator screen for a workspace they don't manage.
+    workspaceItems = [
+      { id: "ws-1", scopes: [] },
+      { id: "ws-2", scopes: ["workspace.manage"] },
+    ];
+    activeWorkspaceId = "ws-2";
+    resolvedState = {
+      status: "ready",
+      coordinator: coordinator(),
+      coordinators: [coordinator()],
+    };
+    render(
+      <CoordinatorRouteContent workspaceId="ws-1" coordinatorId="co-1" view="needs-you">
+        {({ canManage }) => <div data-testid="can-manage">{String(canManage)}</div>}
+      </CoordinatorRouteContent>,
+    );
+    expect(screen.getByTestId("can-manage").textContent).toBe("false");
+  });
+
+  it("grants canManage when the route's own workspace has the scope, even if it is not active", () => {
+    workspaceItems = [
+      { id: "ws-1", scopes: ["workspace.manage"] },
+      { id: "ws-2", scopes: [] },
+    ];
+    activeWorkspaceId = "ws-2";
+    resolvedState = {
+      status: "ready",
+      coordinator: coordinator(),
+      coordinators: [coordinator()],
+    };
+    render(
+      <CoordinatorRouteContent workspaceId="ws-1" coordinatorId="co-1" view="needs-you">
+        {({ canManage }) => <div data-testid="can-manage">{String(canManage)}</div>}
+      </CoordinatorRouteContent>,
+    );
+    expect(screen.getByTestId("can-manage").textContent).toBe("true");
   });
 });

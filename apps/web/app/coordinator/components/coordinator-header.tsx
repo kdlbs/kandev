@@ -3,6 +3,8 @@ import { Button } from "@kandev/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { cn } from "@/lib/utils";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import {
   linkToCoordinatorNeedsYou,
@@ -40,6 +42,7 @@ export function CoordinatorHeader({
 }: CoordinatorHeaderProps) {
   const { t } = useTranslation();
   const router = useRouter();
+  const { isFinePointer } = useResponsiveBreakpoint();
 
   return (
     <div className="flex items-center justify-between gap-2">
@@ -66,7 +69,12 @@ export function CoordinatorHeader({
         <h2 className="text-lg font-semibold">{coordinator.name}</h2>
       )}
       {canManage && (
-        <Button asChild variant="outline" size="sm">
+        <Button
+          asChild
+          variant="outline"
+          size="sm"
+          className={cn(!isFinePointer && "min-h-11 min-w-11")}
+        >
           <Link href={linkToCoordinatorSettings(workspaceId, coordinator.id)}>
             {t("coordinator:configure")}
           </Link>
