@@ -3,37 +3,59 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // fakeWorkflowReader, fakeRepositoryReader and fakeSourceTaskReader are
-// keyed-map test doubles for the propose-time readers: a missing key returns
-// (nil, nil), matching the real services' "not found" shape (no error, nil
-// row), which buildProposalSpec must turn into a *FieldError.
+// keyed-map test doubles for the propose-time readers. A key present in errs
+// returns that error (nil row), matching the real services' actual "not
+// found" shape for a genuinely missing id (sqlite.Repository.GetTask/
+// GetWorkflow/GetRepository wrap a repoerrors sentinel, they don't return
+// (nil, nil)). A key absent from both maps returns (nil, nil), matching a
+// foreign-workspace row's "found, but wrong workspace" case once the caller
+// checks WorkspaceID. buildProposalSpec must turn both into the identical
+// *FieldError (SEC-002).
 type fakeWorkflowReader struct {
 	workflows map[string]*taskmodels.Workflow
+	errs      map[string]error
 }
 
 func (f fakeWorkflowReader) GetWorkflow(_ context.Context, id string) (*taskmodels.Workflow, error) {
+	if err, ok := f.errs[id]; ok {
+		return nil, err
+	}
 	return f.workflows[id], nil
 }
 
 type fakeRepositoryReader struct {
 	repositories map[string]*taskmodels.Repository
+	errs         map[string]error
 }
 
 func (f fakeRepositoryReader) GetRepository(_ context.Context, id string) (*taskmodels.Repository, error) {
+	if err, ok := f.errs[id]; ok {
+		return nil, err
+	}
 	return f.repositories[id], nil
 }
 
-type fakeSourceTaskReader struct{ tasks map[string]*taskmodels.Task }
+type fakeSourceTaskReader struct {
+	tasks map[string]*taskmodels.Task
+	errs  map[string]error
+}
 
 func (f fakeSourceTaskReader) GetTask(_ context.Context, id string) (*taskmodels.Task, error) {
+	if err, ok := f.errs[id]; ok {
+		return nil, err
+	}
 	return f.tasks[id], nil
 }
 
@@ -265,6 +287,107 @@ func TestProposeTask_RepositoryNotInWorkspace(t *testing.T) {
 			assertFieldError(t, err, "repository_id")
 		})
 	}
+}
+
+// TestProposeTask_NotFoundAndForeignWorkspaceProduceIdenticalFieldError
+// covers SEC-002: a genuinely-missing referenced id and a foreign-workspace
+// id must be indistinguishable to the caller. The real task-service readers
+// return a non-nil error wrapping a repoerrors "not found" sentinel for a
+// missing row, not (nil, nil); buildProposalSpec propagated that as a
+// generic wrapped error while a foreign-workspace row (found, wrong
+// workspace) became a *FieldError, letting a caller probe workspace
+// membership of another workspace's ids from the response shape alone.
+func TestProposeTask_NotFoundAndForeignWorkspaceProduceIdenticalFieldError(t *testing.T) {
+	assertSameFieldError := func(t *testing.T, foreignErr, missingErr error) {
+		t.Helper()
+		var foreignFieldErr *FieldError
+		if !errors.As(foreignErr, &foreignFieldErr) {
+			t.Fatalf("foreign-workspace error = %v, want a *FieldError", foreignErr)
+		}
+		var missingFieldErr *FieldError
+		if !errors.As(missingErr, &missingFieldErr) {
+			t.Fatalf("missing-id error = %v (%T), want a *FieldError like the foreign-workspace case", missingErr, missingErr)
+		}
+		if foreignFieldErr.Field != missingFieldErr.Field || foreignFieldErr.Message != missingFieldErr.Message {
+			t.Fatalf("foreign-workspace FieldError = %+v, missing-id FieldError = %+v, want identical", foreignFieldErr, missingFieldErr)
+		}
+	}
+
+	t.Run("workflow_id", func(t *testing.T) {
+		f := newProposalTestFixture(t)
+		foreign := "wf-foreign"
+		f.svc.SetProposalDeps(
+			fakeWorkflowReader{
+				workflows: map[string]*taskmodels.Workflow{
+					f.workflowID: {ID: f.workflowID, WorkspaceID: f.workspaceID},
+					foreign:      {ID: foreign, WorkspaceID: "ws-other"},
+				},
+				errs: map[string]error{
+					"wf-missing": fmt.Errorf("%w: wf-missing", repoerrors.ErrWorkflowNotFound),
+				},
+			},
+			fakeRepositoryReader{}, fakeSourceTaskReader{},
+			fakeWorkflowStepReader{stepsByWorkflow: map[string][]*wfmodels.WorkflowStep{
+				foreign: {{ID: "start", IsStartStep: true}},
+			}},
+		)
+
+		reqForeign := f.baseRequest()
+		reqForeign.WorkflowID = foreign
+		_, _, foreignErr := f.svc.ProposeTask(context.Background(), f.coordinator.ID, reqForeign)
+
+		reqMissing := f.baseRequest()
+		reqMissing.WorkflowID = "wf-missing"
+		_, _, missingErr := f.svc.ProposeTask(context.Background(), f.coordinator.ID, reqMissing)
+
+		assertSameFieldError(t, foreignErr, missingErr)
+	})
+
+	t.Run("source_task_id", func(t *testing.T) {
+		f := newProposalTestFixture(t)
+		f.svc.proposalTasks = fakeSourceTaskReader{
+			tasks: map[string]*taskmodels.Task{
+				f.sourceTask.ID: f.sourceTask,
+				"task-foreign":  {ID: "task-foreign", WorkspaceID: "ws-other"},
+			},
+			errs: map[string]error{
+				"task-missing": fmt.Errorf("%w: task-missing", repoerrors.ErrTaskNotFound),
+			},
+		}
+
+		reqForeign := f.baseRequest()
+		reqForeign.SourceTaskID = "task-foreign"
+		_, _, foreignErr := f.svc.ProposeTask(context.Background(), f.coordinator.ID, reqForeign)
+
+		reqMissing := f.baseRequest()
+		reqMissing.SourceTaskID = "task-missing"
+		_, _, missingErr := f.svc.ProposeTask(context.Background(), f.coordinator.ID, reqMissing)
+
+		assertSameFieldError(t, foreignErr, missingErr)
+	})
+
+	t.Run("repository_id", func(t *testing.T) {
+		f := newProposalTestFixture(t)
+		f.svc.proposalRepositories = fakeRepositoryReader{
+			repositories: map[string]*taskmodels.Repository{
+				f.repository.ID: f.repository,
+				"repo-foreign":  {ID: "repo-foreign", WorkspaceID: "ws-other"},
+			},
+			errs: map[string]error{
+				"repo-missing": fmt.Errorf("%w: repo-missing", repoerrors.ErrRepositoryNotFound),
+			},
+		}
+
+		reqForeign := f.baseRequest()
+		reqForeign.RepositoryID = "repo-foreign"
+		_, _, foreignErr := f.svc.ProposeTask(context.Background(), f.coordinator.ID, reqForeign)
+
+		reqMissing := f.baseRequest()
+		reqMissing.RepositoryID = "repo-missing"
+		_, _, missingErr := f.svc.ProposeTask(context.Background(), f.coordinator.ID, reqMissing)
+
+		assertSameFieldError(t, foreignErr, missingErr)
+	})
 }
 
 // TestProposeTask_StepNotBelongingToWorkflow covers the step-membership

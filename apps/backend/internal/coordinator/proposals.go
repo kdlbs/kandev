@@ -2,11 +2,13 @@ package coordinator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"go.uber.org/zap"
 )
@@ -131,7 +133,7 @@ func (s *Service) buildProposalSpec(ctx context.Context, workspaceID string, req
 	}
 
 	workflow, err := s.proposalWorkflows.GetWorkflow(ctx, req.WorkflowID)
-	if err != nil {
+	if err != nil && !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
 		return ProposalSpec{}, fmt.Errorf("get workflow: %w", err)
 	}
 	if workflow == nil || workflow.WorkspaceID != workspaceID {
@@ -166,7 +168,7 @@ func (s *Service) validateProposalSourceTask(ctx context.Context, workspaceID, s
 		return nil
 	}
 	task, err := s.proposalTasks.GetTask(ctx, sourceTaskID)
-	if err != nil {
+	if err != nil && !errors.Is(err, repoerrors.ErrTaskNotFound) {
 		return fmt.Errorf("get source task: %w", err)
 	}
 	if task == nil || task.WorkspaceID != workspaceID {
@@ -180,7 +182,7 @@ func (s *Service) validateProposalRepository(ctx context.Context, workspaceID, r
 		return nil
 	}
 	repository, err := s.proposalRepositories.GetRepository(ctx, repositoryID)
-	if err != nil {
+	if err != nil && !errors.Is(err, repoerrors.ErrRepositoryNotFound) {
 		return fmt.Errorf("get repository: %w", err)
 	}
 	if repository == nil || repository.WorkspaceID != workspaceID {
