@@ -3,7 +3,10 @@
 import { useAppStore } from "@/components/state-provider";
 import { useEnsureTaskSession } from "@/hooks/use-ensure-task-session";
 import { useTask } from "@/hooks/use-task";
-import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
+import {
+  useSessionResumption,
+  type TaskArchiveState,
+} from "@/hooks/domains/session/use-session-resumption";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import { SessionRecoveryFeedback } from "@/components/task/ensure-session-error";
@@ -28,6 +31,23 @@ function useIsQuickChatPassthrough(sessionId: string) {
 type QuickChatSessionViewProps = {
   session: QuickChatSession;
   onInitialPromptAttempted?: () => void;
+  /** Default `true`. `false` maps to `useSessionResumption`'s
+   *  `skipAutomaticRecovery`, so the check-and-resume and remote-status
+   *  retry effects do nothing; resume/retry/restore stay manual actions. */
+  automaticRecovery?: boolean;
+  /** Renders `QuickChatContent` with `minimalToolbar` (Submit and Stop, no
+   *  mode or model selector) in addition to kind `config`'s own minimal
+   *  toolbar. */
+  hideSessionSelectors?: boolean;
+  /** Any value other than `undefined`, `null` included, overrides
+   *  `resolveTaskArchiveState`. */
+  taskArchiveState?: TaskArchiveState;
+  /** Inserted once through the composer's `chatInputRef.insertText`, not
+   *  sent. See {@link useQuickChatInitialDraft}. */
+  initialDraft?: string;
+  /** Applied to the composer message once per submit, before
+   *  `buildSubmitMessage`. See {@link useSubmitHandler}. */
+  transformOutgoing?: (message: string) => string;
 };
 
 function resolveTaskArchiveState(
@@ -42,9 +62,36 @@ function resolveTaskArchiveState(
   return quickChatTaskId === taskId ? false : null;
 }
 
+/** `hideSessionSelectors` widens kind `config`'s own minimal toolbar to every
+ *  kind, rather than replacing it. */
+function resolveMinimalToolbar(
+  hideSessionSelectors: boolean | undefined,
+  kind: QuickChatSession["kind"],
+): boolean {
+  if (hideSessionSelectors) return true;
+  return kind === "config";
+}
+
+/** Any value other than `undefined`, `null` included, overrides
+ *  {@link resolveTaskArchiveState}. */
+function resolveEffectiveTaskArchiveState(
+  explicit: TaskArchiveState | undefined,
+  taskId: string | null,
+  task: { isArchived?: boolean } | null,
+  quickChatTaskId: string | null,
+): TaskArchiveState {
+  if (explicit !== undefined) return explicit;
+  return resolveTaskArchiveState(taskId, task, quickChatTaskId);
+}
+
 export function QuickChatSessionView({
   session,
   onInitialPromptAttempted,
+  automaticRecovery = true,
+  hideSessionSelectors,
+  taskArchiveState: taskArchiveStateProp,
+  initialDraft,
+  transformOutgoing,
 }: QuickChatSessionViewProps) {
   const { t } = useTranslation();
   // A tab can arrive from a task event, which carries no session payload.
@@ -57,8 +104,15 @@ export function QuickChatSessionView({
   );
   const taskId = taskSession ? (session.taskId ?? taskSession.task_id ?? null) : quickChatTaskId;
   const task = useTask(taskId);
-  const taskArchiveState = resolveTaskArchiveState(taskId, task, quickChatTaskId);
-  const resumption = useSessionResumption(taskId, session.sessionId, taskArchiveState);
+  const taskArchiveState = resolveEffectiveTaskArchiveState(
+    taskArchiveStateProp,
+    taskId,
+    task,
+    quickChatTaskId,
+  );
+  const resumption = useSessionResumption(taskId, session.sessionId, taskArchiveState, {
+    skipAutomaticRecovery: !automaticRecovery,
+  });
   const isPassthrough = useIsQuickChatPassthrough(session.sessionId);
   const statusSummary = useTaskStatusSummary(taskId, task?.statusSummary);
   const recoveryFeedback = (
@@ -84,12 +138,14 @@ export function QuickChatSessionView({
       <div className="flex min-h-0 flex-1 flex-col">
         <QuickChatContent
           sessionId={session.sessionId}
-          minimalToolbar={session.kind === "config"}
+          minimalToolbar={resolveMinimalToolbar(hideSessionSelectors, session.kind)}
           placeholderOverride={
             session.kind === "config" ? t("chat:configChatPlaceholder") : undefined
           }
           initialPrompt={session.initialPrompt}
           onInitialPromptAttempted={onInitialPromptAttempted}
+          initialDraft={initialDraft}
+          transformOutgoing={transformOutgoing}
         />
       </div>
     </div>

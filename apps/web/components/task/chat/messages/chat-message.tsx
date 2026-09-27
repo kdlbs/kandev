@@ -26,6 +26,7 @@ import { entityReferencesFromMetadata } from "@/lib/entity-references/message-re
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { renderUserMessageBody } from "./user-message-body";
+import { useMessageTaskOrigin } from "./message-task-origin-context";
 
 type ChatMessageProps = {
   comment: Message;
@@ -270,6 +271,7 @@ function UserMessageContent({
   onScrollToMessage,
 }: UserMessageProps) {
   const userNavigation = useUserMessageNavigation(sessionId ?? null, comment.id);
+  const taskOrigin = useMessageTaskOrigin();
   const promptNames = usePromptMentionNames();
   const { isFavorite, toggleFavorite } = useMessageFavorite(comment.session_id, comment.id);
   const entityReferences = useMemo(
@@ -324,6 +326,7 @@ function UserMessageContent({
             taskId: comment.task_id,
             worktreePath,
             onOpenFile,
+            taskOrigin,
           })}
         </div>
         <MessageActions
