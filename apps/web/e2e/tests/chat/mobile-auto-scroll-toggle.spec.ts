@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -29,6 +29,16 @@ async function switchMobileTask(testPage: Page, title: string): Promise<void> {
   // while the mobile drawer is under CI load.
   await taskRow.click();
   await expect(sheet).not.toBeVisible({ timeout: 10_000 });
+}
+
+async function simulateReaderScrollToMiddle(list: Locator): Promise<number> {
+  return list.evaluate((element) => {
+    const target = Math.floor((element.scrollHeight - element.clientHeight) / 2);
+    element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
+    element.scrollTop = target;
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    return element.scrollTop;
+  });
 }
 
 /**
@@ -186,11 +196,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     );
     expect(olderRequests).toHaveLength(0);
 
-    const targetScrollTop = await list.evaluate((element) => {
-      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) / 2);
-      element.dispatchEvent(new Event("scroll"));
-      return element.scrollTop;
-    });
+    const targetScrollTop = await simulateReaderScrollToMiddle(list);
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
     await toggle.tap();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
@@ -277,10 +283,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
       })
       .toBeGreaterThan(200);
 
-    const targetScrollTop = await list.evaluate((el) => {
-      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-      return el.scrollTop;
-    });
+    const targetScrollTop = await simulateReaderScrollToMiddle(list);
     expect(targetScrollTop).toBeGreaterThan(100);
 
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
