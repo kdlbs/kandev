@@ -21,6 +21,12 @@ func TestResolveCodexAppServerCommandAllowList(t *testing.T) {
 			want:    []string{"--yes", "--prefer-offline", "@openai/codex@0.154.0", "app-server"},
 			ok:      true,
 		},
+		{
+			name:    "managed npm runtime online retry",
+			command: []string{"npx", "--yes", "--prefer-online", "@openai/codex@0.154.0", "app-server"},
+			want:    []string{"--yes", "--prefer-online", "@openai/codex@0.154.0", "app-server"},
+			ok:      true,
+		},
 		{name: "native command", command: []string{"codex", "app-server"}, want: []string{"app-server"}, ok: true},
 		{name: "other package", command: []string{"npx", "--yes", "--prefer-offline", "example/other@1.2.3", "app-server"}},
 		{name: "unexpected arguments", command: []string{"npx", "--yes", "@openai/codex@0.154.0", "app-server", "--danger"}},

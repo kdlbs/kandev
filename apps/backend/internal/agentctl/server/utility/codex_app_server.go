@@ -21,6 +21,7 @@ const (
 	codexAppServerSubcommand  = "app-server"
 	codexNpxYesFlag           = "--yes"
 	codexNpmPreferOfflineFlag = "--prefer-offline"
+	codexNpmPreferOnlineFlag  = "--prefer-online"
 	codexNpmPrefixFlag        = "--prefix"
 )
 
@@ -58,11 +59,31 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 	}
 	defer cleanup()
 	if err := initializeCodexAppServer(ctx, client); err != nil {
-		return &ProbeResponse{Error: utilityUpstreamError(err, stderr.tail()), DurationMs: int(time.Since(start).Milliseconds())}, nil
+		stderrTail := stderr.tail()
+		e.logger.Error("Codex app-server probe failed",
+			zap.String("agent_id", req.AgentID),
+			zap.Error(err),
+			zap.String("stderr", stderrTail))
+		return &ProbeResponse{
+			Success:     false,
+			Error:       utilityUpstreamError(err, stderrTail),
+			FailureCode: managedRuntimeProbeFailureCode(req.InferenceConfig.Command, stderrTail),
+			DurationMs:  int(time.Since(start).Milliseconds()),
+		}, nil
 	}
 	var listed protocol.ModelListResponse
 	if err := client.Call(ctx, protocol.MethodModelList, protocol.ModelListParams{}, &listed); err != nil {
-		return &ProbeResponse{Error: utilityUpstreamError(err, stderr.tail()), DurationMs: int(time.Since(start).Milliseconds())}, nil
+		stderrTail := stderr.tail()
+		e.logger.Error("Codex app-server probe failed to list models",
+			zap.String("agent_id", req.AgentID),
+			zap.Error(err),
+			zap.String("stderr", stderrTail))
+		return &ProbeResponse{
+			Success:     false,
+			Error:       utilityUpstreamError(err, stderrTail),
+			FailureCode: managedRuntimeProbeFailureCode(req.InferenceConfig.Command, stderrTail),
+			DurationMs:  int(time.Since(start).Milliseconds()),
+		}, nil
 	}
 	models := make([]ProbeModel, 0, len(listed.Data))
 	for _, model := range listed.Data {
@@ -193,12 +214,14 @@ func isDirectCodexAppServerCommand(args []string) bool {
 
 func isLegacyManagedCodexAppServerCommand(args []string) bool {
 	return len(args) == 5 && args[0] == codexNPXExecutable && args[1] == codexNpxYesFlag &&
-		args[2] == codexNpmPreferOfflineFlag && codexPackageSpec.MatchString(args[3]) && args[4] == codexAppServerSubcommand
+		(args[2] == codexNpmPreferOfflineFlag || args[2] == codexNpmPreferOnlineFlag) &&
+		codexPackageSpec.MatchString(args[3]) && args[4] == codexAppServerSubcommand
 }
 
 func isManagedCodexAppServerCommand(args []string) bool {
 	return len(args) == 7 && args[0] == codexNPXExecutable && args[1] == codexNpxYesFlag &&
-		args[2] == codexNpmPreferOfflineFlag && args[3] == codexNpmPrefixFlag &&
+		(args[2] == codexNpmPreferOfflineFlag || args[2] == codexNpmPreferOnlineFlag) &&
+		args[3] == codexNpmPrefixFlag &&
 		args[4] == managedruntime.NPMProjectPrefix && codexPackageSpec.MatchString(args[5]) && args[6] == codexAppServerSubcommand
 }
 

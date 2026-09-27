@@ -144,6 +144,39 @@ printf '%s\n' "$@" > "$CODEX_APP_SERVER_ARGS"
 	}
 }
 
+func TestCodexAppServerProbeClassifiesTrustedManagedRuntimeETarget(t *testing.T) {
+	binDir := t.TempDir()
+	npxPath := filepath.Join(binDir, "npx")
+	fixture := "#!/bin/sh\n" +
+		"printf '%s' \"$4\" > \"$NPM_PREFIX_FILE\"\n" +
+		"printf '%s\\n' 'npm error code ETARGET' " +
+		"'npm error notarget No matching version found for @openai/codex@0.154.0.' >&2\n" +
+		"exit 1\n"
+	if err := os.WriteFile(npxPath, []byte(fixture), 0o755); err != nil {
+		t.Fatalf("write npx fixture: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	home := t.TempDir()
+	workDir := t.TempDir()
+	prefixFile := filepath.Join(t.TempDir(), "npm-prefix")
+
+	executor := NewCodexAppServerInferenceExecutor(zap.NewNop())
+	response, err := executor.Probe(context.Background(), &ProbeRequest{
+		AgentID: "codex-app-server",
+		InferenceConfig: &InferenceConfigDTO{
+			Command: []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@openai/codex@0.154.0", "app-server"},
+			WorkDir: workDir,
+			Env:     map[string]string{"HOME": home, "NPM_PREFIX_FILE": prefixFile},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if response.FailureCode != ProbeFailureManagedRuntimeNPMResolution {
+		t.Fatalf("failure code = %q, want %q", response.FailureCode, ProbeFailureManagedRuntimeNPMResolution)
+	}
+}
+
 func isPreparedNPMPrefix(prefix, workDir string) bool {
 	return filepath.IsAbs(prefix) && prefix != managedruntime.NPMProjectPrefix && prefix != workDir &&
 		filepath.Dir(filepath.Clean(prefix)) == filepath.Clean(os.TempDir()) &&
