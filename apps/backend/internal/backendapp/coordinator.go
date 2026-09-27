@@ -46,6 +46,26 @@ func initCoordinatorWiring(
 	return svc, nil
 }
 
+// coordinatorStandingInstructionsReader closes over svc to build the
+// Standing Instructions system-prompt content
+// (docs/specs/coordinator/system-design/copilot.md#standing-instructions)
+// for orchestrator.Service.SetCoordinatorStandingInstructionsReader.
+// internal/orchestrator cannot import internal/coordinator directly (the
+// dependency runs the other way), so this closure is the seam: it reads the
+// coordinator's name/context through svc and renders them with
+// coordinator.StandingInstructions.
+func coordinatorStandingInstructionsReader(
+	svc *coordinator.Service,
+) func(ctx context.Context, coordinatorID, workspaceName, workspaceID string) (string, error) {
+	return func(ctx context.Context, coordinatorID, workspaceName, workspaceID string) (string, error) {
+		name, coordinatorContext, err := svc.CoordinatorStandingInstructionsData(ctx, coordinatorID)
+		if err != nil {
+			return "", err
+		}
+		return coordinator.StandingInstructions(workspaceName, workspaceID, name, coordinatorContext), nil
+	}
+}
+
 // registerCoordinatorHTTPRoutes is a test seam over coordinator.RegisterRoutes:
 // production always calls the real function; tests may override it to
 // observe its call time relative to when T0 was captured.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,6 +89,56 @@ func TestInitCoordinatorWiring_StoreErrorPropagates(t *testing.T) {
 	}
 	if svc != nil {
 		t.Fatal("expected a nil service on store initialization failure")
+	}
+}
+
+// TestCoordinatorStandingInstructionsReader_BuildsContentFromTheCoordinator
+// verifies the closure wired onto orchestrator.Service in main.go: it reads
+// the named coordinator's name/context through the service and renders the
+// Standing Instructions block from internal/coordinator/prompt.go
+// (docs/specs/coordinator/system-design/copilot.md#standing-instructions).
+func TestCoordinatorStandingInstructionsReader_BuildsContentFromTheCoordinator(t *testing.T) {
+	pool := newCoordinatorTestPool(t)
+	store, err := coordinator.NewStore(pool.Writer(), pool.Reader())
+	if err != nil {
+		t.Fatalf("coordinator.NewStore: %v", err)
+	}
+	svc := coordinator.NewService(store, coordinator.NewValidator(nil, nil), nil, newTestLogger())
+
+	ctx := context.Background()
+	seed := &coordinator.Coordinator{
+		WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e",
+		Context: "watch the release queue",
+	}
+	if err := store.CreateCoordinator(ctx, seed); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+
+	content, err := coordinatorStandingInstructionsReader(svc)(ctx, seed.ID, "Acme Workspace", "ws-1")
+	if err != nil {
+		t.Fatalf("reader unexpected error: %v", err)
+	}
+	for _, want := range []string{"Ops", "Acme Workspace", "ws-1", "watch the release queue", "propose_task_kandev"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("reader content missing %q, got:\n%s", want, content)
+		}
+	}
+}
+
+// TestCoordinatorStandingInstructionsReader_PropagatesLookupFailure verifies
+// an unknown coordinator id surfaces as an error rather than empty content,
+// so the orchestrator side's fallback-to-bare-prompt behavior engages.
+func TestCoordinatorStandingInstructionsReader_PropagatesLookupFailure(t *testing.T) {
+	pool := newCoordinatorTestPool(t)
+	store, err := coordinator.NewStore(pool.Writer(), pool.Reader())
+	if err != nil {
+		t.Fatalf("coordinator.NewStore: %v", err)
+	}
+	svc := coordinator.NewService(store, coordinator.NewValidator(nil, nil), nil, newTestLogger())
+
+	_, err = coordinatorStandingInstructionsReader(svc)(context.Background(), "missing", "Acme Workspace", "ws-1")
+	if err == nil {
+		t.Fatal("expected an error for an unknown coordinator id")
 	}
 }
 
