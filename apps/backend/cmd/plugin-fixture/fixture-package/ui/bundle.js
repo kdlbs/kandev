@@ -1307,9 +1307,11 @@
           profileRegion: "Region",
           profileRegionDescription: "Select the environment region.",
           profileCredential: "Credential",
-          profileCredentialDescription: "The credential is stored as a secret and never returned by profile reads.",
+          profileCredentialDescription:
+            "The credential is stored as a secret and never returned by profile reads.",
           profileWorkspaceLabel: "Environment label with additional context for long names",
-          profileWorkspaceLabelDescription: "A long optional label that verifies narrow form layouts.",
+          profileWorkspaceLabelDescription:
+            "A long optional label that verifies narrow form layouts.",
         },
         pseudo: {
           promptHistoryTitle: "Ƥřǿɱƥŧ ħīşŧǿřẏ ƒīẋŧŭřḗ",
@@ -1328,9 +1330,11 @@
           profileRegion: "Ŕēģĩōń",
           profileRegionDescription: "Śēĺēćŧ ŧħē ēńvĩŕōńḿēńŧ ŕēģĩōń.",
           profileCredential: "Ćŕēďēńŧĩàĺ",
-          profileCredentialDescription: "Ŧħē ćŕēďēńŧĩàĺ ĩś śŧōŕēď àś à śēćŕēŧ àńď ńēvēŕ ŕēŧũŕńēď ƀẏ ƥŕōƒĩĺē ŕēàďś.",
+          profileCredentialDescription:
+            "Ŧħē ćŕēďēńŧĩàĺ ĩś śŧōŕēď àś à śēćŕēŧ àńď ńēvēŕ ŕēŧũŕńēď ƀẏ ƥŕōƒĩĺē ŕēàďś.",
           profileWorkspaceLabel: "Ēńvĩŕōńḿēńŧ ĺàƀēĺ wĩŧħ àďďĩŧĩōńàĺ ćōńŧēẋŧ ƒōŕ ĺōńģ ńàḿēś",
-          profileWorkspaceLabelDescription: "À ĺōńģ ōƥŧĩōńàĺ ĺàƀēĺ ŧħàŧ vēŕĩƒĩēś ńàŕŕōw ƒōŕḿ ĺàẏōũŧś.",
+          profileWorkspaceLabelDescription:
+            "À ĺōńģ ōƥŧĩōńàĺ ĺàƀēĺ ŧħàŧ vēŕĩƒĩēś ńàŕŕōw ƒōŕḿ ĺàẏōũŧś.",
         },
       });
       registry.registerTaskPanel({

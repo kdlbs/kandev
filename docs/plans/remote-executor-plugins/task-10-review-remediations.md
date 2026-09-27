@@ -166,6 +166,25 @@ Post-fixup checks passed:
   specifications), all specification files linted, 36 spec-linter tests, 62 public-doc validation tests,
   and all 47 public pages validated. `git diff HEAD --check` passed.
 
+CI follow-up for head `820a6611e00`:
+
+- E2E setup found that the packaged backend prompt-history fixture no longer matched the tracked web
+  fixture after the base update. The generated backend bundle now matches the web fixture; both have
+  SHA-256 `188c98aa0e78a0396c7d9dd57f07a5086be71d7edd53e142e0c3e08e2e7a56e4`. After Prettier restored
+  the web fixture's tracked formatting, `make -C apps/backend e2e-plugin-package` regenerated the
+  backend bundle, passed, and wrote the E2E plugin identity.
+- Backend Static Checks found repeated manifest schema strings. Named constants now cover the bounded
+  retention and object/boolean schema types. The exact CI command,
+  `golangci-lint run ./... --new-from-rev=dfce4dac05809c0fcec156166f5479f14b0cdb76 --timeout=10m`,
+  passed with zero issues.
+- `E2E_DEBUG=1 E2E_PORT_OFFSET=29 TMPDIR=/root/k.D6zpBC GOTMPDIR=/root/k.D6zpBC pnpm e2e:run
+  --host --no-build --project chromium tests/settings/plugin-executor-profiles.spec.ts` passed (1 test)
+  after bundle regeneration, including managed backend readiness and fixture plugin setup. A previous
+  default-offset attempt timed out waiting for backend readiness while other E2E jobs were active; the
+  isolated-offset reruns passed.
+- The PR documentation coverage evaluator reports `covered`; the Task 10 criterion mapping remains
+  valid. Final-head PR checks are tracked separately in the implementation task plan.
+
 A broad multi-package Go test invocation later exceeded its 600-second limit while running
 `internal/task/service` alongside another suite. It reported no failing assertion. The review-specific
 service regression passed in isolation, and the earlier full-suite and race results above remain recorded

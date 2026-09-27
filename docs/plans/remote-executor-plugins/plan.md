@@ -277,6 +277,11 @@ before persistence, task reset checks authorization first, and desktop/phone con
 contracts. Exact post-fixup test, build, lint and CI results are recorded in
 [Task 10](task-10-review-remediations.md).
 
+The CI follow-up also synchronized the packaged and web E2E fixture bundles and replaced repeated
+manifest schema strings with named constants. Plugin packaging, the CI-equivalent Go lint, and the
+managed desktop profile E2E passed locally. Final-head remote CI remains pending after the remediation
+push and is recorded in the Kandev task plan.
+
 ## Risks
 
 - Cross-process allocation cannot be made atomic with SQLite/PostgreSQL. Provider operation recovery is mandatory.

@@ -10,9 +10,11 @@ import (
 )
 
 const (
+	executorSchemaTypeBoolean = "boolean"
 	executorSchemaTypeInteger = "integer"
 	executorSchemaTypeKeyword = "type"
 	executorSchemaTypeNumber  = "number"
+	executorSchemaTypeObject  = "object"
 )
 
 const (
@@ -27,6 +29,7 @@ const (
 var executorProviderKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 const executorSchemaTitleKeyword = "title"
+const executorRetentionBounded = "bounded"
 
 func (m *Manifest) validateExecutorProviders() []error {
 	if len(m.ExecutorProviders) == 0 {
@@ -104,17 +107,17 @@ func validateExecutorProviderCapabilities(prefix string, capabilities *ExecutorP
 		capabilities.Retention = "unknown"
 	}
 	switch capabilities.Retention {
-	case "unknown", "ephemeral", "bounded", "persistent":
+	case "unknown", "ephemeral", executorRetentionBounded, "persistent":
 	default:
 		return []error{fmt.Errorf("%s.capabilities.retention must be unknown, ephemeral, bounded, or persistent", prefix)}
 	}
 	if capabilities.MaximumLifetimeSecs < 0 || capabilities.MaximumLifetimeSecs > 365*24*60*60 {
 		return []error{fmt.Errorf("%s.capabilities.maximum_lifetime_seconds must be between 0 and 31536000", prefix)}
 	}
-	if capabilities.Retention == "bounded" && capabilities.MaximumLifetimeSecs == 0 {
+	if capabilities.Retention == executorRetentionBounded && capabilities.MaximumLifetimeSecs == 0 {
 		return []error{fmt.Errorf("%s.capabilities.maximum_lifetime_seconds is required for bounded retention", prefix)}
 	}
-	if capabilities.Retention != "bounded" && capabilities.MaximumLifetimeSecs != 0 {
+	if capabilities.Retention != executorRetentionBounded && capabilities.MaximumLifetimeSecs != 0 {
 		return []error{fmt.Errorf("%s.capabilities.maximum_lifetime_seconds requires bounded retention", prefix)}
 	}
 	return nil
@@ -172,7 +175,7 @@ func validateExecutorSchemaRoot(prefix string, root map[string]any, requireClose
 			return fmt.Errorf("%s contains unsupported schema keyword %q", prefix, key)
 		}
 	}
-	if root[executorSchemaTypeKeyword] != "object" {
+	if root[executorSchemaTypeKeyword] != executorSchemaTypeObject {
 		return fmt.Errorf("%s.type must be object", prefix)
 	}
 	additional, present := root["additionalProperties"]
@@ -291,7 +294,7 @@ func schemaNumericValue(value any) (float64, bool) {
 
 func executorSchemaPropertyType(prefix string, raw any) (string, error) {
 	typeName, ok := raw.(string)
-	if !ok || (typeName != "string" && typeName != "boolean" && typeName != executorSchemaTypeNumber && typeName != executorSchemaTypeInteger) {
+	if !ok || (typeName != "string" && typeName != executorSchemaTypeBoolean && typeName != executorSchemaTypeNumber && typeName != executorSchemaTypeInteger) {
 		return "", fmt.Errorf("%s.type must be string, boolean, number, or integer", prefix)
 	}
 	return typeName, nil
@@ -386,7 +389,7 @@ func scalarMatchesType(value any, typeName string) bool {
 	case "string":
 		_, ok := value.(string)
 		return ok
-	case "boolean":
+	case executorSchemaTypeBoolean:
 		_, ok := value.(bool)
 		return ok
 	case executorSchemaTypeNumber:
