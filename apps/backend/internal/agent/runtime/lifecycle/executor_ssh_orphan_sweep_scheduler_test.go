@@ -178,3 +178,49 @@ func TestOrphanSweepSchedulerIgnoresNonReachableState(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+// TestOrphanSweepSchedulerHandlesNATSDecodedEventPayload proves
+// handleReachabilityChanged accepts the shape a NATS subscriber actually
+// receives: event.Data JSON-decoded generically into map[string]interface{},
+// not the exact sshOrphanReachabilityEvent Go value bus.NewEvent was handed
+// (apps/backend/CLAUDE.md: "event.Data.(*T) succeeds on the in-memory bus and
+// matches nothing on NATS, which delivers a JSON-decoded map"). The other
+// scheduler tests in this file publish the typed struct directly, which
+// exercises only the MemoryEventBus shape.
+//
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.13
+func TestOrphanSweepSchedulerHandlesNATSDecodedEventPayload(t *testing.T) {
+	store := &schedulerTestStore{
+		executor:       &models.Executor{ID: "executor-1", Type: models.ExecutorTypeSSH},
+		getExecutorHit: make(chan string, 1),
+	}
+	eventBus := bus.NewMemoryEventBus(logger.Default())
+	scheduler := NewOrphanSweepScheduler(store, store, 3600, logger.Default())
+	scheduler.Start(context.Background(), eventBus)
+	defer scheduler.Stop()
+
+	event := bus.NewEvent(events.ExecutorReachabilityChanged, "test",
+		map[string]interface{}{"executor_id": "executor-1", "state": "reachable"})
+	if err := eventBus.Publish(context.Background(), events.ExecutorReachabilityChanged, event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	select {
+	case id := <-store.getExecutorHit:
+		if id != "executor-1" {
+			t.Fatalf("GetExecutor called for %q, want executor-1", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the NATS-decoded event payload to trigger a sweep")
+	}
+}
+
+// TestDecodeSSHOrphanReachabilityEventRejectsUnrepresentablePayload proves
+// the decode fallback fails closed (ok=false) rather than panicking or
+// silently zero-valuing a payload that cannot represent the event, so a
+// malformed or unrelated event.Data value is dropped instead of matched.
+func TestDecodeSSHOrphanReachabilityEventRejectsUnrepresentablePayload(t *testing.T) {
+	if _, ok := decodeSSHOrphanReachabilityEvent(42); ok {
+		t.Fatalf("decode succeeded for a JSON scalar that cannot represent the event")
+	}
+}
