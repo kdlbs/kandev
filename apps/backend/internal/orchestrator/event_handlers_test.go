@@ -159,9 +159,10 @@ type mockTaskRepo struct {
 	// callers must route guarded REVIEW writes through the CAS method so an
 	// archive can't race a late write; tests assert this stays 0 for those
 	// paths instead of just checking the resulting state.
-	unconditionalWrites  map[string]int
-	getTaskErr           error // if set, GetTask returns this error
-	updateIfSessionState func(
+	unconditionalWrites        map[string]int
+	getTaskErr                 error // if set, GetTask returns this error
+	updateStateIfCurrentInHook func(taskID string)
+	updateIfSessionState       func(
 		context.Context,
 		string,
 		string,
@@ -212,6 +213,9 @@ func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v
 func (m *mockTaskRepo) UpdateTaskStateIfCurrentIn(
 	_ context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
 ) (bool, error) {
+	if m.updateStateIfCurrentInHook != nil {
+		m.updateStateIfCurrentInHook(taskID)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, ok := m.tasks[taskID]

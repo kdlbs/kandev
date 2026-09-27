@@ -22,6 +22,7 @@ vi.mock("@/lib/ws/connection", () => ({
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  requestMock.mockReset().mockResolvedValue({});
 });
 
 const RECOVERY_MESSAGE = "Agent encountered an error";
@@ -100,6 +101,7 @@ function renderWithTranscript(
   sessionState: TaskSessionState,
   messages: Message[],
   sessionMetadata?: Record<string, unknown>,
+  comment = recoveryMessage(),
 ) {
   const initialState: Partial<AppState> = {
     taskSessions: {
@@ -116,7 +118,7 @@ function renderWithTranscript(
     },
     messages: { bySession: { [TEST_SESSION_ID]: messages }, metaBySession: {} },
   };
-  return render(<ActionMessage comment={recoveryMessage()} />, {
+  return render(<ActionMessage comment={comment} />, {
     wrapper: ({ children }) => (
       <StateProvider initialState={initialState}>{children}</StateProvider>
     ),
@@ -196,7 +198,8 @@ describe("ActionMessage — recovery history remains after the agent is back", (
     expect(await screen.findByTestId(RECOVERY_ERROR_TEST_ID)).toBeTruthy();
     expect(screen.getByText(BRANCH_FAILURE_MESSAGE)).toBeTruthy();
     expect(screen.getByTestId("recovery-new-branch-button")).toBeTruthy();
-    expect(screen.getByTestId("recovery-restore-workspace-button")).toBeTruthy();
+
+    expect(screen.getByTestId(RESTORE_BUTTON_TEST_ID)).toBeTruthy();
   });
 
   it("retains both causes when manual resume and read-only restore fail", async () => {
@@ -215,7 +218,7 @@ describe("ActionMessage — recovery history remains after the agent is back", (
     fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
     expect(await screen.findByTestId(RECOVERY_ERROR_TEST_ID)).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId("recovery-restore-workspace-button"));
+    fireEvent.click(screen.getByTestId(RESTORE_BUTTON_TEST_ID));
 
     const recoveryError = await screen.findByTestId(RECOVERY_ERROR_TEST_ID);
     expect(recoveryError.textContent).toContain(`Resume failed: ${BRANCH_FAILURE_MESSAGE}`);
@@ -233,7 +236,8 @@ describe("ActionMessage — recovery history remains after the agent is back", (
 
     expect(await screen.findByText("Provider is unavailable")).toBeTruthy();
     expect(screen.queryByTestId("recovery-new-branch-button")).toBeNull();
-    expect(screen.getByTestId("recovery-restore-workspace-button")).toBeTruthy();
+
+    expect(screen.getByTestId(RESTORE_BUTTON_TEST_ID)).toBeTruthy();
   });
 });
 
@@ -251,13 +255,11 @@ describe("ActionMessage recovery retry", () => {
     fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
     expect(await screen.findByTestId(RECOVERY_ERROR_TEST_ID)).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId("ensure-session-error-retry"));
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
     await waitFor(() =>
-      expect((screen.getByTestId("ensure-session-error-retry") as HTMLButtonElement).disabled).toBe(
-        true,
-      ),
+      expect((screen.getByTestId(RESUME_TEST_ID) as HTMLButtonElement).disabled).toBe(true),
     );
-    fireEvent.click(screen.getByTestId("ensure-session-error-retry"));
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
     expect(requestMock).toHaveBeenCalledTimes(2);
 
     resolveRetry?.();
@@ -324,6 +326,7 @@ describe("ActionMessage — a recovery that failed keeps its controls", () => {
     live.setSessionState("WAITING_FOR_INPUT");
 
     expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
+
     expect(screen.getByTestId(FRESH_TEST_ID)).toBeTruthy();
   });
 
@@ -336,6 +339,7 @@ describe("ActionMessage — a recovery that failed keeps its controls", () => {
     live.setSessionState("FAILED");
 
     expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
+
     expect(screen.getByTestId(FRESH_TEST_ID)).toBeTruthy();
   });
 
@@ -353,3 +357,52 @@ describe("ActionMessage — a recovery that failed keeps its controls", () => {
     expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
   });
 });
+
+it("shows fresh start directly beside resume", () => {
+  renderWithTranscript("FAILED", []);
+  expect(screen.getByTestId(FRESH_TEST_ID)).toBeTruthy();
+});
+
+it("does not duplicate a supplied branch-recovery action after a branch refusal", async () => {
+  requestMock.mockRejectedValueOnce(
+    new WebSocketRequestError(BRANCH_FAILURE_MESSAGE, "CONFLICT", {
+      kind: "branch_unrecoverable",
+      recovery_action: "resume_new_branch",
+      original_branch: "feature/lost",
+      base_branch: "main",
+    }),
+  );
+  const row = recoveryMessage();
+  const metadata = row.metadata as { actions: Record<string, unknown>[] };
+  metadata.actions.push({
+    type: "ws_request",
+    label: "Continue on a new branch",
+    test_id: "supplied-branch",
+    params: { method: "session.recover", payload: { action: "resume_new_branch" } },
+  });
+  renderWithTranscript("FAILED", [row], undefined, row);
+  fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+  await screen.findByTestId(RECOVERY_ERROR_TEST_ID);
+  expect(screen.getAllByRole("button", { name: "Continue on a new branch" })).toHaveLength(1);
+});
+
+it("redacts a workspace failure after a transcript recovery guard", async () => {
+  requestMock
+    .mockRejectedValueOnce(
+      new WebSocketRequestError("busy", "CONFLICT", {
+        kind: "session_recovery_in_progress",
+        retryable: true,
+      }),
+    )
+    .mockRejectedValueOnce(new Error("Restore failed: token=transcript-secret-fixture"));
+  renderWithTranscript("FAILED", [recoveryMessage()]);
+  fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+  fireEvent.click(await screen.findByTestId(RESTORE_BUTTON_TEST_ID));
+  await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(screen.getByTestId(RESTORE_BUTTON_TEST_ID)).toHaveProperty("disabled", false),
+  );
+  expect(document.body.textContent).not.toContain("transcript-secret-fixture");
+});
+
+const RESTORE_BUTTON_TEST_ID = "recovery-restore-workspace-button";

@@ -1,6 +1,11 @@
 "use client";
 
-import { IconAlertCircle, IconChevronDown, IconRefresh } from "@tabler/icons-react";
+import { useEffect, useState } from "react";
+import { useTaskLaunchErrorContext } from "./task-launch-error-context";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { SessionErrorDetails } from "./session-error-details";
+
+import { IconAlertCircle, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
@@ -8,6 +13,7 @@ import { sanitizeWorkspaceRestorationDetails } from "@/lib/state/slices/session-
 
 type WorkspaceUnavailableProps = {
   error?: string | null;
+  failedSessionId?: string | null;
   restoration?: WorkspaceRestorationAttempt | null;
   onRetry?: () => void;
   retryDisabled?: boolean;
@@ -33,14 +39,42 @@ function getWorkspaceRestoreDetail(
   return null;
 }
 
+function useWorkspaceRecoveryOwner(restoration: WorkspaceRestorationAttempt | null | undefined) {
+  const context = useTaskLaunchErrorContext();
+  const failure = context?.automaticRecovery?.recoveryFailure;
+  const ownerId =
+    restoration?.attemptId &&
+    restoration.taskId === context?.taskId &&
+    failure?.outcome === "recovery_failed" &&
+    failure.workspaceAttemptId === restoration.attemptId
+      ? `session-recovery-owner-${restoration.attemptId}`
+      : null;
+  const [visibleOwner, setVisibleOwner] = useState<string | null>(null);
+  useEffect(() => {
+    const owner = ownerId ? document.getElementById(ownerId) : null;
+    setVisibleOwner(owner && (!owner.checkVisibility || owner.checkVisibility()) ? ownerId : null);
+  }, [ownerId, context]);
+  return {
+    ownerId: ownerId && visibleOwner === ownerId ? ownerId : null,
+    invalidateOwner: () => setVisibleOwner(null),
+  };
+}
+
 export function WorkspaceUnavailable({
   error,
+  failedSessionId,
   restoration,
   onRetry,
   retryDisabled = false,
   compact = false,
 }: WorkspaceUnavailableProps) {
   const { t } = useTranslation();
+  const { context, sessionOwner, ownerId, invalidateOwner } = useUnavailableOwner(
+    failedSessionId,
+    restoration,
+  );
+  const hasOwner = Boolean(ownerId);
+
   const isRestoring = restoration?.status === "pending";
   const hasRestoreError = restoration?.status === "error";
   const detail = getWorkspaceRestoreDetail(restoration, error);
@@ -64,12 +98,12 @@ export function WorkspaceUnavailable({
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             {getWorkspaceRestoreMessage(isRestoring, hasRestoreError, t)}
           </p>
-          {restoration && onRetry && (
+          {!hasOwner && restoration && onRetry && (
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="mt-3 h-11 cursor-pointer gap-1.5 md:h-8"
+              className={controlSizingClassName("standard", "mt-3 cursor-pointer gap-1.5")}
               disabled={retryDisabled}
               onClick={onRetry}
               data-testid="workspace-retry"
@@ -78,19 +112,65 @@ export function WorkspaceUnavailable({
               {t("task:retry")}
             </Button>
           )}
-          {detail && (
-            <details className="mt-2 min-w-0 text-xs text-muted-foreground">
-              <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 md:min-h-8">
-                <IconChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-                {t("task:technicalDetails")}
-              </summary>
-              <pre className="max-h-48 max-w-full overflow-y-auto overscroll-contain whitespace-pre-wrap break-words rounded bg-muted/50 p-2 font-mono text-[11px]">
-                {detail}
-              </pre>
-            </details>
+          {hasOwner && (
+            <a
+              href={`#${ownerId}`}
+              className="mt-2 inline-flex min-h-7 cursor-pointer items-center underline max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+              onClick={(event) => {
+                event.preventDefault();
+                if (sessionOwner && context?.revealSessionRecovery)
+                  context.revealSessionRecovery(sessionOwner);
+                else if (ownerId) focusRecoveryOwner(ownerId, invalidateOwner);
+              }}
+            >
+              {t("task:viewRecovery")}
+            </a>
           )}
+          {!hasOwner && detail && <SessionErrorDetails>{detail}</SessionErrorDetails>}
         </div>
       </div>
     </div>
   );
+}
+
+function useUnavailableOwner(
+  failedSessionId: string | null | undefined,
+  restoration: WorkspaceRestorationAttempt | null | undefined,
+) {
+  const context = useTaskLaunchErrorContext();
+  const candidate = context?.statusSummary?.active_error;
+  const dependentSession = !restoration ? failedSessionId : null;
+  const correlatedRestore = correlatedRestorationSession(context, restoration);
+  const candidateSession = dependentSession ?? correlatedRestore;
+  const sessionOwner =
+    candidateSession &&
+    candidate?.scope === "session" &&
+    candidate.session_id === candidateSession &&
+    candidate.stamp
+      ? candidateSession
+      : null;
+  const { ownerId: restoreOwnerId, invalidateOwner } = useWorkspaceRecoveryOwner(restoration);
+  const ownerId = sessionOwner ? `session-recovery-${sessionOwner}` : restoreOwnerId;
+  return { context, sessionOwner, ownerId, invalidateOwner };
+}
+
+function correlatedRestorationSession(
+  context: ReturnType<typeof useTaskLaunchErrorContext>,
+  restoration: WorkspaceRestorationAttempt | null | undefined,
+) {
+  const failure = context?.automaticRecovery?.recoveryFailure;
+  const correlatedRestore =
+    restoration?.attemptId &&
+    restoration.taskId === context?.taskId &&
+    failure?.outcome === "recovery_failed" &&
+    failure.workspaceAttemptId === restoration.attemptId
+      ? restoration.sessionId
+      : null;
+  return correlatedRestore;
+}
+
+function focusRecoveryOwner(ownerId: string, invalidateOwner: () => void) {
+  const owner = document.getElementById(ownerId);
+  if (owner && (!owner.checkVisibility || owner.checkVisibility())) owner.focus();
+  else invalidateOwner();
 }

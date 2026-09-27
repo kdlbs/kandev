@@ -453,6 +453,7 @@ function FileBrowserTreeContent({
       }}
     >
       <FileBrowserContentArea
+        sessionId={data.sessionId}
         isSearchActive={search.isSearchActive}
         searchResults={search.searchResults}
         isSessionFailed={isSessionFailed}

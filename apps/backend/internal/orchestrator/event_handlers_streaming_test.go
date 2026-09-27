@@ -3282,6 +3282,7 @@ func TestTransitionBootstrapFailurePersistsSessionHistory(t *testing.T) {
 		"exec-1",
 		models.TaskSessionStateStarting,
 		"",
+		"",
 		failure,
 	)
 	require.NoError(t, err)
@@ -3375,6 +3376,7 @@ func TestTransitionBootstrapFailureReturnsRepairableHistoryError(t *testing.T) {
 		"bootstrap-repair-session",
 		"exec-repair",
 		models.TaskSessionStateStarting,
+		"",
 		"",
 		failure,
 	)

@@ -126,6 +126,17 @@ type bootstrapFailureCommitter interface {
 	) (changed bool, updatedAt time.Time, err error)
 }
 
+type bootstrapFailureAttemptCommitter interface {
+	CommitBootstrapFailureIfCurrentAttempt(
+		ctx context.Context,
+		taskID, sessionID, agentExecutionID string,
+		expectedState models.TaskSessionState,
+		expectedStamp string,
+		expectedStartAttemptID string,
+		errorValue models.LastAgentError,
+	) (changed bool, updatedAt time.Time, err error)
+}
+
 // officeTaskSessionCreator lets repositories make Office-session origin
 // selection part of the insert transaction. Test and legacy stores can omit
 // it; the executor keeps a per-task fallback lock for those implementations.
@@ -220,12 +231,15 @@ var (
 	ErrTaskArchived            = errors.New("task is archived")
 	ErrStaleExecution          = errors.New("stale execution: no live execution in memory")
 	ErrAgentCommandMissing     = errors.New("existing execution has no agent command configured")
+	// ErrSessionAdvancedToRunning reports that another launch advanced the
+	// session before this launch could persist its prepared runtime data.
+	ErrSessionAdvancedToRunning = errors.New("session state advanced to RUNNING before runtime persistence")
 	// ErrSessionStateSuperseded means a runtime registered successfully, but a
 	// concurrent terminal session transition won the persistence race. Callers
 	// must not start the process and must arbitrate exact-execution teardown
 	// ownership before deciding whether to force-stop the registered runtime.
 	ErrSessionStateSuperseded   = errors.New("session state superseded by terminal transition")
-	errSessionAdvancedToRunning = errors.New("session state advanced to RUNNING before runtime persistence")
+	errSessionAdvancedToRunning = ErrSessionAdvancedToRunning
 	// ErrOrphanRecoveryIncomplete means StopByTaskID stopped every session it
 	// found but could not load at least one registry-only orphan's row, so the
 	// task-scoped stop is not fully confirmed. Callers that already observed a
@@ -676,10 +690,14 @@ type LaunchOptions struct {
 	PriorACPSession     string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID      string
 	StartAgent          bool
-	McpMode             string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
-	McpProfile          *mcpprofile.Context
-	Attachments         []v1.MessageAttachment
-	Env                 map[string]string
+	// RefuseIfAgentRunning makes peer-message admission fail closed when the
+	// selected session already has an active agent. Other internal launch paths
+	// retain their existing workspace reuse behavior.
+	RefuseIfAgentRunning bool
+	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
+	McpProfile           *mcpprofile.Context
+	Attachments          []v1.MessageAttachment
+	Env                  map[string]string
 	// OnInitialPromptAccepted runs only after agentctl accepts the first
 	// prompt. Launch completion is intentionally not treated as acceptance.
 	OnInitialPromptAccepted func()
@@ -830,13 +848,14 @@ type SessionStateTransitionFunc func(
 
 // BootstrapFailureTransitionFunc atomically commits a bootstrap error and
 // its FAILED session transition, then publishes the accepted transition.
-// expectedState and expectedStamp come from the executor's final ownership
-// read and are checked again by the repository commit.
+// expectedState, expectedStamp, and expectedStartAttemptID come from the
+// executor's final ownership read and are checked again by the repository commit.
 type BootstrapFailureTransitionFunc func(
 	ctx context.Context,
 	taskID, sessionID, agentExecutionID string,
 	expectedState models.TaskSessionState,
 	expectedStamp string,
+	expectedStartAttemptID string,
 	errorValue models.LastAgentError,
 ) (changed bool, finalState models.TaskSessionState, err error)
 

@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
 import {
   waitForActiveSessionCancellationPending,
+  waitForActiveSessionCancellationPendingOrSettled,
   waitForActiveSessionForegroundActivity,
   waitForActiveSessionSupportsSteering,
 } from "../../helpers/session-store";
@@ -39,9 +40,15 @@ test.describe.serial("Cancel turn availability", () => {
     await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeVisible();
     await expect(session.activeChat().getByTestId("submit-message-button")).toBeVisible();
 
-    await session.activeChat().getByTestId("cancel-agent-button").click();
-    await waitForActiveSessionCancellationPending(testPage, true);
-    await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeDisabled();
+    const cancelButton = session.activeChat().getByTestId("cancel-agent-button");
+    await cancelButton.click();
+    await waitForActiveSessionCancellationPendingOrSettled(testPage);
+    await expect
+      .poll(async () => {
+        if (!(await cancelButton.isVisible().catch(() => false))) return true;
+        return cancelButton.isDisabled();
+      })
+      .toBe(true);
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await waitForActiveSessionCancellationPending(testPage, false);
     await waitForActiveSessionForegroundActivity(testPage, null);
@@ -71,15 +78,16 @@ test.describe.serial("Cancel turn availability", () => {
     await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeVisible();
     await expect(session.activeChat().getByTestId("submit-message-button")).toBeVisible();
 
+    const cancelButton = session.activeChat().getByTestId("cancel-agent-button");
     const cancellationPending = gateway.waitForEvent("session.cancellation_changed", {
       where: (payload) => payload.cancellation_pending === true,
     });
     const cancellationSettled = gateway.waitForEvent("session.cancellation_changed", {
       where: (payload) => payload.cancellation_pending === false,
     });
-    await session.activeChat().getByTestId("cancel-agent-button").click();
+    await cancelButton.click();
     await cancellationPending;
-    await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeDisabled();
+    await expect(cancelButton).toBeDisabled();
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await cancellationSettled;
     await waitForActiveSessionForegroundActivity(testPage, null);

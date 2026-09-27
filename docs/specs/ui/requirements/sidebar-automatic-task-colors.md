@@ -37,6 +37,7 @@ The UI system owns this presentation contract. The task, workflow, executor, and
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.5:** The Automatic colors summary shall show whether automation is off or how many rules are enabled.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.6:** The collapsed Sort, Group by, and Task row summaries shall use the same compact bottom inset before their separator, and adjacent editor sections shall not add an extra primitive-level gap.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.7:** When editor content exceeds the available viewport, the surface shall use one vertical scroll owner and keep every setting and action reachable.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.8:** In the desktop popover and touch drawer, the Filters label and Add action shall sit below the View row divider with a visible top inset. Neither shall overlap the divider, and the Add action shall remain within the Filters section.
 
 ### REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002: Ordered personal color rules
 

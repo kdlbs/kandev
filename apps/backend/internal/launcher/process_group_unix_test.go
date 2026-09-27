@@ -280,6 +280,10 @@ func TestAttachSignalsSecondSignalForceKillsChildren(t *testing.T) {
 	waitForOutputContains(t, output, "forced shutdown after second signal")
 	waitForOutputContains(t, output, "forced shutdown complete")
 	waitForOutputContains(t, output, "graceful shutdown complete")
+	// launcherExit is captured in this test, so the process does not exit when
+	// the second signal handler calls it. Wait for the graceful shutdown worker
+	// before captureLauncherExit restores the shared output writer.
+	supervisor.shutdown("wait for signal shutdown")
 }
 
 func TestLauncherSignalHelper(t *testing.T) {

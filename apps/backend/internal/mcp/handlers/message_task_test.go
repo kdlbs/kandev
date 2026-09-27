@@ -16,7 +16,6 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
-	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
@@ -46,6 +45,7 @@ type fakeOrchestrator struct {
 	launchErr               error
 	launchFunc              func(context.Context, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
 	launchResponseProfileID string
+	peerStartFunc           func(context.Context, messagequeue.QueueSessionIdentity, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) (*executor.TaskExecution, error)
 	renameCalls             []renameCall
 	renameErr               error
 
@@ -76,6 +76,25 @@ type lifecycleRetryFakeOrchestrator struct {
 
 func (f *lifecycleRetryFakeOrchestrator) DeliveryAcceptanceRetryContext() context.Context {
 	return f.retryCtx
+}
+
+type blockedBusyPeerMessageLauncher struct {
+	*fakeOrchestrator
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (f *blockedBusyPeerMessageLauncher) BeginPeerMessageStart(
+	ctx context.Context,
+	_ messagequeue.QueueSessionIdentity,
+) (orchestrator.PeerMessageStartAdmission, error) {
+	close(f.entered)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-f.release:
+		return nil, executor.ErrExecutionAlreadyRunning
+	}
 }
 
 type failingQueueSnapshotRepository struct {
@@ -287,6 +306,23 @@ func (f *fakeOrchestrator) StartCreatedSessionWithAcceptedCallback(ctx context.C
 	// launch look rejected to its caller.
 	_ = afterDispatch()
 	return execution, nil
+}
+
+func (f *fakeOrchestrator) StartCreatedSessionForPeerMessage(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+) (*executor.TaskExecution, error) {
+	if f.peerStartFunc != nil {
+		return f.peerStartFunc(ctx, identity, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references)
+	}
+	return f.StartCreatedSession(
+		ctx, identity.TaskID, identity.SessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references,
+	)
 }
 
 func (f *fakeOrchestrator) ResumeTaskSession(_ context.Context, _, _ string) (*executor.TaskExecution, error) {
@@ -979,6 +1015,55 @@ func TestHandleMessageTask_InterruptSchedulingNeverClaimsDelivery(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, messagequeue.DeliveryQueued, stored.State)
 	assert.Equal(t, 1, orch.queue.GetStatus(ctx, session.ID).Count)
+}
+
+func TestHandleMessageTask_ParentInterruptDuringInitialLaunchAdmission(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	launcher := &blockedBusyPeerMessageLauncher{
+		fakeOrchestrator: orch,
+		entered:          make(chan struct{}),
+		release:          make(chan struct{}),
+	}
+	h.sessionLauncher = launcher
+	message := makeWSMessage(t, ws.ActionMCPMessageTask,
+		senderPayloadWithMode(child.ID, "stop and pivot during startup", parent.ID, "interrupt"),
+	)
+	type response struct {
+		message *ws.Message
+		err     error
+	}
+	completed := make(chan response, 1)
+	go func() {
+		message, err := h.handleMessageTask(context.Background(), message)
+		completed <- response{message: message, err: err}
+	}()
+	select {
+	case <-launcher.entered:
+	case <-time.After(time.Second):
+		t.Fatal("parent message did not reach peer-start admission")
+	}
+	assert.Zero(t, orch.queue.GetStatus(context.Background(), sess.ID).Count)
+	close(launcher.release)
+
+	select {
+	case outcome := <-completed:
+		require.NoError(t, outcome.err)
+		var payload map[string]interface{}
+		require.NoError(t, json.Unmarshal(outcome.message.Payload, &payload))
+		assert.Equal(t, taskMessageStatusQueued, payload["status"])
+	case <-time.After(time.Second):
+		t.Fatal("parent message did not finish after losing start admission")
+	}
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Len(t, status.Entries, 1)
+	assert.Contains(t, status.Entries[0].Content, "stop and pivot during startup")
+	require.Len(t, orch.interruptCalls, 1)
+	assert.Equal(t, child.ID, orch.interruptCalls[0].taskID)
+	assert.Equal(t, sess.ID, orch.interruptCalls[0].sessionID)
+	assert.Equal(t, status.Entries[0].ID, orch.interruptCalls[0].entryID)
+	assert.Empty(t, orch.turnStartCalls, "a losing initial-start admission must queue before workflow preparation")
 }
 
 // TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMessageQueued
@@ -2324,11 +2409,10 @@ func TestTaskMessageReviewRollbackCaptureQueuesIsAtomic(t *testing.T) {
 	assert.Equal(t, original, rollback.queues, "failed capture must not publish a partial snapshot")
 }
 
-func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(t *testing.T) {
+func TestHandleMessageTask_DispatchErrorAfterSessionSwitchPreservesNewSessionOwner(t *testing.T) {
 	ctx := context.Background()
-	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
+	svc, repo, _ := newTestTaskServiceWithEventBus(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
-	stateEvents := subscribeTaskStateChanged(t, eventBus)
 
 	task, err := svc.GetTask(ctx, target.ID)
 	require.NoError(t, err)
@@ -2416,50 +2500,45 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 
 	updatedTask, err := svc.GetTask(ctx, target.ID)
 	require.NoError(t, err)
-	assert.Equal(t, v1.TaskStateReview, updatedTask.State)
-	assert.Equal(t, "step-review", updatedTask.WorkflowStepID)
-	assertTaskStateChangedEvent(t, stateEvents, target.ID, v1.TaskStateReview, "step-review")
+	assert.Equal(t, v1.TaskStateInProgress, updatedTask.State)
+	assert.Equal(t, "step-in-progress", updatedTask.WorkflowStepID)
 
 	primary, err := svc.GetPrimarySession(ctx, target.ID)
 	require.NoError(t, err)
 	require.NotNil(t, primary)
-	assert.Equal(t, sess.ID, primary.ID)
+	assert.Equal(t, replacementID, primary.ID)
 	assert.Equal(t, models.TaskSessionStateWaitingForInput, primary.State)
 	assert.True(t, primary.IsPrimary)
-	assert.Equal(t, "agent-profile-1", primary.AgentProfileID)
-	assert.Equal(t, "executor-profile-1", primary.ExecutorProfileID)
-	assert.Equal(t, "Agent One", primary.AgentProfileSnapshot["name"])
-	_, ok := models.LoadPendingStepSignal(primary.Metadata)
-	require.True(t, ok)
-	assert.Equal(t, true, primary.Metadata["plan_mode"])
+	assert.Equal(t, "agent-profile-2", primary.AgentProfileID)
 
-	_, err = svc.GetTaskSession(ctx, replacementID)
-	assert.ErrorIs(t, err, models.ErrTaskSessionNotFound)
+	oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateCompleted, oldSession.State)
+	assert.False(t, oldSession.IsPrimary)
+	assert.Equal(t, "agent-profile-mutated", oldSession.AgentProfileID)
+	_, hasPendingSignal := models.LoadPendingStepSignal(oldSession.Metadata)
+	assert.False(t, hasPendingSignal)
+	assert.Nil(t, oldSession.Metadata["plan_mode"])
 
 	assert.Empty(t, orch.promptCalls)
 	require.Len(t, orch.startCreatedCalls, 1)
 	messages, err := svc.ListMessages(ctx, replacementID)
 	require.NoError(t, err)
 	assert.Empty(t, messages)
-	status := orch.queue.GetStatus(ctx, sess.ID)
+	assert.Zero(t, orch.queue.GetStatus(ctx, sess.ID).Count)
+	status := orch.queue.GetStatus(ctx, replacementID)
 	require.Equal(t, 2, status.Count)
-	assert.Equal(t, "queued before switch", status.Entries[0].Content)
 	assert.Equal(t, queuedBeforeSwitch.ID, status.Entries[0].ID)
-	assert.Equal(t, queuedBeforeSwitch.Position, status.Entries[0].Position)
-	assert.Equal(t, queuedBeforeSwitch.QueuedAt, status.Entries[0].QueuedAt)
+	assert.Equal(t, "queued before switch", status.Entries[0].Content)
 	assert.Equal(t, durableBeforeSwitch.ID, status.Entries[1].ID)
 	assert.True(t, status.Entries[1].IsDurableLifecycle())
-	move, ok := orch.queue.TakePendingMove(ctx, sess.ID)
+	move, ok := orch.queue.TakePendingMove(ctx, replacementID)
 	require.True(t, ok)
 	assert.Equal(t, "step-review", move.WorkflowStepID)
 	assert.Equal(t, 2, move.Position)
-	replacementStatus := orch.queue.GetStatus(ctx, replacementID)
-	assert.Zero(t, replacementStatus.Count)
-	_, ok = orch.queue.TakePendingMove(ctx, replacementID)
-	assert.False(t, ok)
 }
 
-func TestHandleMessageTask_DispatchErrorAfterExistingSessionSwitchRestoresQueues(t *testing.T) {
+func TestHandleMessageTask_DispatchErrorAfterExistingSessionSwitchPreservesQueues(t *testing.T) {
 	ctx := context.Background()
 	svc, repo, _ := newTestTaskServiceWithEventBus(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
@@ -2510,18 +2589,18 @@ func TestHandleMessageTask_DispatchErrorAfterExistingSessionSwitchRestoresQueues
 	assertWSError(t, resp, ws.ErrorCodeInternalError)
 
 	primaryStatus := orch.queue.GetStatus(ctx, sess.ID)
-	require.Equal(t, 1, primaryStatus.Count)
-	assert.Equal(t, "original queued", primaryStatus.Entries[0].Content)
+	assert.Zero(t, primaryStatus.Count, "the winning session switch keeps ownership of transferred queue work")
 
 	replacementStatus := orch.queue.GetStatus(ctx, replacementID)
-	require.Equal(t, 1, replacementStatus.Count)
+	require.Equal(t, 2, replacementStatus.Count)
 	assert.Equal(t, "replacement queued", replacementStatus.Entries[0].Content)
+	assert.Equal(t, "original queued", replacementStatus.Entries[1].Content)
 	move, ok := orch.queue.TakePendingMove(ctx, replacementID)
 	require.True(t, ok)
 	assert.Equal(t, "replacement-step", move.WorkflowStepID)
 }
 
-func TestHandleMessageTask_DispatchErrorRollsBackTurnStartOutsideReview(t *testing.T) {
+func TestHandleMessageTask_DispatchErrorPreservesNewSessionOwnerOutsideReview(t *testing.T) {
 	ctx := context.Background()
 	svc, repo, _ := newTestTaskServiceWithEventBus(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
@@ -2568,26 +2647,20 @@ func TestHandleMessageTask_DispatchErrorRollsBackTurnStartOutsideReview(t *testi
 	updatedTask, err := svc.GetTask(ctx, target.ID)
 	require.NoError(t, err)
 	assert.Equal(t, v1.TaskStateInProgress, updatedTask.State)
-	assert.Equal(t, "step-in-progress", updatedTask.WorkflowStepID)
-
-	// Review round 3 must-fix #2: the rollback's ledger row (from
-	// "step-next" back to "step-in-progress") must attribute the causal
-	// MCP sender session, not the session-less system default.
-	ledgerRows := ledgerRowsForTask(t, repo, target.ID)
-	lastLedgerRow := ledgerRows[len(ledgerRows)-1]
-	assert.Equal(t, string(steptelemetry.TriggerUnarchiveRestore), lastLedgerRow.trigger)
-	assert.Equal(t, string(steptelemetry.ActorAgent), lastLedgerRow.actorKind, "rollback must attribute the causal sender session, not system")
-	if assert.NotNil(t, lastLedgerRow.actorID) {
-		assert.Equal(t, "sender-sess-1", *lastLedgerRow.actorID)
-	}
+	assert.Equal(t, "step-next", updatedTask.WorkflowStepID)
 
 	primary, err := svc.GetPrimarySession(ctx, target.ID)
 	require.NoError(t, err)
-	assert.Equal(t, sess.ID, primary.ID)
+	require.NotNil(t, primary)
+	assert.Equal(t, replacementID, primary.ID)
 	assert.Equal(t, models.TaskSessionStateWaitingForInput, primary.State)
-	_, err = svc.GetTaskSession(ctx, replacementID)
-	assert.ErrorIs(t, err, models.ErrTaskSessionNotFound)
-	status := orch.queue.GetStatus(ctx, sess.ID)
+	assert.Equal(t, "agent-profile-2", primary.AgentProfileID)
+	oldSession, err := svc.GetTaskSession(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateCompleted, oldSession.State)
+	assert.False(t, oldSession.IsPrimary)
+	assert.Zero(t, orch.queue.GetStatus(ctx, sess.ID).Count)
+	status := orch.queue.GetStatus(ctx, replacementID)
 	require.Equal(t, 1, status.Count)
 	assert.Equal(t, "original queued", status.Entries[0].Content)
 }

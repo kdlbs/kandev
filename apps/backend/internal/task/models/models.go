@@ -961,6 +961,12 @@ func LoadTurnRuntimeConfigSnapshot(metadata map[string]interface{}) (TurnRuntime
 // other step change.
 const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
 
+// SessionMetaKeyAgentStartAttemptID identifies the process-start attempt that
+// owns asynchronous bootstrap results. Session activity may advance the row
+// revision while that attempt is still starting, so UpdatedAt is not an
+// attempt identity.
+const SessionMetaKeyAgentStartAttemptID = "agent_start_attempt_id"
+
 // SessionMetaKeyLastAgentError stores the last recoverable agent runtime
 // failure for UI surfaces that need to keep the error visible after auto-resume.
 const SessionMetaKeyLastAgentError = "last_agent_error"
