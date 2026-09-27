@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { classify, type ClassifyResult } from "@/lib/coordinator/attention";
+import { classify, type AttentionTask, type ClassifyResult } from "@/lib/coordinator/attention";
 import { useCoordinatorInputs } from "./use-coordinator-inputs";
 import { useCoordinatorTasks } from "./use-coordinator-tasks";
 import { useNowTick } from "./use-now-tick";
@@ -18,6 +18,8 @@ export type UseCoordinatorAttentionResult = {
   classification: ClassifyResult;
   /** The name of each task's current step, keyed by task id (Adoption decision 3). */
   stepNameByTaskId: Map<string, string>;
+  /** Open (non-archived) tasks of the workspace, keyed by id, for a proposal's source-task lookup. */
+  openTasksById: Map<string, AttentionTask>;
   /** True once the tasks input has never had a successful read. */
   tasksNeverLoaded: boolean;
   /** Per-input status, in the banner order tasks, stall records, proposals. */
@@ -49,6 +51,12 @@ export function useCoordinatorAttention(
     [tasksInput.tasks, stalls.value, proposals.value, now],
   );
 
+  const openTasksById = useMemo(
+    () =>
+      new Map(tasksInput.tasks.filter((task) => !task.isArchived).map((task) => [task.id, task])),
+    [tasksInput.tasks],
+  );
+
   const inputs: CoordinatorInputStatus[] = [
     { kind: "tasks", error: tasksInput.error, loadedAt: tasksInput.loadedAt },
     { kind: "stalls", error: stalls.error, loadedAt: stalls.loadedAt },
@@ -63,6 +71,7 @@ export function useCoordinatorAttention(
   return {
     classification,
     stepNameByTaskId: tasksInput.stepNameByTaskId,
+    openTasksById,
     tasksNeverLoaded: tasksInput.loadedAt === undefined,
     inputs,
     retryFailed,

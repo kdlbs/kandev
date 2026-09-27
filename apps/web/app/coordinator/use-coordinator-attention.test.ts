@@ -77,6 +77,22 @@ describe("useCoordinatorAttention - classification", () => {
     expect(result.current.classification.needsYou).toHaveLength(1);
     expect(result.current.classification.needsYou[0]?.kind).toBe("stall");
     expect(result.current.stepNameByTaskId.get("t-1")).toBe("Build");
+    expect(result.current.openTasksById.get("t-1")).toEqual(task("t-1"));
+  });
+
+  it("excludes archived tasks from openTasksById", () => {
+    mockUseCoordinatorTasks.mockReturnValue({
+      tasks: [{ ...task("t-1"), isArchived: true }, task("t-2")],
+      stepNameByTaskId: new Map(),
+      error: false,
+      loadedAt: 500,
+      retry: retryTasksMock,
+    });
+
+    const { result } = renderHook(() => useCoordinatorAttention(WORKSPACE_ID, COORDINATOR_ID));
+
+    expect(result.current.openTasksById.has("t-1")).toBe(false);
+    expect(result.current.openTasksById.has("t-2")).toBe(true);
   });
 
   it("treats an unloaded stalls or proposals input as empty for classification", () => {
