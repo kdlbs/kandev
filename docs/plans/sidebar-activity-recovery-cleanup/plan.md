@@ -12,7 +12,7 @@ legacy_specs: []
 
 ## Overview
 
-Keep an idle task's last activity time stable when startup clears recovery markers left by a completed manual workflow move. One focused backend work order adds a failing restart regression, preserves the task update timestamp during marker cleanup, and verifies both live projection and durable reconstruction. The existing sidebar consumes the corrected value without a UI change.
+Keep an idle task's last activity time stable when startup clears recovery markers left by a completed manual workflow move. One focused backend work order adds a failing restart regression, preserves the task update timestamp during marker cleanup, and verifies both live projection and durable reconstruction. It also prevents an in-flight cross-step workflow change from restoring lifecycle markers removed by startup cleanup. The existing sidebar consumes the corrected value without a UI change.
 
 ## Root cause and reproduction
 
@@ -26,6 +26,7 @@ Reproduce in a test by creating a task and status summary with an older activity
 
 - Preserve the task update timestamp during completed manual-move marker cleanup.
 - Retain marker convergence, feeder reconciliation, and the generation guard against concurrent newer moves.
+- Prevent a stale cross-step workflow-change snapshot from restoring lifecycle markers removed by startup cleanup.
 - Verify live summary activity and durable activity reconstruction stay stable on restart.
 
 ### Out of scope
@@ -35,7 +36,7 @@ Reproduce in a test by creating a task and status summary with an older activity
 
 ## Technical approach
 
-In `apps/backend/internal/task/repository/sqlite/task.go`, remove the `updated_at` assignment from both dialect branches of `ClearManualMoveLifecycleMarkersIfCompleted`. Keep the conditional `updated_at = completedAt` and completed-marker predicates. The orchestrator continues to publish `task.updated` after a successful clear; its unchanged source timestamp leaves `last_activity_at` unchanged. A real task edit or newer move still writes a new generation and remains protected from a stale clear.
+In `apps/backend/internal/task/repository/sqlite/task.go`, remove the `updated_at` assignment from both dialect branches of `ClearManualMoveLifecycleMarkersIfCompleted`. Keep the conditional `updated_at = completedAt` and completed-marker predicates. The orchestrator continues to publish `task.updated` after a successful clear; its unchanged source timestamp leaves `last_activity_at` unchanged. A real task edit or newer move still writes a new generation and remains protected from a stale clear. Cross-step moves also remove both lifecycle markers from their source snapshot before writing, then add a fresh pending marker only when an active session requires it. This prevents an in-flight workflow-change request from restoring a stale marker after cleanup.
 
 Do not suppress the event only in the projector: `LoadTaskLastActivity` reads `tasks.updated_at`, so a rebuild would reintroduce the false activity. No schema, wire, localization, or frontend change is required.
 
@@ -43,7 +44,7 @@ Do not suppress the event only in the projector: `LoadTaskLastActivity` reads `t
 
 | Acceptance criterion | Evidence |
 | --- | --- |
-| `AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.9` | New orchestrator restart integration test for unchanged task and summary activity; SQLite and PostgreSQL repository contract for marker clearing, reconstructed activity, and stale-generation refusal. |
+| `AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.9` | New orchestrator restart integration test for unchanged task and summary activity; SQLite and PostgreSQL repository contract for marker clearing, reconstructed activity, and stale-generation refusal; workflow-change versus cleanup race regression. |
 | `AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.3` and `.7` | Existing sidebar sort unit and desktop Playwright coverage confirms the corrected summary value is ordered and displayed. |
 
 Existing `TestRecoveryDoesNotClearPendingMarkerFromNewManualMove` and `TestRecoveryRetriesWhenNewManualMoveAlreadyCompleted` guard concurrency behavior. Test a real subsequent task update separately so preserving cleanup time does not suppress qualifying activity.
@@ -61,7 +62,10 @@ Run the existing desktop Chromium scenario in `apps/web/e2e/tests/task/sidebar-f
 Implementation and work-order checks completed. The repository tests cover
 SQLite marker cleanup and reconstruction; the PostgreSQL contract is present
 but was skipped because `KANDEV_TEST_POSTGRES_DSN` was unset. The orchestrator
-regression passed through the real status-summary projector, and the existing
+regression passed through the real status-summary projector, and the service
+regression proves a guarded workflow change cannot restore a stale pending
+marker after startup cleanup. The recovery test also asserts task.updated
+publication errors, including when the event bus is closed. The existing
 desktop and mobile last-activity E2E scenarios passed.
 
 ## Risks

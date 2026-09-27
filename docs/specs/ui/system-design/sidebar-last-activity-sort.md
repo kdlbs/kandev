@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 requirements:
   - REQ-UI-SIDEBAR-LAST-ACTIVITY-SORT-001
@@ -30,6 +30,8 @@ The orchestrator's startup lifecycle sweep calls `recoverTaskLifecycleAttempt` f
 `ClearManualMoveLifecycleMarkersIfCompleted` in `apps/backend/internal/task/repository/sqlite/task.go` shall preserve `tasks.updated_at` while removing only those markers. Its existing predicate must still require the observed `updated_at` generation and a present completed marker. A newer manual move writes a new generation before the old clear can succeed, including when the newer completed marker has the same boolean value. A missing marker or stale generation must remain a no-op. Keep the existing `task.updated` publication after a successful clear so subscribers converge on the changed metadata; the event carries the preserved task timestamp and cannot advance semantic activity.
 
 Real task moves and edits continue to update `tasks.updated_at` and advance activity. This correction is limited to completed-marker cleanup; it does not change general task metadata write behavior. The repository has SQLite and PostgreSQL implementations, so both branches must preserve the same predicate and timestamp behavior. No schema or API migration is needed.
+
+A cross-step workflow move clears the source snapshot's manual-move pending and completed markers before writing its new state. If the move has an active session, it adds a fresh pending marker afterward. This prevents a workflow-change write that races recovery cleanup from restoring an old pending marker while the cleanup preserves the task update generation.
 
 ## Recovery and limits
 

@@ -719,6 +719,7 @@ func (s *Service) MoveTaskWithOptions(
 		}
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
+		delete(task.Metadata, models.MetaKeyManualMoveLifecyclePending)
 		delete(task.Metadata, models.MetaKeyManualMoveLifecycleCompleted)
 		if !opts.PreserveDeferredLaunch {
 			models.DropWIPDeferredLaunch(task)

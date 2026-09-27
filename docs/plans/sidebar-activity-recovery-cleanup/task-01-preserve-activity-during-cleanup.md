@@ -25,7 +25,8 @@ Prove that startup recovery changes an idle task's activity time, then keep its 
 
 - Add a failing startup integration regression that observes `tasks.updated_at` and projected `last_activity_at` before and after completed-marker cleanup.
 - Extend the repository contract for SQLite and PostgreSQL to cover successful, absent, and stale-generation clears plus reconstructed activity.
-- Change only the completed-marker cleanup write; verify a genuine subsequent task mutation still advances activity.
+- Add a deterministic guarded-workflow-change race test proving a stale source snapshot cannot restore lifecycle markers cleared by startup recovery.
+- Preserve `updated_at` in completed-marker cleanup and clear stale lifecycle markers from cross-step move snapshots; verify a genuine subsequent task mutation still advances activity.
 
 ## Out of scope
 
@@ -34,7 +35,7 @@ Prove that startup recovery changes an idle task's activity time, then keep its 
 ## Acceptance
 
 1. A completed-marker sweep clears only the intended markers and leaves task `updated_at` and summary `last_activity_at` unchanged; rebuilding the summary does not reintroduce the cleanup time.
-2. Failed feeder reconciliation retains the marker; a stale clear cannot erase a newer pending or completed move; the existing `task.updated` notification still occurs after a successful clear.
+2. Failed feeder reconciliation retains the marker; a stale clear cannot erase a newer pending or completed move; a workflow-change source snapshot cannot restore a stale pending marker after recovery cleanup; the existing `task.updated` notification still occurs after a successful clear.
 3. A real task edit or workflow move after cleanup advances activity and changes the sidebar order through the existing contract.
 
 ## Verification
@@ -57,6 +58,8 @@ The PostgreSQL repository case runs when `KANDEV_TEST_POSTGRES_DSN` is configure
 - `apps/backend/internal/task/repository/sqlite/task.go`
 - `apps/backend/internal/task/repository/sqlite/task_metadata_cas_test.go`
 - `apps/backend/internal/orchestrator/lifecycle_sweep_startup_test.go`
+- `apps/backend/internal/task/service/service_workflow.go`
+- `apps/backend/internal/task/service/change_workflow_test.go`
 
 ## Dependencies
 
@@ -82,14 +85,17 @@ None.
 Implemented the timestamp-preserving cleanup in both SQL dialect branches.
 The repository contract verifies marker removal, unchanged `updated_at`, stable
 activity reconstruction, a genuine subsequent task edit, and stale-generation
-refusal. The orchestrator regression verifies marker convergence, unchanged
+refusal. The service regression verifies that a guarded workflow change cannot
+restore a stale pending marker when recovery cleanup lands between source read
+and write. The orchestrator regression verifies marker convergence, unchanged
 task state and live activity through the status projector when startup
-recovery publishes `task.updated`.
+recovery publishes `task.updated`; it also checks that task-updated publication
+errors during recovery are observed by the test.
 
 Validation passed:
 
 - Repository, orchestrator, and status-summary targeted Go tests.
-- Orchestrator newer-move recovery cases under `-race`.
+- Service and orchestrator packages under `-race`, including the workflow-change/cleanup race.
 - `make build` from `apps/backend`.
 - `pnpm install --frozen-lockfile` from `apps`.
 - Desktop `sorts by last activity` E2E and mobile `mobile last activity sort` E2E.

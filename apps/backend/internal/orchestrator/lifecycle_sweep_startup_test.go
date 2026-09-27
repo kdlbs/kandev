@@ -152,6 +152,9 @@ func TestRecoverTaskLifecycleTokenPreservesLastActivityDuringMarkerCleanup(t *te
 	}
 
 	svc.recoverTaskLifecycleToken(ctx, taskID)
+	if publisher.err != nil {
+		t.Fatalf("publish task.updated during recovery: %v", publisher.err)
+	}
 	stored, err := repo.GetTask(ctx, taskID)
 	if err != nil {
 		t.Fatalf("reload task after recovery: %v", err)
@@ -181,6 +184,32 @@ func TestRecoverTaskLifecycleTokenPreservesLastActivityDuringMarkerCleanup(t *te
 	publisher.publish(t, ctx, edited)
 	if got := loadProjectedTaskActivity(t, ctx, repo, taskID); !got.After(activityAt) {
 		t.Fatalf("projected activity after a genuine task edit = %s, want later than %s", got, activityAt)
+	}
+}
+
+func TestRecoverTaskLifecycleTokenTracksTaskUpdatedPublishFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "completed-publish-error-task"
+	const sessionID = "completed-publish-error-session"
+	seedCompletedLifecycleTask(t, ctx, repo, taskID, sessionID)
+	eventBus := eventbus.NewMemoryEventBus(testLogger())
+	t.Cleanup(eventBus.Close)
+
+	publisher := &lifecycleTaskEventPublisher{eventBus: eventBus}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetTaskEventPublisher(publisher)
+	svc.SetFeederPullReconciler(&countingFeederPullReconciler{})
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("load task before recovery: %v", err)
+	}
+	publisher.publish(t, ctx, task)
+	eventBus.Close()
+
+	svc.recoverTaskLifecycleToken(ctx, taskID)
+	if publisher.err == nil {
+		t.Fatal("recovery task.updated publication failure was not captured")
 	}
 }
 
