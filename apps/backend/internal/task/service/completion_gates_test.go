@@ -14,7 +14,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// @covers AC-TASKS-COORDINATION-002.1, AC-TASKS-COORDINATION-002.2, AC-TASKS-COORDINATION-002.3
+// @covers AC-TASKS-COMPLETION-001.14, AC-TASKS-COMPLETION-001.15, AC-TASKS-COMPLETION-001.16
 func TestCompletionGateEntryPoints(t *testing.T) {
 	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-1", Role: authn.RoleAdmin, Synthetic: true})
 	svc, _, repo := createTestService(t)

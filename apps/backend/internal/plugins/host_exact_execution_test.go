@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// @covers AC-PLUGINS-COORDINATION-006.1
+// @covers AC-PLUGINS-MANAGED-COORDINATION-006.1
 func TestExactExecutionControls(t *testing.T) {
 	want := map[string]string{
 		"EnsureTaskRunExact":               "host.v2.write:execution",

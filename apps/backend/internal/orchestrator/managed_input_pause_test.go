@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// @covers AC-PLUGINS-COORDINATION-003.3
+// @covers AC-PLUGINS-MANAGED-COORDINATION-003.3
 func TestManagedConversationPauseBlocksQueueDrain(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

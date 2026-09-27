@@ -15,7 +15,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// @covers AC-PLUGINS-COORDINATION-006.2
+// @covers AC-PLUGINS-MANAGED-COORDINATION-006.2
 func TestExactHumanInteraction(t *testing.T) {
 	want := map[string]string{
 		"RespondPermissionExact":   "host.v2.write:interactions",

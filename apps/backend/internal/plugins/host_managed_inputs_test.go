@@ -15,8 +15,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// @covers AC-PLUGINS-COORDINATION-003.1
-// @covers AC-PLUGINS-COORDINATION-003.2
+// @covers AC-PLUGINS-MANAGED-COORDINATION-003.1
+// @covers AC-PLUGINS-MANAGED-COORDINATION-003.2
 func TestManagedInputReceipts(t *testing.T) {
 	connection, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
