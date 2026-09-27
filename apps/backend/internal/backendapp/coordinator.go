@@ -98,9 +98,21 @@ func startCoordinatorBackgroundPass(ctx context.Context, t0 time.Time, hooks []f
 }
 
 // registerCoordinatorConversation is task 03's named registration function
-// (Build decision 14). No-op until that work package lands.
-func registerCoordinatorConversation(_ *gin.Engine, _ bus.EventBus, _ *coordinator.Service, _ *logger.Logger) func(context.Context, time.Time) {
-	return func(context.Context, time.Time) {}
+// (Build decision 14): it registers the conversation route and returns the
+// startup cleanup pass as the background hook. svc's conversation
+// dependencies (task and session management) must already be set —
+// wireCoordinatorConversation (coordinator_conversation.go) calls
+// svc.SetConversationDeps and svc.SetConversationHooks from
+// registerSecondaryRoutes, before this function runs. When the dependencies
+// were not set, it logs an error and registers nothing, so the route is 404
+// rather than half-built.
+func registerCoordinatorConversation(router *gin.Engine, _ bus.EventBus, svc *coordinator.Service, log *logger.Logger) func(context.Context, time.Time) {
+	if !svc.ConversationDepsReady() {
+		log.Error("coordinator conversation dependencies not set; conversation route not registered")
+		return func(context.Context, time.Time) {}
+	}
+	coordinator.RegisterConversationRoute(router, svc, log)
+	return svc.CleanupConversationTasks
 }
 
 // registerCoordinatorSubscribers is task 04's named registration function

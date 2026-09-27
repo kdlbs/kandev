@@ -26,9 +26,10 @@ type WorkspaceAuthorizer interface {
 type ConversationClearedHook func(ctx context.Context, coordinatorID, oldConversationTaskID string)
 
 // CoordinatorDeletedHook is invoked after a coordinator and its proposals are
-// deleted (Build decision 8), before its conversation tasks are cleaned up by
-// a later work package.
-type CoordinatorDeletedHook func(ctx context.Context, coordinatorID string)
+// deleted (Build decision 8), naming the workspace so a registered hook can
+// enumerate and delete the coordinator's conversation tasks
+// (copilot.md#conversation-cleanup).
+type CoordinatorDeletedHook func(ctx context.Context, workspaceID, coordinatorID string)
 
 // CoordinatorWithOpenProposals pairs a coordinator with its open proposal
 // count, as the list route needs (coordinators.md#routes, Build decision 9).
@@ -54,6 +55,9 @@ type Service struct {
 	proposalRepositories RepositoryReader
 	proposalTasks        SourceTaskReader
 	proposalSteps        WorkflowStepReader
+
+	conversationTasks    ConversationTaskManager
+	conversationSessions SessionEnsurer
 }
 
 // NewService builds a Service over store, validator, the workspace
@@ -242,7 +246,7 @@ func (s *Service) DeleteCoordinator(ctx context.Context, workspaceID, id string)
 		return err
 	}
 	if s.onCoordinatorDeleted != nil {
-		s.onCoordinatorDeleted(ctx, id)
+		s.onCoordinatorDeleted(ctx, workspaceID, id)
 	}
 	s.logger.Info("coordinator deleted",
 		zap.String("workspace_id", workspaceID), zap.String("coordinator_id", id))

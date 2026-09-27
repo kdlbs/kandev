@@ -1455,6 +1455,7 @@ func registerSecondaryRoutes(
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
 	if p.features.Coordinator {
+		wireCoordinatorConversation(p)
 		registerCoordinatorRoutes(p)
 	}
 

@@ -212,6 +212,28 @@ func (s *Store) CoordinatorForConversationTask(ctx context.Context, taskID strin
 	return id, true, nil
 }
 
+// SetConversationTaskID implements copilot.md#conversation-task step 4's
+// commit: a plain compare-and-swap UPDATE, atomic on its own, needing no
+// separate lock. It sets conversation_task_id to newTaskID only when the
+// column currently holds staleTaskID (the value the caller read in step 2),
+// including the case where both are "" and the column is NULL. ok is true
+// when exactly one row was updated; false means a concurrent write already
+// changed the column and the caller must resolve the race.
+func (s *Store) SetConversationTaskID(ctx context.Context, coordinatorID, newTaskID, staleTaskID string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE coordinators SET conversation_task_id = ?
+		WHERE id = ? AND (conversation_task_id IS NULL OR conversation_task_id = ?)`),
+		newTaskID, coordinatorID, staleTaskID)
+	if err != nil {
+		return false, fmt.Errorf("set conversation task id: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("set conversation task id rows affected: %w", err)
+	}
+	return rows == 1, nil
+}
+
 // ListCoordinators returns every coordinator of a workspace ordered by
 // created_at then id, never nil.
 func (s *Store) ListCoordinators(ctx context.Context, workspaceID string) ([]*Coordinator, error) {

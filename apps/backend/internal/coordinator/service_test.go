@@ -421,8 +421,9 @@ func TestServiceDeleteCoordinator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
 		}
-		var deletedID string
-		svc.SetConversationHooks(nil, func(_ context.Context, coordinatorID string) {
+		var deletedID, deletedWorkspaceID string
+		svc.SetConversationHooks(nil, func(_ context.Context, gotWorkspaceID, coordinatorID string) {
+			deletedWorkspaceID = gotWorkspaceID
 			deletedID = coordinatorID
 		})
 
@@ -431,6 +432,9 @@ func TestServiceDeleteCoordinator(t *testing.T) {
 		}
 		if deletedID != created.ID {
 			t.Errorf("delete hook called with %q, want %q", deletedID, created.ID)
+		}
+		if deletedWorkspaceID != workspaceID {
+			t.Errorf("delete hook called with workspace %q, want %q", deletedWorkspaceID, workspaceID)
 		}
 		_, _, _, err = svc.GetCoordinator(context.Background(), workspaceID, created.ID)
 		if !errors.Is(err, ErrNotFound) {
