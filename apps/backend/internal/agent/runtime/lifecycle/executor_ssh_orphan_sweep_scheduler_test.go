@@ -149,9 +149,20 @@ func TestOrphanSweepSchedulerCoalescesConcurrentTriggersForSameExecutor(t *testi
 	// A second trigger for the same executor while the first sweep is still
 	// blocked in its SSH dial must be dropped, not queued — AC.13's "one
 	// sweep per executor at a time; a trigger that arrives during a sweep is
-	// coalesced."
+	// coalesced." A single flat sleep before one assertion only proves the
+	// count hadn't reached 2 at that one instant (TS-002); poll across a
+	// generous bounded window instead, failing the moment a second dial
+	// attempt lands rather than only if one happened to already be there at
+	// the end of an arbitrary fixed wait.
 	publishReachable()
-	time.Sleep(100 * time.Millisecond)
+
+	pollDeadline := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(pollDeadline) {
+		if got := atomic.LoadInt32(acceptCount); got >= 2 {
+			t.Fatalf("dial attempts observed by the listener = %d, want exactly 1 (coalesced)", got)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	if got := atomic.LoadInt32(acceptCount); got != 1 {
 		t.Fatalf("dial attempts observed by the listener = %d, want exactly 1 (coalesced)", got)

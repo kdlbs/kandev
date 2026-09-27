@@ -87,15 +87,19 @@ type sshOrphanSweepReport struct {
 
 // sshOrphanWorkdirRoots returns every raw workdir root configuration the
 // sweep must cover for one executor: its own config, then each of its
-// profiles' overrides. A profile's ssh_workdir_root is authoritative over the
-// executor's at launch time (see workdirRoot's "per-profile wins over
-// per-executor" precedence in executor_ssh.go, backed by
-// profileConfigAuthoritativeKeys in the orchestrator's executor state) — a
-// session launched under such a profile runs agentctl under the profile's
-// root, invisible to a sweep that only reads the executor's own config. When
-// nothing configures a root anywhere, the package default is the sole entry.
-// Entries are deduplicated by their exact trimmed string, before any
-// per-connection $HOME expansion.
+// profiles' overrides, plus the package default. A profile's
+// ssh_workdir_root is authoritative over the executor's at launch time (see
+// workdirRoot's "per-profile wins over per-executor" precedence in
+// executor_ssh.go, backed by profileConfigAuthoritativeKeys in the
+// orchestrator's executor state) — a session launched under such a profile
+// runs agentctl under the profile's root, invisible to a sweep that only
+// reads the executor's own config. The default is always included alongside
+// any configured roots, never only as a fallback: profileConfigAuthoritativeKeys
+// sets metadata[ssh_workdir_root] unconditionally, including empty, and
+// SSHExecutor.workdirRoot falls back to the same default when a profile's
+// (or the executor's) configured root is empty — a launch can land there even
+// when other roots are also configured. Entries are deduplicated by their
+// exact trimmed string, before any per-connection $HOME expansion.
 func sshOrphanWorkdirRoots(executorConfig map[string]string, profiles []*models.ExecutorProfile) []string {
 	seen := map[string]bool{}
 	var roots []string
@@ -115,9 +119,7 @@ func sshOrphanWorkdirRoots(executorConfig map[string]string, profiles []*models.
 		}
 		add(profile.Config[MetadataKeySSHWorkdirRoot])
 	}
-	if len(roots) == 0 {
-		roots = append(roots, sshDefaultWorkdir)
-	}
+	add(sshDefaultWorkdir)
 	return roots
 }
 
@@ -209,6 +211,26 @@ func sweepSSHExecutorOrphansUnderRoot(
 			continue
 		}
 
+		// Re-decide against a fresh, uncached read immediately before
+		// signalling: taskCtx above can be stale by the time this process's
+		// turn in the sequential stop loop arrives, since a resume can race
+		// in against an earlier process's grace-period wait and flip this
+		// task's session out of the terminal state the cached decision relied
+		// on. Only a fresh Stop verdict may proceed; a fresh Preserve leaves
+		// the process alone even though the cached decision above said Stop.
+		freshTaskCtx, err := loadSSHOrphanTaskContextFresh(ctx, store, proc.TaskID)
+		if err != nil {
+			report.Failed++
+			log.Warn("ssh orphan sweep: pre-stop recheck failed",
+				zap.String("executor_id", executorID), zap.Error(err))
+			continue
+		}
+		freshDecision := decideSSHOrphanProcess(proc.PID, sessionID, claimed, tainted, freshTaskCtx)
+		if freshDecision.Verdict == sshOrphanPreserve {
+			report.Preserved++
+			continue
+		}
+
 		if err := stopSSHOrphanProcess(ctx, client, resolvedRoot, proc, claimed, sessionID); err != nil {
 			report.Failed++
 			log.Warn("ssh orphan sweep: stop failed",
@@ -234,12 +256,29 @@ func loadSSHOrphanTaskContext(
 	if cached, ok := cache[taskID]; ok {
 		return cached, nil
 	}
+	taskCtx, err := loadSSHOrphanTaskContextFresh(ctx, store, taskID)
+	if err != nil {
+		return nil, err
+	}
+	cache[taskID] = taskCtx
+	return taskCtx, nil
+}
+
+// loadSSHOrphanTaskContextFresh reads a task, its sessions, and its
+// executors_running rows directly from store, bypassing any per-sweep cache.
+// Used both to populate loadSSHOrphanTaskContext's cache and, uncached, for
+// the immediately-pre-stop recheck in sweepSSHExecutorOrphansUnderRoot, which
+// must observe state at the instant of the stop rather than the sweep's
+// earlier cached snapshot.
+func loadSSHOrphanTaskContextFresh(
+	ctx context.Context,
+	store sshOrphanSweepStore,
+	taskID string,
+) (*sshOrphanTaskContext, error) {
 	task, err := store.GetTask(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {
-			taskCtx := &sshOrphanTaskContext{}
-			cache[taskID] = taskCtx
-			return taskCtx, nil
+			return &sshOrphanTaskContext{}, nil
 		}
 		return nil, err
 	}
@@ -251,9 +290,7 @@ func loadSSHOrphanTaskContext(
 	if err != nil {
 		return nil, err
 	}
-	taskCtx := &sshOrphanTaskContext{Task: task, Sessions: sessions, Running: running}
-	cache[taskID] = taskCtx
-	return taskCtx, nil
+	return &sshOrphanTaskContext{Task: task, Sessions: sessions, Running: running}, nil
 }
 
 // decideSSHOrphanProcess implements AC-EXECUTORS-SSH-EXECUTOR-001.14 and .15.
@@ -547,6 +584,35 @@ func stopSSHOrphanProcess(
 	return err
 }
 
+// sshOrphanSessionDirCleanupCommand returns the shell snippet that removes
+// sessionDir only when doing so cannot delete a newer claim: either its
+// agentctl.pid is absent (nothing has claimed the directory since), or the
+// pidfile still names $TARGET_PID — the same process this script just
+// stopped. A pidfile naming a different pid means a fresh agentctl launch
+// has already claimed this session directory since the inventory snapshot
+// was taken (Review Round 2, R2-F2 part 2); removing it then would delete
+// state out from under that live, unrelated process, so the directory is
+// left alone instead. The identity check runs inside this same shell
+// snippet, atomically with the removal it gates, so there is no separate
+// round trip between checking and removing for a resume to race into.
+//
+//nolint:dupword // shell branches contain repeated `fi` tokens.
+func sshOrphanSessionDirCleanupCommand(sessionDir string) string {
+	pidFile := strings.TrimSuffix(sessionDir, "/") + "/agentctl.pid"
+	remove := removeRemoteDirCommand(sessionDir)
+	return fmt.Sprintf(`SESSION_PIDFILE=%[1]s
+if [ ! -f "$SESSION_PIDFILE" ]; then
+  %[2]s
+else
+  SESSION_PID=$(cat "$SESSION_PIDFILE" 2>/dev/null | tr -d '[:space:]')
+  if [ -z "$SESSION_PID" ] || [ "$SESSION_PID" = "$TARGET_PID" ]; then
+    %[2]s
+  else
+    echo "orphan sweep: session dir now belongs to pid $SESSION_PID, not $TARGET_PID; leaving it" >&2
+  fi
+fi`, shellQuote(pidFile), remove)
+}
+
 // sshOrphanStopCommand implements AC-EXECUTORS-SSH-EXECUTOR-001.16: SIGTERM,
 // a bounded grace period, then SIGKILL of pid together with the process
 // groups of pid's direct children (captured before signalling, since
@@ -554,9 +620,11 @@ func stopSSHOrphanProcess(
 // and a SIGKILL of agentctl alone would strand them). Children are only
 // signalled when SIGKILL is actually needed, mirroring the AC's wording.
 // sessionDir, when non-empty, is removed only after the pid is confirmed
-// gone. The final liveness check treats a zombie (STAT starting with Z) as
-// gone too: kill(2) still reports success for an unreaped zombie, and this
-// sweep is not the process's parent, so it can never be the one to reap it.
+// gone, and only when sshOrphanSessionDirCleanupCommand's pidfile-identity
+// check still allows it. The final liveness check treats a zombie (STAT
+// starting with Z) as gone too: kill(2) still reports success for an
+// unreaped zombie, and this sweep is not the process's parent, so it can
+// never be the one to reap it.
 //
 // Before any signal, the script re-reads the pid's own command line (the
 // same ps -p/proc fallback remoteProcessCommandLineCommand uses for the
@@ -576,7 +644,7 @@ func stopSSHOrphanProcess(
 func sshOrphanStopCommand(pid int, taskDirPath, sessionDir string) string {
 	cleanup := "true"
 	if sessionDir != "" {
-		cleanup = removeRemoteDirCommand(sessionDir)
+		cleanup = sshOrphanSessionDirCleanupCommand(sessionDir)
 	}
 	return fmt.Sprintf(`TARGET_PID=%[1]d
 TASKDIR=%[2]s

@@ -25,7 +25,7 @@ func TestSSHOrphanWorkdirRoots(t *testing.T) {
 		{
 			name:           "executor config only",
 			executorConfig: map[string]string{"ssh_workdir_root": "/exec/root"},
-			wantRoots:      []string{"/exec/root"},
+			wantRoots:      []string{"/exec/root", sshDefaultWorkdir},
 		},
 		{
 			name:           "profile only, no executor-level root",
@@ -33,7 +33,7 @@ func TestSSHOrphanWorkdirRoots(t *testing.T) {
 			profiles: []*models.ExecutorProfile{
 				{ID: "bc154c2b", Config: map[string]string{"ssh_workdir_root": "/Users/neo/kandev-workspaces"}},
 			},
-			wantRoots: []string{"/Users/neo/kandev-workspaces"},
+			wantRoots: []string{"/Users/neo/kandev-workspaces", sshDefaultWorkdir},
 		},
 		{
 			name:           "executor config and a distinct profile root are both covered",
@@ -41,7 +41,7 @@ func TestSSHOrphanWorkdirRoots(t *testing.T) {
 			profiles: []*models.ExecutorProfile{
 				{ID: "profile-1", Config: map[string]string{"ssh_workdir_root": "/profile/root"}},
 			},
-			wantRoots: []string{"/exec/root", "/profile/root"},
+			wantRoots: []string{"/exec/root", "/profile/root", sshDefaultWorkdir},
 		},
 		{
 			name:           "duplicate roots across executor and profile are deduplicated",
@@ -50,13 +50,21 @@ func TestSSHOrphanWorkdirRoots(t *testing.T) {
 				{ID: "profile-1", Config: map[string]string{"ssh_workdir_root": "/shared/root"}},
 				{ID: "profile-2", Config: map[string]string{"ssh_workdir_root": " /shared/root "}},
 			},
-			wantRoots: []string{"/shared/root"},
+			wantRoots: []string{"/shared/root", sshDefaultWorkdir},
 		},
 		{
 			name:           "a nil profile entry is skipped",
 			executorConfig: map[string]string{},
 			profiles:       []*models.ExecutorProfile{nil, {ID: "p", Config: map[string]string{"ssh_workdir_root": "/p/root"}}},
-			wantRoots:      []string{"/p/root"},
+			wantRoots:      []string{"/p/root", sshDefaultWorkdir},
+		},
+		{
+			name:           "executor root plus an empty-root profile: both roots, default still appended once",
+			executorConfig: map[string]string{"ssh_workdir_root": "/exec/root"},
+			profiles: []*models.ExecutorProfile{
+				{ID: "profile-1", Config: map[string]string{"ssh_workdir_root": ""}},
+			},
+			wantRoots: []string{"/exec/root", sshDefaultWorkdir},
 		},
 	}
 
@@ -106,6 +114,11 @@ func (s *orphanSweepRootTestStore) ListExecutorProfiles(context.Context, string)
 // executor.Config alone finds nothing to stop. This proves the sweep
 // inventories under a root that is configured only on a profile.
 //
+// Review Round 2 (R2-F1) made sshOrphanWorkdirRoots always add the package
+// default alongside any configured roots, so this sweep now also resolves
+// and inventories "~/.kandev" — hence the two extra scripted rules below for
+// its $HOME expansion and its (empty) inventory pass.
+//
 // @covers AC-EXECUTORS-SSH-EXECUTOR-001.13
 func TestSweepSSHExecutorOrphansUsesProfileWorkdirRoot(t *testing.T) {
 	archivedAt := time.Now().Add(-time.Hour)
@@ -115,6 +128,8 @@ func TestSweepSSHExecutorOrphansUsesProfileWorkdirRoot(t *testing.T) {
 			result: sshOut("PROC\t4242\t1\t/opt/kandev/agentctl --workdir /Users/neo/kandev-workspaces/tasks/task-1\n"),
 		},
 		sshScriptRule{match: "TARGET_PID=4242", result: sshOK},
+		sshScriptRule{match: `printf %s "$HOME"`, result: sshOut("/Users/neo")},
+		sshScriptRule{match: `ROOT='/Users/neo/.kandev/tasks'`, result: sshOK},
 	)
 	server := newFakeSSHServer(t, handler.handle)
 	client := server.dial(t)

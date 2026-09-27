@@ -152,6 +152,50 @@ func TestSSHOrphanStopCommandOnAlreadyExitedProcessSucceeds(t *testing.T) {
 
 // @covers AC-EXECUTORS-SSH-EXECUTOR-001.16
 //
+// Review Round 2 (R2-F2 part 2): between the inventory snapshot and this
+// stop command, a fresh agentctl launch can claim the same session
+// directory and rewrite its agentctl.pid to a different pid — the pidfile
+// equivalent of the pid-reuse race R1-F2 already guards against for the
+// kill itself. Removing the directory in that case would delete state out
+// from under the new, live process. This proves the directory survives
+// when its pidfile no longer names the pid this stop command was given.
+func TestSSHOrphanStopCommandSessionDirSurvivesWhenPidfileNamesAnotherPID(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+
+	cmd := exec.Command("sh", "-c", "exit 0")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("spawn short-lived process: %v", err)
+	}
+	deadPID := cmd.Process.Pid
+
+	dir := t.TempDir()
+	sessionDir := filepath.Join(dir, "session")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	otherPID := deadPID + 1
+	pidFile := filepath.Join(sessionDir, "agentctl.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(otherPID)), 0o644); err != nil {
+		t.Fatalf("write pidfile: %v", err)
+	}
+
+	script := sshOrphanStopCommand(deadPID, filepath.Join(dir, "task-1"), sessionDir)
+	output, err := exec.Command("sh", "-c", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("stop command on an already-exited pid failed: %v\n%s", err, output)
+	}
+	if _, statErr := os.Stat(sessionDir); statErr != nil {
+		t.Fatalf("session dir %s was removed even though its pidfile now names a different pid (%d): %v", sessionDir, otherPID, statErr)
+	}
+	if got, readErr := os.ReadFile(pidFile); readErr != nil || strings.TrimSpace(string(got)) != strconv.Itoa(otherPID) {
+		t.Fatalf("pidfile content changed, got %q err %v, want %d untouched", got, readErr, otherPID)
+	}
+}
+
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.16
+//
 // Review Round 1 (R1-F2): the stop script must re-check the target pid's own
 // command line before signalling it, because the pid can have exited and
 // been reused by an unrelated process in the window between the inventory
