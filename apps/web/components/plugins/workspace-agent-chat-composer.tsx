@@ -28,12 +28,14 @@ export const EMPTY_WORKSPACE_AGENT_CHAT_COMPOSER_STATE: WorkspaceAgentChatCompos
 
 export function WorkspaceAgentChatComposer({
   enabled,
+  touchTargets,
   generateKey,
   onSubmit,
   state,
   updateState,
 }: {
   enabled: boolean;
+  touchTargets: boolean;
   generateKey(): string;
   onSubmit(intent: PluginManagedConversationInputIntent): Promise<void>;
   state: WorkspaceAgentChatComposerState;
@@ -70,14 +72,14 @@ export function WorkspaceAgentChatComposer({
       <Textarea
         aria-label={t("managedChatMessageLabel")}
         placeholder={t("managedChatMessagePlaceholder")}
-        className="min-h-11 max-h-40 resize-y text-base md:text-sm"
+        className={`${touchTargets ? "min-h-11" : "min-h-7 py-0.5"} max-h-40 resize-y text-base md:text-sm`}
         value={state.draft}
         disabled={!enabled || state.submitting || state.intent !== null}
         onChange={(event) => updateState({ draft: event.target.value })}
       />
       <Button
         type="submit"
-        className="min-h-11 min-w-16 shrink-0"
+        className={`${touchTargets ? "min-h-11" : "min-h-7"} min-w-16 shrink-0`}
         disabled={!enabled || state.submitting || (!state.draft.trim() && !state.intent)}
       >
         {submitLabel(state.submitting, state.failed, t)}

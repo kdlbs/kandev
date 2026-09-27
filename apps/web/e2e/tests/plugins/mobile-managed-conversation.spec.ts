@@ -55,6 +55,14 @@ test.describe("managed conversation chat on phone", () => {
     await expect(chatTab).toBeVisible();
     await expect(tasksTab).toBeVisible();
     await expect(outcomesTab).toBeVisible();
+    for (const control of [
+      testPage.getByRole("button", { name: "Pause" }),
+      testPage.getByRole("button", { name: "Send" }),
+    ]) {
+      await expect
+        .poll(async () => (await control.boundingBox())?.height ?? 0)
+        .toBeGreaterThanOrEqual(44);
+    }
     await expect(testPage.getByTestId("managed-chat-transcript")).toContainText(
       "Long conversation entry with a narrow mobile layout 35",
     );

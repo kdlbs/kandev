@@ -200,21 +200,25 @@ type AutomationTrigger struct {
 
 // AutomationRun records a single trigger firing for audit/observability.
 type AutomationRun struct {
-	ID                    string                `json:"id" db:"id"`
-	AutomationID          string                `json:"automation_id" db:"automation_id"`
-	TriggerID             string                `json:"trigger_id" db:"trigger_id"`
-	TriggerType           TriggerType           `json:"trigger_type" db:"trigger_type"`
-	TaskID                string                `json:"task_id,omitempty" db:"task_id"`
-	ManagedConversationID string                `json:"managed_conversation_id,omitempty" db:"managed_conversation_id"`
-	Status                RunStatus             `json:"status" db:"status"`
-	ManagedInputID        string                `json:"managed_input_id,omitempty" db:"managed_input_id"`
-	DeliveryStatus        ManagedDeliveryStatus `json:"delivery_status,omitempty" db:"delivery_status"`
-	DeliveryAttempts      int                   `json:"-" db:"managed_delivery_attempts"`
-	DedupKey              string                `json:"dedup_key" db:"dedup_key"`
-	TriggerData           json.RawMessage       `json:"trigger_data" db:"-"`
-	TriggerDataJSON       string                `json:"-" db:"trigger_data"`
-	ErrorMessage          string                `json:"error_message,omitempty" db:"error_message"`
-	CreatedAt             time.Time             `json:"created_at" db:"created_at"`
+	ID                               string                `json:"id" db:"id"`
+	AutomationID                     string                `json:"automation_id" db:"automation_id"`
+	TriggerID                        string                `json:"trigger_id" db:"trigger_id"`
+	TriggerType                      TriggerType           `json:"trigger_type" db:"trigger_type"`
+	TaskID                           string                `json:"task_id,omitempty" db:"task_id"`
+	ManagedConversationID            string                `json:"managed_conversation_id,omitempty" db:"managed_conversation_id"`
+	ManagedDestinationInstallationID string                `json:"-" db:"managed_destination_installation_id"`
+	ManagedDestinationPluginID       string                `json:"-" db:"managed_destination_plugin_id"`
+	ManagedDestinationInstanceKey    string                `json:"-" db:"managed_destination_instance_key"`
+	ManagedDestinationRevision       uint64                `json:"-" db:"managed_destination_revision"`
+	Status                           RunStatus             `json:"status" db:"status"`
+	ManagedInputID                   string                `json:"managed_input_id,omitempty" db:"managed_input_id"`
+	DeliveryStatus                   ManagedDeliveryStatus `json:"delivery_status,omitempty" db:"delivery_status"`
+	DeliveryAttempts                 int                   `json:"-" db:"managed_delivery_attempts"`
+	DedupKey                         string                `json:"dedup_key" db:"dedup_key"`
+	TriggerData                      json.RawMessage       `json:"trigger_data" db:"-"`
+	TriggerDataJSON                  string                `json:"-" db:"trigger_data"`
+	ErrorMessage                     string                `json:"error_message,omitempty" db:"error_message"`
+	CreatedAt                        time.Time             `json:"created_at" db:"created_at"`
 
 	// Summary is the tail of the agent's last message on the generated task,
 	// read at list time and truncated for display. Hidden automation-run tasks

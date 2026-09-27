@@ -66,6 +66,14 @@ test.describe("managed conversation chat", () => {
     await expect(testPage.getByTestId("managed-chat-transcript")).toContainText("No messages yet");
     await expect(testPage.getByTestId("workspace-task-status")).toBeVisible();
     await expect(testPage.getByTestId("workspace-task-usage")).toBeVisible();
+    for (const control of [
+      testPage.getByTestId("managed-chat-instance-picker"),
+      testPage.getByRole("button", { name: "Pause" }),
+      testPage.getByRole("button", { name: "Send" }),
+      testPage.getByTestId("managed-chat-composer").locator("textarea"),
+    ]) {
+      await expect.poll(async () => (await control.boundingBox())?.height ?? 0).toBe(28);
+    }
 
     await testPage.getByTestId("managed-chat-instance-picker").click();
     const drawer = testPage.getByRole("dialog");
@@ -119,7 +127,9 @@ test.describe("managed conversation chat", () => {
     await expect(chat).toContainText("does not support this managed conversation", {
       timeout: 10_000,
     });
-    await expect(testPage.getByRole("button", { name: "Open plugin settings" })).toBeVisible();
+    const settingsButton = testPage.getByRole("button", { name: "Open plugin settings" });
+    await expect(settingsButton).toBeVisible();
+    await expect.poll(async () => (await settingsButton.boundingBox())?.height ?? 0).toBe(28);
 
     if (!main.task_id || !main.session_id) {
       throw new Error("Managed chat fixture did not return task and session IDs");

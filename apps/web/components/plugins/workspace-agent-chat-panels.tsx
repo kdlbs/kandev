@@ -14,6 +14,7 @@ import type { ClarificationAnswer } from "./workspace-agent-chat-interactions";
 export function ConversationControls({
   status,
   inputs,
+  touchTargets,
   busy,
   cancelInput,
   permission,
@@ -21,6 +22,7 @@ export function ConversationControls({
 }: {
   status: PluginManagedConversationSnapshot;
   inputs: readonly PluginHostV2ManagedAgentInputReceipt[];
+  touchTargets: boolean;
   busy: boolean;
   cancelInput(receipt: PluginHostV2ManagedAgentInputReceipt): void;
   permission(id: string, version: string, optionId?: string): void;
@@ -38,7 +40,7 @@ export function ConversationControls({
       {active.map((receipt) => (
         <div
           key={receipt.hostInputId}
-          className="flex min-h-11 min-w-0 items-center gap-2 text-sm"
+          className={`flex ${touchTargets ? "min-h-11" : "min-h-7"} min-w-0 items-center gap-2 text-sm`}
           data-testid={`managed-chat-input-${receipt.hostInputId}`}
         >
           <span className="min-w-0 flex-1">
@@ -53,7 +55,7 @@ export function ConversationControls({
             type="button"
             size="sm"
             variant="outline"
-            className="min-h-11"
+            className={touchTargets ? "min-h-11" : "min-h-7"}
             disabled={busy || status.readOnly || receipt.state !== "accepted"}
             onClick={() => cancelInput(receipt)}
           >
@@ -65,6 +67,7 @@ export function ConversationControls({
         <WorkspaceAgentChatInteractions
           key={interaction.id}
           interaction={interaction}
+          touchTargets={touchTargets}
           busy={
             busy ||
             Boolean(status.readOnly) ||

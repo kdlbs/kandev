@@ -3,7 +3,15 @@ id: "14-host-conversation-ui"
 title: "Reusable workspace conversation and task-status UI"
 status: complete
 wave: 14
-depends_on: ["02-capability-settings", "03-managed-lifetime", "04-restricted-tools", "05-durable-input", "06-workspace-observations", "08-execution-controls"]
+depends_on:
+  [
+    "02-capability-settings",
+    "03-managed-lifetime",
+    "04-restricted-tools",
+    "05-durable-input",
+    "06-workspace-observations",
+    "08-execution-controls",
+  ]
 plan: "plan.md"
 requirements:
   - REQ-PLUGINS-COORDINATION-009
@@ -180,3 +188,7 @@ controller calls remain bound to the originating instance. The managed-chat hook
 regression and deferred-response desktop and phone coordinator E2Es passed. The
 composer identity deliberately excludes mutable task status so an open composer
 does not remount when task projections change.
+
+The PR fixup also restores 28px minimum targets for desktop chat controls while
+keeping 44px targets for phone and coarse-pointer use. Desktop and phone managed
+conversation E2E cover the respective sizes.

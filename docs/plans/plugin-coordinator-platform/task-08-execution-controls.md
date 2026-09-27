@@ -3,7 +3,13 @@ id: "08-execution-controls"
 title: "Guarded execution, recovery, and human interactions"
 status: complete
 wave: 8
-depends_on: ["01-exact-host-foundation", "04-restricted-tools", "06-workspace-observations", "07-task-commands"]
+depends_on:
+  [
+    "01-exact-host-foundation",
+    "04-restricted-tools",
+    "06-workspace-observations",
+    "07-task-commands",
+  ]
 plan: "plan.md"
 requirements:
   - REQ-PLUGINS-COORDINATION-006
@@ -118,3 +124,11 @@ instance and generation, and the backend checks all six control operations under
 the shared task-claim fence. Pending-replay and Host execution tests passed with
 the race detector; backend ownership-admission tests passed with the race detector,
 and the service transfer/release effect-boundary race regression passed.
+
+### PR fixup (2026-09-27)
+
+Session mode admission now uses a case-sensitive exact allowlist containing only
+`plan`; unknown IDs such as `default`, `acceptEdits`, and permission-bypass values
+are rejected before the controller is called. Provider names and descriptions are
+not used for authorization. The exact execution regression passed, including
+rejected-mode controller-call assertions.

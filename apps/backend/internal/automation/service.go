@@ -1632,8 +1632,7 @@ func (s *Service) RecordFilteredTrigger(
 		DisplayTitle: RenderRunDisplayTitle(a, triggerType, triggerData),
 	}
 	if a.TaskMode == TaskModeManagedConversation {
-		run.DeliveryStatus = ManagedDeliveryPending
-		run.ManagedConversationID = a.ManagedDestinationConversationID
+		snapshotManagedAutomationDestination(a, run)
 	}
 	return s.store.CreateRun(ctx, run)
 }
@@ -1774,6 +1773,7 @@ func (s *Service) admitTriggerLocked(
 		TriggerData:  triggerData,
 		DisplayTitle: RenderRunDisplayTitle(a, triggerType, triggerData),
 	}
+	snapshotManagedAutomationDestination(a, run)
 	if err := s.store.CreateRun(ctx, run); err != nil {
 		// idx_automation_runs_dedup_unique backstops the check above: on a
 		// multi-instance deployment, another instance can win the race

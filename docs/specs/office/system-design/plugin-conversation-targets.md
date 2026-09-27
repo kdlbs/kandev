@@ -12,8 +12,8 @@ owners:
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
+| Requirement                     | Design section                                |
+| ------------------------------- | --------------------------------------------- |
 | `REQ-OFFICE-PLUGIN-TARGETS-001` | [Destination contract](#destination-contract) |
 
 ## Purpose and boundaries
@@ -41,7 +41,12 @@ Each admitted firing passes a stable automation occurrence ID to
 accepted. The automation history distinguishes pending delivery, accepted, running,
 completed, failed, paused, and uncertain outcomes by authoritative receipt readback.
 A delivery acknowledgement is never a completion event. Duplicate firing attempts
-reuse the same key; a changed payload under that identity conflicts.
+reuse the same key; a changed payload under that identity conflicts. Snapshot the
+resolved installation, plugin, logical instance, destination revision, and
+conversation when admitting each occurrence. Retries and receipt reads must keep
+using that snapshot, even if a human rebinds the schedule afterward. A temporary
+receipt-read failure updates the observation but does not consume enqueue attempts
+or terminalize an accepted run.
 
 Plugin routine configuration uses proposed `ListManagedConversationSchedulesExact`,
 `CreateManagedConversationScheduleExact`, `UpdateManagedConversationScheduleExact`,

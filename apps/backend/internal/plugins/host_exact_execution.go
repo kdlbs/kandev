@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/plugins/state"
@@ -14,6 +13,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+const safeManagedSessionModeID = "plan"
 
 type exactExecutionAdmission struct {
 	store  *state.CommandStore
@@ -391,22 +392,12 @@ func safeSessionModes(in []pluginsdk.SessionModeOption) []pluginsdk.SessionModeO
 }
 
 func isSafeSessionModeID(modeID string) bool {
-	return modeID != "" && isSafeSessionModeValue(modeID)
+	// Plan mode is the only session mode whose permission behavior is
+	// constrained by the host contract. Provider-defined labels and names are
+	// not a security boundary, so unknown IDs must fail closed.
+	return modeID == safeManagedSessionModeID
 }
 
 func isSafeSessionMode(mode pluginsdk.SessionModeOption) bool {
-	return isSafeSessionModeID(mode.ID) && isSafeSessionModeValue(mode.Name) && isSafeSessionModeValue(mode.Description)
-}
-
-func isSafeSessionModeValue(value string) bool {
-	normalized := strings.NewReplacer("_", "", "-", "", " ", "", ".", "", "/", "").Replace(strings.ToLower(value))
-	for _, forbidden := range []string{
-		"bypass", "dangerouslyskip", "dontask", "yolo", "credential", "autoapprove",
-		"skippermission", "nopermission", "noapproval", "acceptall", "fullauto", "unrestricted", "allowall",
-	} {
-		if strings.Contains(normalized, forbidden) {
-			return false
-		}
-	}
-	return true
+	return isSafeSessionModeID(mode.ID)
 }

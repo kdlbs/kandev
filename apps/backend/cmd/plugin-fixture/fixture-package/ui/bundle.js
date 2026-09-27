@@ -291,15 +291,16 @@
           };
         }
 
+        function managedState(response, reason) {
+          if (response.managed_conversation_supported) {
+            return response.desired_paused ? "paused" : "ready";
+          }
+          return reason === "capability_not_approved" ? "revoked" : "unsupported";
+        }
+
         function mapSnapshot(response, instanceKey) {
           var reason = response.managed_conversation_reason || "";
-          var state = response.managed_conversation_supported
-            ? response.desired_paused
-              ? "paused"
-              : "ready"
-            : reason === "capability_not_approved"
-              ? "revoked"
-              : "unsupported";
+          var state = managedState(response, reason);
           return {
             workspaceId: workspaceId,
             instanceKey: response.instance_key || instanceKey,
@@ -319,11 +320,13 @@
         }
 
         function readStatus(instanceKey) {
-          return invoke("managed-conversation-status", { instance_key: instanceKey }).then(function (response) {
-            var next = mapSnapshot(response, instanceKey);
-            if (selectedKeyRef.current === instanceKey) publishSnapshot(next);
-            return next;
-          });
+          return invoke("managed-conversation-status", { instance_key: instanceKey }).then(
+            function (response) {
+              var next = mapSnapshot(response, instanceKey);
+              if (selectedKeyRef.current === instanceKey) publishSnapshot(next);
+              return next;
+            },
+          );
         }
 
         function checkCommand(result) {
@@ -348,29 +351,36 @@
           return invoke("managed-conversation-ensure", {
             instance_key: instanceKey,
             agent_profile_id: agentProfileId,
-          }).then(function () {
-            return invoke("managed-conversation-status", { instance_key: instanceKey });
-          }).then(function (response) {
-            if (generation === loadGeneration.current) publishSnapshot(mapSnapshot(response, instanceKey));
-          }).catch(function () {
-            if (generation === loadGeneration.current) {
-              publishSnapshot({
-                workspaceId: workspaceId,
-                instanceKey: instanceKey,
-                taskId: "",
-                sessionId: null,
-                revision: 0,
-                sessionResourceVersion: "",
-                state: "unavailable",
-                pendingInteractions: [],
-              });
-            }
-          });
+          })
+            .then(function () {
+              return invoke("managed-conversation-status", { instance_key: instanceKey });
+            })
+            .then(function (response) {
+              if (generation === loadGeneration.current)
+                publishSnapshot(mapSnapshot(response, instanceKey));
+            })
+            .catch(function () {
+              if (generation === loadGeneration.current) {
+                publishSnapshot({
+                  workspaceId: workspaceId,
+                  instanceKey: instanceKey,
+                  taskId: "",
+                  sessionId: null,
+                  revision: 0,
+                  sessionResourceVersion: "",
+                  state: "unavailable",
+                  pendingInteractions: [],
+                });
+              }
+            });
         }
 
-        React.useEffect(function () {
-          void loadInstance(selectedKey);
-        }, [selectedKey]);
+        React.useEffect(
+          function () {
+            void loadInstance(selectedKey);
+          },
+          [selectedKey],
+        );
 
         var controller = {
           getStatus: function () {

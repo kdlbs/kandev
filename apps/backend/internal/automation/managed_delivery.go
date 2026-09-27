@@ -40,11 +40,20 @@ func (s *Service) dispatchManagedAutomationRun(ctx context.Context, run *Automat
 		return s.store.UpdateManagedRunDelivery(ctx, run.ID, "", ManagedDeliveryFailed,
 			run.DeliveryAttempts, "schedule was disabled before delivery")
 	}
+	target, ok := managedAutomationForRun(a, run)
+	if !ok {
+		if run.ManagedInputID != "" {
+			return s.store.UpdateManagedRunObservation(ctx, run.ID, run.ManagedInputID, ManagedDeliveryUnavailable,
+				"admitted managed destination snapshot is unavailable")
+		}
+		return s.store.UpdateManagedRunDelivery(ctx, run.ID, "", ManagedDeliveryFailed,
+			run.DeliveryAttempts, "admitted managed destination snapshot is unavailable; input was not sent")
+	}
 	if run.DeliveryAttempts >= managedAutomationDeliveryAttemptLimit {
 		return s.store.UpdateManagedRunDelivery(ctx, run.ID, "", ManagedDeliveryUnavailable,
 			run.DeliveryAttempts, "managed destination delivery retry limit reached")
 	}
-	if s.managedAutomationDelivery == nil || a.ManagedDestination == nil || a.ManagedDestinationInstallationID == "" || a.ManagedDestinationConversationID == "" {
+	if s.managedAutomationDelivery == nil {
 		return s.store.UpdateManagedRunDelivery(ctx, run.ID, "", ManagedDeliveryUnavailable,
 			run.DeliveryAttempts+1, "managed conversation delivery is unavailable")
 	}
@@ -52,7 +61,7 @@ func (s *Service) dispatchManagedAutomationRun(ctx context.Context, run *Automat
 	if prompt == "" {
 		prompt = fmt.Sprintf("Automation '%s' triggered by %s", a.Name, run.TriggerType)
 	}
-	receipt, deliveryErr := s.managedAutomationDelivery.EnqueueManagedAutomationInput(ctx, a, run.ID, prompt)
+	receipt, deliveryErr := s.managedAutomationDelivery.EnqueueManagedAutomationInput(ctx, target, run.ID, prompt)
 	if deliveryErr != nil {
 		return s.store.UpdateManagedRunDelivery(ctx, run.ID, "", ManagedDeliveryUnavailable,
 			run.DeliveryAttempts+1, safeManagedDeliveryError(deliveryErr))
@@ -97,21 +106,55 @@ func (s *Service) observeManagedAutomationRun(ctx context.Context, run *Automati
 		return err
 	}
 	if a == nil || a.TaskMode != TaskModeManagedConversation || s.managedAutomationDelivery == nil {
-		return s.store.UpdateManagedRunDelivery(ctx, run.ID, run.ManagedInputID, ManagedDeliveryUnavailable,
-			run.DeliveryAttempts+1, "managed conversation receipt is unavailable")
+		return s.store.UpdateManagedRunObservation(ctx, run.ID, run.ManagedInputID, ManagedDeliveryUnavailable,
+			"managed conversation receipt is unavailable")
 	}
-	receipt, readErr := s.managedAutomationDelivery.ReadManagedAutomationInput(ctx, a, run.ManagedInputID)
+	target, ok := managedAutomationForRun(a, run)
+	if !ok {
+		return s.store.UpdateManagedRunObservation(ctx, run.ID, run.ManagedInputID, ManagedDeliveryUnavailable,
+			"admitted managed destination snapshot is unavailable")
+	}
+	receipt, readErr := s.managedAutomationDelivery.ReadManagedAutomationInput(ctx, target, run.ManagedInputID)
 	if readErr != nil {
-		return s.store.UpdateManagedRunDelivery(ctx, run.ID, run.ManagedInputID, ManagedDeliveryUnavailable,
-			run.DeliveryAttempts+1, safeManagedDeliveryError(readErr))
+		return s.store.UpdateManagedRunObservation(ctx, run.ID, run.ManagedInputID, ManagedDeliveryUnavailable,
+			safeManagedDeliveryError(readErr))
 	}
 	if receipt.InputID != run.ManagedInputID {
-		return s.store.UpdateManagedRunDelivery(ctx, run.ID, run.ManagedInputID, ManagedDeliveryUnavailable,
-			run.DeliveryAttempts+1, "managed conversation receipt identity changed")
+		return s.store.UpdateManagedRunObservation(ctx, run.ID, run.ManagedInputID, ManagedDeliveryUnavailable,
+			"managed conversation receipt identity changed")
 	}
 	state := managedDeliveryStatus(receipt.State, receipt.Paused)
-	return s.store.UpdateManagedRunDelivery(ctx, run.ID, run.ManagedInputID, state,
-		run.DeliveryAttempts+1, "")
+	return s.store.UpdateManagedRunObservation(ctx, run.ID, run.ManagedInputID, state, "")
+}
+
+func snapshotManagedAutomationDestination(a *Automation, run *AutomationRun) {
+	if a == nil || run == nil || a.TaskMode != TaskModeManagedConversation || a.ManagedDestination == nil {
+		return
+	}
+	run.DeliveryStatus = ManagedDeliveryPending
+	run.ManagedDestinationInstallationID = a.ManagedDestinationInstallationID
+	run.ManagedDestinationPluginID = a.ManagedDestination.PluginID
+	run.ManagedDestinationInstanceKey = a.ManagedDestination.InstanceKey
+	run.ManagedDestinationRevision = a.ManagedDestination.Revision
+	run.ManagedConversationID = a.ManagedDestinationConversationID
+}
+
+func managedAutomationForRun(a *Automation, run *AutomationRun) (*Automation, bool) {
+	if a == nil || run == nil || run.ManagedDestinationInstallationID == "" ||
+		run.ManagedDestinationPluginID == "" || run.ManagedDestinationInstanceKey == "" || run.ManagedConversationID == "" {
+		return nil, false
+	}
+	target := *a
+	target.ManagedDestinationInstallationID = run.ManagedDestinationInstallationID
+	target.ManagedDestinationPluginID = run.ManagedDestinationPluginID
+	target.ManagedDestinationInstanceKey = run.ManagedDestinationInstanceKey
+	target.ManagedDestinationConversationID = run.ManagedConversationID
+	target.ManagedDestinationRevision = run.ManagedDestinationRevision
+	target.ManagedDestination = &ManagedConversationDestination{
+		PluginID: run.ManagedDestinationPluginID, InstanceKey: run.ManagedDestinationInstanceKey,
+		Revision: run.ManagedDestinationRevision,
+	}
+	return &target, true
 }
 
 func managedDeliveryStatus(state string, paused bool) ManagedDeliveryStatus {

@@ -3,7 +3,13 @@ id: "13-automation-destination"
 title: "Native automation delivery to managed conversations"
 status: complete
 wave: 13
-depends_on: ["01-exact-host-foundation", "03-managed-lifetime", "05-durable-input", "06-workspace-observations"]
+depends_on:
+  [
+    "01-exact-host-foundation",
+    "03-managed-lifetime",
+    "05-durable-input",
+    "06-workspace-observations",
+  ]
 plan: "plan.md"
 requirements:
   - REQ-OFFICE-PLUGIN-TARGETS-001
@@ -138,3 +144,12 @@ Existing automation cleanup owns disposable runs. A shared conversation is only 
 Implemented native scheduling to retained managed conversations, installation-owned Exact Host schedule APIs, revisioned schedule updates, durable occurrence delivery receipts, retry-safe dispatch, destination repair, and portable YAML rebinding on desktop and phone. A dispatch E2E exposed that the automation run-list SQL projection omitted the managed receipt columns; added the fields and a regression test. Durable input admission now returns before queue wake-up completes, with a race regression proving the boundary.
 
 Validation passed: `make build`; `make e2e-plugin-package`; automation destination/target/cleanup and managed receipt projection race tests; managed-input queue race tests; 41 focused web tests; web typecheck and i18n checks; desktop and mobile managed automation E2E (one each); public-doc validator tests (62) and all-page validation (47); and `git diff --check`. The mock provider still fails closed at the managed-tool support gate after a durable delivery receipt; no provider is advertised as supporting managed execution without adapter evidence.
+
+### PR fixup (2026-09-27)
+
+Each admitted run now persists its resolved destination identity, instance key,
+revision, and conversation. Enqueue retries and receipt reads remain pinned to that
+snapshot after a schedule is rebound. Temporary receipt-read failures preserve the
+accepted run and do not consume enqueue attempts; receipt recovery can still settle
+the run. Automation package tests passed for destination rebinding and repeated
+receipt-read failures at the retry limit.

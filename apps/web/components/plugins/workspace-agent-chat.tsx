@@ -80,7 +80,8 @@ function WorkspaceAgentChatView({
   updateComposerState,
 }: WorkspaceAgentChatViewProps) {
   const { t } = useTranslation("plugins");
-  const { isMobile } = useResponsiveBreakpoint();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const touchTargets = isMobile || !isFinePointer;
   const [mobileTab, setMobileTab] = useState("chat");
   const [recoveryConfirmationOpen, setRecoveryConfirmationOpen] = useState(false);
   const chat = useManagedConversationChat(conversation, controller, onStatus);
@@ -106,12 +107,17 @@ function WorkspaceAgentChatView({
   const tasks = (tasksPanel as ReactNode) ?? <ManagedChatEmptyPanel kind="tasks" />;
   const outcomes = (outcomesPanel as ReactNode) ?? <ManagedChatEmptyPanel kind="outcomes" />;
   const transcript = (
-    <WorkspaceAgentChatTranscript taskId={status.taskId} sessionId={status.sessionId} />
+    <WorkspaceAgentChatTranscript
+      taskId={status.taskId}
+      sessionId={status.sessionId}
+      touchTargets={touchTargets}
+    />
   );
   const controls = (
     <ConversationControls
       status={status}
       inputs={inputs}
+      touchTargets={touchTargets}
       busy={busy}
       cancelInput={chat.cancelInput}
       permission={chat.respondPermission}
@@ -121,6 +127,7 @@ function WorkspaceAgentChatView({
   const composer = (
     <WorkspaceAgentChatComposer
       enabled={canSubmit}
+      touchTargets={touchTargets}
       generateKey={generateUUID}
       onSubmit={chat.queueMessage}
       state={composerState}
@@ -144,6 +151,7 @@ function WorkspaceAgentChatView({
           <WorkspaceAgentChatInstancePicker
             instances={instances}
             selectedKey={status.instanceKey}
+            touchTargets={touchTargets}
             onSelect={(key) => onSelectInstance?.(key)}
           />
           <div className="ml-auto flex items-center gap-2">
@@ -151,7 +159,7 @@ function WorkspaceAgentChatView({
             <Button
               type="button"
               variant="outline"
-              className="min-h-11"
+              className={touchTargets ? "min-h-11" : "min-h-7"}
               disabled={busy || status.readOnly || !["ready", "paused"].includes(status.state)}
               onClick={chat.togglePaused}
             >
@@ -171,7 +179,7 @@ function WorkspaceAgentChatView({
                 type="button"
                 size="sm"
                 variant="link"
-                className="min-h-11"
+                className={touchTargets ? "min-h-11" : "min-h-7"}
                 onClick={onOpenSettings}
               >
                 {t("managedChatOpenPluginSettings")}
@@ -182,7 +190,7 @@ function WorkspaceAgentChatView({
                 type="button"
                 size="sm"
                 variant="outline"
-                className="min-h-11"
+                className={touchTargets ? "min-h-11" : "min-h-7"}
                 disabled={busy}
                 onClick={() => setRecoveryConfirmationOpen(true)}
               >

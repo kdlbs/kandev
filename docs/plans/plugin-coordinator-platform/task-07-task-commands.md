@@ -100,3 +100,8 @@ Exact task updates now treat Host installation identity as authenticated attribu
 not as an ownership claim. The real Host-to-service-to-SQLite regression passed for
 never-claimed and released tasks, and still rejects a competing active owner. The
 Host regression suite passed with the race detector.
+
+The WebSocket task-delete handler now uses the same current, single-use Human
+confirmation receipt and delete options as HTTP, including cascade and worktree
+discard choices. Handler regressions passed for missing and replayed confirmations
+and successful confirmed deletion.

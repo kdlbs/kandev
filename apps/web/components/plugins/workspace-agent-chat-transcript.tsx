@@ -7,9 +7,11 @@ import { pluginConversationApi } from "@/lib/plugins/conversation-host";
 export function WorkspaceAgentChatTranscript({
   taskId,
   sessionId,
+  touchTargets,
 }: {
   taskId: string;
   sessionId: string | null;
+  touchTargets: boolean;
 }) {
   const { t } = useTranslation("plugins");
   const history = pluginConversationApi.useSessionMessages({
@@ -39,7 +41,7 @@ export function WorkspaceAgentChatTranscript({
             type="button"
             size="sm"
             variant="outline"
-            className="min-h-11"
+            className={touchTargets ? "min-h-11" : "min-h-7"}
             onClick={history.retry}
           >
             {t("managedChatRetry")}
@@ -60,7 +62,7 @@ export function WorkspaceAgentChatTranscript({
             type="button"
             size="sm"
             variant="outline"
-            className="min-h-11"
+            className={touchTargets ? "min-h-11" : "min-h-7"}
             disabled={history.loadingMore}
             onClick={() => void history.loadMore()}
           >

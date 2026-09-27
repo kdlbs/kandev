@@ -70,7 +70,9 @@ func TestListRuns_PreservesManagedDeliveryReceipt_WithTasksTablePresent(t *testi
 	require.NoError(t, store.CreateAutomation(ctx, a))
 	run := &AutomationRun{
 		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTriggered,
-		ManagedConversationID: "conversation-1", ManagedInputID: "input-1",
+		ManagedConversationID: "conversation-1", ManagedDestinationInstallationID: "install-1",
+		ManagedDestinationPluginID: "coordinator", ManagedDestinationInstanceKey: "daily-brief",
+		ManagedDestinationRevision: 4, ManagedInputID: "input-1",
 		DeliveryStatus: ManagedDeliveryAccepted, DeliveryAttempts: 1,
 	}
 	require.NoError(t, store.CreateRun(ctx, run))
@@ -79,6 +81,10 @@ func TestListRuns_PreservesManagedDeliveryReceipt_WithTasksTablePresent(t *testi
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	require.Equal(t, "conversation-1", runs[0].ManagedConversationID)
+	require.Equal(t, "install-1", runs[0].ManagedDestinationInstallationID)
+	require.Equal(t, "coordinator", runs[0].ManagedDestinationPluginID)
+	require.Equal(t, "daily-brief", runs[0].ManagedDestinationInstanceKey)
+	require.Equal(t, uint64(4), runs[0].ManagedDestinationRevision)
 	require.Equal(t, "input-1", runs[0].ManagedInputID)
 	require.Equal(t, ManagedDeliveryAccepted, runs[0].DeliveryStatus)
 	require.Equal(t, 1, runs[0].DeliveryAttempts)

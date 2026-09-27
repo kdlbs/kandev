@@ -91,7 +91,7 @@ func (f *fakeExactExecutionController) CancelPendingTaskTransition(_ context.Con
 func (f *fakeExactExecutionController) GetSessionModeContext(_ context.Context, installationID string, in pluginsdk.ExactTaskExecutionCommand) (pluginsdk.SessionModeContext, error) {
 	f.callerInstallations = append(f.callerInstallations, installationID)
 	f.modeReadInput = in
-	return pluginsdk.SessionModeContext{SessionID: "session-exact", ExecutionID: f.activeExecutionID, AvailableModes: []pluginsdk.SessionModeOption{{ID: "plan"}, {ID: "bypassPermissions"}}}, nil
+	return pluginsdk.SessionModeContext{SessionID: "session-exact", ExecutionID: f.activeExecutionID, AvailableModes: []pluginsdk.SessionModeOption{{ID: safeManagedSessionModeID}, {ID: "bypassPermissions"}}}, nil
 }
 
 func (f *fakeExactExecutionController) SetSessionMode(_ context.Context, installationID string, in pluginsdk.ExactSessionModeCommand) (string, error) {
@@ -195,17 +195,27 @@ func TestExactExecutionControlsGenerationAndReplay(t *testing.T) {
 	if err != nil || modeContext.SessionID != "session-exact" {
 		t.Fatalf("mode context = %+v, err=%v", modeContext, err)
 	}
-	modeSet := pluginsdk.ExactSessionModeCommand{ExactTaskExecutionCommand: base, ModeID: "plan"}
+	modeSet := pluginsdk.ExactSessionModeCommand{ExactTaskExecutionCommand: base, ModeID: safeManagedSessionModeID}
 	modeSet.RequestID = "request-mode-set"
 	modeSet.IdempotencyKey = "mode-set"
 	modeSetResult, modeID, err := manager.SetSessionMode(context.Background(), modeSet)
-	if err != nil || modeSetResult.Status != pluginsdk.CommandApplied || modeID != "plan" {
+	if err != nil || modeSetResult.Status != pluginsdk.CommandApplied || modeID != safeManagedSessionModeID {
 		t.Fatalf("mode set = %+v mode=%q err=%v", modeSetResult, modeID, err)
 	}
+	for _, unsafeMode := range []string{"acceptEdits", "default", "bypassPermissions", "Plan"} {
+		unsafeInput := modeSet
+		unsafeInput.RequestID = "request-mode-unsafe-" + unsafeMode
+		unsafeInput.IdempotencyKey = "mode-unsafe-" + unsafeMode
+		unsafeInput.ModeID = unsafeMode
+		unsafeResult, _, unsafeErr := manager.SetSessionMode(context.Background(), unsafeInput)
+		if unsafeErr != nil || unsafeResult.Status != pluginsdk.CommandInvalid || controller.modeCalls != 1 {
+			t.Fatalf("unsafe mode %q = %+v calls=%d err=%v", unsafeMode, unsafeResult, controller.modeCalls, unsafeErr)
+		}
+	}
 	if got := safeSessionModes([]pluginsdk.SessionModeOption{
-		{ID: "plan"}, {ID: "bypassPermissions"}, {ID: "dont-ask"},
+		{ID: safeManagedSessionModeID}, {ID: "acceptEdits"}, {ID: "default"}, {ID: "bypassPermissions"}, {ID: "dont-ask"},
 		{ID: "fast", Name: "Auto approve all permissions"},
-	}); len(got) != 1 || got[0].ID != "plan" {
+	}); len(got) != 1 || got[0].ID != safeManagedSessionModeID {
 		t.Fatalf("safe modes = %+v", got)
 	}
 	if controller.ensureInput.ManagementInstanceKey != "delivery-lead" || controller.ensureInput.ExpectedClaimGeneration != 4 ||
@@ -279,7 +289,7 @@ func TestExactExecutionPendingReplaysReturnUncertainWithoutReceipt(t *testing.T)
 			SessionID: "session-mode-pending", ExpectedSessionResourceVersion: "2026-09-26T09:02:00Z",
 			ExpectedExecutionID: "exec-mode-pending", IdempotencyKey: "mode-pending", ApprovalRevision: 1, ManifestDigest: digest,
 		},
-		ModeID: "plan",
+		ModeID: safeManagedSessionModeID,
 	}
 	modeBase := modeInput.ExactTaskExecutionCommand
 	modeAdmission, result := host.admitExecutionCommand(ctx, exactSetSessionModeMethod, "host.v2.write:execution",

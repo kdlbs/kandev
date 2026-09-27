@@ -13,9 +13,9 @@ owners:
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
-| `REQ-AGENTS-MANAGED-TOOLS-001` | [Restricted execution](#restricted-execution) |
+| Requirement                    | Design section                                                            |
+| ------------------------------ | ------------------------------------------------------------------------- |
+| `REQ-AGENTS-MANAGED-TOOLS-001` | [Restricted execution](#restricted-execution)                             |
 | `REQ-AGENTS-MANAGED-TOOLS-002` | [Provider and lifecycle enforcement](#provider-and-lifecycle-enforcement) |
 
 ## Purpose and boundaries
@@ -66,9 +66,11 @@ transfer where relevant, disable, or uninstall. Revocation stops further Host ef
 at the authorization boundary and requests normal runtime cancellation. Report an
 unconfirmed cancellation rather than claiming the process stopped.
 
-Managed sessions may request only supported modes that preserve this policy.
-Permission decisions still flow through native human interaction services. Neither
-an `acceptEdits` label nor provider-specific mode can widen the restricted tool set.
+Managed sessions may expose or set only the exact `plan` mode ID. Reject all other
+provider-defined mode IDs, including `default` and `acceptEdits`; display names and
+descriptions do not affect this decision. Permission decisions still flow through
+native human interaction services. Neither an `acceptEdits` label nor a
+provider-specific mode can widen the restricted tool set.
 The fork's provider login-lock repair is deliberately excluded: normal provider
 configuration owns credential recovery.
 

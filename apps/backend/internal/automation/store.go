@@ -93,6 +93,10 @@ const createTablesSQL = `
 		trigger_type TEXT NOT NULL,
 		task_id TEXT DEFAULT '',
 		managed_conversation_id TEXT NOT NULL DEFAULT '',
+		managed_destination_installation_id TEXT NOT NULL DEFAULT '',
+		managed_destination_plugin_id TEXT NOT NULL DEFAULT '',
+		managed_destination_instance_key TEXT NOT NULL DEFAULT '',
+		managed_destination_revision INTEGER NOT NULL DEFAULT 0,
 		status TEXT NOT NULL,
 		dedup_key TEXT DEFAULT '',
 		trigger_data TEXT NOT NULL DEFAULT '{}',
@@ -174,32 +178,36 @@ const createTablesSQL = `
 // automationColumns needs the column to exist on every DB it queries,
 // including one initialised before the column was ever added.
 const (
-	migrateTaskTitleSQL              = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
-	migrateExecutionModeSQL          = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
-	migrateRepositoryIDSQL           = `ALTER TABLE automations ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`
-	migrateContinuationPolicySQL     = `ALTER TABLE automations ADD COLUMN continuation_policy TEXT NOT NULL DEFAULT 'new_task'`
-	migrateContinuationTaskSQL       = `ALTER TABLE automations ADD COLUMN continuation_task_id TEXT DEFAULT ''`
-	migrateTaskModeSQL               = `ALTER TABLE automations ADD COLUMN task_mode TEXT NOT NULL DEFAULT 'automation_run'`
-	migrateRepositoryModeSQL         = `ALTER TABLE automations ADD COLUMN repository_mode TEXT NOT NULL DEFAULT 'none'`
-	migrateManagedOwnerSQL           = `ALTER TABLE automations ADD COLUMN managed_owner_installation_id TEXT NOT NULL DEFAULT ''`
-	migrateManagedInstallSQL         = `ALTER TABLE automations ADD COLUMN managed_destination_installation_id TEXT NOT NULL DEFAULT ''`
-	migrateManagedConversationSQL    = `ALTER TABLE automations ADD COLUMN managed_destination_conversation_id TEXT NOT NULL DEFAULT ''`
-	migrateManagedPluginSQL          = `ALTER TABLE automations ADD COLUMN managed_destination_plugin_id TEXT NOT NULL DEFAULT ''`
-	migrateManagedInstanceSQL        = `ALTER TABLE automations ADD COLUMN managed_destination_instance_key TEXT NOT NULL DEFAULT ''`
-	migrateManagedRevisionSQL        = `ALTER TABLE automations ADD COLUMN managed_destination_revision INTEGER NOT NULL DEFAULT 0`
-	migrateAutomationRevisionSQL     = `ALTER TABLE automations ADD COLUMN resource_revision INTEGER NOT NULL DEFAULT 1`
-	migrateRepositoryBranchSQL       = `ALTER TABLE automation_repositories ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`
-	migrateRunSessionSQL             = `ALTER TABLE automation_runs ADD COLUMN session_id TEXT DEFAULT ''`
-	migrateRunManagedConversationSQL = `ALTER TABLE automation_runs ADD COLUMN managed_conversation_id TEXT NOT NULL DEFAULT ''`
-	migrateRunTurnSQL                = `ALTER TABLE automation_runs ADD COLUMN turn_id TEXT DEFAULT ''`
-	migrateRunThreadActionSQL        = `ALTER TABLE automation_runs ADD COLUMN thread_action TEXT DEFAULT ''`
-	migrateRunThreadReasonSQL        = `ALTER TABLE automation_runs ADD COLUMN thread_reason TEXT DEFAULT ''`
-	migrateRunDisplayTitleSQL        = `ALTER TABLE automation_runs ADD COLUMN display_title TEXT DEFAULT ''`
-	migrateRunDedupReasonSQL         = `ALTER TABLE automation_runs ADD COLUMN dedup_reason TEXT DEFAULT ''`
-	migrateRunRepositoryReasonSQL    = `ALTER TABLE automation_runs ADD COLUMN repository_reason TEXT DEFAULT ''`
-	migrateRunManagedInputSQL        = `ALTER TABLE automation_runs ADD COLUMN managed_input_id TEXT NOT NULL DEFAULT ''`
-	migrateRunDeliveryStatusSQL      = `ALTER TABLE automation_runs ADD COLUMN delivery_status TEXT NOT NULL DEFAULT ''`
-	migrateRunDeliveryAttemptsSQL    = `ALTER TABLE automation_runs ADD COLUMN managed_delivery_attempts INTEGER NOT NULL DEFAULT 0`
+	migrateTaskTitleSQL                         = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
+	migrateExecutionModeSQL                     = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
+	migrateRepositoryIDSQL                      = `ALTER TABLE automations ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`
+	migrateContinuationPolicySQL                = `ALTER TABLE automations ADD COLUMN continuation_policy TEXT NOT NULL DEFAULT 'new_task'`
+	migrateContinuationTaskSQL                  = `ALTER TABLE automations ADD COLUMN continuation_task_id TEXT DEFAULT ''`
+	migrateTaskModeSQL                          = `ALTER TABLE automations ADD COLUMN task_mode TEXT NOT NULL DEFAULT 'automation_run'`
+	migrateRepositoryModeSQL                    = `ALTER TABLE automations ADD COLUMN repository_mode TEXT NOT NULL DEFAULT 'none'`
+	migrateManagedOwnerSQL                      = `ALTER TABLE automations ADD COLUMN managed_owner_installation_id TEXT NOT NULL DEFAULT ''`
+	migrateManagedInstallSQL                    = `ALTER TABLE automations ADD COLUMN managed_destination_installation_id TEXT NOT NULL DEFAULT ''`
+	migrateManagedConversationSQL               = `ALTER TABLE automations ADD COLUMN managed_destination_conversation_id TEXT NOT NULL DEFAULT ''`
+	migrateManagedPluginSQL                     = `ALTER TABLE automations ADD COLUMN managed_destination_plugin_id TEXT NOT NULL DEFAULT ''`
+	migrateManagedInstanceSQL                   = `ALTER TABLE automations ADD COLUMN managed_destination_instance_key TEXT NOT NULL DEFAULT ''`
+	migrateManagedRevisionSQL                   = `ALTER TABLE automations ADD COLUMN managed_destination_revision INTEGER NOT NULL DEFAULT 0`
+	migrateAutomationRevisionSQL                = `ALTER TABLE automations ADD COLUMN resource_revision INTEGER NOT NULL DEFAULT 1`
+	migrateRepositoryBranchSQL                  = `ALTER TABLE automation_repositories ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`
+	migrateRunSessionSQL                        = `ALTER TABLE automation_runs ADD COLUMN session_id TEXT DEFAULT ''`
+	migrateRunManagedConversationSQL            = `ALTER TABLE automation_runs ADD COLUMN managed_conversation_id TEXT NOT NULL DEFAULT ''`
+	migrateRunManagedDestinationInstallationSQL = `ALTER TABLE automation_runs ADD COLUMN managed_destination_installation_id TEXT NOT NULL DEFAULT ''`
+	migrateRunManagedDestinationPluginSQL       = `ALTER TABLE automation_runs ADD COLUMN managed_destination_plugin_id TEXT NOT NULL DEFAULT ''`
+	migrateRunManagedDestinationInstanceSQL     = `ALTER TABLE automation_runs ADD COLUMN managed_destination_instance_key TEXT NOT NULL DEFAULT ''`
+	migrateRunManagedDestinationRevisionSQL     = `ALTER TABLE automation_runs ADD COLUMN managed_destination_revision INTEGER NOT NULL DEFAULT 0`
+	migrateRunTurnSQL                           = `ALTER TABLE automation_runs ADD COLUMN turn_id TEXT DEFAULT ''`
+	migrateRunThreadActionSQL                   = `ALTER TABLE automation_runs ADD COLUMN thread_action TEXT DEFAULT ''`
+	migrateRunThreadReasonSQL                   = `ALTER TABLE automation_runs ADD COLUMN thread_reason TEXT DEFAULT ''`
+	migrateRunDisplayTitleSQL                   = `ALTER TABLE automation_runs ADD COLUMN display_title TEXT DEFAULT ''`
+	migrateRunDedupReasonSQL                    = `ALTER TABLE automation_runs ADD COLUMN dedup_reason TEXT DEFAULT ''`
+	migrateRunRepositoryReasonSQL               = `ALTER TABLE automation_runs ADD COLUMN repository_reason TEXT DEFAULT ''`
+	migrateRunManagedInputSQL                   = `ALTER TABLE automation_runs ADD COLUMN managed_input_id TEXT NOT NULL DEFAULT ''`
+	migrateRunDeliveryStatusSQL                 = `ALTER TABLE automation_runs ADD COLUMN delivery_status TEXT NOT NULL DEFAULT ''`
+	migrateRunDeliveryAttemptsSQL               = `ALTER TABLE automation_runs ADD COLUMN managed_delivery_attempts INTEGER NOT NULL DEFAULT 0`
 )
 
 // migrateRunDedupUniqueIndexSQL backstops admitTriggerLocked's check-then-insert
@@ -266,6 +274,10 @@ func (s *Store) initSchema() error {
 		{"automation_repositories.base_branch", schemaSQLForDriver(migrateRepositoryBranchSQL, s.db.DriverName())},
 		{"automation_runs.session_id", schemaSQLForDriver(migrateRunSessionSQL, s.db.DriverName())},
 		{"automation_runs.managed_conversation_id", schemaSQLForDriver(migrateRunManagedConversationSQL, s.db.DriverName())},
+		{"automation_runs.managed_destination_installation_id", schemaSQLForDriver(migrateRunManagedDestinationInstallationSQL, s.db.DriverName())},
+		{"automation_runs.managed_destination_plugin_id", schemaSQLForDriver(migrateRunManagedDestinationPluginSQL, s.db.DriverName())},
+		{"automation_runs.managed_destination_instance_key", schemaSQLForDriver(migrateRunManagedDestinationInstanceSQL, s.db.DriverName())},
+		{"automation_runs.managed_destination_revision", schemaSQLForDriver(migrateRunManagedDestinationRevisionSQL, s.db.DriverName())},
 		{"automation_runs.turn_id", schemaSQLForDriver(migrateRunTurnSQL, s.db.DriverName())},
 		{"automation_runs.thread_action", schemaSQLForDriver(migrateRunThreadActionSQL, s.db.DriverName())},
 		{"automation_runs.thread_reason", schemaSQLForDriver(migrateRunThreadReasonSQL, s.db.DriverName())},
@@ -1337,12 +1349,15 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 		INSERT INTO automation_runs (id, automation_id, trigger_id, trigger_type, task_id, status,
 			dedup_key, trigger_data, error_message, session_id, turn_id, thread_action, thread_reason,
 			display_title, dedup_reason, repository_reason, managed_input_id, delivery_status, managed_delivery_attempts,
-			managed_conversation_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			managed_conversation_id, managed_destination_installation_id, managed_destination_plugin_id,
+			managed_destination_instance_key, managed_destination_revision, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		r.ID, r.AutomationID, r.TriggerID, r.TriggerType, r.TaskID, r.Status,
 		r.DedupKey, r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID,
 		r.ThreadAction, r.ThreadReason, r.DisplayTitle, r.DedupReason, r.RepositoryReason,
-		r.ManagedInputID, r.DeliveryStatus, r.DeliveryAttempts, r.ManagedConversationID, r.CreatedAt)
+		r.ManagedInputID, r.DeliveryStatus, r.DeliveryAttempts, r.ManagedConversationID,
+		r.ManagedDestinationInstallationID, r.ManagedDestinationPluginID,
+		r.ManagedDestinationInstanceKey, r.ManagedDestinationRevision, r.CreatedAt)
 	return err
 }
 
@@ -1670,7 +1685,9 @@ const runTaskStateColumnsSQL = `
 		ar.dedup_key, ar.trigger_data, ar.error_message,
 		ar.session_id, ar.turn_id, ar.thread_action, ar.thread_reason, ar.display_title,
 		ar.dedup_reason, ar.repository_reason,
-		ar.managed_conversation_id, ar.managed_input_id, ar.delivery_status, ar.managed_delivery_attempts,
+		ar.managed_conversation_id, ar.managed_destination_installation_id,
+		ar.managed_destination_plugin_id, ar.managed_destination_instance_key, ar.managed_destination_revision,
+		ar.managed_input_id, ar.delivery_status, ar.managed_delivery_attempts,
 		ar.created_at,
 		COALESCE((
 			SELECT substr(m.content, 1, 280) FROM task_session_messages m

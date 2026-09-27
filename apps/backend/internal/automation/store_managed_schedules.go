@@ -301,3 +301,26 @@ func (s *Store) UpdateManagedRunDelivery(ctx context.Context, runID, inputID str
 		runID, string(RunStatusTriggered), string(RunStatusTaskCreated))
 	return err
 }
+
+// UpdateManagedRunObservation records a receipt read without charging it as an
+// enqueue attempt. A temporary read failure must leave an accepted occurrence
+// open for reconciliation, even after enqueue retries have been exhausted.
+func (s *Store) UpdateManagedRunObservation(ctx context.Context, runID, inputID string, delivery ManagedDeliveryStatus, errorMessage string) error {
+	if runID == "" {
+		return ErrManagedScheduleInvalid
+	}
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`UPDATE automation_runs SET
+		managed_input_id = CASE WHEN ? = '' THEN managed_input_id ELSE ? END,
+		delivery_status = ?, error_message = ?,
+		status = CASE
+			WHEN ? = ? THEN ?
+			WHEN ? = ? THEN ?
+			ELSE status
+		END
+		WHERE id = ? AND status IN (?, ?)`),
+		inputID, inputID, delivery, errorMessage,
+		string(delivery), string(ManagedDeliveryCompleted), string(RunStatusSucceeded),
+		string(delivery), string(ManagedDeliveryFailed), string(RunStatusFailed),
+		runID, string(RunStatusTriggered), string(RunStatusTaskCreated))
+	return err
+}

@@ -17,11 +17,13 @@ export type ClarificationAnswer = PluginManagedConversationClarificationAnswer;
 // eslint-disable-next-line max-lines-per-function -- Permission and clarification controls share the pending interaction's answer state.
 export function WorkspaceAgentChatInteractions({
   interaction,
+  touchTargets,
   busy,
   onPermission,
   onClarification,
 }: {
   interaction: PluginManagedConversationInteraction;
+  touchTargets: boolean;
   busy: boolean;
   onPermission(optionId?: string): void;
   onClarification(answers: ClarificationAnswer[]): void;
@@ -52,7 +54,7 @@ export function WorkspaceAgentChatInteractions({
                 key={option.id}
                 type="button"
                 size="sm"
-                className="min-h-11"
+                className={touchTargets ? "min-h-11" : "min-h-7"}
                 disabled={busy}
                 onClick={() => onPermission(option.id)}
               >
@@ -63,7 +65,7 @@ export function WorkspaceAgentChatInteractions({
               type="button"
               size="sm"
               variant="outline"
-              className="min-h-11"
+              className={touchTargets ? "min-h-11" : "min-h-7"}
               disabled={busy}
               onClick={() => onPermission()}
             >
@@ -83,7 +85,7 @@ export function WorkspaceAgentChatInteractions({
                   return (
                     <Label
                       key={option.id}
-                      className="flex min-h-11 items-center gap-3 rounded-md border px-3"
+                      className={`flex ${touchTargets ? "min-h-11" : "min-h-7"} items-center gap-3 rounded-md border px-3`}
                     >
                       <Checkbox
                         checked={checked}
@@ -115,7 +117,7 @@ export function WorkspaceAgentChatInteractions({
             ))}
             <Button
               type="button"
-              className="min-h-11"
+              className={touchTargets ? "min-h-11" : "min-h-7"}
               disabled={busy || !canAnswer}
               onClick={() =>
                 onClarification(

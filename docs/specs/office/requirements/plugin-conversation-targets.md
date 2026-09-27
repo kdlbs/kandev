@@ -23,7 +23,7 @@ stages delivery through public contracts and independent plugin consumers.
 
 #### Acceptance criteria
 
-- **AC-OFFICE-PLUGIN-TARGETS-001.1:** An automation shall support an explicitly selected managed conversation in its workspace; firing shall enqueue one input per occurrence and distinguish accepted delivery from completed agent work.
+- **AC-OFFICE-PLUGIN-TARGETS-001.1:** An automation shall support an explicitly selected managed conversation in its workspace; firing shall snapshot that destination for the occurrence, enqueue one input per occurrence, and distinguish accepted delivery from completed agent work.
 - **AC-OFFICE-PLUGIN-TARGETS-001.2:** A disabled, missing, revoked, or paused destination shall produce a visible delivery state; automation cleanup shall never delete the destination conversation or its shared transcript.
 - **AC-OFFICE-PLUGIN-TARGETS-001.3:** The automation editor and portable import/export shall preserve destination intent through explicit instance rebinding, with desktop and phone parity and unchanged defaults for existing task modes.
 

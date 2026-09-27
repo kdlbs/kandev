@@ -9,10 +9,12 @@ import type { PluginManagedConversationInstance } from "@kandev/plugin-sdk";
 export function WorkspaceAgentChatInstancePicker({
   instances,
   selectedKey,
+  touchTargets,
   onSelect,
 }: {
   instances: readonly PluginManagedConversationInstance[];
   selectedKey: string;
+  touchTargets: boolean;
   onSelect(instanceKey: string): void;
 }) {
   const { t } = useTranslation("plugins");
@@ -26,7 +28,7 @@ export function WorkspaceAgentChatInstancePicker({
         <Button
           type="button"
           variant="outline"
-          className="min-h-11 max-w-[45vw] justify-between gap-2 truncate"
+          className={`${touchTargets ? "min-h-11" : "min-h-7"} max-w-[45vw] justify-between gap-2 truncate`}
           aria-label={t("managedChatChooseInstance")}
           data-testid="managed-chat-instance-picker"
         >
@@ -44,7 +46,7 @@ export function WorkspaceAgentChatInstancePicker({
               key={instance.key}
               type="button"
               variant={instance.key === selectedKey ? "secondary" : "ghost"}
-              className="min-h-11 w-full justify-start"
+              className={`${touchTargets ? "min-h-11" : "min-h-7"} w-full justify-start`}
               aria-pressed={instance.key === selectedKey}
               onClick={() => {
                 onSelect(instance.key);

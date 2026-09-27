@@ -75,7 +75,7 @@ stages delivery through public contracts and independent plugin consumers.
 
 - **AC-PLUGINS-COORDINATION-006.1:** Authorized plugins shall ensure a task run, stop an observed run, request guarded recovery, and cancel an exact pending transition without acting on a replacement execution.
 - **AC-PLUGINS-COORDINATION-006.2:** Permission and clarification responses shall target the exact pending request and observed revision; permission approval shall require a human response and shall grant at most once.
-- **AC-PLUGINS-COORDINATION-006.3:** Recovery and session-mode changes shall obey supported provider capabilities and host policy; unsupported operations shall return typed reasons without silently enabling broader tool access.
+- **AC-PLUGINS-COORDINATION-006.3:** Recovery and session-mode changes shall obey supported provider capabilities and host policy; only the exact `plan` mode ID is exposed or accepted for managed sessions, and unknown mode IDs shall be rejected regardless of provider-supplied labels; unsupported operations shall return typed reasons without silently enabling broader tool access.
 
 ### REQ-PLUGINS-COORDINATION-007: Workspace administration
 
