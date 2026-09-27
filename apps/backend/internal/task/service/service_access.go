@@ -263,7 +263,7 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 		return err
 	}
 	if workflow == nil {
-		return repoerrors.ErrWorkspaceNotFound
+		return repoerrors.ErrWorkflowNotFound
 	}
 	if workflow.WorkspaceID == "" {
 		return nil
@@ -282,7 +282,10 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 	workspace, err := s.workspaces.GetWorkspace(ctx, workflow.WorkspaceID)
 	switch {
 	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
-		return repoerrors.ErrWorkspaceNotFound
+		// Collapse to the workflow's own not-found sentinel, same as the
+		// reachable-but-denied branch below: a caller must not be able to
+		// tell an orphaned workspace from a foreign-but-reachable one.
+		return repoerrors.ErrWorkflowNotFound
 	case err != nil:
 		// A failed lookup is not an answer at all: propagate it rather than
 		// letting a transient database error read as either allow or deny.

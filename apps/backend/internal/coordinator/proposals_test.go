@@ -23,10 +23,14 @@ import (
 // foreign-workspace row's "found, but wrong workspace" case once the caller
 // checks WorkspaceID. buildProposalSpec must turn both into the identical
 // *FieldError (SEC-002). fakeWorkflowReader's foreign-workspace fixtures use
-// errs, not workflows: the real WorkflowReader (the scoped task service)
-// denies a foreign workflow inside GetWorkflow itself (authorizeWorkflowID),
-// wrapping the same ErrWorkflowNotFound sentinel as a missing id, so it never
-// actually returns a row with a mismatched WorkspaceID.
+// errs, not workflows, ONLY for a scoped caller: the real WorkflowReader (the
+// scoped task service) denies a foreign workflow inside GetWorkflow itself
+// (authorizeWorkflowID), wrapping the same ErrWorkflowNotFound sentinel as a
+// missing id. For an unscoped caller (no identity, or the auth-disabled
+// default profile's synthetic identity), authorizeWorkflowID's scope check
+// never runs and GetWorkflow returns the raw row, mismatched WorkspaceID
+// included — that path uses the workflows map instead, and buildProposalSpec
+// has to catch it itself via the WorkspaceID comparison, not via GetWorkflow.
 type fakeWorkflowReader struct {
 	workflows map[string]*taskmodels.Workflow
 	errs      map[string]error
@@ -225,7 +229,7 @@ func TestProposeTask_WorkflowNotInWorkspace(t *testing.T) {
 		assertFieldError(t, err, "workflow_id")
 	})
 
-	t.Run("foreign workspace", func(t *testing.T) {
+	t.Run("foreign workspace, scoped caller", func(t *testing.T) {
 		f := newProposalTestFixture(t)
 		foreign := "wf-foreign"
 		f.svc.SetProposalDeps(
@@ -233,10 +237,10 @@ func TestProposeTask_WorkflowNotInWorkspace(t *testing.T) {
 				workflows: map[string]*taskmodels.Workflow{
 					f.workflowID: {ID: f.workflowID, WorkspaceID: f.workspaceID},
 				},
-				// The real WorkflowReader (the scoped task service) never returns
-				// a foreign-workspace row: authorizeWorkflowID denies it before
-				// GetWorkflow returns, wrapping the same ErrWorkflowNotFound
-				// sentinel as a genuinely missing id.
+				// A scoped caller never sees a foreign-workspace row:
+				// authorizeWorkflowID denies it before GetWorkflow returns,
+				// wrapping the same ErrWorkflowNotFound sentinel as a
+				// genuinely missing id.
 				errs: map[string]error{
 					foreign: fmt.Errorf("%w: %s", repoerrors.ErrWorkflowNotFound, foreign),
 				},
@@ -246,6 +250,55 @@ func TestProposeTask_WorkflowNotInWorkspace(t *testing.T) {
 		)
 		req := f.baseRequest()
 		req.WorkflowID = foreign
+		_, _, err := f.svc.ProposeTask(context.Background(), f.coordinator.ID, req)
+		assertFieldError(t, err, "workflow_id")
+	})
+
+	// An unscoped caller (no identity, or the auth-disabled default
+	// profile's synthetic identity) bypasses authorizeWorkflowID's scope
+	// check entirely, so GetWorkflow returns the raw row with its real,
+	// mismatched WorkspaceID. buildProposalSpec's own WorkspaceID comparison
+	// is the only thing that catches this case.
+	t.Run("foreign workspace, unscoped caller", func(t *testing.T) {
+		f := newProposalTestFixture(t)
+		foreign := "wf-foreign"
+		f.svc.SetProposalDeps(
+			fakeWorkflowReader{
+				workflows: map[string]*taskmodels.Workflow{
+					f.workflowID: {ID: f.workflowID, WorkspaceID: f.workspaceID},
+					foreign:      {ID: foreign, WorkspaceID: "ws-other"},
+				},
+			},
+			fakeRepositoryReader{}, fakeSourceTaskReader{},
+			fakeWorkflowStepReader{},
+		)
+		req := f.baseRequest()
+		req.WorkflowID = foreign
+		_, _, err := f.svc.ProposeTask(context.Background(), f.coordinator.ID, req)
+		assertFieldError(t, err, "workflow_id")
+	})
+
+	// An orphaned-workspace workflow (the workspace row itself is gone)
+	// collapses to the same ErrWorkflowNotFound sentinel as a foreign or
+	// missing workflow (internal/task/service.authorizeWorkflowID), so it
+	// must refuse identically here too.
+	t.Run("orphaned workspace", func(t *testing.T) {
+		f := newProposalTestFixture(t)
+		orphan := "wf-orphaned"
+		f.svc.SetProposalDeps(
+			fakeWorkflowReader{
+				workflows: map[string]*taskmodels.Workflow{
+					f.workflowID: {ID: f.workflowID, WorkspaceID: f.workspaceID},
+				},
+				errs: map[string]error{
+					orphan: fmt.Errorf("%w: %s", repoerrors.ErrWorkflowNotFound, orphan),
+				},
+			},
+			fakeRepositoryReader{}, fakeSourceTaskReader{},
+			fakeWorkflowStepReader{},
+		)
+		req := f.baseRequest()
+		req.WorkflowID = orphan
 		_, _, err := f.svc.ProposeTask(context.Background(), f.coordinator.ID, req)
 		assertFieldError(t, err, "workflow_id")
 	})
