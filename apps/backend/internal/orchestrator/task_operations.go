@@ -7136,6 +7136,9 @@ func (s *Service) attemptModelSwitchForPrompt(
 	foregroundDispatch *foregroundDispatch, runBeforeDispatch func() error,
 	runAfterDispatchAdmission func() error, resumeAttempts ...*resumeAttempt,
 ) (result *PromptResult, handled bool, err error) {
+	if err := s.validateExactProfileModelRequest(ctx, taskID, model, session); err != nil {
+		return nil, true, err
+	}
 	var resumeAttempt *resumeAttempt
 	if len(resumeAttempts) > 0 {
 		resumeAttempt = resumeAttempts[0]

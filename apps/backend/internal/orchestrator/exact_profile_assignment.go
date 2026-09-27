@@ -16,6 +16,10 @@ import (
 // contract: a changed, disabled, or cross-workspace profile is never replaced.
 var ErrExactProfileAssignmentInvalid = errors.New("exact profile assignment is no longer valid")
 
+// ErrExactProfileModelMismatch is returned when a prompt requests a model
+// outside the profile bound to its session.
+var ErrExactProfileModelMismatch = errors.New("requested model conflicts with exact profile assignment")
+
 type exactProfileAssignmentStore interface {
 	GetExactProfileAssignment(context.Context, string) (*models.ExactProfileAssignment, error)
 }
@@ -66,6 +70,28 @@ func (s *Service) resolveExactProfileAssignment(
 		Assignments: assignments,
 		Profiles:    s.agentManager,
 	}).Resolve(ctx, taskID, task.WorkspaceID)
+}
+
+func (s *Service) validateExactProfileModelRequest(
+	ctx context.Context,
+	taskID, requestedModel string,
+	session *models.TaskSession,
+) error {
+	if requestedModel == "" || session == nil || session.ExactProfileGeneration == 0 {
+		return nil
+	}
+	exact, err := s.resolveExactProfileAssignment(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if exact == nil || session.AgentProfileID != exact.AgentProfileID ||
+		session.ExactProfileGeneration != exact.Generation || session.ExactProfileRevision != exact.Revision {
+		return ErrExactProfileAssignmentInvalid
+	}
+	if requestedModel != exact.Model {
+		return fmt.Errorf("%w: requested %q, assigned profile requires %q", ErrExactProfileModelMismatch, requestedModel, exact.Model)
+	}
+	return nil
 }
 
 // ExactTaskProfileGeneration returns the currently active exact-assignment
