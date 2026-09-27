@@ -24,6 +24,7 @@ type OrphanSweepTaskStore interface {
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
+	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)
 }
 
 // OrphanSweepScheduler is the runtime-seam handle for the SSH orphaned-agentctl

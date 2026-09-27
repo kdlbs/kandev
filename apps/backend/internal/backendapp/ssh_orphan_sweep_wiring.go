@@ -25,6 +25,7 @@ type sshOrphanSweepRepo interface {
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
+	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)
 }
 
 // startSSHOrphanSweepScheduler launches the SSH orphaned-agentctl sweep

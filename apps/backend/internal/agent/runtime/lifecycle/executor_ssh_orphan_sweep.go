@@ -23,6 +23,7 @@ type sshOrphanSweepStore interface {
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
+	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)
 }
 
 // sshOrphanProcessRecord is one remote agentctl process discovered by the
@@ -84,8 +85,45 @@ type sshOrphanSweepReport struct {
 	Failed     int
 }
 
-// sweepSSHExecutorOrphans inventories remote agentctl processes under
-// executor's configured workdir root, classifies each against Kandev's task
+// sshOrphanWorkdirRoots returns every raw workdir root configuration the
+// sweep must cover for one executor: its own config, then each of its
+// profiles' overrides. A profile's ssh_workdir_root is authoritative over the
+// executor's at launch time (see workdirRoot's "per-profile wins over
+// per-executor" precedence in executor_ssh.go, backed by
+// profileConfigAuthoritativeKeys in the orchestrator's executor state) — a
+// session launched under such a profile runs agentctl under the profile's
+// root, invisible to a sweep that only reads the executor's own config. When
+// nothing configures a root anywhere, the package default is the sole entry.
+// Entries are deduplicated by their exact trimmed string, before any
+// per-connection $HOME expansion.
+func sshOrphanWorkdirRoots(executorConfig map[string]string, profiles []*models.ExecutorProfile) []string {
+	seen := map[string]bool{}
+	var roots []string
+	add := func(root string) {
+		root = strings.TrimSpace(root)
+		if root == "" || seen[root] {
+			return
+		}
+		seen[root] = true
+		roots = append(roots, root)
+	}
+
+	add(executorConfig[MetadataKeySSHWorkdirRoot])
+	for _, profile := range profiles {
+		if profile == nil {
+			continue
+		}
+		add(profile.Config[MetadataKeySSHWorkdirRoot])
+	}
+	if len(roots) == 0 {
+		roots = append(roots, sshDefaultWorkdir)
+	}
+	return roots
+}
+
+// sweepSSHExecutorOrphans inventories remote agentctl processes under every
+// workdir root the executor uses (its own config plus every profile
+// override — sshOrphanWorkdirRoots), classifies each against Kandev's task
 // and session state, and stops the ones that are orphaned. It never removes
 // the task directory itself; only a pidfile-attributed stop reclaims the
 // session runtime directory (AC-EXECUTORS-SSH-EXECUTOR-001.13-.16).
@@ -99,23 +137,60 @@ func sweepSSHExecutorOrphans(
 ) (sshOrphanSweepReport, error) {
 	report := sshOrphanSweepReport{ExecutorID: executorID}
 
-	root := strings.TrimSpace(config["ssh_workdir_root"])
-	if root == "" {
-		root = sshDefaultWorkdir
-	}
-	resolvedRoot, err := expandRemoteHome(ctx, client, root)
+	profiles, err := store.ListExecutorProfiles(ctx, executorID)
 	if err != nil {
-		return report, fmt.Errorf("ssh orphan sweep: resolve workdir root: %w", err)
+		return report, fmt.Errorf("ssh orphan sweep: list executor profiles: %w", err)
 	}
-
-	stdout, _, err := runSSHCommand(ctx, client, sshOrphanInventoryCommand(resolvedRoot))
-	if err != nil {
-		return report, fmt.Errorf("ssh orphan sweep: inventory: %w", err)
-	}
-	inventory := parseSSHOrphanInventory(stdout, resolvedRoot)
-	report.Found = len(inventory.Processes)
 
 	taskContexts := map[string]*sshOrphanTaskContext{}
+	resolvedRoots := map[string]bool{}
+	for _, root := range sshOrphanWorkdirRoots(config, profiles) {
+		resolvedRoot, err := expandRemoteHome(ctx, client, root)
+		if err != nil {
+			return report, fmt.Errorf("ssh orphan sweep: resolve workdir root: %w", err)
+		}
+		if resolvedRoots[resolvedRoot] {
+			// Two distinct raw roots (e.g. an executor-config default and a
+			// profile override) can expand to the same absolute remote path
+			// once $HOME is resolved; sweep it only once.
+			continue
+		}
+		resolvedRoots[resolvedRoot] = true
+
+		if err := sweepSSHExecutorOrphansUnderRoot(ctx, client, store, executorID, resolvedRoot, taskContexts, &report, log); err != nil {
+			return report, err
+		}
+	}
+
+	log.Info("ssh orphan sweep completed",
+		zap.String("executor_id", executorID),
+		zap.Int("roots", len(resolvedRoots)),
+		zap.Int("found", report.Found),
+		zap.Int("stopped", report.Stopped),
+		zap.Int("preserved", report.Preserved),
+		zap.Int("failed", report.Failed))
+	return report, nil
+}
+
+// sweepSSHExecutorOrphansUnderRoot runs one inventory/classify/stop pass
+// under a single already-resolved workdir root, accumulating into report.
+func sweepSSHExecutorOrphansUnderRoot(
+	ctx context.Context,
+	client *ssh.Client,
+	store sshOrphanSweepStore,
+	executorID string,
+	resolvedRoot string,
+	taskContexts map[string]*sshOrphanTaskContext,
+	report *sshOrphanSweepReport,
+	log *logger.Logger,
+) error {
+	stdout, _, err := runSSHCommand(ctx, client, sshOrphanInventoryCommand(resolvedRoot))
+	if err != nil {
+		return fmt.Errorf("ssh orphan sweep: inventory: %w", err)
+	}
+	inventory := parseSSHOrphanInventory(stdout, resolvedRoot)
+	report.Found += len(inventory.Processes)
+
 	for _, proc := range inventory.Processes {
 		taskCtx, err := loadSSHOrphanTaskContext(ctx, store, taskContexts, proc.TaskID)
 		if err != nil {
@@ -142,14 +217,7 @@ func sweepSSHExecutorOrphans(
 		}
 		report.Stopped++
 	}
-
-	log.Info("ssh orphan sweep completed",
-		zap.String("executor_id", executorID),
-		zap.Int("found", report.Found),
-		zap.Int("stopped", report.Stopped),
-		zap.Int("preserved", report.Preserved),
-		zap.Int("failed", report.Failed))
-	return report, nil
+	return nil
 }
 
 // loadSSHOrphanTaskContext reads a task, its sessions, and its
@@ -459,6 +527,9 @@ func sshOrphanTaskIDFromWorkdir(root, workdir string) (taskDir, taskID string, o
 // stopSSHOrphanProcess runs the stop ladder for one confirmed orphan.
 // sessionDir is only populated (and only then removed) when a pidfile
 // attributed the process to a session; the task directory is never touched.
+// taskDirPath is the exact --workdir value the inventory observed for this
+// pid, passed through so the stop script can re-check the pid's identity
+// immediately before signalling it (see sshOrphanStopCommand).
 func stopSSHOrphanProcess(
 	ctx context.Context,
 	client *ssh.Client,
@@ -467,11 +538,12 @@ func stopSSHOrphanProcess(
 	pidfileAttributed bool,
 	sessionID string,
 ) error {
+	taskDirPath := strings.TrimSuffix(resolvedRoot, "/") + "/tasks/" + proc.TaskDir
 	var sessionDir string
 	if pidfileAttributed && sessionID != "" {
-		sessionDir = resolvedRoot + "/tasks/" + proc.TaskDir + "/.kandev/sessions/" + sessionID
+		sessionDir = taskDirPath + "/.kandev/sessions/" + sessionID
 	}
-	_, _, err := runSSHCommand(ctx, client, sshOrphanStopCommand(proc.PID, sessionDir))
+	_, _, err := runSSHCommand(ctx, client, sshOrphanStopCommand(proc.PID, taskDirPath, sessionDir))
 	return err
 }
 
@@ -486,19 +558,47 @@ func stopSSHOrphanProcess(
 // gone too: kill(2) still reports success for an unreaped zombie, and this
 // sweep is not the process's parent, so it can never be the one to reap it.
 //
+// Before any signal, the script re-reads the pid's own command line (the
+// same ps -p/proc fallback remoteProcessCommandLineCommand uses for the
+// persisted-executors_running identity check) and confirms it still names
+// agentctl with --workdir taskDirPath at a word boundary, mirroring
+// commandLineHasFlagValue's exact-value contract. The time between the
+// inventory snapshot and this stop command is a real window for the pid to
+// have exited and been reused by an unrelated process on a busy host; a
+// confirmed mismatch is a no-op (exit 0, nothing signalled, nothing
+// cleaned up) rather than a best-effort skip, so a reused pid is never
+// killed on stale evidence. A pid that cannot be read at all (already
+// exited, or the identity probe itself is inconclusive) falls through to
+// the existing kill ladder unchanged, since signalling an absent pid was
+// always harmless.
+//
 //nolint:dupword // shell branches contain repeated `fi` tokens.
-func sshOrphanStopCommand(pid int, sessionDir string) string {
+func sshOrphanStopCommand(pid int, taskDirPath, sessionDir string) string {
 	cleanup := "true"
 	if sessionDir != "" {
 		cleanup = removeRemoteDirCommand(sessionDir)
 	}
 	return fmt.Sprintf(`TARGET_PID=%[1]d
+TASKDIR=%[2]s
+NEEDLE="--workdir $TASKDIR "
+CURRENT_CMD=$(
+%[3]s
+)
+if [ $? -eq 0 ]; then
+  case "$CURRENT_CMD " in
+    *agentctl*"$NEEDLE"*) ;;
+    *)
+      echo "orphan sweep: pid $TARGET_PID no longer matches agentctl --workdir $TASKDIR; skipping" >&2
+      exit 0
+      ;;
+  esac
+fi
 CHILDREN=$(ps -eo pid=,ppid= 2>/dev/null | while read -r cpid cppid; do
   [ "$cppid" = "$TARGET_PID" ] && echo "$cpid"
 done)
 if kill "$TARGET_PID" 2>/dev/null; then
   attempt=0
-  while kill -0 "$TARGET_PID" 2>/dev/null && [ "$attempt" -lt %[2]d ]; do
+  while kill -0 "$TARGET_PID" 2>/dev/null && [ "$attempt" -lt %[4]d ]; do
     sleep 0.1
     attempt=$((attempt + 1))
   done
@@ -519,5 +619,5 @@ if kill -0 "$TARGET_PID" 2>/dev/null; then
       ;;
   esac
 fi
-%[3]s`, pid, sshAgentctlStopPollAttempts, cleanup)
+%[5]s`, pid, shellQuote(taskDirPath), remoteProcessCommandLineCommand(pid), sshAgentctlStopPollAttempts, cleanup)
 }

@@ -57,6 +57,7 @@ func TestSSHOrphanStopCommandKillsProcessAndDirectChildProcessGroup(t *testing.T
 
 	dir := t.TempDir()
 	childPIDFile := filepath.Join(dir, "child.pid")
+	taskDirPath := filepath.Join(dir, "tasks", "task-1")
 
 	targetScript := fmt.Sprintf(`set -m
 trap '' TERM
@@ -65,7 +66,12 @@ echo $! > %s
 wait
 `, shellQuote(childPIDFile))
 
-	target := exec.Command("bash", "-c", targetScript)
+	// The real target is a plain bash process, not agentctl, so its own
+	// command line is given a trailing "agentctl --workdir <taskDirPath>"
+	// argv tail purely so the stop script's identity recheck (added for
+	// R1-F2) sees a match — exercising the exact same script this test
+	// already runs, rather than a shortcut around it.
+	target := exec.Command("bash", "-c", targetScript, "agentctl", "--workdir", taskDirPath)
 	if err := target.Start(); err != nil {
 		t.Fatalf("start target process: %v", err)
 	}
@@ -90,7 +96,7 @@ wait
 		t.Fatalf("child pid %d is not alive before the stop", childPID)
 	}
 
-	script := sshOrphanStopCommand(targetPID, "")
+	script := sshOrphanStopCommand(targetPID, taskDirPath, "")
 	output, err := exec.Command("sh", "-c", script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("stop command failed: %v\n%s", err, output)
@@ -134,12 +140,65 @@ func TestSSHOrphanStopCommandOnAlreadyExitedProcessSucceeds(t *testing.T) {
 		t.Fatalf("mkdir session dir: %v", err)
 	}
 
-	script := sshOrphanStopCommand(deadPID, sessionDir)
+	script := sshOrphanStopCommand(deadPID, filepath.Join(dir, "task-1"), sessionDir)
 	output, err := exec.Command("sh", "-c", script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("stop command on an already-exited pid failed: %v\n%s", err, output)
 	}
 	if _, statErr := os.Stat(sessionDir); !os.IsNotExist(statErr) {
 		t.Fatalf("session dir %s was not removed for a pidfile-attributed stop", sessionDir)
+	}
+}
+
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.16
+//
+// Review Round 1 (R1-F2): the stop script must re-check the target pid's own
+// command line before signalling it, because the pid can have exited and
+// been reused by an unrelated process in the window between the inventory
+// snapshot and this stop call. This proves a real, live process whose
+// command line does not name agentctl with the expected --workdir is left
+// completely alone: not signalled, and the script still exits 0 (a no-op is
+// success, not a failure to report).
+func TestSSHOrphanStopCommandMismatchedIdentityLeavesProcessAlive(t *testing.T) {
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep not available")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+
+	target := exec.Command("sleep", "100")
+	if err := target.Start(); err != nil {
+		t.Fatalf("start target process: %v", err)
+	}
+	targetPID := target.Process.Pid
+	targetReaped := false
+	t.Cleanup(func() {
+		_ = target.Process.Kill()
+		if !targetReaped {
+			_ = target.Wait()
+		}
+	})
+
+	if !processAlive(targetPID) {
+		t.Fatalf("target pid %d is not alive before the stop", targetPID)
+	}
+
+	// The target's real command line is a plain "sleep 100": it never names
+	// agentctl or this taskDirPath, simulating the pid having been reused by
+	// an unrelated process since the inventory snapshot was taken.
+	script := sshOrphanStopCommand(targetPID, "/remote/tasks/task-1", "")
+	output, err := exec.Command("sh", "-c", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("stop command on a mismatched pid should succeed as a no-op: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "no longer matches") {
+		t.Fatalf("stop command output = %q, want a message noting the identity mismatch", output)
+	}
+	if !processAlive(targetPID) {
+		_ = target.Process.Kill()
+		targetReaped = true
+		_ = target.Wait()
+		t.Fatalf("target pid %d was signalled despite a command-line identity mismatch", targetPID)
 	}
 }

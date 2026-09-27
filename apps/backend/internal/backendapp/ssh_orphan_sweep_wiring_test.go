@@ -45,6 +45,10 @@ func (r *sshOrphanSweepWiringRepo) ListExecutorsRunningByTaskID(context.Context,
 	return nil, nil
 }
 
+func (r *sshOrphanSweepWiringRepo) ListExecutorProfiles(context.Context, string) ([]*models.ExecutorProfile, error) {
+	return nil, nil
+}
+
 // TestStartAgentInfrastructureUsesSSHOrphanSweepWiringHelper mirrors
 // TestStartAgentInfrastructureUsesSSHReachabilityPollerWiringHelper: the
 // composition root must delegate to the narrow, independently-testable

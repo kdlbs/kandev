@@ -22,6 +22,7 @@ import (
 type schedulerTestStore struct {
 	executor       *models.Executor
 	getExecutorHit chan string
+	profiles       []*models.ExecutorProfile
 }
 
 func (s *schedulerTestStore) GetExecutor(_ context.Context, id string) (*models.Executor, error) {
@@ -52,6 +53,10 @@ func (s *schedulerTestStore) ListTaskSessions(context.Context, string) ([]*model
 
 func (s *schedulerTestStore) ListExecutorsRunningByTaskID(context.Context, string) ([]*models.ExecutorRunning, error) {
 	return nil, nil
+}
+
+func (s *schedulerTestStore) ListExecutorProfiles(context.Context, string) ([]*models.ExecutorProfile, error) {
+	return s.profiles, nil
 }
 
 // hangingSSHListener accepts TCP connections but never writes an SSH version
