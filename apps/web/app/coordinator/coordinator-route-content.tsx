@@ -14,6 +14,7 @@ import {
   useCoordinatorAttention,
   type UseCoordinatorAttentionResult,
 } from "./use-coordinator-attention";
+import { useSyncActiveWorkspaceToRoute } from "./use-coordinator-workspace-sync";
 import { CoordinatorHeader, type CoordinatorHeaderView } from "./components/coordinator-header";
 import { CountStrip } from "./components/count-strip";
 import { InputFailureBanner } from "./components/input-failure-banner";
@@ -67,6 +68,7 @@ export function CoordinatorRouteContent({
   children,
 }: CoordinatorRouteContentProps) {
   const { t } = useTranslation();
+  useSyncActiveWorkspaceToRoute(workspaceId);
   const resolved = useResolvedCoordinator(workspaceId, coordinatorId);
   const readyCoordinatorId = resolved.status === "ready" ? resolved.coordinator.id : null;
   const attention = useCoordinatorAttention(workspaceId, readyCoordinatorId);
