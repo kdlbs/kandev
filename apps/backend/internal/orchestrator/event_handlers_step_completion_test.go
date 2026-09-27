@@ -744,11 +744,14 @@ func TestCompletionIntentReconcilerProcessesDueWorkAndStops(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetCompletionIntent: %v", err)
 		}
-		if intent.State == models.CompletionIntentStateSettled {
+		// The repository commits the settled intent before CompleteTurn
+		// publishes the completion event. Wait for both sides of that
+		// boundary before asserting the callback count.
+		if intent.State == models.CompletionIntentStateSettled && turns.completeCalls.Load() == 1 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("due completion intent was not settled by periodic reconciler: %+v", intent)
+			t.Fatalf("due completion intent did not settle and publish exactly once: intent=%+v CompleteTurn calls=%d", intent, turns.completeCalls.Load())
 		}
 		time.Sleep(time.Millisecond)
 	}
