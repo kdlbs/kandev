@@ -115,14 +115,18 @@ type fakeSessionEnsurer struct {
 	err      error
 	sessions map[string]string // taskID -> sessionID
 	calls    []string
+	lastOpts orchestrator.EnsureSessionOptions
 }
 
 func newFakeSessionEnsurer() *fakeSessionEnsurer {
 	return &fakeSessionEnsurer{sessions: map[string]string{}}
 }
 
-func (f *fakeSessionEnsurer) EnsureSession(_ context.Context, taskID string, _ ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
+func (f *fakeSessionEnsurer) EnsureSession(_ context.Context, taskID string, opts ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
 	f.calls = append(f.calls, taskID)
+	if len(opts) > 0 {
+		f.lastOpts = opts[0]
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
