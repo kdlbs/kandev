@@ -124,6 +124,9 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	}
 	dbSvc := database.NewService(pool, databasePath, resetDirs, tracker, log)
 	dbSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
+	if wiring.PersistenceHealth != nil {
+		dbSvc.SetPersistenceHealthProbe(wiring.PersistenceHealth.Healthy)
+	}
 	markPersistenceUnavailable := func() {
 		if wiring.PersistenceHealth != nil {
 			wiring.PersistenceHealth.MarkUnavailable()
@@ -140,7 +143,13 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	if restoreQuiesce == nil && wiring.OrchestratorShutdown != nil {
 		restoreQuiesce = func() error { wiring.OrchestratorShutdown(); return nil }
 	}
-	backupsSvc.RestoreQuiesce = retentionQuiesce(retentionSvc, restoreQuiesce)
+	backupsSvc.RestoreQuiesce = retentionQuiesce(retentionSvc, func() error {
+		dbSvc.InvalidateDatabase()
+		if restoreQuiesce != nil {
+			return restoreQuiesce()
+		}
+		return nil
+	})
 
 	settingsStore := wiring.SystemSettings
 	if settingsStore == nil {
@@ -312,6 +321,9 @@ func (s *Service) StartBackground(ctx context.Context) {
 
 // StopBackground joins owned storage background workers.
 func (s *Service) StopBackground() {
+	if s.Database != nil {
+		s.Database.StopBackground()
+	}
 	if s.ToolRetention != nil {
 		s.ToolRetention.Stop()
 	}

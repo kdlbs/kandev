@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"expvar"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,6 +30,8 @@ import (
 const fakePostgresStatsDriverName = "kandev-system-database-stats-postgres"
 
 var registerFakePostgresStatsDriverOnce sync.Once
+var fakePostgresStatsQueryHookMu sync.RWMutex
+var fakePostgresStatsQueryHook func(context.Context, string) error
 
 type fakePostgresStatsDriver struct{}
 
@@ -50,11 +54,19 @@ func (fakePostgresStatsConn) Begin() (driver.Tx, error) {
 }
 
 func (fakePostgresStatsConn) QueryContext(
-	_ context.Context,
+	ctx context.Context,
 	query string,
 	args []driver.NamedValue,
 ) (driver.Rows, error) {
 	normalized := strings.Join(strings.Fields(query), " ")
+	fakePostgresStatsQueryHookMu.RLock()
+	hook := fakePostgresStatsQueryHook
+	fakePostgresStatsQueryHookMu.RUnlock()
+	if hook != nil {
+		if err := hook(ctx, normalized); err != nil {
+			return nil, err
+		}
+	}
 	switch normalized {
 	case "SELECT pg_database_size(current_database())":
 		return newFakeRows([]string{"pg_database_size"}, []driver.Value{int64(4096)}), nil
@@ -63,6 +75,10 @@ func (fakePostgresStatsConn) QueryContext(
 			return nil, fmt.Errorf("unexpected args for schema version: %#v", args)
 		}
 		return newFakeRows([]string{"value"}, []driver.Value{"v0.99.0"}), nil
+	case "SELECT MAX(id) FROM task_session_messages",
+		"SELECT MAX(digest) FROM task_message_payloads",
+		"SELECT MAX(id) FROM task_session_git_snapshots":
+		return newFakeRows([]string{"max"}, []driver.Value{nil}), nil
 	case "SELECT COALESCE(SUM(LENGTH(content)), 0) FROM task_session_messages",
 		"SELECT COALESCE(SUM(LENGTH(metadata)), 0) FROM task_session_messages",
 		"SELECT COALESCE(SUM(LENGTH(compressed_content)), 0) FROM task_message_payloads",
@@ -213,6 +229,7 @@ func newTestService(t *testing.T) (*Service, *jobs.Tracker, *stubBus, string) {
 		}
 	}
 	svc := NewService(pool, filepath.Join(dataDir, "kandev.db"), dirs, tracker, log)
+	t.Cleanup(svc.StopBackground)
 	return svc, tracker, stub, dataDir
 }
 
@@ -277,12 +294,12 @@ func TestStats_ReturnsPathSizeAndSchemaVersion(t *testing.T) {
 func TestStatsReportsLogicalStorageAndDatabaseGauges(t *testing.T) {
 	svc, _, _, _ := newTestService(t)
 	for _, statement := range []string{
-		`CREATE TABLE task_session_messages (content TEXT, metadata TEXT)`,
-		`CREATE TABLE task_message_payloads (compressed_content BLOB)`,
-		`CREATE TABLE task_session_git_snapshots (files TEXT, metadata TEXT)`,
-		`INSERT INTO task_session_messages VALUES ('hello', '{"a":1}')`,
-		`INSERT INTO task_message_payloads VALUES (x'01020304')`,
-		`INSERT INTO task_session_git_snapshots VALUES ('{"f":1}', '{"m":2}')`,
+		`CREATE TABLE task_session_messages (id TEXT PRIMARY KEY, content TEXT, metadata TEXT)`,
+		`CREATE TABLE task_message_payloads (digest TEXT PRIMARY KEY, compressed_content BLOB)`,
+		`CREATE TABLE task_session_git_snapshots (id TEXT PRIMARY KEY, files TEXT, metadata TEXT)`,
+		`INSERT INTO task_session_messages VALUES ('m-1', 'hello', '{"a":1}')`,
+		`INSERT INTO task_message_payloads VALUES ('p-1', x'01020304')`,
+		`INSERT INTO task_session_git_snapshots VALUES ('g-1', '{"f":1}', '{"m":2}')`,
 	} {
 		if _, err := svc.pool.Writer().Exec(statement); err != nil {
 			t.Fatalf("seed storage metrics with %q: %v", statement, err)
@@ -292,6 +309,11 @@ func TestStatsReportsLogicalStorageAndDatabaseGauges(t *testing.T) {
 	stats, err := svc.Stats()
 	if err != nil {
 		t.Fatalf("Stats: %v", err)
+	}
+	waitForLogicalStatsScan(t, svc)
+	stats, err = svc.Stats()
+	if err != nil {
+		t.Fatalf("Stats after logical scan: %v", err)
 	}
 	payload := statsPayload(t, stats)
 	for field, want := range map[string]float64{
@@ -315,6 +337,184 @@ func TestStatsReportsLogicalStorageAndDatabaseGauges(t *testing.T) {
 	} {
 		if expvar.Get(name) == nil {
 			t.Errorf("expvar %q is not published", name)
+		}
+	}
+}
+
+func TestStatsColdReadDoesNotWaitForLogicalScan(t *testing.T) {
+	pool := newFakePostgresStatsPool(t)
+	svc := NewService(pool, filepath.Join(t.TempDir(), "kandev.db"), ResetDirs{}, nil, nil)
+	t.Cleanup(svc.StopBackground)
+	scanStarted := make(chan struct{})
+	releaseScan := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseScan) }) }
+	fakePostgresStatsQueryHookMu.Lock()
+	fakePostgresStatsQueryHook = func(_ context.Context, query string) error {
+		if strings.Contains(query, "task_session_messages") {
+			select {
+			case <-scanStarted:
+			default:
+				close(scanStarted)
+			}
+			<-releaseScan
+		}
+		return nil
+	}
+	fakePostgresStatsQueryHookMu.Unlock()
+	t.Cleanup(func() {
+		release()
+		fakePostgresStatsQueryHookMu.Lock()
+		fakePostgresStatsQueryHook = nil
+		fakePostgresStatsQueryHookMu.Unlock()
+	})
+
+	type statsResult struct {
+		stats Stats
+		err   error
+	}
+	result := make(chan statsResult, 1)
+	go func() {
+		stats, err := svc.Stats()
+		result <- statsResult{stats: stats, err: err}
+	}()
+
+	select {
+	case <-scanStarted:
+	case <-time.After(time.Second):
+		t.Fatal("logical scan did not start")
+	}
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("Stats: %v", got.err)
+		}
+		if got.stats.LogicalStatsState != "pending" || got.stats.MessageContentBytes != nil || got.stats.LogicalStatsMeasuredAt != nil {
+			t.Fatalf("cold logical stats = %#v, want pending with null totals and timestamp", got.stats)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Stats waited for the logical scan to finish")
+	}
+	release()
+}
+
+func TestStatsUsesLastMetadataAfterTimedOutRead(t *testing.T) {
+	svc := NewService(newFakePostgresStatsPool(t), filepath.Join(t.TempDir(), "kandev.db"), ResetDirs{}, nil, nil)
+	t.Cleanup(svc.StopBackground)
+	first, err := svc.Stats()
+	if err != nil {
+		t.Fatalf("initial Stats: %v", err)
+	}
+	waitForLogicalStatsScan(t, svc)
+
+	fakePostgresStatsQueryHookMu.Lock()
+	fakePostgresStatsQueryHook = func(ctx context.Context, query string) error {
+		if query == "SELECT pg_database_size(current_database())" {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	}
+	fakePostgresStatsQueryHookMu.Unlock()
+	t.Cleanup(func() {
+		fakePostgresStatsQueryHookMu.Lock()
+		fakePostgresStatsQueryHook = nil
+		fakePostgresStatsQueryHookMu.Unlock()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	got, err := svc.StatsContext(ctx)
+	if err != nil {
+		t.Fatalf("StatsContext with cached metadata: %v", err)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("StatsContext exceeded its request deadline by too much")
+	}
+	if !got.MetadataStale || got.SizeBytes != first.SizeBytes || got.MetadataMeasuredAt == nil || first.MetadataMeasuredAt == nil || !got.MetadataMeasuredAt.Equal(*first.MetadataMeasuredAt) {
+		t.Fatalf("metadata fallback = %#v, want stale last-good metadata", got)
+	}
+}
+
+func TestStatsMarksLogicalSnapshotStaleWhilePersistenceIsUnhealthy(t *testing.T) {
+	var healthy atomic.Bool
+	healthy.Store(true)
+	svc := NewService(newFakePostgresStatsPool(t), filepath.Join(t.TempDir(), "kandev.db"), ResetDirs{}, nil, nil)
+	svc.SetPersistenceHealthProbe(healthy.Load)
+	t.Cleanup(svc.StopBackground)
+	if _, err := svc.Stats(); err != nil {
+		t.Fatalf("initial Stats: %v", err)
+	}
+	waitForLogicalStatsScan(t, svc)
+	healthy.Store(false)
+	got, err := svc.Stats()
+	if err != nil {
+		t.Fatalf("Stats while persistence is unhealthy: %v", err)
+	}
+	if got.LogicalStatsState != "stale" || !got.MetadataStale {
+		t.Fatalf("health fallback = %#v, want stale logical and metadata values", got)
+	}
+	svc.logicalStats.mu.Lock()
+	flight := svc.logicalStats.flight
+	svc.logicalStats.mu.Unlock()
+	if flight != nil {
+		t.Fatal("logical scan started while persistence was known unhealthy")
+	}
+}
+
+func TestFailedLogicalScanDoesNotReplaceMetricValues(t *testing.T) {
+	messageContentBytes.Set(8675309)
+	svc := NewService(newFakePostgresStatsPool(t), filepath.Join(t.TempDir(), "kandev.db"), ResetDirs{}, nil, nil)
+	t.Cleanup(svc.StopBackground)
+	fakePostgresStatsQueryHookMu.Lock()
+	fakePostgresStatsQueryHook = func(_ context.Context, query string) error {
+		if query == "SELECT MAX(id) FROM task_session_messages" {
+			return errors.New("database busy")
+		}
+		return nil
+	}
+	fakePostgresStatsQueryHookMu.Unlock()
+	t.Cleanup(func() {
+		fakePostgresStatsQueryHookMu.Lock()
+		fakePostgresStatsQueryHook = nil
+		fakePostgresStatsQueryHookMu.Unlock()
+	})
+
+	if _, err := svc.Stats(); err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	waitForLogicalStatsScan(t, svc)
+	read, err := svc.Stats()
+	if err != nil {
+		t.Fatalf("Stats after failed scan: %v", err)
+	}
+	if read.LogicalStatsState != "unavailable" || read.LogicalStatsError != logicalStatsErrorScanFailed {
+		t.Fatalf("logical state = %q / %q, want unavailable / scan_failed", read.LogicalStatsState, read.LogicalStatsError)
+	}
+	if got := messageContentBytes.Value(); got != 8675309 {
+		t.Fatalf("message content gauge = %d, want prior value after failed scan", got)
+	}
+}
+
+func waitForLogicalStatsScan(t *testing.T, svc *Service) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		svc.logicalStats.mu.Lock()
+		flight := svc.logicalStats.flight
+		finished := svc.logicalStats.snapshot != nil || svc.logicalStats.errorCode != ""
+		svc.logicalStats.mu.Unlock()
+		if finished {
+			return
+		}
+		if flight == nil {
+			t.Fatal("logical stats scan did not start")
+		}
+		select {
+		case <-flight.done:
+		case <-deadline:
+			t.Fatal("logical stats scan did not finish")
 		}
 	}
 }
@@ -358,6 +558,7 @@ func TestStats_ResolvesRelativeSQLiteBackupDirectory(t *testing.T) {
 func TestStats_PostgresDoesNotUseSQLitePragmas(t *testing.T) {
 	dataDir := t.TempDir()
 	svc := NewService(newFakePostgresStatsPool(t), filepath.Join(dataDir, "kandev.db"), ResetDirs{}, nil, nil)
+	t.Cleanup(svc.StopBackground)
 
 	stats, err := svc.Stats()
 	if err != nil {

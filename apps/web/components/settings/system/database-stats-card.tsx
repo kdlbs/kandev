@@ -20,6 +20,7 @@ import type { DatabaseStats } from "@/lib/types/system";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { useActionFeedback, type ActionFeedbackState } from "@/hooks/use-action-feedback";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { ActionButtonContent } from "./action-button-content";
 import { JobProgressIndicator } from "./job-progress-indicator";
 import { FactoryResetDialog } from "./factory-reset-dialog";
@@ -117,6 +118,65 @@ function StatsTable({ database }: { database: DatabaseStats }) {
           value={formatTimestamp(database.last_backup_at, t)}
           testid="system-db-last-backup"
         />
+      )}
+    </div>
+  );
+}
+
+function LogicalStatsStatus({
+  database,
+  isLoading,
+  reload,
+}: {
+  database: DatabaseStats;
+  isLoading: boolean;
+  reload: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const measuredAt = formatTimestamp(database.logical_stats_measured_at, t);
+  const text = {
+    pending: t("system:databaseLogicalStatsPending"),
+    ready: t("system:databaseLogicalStatsReady", { at: measuredAt }),
+    refreshing: t("system:databaseLogicalStatsRefreshing", { at: measuredAt }),
+    stale: t("system:databaseLogicalStatsStale", { at: measuredAt }),
+    unavailable: t("system:databaseLogicalStatsUnavailable"),
+  }[database.logical_stats_state];
+  const canRetry =
+    database.logical_stats_state === "stale" || database.logical_stats_state === "unavailable";
+
+  return (
+    <div className="space-y-1.5" data-testid="system-db-logical-stats">
+      <div className="flex flex-wrap items-center gap-2">
+        <p
+          role="status"
+          className="min-w-0 break-words text-xs text-muted-foreground"
+          data-testid="system-db-logical-stats-status"
+        >
+          {text}
+        </p>
+        {canRetry && (
+          <Button
+            variant="outline"
+            size="sm"
+            className={settingsActionClassName("cursor-pointer")}
+            disabled={isLoading}
+            onClick={() => void reload()}
+            data-testid="system-db-logical-stats-retry"
+          >
+            <IconRefresh className="mr-1 h-3.5 w-3.5" /> {t("system:databaseLogicalStatsRetry")}
+          </Button>
+        )}
+      </div>
+      {database.metadata_stale && (
+        <p
+          role="note"
+          className="break-words text-xs text-amber-600"
+          data-testid="system-db-metadata-stale"
+        >
+          {t("system:databaseMetadataStale", {
+            at: formatTimestamp(database.metadata_measured_at, t),
+          })}
+        </p>
       )}
     </div>
   );
@@ -313,7 +373,12 @@ export function DatabaseStatsCard() {
             <Spinner className="size-4" /> {t("system:databaseLoading")}
           </div>
         )}
-        {database && <StatsTable database={database} />}
+        {database && (
+          <>
+            <StatsTable database={database} />
+            <LogicalStatsStatus database={database} isLoading={isLoading} reload={reload} />
+          </>
+        )}
         <MaintenanceButtons
           driver={driver}
           vacuumState={vacuum.state}

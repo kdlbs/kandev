@@ -39,6 +39,18 @@ export interface DatabaseStats {
   backup_directory: string;
   size_bytes: number;
   wal_size_bytes: number;
+  /** Logical database-byte snapshot is null until its first complete scan. */
+  message_content_bytes: number | null;
+  message_metadata_bytes: number | null;
+  message_payload_bytes: number | null;
+  git_snapshot_bytes: number | null;
+  logical_stats_state: "pending" | "ready" | "refreshing" | "stale" | "unavailable";
+  /** ISO timestamp for the last complete logical scan. */
+  logical_stats_measured_at: string | null;
+  logical_stats_error?: string;
+  metadata_stale: boolean;
+  /** ISO timestamp for the current or last-known metadata read. */
+  metadata_measured_at: string | null;
   schema_version: string;
   /** ISO timestamp; null when no backup has been taken yet. */
   last_backup_at: string | null;

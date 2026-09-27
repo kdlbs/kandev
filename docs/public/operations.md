@@ -466,6 +466,14 @@ verified snapshot or a later deliberate recovery procedure to reconcile them.
 
 Open **Settings > System > Data & Logs > Database** to see database size, WAL size, schema version, path, and the newest modification time among regular entries in the sibling `backups/` directory. That timestamp is a filesystem hint, not proof of a valid snapshot: an unrelated or temporary file in the directory can affect it. SQLite exposes three maintenance actions:
 
+Logical storage totals are measured in the background and shown with their last
+measurement time. During the first scan, the page still shows database details
+and available maintenance actions. If a refresh fails, the last complete totals
+remain visible as stale; select **Retry measurement** when the page offers it.
+The logical snapshot is held by the backend for 15 minutes and is lost when the
+backend restarts. The page reports the metadata measurement time separately if
+the live metadata read could not refresh.
+
 - **Optimize** runs `PRAGMA optimize`. It is quick and updates planner statistics.
 - **Vacuum** runs `VACUUM`, compacts the file, and reports bytes reclaimed. It can need substantial temporary disk and can block writes, so run it during a quiet period.
 - **Factory reset** is destructive and is described below.

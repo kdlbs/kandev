@@ -317,18 +317,30 @@ workspace, repository, branch, session, or execution identifiers as labels.
 | `task_status_summary_event_handler_failures_total` | Status-summary events that returned a handler error. |
 | `task_message_payload_hydrations_total` | Explicit payload hydration outcomes, labelled only by `outcome=success` or `outcome=error`. |
 | `task_message_payload_hydration_latency_ms` | Cumulative hydration counts in the bounded `10`, `50`, `250`, `1000`, and `+Inf` millisecond buckets, labelled by outcome. |
-| `task_message_content_bytes` | Logical bytes in message content from the latest database-stat read. |
-| `task_message_metadata_bytes` | Logical bytes in inline message metadata from the latest database-stat read. |
-| `task_message_payload_compressed_bytes` | Compressed external payload bytes from the latest database-stat read. |
-| `task_git_snapshot_bytes` | Logical Git snapshot file and metadata bytes from the latest database-stat read. |
+| `task_message_content_bytes` | Logical bytes in message content from the latest complete database-stat scan. |
+| `task_message_metadata_bytes` | Logical bytes in inline message metadata from the latest complete database-stat scan. |
+| `task_message_payload_compressed_bytes` | Compressed external payload bytes from the latest complete database-stat scan. |
+| `task_git_snapshot_bytes` | Logical Git snapshot file and metadata bytes from the latest complete database-stat scan. |
+| `database_logical_stats_measured_at_unix` | Unix timestamp of the latest complete logical database-stat scan. Zero means no scan has completed. |
+| `database_logical_stats_scan_total` | Background logical scan outcomes, keyed only by the fixed result category. |
 | `database_size_bytes` / `database_wal_size_bytes` | Database and SQLite WAL bytes from the latest database-stat read. PostgreSQL reports `0` for the SQLite-only WAL gauge. |
 | `message_queue_depth` | Current unreserved prompt queue depth. `-1` means the queue is unavailable or the bounded read failed. |
 | `agent_active_runtimes` | Agent executions currently owned by the lifecycle runtime. |
 
-`GET /api/v1/system/database` refreshes the database and storage gauges and
-returns the same values as typed fields: `size_bytes`, `wal_size_bytes`,
-`message_content_bytes`, `message_metadata_bytes`, `message_payload_bytes`,
-and `git_snapshot_bytes`. Storage categories use portable logical byte
+`GET /api/v1/system/database` returns live database metadata and the latest
+complete logical storage snapshot. Metadata fields include `size_bytes`,
+`wal_size_bytes`, `backup_directory`, `schema_version`, and `last_backup_at`.
+`message_content_bytes`,
+`message_metadata_bytes`, `message_payload_bytes`, and `git_snapshot_bytes` are
+null until the first scan completes. `logical_stats_state` reports `pending`,
+`ready`, `refreshing`, `stale`, or `unavailable`, and
+`logical_stats_measured_at` identifies the snapshot time. A request does not
+wait for a logical scan. The backend builds snapshots in bounded batches and
+keeps one process-local result for 15 minutes. If a refresh fails, the endpoint
+keeps the previous values and their timestamp; a backend restart starts a new
+cold scan. `metadata_stale` and `metadata_measured_at` describe freshness of
+the live metadata separately. `logical_stats_error` contains a stable error
+code when a scan fails. Storage categories use portable logical byte
 aggregates, so they remain available when SQLite `dbstat` or PostgreSQL
 relation-size facilities are unavailable. Use them for trends and retention
 decisions; use filesystem or database-provider metrics for physical quota and

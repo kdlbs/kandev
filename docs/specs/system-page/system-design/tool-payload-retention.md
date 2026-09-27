@@ -270,7 +270,10 @@ Persisted operation failures remain part of the returned status.
 The existing lifetime epoch and mutation generation checks apply to both error
 channels. A stale GET cannot clear a newer error or overwrite a mutation result.
 Polling continues at the existing cadence without automatic mutation retries.
-The hook keeps its outward `error` contract for `RetentionError`.
+Expose the error source to `RetentionError`: a failed status GET says that
+current status is unavailable and labels retained analysis as last known;
+an action error retains the operation-failure copy. The hook still keeps the
+last accepted status and its timestamps while polling recovers.
 Draft ownership stays in `useToolPayloadRetentionDraft`.
 
 The [platform health design](../../platform/system-design/postgres-domain-store-parity.md#sqlite-maintenance-coordination)
