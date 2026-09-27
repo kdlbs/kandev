@@ -118,7 +118,7 @@ function PluginExecutorActions({
   const settingsLabel = t("task:executorSettings");
   const controlClassName = cn(
     "cursor-pointer rounded-md text-muted-foreground hover:bg-muted hover:text-foreground active:scale-[0.96]",
-    touch ? "h-11 w-11" : "h-10 w-10",
+    touch ? "h-12 w-12" : "h-10 w-10",
   );
   const settingsPath = env.executor_profile_id
     ? executorProfileSettingsPath(env.executor_profile_id)
@@ -233,7 +233,7 @@ function KubernetesActions({
   const { t } = useTranslation();
   const controlClassName = cn(
     "cursor-pointer rounded-md text-muted-foreground hover:bg-muted hover:text-foreground active:scale-[0.96]",
-    touch ? "h-11 w-11" : "h-10 w-10",
+    touch ? "h-12 w-12" : "h-10 w-10",
   );
   const settingsPath = env.executor_profile_id
     ? executorProfileSettingsPath(env.executor_profile_id)
@@ -305,7 +305,7 @@ function ResetEnvironmentAction({
             <Button
               variant="destructive"
               size="sm"
-              className={cn("cursor-pointer text-xs", touch && "min-h-11 px-3")}
+              className={cn("cursor-pointer text-xs", touch && "min-h-12 px-3")}
               disabled={!env || isResetting}
               data-testid="executor-settings-reset"
               onClick={onReset}

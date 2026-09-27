@@ -214,6 +214,19 @@ The exact CI Go lint command passed with zero issues. `make -C apps/backend buil
 failed or pending checks. The documentation-coverage publisher first hit GitHub code-search HTTP 429;
 the failed-job rerun passed after the reported retry delay elapsed. No review threads remain unresolved.
 
+## Touch-target retry audit
+
+The retry audit for the green CI rerun at `986910f1c18` found that the phone plugin-executor status
+test passed only after retry: a refresh control rendered at `43.99993896484375px`, just below the
+44px target. Touch controls in the executor disclosure now use 48px nominal height and width,
+including the drawer close and reset actions. The Playwright helper checks both dimensions and covers
+the drawer close action. The component test expects the 48px classes.
+
+Local validation passed after `make build-web`: the executor disclosure component tests (12 passed),
+the phone and desktop plugin-executor status specs (one test each, retries disabled), and the phone
+Kubernetes task-environment spec (one test, retries disabled). Targeted Prettier and ESLint checks
+passed. Fresh PR checks for this follow-up commit are tracked in the implementation task plan.
+
 ## Dependencies
 
 [Task 02](task-02-authenticated-transport.md), [Task 03](task-03-profile-admission.md),

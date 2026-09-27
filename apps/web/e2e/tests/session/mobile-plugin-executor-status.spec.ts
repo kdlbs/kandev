@@ -9,6 +9,7 @@ async function expectTouchTarget(locator: Locator, label: string) {
   const box = await locator.boundingBox();
   expect(box, `${label} must have geometry`).not.toBeNull();
   expect(box!.height, `${label} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
+  expect(box!.width, `${label} must be at least 44px wide`).toBeGreaterThanOrEqual(44);
 }
 
 test("phone drawer exposes cleanup retry and status with touch-sized actions", async ({
@@ -46,6 +47,7 @@ test("phone drawer exposes cleanup retry and status with touch-sized actions", a
     await trigger.tap();
     const drawer = testPage.getByTestId("executor-settings-drawer");
     await expect(drawer).toBeVisible();
+    await expectTouchTarget(drawer.getByRole("button", { name: "Close" }), "Drawer close action");
     await expect(drawer.getByTestId("plugin-executor-status-message")).toContainText(
       "Resource removal is unconfirmed.",
     );
