@@ -389,6 +389,7 @@
   "sshIdentityEncrypted": "暗号化済み",
   "sshIdentityEncryptedReason": "パスフレーズで保護されています。この鍵には ssh-agent の認証情報ソースを使用してください。",
   "sshIdentityFileBackendHint": "パスは Kandev バックエンドを実行しているマシン上で解決されます。",
+  "sshIdentityFileHint": "パスフレーズで保護された鍵は、先に ssh-agent に読み込む必要があります。",
   "sshIdentityFilePath": "Identity file パス",
   "sshIdentityLoading": "バックエンドホスト上で鍵を検索しています…",
   "sshIdentityNoMatch": "一致する鍵がありません。",

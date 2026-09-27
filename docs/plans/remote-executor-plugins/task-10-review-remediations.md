@@ -159,6 +159,9 @@ Post-fixup checks passed:
   exists, uses fixture data, and was compressed with the supported pngquant fallback.
 - Commit hooks passed, including changed-package Go lint, web lint, i18n ratchet, documentation catalog,
   architecture and specification checks. The current-base merge was validated with the same hooks.
+- CI follow-up supplied the missing Japanese `sshIdentityFileHint` translation; `pnpm run i18n:check`
+  passed with all real locale catalogs complete. The local PR documentation-coverage evaluator reports
+  `covered` after Task 10 links criterion 003.1 to its owning requirement.
 - Documentation checks passed after the final edits: catalog validation (312 decisions, 1189
   specifications), all specification files linted, 36 spec-linter tests, 62 public-doc validation tests,
   and all 47 public pages validated. `git diff HEAD --check` passed.
