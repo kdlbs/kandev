@@ -401,8 +401,9 @@ always journaled before the new stream becomes current.
      comes back to step 5, which then sees any stream that started waiting
      during the stop.
 
-Enforcement **ends** when step 1 finds no turn, or when step 4 or step 5
-journals. At its end, in one `attachMu` hold, it sets `enforcing` false and
+Enforcement **ends** when step 1 finds no turn, when step 4 or step 5
+journals, or when step 4 or step 5 keeps the unjournaled budget pause after
+its append retries fail. At its end, in one `attachMu` hold, it sets `enforcing` false and
 closes `enforcementDoneCh`. It journals at most one event per episode.
 
 A stream that starts waiting waits at most for the rest of step 2, one

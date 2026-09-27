@@ -140,7 +140,7 @@ from the executor profile.
    with `ErrOfflineBudgetExhausted`. With three starts A, B, C where C
    supersedes B while B waits on A, B closes with 4001 and never reads
    `updatesCh` or `requestCh`. A journal append that fails 3 times ends
-   enforcement, increments the counter, and `GetDeliveryStatus` reports the
+   enforcement (closing `enforcementDoneCh`, so a waiting stream proceeds), increments the counter, and `GetDeliveryStatus` reports the
    pause until the next Confirm.
 2. The profile value reaches the instance config. Empty means 15. A
    non-integer, overflow, or out-of-range value is rejected at profile save

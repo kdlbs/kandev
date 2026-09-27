@@ -40,6 +40,14 @@ uses `m.remoteRefreshGroup` so that it never runs alongside a Kubernetes
 refresh. A trigger that arrives during an attempt joins that attempt and
 starts nothing.
 
+An attempt owns the execution from its start until the execution-lock hold
+that ends it: the step 7.3 hold of a clear, the step 3 hold of a [typed
+replay error](#typed-replay-error), the step 1 hold of a
+[rollback](#rollback-after-commit), or the end of a cleanup. Work after that
+hold, such as steps 7.4 and 7.5, runs outside the attempt. A trigger that
+arrives then starts a new attempt instead of joining, so a disconnect during
+step 7.4 or 7.5 gets its own attempts and timer.
+
 ### Triggers
 
 | Trigger | Source | When it runs |
@@ -76,15 +84,22 @@ timer.
   7. `n` never decreases within an episode, so every later timer in the
   episode is at the cap delay, whatever the later results are.
 - A timer captures the link generation current when it is scheduled, read
-  under the execution lock. A callback whose generation is no longer current
-  returns without an attempt. Stop while Disconnected increments the
+  under the execution lock, and gets a new timer token that the execution
+  stores as its pending token in the same hold. Stopping the timer clears the
+  pending token. A callback takes the execution lock and returns without an
+  attempt unless its token is the pending token and its generation is still
+  current; otherwise it clears the pending token as its attempt starts. A
+  callback that had already fired when its timer was stopped therefore
+  starts nothing, and never leaves a second timer. Stop while Disconnected increments the
   generation, so in the same lock hold it stops the pending timer, if any,
   and schedules one timer at the delay for the current `n` that captures the
   new generation (see [Stop while disconnected](#stop-while-disconnected)).
   While an attempt runs, no timer is pending, and the attempt's end
   schedules the next timer with the generation current at that end.
-- Clear, cleanup, and manager shutdown stop the timer. No timer outlives the
-  execution's tracking.
+- Clear, cleanup, a typed replay error, and manager shutdown stop the
+  timer. An attempt that ends with a clear, a cleanup, or the typed replay
+  branch's step 3 schedules no timer. No timer outlives the execution's
+  tracking.
 
 `NextAttemptAt` in the link state is the pending timer's due time. It is nil
 while an attempt runs.
@@ -194,8 +209,10 @@ call is processed for a session whose Stop won, as
      1](detached-agent-continuity-01.md#notices) apply to it as to a
      journaled one, and it sorts after every journaled event at the same
      sequence. Its notice key is
-     `agent-link-budget-unjournaled:<session_id>:<episode_id>`, so a later
-     attempt that reads it again writes nothing new.
+     `agent-link-budget-unjournaled:<session_id>:<episode_id>:<exhausted_at>`,
+     with `ExhaustedAt` in Unix milliseconds, so a later attempt that reads
+     the same pause again writes nothing new, and a second unjournaled pause
+     in the same backend episode gets its own notice.
    - Wait until the projected cursor reaches `AttachedAtSequence`, bounded
      by 30 s. The live stream delivers any event that agentctl journaled
      after the step 4 barrier but before the stream became current. When
@@ -266,8 +283,8 @@ single call site in `connectUpdatesStream`.
 | `completed`, `failed`, or `cancelled` with `TerminalEventRetained` and `TerminalSequence` at or below the projected cursor | Replay has already delivered the terminal event and resolved the waiter. No-op |
 | `completed`, `failed`, or `cancelled` without a retained terminal event, or with `TerminalSequence` above the projected cursor | Uncertain |
 | `prepared`, `interrupted_unknown`, or HTTP 404 (agentctl never journaled the submission) | Uncertain |
-| Transport error | The attempt fails and rolls back |
-| Any other error | Uncertain, with a warning log |
+| Transport error: a dial or connection error, a context deadline or cancellation (including the clear deadline), or an HTTP 5xx or 429 response | The attempt fails and rolls back. The next attempt classifies again |
+| Any other error: an HTTP 4xx response other than 404 and 429, or a response body that does not decode | Uncertain, with a warning log |
 
 Uncertain resolves the waiter through the same marking that the prompt branch
 of `handleStreamDisconnectWithAttempt` applies today: `FailureCode`
@@ -276,8 +293,9 @@ delivery's recovery controls own what happens next. A submission is never
 resent, whatever its state.
 
 Every waiter resolution is guarded by the prompt generation. A resolution
-whose generation is no longer current, or whose waiter the live stream has
-already resolved, is a no-op. The live stream and the classification can
+whose generation is no longer current, or whose waiter the live stream or a
+Stop has already resolved, is a no-op. A classification that finishes after
+Stop resolved the waiter as cancelled therefore leaves it cancelled. The live stream and the classification can
 therefore race without a double resolution.
 
 ### Failure handling
@@ -354,7 +372,9 @@ so that no later attempt finds a half-live transport:
    `REQ-PLATFORM-DETACHED-AGENT-CONTINUITY-004`, because each restart needs
    an attempt that completed steps 1 to 6 on a working link. By then replay
    has shown everything the agent did in the chat. Stop is available the
-   whole time. Attempts are also at least one backoff delay apart. When the
+   whole time. Attempts that the backoff timer starts are at least one
+   backoff delay apart; any other attempt needs a reachability change, a
+   user Reconnect, or a Kubernetes status tick. When the
    confirm returned 204 and step 1 keeps link state `disconnected`, the
    same lock hold sets the episode's `BudgetDeadline` to the rollback time
    plus the budget, and keeps `Since`.

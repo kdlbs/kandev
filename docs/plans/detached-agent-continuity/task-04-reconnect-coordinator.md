@@ -190,7 +190,16 @@ the conversation notices.
     agent gets `ErrKandevCallOutcomeUnknown`. A rollback after a 204 confirm
     moves `BudgetDeadline`; after a lost confirm response it does not.
 13. An `UnjournaledBudgetPause` sets `budget_paused`, holds the queue, and
-    writes one budget notice across repeated attempts.
+    writes one budget notice across repeated attempts; a second unjournaled
+    pause with a different `ExhaustedAt` in the same backend episode writes
+    its own notice.
+14. A timer callback that fired before an immediate trigger stopped its
+    timer starts no attempt and leaves one pending timer. A disconnect during
+    step 7.4 or 7.5 starts its own attempt and timer instead of joining the
+    old attempt. A typed replay error schedules no timer.
+15. A context deadline, a 5xx, or a 429 from `GetDeliverySubmission` in step
+    6 rolls the attempt back and leaves the waiter pending; a waiter that
+    Stop already resolved as cancelled stays cancelled.
 11. A typed replay error in step 4 connects no stream, writes the recorded
     notices but no reconnected notice, clears the link, and assigns durable
     delivery's outcome; a notice write that fails 4 times is counted and the
