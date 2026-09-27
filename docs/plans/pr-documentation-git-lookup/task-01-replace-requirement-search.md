@@ -36,7 +36,7 @@ per-member merge-queue isolation, and trusted workflow execution.
 
 - Build a Git-object reader that fetches the base repository's PR ref,
   verifies the requested head SHA, and searches only referenced requirement
-  directories without checking out the PR head.
+  directories without checking out the PR head. Fetch public refs anonymously.
 - Pass candidate paths through existing exact-head document reads and
   validation; remove code search, base-identity optimization, and filename
   fallback from the loader.
@@ -47,7 +47,8 @@ per-member merge-queue isolation, and trusted workflow execution.
 
 - Coverage exemptions, label permissions, status context, ruleset changes, and
   unrelated API retry behavior.
-- External credentials, execution of PR files, or automatic reruns of #3834.
+- Private-repository support, new credentials, execution of PR files, or
+  automatic reruns of #3834.
 
 ## Acceptance
 
@@ -121,8 +122,16 @@ and removes GitHub code search and filename fallback. Tests cover the PR #3834
 shape, new, moved, deleted, and duplicate definitions, mismatch and failure
 paths, merge-group isolation, and trusted-checkout preservation.
 
-Passed the Node validator and Git reader tests (94 tests), workflow contract,
-action-pinning tests and lint, documentation catalog validation, specification
-lint, Node syntax checks, and `git diff --check`. The repository-wide audit
+PR fixup also preserves the Git operation stage when the child process cannot
+start and isolates fixture Git commands from inherited `GIT_*` overrides. The
+workflow contract keeps credentials disabled because this public repository's
+pull-request refs are fetched anonymously; private-repository support remains
+out of scope.
+
+Passed the Node validator and Git reader tests (111 tests), workflow contract
+(7 tests), action-pinning tests (9 tests) and lint (24 workflow files),
+documentation catalog validation (317 decisions and 1210 specifications),
+specification lint, harness checks, Node syntax checks, `git diff --check`, and
+the focused `pr-docs.yml` security audit. The repository-wide audit
 (`zizmor .github/workflows`) remains nonzero because of findings in other
 workflow files; the changed `pr-docs.yml` workflow has no findings.

@@ -44,7 +44,9 @@ Apply this guidance whenever editing `.github/**`.
   for bounded exact-head requirement searches, but must keep its worktree and
   executable scripts at the trusted revision. Read candidate files through
   the bounded `.github/scripts/pr-docs.cjs` adapter; never check out or execute
-  a pull-request head.
+  a pull-request head. The repository is public, so Git fetches are anonymous;
+  keep `persist-credentials: false`. Private-repository support needs a separate
+  security review.
 - Its `PR documentation coverage` status is revision-specific. The exact
   `no-docs-allow` label is the only policy override, and merge-group evaluation
   must resolve and validate every member independently against the group's

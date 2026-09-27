@@ -71,7 +71,7 @@ function processFailureDetail(error) {
   return 'process could not start';
 }
 
-function executeGit(args, { cwd, timeoutMs, maxOutputBytes }) {
+function executeGit(args, { cwd, timeoutMs, maxOutputBytes, stage }) {
   const commandArgs = [
     '-c', `core.hooksPath=${os.devNull}`,
     '-c', `core.attributesFile=${os.devNull}`,
@@ -89,7 +89,7 @@ function executeGit(args, { cwd, timeoutMs, maxOutputBytes }) {
       windowsHide: true,
     }, (error, stdout, stderr) => {
       if (error && !Number.isInteger(error.code)) {
-        reject(new GitLookupError('process', processFailureDetail(error)));
+        reject(new GitLookupError(stage, processFailureDetail(error)));
         return;
       }
       resolve({
@@ -189,6 +189,7 @@ class GitHeadReader {
       result = await this.runGit(args, {
         cwd: this.cwd,
         maxOutputBytes,
+        stage,
         timeoutMs: Math.min(MAX_GIT_COMMAND_MS, remainingMs),
       });
     } catch (error) {

@@ -243,6 +243,9 @@ Do not dequeue, requeue, or automatically merge PRs.
 
 Permissions are `contents: read`, `pull-requests: read`, and `statuses: write` only.
 Use SHA-pinned actions, GitHub-hosted runners, a trusted base checkout, and `persist-credentials: false`.
+The public repository's pull-request refs are fetched anonymously. Private-repository
+support is outside this workflow contract; unavailable refs fail closed rather
+than requiring persisted credentials.
 For dispatch, restrict the workflow definition to the default branch. For queue runs, pin consumed scripts to the event base SHA.
 The workflow may fetch PR commits into the trusted checkout's object database, but must keep its worktree and executable scripts at the trusted revision. Do not install PR dependencies, execute PR files, enable Git text-conversion hooks, or interpolate PR text into shell or JavaScript source.
 Validate PR numbers, commit IDs, system names, and returned paths before using them as process arguments or content requests. Bound Git child processes and their output; fail closed when Git objects cannot be retrieved or searched completely. Normalize artifact paths inside their allowed roots, bind content requests to exact repository/head identities, and escape summary text.

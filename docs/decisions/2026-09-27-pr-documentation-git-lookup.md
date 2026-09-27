@@ -26,6 +26,11 @@ trusted workflow or merge-group base revision; never check out or execute the
 PR head. Verify the fetched commit ID against current PR metadata and the
 merge-queue member when applicable.
 
+Keep checkout credentials disabled. The public repository's pull-request refs
+are fetched anonymously, so private-repository support is outside this decision.
+An unavailable ref remains an infrastructure error; private-repository support
+would need a separate credential and trust-boundary review.
+
 Search only the owning system's requirements directory. Treat search matches
 as candidate paths, then use the existing bounded exact-head document reader
 and structural parser to establish definitions, acceptance criteria, and

@@ -8,11 +8,15 @@ const { execFileSync } = require('node:child_process');
 const test = require('node:test');
 
 const { GitHeadReader } = require('./pr-docs-git.cjs');
+const cleanEnvironment = Object.fromEntries(
+  Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)),
+);
 
 function git(cwd, ...args) {
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
+    env: cleanEnvironment,
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
 }
@@ -32,9 +36,9 @@ function makeRemoteFixture(t) {
   const checkout = path.join(root, 'checkout');
   fs.mkdirSync(producer);
   fs.mkdirSync(checkout);
-  execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' });
+  execFileSync('git', ['init', '--bare', remote], { env: cleanEnvironment, stdio: 'ignore' });
   git(remote, 'config', 'uploadpack.allowFilter', 'true');
-  execFileSync('git', ['init', producer], { stdio: 'ignore' });
+  execFileSync('git', ['init', producer], { env: cleanEnvironment, stdio: 'ignore' });
   git(producer, 'config', 'user.email', 'pr-docs@example.invalid');
   git(producer, 'config', 'user.name', 'PR docs test');
 
@@ -87,12 +91,35 @@ function makeRemoteFixture(t) {
   const headSha = git(producer, 'rev-parse', 'HEAD');
   git(producer, 'push', 'origin', `${headSha}:refs/pull/42/head`);
 
-  execFileSync('git', ['init', checkout], { stdio: 'ignore' });
+  execFileSync('git', ['init', checkout], { env: cleanEnvironment, stdio: 'ignore' });
   git(checkout, 'remote', 'add', 'origin', remote);
   git(checkout, 'fetch', '--depth=1', 'origin', 'refs/heads/main');
   git(checkout, 'checkout', '--detach', trustedSha);
   return { checkout, headSha, trustedSha };
 }
+
+test('fixture Git commands ignore inherited repository and index overrides', async t => {
+  const previousGitDir = process.env.GIT_DIR;
+  const previousGitIndexFile = process.env.GIT_INDEX_FILE;
+  process.env.GIT_DIR = path.join(os.tmpdir(), `pr-docs-invalid-git-dir-${process.pid}`);
+  process.env.GIT_INDEX_FILE = path.join(os.tmpdir(), `pr-docs-invalid-index-${process.pid}`);
+
+  try {
+    const fixture = makeRemoteFixture(t);
+    assert.equal(git(fixture.checkout, 'rev-parse', 'HEAD'), fixture.trustedSha);
+  } finally {
+    if (previousGitDir === undefined) {
+      delete process.env.GIT_DIR;
+    } else {
+      process.env.GIT_DIR = previousGitDir;
+    }
+    if (previousGitIndexFile === undefined) {
+      delete process.env.GIT_INDEX_FILE;
+    } else {
+      process.env.GIT_INDEX_FILE = previousGitIndexFile;
+    }
+  }
+});
 
 test('searches the exact fetched PR tree and returns only requirement Markdown paths', async t => {
   const fixture = makeRemoteFixture(t);
@@ -194,6 +221,22 @@ test('rejects a fetched PR ref that does not match the API snapshot', async t =>
     /fetched revision does not match the API snapshot/,
   );
   assert.equal(calls.some(call => call.args[0] === 'grep'), false);
+});
+
+test('preserves the Git operation stage when the process cannot start', async t => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-docs-missing-checkout-'));
+  fs.rmSync(cwd, { recursive: true, force: true });
+  const reader = new GitHeadReader({
+    cwd,
+    headSha: HEAD_SHA,
+    pullNumber: 42,
+    trustedSha: TRUSTED_SHA,
+  });
+
+  await assert.rejects(
+    reader.findRequirementPaths('docs/specs/ui/requirements', 'REQ-UI-COVERAGE-001'),
+    /Git object lookup checkout failed \(process could not start\)/,
+  );
 });
 
 test('treats incomplete, unsafe, and over-limit grep output as lookup errors', async t => {

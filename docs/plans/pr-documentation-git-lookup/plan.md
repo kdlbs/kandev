@@ -25,7 +25,8 @@ can still evaluate a complete PR.
 ### In scope
 
 - Fetch and verify the current PR head as inert Git objects for ordinary,
-  fork, manual-dispatch, and merge-group evaluations.
+  fork, manual-dispatch, and merge-group evaluations. Fetch public PR refs
+  anonymously and keep checkout credentials disabled.
 - Locate requirement candidates in each owning system's exact-head tree and
   validate their contents through the existing bounded document path.
 - Remove code-search requests and filename-derived fallback; retain missing,
@@ -36,8 +37,8 @@ can still evaluate a complete PR.
 
 - Changing which paths need coverage, the `no-docs-allow` override, or the
   required status context.
-- Running or checking out a contributor's code, adding a new token, or
-  changing repository rulesets and merge-queue membership.
+- Private-repository support, running or checking out a contributor's code,
+  adding a new token, or changing repository rulesets and merge-queue membership.
 - Retrying the failed PR #3834 workflow or posting statuses during planning.
 
 ## Technical approach
@@ -47,7 +48,8 @@ trusted checkout in `.github/workflows/pr-docs.yml` and the existing PR metadata
 and changed-file API reads in `.github/scripts/pr-docs.cjs`. A narrow Git object
 reader fetches `refs/pull/<number>/head` from the base repository, verifies its
 commit ID against the current API snapshot, and keeps the checkout at the
-trusted revision. The [PR walkthrough's read-only fetch pattern](../../../.github/workflows/pr-walkthrough.yml)
+trusted revision. Because this repository is public, fetches are anonymous and
+`persist-credentials` stays disabled. The [PR walkthrough's read-only fetch pattern](../../../.github/workflows/pr-walkthrough.yml)
 is the closest local example; the coverage reader does not run PR code.
 
 Search each referenced requirement ID in its system's requirements subtree with
@@ -86,13 +88,21 @@ required for unit tests.
 
 ## Verification results
 
-- PASS: `node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs` (94 tests).
+- PASS: `node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs` (111 tests).
 - PASS: `python3 .github/scripts/pr-docs-workflow-contract_test.py` (7 tests).
-- PASS: action-pinning tests and lint (24 workflow files).
-- PASS: specification catalog validation and spec lint.
-- PASS: Node syntax checks and `git diff --check`.
+- PASS: `python3 .github/scripts/lint-action-pinning_test.py` (9 tests) and
+  `python3 .github/scripts/lint-action-pinning.py` (24 workflow files).
+- PASS: specification catalog validation (317 decisions and 1210 specifications)
+  and specification lint.
+- PASS: harness tests (19), all-file harness lint (200 files), and targeted
+  harness pre-commit check for `.github/AGENTS.md`.
+- PASS: Node syntax checks, `git diff --check`, and focused `zizmor` audit for
+  `pr-docs.yml`.
 - `zizmor .github/workflows` exits 14 on findings in other workflows. The
   focused `pr-docs.yml` audit reports no findings (1 ignored, 2 suppressed).
+- PR fixup preserves the Git operation stage on process-launch errors, isolates
+  fixture Git commands from inherited `GIT_*` variables, and documents anonymous
+  fetches for the public repository with checkout credentials disabled.
 
 ## Risks
 
