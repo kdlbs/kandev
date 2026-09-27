@@ -50,10 +50,19 @@ service Plugin {
   // Optional provider-neutral credential resolver for declared repository providers.
   rpc ResolveGitCredential(ResolveGitCredentialRequest) returns (ResolveGitCredentialResponse);
   rpc GetGitCredentialBinding(GitCredentialBindingRequest) returns (GitCredentialBindingResponse);
+  // Optional, all-or-nothing remote executor provider extension.
+  rpc ValidateExecutorProfile(ValidateExecutorProfileRequest) returns (ValidateExecutorProfileResponse);
+  rpc ProvisionExecutorEnvironment(ProvisionExecutorEnvironmentRequest) returns (ProvisionExecutorEnvironmentResponse);
+  rpc RecoverExecutorOperation(RecoverExecutorOperationRequest) returns (RecoverExecutorOperationResponse);
+  rpc AttachExecutorEnvironment(AttachExecutorEnvironmentRequest) returns (AttachExecutorEnvironmentResponse);
+  rpc InspectExecutorEnvironment(InspectExecutorEnvironmentRequest) returns (InspectExecutorEnvironmentResponse);
+  rpc ResolveExecutorConnection(ResolveExecutorConnectionRequest) returns (ResolveExecutorConnectionResponse);
+  rpc DestroyExecutorEnvironment(DestroyExecutorEnvironmentRequest) returns (DestroyExecutorEnvironmentResponse);
 }
 
 // Implemented by KANDEV (served back over the go-plugin broker).
-// Every RPC is capability-gated server-side (§5).
+// Ordinary Host APIs are capability-gated. Executor callbacks are bound to an
+// admitted provider operation and its current dispatch generation.
 service Host {
   rpc GetState(GetStateRequest) returns (GetStateResponse);
   rpc SetState(SetStateRequest) returns (SetStateResponse);
@@ -96,6 +105,9 @@ service Host {
   rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
   rpc ListAgentProfiles(ListAgentProfilesRequest) returns (ListAgentProfilesResponse);
   rpc ListExecutorProfiles(ListExecutorProfilesRequest) returns (ListExecutorProfilesResponse);
+  rpc CheckpointExecutorResource(CheckpointExecutorResourceRequest) returns (CheckpointExecutorResourceResponse);
+  rpc ReportExecutorProgress(ReportExecutorProgressRequest) returns (ReportExecutorProgressResponse);
+  rpc ReadExecutorRuntimeArtifact(ReadExecutorRuntimeArtifactRequest) returns (stream ExecutorRuntimeArtifactChunk);
   rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListSessionCodeStats(ListSessionCodeStatsRequest) returns (ListSessionCodeStatsResponse);
@@ -450,6 +462,62 @@ generation checked before and after redemption; missing or changed bindings fail
 Disabling, failing, or uninstalling a plugin immediately revokes leases for all
 manifest-declared provider IDs. Repository host and path matching are exact and
 case-sensitive. The broker does not add, remove, or equate a trailing `.git`.
+
+### Remote executor providers
+
+The optional `ExecutorProviderPlugin` extension is all-or-nothing. Its seven RPCs
+validate profiles, provision environments, recover uncertain operations, attach to
+existing resources, inspect state, resolve connection leases, and destroy resources.
+An older plugin that implements none of these methods remains compatible. A plugin
+that declares a provider but omits any required method is unavailable for that provider.
+
+```go
+type ExecutorProviderPlugin interface {
+    ValidateExecutorProfile(context.Context, *ValidateExecutorProfileRequest) (*ValidateExecutorProfileResponse, error)
+    ProvisionExecutorEnvironment(context.Context, *ProvisionExecutorEnvironmentRequest) (*ProvisionExecutorEnvironmentResponse, error)
+    RecoverExecutorOperation(context.Context, *RecoverExecutorOperationRequest) (*RecoverExecutorOperationResponse, error)
+    AttachExecutorEnvironment(context.Context, *AttachExecutorEnvironmentRequest) (*AttachExecutorEnvironmentResponse, error)
+    InspectExecutorEnvironment(context.Context, *InspectExecutorEnvironmentRequest) (*InspectExecutorEnvironmentResponse, error)
+    ResolveExecutorConnection(context.Context, *ResolveExecutorConnectionRequest) (*ResolveExecutorConnectionResponse, error)
+    DestroyExecutorEnvironment(context.Context, *DestroyExecutorEnvironmentRequest) (*DestroyExecutorEnvironmentResponse, error)
+}
+
+type ExecutorProviderHost interface {
+    ExecutorProvider() ExecutorProviderHostAPI
+}
+
+type ExecutorProviderHostAPI interface {
+    CheckpointExecutorResource(context.Context, *CheckpointExecutorResourceRequest) (*CheckpointExecutorResourceResponse, error)
+    ReportExecutorProgress(context.Context, *ReportExecutorProgressRequest) (*ReportExecutorProgressResponse, error)
+    ReadExecutorRuntimeArtifact(context.Context, *ReadExecutorRuntimeArtifactRequest, func(*ExecutorRuntimeArtifactChunk) error) error
+}
+```
+
+The manifest owns provider identity and declares contract and resource-state
+versions. The host forms the identity as `plugin:<plugin-id>:<provider-key>`.
+Provider context includes an operation ID and input digest. Retries of one launch
+reuse both values; the provider must make provisioning idempotent and recover the
+same resource after a lost response. Recovery distinguishes a found resource, a
+confirmed absent operation, and an unknown outcome. Unknown outcomes stay in host
+cleanup inventory until resolved.
+
+Profile secret values are transient inputs. Do not write them, bootstrap nonces,
+or connection credentials to resource state, logs, command arguments, task data,
+or endpoint URLs. Persist only bounded, non-secret state accepted by the manifest's
+`resource_state_schema`. The host supplies generation-fenced callbacks to checkpoint
+resource state, report progress, and stream the agentctl artifact selected for the
+resource platform.
+
+The provider resolves short-lived HTTPS leases for agentctl. Keep credentials in
+HTTP or WebSocket headers. Do not put credentials in URL queries or user info.
+The host validates endpoint addresses and TLS and decorates agentctl, editor, and
+preview proxy traffic. Remote environments must reach the configured Kandev API
+URL for normal task and session operations.
+
+Kandev owns agentctl, ACP, workspace materialization, authorization, task lifecycle,
+and durable resource inventory. The provider owns remote compute and provider
+credentials. Disable, uninstall, or upgrade cannot discard retained-resource
+inventory. Cleanup remains retryable until the provider confirms absence.
 
 SDK types mirror proto but use `map[string]any` for Struct fields. The SDK owns
 all go-plugin/grpc plumbing (handshake, broker for Host, conversions).

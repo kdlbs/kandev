@@ -70,10 +70,13 @@ const MAX_CHANGED_FILES = 3000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_REQUEST_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 250;
-const MAX_RETRY_SLEEP_MS = 180_000;
+// Keep room in the 10-minute workflow job for API requests and evaluation.
+const MAX_RETRY_SLEEP_MS = 7 * 60_000;
 const SECONDARY_RATE_LIMIT_DELAYS_MS = [60_000, 120_000];
+const MAX_RUN_FAILURE_LOG_LENGTH = 300;
 const NO_DOCS_LABEL = 'no-docs-allow';
 const STATUS_CONTEXT = 'PR documentation coverage';
+const MERGE_GROUP_REEVALUATION_CONTEXT = 'PR documentation coverage (merge group reevaluation)';
 const GITHUB_API = 'https://api.github.com';
 
 function defaultSleep(delay) {
@@ -259,6 +262,15 @@ function pathExemption(pathname) {
   }
   if (/^\.github\/(?:workflows|scripts|actions)\//.test(pathname)) {
     return 'CI infrastructure path';
+  }
+  if (
+    pathname.startsWith('scripts/architecture_lint/')
+    || pathname.startsWith('scripts/architecture_lint_tests/')
+    || pathname.startsWith('config/architecture-lint/')
+    || pathname === 'scripts/lint-architecture.py'
+    || pathname === 'scripts/lint-architecture.test.py'
+  ) {
+    return 'architecture lint tooling';
   }
 
   const basename = POSIX_PATH.basename(pathname);
@@ -1367,7 +1379,7 @@ class GitHubClient {
     return [...paths];
   }
 
-  async createCommitStatus(sha, status) {
+  async createCommitStatus(sha, status, context = STATUS_CONTEXT) {
     requireCommitSha(sha, 'status revision');
     if (!status || !['pending', 'success', 'failure', 'error'].includes(status.state)) {
       throw new Error('commit status has an invalid state');
@@ -1379,7 +1391,7 @@ class GitHubClient {
         requestClass: 'commit-status',
         body: {
           state: status.state,
-          context: STATUS_CONTEXT,
+          context,
           description: String(status.description ?? '').slice(0, 140),
           target_url: status.targetUrl,
         },
@@ -1426,7 +1438,16 @@ class GitHubClient {
         repo: this.repo,
         after,
       });
-      const connection = data?.repository?.mergeQueue?.entries;
+      const repository = data?.repository;
+      if (
+        repository
+        && Object.hasOwn(repository, 'mergeQueue')
+        && repository.mergeQueue === null
+        && after === null
+      ) {
+        return [];
+      }
+      const connection = repository?.mergeQueue?.entries;
       if (!connection || !Array.isArray(connection.nodes) || !connection.pageInfo) {
         throw new Error('GitHub merge queue response is incomplete');
       }
@@ -2048,6 +2069,9 @@ function markdownValue(value) {
 
 function resultSummary(result) {
   const lines = [`## PR documentation coverage`, `Result: **${markdownValue(result.status)}**`];
+  if (result.pullRequestResult) {
+    lines.push(`Pull request result: **${markdownValue(result.pullRequestResult.status)}**`);
+  }
   if (result.override) {
     lines.push(`Override: \`${markdownValue(result.override)}\``);
   }
@@ -2090,6 +2114,17 @@ function resultSummary(result) {
       lines.push(`- #${member.number}: **${markdownValue(member.status)}**`);
     }
   }
+  if (result.affectedGroups?.length > 0) {
+    lines.push('', 'Affected merge groups:');
+    for (const group of result.affectedGroups) {
+      lines.push(
+        '- Group ending at ' + markdownValue(group.headSha) + ': **' + markdownValue(group.status) + '**',
+      );
+      for (const member of group.memberResults ?? []) {
+        lines.push(`  - #${member.number}: **${markdownValue(member.status)}**`);
+      }
+    }
+  }
   return `${lines.join('\n')}\n`;
 }
 
@@ -2118,6 +2153,37 @@ function statusDescription(result) {
   return 'Coverage evaluation failed';
 }
 
+function runnerFailureLog(result) {
+  const category = String(result?.status ?? 'error').replace(/[^a-z0-9_-]/gi, '').slice(0, 40) || 'error';
+  const firstError = String(result?.errors?.[0] ?? '')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const apiFailure = /GitHub API request failed with HTTP (\d{3})/i.exec(firstError);
+  let reason;
+  if (category === 'missing') {
+    reason = 'No changed work order covers the triggering paths.';
+  } else if (category === 'invalid') {
+    reason = 'Linked delivery documentation is incomplete or invalid.';
+  } else if (category === 'failure') {
+    reason = 'An affected merge group does not satisfy documentation coverage.';
+  } else if (/GitHub merge queue response is incomplete/i.test(firstError)) {
+    reason = 'GitHub returned an incomplete merge queue response.';
+  } else if (/GitHub GraphQL request failed/i.test(firstError)) {
+    reason = 'The GitHub GraphQL request failed.';
+  } else if (apiFailure) {
+    reason = `The GitHub API request failed with HTTP ${apiFailure[1]}.`;
+  } else if (/merge-group membership/i.test(firstError)) {
+    reason = 'Merge-group membership could not be validated.';
+  } else if (category === 'error') {
+    reason = 'Required GitHub data could not be read or validated.';
+  } else {
+    reason = 'Documentation coverage requirements were not satisfied.';
+  }
+  return `PR documentation coverage failed (${category}): ${reason}`
+    .slice(0, MAX_RUN_FAILURE_LOG_LENGTH);
+}
+
 function runUrl(env) {
   if (!env.GITHUB_SERVER_URL || !env.GITHUB_REPOSITORY || !env.GITHUB_RUN_ID) {
     return undefined;
@@ -2141,36 +2207,54 @@ async function writeRunSummary(summary, env, writeSummary) {
   }
 }
 
-async function publishResult(client, sha, result, targetUrl) {
+async function publishResult(client, sha, result, targetUrl, context = STATUS_CONTEXT) {
   await client.createCommitStatus(sha, {
     description: statusDescription(result),
     state: statusState(result),
     targetUrl,
-  });
+  }, context);
 }
 
-async function evaluateAffectedGroups({ client, pullNumber, targetUrl, entries }) {
+async function evaluateAffectedGroups({ client, pullNumber, targetUrl, entries, publishStatus = true }) {
   const groups = findAffectedMergeGroups({ entries, pullRequestNumber: pullNumber });
   const groupResults = [];
   for (const group of groups) {
-    await client.createCommitStatus(group.headSha, {
-      description: 'Evaluating merge-group documentation coverage',
-      state: 'pending',
-      targetUrl,
-    });
+    if (publishStatus) {
+      await client.createCommitStatus(group.headSha, {
+        description: 'Evaluating merge-group documentation coverage',
+        state: 'pending',
+        targetUrl,
+      }, MERGE_GROUP_REEVALUATION_CONTEXT);
+    }
     const result = await evaluateMergeGroup({
       baseSha: group.baseSha,
       client,
       entries: group.entries,
       headSha: group.headSha,
     });
-    await publishResult(client, group.headSha, result, targetUrl);
+    if (publishStatus) {
+      await publishResult(
+        client,
+        group.headSha,
+        result,
+        targetUrl,
+        MERGE_GROUP_REEVALUATION_CONTEXT,
+      );
+    }
     groupResults.push(result);
   }
   return groupResults;
 }
 
-async function run({ client, env = process.env, event, eventName, writeSummary } = {}) {
+async function run({
+  client,
+  env = process.env,
+  event,
+  eventName,
+  writeSummary,
+  writeLog = defaultLog,
+  publishStatus = env.PR_DOCS_DRY_RUN !== '1' && env.PR_DOCS_DRY_RUN !== 'true',
+} = {}) {
   const effectiveEventName = eventName ?? env.GITHUB_EVENT_NAME;
   const effectiveEvent = event ?? (() => {
     if (typeof env.GITHUB_EVENT_PATH !== 'string' || env.GITHUB_EVENT_PATH.length === 0) {
@@ -2214,11 +2298,13 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
         'merge-group head revision',
       );
       pendingSha = headSha;
-      await apiClient.createCommitStatus(headSha, {
-        description: 'Evaluating merge-group documentation coverage',
-        state: 'pending',
-        targetUrl,
-      });
+      if (publishStatus) {
+        await apiClient.createCommitStatus(headSha, {
+          description: 'Evaluating merge-group documentation coverage',
+          state: 'pending',
+          targetUrl,
+        });
+      }
       const entries = await apiClient.listMergeQueueEntries(targetBranch);
       result = await evaluateMergeGroup({
         baseSha,
@@ -2226,28 +2312,33 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
         entries,
         headSha,
       });
-      await publishResult(apiClient, headSha, result, targetUrl);
+      if (publishStatus) {
+        await publishResult(apiClient, headSha, result, targetUrl);
+      }
     } else {
       const pullNumber = eventPullRequestNumber(effectiveEvent);
       const current = await apiClient.getPullRequest(pullNumber);
       pendingSha = requireCommitSha(current.head.sha, 'pull-request head revision');
-      await apiClient.createCommitStatus(pendingSha, {
-        description: 'Evaluating pull-request documentation coverage',
-        state: 'pending',
-        targetUrl,
-      });
-      result = await evaluatePullRequest({
+      if (publishStatus) {
+        await apiClient.createCommitStatus(pendingSha, {
+          description: 'Evaluating pull-request documentation coverage',
+          state: 'pending',
+          targetUrl,
+        });
+      }
+      const pullRequestResult = await evaluatePullRequest({
         client: apiClient,
         initialPullRequest: current,
         pullNumber,
       });
-      await publishResult(apiClient, result.headSha ?? pendingSha, result, targetUrl);
 
+      let isLabelTransition = false;
       if (effectiveEventName !== 'workflow_dispatch') {
         const action = effectiveEvent.action;
         if (action === 'labeled' || action === 'unlabeled') {
+          isLabelTransition = true;
           const targetBranch = requireBranchName(
-            result.baseRef ?? current.base?.ref,
+            pullRequestResult.baseRef ?? current.base?.ref,
             'pull-request target branch',
           );
           const entries = await apiClient.listMergeQueueEntries(targetBranch);
@@ -2256,25 +2347,41 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
             entries,
             pullNumber,
             targetUrl,
+            publishStatus,
           });
+          result = {
+            ...pullRequestResult,
+            affectedGroups: groupResults,
+            pullRequestResult,
+          };
           if (groupResults.some(groupResult => !groupResult.ok)) {
             result = {
               ...result,
-              affectedGroups: groupResults,
               errors: [
                 ...(result.errors ?? []),
                 'An affected merge group does not satisfy documentation coverage.',
               ],
               ok: false,
-              status: 'failure',
+              status: pullRequestResult.ok ? 'failure' : pullRequestResult.status,
             };
           }
         }
       }
+      if (!isLabelTransition) {
+        result = pullRequestResult;
+      }
+      if (publishStatus) {
+        await publishResult(
+          apiClient,
+          pullRequestResult.headSha ?? pendingSha,
+          pullRequestResult,
+          targetUrl,
+        );
+      }
     }
   } catch (error) {
     result = errorCoverageResult(error.message, { headSha: pendingSha });
-    if (pendingSha) {
+    if (pendingSha && publishStatus) {
       try {
         await publishResult(apiClient, pendingSha, result, targetUrl);
       } catch {
@@ -2283,12 +2390,15 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
     }
   }
 
+  if (!result.ok && typeof writeLog === 'function') {
+    writeLog(runnerFailureLog(result));
+  }
   await writeRunSummary(resultSummary(result), env, writeSummary);
   return { exitCode: result.ok ? 0 : 1, result };
 }
 
 if (require.main === module) {
-  run()
+  run({ publishStatus: !process.argv.includes('--dry-run') })
     .then(({ exitCode }) => {
       process.exitCode = exitCode;
     })

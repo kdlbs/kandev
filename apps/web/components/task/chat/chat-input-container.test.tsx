@@ -73,7 +73,8 @@ vi.mock("@/hooks/use-prompt-result-delivery", () => ({
   }),
 }));
 
-vi.mock("@/lib/i18n", () => ({
+vi.mock("@/lib/i18n", async (original) => ({
+  ...(await original<typeof import("@/lib/i18n")>()),
   t: (key: string) => key,
 }));
 

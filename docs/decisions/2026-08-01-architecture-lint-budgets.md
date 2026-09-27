@@ -38,15 +38,19 @@ implementation or policy data.
 The enforced checks cover the documented agent-runtime import seam, the rule that shared task code
 must not depend on Office models, the narrow root Zustand composition boundary, backend-wide run
 scheduler ownership, the generic-runs-over-Office dependency direction, and the frontend state
-dependency direction below UI and route modules. Diagnostics must identify the rule, source
-location, and intended replacement seam.
+dependency direction below UI and route modules. `ARCH-DEPRECATION-LEDGER` additionally tracks
+canonical handwritten Go and TypeScript deprecation annotations under the contract in
+[`2026-09-26-architecture-deprecation-ledger.md`](2026-09-26-architecture-deprecation-ledger.md).
+Diagnostics must identify the rule, source location, and intended replacement seam.
 
 Intentional compatibility exceptions are registered in
 `config/architecture-lint/compatibility-ledger.json`. Every entry requires a stable identifier and
 source locator, reason, owner, introduction date or version, removal condition, and target removal
-date or version. Date-based entries fail after expiry, and entries fail when their tracked path or
-marker disappears. New compatibility behavior must register explicitly; broad keyword discovery
-is not part of this foundation.
+date or version. A declaration-level locator may add `declaration` to bind the path and marker to a
+specific source symbol. Date-based entries fail after expiry, and entries fail when their tracked
+path or marker disappears. Declaration registrations also fail when the matching declaration
+disappears. New compatibility behavior must register explicitly; broad keyword discovery is not
+part of this foundation.
 
 ## Consequences
 

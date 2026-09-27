@@ -63,6 +63,7 @@ export function useFileBrowserData(sessionId: string, environmentId: string | nu
     treeLoaded: isTreeLoaded,
   });
   return {
+    sessionId,
     isSessionFailed,
     sessionError,
     folderAction,

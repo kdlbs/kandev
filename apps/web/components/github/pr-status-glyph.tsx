@@ -43,7 +43,8 @@ export function PRStatusGlyph({
   autoMergeEnabled?: boolean;
   size?: "task" | "topbar";
 }) {
-  const dimension = size === "topbar" ? "h-4 w-4" : "h-3.5 w-3.5";
+  // The topbar button shrinks SVGs without an explicit size-* class.
+  const dimension = size === "topbar" ? "size-4" : "h-3.5 w-3.5";
   return (
     <span
       className={cn("relative inline-flex shrink-0", dimension, colorClassName)}

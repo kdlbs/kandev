@@ -27,6 +27,9 @@ by the [Office system](../office/README.md).
 - Core UI behavior belongs to the [UI system](../ui/README.md).
 - External service credentials belong to the [integration system](../integrations/README.md).
 - Desktop packaging belongs to the [desktop system](../desktop/README.md).
+- Remote executor environment identity, inventory, and recovery belong to the
+  [executor system](../executors/README.md). Its draft
+  [provider contract](../executors/system-design/remote-executor-plugins.md) uses plugin lifecycle and dispatch.
 
 ## Migration record
 

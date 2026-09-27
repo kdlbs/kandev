@@ -220,6 +220,52 @@ describe("PRTaskIcon corrupted store entry", () => {
   });
 });
 
+describe("PRTaskIcon stale compact summary", () => {
+  it("keeps a compact summary when a deletion tombstone does not prove it was the final PR", () => {
+    const { container } = renderWithStore(
+      {
+        workspaces: { items: [], activeId: WORKSPACE_ID },
+        workspaceContextGeneration: 3,
+        taskPRs: {
+          workspaceId: WORKSPACE_ID,
+          workspaceContextGeneration: 3,
+          byTaskId: {},
+          deletedAssociationIdsByTaskId: { [TASK_ID]: { id: true } },
+        },
+      },
+      <PRTaskIcon taskId={TASK_ID} prInfo={{ number: 1, state: "open" }} />,
+    );
+
+    expect(container.querySelector(`[data-testid="pr-task-icon-${TASK_ID}"]`)).not.toBeNull();
+  });
+
+  it("hides the indicator after the authoritative summary removes the final PR", () => {
+    const state: Partial<AppState> = {
+      workspaces: { items: [], activeId: WORKSPACE_ID },
+      workspaceContextGeneration: 3,
+      taskPRs: {
+        workspaceId: WORKSPACE_ID,
+        workspaceContextGeneration: 3,
+        byTaskId: {},
+        deletedAssociationIdsByTaskId: { [TASK_ID]: { id: true } },
+      },
+    };
+    const tree = (prInfo?: { number: number; state: string }) => (
+      <StateProvider initialState={state}>
+        <TooltipProvider>
+          <PRTaskIcon taskId={TASK_ID} prInfo={prInfo} />
+        </TooltipProvider>
+      </StateProvider>
+    );
+    const { container, rerender } = render(tree({ number: 1, state: "open" }));
+
+    expect(container.querySelector(`[data-testid="pr-task-icon-${TASK_ID}"]`)).not.toBeNull();
+    rerender(tree());
+
+    expect(container.querySelector(`[data-testid="pr-task-icon-${TASK_ID}"]`)).toBeNull();
+  });
+});
+
 describe("PRTaskIcon accessible status", () => {
   it("names draft, failing checks, and conflict for a complete task indicator", () => {
     renderWithStore(

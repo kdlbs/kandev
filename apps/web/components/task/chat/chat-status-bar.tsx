@@ -88,6 +88,7 @@ function getRightControlVisibility({
   showAutoScrollControl,
   showScrollToLastPrompt,
   showScrollToStart,
+  showJumpToLatest,
   showThreadsLink,
 }: {
   taskId: string | null;
@@ -96,6 +97,7 @@ function getRightControlVisibility({
   showAutoScrollControl: boolean;
   showScrollToLastPrompt: boolean | undefined;
   showScrollToStart: boolean | undefined;
+  showJumpToLatest: boolean | undefined;
   showThreadsLink: boolean;
 }) {
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
@@ -104,7 +106,8 @@ function getRightControlVisibility({
     canShare ||
     showThreadsLink ||
     !!showScrollToLastPrompt ||
-    !!showScrollToStart;
+    !!showScrollToStart ||
+    !!showJumpToLatest;
   return { canShare, showRightControls };
 }
 
@@ -128,6 +131,8 @@ export type ChatStatusBarProps = {
   showScrollToLastPrompt?: boolean;
   onScrollToLastPrompt?: () => void;
   lastPromptScrollDirection?: "up" | "down";
+  showJumpToLatest?: boolean;
+  onJumpToLatest?: () => void;
   showScrollToStart?: boolean;
   onScrollToStart?: () => void;
 };
@@ -153,6 +158,49 @@ export function ComposerCIStatus({
   );
 }
 
+function ChatStatusBarRightControls({
+  canShare,
+  taskId,
+  sessionId,
+  showJumpToLatest,
+  onJumpToLatest,
+  showScrollToLastPrompt,
+  onScrollToLastPrompt,
+  lastPromptScrollDirection,
+  showScrollToStart,
+  onScrollToStart,
+}: Pick<
+  ChatStatusBarProps,
+  | "taskId"
+  | "sessionId"
+  | "showJumpToLatest"
+  | "onJumpToLatest"
+  | "showScrollToLastPrompt"
+  | "onScrollToLastPrompt"
+  | "lastPromptScrollDirection"
+  | "showScrollToStart"
+  | "onScrollToStart"
+> & { canShare: boolean }) {
+  return (
+    <div className="ml-auto flex shrink-0 items-center gap-1.5">
+      <OpenInThreadsButton taskId={taskId} sessionId={sessionId} />
+      {sessionId && <AutoScrollToggleButton sessionId={sessionId} />}
+      <TranscriptNavGroup
+        canShare={canShare}
+        taskId={taskId}
+        sessionId={sessionId}
+        showJumpToLatest={showJumpToLatest}
+        onJumpToLatest={onJumpToLatest}
+        showScrollToLastPrompt={showScrollToLastPrompt}
+        onScrollToLastPrompt={onScrollToLastPrompt}
+        lastPromptScrollDirection={lastPromptScrollDirection}
+        showScrollToStart={showScrollToStart}
+        onScrollToStart={onScrollToStart}
+      />
+    </div>
+  );
+}
+
 export function ChatStatusBar({
   todoItems,
   taskId,
@@ -168,6 +216,8 @@ export function ChatStatusBar({
   showScrollToLastPrompt,
   onScrollToLastPrompt,
   lastPromptScrollDirection,
+  showJumpToLatest,
+  onJumpToLatest,
   showScrollToStart,
   onScrollToStart,
 }: ChatStatusBarProps) {
@@ -195,6 +245,7 @@ export function ChatStatusBar({
     showAutoScrollControl,
     showScrollToLastPrompt,
     showScrollToStart,
+    showJumpToLatest,
     showThreadsLink,
   });
   if (
@@ -227,20 +278,18 @@ export function ChatStatusBar({
       {taskId && <PRMergedBanner key={`${taskId}-merged`} taskId={taskId} />}
       {taskId && <PRClosedBanner key={`${taskId}-closed`} taskId={taskId} />}
       {showRightControls && (
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <OpenInThreadsButton taskId={taskId} sessionId={sessionId} />
-          {sessionId && <AutoScrollToggleButton sessionId={sessionId} />}
-          <TranscriptNavGroup
-            canShare={canShare}
-            taskId={taskId}
-            sessionId={sessionId}
-            showScrollToLastPrompt={showScrollToLastPrompt}
-            onScrollToLastPrompt={onScrollToLastPrompt}
-            lastPromptScrollDirection={lastPromptScrollDirection}
-            showScrollToStart={showScrollToStart}
-            onScrollToStart={onScrollToStart}
-          />
-        </div>
+        <ChatStatusBarRightControls
+          canShare={canShare}
+          taskId={taskId}
+          sessionId={sessionId}
+          showJumpToLatest={showJumpToLatest}
+          onJumpToLatest={onJumpToLatest}
+          showScrollToLastPrompt={showScrollToLastPrompt}
+          onScrollToLastPrompt={onScrollToLastPrompt}
+          lastPromptScrollDirection={lastPromptScrollDirection}
+          showScrollToStart={showScrollToStart}
+          onScrollToStart={onScrollToStart}
+        />
       )}
       {showProceed && nextStepName && (
         <WorkflowMoveProceedButton

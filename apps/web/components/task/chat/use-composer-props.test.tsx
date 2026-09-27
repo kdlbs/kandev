@@ -39,6 +39,8 @@ function composerArgs() {
       handleAddContextFile: vi.fn(),
     } as never,
     composerWorkspaceId: null,
+    workspaceResolutionFailed: false,
+    onRetryWorkspaceResolution: vi.fn(),
     isMoving: false,
     implementPlanHandler: undefined,
     executor: { unavailable: false },

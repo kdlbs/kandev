@@ -1,5 +1,5 @@
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
-import type { ChangeLayer, CommitDetailTarget } from "@/components/task/changes-diff-target";
+import type { ChangeLayer, CommitDetailTarget } from "@/lib/state/diff-target-types";
 import { t } from "@/lib/i18n";
 import { focusOrAddPanel } from "./dockview-layout-builders";
 import { reviewPanelId, type ReviewPanelTarget } from "./dockview-review-panel-id";

@@ -188,6 +188,14 @@ type RunResolver interface {
 	ResolveRunForTask(ctx context.Context, taskID string) string
 }
 
+// RunEventAppender records runtime behavior against a run's event stream.
+// Satisfied by the office service; mirrors the runtime action surface's own
+// seam (internal/office/runtime.RunEventAppender) so a refused agent read
+// can be recorded the same way a refused runtime action already is.
+type RunEventAppender interface {
+	AppendRunEvent(ctx context.Context, runID, eventType, level string, payload map[string]interface{})
+}
+
 // TaskCanceller hard-cancels a task's active execution. Used by the
 // reactivity pipeline when a task is moved to "cancelled" status.
 type TaskCanceller interface {
@@ -427,6 +435,7 @@ type DashboardService struct {
 	routingProvider       RoutingProvider                 // optional; nil disables /routing endpoints (503)
 	attemptLister         RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
 	runResolver           RunResolver                     // optional; nil means status-change activity rows have no run_id
+	runEvents             RunEventAppender                // optional; nil means a refused agent comment read is not recorded on its run
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
 }
@@ -541,6 +550,34 @@ func (s *DashboardService) SetTerminalShapeRecorder(r TerminalShapeRecorder) {
 // rows are logged with an empty run_id.
 func (s *DashboardService) SetRunResolver(r RunResolver) {
 	s.runResolver = r
+}
+
+// SetRunEventAppender wires the seam used to record a refused agent comment
+// read on the caller's run. Optional; when unset, refusals are not recorded
+// anywhere but the response.
+func (s *DashboardService) SetRunEventAppender(r RunEventAppender) {
+	s.runEvents = r
+}
+
+// appendDeniedCommentReadEvent records a refused agent comment read on the
+// caller's run, mirroring the runtime action surface's runtime.denied shape
+// (REQ-OFFICE-AGENT-COMMENT-READS-009). No-ops when no appender is wired or
+// the caller's JWT carries no run identifier; never changes the response or
+// the run's outcome.
+func (s *DashboardService) appendDeniedCommentReadEvent(
+	ctx context.Context, runID, targetTaskID, agentID, sessionID string, err error,
+) {
+	if s.runEvents == nil || runID == "" {
+		return
+	}
+	s.runEvents.AppendRunEvent(ctx, runID, string(models.RunEventTypeRuntimeDenied), string(models.RunEventLevelWarn), map[string]interface{}{
+		"action":      "read_comments",
+		"target_type": "task",
+		"target_id":   targetTaskID,
+		"agent_id":    agentID,
+		"session_id":  sessionID,
+		errorKey:      err.Error(),
+	})
 }
 
 // SetProjectBudgetEvaluator wires the seam used to re-evaluate a

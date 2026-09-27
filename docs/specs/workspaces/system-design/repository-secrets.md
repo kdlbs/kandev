@@ -12,7 +12,7 @@ owners:
 
 ## Scope and requirement mapping
 
-This design covers AC-WORKSPACES-REPOSITORY-SECRETS-001.9 through .12.
+This design covers AC-WORKSPACES-REPOSITORY-SECRETS-001.9 through .13.
 The existing repository-secrets requirement retains the other runtime and storage contracts during specification migration.
 
 ## Deletion boundary
@@ -47,6 +47,13 @@ Automatic name matching is excluded because a replacement name does not establis
 Existing scope-transfer operations remain unchanged in this repair.
 
 ## Settings feedback and mobile parity
+
+`SecretsSettings` renders the scope-specific description in the existing page and group headers.
+The Global description names the three supported binding locations and states that saving alone
+does not inject a secret. The Workspace description names repository bindings and the profile
+restriction. Both descriptions remain visible in empty and populated lists on desktop and phone.
+Update the existing localized settings description keys in every supported locale. No reference
+lookup or secret-value request is needed to render this guidance.
 
 Opening a secret-delete confirmation starts the read-only reference request. While it is pending, the row-local desktop popover or mobile inline confirmation remains visible with its destructive action disabled.
 An unreferenced secret keeps that local confirmation and requires a separate Delete action.

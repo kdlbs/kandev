@@ -37,26 +37,49 @@ func (s *Service) Enable(id string) error {
 	return nil
 }
 
+type DisableResult struct {
+	Disabled                 bool
+	RemoteResourcesMayRemain bool
+}
+
 // Disable stops id's process (if running) and transitions it to
 // StatusDisabled. Idempotent: a no-op (nil error) if id is already
 // disabled.
 func (s *Service) Disable(id string) error {
+	_, err := s.DisableWithResult(id)
+	return err
+}
+
+// DisableWithResult reports whether the plugin declares remote executor
+// providers so the settings UI can warn that their compute may remain live.
+func (s *Service) DisableWithResult(id string) (DisableResult, error) {
+	var result DisableResult
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	rec, err := s.Get(id)
+	if err != nil {
+		return result, err
+	}
+	result.RemoteResourcesMayRemain = len(rec.ExecutorProviders) > 0
+	if len(rec.ExecutorProviders) > 0 {
+		s.closeExecutorProviderAdmission(id)
+		defer s.reopenExecutorProviderAdmissionIfActive(id)
+	}
 	dispatchLock := s.dispatchLocks.lockFor(id)
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
 
-	rec, err := s.Get(id)
+	rec, err = s.Get(id)
 	if err != nil {
-		return err
+		return result, err
 	}
 	if rec.Status == StatusDisabled {
-		return nil
+		result.Disabled = true
+		return result, nil
 	}
 	if err := s.cancelAutomationDeliveries(id); err != nil {
-		return err
+		return result, err
 	}
 	if s.runtime != nil {
 		s.runtime.Stop(id)
@@ -70,14 +93,15 @@ func (s *Service) Disable(id string) error {
 				zap.String("plugin_id", id), zap.Error(setErr))
 		}
 		s.notifyDeliverer()
-		return fmt.Errorf("plugins: disable aborted, could not purge plugin agent conversations: %w", err)
+		return result, fmt.Errorf("plugins: disable aborted, could not purge plugin agent conversations: %w", err)
 	}
 	if err := s.SetStatus(id, StatusDisabled); err != nil {
-		return err
+		return result, err
 	}
 	s.notifyDeliverer()
 	s.notifyAgentToolCatalogChanged()
-	return nil
+	result.Disabled = true
+	return result, nil
 }
 
 // activateStartTimeout bounds the context activate hands to runtime.Start,
@@ -108,6 +132,18 @@ func (s *Service) activate(rec *store.Record) error {
 			return fmt.Errorf("plugins: start %q: %w", rec.ID, err)
 		}
 	}
+	probeCtx, cancelProbe := context.WithTimeout(context.Background(), activateStartTimeout)
+	defer cancelProbe()
+	if err := s.validateExecutorProviderRuntime(probeCtx, rec); err != nil {
+		if s.runtime != nil {
+			s.runtime.Stop(rec.ID)
+		}
+		if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
+			s.log.Warn("plugins: could not persist executor provider contract failure",
+				zap.String("plugin_id", rec.ID), zap.Error(setErr))
+		}
+		return fmt.Errorf("plugins: activate %q: %w", rec.ID, err)
+	}
 	return s.setStatus(rec.ID, StatusActive)
 }
 
@@ -115,6 +151,12 @@ func (s *Service) activate(rec *store.Record) error {
 // Disabled plugins release ownership immediately; an in-place upgrade excludes
 // its previous record by plugin ID.
 func (s *Service) ensureOwnershipAvailable(candidate *manifest.Manifest) error {
+	for _, provider := range candidate.ExecutorProviders {
+		identity := ExecutorProviderIdentity(candidate.ID, provider.Key)
+		if owner, found := s.registry.activeExecutorProviderOwner(identity, candidate.ID); found {
+			return fmt.Errorf("plugins: executor provider %q is already owned by active plugin %q", identity, owner)
+		}
+	}
 	for _, provider := range candidate.RepositoryProviders {
 		if owner, found := s.registry.activeRepositoryProviderOwner(provider, candidate.ID); found {
 			return fmt.Errorf("plugins: repository provider %q is already owned by active plugin %q", provider, owner)
@@ -216,10 +258,13 @@ func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error
 	}
 	s.mu.Unlock()
 	if status != StatusActive {
+		s.closeExecutorProviderAdmission(id)
 		if err := s.cancelAutomationDeliveries(id); err != nil {
 			return err
 		}
 		s.revokeGitCredentialProviderLeases(updated.RepositoryProviders)
+	} else {
+		s.openExecutorProviderAdmission(id)
 	}
 	return nil
 }
@@ -319,6 +364,22 @@ func (s *Service) StartActivePlugins(ctx context.Context) {
 				// The deliverer was refreshed before boot activation began, so
 				// reconcile it after an active plugin fails to spawn. Otherwise
 				// its worker would continue treating the plugin as active.
+				s.notifyDeliverer()
+				s.notifyAgentToolCatalogChanged()
+			}
+			continue
+		}
+		probeCtx, cancelProbe := context.WithTimeout(ctx, activateStartTimeout)
+		probeErr := s.validateExecutorProviderRuntime(probeCtx, rec)
+		cancelProbe()
+		if probeErr != nil {
+			s.runtime.Stop(rec.ID)
+			s.log.Warn("plugins: active provider does not implement the executor contract",
+				zap.String("plugin_id", rec.ID), zap.Error(probeErr))
+			if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, probeErr, true); setErr != nil {
+				s.log.Warn("plugins: could not persist executor provider contract failure",
+					zap.String("plugin_id", rec.ID), zap.Error(setErr))
+			} else {
 				s.notifyDeliverer()
 				s.notifyAgentToolCatalogChanged()
 			}

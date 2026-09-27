@@ -1815,6 +1815,9 @@ func validateKubernetesProfileConfig(config map[string]string) error {
 }
 
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
+	if req.Type == models.ExecutorTypePluginRemote {
+		return nil, fmt.Errorf("%w: plugin remote executors are provider-owned", ErrInvalidExecutorConfig)
+	}
 	if err := requireExecutorTypeAdmin(ctx, req.Type); err != nil {
 		return nil, err
 	}
@@ -1849,13 +1852,25 @@ func (s *Service) notifyExecutorSaved(ctx context.Context, before, after *models
 }
 
 func (s *Service) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
-	return s.executors.GetExecutor(ctx, id)
+	providers, err := s.syncPluginExecutorEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	executor, err := s.executors.GetExecutor(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	s.attachExecutorProvider(executor, providers)
+	return executor, nil
 }
 
 func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExecutorRequest) (*models.Executor, error) {
 	executor, err := s.executors.GetExecutor(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if executor.Type == models.ExecutorTypePluginRemote || (req.Type != nil && *req.Type == models.ExecutorTypePluginRemote) {
+		return nil, fmt.Errorf("%w: plugin remote executors are provider-owned", ErrInvalidExecutorConfig)
 	}
 	targetType := executor.Type
 	if req.Type != nil {
@@ -1949,6 +1964,9 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	executor, err := s.executors.GetExecutor(ctx, id)
 	if err != nil {
 		return err
+	}
+	if executor.Type == models.ExecutorTypePluginRemote {
+		return fmt.Errorf("%w: plugin remote executors are provider-owned", ErrInvalidExecutorConfig)
 	}
 	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
 		return err
@@ -2073,7 +2091,18 @@ func (s *Service) hasExecutorRunningInventory(ctx context.Context, executorID st
 }
 
 func (s *Service) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
-	return s.executors.ListExecutors(ctx)
+	providers, err := s.syncPluginExecutorEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	executors, err := s.executors.ListExecutors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, executor := range executors {
+		s.attachExecutorProvider(executor, providers)
+	}
+	return executors, nil
 }
 
 // Executor Profile operations
@@ -2086,12 +2115,15 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 		return nil, fmt.Errorf("executor_id is required")
 	}
 	// Verify executor exists
-	executor, err := s.executors.GetExecutor(ctx, req.ExecutorID)
+	executor, err := s.GetExecutor(ctx, req.ExecutorID)
 	if err != nil {
 		return nil, fmt.Errorf("executor not found: %w", err)
 	}
 	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
 		return nil, err
+	}
+	if executor.Type == models.ExecutorTypePluginRemote {
+		return s.createPluginExecutorProfile(ctx, executor, req)
 	}
 	if executor.Type == models.ExecutorTypeKubernetes {
 		if err := validateKubernetesProfileConfig(req.Config); err != nil {
@@ -2129,12 +2161,15 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	if err != nil {
 		return nil, err
 	}
-	executor, err := s.executors.GetExecutor(ctx, profile.ExecutorID)
+	executor, err := s.GetExecutor(ctx, profile.ExecutorID)
 	if err != nil {
 		return nil, err
 	}
 	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
 		return nil, err
+	}
+	if executor.Type == models.ExecutorTypePluginRemote {
+		return s.updatePluginExecutorProfile(ctx, profile, executor, req)
 	}
 	if executor.Type == models.ExecutorTypeKubernetes {
 		config := profile.Config
@@ -2252,7 +2287,7 @@ func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	executor, err := s.executors.GetExecutor(ctx, profile.ExecutorID)
+	executor, err := s.GetExecutor(ctx, profile.ExecutorID)
 	if err != nil && !errors.Is(err, models.ErrExecutorNotFound) {
 		return err
 	}
@@ -2261,9 +2296,21 @@ func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
 			return err
 		}
 	}
+	profileInUse, _, err := s.retainedPluginExecutorReferences(ctx, id, nil)
+	if err != nil {
+		return err
+	}
+	if profileInUse {
+		return ErrExecutorProfileInUse
+	}
+	secretIDs, err := s.executorProfileSecretIDs(ctx, profile)
+	if err != nil {
+		return err
+	}
 	if err := s.executors.DeleteExecutorProfile(ctx, id); err != nil {
 		return err
 	}
+	cleanupProfileSecrets(ctx, s.secretStore, secretIDs)
 	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileDeleted, profile)
 	return nil
 }

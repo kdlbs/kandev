@@ -49,11 +49,18 @@ async function createTaskAndWait(apiClient: ApiClient, seedData: SeedData, title
 async function openTask(page: Page, title: string): Promise<SessionPage> {
   const kanban = new KanbanPage(page);
   await kanban.goto();
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 15_000 });
-  await card.click();
-  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
   const session = new SessionPage(page);
+  const sidebarTask = session.sidebarTaskItem(title);
+  if (await sidebarTask.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    // Sidebar task rows are live immediately after creation. The Kanban board
+    // can still be waiting for its filtered column to render the same task.
+    await sidebarTask.click();
+  } else {
+    const card = kanban.taskCardByTitle(title);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await card.click();
+  }
+  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
   await session.waitForLoad();
   return session;
 }

@@ -112,14 +112,22 @@ type Service struct {
 	conversationEpoch  string
 	log                *logger.Logger
 
-	deliverer                Deliverer
-	agentToolCatalogListener AgentToolCatalogListener
-	agentToolGeneration      string
-	agentToolRevision        uint64
-	agentToolSnapshot        plugintools.Snapshot
-	agentToolSnapshotReady   bool
-	runtime                  PluginRuntime
-	secrets                  SecretVault
+	deliverer                       Deliverer
+	agentToolCatalogListener        AgentToolCatalogListener
+	agentToolGeneration             string
+	agentToolRevision               uint64
+	agentToolSnapshot               plugintools.Snapshot
+	agentToolSnapshotReady          bool
+	runtime                         PluginRuntime
+	remoteExecutorPluginsEnabled    bool
+	executorProviderHostHandler     ExecutorProviderHostHandler
+	executorProviderInventoryReader ExecutorProviderInventoryReader
+	executorProviderOpMu            sync.Mutex
+	executorProviderOps             map[string]*activeExecutorProviderOperation
+	executorProviderDispatches      map[string]map[uint64]context.CancelFunc
+	executorProviderAdmissionClosed map[string]bool
+	executorProviderDispatchID      uint64
+	secrets                         SecretVault
 
 	// revokeGitCredentialProvider invalidates leases for a repository provider
 	// when its owning plugin is no longer active. It is wired by backendapp to
@@ -204,17 +212,20 @@ type ReferenceIdentity struct {
 // directly for tests that want a fake store.Store/PluginRuntime.
 func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventBus, log *logger.Logger) *Service {
 	service := &Service{
-		store:               pluginStore,
-		registry:            registry,
-		eventBus:            eventBus,
-		log:                 log,
-		httpClient:          &http.Client{},
-		lifecycleLocks:      newKeyedMutex(),
-		dispatchLocks:       newKeyedRWMutex(),
-		agentToolGeneration: uuid.NewString(),
-		eventHub:            webapp.NewEventHub(),
-		conversationTokens:  newConversationTokenManager(),
-		conversationEpoch:   uuid.NewString(),
+		store:                           pluginStore,
+		registry:                        registry,
+		eventBus:                        eventBus,
+		log:                             log,
+		httpClient:                      &http.Client{},
+		lifecycleLocks:                  newKeyedMutex(),
+		dispatchLocks:                   newKeyedRWMutex(),
+		agentToolGeneration:             uuid.NewString(),
+		eventHub:                        webapp.NewEventHub(),
+		conversationTokens:              newConversationTokenManager(),
+		conversationEpoch:               uuid.NewString(),
+		executorProviderOps:             make(map[string]*activeExecutorProviderOperation),
+		executorProviderDispatches:      make(map[string]map[uint64]context.CancelFunc),
+		executorProviderAdmissionClosed: make(map[string]bool),
 	}
 	return service
 }
@@ -686,6 +697,13 @@ func (s *Service) SetRuntime(rt PluginRuntime) {
 	s.runtime = rt
 }
 
+// SetRemoteExecutorPluginsEnabled applies the restart-scoped rollout gate.
+func (s *Service) SetRemoteExecutorPluginsEnabled(enabled bool) {
+	s.mu.Lock()
+	s.remoteExecutorPluginsEnabled = enabled
+	s.mu.Unlock()
+}
+
 // Runtime returns the runtime manager Service spawns/supervises plugin
 // processes through, for boot-time wiring (spawning every active plugin)
 // and the HTTP layer (webhook/tool invocation).
@@ -796,6 +814,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		rec = &store.Record{} // every capability check below denies; should not happen in practice
 	}
 	return &pluginHost{
+		service:             s,
 		pluginID:            pluginID,
 		capabilities:        rec.Capabilities,
 		repositoryProviders: rec.RepositoryProviders,

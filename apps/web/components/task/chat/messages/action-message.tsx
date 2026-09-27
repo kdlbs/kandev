@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useEffect, useMemo, memo, type ReactElement } from "react";
+import { useSessionComposerRecovery } from "../session-recovery-context";
+import { SessionErrorDetails } from "@/components/task/session-error-details";
 import { Trans, useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
+import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { cn } from "@/lib/utils";
 import { useActionMessageSession, useAgentBootOutcomeAfterMessage } from "./action-message-state";
 import type { Message, TaskSessionState } from "@/lib/types/http";
@@ -70,6 +73,18 @@ function shouldShowRecoveryActions({
 }
 
 export const ActionMessage = memo(function ActionMessage({ comment }: { comment: Message }) {
+  const owner = useSessionComposerRecovery(comment.session_id);
+  const metadata = comment.metadata as ActionMeta | undefined;
+  if (metadata?.recovery_actions && owner?.model)
+    return <RecoveryHistory message={comment.content} metadata={metadata} />;
+  return <ActionMessageControls comment={comment} />;
+});
+
+const ActionMessageControls = memo(function ActionMessageControls({
+  comment,
+}: {
+  comment: Message;
+}) {
   // Read session state from the store instead of receiving it as a prop, so a
   // state transition doesn't re-render every message in the list (only the
   // rare action messages that actually depend on it).
@@ -208,6 +223,9 @@ function SettledFailureMessage({
   recoveryActionsVisible: boolean;
   onRecoveryRequested: () => void;
 }) {
+  const { t } = useTranslation();
+  const safeMessage = readableFailureSummary(message);
+  const needsDetails = safeMessage === null;
   const renderedMetadata = recoveryActionsVisible ? metadata : withoutRecoveryActions(metadata);
 
   const specialRecovery = renderSpecialRecovery({
@@ -231,19 +249,37 @@ function SettledFailureMessage({
           <IconAlertTriangle className={cn("h-4 w-4", iconClass)} />
         </div>
         <div className="flex-1 min-w-0 pt-0.5">
-          <div className={cn("text-xs break-words", textClass)}>{message}</div>
-          <ActionMessageDetails metadata={renderedMetadata} />
+          <div className={cn("text-xs wrap-anywhere", textClass)}>
+            {needsDetails ? t("task:anErrorOccurred") : safeMessage}
+          </div>
           {renderSettledActionButtons({
             actions: renderedMetadata?.actions,
             taskId,
             sessionId,
             isRecoveryMessage: metadata?.recovery_actions === true,
+            errorStamp: metadata?.error_stamp ?? metadata?.recovery_stamp,
             onRecoveryRequested,
           })}
+          <ActionMessageDetails
+            metadata={failureDetailsMetadata(renderedMetadata, needsDetails, message)}
+          />
         </div>
       </div>
     </div>
   );
+}
+
+function failureDetailsMetadata(
+  metadata: ActionMeta | undefined,
+  needsDetails: boolean,
+  message: string,
+) {
+  return needsDetails ? { ...metadata, error_output: metadata?.error_output || message } : metadata;
+}
+
+function readableFailureSummary(message: string): string | null {
+  const safe = sanitizeSessionErrorDetails(message);
+  return safe !== message || message.length > 240 || message.includes("\n") ? null : safe;
 }
 
 function withoutRecoveryActions(metadata: ActionMeta | undefined): ActionMeta | undefined {
@@ -256,12 +292,14 @@ function renderSettledActionButtons({
   taskId,
   sessionId,
   isRecoveryMessage,
+  errorStamp,
   onRecoveryRequested,
 }: {
   actions?: MessageAction[];
   taskId?: string;
   sessionId?: string;
   isRecoveryMessage: boolean;
+  errorStamp?: string;
   onRecoveryRequested: () => void;
 }): ReactElement | null {
   if (!actions || actions.length === 0) return null;
@@ -272,6 +310,7 @@ function renderSettledActionButtons({
         actions={actions}
         taskId={taskId}
         sessionId={sessionId}
+        errorStamp={errorStamp}
         onRecoveryRequested={onRecoveryRequested}
       />
     );
@@ -581,5 +620,20 @@ function MissingBranchRecovery({
         </div>
       </div>
     </section>
+  );
+}
+
+function RecoveryHistory({ message, metadata }: { message: string; metadata?: ActionMeta }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="min-w-0 py-2 text-xs text-muted-foreground"
+      data-testid="session-recovery-history"
+    >
+      <p className="wrap-anywhere">
+        {readableFailureSummary(message) ?? t("task:anErrorOccurred")}
+      </p>
+      <SessionErrorDetails>{metadata?.error_output ?? message}</SessionErrorDetails>
+    </div>
   );
 }

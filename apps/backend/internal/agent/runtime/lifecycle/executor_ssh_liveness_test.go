@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 // @covers AC-EXECUTORS-SSH-EXECUTOR-001.10
@@ -195,7 +196,9 @@ func TestVerifyRemoteAgentctlIdentity(t *testing.T) {
 			t.Fatalf("close client: %v", err)
 		}
 
-		ours, err := verifyRemoteAgentctlIdentity(context.Background(), client, 4242, "/remote/session", "/remote/task")
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		ours, err := verifyRemoteAgentctlIdentity(ctx, client, 4242, "/remote/session", "/remote/task")
 		if err == nil || ours {
 			t.Fatalf("verify = (%v, %v), want (false, error)", ours, err)
 		}

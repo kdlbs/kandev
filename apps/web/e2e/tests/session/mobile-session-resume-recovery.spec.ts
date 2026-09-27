@@ -320,24 +320,18 @@ test.describe("mobile: worktree branch resume recovery", () => {
     await expect(fixture.session.recoveryError()).toBeVisible({ timeout: 30_000 });
     await expect(fixture.session.recoveryError()).toContainText("no longer available");
     await expect(fixture.session.recoveryNewBranchButton()).toBeVisible();
-    await expect(fixture.session.recoveryRestoreWorkspaceButton()).toBeVisible();
-
-    for (const button of [
-      fixture.session.recoveryNewBranchButton(),
-      fixture.session.recoveryRestoreWorkspaceButton(),
-    ]) {
-      await expect(button).toBeInViewport();
-      const box = await button.boundingBox();
-      expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-    }
-    await fixture.session.recoveryRestoreWorkspaceButton().focus();
-    await expect(fixture.session.recoveryRestoreWorkspaceButton()).toBeFocused();
+    const branchButton = fixture.session.recoveryNewBranchButton();
+    await expect(branchButton).toBeInViewport();
+    expect((await branchButton.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    const restoreButton = testPage.getByTestId("recovery-restore-workspace-button");
+    await expect(restoreButton).toBeInViewport();
+    expect((await restoreButton.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await restoreButton.focus();
+    await expect(restoreButton).toBeFocused();
     await assertNoDocumentHorizontalOverflow(testPage, "mobile lost branch recovery error");
 
-    // The normal action remains retryable and cannot alter the persisted branch
-    // until the user taps the explicit replacement action.
-    await fixture.session.recoveryResumeButton().tap();
+    // A normal retry remains distinct from the explicit replacement action.
+    await testPage.getByTestId("recovery-resume-button").tap();
     await expect(fixture.session.recoveryError()).toBeVisible({ timeout: 30_000 });
     await expect
       .poll(

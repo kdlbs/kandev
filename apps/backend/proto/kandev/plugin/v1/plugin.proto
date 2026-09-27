@@ -30,6 +30,16 @@ service Plugin {
   // closed without resolving a secret merely to inspect its revision.
   rpc GetGitCredentialBinding(GitCredentialBindingRequest) returns (GitCredentialBindingResponse);
   rpc InvokeAgentTool(AgentToolRequest) returns (AgentToolResponse);
+
+  // Optional remote-executor provider extension. A provider must implement
+  // the complete lifecycle interface before any of these methods are served.
+  rpc ValidateExecutorProfile(ValidateExecutorProfileRequest) returns (ValidateExecutorProfileResponse);
+  rpc ProvisionExecutorEnvironment(ProvisionExecutorEnvironmentRequest) returns (ProvisionExecutorEnvironmentResponse);
+  rpc RecoverExecutorOperation(RecoverExecutorOperationRequest) returns (RecoverExecutorOperationResponse);
+  rpc AttachExecutorEnvironment(AttachExecutorEnvironmentRequest) returns (AttachExecutorEnvironmentResponse);
+  rpc InspectExecutorEnvironment(InspectExecutorEnvironmentRequest) returns (InspectExecutorEnvironmentResponse);
+  rpc ResolveExecutorConnection(ResolveExecutorConnectionRequest) returns (ResolveExecutorConnectionResponse);
+  rpc DestroyExecutorEnvironment(DestroyExecutorEnvironmentRequest) returns (DestroyExecutorEnvironmentResponse);
 }
 
 // Implemented by KANDEV (served back over the go-plugin broker).
@@ -89,6 +99,10 @@ service Host {
   rpc ListWorkflowTransitionGroups(ListWorkflowTransitionGroupsRequest) returns (ListWorkflowTransitionGroupsResponse);
   rpc ListAgentProfiles(ListAgentProfilesRequest) returns (ListAgentProfilesResponse);
   rpc ListExecutorProfiles(ListExecutorProfilesRequest) returns (ListExecutorProfilesResponse);
+  // Operation-bound callbacks available only to executor-provider plugins.
+  rpc CheckpointExecutorResource(CheckpointExecutorResourceRequest) returns (CheckpointExecutorResourceResponse);
+  rpc ReportExecutorProgress(ReportExecutorProgressRequest) returns (ReportExecutorProgressResponse);
+  rpc ReadExecutorRuntimeArtifact(ReadExecutorRuntimeArtifactRequest) returns (stream ExecutorRuntimeArtifactChunk);
   rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
 
   // Sessions + code stats — capability api_read:sessions. Driven by a real
@@ -649,6 +663,193 @@ message ListExecutorProfilesRequest {
 message ListExecutorProfilesResponse {
   repeated ExecutorProfile profiles = 1;
   PageInfo page_info = 2;
+}
+
+// The host derives this authority from the admitted operation. Values from a
+// plugin or browser never grant access to another installation or environment.
+message ExecutorProviderRequestContext {
+  string plugin_id = 1;
+  string installation_id = 2;
+  string provider_key = 3;
+  int32 contract_version = 4;
+  string workspace_id = 5;
+  string task_id = 6;
+  string session_id = 7;
+  string environment_id = 8;
+  string execution_id = 9;
+  string operation_id = 10;
+  string deadline = 11;
+  uint64 environment_generation = 12;
+  string input_digest = 13;
+  uint64 dispatch_generation = 14;
+}
+
+message ExecutorProfileSnapshot {
+  string profile_id = 1;
+  map<string, string> config = 2;
+  // Secret values are transient and scoped to this operation/profile. Never
+  // place them in profile snapshots, checkpoints, or persisted provider state.
+  map<string, string> secret_values = 3;
+}
+
+message ExecutorProviderFieldError {
+  string field = 1;
+  string code = 2;
+  string message_id = 3;
+}
+
+message ExecutorProviderError {
+  string code = 1;
+  string message_id = 2;
+  repeated ExecutorProviderFieldError fields = 3;
+  uint32 retry_after_seconds = 4;
+}
+
+message ExecutorProviderCapabilities {
+  bool terminal = 1;
+  bool files = 2;
+  bool git = 3;
+  bool embedded_editor = 4;
+  bool preview = 5;
+  bool reattach = 6;
+  string retention = 7;
+  uint64 maximum_lifetime_seconds = 8;
+}
+
+message ExecutorResourceDescriptor {
+  string resource_handle = 1;
+  string state_json = 2;
+  string platform = 3;
+  ExecutorProviderCapabilities capabilities = 4;
+  string expires_at = 5;
+  string retention = 6;
+  uint32 state_version = 7;
+}
+
+message ValidateExecutorProfileRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorProfileSnapshot profile = 2;
+}
+
+message ValidateExecutorProfileResponse {
+  repeated ExecutorProviderFieldError field_errors = 1;
+  ExecutorProviderCapabilities capabilities = 2;
+  ExecutorProviderError error = 3;
+}
+
+message ProvisionExecutorEnvironmentRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorProfileSnapshot profile = 2;
+  string bootstrap_json = 3;
+}
+
+message ProvisionExecutorEnvironmentResponse {
+  ExecutorResourceDescriptor resource = 1;
+  ExecutorProviderError error = 2;
+}
+
+message RecoverExecutorOperationRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorProfileSnapshot profile = 2;
+}
+
+message RecoverExecutorOperationResponse {
+  string outcome = 1;
+  ExecutorResourceDescriptor resource = 2;
+  ExecutorProviderError error = 3;
+}
+
+message AttachExecutorEnvironmentRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorResourceDescriptor resource = 2;
+  string expected_runtime_identity = 3;
+}
+
+message AttachExecutorEnvironmentResponse {
+  ExecutorResourceDescriptor resource = 1;
+  ExecutorProviderError error = 2;
+}
+
+message InspectExecutorEnvironmentRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorResourceDescriptor resource = 2;
+}
+
+message InspectExecutorEnvironmentResponse {
+  string state = 1;
+  string reason = 2;
+  string expires_at = 3;
+  ExecutorProviderError error = 4;
+}
+
+message ResolveExecutorConnectionRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorResourceDescriptor resource = 2;
+  string purpose = 3;
+  uint32 runtime_port = 4;
+}
+
+message ExecutorConnectionLease {
+  string base_url = 1;
+  map<string, string> http_headers = 2;
+  map<string, string> websocket_headers = 3;
+  repeated string websocket_subprotocols = 4;
+  string expires_at = 5;
+  string generation = 6;
+}
+
+message ResolveExecutorConnectionResponse {
+  ExecutorConnectionLease lease = 1;
+  ExecutorProviderError error = 2;
+}
+
+message DestroyExecutorEnvironmentRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorResourceDescriptor resource = 2;
+  string cleanup_reason = 3;
+  string cleanup_claim = 4;
+}
+
+message DestroyExecutorEnvironmentResponse {
+  bool confirmed_absent = 1;
+  ExecutorProviderError error = 2;
+}
+
+message CheckpointExecutorResourceRequest {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorResourceDescriptor resource = 2;
+  string phase = 3;
+}
+
+message CheckpointExecutorResourceResponse {
+  bool accepted = 1;
+}
+
+message ReportExecutorProgressRequest {
+  ExecutorProviderRequestContext context = 1;
+  string stage = 2;
+  uint32 completed = 3;
+  uint32 total = 4;
+}
+
+message ReportExecutorProgressResponse {
+  bool accepted = 1;
+}
+
+message ReadExecutorRuntimeArtifactRequest {
+  ExecutorProviderRequestContext context = 1;
+  string artifact_id = 2;
+  string platform = 3;
+}
+
+message ExecutorRuntimeArtifactChunk {
+  string artifact_id = 1;
+  string version = 2;
+  uint64 total_size_bytes = 3;
+  string sha256 = 4;
+  uint32 chunk_index = 5;
+  bytes data = 6;
+  bool final = 7;
 }
 
 message Repository {

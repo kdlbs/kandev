@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isBootstrapSessionRecoveryError,
+  hasSessionRecoveryMessage,
   ownsSessionRecoveryChat,
   selectSessionRecoveryError,
 } from "./session-recovery-presentation";
@@ -62,5 +63,24 @@ describe("session recovery presentation", () => {
     expect(isBootstrapSessionRecoveryError(error)).toBe(false);
     expect(selectSessionRecoveryError(error, "session-1")).toBeNull();
     expect(ownsSessionRecoveryChat(error, "session-1")).toBe(false);
+  });
+});
+
+describe("correlated recovery ownership", () => {
+  it("suppresses only a matching session/stamp, never equal error text", () => {
+    const messages = [
+      { session_id: "session-1", metadata: { recovery_actions: true, error_stamp: "failure-1" } },
+    ];
+    expect(hasSessionRecoveryMessage(messages, "session-1", "failure-1")).toBe(true);
+    expect(hasSessionRecoveryMessage(messages, "session-1", "failure-2")).toBe(false);
+    expect(hasSessionRecoveryMessage(messages, "session-2", "failure-1")).toBe(false);
+    expect(hasSessionRecoveryMessage(messages, "session-1", undefined)).toBe(false);
+    expect(
+      hasSessionRecoveryMessage(
+        [{ ...messages[0], metadata: { ...messages[0].metadata, scope: "task" } }],
+        "session-1",
+        "failure-1",
+      ),
+    ).toBe(false);
   });
 });

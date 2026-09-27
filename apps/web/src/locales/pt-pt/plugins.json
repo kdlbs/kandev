@@ -16,6 +16,7 @@
   "enable": "Ativar",
   "failedToAddSource": "Não foi possível adicionar a origem",
   "failedToDisable": "Não foi possível desativar {{name}}",
+  "remoteResourcesMayRemain": "Os ambientes remotos podem continuar em execução depois de desativar este plugin. Volte a ativá-lo e limpe os ambientes das tarefas antes de o desinstalar.",
   "failedToEnable": "Não foi possível ativar {{name}}",
   "failedToInstallPlugin": "Não foi possível instalar o plugin",
   "failedToLoadMarketplace": "Não foi possível carregar o marketplace",

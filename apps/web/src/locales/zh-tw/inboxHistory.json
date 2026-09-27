@@ -19,7 +19,7 @@
   "turnAsked": "在第 {{turn}} 輪提出",
   "turnSupersededBy": "在第 {{askingTurn}} 輪提出，被第 {{supersedingTurn}} 輪取代",
   "stepStartsNoAgent": "此任務的目前步驟不會啟動代理。",
-  "truncatedNotice": "還有更多歷史問題可查看。",
+  "truncatedNotice": "還有更多歷史問題可檢視。",
   "loadMore": "載入更多歷史記錄",
   "loadMoreError": "無法載入更多歷史記錄。請重試。"
 }

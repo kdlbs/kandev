@@ -1,4 +1,4 @@
-import type { GitChangeLayer } from "@/lib/state/slices/session-runtime/types";
+import type { GitChangeLayer } from "./slices/session-runtime/types";
 
 export type DiffSource = "uncommitted" | "committed" | "pr";
 export type ChangeLayer = GitChangeLayer;

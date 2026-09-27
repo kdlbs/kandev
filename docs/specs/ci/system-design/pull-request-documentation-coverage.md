@@ -1,6 +1,6 @@
 ---
 status: draft
-last_updated: 2026-09-21
+last_updated: 2026-09-27
 system: ci
 requirements:
   - REQ-CI-PR-DOCS-001
@@ -47,9 +47,11 @@ Initial exemptions:
 - Exact lock basenames `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `go.sum`, and `Cargo.lock`.
 - Recognized non-Markdown harness files: `.codex/agents/*.toml`, `.codex/config.toml`, `.claude/settings.json`, and `.cursor/rules/*.mdc`.
 - CI infrastructure paths `.github/workflows/**`, `.github/scripts/**`, and `.github/actions/**`. These change the delivery pipeline, not shipped product behavior, and are already governed by workflow contract tests.
+- Architecture-lint tooling under `scripts/architecture_lint/**`, `scripts/architecture_lint_tests/**`, and `config/architecture-lint/**`, plus the exact entrypoints `scripts/lint-architecture.py` and `scripts/lint-architecture.test.py`. This boundary follows the repository-tooling ownership recorded in the [architecture lint decision](../../../decisions/2026-08-01-architecture-lint-budgets.md); it does not cover other `scripts/` or `config/` paths.
 
 Keep other `plugin-registry/**` paths subject to normal coverage. Do not exempt all JSON, YAML, assets, scripts, package manifests, Rust files, workflows, generated directories, or files containing the word `test`.
 These can change shipped behavior or repository contracts. The `.github/` CI exemption is a directory-scoped rule; a workflow, script, or action outside `.github/` still requires coverage.
+Architecture-lint paths are also explicit and boundary-scoped. A mixed pull request still requires coverage for each unrelated or application path, and a rename into an exempt path retains the original path for classification.
 Add exemptions later only with concrete fixtures.
 This conservative policy creates false positives for small runtime fixes and refactors. The explicit label is their escape hatch.
 
@@ -123,6 +125,10 @@ evaluator input, so they do not start the job.
 Read current PR metadata and labels, not just the event snapshot. Drafts follow the same policy.
 The exact current label `no-docs-allow` returns an override success before expensive file reads.
 Failure to read current metadata or labels is still an infrastructure error.
+For an exact-label transition, the evaluator also checks affected merge groups.
+An explicit `null` merge queue on an otherwise valid repository response means
+the target branch has no queue and contributes no groups. A missing repository,
+GraphQL error, or malformed queue connection remains an infrastructure error.
 
 GitHub repository permissions control who applies the label. No separate author allowlist or title-based exception exists.
 The override is PR-wide and persists across pushes. This is distinct from the revision-specific `ready-to-merge` contract.
@@ -131,12 +137,28 @@ Provide a `workflow_dispatch` PR-number input for retries, read current metadata
 
 ## Reporting and consistency
 
-Publish one commit status context, `PR documentation coverage`, on the current PR head using `statuses: write`.
+Publish the `PR documentation coverage` commit status context on the current PR head using `statuses: write`.
 Do not rely on the native `pull_request_target` job check, whose execution identity is the base revision.
 Use a distinct job name to avoid a status/check-name collision.
 Set pending before evaluation; publish success, failure for missing coverage, or error for incomplete data.
 The status target URL points to the run summary, which lists reasons, paths, references, and remediation.
 Also fail the workflow job on policy failure or infrastructure error. Do not post PR comments.
+For label transitions, complete the queue lookup and affected-group updates
+before publishing the PR-head terminal status. Keep the PR's own coverage
+decision separate from each group's policy result: a failing group fails the
+run and receives its group status, while the PR-head status still reflects the
+PR's own result. A failed queue lookup prevents premature PR-head success and
+publishes an infrastructure error there. Preserve the pending status until a
+terminal result is ready.
+Publish affected-group statuses from label-triggered reevaluation under the
+separate `PR documentation coverage (merge group reevaluation)` context. This
+prevents a group result from replacing the PR result when both refer to the
+same commit SHA. The normal `merge_group` event continues to publish the
+required `PR documentation coverage` context on its synthetic group SHA.
+Show the PR result and each affected-group result separately in the run summary.
+Write the result category and a bounded, single-line failure reason to the
+runner log when the job fails. Strip control characters and cap untrusted text;
+never log tokens, request bodies, document contents, or raw API responses.
 On each retry and terminal request failure, write a bounded runner-log
 diagnostic. Include the request class, HTTP status or transport category,
 attempt count, and selected delay or stop reason. Do not log authorization
@@ -181,6 +203,8 @@ Load only trusted base code. Never evaluate coverage against the combined diff, 
 Resolve members using the paginated GraphQL merge queue entries, including each entry's `baseCommit`, `headCommit`, and `pullRequest`.
 Find the entry for the event head and trace the entry commit boundaries back to the event base.
 Require a complete, unambiguous chain; unknown membership produces an error, not success.
+An absent queue is valid for a label-triggered PR run but cannot satisfy a
+`merge_group` event. That event still fails if membership is absent or invalid.
 Evaluate each member's own current PR diff, artifact chain, and labels. Confirm queue identities and member heads again before publication.
 Use the target-branch concurrency key shared with queued label reevaluation and
 never cancel active group evaluation. The group status itself remains on the
@@ -190,6 +214,8 @@ Integration must validate the entry-boundary mapping against real GitHub merge-g
 If GitHub cannot supply the expected chain for a supported queue mode, revise the mapping and fixtures before rollout.
 Label removal while queued must also reevaluate every active group prefix
 containing that PR, through the same group evaluator and serialization key.
+These label-triggered group statuses use the group-reevaluation context; the
+merge-group event remains authoritative for the required status context.
 Do not dequeue, requeue, or automatically merge PRs.
 
 ## Security

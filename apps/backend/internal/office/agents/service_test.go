@@ -287,6 +287,36 @@ func TestCreateAgentInstance_RollsBackWhenCanonicalProfileUpdateFails(t *testing
 	}
 }
 
+// TestCreateAgentInstance_PersistsEnabledTrue guards against a regression
+// where persistAgent's canonical-profile write round-tripped an AgentInstance
+// whose Enabled field was never set, overwriting the row's own DEFAULT 1
+// with 0 immediately after insert. A repo-only fixture (no profileStore)
+// can't see this: it never exercises profileStore.UpdateAgentProfile, so the
+// disabling write never happens and Enabled reads back as its Go zero value
+// regardless. Only the real settings-store-backed profileStore proves the
+// stored column value.
+func TestCreateAgentInstance_PersistsEnabledTrue(t *testing.T) {
+	svc, _, profileStore := newTestAgentServiceWithProfileStore(t)
+	ctx := context.Background()
+	agent := &models.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "CEO",
+		Role:        models.AgentRoleCEO,
+	}
+
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	stored, err := profileStore.GetAgentProfile(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get agent profile: %v", err)
+	}
+	if !stored.Enabled {
+		t.Fatal("newly created office agent is not enabled; ValidateAssigneeAgentProfile would reject it")
+	}
+}
+
 func TestUpdateAgent_ProfileSelectionDirectsClientsToRouting(t *testing.T) {
 	svc, _, profileStore := newTestAgentServiceWithProfileStore(t)
 	ctx := context.Background()

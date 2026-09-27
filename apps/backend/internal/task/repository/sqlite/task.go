@@ -4907,14 +4907,15 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 
 // RestoreTaskMessageRollbackIfSessionState atomically restores the two task
 // fields changed by message_task's on-turn-start preparation, but only while
-// the owning session remains in the state restored by the same rollback. A
-// coordinator cancellation therefore prevents a late dispatch-failure
-// rollback from moving the task out of REVIEW or rewinding its workflow step.
+// both the owning session and prepared task state still match the rollback's
+// observed state. A later independent task update therefore cannot be rewound.
 func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	ctx context.Context,
 	task *models.Task,
 	sessionID string,
 	expectedSessionState models.TaskSessionState,
+	expectedTaskState v1.TaskState,
+	expectedWorkflowStepID string,
 ) (bool, error) {
 	if task == nil {
 		return false, errors.New("restore task message rollback: task is nil")
@@ -4938,6 +4939,8 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 		UPDATE tasks
 		SET state = ?, workflow_step_id = ?, updated_at = ?
 		WHERE id = ?
+		  AND state = ?
+		  AND workflow_step_id = ?
 		  AND EXISTS (
 			SELECT 1
 			FROM task_sessions
@@ -4945,7 +4948,7 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 			  AND task_sessions.task_id = tasks.id
 			  AND task_sessions.state = ?
 		  )
-	`), task.State, task.WorkflowStepID, updatedAt, task.ID, sessionID, expectedSessionState)
+	`), task.State, task.WorkflowStepID, updatedAt, task.ID, expectedTaskState, expectedWorkflowStepID, sessionID, expectedSessionState)
 	if err != nil {
 		return false, err
 	}
