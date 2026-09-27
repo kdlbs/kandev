@@ -1004,6 +1004,8 @@ func (s *Service) wrapCreatedSessionPrompt(
 			s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
 			referenceContext, promptReferenceContext, pullRequestTargetContext,
 		)
+	case dbTask.Origin == models.TaskOriginCoordinator:
+		return s.wrapCoordinatorStandingInstructions(ctx, prompt, dbTask)
 	default:
 		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
 			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
