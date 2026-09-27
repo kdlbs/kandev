@@ -165,7 +165,7 @@ func newReconcileHarness(t *testing.T) *reconcileHarness {
 	svc.SetBudgetChecker(officecosts.NewCostService(officeRepo, log, activity, svc, svc))
 
 	backend := newFakeReconcileBackend()
-	launcher := newOfficeRunSessionLauncher(officeRepo, backend, log)
+	launcher := newOfficeRunSessionLauncher(officeRepo, backend, nil, log)
 	svc.SetRunSessionLauncher(launcher)
 
 	return &reconcileHarness{svc: svc, repo: officeRepo, eb: eventBus, launcher: launcher, backend: backend}

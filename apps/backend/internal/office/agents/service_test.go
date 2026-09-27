@@ -403,6 +403,32 @@ func TestApplyProfileConfigurationCopiesOnlyProviderFamily(t *testing.T) {
 	}
 }
 
+func TestApplyProfileConfigurationBindsDynamicSource(t *testing.T) {
+	svc, _, profileStore := newTestAgentServiceWithProfileStore(t)
+	ctx := context.Background()
+	provider := &settingsmodels.Agent{ID: "dynamic", Name: "dynamic"}
+	if err := profileStore.CreateAgent(ctx, provider); err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	source := &settingsmodels.AgentProfile{
+		ID: "source-dynamic", AgentID: provider.ID, Name: "Cascade",
+	}
+	if err := profileStore.CreateAgentProfile(ctx, source); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	target := &models.AgentInstance{WorkspaceID: "ws-1", Name: "CEO"}
+
+	if err := svc.ApplyProfileConfiguration(ctx, target, source.ID); err != nil {
+		t.Fatalf("apply profile configuration: %v", err)
+	}
+	if target.AgentID != provider.ID {
+		t.Fatalf("agent family = %q, want %q", target.AgentID, provider.ID)
+	}
+	if target.ExecutionAgentProfileID != source.ID {
+		t.Fatalf("execution binding = %q, want %q", target.ExecutionAgentProfileID, source.ID)
+	}
+}
+
 func TestApplyProfileConfiguration_RejectsCrossWorkspaceSource(t *testing.T) {
 	svc, _, profileStore := newTestAgentServiceWithProfileStore(t)
 	ctx := context.Background()

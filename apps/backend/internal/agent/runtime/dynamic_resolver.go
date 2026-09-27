@@ -587,6 +587,25 @@ func (r *ProfileExecutionResolver) executionFromDecision(
 	}, nil
 }
 
+// dynamicSourceProfileID returns the profile whose dynamic candidate set backs
+// logicalProfileID. An Office identifier binds an execution profile (spec
+// dynamic-agent-routing "Use in Office"): the bound profile owns the routes
+// while the Office ID remains the logical session identity. Ordinary profiles
+// keep selecting themselves.
+func (r *ProfileExecutionResolver) dynamicSourceProfileID(ctx context.Context, logicalProfileID string) (string, error) {
+	if r.profiles == nil {
+		return logicalProfileID, nil
+	}
+	profile, err := r.profiles.GetAgentProfile(ctx, logicalProfileID)
+	if err != nil {
+		return "", fmt.Errorf("resolve profile %s: %w", logicalProfileID, err)
+	}
+	if profile != nil && profile.ExecutionAgentProfileID != "" {
+		return profile.ExecutionAgentProfileID, nil
+	}
+	return logicalProfileID, nil
+}
+
 func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profileID string) (dynamic.Profile, error) {
 	if !r.enabled.Load() {
 		return dynamic.Profile{}, ErrDynamicRoutingDisabled
@@ -594,7 +613,11 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 	if r.dynamic == nil {
 		return dynamic.Profile{}, errors.New("dynamic profile execution is not configured")
 	}
-	config, routes, err := r.dynamic.GetDynamicAgentProfile(ctx, profileID)
+	sourceProfileID, err := r.dynamicSourceProfileID(ctx, profileID)
+	if err != nil {
+		return dynamic.Profile{}, err
+	}
+	config, routes, err := r.dynamic.GetDynamicAgentProfile(ctx, sourceProfileID)
 	if err != nil {
 		return dynamic.Profile{}, fmt.Errorf("load dynamic profile %s: %w", profileID, err)
 	}

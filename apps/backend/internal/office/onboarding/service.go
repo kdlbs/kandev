@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/agents"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/configloader"
@@ -592,6 +593,12 @@ func (s *OnboardingService) createOnboardingAgent(ctx context.Context, wsID stri
 			return "", fmt.Errorf("look up source profile %s: %w", req.AgentProfileID, err)
 		}
 		agent.AgentID = src.AgentID
+		if src.AgentID == agents.DynamicAgentID {
+			// The chosen profile is a dynamic routing owner. Bind the Office
+			// identity to it so launches resolve a concrete candidate; the
+			// Office ID remains the session's logical profile.
+			agent.ExecutionAgentProfileID = src.ID
+		}
 	}
 	if err := s.agentCreator.CreateAgentInstance(ctx, agent); err != nil {
 		return "", err
@@ -693,6 +700,13 @@ func (s *OnboardingService) applyOnboardingTierProfile(
 	src, err := s.sourceProfile.GetAgentProfile(ctx, profileID)
 	if err != nil {
 		return fmt.Errorf("look up tier profile %s: %w", profileID, err)
+	}
+	if src.AgentID == agents.DynamicAgentID {
+		// The legacy workspace routing shape (provider_profiles) only carries
+		// concrete provider families. A dynamic profile is executed through the
+		// dynamic resolver, so there is nothing to seed here; skip instead of
+		// emitting an "unsupported provider" warning.
+		return nil
 	}
 	if src.AgentID == "" {
 		return nil

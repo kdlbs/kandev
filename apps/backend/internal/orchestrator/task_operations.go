@@ -1529,13 +1529,19 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// transition here avoids gratuitous flicker (REVIEW → SCHEDULING →
 	// IN_PROGRESS → REVIEW for a single comment-reply cycle) and matches
 	// the user's mental model.
+	previousTaskState := v1.TaskState("")
 	if isOfficeTask {
 		s.logger.Debug("skipping SCHEDULING transition for office task",
 			zap.String("task_id", taskID))
-	} else if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
-		s.logger.Warn("failed to update task state to SCHEDULING",
-			zap.String("task_id", taskID),
-			zap.Error(err))
+	} else {
+		if currentTask, taskErr := s.taskRepo.GetTask(ctx, taskID); taskErr == nil && currentTask != nil {
+			previousTaskState = currentTask.State
+		}
+		if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
+			s.logger.Warn("failed to update task state to SCHEDULING",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
 	}
 
 	s.moveTaskToWorkflowStep(ctx, taskID, workflowStepID)
@@ -1713,6 +1719,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 
 	if route == nil {
 		if agentProfileID, err = s.resolveDynamicLaunchExecution(ctx, launchSession, agentProfileID, false); err != nil {
+			s.restoreTaskStateAfterDynamicResolutionFailure(ctx, taskID, previousTaskState)
 			return nil, err
 		}
 	}
@@ -2232,6 +2239,31 @@ func applyResolvedExecution(session *models.TaskSession, resolved agentruntime.P
 			"cli_passthrough":              resolved.Profile.CLIPassthrough,
 		}
 		session.IsPassthrough = resolved.Profile.CLIPassthrough
+	}
+}
+
+// restoreTaskStateAfterDynamicResolutionFailure undoes the SCHEDULING
+// transition when the dynamic execution profile cannot be resolved, so a
+// failed resolution leaves the task actionable instead of permanently
+// SCHEDULING. It only writes while the task is still SCHEDULING, so a
+// concurrent transition (cancel, retry) always wins.
+func (s *Service) restoreTaskStateAfterDynamicResolutionFailure(
+	ctx context.Context, taskID string, previous v1.TaskState,
+) {
+	if taskID == "" || previous == "" || previous == v1.TaskStateScheduling {
+		return
+	}
+	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
+		ctx, taskID, previous, []v1.TaskState{v1.TaskStateScheduling},
+	)
+	if err != nil {
+		s.logger.Warn("failed to restore task state after dynamic resolution failure",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if updated {
+		s.logger.Info("restored task state after dynamic resolution failure",
+			zap.String("task_id", taskID), zap.String("state", string(previous)))
 	}
 }
 

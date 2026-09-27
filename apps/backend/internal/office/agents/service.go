@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/configloader"
@@ -557,6 +558,12 @@ func (s *AgentService) ApplyProfileConfiguration(
 		return errors.New("source agent profile belongs to a different workspace")
 	}
 	target.AgentID = source.AgentID
+	if source.AgentID == agents.DynamicAgentID {
+		// A dynamic execution profile is a routing owner, not a concrete CLI
+		// family. Bind the Office identity to it so the shared resolver can
+		// select a concrete candidate without replacing the Office ID.
+		target.ExecutionAgentProfileID = source.ID
+	}
 	return nil
 }
 

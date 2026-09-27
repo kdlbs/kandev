@@ -12,6 +12,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -343,6 +344,48 @@ func TestCreateOnboardingAgent_KeepsRuntimeConfigurationIndirect(t *testing.T) {
 	if len(capture.agent.CLIFlags) != 0 || len(capture.agent.EnvVars) != 0 {
 		t.Errorf("CLI configuration copied onto Office identity: flags=%+v env=%+v",
 			capture.agent.CLIFlags, capture.agent.EnvVars)
+	}
+}
+
+func TestCreateOnboardingAgent_BindsDynamicSourceProfile(t *testing.T) {
+	svc, _, _ := newTestOnboardingService(t)
+	source := &models.AgentInstance{ID: "dynamic-profile", AgentID: agents.DynamicAgentID}
+	svc.sourceProfile = fakeSourceProfileReader{profiles: map[string]*models.AgentInstance{
+		"dynamic-profile": source,
+	}}
+	capture := &capturingAgentCreator{}
+	svc.agentCreator = capture
+
+	if _, err := svc.createOnboardingAgent(context.Background(), "ws-1", CompleteRequest{
+		AgentName: "CEO", AgentProfileID: "dynamic-profile",
+	}); err != nil {
+		t.Fatalf("create onboarding agent: %v", err)
+	}
+	if capture.agent == nil {
+		t.Fatal("agent was not created")
+	}
+	if capture.agent.AgentID != agents.DynamicAgentID {
+		t.Fatalf("agent family = %q, want %q", capture.agent.AgentID, agents.DynamicAgentID)
+	}
+	if capture.agent.ExecutionAgentProfileID != "dynamic-profile" {
+		t.Fatalf("execution binding = %q, want dynamic-profile", capture.agent.ExecutionAgentProfileID)
+	}
+}
+
+// TestApplyOnboardingTierProfileSkipsDynamicSource verifies the legacy
+// provider_profiles seed is skipped for a dynamic source instead of emitting
+// an "unsupported provider" warning.
+func TestApplyOnboardingTierProfileSkipsDynamicSource(t *testing.T) {
+	svc := &OnboardingService{sourceProfile: fakeSourceProfileReader{profiles: map[string]*models.AgentInstance{
+		"dynamic-profile": {AgentID: agents.DynamicAgentID},
+	}}}
+	cfg := &routing.WorkspaceConfig{ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{}}
+
+	if err := svc.applyOnboardingTierProfile(context.Background(), cfg, routing.TierBalanced, "dynamic-profile"); err != nil {
+		t.Fatalf("applyOnboardingTierProfile: %v", err)
+	}
+	if len(cfg.ProviderProfiles) != 0 || len(cfg.ProviderOrder) != 0 {
+		t.Fatalf("dynamic source seeded legacy provider profiles: %+v", cfg.ProviderProfiles)
 	}
 }
 
