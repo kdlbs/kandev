@@ -25,8 +25,9 @@ type countingCompletionTurnService struct {
 }
 
 func (s *countingCompletionTurnService) CompleteTurn(ctx context.Context, turnID string) error {
+	err := s.TurnService.CompleteTurn(ctx, turnID)
 	s.completeCalls.Add(1)
-	return s.TurnService.CompleteTurn(ctx, turnID)
+	return err
 }
 
 // TestProcessOnTurnComplete_ExplicitSignalGating verifies the ADR 0015
@@ -745,8 +746,8 @@ func TestCompletionIntentReconcilerProcessesDueWorkAndStops(t *testing.T) {
 			t.Fatalf("GetCompletionIntent: %v", err)
 		}
 		// The repository commits the settled intent before CompleteTurn
-		// publishes the completion event. Wait for both sides of that
-		// boundary before asserting the callback count.
+		// returns. Wait for both sides of that boundary before asserting
+		// the callback count.
 		if intent.State == models.CompletionIntentStateSettled && turns.completeCalls.Load() == 1 {
 			break
 		}
