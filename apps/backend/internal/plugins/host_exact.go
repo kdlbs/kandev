@@ -159,6 +159,12 @@ func (s *Service) GetCapabilityContext(installationID, workspaceID string) (*plu
 			Method: method.method, CapabilityID: method.capability,
 			Description: method.description, Supported: true,
 		}
+		if isExactWorkspaceAdminMethod(method.method) && s.workspaceAdminWriter == nil {
+			operation.Supported = false
+			operation.UnavailableReason = "workspace_administration_unavailable"
+			context.Operations = append(context.Operations, operation)
+			continue
+		}
 		if method.capability == "" {
 			operation.Authorized = true
 		} else {

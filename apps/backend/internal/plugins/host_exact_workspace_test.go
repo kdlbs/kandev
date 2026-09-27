@@ -71,7 +71,9 @@ func TestExactWorkspaceAdministration(t *testing.T) {
 	}
 
 	writer := &workspaceAdminRecordingWriter{}
-	host.workspaceAdminWriter = writer
+	svc.SetWorkspaceAdminWriter(writer)
+	host = svc.hostForPlugin(record.ID).(*pluginHost)
+	host.commandStore = commandStore
 	capabilityContext, err := host.GetCapabilityContext(context.Background(), workspaceID)
 	if err != nil {
 		t.Fatalf("GetCapabilityContext with writer: %v", err)
