@@ -218,6 +218,21 @@ func run(cfg *config.Config, log *logger.Logger) {
 		// Create MCP backend client for bidirectional communication through agent stream
 		// MCP requests from agents are sent through the agent stream WebSocket to the backend
 		mcpBackendClient := mcpserver.NewChannelBackendClient(instLog)
+		// Kandev tool calls block on agentctl's attachment state while
+		// detached (system design part 2 "Send loop") instead of failing
+		// outright. mcp/server cannot import process directly: it is also
+		// linked into the backend binary, so it must not depend on
+		// agentctl-only internals. Adapt through a closure instead,
+		// mirroring SetAttachmentReporter below.
+		mcpBackendClient.SetAttachmentSnapshotter(func() mcpserver.AttachmentSnapshot {
+			snap := procMgr.AttachmentSnapshot()
+			return mcpserver.AttachmentSnapshot{
+				Attached:        snap.Attached,
+				Episode:         snap.Episode,
+				AttachedCh:      snap.AttachedCh,
+				BudgetExhausted: snap.BudgetExhausted,
+			}
+		})
 
 		// Create MCP server using the channel-based backend client
 		var mcpSrv *mcpserver.Server

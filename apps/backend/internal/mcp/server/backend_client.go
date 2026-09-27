@@ -17,6 +17,49 @@ import (
 // ErrEmptyBackendPayload identifies a response with no payload bytes when a result sink was provided.
 var ErrEmptyBackendPayload = errors.New("mcp backend response payload was empty")
 
+// ErrOfflineBudgetExhausted is returned to every Kandev call waiting on a
+// detached episode whose offline budget expired (system design part 2 "Send
+// loop", "Agent guidance"). Its text is agent-facing guidance, not just a
+// log message: it tells the agent to stop rather than poll or retry.
+var ErrOfflineBudgetExhausted = errors.New("Kandev is unreachable and the offline budget was reached. Stop now and end your turn. Do not poll, sleep, or retry this call.") //nolint:staticcheck // agent-facing guidance text (system design part 2 "Agent guidance"), not a log message
+
+// ErrKandevCallOutcomeUnknown is returned for a call whose stream ended
+// after it was bound (sent) but before an answer arrived: the backend may
+// already have applied it (system design part 2 "Sent and not sent", "Agent
+// guidance").
+var ErrKandevCallOutcomeUnknown = errors.New("The connection to Kandev dropped before this call returned. Its outcome is unknown. Check the current state before retrying.") //nolint:staticcheck // agent-facing guidance text (system design part 2 "Agent guidance"), not a log message
+
+// errRequestNotSent is the internal sentinel a bind failure completes a call
+// with (system design part 2 "Sent and not sent" step 3): the call was
+// never written, so RequestPayload retries from the top of its send loop
+// instead of surfacing anything to the agent.
+var errRequestNotSent = errors.New("mcp: request not sent")
+
+// requestSendTimeout bounds one attempt to hand a request to the stream
+// writer while attached (system design part 2 "Send loop" step 2). A
+// package-level var, like askQuestionKeepAliveInterval, so tests can shrink
+// it instead of waiting out the real 5s.
+var requestSendTimeout = 5 * time.Second
+
+// AttachmentSnapshot is what RequestPayload's send loop reads to decide
+// whether to send now, wait for a reattach, or give up on offline-budget
+// expiry (system design part 2 "Kandev tool calls while detached"). Defined
+// locally rather than imported from agentctl's process package: this
+// package is also linked into the backend binary for its own MCP server
+// (see NewExternalDispatcherBackendClient), which must not depend on
+// agentctl-only internals.
+type AttachmentSnapshot struct {
+	// Attached reports whether the current agentctl stream is confirmed.
+	Attached bool
+	// Episode identifies the detached period AttachedCh/BudgetExhausted
+	// belong to.
+	Episode uint64
+	// AttachedCh is closed when this episode ends by a confirmation.
+	AttachedCh <-chan struct{}
+	// BudgetExhausted is closed when this episode's offline budget expires.
+	BudgetExhausted <-chan struct{}
+}
+
 // MCPRequest represents an MCP request to be sent to the backend.
 type MCPRequest struct {
 	ID      string          `json:"id"`
@@ -47,16 +90,18 @@ type pendingRequest struct {
 // It sends MCP requests through a channel that will be read by the agent stream handler,
 // and receives responses through a callback mechanism.
 type ChannelBackendClient struct {
-	requestCh chan *ws.Message
-	pending   map[string]*pendingRequest
-	pendingMu sync.Mutex
-	sessionID string
-	done      chan struct{}
-	closeOnce sync.Once
-	closeMu   sync.Mutex
-	closed    bool
-	publishWG sync.WaitGroup
-	logger    *logger.Logger
+	requestCh          chan *ws.Message
+	pending            map[string]*pendingRequest
+	failedStreams      map[string]struct{}
+	pendingMu          sync.Mutex
+	sessionID          string
+	done               chan struct{}
+	closeOnce          sync.Once
+	closeMu            sync.Mutex
+	closed             bool
+	publishWG          sync.WaitGroup
+	logger             *logger.Logger
+	attachmentSnapshot func() AttachmentSnapshot
 }
 
 // NewChannelBackendClient creates a new channel-based backend client.
@@ -67,11 +112,32 @@ func NewChannelBackendClient(log *logger.Logger) *ChannelBackendClient {
 	}
 	clientLogger = clientLogger.WithFields(zap.String("component", "mcp-backend-client"))
 	return &ChannelBackendClient{
-		requestCh: make(chan *ws.Message),
-		pending:   make(map[string]*pendingRequest),
-		done:      make(chan struct{}),
-		logger:    clientLogger,
+		requestCh:     make(chan *ws.Message),
+		pending:       make(map[string]*pendingRequest),
+		failedStreams: make(map[string]struct{}),
+		done:          make(chan struct{}),
+		logger:        clientLogger,
 	}
+}
+
+// SetAttachmentSnapshotter wires the agentctl-side attachment state that
+// RequestPayload's send loop waits on while detached (system design part 2
+// "Send loop"). Unset, every call behaves as always attached, matching the
+// client's original single-attempt-then-timeout behavior.
+func (c *ChannelBackendClient) SetAttachmentSnapshotter(fn func() AttachmentSnapshot) {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	c.attachmentSnapshot = fn
+}
+
+func (c *ChannelBackendClient) snapshot() AttachmentSnapshot {
+	c.pendingMu.Lock()
+	fn := c.attachmentSnapshot
+	c.pendingMu.Unlock()
+	if fn == nil {
+		return AttachmentSnapshot{Attached: true}
+	}
+	return fn()
 }
 
 // GetRequestChannel returns the channel for outgoing MCP requests.
@@ -100,12 +166,20 @@ func (c *ChannelBackendClient) HandleResponse(msg *ws.Message) {
 }
 
 // BindRequestToStream records which backend stream delivered a request.
-func (c *ChannelBackendClient) BindRequestToStream(requestID, streamID string) {
+// Binding to a stream FailStreamRequests has already marked failed returns
+// an error and binds nothing (system design part 2 "Sent and not sent" step
+// 2): the write raced a disconnect, so the caller must treat the request as
+// not sent and retry rather than leave it bound to a dead stream.
+func (c *ChannelBackendClient) BindRequestToStream(requestID, streamID string) error {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
+	if _, failed := c.failedStreams[streamID]; failed {
+		return fmt.Errorf("mcp: stream %s already failed", streamID)
+	}
 	if pending, ok := c.pending[requestID]; ok {
 		pending.streamID = streamID
 	}
+	return nil
 }
 
 // FailRequest releases one pending request after a transport failure.
@@ -113,9 +187,22 @@ func (c *ChannelBackendClient) FailRequest(requestID string, err error) {
 	c.completeRequest(requestID, backendResponse{err: err})
 }
 
-// FailStreamRequests releases requests delivered by one disconnected stream.
+// FailRequestNotSent releases one pending request that was never written to
+// the agent stream (system design part 2 "Sent and not sent" step 2, a bind
+// failure). RequestPayload's send loop retries on this outcome instead of
+// surfacing it, so callers outside this package signal it through this
+// method rather than needing the unexported sentinel directly.
+func (c *ChannelBackendClient) FailRequestNotSent(requestID string) {
+	c.completeRequest(requestID, backendResponse{err: errRequestNotSent})
+}
+
+// FailStreamRequests releases requests delivered by one disconnected stream
+// and marks the stream failed so a late-arriving bind for it (system design
+// part 2 "Sent and not sent" step 2) is rejected instead of silently
+// succeeding.
 func (c *ChannelBackendClient) FailStreamRequests(streamID string, err error) {
 	c.pendingMu.Lock()
+	c.failedStreams[streamID] = struct{}{}
 	failed := make([]*pendingRequest, 0)
 	for id, pending := range c.pending {
 		if pending.streamID == streamID {
@@ -148,6 +235,13 @@ func (c *ChannelBackendClient) completeRequest(requestID string, response backen
 
 // RequestPayload sends a request to the backend and unmarshals the response.
 // The request will be cancelled if the context is cancelled or if Reset() is called.
+//
+// While agentctl is detached from the backend, this blocks on the send loop
+// from system design part 2 "Kandev tool calls while detached": wait for
+// reattachment or offline-budget exhaustion, then attempt to send once
+// attached. A bind failure ("Sent and not sent" step 2, surfaced here as
+// errRequestNotSent) means the write never happened, so the loop retries
+// from the top instead of surfacing anything to the caller.
 func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string, payload, result interface{}) error {
 	if !c.beginPublish() {
 		return fmt.Errorf("MCP backend client is closed")
@@ -167,11 +261,8 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Create response channel
-	respChan := make(chan backendResponse, 1)
 	c.pendingMu.Lock()
 	sessionID := c.sessionID
-	c.pending[id] = &pendingRequest{result: respChan, sessionID: sessionID}
 	c.pendingMu.Unlock()
 
 	c.logger.Debug("sending MCP request through agent stream",
@@ -187,12 +278,70 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 		c.pendingMu.Unlock()
 	}()
 
-	// Send request through channel
+	respChan := make(chan backendResponse, 1)
+	for {
+		c.pendingMu.Lock()
+		c.pending[id] = &pendingRequest{result: respChan, sessionID: sessionID}
+		c.pendingMu.Unlock()
+
+		snap := c.snapshot()
+		if !snap.Attached {
+			if err := c.awaitReattach(ctx, snap); err != nil {
+				return err
+			}
+			continue
+		}
+
+		sent, err := c.attemptSend(ctx, msg, id, action, sessionID, start)
+		if err != nil {
+			return err
+		}
+		if !sent {
+			continue
+		}
+		if publishing {
+			publishing = false
+			c.publishWG.Done()
+		}
+
+		response, retry, err := c.awaitResponse(ctx, id, action, start, respChan)
+		if err != nil {
+			return err
+		}
+		if retry {
+			continue
+		}
+		return c.finishResponse(id, action, start, response, result)
+	}
+}
+
+// awaitReattach blocks while detached (system design part 2 "Send loop" step
+// 3): a closed AttachedCh means the caller should retry the send loop from
+// the top, a closed BudgetExhausted means the offline budget ran out.
+func (c *ChannelBackendClient) awaitReattach(ctx context.Context, snap AttachmentSnapshot) error {
 	select {
-	case c.requestCh <- msg:
-		// Request sent
+	case <-snap.AttachedCh:
+		return nil
+	case <-snap.BudgetExhausted:
+		return ErrOfflineBudgetExhausted
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-c.done:
 		return fmt.Errorf("MCP backend client is closed")
+	}
+}
+
+// attemptSend hands msg to the stream writer while attached (system design
+// part 2 "Send loop" step 2). sent=true means the writer took it and the
+// caller should wait for a response. sent=false, err=nil means the send
+// timed out and agentctl is now detached, so the caller should retry from
+// the top of the send loop; any other outcome is terminal.
+func (c *ChannelBackendClient) attemptSend(ctx context.Context, msg *ws.Message, id, action, sessionID string, start time.Time) (bool, error) {
+	select {
+	case c.requestCh <- msg:
+		return true, nil
+	case <-c.done:
+		return false, fmt.Errorf("MCP backend client is closed")
 	case <-ctx.Done():
 		c.logger.Debug("MCP request cancelled before send",
 			zap.String("request_id", id),
@@ -200,68 +349,82 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 			zap.String("session_id", sessionID),
 			zap.Duration("duration", time.Since(start)),
 			zap.Error(ctx.Err()))
-		return ctx.Err()
-	case <-time.After(5 * time.Second):
+		return false, ctx.Err()
+	case <-time.After(requestSendTimeout):
+		if !c.snapshot().Attached {
+			return false, nil
+		}
 		c.logger.Warn("timed out sending MCP request to agent stream",
 			zap.String("request_id", id),
 			zap.String("action", action),
 			zap.String("session_id", sessionID),
 			zap.Duration("duration", time.Since(start)))
-		return fmt.Errorf("timeout sending request to agent stream")
+		return false, fmt.Errorf("timeout sending request to agent stream")
 	}
-	publishing = false
-	c.publishWG.Done()
+}
 
-	// Wait for response
+// awaitResponse waits for the bound request's answer. retry=true means the
+// response carried errRequestNotSent (system design part 2 "Sent and not
+// sent" step 3, a bind failure): the write never happened, so the caller
+// retries the send loop instead of surfacing anything to the agent.
+func (c *ChannelBackendClient) awaitResponse(ctx context.Context, id, action string, start time.Time, respChan chan backendResponse) (backendResponse, bool, error) {
 	select {
 	case response := <-respChan:
-		if response.err != nil {
-			c.logger.Warn("MCP request failed after publication",
-				zap.String("request_id", id),
-				zap.String("action", action),
-				zap.String("session_id", response.sessionID),
-				zap.Duration("duration", time.Since(start)),
-				zap.Error(response.err))
-			return response.err
+		if errors.Is(response.err, errRequestNotSent) {
+			return backendResponse{}, true, nil
 		}
-		resp := response.message
-		c.logger.Debug("received MCP response from backend",
-			zap.String("request_id", id),
-			zap.String("action", action),
-			zap.String("type", string(resp.Type)),
-			zap.Duration("duration", time.Since(start)))
-		if resp.Type == ws.MessageTypeError {
-			var ep ws.ErrorPayload
-			if json.Unmarshal(resp.Payload, &ep) == nil {
-				return &BackendError{Code: ep.Code, Message: ep.Message, Details: ep.Details}
-			}
-			return fmt.Errorf("backend error: %s", string(resp.Payload))
-		}
-		if result == nil {
-			return nil
-		}
-		if len(resp.Payload) == 0 {
-			c.logger.Warn(ErrEmptyBackendPayload.Error(),
-				zap.String("request_id", id),
-				zap.String("action", action),
-				zap.String("session_id", response.sessionID),
-				zap.Duration("duration", time.Since(start)))
-			return fmt.Errorf("empty response payload for action %q: %w", action, ErrEmptyBackendPayload)
-		}
-		if err := json.Unmarshal(resp.Payload, result); err != nil {
-			return fmt.Errorf("failed to unmarshal response: %w", err)
-		}
-		return nil
+		return response, false, nil
 	case <-ctx.Done():
 		c.logger.Warn("MCP request context cancelled while waiting for response",
 			zap.String("request_id", id),
 			zap.String("action", action),
 			zap.Duration("duration", time.Since(start)),
 			zap.Error(ctx.Err()))
-		return ctx.Err()
+		return backendResponse{}, false, ctx.Err()
 	case <-c.done:
-		return fmt.Errorf("MCP backend client is closed")
+		return backendResponse{}, false, fmt.Errorf("MCP backend client is closed")
 	}
+}
+
+// finishResponse turns a completed backend response into RequestPayload's result.
+func (c *ChannelBackendClient) finishResponse(id, action string, start time.Time, response backendResponse, result interface{}) error {
+	if response.err != nil {
+		c.logger.Warn("MCP request failed after publication",
+			zap.String("request_id", id),
+			zap.String("action", action),
+			zap.String("session_id", response.sessionID),
+			zap.Duration("duration", time.Since(start)),
+			zap.Error(response.err))
+		return response.err
+	}
+	resp := response.message
+	c.logger.Debug("received MCP response from backend",
+		zap.String("request_id", id),
+		zap.String("action", action),
+		zap.String("type", string(resp.Type)),
+		zap.Duration("duration", time.Since(start)))
+	if resp.Type == ws.MessageTypeError {
+		var ep ws.ErrorPayload
+		if json.Unmarshal(resp.Payload, &ep) == nil {
+			return &BackendError{Code: ep.Code, Message: ep.Message, Details: ep.Details}
+		}
+		return fmt.Errorf("backend error: %s", string(resp.Payload))
+	}
+	if result == nil {
+		return nil
+	}
+	if len(resp.Payload) == 0 {
+		c.logger.Warn(ErrEmptyBackendPayload.Error(),
+			zap.String("request_id", id),
+			zap.String("action", action),
+			zap.String("session_id", response.sessionID),
+			zap.Duration("duration", time.Since(start)))
+		return fmt.Errorf("empty response payload for action %q: %w", action, ErrEmptyBackendPayload)
+	}
+	if err := json.Unmarshal(resp.Payload, result); err != nil {
+		return fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	return nil
 }
 
 func (c *ChannelBackendClient) beginPublish() bool {

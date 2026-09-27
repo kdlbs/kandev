@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/mcp/server"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -297,7 +298,7 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	close(done)
 	s.procMgr.StreamEnd(streamID)
 	if s.mcpBackendClient != nil {
-		s.mcpBackendClient.FailStreamRequests(streamID, errors.New("agent stream disconnected"))
+		s.mcpBackendClient.FailStreamRequests(streamID, mcp.ErrKandevCallOutcomeUnknown)
 	}
 }
 
@@ -692,7 +693,22 @@ func (s *Server) writeAgentStreamNotification(notification adapter.AgentEvent, w
 	return true
 }
 
+// writeAgentStreamMCPRequest binds mcpReq to streamID before writing it
+// (system design part 2 "Sent and not sent" step 2): a request is treated as
+// "sent" only once it is bound to the stream that is about to carry it, so a
+// disconnect racing this call can never leave it bound to a dead stream
+// without also being retried. A bind failure means the write never happens.
 func (s *Server) writeAgentStreamMCPRequest(mcpReq *ws.Message, streamID string, writeMessage func([]byte) error) bool {
+	if s.mcpBackendClient != nil {
+		if err := s.mcpBackendClient.BindRequestToStream(mcpReq.ID, streamID); err != nil {
+			s.logger.Warn("MCP request stream already failed, not sending",
+				zap.String("request_id", mcpReq.ID),
+				zap.String("action", mcpReq.Action),
+				zap.Error(err))
+			s.mcpBackendClient.FailRequestNotSent(mcpReq.ID)
+			return true
+		}
+	}
 	data, err := json.Marshal(mcpReq)
 	if err != nil {
 		s.logger.Error("failed to marshal MCP request", zap.Error(err))
@@ -704,12 +720,9 @@ func (s *Server) writeAgentStreamMCPRequest(mcpReq *ws.Message, streamID string,
 			zap.String("action", mcpReq.Action),
 			zap.Error(err))
 		if s.mcpBackendClient != nil {
-			s.mcpBackendClient.FailRequest(mcpReq.ID, fmt.Errorf("failed to write MCP request to agent stream: %w", err))
+			s.mcpBackendClient.FailRequest(mcpReq.ID, mcp.ErrKandevCallOutcomeUnknown)
 		}
 		return false
-	}
-	if s.mcpBackendClient != nil {
-		s.mcpBackendClient.BindRequestToStream(mcpReq.ID, streamID)
 	}
 	return true
 }

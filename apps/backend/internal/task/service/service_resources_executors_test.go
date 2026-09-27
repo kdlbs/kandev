@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/events"
+	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -465,6 +466,84 @@ func TestUpdateExecutorProfileKeepsSpritesTokenWhenOmitted(t *testing.T) {
 	}
 	if !hasSpritesToken(stored.EnvVars) {
 		t.Fatalf("stored env vars = %+v, want the sprites token preserved", stored.EnvVars)
+	}
+}
+
+func TestCreateExecutorProfileRejectsInvalidOfflineBudget(t *testing.T) {
+	svc, bus, _ := createTestService(t)
+	ctx := context.Background()
+	executor := createTestExecutor(t, svc, "Runner", models.ExecutorTypeLocal)
+	bus.ClearEvents()
+
+	for name, value := range map[string]string{
+		"non-integer": "abc",
+		"fractional":  "3.5",
+		"overflow":    "1441",
+		"zero":        "0",
+		"negative":    "-5",
+	} {
+		if _, err := svc.CreateExecutorProfile(ctx, &CreateExecutorProfileRequest{
+			ExecutorID: executor.ID, Name: "p", Config: map[string]string{"offline_budget_minutes": value},
+		}); !errors.Is(err, ErrInvalidExecutorConfig) || !errors.Is(err, orchestratorexecutor.ErrInvalidOfflineBudget) {
+			t.Fatalf("%s: error = %v, want ErrInvalidExecutorConfig wrapping ErrInvalidOfflineBudget", name, err)
+		}
+	}
+	if published := bus.GetPublishedEvents(); len(published) != 0 {
+		t.Fatalf("rejected creates published %d events, want none", len(published))
+	}
+
+	for name, value := range map[string]string{"min boundary": "1", "max boundary": "1440", "absent": ""} {
+		if _, err := svc.CreateExecutorProfile(ctx, &CreateExecutorProfileRequest{
+			ExecutorID: executor.ID, Name: "p-" + name, Config: map[string]string{"offline_budget_minutes": value},
+		}); err != nil {
+			t.Fatalf("%s: CreateExecutorProfile = %v, want accepted", name, err)
+		}
+	}
+}
+
+func TestUpdateExecutorProfileRejectsInvalidOfflineBudget(t *testing.T) {
+	svc, bus, repo := createTestService(t)
+	ctx := context.Background()
+	executor := createTestExecutor(t, svc, "Runner", models.ExecutorTypeLocal)
+	profile, err := svc.CreateExecutorProfile(ctx, &CreateExecutorProfileRequest{
+		ExecutorID: executor.ID, Name: "default", Config: map[string]string{"offline_budget_minutes": "30"},
+	})
+	if err != nil {
+		t.Fatalf("CreateExecutorProfile: %v", err)
+	}
+	bus.ClearEvents()
+
+	if _, err := svc.UpdateExecutorProfile(ctx, profile.ID, &UpdateExecutorProfileRequest{
+		Config: map[string]string{"offline_budget_minutes": "1441"},
+	}); !errors.Is(err, ErrInvalidExecutorConfig) || !errors.Is(err, orchestratorexecutor.ErrInvalidOfflineBudget) {
+		t.Fatalf("overflow update error = %v, want ErrInvalidExecutorConfig wrapping ErrInvalidOfflineBudget", err)
+	}
+	if published := bus.GetPublishedEvents(); len(published) != 0 {
+		t.Fatalf("rejected update published %d events, want none", len(published))
+	}
+	stored, err := repo.GetExecutorProfile(ctx, profile.ID)
+	if err != nil {
+		t.Fatalf("GetExecutorProfile: %v", err)
+	}
+	if stored.Config["offline_budget_minutes"] != "30" {
+		t.Fatalf("rejected update must leave the stored value: %+v", stored.Config)
+	}
+
+	// An update that omits Config re-validates the profile's existing stored
+	// value (config falls back to profile.Config), which is still valid.
+	name := "renamed"
+	if _, err := svc.UpdateExecutorProfile(ctx, profile.ID, &UpdateExecutorProfileRequest{Name: &name}); err != nil {
+		t.Fatalf("update omitting config = %v, want accepted", err)
+	}
+
+	updated, err := svc.UpdateExecutorProfile(ctx, profile.ID, &UpdateExecutorProfileRequest{
+		Config: map[string]string{"offline_budget_minutes": "45"},
+	})
+	if err != nil {
+		t.Fatalf("valid update = %v, want accepted", err)
+	}
+	if updated.Config["offline_budget_minutes"] != "45" {
+		t.Fatalf("updated config = %+v", updated.Config)
 	}
 }
 
