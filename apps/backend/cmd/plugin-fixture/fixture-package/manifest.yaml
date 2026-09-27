@@ -26,6 +26,7 @@ runtime:
 capabilities:
   api_read: ["messages"]
   events: ["task.created"]
+  api_read: ["tasks"]
   api_write: ["tasks"]
   agent_invoke: true
   state: true
@@ -97,6 +98,9 @@ agent_tools:
       idempotent_hint: true
 
 webhooks:
+  - key: "priority"
+    description: "Exercises external Host priority persistence for integration tests"
+    method: "POST"
   - key: "test-hook"
     description: "Records inbound webhooks for e2e polling"
     method: "POST"
