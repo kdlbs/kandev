@@ -105,6 +105,35 @@ export function TaskDetailRoute({
   }
 
   return (
+    <TaskDetailRouteBody
+      route={route}
+      layout={layout}
+      simple={simple}
+      mode={mode}
+      routeDataReady={routeDataReady}
+      onRouteHydrated={onRouteHydrated}
+    />
+  );
+}
+
+type TaskDetailRouteView = ReturnType<typeof deriveTaskDetailRouteView>;
+
+function TaskDetailRouteBody({
+  route,
+  layout,
+  simple,
+  mode,
+  routeDataReady,
+  onRouteHydrated,
+}: {
+  route: TaskDetailRouteView;
+  layout?: string | null;
+  simple?: string;
+  mode?: string;
+  routeDataReady: boolean;
+  onRouteHydrated?: () => void;
+}) {
+  return (
     <div className="relative h-full min-h-0 w-full" aria-busy={route.isLoadingOverPreviousRoute}>
       {route.initialState ? (
         <StateHydrator

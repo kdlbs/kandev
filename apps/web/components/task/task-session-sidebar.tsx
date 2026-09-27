@@ -23,7 +23,6 @@ import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useNestTaskByDrag } from "@/hooks/use-nest-task";
 import { useSidebarSelection, SidebarBulkDialogs } from "./task-session-sidebar-selection";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
-import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
 import {
   buildSwitchToSession,
@@ -44,6 +43,7 @@ import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-pr
 import { applyView } from "@/lib/sidebar/apply-view";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { applySidebarPageMetadata } from "./sidebar-page-metadata";
+import { findSidebarTask } from "./task-session-sidebar-task-lookup";
 
 type TaskSessionSidebarProps = {
   workspaceId: string | null;
@@ -52,15 +52,7 @@ type TaskSessionSidebarProps = {
   hideFilterBar?: boolean;
 };
 
-function findSidebarTask(state: ReturnType<StoreApi["getState"]>, taskId: string) {
-  const activeTask = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
-  if (activeTask) return activeTask;
-  for (const tasks of Object.values(state.sidebarArchivedTasks?.itemsByWorkspaceId ?? {})) {
-    const archivedTask = tasks.find((task) => task.id === taskId);
-    if (archivedTask) return archivedTask;
-  }
-  return undefined;
-}
+const EMPTY_SIDEBAR_TASKS: AggregatedSidebarTasks["allTasks"] = [];
 
 function buildSidebarTaskItems(params: {
   workspaceId: string | null;
@@ -200,6 +192,7 @@ export function useSidebarData(workspaceId: string | null) {
     workspaceContextPending,
     workspaceContextAccessDenied,
     retryWorkspaceContext,
+    allTasks,
     tasksWithRepositories,
     workflows,
   };
@@ -207,7 +200,7 @@ export function useSidebarData(workspaceId: string | null) {
 
 type StoreApi = ReturnType<typeof useAppStoreApi>;
 
-function useArchiveActions(store: StoreApi) {
+function useArchiveActions(store: StoreApi, pageTasks: AggregatedSidebarTasks["allTasks"]) {
   const { t } = useTranslation();
   const { runArchive: archiveAndSwitch } = useTaskMenuActions({ useLayoutSwitch: true });
   const [archivingTask, setArchivingTask] = useState<{
@@ -242,14 +235,14 @@ function useArchiveActions(store: StoreApi) {
         return;
       }
       const state = store.getState();
-      const task = findSidebarTask(state, taskId);
+      const task = findSidebarTask(state, taskId, pageTasks);
       setArchivingTask({
         id: taskId,
         title: task?.title ?? t("task:thisTask"),
         executorType: task?.primaryExecutorType,
       });
     },
-    [runArchive, store, t],
+    [pageTasks, runArchive, store, t],
   );
 
   const handleArchiveConfirm = useCallback(
@@ -270,7 +263,7 @@ function useArchiveActions(store: StoreApi) {
   };
 }
 
-function useDeleteActions(store: StoreApi) {
+function useDeleteActions(store: StoreApi, pageTasks: AggregatedSidebarTasks["allTasks"]) {
   const { t } = useTranslation();
   const { runDelete } = useTaskMenuActions({ useLayoutSwitch: true });
   const [deletingTask, setDeletingTask] = useState<{
@@ -283,14 +276,14 @@ function useDeleteActions(store: StoreApi) {
   const handleDeleteTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findSidebarTask(state, taskId);
+      const task = findSidebarTask(state, taskId, pageTasks);
       setDeletingTask({
         id: taskId,
         title: task?.title ?? t("task:thisTask"),
         executorType: task?.primaryExecutorType,
       });
     },
-    [store],
+    [pageTasks, store, t],
   );
 
   const handleDeleteConfirm = useCallback(
@@ -324,6 +317,7 @@ function useDeleteActions(store: StoreApi) {
 
 function useSidebarTaskSelection(params: {
   store: StoreApi;
+  pageTasks: AggregatedSidebarTasks["allTasks"];
   pathname: string | null;
   router: ReturnType<typeof useRouter>;
   loadTaskSessionsForTask: ReturnType<typeof useTaskRemoval>["loadTaskSessionsForTask"];
@@ -333,6 +327,7 @@ function useSidebarTaskSelection(params: {
 }) {
   const {
     store,
+    pageTasks,
     pathname,
     router,
     loadTaskSessionsForTask,
@@ -356,7 +351,7 @@ function useSidebarTaskSelection(params: {
   return useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findSidebarTask(state, taskId);
+      const task = findSidebarTask(state, taskId, pageTasks);
       const onTaskRoute =
         !!pathname && (pathname.startsWith("/t/") || pathname.startsWith("/office/tasks/"));
       if (!onTaskRoute && !task?.isArchived && !effectiveTaskPendingAction(task)) {
@@ -382,6 +377,7 @@ function useSidebarTaskSelection(params: {
     },
     [
       loadTaskSessionsForTask,
+      pageTasks,
       pathname,
       router,
       setActiveSession,
@@ -393,7 +389,7 @@ function useSidebarTaskSelection(params: {
   );
 }
 
-export function useSidebarActions(store: StoreApi) {
+export function useSidebarActions(store: StoreApi, pageTasks: AggregatedSidebarTasks["allTasks"]) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
@@ -406,6 +402,7 @@ export function useSidebarActions(store: StoreApi) {
 
   const handleSelectTask = useSidebarTaskSelection({
     store,
+    pageTasks,
     pathname,
     router,
     loadTaskSessionsForTask,
@@ -414,13 +411,16 @@ export function useSidebarActions(store: StoreApi) {
     setPreparingTaskId,
   });
 
-  return { preparingTaskId, handleSelectTask, ...useTaskRowActions(store) };
+  return { preparingTaskId, handleSelectTask, ...useTaskRowActions(store, pageTasks) };
 }
 
-export function useTaskRowActions(store: StoreApi) {
+export function useTaskRowActions(
+  store: StoreApi,
+  pageTasks: AggregatedSidebarTasks["allTasks"] = EMPTY_SIDEBAR_TASKS,
+) {
   const { renameTaskById } = useTaskActions();
-  const archiveActions = useArchiveActions(store);
-  const deleteActions = useDeleteActions(store);
+  const archiveActions = useArchiveActions(store, pageTasks);
+  const deleteActions = useDeleteActions(store, pageTasks);
   const detachActions = useTaskDetachDialog(store);
   const handleNestTask = useNestTaskByDrag();
   const linkActions = useSidebarLinkActions(store);
@@ -504,6 +504,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     workspaceContextAccessDenied,
     retryWorkspaceContext,
     tasksWithRepositories,
+    allTasks,
     page,
     pageEntries,
   } = useSidebarData(workspaceId);
@@ -514,7 +515,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const highlightedTaskId = onTaskRoute ? activeTaskId : null;
   const highlightedSelectedTaskId = onTaskRoute ? selectedTaskId : null;
 
-  const sidebarActions = useSidebarActions(store);
+  const sidebarActions = useSidebarActions(store, allTasks);
   const { preparingTaskId, taskMoveError } = sidebarActions;
   const taskLinkHandlers = useSidebarTaskLinking(workspaceId, sidebarActions);
   const repositories =
