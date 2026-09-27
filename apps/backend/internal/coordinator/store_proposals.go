@@ -270,6 +270,31 @@ func (s *Store) ListProposals(ctx context.Context, workspaceID, coordinatorID st
 	return result, nil
 }
 
+// ListApprovingClaimedBefore returns every approving proposal, across every
+// workspace, whose claimed_at is strictly before cutoff, ordered by
+// claimed_at then id (docs/specs/coordinator/system-design/proposals.md#recovery).
+// Unbounded: the startup pass is expected to run against a small number of
+// stuck rows, and no new index backs this query.
+func (s *Store) ListApprovingClaimedBefore(ctx context.Context, cutoff time.Time) ([]*Proposal, error) {
+	var rows []proposalRow
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
+		SELECT `+proposalColumns+` FROM coordinator_proposals
+		WHERE status = ? AND claimed_at < ?
+		ORDER BY claimed_at ASC, id ASC`),
+		string(ProposalStatusApproving), cutoff); err != nil {
+		return nil, fmt.Errorf("list approving proposals claimed before cutoff: %w", err)
+	}
+	result := make([]*Proposal, len(rows))
+	for i := range rows {
+		p, err := rows[i].toProposal()
+		if err != nil {
+			return nil, err
+		}
+		result[i] = p
+	}
+	return result, nil
+}
+
 // ClaimProposal conditionally moves a pending or failed proposal to
 // approving, storing finalSpec, decidedBy and a fresh claim token. Returns
 // matched=false (never an error) when no row satisfied the condition.

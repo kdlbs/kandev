@@ -6,8 +6,27 @@ import (
 
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	"go.uber.org/zap"
 )
+
+// DecisionTaskService is the narrow task-service surface the approve/reject
+// decisions (task-07) need: reading a candidate spec's referenced workflow,
+// repository and source task for validation, and creating/settling/looking
+// up the task an approval produces. Reached through a narrow interface, like
+// WorkspaceAuthorizer, so this package does not depend on task/service's
+// full surface. Satisfied by *taskservice.Service.
+type DecisionTaskService interface {
+	GetWorkflow(ctx context.Context, id string) (*taskmodels.Workflow, error)
+	GetRepository(ctx context.Context, id string) (*taskmodels.Repository, error)
+	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
+	CreateTask(ctx context.Context, req *taskservice.CreateTaskRequest) (taskservice.CreateTaskResult, error)
+	SettleExternalID(ctx context.Context, taskID, externalID string) (bool, *taskmodels.Task, error)
+	GetTaskByExternalID(ctx context.Context, workspaceID, externalID string) (*taskmodels.Task, error)
+}
 
 // WorkspaceAuthorizer is the workspace-scope check every coordinator route
 // needs (docs/specs/coordinator/system-design/coordinators.md#routes):
@@ -49,6 +68,14 @@ type Service struct {
 
 	onConversationCleared ConversationClearedHook
 	onCoordinatorDeleted  CoordinatorDeletedHook
+
+	// decisionTasks, decisionSteps and eventBus back Approve and Reject
+	// (task-07). Wired by SetDecisionDeps; nil until the decisions
+	// registration function calls it. See docs/specs/coordinator/
+	// system-design/proposals.md#approve.
+	decisionTasks DecisionTaskService
+	decisionSteps WorkflowStepReader
+	eventBus      bus.EventBus
 }
 
 // NewService builds a Service over store, validator, the workspace
@@ -68,6 +95,40 @@ func NewService(store *Store, validator *Validator, authorizer WorkspaceAuthoriz
 func (s *Service) SetConversationHooks(cleared ConversationClearedHook, deleted CoordinatorDeletedHook) {
 	s.onConversationCleared = cleared
 	s.onCoordinatorDeleted = deleted
+}
+
+// SetDecisionDeps wires the task service and step-graph reader Approve and
+// Reject need, and the event bus coordinator.updated publishes on
+// (docs/plans/workspace-coordinator/task-07-proposals-backend.md). Called
+// once by the decisions registration function in backendapp/coordinator.go;
+// nil until then, matching SetConversationHooks's contract.
+func (s *Service) SetDecisionDeps(tasks DecisionTaskService, steps WorkflowStepReader, eventBus bus.EventBus) {
+	s.decisionTasks = tasks
+	s.decisionSteps = steps
+	s.eventBus = eventBus
+}
+
+// publishCoordinatorUpdated recomputes coordinatorID's open-proposal count
+// and publishes events.CoordinatorUpdated (proposals.md#events). A nil
+// eventBus (SetDecisionDeps not called, e.g. in a store-only test) makes
+// this a no-op; a count read failure is logged at warn and swallowed, since
+// a stale badge count is not worth failing the caller's write over.
+func (s *Service) publishCoordinatorUpdated(ctx context.Context, workspaceID, coordinatorID string) {
+	if s.eventBus == nil {
+		return
+	}
+	open, err := s.store.CountOpenProposals(ctx, coordinatorID)
+	if err != nil {
+		s.logger.Warn("failed to count open proposals for coordinator.updated",
+			zap.String("coordinator_id", coordinatorID), zap.Error(err))
+		return
+	}
+	payload := NewCoordinatorUpdatedPayload(workspaceID, coordinatorID, open)
+	event := bus.NewEvent(events.CoordinatorUpdated, "coordinator-service", payload)
+	if err := s.eventBus.Publish(ctx, events.CoordinatorUpdated, event); err != nil {
+		s.logger.Warn("failed to publish coordinator.updated",
+			zap.String("coordinator_id", coordinatorID), zap.Error(err))
+	}
 }
 
 // CreateCoordinator validates and inserts a new coordinator
