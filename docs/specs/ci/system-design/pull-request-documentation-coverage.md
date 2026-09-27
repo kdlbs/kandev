@@ -137,7 +137,7 @@ Provide a `workflow_dispatch` PR-number input for retries, read current metadata
 
 ## Reporting and consistency
 
-Publish one commit status context, `PR documentation coverage`, on the current PR head using `statuses: write`.
+Publish the `PR documentation coverage` commit status context on the current PR head using `statuses: write`.
 Do not rely on the native `pull_request_target` job check, whose execution identity is the base revision.
 Use a distinct job name to avoid a status/check-name collision.
 Set pending before evaluation; publish success, failure for missing coverage, or error for incomplete data.
@@ -150,6 +150,12 @@ run and receives its group status, while the PR-head status still reflects the
 PR's own result. A failed queue lookup prevents premature PR-head success and
 publishes an infrastructure error there. Preserve the pending status until a
 terminal result is ready.
+Publish affected-group statuses from label-triggered reevaluation under the
+separate `PR documentation coverage (merge group reevaluation)` context. This
+prevents a group result from replacing the PR result when both refer to the
+same commit SHA. The normal `merge_group` event continues to publish the
+required `PR documentation coverage` context on its synthetic group SHA.
+Show the PR result and each affected-group result separately in the run summary.
 Write the result category and a bounded, single-line failure reason to the
 runner log when the job fails. Strip control characters and cap untrusted text;
 never log tokens, request bodies, document contents, or raw API responses.
@@ -208,6 +214,8 @@ Integration must validate the entry-boundary mapping against real GitHub merge-g
 If GitHub cannot supply the expected chain for a supported queue mode, revise the mapping and fixtures before rollout.
 Label removal while queued must also reevaluate every active group prefix
 containing that PR, through the same group evaluator and serialization key.
+These label-triggered group statuses use the group-reevaluation context; the
+merge-group event remains authoritative for the required status context.
 Do not dequeue, requeue, or automatically merge PRs.
 
 ## Security

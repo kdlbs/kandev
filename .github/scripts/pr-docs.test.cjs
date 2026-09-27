@@ -1147,10 +1147,11 @@ test('GitHub client retries status writes with the original request payload', as
     description: 'Coverage failed',
     state: 'failure',
     targetUrl: 'https://github.com/kdlbs/kandev/actions/runs/42',
-  });
+  }, 'PR documentation coverage (merge group reevaluation)');
 
   assert.equal(calls, 2);
   assert.deepEqual(requests[1], requests[0]);
+  assert.equal(JSON.parse(requests[0].body).context, 'PR documentation coverage (merge group reevaluation)');
 });
 
 test('GitHub client uses a due primary rate-limit reset', async () => {
@@ -2849,26 +2850,27 @@ test('queue lookup failure leaves the PR status pending until error and logs a b
   assert.ok(logs[0].length <= 300);
 });
 
-// @covers AC-CI-PR-DOCS-003.9
+// @covers AC-CI-PR-DOCS-003.9, AC-CI-PR-DOCS-003.10
 test('an affected group failure does not change the PR-head coverage decision', async () => {
   const statuses = [];
+  const summaries = [];
   const entries = [
     {
       baseCommit: { oid: SHA_A },
       headCommit: { oid: SHA_B },
-      pullRequest: { number: 42, headRefOid: SHA_B },
+      pullRequest: { number: 43, headRefOid: SHA_B },
     },
     {
       baseCommit: { oid: SHA_B },
       headCommit: { oid: SHA_C },
-      pullRequest: { number: 43, headRefOid: SHA_C },
+      pullRequest: { number: 42, headRefOid: SHA_C },
     },
   ];
   const client = {
     async getPullRequest(number) {
       return number === 42
-        ? pullRequest(42, SHA_B, ['no-docs-allow'])
-        : pullRequest(43, SHA_C);
+        ? pullRequest(42, SHA_C, ['no-docs-allow'])
+        : pullRequest(43, SHA_B);
     },
     async listFiles() {
       return [{ filename: 'apps/backend/runtime.go', status: 'modified' }];
@@ -2876,8 +2878,12 @@ test('an affected group failure does not change the PR-head coverage decision', 
     async listMergeQueueEntries() {
       return entries;
     },
-    async createCommitStatus(sha, status) {
-      statuses.push({ sha, state: status.state });
+    async createCommitStatus(sha, status, context) {
+      statuses.push({
+        context: context ?? 'PR documentation coverage',
+        sha,
+        state: status.state,
+      });
     },
   };
 
@@ -2887,19 +2893,22 @@ test('an affected group failure does not change the PR-head coverage decision', 
     event: { action: 'labeled', pull_request: { number: 42 } },
     eventName: 'pull_request_target',
     writeLog: () => {},
-    writeSummary: () => {},
+    writeSummary: summary => summaries.push(summary),
   });
 
   assert.equal(result.exitCode, 1);
   assert.equal(result.result.affectedGroups.at(-1).ok, false);
+  assert.equal(result.result.pullRequestResult.status, 'override');
   assert.deepEqual(statuses, [
-    { sha: SHA_B, state: 'pending' },
-    { sha: SHA_B, state: 'pending' },
-    { sha: SHA_B, state: 'success' },
-    { sha: SHA_C, state: 'pending' },
-    { sha: SHA_C, state: 'failure' },
-    { sha: SHA_B, state: 'success' },
+    { context: 'PR documentation coverage', sha: SHA_C, state: 'pending' },
+    { context: 'PR documentation coverage (merge group reevaluation)', sha: SHA_C, state: 'pending' },
+    { context: 'PR documentation coverage (merge group reevaluation)', sha: SHA_C, state: 'failure' },
+    { context: 'PR documentation coverage', sha: SHA_C, state: 'success' },
   ]);
+  assert.match(summaries[0], /Pull request result: \*\*override\*\*/);
+  assert.match(summaries[0], /Affected merge groups:/);
+  assert.match(summaries[0], /Group ending at .*failure/);
+  assert.match(summaries[0], /#43: \*\*missing\*\*/);
 });
 
 test('run summaries escape untrusted paths and error text', () => {

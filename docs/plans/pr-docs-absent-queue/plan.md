@@ -70,10 +70,12 @@ Keep `pending` as the only PR-head status during a label transition. Evaluate
 the PR, read the queue, and update affected group statuses before publishing
 the PR-head terminal result. An affected group's policy failure makes the job
 fail and sets that group's status, while the PR-head status reflects the PR's
-own coverage decision. A queue read failure sets the PR-head status to error.
+own coverage decision. Publish label-triggered group results under a separate
+status context so a group and PR result cannot overwrite each other when their
+commit SHA is the same. A queue read failure sets the PR-head status to error.
 Log the final failed result as one bounded, sanitized line, without raw API
 responses or contributor document content. The step summary retains detailed
-paths and remediation.
+paths and remediation, with PR and affected-group outcomes shown separately.
 
 No workflow trigger or permission change is expected. The trusted-base checkout
 and `persist-credentials: false` remain the security boundary.
@@ -84,7 +86,7 @@ and `persist-credentials: false` remain the security boundary.
 | --- | --- |
 | AC-CI-PR-DOCS-002.1, .2, .5 | `pr-docs.test.cjs`: label addition with `mergeQueue: null` finishes with override success; removal evaluates the PR normally with no groups. |
 | AC-CI-PR-DOCS-003.2, .4 | Adapter fixtures distinguish explicit null from missing repository, malformed connection, and GraphQL errors; an actual merge-group event with no members remains an error. |
-| AC-CI-PR-DOCS-003.8, .9 | Event fixtures assert status ordering, separate PR/group policy outcomes, error on queue-read failure, and a bounded safe runner-log reason. |
+| AC-CI-PR-DOCS-003.8, .9, .10 | Event fixtures assert status ordering, distinct status contexts for colliding PR/group SHAs, separate PR/group summary outcomes, error on queue-read failure, and a bounded safe runner-log reason. |
 
 The first red test, `label addition with an absent merge queue preserves
 override success`, should reproduce the observed labeled-event failure with a
@@ -102,11 +104,18 @@ Implementation completed on 2026-09-27:
 
 - The 104 validator tests passed, including absent, malformed, and disappearing
   queue responses; label status ordering; group result separation; and bounded
-  runner-log reporting.
+  runner-log reporting. The shared-SHA regression confirms label group status
+  cannot overwrite the PR status, and summaries identify PR and group outcomes.
 - The workflow contract suite passed all 7 tests.
 - The specification catalog validated 314 decisions and 1194 specifications.
 - All specification files passed the full linter.
 - `git diff --check` passed.
+
+PR review fixup on 2026-09-27: The failing shared-SHA regression was verified
+red before implementation and green afterward. Label-triggered group
+reevaluations now use `PR documentation coverage (merge group reevaluation)`;
+the required `PR documentation coverage` context remains on PR heads and
+actual `merge_group` event heads.
 
 ## Risks
 
@@ -114,7 +123,8 @@ Implementation completed on 2026-09-27:
   responses. Accept only an explicit null queue under a valid repository with
   no GraphQL errors.
 - Reordering status publication could make a group policy failure incorrectly
-  fail the PR's own override. Keep PR and group results separate in tests.
+  fail the PR's own override. Use separate status contexts and assert the
+  shared-SHA case in tests.
 - GitHub status writes remain eventually consistent. The existing bounded
   retry policy can create duplicate records after an uncertain response.
 

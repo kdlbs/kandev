@@ -16,6 +16,7 @@ acceptance_criteria:
   - AC-CI-PR-DOCS-003.4
   - AC-CI-PR-DOCS-003.8
   - AC-CI-PR-DOCS-003.9
+  - AC-CI-PR-DOCS-003.10
 system_design:
   - ../../specs/ci/system-design/pull-request-documentation-coverage.md
 ---
@@ -37,7 +38,11 @@ processing finishes and report job failures in the runner log.
 - Distinguish an explicitly absent queue from malformed or inaccessible queue
   data in the bounded GitHub adapter.
 - Keep PR and affected-group policy results separate while publishing terminal
-  statuses after label-related work.
+  statuses after label-related work. Publish affected-group reevaluation
+  statuses with a distinct context so a group failure cannot overwrite the PR
+  result when both statuses use the same SHA.
+- Show the PR outcome and affected-group outcomes separately in the run
+  summary.
 - Emit a bounded, sanitized final failure reason to the runner log.
 - Cover label addition, label removal, no queue, queue lookup failure, failing
   affected group, and actual merge-group event paths.
@@ -55,8 +60,9 @@ processing finishes and report job failures in the runner log.
 - Malformed or inaccessible queue data cannot produce PR-head success, and an
   actual merge-group event without validated members remains an error.
 - The PR-head terminal status follows required group work. A group's policy
-  failure leaves the PR's own coverage decision intact; failed jobs show one
-  bounded reason in the runner log.
+  failure leaves the PR's own coverage decision intact, including when the
+  group head and PR head are the same SHA; failed jobs show one bounded reason
+  in the runner log.
 
 ## Verification
 
@@ -109,3 +115,9 @@ Completed on 2026-09-27. The first adapter regression failed with
 response. After the fix, the complete validator suite passed all 104 tests, the
 workflow contract suite passed all 7 tests, the specification catalog and full
 specification linter passed, and `git diff --check` passed.
+
+PR review fixup on 2026-09-27: Added coverage for a failing group that shares
+the labeled PR's head SHA. Label-triggered group reevaluations now use a
+separate GitHub status context, and the run summary shows the PR result before
+the affected-group and member results. The regression failed before the fix and
+passed afterward. Full verification results are recorded in the task plan.

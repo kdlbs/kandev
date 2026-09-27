@@ -65,6 +65,7 @@ Contributors can write the artifacts manually; use of the repository harness is 
 - **AC-CI-PR-DOCS-003.7:** When a GitHub request has a permanent failure, requires an excessive wait, or exhausts its retries, the result shall be an infrastructure error. The bounded diagnostic shall identify the request class, response status, and retry outcome. It shall not expose credentials or document contents.
 - **AC-CI-PR-DOCS-003.8:** A failed coverage job shall identify its result category and a bounded failure reason in the runner log without exposing credentials or document contents.
 - **AC-CI-PR-DOCS-003.9:** A label-triggered run shall not publish success on the pull request revision before it finishes the affected merge-group lookup and evaluation. If required queue data cannot be read, the pull request revision shall receive an error result. An affected group's policy failure shall remain on that group's status and shall not change the pull request's own coverage decision.
+- **AC-CI-PR-DOCS-003.10:** Label-triggered group reevaluation shall publish group results in a status context distinct from the pull request coverage context, so results cannot overwrite each other when they share a commit revision.
 
 ### REQ-CI-PR-DOCS-004: Request-efficient evaluation
 

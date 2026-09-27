@@ -76,6 +76,7 @@ const SECONDARY_RATE_LIMIT_DELAYS_MS = [60_000, 120_000];
 const MAX_RUN_FAILURE_LOG_LENGTH = 300;
 const NO_DOCS_LABEL = 'no-docs-allow';
 const STATUS_CONTEXT = 'PR documentation coverage';
+const MERGE_GROUP_REEVALUATION_CONTEXT = 'PR documentation coverage (merge group reevaluation)';
 const GITHUB_API = 'https://api.github.com';
 
 function defaultSleep(delay) {
@@ -1378,7 +1379,7 @@ class GitHubClient {
     return [...paths];
   }
 
-  async createCommitStatus(sha, status) {
+  async createCommitStatus(sha, status, context = STATUS_CONTEXT) {
     requireCommitSha(sha, 'status revision');
     if (!status || !['pending', 'success', 'failure', 'error'].includes(status.state)) {
       throw new Error('commit status has an invalid state');
@@ -1390,7 +1391,7 @@ class GitHubClient {
         requestClass: 'commit-status',
         body: {
           state: status.state,
-          context: STATUS_CONTEXT,
+          context,
           description: String(status.description ?? '').slice(0, 140),
           target_url: status.targetUrl,
         },
@@ -2068,6 +2069,9 @@ function markdownValue(value) {
 
 function resultSummary(result) {
   const lines = [`## PR documentation coverage`, `Result: **${markdownValue(result.status)}**`];
+  if (result.pullRequestResult) {
+    lines.push(`Pull request result: **${markdownValue(result.pullRequestResult.status)}**`);
+  }
   if (result.override) {
     lines.push(`Override: \`${markdownValue(result.override)}\``);
   }
@@ -2108,6 +2112,17 @@ function resultSummary(result) {
     lines.push('', 'Merge-group members:');
     for (const member of result.memberResults) {
       lines.push(`- #${member.number}: **${markdownValue(member.status)}**`);
+    }
+  }
+  if (result.affectedGroups?.length > 0) {
+    lines.push('', 'Affected merge groups:');
+    for (const group of result.affectedGroups) {
+      lines.push(
+        '- Group ending at ' + markdownValue(group.headSha) + ': **' + markdownValue(group.status) + '**',
+      );
+      for (const member of group.memberResults ?? []) {
+        lines.push(`  - #${member.number}: **${markdownValue(member.status)}**`);
+      }
     }
   }
   return `${lines.join('\n')}\n`;
@@ -2192,12 +2207,12 @@ async function writeRunSummary(summary, env, writeSummary) {
   }
 }
 
-async function publishResult(client, sha, result, targetUrl) {
+async function publishResult(client, sha, result, targetUrl, context = STATUS_CONTEXT) {
   await client.createCommitStatus(sha, {
     description: statusDescription(result),
     state: statusState(result),
     targetUrl,
-  });
+  }, context);
 }
 
 async function evaluateAffectedGroups({ client, pullNumber, targetUrl, entries, publishStatus = true }) {
@@ -2209,7 +2224,7 @@ async function evaluateAffectedGroups({ client, pullNumber, targetUrl, entries, 
         description: 'Evaluating merge-group documentation coverage',
         state: 'pending',
         targetUrl,
-      });
+      }, MERGE_GROUP_REEVALUATION_CONTEXT);
     }
     const result = await evaluateMergeGroup({
       baseSha: group.baseSha,
@@ -2218,7 +2233,13 @@ async function evaluateAffectedGroups({ client, pullNumber, targetUrl, entries, 
       headSha: group.headSha,
     });
     if (publishStatus) {
-      await publishResult(client, group.headSha, result, targetUrl);
+      await publishResult(
+        client,
+        group.headSha,
+        result,
+        targetUrl,
+        MERGE_GROUP_REEVALUATION_CONTEXT,
+      );
     }
     groupResults.push(result);
   }
@@ -2331,6 +2352,7 @@ async function run({
           result = {
             ...pullRequestResult,
             affectedGroups: groupResults,
+            pullRequestResult,
           };
           if (groupResults.some(groupResult => !groupResult.ok)) {
             result = {
