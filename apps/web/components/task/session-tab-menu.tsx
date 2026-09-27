@@ -29,12 +29,14 @@ export function BulkSessionRemoveDialog({
   scope,
   count,
   pending,
+  removedCount,
   onCancel,
   onConfirm,
 }: {
   scope: "others" | "all" | null;
   count: number;
   pending: boolean;
+  removedCount: number;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -48,6 +50,11 @@ export function BulkSessionRemoveDialog({
           <AlertDialogDescription>
             {t("task:removeSessionsDescription", { count })}
           </AlertDialogDescription>
+          {pending && (
+            <p role="status" className="text-sm text-muted-foreground">
+              {t("task:bulkRemovalProgress", { removed: removedCount, total: count })}
+            </p>
+          )}
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{t("common:cancel")}</AlertDialogCancel>

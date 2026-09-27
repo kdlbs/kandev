@@ -1,5 +1,5 @@
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 export type BulkSessionRemovalScope = "others" | "all";
 export type BulkSessionRemovalReason = "loading" | "empty" | "active" | null;
@@ -31,8 +31,9 @@ function orderedTargetSessions(
     (session) => scope === "all" || session.id !== selectedSessionId,
   );
   return [
-    ...candidates.filter((session) => !session.is_primary),
-    ...candidates.filter((session) => session.is_primary),
+    ...candidates.filter((session) => !session.is_primary && session.id !== selectedSessionId),
+    ...candidates.filter((session) => session.is_primary && session.id !== selectedSessionId),
+    ...candidates.filter((session) => session.id === selectedSessionId),
   ];
 }
 
@@ -85,13 +86,21 @@ export function isBulkSessionRemovalSnapshotCurrent(
 export async function executeBulkSessionRemoval(
   targetIds: string[],
   remove: (sessionId: string) => Promise<boolean>,
+  onProgress?: (removed: number) => void,
 ): Promise<{ removed: number; remaining: number; failed: boolean }> {
   let removed = 0;
   for (const sessionId of targetIds) {
-    if (!(await remove(sessionId))) {
+    let succeeded = false;
+    try {
+      succeeded = await remove(sessionId);
+    } catch {
+      succeeded = false;
+    }
+    if (!succeeded) {
       return { removed, remaining: targetIds.length - removed, failed: true };
     }
     removed += 1;
+    onProgress?.(removed);
   }
   return { removed, remaining: 0, failed: false };
 }
@@ -115,24 +124,35 @@ export function useBulkSessionRemoval({
 }) {
   const [snapshot, setSnapshot] = useState<BulkSessionRemovalSnapshot | null>(null);
   const [pending, setPending] = useState(false);
+  const [removedCount, setRemovedCount] = useState(0);
   const [wasRefreshed, setWasRefreshed] = useState(false);
+  const pendingRef = useRef(false);
   const request = useCallback(
     (scope: BulkSessionRemovalScope, selectedSessionId: string) => {
       const next = buildBulkSessionRemovalSnapshot(scope, selectedSessionId, sessions, isLoading);
+      if (pendingRef.current) return next;
       if (next.eligible) setSnapshot(next);
+      setRemovedCount(0);
       setWasRefreshed(false);
       return next;
     },
     [isLoading, sessions],
   );
   const cancel = useCallback(() => {
+    if (pendingRef.current) return;
     setSnapshot(null);
     setWasRefreshed(false);
   }, []);
   const confirm = useCallback(async () => {
-    if (!snapshot || pending) return null;
+    if (!snapshot || pendingRef.current) return null;
+    pendingRef.current = true;
     setPending(true);
-    const latest = getLatestSnapshot ? await getLatestSnapshot() : { sessions, isLoading };
+    let latest: { sessions: TaskSession[]; isLoading: boolean };
+    try {
+      latest = getLatestSnapshot ? await getLatestSnapshot() : { sessions, isLoading };
+    } catch {
+      latest = { sessions: [], isLoading: true };
+    }
     if (!isBulkSessionRemovalSnapshotCurrent(snapshot, latest.sessions, latest.isLoading)) {
       const refreshed = buildBulkSessionRemovalSnapshot(
         snapshot.scope,
@@ -143,12 +163,14 @@ export function useBulkSessionRemoval({
       setSnapshot(refreshed.eligible ? refreshed : null);
       setWasRefreshed(refreshed.eligible);
       setPending(false);
+      pendingRef.current = false;
       onInvalidSnapshot?.();
       return { stale: true } satisfies BulkSessionRemovalConfirmationResult;
     }
     if (snapshot.scope === "all") onRemoveAllConfirmed?.();
-    const result = await executeBulkSessionRemoval(snapshot.targetIds, remove);
+    const result = await executeBulkSessionRemoval(snapshot.targetIds, remove, setRemovedCount);
     setPending(false);
+    pendingRef.current = false;
     setSnapshot(null);
     setWasRefreshed(false);
     onComplete?.(result);
@@ -159,10 +181,17 @@ export function useBulkSessionRemoval({
     onComplete,
     onInvalidSnapshot,
     onRemoveAllConfirmed,
-    pending,
     remove,
     sessions,
     snapshot,
   ]);
-  return { snapshot, pending, wasRefreshed, request, cancel, confirm };
+  return {
+    snapshot,
+    pending,
+    removedCount,
+    wasRefreshed,
+    request,
+    cancel,
+    confirm,
+  };
 }

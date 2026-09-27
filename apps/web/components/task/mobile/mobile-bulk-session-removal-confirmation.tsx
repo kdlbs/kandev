@@ -32,6 +32,14 @@ export function MobileBulkSessionRemovalConfirmation({
         if (result?.stale) return Promise.reject();
       }}
     >
+      {bulkRemoval.pending && (
+        <p role="status">
+          {t("task:bulkRemovalProgress", {
+            removed: bulkRemoval.removedCount,
+            total: bulkRemoval.snapshot?.targetIds.length ?? 0,
+          })}
+        </p>
+      )}
       {bulkRemoval.wasRefreshed && <p role="status">{t("task:sessionsChangedReviewAgain")}</p>}
     </MobileActionConfirmation>
   );

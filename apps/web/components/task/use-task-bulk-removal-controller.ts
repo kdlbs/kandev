@@ -1,7 +1,14 @@
-import { useCallback, useRef } from "react";
+import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import { useAppStoreApi } from "@/components/state-provider";
+import { useToast } from "@/components/toast-provider";
 import type { TaskSession } from "@/lib/types/http";
 import { suppressTaskSessionAutoProvisioning } from "@/lib/session/session-auto-provisioning-fence";
-import { useBulkSessionRemoval, type BulkSessionRemovalScope } from "./session-bulk-removal";
+import {
+  useBulkSessionRemoval,
+  type BulkSessionRemovalReason,
+  type BulkSessionRemovalScope,
+} from "./session-bulk-removal";
 
 export function useTaskBulkRemovalController({
   taskId,
@@ -18,26 +25,46 @@ export function useTaskBulkRemovalController({
   loadSessions: (force?: boolean) => Promise<void>;
   removeById: (id: string) => Promise<boolean>;
 }) {
-  const latestSessions = useRef(sessions);
-  const latestLoading = useRef(isLoading);
-  latestSessions.current = sessions;
-  latestLoading.current = isLoading;
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const store = useAppStoreApi();
+  const reportIneligible = useCallback(
+    (reason: BulkSessionRemovalReason) => {
+      if (!reason) return;
+      toast({ title: t(`task:bulkRemovalUnavailable_${reason}`), variant: "error" });
+    },
+    [t, toast],
+  );
   const getLatestSnapshot = useCallback(async () => {
     if (taskId) await loadSessions(true);
-    return { sessions: latestSessions.current, isLoading: latestLoading.current };
-  }, [loadSessions, taskId]);
+    const state = store.getState();
+    return {
+      sessions: taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []) : [],
+      isLoading: !taskId || !!state.taskSessionsByTask.errorByTaskId?.[taskId],
+    };
+  }, [loadSessions, store, taskId]);
   const bulkRemoval = useBulkSessionRemoval({
     sessions,
     isLoading,
     remove: removeById,
     getLatestSnapshot,
     onRemoveAllConfirmed: () => taskId && suppressTaskSessionAutoProvisioning(taskId),
+    onInvalidSnapshot: () => toast({ title: t("task:sessionsChangedReviewAgain") }),
+    onComplete: ({ removed, remaining, failed }) => {
+      if (failed) {
+        toast({
+          title: t("task:bulkRemovalPartial", { removed, remaining }),
+          variant: "error",
+        });
+      }
+    },
   });
   const request = useCallback(
-    (scope: BulkSessionRemovalScope) => {
-      if (sessionId) bulkRemoval.request(scope, sessionId);
+    (scope: BulkSessionRemovalScope, targetSessionId = sessionId) => {
+      if (!targetSessionId) return;
+      reportIneligible(bulkRemoval.request(scope, targetSessionId).reason);
     },
-    [bulkRemoval, sessionId],
+    [bulkRemoval, reportIneligible, sessionId],
   );
   return { bulkRemoval, request };
 }

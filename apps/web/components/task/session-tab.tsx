@@ -527,6 +527,7 @@ function SessionTabContent({
         scope={bulkRemoval.snapshot?.scope ?? null}
         count={bulkRemoval.snapshot?.targetIds.length ?? 0}
         pending={bulkRemoval.pending}
+        removedCount={bulkRemoval.removedCount}
         onCancel={bulkRemoval.cancel}
         onConfirm={() => void bulkRemoval.confirm()}
       />

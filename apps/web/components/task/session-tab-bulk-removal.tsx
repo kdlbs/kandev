@@ -5,12 +5,14 @@ export function SessionTabBulkRemovalDialog({
   scope,
   count,
   pending,
+  removedCount,
   onCancel,
   onConfirm,
 }: {
   scope: BulkSessionRemovalScope | null;
   count: number;
   pending: boolean;
+  removedCount: number;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -19,6 +21,7 @@ export function SessionTabBulkRemovalDialog({
       scope={scope}
       count={count}
       pending={pending}
+      removedCount={removedCount}
       onCancel={onCancel}
       onConfirm={onConfirm}
     />

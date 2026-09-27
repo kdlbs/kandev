@@ -30,7 +30,7 @@ describe("bulk session removal", () => {
       eligible: true,
     });
     expect(buildBulkSessionRemovalSnapshot("all", "selected", sessions, false)).toMatchObject({
-      targetIds: ["selected", "hidden", "primary"],
+      targetIds: ["hidden", "primary", "selected"],
       eligible: true,
     });
   });

@@ -451,7 +451,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const { rows, sessions, isLoading, loadSessions } = useSessionRows(taskId);
   const bulkActions = useSessionActions({ sessionId: null, taskId });
-  const { bulkRemoval } = useTaskBulkRemovalController({
+  const { bulkRemoval, request: requestBulkRemoval } = useTaskBulkRemovalController({
     taskId,
     sessionId: activeSessionId ?? undefined,
     sessions,
@@ -522,7 +522,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
             totalSessions={rows.length}
             isConfirming={row.id === confirmDeleteSessionId}
             onAskDelete={() => setConfirmDeleteSessionId(row.id)}
-            onRemoveScope={(scope) => bulkRemoval.request(scope, row.id)}
+            onRemoveScope={(scope) => requestBulkRemoval(scope, row.id)}
             onCancelDelete={() => setConfirmDeleteSessionId(null)}
             onSelect={handleSelect}
           />
