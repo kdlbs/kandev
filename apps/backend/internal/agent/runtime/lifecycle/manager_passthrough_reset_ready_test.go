@@ -52,6 +52,7 @@ func TestRestartPassthroughProcessSettlesStartupBeforeNextTurn(t *testing.T) {
 	require.NoError(t, mgr.restartPassthroughProcess(ctx, execution))
 	require.True(t, startupSettled.Load(), "reset must settle boot readiness before admitting a prompt")
 	require.NoError(t, mgr.MarkPassthroughRunning(execution.SessionID))
+	mgr.MarkPassthroughInputDelivered(execution.SessionID, execution.PassthroughProcessID)
 	mgr.handlePassthroughTurnComplete(execution.SessionID, execution.PassthroughProcessID)
 	require.Equal(t, v1.AgentStatusReady, execution.Status)
 	bus := mgr.eventBus.(*MockEventBus)
