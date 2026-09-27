@@ -1,6 +1,8 @@
 import { expect, test } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import { useRegularMode } from "../../helpers/regular-mode";
 import {
   createFixtureExecutorProfile,
@@ -25,6 +27,21 @@ test.describe("remote executor profiles", () => {
     try {
       const executor = await installFixtureExecutorProvider(testPage, apiClient);
       await testPage.goto("/settings/executors");
+      const profilesCard = testPage.getByTestId(`executor-profiles-card-${executor.id}`);
+      await profilesCard.getByRole("button", { name: "Add", exact: true }).click();
+      const createForm = testPage.getByTestId("plugin-executor-profile-create-form");
+      await expect(createForm).toBeVisible();
+      await waitForFiniteAnimations(testPage.getByRole("dialog"));
+      const nameInput = testPage.locator("#plugin-executor-profile-name");
+      const cancelCreate = testPage.getByRole("button", { name: "Cancel", exact: true });
+      const createProfile = testPage.getByRole("button", { name: "Create Profile", exact: true });
+      // @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3, AC-UI-CONTROL-SIZING-001.6
+      await expectControlHeight(nameInput, 28);
+      await expectControlHeight(cancelCreate, 28);
+      await expectControlHeight(createProfile, 28);
+      await cancelCreate.click();
+      await expect(createForm).toBeHidden();
+
       const profile = await createFixtureExecutorProfile(testPage, executor, false);
       const editor = testPage.getByTestId("plugin-executor-profile-page");
       await expect(editor).toBeVisible();
@@ -34,9 +51,12 @@ test.describe("remote executor profiles", () => {
       await expect(testPage.getByLabel("Credential")).toHaveValue("");
 
       for (const control of [
+        testPage.locator("#executor-profile-name"),
         testPage.getByLabel("Region"),
         testPage.getByLabel("Image"),
         testPage.getByTestId("executor-profile-secret-clear-credential"),
+        testPage.getByRole("button", { name: "Delete Profile", exact: true }),
+        testPage.getByRole("button", { name: "Back to Executors", exact: true }),
       ]) {
         const box = await control.boundingBox();
         expect(box, "fine-pointer desktop profile controls must have geometry").not.toBeNull();

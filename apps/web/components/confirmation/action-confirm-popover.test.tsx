@@ -47,15 +47,21 @@ function Harness({
 describe("ActionConfirmPopover", () => {
   afterEach(cleanup);
 
-  it("focuses Cancel first and gives coarse pointers a touch-sized action", async () => {
+  it("focuses Cancel first and applies touch sizing only to phone and coarse-pointer contexts", async () => {
     render(<Harness />);
 
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" })),
     );
-    expect(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }).className,
-    ).toContain("min-h-11");
+    const dialog = within(screen.getByRole("dialog"));
+    for (const action of [
+      dialog.getByRole("button", { name: "Cancel" }),
+      dialog.getByRole("button", { name: "Delete" }),
+    ]) {
+      expect(action.className).toContain("max-md:h-11");
+      expect(action.className).toContain("[@media(pointer:coarse)]:h-11");
+      expect(action.className).not.toContain("min-h-11");
+    }
   });
 
   it("supports a wider bounded surface without changing the default width", async () => {

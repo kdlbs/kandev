@@ -48,7 +48,7 @@ function ChoiceGroup({
           variant={value === choice ? "default" : "outline"}
           aria-pressed={value === choice}
           className={cn(
-            "min-h-11 h-8 cursor-pointer px-2 text-xs sm:min-h-8",
+            "max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 cursor-pointer px-2 text-xs",
             choice === REPLACE && "hover:text-destructive",
           )}
           onClick={() => onChange(choice)}
@@ -149,18 +149,10 @@ export function FileUploadConflictDialog({
         </ul>
 
         <DialogFooter>
-          <Button
-            variant="outline"
-            className="min-h-11 cursor-pointer sm:min-h-9"
-            onClick={handleCancel}
-          >
+          <Button variant="outline" className="cursor-pointer" onClick={handleCancel}>
             {t("common:cancel")}
           </Button>
-          <Button
-            variant="default"
-            className="min-h-11 cursor-pointer sm:min-h-9"
-            onClick={handleConfirm}
-          >
+          <Button variant="default" className="cursor-pointer" onClick={handleConfirm}>
             {t("task:uploadConflictConfirm")}
           </Button>
         </DialogFooter>

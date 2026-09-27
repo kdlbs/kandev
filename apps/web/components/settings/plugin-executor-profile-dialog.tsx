@@ -94,7 +94,7 @@ function ProfileCreationFields({
             id="plugin-executor-profile-name"
             value={name}
             disabled={!supported || Boolean(unavailableReason)}
-            className="min-h-11 w-full"
+            className="w-full"
             onChange={(event) => onNameChange(event.target.value)}
           />
           {!name.trim() && (
@@ -133,14 +133,14 @@ function ProfileCreationActions({
       <Button
         variant="outline"
         onClick={onCancel}
-        className={settingsActionClassName("min-h-11 cursor-pointer")}
+        className={settingsActionClassName("cursor-pointer")}
       >
         {t("common:cancel")}
       </Button>
       <Button
         onClick={onCreate}
         disabled={!canSave}
-        className={settingsActionClassName("min-h-11 cursor-pointer")}
+        className={settingsActionClassName("cursor-pointer")}
       >
         {saving ? t("executors:creating") : t("executors:createProfile")}
       </Button>
