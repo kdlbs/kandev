@@ -176,11 +176,13 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		}
 
 		parentID := req.GetString("parent_id", "")
+		parentIsSelf := false
 		if parentID == "self" {
 			if s.taskID == "" {
 				return mcp.NewToolResultError("cannot use 'self' as parent_id: no current task context"), nil
 			}
 			parentID = s.taskID
+			parentIsSelf = true
 		}
 		workspaceID := req.GetString("workspace_id", "")
 		workflowID := req.GetString("workflow_id", "")
@@ -210,6 +212,12 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		}
 		if s.sessionID != "" && s.taskID != "" {
 			payload["source_session_id"] = s.sessionID
+		}
+		if parentIsSelf {
+			// This is an internal server-owned intent marker. The backend still
+			// authenticates the current session and verifies that parent_id is
+			// the authenticated caller task before applying self placement.
+			payload["parent_is_self"] = true
 		}
 		if externalID := req.GetString("external_id", ""); externalID != "" {
 			payload["external_id"] = externalID

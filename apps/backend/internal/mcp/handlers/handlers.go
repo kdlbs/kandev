@@ -943,7 +943,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			SessionID: req.SourceSessionID,
 		})
 	}
-	result, err := h.taskSvc.CreateTask(createCtx, &service.CreateTaskRequest{
+	createReq := &service.CreateTaskRequest{
 		ParentID:               req.ParentID,
 		WorkspaceID:            req.WorkspaceID,
 		WorkflowID:             req.WorkflowID,
@@ -960,7 +960,8 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		StartAgent:             startAgent,
 		ExternalID:             req.ExternalID,
 		WorkspacePolicy:        &workspacePolicy,
-	})
+	}
+	result, err := h.taskSvc.CreateTask(createCtx, createReq)
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
 		code := classifyCreateTaskError(err)
@@ -992,6 +993,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			TaskDTO:          dto.FromTask(result.Task),
 			Deduplicated:     true,
 			CreationComplete: result.Outcome == service.CreateTaskOutcomeFoundSettled,
+			ParentResolution: admission.parentResolution.forOutcome(false),
 		})
 	}
 	task := result.Task
@@ -1021,8 +1023,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	// Settlement (create-sequence step 7): after policy attach, before
-	// auto-start dispatch.
-	settled, survivor, settleErr := h.taskSvc.SettleExternalID(ctx, task.ID, task.ExternalID)
+	// auto-start dispatch. The normalized request identity survives a release
+	// during synchronous creation, even when the refreshed task has lost it.
+	settled, survivor, settleErr := h.taskSvc.SettleExternalID(ctx, task.ID, createReq.ExternalID)
 	if settleErr != nil {
 		if errors.Is(settleErr, taskrepo.ErrTaskNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
@@ -1039,6 +1042,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			TaskDTO:          dto.FromTask(survivor),
 			Deduplicated:     false,
 			CreationComplete: true,
+			ParentResolution: admission.parentResolution.forOutcome(true),
 		})
 	}
 
@@ -1067,6 +1071,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		TaskDTO:          response,
 		Deduplicated:     false,
 		CreationComplete: true,
+		ParentResolution: admission.parentResolution.forOutcome(true),
 	})
 }
 
@@ -1076,8 +1081,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 // booleans, not presence-only markers, mirroring the REST create response.
 type mcpCreateTaskResult struct {
 	dto.TaskDTO
-	Deduplicated     bool `json:"deduplicated"`
-	CreationComplete bool `json:"creation_complete"`
+	Deduplicated     bool                           `json:"deduplicated"`
+	CreationComplete bool                           `json:"creation_complete"`
+	ParentResolution *mcpCreateTaskParentResolution `json:"parent_resolution,omitempty"`
 }
 
 func classifyCreateTaskError(err error) string {
