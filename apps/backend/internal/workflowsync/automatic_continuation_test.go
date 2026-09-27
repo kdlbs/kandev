@@ -330,13 +330,12 @@ func TestAutomaticSyncRestartsAfterFailedRequestUsesRotatedCredential(t *testing
 
 	svc.dispatchAutomaticSync("ws-credential-error", false)
 	<-started
-	provider.setFingerprint("credential-2")
-	close(release)
-
 	svc.automaticMu.Lock()
 	state := svc.automaticInFlight["ws-credential-error"]
 	svc.automaticMu.Unlock()
 	require.NotNil(t, state)
+	provider.setFingerprint("credential-2")
+	close(release)
 	<-state.done
 
 	directoryReads, fileReads := provider.counts()
