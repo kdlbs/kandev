@@ -1,5 +1,5 @@
 import { type Page } from "@playwright/test";
-import { test as base, expect } from "../../fixtures/test-base";
+import { runWithBackendRecovery, test as base, expect } from "../../fixtures/test-base";
 import { OfficeApiClient } from "../../helpers/office-api-client";
 import { waitForOfficeTaskSessionLive } from "../../helpers/office-launch";
 import { SessionPage } from "../../pages/session-page";
@@ -17,6 +17,11 @@ import { SessionPage } from "../../pages/session-page";
 
 type AdvancedModeFixtures = {
   officeApi: OfficeApiClient;
+  advancedWorkspace: {
+    workspaceId: string;
+    agentId: string;
+    workflowId: string;
+  };
   advancedSeed: {
     workspaceId: string;
     agentId: string;
@@ -32,22 +37,42 @@ const test = base.extend<{ testPage: Page }, AdvancedModeFixtures>({
     { scope: "worker" },
   ],
 
-  advancedSeed: [
+  advancedWorkspace: [
     async ({ officeApi, apiClient, seedData }, use) => {
-      const result = (await officeApi.completeOnboarding({
+      const result = await officeApi.completeOnboarding({
         workspaceName: "Advanced Mode Workspace",
         taskPrefix: "AM",
         agentName: "CEO",
         agentProfileId: seedData.agentProfileId,
         executorPreference: "local_pc",
-        taskTitle: "present yourself",
-        taskDescription: "say your name",
-      })) as { workspaceId: string; agentId: string; projectId: string; taskId?: string };
+      });
 
-      const taskId = result.taskId;
-      if (!taskId) {
-        throw new Error("completeOnboarding did not return a taskId");
+      const { workspaces } = await apiClient.listWorkspaces();
+      const workflowId = workspaces.find(
+        (workspace) => workspace.id === result.workspaceId,
+      )?.office_workflow_id;
+      if (!workflowId) {
+        throw new Error(`Advanced mode workspace ${result.workspaceId} has no office workflow`);
       }
+
+      await use({ workspaceId: result.workspaceId, agentId: result.agentId, workflowId });
+    },
+    { scope: "worker" },
+  ],
+
+  advancedSeed: async (
+    { officeApi, apiClient, backend, advancedWorkspace, testPage, seedData },
+    use,
+  ) => {
+    void testPage;
+    try {
+      const task = (await officeApi.createTask(advancedWorkspace.workspaceId, "present yourself", {
+        workflow_id: advancedWorkspace.workflowId,
+        description: "say your name",
+      })) as { id?: string };
+      const taskId = task.id;
+      if (!taskId) throw new Error("Office createTask did not return a taskId");
+      await officeApi.assignTask(taskId, advancedWorkspace.agentId);
 
       // Wait for the initial launch and turn to settle before advanced mode
       // asks the runtime to ensure the execution again.
@@ -77,20 +102,35 @@ const test = base.extend<{ testPage: Page }, AdvancedModeFixtures>({
         .toEqual({ sessionReady: true, workspaceReady: true });
 
       await use({
-        workspaceId: result.workspaceId,
-        agentId: result.agentId,
+        workspaceId: advancedWorkspace.workspaceId,
+        agentId: advancedWorkspace.agentId,
         taskId,
       });
-    },
-    { scope: "worker" },
-  ],
+    } finally {
+      await runWithBackendRecovery(backend, () =>
+        apiClient.e2eReset(advancedWorkspace.workspaceId, [
+          seedData.workflowId,
+          advancedWorkspace.workflowId,
+        ]),
+      );
+    }
+  },
 
-  testPage: async ({ testPage: basePage, apiClient, advancedSeed, seedData }, use) => {
-    await apiClient.saveUserSettings({
-      workspace_id: advancedSeed.workspaceId,
-      workflow_filter_id: seedData.workflowId,
-      keyboard_shortcuts: {},
-      enable_preview_on_click: false,
+  testPage: async (
+    { testPage: basePage, backend, apiClient, advancedWorkspace, seedData },
+    use,
+  ) => {
+    await runWithBackendRecovery(backend, async () => {
+      await apiClient.e2eReset(advancedWorkspace.workspaceId, [
+        seedData.workflowId,
+        advancedWorkspace.workflowId,
+      ]);
+      await apiClient.saveUserSettings({
+        workspace_id: advancedWorkspace.workspaceId,
+        workflow_filter_id: seedData.workflowId,
+        keyboard_shortcuts: {},
+        enable_preview_on_click: false,
+      });
     });
     await use(basePage);
   },
