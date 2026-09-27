@@ -10,6 +10,7 @@ import {
   fetchDiskUsage,
   refreshDiskUsage,
   fetchDatabaseStats,
+  retryDatabaseStats,
   vacuumDatabase,
   optimizeDatabase,
   resetDatabase,
@@ -148,6 +149,13 @@ describe("fetchDatabaseStats", () => {
     expect(stats.driver).toBe("sqlite");
     expect(stats.path).toBe("/data/kandev.db");
     expect(stats.backup_directory).toBe("/data/backups");
+  });
+
+  it("POSTs /database/refresh to request an immediate background retry", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await retryDatabaseStats();
+    expect(lastCall().url).toBe(`${BASE}/database/refresh`);
+    expect(method()).toBe("POST");
   });
 });
 

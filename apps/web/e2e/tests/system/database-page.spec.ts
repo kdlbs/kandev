@@ -97,7 +97,12 @@ test.describe("System Database page", () => {
       await expectDatabaseControls(testPage);
 
       scenario.recover();
+      const retryRequest = testPage.waitForRequest(
+        (request) =>
+          request.url().includes("/api/v1/system/database/refresh") && request.method() === "POST",
+      );
       await testPage.getByTestId("system-db-logical-stats-retry").click();
+      await retryRequest;
       await expect(testPage.getByTestId("system-db-logical-stats-status")).toContainText(
         "Logical totals measured at",
       );

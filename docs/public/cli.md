@@ -346,6 +346,10 @@ relation-size facilities are unavailable. Use them for trends and retention
 decisions; use filesystem or database-provider metrics for physical quota and
 capacity alerts.
 
+`POST /api/v1/system/database/refresh` requests an immediate background retry
+and bypasses any remaining automatic retry backoff. It returns `204` without
+waiting for the scan, or `503` while persistence is known to be unavailable.
+
 ## Ports and network exposure
 
 | Process | Preferred port | Automatic behavior |

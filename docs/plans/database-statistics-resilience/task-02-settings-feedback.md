@@ -135,7 +135,7 @@ configured.
 
 ## Review remediation
 
-The database hook now revalidates on mount, polls pending and refreshing scans every two seconds, retries stale or unavailable responses every 30 seconds, and revalidates at the 15-minute snapshot expiry. Scheduled polling stops on unmount. The hook test changes a mocked API response from pending to ready while the hook stays mounted, verifies stale recovery after backend backoff, and covers expiry refresh.
+The database hook now revalidates on mount, polls pending and refreshing scans every two seconds, retries status errors and stale or unavailable responses every 30 seconds, and revalidates at the 15-minute snapshot expiry. Scheduled polling stops on unmount. The hook test changes a mocked API response from pending to ready while the hook stays mounted, verifies stale recovery after backend backoff, and covers expiry refresh.
 
 Verification after the review fix:
 
@@ -144,3 +144,21 @@ Verification after the review fix:
 - `cd apps/web && pnpm run build:vite`.
 - `cd apps/web && pnpm e2e:run --project chromium tests/system/database-page.spec.ts` (5 tests).
 - `cd apps/web && pnpm e2e:run --project mobile-chrome tests/system/mobile-database-page.spec.ts` (2 tests).
+
+## Additional PR review remediation
+
+The retry action now POSTs to the database refresh endpoint before reading the
+current scan state, so it can bypass automatic server backoff without running
+the scan in the request. A failed status read schedules the bounded retry even
+when the store retains a recent ready snapshot. The retention design now states
+that Refresh status clears only its read error; a new user action clears both
+error channels and a failed action records its new failure.
+
+Verification after these fixes:
+
+- `cd apps/web && pnpm exec vitest run hooks/domains/system/use-database-stats.test.ts components/settings/system/database-stats-card.test.tsx lib/api/domains/system-api.test.ts` (41 tests).
+- `cd apps/web && pnpm run typecheck` and changed-file ESLint.
+- `cd apps && pnpm --filter @kandev/web build:vite`.
+- Desktop Chromium database page E2E suite (5 tests).
+- Mobile Chrome database page E2E suite (2 tests).
+- `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all`.

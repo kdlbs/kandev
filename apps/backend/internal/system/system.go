@@ -254,6 +254,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	admin.POST("/disk-usage/open", disk.HandleOpenFolder(s.Disk))
 
 	g.GET("/database", database.HandleStats(s.Database))
+	g.POST("/database/refresh", database.HandleRefreshStats(s.Database))
 	admin.POST("/database/vacuum", database.HandleVacuum(s.Database))
 	admin.POST("/database/optimize", database.HandleOptimize(s.Database))
 	admin.POST("/database/reset", database.HandleReset(s.Database))

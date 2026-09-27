@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     isLoading: false,
     error: null as string | null,
     reload: vi.fn(),
+    retry: vi.fn(),
   },
 }));
 
@@ -40,7 +41,7 @@ const database: DatabaseStats = {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.value = { database, isLoading: false, error: null, reload: vi.fn() };
+  mocks.value = { database, isLoading: false, error: null, reload: vi.fn(), retry: vi.fn() };
 });
 afterEach(cleanup);
 
@@ -69,7 +70,8 @@ it("keeps database details and maintenance actions visible when logical totals a
 it("offers a retry when the logical snapshot is unavailable", () => {
   renderCard();
   fireEvent.click(screen.getByTestId("system-db-logical-stats-retry"));
-  expect(mocks.value.reload).toHaveBeenCalledOnce();
+  expect(mocks.value.retry).toHaveBeenCalledOnce();
+  expect(mocks.value.reload).not.toHaveBeenCalled();
 });
 
 it("shows the last measurement time while an expired snapshot refreshes", () => {

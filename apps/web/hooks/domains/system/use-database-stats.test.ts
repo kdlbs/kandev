@@ -82,6 +82,59 @@ it("keeps the last database response when a refresh fails", async () => {
   expect(store.setSystemDatabase).not.toHaveBeenCalled();
 });
 
+it("requests an immediate server retry before reading the new scan state", async () => {
+  const stale: DatabaseStats = { ...measured, logical_stats_state: "stale" };
+  const refreshing: DatabaseStats = { ...measured, logical_stats_state: "refreshing" };
+  store.database = stale;
+  const requests: string[] = [];
+  vi.mocked(api.fetchDatabaseStats).mockImplementation(async () => {
+    requests.push("status");
+    return requests.length === 1 ? stale : refreshing;
+  });
+  vi.mocked(api.retryDatabaseStats).mockImplementation(async () => {
+    requests.push("retry");
+  });
+
+  const { result } = renderHook(() => useDatabaseStats());
+  await waitFor(() => expect(result.current.database?.logical_stats_state).toBe("stale"));
+  await act(async () => {
+    await result.current.retry();
+  });
+
+  expect(requests).toEqual(["status", "retry", "status"]);
+  expect(result.current.database?.logical_stats_state).toBe("refreshing");
+});
+
+it("retries a failed status read after a bounded delay when ready data is cached", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-27T10:01:00Z"));
+  store.database = measured;
+  const failure = new Error("database status unavailable");
+  const refreshing: DatabaseStats = { ...measured, logical_stats_state: "refreshing" };
+  vi.mocked(api.fetchDatabaseStats)
+    .mockRejectedValueOnce(failure)
+    .mockResolvedValueOnce(refreshing);
+
+  const { result } = renderHook(() => useDatabaseStats());
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(result.current.error).toBe(failure.message);
+  expect(result.current.database).toBe(measured);
+  expect(api.fetchDatabaseStats).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(29_999);
+  });
+  expect(api.fetchDatabaseStats).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(result.current.database?.logical_stats_state).toBe("refreshing");
+  expect(api.fetchDatabaseStats).toHaveBeenCalledTimes(2);
+});
+
 it("stores a cold pending response and polls to the measured result while mounted", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-09-27T10:01:00Z"));

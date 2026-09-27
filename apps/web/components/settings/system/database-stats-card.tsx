@@ -126,11 +126,11 @@ function StatsTable({ database }: { database: DatabaseStats }) {
 function LogicalStatsStatus({
   database,
   isLoading,
-  reload,
+  retry,
 }: {
   database: DatabaseStats;
   isLoading: boolean;
-  reload: () => Promise<void>;
+  retry: () => Promise<void>;
 }) {
   const { t } = useTranslation();
   const measuredAt = formatTimestamp(database.logical_stats_measured_at, t);
@@ -160,7 +160,7 @@ function LogicalStatsStatus({
             size="sm"
             className={settingsActionClassName("cursor-pointer")}
             disabled={isLoading}
-            onClick={() => void reload()}
+            onClick={() => void retry()}
             data-testid="system-db-logical-stats-retry"
           >
             <IconRefresh className="mr-1 h-3.5 w-3.5" /> {t("system:databaseLogicalStatsRetry")}
@@ -338,7 +338,7 @@ function MaintenanceButtons({
 
 export function DatabaseStatsCard() {
   const { t } = useTranslation();
-  const { database, isLoading, error, reload } = useDatabaseStats();
+  const { database, isLoading, error, reload, retry } = useDatabaseStats();
   const vacuum = useActionFeedback();
   const optimize = useActionFeedback();
   const [resetOpen, setResetOpen] = useState(false);
@@ -376,7 +376,7 @@ export function DatabaseStatsCard() {
         {database && (
           <>
             <StatsTable database={database} />
-            <LogicalStatsStatus database={database} isLoading={isLoading} reload={reload} />
+            <LogicalStatsStatus database={database} isLoading={isLoading} retry={retry} />
           </>
         )}
         <MaintenanceButtons

@@ -105,6 +105,22 @@ func (c *logicalStatsCache) Read() logicalStatsRead {
 	return read
 }
 
+// Retry bypasses the automatic backoff for one explicit user request.
+func (c *logicalStatsCache) Retry() bool {
+	c.mu.Lock()
+	now := c.options.now().UTC()
+	if c.stopped {
+		c.mu.Unlock()
+		return false
+	}
+	if c.flight == nil && c.needsRefreshLocked(now) {
+		c.nextRetry = time.Time{}
+		c.startLocked()
+	}
+	c.mu.Unlock()
+	return true
+}
+
 // ReadStale exposes the last complete values without starting or presenting a
 // refresh while persistence is known to be unhealthy.
 func (c *logicalStatsCache) ReadStale() logicalStatsRead {
@@ -139,7 +155,7 @@ func (c *logicalStatsCache) readLocked(now time.Time) logicalStatsRead {
 	}
 	state := "pending"
 	switch {
-	case snapshot == nil && c.errorCode != "":
+	case snapshot == nil && c.errorCode != "" && c.flight == nil:
 		state = logicalStatsStateUnavailable
 	case snapshot != nil && c.flight != nil:
 		state = "refreshing"

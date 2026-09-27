@@ -15,7 +15,7 @@ legacy_specs: []
 
 ## Overview
 
-Make database statistics quick to read and reusable across browser refreshes. Implement the server snapshot and bounded scanner first, then update the Data & Logs presentation and compaction-status feedback. The cache remains in the backend process; a backend restart starts a new cold measurement. Implementation follows the approved requirements and work orders; the design package and implementation remain uncommitted.
+Make database statistics quick to read and reusable across browser refreshes. Implement the server snapshot and bounded scanner first, then update the Data & Logs presentation and compaction-status feedback. The cache remains in the backend process; a backend restart starts a new cold measurement. Implementation follows the approved requirements and work orders and is tracked in the feature branch.
 
 ## Evidence and intent
 
@@ -43,11 +43,11 @@ The screenshot shows progress from the existing background compaction analysis. 
 
 ### Server
 
-In `apps/backend/internal/system/database`, split live metadata from expensive logical totals. Add a cache with a single worker, 15-minute TTL, last-good snapshot, failure backoff, and generation invalidation. Replace per-request whole-table aggregates with keyset batches using the current length expressions. Keep the four logical byte fields nullable until measured; add state and measured-time fields to `GET /api/v1/system/database`. Bound live metadata reads and preserve a last-good response during transient read failure. Wire invalidation after successful maintenance and database replacement. Measure cancellation and resource release with focused tests.
+In `apps/backend/internal/system/database`, split live metadata from expensive logical totals. Add a cache with a single worker, 15-minute TTL, last-good snapshot, failure backoff, and generation invalidation. Replace per-request whole-table aggregates with keyset batches using the current length expressions. Keep the four logical byte fields nullable until measured; add state and measured-time fields to `GET /api/v1/system/database`. Bound live metadata reads and preserve a last-good response during transient read failure. Wire invalidation after successful maintenance and database replacement. Expose `POST /api/v1/system/database/refresh` to bypass automatic retry backoff without running the scan in HTTP. Measure cancellation and resource release with focused tests.
 
 ### Web and operations
 
-Update `DatabaseStats`, the API client, store, and `DatabaseStatsCard` to render live metadata independently from logical totals. Use one compact localized status line and an explicit retry state. Keep the backup directory available from the same response. Update `useToolPayloadRetention` and `RetentionError` so a status GET failure says status is unavailable, while a failed action keeps its existing message. Document the API null/state semantics and the logical gauge measurement time in `docs/public/cli.md`; document the page behavior in `docs/public/operations.md` if its database section needs it.
+Update `DatabaseStats`, the API client, store, and `DatabaseStatsCard` to render live metadata independently from logical totals. Use one compact localized status line and an explicit retry state. Keep the backup directory available from the same response. Update `useToolPayloadRetention` and `RetentionError` so a status GET failure says status is unavailable, while a failed action keeps its existing message. Document the API null/state semantics, explicit retry endpoint, and logical gauge measurement time in `docs/public/cli.md`; document the page behavior in `docs/public/operations.md` if its database section needs it.
 
 ## ASCII UI preview
 

@@ -9,6 +9,8 @@ import (
 	"expvar"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -437,6 +439,64 @@ func TestStatsUsesLastMetadataAfterTimedOutRead(t *testing.T) {
 	}
 }
 
+func TestStatsDiscardsMetadataMeasuredAcrossDatabaseInvalidation(t *testing.T) {
+	svc := NewService(newFakePostgresStatsPool(t), filepath.Join(t.TempDir(), "kandev.db"), ResetDirs{}, nil, nil)
+	t.Cleanup(svc.StopBackground)
+
+	previousSize := databaseSizeBytes.Value()
+	databaseSizeBytes.Set(991)
+	t.Cleanup(func() { databaseSizeBytes.Set(previousSize) })
+
+	queryStarted := make(chan struct{})
+	releaseQuery := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseQuery) }) }
+	var blocked atomic.Bool
+	fakePostgresStatsQueryHookMu.Lock()
+	fakePostgresStatsQueryHook = func(ctx context.Context, query string) error {
+		if query == "SELECT pg_database_size(current_database())" && blocked.CompareAndSwap(false, true) {
+			close(queryStarted)
+			select {
+			case <-releaseQuery:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
+	fakePostgresStatsQueryHookMu.Unlock()
+	t.Cleanup(func() {
+		release()
+		fakePostgresStatsQueryHookMu.Lock()
+		fakePostgresStatsQueryHook = nil
+		fakePostgresStatsQueryHookMu.Unlock()
+	})
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := svc.StatsContext(context.Background())
+		result <- err
+	}()
+	select {
+	case <-queryStarted:
+	case <-time.After(time.Second):
+		t.Fatal("metadata measurement did not reach the database-size query")
+	}
+
+	svc.InvalidateDatabase()
+	release()
+	if err := <-result; err == nil {
+		t.Fatal("Stats returned metadata measured before database invalidation")
+	}
+	if _, ok := svc.cachedMetadata(); ok {
+		t.Fatal("metadata measured before invalidation repopulated the cache")
+	}
+	if got := databaseSizeBytes.Value(); got != 991 {
+		t.Fatalf("database size gauge = %d, want unchanged value 991", got)
+	}
+}
+
 func TestStatsMarksLogicalSnapshotStaleWhilePersistenceIsUnhealthy(t *testing.T) {
 	var healthy atomic.Bool
 	healthy.Store(true)
@@ -460,6 +520,29 @@ func TestStatsMarksLogicalSnapshotStaleWhilePersistenceIsUnhealthy(t *testing.T)
 	svc.logicalStats.mu.Unlock()
 	if flight != nil {
 		t.Fatal("logical scan started while persistence was known unhealthy")
+	}
+}
+
+func TestInvalidateDatabaseKeepsLogicalStatsWorkerAvailable(t *testing.T) {
+	svc := NewService(nil, filepath.Join(t.TempDir(), "kandev.db"), ResetDirs{}, nil, nil)
+	t.Cleanup(svc.StopBackground)
+	var scans atomic.Int32
+	svc.logicalStats.scan = func(context.Context) (logicalStorageStats, error) {
+		scans.Add(1)
+		return logicalStorageStats{messageContent: 17}, nil
+	}
+
+	svc.InvalidateDatabase()
+	if got := svc.logicalStats.Read(); got.state != "pending" {
+		t.Fatalf("read after invalidation = %#v, want a new background scan", got)
+	}
+	waitLogicalStatsCache(t, svc.logicalStats)
+	got := svc.logicalStats.Read()
+	if got.state != "ready" || got.snapshot == nil || got.snapshot.values.messageContent != 17 {
+		t.Fatalf("read after replacement scan = %#v, want a fresh snapshot", got)
+	}
+	if scans.Load() != 1 {
+		t.Fatalf("scan count = %d, want one scan after invalidation", scans.Load())
 	}
 }
 
@@ -633,6 +716,53 @@ func TestHandleStats_Returns200JSON(t *testing.T) {
 	body := w.Body.String()
 	if !contains(body, `"driver"`) || !contains(body, `"path"`) || !contains(body, `"schema_version"`) || !contains(body, `"backup_directory"`) {
 		t.Errorf("body missing fields: %s", body)
+	}
+}
+
+func TestHandleRefreshStatsStartsScanDespiteBackoff(t *testing.T) {
+	clock := newTestClock(time.Date(2026, time.September, 27, 12, 0, 0, 0, time.UTC))
+	retryStarted := make(chan struct{})
+	releaseRetry := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(releaseRetry) })
+	var scans atomic.Int32
+	svc := NewService(nil, filepath.Join(t.TempDir(), "kandev.db"), ResetDirs{}, nil, nil)
+	t.Cleanup(svc.StopBackground)
+	svc.logicalStats.options.now = clock.Now
+	svc.logicalStats.options.retryMin = 5 * time.Minute
+	svc.logicalStats.scan = func(context.Context) (logicalStorageStats, error) {
+		switch scans.Add(1) {
+		case 1:
+			return logicalStorageStats{}, errors.New("database busy")
+		case 2:
+			close(retryStarted)
+			<-releaseRetry
+			return logicalStorageStats{messageContent: 29}, nil
+		default:
+			return logicalStorageStats{}, nil
+		}
+	}
+	svc.logicalStats.Read()
+	waitLogicalStatsCache(t, svc.logicalStats)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/db/refresh", HandleRefreshStats(svc))
+	request := httptest.NewRequest(http.MethodPost, "/db/refresh", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("refresh status = %d, want 204; body=%s", response.Code, response.Body.String())
+	}
+	select {
+	case <-retryStarted:
+	case <-time.After(time.Second):
+		t.Fatal("explicit refresh did not start a scan during backoff")
+	}
+	releaseOnce.Do(func() { close(releaseRetry) })
+	waitLogicalStatsCache(t, svc.logicalStats)
+	if got := svc.logicalStats.Read(); got.state != "ready" || got.snapshot == nil || got.snapshot.values.messageContent != 29 {
+		t.Fatalf("read after refresh = %#v, want the new snapshot", got)
 	}
 }
 

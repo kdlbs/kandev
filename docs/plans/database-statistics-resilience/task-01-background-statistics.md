@@ -83,7 +83,7 @@ None. Inspect the actual maintenance and restore call sites before wiring invali
 
 ## Results
 
-Implemented the process-local logical statistics cache, bounded keyset scanner, live metadata fallback, generation invalidation, maintenance deferral, and metric publication. Restore and reset clear and stop database-derived workers; shutdown joins the scanner.
+Implemented the process-local logical statistics cache, bounded keyset scanner, live metadata fallback, generation invalidation, maintenance deferral, and metric publication. Restore and reset invalidate metadata and cancel active scans while leaving the worker available for a later read; application shutdown joins it.
 
 Verification passed:
 
@@ -92,6 +92,23 @@ Verification passed:
 - `cd apps/backend && go test -race ./internal/persistence/storeconformance -count=1`
 
 The PostgreSQL DSN-gated integration was not run. SQLite scanner coverage and fake-PostgreSQL route coverage passed.
+
+## Additional PR review remediation
+
+`InvalidateDatabase` no longer closes the process-lifetime worker, so a failed
+restore can be followed by a new measurement. Metadata reads capture an
+invalidation generation and cannot cache, return, or publish gauges from an old
+database generation. The database refresh endpoint can request one shared
+background retry during automatic failure backoff.
+
+Verification after these fixes:
+
+- `cd apps/backend && go test -race ./internal/system/database ./internal/system -count=1`
+- `cd apps/backend && make build`
+- `cd apps/backend && go test ./internal/system/database ./internal/system -run 'TestLogicalStatsCacheExplicitRetryBypassesBackoff|TestHandleRefreshStatsStartsScanDespiteBackoff|TestStatsDiscardsMetadataMeasuredAcrossDatabaseInvalidation|TestInvalidateDatabaseKeepsLogicalStatsWorkerAvailable|TestRegisterRoutesAllowsMemberToRetryDatabaseStats' -count=1`
+
+The PostgreSQL DSN-gated integration was not run because no test DSN was
+configured.
 
 ## Review remediation
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { fetchDatabaseStats } from "@/lib/api/domains/system-api";
+import { fetchDatabaseStats, retryDatabaseStats } from "@/lib/api/domains/system-api";
 import type { DatabaseStats } from "@/lib/types/system";
 
 const DATABASE_STATS_TTL_MS = 15 * 60 * 1_000;
@@ -15,7 +15,8 @@ function nextRefreshDelay(
   error: string | null,
 ) {
   if (isLoading) return null;
-  if (!database) return error ? DATABASE_STATS_RETRY_INTERVAL_MS : null;
+  if (error) return DATABASE_STATS_RETRY_INTERVAL_MS;
+  if (!database) return null;
 
   switch (database.logical_stats_state) {
     case "pending":
@@ -39,18 +40,24 @@ export function useDatabaseStats() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await fetchDatabaseStats({ cache: "no-store" });
-      setSystemDatabase(res);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [setSystemDatabase]);
+  const load = useCallback(
+    async (retry: boolean) => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        if (retry) await retryDatabaseStats({ cache: "no-store" });
+        const res = await fetchDatabaseStats({ cache: "no-store" });
+        setSystemDatabase(res);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [setSystemDatabase],
+  );
+  const reload = useCallback(() => load(false), [load]);
+  const retry = useCallback(() => load(true), [load]);
 
   useEffect(() => {
     void reload();
@@ -63,5 +70,5 @@ export function useDatabaseStats() {
     return () => clearTimeout(timer);
   }, [database, error, isLoading, reload]);
 
-  return { database, isLoading, error, reload };
+  return { database, isLoading, error, reload, retry };
 }

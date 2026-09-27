@@ -34,6 +34,8 @@ const (
 
 const logicalStatsErrorScanFailed = "scan_failed"
 
+var errDatabaseMetadataInvalidated = errors.New("database metadata invalidated during read")
+
 // Stats is the read-only database-state payload returned to the frontend.
 //
 // LastBackupAt is a pointer so the JSON shape is `null` when no backup
@@ -91,15 +93,16 @@ type ResetDirs struct {
 // quit and relaunch Kandev. The previous syscall.Exec approach was brittle
 // under desktop launchers and `make dev` watchers.
 type Service struct {
-	pool         *db.Pool
-	databasePath string
-	dirs         ResetDirs
-	jobs         *jobs.Tracker
-	log          *logger.Logger
-	logicalStats *logicalStatsCache
-	metadataMu   sync.RWMutex
-	metadata     *databaseMetadataSnapshot
-	healthy      func() bool
+	pool               *db.Pool
+	databasePath       string
+	dirs               ResetDirs
+	jobs               *jobs.Tracker
+	log                *logger.Logger
+	logicalStats       *logicalStatsCache
+	metadataMu         sync.RWMutex
+	metadata           *databaseMetadataSnapshot
+	metadataGeneration uint64
+	healthy            func() bool
 
 	// PersistenceUnavailable marks required stores unhealthy before a
 	// destructive maintenance operation leaves the process awaiting restart.
@@ -154,6 +157,14 @@ func (s *Service) SetPersistenceHealthProbe(healthy func() bool) {
 	s.healthy = healthy
 }
 
+// RetryLogicalStats bypasses automatic scan backoff for an explicit request.
+func (s *Service) RetryLogicalStats() bool {
+	if s == nil || s.logicalStats == nil || !s.persistenceHealthy() {
+		return false
+	}
+	return s.logicalStats.Retry()
+}
+
 // StopBackground cancels and joins the process-local logical statistics scan.
 func (s *Service) StopBackground() {
 	if s.logicalStats != nil {
@@ -163,13 +174,13 @@ func (s *Service) StopBackground() {
 
 // InvalidateDatabase drops database-derived state after reset or restore.
 func (s *Service) InvalidateDatabase() {
-	if s.logicalStats != nil {
-		s.logicalStats.Invalidate(true)
-		s.logicalStats.Close()
-	}
 	s.metadataMu.Lock()
+	s.metadataGeneration++
 	s.metadata = nil
 	s.metadataMu.Unlock()
+	if s.logicalStats != nil {
+		s.logicalStats.Invalidate(true)
+	}
 }
 
 func (s *Service) backupsDir() string {
@@ -226,6 +237,7 @@ func (s *Service) StatsContext(ctx context.Context) (Stats, error) {
 func int64Pointer(value int64) *int64 { return &value }
 
 func (s *Service) readMetadata(ctx context.Context) (databaseMetadata, *time.Time, bool, error) {
+	generation := s.metadataGenerationValue()
 	metadata, err := s.metadataBase()
 	if err != nil {
 		return databaseMetadata{}, nil, false, err
@@ -242,9 +254,9 @@ func (s *Service) readMetadata(ctx context.Context) (databaseMetadata, *time.Tim
 		return s.readCachedMetadata()
 	}
 	measuredAt := time.Now().UTC()
-	s.storeMetadata(metadata, measuredAt)
-	databaseSizeBytes.Set(metadata.sizeBytes)
-	databaseWALSizeBytes.Set(metadata.walSizeBytes)
+	if !s.storeMetadata(metadata, measuredAt, generation) {
+		return databaseMetadata{}, nil, false, errDatabaseMetadataInvalidated
+	}
 	return metadata, &measuredAt, false, nil
 }
 
@@ -295,10 +307,23 @@ func (s *Service) addSQLiteMetadata(metadata *databaseMetadata) {
 	}
 }
 
-func (s *Service) storeMetadata(metadata databaseMetadata, measuredAt time.Time) {
+func (s *Service) metadataGenerationValue() uint64 {
+	s.metadataMu.RLock()
+	generation := s.metadataGeneration
+	s.metadataMu.RUnlock()
+	return generation
+}
+
+func (s *Service) storeMetadata(metadata databaseMetadata, measuredAt time.Time, generation uint64) bool {
 	s.metadataMu.Lock()
+	defer s.metadataMu.Unlock()
+	if s.metadataGeneration != generation {
+		return false
+	}
 	s.metadata = &databaseMetadataSnapshot{metadata: metadata, measuredAt: measuredAt}
-	s.metadataMu.Unlock()
+	databaseSizeBytes.Set(metadata.sizeBytes)
+	databaseWALSizeBytes.Set(metadata.walSizeBytes)
+	return true
 }
 
 func (s *Service) warnMetadataReadFailure(err error) {
@@ -469,6 +494,17 @@ func HandleStats(s *Service) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, stats)
+	}
+}
+
+// HandleRefreshStats starts a background logical scan without waiting for its result.
+func HandleRefreshStats(s *Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !s.RetryLogicalStats() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database statistics unavailable"})
+			return
+		}
+		c.Status(http.StatusNoContent)
 	}
 }
 

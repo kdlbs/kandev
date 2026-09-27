@@ -100,6 +100,59 @@ func TestLogicalStatsCacheKeepsStaleSnapshotThroughFailureAndBackoff(t *testing.
 	}
 }
 
+func TestLogicalStatsCacheExplicitRetryBypassesBackoff(t *testing.T) {
+	clock := newTestClock(time.Date(2026, time.September, 27, 12, 0, 0, 0, time.UTC))
+	retryStarted := make(chan struct{})
+	releaseRetry := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(releaseRetry) })
+	var calls atomic.Int32
+	cache := newLogicalStatsCache(context.Background(), func(context.Context) (logicalStorageStats, error) {
+		switch calls.Add(1) {
+		case 1:
+			return logicalStorageStats{}, errors.New("database busy")
+		case 2:
+			close(retryStarted)
+			<-releaseRetry
+			return logicalStorageStats{messageContent: 23}, nil
+		default:
+			return logicalStorageStats{}, nil
+		}
+	}, logicalStatsCacheOptions{
+		retryMin: 5 * time.Minute,
+		retryMax: 10 * time.Minute,
+		now:      clock.Now,
+	})
+	t.Cleanup(cache.Close)
+
+	cache.Read()
+	waitLogicalStatsCache(t, cache)
+	if got := cache.Read(); got.state != "unavailable" || got.error != logicalStatsErrorScanFailed {
+		t.Fatalf("read after failed scan = %#v, want unavailable", got)
+	}
+	cache.Read()
+	if calls.Load() != 1 {
+		t.Fatalf("automatic reads during backoff started %d scans, want one", calls.Load())
+	}
+	if !cache.Retry() {
+		t.Fatal("explicit retry was rejected")
+	}
+	select {
+	case <-retryStarted:
+	case <-time.After(time.Second):
+		t.Fatal("explicit retry did not start a scan during backoff")
+	}
+	if got := cache.Read(); got.state != "pending" {
+		t.Fatalf("read during retry = %#v, want pending", got)
+	}
+
+	releaseOnce.Do(func() { close(releaseRetry) })
+	waitLogicalStatsCache(t, cache)
+	if got := cache.Read(); got.state != "ready" || got.snapshot == nil || got.snapshot.values.messageContent != 23 {
+		t.Fatalf("read after explicit retry = %#v, want ready snapshot", got)
+	}
+}
+
 func TestLogicalStatsCacheDoesNotOverlapAnInvalidatedScan(t *testing.T) {
 	firstStarted := make(chan struct{})
 	secondStarted := make(chan struct{})

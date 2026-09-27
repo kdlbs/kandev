@@ -54,7 +54,12 @@ test.describe("Mobile System Database page", () => {
       const retry = page.getByTestId("system-db-logical-stats-retry");
       const box = await retry.boundingBox();
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      const retryRequest = page.waitForRequest(
+        (request) =>
+          request.url().includes("/api/v1/system/database/refresh") && request.method() === "POST",
+      );
       await retry.tap();
+      await retryRequest;
       await expect(page.getByTestId("system-db-logical-stats-status")).toContainText(
         "Logical totals measured at",
       );

@@ -264,8 +264,10 @@ Payload bytes are not a prediction of compacted file bytes or backup duration.
 `useToolPayloadRetention` keeps status-read errors separate from action errors.
 A current successful GET clears only the status-read error. An action error
 takes display precedence and survives successful background reads. Explicit
-Refresh status and a new user action retain their existing dismissal behavior.
-Persisted operation failures remain part of the returned status.
+Refresh status clears only the status-read error and preserves `actionError`.
+Starting a new user action clears both error channels; a failed action sets
+`actionError` to its new failure. Persisted operation failures remain part of
+the returned status.
 
 The existing lifetime epoch and mutation generation checks apply to both error
 channels. A stale GET cannot clear a newer error or overwrite a mutation result.

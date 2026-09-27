@@ -74,6 +74,7 @@ export async function routeDatabaseStatsSequence(page: Page) {
     }),
   };
   const pattern = "**/api/v1/system/database";
+  const retryPattern = "**/api/v1/system/database/refresh";
   await page.route(pattern, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
@@ -86,6 +87,13 @@ export async function routeDatabaseStatsSequence(page: Page) {
       body: JSON.stringify(response),
     });
   });
+  await page.route(retryPattern, async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({ status: 204 });
+  });
   return {
     showRefreshing: () => {
       current = "refreshing";
@@ -96,7 +104,9 @@ export async function routeDatabaseStatsSequence(page: Page) {
     recover: () => {
       current = "ready";
     },
-    remove: async () => page.unroute(pattern),
+    remove: async () => {
+      await Promise.all([page.unroute(pattern), page.unroute(retryPattern)]);
+    },
   };
 }
 
