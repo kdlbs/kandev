@@ -6085,6 +6085,13 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if err != nil {
 		return nil, err
 	}
+	// Reject incompatible exact-profile requests before a cold resume can
+	// launch an agent. The model-switch path validates again immediately before
+	// switching so an assignment change during resume cannot escape the guard.
+	if err := s.validateExactProfileModelRequest(ctx, taskID, model, session); err != nil {
+		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+		return nil, err
+	}
 
 	// After a lazy backend restart the session may be WAITING_FOR_INPUT with no agent process yet.
 	_, hadExecutionBeforeEnsure := s.executor.GetExecutionBySession(sessionID)
@@ -7137,6 +7144,7 @@ func (s *Service) attemptModelSwitchForPrompt(
 	runAfterDispatchAdmission func() error, resumeAttempts ...*resumeAttempt,
 ) (result *PromptResult, handled bool, err error) {
 	if err := s.validateExactProfileModelRequest(ctx, taskID, model, session); err != nil {
+		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
 		return nil, true, err
 	}
 	var resumeAttempt *resumeAttempt
