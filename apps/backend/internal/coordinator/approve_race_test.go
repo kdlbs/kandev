@@ -250,3 +250,68 @@ func TestSettleWriteRace_ProposalDeletedReturnsNotFound(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
+
+// TestSettleWriteRace_CurrentRowFoundReturnsCurrentRowUnchanged proves
+// settleWriteRace's "row found, not gone" branch (reached from
+// completeApproval when the row's status/claim_token no longer match this
+// request's fence): it returns the CURRENT row as-is and writes nothing,
+// rather than the create call's own outcome. This is the accepted
+// slow-claimer behavior this plan's Contract section documents ("A later
+// approve finds the task through step 1's lookup ... [a failed/rejected row]
+// ... and nothing is written"). Reached through a real claim -> stale
+// reclaim -> fail sequence (not a simulated status) so the fence's token
+// comparison is genuinely exercised.
+func TestSettleWriteRace_CurrentRowFoundReturnsCurrentRowUnchanged(t *testing.T) {
+	store, c, _, svc := approveFixture(t)
+	p := insertProposal(t, store, c, sampleSpec())
+
+	claimDirectly(t, store, p, "tokenA", sampleSpec(), time.Now().Add(-3*time.Minute))
+	if matched, err := store.ReclaimStale(context.Background(), p.ID, "tokenB", time.Now(), time.Now().Add(-2*time.Minute)); err != nil || !matched {
+		t.Fatalf("ReclaimStale (setup): matched=%v err=%v", matched, err)
+	}
+	if matched, err := store.FailProposal(context.Background(), p.ID, "tokenB", "setup failure", time.Now()); err != nil || !matched {
+		t.Fatalf("FailProposal (setup): matched=%v err=%v", matched, err)
+	}
+
+	got, err := svc.completeApproval(context.Background(), "ws-1", c.ID, p.ID, "tokenA", "orphan-task-id")
+	if err != nil {
+		t.Fatalf("completeApproval: %v", err)
+	}
+	if got.Status != ProposalStatusFailed {
+		t.Fatalf("Status = %q, want failed (the current row, unchanged by this request's stale token)", got.Status)
+	}
+	if got.TaskID != nil {
+		t.Fatalf("TaskID = %v, want nil (orphan-task-id must not have been written)", *got.TaskID)
+	}
+}
+
+// TestSettleWriteRace_CurrentRowFoundAfterRejectReturnsCurrentRowUnchanged is
+// TestSettleWriteRace_CurrentRowFoundReturnsCurrentRowUnchanged's twin
+// reaching "rejected" instead of "failed" ("A reject leaves the task on its
+// board").
+func TestSettleWriteRace_CurrentRowFoundAfterRejectReturnsCurrentRowUnchanged(t *testing.T) {
+	store, c, _, svc := approveFixture(t)
+	p := insertProposal(t, store, c, sampleSpec())
+
+	claimDirectly(t, store, p, "tokenA", sampleSpec(), time.Now().Add(-3*time.Minute))
+	if matched, err := store.ReclaimStale(context.Background(), p.ID, "tokenB", time.Now(), time.Now().Add(-2*time.Minute)); err != nil || !matched {
+		t.Fatalf("ReclaimStale (setup): matched=%v err=%v", matched, err)
+	}
+	if matched, err := store.FailProposal(context.Background(), p.ID, "tokenB", "setup failure", time.Now()); err != nil || !matched {
+		t.Fatalf("FailProposal (setup): matched=%v err=%v", matched, err)
+	}
+	if matched, err := store.RejectProposal(context.Background(), p.ID, "not needed", "", time.Now()); err != nil || !matched {
+		t.Fatalf("RejectProposal (setup): matched=%v err=%v", matched, err)
+	}
+
+	got, err := svc.completeApproval(context.Background(), "ws-1", c.ID, p.ID, "tokenA", "orphan-task-id")
+	if err != nil {
+		t.Fatalf("completeApproval: %v", err)
+	}
+	if got.Status != ProposalStatusRejected {
+		t.Fatalf("Status = %q, want rejected (the current row, unchanged by this request's stale token)", got.Status)
+	}
+	if got.TaskID != nil {
+		t.Fatalf("TaskID = %v, want nil (orphan-task-id must not have been written)", *got.TaskID)
+	}
+}

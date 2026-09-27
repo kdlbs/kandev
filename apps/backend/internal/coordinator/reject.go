@@ -7,6 +7,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/authz"
 )
 
@@ -56,5 +58,7 @@ func (s *Service) RejectProposal(ctx context.Context, workspaceID, coordinatorID
 		return s.claimRaceResult(ctx, workspaceID, coordinatorID, proposalID)
 	}
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
+	s.logger.Info("proposal rejected",
+		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID), zap.String("workspace_id", workspaceID))
 	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID)
 }

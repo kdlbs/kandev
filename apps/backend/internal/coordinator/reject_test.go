@@ -113,6 +113,31 @@ func TestRejectProposal_ApprovedIsConflict(t *testing.T) {
 	_ = assertConflict(t, err, ProposalStatusApproved)
 }
 
+// TestRejectProposal_ApprovedWithTooLongReasonIsConflictNotFieldError proves
+// reject checks status before the reason (reject.go): a too-long reason
+// against an already-approved row returns the 409 conflict the status check
+// produces, not the 400 FieldError the length check would otherwise produce
+// (docs/specs/coordinator/system-design/proposals.md#reject: "Allowed from
+// pending or failed only, with status checked before the reason").
+func TestRejectProposal_ApprovedWithTooLongReasonIsConflictNotFieldError(t *testing.T) {
+	store, c, tasks, svc := approveFixture(t)
+	p := insertProposal(t, store, c, sampleSpec())
+	tasks.createResult = createdResult("task-new")
+	tasks.settled = true
+	if _, err := svc.ApproveProposal(context.Background(), "ws-1", c.ID, p.ID, ApproveProposalRequest{}); err != nil {
+		t.Fatalf("ApproveProposal (setup): %v", err)
+	}
+
+	reason := strings.Repeat("a", proposalRejectReasonMaxRunes+1)
+	_, err := svc.RejectProposal(context.Background(), "ws-1", c.ID, p.ID, RejectProposalRequest{Reason: &reason})
+
+	var fieldErr *FieldError
+	if errors.As(err, &fieldErr) {
+		t.Fatalf("err = %v, want a status conflict, not a FieldError", err)
+	}
+	_ = assertConflict(t, err, ProposalStatusApproved)
+}
+
 func TestRejectProposal_ApprovingIsConflict(t *testing.T) {
 	store, c, _, svc := approveFixture(t)
 	p := insertProposal(t, store, c, sampleSpec())

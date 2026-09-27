@@ -468,6 +468,52 @@ func TestApproveProposal_EditWorkflowChangedExplicitStepIDWins(t *testing.T) {
 	}
 }
 
+// countingStepReader wraps a fixed step list and counts ListStepsByWorkflow
+// calls, so a test can assert a step-graph read never happened.
+type countingStepReader struct {
+	steps []*workflowmodels.WorkflowStep
+	calls int
+}
+
+func (r *countingStepReader) ListStepsByWorkflow(context.Context, string) ([]*workflowmodels.WorkflowStep, error) {
+	r.calls++
+	return r.steps, nil
+}
+
+// TestApproveProposal_EditWorkflowChangedCrossWorkspaceRejectedBeforeStepGraphRead
+// proves an edited workflow_id has its workspace ownership validated
+// immediately when it changes, before resolveStepEdit's step-graph read
+// (RV2-F1): ListStepsByWorkflow does no authorization of its own and trusts
+// the caller to have already scoped the workspace, so reading it against an
+// unvalidated, attacker-choosable workflow_id would be an ordering bug even
+// though today's generic 400 discards the result either way.
+func TestApproveProposal_EditWorkflowChangedCrossWorkspaceRejectedBeforeStepGraphRead(t *testing.T) {
+	store, c, tasks, svc := approveFixture(t)
+	p := insertProposal(t, store, c, sampleSpec())
+	tasks.workflows["wf-2"] = &taskmodels.Workflow{ID: "wf-2", WorkspaceID: "ws-2"}
+	steps := &countingStepReader{steps: []*workflowmodels.WorkflowStep{{ID: "wf2-start", IsStartStep: true}}}
+	svc.SetDecisionDeps(tasks, steps, nil)
+
+	edits := ApproveProposalRequest{ApproveFieldWorkflowID: json.RawMessage(`"wf-2"`)}
+	_, err := svc.ApproveProposal(context.Background(), "ws-1", c.ID, p.ID, edits)
+	assertFieldError(t, err, "workflow_id")
+
+	if steps.calls != 0 {
+		t.Fatalf("ListStepsByWorkflow calls = %d, want 0 (workspace ownership must be checked before the step-graph read)", steps.calls)
+	}
+
+	reread, rerr := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	if rerr != nil {
+		t.Fatalf("GetProposal: %v", rerr)
+	}
+	if reread.Status != ProposalStatusPending {
+		t.Fatalf("Status = %q, want pending (no write should have happened)", reread.Status)
+	}
+	if len(tasks.createCalls) != 0 {
+		t.Fatalf("createCalls = %d, want 0", len(tasks.createCalls))
+	}
+}
+
 // --- Group C: create-outcome branches ---
 
 func TestApproveProposal_CreateFoundSettledCompletesWithoutSettle(t *testing.T) {

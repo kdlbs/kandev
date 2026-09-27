@@ -44,6 +44,8 @@ func (s *Service) StartupRecoveryPass(ctx context.Context, t0 time.Time) {
 func (s *Service) recoverStaleRow(ctx context.Context, row *Proposal, cutoff time.Time) {
 	_, err := s.reclaimStaleAndProceed(ctx, row.WorkspaceID, row.CoordinatorID, row.ID, cutoff)
 	if err == nil {
+		s.logger.Info("startup recovery: row recovered",
+			zap.String("proposal_id", row.ID), zap.String("coordinator_id", row.CoordinatorID), zap.String("workspace_id", row.WorkspaceID))
 		return
 	}
 	var conflict *ProposalConflictError

@@ -113,7 +113,7 @@ func (s *Service) approveApproving(ctx context.Context, workspaceID, coordinator
 // approvePending validates and claims a never-claimed proposal (proposals.md#approve
 // step 2 and step 3, pending branch).
 func (s *Service) approvePending(ctx context.Context, workspaceID, coordinatorID, proposalID, decidedBy string, proposal *Proposal, edits ApproveProposalRequest) (*Proposal, error) {
-	candidate, err := s.buildCandidateSpec(ctx, proposal.Spec, edits)
+	candidate, err := s.buildCandidateSpec(ctx, workspaceID, proposal.Spec, edits)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ func (s *Service) approveFailed(ctx context.Context, workspaceID, coordinatorID,
 		if proposal.FinalSpec != nil {
 			base = *proposal.FinalSpec
 		}
-		candidate, verr := s.buildCandidateSpec(ctx, base, edits)
+		candidate, verr := s.buildCandidateSpec(ctx, workspaceID, base, edits)
 		if verr != nil {
 			return nil, verr
 		}
@@ -164,8 +164,12 @@ func (s *Service) approveFailed(ctx context.Context, workspaceID, coordinatorID,
 // step_id absent) resolves to the target workflow's start step, and an empty
 // workflow_id or empty title fail validation downstream. Strings are trimmed
 // here; validateProposalSpec re-trims title/description/rationale, which is
-// harmless.
-func (s *Service) buildCandidateSpec(ctx context.Context, base ProposalSpec, edits ApproveProposalRequest) (ProposalSpec, error) {
+// harmless. An edited workflow_id has its workspace ownership checked as soon
+// as it changes, before resolveStepEdit's step-graph read: that read
+// (LoadStepGraph/ListStepsByWorkflow) does no authorization of its own and
+// trusts the caller to have already scoped the workspace
+// (apps/backend/AGENTS.md).
+func (s *Service) buildCandidateSpec(ctx context.Context, workspaceID string, base ProposalSpec, edits ApproveProposalRequest) (ProposalSpec, error) {
 	candidate := base
 
 	if v, present, err := edits.StringField(ApproveFieldTitle); err != nil {
@@ -187,6 +191,11 @@ func (s *Service) buildCandidateSpec(ctx context.Context, base ProposalSpec, edi
 	workflowChanged, err := applyWorkflowIDEdit(edits, &candidate)
 	if err != nil {
 		return ProposalSpec{}, err
+	}
+	if workflowChanged {
+		if err := s.validateWorkflowInWorkspace(ctx, workspaceID, candidate.WorkflowID); err != nil {
+			return ProposalSpec{}, err
+		}
 	}
 	stepPresent, stepValue, err := stepIDEdit(edits)
 	if err != nil {
@@ -269,6 +278,8 @@ func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorI
 		return s.claimRaceResult(ctx, workspaceID, coordinatorID, proposalID)
 	}
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
+	s.logger.Info("proposal claimed",
+		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID), zap.String("workspace_id", workspaceID))
 	return s.completeClaimedApproval(ctx, workspaceID, coordinatorID, proposalID, token, spec, foundTask)
 }
 
@@ -288,6 +299,8 @@ func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coord
 		return s.claimRaceResult(ctx, workspaceID, coordinatorID, proposalID)
 	}
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
+	s.logger.Info("proposal re-claimed",
+		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID), zap.String("workspace_id", workspaceID))
 
 	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID)
 	if err != nil {
@@ -416,6 +429,9 @@ func (s *Service) completeApproval(ctx context.Context, workspaceID, coordinator
 		return s.settleWriteRace(ctx, workspaceID, coordinatorID, proposalID, taskID)
 	}
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
+	s.logger.Info("proposal approved",
+		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID),
+		zap.String("workspace_id", workspaceID), zap.String("task_id", taskID))
 	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID)
 }
 
@@ -430,6 +446,9 @@ func (s *Service) failApproval(ctx context.Context, workspaceID, coordinatorID, 
 		return s.settleWriteRace(ctx, workspaceID, coordinatorID, proposalID, "")
 	}
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
+	s.logger.Info("proposal approval failed",
+		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID),
+		zap.String("workspace_id", workspaceID), zap.String("error", errMsg))
 	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID)
 }
 

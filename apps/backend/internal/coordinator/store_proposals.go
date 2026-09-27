@@ -342,8 +342,11 @@ func (s *Store) ReclaimStale(ctx context.Context, id, token string, now, staleBe
 }
 
 // CompleteProposal marks an approving proposal (fenced by its current claim
-// token) approved, recording taskID and clearing the claim token.
+// token) approved, recording taskID and clearing the claim token. now is
+// normalized to UTC before binding, matching ClaimProposal and ReclaimStale,
+// so every stored timestamp in the table carries the same offset.
 func (s *Store) CompleteProposal(ctx context.Context, id, token, taskID string, now time.Time) (bool, error) {
+	now = now.UTC()
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinator_proposals
 		SET status = ?, task_id = ?, claim_token = NULL, updated_at = ?
@@ -358,8 +361,10 @@ func (s *Store) CompleteProposal(ctx context.Context, id, token, taskID string, 
 
 // FailProposal marks an approving proposal (fenced by its current claim
 // token) failed, recording errMsg truncated to 1000 runes and clearing the
-// claim token.
+// claim token. now is normalized to UTC before binding, matching
+// ClaimProposal and ReclaimStale.
 func (s *Store) FailProposal(ctx context.Context, id, token, errMsg string, now time.Time) (bool, error) {
+	now = now.UTC()
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinator_proposals
 		SET status = ?, error = ?, claim_token = NULL, updated_at = ?
@@ -374,8 +379,10 @@ func (s *Store) FailProposal(ctx context.Context, id, token, errMsg string, now 
 
 // RejectProposal conditionally moves a pending or failed proposal to
 // rejected, trimming and truncating reason to 500 runes (stored NULL when
-// empty after trimming).
+// empty after trimming). now is normalized to UTC before binding, matching
+// ClaimProposal and ReclaimStale.
 func (s *Store) RejectProposal(ctx context.Context, id, reason, decidedBy string, now time.Time) (bool, error) {
+	now = now.UTC()
 	trimmed := strings.TrimSpace(reason)
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinator_proposals
