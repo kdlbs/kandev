@@ -400,6 +400,11 @@ type InstanceConfig struct {
 	// that owns this agentctl instance.
 	DeliveryHarnessGeneration uint64
 
+	// OfflineBudgetMinutes is how long this instance tolerates no confirmed
+	// backend stream before it cancels the running turn (system design part 2
+	// "Offline budget"). Zero means the default 15 minutes.
+	OfflineBudgetMinutes int
+
 	// CreateReadyMillis is written once by instance.Manager.CreateInstance
 	// with the elapsed milliseconds from CreateInstance's entry (including
 	// the creation-queue mutex wait) to the instant this instance's HTTP
@@ -782,6 +787,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.DeliveryHarnessGeneration > 0 {
 		cfg.DeliveryHarnessGeneration = overrides.DeliveryHarnessGeneration
 	}
+	if overrides.OfflineBudgetMinutes > 0 {
+		cfg.OfflineBudgetMinutes = overrides.OfflineBudgetMinutes
+	}
 }
 
 // applyApprovalOverrides sets approval-related instance overrides. Env is a
@@ -830,6 +838,7 @@ type InstanceOverrides struct {
 	DeliveryStreamID           string
 	DeliveryIncarnationID      string
 	DeliveryHarnessGeneration  uint64
+	OfflineBudgetMinutes       int
 }
 
 func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {

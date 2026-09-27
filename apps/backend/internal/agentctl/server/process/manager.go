@@ -290,9 +290,17 @@ type Manager struct {
 	// they assign stopCh itself.
 	stopChSnapshot atomic.Value // chan struct{}
 	doneCh         chan struct{}
-	// attachedCount is the live count of backend event-stream connections
-	// (see attachment.go). Zero value correctly starts an instance detached.
-	attachedCount atomic.Int32
+	// attach is the attachment/offline-budget state machine (see
+	// attachment.go). Built lazily by ensureAttachState so a Manager built
+	// directly (as tests and blocking_send_sites_test.go do) still starts
+	// detached rather than panicking on a nil pointer.
+	attach   *attachmentState
+	attachMu sync.Mutex
+	// activeTurnCount tracks whether the adapter has a turn in flight, for
+	// budget enforcement's "no active turn" check. It is incremented and
+	// decremented around every prompt dispatch, durable or not (see
+	// agent.go's WS prompt handler).
+	activeTurnCount atomic.Int32
 	// Terminal producers must access the recorder while Stop holds mu and
 	// waits for those producers to exit, so its wiring has a separate lock.
 	turnOutcomeMu         sync.RWMutex

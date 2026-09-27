@@ -16,6 +16,19 @@ const errKey = "error"
 // repeated-string rule across the api package.
 const instanceNotFoundMessage = "instance not found"
 
+// JSON field names reused across handler error/detail payloads in this
+// package. Hoisted out to satisfy goconst's repeated-string rule.
+const (
+	kindKey    = "kind"
+	reasonKey  = "reason"
+	codeKey    = "code"
+	messageKey = "message"
+)
+
+// errDurableDeliveryUnavailable is the shared error code for every response
+// that reports the durable delivery journal/process manager is unavailable.
+const errDurableDeliveryUnavailable = "DURABLE_DELIVERY_UNAVAILABLE"
+
 // RescanWorkspaceRequest is the body for POST /api/v1/workspace/rescan.
 //
 // work_dir is optional. When supplied, the manager updates its tracking

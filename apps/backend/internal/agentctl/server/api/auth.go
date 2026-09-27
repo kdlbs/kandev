@@ -17,6 +17,10 @@ const (
 	errInvalidAuthToken  = "invalid auth token"
 )
 
+// errInvalidRequestBody is reused by every handler that rejects a body
+// ShouldBindJSON couldn't parse (goconst: 3+ occurrences).
+const errInvalidRequestBody = "invalid request body"
+
 // credentialInvalidatedContextKey is the gin context key instanceAuth uses to
 // hand a stream handler the invalidation channel for the exact credential
 // generation that authenticated the request. A stream handler must read it

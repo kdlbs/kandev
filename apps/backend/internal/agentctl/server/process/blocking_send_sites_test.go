@@ -228,7 +228,8 @@ func TestSendPermissionNotificationSendsImmediatelyWhenAttachedAndRoomAvailable(
 		updatesCh: make(chan adapter.AgentEvent, 1),
 		logger:    newTestLogger(t),
 	}
-	m.MarkAttached()
+	m.ensureAttach()
+	m.FinalizeStreamStart("stream-1", "", noopClose, doneCh())
 	pending := newPendingPermissionForNotificationTest(m)
 
 	m.sendPermissionNotification(pending)

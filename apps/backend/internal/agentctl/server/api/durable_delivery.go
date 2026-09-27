@@ -34,8 +34,8 @@ const deliveryOwnerMismatchCode = "OWNER_MISMATCH"
 func (s *Server) getDeliveryJournal(c *gin.Context) (*journal.Journal, bool) {
 	if s.procMgr == nil {
 		c.JSON(http.StatusConflict, gin.H{
-			"code":    "DURABLE_DELIVERY_UNAVAILABLE",
-			"message": "durable delivery process manager is unavailable",
+			codeKey:    errDurableDeliveryUnavailable,
+			messageKey: "durable delivery process manager is unavailable",
 		})
 		return nil, false
 	}
@@ -44,8 +44,8 @@ func (s *Server) getDeliveryJournal(c *gin.Context) (*journal.Journal, bool) {
 		return deliveryJournal, true
 	}
 	c.JSON(http.StatusConflict, gin.H{
-		"code":    "DURABLE_DELIVERY_UNAVAILABLE",
-		"message": "durable delivery storage is unavailable",
+		codeKey:    errDurableDeliveryUnavailable,
+		messageKey: "durable delivery storage is unavailable",
 	})
 	return nil, false
 }
@@ -53,8 +53,8 @@ func (s *Server) getDeliveryJournal(c *gin.Context) (*journal.Journal, bool) {
 func (s *Server) handleDeliveryStatus(c *gin.Context) {
 	if s.procMgr == nil {
 		c.JSON(http.StatusConflict, gin.H{
-			"code":    "DURABLE_DELIVERY_UNAVAILABLE",
-			"message": "durable delivery process manager is unavailable",
+			codeKey:    errDurableDeliveryUnavailable,
+			messageKey: "durable delivery process manager is unavailable",
 		})
 		return
 	}
@@ -84,10 +84,10 @@ func (s *Server) handleDeliverySubmission(c *gin.Context) {
 	if err := c.ShouldBindJSON(&request); err != nil {
 		var maxBytesError *http.MaxBytesError
 		if errors.As(err, &maxBytesError) {
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "SUBMISSION_TOO_LARGE"})
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{codeKey: "SUBMISSION_TOO_LARGE"})
 			return
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_SUBMISSION", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{codeKey: "INVALID_SUBMISSION", messageKey: err.Error()})
 		return
 	}
 	submission := journal.Submission{
@@ -110,7 +110,7 @@ func (s *Server) handleDeliverySubmission(c *gin.Context) {
 			status = http.StatusRequestEntityTooLarge
 			code = "SUBMISSION_TOO_LARGE"
 		}
-		c.JSON(status, gin.H{"code": code, "message": code})
+		c.JSON(status, gin.H{codeKey: code, messageKey: code})
 		return
 	}
 	c.JSON(http.StatusOK, submission)
@@ -124,7 +124,7 @@ func (s *Server) handleDeliverySubmissionByID(c *gin.Context) {
 	submission, err := deliveryJournal.GetSubmission(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		if errors.Is(err, journal.ErrSubmissionNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "SUBMISSION_NOT_FOUND"})
+			c.JSON(http.StatusNotFound, gin.H{codeKey: "SUBMISSION_NOT_FOUND"})
 			return
 		}
 		writeDeliveryError(c, err)
@@ -202,7 +202,7 @@ func (s *Server) handleDeliveryReplay(c *gin.Context) {
 	}
 	streamID := c.Query("stream_id")
 	if streamID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "STREAM_REQUIRED"})
+		c.JSON(http.StatusBadRequest, gin.H{codeKey: "STREAM_REQUIRED"})
 		return
 	}
 	if !s.validateDeliveryStreamID(c, streamID) {
@@ -210,14 +210,14 @@ func (s *Server) handleDeliveryReplay(c *gin.Context) {
 	}
 	after, err := parseDeliveryUint(c.Query("after"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_CURSOR"})
+		c.JSON(http.StatusBadRequest, gin.H{codeKey: "INVALID_CURSOR"})
 		return
 	}
 	limit := 1000
 	if raw := c.Query("limit"); raw != "" {
 		limit, err = strconv.Atoi(raw)
 		if err != nil || limit < 1 || limit > 1000 {
-			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_LIMIT"})
+			c.JSON(http.StatusBadRequest, gin.H{codeKey: "INVALID_LIMIT"})
 			return
 		}
 	}
@@ -239,7 +239,7 @@ func (s *Server) handleDeliveryAcknowledgement(c *gin.Context) {
 	}
 	var request deliveryAcknowledgementRequest
 	if err := c.ShouldBindJSON(&request); err != nil || request.StreamID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ACKNOWLEDGEMENT"})
+		c.JSON(http.StatusBadRequest, gin.H{codeKey: "INVALID_ACKNOWLEDGEMENT"})
 		return
 	}
 	if !s.validateDeliveryStreamID(c, request.StreamID) {
@@ -471,5 +471,5 @@ func writeDeliveryError(c *gin.Context, err error) {
 	case errors.Is(err, journal.ErrSubmissionState):
 		status, code = http.StatusConflict, "SUBMISSION_STATE"
 	}
-	c.JSON(status, gin.H{"code": code, "message": code})
+	c.JSON(status, gin.H{codeKey: code, messageKey: code})
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -172,6 +173,15 @@ type CancelResponse struct {
 	NotAcknowledged bool   `json:"not_acknowledged,omitempty"`
 }
 
+// Stream liveness timings (system design part 2 "Stream liveness"): a ping
+// every 15s, a 45s read deadline extended on every frame, and a 10s write
+// deadline on every write.
+const (
+	agentStreamPingInterval  = 15 * time.Second
+	agentStreamReadDeadline  = 45 * time.Second
+	agentStreamWriteDeadline = 10 * time.Second
+)
+
 // handleAgentStreamWS streams agent session notifications via WebSocket.
 // This is a bidirectional stream:
 // - agentctl -> backend: agent events, MCP requests
@@ -185,6 +195,7 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 
 	s.logger.Info("agent stream WebSocket connected")
 	streamID := uuid.NewString()
+	attachID := c.Query("attach_id")
 	after, err := parseDeliveryUint(c.Query("after"))
 	if err != nil {
 		s.logger.Warn("invalid agent stream delivery cursor", zap.Error(err))
@@ -192,13 +203,39 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 		return
 	}
 
+	closeConn := func(code int, reason string) {
+		deadline := time.Now().Add(agentStreamWriteDeadline)
+		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), deadline)
+		_ = conn.Close()
+	}
+
+	superseded, err := s.procMgr.StreamStart(c.Request.Context(), streamID)
+	if err != nil {
+		_ = conn.Close()
+		return
+	}
+	if superseded != nil {
+		if s.mcpBackendClient != nil {
+			s.mcpBackendClient.FailStreamRequests(superseded.StreamID, errors.New("agent stream superseded"))
+		}
+		superseded.Close(process.CloseCodeSuperseded, "superseded")
+		if superseded.Done != nil {
+			<-superseded.Done
+		}
+	}
+
+	done := make(chan struct{})
+	_, _, stillCurrent := s.procMgr.FinalizeStreamStart(streamID, attachID, closeConn, done)
+	if !stillCurrent {
+		close(done)
+		closeConn(process.CloseCodeSuperseded, "superseded")
+		return
+	}
+
 	// This is the agentctl-local "instance is attached" signal
 	// (AC-EXECUTORS-SURVIVAL-001.5/.6): the permission-request notification
 	// site reads it to decide whether to auto-cancel on a five-second
 	// timeout (attached) or park (detached) when its channel is full.
-	s.procMgr.MarkAttached()
-	defer s.procMgr.MarkDetached()
-
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
 	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2: terminate this stream if the
@@ -223,8 +260,19 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	writeMessage := func(data []byte) error {
 		writeMu.Lock()
 		defer writeMu.Unlock()
+		_ = conn.SetWriteDeadline(time.Now().Add(agentStreamWriteDeadline))
 		return conn.WriteMessage(websocket.TextMessage, data)
 	}
+	sendPing := func() error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(agentStreamWriteDeadline))
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(agentStreamReadDeadline))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(agentStreamReadDeadline))
+	})
 
 	// Get the session updates channel
 	updatesCh := s.procMgr.GetUpdates()
@@ -235,15 +283,59 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 		mcpRequestCh = s.mcpBackendClient.GetRequestChannel()
 	}
 
+	go s.runAgentStreamPinger(ctx, sendPing)
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go s.runAgentStreamReader(ctx, conn, writeMessage, cancel, &wg)
 	wg.Add(1)
 	go s.runAgentStreamWriterWithJournalReplay(ctx, conn, streamID, after, s.procMgr.DeliveryStreamID(), updatesCh, mcpRequestCh, writeMessage, &wg)
 	wg.Wait()
+	close(done)
+	s.procMgr.StreamEnd(streamID)
 	if s.mcpBackendClient != nil {
 		s.mcpBackendClient.FailStreamRequests(streamID, errors.New("agent stream disconnected"))
 	}
+}
+
+// runAgentStreamPinger sends a liveness ping every agentStreamPingInterval
+// until ctx is done. It runs detached from wg: a failed ping leaves
+// detection to the read deadline on the peer's side and to this stream's own
+// read deadline on ours, rather than needing to be waited on itself.
+func (s *Server) runAgentStreamPinger(ctx context.Context, sendPing func() error) {
+	ticker := time.NewTicker(agentStreamPingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := sendPing(); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// AgentStreamConfirmRequest is the body of POST /api/v1/agent/stream/confirm.
+type AgentStreamConfirmRequest struct {
+	AttachID string `json:"attach_id"`
+}
+
+// handleAgentStreamConfirm implements the Confirm transition (system design
+// part 2 "Attachment state"): 204 on match (idempotent), 409
+// ATTACH_NOT_CURRENT otherwise.
+func (s *Server) handleAgentStreamConfirm(c *gin.Context) {
+	var req AgentStreamConfirmRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errKey: errInvalidRequestBody})
+		return
+	}
+	if s.procMgr.ConfirmStream(req.AttachID) != process.ConfirmMatched {
+		c.JSON(http.StatusConflict, gin.H{errKey: "ATTACH_NOT_CURRENT"})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // runAgentStreamReader reads MCP responses and agent operation requests from the backend connection.
@@ -793,8 +885,8 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 	deliveryCapability := s.procMgr.DeliveryCapability()
 	if s.cfg.DurableJournalPath != "" && !deliveryCapability.Durable {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "durable delivery storage is unavailable", map[string]interface{}{
-			"kind":   "durable_delivery_blocked",
-			"reason": deliveryCapability.Reason,
+			kindKey:   "durable_delivery_blocked",
+			reasonKey: deliveryCapability.Reason,
 		})
 		return resp
 	}
@@ -1045,15 +1137,15 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 		var restoreErr *acptransport.SessionRestoreError
 		if errors.As(err, &restoreErr) {
 			details = map[string]interface{}{
-				"kind":       "session_restore_blocked",
-				"reason":     restoreErr.Reason,
+				kindKey:      "session_restore_blocked",
+				reasonKey:    restoreErr.Reason,
 				"session_id": req.SessionID,
 			}
 			switch restoreErr.Reason {
 			case acptransport.SessionRestoreReasonNativeStateMissing,
 				acptransport.SessionRestoreReasonNativeResumeUnsupported:
 				code = "SESSION_RESTORE_REQUIRED"
-				details["kind"] = "session_restore_required"
+				details[kindKey] = "session_restore_required"
 				details["recovery_action"] = "continue_from_history"
 			}
 		}
@@ -1101,8 +1193,8 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	deliveryCapability := s.procMgr.DeliveryCapability()
 	if s.cfg.DurableJournalPath != "" && !deliveryCapability.Durable {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "durable delivery storage is unavailable", map[string]interface{}{
-			"kind":   "durable_delivery_blocked",
-			"reason": deliveryCapability.Reason,
+			kindKey:   "durable_delivery_blocked",
+			reasonKey: deliveryCapability.Reason,
 		})
 		return resp
 	}
@@ -1137,6 +1229,11 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	// The prompt completes naturally when the agent process exits (stdin/stdout close),
 	// the user cancels, or agentctl shuts down.
 	go func() {
+		// activeTurnCount backs budget enforcement's "no active turn" check
+		// (system design part 2 "Budget enforcement") on both the durable and
+		// non-durable dispatch paths below.
+		s.procMgr.BeginTurn()
+		defer s.procMgr.EndTurn()
 		prompt := func(promptCtx context.Context) error {
 			return promptOrSteer(promptCtx, adapter, req)
 		}
@@ -1185,8 +1282,8 @@ func unresolvedDeliveryResponse(msg *ws.Message, capability journal.StorageCapab
 		return nil
 	}
 	resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "durable delivery requires reconciliation before a new prompt", map[string]interface{}{
-		"kind":   "durable_delivery_reconciliation_required",
-		"reason": "unresolved_durable_work",
+		kindKey:   "durable_delivery_reconciliation_required",
+		reasonKey: "unresolved_durable_work",
 	})
 	return resp
 }

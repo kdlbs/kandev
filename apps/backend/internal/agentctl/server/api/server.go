@@ -132,6 +132,7 @@ func (s *Server) setupRoutes() {
 		// (initialize, session/new, session/load, prompt, cancel, stderr, permissions/respond)
 		api.GET("/agent/stream", s.handleAgentStreamWS)
 		api.GET("/agent/session", s.handleAgentSessionAssociation)
+		api.POST("/agent/stream/confirm", s.handleAgentStreamConfirm)
 		api.GET("/agent/delivery", s.handleDeliveryStatus)
 		api.POST("/agent/submissions", s.handleDeliverySubmission)
 		api.GET("/agent/submissions", s.handleDeliverySubmissions)
