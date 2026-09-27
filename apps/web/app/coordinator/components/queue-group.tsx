@@ -3,6 +3,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import type { QueueGroupKind, QueueItem } from "@/lib/coordinator/attention";
+import type { TaskPR } from "@/lib/types/github";
 import { QueueRow } from "./queue-row";
 
 const GROUP_LABEL_KEY: Record<QueueGroupKind, string> = {
@@ -19,20 +20,28 @@ export type QueueGroupProps = {
   group: QueueGroupKind;
   items: QueueItem[];
   stepNameByTaskId: Map<string, string>;
+  prsByTaskId: ReadonlyMap<string, TaskPR[]>;
   defaultOpen?: boolean;
 };
 
 function QueueGroupRows({
   items,
   stepNameByTaskId,
+  prsByTaskId,
 }: {
   items: QueueItem[];
   stepNameByTaskId: Map<string, string>;
+  prsByTaskId: ReadonlyMap<string, TaskPR[]>;
 }) {
   return (
     <div className="divide-border divide-y" data-testid="queue-group-rows">
       {items.map((item) => (
-        <QueueRow key={item.id} item={item} stepNameByTaskId={stepNameByTaskId} />
+        <QueueRow
+          key={item.id}
+          item={item}
+          stepNameByTaskId={stepNameByTaskId}
+          prsByTaskId={prsByTaskId}
+        />
       ))}
     </div>
   );
@@ -42,7 +51,13 @@ function QueueGroupRows({
  * One Queue group: Working/In review/Ready to merge shown expanded, Done and
  * Other collapsed behind a disclosure (AC-COORDINATOR-NEEDS-YOU-004.1).
  */
-export function QueueGroup({ group, items, stepNameByTaskId, defaultOpen }: QueueGroupProps) {
+export function QueueGroup({
+  group,
+  items,
+  stepNameByTaskId,
+  prsByTaskId,
+  defaultOpen,
+}: QueueGroupProps) {
   const { t } = useTranslation();
   const label = t(GROUP_LABEL_KEY[group]);
   const open = defaultOpen ?? !COLLAPSED_BY_DEFAULT.has(group);
@@ -58,7 +73,11 @@ export function QueueGroup({ group, items, stepNameByTaskId, defaultOpen }: Queu
           <span>{label}</span>
           <Badge variant="secondary">{items.length}</Badge>
         </h3>
-        <QueueGroupRows items={items} stepNameByTaskId={stepNameByTaskId} />
+        <QueueGroupRows
+          items={items}
+          stepNameByTaskId={stepNameByTaskId}
+          prsByTaskId={prsByTaskId}
+        />
       </section>
     );
   }
@@ -76,7 +95,11 @@ export function QueueGroup({ group, items, stepNameByTaskId, defaultOpen }: Queu
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <QueueGroupRows items={items} stepNameByTaskId={stepNameByTaskId} />
+        <QueueGroupRows
+          items={items}
+          stepNameByTaskId={stepNameByTaskId}
+          prsByTaskId={prsByTaskId}
+        />
       </CollapsibleContent>
     </Collapsible>
   );

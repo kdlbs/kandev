@@ -1,22 +1,26 @@
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "@/components/state-provider";
-import { getTaskPRsForCurrentWorkspace } from "@/hooks/domains/github/use-task-pr-tooltip-hydration";
 import { getPrimaryTaskPR } from "@/hooks/domains/github/use-task-pr";
 import TaskLink from "@/components/routing/task-link";
 import type { QueueItem } from "@/lib/coordinator/attention";
 import { formatAge } from "@/lib/coordinator/format";
 import { agentStateLabel, otherRowStatusText } from "@/lib/coordinator/queue-text";
+import type { TaskPR } from "@/lib/types/github";
 
 export type QueueRowProps = {
   item: QueueItem;
   stepNameByTaskId: Map<string, string>;
+  prsByTaskId: ReadonlyMap<string, TaskPR[]>;
 };
 
-function PullRequestStatus({ item }: { item: QueueItem }) {
+function PullRequestStatus({
+  item,
+  prsByTaskId,
+}: {
+  item: QueueItem;
+  prsByTaskId: ReadonlyMap<string, TaskPR[]>;
+}) {
   const { t } = useTranslation();
-  const pr = useAppStore((s) =>
-    getPrimaryTaskPR(getTaskPRsForCurrentWorkspace(s, item.task.id) ?? undefined),
-  );
+  const pr = getPrimaryTaskPR(prsByTaskId.get(item.task.id));
 
   if (!pr) {
     const state = item.task.statusSummary?.pull_request?.state;
@@ -43,7 +47,13 @@ function PullRequestStatus({ item }: { item: QueueItem }) {
  * shows its exception text when applicable, Done shows nothing extra
  * (neither is required by the frozen ACs).
  */
-function QueueRowStatus({ item }: { item: QueueItem }) {
+function QueueRowStatus({
+  item,
+  prsByTaskId,
+}: {
+  item: QueueItem;
+  prsByTaskId: ReadonlyMap<string, TaskPR[]>;
+}) {
   const { t } = useTranslation();
   if (item.group === "working") {
     return (
@@ -53,7 +63,7 @@ function QueueRowStatus({ item }: { item: QueueItem }) {
     );
   }
   if (item.group === "in_review" || item.group === "ready_to_merge") {
-    return <PullRequestStatus item={item} />;
+    return <PullRequestStatus item={item} prsByTaskId={prsByTaskId} />;
   }
   const otherText = otherRowStatusText(t, item, item.task);
   return otherText ? <span className="text-muted-foreground text-xs">{otherText}</span> : null;
@@ -63,7 +73,7 @@ function QueueRowStatus({ item }: { item: QueueItem }) {
  * One Queue row: card identifier, step, group-specific status, last
  * activity. Opening the task is its only action (AC-COORDINATOR-NEEDS-YOU-004.5).
  */
-export function QueueRow({ item, stepNameByTaskId }: QueueRowProps) {
+export function QueueRow({ item, stepNameByTaskId, prsByTaskId }: QueueRowProps) {
   const stepName = stepNameByTaskId.get(item.task.id);
   return (
     <TaskLink
@@ -73,7 +83,7 @@ export function QueueRow({ item, stepNameByTaskId }: QueueRowProps) {
     >
       <span className="font-medium">{item.task.identifier ?? item.task.title}</span>
       {stepName && <span className="text-muted-foreground text-xs">{stepName}</span>}
-      <QueueRowStatus item={item} />
+      <QueueRowStatus item={item} prsByTaskId={prsByTaskId} />
       <span className="text-muted-foreground ml-auto text-xs">{formatAge(item.ageMs)}</span>
     </TaskLink>
   );

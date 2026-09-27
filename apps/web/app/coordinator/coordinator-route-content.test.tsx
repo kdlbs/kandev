@@ -29,22 +29,12 @@ vi.mock("@/components/state-provider", () => ({
     }),
 }));
 
-vi.mock("@/hooks/domains/github/use-task-pr", () => ({
-  useWorkspacePRs: vi.fn(),
-}));
-
 vi.mock("./use-resolved-coordinator", () => ({
   useResolvedCoordinator: () => resolvedState,
 }));
 
 vi.mock("./use-coordinator-attention", () => ({
   useCoordinatorAttention: () => attentionResult,
-}));
-
-const syncActiveWorkspaceToRouteMock = vi.fn();
-vi.mock("./use-coordinator-workspace-sync", () => ({
-  useSyncActiveWorkspaceToRoute: (workspaceId: string) =>
-    syncActiveWorkspaceToRouteMock(workspaceId),
 }));
 
 import { CoordinatorRouteContent } from "./coordinator-route-content";
@@ -87,6 +77,7 @@ function attention(
     workflowNameById: new Map(),
     stepNameByWorkflowStep: new Map(),
     openTasksById: new Map(),
+    prsByTaskId: new Map(),
     tasksNeverLoaded: false,
     inputs,
     retryFailed: retryFailedMock,
@@ -102,16 +93,6 @@ beforeEach(() => {
 });
 
 describe("CoordinatorRouteContent", () => {
-  it("syncs the active workspace to the route's workspaceId", () => {
-    resolvedState = { status: "loading" };
-    render(
-      <CoordinatorRouteContent workspaceId="ws-1" coordinatorId={null} view="needs-you">
-        {() => <div data-testid="ready-content" />}
-      </CoordinatorRouteContent>,
-    );
-    expect(syncActiveWorkspaceToRouteMock).toHaveBeenCalledWith("ws-1");
-  });
-
   it("shows a loading indicator while the coordinator list is unresolved", () => {
     resolvedState = { status: "loading" };
     render(

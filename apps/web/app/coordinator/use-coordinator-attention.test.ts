@@ -4,11 +4,16 @@ import type { AttentionTask } from "@/lib/coordinator/attention";
 import type { Stall } from "@/lib/api/domains/coordinator-api";
 
 const mockUseCoordinatorTasks = vi.fn();
+const mockUseCoordinatorPRs = vi.fn();
 const mockUseCoordinatorInputs = vi.fn();
 const mockUseNowTick = vi.fn();
 
 vi.mock("./use-coordinator-tasks", () => ({
   useCoordinatorTasks: (...args: unknown[]) => mockUseCoordinatorTasks(...args),
+}));
+
+vi.mock("./use-coordinator-prs", () => ({
+  useCoordinatorPRs: (...args: unknown[]) => mockUseCoordinatorPRs(...args),
 }));
 
 vi.mock("./use-coordinator-inputs", () => ({
@@ -52,6 +57,7 @@ beforeEach(() => {
     loadedAt: 500,
     retry: retryTasksMock,
   });
+  mockUseCoordinatorPRs.mockReturnValue(new Map());
   mockUseCoordinatorInputs.mockReturnValue({
     stalls: { value: undefined, loadedAt: undefined, error: false },
     proposals: { value: undefined, loadedAt: undefined, error: false },
@@ -75,6 +81,8 @@ describe("useCoordinatorAttention - classification", () => {
       proposals: { value: [], loadedAt: 500, error: false },
       retryFailed: retryFailedMock,
     });
+    const prsByTaskId = new Map([["t-1", [{ id: "pr-1" }]]]);
+    mockUseCoordinatorPRs.mockReturnValue(prsByTaskId);
 
     const { result } = renderHook(() => useCoordinatorAttention(WORKSPACE_ID, COORDINATOR_ID));
 
@@ -84,6 +92,8 @@ describe("useCoordinatorAttention - classification", () => {
     expect(result.current.workflowNameById.get("wf-1")).toBe("Planner");
     expect(result.current.stepNameByWorkflowStep.get("wf-1:step-1")).toBe("Build");
     expect(result.current.openTasksById.get("t-1")).toEqual(task("t-1"));
+    expect(mockUseCoordinatorPRs).toHaveBeenCalledWith(WORKSPACE_ID);
+    expect(result.current.prsByTaskId).toBe(prsByTaskId);
   });
 
   it("excludes archived tasks from openTasksById", () => {

@@ -50,6 +50,7 @@ export function QueuePageClient({ workspaceId, coordinatorId }: QueuePageClientP
                 group={group}
                 items={attention.classification.queue[group]}
                 stepNameByTaskId={attention.stepNameByTaskId}
+                prsByTaskId={attention.prsByTaskId}
                 defaultOpen={linkedGroup === group ? true : undefined}
               />
             ))}

@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 const mockUseAllWorkflowSnapshots = vi.fn();
 const mockRequestWorkspaceContextRefresh = vi.fn();
+const mockListWorkflows = vi.fn();
+const mockFetchWorkflowSnapshot = vi.fn();
 
 type Workflow = { id: string; workspaceId: string; name: string };
 type WorkspaceContextRead = {
@@ -12,6 +14,7 @@ type WorkspaceContextRead = {
   snapshotRequestId: string | null;
 };
 type MockState = {
+  workspaces: { activeId: string | null };
   workflows: { items: Workflow[] };
   kanbanMulti: { snapshots: Record<string, unknown> };
   workspaceContextRead: WorkspaceContextRead;
@@ -22,6 +25,7 @@ let mockState: MockState;
 
 function baseState(overrides: Partial<MockState> = {}): MockState {
   return {
+    workspaces: { activeId: WORKSPACE_ID },
     workflows: { items: [] },
     kanbanMulti: { snapshots: {} },
     workspaceContextRead: {
@@ -43,6 +47,11 @@ vi.mock("@/hooks/domains/kanban/use-all-workflow-snapshots", () => ({
   useAllWorkflowSnapshots: (...args: unknown[]) => mockUseAllWorkflowSnapshots(...args),
 }));
 
+vi.mock("@/lib/api/domains/kanban-api", () => ({
+  listWorkflows: (...args: unknown[]) => mockListWorkflows(...args),
+  fetchWorkflowSnapshot: (...args: unknown[]) => mockFetchWorkflowSnapshot(...args),
+}));
+
 import { useCoordinatorTasks } from "./use-coordinator-tasks";
 
 const WORKSPACE_ID = "workspace-1";
@@ -52,7 +61,7 @@ beforeEach(() => {
   mockState = baseState();
 });
 
-describe("useCoordinatorTasks - flattening", () => {
+describe("useCoordinatorTasks - active workspace (live cache)", () => {
   it("flattens tasks across every workflow snapshot of the workspace, with each task's step name", () => {
     mockState = baseState({
       workflows: {
@@ -92,9 +101,7 @@ describe("useCoordinatorTasks - flattening", () => {
     expect(result.current.stepNameByWorkflowStep.get("wf-b:step-2")).toBe("Review");
     expect(result.current.stepNameByWorkflowStep.has("wf-other:step-3")).toBe(false);
   });
-});
 
-describe("useCoordinatorTasks - error and load time", () => {
   it("reports no error and no load time before the first success", () => {
     mockState = baseState({
       workspaceContextRead: {
@@ -156,14 +163,103 @@ describe("useCoordinatorTasks - error and load time", () => {
     expect(result.current.error).toBe(false);
     expect(result.current.loadedAt).toBeUndefined();
   });
-});
 
-describe("useCoordinatorTasks - retry", () => {
-  it("calls requestWorkspaceContextRefresh", () => {
+  it("calls requestWorkspaceContextRefresh on retry", () => {
     const { result } = renderHook(() => useCoordinatorTasks(WORKSPACE_ID));
 
     result.current.retry();
 
     expect(mockRequestWorkspaceContextRefresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The route's workspace can differ from the globally active one (a deep link
+// or cold load into another workspace) — `workflows.items`/
+// `kanbanMulti.snapshots` only ever describe the active workspace, so this
+// path must never read them: it fetches directly instead (build round 4's
+// fix for the R2/R4/R5 fix-induced chain).
+describe("useCoordinatorTasks - non-active workspace (direct fetch)", () => {
+  beforeEach(() => {
+    mockState = baseState({ workspaces: { activeId: "some-other-active-workspace" } });
+  });
+
+  it("never reads the shared workflows/snapshots cache", () => {
+    mockListWorkflows.mockResolvedValue({ workflows: [], total: 0 });
+    renderHook(() => useCoordinatorTasks(WORKSPACE_ID));
+    expect(mockUseAllWorkflowSnapshots).toHaveBeenCalledWith(null);
+  });
+
+  it("fetches the route workspace's workflows and snapshots directly, flattening tasks", async () => {
+    mockListWorkflows.mockResolvedValue({
+      workflows: [{ id: "wf-a", workspace_id: WORKSPACE_ID, name: "A" }],
+      total: 1,
+    });
+    mockFetchWorkflowSnapshot.mockResolvedValue({
+      workflow: { id: "wf-a", name: "A" },
+      steps: [{ id: "step-1", name: "Build" }],
+      tasks: [
+        {
+          id: "t-1",
+          title: "Task 1",
+          state: "in_progress",
+          workflow_step_id: "step-1",
+          updated_at: "2026-09-27T00:00:00Z",
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useCoordinatorTasks(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.loadedAt).toBeDefined());
+
+    expect(mockListWorkflows).toHaveBeenCalledWith(WORKSPACE_ID);
+    expect(result.current.tasks.map((t) => t.id)).toEqual(["t-1"]);
+    expect(result.current.stepNameByTaskId.get("t-1")).toBe("Build");
+    expect(result.current.workflowNameById.get("wf-a")).toBe("A");
+    expect(result.current.stepNameByWorkflowStep.get("wf-a:step-1")).toBe("Build");
+    expect(result.current.error).toBe(false);
+  });
+
+  it("drops ephemeral tasks and tasks whose step is not in the snapshot", async () => {
+    mockListWorkflows.mockResolvedValue({
+      workflows: [{ id: "wf-a", workspace_id: WORKSPACE_ID, name: "A" }],
+      total: 1,
+    });
+    mockFetchWorkflowSnapshot.mockResolvedValue({
+      workflow: { id: "wf-a", name: "A" },
+      steps: [{ id: "step-1", name: "Build" }],
+      tasks: [
+        { id: "t-ephemeral", title: "Ephemeral", workflow_step_id: "step-1", is_ephemeral: true },
+        { id: "t-unknown-step", title: "Unknown step", workflow_step_id: "unknown-step" },
+        { id: "t-1", title: "Task 1", workflow_step_id: "step-1" },
+      ],
+    });
+
+    const { result } = renderHook(() => useCoordinatorTasks(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.loadedAt).toBeDefined());
+
+    expect(result.current.tasks.map((t) => t.id)).toEqual(["t-1"]);
+  });
+
+  it("reports an error when the direct fetch fails", async () => {
+    mockListWorkflows.mockRejectedValue(new Error("network error"));
+
+    const { result } = renderHook(() => useCoordinatorTasks(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.error).toBe(true));
+    expect(result.current.loadedAt).toBeUndefined();
+  });
+
+  it("re-fetches on retry", async () => {
+    mockListWorkflows.mockResolvedValue({ workflows: [], total: 0 });
+    const { result } = renderHook(() => useCoordinatorTasks(WORKSPACE_ID));
+    await waitFor(() => expect(result.current.loadedAt).toBeDefined());
+
+    expect(mockListWorkflows).toHaveBeenCalledTimes(1);
+    act(() => {
+      result.current.retry();
+    });
+    await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledTimes(2));
   });
 });

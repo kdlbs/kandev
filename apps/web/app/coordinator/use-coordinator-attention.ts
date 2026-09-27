@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
+import type { TaskPR } from "@/lib/types/github";
 import { classify, type AttentionTask, type ClassifyResult } from "@/lib/coordinator/attention";
 import { useCoordinatorInputs } from "./use-coordinator-inputs";
+import { useCoordinatorPRs } from "./use-coordinator-prs";
 import { useCoordinatorTasks } from "./use-coordinator-tasks";
 import { useNowTick } from "./use-now-tick";
 
@@ -24,6 +26,8 @@ export type UseCoordinatorAttentionResult = {
   stepNameByWorkflowStep: Map<string, string>;
   /** Open (non-archived) tasks of the workspace, keyed by id, for a proposal's source-task lookup. */
   openTasksById: Map<string, AttentionTask>;
+  /** Every loaded PR association for the workspace's tasks, keyed by task id (Queue's PR detail column). */
+  prsByTaskId: ReadonlyMap<string, TaskPR[]>;
   /** True once the tasks input has never had a successful read. */
   tasksNeverLoaded: boolean;
   /** Per-input status, in the banner order tasks, stall records, proposals. */
@@ -43,6 +47,7 @@ export function useCoordinatorAttention(
   coordinatorId: string | null,
 ): UseCoordinatorAttentionResult {
   const tasksInput = useCoordinatorTasks(workspaceId);
+  const prsByTaskId = useCoordinatorPRs(workspaceId);
   const {
     stalls,
     proposals,
@@ -78,6 +83,7 @@ export function useCoordinatorAttention(
     workflowNameById: tasksInput.workflowNameById,
     stepNameByWorkflowStep: tasksInput.stepNameByWorkflowStep,
     openTasksById,
+    prsByTaskId,
     tasksNeverLoaded: tasksInput.loadedAt === undefined,
     inputs,
     retryFailed,

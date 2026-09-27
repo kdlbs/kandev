@@ -6,7 +6,6 @@ import { useAppStore } from "@/components/state-provider";
 import { useRouter } from "@/lib/routing/client-router";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { selectWorkspaceById } from "@/lib/state/slices/workspace/selectors";
-import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import { linkToCoordinatorNeedsYou, linkToCoordinatorQueue } from "@/lib/coordinator/links";
 import { useResolvedCoordinator } from "./use-resolved-coordinator";
@@ -14,7 +13,6 @@ import {
   useCoordinatorAttention,
   type UseCoordinatorAttentionResult,
 } from "./use-coordinator-attention";
-import { useSyncActiveWorkspaceToRoute } from "./use-coordinator-workspace-sync";
 import { CoordinatorHeader, type CoordinatorHeaderView } from "./components/coordinator-header";
 import { CountStrip } from "./components/count-strip";
 import { InputFailureBanner } from "./components/input-failure-banner";
@@ -68,11 +66,9 @@ export function CoordinatorRouteContent({
   children,
 }: CoordinatorRouteContentProps) {
   const { t } = useTranslation();
-  useSyncActiveWorkspaceToRoute(workspaceId);
   const resolved = useResolvedCoordinator(workspaceId, coordinatorId);
   const readyCoordinatorId = resolved.status === "ready" ? resolved.coordinator.id : null;
   const attention = useCoordinatorAttention(workspaceId, readyCoordinatorId);
-  useWorkspacePRs(workspaceId);
   const workspace = useAppStore(selectWorkspaceById(workspaceId));
   const canManage = hasScope(workspace?.scopes, SCOPE.workspaceManage);
 
