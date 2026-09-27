@@ -45,6 +45,7 @@ type TaskHandlers struct {
 	unarchiveRecoveryTimeout      time.Duration
 	taskCreateLastUsedRecorder    taskCreateLastUsedRecorder
 	agentProfileRecentUseRecorder agentProfileRecentUseRecorder
+	sidebarSettingsReader         sidebarTaskSettingsReader
 	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
 	logger                        *logger.Logger
 }
@@ -77,6 +78,10 @@ type agentProfileRecentUseRecorder interface {
 		contextValue usermodels.AgentProfileRecentUseContext,
 		profileID string,
 	) (*usermodels.AgentProfileRecentUse, error)
+}
+
+type sidebarTaskSettingsReader interface {
+	GetUserSettings(ctx context.Context) (*usermodels.UserSettings, error)
 }
 
 // SetHandoffService wires the office task-handoffs service used by the
@@ -113,6 +118,10 @@ func (h *TaskHandlers) SetTaskCreateLastUsedRecorder(recorder taskCreateLastUsed
 
 func (h *TaskHandlers) SetAgentProfileRecentUseRecorder(recorder agentProfileRecentUseRecorder) {
 	h.agentProfileRecentUseRecorder = recorder
+}
+
+func (h *TaskHandlers) SetSidebarTaskSettingsReader(reader sidebarTaskSettingsReader) {
+	h.sidebarSettingsReader = reader
 }
 
 func (h *TaskHandlers) recordSuccessfulTaskCreateProfileAsync(ctx context.Context, profileID string) {
@@ -190,6 +199,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/workflows/:id/tasks", h.httpListTasks)
 	api.GET("/workspaces/:id/tasks", h.httpListTasksByWorkspace)
+	api.POST("/workspaces/:id/sidebar/query", h.httpQuerySidebarTasks)
 	// Task create-idempotency (docs/specs/tasks/requirements/external-id-idempotency.md):
 	// side-effect-free lookup, and an operator-only release. Both take
 	// external_id as a query parameter.

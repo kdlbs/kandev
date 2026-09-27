@@ -800,19 +800,28 @@ function usePersistedTranscriptScroll({
   messages: Message[];
   initialPlacementPending: boolean;
 }) {
-  const frozenScrollTopRef = useRef<number | null>(null);
+  const frozenScrollTopRef = useRef<{ sessionId: string | null; scrollTop: number } | null>(null);
+  const lastScrollTopBySessionRef = useRef(new Map<string, number>());
   const userScrollIntentUntilRef = useRef(0);
   const latestSessionIdRef = useRef(sessionId);
-  if (latestSessionIdRef.current !== sessionId) {
-    latestSessionIdRef.current = sessionId;
-    frozenScrollTopRef.current = null;
-  }
+  latestSessionIdRef.current = sessionId;
+  const rememberSessionScrollTop = useCallback((targetSessionId: string, scrollTop: number) => {
+    lastScrollTopBySessionRef.current.set(targetSessionId, scrollTop);
+    while (lastScrollTopBySessionRef.current.size > 2) {
+      const oldestSessionId = lastScrollTopBySessionRef.current.keys().next().value;
+      if (oldestSessionId === undefined) break;
+      lastScrollTopBySessionRef.current.delete(oldestSessionId);
+    }
+  }, []);
   const syncOwnedScrollTop = useCallback(
     (scrollTop: number) => {
-      if (!enabled) frozenScrollTopRef.current = scrollTop;
-      if (sessionId) storeApi.getState().setTranscriptScrollTop(sessionId, scrollTop);
+      if (!enabled) frozenScrollTopRef.current = { sessionId, scrollTop };
+      if (sessionId) {
+        storeApi.getState().setTranscriptScrollTop(sessionId, scrollTop);
+        rememberSessionScrollTop(sessionId, scrollTop);
+      }
     },
-    [enabled, sessionId, storeApi],
+    [enabled, rememberSessionScrollTop, sessionId, storeApi],
   );
   useEffect(() => {
     const el = scrollRef.current;
@@ -829,11 +838,17 @@ function usePersistedTranscriptScroll({
     /** Persists the container's current scrollTop for the session (used when
      * auto-scroll is disabled). */
     const captureScrollTop = () => {
-      if (sessionId && (isVisibleRef.current || frozenScrollTopRef.current !== null)) {
-        storeApi
-          .getState()
-          .setTranscriptScrollTop(sessionId, frozenScrollTopRef.current ?? el.scrollTop);
-      }
+      if (!sessionId) return;
+      const frozen = frozenScrollTopRef.current;
+      const frozenScrollTop = frozen?.sessionId === sessionId ? frozen.scrollTop : undefined;
+      const isCurrentVisibleSession =
+        latestSessionIdRef.current === sessionId && isVisibleRef.current;
+      const scrollTop =
+        frozenScrollTop ??
+        (isCurrentVisibleSession ? el.scrollTop : lastScrollTopBySessionRef.current.get(sessionId));
+      if (scrollTop === undefined) return;
+      storeApi.getState().setTranscriptScrollTop(sessionId, scrollTop);
+      rememberSessionScrollTop(sessionId, scrollTop);
     };
     // Coalesce persisted writes to at most one per animation frame — native
     // scroll events can fire far more often than that, and each write is a
@@ -842,14 +857,18 @@ function usePersistedTranscriptScroll({
     /** Scroll listener: resyncs the near-bottom flag and schedules a
      * coalesced persistence of the scroll position. */
     const onScroll = () => {
-      if (!isVisibleRef.current) return;
+      if (!isVisibleRef.current || latestSessionIdRef.current !== sessionId) return;
       resyncIsNearBottom();
       // A layout change can clamp a disabled transcript's scrollTop and emit a
       // native scroll event. Only adopt an offset when a recent user gesture
       // explains the movement; otherwise the layout effect must restore the
       // frozen offset on the next render.
-      if (!enabled && userScrollIntentUntilRef.current >= Date.now()) {
-        frozenScrollTopRef.current = el.scrollTop;
+      const hasUserScrollIntent = userScrollIntentUntilRef.current >= Date.now();
+      if (!enabled && hasUserScrollIntent) {
+        frozenScrollTopRef.current = { sessionId, scrollTop: el.scrollTop };
+      }
+      if (sessionId && (enabled || hasUserScrollIntent)) {
+        rememberSessionScrollTop(sessionId, el.scrollTop);
       }
       coalescer.schedule();
     };
@@ -888,6 +907,7 @@ function usePersistedTranscriptScroll({
     storeApi,
     resyncIsNearBottom,
     enabled,
+    rememberSessionScrollTop,
     frozenScrollTopRef,
     userScrollIntentUntilRef,
     initialPlacementPending,
@@ -903,17 +923,29 @@ function usePersistedTranscriptScroll({
     if (initialPlacementPending) return;
     const el = scrollRef.current;
     if (!el || !isVisibleRef.current) return;
-    const wasEnabled = frozenScrollTopRef.current === null || enabled;
+    const frozen = frozenScrollTopRef.current;
+    const frozenScrollTop = frozen?.sessionId === sessionId ? frozen.scrollTop : null;
+    const wasEnabled = frozenScrollTop === null || enabled;
     if (enabled) {
-      frozenScrollTopRef.current = null;
+      if (frozen?.sessionId === sessionId) frozenScrollTopRef.current = null;
       return;
     }
-    if (wasEnabled || frozenScrollTopRef.current === null) {
-      frozenScrollTopRef.current = el.scrollTop;
+    if (wasEnabled || frozenScrollTop === null) {
+      frozenScrollTopRef.current = { sessionId, scrollTop: el.scrollTop };
+      if (sessionId) rememberSessionScrollTop(sessionId, el.scrollTop);
       return;
     }
-    el.scrollTop = frozenScrollTopRef.current;
-  }, [enabled, isWorking, isVisible, messages, scrollRef, initialPlacementPending]);
+    el.scrollTop = frozenScrollTop;
+  }, [
+    enabled,
+    initialPlacementPending,
+    isVisible,
+    isWorking,
+    messages,
+    rememberSessionScrollTop,
+    scrollRef,
+    sessionId,
+  ]);
 
   return syncOwnedScrollTop;
 }
@@ -1378,11 +1410,12 @@ export function resolveCompetingInitialScrollOwner(params: {
   hasPendingLayoutRestore: boolean;
   hasExplicitScrollTarget: boolean;
   hasUnreadDivider: boolean;
+  enabled: boolean;
   isProgrammaticScrollLocked: () => boolean;
 }): CompetingInitialScrollOwner | null {
   if (params.hasPendingLayoutRestore) return "layout-restore";
   if (params.hasExplicitScrollTarget) return "explicit-target";
-  if (params.hasUnreadDivider) return "unread-divider";
+  if (params.enabled && params.hasUnreadDivider) return "unread-divider";
   if (params.isProgrammaticScrollLocked()) return "programmatic-scroll";
   return null;
 }
@@ -1550,13 +1583,16 @@ function applyInitialScrollPosition(params: InitialScrollApplyParams): "applied"
     hasPendingLayoutRestore,
     hasExplicitScrollTarget,
     hasUnreadDivider,
+    enabled,
     isProgrammaticScrollLocked,
   });
   if (competingOwner) return resolveCompetingInitialPlacement(params, competingOwner);
+  const storedScrollTop = sessionId ? getStoredAutoScrollTop(sessionId) : null;
+  const inMemoryScrollTop = sessionId
+    ? storeApi.getState().transcriptAutoScroll.scrollTopBySessionId[sessionId]
+    : undefined;
   const savedScrollTop = sessionId
-    ? (storeApi.getState().transcriptAutoScroll.scrollTopBySessionId[sessionId] ??
-      getStoredAutoScrollTop(sessionId) ??
-      undefined)
+    ? (storedScrollTop ?? inMemoryScrollTop ?? undefined)
     : undefined;
   const scrollTop = resolveNativeInitialScrollTop({
     enabled,
@@ -1602,10 +1638,11 @@ function applyInitialScrollPosition(params: InitialScrollApplyParams): "applied"
 
 function shouldSkipProvisionalPlacement(
   phase: InitialScrollApplyParams["phase"],
+  enabled: boolean,
   hasUnreadDivider: boolean,
   provisionalApplied: boolean,
 ): boolean {
-  return phase === "provisional" && (hasUnreadDivider || provisionalApplied);
+  return phase === "provisional" && ((enabled && hasUnreadDivider) || provisionalApplied);
 }
 
 function useInitialPlacementLatches(
@@ -1782,7 +1819,9 @@ function runInitialScrollPositionEffect(
   if (!element) return;
 
   const phase = historyRefreshPending ? "provisional" : "final";
-  if (shouldSkipProvisionalPlacement(phase, hasUnreadDivider, provisionalAppliedRef.current)) {
+  if (
+    shouldSkipProvisionalPlacement(phase, enabled, hasUnreadDivider, provisionalAppliedRef.current)
+  ) {
     return;
   }
   const applyInitialScroll = () => {

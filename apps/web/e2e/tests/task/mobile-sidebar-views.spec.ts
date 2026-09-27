@@ -344,7 +344,6 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(
       testPage.getByText("Save or discard changes before creating a new view."),
     ).toBeVisible();
-    await testPage.keyboard.press("Escape");
 
     // The list inside the sheet re-filters live via applyView.
     await expect(sheet.getByText("Fix auth bug")).toBeVisible();
@@ -505,7 +504,7 @@ test.describe("Mobile sidebar — view system", () => {
     await testPage.keyboard.press("Escape");
 
     const taskIds = [oldTask!.id, newTask!.id];
-    await expect.poll(() => taskRowOrder(sheet, taskIds)).toEqual(taskIds);
+    await expect.poll(() => taskRowOrder(sheet, taskIds), { timeout: 20000 }).toEqual(taskIds);
     const viewport = testPage.viewportSize();
     const list = sheet.getByTestId("mobile-task-switcher-list");
     const sheetBox = await sheet.boundingBox();

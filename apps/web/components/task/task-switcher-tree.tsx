@@ -11,6 +11,7 @@ import {
 import { GroupHeader } from "./task-switcher-group";
 import { TaskRow, type SubtaskToggleInfo, type TaskRowProps } from "./task-switcher-row";
 import type { TaskSwitcherItem } from "./task-switcher-types";
+import { useTranslation } from "react-i18next";
 
 export type TaskRowBaseProps = Omit<
   TaskRowProps,
@@ -104,10 +105,12 @@ const TaskTreeNode = memo(function TaskTreeNode({
   ctx,
   isDraggable,
 }: TaskTreeNodeProps) {
+  const { t } = useTranslation();
   const subs = ctx.subTasksByParentId.get(task.id);
-  const hasSubs = !!subs?.length;
+  const subtaskCount =
+    task.subtaskCount ?? (subs ? countGroupTasks(subs, ctx.subTasksByParentId) : 0);
+  const hasSubs = subtaskCount > 0 || !!subs?.length;
   const subsHidden = hasSubs && !!ctx.onToggleSubtasks && ctx.collapsedSubs.has(task.id);
-  const subtaskCount = hasSubs ? countGroupTasks(subs, ctx.subTasksByParentId) : 0;
   const handleToggleSubtasks = useCallback(
     () => ctx.onToggleSubtasks?.(task.id),
     [ctx.onToggleSubtasks, task.id],
@@ -129,6 +132,11 @@ const TaskTreeNode = memo(function TaskTreeNode({
     // The relative wrapper keeps the nest drop zone pinned to this row's
     // left edge rather than spanning the nested subtree below it.
     <div className="relative">
+      {task.continuationParentTitle && (
+        <div className="truncate pl-3 pt-1 text-xs text-muted-foreground">
+          {t("sidebar:continuedFrom", { title: task.continuationParentTitle })}
+        </div>
+      )}
       <TaskRow
         task={task}
         depth={depth}
@@ -144,7 +152,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
     </div>
   );
   const nested =
-    !subsHidden && hasSubs ? (
+    !subsHidden && !!subs?.length ? (
       <TaskTreeLevel parentTaskId={task.id} tasks={subs} depth={depth + 1} ctx={ctx} />
     ) : undefined;
   return (
@@ -313,7 +321,7 @@ export const GroupSection = memo(function GroupSection({
   onReorderSubtasks,
   onNestTask,
 }: GroupSectionProps) {
-  const totalCount = countGroupTasks(group.tasks, subTasksByParentId);
+  const totalCount = group.matchingCount ?? countGroupTasks(group.tasks, subTasksByParentId);
   const groupTasks = useMemo(
     () => flattenGroupTasks(group.tasks, subTasksByParentId),
     [group.tasks, subTasksByParentId],
@@ -351,6 +359,7 @@ export const GroupSection = memo(function GroupSection({
           groupKey={group.key}
           count={totalCount}
           isCollapsed={isCollapsed}
+          isContinuation={group.isContinuation}
           onToggle={() => onToggleGroup?.(group.key)}
         />
       )}

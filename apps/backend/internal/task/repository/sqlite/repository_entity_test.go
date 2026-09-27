@@ -156,7 +156,7 @@ func TestExactWorkspaceConfigurationWritesFenceStoredVersions(t *testing.T) {
 	}
 }
 
-func seedWorkspace(t *testing.T, repo *Repository, id string) {
+func seedWorkspace(t testing.TB, repo *Repository, id string) {
 	t.Helper()
 	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{ID: id, Name: id}); err != nil {
 		t.Fatalf("seed workspace %s: %v", id, err)

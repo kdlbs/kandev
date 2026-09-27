@@ -95,6 +95,7 @@ import type {
   QueueMetaUpdateOptions,
   QueueOperationToken,
   QueuedMessage,
+  TaskSessionHydrationEpoch,
 } from "./slices/session/types";
 // Combined AppState type
 export type AppState = KanbanSlice & {
@@ -491,7 +492,10 @@ export type AppState = KanbanSlice & {
   ) => void;
   setPromptMessagesLoading: (sessionId: string, loading: boolean) => void;
   setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
-  setTaskSession: (session: TaskSession) => void;
+  setTaskSession: (
+    session: TaskSession,
+    hydrationEpochAtRequestStart?: TaskSessionHydrationEpoch,
+  ) => void;
   updateSessionReadCursor: (sessionId: string, lastReadMessageId: string) => void;
   setTaskSessionPendingAction: (
     sessionId: string,
@@ -503,7 +507,7 @@ export type AppState = KanbanSlice & {
   setTaskSessionsForTask: (
     taskId: string,
     sessions: TaskSession[],
-    activityEpochsAtRequestStart: Readonly<Record<string, number>>,
+    hydrationEpochsAtRequestStart: Readonly<Record<string, TaskSessionHydrationEpoch>>,
   ) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;

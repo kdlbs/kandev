@@ -637,6 +637,8 @@ The **TASKS** list in the left sidebar has two time-based sort choices. These ch
 
 Choose **Last activity** when you want to review tasks by the least recent user or agent interaction.
 
+Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
+
 - Search matches tasks without changing their state.
 - The display menu groups its controls into collapsible **Filters**, **Sort**, **Preview panel**, and, in **List**, **List rows** sections. Each section shows its current values while collapsed. Filters cover **Workflow**, **Repository**, and, in Kanban, **Priority**; registered plugin filters appear there when available. In Kanban/Pipeline, each workflow lane has a **Columns** menu outside these groups to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, tap the listing-title dropdown to open **View options** and expand the same display groups and change columns for the focused workflow.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
@@ -818,15 +820,22 @@ to review an action and return to your list.
 - While the request is pending, the task stays visible with a spinner and an **Archiving in progress** toast. On failure, it returns to its normal state.
 - Runtime stop and cleanup run in the background with a 60-second timeout. Cleanup failure does not undo the archive. Kandev preserves a runtime or environment when it cannot stop a nonterminal session, or while another active task uses a shared environment or worktree.
 
-| Executor      | Archive cleanup                                                                                                                                                                                                                              |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                                                                    |
-| Git worktree  | Attempts to remove the Kandev-owned worktree directory. It removes a managed local branch only when its exact head is already integrated; unpublished, external, ambiguous, shared, or borrowed work remains. Remote branches are untouched. |
-| Local Docker  | Attempts to stop and remove the container; the host repository remains.                                                                                                                                                                      |
-| Kubernetes    | Deletes only the recorded Pod and Kandev-managed PVC after exact UID and ownership checks. An existing claim is retained.                                                                                                                    |
-| Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                                                                    |
-| Sprites       | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost.                                                                                                                                                      |
-| SSH           | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them.                                                         |
+For Git worktrees, archive removes a worktree only when Git reports it clean.
+If it has tracked or untracked changes, Kandev keeps its directory and branch
+and records a durable recheck. The task cleanup worker checks it again after
+about 24 hours and removes it when it is clean. This task-lifecycle check runs
+even when scheduled storage cleanup is disabled. Git does not include ignored
+files in this check. Protect ignored work that must remain.
+
+| Executor      | Archive cleanup                                                                                                                                                                                                       |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                                             |
+| Git worktree  | Removes clean Kandev-owned worktrees. Worktrees with tracked or untracked changes stay on disk until a later clean recheck. Kandev removes a managed local branch only when its exact head is integrated; unpublished, external, ambiguous, shared, or borrowed work remains. Remote branches are untouched. |
+| Local Docker  | Attempts to stop and remove the container; the host repository remains.                                                                                                                                               |
+| Kubernetes    | Deletes only the recorded Pod and Kandev-managed PVC after exact UID and ownership checks. An existing claim is retained.                                                                                             |
+| Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                                             |
+| Sprites       | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost.                                                                                                                               |
+| SSH           | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them.                                  |
 
 The archive confirmation is on by default in **Settings → Preferences → Task Behavior → Tasks → Archiving**.
 
@@ -844,12 +853,16 @@ If **Prevent auto-start on open** is on, select **Start agent** to begin recover
 
 While archived, a task keeps its history. Kandev does not start its agent or restore its workspace. If unarchive fails, the task stays archived.
 
+Select an archived task to read its saved conversation in the current page. Archived conversations are read-only. Kandev does not launch, prepare, or resume an agent while you browse them. Unarchive the task to use its normal start or resume actions.
+
 If task or workspace preparation fails, select **Show details** in the error strip above the session tabs. It opens the available recovery actions. The strip stays visible when you switch sessions and disappears after recovery succeeds. Archiving during recovery stops that recovery path without starting a fallback restore. For session recovery behavior, see [Sessions and review](sessions-and-review.md).
 
 <details>
 <summary>Worktree recovery after archive</summary>
 
 For worktree tasks, Kandev keeps the environment identity and either retains the local branch or records its exact integrated head before safe compaction. A later session restores a missing managed branch from that head, then tries `origin`. If neither source has the branch, it starts from the base branch. Recovery does not rewrite ambiguous multi-row repository attachments. Kandev recreates removed worktree directories, containers, and sandboxes on a later launch.
+
+Unarchiving a task cancels a pending worktree recheck. If the recheck is already running, Kandev rejects the unarchive because removal is active; retry once cleanup stops.
 
 </details>
 

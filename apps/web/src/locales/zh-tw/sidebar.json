@@ -121,5 +121,14 @@
   "newViewNumbered": "新檢視 {{suffix}}",
   "untitledView": "未命名檢視",
   "workspaceContextRefreshFailed": "無法重新整理任務。",
-  "workspaceContextAccessDenied": "您已無法存取此工作區。"
+  "workspaceContextAccessDenied": "您已無法存取此工作區。",
+  "continuedFrom": "從 {{title}} 繼續",
+  "continuationLabel": "續",
+  "selectedTaskCount_one": "已選擇 {{count}} 項任務",
+  "selectedTaskCount_other": "已選擇 {{count}} 項任務",
+  "clearSelection": "清除選擇",
+  "nextPage": "下一頁",
+  "pageLoadFailed": "無法載入此頁面。",
+  "pageStatus": "第 {{page}} 頁，共 {{total}} 頁",
+  "previousPage": "上一頁"
 }

@@ -9,6 +9,8 @@ import type {
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
   Task,
+  SidebarTaskQuery,
+  SidebarTaskPageResponse,
   TaskPriority,
   MoveTaskResponse,
   ReorderBand,
@@ -540,4 +542,19 @@ export async function listTasksByWorkspace(
   if (params.repositoryId) url.searchParams.set("repository_id", params.repositoryId);
   if (params.sort) url.searchParams.set("sort", params.sort);
   return fetchJson<ListTasksResponse>(url.toString(), options);
+}
+
+export async function querySidebarTasks(
+  workspaceId: string,
+  query: SidebarTaskQuery,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<SidebarTaskPageResponse>(`/api/v1/workspaces/${workspaceId}/sidebar/query`, {
+    ...options,
+    init: {
+      method: "POST",
+      body: JSON.stringify(query),
+      ...(options?.init ?? {}),
+    },
+  });
 }

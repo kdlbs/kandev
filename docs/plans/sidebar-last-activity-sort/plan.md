@@ -211,3 +211,9 @@ The full backend test, lint, and build matrix passed as the final pre-PR gate.
   handcrafted `PRStatus` pair does not detect future adapter drift.
 - Public documentation does not describe sidebar sort choices today. No public
   documentation update is required.
+
+## Subsequent archive browsing package
+
+[Archived sidebar loading](../archived-sidebar-loading/plan.md) proposes bounded archive pages
+and preserves the view semantics established here. This completed package remains historical
+evidence. Its recorded results do not validate the subsequent repair.

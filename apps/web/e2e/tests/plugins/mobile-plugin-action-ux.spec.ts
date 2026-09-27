@@ -128,19 +128,29 @@ test.describe("Plugin action UX, composer on phone", () => {
     const taskGroup = taskAction.locator('xpath=ancestor::*[@data-slot="surface-action-group"][1]');
     const taskActions = taskGroup.locator('[data-slot="surface-action"]');
     await expect(taskActions).toHaveCount(4);
-    const sectionBox = await section.boundingBox();
-    expect(sectionBox).not.toBeNull();
     const topbarRows = new Set<number>();
     for (const action of await taskActions.all()) {
-      const box = await action.boundingBox();
-      expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-      expect(box!.width).toBeGreaterThanOrEqual(44);
-      expect(box!.x).toBeGreaterThanOrEqual(sectionBox!.x - 1);
-      expect(box!.y).toBeGreaterThanOrEqual(sectionBox!.y - 1);
-      expect(box!.x + box!.width).toBeLessThanOrEqual(sectionBox!.x + sectionBox!.width + 1);
-      expect(box!.y + box!.height).toBeLessThanOrEqual(sectionBox!.y + sectionBox!.height + 1);
-      topbarRows.add(Math.round(box!.y));
+      const bounds = await action.evaluate((element) => {
+        const sectionElement = element.closest<HTMLElement>(
+          '[data-testid="mobile-plugin-nav-section"]',
+        );
+        if (!sectionElement) return null;
+        const toBox = (target: Element) => {
+          const { x, y, width, height } = target.getBoundingClientRect();
+          return { x, y, width, height };
+        };
+        return { action: toBox(element), section: toBox(sectionElement) };
+      });
+      expect(bounds).not.toBeNull();
+      if (!bounds) throw new Error("Plugin action is missing its section geometry");
+      const { action: box, section: sectionBox } = bounds;
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.x).toBeGreaterThanOrEqual(sectionBox.x - 1);
+      expect(box.y).toBeGreaterThanOrEqual(sectionBox.y - 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(sectionBox.x + sectionBox.width + 1);
+      expect(box.y + box.height).toBeLessThanOrEqual(sectionBox.y + sectionBox.height + 1);
+      topbarRows.add(Math.round(box.y));
       await action.tap();
     }
     expect(topbarRows.size).toBeGreaterThan(1);

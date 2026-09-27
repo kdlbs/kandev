@@ -482,7 +482,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
               />
             )}
             <TaskArchivedProvider value={archivedValue}>
-              <TaskCommands />
+              <TaskCommands task={task} />
               <TaskLaunchErrorProvider
                 value={{
                   taskId: task.id,

@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/system/database"
 	"github.com/kandev/kandev/internal/system/frontenderrors"
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/sleepinhibition"
@@ -43,6 +45,25 @@ func TestRegisterRoutesAllowsMemberFrontendErrorReports(t *testing.T) {
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("member report status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestRegisterRoutesAllowsMemberToRetryDatabaseStats(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	databaseService := database.NewService(nil, filepath.Join(t.TempDir(), "kandev.db"), database.ResetDirs{}, nil, nil)
+	t.Cleanup(databaseService.StopBackground)
+	router := systemRouterForRole(authn.RoleMember)
+	(&Service{Database: databaseService}).RegisterRoutes(router, log)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/system/database/refresh", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("member retry status = %d, want 204; body=%s", response.Code, response.Body.String())
 	}
 }
 
