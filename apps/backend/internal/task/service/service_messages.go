@@ -670,12 +670,14 @@ func (s *Service) authorizeMessageCreate(ctx context.Context, req *CreateMessage
 	}
 	if req.TaskID != "" {
 		scope := authz.ScopeSessionPrompt
-		task, err := s.tasks.GetTask(ctx, req.TaskID)
-		if err != nil {
-			return err
-		}
-		if task != nil && task.Origin == models.TaskOriginCoordinator {
-			scope = authz.ScopeWorkspaceManage
+		if _, scoped := callerScope(ctx); scoped {
+			task, err := s.tasks.GetTask(ctx, req.TaskID)
+			if err != nil {
+				return err
+			}
+			if task != nil && task.Origin == models.TaskOriginCoordinator {
+				scope = authz.ScopeWorkspaceManage
+			}
 		}
 		return s.authorizeTaskSessionScope(ctx, req.TaskID, req.TaskSessionID, scope)
 	}
