@@ -74,12 +74,12 @@ records the agreed boundary. Work-order status and results track implementation.
 
 ## Design package
 
-| Owner | Requirements | System design |
-| --- | --- | --- |
-| plugins | [Plugin managed coordination](../../specs/plugins/requirements/managed-coordination.md) | [Design](../../specs/plugins/system-design/managed-coordination.md) |
-| tasks | [Task coordination controls](../../specs/tasks/requirements/coordination-controls.md) | [Design](../../specs/tasks/system-design/coordination-controls.md) |
-| agents | [Managed agent tool policy](../../specs/agents/requirements/managed-tool-policy.md) | [Design](../../specs/agents/system-design/managed-tool-policy.md) |
-| office | [Plugin conversation automation targets](../../specs/office/requirements/plugin-conversation-targets.md) | [Design](../../specs/office/system-design/plugin-conversation-targets.md) |
+| Owner   | Requirements                                                                                             | System design                                                             |
+| ------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| plugins | [Plugin managed coordination](../../specs/plugins/requirements/managed-coordination.md)                  | [Design](../../specs/plugins/system-design/managed-coordination.md)       |
+| tasks   | [Task coordination controls](../../specs/tasks/requirements/coordination-controls.md)                    | [Design](../../specs/tasks/system-design/coordination-controls.md)        |
+| agents  | [Managed agent tool policy](../../specs/agents/requirements/managed-tool-policy.md)                      | [Design](../../specs/agents/system-design/managed-tool-policy.md)         |
+| office  | [Plugin conversation automation targets](../../specs/office/requirements/plugin-conversation-targets.md) | [Design](../../specs/office/system-design/plugin-conversation-targets.md) |
 
 The [2026-08-31 Host proposal](../../decisions/2026-08-31-generic-plugin-host-boundary.md)
 is related architecture, not evidence that its APIs exist. This package adopts its
@@ -100,24 +100,24 @@ automation destination, and agentctl process policy were inspected. The fork did
 not add plugin API contracts. Use its product behavior as evidence, not as a patch
 to cherry-pick. Its named roles and policy stay outside the host.
 
-| Fork feature | Host responsibility | Plugin responsibility | Orders |
-| --- | --- | --- | --- |
-| Named chief roles and workspace assignments | Opaque instance keys, approved profile/executor | Role templates, names, icons, instructions, multiple instances | 03, 04, 15 |
-| Persistent chat and busy input | Retained conversations, FIFO receipts, replay protection | Route/layout and prompt construction | 03, 05, 14, 15 |
-| Broker-only agent execution | Adapter enforcement, live provenance, capability checks | Declared tools and their policy | 01, 04 |
-| Workspace/task overview and outcomes | Canonical status, relations, PR evidence, available usage | Grouping, filters, reports | 06, 14, 17 |
-| Delegate, edit, assign, move, message, archive | Shared exact task commands and source dedup | Task selection, worker policy, follow-up | 07, 15 |
-| Adopt existing work | Claim fencing and human takeover | Explicit adoption intent and watches | 09, 17 |
-| Stop, recover, modes, permissions, questions | Exact generation controls and native human consent | Decide when to request or surface help | 08, 14, 17 |
-| Callbacks, private memory, pause | Events as hints, authoritative queries, runtime pause | Durable memory, cursors, filters, outbox, loop limits | 05, 06, 16 |
-| Proposals and approval before task creation | Idempotent task creation | Revisioned proposal approval and outbox | 07, 16 |
-| Acceptance criteria and verified completion | Task-owned versioned evidence and transition gate | Criteria policy and evidence collection | 10, 17 |
-| Recurring prompts and routines | Generic destination and owned-schedule lifecycle APIs | Routine purpose and schedule policy | 13, 16 |
-| Workspace/workflow/repository administration | Typed defaults, ordering, registration, and domain invariants | Optional administration tools | 11, 17 |
-| Jira/Linear linked issue updates | Credentials, provider adapter, uncertain-write receipts | Decide content and timing | 12, 17 |
-| Metrics and budget policy | Measured/estimated/unknown usage with units | Outcome reports and discretionary budget decisions | 06, 16, 17 |
-| Per-user coordination flavor | Stable public contracts and composable UI | Independent prompts, tools, policy, persistence | 15, 18 |
-| Delete and repair helpers | Human-confirmed deletion; guarded lifecycle recovery | Request the supported operation | 07, 08 |
+| Fork feature                                   | Host responsibility                                           | Plugin responsibility                                          | Orders         |
+| ---------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------- | -------------- |
+| Named chief roles and workspace assignments    | Opaque instance keys, approved profile/executor               | Role templates, names, icons, instructions, multiple instances | 03, 04, 15     |
+| Persistent chat and busy input                 | Retained conversations, FIFO receipts, replay protection      | Route/layout and prompt construction                           | 03, 05, 14, 15 |
+| Broker-only agent execution                    | Adapter enforcement, live provenance, capability checks       | Declared tools and their policy                                | 01, 04         |
+| Workspace/task overview and outcomes           | Canonical status, relations, PR evidence, available usage     | Grouping, filters, reports                                     | 06, 14, 17     |
+| Delegate, edit, assign, move, message, archive | Shared exact task commands and source dedup                   | Task selection, worker policy, follow-up                       | 07, 15         |
+| Adopt existing work                            | Claim fencing and human takeover                              | Explicit adoption intent and watches                           | 09, 17         |
+| Stop, recover, modes, permissions, questions   | Exact generation controls and native human consent            | Decide when to request or surface help                         | 08, 14, 17     |
+| Callbacks, private memory, pause               | Events as hints, authoritative queries, runtime pause         | Durable memory, cursors, filters, outbox, loop limits          | 05, 06, 16     |
+| Proposals and approval before task creation    | Idempotent task creation                                      | Revisioned proposal approval and outbox                        | 07, 16         |
+| Acceptance criteria and verified completion    | Task-owned versioned evidence and transition gate             | Criteria policy and evidence collection                        | 10, 17         |
+| Recurring prompts and routines                 | Generic destination and owned-schedule lifecycle APIs         | Routine purpose and schedule policy                            | 13, 16         |
+| Workspace/workflow/repository administration   | Typed defaults, ordering, registration, and domain invariants | Optional administration tools                                  | 11, 17         |
+| Jira/Linear linked issue updates               | Credentials, provider adapter, uncertain-write receipts       | Decide content and timing                                      | 12, 17         |
+| Metrics and budget policy                      | Measured/estimated/unknown usage with units                   | Outcome reports and discretionary budget decisions             | 06, 16, 17     |
+| Per-user coordination flavor                   | Stable public contracts and composable UI                     | Independent prompts, tools, policy, persistence                | 15, 18         |
+| Delete and repair helpers                      | Human-confirmed deletion; guarded lifecycle recovery          | Request the supported operation                                | 07, 08         |
 
 Provider login repair and broad autonomous permission approval in the fork do not
 become plugin authority. Repository scripts and secret-binding configuration also
@@ -301,18 +301,12 @@ Desktop: task detail > management and completion
 +----------------------------------------------------------------+
 Phone: task detail > completion
 +------------------------------+
-| Manager: Delivery lead       |
-| [Transfer] [Release]         |
-| Completion: 1 of 2           |
-| [ok] Regression test passes  |
-| [Evidence]                  |
-| [!] Review unresolved       |
-| [Inspect blocker]           |
-| [Record override...]        |
+| Manager: Delivery lead [Manage] |
+| Completion: 1 of 2    [Inspect] |
 +------------------------------+
 ```
 
-Show claims independently from the worker assignee. Evidence/transfer opens a drawer on phone and a dialog on desktop. An override requires a reason and targets one observed move. Stale evidence and an unavailable manager remain visible; no hidden automatic takeover.
+Show claims independently from the worker assignee. On phone, combine both summaries and the Manage/Inspect actions in one compact toolbar below the fixed top bar, with 44px touch targets so the chat stays above bottom navigation. Manage and Inspect open native bottom drawers; desktop retains the full task-detail rows and shared dialogs. An override requires a reason and targets one observed move. Stale evidence and an unavailable manager remain visible; no hidden automatic takeover.
 
 ### UI-04: Automation destination
 
@@ -371,13 +365,13 @@ Phone: instance settings, separate full-height view
 
 Phone proposal detail is a full-height view with fixed Approve/Reject actions. Role/profile/executor/scope selection uses drawers. Unsupported profiles show a reason. Duplicate approval reads one receipt; stale proposals require inspection of the new revision. Pause preserves memory and pending inputs.
 
-| View | Primary criteria | Rendered evidence |
-| --- | --- | --- |
-| UI-01 | AC-PLUGINS-COORDINATION-001.3 | Order 02, desktop and mobile capability specs |
+| View  | Primary criteria                                                                            | Rendered evidence                                              |
+| ----- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| UI-01 | AC-PLUGINS-COORDINATION-001.3                                                               | Order 02, desktop and mobile capability specs                  |
 | UI-02 | AC-PLUGINS-COORDINATION-009.1, AC-PLUGINS-COORDINATION-009.2, AC-PLUGINS-COORDINATION-009.3 | Orders 14-15, managed conversation and reference package specs |
-| UI-03 | AC-TASKS-COORDINATION-001.3, AC-TASKS-COORDINATION-002.3 | Orders 09-10, claim and completion specs on both projects |
-| UI-04 | AC-OFFICE-PLUGIN-TARGETS-001.3 | Order 13, automation desktop and mobile specs |
-| UI-05 | AC-PLUGINS-COORDINATION-010.1, AC-PLUGINS-COORDINATION-011.1, AC-PLUGINS-COORDINATION-011.2 | Orders 15-16, instance and proposal specs on both projects |
+| UI-03 | AC-TASKS-COORDINATION-001.3, AC-TASKS-COORDINATION-002.3                                    | Orders 09-10, claim and completion specs on both projects      |
+| UI-04 | AC-OFFICE-PLUGIN-TARGETS-001.3                                                              | Order 13, automation desktop and mobile specs                  |
+| UI-05 | AC-PLUGINS-COORDINATION-010.1, AC-PLUGINS-COORDINATION-011.1, AC-PLUGINS-COORDINATION-011.2 | Orders 15-16, instance and proposal specs on both projects     |
 
 Use 44px minimum phone targets, safe-area composer spacing, keyboard avoidance,
 fixed drawer headings/actions, and one scroll container per active phone view.
@@ -412,26 +406,26 @@ evidence. Cross-boundary integration can repeat a criterion without changing its
 ownership. Existing capability-approval requirements remain covered by their active
 specification and regression suite.
 
-| Acceptance criteria | Owner | Named evidence to add |
-| --- | --- | --- |
-| `AC-PLUGINS-COORDINATION-001.1`, `AC-PLUGINS-COORDINATION-001.2` | [01](task-01-exact-host-foundation.md) | `apps/backend/internal/plugins/host_exact_test.go`: TestExactHostAdmission; `apps/backend/internal/task/service/service_exact_operation_test.go`: TestExactTaskUpdateRecovery |
-| `AC-PLUGINS-COORDINATION-001.3` | [02](task-02-capability-settings.md) | `apps/web/e2e/tests/plugins/managed-capabilities.spec.ts`: grant, revoke, upgrade review, stale revision; `apps/web/e2e/tests/plugins/mobile-managed-capabilities.spec.ts`: phone grant and revoke |
-| `AC-PLUGINS-COORDINATION-002.1`, `AC-PLUGINS-COORDINATION-002.2`, `AC-PLUGINS-COORDINATION-002.3` | [03](task-03-managed-lifetime.md) | `apps/backend/internal/plugins/host_managed_conversations_test.go`: TestManagedConversationLifetime; `apps/backend/internal/task/service/managed_conversations_test.go`: TestManagedConversationIdentity |
-| `AC-AGENTS-MANAGED-TOOLS-001.1`, `AC-AGENTS-MANAGED-TOOLS-001.2`, `AC-AGENTS-MANAGED-TOOLS-001.3`, `AC-AGENTS-MANAGED-TOOLS-002.1`, `AC-AGENTS-MANAGED-TOOLS-002.2`, `AC-AGENTS-MANAGED-TOOLS-002.3` | [04](task-04-restricted-tools.md) | `apps/backend/internal/agent/runtime/managed_tool_policy_test.go`: TestManagedToolPolicyLifecycle; `apps/backend/internal/agentctl/server/process/managed_tool_policy_test.go`: TestManagedToolPolicyAdapter; `apps/backend/internal/mcp/handlers/plugin_tools_managed_test.go`: TestManagedToolProvenance |
-| `AC-PLUGINS-COORDINATION-003.1`, `AC-PLUGINS-COORDINATION-003.2`, `AC-PLUGINS-COORDINATION-003.3` | [05](task-05-durable-input.md) | `apps/backend/internal/plugins/host_managed_inputs_test.go`: TestManagedInputReceipts; `apps/backend/internal/orchestrator/messagequeue/managed_inputs_test.go`: TestManagedInputRecovery |
-| `AC-PLUGINS-COORDINATION-004.1`, `AC-PLUGINS-COORDINATION-004.2`, `AC-PLUGINS-COORDINATION-004.3` | [06](task-06-workspace-observations.md) | `apps/backend/internal/plugins/host_exact_queries_test.go`: TestExactWorkspaceSnapshot; `apps/backend/internal/plugins/host_exact_evidence_test.go`: TestExactEvidenceAndUsage |
-| `AC-PLUGINS-COORDINATION-005.1`, `AC-PLUGINS-COORDINATION-005.2`, `AC-PLUGINS-COORDINATION-005.3` | [07](task-07-task-commands.md) | `apps/backend/internal/plugins/host_exact_tasks_test.go`: TestExactTaskCommands; `apps/backend/internal/task/service/service_source_dedup_test.go`: TestSourceIdentityDedup; `apps/web/e2e/tests/plugins/managed-task-commands.spec.ts`: delegation, retry and deletion consent |
-| `AC-PLUGINS-COORDINATION-006.1`, `AC-PLUGINS-COORDINATION-006.2`, `AC-PLUGINS-COORDINATION-006.3` | [08](task-08-execution-controls.md) | `apps/backend/internal/plugins/host_exact_execution_test.go`: TestExactExecutionControls; `apps/backend/internal/plugins/host_exact_interactions_test.go`: TestExactHumanInteraction |
-| `AC-TASKS-COORDINATION-001.1`, `AC-TASKS-COORDINATION-001.2`, `AC-TASKS-COORDINATION-001.3` | [09](task-09-task-claims.md) | `apps/backend/internal/task/service/management_claims_test.go`: TestTaskManagementClaimFencing; `apps/web/e2e/tests/plugins/task-management-claims.spec.ts`: claim conflict and human takeover; `apps/web/e2e/tests/plugins/mobile-task-management-claims.spec.ts`: phone transfer and release |
-| `AC-TASKS-COORDINATION-002.1`, `AC-TASKS-COORDINATION-002.2`, `AC-TASKS-COORDINATION-002.3` | [10](task-10-completion-gates.md) | `apps/backend/internal/task/service/completion_gates_test.go`: TestCompletionGateEntryPoints; `apps/web/e2e/tests/plugins/task-completion-evidence.spec.ts`: stale evidence, blocked move and override; `apps/web/e2e/tests/plugins/mobile-task-completion-evidence.spec.ts`: phone inspect and override |
-| `AC-PLUGINS-COORDINATION-007.1`, `AC-PLUGINS-COORDINATION-007.2`, `AC-PLUGINS-COORDINATION-007.3` | [11](task-11-workspace-admin.md) | `apps/backend/internal/plugins/host_exact_workspace_test.go`: TestExactWorkspaceAdministration |
-| `AC-PLUGINS-COORDINATION-008.1`, `AC-PLUGINS-COORDINATION-008.2`, `AC-PLUGINS-COORDINATION-008.3` | [12](task-12-source-writeback.md) | `apps/backend/internal/plugins/host_source_writeback_test.go`: TestSourceWritebackReceipts; `apps/backend/internal/jira/service_plugin_writeback_test.go`: TestPluginWriteback; `apps/backend/internal/linear/service_plugin_writeback_test.go`: TestPluginWriteback |
-| `AC-OFFICE-PLUGIN-TARGETS-001.1`, `AC-OFFICE-PLUGIN-TARGETS-001.2`, `AC-OFFICE-PLUGIN-TARGETS-001.3`, `AC-OFFICE-PLUGIN-TARGETS-001.4` | [13](task-13-automation-destination.md) | `apps/backend/internal/automation/managed_destination_test.go`: TestManagedConversationDestination; `apps/web/e2e/tests/plugins/managed-automation.spec.ts`: schedule delivery, cleanup and portable rebinding; `apps/web/e2e/tests/plugins/mobile-managed-automation.spec.ts`: phone destination editor |
-| `AC-PLUGINS-COORDINATION-009.1`, `AC-PLUGINS-COORDINATION-009.2`, `AC-PLUGINS-COORDINATION-009.3` | [14](task-14-host-conversation-ui.md) | `apps/web/lib/plugins/managed-conversation.test.ts`: receipt ordering, retry keys and revoked state; `apps/web/e2e/tests/plugins/managed-conversation.spec.ts`: conversation and lifecycle states; `apps/web/e2e/tests/plugins/mobile-managed-conversation.spec.ts`: phone tabs, drawer, keyboard and long content |
-| `AC-PLUGINS-COORDINATION-010.1`, `AC-PLUGINS-COORDINATION-010.2`, `AC-PLUGINS-COORDINATION-010.3` | [15](task-15-reference-plugin.md) | `../kandev-plugin-coordinator/server/instances_test.go`: TestCoordinatorInstances; `apps/web/e2e/tests/plugins/reference-coordinator.spec.ts`: packaged instance creation and delegation; `apps/web/e2e/tests/plugins/mobile-reference-coordinator.spec.ts`: phone instance selection and settings |
-| `AC-PLUGINS-COORDINATION-011.1`, `AC-PLUGINS-COORDINATION-011.2` | [16](task-16-durable-policy.md) | `../kandev-plugin-coordinator/server/policy_test.go`: TestProposalOutboxRecovery and TestCoordinatorPolicyLimits; `apps/web/e2e/tests/plugins/reference-coordinator-policy.spec.ts`: proposal approval, pause and schedule; `apps/web/e2e/tests/plugins/mobile-reference-coordinator-policy.spec.ts`: phone proposal inspection and approval |
-| `AC-PLUGINS-COORDINATION-011.3` | [17](task-17-reference-operations.md) | `../kandev-plugin-coordinator/server/operations_test.go`: TestCoordinatorOperationalTools; `apps/web/e2e/tests/plugins/reference-coordinator-operations.spec.ts`: adoption, evidence, issue writeback and outcomes; `apps/web/e2e/tests/plugins/mobile-reference-coordinator-operations.spec.ts`: phone blockers and outcomes |
-| `AC-PLUGINS-COORDINATION-012.1`, `AC-PLUGINS-COORDINATION-012.2`, `AC-PLUGINS-COORDINATION-012.3` | [18](task-18-independent-consumer.md) | `../kandev-plugin-observer/server/observer_test.go`: TestObserverPolicy; `apps/web/e2e/tests/plugins/coordinator-compatibility.spec.ts`: two independent packages and lifecycle contract; `apps/web/e2e/tests/plugins/mobile-coordinator-compatibility.spec.ts`: phone policy parity and unavailable capability |
+| Acceptance criteria                                                                                                                                                                                  | Owner                                   | Named evidence to add                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AC-PLUGINS-COORDINATION-001.1`, `AC-PLUGINS-COORDINATION-001.2`                                                                                                                                     | [01](task-01-exact-host-foundation.md)  | `apps/backend/internal/plugins/host_exact_test.go`: TestExactHostAdmission; `apps/backend/internal/task/service/service_exact_operation_test.go`: TestExactTaskUpdateRecovery                                                                                                                                                                |
+| `AC-PLUGINS-COORDINATION-001.3`                                                                                                                                                                      | [02](task-02-capability-settings.md)    | `apps/web/e2e/tests/plugins/managed-capabilities.spec.ts`: grant, revoke, upgrade review, stale revision; `apps/web/e2e/tests/plugins/mobile-managed-capabilities.spec.ts`: phone grant and revoke                                                                                                                                           |
+| `AC-PLUGINS-COORDINATION-002.1`, `AC-PLUGINS-COORDINATION-002.2`, `AC-PLUGINS-COORDINATION-002.3`                                                                                                    | [03](task-03-managed-lifetime.md)       | `apps/backend/internal/plugins/host_managed_conversations_test.go`: TestManagedConversationLifetime; `apps/backend/internal/task/service/managed_conversations_test.go`: TestManagedConversationIdentity                                                                                                                                     |
+| `AC-AGENTS-MANAGED-TOOLS-001.1`, `AC-AGENTS-MANAGED-TOOLS-001.2`, `AC-AGENTS-MANAGED-TOOLS-001.3`, `AC-AGENTS-MANAGED-TOOLS-002.1`, `AC-AGENTS-MANAGED-TOOLS-002.2`, `AC-AGENTS-MANAGED-TOOLS-002.3` | [04](task-04-restricted-tools.md)       | `apps/backend/internal/agent/runtime/managed_tool_policy_test.go`: TestManagedToolPolicyLifecycle; `apps/backend/internal/agentctl/server/process/managed_tool_policy_test.go`: TestManagedToolPolicyAdapter; `apps/backend/internal/mcp/handlers/plugin_tools_managed_test.go`: TestManagedToolProvenance                                   |
+| `AC-PLUGINS-COORDINATION-003.1`, `AC-PLUGINS-COORDINATION-003.2`, `AC-PLUGINS-COORDINATION-003.3`                                                                                                    | [05](task-05-durable-input.md)          | `apps/backend/internal/plugins/host_managed_inputs_test.go`: TestManagedInputReceipts; `apps/backend/internal/orchestrator/messagequeue/managed_inputs_test.go`: TestManagedInputRecovery                                                                                                                                                    |
+| `AC-PLUGINS-COORDINATION-004.1`, `AC-PLUGINS-COORDINATION-004.2`, `AC-PLUGINS-COORDINATION-004.3`                                                                                                    | [06](task-06-workspace-observations.md) | `apps/backend/internal/plugins/host_exact_queries_test.go`: TestExactWorkspaceSnapshot; `apps/backend/internal/plugins/host_exact_evidence_test.go`: TestExactEvidenceAndUsage                                                                                                                                                               |
+| `AC-PLUGINS-COORDINATION-005.1`, `AC-PLUGINS-COORDINATION-005.2`, `AC-PLUGINS-COORDINATION-005.3`                                                                                                    | [07](task-07-task-commands.md)          | `apps/backend/internal/plugins/host_exact_tasks_test.go`: TestExactTaskCommands; `apps/backend/internal/task/service/service_source_dedup_test.go`: TestSourceIdentityDedup; `apps/web/e2e/tests/plugins/managed-task-commands.spec.ts`: delegation, retry and deletion consent                                                              |
+| `AC-PLUGINS-COORDINATION-006.1`, `AC-PLUGINS-COORDINATION-006.2`, `AC-PLUGINS-COORDINATION-006.3`                                                                                                    | [08](task-08-execution-controls.md)     | `apps/backend/internal/plugins/host_exact_execution_test.go`: TestExactExecutionControls; `apps/backend/internal/plugins/host_exact_interactions_test.go`: TestExactHumanInteraction                                                                                                                                                         |
+| `AC-TASKS-COORDINATION-001.1`, `AC-TASKS-COORDINATION-001.2`, `AC-TASKS-COORDINATION-001.3`                                                                                                          | [09](task-09-task-claims.md)            | `apps/backend/internal/task/service/management_claims_test.go`: TestTaskManagementClaimFencing; `apps/web/e2e/tests/plugins/task-management-claims.spec.ts`: claim conflict and human takeover; `apps/web/e2e/tests/plugins/mobile-task-management-claims.spec.ts`: phone transfer and release                                               |
+| `AC-TASKS-COORDINATION-002.1`, `AC-TASKS-COORDINATION-002.2`, `AC-TASKS-COORDINATION-002.3`                                                                                                          | [10](task-10-completion-gates.md)       | `apps/backend/internal/task/service/completion_gates_test.go`: TestCompletionGateEntryPoints; `apps/web/e2e/tests/plugins/task-completion-evidence.spec.ts`: stale evidence, blocked move and override; `apps/web/e2e/tests/plugins/mobile-task-completion-evidence.spec.ts`: phone inspect and override                                     |
+| `AC-PLUGINS-COORDINATION-007.1`, `AC-PLUGINS-COORDINATION-007.2`, `AC-PLUGINS-COORDINATION-007.3`                                                                                                    | [11](task-11-workspace-admin.md)        | `apps/backend/internal/plugins/host_exact_workspace_test.go`: TestExactWorkspaceAdministration                                                                                                                                                                                                                                               |
+| `AC-PLUGINS-COORDINATION-008.1`, `AC-PLUGINS-COORDINATION-008.2`, `AC-PLUGINS-COORDINATION-008.3`                                                                                                    | [12](task-12-source-writeback.md)       | `apps/backend/internal/plugins/host_source_writeback_test.go`: TestSourceWritebackReceipts; `apps/backend/internal/jira/service_plugin_writeback_test.go`: TestPluginWriteback; `apps/backend/internal/linear/service_plugin_writeback_test.go`: TestPluginWriteback                                                                         |
+| `AC-OFFICE-PLUGIN-TARGETS-001.1`, `AC-OFFICE-PLUGIN-TARGETS-001.2`, `AC-OFFICE-PLUGIN-TARGETS-001.3`, `AC-OFFICE-PLUGIN-TARGETS-001.4`                                                               | [13](task-13-automation-destination.md) | `apps/backend/internal/automation/managed_destination_test.go`: TestManagedConversationDestination; `apps/web/e2e/tests/plugins/managed-automation.spec.ts`: schedule delivery, cleanup and portable rebinding; `apps/web/e2e/tests/plugins/mobile-managed-automation.spec.ts`: phone destination editor                                     |
+| `AC-PLUGINS-COORDINATION-009.1`, `AC-PLUGINS-COORDINATION-009.2`, `AC-PLUGINS-COORDINATION-009.3`                                                                                                    | [14](task-14-host-conversation-ui.md)   | `apps/web/lib/plugins/managed-conversation.test.ts`: receipt ordering, retry keys and revoked state; `apps/web/e2e/tests/plugins/managed-conversation.spec.ts`: conversation and lifecycle states; `apps/web/e2e/tests/plugins/mobile-managed-conversation.spec.ts`: phone tabs, drawer, keyboard and long content                           |
+| `AC-PLUGINS-COORDINATION-010.1`, `AC-PLUGINS-COORDINATION-010.2`, `AC-PLUGINS-COORDINATION-010.3`                                                                                                    | [15](task-15-reference-plugin.md)       | `../kandev-plugin-coordinator/server/instances_test.go`: TestCoordinatorInstances; `apps/web/e2e/tests/plugins/reference-coordinator.spec.ts`: packaged instance creation and delegation; `apps/web/e2e/tests/plugins/mobile-reference-coordinator.spec.ts`: phone instance selection and settings                                           |
+| `AC-PLUGINS-COORDINATION-011.1`, `AC-PLUGINS-COORDINATION-011.2`                                                                                                                                     | [16](task-16-durable-policy.md)         | `../kandev-plugin-coordinator/server/policy_test.go`: TestProposalOutboxRecovery and TestCoordinatorPolicyLimits; `apps/web/e2e/tests/plugins/reference-coordinator-policy.spec.ts`: proposal approval, pause and schedule; `apps/web/e2e/tests/plugins/mobile-reference-coordinator-policy.spec.ts`: phone proposal inspection and approval |
+| `AC-PLUGINS-COORDINATION-011.3`                                                                                                                                                                      | [17](task-17-reference-operations.md)   | `../kandev-plugin-coordinator/server/operations_test.go`: TestCoordinatorOperationalTools; `apps/web/e2e/tests/plugins/reference-coordinator-operations.spec.ts`: adoption, evidence, issue writeback and outcomes; `apps/web/e2e/tests/plugins/mobile-reference-coordinator-operations.spec.ts`: phone blockers and outcomes                |
+| `AC-PLUGINS-COORDINATION-012.1`, `AC-PLUGINS-COORDINATION-012.2`, `AC-PLUGINS-COORDINATION-012.3`                                                                                                    | [18](task-18-independent-consumer.md)   | `../kandev-plugin-observer/server/observer_test.go`: TestObserverPolicy; `apps/web/e2e/tests/plugins/coordinator-compatibility.spec.ts`: two independent packages and lifecycle contract; `apps/web/e2e/tests/plugins/mobile-coordinator-compatibility.spec.ts`: phone policy parity and unavailable capability                              |
 
 Required failure evidence includes crash after domain commit, execution replacement,
 revocation between queue and effect, source-link changes, stale PR head evidence,
@@ -448,18 +442,18 @@ commands. Use `chromium` and separate `mobile-chrome` runs. The existing
 state, causal transport waits, and packaged installation. Do not use personal tasks,
 provider accounts, or production data in these tests.
 
-| Flow | Desktop spec | Phone spec | Criteria owner |
-| --- | --- | --- | --- |
-| Workspace grants and revocation | managed-capabilities.spec.ts | mobile-managed-capabilities.spec.ts | 01.3 |
-| Delegation and human-confirmed delete | managed-task-commands.spec.ts | mobile-managed-task-commands.spec.ts | 05 |
-| Management ownership and takeover | task-management-claims.spec.ts | mobile-task-management-claims.spec.ts | tasks 001 |
-| Completion gate and override | task-completion-evidence.spec.ts | mobile-task-completion-evidence.spec.ts | tasks 002 |
-| Automation enqueue and portable binding | managed-automation.spec.ts | mobile-managed-automation.spec.ts | office 001 |
-| Retained chat, queue, consent and recovery | managed-conversation.spec.ts | mobile-managed-conversation.spec.ts | 002, 003, 006, 009 |
-| Named instances and delegated work | reference-coordinator.spec.ts | mobile-reference-coordinator.spec.ts | 010 |
-| Proposal approval, pause and schedules | reference-coordinator-policy.spec.ts | mobile-reference-coordinator-policy.spec.ts | 011.1-2 |
-| Adoption, evidence, writeback and outcomes | reference-coordinator-operations.spec.ts | mobile-reference-coordinator-operations.spec.ts | 007, 008, 011.3 |
-| Independent consumer lifecycle and compatibility | coordinator-compatibility.spec.ts | mobile-coordinator-compatibility.spec.ts | 012 |
+| Flow                                             | Desktop spec                             | Phone spec                                      | Criteria owner     |
+| ------------------------------------------------ | ---------------------------------------- | ----------------------------------------------- | ------------------ |
+| Workspace grants and revocation                  | managed-capabilities.spec.ts             | mobile-managed-capabilities.spec.ts             | 01.3               |
+| Delegation and human-confirmed delete            | managed-task-commands.spec.ts            | mobile-managed-task-commands.spec.ts            | 05                 |
+| Management ownership and takeover                | task-management-claims.spec.ts           | mobile-task-management-claims.spec.ts           | tasks 001          |
+| Completion gate and override                     | task-completion-evidence.spec.ts         | mobile-task-completion-evidence.spec.ts         | tasks 002          |
+| Automation enqueue and portable binding          | managed-automation.spec.ts               | mobile-managed-automation.spec.ts               | office 001         |
+| Retained chat, queue, consent and recovery       | managed-conversation.spec.ts             | mobile-managed-conversation.spec.ts             | 002, 003, 006, 009 |
+| Named instances and delegated work               | reference-coordinator.spec.ts            | mobile-reference-coordinator.spec.ts            | 010                |
+| Proposal approval, pause and schedules           | reference-coordinator-policy.spec.ts     | mobile-reference-coordinator-policy.spec.ts     | 011.1-2            |
+| Adoption, evidence, writeback and outcomes       | reference-coordinator-operations.spec.ts | mobile-reference-coordinator-operations.spec.ts | 007, 008, 011.3    |
+| Independent consumer lifecycle and compatibility | coordinator-compatibility.spec.ts        | mobile-coordinator-compatibility.spec.ts        | 012                |
 
 The reference-package smoke fixture introduced in order 15 loads the actual sibling
 archive, derived from its manifest, and fails if it is absent. Order 18 adds a second
@@ -630,3 +624,29 @@ service and SQLite repository packages; rerunning the SQLite repository package
 alone with eight-way test parallelism reached the same timeout while still
 initializing repository fixtures. No assertion failure was reported before
 those timeouts. The multi-target backend build passed after these changes.
+
+## PR fixup verification (2026-09-27)
+
+The PR fixup preserves task-delete confirmation IDs through bulk deletion and
+uses the human-confirmed delete helper in preparation-attachment cleanup. It
+dismisses the LSP status popover before editor interactions. On phone, manager
+and completion summaries share a compact toolbar below the fixed top bar, with
+44px Manage/Inspect actions and no duplicate top inset, so chat controls stay
+above bottom navigation.
+
+Local verification passed: web typecheck and scoped ESLint; the mobile session
+layout unit suite (25 tests); the Vite E2E build; five phone E2E regressions for
+clarification, full-queue layout, oversized messages, claims, and completion;
+four desktop E2E regressions for LSP, file-tree drag/drop, completed-session
+resume, and detached-turn cancellation; three additional cancellation repeats;
+five bulk-delete/preparation-attachment E2E checks; documentation validation
+(312 decisions and 1,195 specifications); all specification files; 83 PR-docs
+unit tests; and whitespace checks.
+
+The prior PR documentation-coverage check remains blocked by the trusted base
+validator's 200 referenced-document limit. The `pull_request_target` workflow
+checks out `github.workflow_sha`, so changing the validator in this feature
+branch cannot repair that run. No `no-docs-allow` bypass was used. A fresh
+current-head run must confirm the result; if it persists, the trusted mainline
+validator must be expanded or this change must be split before the PR can be
+considered clear.

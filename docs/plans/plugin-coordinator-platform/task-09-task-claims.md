@@ -3,7 +3,8 @@ id: "09-task-claims"
 title: "Task management claims and human takeover"
 status: complete
 wave: 9
-depends_on: ["01-exact-host-foundation", "06-workspace-observations", "07-task-commands"]
+depends_on:
+  ["01-exact-host-foundation", "06-workspace-observations", "07-task-commands"]
 plan: "plan.md"
 requirements:
   - REQ-TASKS-COORDINATION-001
@@ -56,18 +57,12 @@ Desktop: task detail > management and completion
 +----------------------------------------------------------------+
 Phone: task detail > completion
 +------------------------------+
-| Manager: Delivery lead       |
-| [Transfer] [Release]         |
-| Completion: 1 of 2           |
-| [ok] Regression test passes  |
-| [Evidence]                  |
-| [!] Review unresolved       |
-| [Inspect blocker]           |
-| [Record override...]        |
+| Manager: Delivery lead [Manage] |
+| Completion: 1 of 2    [Inspect] |
 +------------------------------+
 ```
 
-Show claims independently from the worker assignee. Evidence/transfer opens a drawer on phone and a dialog on desktop. An override requires a reason and targets one observed move. Stale evidence and an unavailable manager remain visible; no hidden automatic takeover.
+Show claims independently from the worker assignee. On phone, the manager and completion summaries share one compact toolbar below the fixed top bar; both 44px actions open their native bottom drawers. Desktop retains full detail rows and dialogs. An override requires a reason and targets one observed move. Stale evidence and an unavailable manager remain visible; no hidden automatic takeover.
 
 Applicable criteria: `AC-TASKS-COORDINATION-001.1`, `AC-TASKS-COORDINATION-001.2`, `AC-TASKS-COORDINATION-001.3`.
 
@@ -127,7 +122,9 @@ Implemented task-owned claims with compare-and-set generations, exact Host
 commands, native transfer/release and history, legacy v1 write fencing, durable
 queue-generation checks, WIP-deferred move checks, and desktop/phone claim UI.
 Human mutations remain available and retain their audit actor. The phone claim
-surface is placed below the fixed navigation bar.
+surface is placed below the fixed navigation bar. Manager and completion status
+share a compact phone toolbar, preserving the 44px Manage/Inspect actions while
+keeping the session composer above the bottom navigation.
 
 Verification passed:
 
@@ -136,8 +133,9 @@ Verification passed:
 - Focused service and SQLite regressions for queue-promotion metadata and
   rejecting a deferred WIP move after claim transfer.
 - `pnpm run typecheck && pnpm run i18n:check`.
-- Desktop claim E2E passed in the preceding verification session; the current
-  phone claim E2E passed: `pnpm e2e:run --project mobile-chrome tests/plugins/mobile-task-management-claims.spec.ts`.
+- Desktop claim E2E passed in the preceding verification session. The current
+  phone claim E2E passed through the compact toolbar; it asserts the toolbar
+  stays at or below 60px and keeps the Manage target at least 44px.
 - Public documentation tests and page validation (62 tests, 47 pages),
   specification catalog validation (306 decisions and 1,162 specifications),
   full specification lint, and `git diff --check`.

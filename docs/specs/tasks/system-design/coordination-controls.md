@@ -13,10 +13,10 @@ owners:
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
+| Requirement                  | Design section                          |
+| ---------------------------- | --------------------------------------- |
 | `REQ-TASKS-COORDINATION-001` | [Management claims](#management-claims) |
-| `REQ-TASKS-COORDINATION-002` | [Completion gates](#completion-gates) |
+| `REQ-TASKS-COORDINATION-002` | [Completion gates](#completion-gates)   |
 
 ## Purpose and boundaries
 
@@ -86,9 +86,12 @@ introduced remain complete; criteria edits do not silently reopen them.
 ## UI and contracts
 
 Add a manager row and completion section to existing task detail, available on
-desktop and phone. Use a bottom drawer for mobile claim transfer and evidence
-inspection; use shared dialogs on desktop. Keep workflow controls visible with an
-explanation when blocked. MCP and Host adapters return the same typed blocker data.
+desktop and phone. On phone, show both summaries and their Manage/Inspect actions
+in one compact toolbar below the fixed top bar, so the chat keeps room above the
+bottom navigation. Keep touch targets at least 44px. Use bottom drawers for phone
+claim transfer and evidence inspection; use shared dialogs on desktop. Keep
+workflow controls visible with an explanation when blocked. MCP and Host adapters
+return the same typed blocker data.
 
 New proposed Host methods are `AcquireTaskManagementClaimExact`,
 `ReleaseTaskManagementClaimExact`, `TransferTaskManagementClaimExact`,

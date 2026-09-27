@@ -13,6 +13,9 @@ test("phone transfer and release", async ({ testPage, apiClient, seedData }) => 
   expect(seeded.ok).toBe(true);
 
   await testPage.goto(`/t/${task.id}`);
+  const toolbar = testPage.getByTestId("mobile-task-control-toolbar");
+  await expect(toolbar).toBeVisible();
+  expect((await toolbar.boundingBox())?.height).toBeLessThanOrEqual(60);
   const row = testPage.getByTestId("task-management-claim-row");
   await expect(row).toBeVisible();
   await expect(row.getByTestId("task-management-claim-owner")).toContainText("disabled-manager");

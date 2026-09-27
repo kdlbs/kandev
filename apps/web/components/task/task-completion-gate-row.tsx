@@ -24,7 +24,18 @@ type TaskCompletionGateRowProps = {
   taskState: string;
   workflowSteps: WorkflowStepperStep[];
   isMobile: boolean;
+  compact?: boolean;
 };
+
+function completionGateRowClass(compact: boolean) {
+  return compact
+    ? "flex min-w-0 flex-1 items-center justify-between gap-1 px-1"
+    : "flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2";
+}
+
+function completionGateButtonClass(compact: boolean) {
+  return `min-h-11 shrink-0 cursor-pointer ${compact ? "px-2 text-xs" : ""}`;
+}
 
 export function TaskCompletionGateRow({
   taskId,
@@ -34,6 +45,7 @@ export function TaskCompletionGateRow({
   taskState,
   workflowSteps,
   isMobile,
+  compact = false,
 }: TaskCompletionGateRowProps) {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<TaskCompletionGateSnapshot | null>(null);
@@ -93,15 +105,17 @@ export function TaskCompletionGateRow({
   );
 
   return (
-    <section
-      className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2"
-      data-testid="task-completion-gate-row"
-    >
-      <TaskCompletionGateStatus loading={loading} snapshot={snapshot} error={error} />
+    <section className={completionGateRowClass(compact)} data-testid="task-completion-gate-row">
+      <TaskCompletionGateStatus
+        loading={loading}
+        snapshot={snapshot}
+        error={error}
+        compact={compact}
+      />
       <Button
         type="button"
         variant="outline"
-        className="min-h-11 shrink-0 cursor-pointer"
+        className={completionGateButtonClass(compact)}
         disabled={loading || movingToStepId !== null}
         onClick={() => setOpen(true)}
         data-testid="task-completion-gate-open"
@@ -129,10 +143,12 @@ function TaskCompletionGateStatus({
   loading,
   snapshot,
   error,
+  compact,
 }: {
   loading: boolean;
   snapshot: TaskCompletionGateSnapshot | null;
   error: string | null;
+  compact: boolean;
 }) {
   const { t } = useTranslation();
   const criterionCount = snapshot?.criteria.length ?? 0;
@@ -149,8 +165,17 @@ function TaskCompletionGateStatus({
 
   return (
     <div className="flex min-w-0 flex-col">
-      <span className="text-xs text-muted-foreground">{t("task:completionGateLabel")}</span>
-      <span className="truncate text-sm font-medium" data-testid="task-completion-gate-status">
+      <span
+        className={
+          compact ? "truncate text-[10px] text-muted-foreground" : "text-xs text-muted-foreground"
+        }
+      >
+        {t("task:completionGateLabel")}
+      </span>
+      <span
+        className={compact ? "truncate text-xs font-medium" : "truncate text-sm font-medium"}
+        data-testid="task-completion-gate-status"
+      >
         {status}
         {!loading &&
           snapshot &&

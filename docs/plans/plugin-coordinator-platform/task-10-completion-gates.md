@@ -3,7 +3,13 @@ id: "10-completion-gates"
 title: "Native completion criteria and evidence gates"
 status: complete
 wave: 10
-depends_on: ["01-exact-host-foundation", "06-workspace-observations", "07-task-commands", "09-task-claims"]
+depends_on:
+  [
+    "01-exact-host-foundation",
+    "06-workspace-observations",
+    "07-task-commands",
+    "09-task-claims",
+  ]
 plan: "plan.md"
 requirements:
   - REQ-TASKS-COORDINATION-002
@@ -56,14 +62,8 @@ Desktop: task detail > management and completion
 +----------------------------------------------------------------+
 Phone: task detail > completion
 +------------------------------+
-| Manager: Delivery lead       |
-| [Transfer] [Release]         |
-| Completion: 1 of 2           |
-| [ok] Regression test passes  |
-| [Evidence]                  |
-| [!] Review unresolved       |
-| [Inspect blocker]           |
-| [Record override...]        |
+| Manager: Delivery lead [Manage] |
+| Completion: 1 of 2    [Inspect] |
 +------------------------------+
 ```
 
@@ -125,7 +125,7 @@ A UI-only gate is bypassable. Locate and unify all final transition commits befo
 
 ## Results
 
-Implemented revisioned task completion criteria, typed evidence with task-revision freshness, audit history, exact Host set/verify calls, and a shared final transition guard. Tasks without criteria retain the existing completion behavior. Manual and deferred workflow moves use the same repository guard; stale evidence and concurrent criteria changes are rechecked at commit. The native task detail view shows evidence status and blockers, and supports a reasoned one-move human override on desktop and phone. Workflow snapshot projection now preserves the terminal-step completion flag required by the override selector.
+Implemented revisioned task completion criteria, typed evidence with task-revision freshness, audit history, exact Host set/verify calls, and a shared final transition guard. Tasks without criteria retain the existing completion behavior. Manual and deferred workflow moves use the same repository guard; stale evidence and concurrent criteria changes are rechecked at commit. The native task detail view shows evidence status and blockers, and supports a reasoned one-move human override on desktop and phone. Phone manager/completion summaries share a compact toolbar with 44px controls, leaving the session composer above bottom navigation. Workflow snapshot projection now preserves the terminal-step completion flag required by the override selector.
 
 Validation passed:
 
@@ -134,4 +134,5 @@ Validation passed:
 - `make -C apps/backend proto` and `make -C apps/backend build`
 - Web completion-gate API and workflow-snapshot tests; `pnpm run typecheck`; scoped ESLint; `pnpm run i18n:check`
 - Desktop completion-evidence E2E and phone completion-evidence E2E, one test each
+- Phone completion E2E passes through the compact shared toolbar and retains a 44px Inspect target. Mobile clarification and full-queue E2E verify that send and composer controls remain above the fixed bottom navigation.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`

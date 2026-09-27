@@ -423,6 +423,7 @@ test.describe("LSP file intelligence", () => {
     expect(lspSockets).toHaveLength(1);
     await expectFakeLspMarkerCount(testPage, 1);
 
+    await testPage.keyboard.press("Escape");
     const editor = testPage.locator(".monaco-editor:visible");
     await editor.click();
     await testPage.keyboard.press("Control+Space");

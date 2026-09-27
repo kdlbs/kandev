@@ -3,7 +3,15 @@ id: "17-reference-operations"
 title: "Reference adoption, evidence, writeback, and outcomes"
 status: complete
 wave: 17
-depends_on: ["09-task-claims", "10-completion-gates", "11-workspace-admin", "12-source-writeback", "15-reference-plugin", "16-durable-policy"]
+depends_on:
+  [
+    "09-task-claims",
+    "10-completion-gates",
+    "11-workspace-admin",
+    "12-source-writeback",
+    "15-reference-plugin",
+    "16-durable-policy",
+  ]
 plan: "plan.md"
 requirements:
   - REQ-PLUGINS-COORDINATION-011
@@ -93,18 +101,12 @@ Desktop: task detail > management and completion
 +----------------------------------------------------------------+
 Phone: task detail > completion
 +------------------------------+
-| Manager: Delivery lead       |
-| [Transfer] [Release]         |
-| Completion: 1 of 2           |
-| [ok] Regression test passes  |
-| [Evidence]                  |
-| [!] Review unresolved       |
-| [Inspect blocker]           |
-| [Record override...]        |
+| Manager: Delivery lead [Manage] |
+| Completion: 1 of 2    [Inspect] |
 +------------------------------+
 ```
 
-Show claims independently from the worker assignee. Evidence/transfer opens a drawer on phone and a dialog on desktop. An override requires a reason and targets one observed move. Stale evidence and an unavailable manager remain visible; no hidden automatic takeover.
+Show claims independently from the worker assignee. On phone, the manager and completion summaries share one compact toolbar below the fixed top bar; both 44px actions open their native bottom drawers. Desktop retains full detail rows and dialogs. An override requires a reason and targets one observed move. Stale evidence and an unavailable manager remain visible; no hidden automatic takeover.
 
 Applicable criteria: `AC-PLUGINS-COORDINATION-011.3`.
 

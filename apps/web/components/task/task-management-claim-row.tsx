@@ -13,6 +13,7 @@ type TaskManagementClaimRowProps = {
   taskId: string;
   taskUpdatedAt: string;
   isMobile: boolean;
+  compact?: boolean;
 };
 
 function ownerText(
@@ -34,6 +35,7 @@ export function TaskManagementClaimRow({
   taskId,
   taskUpdatedAt,
   isMobile,
+  compact = false,
 }: TaskManagementClaimRowProps) {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<TaskManagementClaimSnapshot | null>(null);
@@ -58,12 +60,25 @@ export function TaskManagementClaimRow({
 
   return (
     <section
-      className={`flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2 ${isMobile ? "mt-14" : ""}`}
+      className={
+        compact
+          ? "flex min-w-0 flex-1 items-center justify-between gap-1 px-1"
+          : "flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2"
+      }
       data-testid="task-management-claim-row"
     >
-      <div className="flex min-w-0 flex-col">
-        <span className="text-xs text-muted-foreground">{t("task:managementClaimManager")}</span>
-        <span className="truncate text-sm font-medium" data-testid="task-management-claim-owner">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span
+          className={
+            compact ? "truncate text-[10px] text-muted-foreground" : "text-xs text-muted-foreground"
+          }
+        >
+          {t("task:managementClaimManager")}
+        </span>
+        <span
+          className={compact ? "truncate text-xs font-medium" : "truncate text-sm font-medium"}
+          data-testid="task-management-claim-owner"
+        >
           {loading ? t("task:managementClaimLoading") : ownerText(snapshot, t)}
         </span>
         {error && (
@@ -75,7 +90,7 @@ export function TaskManagementClaimRow({
       <Button
         type="button"
         variant="outline"
-        className="min-h-11 shrink-0 cursor-pointer"
+        className={`min-h-11 shrink-0 cursor-pointer ${compact ? "px-2 text-xs" : ""}`}
         onClick={() => setOpen(true)}
         data-testid="task-management-claim-open"
       >

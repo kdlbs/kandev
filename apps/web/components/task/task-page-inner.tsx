@@ -77,6 +77,52 @@ export type TaskPageInnerProps = {
   taskCanvasesStatus?: TaskCanvasesLoadStatus;
 };
 
+function TaskCoordinationControls({
+  task,
+  workflowSteps,
+  isMobile,
+}: {
+  task: Task;
+  workflowSteps: TaskPageInnerProps["workflowSteps"];
+  isMobile: boolean;
+}) {
+  if (isMobile) {
+    return (
+      <div
+        className="mt-14 flex shrink-0 items-center gap-1 border-b border-border px-2 py-1"
+        data-testid="mobile-task-control-toolbar"
+      >
+        <TaskManagementClaimRow taskId={task.id} taskUpdatedAt={task.updated_at} isMobile compact />
+        <TaskCompletionGateRow
+          taskId={task.id}
+          taskUpdatedAt={task.updated_at}
+          workflowId={task.workflow_id}
+          workflowStepId={task.workflow_step_id}
+          taskState={task.state}
+          workflowSteps={workflowSteps}
+          isMobile
+          compact
+        />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <TaskManagementClaimRow taskId={task.id} taskUpdatedAt={task.updated_at} isMobile={false} />
+      <TaskCompletionGateRow
+        taskId={task.id}
+        taskUpdatedAt={task.updated_at}
+        workflowId={task.workflow_id}
+        workflowStepId={task.workflow_step_id}
+        taskState={task.state}
+        workflowSteps={workflowSteps}
+        isMobile={false}
+      />
+    </>
+  );
+}
+
 type RemoteExecutorStatus = {
   is_remote_executor?: boolean;
   executor_type?: string | null;
@@ -422,17 +468,8 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                 onMoveError={reportTaskMoveError}
               />
             )}
-            <TaskManagementClaimRow
-              taskId={task.id}
-              taskUpdatedAt={task.updated_at}
-              isMobile={isMobile}
-            />
-            <TaskCompletionGateRow
-              taskId={task.id}
-              taskUpdatedAt={task.updated_at}
-              workflowId={task.workflow_id}
-              workflowStepId={task.workflow_step_id}
-              taskState={task.state}
+            <TaskCoordinationControls
+              task={task}
               workflowSteps={props.workflowSteps}
               isMobile={isMobile}
             />

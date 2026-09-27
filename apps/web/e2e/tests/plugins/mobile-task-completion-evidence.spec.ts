@@ -28,6 +28,9 @@ test("phone can inspect stale completion evidence and record a one-move override
     expect(blockedMove.status).toBe(409);
 
     await testPage.goto(`/t/${seed.taskId}`);
+    const toolbar = testPage.getByTestId("mobile-task-control-toolbar");
+    await expect(toolbar).toBeVisible();
+    expect((await toolbar.boundingBox())?.height).toBeLessThanOrEqual(60);
     const row = testPage.getByTestId("task-completion-gate-row");
     await expect(row).toBeVisible();
     const open = row.getByTestId("task-completion-gate-open");

@@ -1448,13 +1448,22 @@ export class ApiClient {
     return res.json() as Promise<{ created: string[]; skipped: string[] }>;
   }
 
-  async deleteTask(taskId: string): Promise<void> {
+  async deleteTask(
+    taskId: string,
+    options?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ): Promise<void> {
+    const cascade = options?.cascade ?? false;
+    const discardWorktreeChanges = options?.discardWorktreeChanges ?? false;
     const preview = await this.request<{ confirmation_id: string }>(
       "POST",
       "/api/v1/tasks/delete-preflight",
-      { task_ids: [taskId], cascade: false, discard_worktree_changes: false },
+      { task_ids: [taskId], cascade, discard_worktree_changes: discardWorktreeChanges },
     );
-    await this.request("DELETE", `/api/v1/tasks/${taskId}`, undefined, {
+    const query = new URLSearchParams();
+    if (cascade) query.set("cascade", "true");
+    if (discardWorktreeChanges) query.set("discard_worktree_changes", "true");
+    const queryString = query.toString() ? `?${query.toString()}` : "";
+    await this.request("DELETE", `/api/v1/tasks/${taskId}${queryString}`, undefined, {
       "X-Kandev-Task-Delete-Confirmation": preview.confirmation_id,
     });
   }
