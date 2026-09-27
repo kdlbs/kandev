@@ -279,8 +279,10 @@ contracts. Exact post-fixup test, build, lint and CI results are recorded in
 
 The CI follow-up also synchronized the packaged and web E2E fixture bundles and replaced repeated
 manifest schema strings with named constants. Plugin packaging, the CI-equivalent Go lint, and the
-managed desktop profile E2E passed locally. Final-head remote CI remains pending after the remediation
-push and is recorded in the Kandev task plan.
+managed desktop profile E2E passed locally. The code-fixup head `67511e8bcc9be52330e37c9e46dbba3a1d60e3f5`
+passed its terminal PR run with 60 passed, 10 skipped, and no failed or pending checks. The documentation
+coverage publisher passed after a retry following GitHub API HTTP 429; the Kandev task plan records the
+final result for the subsequent documentation-only update.
 
 The final pre-push PR checks also exposed a nondeterministic workflow-step test helper and two E2E
 fixtures that depended on stale or implicit executor-profile selection. Task 10 records the corrections

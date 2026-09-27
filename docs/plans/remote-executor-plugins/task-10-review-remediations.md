@@ -209,7 +209,10 @@ offscreen option. Both exact tests passed with retries disabled:
 - `E2E_DEBUG=1 E2E_PORT_OFFSET=27 TMPDIR=/root/k.D6zpBC GOTMPDIR=/root/k.D6zpBC pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/task/mobile-sidebar-task-actions.spec.ts -- --grep "creates a policy branch for a local-executor subtask" --retries=0`
 
 The exact CI Go lint command passed with zero issues. `make -C apps/backend build`, Prettier, ESLint,
-`gofmt -l`, and `git diff --check` passed. Updated PR-head CI is pending the fixup push.
+`gofmt -l`, and `git diff --check` passed. PR #3985 code-fixup head
+`67511e8bcc9be52330e37c9e46dbba3a1d60e3f5` reached a terminal run with 60 passed, 10 skipped, and no
+failed or pending checks. The documentation-coverage publisher first hit GitHub code-search HTTP 429;
+the failed-job rerun passed after the reported retry delay elapsed. No review threads remain unresolved.
 
 ## Dependencies
 
