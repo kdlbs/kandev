@@ -1985,7 +1985,7 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 		args = append(args, string(*expected))
 	}
 	if expectedUpdatedAt != nil {
-		query += " AND updated_at = ?"
+		query += optimisticUpdatedAtPredicate
 		args = append(args, *expectedUpdatedAt)
 	}
 	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)

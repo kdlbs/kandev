@@ -15,6 +15,8 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
+const optimisticUpdatedAtPredicate = " AND updated_at = ?"
+
 // CreateRepository creates a new repository
 func (r *Repository) CreateRepository(ctx context.Context, repository *models.Repository) error {
 	return r.insertRepository(ctx, r.db, repository)
@@ -166,7 +168,7 @@ func (r *Repository) updateRepository(ctx context.Context, exec sqlx.ExtContext,
 		repository.ProviderHost, repository.ProviderScope, repository.ProviderOwner, repository.ProviderName, repository.RemoteURL, repository.DefaultBranch, repository.WorktreeBranchPrefix, repository.WorktreeBranchTemplate, dialect.BoolToInt(repository.PullBeforeWorktree),
 		repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.CopyFiles, repository.UpdatedAt, repository.ID}
 	if expected != nil {
-		query += ` AND updated_at = ?`
+		query += optimisticUpdatedAtPredicate
 		args = append(args, *expected)
 	}
 	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)

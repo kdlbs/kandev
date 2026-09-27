@@ -133,7 +133,7 @@ func (r *Repository) updateWorkspace(ctx context.Context, workspace *models.Work
 		workspace.DefaultConfigAgentProfileID, workspace.UpdatedAt, workspace.ID,
 	}
 	if expected != nil {
-		query += ` AND updated_at = ?`
+		query += optimisticUpdatedAtPredicate
 		args = append(args, *expected)
 	}
 
