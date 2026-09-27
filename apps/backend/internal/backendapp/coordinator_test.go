@@ -46,7 +46,7 @@ func TestInitCoordinatorWiring_DisabledBuildsStoreOnly(t *testing.T) {
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, false, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestInitCoordinatorWiring_EnabledBuildsService(t *testing.T) {
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, true, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestInitCoordinatorWiring_StoreErrorPropagates(t *testing.T) {
 		t.Fatalf("close writer: %v", err)
 	}
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, false, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, newTestLogger())
 	if err == nil {
 		t.Fatal("expected an error when the coordinator store fails to initialize")
 	}
@@ -135,7 +135,7 @@ func TestRegisterCoordinatorRoutes_CapturesT0BeforeRoutesRegister(t *testing.T) 
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, true, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, true, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestRegisterCoordinatorRoutes_DisabledReturns404AndPreservesRows(t *testing
 	tracker := newCoordinatorTestTracker(t)
 	pool := newCoordinatorTestPool(t)
 
-	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, false, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, tracker, nil, nil, nil, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}

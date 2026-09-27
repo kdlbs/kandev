@@ -49,6 +49,11 @@ type Service struct {
 
 	onConversationCleared ConversationClearedHook
 	onCoordinatorDeleted  CoordinatorDeletedHook
+
+	proposalWorkflows    WorkflowReader
+	proposalRepositories RepositoryReader
+	proposalTasks        SourceTaskReader
+	proposalSteps        WorkflowStepReader
 }
 
 // NewService builds a Service over store, validator, the workspace

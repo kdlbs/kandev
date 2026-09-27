@@ -448,7 +448,7 @@ func initIntegrationWiring(
 	if err != nil {
 		return nil, err
 	}
-	coordinatorSvc, err := initCoordinatorWiring(ctx, dbPool, storeTracker, taskSvc, repos.AgentSettings, cfg.Features.Coordinator, log)
+	coordinatorSvc, err := initCoordinatorWiring(ctx, dbPool, storeTracker, taskSvc, workflowSvc, repos.AgentSettings, cfg.Features.Coordinator, log)
 	if err != nil {
 		return nil, err
 	}

@@ -1074,9 +1074,11 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 	office := surfaceEnabled(mcpprofile.SurfaceOfficeTask)
 	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
 	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
+	coordinatorSurface := surfaceEnabled(mcpprofile.SurfaceCoordinator)
 	return []profileToolGroup{
 		{name: "configuration-automations", enabled: config, register: func(s *Server) { s.registerConfigAutomationTools() }},
 		{name: "automation", enabled: automation, register: func(s *Server) { s.registerAutomationTools() }},
+		{name: "coordinator", enabled: coordinatorSurface, register: func(s *Server) { s.registerCoordinatorTools() }},
 		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
 		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},
 		{name: "configuration-mcp", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigMcpTools() }},
@@ -1146,7 +1148,7 @@ func (s *Server) registerTools() {
 			group.register(s)
 		}
 	}
-	if s.profile.Surface != mcpprofile.SurfaceAutomation {
+	if s.profile.Surface != mcpprofile.SurfaceAutomation && s.profile.Surface != mcpprofile.SurfaceCoordinator {
 		s.registerPluginTools()
 	}
 	s.logger.Info("registered MCP tools",

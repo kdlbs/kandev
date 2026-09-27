@@ -2164,6 +2164,10 @@ func registerMCPAndDebugRoutes(
 	}
 	p.log.Debug("Registered native code review (WebSocket + MCP)")
 
+	if p.services.Coordinator != nil {
+		mcpHandlers.SetCoordinatorService(p.services.Coordinator)
+	}
+
 	mcpHandlers.RegisterHandlers(p.gateway.Dispatcher)
 	p.log.Debug("Registered MCP handlers (WebSocket)")
 

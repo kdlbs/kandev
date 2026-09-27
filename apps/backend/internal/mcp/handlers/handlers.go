@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -336,6 +337,12 @@ type Handlers struct {
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc AgentPermissionService
+
+	// Optional coordinator.propose_task dependency (coordinator MCP surface
+	// only, set via SetCoordinatorService). Without it the action is not
+	// registered and a coordinator principal's propose call 404s via the
+	// guard's nil-service check.
+	coordinatorSvc *coordinator.Service
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -472,6 +479,12 @@ func (h *Handlers) SetCanvasAuthoringService(svc CanvasAuthoringService) {
 	h.canvasAuthoringSvc = svc
 }
 
+// SetCoordinatorService wires coordinator.propose_task. Leave it unset when
+// features.coordinator is disabled so the action is not registered either.
+func (h *Handlers) SetCoordinatorService(svc *coordinator.Service) {
+	h.coordinatorSvc = svc
+}
+
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(dispatcher *ws.Dispatcher) {
 	d := &guardedMCPDispatcher{Dispatcher: dispatcher, handlers: h}
@@ -514,6 +527,9 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
+	if h.coordinatorSvc != nil {
+		d.RegisterFunc(coordinator.ActionProposeTask, h.handleProposeTask)
+	}
 }
 
 func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {

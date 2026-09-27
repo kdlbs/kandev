@@ -25,6 +25,13 @@ func (p Principal) IsAutomation() bool {
 	return p.AutomationID != "" && p.Surface == mcpprofile.SurfaceAutomation
 }
 
+// IsCoordinator reports whether this principal is a coordinator's own
+// attended conversation session (docs/specs/coordinator/system-design/
+// copilot.md#principal-and-mode).
+func (p Principal) IsCoordinator() bool {
+	return p.CoordinatorID != "" && p.Surface == mcpprofile.SurfaceCoordinator
+}
+
 type principalContextKey struct{}
 
 // WithPrincipal attaches a trusted principal to a dispatch context.

@@ -15,6 +15,7 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
 // initCoordinatorWiring builds the coordinator store unconditionally (it is a
@@ -26,6 +27,7 @@ func initCoordinatorWiring(
 	dbPool *db.Pool,
 	storeTracker *requiredstores.Tracker,
 	taskSvc *taskservice.Service,
+	workflowSvc *workflowservice.Service,
 	agentProfiles settingsstore.Repository,
 	enabled bool,
 	log *logger.Logger,
@@ -39,7 +41,9 @@ func initCoordinatorWiring(
 	}
 
 	validator := coordinator.NewValidator(agentProfiles, taskSvc)
-	return coordinator.NewService(store, validator, taskSvc, log), nil
+	svc := coordinator.NewService(store, validator, taskSvc, log)
+	svc.SetProposalDeps(taskSvc, taskSvc, taskSvc, workflowSvc)
+	return svc, nil
 }
 
 // registerCoordinatorHTTPRoutes is a test seam over coordinator.RegisterRoutes:
