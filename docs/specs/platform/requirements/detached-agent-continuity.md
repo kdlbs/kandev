@@ -34,7 +34,9 @@ transport. Here it only supplies the ability to re-establish one.
 
 - **Link:** the backend's connection to one agentctl control stream, carried
   by the executor's transport.
-- **Detached:** agentctl has no attached backend stream.
+- **Detached:** agentctl has no backend stream that the backend has
+  confirmed. A stream the backend opened but has not yet confirmed does not
+  count as attached.
 - **Disconnected:** the backend has lost the link to a live execution, and
   has no evidence yet that the agent stopped.
 - **Redial:** the executor re-establishes its transport to the same surviving
@@ -171,8 +173,10 @@ period, so that a long outage cannot let it run away.
   cancels a turn, agentctl shall keep running and keep its journal. Kandev
   shall keep reconnecting. After reconnect, the session shall wait for the
   user's next instruction. It shall not start another turn by itself.
-- **AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.4:** When a backend stream
-  attaches, the offline budget shall restart from zero at the next detach.
+- **AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.4:** When the backend confirms
+  an attached stream, the offline budget shall restart from zero at the next
+  detach. A stream that attaches and ends without that confirmation shall not
+  restart the budget.
 - **AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.5:** agentctl shall not exit
   because no backend is attached before the offline budget has expired and the
   running turn has been cancelled.

@@ -36,8 +36,9 @@ harness tool timeout exceeds the budget.
     while attached, the 5 s bound with a re-check on timeout; while detached,
     wait on `AttachedCh`, `BudgetExhausted`, or `ctx` only, never
     `requestCh`;
-  - the writer stops reading `requestCh` before its stream's pending set is
-    failed;
+  - the writer reads `requestCh` only while its stream is current and
+    confirmed, and stops before its stream's pending set is failed, so an
+    unconfirmed reconnect stream never carries a call;
   - `writeAgentStreamMCPRequest` binds before it writes: a call is sent once
     `BindRequestToStream` succeeds. Binding to a stream that
     `FailStreamRequests` already failed returns an error, and the writer
@@ -75,8 +76,11 @@ harness tool timeout exceeds the budget.
 
 ## Acceptance
 
-1. While detached, a call blocks. After a stream attaches it completes with
-   the backend's answer. It sends progress notifications at 20 s intervals or
+1. While detached, a call blocks, including while an unconfirmed stream is
+   current. After the backend confirms a stream it completes with the
+   backend's answer. A call bound to a stream that a new stream supersedes
+   returns `ErrKandevCallOutcomeUnknown`; a call not yet bound goes to the new
+   stream once it is confirmed. It sends progress notifications at 20 s intervals or
    less while waiting.
 2. Budget expiry returns `ErrOfflineBudgetExhausted` to every waiting call. A
    call that was sent before the drop returns `ErrKandevCallOutcomeUnknown`.
@@ -91,7 +95,7 @@ harness tool timeout exceeds the budget.
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/mcp/server/... -run 'TestRequestPayload|TestSendRacesDetach|TestFailStreamRequests|TestKandevCallKeepAlive|TestBindToFailedStreamNotSent|TestWriteErrorUnknownOutcome')
+(cd apps/backend && go test -race -count=1 ./internal/mcp/server/... -run 'TestRequestPayload|TestSendRacesDetach|TestFailStreamRequests|TestKandevCallKeepAlive|TestBindToFailedStreamNotSent|TestWriteErrorUnknownOutcome|TestUnconfirmedStreamCarriesNoCall')
 (cd apps/backend && go test -race -count=1 ./internal/agentctl/server/api/... -run 'TestWriteAgentStreamMCPRequestBindsBeforeWrite')
 (cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... ./internal/agent/agents/... -run 'TestToolTimeoutCoversOfflineBudget')
 (cd apps/backend && go test -race -count=1 ./internal/sysprompt/... -run 'TestKandevContextHasConnectionLossSection')

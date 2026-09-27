@@ -78,15 +78,22 @@ and [part 3](../../specs/platform/system-design/detached-agent-continuity-03.md)
 This section lists the integration points per slice.
 
 - **Offline budget** (task 01):
-  - `agentctl/server/process/attachment.go` detach clock;
+  - `agentctl/server/process/attachment.go` detach clock, with a current
+    stream that the backend confirms (`attach_id`,
+    `POST /api/v1/agent/stream/confirm`); only a confirmation restarts the
+    budget;
+  - agent stream liveness (15 s ping, 45 s read deadline, 10 s write
+    deadline) and supersession of an older stream;
   - budget enforcement: `(*Adapter).Cancel` with retries, then a
     process-group stop;
   - the journaled `agent_link.offline_budget_exhausted` event;
   - `offline_budget_minutes` in `profileConfigAuthoritativeKeys`;
   - `OfflineBudget` in `agentctl.CreateInstanceRequest` and
     `config.InstanceOverrides`;
+  - the enforcement signals (`attachWaitCh`, `enforcementDoneCh`) that an
+    attaching stream uses;
   - the unowned-reaper gate while a budget is unexpired or its enforcement
-    is not complete;
+    has not ended;
   - the `detached-continuity.v1` capability and the stream close reasons.
 - **Waiting Kandev calls** (task 02):
   - `ChannelBackendClient.RequestPayload` waits on an `AttachmentWaiter`
@@ -109,16 +116,23 @@ This section lists the integration points per slice.
   - the `RemoteTransportRedialer` interface, the redial error types, and
     `verifyRedialIdentity`;
   - attempt steps with a synchronous replay barrier, an attach-sequence
-    barrier, guarded commit and clear, and rollback after commit;
+    barrier, a 5 s clear deadline, the stream confirm, guarded commit and
+    clear, the reconnected notice after the guard, the typed replay error
+    branch, and rollback after commit;
+  - `ConnectFromCursor` over a new `connectUpdatesStreamErr`, with
+    `connectUpdatesStream` kept as a wrapper;
   - `classifyReattachedSubmission` for the in-flight submission;
   - a coordinator in `lifecycle`, single-flight through `remoteRefreshGroup`;
   - an `events.ExecutorReachabilityChanged` subscriber;
   - the backoff timer, one step counter per episode;
-  - the startup `ClearStaleAgentLinks` sweep and `ErrAgentLinkNotDisconnected`;
+  - the startup `ClearStaleAgentLinks` sweep with retries,
+    `ErrAgentLinkNotDisconnected`, and the stale-link repair on Reconnect or
+    Stop;
   - the `session.reconnect` WS action;
   - the Kubernetes adapter over `RefreshRemoteInstance`, with a restart
     mapped to `ErrRedialTargetGone`;
-  - pending-stop cleanup;
+  - pending-stop cleanup over HTTP (`CancelDeliverySubmission`,
+    `Client.Stop`, `StopInstance`), idempotent on retry;
   - the orchestrator notices, with deterministic message IDs, and the queue
     hold after a budget pause.
 - **Per-executor redials** (tasks 05-07): SSH replaces the lost
@@ -213,7 +227,7 @@ Maps to AC-PLATFORM-DETACHED-AGENT-CONTINUITY-006.2.
 | --- | --- |
 | 004.1 | `orchestrator/executor/executor_state_test.go` `TestOfflineBudgetProfileResolution`, `TestOfflineBudgetProfileValidation` |
 | 004.2, 004.3 | `agentctl/server/process/attachment_test.go` `TestDetachClockCancelsTurnAtBudget` |
-| 004.2, 004.4 | `attachment_test.go` `TestOfflineBudgetRestartsAfterAttach`, `TestAttachRacesExpiry` |
+| 004.2, 004.4 | `attachment_test.go` `TestOfflineBudgetRestartsAfterAttach`, `TestAttachRacesExpiry`, `TestUnconfirmedStreamKeepsBudget`, `TestStreamSupersede`; `agentctl/server/api` `TestAgentStreamLiveness` |
 | 004.5 | `cmd/agentctl/unowned_reaper_gate_test.go` `TestReaperGateHoldsDuringOfflineBudget` |
 | 003.1, 003.3 | `mcp/server/backend_client_test.go` `TestRequestPayloadWaitsWhileDetached`, `TestSendRacesDetach` |
 | 003.1 | `lifecycle` `TestToolTimeoutCoversOfflineBudget` |
@@ -226,11 +240,11 @@ Maps to AC-PLATFORM-DETACHED-AGENT-CONTINUITY-006.2.
 | 001.3 | `manager_events_disconnect_test.go` `TestStaleDisconnectCallbackIgnored`; `reconnect_coordinator_test.go` `TestStaleAttemptIgnored` |
 | 001.5, 001.6 | `lifecycle/manager_events_disconnect_test.go` `TestStopWhileDisconnected`; `reconnect_coordinator_test.go` `TestPendingStopCleanup` |
 | 006.6 | `orchestrator/agent_link_test.go` `TestAgentLinkMetadataPersisted`; `task/repository/sqlite` `TestSetSessionAgentLinkIfNewer` |
-| 002.1, 002.2, 002.3 | `lifecycle/reconnect_coordinator_test.go` `TestReconnectOnReachability`, `TestReconnectBackoffSchedule`, `TestUserReconnectCancelsTimer` |
+| 002.1, 002.2, 002.3 | `lifecycle/reconnect_coordinator_test.go` `TestReconnectOnReachability`, `TestReconnectBackoffSchedule`, `TestBackoffNeverAboveCap`, `TestUserReconnectCancelsTimer` |
 | 002.4, 002.5 | `reconnect_coordinator_test.go` `TestReconnectSkipsInitializeAndReplays`, `TestRedialIdentity`; `TestKubernetesRedialAdapter` |
 | 001.3, 001.4 | `reconnect_coordinator_test.go` `TestReconnectTargetGoneReconciles` |
 | 001.7 | `agentctl/server/process` `TestAgentPgidRecord` (task 01); `lifecycle/executor_ssh_redial_test.go` `TestSSHOrphanReap`; `executor_remote_docker_redial_test.go` `TestRemoteDockerOrphanReap`; `reconnect_coordinator_test.go` `TestReconnectOrphanUnreapedReportsNoOutcome` |
-| 006.3, 006.4, 006.5 | `orchestrator/agent_link_notices_test.go` `TestReconnectNotices`, `TestReconnectNoticesIdempotent` |
+| 006.3, 006.4, 006.5 | `orchestrator/agent_link_notices_test.go` `TestReconnectNotices`, `TestReconnectNoticesIdempotent`, `TestNoticeSequenceOrder`, `TestReconnectedNoticeAfterGuard`; `reconnect_coordinator_test.go` `TestClearDeadline` |
 | 002.6 | `lifecycle/executor_ssh_redial_test.go`, `executor_remote_docker_redial_test.go`, `executor_kubernetes_redial_test.go`, `executor_sprites_redial_test.go` |
 
 ## E2E tests

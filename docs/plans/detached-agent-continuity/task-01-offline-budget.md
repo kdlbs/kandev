@@ -33,16 +33,34 @@ from the executor profile.
 ## In scope
 
 - **Attachment state in `agentctl/server/process/attachment.go`:** replace
-  the atomic counter with the `attachMu`-guarded state from the design
-  section "Attachment state": count, episode, per-episode `attachedCh` and
-  `exhaustedCh`, `detachedSince`, the timer, and `attachedAtSequence`
-  (the journal high water read under `attachMu` when the count rises from
-  zero), reported by `GetDeliveryStatus` as `AttachedAtSequence`. `Snapshot()` implements
-  `AttachmentWaiter` for task 02. `IsAttached` reads under the same mutex.
-- **Detach clock:** detach to zero starts a new episode and arms the timer;
-  attach from zero stops it and closes `attachedCh`; `expire(E)` is a no-op
-  for a stale or already-exhausted episode, and otherwise closes
-  `exhaustedCh` even when no turn runs.
+  the atomic counter with the `attachMu`-guarded state from part 2
+  "Attachment state": the current stream (`streamID`, `attach_id`, confirmed
+  flag, close function), episode, per-episode `attachedCh` and
+  `exhaustedCh`, `detachedSince`, the timer, `attachedAtSequence` (the
+  journal high water read when a stream becomes current), and the
+  enforcement signals. Implement the Stream start, Supersede, Stream end, and
+  Confirm transitions. `GetDeliveryStatus` reports `Attachment{Current,
+  AttachID, Confirmed, AttachedAtSequence}`; zero is a valid sequence.
+  `Snapshot()` implements `AttachmentWaiter` for task 02, with `Attached`
+  meaning confirmed. `IsAttached` reads under the same mutex and reports a
+  current stream.
+- **Stream confirm and supersede in `agentctl/server/api/agent.go`:** accept
+  the `attach_id` query parameter on the agent stream; a stream without it is
+  confirmed at once. Add `POST /api/v1/agent/stream/confirm` (204 on match,
+  idempotent; 409 `ATTACH_NOT_CURRENT` otherwise). A new stream supersedes
+  the current one: `FailStreamRequests(old, ErrKandevCallOutcomeUnknown)`,
+  close code 4001 `superseded`, and wait for the old goroutines to exit
+  before the new handshake completes.
+- **Stream liveness in `handleAgentStreamWS`:** a ping every 15 s, a 45 s
+  read deadline extended on every frame, and a 10 s write deadline on every
+  write.
+- **Detach clock:** a confirmed stream that ends, or is superseded by an
+  unconfirmed one, starts a new episode and arms the timer; an unconfirmed
+  stream changes nothing; a confirmation stops the timer and closes
+  `attachedCh`; `expire(E)` is a no-op for a stale, attached, or
+  already-exhausted episode, otherwise closes `exhaustedCh` even when no turn
+  runs, and ends a current unconfirmed stream with close code 4002
+  `offline_budget`.
 - **Budget enforcement** from part 2 "Budget enforcement", outside the lock:
   - with no active turn, end and journal nothing;
   - call the adapter's `Cancel`, up to 3 attempts of 10 s, 2 s apart;
@@ -51,9 +69,12 @@ from the executor profile.
     request, then journal `agent_link.offline_budget_exhausted` once with
     `detached_since`, `exhausted_at`, `outcome`, and the last
     `cancel_error`;
-  - a failed stop retries every 60 s while no stream waits, and ends with
-    outcome `stop_failed` when a stream waits to attach;
-  - an attaching stream waits until enforcement is settled;
+  - a failed stop selects on a 60 s timer and `attachWaitCh` (checked
+    first): the timer repeats the stop, which always runs to its end;
+    `attachWaitCh` journals outcome `stop_failed` and ends;
+  - `enforcing`, `attachWaitCh`, and `enforcementDoneCh` under `attachMu`; a
+    stream start that finds `enforcing` closes `attachWaitCh` and waits on
+    `enforcementDoneCh` or its request context;
   - keep agentctl and the journal running.
 - **Profile override:**
   - `offline_budget_minutes` in `profileConfigAuthoritativeKeys`
@@ -66,9 +87,9 @@ from the executor profile.
     `config.InstanceOverrides`.
 - **Reaper gate:** the unowned reaper does not shut agentctl down while any
   instance is detached with an unexpired budget, or with an expired budget
-  whose enforcement is not complete, evaluated each tick from live instance
+  whose enforcement has not ended, evaluated each tick from live instance
   state. The unowned period counts from the later of the last renewal and the
-  latest enforcement completion. `ownershipperiod.Resolve` and the
+  latest enforcement end. `ownershipperiod.Resolve` and the
   reported `unowned_period_ms` do not change.
 - **Capability and close reason:** add `detached-continuity.v1` to
   `SurvivalCapabilities` (`agentctl/server/api/identity.go`). Close the
@@ -88,14 +109,24 @@ from the executor profile.
 ## Acceptance
 
 1. A detached instance with a running turn is cancelled exactly once, at the
-   budget. A reattach before the budget cancels nothing, and the clock
-   restarts at the next detach. An attach that races expiry either wins
-   (no cancel) or loses (one cancel), never both, under `-race`. Expiry with
+   budget. A confirmed reattach before the budget cancels nothing, and the
+   clock restarts at the next detach. An unconfirmed stream that attaches and
+   ends, any number of times, leaves the clock running, and one that is
+   current at expiry is closed with code 4002. A confirm that races expiry
+   either wins (no cancel) or loses (one cancel), never both, under `-race`.
+   A retried confirm returns 204; a confirm for another `attach_id` returns
+   409 and changes nothing. A new stream supersedes the old one, which fails
+   its bound calls as outcome unknown, and `AttachedAtSequence` belongs to
+   the new stream; an empty journal reports `Current` true with sequence 0.
+   A stream whose peer stops answering pings ends within 45 s. Expiry with
    no turn closes `exhaustedCh` and journals nothing. Each episode gets new
    channels. A cancel that fails 3 times escalates to a process-group stop
    and journals outcome `stopped`. A stop that fails keeps the reaper gate
    closed. A stream attaching during enforcement waits for it, and its
-   `AttachedAtSequence` is at or above the budget event's sequence.
+   `AttachedAtSequence` is at or above the budget event's sequence. A stream
+   that starts waiting during the 60 s stop-retry wait gets outcome
+   `stop_failed` without another stop; one that starts waiting during a stop
+   retry sees that stop's result first.
 2. The profile value reaches the instance config. Empty means 15. A
    non-integer, overflow, or out-of-range value is rejected at profile save
    and at launch with `ErrInvalidOfflineBudget`.
@@ -108,9 +139,9 @@ from the executor profile.
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/agentctl/server/process/... -run 'TestDetachClock|TestOfflineBudget|TestAttachRacesExpiry|TestPermissionParkedUntilBudgetCancel|TestAgentPgidRecord|TestBudgetEnforcementRetriesThenStops|TestBudgetStopFailedHoldsGate|TestAttachWaitsForEnforcement|TestAttachedAtSequence')
+(cd apps/backend && go test -race -count=1 ./internal/agentctl/server/process/... -run 'TestDetachClock|TestOfflineBudget|TestAttachRacesExpiry|TestPermissionParkedUntilBudgetCancel|TestAgentPgidRecord|TestBudgetEnforcementRetriesThenStops|TestBudgetStopFailedHoldsGate|TestAttachWaitsForEnforcement|TestAttachedAtSequence|TestUnconfirmedStreamKeepsBudget|TestStreamConfirm|TestStreamSupersede|TestStopRetryAttachWaitTiebreak')
 (cd apps/backend && go test -race -count=1 ./cmd/agentctl/... ./internal/orchestrator/executor/... -run 'TestReaperGateHoldsDuringOfflineBudget|TestOfflineBudgetProfileResolution|TestOfflineBudgetProfileValidation')
-(cd apps/backend && go test -race -count=1 ./internal/agentctl/server/api/... -run 'TestIdentityAdvertisesDetachedContinuity|TestStreamCloseReason')
+(cd apps/backend && go test -race -count=1 ./internal/agentctl/server/api/... -run 'TestIdentityAdvertisesDetachedContinuity|TestStreamCloseReason|TestAgentStreamLiveness|TestAgentStreamConfirmEndpoint|TestAgentStreamSupersedes')
 (cd apps/backend && go test -race -count=1 ./internal/agentctl/server/config/... ./internal/agent/runtime/agentctl/...)
 make -C apps/backend lint
 ```

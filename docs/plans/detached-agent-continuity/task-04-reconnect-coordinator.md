@@ -53,48 +53,72 @@ the conversation notices.
 - **Coordinator in `lifecycle`:**
   - `remoteRefreshGroup` single-flight;
   - a subscriber to `events.ExecutorReachabilityChanged`;
-  - a backoff of 5 s doubling to a 300 s cap, with ±20% jitter and unlimited
-    attempts, following part 3's "Backoff and timer rules": one step counter
-    per episode, advanced by every failed attempt whatever its trigger, reset
-    by a new episode, one pending timer, and "other error" at the cap;
+  - a backoff of 5 s doubling to a 300 s cap, with ±20% jitter applied
+    before the clamp so no delay exceeds 300 s, and unlimited attempts,
+    following part 3's "Backoff and timer rules": one step counter per
+    episode that never decreases, advanced by every failed attempt whatever
+    its trigger, reset by a new episode, one pending timer, and "other error"
+    at the cap for the rest of the episode;
   - a `session.reconnect` WS action, authorized like `RetrySessionDelivery`.
 - **Attempt steps** from part 3 "Attempt steps", each generation compare
   inside the execution-lock hold of the write it guards: redial; pending
   stop cleanup if the link state is `stopped_pending_cleanup`; guarded
   commit that sets generation `G+1`; `GetDeliveryStatus` and synchronous
   `ReplayRecoveredDelivery` to its high-water barrier; the new synchronous
-  `StreamManager.ConnectFromCursor` with a 90 s handshake bound; a second
-  `GetDeliveryStatus` for `AttachedAtSequence` and a bounded cursor wait;
-  the new `classifyReattachedSubmission` (the existing
-  `reconcileDisconnectedSubmission` and its call site stay unchanged);
-  notices; guarded clear that publishes `agentctl.ready` with
-  `reconnected_after_ms` and `budget_paused`. Never
-  `StreamManager.ReconnectAll`. Part 3's failure table applies.
+  `StreamManager.ConnectFromCursor(ctx, execution, attachID)` with a fresh
+  `attach_id` and a 90 s dial bound; a second `GetDeliveryStatus` whose
+  `Attachment` must be current with that `attach_id`, then a bounded cursor
+  wait to `AttachedAtSequence` (zero is valid); the 5 s clear deadline that
+  starts when that wait succeeds; the new `classifyReattachedSubmission`
+  (the existing `reconcileDisconnectedSubmission` and its call site stay
+  unchanged); step 7 in part 3's order: turn-ended and budget notices, the
+  stream confirm, the guarded clear, the `agentctl.ready` publish with
+  `reconnected_after_ms` and `budget_paused`, then the reconnected notice.
+  Never `StreamManager.ReconnectAll`. Part 3's failure table applies.
+- **Stream connect refactor in `streams.go`:** move the body of
+  `connectUpdatesStream` into `connectUpdatesStreamErr(dialCtx, execution,
+  ready, attachID) error`; keep `connectUpdatesStream(execution, ready)` as a
+  wrapper with no `attach_id`, so `connectUpdatesStreamAsync`, the overload
+  retry, and `ConnectAll` stay unchanged. `StreamUpdatesFrom` gains the dial
+  context and `attach_id`. The agentctl client gains `ConfirmAgentStream(ctx,
+  attachID)`.
+- **Typed replay error:** part 3 "Typed replay error": skip steps 5 and 6,
+  write the recorded turn-ended and budget notices up to the projected
+  cursor, set link state `cleared` under the guard, and hand the error to
+  `handleStreamDisconnectWithAttempt`. Other replay errors roll back.
 - **Rollback after commit:** remove the installed client, advance the
   generation, close the stream and client, and call the new
   `DropRedialedTransport` (tasks 05-07 implement it per executor; the
   Kubernetes body is here).
 - **Backend restart:** the startup `ClearStaleAgentLinks` sweep (SQLite and
-  PostgreSQL), counter seeding from the stored `agent_link`, and the typed
-  `ErrAgentLinkNotDisconnected` for `session.reconnect`.
-- **Pending stop cleanup:** on a refresh, run `agent.cancel` and stop the
-  instance with no stream and no replay; on target gone, nothing to stop;
-  then write `cleared`. On an error, keep `stopped_pending_cleanup` and
-  retry on the next trigger.
+  PostgreSQL) with 3 retries 1 s apart, counter seeding from the stored
+  `agent_link`, the typed `ErrAgentLinkNotDisconnected` for
+  `session.reconnect`, and the repair that writes `cleared` for a stored
+  `disconnected` or `stopped_pending_cleanup` link with no tracked
+  execution, on Reconnect or Stop.
+- **Pending stop cleanup:** on a refresh, call over HTTP only:
+  `CancelDeliverySubmission` for the execution's submission if any,
+  `Client.Stop`, then the executor's `StopInstance`, each treating "already
+  done" (terminal record, 404, already stopped, instance gone) as success;
+  never `Client.Cancel`, which needs a stream. On target gone, nothing to
+  stop. Then write `cleared`. On an error, keep `stopped_pending_cleanup` and
+  repeat all three calls on the next trigger.
 - **Orphan reap failure:** `ErrRedialOrphanUnreaped` keeps the session
   Disconnected with `orphan_reap_failed` and reports no outcome.
 - **Episode record:** inbox projection records terminal and budget events
   above `EpisodeStartSequence` while the link is not connected, once per
   sequence, kept across rollbacks.
 - **Orchestrator notices** through `CreateSessionMessageIdempotent`, with
-  the name-based message IDs from part 1 "Notices", all written in step 7
-  before the clear, for recorded events at or below `AttachedAtSequence`:
+  the name-based message IDs from part 1 "Notices", for recorded events at
+  or below `AttachedAtSequence`, in ascending journal sequence:
   - turn ended while disconnected, keyed by the terminal event's stream and
     sequence (the workflow effect still runs once through
     `processOnTurnCompleteViaEngineWithCause`);
   - paused by the offline budget, keyed by the budget event's stream and
-    sequence, only for outcome `cancelled` or `stopped`;
-  - reconnected after a duration, keyed by session and `EpisodeID`, last.
+    sequence, only for outcome `cancelled` or `stopped`, and only the
+    lowest sequence if more than one is recorded;
+  - reconnected after a duration, keyed by session and `EpisodeID`, written
+    in step 7.5 after the guard held, retried 3 times, then counted.
 - **Queue after a clear:** with `budget_paused` false, run the existing queue
   dispatch once; with it true, hold the queue until the user sends a message
   or uses `message.queue.send_now`.
@@ -109,7 +133,7 @@ the conversation notices.
 ## Acceptance
 
 1. A reachability-returned event starts an attempt within 10 s. Backoff
-   follows the schedule. User Reconnect runs immediately and cancels the
+   follows the schedule, and no delay is above 300 s for any jitter draw. User Reconnect runs immediately and cancels the
    pending timer. A failed immediate attempt advances the step counter and
    leaves exactly one timer. A new episode restarts at 5 s.
 2. A successful attempt never calls `initializeAgentSession` or any launch
@@ -126,8 +150,10 @@ the conversation notices.
    notice once. A Kubernetes container restart on the redial path returns
    `ErrRedialTargetGone` and creates no ACP session.
 6. Stop racing each guard (commit, clear) never leaves a stopped session
-   connected. A failure after commit removes the client and calls
-   `DropRedialedTransport`, and the next attempt redials cleanly.
+   connected, and never writes a reconnected notice. A failure after commit
+   removes the client and calls `DropRedialedTransport`, and the next attempt
+   redials cleanly. An attempt that fails after step 5 never confirms its
+   stream, so agentctl's budget keeps running.
 7. Submission classification maps every journal state as part 3's table
    says, never resends, and never double-resolves a waiter that the live
    stream resolved.
@@ -136,13 +162,22 @@ the conversation notices.
    without one dispatches it once.
 9. After a restart, the sweep clears `disconnected` and
    `stopped_pending_cleanup` links, the next link write is accepted, and
-   `session.reconnect` returns `ErrAgentLinkNotDisconnected`.
+   `session.reconnect` returns `ErrAgentLinkNotDisconnected`. With the sweep
+   failing, Reconnect on a stale link writes `cleared` and the banner goes.
+10. With a fake clock, a successful attempt publishes the clear within 5 s
+    after the step 6 cursor wait succeeds; a clear deadline that passes
+    before step 7.3 rolls back. An idle execution with an empty journal
+    reconnects (`AttachedAtSequence` 0).
+11. A typed replay error in step 4 connects no stream, writes the recorded
+    notices but no reconnected notice, clears the link, and assigns durable
+    delivery's outcome. A pending stop cleanup whose calls succeeded but whose
+    responses were lost converges on the next trigger.
 
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestReconnect|TestUserReconnect|TestKubernetesRedialAdapter|TestRedialIdentity|TestStaleAttemptIgnored|TestPendingStopCleanup|TestBackoffTimerRules|TestRollbackAfterCommit|TestStopRacesGuards|TestClassifyReattachedSubmission|TestEpisodeSequenceBounds|TestLinkCounterSeeding')
-(cd apps/backend && go test -race -count=1 ./internal/orchestrator/... -run 'TestReconnectNotices|TestReconnectNoticesIdempotent|TestTurnEndedWhileDisconnected|TestBudgetPauseNoAutoDispatch|TestQueueDispatchAfterClear|TestClearStaleAgentLinksOnStartup|TestReconnectNotDisconnected')
+(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestReconnect|TestUserReconnect|TestKubernetesRedialAdapter|TestRedialIdentity|TestStaleAttemptIgnored|TestPendingStopCleanup|TestBackoffTimerRules|TestRollbackAfterCommit|TestStopRacesGuards|TestClassifyReattachedSubmission|TestEpisodeSequenceBounds|TestLinkCounterSeeding|TestBackoffNeverAboveCap|TestClearDeadline|TestEmptyJournalReconnects|TestTypedReplayError|TestConfirmBeforeGuard|TestConnectFromCursor|TestPendingStopCleanupIdempotent')
+(cd apps/backend && go test -race -count=1 ./internal/orchestrator/... -run 'TestReconnectNotices|TestReconnectNoticesIdempotent|TestTurnEndedWhileDisconnected|TestBudgetPauseNoAutoDispatch|TestQueueDispatchAfterClear|TestClearStaleAgentLinksOnStartup|TestReconnectNotDisconnected|TestStaleLinkRepairOnReconnect|TestReconnectedNoticeAfterGuard|TestNoticeSequenceOrder')
 (cd apps/backend && go test -race -count=1 ./internal/task/repository/sqlite/... -run 'TestClearStaleAgentLinks')
 (cd apps/backend && go test -race -count=1 ./internal/executors/reachability/...)
 make -C apps/backend lint

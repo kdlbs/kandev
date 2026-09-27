@@ -90,31 +90,79 @@ every call fails.
 ### Attachment state
 
 `attachment.go` replaces the atomic counter with state guarded by one mutex,
-`attachMu`:
+`attachMu`. Three terms:
 
-- `attachedCount`, still a count, so an overlapping reconnect cannot report
-  detached while a stream is live;
-- `episode`, incremented when the count drops to zero;
-- `attachedCh`, closed when the count rises from zero;
+- A stream is **current** when it is the newest agent stream agentctl has
+  accepted for the instance and it has not ended. At most one stream is
+  current.
+- A current stream is **confirmed** when the backend has confirmed it. A
+  stream opened without the `attach_id` query parameter is confirmed as it
+  becomes current, as every stream is today. The launch, adoption, and
+  overload reconnect paths open streams this way. Only the reconnect
+  coordinator opens a stream with `attach_id` (see [part
+  3](detached-agent-continuity-03.md#attempt-steps), step 5). That stream is
+  confirmed only by `POST /api/v1/agent/stream/confirm` with the same
+  `attach_id` (step 7).
+- agentctl is **attached** while the current stream is confirmed, and
+  **detached** at any other time, including while an unconfirmed stream is
+  current. The offline budget, the waiting Kandev calls, and the reaper gate
+  use these two words only in this sense.
+
+The state:
+
+- `current`: the current stream's `streamID`, its `attach_id`, its confirmed
+  flag, and a function that closes it; nil when no stream is current;
+- `episode`, incremented when a detached period starts;
+- `attachedCh`, closed when the episode ends by a confirmation;
 - `exhaustedCh`, closed when the episode's budget expires;
 - `detachedSince` and the budget timer (see [Offline budget](#offline-budget));
-- `attachedAtSequence`, the journal high water read when the count last rose
-  from zero.
+- `attachedAtSequence`, the journal high water read when the current stream
+  became current;
+- the enforcement signals (see [Budget enforcement](#budget-enforcement)).
 
-`GetDeliveryStatus` reports `attachedAtSequence` as `AttachedAtSequence`. It
-is zero while detached. The backend uses it as the end of an episode (see
-[part 3](detached-agent-continuity-03.md#attempt-steps)). The attach reads
-the high water under `attachMu` as it raises the count, so every event at or
-below it was journaled before the stream attached.
+Transitions, each in one `attachMu` hold:
 
-When the count drops to zero, a new `attachedCh` and `exhaustedCh` pair is
+- **Stream start.** If [enforcement](#budget-enforcement) is running, the new
+  stream first waits for it to end. Then it becomes current and reads the
+  journal high water into `attachedAtSequence`, so every event at or below it
+  was journaled before the stream became current. A stream opened without
+  `attach_id` is confirmed at once (see Confirm).
+- **Supersede.** A stream start that finds another stream current supersedes
+  it. If the old stream was confirmed and the new one is not, a detached
+  period starts (see [Offline budget](#offline-budget)). Outside the lock,
+  agentctl then calls `FailStreamRequests(old, ErrKandevCallOutcomeUnknown)`,
+  closes the old socket with close code 4001 and reason `superseded`, and
+  waits for the old stream's reader and writer goroutines to exit before the
+  new stream's handshake completes. Closing the socket unblocks their reads
+  and writes. Two streams therefore never read `updatesCh` or `requestCh` at
+  the same time, and `attachedAtSequence` always belongs to the current
+  stream.
+- **Stream end.** A stream that ends changes the state only if it is
+  current. Then no stream is current, and if it was confirmed, a detached
+  period starts.
+- **Confirm.** `POST /api/v1/agent/stream/confirm` with an `attach_id`:
+  - the current stream has that `attach_id` and is not confirmed: mark it
+    confirmed, which ends the episode (see Attach in
+    [Offline budget](#offline-budget)); return 204;
+  - the current stream has that `attach_id` and is already confirmed: 204,
+    with no change, so a retried confirm is safe;
+  - no stream is current, or it has another `attach_id`: 409 with code
+    `ATTACH_NOT_CURRENT`, with no change.
+
+`GetDeliveryStatus` reports the state as `Attachment{Current bool, AttachID
+string, Confirmed bool, AttachedAtSequence uint64}`. `AttachedAtSequence` is
+meaningful only when `Current` is true. Zero is then a real value, the high
+water of an empty journal, and never means detached. The backend uses it as
+the end of an episode (see [part 3](detached-agent-continuity-03.md#attempt-steps)).
+
+When a detached period starts, a new `attachedCh` and `exhaustedCh` pair is
 created for the new episode. Channels from an older episode are never reused.
 
 ```go
 type AttachmentSnapshot struct {
-    Attached        bool
+    Attached        bool            // the current stream is confirmed
     Episode         uint64
-    AttachedCh      <-chan struct{} // closed when this episode ends by attach
+    AttachedCh      <-chan struct{} // closed when this episode ends by a confirmation
     BudgetExhausted <-chan struct{} // closed when this episode's budget expires
 }
 
@@ -124,8 +172,27 @@ type AttachmentWaiter interface {
 }
 ```
 
-`IsAttached()` stays for its existing callers and reads under the same
-mutex.
+`IsAttached()` stays for its existing callers, reads under the same mutex, and
+reports whether a stream is current, confirmed or not, as the count did.
+
+### Stream liveness
+
+Today agentctl sees a detach only when a read on the agent stream fails.
+After a silent drop, such as a VPN reset or a sleeping laptop, the socket to
+agentctl can stay open for hours. `handleAgentStreamWS` therefore adds
+liveness on the agentctl side:
+
+- The writer goroutine sends a WebSocket ping every 15 s.
+- The reader sets a 45 s read deadline and extends it on every frame it
+  reads, pongs included. The backend's gorilla/websocket client answers a
+  ping with its default ping handler while its read loop runs.
+- Every write, pings included, has a 10 s write deadline.
+- A deadline expiry ends the stream like any other read or write error: the
+  existing `FailStreamRequests` call runs, and the Stream end transition
+  applies.
+
+agentctl therefore sees a silent drop at most 45 s after the last frame, and
+the offline budget starts then.
 
 ### Sent and not sent
 
@@ -138,8 +205,9 @@ on failure, and calls `BindRequestToStream` after a successful write. The new
 order is:
 
 1. The writer receives the call from `requestCh`. The writer reads
-   `requestCh` only while its stream is live, and stops reading before the
-   stream's pending set is failed.
+   `requestCh` only while its stream is current and confirmed, and stops
+   reading before the stream's pending set is failed. An unconfirmed stream
+   therefore never carries a Kandev call.
 2. It calls `BindRequestToStream(id, streamID)`. `ChannelBackendClient`
    (`mcp/server/backend_client.go`) records each stream that
    `FailStreamRequests` has failed, under the same mutex as the pending set.
@@ -244,29 +312,45 @@ The detach clock in `agentctl/server/process` uses the
 [attachment state](#attachment-state). All steps below run under `attachMu`
 unless marked otherwise.
 
-- **Detach.** When the count drops to zero: increment `episode`, record
+- **Detach.** When a detached period starts (a confirmed stream ends, or an
+  unconfirmed stream supersedes it): increment `episode`, record
   `detachedSince` on agentctl's clock, create the new channel pair, and arm
   `time.AfterFunc(budget, expire(episode))`.
-- **Attach.** If the ending episode's [enforcement](#budget-enforcement) has
-  started and is not settled, the new stream waits for it, outside the lock,
-  before its handshake completes. Then, when the count rises from zero: stop
-  the timer, close
-  `attachedCh`, and clear `detachedSince`
+- **Unconfirmed stream.** A stream that becomes current without confirmation
+  leaves the episode as it is. The timer keeps running, `attachedCh` stays
+  open, and waiting calls keep waiting. Its end leaves the episode as it is
+  too. A reconnect attempt that fails after its step 5 therefore never
+  restarts the budget.
+- **Attach.** When the current stream is confirmed: stop the timer, close
+  `attachedCh`, and clear `detachedSince`. Only this restarts the budget
   (`AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.4`). If the timer had already
   fired, its callback finds the episode over and does nothing.
-- **Expire.** `expire(E)` returns without effect if `episode != E`, the count
-  is above zero, or `exhaustedCh` is already closed. Otherwise it closes
-  `exhaustedCh`, which releases waiting calls whether or not a turn runs.
-  Cancellation therefore happens at most once per episode.
+- **Expire.** `expire(E)` returns without effect if `episode != E`, agentctl
+  is attached, or `exhaustedCh` is already closed. Otherwise it closes
+  `exhaustedCh`, which releases waiting calls whether or not a turn runs. If
+  an unconfirmed stream is current, it ends that stream with close code 4002
+  and reason `offline_budget`; the Stream end transition applies, and the
+  backend attempt that owned it rolls back. Then it starts enforcement.
+  Cancellation therefore happens at most once per episode, and one episode
+  ends only at a confirmation, so it records at most one budget event.
 - **Enforce,** outside the lock, in one goroutine per episode. See
   [Budget enforcement](#budget-enforcement).
 
 ### Budget enforcement
 
-Enforcement starts when `expire(E)` closes `exhaustedCh`. A stream that
-attaches meanwhile waits until enforcement is settled (see
-[Offline budget](#offline-budget)), so the budget event is always journaled
-before the attach.
+Enforcement starts when `expire(E)` closes `exhaustedCh`. Its signals live in
+the attachment state, under `attachMu`:
+
+- `enforcing`, true from the start of enforcement until it ends;
+- `attachWaitCh`, created when enforcement starts and closed, once, when a
+  stream start finds `enforcing` true;
+- `enforcementDoneCh`, created when enforcement starts and closed when it
+  ends.
+
+A stream start that finds `enforcing` true closes `attachWaitCh`, releases
+the lock, and waits on `enforcementDoneCh` or its request context. The
+backend's 90 s handshake bound cancels that context. So the budget event is
+always journaled before the new stream becomes current.
 
 1. **No turn.** If the adapter reports no active turn, enforcement ends.
    Nothing is journaled.
@@ -275,25 +359,33 @@ before the attach.
    2 s apart. Before each retry, check the turn again. A turn that has ended
    ends the cancel with outcome `cancelled`.
 3. **Stop.** If all 3 attempts fail, stop the agent process group, as
-   `Manager.Stop` does (`killProcessGroup`), and remove `agent.pgid`. agentctl
-   and its journal stay up. The outcome is `stopped`.
+   `Manager.Stop` does (`killProcessGroup`: `SIGTERM`, up to 10 s, `SIGKILL`,
+   then a check), and remove `agent.pgid`. A stop that has started always
+   runs to its end, in about 12 s at most. agentctl and its journal stay up.
+   The outcome is `stopped`.
 4. **Journal.** After `cancelled` or `stopped`, cancel any permission request
    still pending (see [Permission requests](#permission-requests)). Then
    journal `agent_link.offline_budget_exhausted` with `detached_since`,
-   `exhausted_at`, `outcome`, and the last `cancel_error` if any. It is
-   journaled once per episode.
-5. **Stop failed.** If the stop fails, log it, wait 60 s, and repeat step 3
-   while no stream waits to attach, until it succeeds or the agent process is
-   gone. A process that is gone gives outcome `stopped`. When a stream waits
-   to attach, enforcement ends instead: it journals the event with outcome
-   `stop_failed` and cancels nothing more. The turn keeps running, now
-   visible to the user, who can stop it.
+   `exhausted_at`, `outcome`, and the last `cancel_error` if any, and end.
+5. **Stop failed.** If the stop fails, log it, then select on a 60 s timer
+   and `attachWaitCh`, with `attachWaitCh` checked first when both are
+   ready:
+   - `attachWaitCh` closed: journal the event with outcome `stop_failed`,
+     cancel nothing more, and end. The turn keeps running, now visible to the
+     user, who can stop it.
+   - Timer fired: repeat step 3. A stop that succeeds, or finds the agent
+     process gone, goes to step 4 with outcome `stopped`. A stop that fails
+     comes back to step 5, which then sees any stream that started waiting
+     during the stop.
 
-Enforcement is **complete** when step 4 has journaled, or when step 1 found
-no turn. It is **settled** when it is complete, or when a stop has failed
-once. The worst case before settled is 3 cancels of 10 s, 2 waits of 2 s, and
-one stop of about 12 s, so under 50 s. The backend bounds the step 5
-handshake at 90 s.
+Enforcement **ends** when step 1 finds no turn, or when step 4 or step 5
+journals. At its end, in one `attachMu` hold, it sets `enforcing` false and
+closes `enforcementDoneCh`. It journals at most one event per episode.
+
+A stream that starts waiting waits at most for the rest of step 2 and one
+stop: 3 cancels of 10 s, 2 waits of 2 s, and one stop of about 12 s, so under
+50 s. A stream that starts waiting during the 60 s wait of step 5 waits for
+no stop at all. The backend bounds the step 5 handshake at 90 s.
 
 No turn can start while detached. Prompts reach agentctl only over the
 backend stream, and none is attached. A turn that ends on its own while the
@@ -329,7 +421,9 @@ No global setting and no feature toggle exist.
 agentctl's clock is authoritative. Its episode starts when agentctl sees the
 stream end, which can differ from when the backend sees it. The backend's
 `BudgetDeadline` (`Since` plus budget) is therefore an estimate, and the
-banner labels it as approximate. After a reconnect, the budget notice uses the
+banner labels it as approximate. After a silent drop, agentctl's episode can
+start up to 45 s after the last frame (see [Stream liveness](#stream-liveness)),
+so the pause can come up to 45 s after the displayed time. After a reconnect, the budget notice uses the
 journaled `exhausted_at`.
 
 ### Unowned reaper
@@ -343,14 +437,14 @@ agent survival on. It can shut agentctl down after `agentctl.unownedPeriod`
 condition, evaluated on every tick from live instance state: it does not
 shut agentctl down while any instance is detached with its budget not yet
 expired, or with its budget expired and its
-[enforcement](#budget-enforcement) not complete
+[enforcement](#budget-enforcement) not ended
 (`AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.5`). A stop that keeps failing
 therefore keeps agentctl up, because its exit would leave a running agent
 with nothing tracking it. The gate reads each
 instance's episode state under its `attachMu`, so instances created or
 removed after startup are covered, and a removed instance no longer holds the
 gate. The unowned period also counts from the later of the last renewal and
-the latest enforcement completion, so the journal stays readable for at least one
+the latest enforcement end, so the journal stays readable for at least one
 full unowned period after the cancel. After that, the existing reaper
 contract applies. A later reconnect that finds agentctl gone takes the
 reconciliation path (`AC-PLATFORM-DETACHED-AGENT-CONTINUITY-001.4`).

@@ -188,7 +188,8 @@ cannot silently hold a session open.
 
 - `LinkGeneration` increments on entering Disconnected, on Stop while
   Disconnected, when an attempt commits a new client, when an attempt rolls
-  back after that commit, and on cleanup. An attempt in flight when the user
+  back after that commit, when a typed replay error ends the episode, and on
+  cleanup. An attempt in flight when the user
   stops is therefore stale, and cannot connect a stopped session. The
   episode's `EpisodeID` does not change within an episode.
 - `LinkRevision` increments on every link state change, including attempt
@@ -390,7 +391,9 @@ writes the same ID, so the notice appears at most once.
 An episode is bounded by journal sequence, not by time. It covers the
 sequences above its `EpisodeStartSequence` and at or below the
 `AttachedAtSequence` that [step 6](detached-agent-continuity-03.md#attempt-steps)
-reads, which is the journal high water when the new stream attached. While
+reads, which is the journal high water when the attempt's stream became
+current. After a [typed replay error](detached-agent-continuity-03.md#typed-replay-error),
+the projected cursor is the upper bound instead. While
 the link state is not connected, inbox projection records on the episode each
 terminal turn event and each `agent_link.offline_budget_exhausted` event
 above `EpisodeStartSequence`, with its sequence and time, once per sequence.
@@ -399,18 +402,28 @@ recorded. A rollback keeps the record.
 
 | Notice | Key | Written when |
 | --- | --- | --- |
-| Turn ended while disconnected | `agent-link-turn-ended:<stream_id>:<sequence>` of the terminal event | Step 7, for each recorded terminal event at or below `AttachedAtSequence`, with the event's `created_at` |
-| Paused by the offline budget | `agent-link-budget:<stream_id>:<sequence>` of the budget event | Step 7, for a recorded budget event at or below `AttachedAtSequence` whose `outcome` is `cancelled` or `stopped`, with its journaled `exhausted_at` |
-| Reconnected after a duration | `agent-link-reconnected:<session_id>:<episode_id>` | Step 7, after the other notices and before the link state clears |
+| Turn ended while disconnected | `agent-link-turn-ended:<stream_id>:<sequence>` of the terminal event | Step 7.1, for each recorded terminal event at or below `AttachedAtSequence`, with the event's `created_at` |
+| Paused by the offline budget | `agent-link-budget:<stream_id>:<sequence>` of the budget event | Step 7.1, for a recorded budget event at or below `AttachedAtSequence` whose `outcome` is `cancelled` or `stopped`, with its journaled `exhausted_at` |
+| Reconnected after a duration | `agent-link-reconnected:<session_id>:<episode_id>` | Step 7.5, after the guard in step 7.3 held and the link state cleared |
 
 Ordering rules:
 
-- Step 7 writes every notice before the clear. A failure between a write and
-  the clear leaves the session Disconnected. The next attempt in the same
-  episode writes the same IDs, so nothing duplicates.
-- A recorded event above `AttachedAtSequence` happened after the attach. It
-  gets no notice. A budget event can never be above it, because an attach
-  waits until budget enforcement is settled (see [part
+- Step 7.1 writes the turn-ended and budget notices in ascending journal
+  sequence of their events. Sequence is the tiebreak for equal times. The
+  reconnected notice comes after all of them.
+- A failure between step 7.1 and the clear leaves the session Disconnected.
+  The next attempt in the same episode writes the same IDs, so nothing
+  duplicates. If Stop wins the guard, the notices already written stay,
+  because each records a journaled fact, and no reconnected notice is
+  written.
+- One agentctl episode records at most one budget event (see [part
+  2](detached-agent-continuity-02.md#offline-budget)). If an episode still
+  records more than one, only the lowest sequence gets a notice, and a
+  warning is logged.
+- A recorded event above `AttachedAtSequence` happened after the stream
+  became current. It gets no notice. A budget event can never be above it,
+  because a stream start
+  waits until budget enforcement has ended (see [part
   2](detached-agent-continuity-02.md#budget-enforcement)).
 - A budget event with outcome `stop_failed` gets no notice and sets no
   budget flag, because its turn still runs. It is logged and counted.
@@ -422,7 +435,7 @@ Ordering rules:
 ### Queue after a clear
 
 The episode's budget flag is true when it recorded a budget event at or
-below `AttachedAtSequence` with outcome `cancelled` or `stopped`. Step 7 reads it in the same lock hold that sets
+below `AttachedAtSequence` with outcome `cancelled` or `stopped`. Step 7.3 reads it in the same lock hold that sets
 link state `connected`, and publishes it as `BudgetPaused`. All detached
 events are projected by then, so the flag cannot change after the clear.
 
@@ -489,7 +502,7 @@ On the `AgentctlReady` event of a clear, the orchestrator:
 | Host reachable, a different agentctl answers | Identity check fails; reap, then `ErrRedialTargetGone` |
 | Kubernetes container restarted | `ErrRedialTargetGone` with no reap; no new ACP session |
 | Host-key mismatch or authentication failure | Stay Disconnected, show `last_error`, back off at the cap; never re-pin a host key automatically |
-| Redial succeeds, stream replay fails (cursor invalid, journal lost) | Durable delivery's typed replay errors apply; the session takes its uncertain state; the link state becomes connected |
+| Redial succeeds, stream replay fails (cursor invalid, journal lost) | Link state `cleared`; durable delivery's typed error path assigns the outcome; see [part 3](detached-agent-continuity-03.md#typed-replay-error) |
 | Redial succeeds, transport drops during replay | Close the new client; stay Disconnected; next attempt on backoff |
 | Stale disconnect callback or attempt result | Dropped by the link generation check |
 | agentctl predates the capability | Current failure path |
