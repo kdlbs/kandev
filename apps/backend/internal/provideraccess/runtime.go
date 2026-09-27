@@ -174,3 +174,9 @@ func (r *Runtime) FenceWorkspace(ctx context.Context, workspaceID string) (Works
 	}
 	return result, err
 }
+
+// CleanupWorkspaceProviderAccess is the task workspace-delete lifecycle seam.
+func (r *Runtime) CleanupWorkspaceProviderAccess(ctx context.Context, workspaceID string) error {
+	_, err := r.FenceWorkspace(ctx, workspaceID)
+	return err
+}

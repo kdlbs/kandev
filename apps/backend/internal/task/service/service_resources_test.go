@@ -1010,6 +1010,42 @@ func TestService_DeleteWorkspaceDeletesWorkspaceOwnedTasksAndWorkflows(t *testin
 	}
 }
 
+type fakeProviderAccessCleanup struct {
+	workspaceID string
+	err         error
+}
+
+func (f *fakeProviderAccessCleanup) CleanupWorkspaceProviderAccess(
+	_ context.Context, workspaceID string,
+) error {
+	f.workspaceID = workspaceID
+	return f.err
+}
+
+func TestService_DeleteWorkspaceFencesProviderAccessBeforeCascade(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"}); err != nil {
+		t.Fatal(err)
+	}
+	cleanupErr := errors.New("provider revocation unconfirmed")
+	cleanup := &fakeProviderAccessCleanup{err: cleanupErr}
+	svc.SetProviderAccessCleanup(cleanup)
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); !errors.Is(err, cleanupErr) {
+		t.Fatalf("workspace deletion error = %v", err)
+	}
+	if cleanup.workspaceID != "ws-delete" {
+		t.Fatalf("fenced workspace = %q", cleanup.workspaceID)
+	}
+	if _, err := repo.GetWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("workspace removed after provider cleanup failure: %v", err)
+	}
+	cleanup.err = nil
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("workspace retry after provider cleanup: %v", err)
+	}
+}
+
 func TestService_DeleteWorkspaceRemovesStagedAndClaimedAttachmentBytes(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

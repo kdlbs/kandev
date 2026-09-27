@@ -39,6 +39,12 @@ type CanvasCleanup interface {
 	CleanupWorkspaceCanvases(ctx context.Context, workspaceID string) error
 }
 
+// ProviderAccessCleanup fences new provider credentials and attempts
+// exact-token revocation before a workspace's task rows are deleted.
+type ProviderAccessCleanup interface {
+	CleanupWorkspaceProviderAccess(ctx context.Context, workspaceID string) error
+}
+
 // WorkspaceSecretDeleter removes secrets owned by a workspace. It is optional
 // for isolated task-service users.
 type WorkspaceSecretDeleter interface {
@@ -510,6 +516,7 @@ type Service struct {
 	filesystemWarnings              *fsdiagnostics.WarningLimiter
 	worktreeCleanup                 WorktreeCleanup
 	canvasCleanup                   CanvasCleanup
+	providerAccessCleanup           ProviderAccessCleanup
 	executionStopper                TaskExecutionStopper
 	clarificationCanceller          TerminalClarificationCanceller
 	parkedProjectionCanceller       ParkedProjectionCanceller
@@ -818,6 +825,10 @@ func (s *Service) SetWorktreeCleanup(cleanup WorktreeCleanup) {
 // SetCanvasCleanup wires lifecycle cleanup for plugin-backed canvases.
 func (s *Service) SetCanvasCleanup(cleanup CanvasCleanup) {
 	s.canvasCleanup = cleanup
+}
+
+func (s *Service) SetProviderAccessCleanup(cleanup ProviderAccessCleanup) {
+	s.providerAccessCleanup = cleanup
 }
 
 func (s *Service) setCleanupDoneForTestHook(ch chan struct{}) {
