@@ -14,7 +14,8 @@ requirements:
 
 Part 2 of the design begun in [part 1](detached-agent-continuity-01.md), which
 states the purpose, the contracts this design uses, and the backend side:
-link state, redial, reconnect, notices, persistence, and the UI. Part 2 covers
+link state, redial, notices, persistence, and the UI.
+[Part 3](detached-agent-continuity-03.md) covers reconnect. Part 2 covers
 what runs on the executor host while no backend is attached:
 
 - the record and reap of an agent that outlived its agentctl;
@@ -96,7 +97,15 @@ every call fails.
 - `episode`, incremented when the count drops to zero;
 - `attachedCh`, closed when the count rises from zero;
 - `exhaustedCh`, closed when the episode's budget expires;
-- `detachedSince` and the budget timer (see [Offline budget](#offline-budget)).
+- `detachedSince` and the budget timer (see [Offline budget](#offline-budget));
+- `attachedAtSequence`, the journal high water read when the count last rose
+  from zero.
+
+`GetDeliveryStatus` reports `attachedAtSequence` as `AttachedAtSequence`. It
+is zero while detached. The backend uses it as the end of an episode (see
+[part 3](detached-agent-continuity-03.md#attempt-steps)). The attach reads
+the high water under `attachMu` as it raises the count, so every event at or
+below it was journaled before the stream attached.
 
 When the count drops to zero, a new `attachedCh` and `exhaustedCh` pair is
 created for the new episode. Channels from an older episode are never reused.
@@ -120,23 +129,39 @@ mutex.
 
 ### Sent and not sent
 
-A call is **sent** when a stream writer goroutine has received it from
-`requestCh` and registered it in that stream's pending set. Before that point
-the call is **not sent**, and the backend cannot have seen it.
+A call is **sent** when the stream writer has bound it to its stream. Before
+that point the call is **not sent**, and the backend cannot have seen it.
 
-- The writer reads `requestCh` only while its stream is live. When its
-  stream ends, it stops reading `requestCh` before the stream's pending set
-  is failed.
-- A not-sent call is never failed by a stream end. It waits.
-- A sent call that has no answer when its stream ends fails with
-  `ErrKandevCallOutcomeUnknown`. This includes a call the writer took but
-  could not finish writing, because agentctl cannot know whether the backend
-  read it.
+`writeAgentStreamMCPRequest` (`agentctl/server/api/agent.go`) changes its
+order. Today it writes the request, calls `FailRequest` with the write error
+on failure, and calls `BindRequestToStream` after a successful write. The new
+order is:
 
-`FailStreamRequests(streamID, err)` in `agentctl/server/api/agent.go` runs
-after the stream goroutines exit, on every stream end. It runs the same way
-whether the backend will treat the loss as Disconnected or as terminal,
-because agentctl cannot tell the two apart. Its call site changes only the
+1. The writer receives the call from `requestCh`. The writer reads
+   `requestCh` only while its stream is live, and stops reading before the
+   stream's pending set is failed.
+2. It calls `BindRequestToStream(id, streamID)`. `ChannelBackendClient`
+   (`mcp/server/backend_client.go`) records each stream that
+   `FailStreamRequests` has failed, under the same mutex as the pending set.
+   Binding to a failed stream returns an error and binds nothing.
+3. **Bind failed:** the call was never written. The writer completes it with
+   the internal sentinel `errRequestNotSent`. `RequestPayload` treats that
+   sentinel as not sent and returns to step 1 of its [send loop](#send-loop).
+   The agent never sees the sentinel.
+4. **Bound:** the writer writes the request. A write error calls
+   `FailRequest(id, ErrKandevCallOutcomeUnknown)`, because a partial write may
+   have reached the backend.
+
+A bound call that has no answer when its stream ends fails with
+`ErrKandevCallOutcomeUnknown`. `FailRequest` on a call that is already
+completed or failed is a no-op, so a write error and a stream end cannot
+complete a call twice.
+
+`FailStreamRequests(streamID, err)` is defined in
+`mcp/server/backend_client.go`. Its call site in `agentctl/server/api/agent.go`
+runs after the stream goroutines exit, on every stream end. It runs the same
+way whether the backend will treat the loss as Disconnected or as terminal,
+because agentctl cannot tell the two apart. The call site changes only the
 error it passes, from `errors.New("agent stream disconnected")` to
 `ErrKandevCallOutcomeUnknown`. The backend may already have applied such a
 call, and resending a non-idempotent call could apply it twice.
@@ -147,7 +172,8 @@ call, and resending a non-idempotent call could apply it twice.
 
 1. Take a `Snapshot`.
 2. **Attached:** select on the `requestCh` send, a 5 s timer, and `ctx`.
-   - Sent: wait for the answer as today.
+   - Taken by the writer: wait for the answer as today. An
+     `errRequestNotSent` answer goes to step 1.
    - Timer fired: take a new snapshot. If still attached, return the
      existing send-timeout error, because a stuck writer is a local fault.
      If now detached, go to step 1.
@@ -197,9 +223,20 @@ The waiting client therefore holds a call until the budget ends, and every
 
 Permission requests are not MCP calls. `sendPermissionNotification`
 (`agentctl/server/process/manager.go`) already parks a request while
-detached, and journal replay delivers it on reattach. This design keeps that
-path. The only change is that budget expiry cancels the turn, which cancels
-any parked request with it (`AC-PLATFORM-DETACHED-AGENT-CONTINUITY-003.5`).
+detached, and journal replay delivers it on reattach. The request stays
+pending while detached, and nothing answers it automatically.
+
+The one exception is the offline budget
+(`AC-PLATFORM-DETACHED-AGENT-CONTINUITY-003.5`). Budget enforcement cancels
+the turn, and the turn's context cancellation completes each pending request
+through the existing path: `consumePermission` with `Cancelled: true`, then
+`sendPermissionCancelledNotification`, which journals a
+`permission_cancelled` event. After enforcement, agentctl cancels any
+request of the instance that is still pending the same way, so none is left
+waiting. A cancelled request is neither approved nor denied. On reattach,
+replay delivers the `permission_cancelled` event, the backend marks the
+permission message cancelled as it does today, and the budget notice that
+follows it records the pause.
 
 ## Offline budget
 
@@ -210,7 +247,10 @@ unless marked otherwise.
 - **Detach.** When the count drops to zero: increment `episode`, record
   `detachedSince` on agentctl's clock, create the new channel pair, and arm
   `time.AfterFunc(budget, expire(episode))`.
-- **Attach.** When the count rises from zero: stop the timer, close
+- **Attach.** If the ending episode's [enforcement](#budget-enforcement) has
+  started and is not settled, the new stream waits for it, outside the lock,
+  before its handshake completes. Then, when the count rises from zero: stop
+  the timer, close
   `attachedCh`, and clear `detachedSince`
   (`AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.4`). If the timer had already
   fired, its callback finds the episode over and does nothing.
@@ -218,11 +258,42 @@ unless marked otherwise.
   is above zero, or `exhaustedCh` is already closed. Otherwise it closes
   `exhaustedCh`, which releases waiting calls whether or not a turn runs.
   Cancellation therefore happens at most once per episode.
-- **Cancel,** outside the lock: if the adapter reports an active turn, call
-  its `Cancel` (the same `(*Adapter).Cancel` that `handleWSCancel` uses).
-  Then journal `agent_link.offline_budget_exhausted` with `detached_since`,
-  `exhausted_at`, and `cancel_error` when the cancel failed. With no active
-  turn, there is nothing to cancel and nothing is journaled.
+- **Enforce,** outside the lock, in one goroutine per episode. See
+  [Budget enforcement](#budget-enforcement).
+
+### Budget enforcement
+
+Enforcement starts when `expire(E)` closes `exhaustedCh`. A stream that
+attaches meanwhile waits until enforcement is settled (see
+[Offline budget](#offline-budget)), so the budget event is always journaled
+before the attach.
+
+1. **No turn.** If the adapter reports no active turn, enforcement ends.
+   Nothing is journaled.
+2. **Cancel.** Call the adapter's `Cancel` (the same `(*Adapter).Cancel` that
+   `handleWSCancel` uses), bounded by 10 s. Retry up to 3 attempts in total,
+   2 s apart. Before each retry, check the turn again. A turn that has ended
+   ends the cancel with outcome `cancelled`.
+3. **Stop.** If all 3 attempts fail, stop the agent process group, as
+   `Manager.Stop` does (`killProcessGroup`), and remove `agent.pgid`. agentctl
+   and its journal stay up. The outcome is `stopped`.
+4. **Journal.** After `cancelled` or `stopped`, cancel any permission request
+   still pending (see [Permission requests](#permission-requests)). Then
+   journal `agent_link.offline_budget_exhausted` with `detached_since`,
+   `exhausted_at`, `outcome`, and the last `cancel_error` if any. It is
+   journaled once per episode.
+5. **Stop failed.** If the stop fails, log it, wait 60 s, and repeat step 3
+   while no stream waits to attach, until it succeeds or the agent process is
+   gone. A process that is gone gives outcome `stopped`. When a stream waits
+   to attach, enforcement ends instead: it journals the event with outcome
+   `stop_failed` and cancels nothing more. The turn keeps running, now
+   visible to the user, who can stop it.
+
+Enforcement is **complete** when step 4 has journaled, or when step 1 found
+no turn. It is **settled** when it is complete, or when a stop has failed
+once. The worst case before settled is 3 cancels of 10 s, 2 waits of 2 s, and
+one stop of about 12 s, so under 50 s. The backend bounds the step 5
+handshake at 90 s.
 
 No turn can start while detached. Prompts reach agentctl only over the
 backend stream, and none is attached. A turn that ends on its own while the
@@ -271,11 +342,15 @@ agent survival on. It can shut agentctl down after `agentctl.unownedPeriod`
 `unowned_period_ms` that `/identity` reports. The reaper gate gains one
 condition, evaluated on every tick from live instance state: it does not
 shut agentctl down while any instance is detached with its budget not yet
-expired (`AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.5`). The gate reads each
+expired, or with its budget expired and its
+[enforcement](#budget-enforcement) not complete
+(`AC-PLATFORM-DETACHED-AGENT-CONTINUITY-004.5`). A stop that keeps failing
+therefore keeps agentctl up, because its exit would leave a running agent
+with nothing tracking it. The gate reads each
 instance's episode state under its `attachMu`, so instances created or
 removed after startup are covered, and a removed instance no longer holds the
 gate. The unowned period also counts from the later of the last renewal and
-the latest budget expiry, so the journal stays readable for at least one
+the latest enforcement completion, so the journal stays readable for at least one
 full unowned period after the cancel. After that, the existing reaper
 contract applies. A later reconnect that finds agentctl gone takes the
 reconciliation path (`AC-PLATFORM-DETACHED-AGENT-CONTINUITY-001.4`).

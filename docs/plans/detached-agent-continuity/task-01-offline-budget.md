@@ -18,6 +18,7 @@ acceptance_criteria:
 system_design:
   - ../../specs/platform/system-design/detached-agent-continuity-01.md
   - ../../specs/platform/system-design/detached-agent-continuity-02.md
+  - ../../specs/platform/system-design/detached-agent-continuity-03.md
 ---
 
 # Task 01: Offline budget in agentctl
@@ -34,16 +35,25 @@ from the executor profile.
 - **Attachment state in `agentctl/server/process/attachment.go`:** replace
   the atomic counter with the `attachMu`-guarded state from the design
   section "Attachment state": count, episode, per-episode `attachedCh` and
-  `exhaustedCh`, `detachedSince`, and the timer. `Snapshot()` implements
+  `exhaustedCh`, `detachedSince`, the timer, and `attachedAtSequence`
+  (the journal high water read under `attachMu` when the count rises from
+  zero), reported by `GetDeliveryStatus` as `AttachedAtSequence`. `Snapshot()` implements
   `AttachmentWaiter` for task 02. `IsAttached` reads under the same mutex.
 - **Detach clock:** detach to zero starts a new episode and arms the timer;
   attach from zero stops it and closes `attachedCh`; `expire(E)` is a no-op
   for a stale or already-exhausted episode, and otherwise closes
   `exhaustedCh` even when no turn runs.
-- **On expiry with an active turn,** outside the lock:
-  - call the adapter's `Cancel` once;
-  - journal `agent_link.offline_budget_exhausted` with `detached_since`,
-    `exhausted_at`, and `cancel_error` when the cancel failed;
+- **Budget enforcement** from part 2 "Budget enforcement", outside the lock:
+  - with no active turn, end and journal nothing;
+  - call the adapter's `Cancel`, up to 3 attempts of 10 s, 2 s apart;
+  - if all fail, stop the agent process group and remove `agent.pgid`;
+  - after `cancelled` or `stopped`, cancel any still-pending permission
+    request, then journal `agent_link.offline_budget_exhausted` once with
+    `detached_since`, `exhausted_at`, `outcome`, and the last
+    `cancel_error`;
+  - a failed stop retries every 60 s while no stream waits, and ends with
+    outcome `stop_failed` when a stream waits to attach;
+  - an attaching stream waits until enforcement is settled;
   - keep agentctl and the journal running.
 - **Profile override:**
   - `offline_budget_minutes` in `profileConfigAuthoritativeKeys`
@@ -55,9 +65,10 @@ from the executor profile.
   - carried as `OfflineBudget` through `agentctl.CreateInstanceRequest` and
     `config.InstanceOverrides`.
 - **Reaper gate:** the unowned reaper does not shut agentctl down while any
-  instance is detached with an unexpired budget, evaluated each tick from
-  live instance state. The unowned period counts from the later of the last
-  renewal and the latest budget expiry. `ownershipperiod.Resolve` and the
+  instance is detached with an unexpired budget, or with an expired budget
+  whose enforcement is not complete, evaluated each tick from live instance
+  state. The unowned period counts from the later of the last renewal and the
+  latest enforcement completion. `ownershipperiod.Resolve` and the
   reported `unowned_period_ms` do not change.
 - **Capability and close reason:** add `detached-continuity.v1` to
   `SurvivalCapabilities` (`agentctl/server/api/identity.go`). Close the
@@ -81,7 +92,10 @@ from the executor profile.
    restarts at the next detach. An attach that races expiry either wins
    (no cancel) or loses (one cancel), never both, under `-race`. Expiry with
    no turn closes `exhaustedCh` and journals nothing. Each episode gets new
-   channels.
+   channels. A cancel that fails 3 times escalates to a process-group stop
+   and journals outcome `stopped`. A stop that fails keeps the reaper gate
+   closed. A stream attaching during enforcement waits for it, and its
+   `AttachedAtSequence` is at or above the budget event's sequence.
 2. The profile value reaches the instance config. Empty means 15. A
    non-integer, overflow, or out-of-range value is rejected at profile save
    and at launch with `ErrInvalidOfflineBudget`.
@@ -94,7 +108,7 @@ from the executor profile.
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/agentctl/server/process/... -run 'TestDetachClock|TestOfflineBudget|TestAttachRacesExpiry|TestPermissionParkedUntilBudgetCancel|TestAgentPgidRecord')
+(cd apps/backend && go test -race -count=1 ./internal/agentctl/server/process/... -run 'TestDetachClock|TestOfflineBudget|TestAttachRacesExpiry|TestPermissionParkedUntilBudgetCancel|TestAgentPgidRecord|TestBudgetEnforcementRetriesThenStops|TestBudgetStopFailedHoldsGate|TestAttachWaitsForEnforcement|TestAttachedAtSequence')
 (cd apps/backend && go test -race -count=1 ./cmd/agentctl/... ./internal/orchestrator/executor/... -run 'TestReaperGateHoldsDuringOfflineBudget|TestOfflineBudgetProfileResolution|TestOfflineBudgetProfileValidation')
 (cd apps/backend && go test -race -count=1 ./internal/agentctl/server/api/... -run 'TestIdentityAdvertisesDetachedContinuity|TestStreamCloseReason')
 (cd apps/backend && go test -race -count=1 ./internal/agentctl/server/config/... ./internal/agent/runtime/agentctl/...)

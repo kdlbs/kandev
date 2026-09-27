@@ -17,6 +17,9 @@ it redials the executor transport, and what the user sees.
 [Part 2](detached-agent-continuity-02.md) covers agentctl and the executor
 host while no backend is attached: the orphan reap, Kandev tool calls, the
 offline budget, and agent guidance.
+[Part 3](detached-agent-continuity-03.md) covers how the backend leaves
+Disconnected: reconnect attempts, rollback, Stop while Disconnected, and a
+backend restart.
 
 Platform owns it because the behavior crosses every executor and extends the
 shared recovery services.
@@ -45,8 +48,8 @@ records this and the other boundary choices.
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-DETACHED-AGENT-CONTINUITY-001` | [Disconnected link state](#disconnected-link-state), [Stop while disconnected](#stop-while-disconnected) |
-| `REQ-PLATFORM-DETACHED-AGENT-CONTINUITY-002` | [Redial contract](#redial-contract), [Reconnect coordinator](#reconnect-coordinator) |
+| `REQ-PLATFORM-DETACHED-AGENT-CONTINUITY-001` | [Disconnected link state](#disconnected-link-state); part 3: [Stop while disconnected](detached-agent-continuity-03.md#stop-while-disconnected) |
+| `REQ-PLATFORM-DETACHED-AGENT-CONTINUITY-002` | [Redial contract](#redial-contract); part 3: [Reconnect coordinator](detached-agent-continuity-03.md#reconnect-coordinator) |
 | `REQ-PLATFORM-DETACHED-AGENT-CONTINUITY-006` | [Link events and notices](#link-events-and-notices), [Frontend](#frontend) |
 
 ## Components and responsibilities
@@ -98,21 +101,25 @@ lock:
    BudgetDeadline}` on the execution. `BudgetDeadline` is `Since` plus the
    resolved offline budget. It is an estimate; see
    [part 2](detached-agent-continuity-02.md#displayed-pause-time) for the
-   authoritative clock.
+   authoritative clock. It starts a new episode record: `EpisodeID`, equal
+   to the new generation; `EpisodeStartSequence`, equal to the execution's
+   projected cursor; and an empty list of recorded events (see
+   [Notices](#notices)).
 2. It keeps the execution tracked and leaves its status `Running`. It does
    not set a failure code.
 3. In the prompt branch, it keeps the prompt-completion waiter pending, so
    the running turn is not completed or failed. The waiter resolves when
    replay delivers the turn's terminal event, or through durable delivery
    reconciliation if the agent is gone. An in-flight submission is not
-   marked uncertain here. The reconnect runs `reconcileDisconnectedSubmission`
-   and that decides it.
+   marked uncertain here. The reconnect's
+   [submission classification](detached-agent-continuity-03.md#submission-classification)
+   decides it.
 4. In the idle branch, no waiter exists. The execution stays tracked with no
    turn.
 
 After the lock is released, it persists and publishes the link state (see
 [Persistence](#persistence)) and starts the
-[reconnect coordinator](#reconnect-coordinator).
+[reconnect coordinator](detached-agent-continuity-03.md#reconnect-coordinator).
 
 The task session state stays `RUNNING`, which is true on the executor host.
 Disconnected is a link attribute, not a new `TaskSessionState`. Every existing
@@ -126,9 +133,11 @@ leaves Disconnected. The only exits are the three that
 `ErrAgentLinkDisconnected` before it touches the client. The orchestrator
 treats that error like a busy session. A message the user queues stays in the
 existing session message queue and is not dispatched while the link state is
-anything other than connected. After a reconnect clears the link state, the
-queue follows its existing rules, except after a budget pause (see
-[Link events and notices](#link-events-and-notices)). The chat input is
+anything other than connected. A queue dispatch that the orchestrator tries in
+that time, for example on a turn end that replay delivers, gets
+`ErrAgentLinkDisconnected` and leaves the message queued. After a reconnect
+clears the link state, the queue follows its existing rules, except after a
+budget pause (see [Queue after a clear](#queue-after-a-clear)). The chat input is
 disabled while Disconnected.
 
 ### Capability gate
@@ -177,10 +186,11 @@ cannot silently hold a session open.
 
 `AgentExecution` gains two counters, guarded by the execution lock:
 
-- `LinkGeneration` changes once per link episode. It increments on entering
-  Disconnected, on Stop while Disconnected, and on a successful reattach or
-  cleanup. An attempt in flight when the user stops is therefore stale, and
-  cannot connect a stopped session.
+- `LinkGeneration` increments on entering Disconnected, on Stop while
+  Disconnected, when an attempt commits a new client, when an attempt rolls
+  back after that commit, and on cleanup. An attempt in flight when the user
+  stops is therefore stale, and cannot connect a stopped session. The
+  episode's `EpisodeID` does not change within an episode.
 - `LinkRevision` increments on every link state change, including attempt
   results inside one episode.
 
@@ -191,9 +201,13 @@ Rules:
   with a debug log. A stale stream therefore cannot re-enter Disconnected
   after a reattach.
 - Each reconnect attempt, backoff timer, and user trigger captures the
-  generation of the episode it serves. Its result applies only if the
-  generation is still current. Otherwise the attempt calls `Abort` on any
-  staged refresh and returns.
+  generation it serves. Its result applies only if the generation is still
+  current. The compare runs inside the same execution-lock hold as the write
+  it guards, and Stop takes the same lock. On a failed compare the attempt
+  aborts or rolls back (see [part
+  3](detached-agent-continuity-03.md#attempt-steps)).
+- A disconnect callback from an attempt's own stream, before that attempt
+  clears, fails the attempt instead of entering Disconnected again.
 - Every persisted `agent_link` value and every link event carries
   `link_generation` and `link_revision`. The store and the frontend apply a
   value only when its revision is newer than the one they hold.
@@ -216,12 +230,17 @@ type RedialIdentity struct {
 // already runs instance, without starting a new one.
 type RemoteTransportRedialer interface {
     RedialRemoteInstance(ctx context.Context, instance *ExecutorInstance, expect RedialIdentity) (*RemoteInstanceRefresh, error)
+    // DropRedialedTransport tears down a committed redial transport after a
+    // failed attempt and marks it lost. It is idempotent.
+    DropRedialedTransport(instance *ExecutorInstance)
 }
 ```
 
 It returns the existing `RemoteInstanceRefresh` (`lifecycle/executor_backend.go`),
 so the manager keeps a single staged-swap path. `Commit(publish)` installs the
-new agentctl client under the execution write lock. `Abort` releases a
+new agentctl client under the execution write lock, after a link generation
+guard in the same lock hold (see [part
+3](detached-agent-continuity-03.md#attempt-steps)). `Abort` releases a
 half-built transport. `ProcessRestarted` is always false on a redial result.
 Any evidence that agentctl was replaced returns `ErrRedialTargetGone`
 instead.
@@ -303,92 +322,10 @@ A matching PID is not identity. The SSH PID probe is only a fast path to
 
 ## Reconnect coordinator
 
-The coordinator lives in `lifecycle` and owns at most one attempt at a time
-per execution in link state `disconnected` or `stopped_pending_cleanup`. It
-uses `m.remoteRefreshGroup` so that it never runs alongside a Kubernetes
-refresh. A second trigger during an attempt joins that attempt.
-
-Triggers:
-
-| Trigger | Source | Delay |
-| --- | --- | --- |
-| Reachability returns | Subscriber to `events.ExecutorReachabilityChanged` with state `reachable`; matched to executions by executor ID | Immediate |
-| Backoff | Coordinator timer: 5 s, doubling, capped at 300 s, ±20% jitter, unlimited attempts | Scheduled |
-| User Reconnect | WS action `session.reconnect` on a `disconnected` session | Immediate; cancels the pending timer |
-| Kubernetes status loop | `refreshTrackedRemoteInstance` for an execution not in link state connected | Every 60 s |
-
-An attempt captures the episode generation `G`, then runs these steps. Any
-step that finds `G` no longer current aborts the staged refresh and returns.
-
-1. **Redial.** Call `RedialRemoteInstance`, bounded by 30 s, with the
-   identity from the execution's `DeliveryDescriptor`. Handle a non-refresh
-   result as the [results table](#results) says.
-2. **Pending stop.** In link state `stopped_pending_cleanup`, run
-   [the cleanup](#stop-while-disconnected) instead of steps 3 to 7.
-3. **Commit.** Run `refreshTrackedRemoteInstance`'s commit steps: persist the
-   new transport, then `Commit(publish)` under the execution write lock. The
-   coordinator does not call `StreamManager.ReconnectAll`.
-4. **Replay to a barrier.** Read `GetDeliveryStatus` on the new client and
-   store the descriptor on the execution. Its `HighWater` is the barrier.
-   Call `ReplayRecoveredDelivery(ctx, execution)` synchronously. Replay is
-   complete when it returns nil, which means `DeliveryReplayCursor` has
-   reached the barrier.
-5. **Live stream.** Call the new synchronous
-   `StreamManager.ConnectFromCursor(ctx, execution) error`. It wraps
-   `connectUpdatesStream` and returns once `StreamUpdatesFrom(after)` has
-   completed its handshake, or with the handshake error. The new stream's
-   disconnect callback captures generation `G+1`.
-6. **Reconcile.** Run `reconcileDisconnectedSubmission` against the new
-   client for the submission that was in flight, if any. Its result decides
-   the turn: still running, completed in the journal, or uncertain.
-7. **Clear.** Write the reconnected notice, then, under the execution lock,
-   set link state `connected` with generation `G+1`. Then persist and
-   publish (`events.AgentctlReady` with `reconnected_after_ms`).
-
-Failure handling:
-
-| Failure | Result |
-| --- | --- |
-| Commit fails | `Abort`; stay Disconnected; next attempt on backoff |
-| Transport error in step 4 or 5 | Close the new client; stay Disconnected with `last_error`; next attempt on backoff |
-| #3598 typed replay error in step 4 | The link is back. Durable delivery's typed error handling applies and the session takes its state; the link state becomes connected |
-| Notice write fails in step 7 | Retried up to 3 times with a 1 s wait, then logged and counted; the clear proceeds |
-
-A reconnect never calls `initializeAgentSession`, `LoadSession`, or any launch
-intent. The same agentctl and harness process continue. A reconnect that finds
-the agent gone hands over to durable delivery reconciliation, and the session
-takes that outcome.
-
-## Stop while disconnected
-
-Stop on a Disconnected session ends Disconnected, which is the third exit in
-`AC-PLATFORM-DETACHED-AGENT-CONTINUITY-001.3`. It does these things:
-
-- The existing stop path moves the session to its stopped state. The
-  execution stays tracked in the lifecycle manager, because its agent may
-  still run on the host.
-- The link state becomes `stopped_pending_cleanup`, with `pending_stop`
-  true, under a new link generation and revision.
-- The user Reconnect trigger is removed. The backoff, reachability, and
-  Kubernetes triggers stay, and serve only the cleanup.
-- Any pending prompt-completion waiter resolves as cancelled, the same way a
-  stop resolves it today.
-
-A cleanup attempt runs step 1 of the coordinator, then:
-
-1. If the redial returns a refresh, call agentctl `agent.cancel`, then stop
-   the instance. No event stream is connected and no replay runs, so no
-   admission or intake happens. The detached output stays in the journal and
-   is removed with the instance.
-2. If the redial returns `ErrRedialTargetGone`, nothing remains to stop.
-3. After either, stop tracking the execution and write link state
-   `cleared` with no pending stop. The session stays stopped.
-   Reconciliation does not change a stopped session's outcome.
-4. On `ErrRedialOrphanUnreaped` or a cancel or stop error, keep
-   `stopped_pending_cleanup` with `last_error` and retry on the next trigger.
-
-The chat shows the existing stopped banner, with one extra line while
-cleanup is pending (see [Frontend](#frontend)).
+[Part 3](detached-agent-continuity-03.md) defines how the backend leaves
+Disconnected: the coordinator and its backoff and timer rules, the attempt
+steps from redial to clear, submission classification, rollback after a
+failed attempt, Stop while Disconnected, and a backend restart.
 
 ## Link events and notices
 
@@ -411,6 +348,7 @@ type AgentLinkPayload struct {
     LastError          string     // closed set: auth, host_key, unreachable, orphan_reap_failed, replay, config
     PendingStop        bool
     ReconnectedAfterMS int64      // set on the change to connected
+    BudgetPaused       bool       // set on the change to connected
 }
 
 PublishAgentLinkEvent(ctx context.Context, execution *AgentExecution, payload AgentLinkPayload)
@@ -449,26 +387,54 @@ message ID is a name-based UUID (`uuid.NewSHA1(uuid.NameSpaceOID, key)`) of a
 deterministic key. A retry, a replay, or a second attempt in the same episode
 writes the same ID, so the notice appears at most once.
 
+An episode is bounded by journal sequence, not by time. It covers the
+sequences above its `EpisodeStartSequence` and at or below the
+`AttachedAtSequence` that [step 6](detached-agent-continuity-03.md#attempt-steps)
+reads, which is the journal high water when the new stream attached. While
+the link state is not connected, inbox projection records on the episode each
+terminal turn event and each `agent_link.offline_budget_exhausted` event
+above `EpisodeStartSequence`, with its sequence and time, once per sequence.
+The events can arrive by replay or by the live stream, and both are
+recorded. A rollback keeps the record.
+
 | Notice | Key | Written when |
 | --- | --- | --- |
-| Reconnected after a duration | `agent-link-reconnected:<session_id>:<link_generation>`, using the episode's generation | Coordinator step 7, before the link state clears |
-| Turn ended while disconnected | `agent-link-turn-ended:<stream_id>:<sequence>` of the terminal journal event | Replay projects a terminal event whose sequence is at or below the step 4 barrier and whose `created_at` is at or after the episode's `since` |
-| Paused by the offline budget | `agent-link-budget:<stream_id>:<sequence>` of the `agent_link.offline_budget_exhausted` event | Replay projects that event |
+| Turn ended while disconnected | `agent-link-turn-ended:<stream_id>:<sequence>` of the terminal event | Step 7, for each recorded terminal event at or below `AttachedAtSequence`, with the event's `created_at` |
+| Paused by the offline budget | `agent-link-budget:<stream_id>:<sequence>` of the budget event | Step 7, for a recorded budget event at or below `AttachedAtSequence` whose `outcome` is `cancelled` or `stopped`, with its journaled `exhausted_at` |
+| Reconnected after a duration | `agent-link-reconnected:<session_id>:<episode_id>` | Step 7, after the other notices and before the link state clears |
 
 Ordering rules:
 
-- The reconnected notice is written before the clear. A failure between the
-  two leaves the session Disconnected. The next attempt in the same episode
-  writes the same ID, so it does not duplicate.
-- The turn-ended and budget notices are keyed by journal position. Inbox
-  projection is idempotent per sequence (durable delivery), so a replay that
-  repeats does not duplicate them.
+- Step 7 writes every notice before the clear. A failure between a write and
+  the clear leaves the session Disconnected. The next attempt in the same
+  episode writes the same IDs, so nothing duplicates.
+- A recorded event above `AttachedAtSequence` happened after the attach. It
+  gets no notice. A budget event can never be above it, because an attach
+  waits until budget enforcement is settled (see [part
+  2](detached-agent-continuity-02.md#budget-enforcement)).
+- A budget event with outcome `stop_failed` gets no notice and sets no
+  budget flag, because its turn still runs. It is logged and counted.
 - The turn-ended notice sits beside the workflow effect and gates nothing.
   The workflow effect still runs once, through `workflowEffectForTurn` and
   `processOnTurnCompleteViaEngineWithCause`, with its own durable delivery
   effect key.
-- After the budget notice, the session waits for input. No queued prompt is
-  dispatched automatically, until the user sends or releases one.
+
+### Queue after a clear
+
+The episode's budget flag is true when it recorded a budget event at or
+below `AttachedAtSequence` with outcome `cancelled` or `stopped`. Step 7 reads it in the same lock hold that sets
+link state `connected`, and publishes it as `BudgetPaused`. All detached
+events are projected by then, so the flag cannot change after the clear.
+
+On the `AgentctlReady` event of a clear, the orchestrator:
+
+- with `BudgetPaused` false: runs its existing queue dispatch for the session
+  once, as it would after a turn end;
+- with `BudgetPaused` true: dispatches nothing and marks the session's queue
+  held. The hold ends when the user sends a new message, or uses the queue's
+  existing Send now action (`message.queue.send_now`) on a queued message.
+  Then the queue follows its existing rules. The hold lives in memory, and a
+  backend restart ends it.
 
 ## Frontend
 
@@ -527,9 +493,9 @@ Ordering rules:
 | Redial succeeds, transport drops during replay | Close the new client; stay Disconnected; next attempt on backoff |
 | Stale disconnect callback or attempt result | Dropped by the link generation check |
 | agentctl predates the capability | Current failure path |
-| Backend restarts while Disconnected | The in-memory coordinator is gone; `agent_link` shows the session as Disconnected and the existing resume path applies on the next open |
-| Backend restarts while stopped pending cleanup | The session stays stopped. The budget bounds the agent. With agent survival on, the unowned reaper later ends agentctl |
-| Two triggers fire together | Single-flight per execution; the second joins the first attempt |
+| Backend restarts while Disconnected or stopped pending cleanup | The startup sweep clears `agent_link`, and the existing restart path applies; see [part 3](detached-agent-continuity-03.md#backend-restart) |
+| Attempt fails after its commit | Rollback removes the client and drops the transport; see [part 3](detached-agent-continuity-03.md#rollback-after-commit) |
+| Two triggers fire together | Single-flight per execution; the second joins the first attempt and does not advance the backoff |
 
 ## Persistence
 
@@ -555,7 +521,10 @@ lower, so an out-of-order write cannot replace a newer one.
 
 The manager writes `agent_link` on each change. On reconnect it writes state
 `connected`. On a terminal outcome or after stop cleanup, it writes `cleared`.
-The key is never deleted, so the revision guard keeps working. The frontend
+The key is never deleted, so the revision guard keeps working. The startup
+sweep and the counter seeding in [part
+3](detached-agent-continuity-03.md#backend-restart) keep the guard working
+across a backend restart. The frontend
 treats `connected`, `cleared`, and an absent key the same way. It needs no new
 table and no migration.
 

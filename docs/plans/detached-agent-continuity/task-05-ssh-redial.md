@@ -19,6 +19,7 @@ acceptance_criteria:
 system_design:
   - ../../specs/platform/system-design/detached-agent-continuity-01.md
   - ../../specs/platform/system-design/detached-agent-continuity-02.md
+  - ../../specs/platform/system-design/detached-agent-continuity-03.md
 ---
 
 # Task 05: SSH redial
@@ -53,6 +54,9 @@ end-to-end proof on a real SSH executor.
   - Report `reap_failed` (still alive, file unreadable, or a command
     failure) with `ErrRedialOrphanUnreaped`, never `ErrRedialTargetGone`.
   - See the design section "Orphaned agent after agentctl loss".
+- **`DropRedialedTransport`:** close the forward and SSH client of a
+  committed redial and mark the `sshSessionState` entry lost, as the watchdog
+  does, so the next redial takes it. Idempotent; never touches agentctl.
 - **Guards:** the `CreateInstance` and `ResumeRemoteInstance` lost-entry
   guards (`executor_ssh.go`) must see either the lost or the new entry, never
   a missing one.
@@ -80,7 +84,7 @@ end-to-end proof on a real SSH executor.
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestSSHRedial|TestSSHTransport|TestSSHOrphanReap|TestSSHRedialIdentityMismatch')
+(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestSSHRedial|TestSSHTransport|TestSSHOrphanReap|TestSSHRedialIdentityMismatch|TestSSHDropRedialedTransport')
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --project containers tests/ssh/detached-reconnect.spec.ts)
 make -C apps/backend lint

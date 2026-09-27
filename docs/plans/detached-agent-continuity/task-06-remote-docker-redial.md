@@ -15,6 +15,7 @@ acceptance_criteria:
 system_design:
   - ../../specs/platform/system-design/detached-agent-continuity-01.md
   - ../../specs/platform/system-design/detached-agent-continuity-02.md
+  - ../../specs/platform/system-design/detached-agent-continuity-03.md
 ---
 
 # Task 06: Remote Docker redial
@@ -36,6 +37,8 @@ client, and the forward to the same container.
 - **Error mapping:** a missing container maps to `ErrRedialTargetGone` with
   nothing to reap. A dial failure maps to `ErrRedialUnreachable`. An identity
   mismatch goes to the orphan reap.
+- **`DropRedialedTransport`:** close the Docker and SSH clients and the
+  forward of a committed redial, and keep the target. Idempotent.
 - **Cleanup:** a completed instance stop removes the target, so a stopped
   instance is never redialed. A stop recorded while Disconnected
   (`stopped_pending_cleanup`) keeps the target until the cleanup attempt
@@ -62,7 +65,7 @@ client, and the forward to the same container.
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestRemoteDockerRedial|TestRemoteDockerTransport|TestRemoteDockerOrphanReap')
+(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestRemoteDockerRedial|TestRemoteDockerTransport|TestRemoteDockerOrphanReap|TestRemoteDockerDropRedialedTransport')
 make -C apps/backend lint
 ```
 

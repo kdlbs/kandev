@@ -146,7 +146,10 @@ not seen.
   the call automatically.
 - **AC-PLATFORM-DETACHED-AGENT-CONTINUITY-003.5:** While detached, a tool
   permission request shall remain pending until the user answers it after
-  reattach. It shall not be approved or denied automatically.
+  reattach. It shall not be approved or denied automatically. The one
+  exception is the offline budget: when the budget cancels the turn, the
+  pending request shall be cancelled with it, neither approved nor denied.
+  After reattach, the conversation shall show the request as cancelled.
 
 ### REQ-PLATFORM-DETACHED-AGENT-CONTINUITY-004: Offline budget
 

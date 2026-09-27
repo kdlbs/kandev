@@ -11,6 +11,7 @@ requirements:
 system_design:
   - ../../specs/platform/system-design/detached-agent-continuity-01.md
   - ../../specs/platform/system-design/detached-agent-continuity-02.md
+  - ../../specs/platform/system-design/detached-agent-continuity-03.md
 legacy_specs: []
 ---
 
@@ -71,24 +72,27 @@ The origin incident is recorded in
 ## Technical approach
 
 Symbols and paths are defined in the
-system design, [part 1](../../specs/platform/system-design/detached-agent-continuity-01.md)
-and [part 2](../../specs/platform/system-design/detached-agent-continuity-02.md).
+system design, [part 1](../../specs/platform/system-design/detached-agent-continuity-01.md),
+[part 2](../../specs/platform/system-design/detached-agent-continuity-02.md),
+and [part 3](../../specs/platform/system-design/detached-agent-continuity-03.md).
 This section lists the integration points per slice.
 
 - **Offline budget** (task 01):
   - `agentctl/server/process/attachment.go` detach clock;
-  - `(*Adapter).Cancel` on expiry;
+  - budget enforcement: `(*Adapter).Cancel` with retries, then a
+    process-group stop;
   - the journaled `agent_link.offline_budget_exhausted` event;
   - `offline_budget_minutes` in `profileConfigAuthoritativeKeys`;
   - `OfflineBudget` in `agentctl.CreateInstanceRequest` and
     `config.InstanceOverrides`;
-  - the unowned-reaper gate while a budget is unexpired;
+  - the unowned-reaper gate while a budget is unexpired or its enforcement
+    is not complete;
   - the `detached-continuity.v1` capability and the stream close reasons.
 - **Waiting Kandev calls** (task 02):
   - `ChannelBackendClient.RequestPayload` waits on an `AttachmentWaiter`
     snapshot and never offers a detached call to `requestCh`;
   - `FailStreamRequests` uses `ErrKandevCallOutcomeUnknown` on every stream
-    end;
+    end, and the writer binds a call before it writes it;
   - launch keeps the harness tool timeout above the budget;
   - one `emitKeepAlivePings` wrapper covers every `RequestPayload` handler;
   - a `connectionLossSection` in `sysprompt.go` and `kandev-context.md`.
@@ -104,18 +108,22 @@ This section lists the integration points per slice.
 - **Reconnect coordinator** (task 04):
   - the `RemoteTransportRedialer` interface, the redial error types, and
     `verifyRedialIdentity`;
-  - attempt steps with a synchronous replay barrier before the clear;
+  - attempt steps with a synchronous replay barrier, an attach-sequence
+    barrier, guarded commit and clear, and rollback after commit;
+  - `classifyReattachedSubmission` for the in-flight submission;
   - a coordinator in `lifecycle`, single-flight through `remoteRefreshGroup`;
   - an `events.ExecutorReachabilityChanged` subscriber;
-  - the backoff timer;
+  - the backoff timer, one step counter per episode;
+  - the startup `ClearStaleAgentLinks` sweep and `ErrAgentLinkNotDisconnected`;
   - the `session.reconnect` WS action;
   - the Kubernetes adapter over `RefreshRemoteInstance`, with a restart
     mapped to `ErrRedialTargetGone`;
   - pending-stop cleanup;
-  - the orchestrator notices, with deterministic message IDs.
+  - the orchestrator notices, with deterministic message IDs, and the queue
+    hold after a budget pause.
 - **Per-executor redials** (tasks 05-07): SSH replaces the lost
   `sshSessionState`, remote Docker retains `targets` on loss, and Sprites
-  re-proxies.
+  re-proxies. Each implements `DropRedialedTransport`.
 - **UI** (task 08):
   - `SessionAgentctlStatus` gains `disconnected` and
     `stopped_pending_cleanup`;

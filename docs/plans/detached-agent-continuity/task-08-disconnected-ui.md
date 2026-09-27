@@ -18,6 +18,7 @@ acceptance_criteria:
   - AC-PLATFORM-DETACHED-AGENT-CONTINUITY-002.3
 system_design:
   - ../../specs/platform/system-design/detached-agent-continuity-01.md
+  - ../../specs/platform/system-design/detached-agent-continuity-03.md
 ---
 
 # Task 08: Disconnected UI and notices
@@ -48,7 +49,10 @@ survives a reload, and the reconnect notices render in the conversation.
   - the phone gets it through the shared `ChatInputArea`;
   - test IDs are `disconnected-session-banner`,
     `disconnected-reconnect-button`, and `disconnected-stop-button`;
-  - Reconnect sends `session.reconnect`.
+  - Reconnect sends `session.reconnect`. A WS error with code
+    `agent_link_not_disconnected` drops the stored link status and reloads
+    the session's `agent_link`, so a banner left from before a backend
+    restart disappears.
 - **Indicators:** `RemoteCloudTooltip` and the kanban status icon show the
   disconnected state.
 - **Copy:** the `task:` keys named in the system design, in all six locales.

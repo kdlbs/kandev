@@ -37,11 +37,15 @@ it.
 - **Capability gate:** read `GET /identity` after the health check at launch
   and adoption; store `DetachedContinuity` on the execution.
 - **Execution state:** `LinkState`, `LinkGeneration`, and `LinkRevision` on
-  `AgentExecution`, under the execution lock. In the prompt branch the
+  `AgentExecution`, under the execution lock, and the episode record
+  (`EpisodeID`, `EpisodeStartSequence`, recorded events) started on entry.
+  Stop increments the generation in the same lock hold that sets
+  `stopped_pending_cleanup`. In the prompt branch the
   prompt-completion waiter stays pending and no uncertain code is set. In
   the idle branch nothing waits.
 - **Prompts while Disconnected:** a prompt send returns the typed
-  `ErrAgentLinkDisconnected`. Queued messages stay queued.
+  `ErrAgentLinkDisconnected`. Queued messages stay queued, including a queue
+  dispatch the orchestrator tries on a replayed turn end.
 - **Event:** the new `PublishAgentLinkEvent` with `AgentLinkPayload`,
   published as `events.AgentctlDisconnected` (`agentctl.disconnected`) and
   mapped to WS `session.agentctl_disconnected`.

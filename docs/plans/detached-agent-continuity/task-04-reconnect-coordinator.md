@@ -24,6 +24,7 @@ acceptance_criteria:
 system_design:
   - ../../specs/platform/system-design/detached-agent-continuity-01.md
   - ../../specs/platform/system-design/detached-agent-continuity-02.md
+  - ../../specs/platform/system-design/detached-agent-continuity-03.md
 ---
 
 # Task 04: Reconnect coordinator and redial contract
@@ -53,32 +54,50 @@ the conversation notices.
   - `remoteRefreshGroup` single-flight;
   - a subscriber to `events.ExecutorReachabilityChanged`;
   - a backoff of 5 s doubling to a 300 s cap, with ±20% jitter and unlimited
-    attempts;
+    attempts, following part 3's "Backoff and timer rules": one step counter
+    per episode, advanced by every failed attempt whatever its trigger, reset
+    by a new episode, one pending timer, and "other error" at the cap;
   - a `session.reconnect` WS action, authorized like `RetrySessionDelivery`.
-- **Attempt steps,** each guarded by the episode generation: redial; pending
-  stop cleanup if the link state is `stopped_pending_cleanup`; commit;
-  `GetDeliveryStatus` and synchronous `ReplayRecoveredDelivery` to its
-  high-water barrier; the new synchronous `StreamManager.ConnectFromCursor`;
-  `reconcileDisconnectedSubmission`; reconnected notice; clear under the
-  lock and publish `agentctl.ready` with `reconnected_after_ms`. Never
-  `StreamManager.ReconnectAll`. The failure table in the design section
-  "Reconnect coordinator" applies.
+- **Attempt steps** from part 3 "Attempt steps", each generation compare
+  inside the execution-lock hold of the write it guards: redial; pending
+  stop cleanup if the link state is `stopped_pending_cleanup`; guarded
+  commit that sets generation `G+1`; `GetDeliveryStatus` and synchronous
+  `ReplayRecoveredDelivery` to its high-water barrier; the new synchronous
+  `StreamManager.ConnectFromCursor` with a 90 s handshake bound; a second
+  `GetDeliveryStatus` for `AttachedAtSequence` and a bounded cursor wait;
+  the new `classifyReattachedSubmission` (the existing
+  `reconcileDisconnectedSubmission` and its call site stay unchanged);
+  notices; guarded clear that publishes `agentctl.ready` with
+  `reconnected_after_ms` and `budget_paused`. Never
+  `StreamManager.ReconnectAll`. Part 3's failure table applies.
+- **Rollback after commit:** remove the installed client, advance the
+  generation, close the stream and client, and call the new
+  `DropRedialedTransport` (tasks 05-07 implement it per executor; the
+  Kubernetes body is here).
+- **Backend restart:** the startup `ClearStaleAgentLinks` sweep (SQLite and
+  PostgreSQL), counter seeding from the stored `agent_link`, and the typed
+  `ErrAgentLinkNotDisconnected` for `session.reconnect`.
 - **Pending stop cleanup:** on a refresh, run `agent.cancel` and stop the
   instance with no stream and no replay; on target gone, nothing to stop;
   then write `cleared`. On an error, keep `stopped_pending_cleanup` and
   retry on the next trigger.
 - **Orphan reap failure:** `ErrRedialOrphanUnreaped` keeps the session
   Disconnected with `orphan_reap_failed` and reports no outcome.
+- **Episode record:** inbox projection records terminal and budget events
+  above `EpisodeStartSequence` while the link is not connected, once per
+  sequence, kept across rollbacks.
 - **Orchestrator notices** through `CreateSessionMessageIdempotent`, with
-  the name-based message IDs from the design section "Notices":
-  - reconnected after a duration, keyed by session and episode generation,
-    written before the clear;
+  the name-based message IDs from part 1 "Notices", all written in step 7
+  before the clear, for recorded events at or below `AttachedAtSequence`:
   - turn ended while disconnected, keyed by the terminal event's stream and
     sequence (the workflow effect still runs once through
     `processOnTurnCompleteViaEngineWithCause`);
-  - paused by the offline budget, keyed by the replayed
-    `agent_link.offline_budget_exhausted` event's stream and sequence. No
-    queued prompt is dispatched automatically after it.
+  - paused by the offline budget, keyed by the budget event's stream and
+    sequence, only for outcome `cancelled` or `stopped`;
+  - reconnected after a duration, keyed by session and `EpisodeID`, last.
+- **Queue after a clear:** with `budget_paused` false, run the existing queue
+  dispatch once; with it true, hold the queue until the user sends a message
+  or uses `message.queue.send_now`.
 - **Metrics:** the metrics listed in the system design.
 
 ## Out of scope
@@ -91,7 +110,8 @@ the conversation notices.
 
 1. A reachability-returned event starts an attempt within 10 s. Backoff
    follows the schedule. User Reconnect runs immediately and cancels the
-   pending timer.
+   pending timer. A failed immediate attempt advances the step counter and
+   leaves exactly one timer. A new episode restarts at 5 s.
 2. A successful attempt never calls `initializeAgentSession` or any launch
    intent. Replayed output appears once and in order, and the notices are
    recorded.
@@ -105,12 +125,25 @@ the conversation notices.
 5. A repeated attempt, replay, or notice write in one episode yields each
    notice once. A Kubernetes container restart on the redial path returns
    `ErrRedialTargetGone` and creates no ACP session.
+6. Stop racing each guard (commit, clear) never leaves a stopped session
+   connected. A failure after commit removes the client and calls
+   `DropRedialedTransport`, and the next attempt redials cleanly.
+7. Submission classification maps every journal state as part 3's table
+   says, never resends, and never double-resolves a waiter that the live
+   stream resolved.
+8. A terminal or budget event journaled after the step 4 barrier but before
+   the attach gets its notice. A budget pause holds the queue; a turn end
+   without one dispatches it once.
+9. After a restart, the sweep clears `disconnected` and
+   `stopped_pending_cleanup` links, the next link write is accepted, and
+   `session.reconnect` returns `ErrAgentLinkNotDisconnected`.
 
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestReconnect|TestUserReconnect|TestKubernetesRedialAdapter|TestRedialIdentity|TestStaleAttemptIgnored|TestPendingStopCleanup')
-(cd apps/backend && go test -race -count=1 ./internal/orchestrator/... -run 'TestReconnectNotices|TestReconnectNoticesIdempotent|TestTurnEndedWhileDisconnected|TestBudgetPauseNoAutoDispatch')
+(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestReconnect|TestUserReconnect|TestKubernetesRedialAdapter|TestRedialIdentity|TestStaleAttemptIgnored|TestPendingStopCleanup|TestBackoffTimerRules|TestRollbackAfterCommit|TestStopRacesGuards|TestClassifyReattachedSubmission|TestEpisodeSequenceBounds|TestLinkCounterSeeding')
+(cd apps/backend && go test -race -count=1 ./internal/orchestrator/... -run 'TestReconnectNotices|TestReconnectNoticesIdempotent|TestTurnEndedWhileDisconnected|TestBudgetPauseNoAutoDispatch|TestQueueDispatchAfterClear|TestClearStaleAgentLinksOnStartup|TestReconnectNotDisconnected')
+(cd apps/backend && go test -race -count=1 ./internal/task/repository/sqlite/... -run 'TestClearStaleAgentLinks')
 (cd apps/backend && go test -race -count=1 ./internal/executors/reachability/...)
 make -C apps/backend lint
 ```
@@ -124,7 +157,10 @@ make -C apps/backend lint
 - `apps/backend/internal/agent/runtime/lifecycle/streams.go`:
   `ConnectFromCursor`
 - `apps/backend/internal/agent/runtime/lifecycle/durable_delivery_stream.go`:
-  call sites only
+  the new `classifyReattachedSubmission`; `reconcileDisconnectedSubmission`
+  unchanged
+- `apps/backend/internal/task/repository/sqlite/`: `ClearStaleAgentLinks`
+- `apps/backend/internal/orchestrator/service.go`: the startup sweep call
 - `apps/backend/internal/orchestrator/`: the notices and the
   `session.reconnect` handler
 - `apps/backend/pkg/websocket/actions.go`
@@ -149,8 +185,8 @@ make -C apps/backend lint
 
 ## Inputs
 
-- System design sections: Redial contract; Reconnect coordinator; Stop while
-  disconnected; Link events and notices; Observability.
+- System design sections: part 1 Redial contract, Link events and notices,
+  Queue after a clear, Observability; part 3 in full.
 
 ## Results
 

@@ -37,8 +37,16 @@ harness tool timeout exceeds the budget.
     wait on `AttachedCh`, `BudgetExhausted`, or `ctx` only, never
     `requestCh`;
   - the writer stops reading `requestCh` before its stream's pending set is
-    failed, so "sent" means taken by a live writer and registered.
-- **`FailStreamRequests`:** its call site in `agentctl/server/api/agent.go`
+    failed;
+  - `writeAgentStreamMCPRequest` binds before it writes: a call is sent once
+    `BindRequestToStream` succeeds. Binding to a stream that
+    `FailStreamRequests` already failed returns an error, and the writer
+    completes the call with `errRequestNotSent`, which returns it to the send
+    loop. A write error after the bind calls `FailRequest` with
+    `ErrKandevCallOutcomeUnknown`. `FailRequest` on a completed call is a
+    no-op.
+- **`FailStreamRequests`:** defined in `mcp/server/backend_client.go`; its
+  call site in `agentctl/server/api/agent.go`
   runs on every stream end and now passes `ErrKandevCallOutcomeUnknown`. It
   fails only sent calls. It never resends.
 - **Harness tool timeout:** an agent's `RuntimeConfig` declares its
@@ -73,7 +81,8 @@ harness tool timeout exceeds the budget.
 2. Budget expiry returns `ErrOfflineBudgetExhausted` to every waiting call. A
    call that was sent before the drop returns `ErrKandevCallOutcomeUnknown`.
    A call not yet sent when the stream drops waits instead, including one
-   racing the drop, under `-race`.
+   racing the drop, under `-race`. A call whose bind finds the stream failed
+   waits. A call whose write fails returns `ErrKandevCallOutcomeUnknown`.
 3. A 1440-minute budget launches Claude with `MCP_TOOL_TIMEOUT` of at least
    1450 minutes. A profile environment value below the budget plus 1 minute
    fails launch with `ErrToolTimeoutBelowOfflineBudget`.
@@ -82,7 +91,8 @@ harness tool timeout exceeds the budget.
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/mcp/server/... -run 'TestRequestPayload|TestSendRacesDetach|TestFailStreamRequests|TestKandevCallKeepAlive')
+(cd apps/backend && go test -race -count=1 ./internal/mcp/server/... -run 'TestRequestPayload|TestSendRacesDetach|TestFailStreamRequests|TestKandevCallKeepAlive|TestBindToFailedStreamNotSent|TestWriteErrorUnknownOutcome')
+(cd apps/backend && go test -race -count=1 ./internal/agentctl/server/api/... -run 'TestWriteAgentStreamMCPRequestBindsBeforeWrite')
 (cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... ./internal/agent/agents/... -run 'TestToolTimeoutCoversOfflineBudget')
 (cd apps/backend && go test -race -count=1 ./internal/sysprompt/... -run 'TestKandevContextHasConnectionLossSection')
 (cd apps/backend && go test -race -count=1 ./internal/agentctl/server/api/...)

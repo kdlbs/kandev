@@ -135,6 +135,7 @@ and repository-context identity.
 - [Durable agent delivery](system-design/durable-agent-delivery.md) (draft)
 - [Detached agent continuity, part 1](system-design/detached-agent-continuity-01.md) (draft)
 - [Detached agent continuity, part 2](system-design/detached-agent-continuity-02.md) (draft)
+- [Detached agent continuity, part 3](system-design/detached-agent-continuity-03.md) (draft)
 - [Durable agent stream processing](system-design/durable-agent-stream-processing.md) (draft)
 - [Duration-aware E2E sharding and CI reliability](system-design/e2e-duration-aware-sharding.md)
 - [External CI runner capacity](system-design/external-e2e-runner-capacity.md)

@@ -12,6 +12,7 @@ acceptance_criteria:
 system_design:
   - ../../specs/platform/system-design/detached-agent-continuity-01.md
   - ../../specs/platform/system-design/detached-agent-continuity-02.md
+  - ../../specs/platform/system-design/detached-agent-continuity-03.md
 ---
 
 # Task 07: Sprites redial
@@ -31,6 +32,8 @@ Unblock when an account is available.
 - **`RedialRemoteInstance`** in a new `executor_sprites_redial.go`, calling
   task 04's `verifyRedialIdentity`. A sprite that no longer exists yields
   `ErrRedialTargetGone` with nothing to reap.
+- **`DropRedialedTransport`:** close the proxy of a committed redial and
+  remove it from `proxies`. Idempotent.
 - **Orphan reap:** when the sprite exists but agentctl is gone, run the
   `agent.pgid` reap through the sprite command API. `reap_failed` returns
   `ErrRedialOrphanUnreaped`.
@@ -51,7 +54,7 @@ Unblock when an account is available.
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestSpritesRedial')
+(cd apps/backend && go test -race -count=1 ./internal/agent/runtime/lifecycle/... -run 'TestSpritesRedial|TestSpritesDropRedialedTransport')
 make -C apps/backend lint
 ```
 
