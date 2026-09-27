@@ -341,7 +341,11 @@ func codexUtilityMCPConfig(servers []MCPServerDTO) map[string]any {
 	for _, server := range servers {
 		name := strings.TrimSpace(server.Name)
 		url := strings.TrimSpace(server.URL)
-		if name == "" || url == "" || (server.Type != "http" && server.Type != "sse" && server.Type != "streamable_http") {
+		serverType := strings.ToLower(server.Type)
+		if name == "" || url == "" || (serverType != "http" && serverType != "streamable_http") {
+			continue
+		}
+		if _, exists := mcpServers[name]; exists {
 			continue
 		}
 		entry := map[string]any{"url": url}

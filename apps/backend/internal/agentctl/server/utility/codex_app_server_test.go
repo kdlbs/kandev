@@ -125,3 +125,21 @@ func TestCodexUtilityMCPConfigKeepsHTTPHeaders(t *testing.T) {
 		t.Fatalf("MCP headers = %#v", server["http_headers"])
 	}
 }
+func TestCodexUtilityMCPConfigPrefersHTTPAndDropsSSE(t *testing.T) {
+	config := codexUtilityMCPConfig([]MCPServerDTO{
+		{Name: "kandev", Type: "http", URL: "http://localhost:4231/mcp"},
+		{Name: "kandev", Type: "sse", URL: "http://localhost:4231/sse"},
+		{Name: "other-sse", Type: "sse", URL: "http://localhost:4231/other-sse"},
+	})
+	servers, ok := config["mcp_servers"].(map[string]any)
+	if !ok {
+		t.Fatal("MCP server config is missing")
+	}
+	if len(servers) != 1 {
+		t.Fatalf("expected 1 server, got %d: %#v", len(servers), servers)
+	}
+	kandevServer, ok := servers["kandev"].(map[string]any)
+	if !ok || kandevServer["url"] != "http://localhost:4231/mcp" {
+		t.Fatalf("kandev server = %#v, want http endpoint", kandevServer)
+	}
+}

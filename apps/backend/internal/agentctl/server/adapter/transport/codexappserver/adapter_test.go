@@ -801,3 +801,29 @@ func readString(values map[string]json.RawMessage, key string) string {
 	_ = json.Unmarshal(values[key], &value)
 	return value
 }
+
+func TestCodexConfigPrefersHTTPAndDropsSSE(t *testing.T) {
+	config := codexConfig([]agenttypes.McpServer{
+		{Name: "kandev", Type: "http", URL: "http://localhost:4231/mcp"},
+		{Name: "kandev", Type: "sse", URL: "http://localhost:4231/sse"},
+		{Name: "other-sse", Type: "sse", URL: "http://localhost:4231/other-sse"},
+		{Name: "local-stdio", Command: "node", Args: []string{"server.js"}},
+	})
+	servers, ok := config["mcp_servers"].(map[string]any)
+	if !ok {
+		t.Fatal("MCP server config is missing")
+	}
+	if len(servers) != 2 {
+		t.Fatalf("expected 2 servers, got %d: %#v", len(servers), servers)
+	}
+	kandevServer, ok := servers["kandev"].(map[string]any)
+	if !ok || kandevServer["url"] != "http://localhost:4231/mcp" {
+		t.Fatalf("kandev server = %#v, want http endpoint", kandevServer)
+	}
+	if servers["other-sse"] != nil {
+		t.Fatalf("other-sse unexpectedly present: %#v", servers["other-sse"])
+	}
+	if servers["local-stdio"] == nil {
+		t.Fatal("local-stdio missing")
+	}
+}

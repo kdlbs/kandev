@@ -669,9 +669,16 @@ func codexConfig(servers []agenttypes.McpServer) map[string]any {
 		if name == "" {
 			continue
 		}
+		serverType := strings.ToLower(server.Type)
+		if serverType == "sse" {
+			continue
+		}
+		if _, exists := mcpServers[name]; exists {
+			continue
+		}
 		entry := make(map[string]any)
-		switch strings.ToLower(server.Type) {
-		case "http", "sse", "streamable_http":
+		switch serverType {
+		case "http", "streamable_http":
 			entry["url"] = server.URL
 			if len(server.Headers) != 0 {
 				entry["http_headers"] = server.Headers
