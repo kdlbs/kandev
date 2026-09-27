@@ -56,11 +56,15 @@ provider tokens stay outside the retirement receipt.
    or source-manifest hash alone is never proof. Its absence is
    `UNKNOWN/ARCHIVE_BYTES_UNVERIFIED`.
 3. Obtain a read-only FIFO snapshot for every old-session incarnation. Each
-   item contributes its stable entry ID, position, and body hash. The
-   replacement must present an ordered intake receipt with the same hashes and
-   a durable acknowledgement bound to the exact replacement session
-   incarnation. Any unread item, missing acknowledgement, reordered item, or
-   changed snapshot is `BLOCKED` or `UNKNOWN`; no implicit replay is allowed.
+   item contributes its stable entry ID, position, body hash, attachment
+   identities and digests, and a digest of its delivery settings. The
+   replacement must present an ordered, one-to-one intake receipt mapping every
+   source `(session incarnation, position, entry ID, body hash)` to one
+   acknowledged intake entry with matching attachment and delivery-setting
+   evidence. A durable acknowledgement is bound to the exact replacement
+   session incarnation. Any unread item, missing acknowledgement, reordered
+   item, duplicate-body substitution, changed attachment or delivery settings,
+   or changed snapshot is `BLOCKED` or `UNKNOWN`; no implicit replay is allowed.
 4. Read one exact pending-move census per old session through the #3155
    contract. `found: false` is a terminal absence receipt only when the live
    Coordinator and reachability predicates are satisfied. A found row remains
@@ -81,9 +85,10 @@ identity mismatch, stale generation, or unimplemented integration is
   archive location, incomplete metadata inventory, and unpushed/unreachable
   commit evidence.
 - FIFO handoff: assert deterministic `(session incarnation, position, entry
-  ID)` ordering; reject changed, omitted, duplicated, reordered, or
-  hash-mismatched entries, and reject a receipt without a replacement durable
-  acknowledgement.
+  ID)` ordering and one-to-one source-to-intake acknowledgement mapping; reject
+  changed, omitted, duplicated, reordered, hash-mismatched, attachment- or
+  delivery-setting-mismatched entries, duplicate-body substitution, and a
+  receipt without a replacement durable acknowledgement.
 - Pending moves: map an authorized #3155 `found: false` census to a terminal
   absence receipt; map `found: true` to `BLOCKED`; map authorization, stale,
   or unavailable census outcomes to `UNKNOWN`. Assert no queue, session, task,
