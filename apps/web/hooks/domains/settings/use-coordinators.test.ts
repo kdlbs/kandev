@@ -58,18 +58,20 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-describe("useCoordinators", () => {
-  beforeEach(() => {
-    mockListCoordinators.mockReset();
-    mockCreateCoordinator.mockReset();
-    mockPatchCoordinator.mockReset();
-    mockDeleteCoordinator.mockReset();
-    storeState.setCoordinators.mockReset();
-    storeState.setCoordinatorsLoading.mockReset();
-    storeState.addCoordinator.mockReset();
-    storeState.updateCoordinator.mockReset();
-    storeState.removeCoordinator.mockReset();
-  });
+function resetCoordinatorMocks() {
+  mockListCoordinators.mockReset();
+  mockCreateCoordinator.mockReset();
+  mockPatchCoordinator.mockReset();
+  mockDeleteCoordinator.mockReset();
+  storeState.setCoordinators.mockReset();
+  storeState.setCoordinatorsLoading.mockReset();
+  storeState.addCoordinator.mockReset();
+  storeState.updateCoordinator.mockReset();
+  storeState.removeCoordinator.mockReset();
+}
+
+describe("useCoordinators fetching", () => {
+  beforeEach(resetCoordinatorMocks);
 
   it("fetches the workspace's coordinators once on mount", async () => {
     mockListCoordinators.mockResolvedValue({ coordinators: [coordinator()] });
@@ -115,6 +117,10 @@ describe("useCoordinators", () => {
 
     expect(mockListCoordinators).toHaveBeenCalledWith("w2");
   });
+});
+
+describe("useCoordinators mutations", () => {
+  beforeEach(resetCoordinatorMocks);
 
   it("creates a coordinator through the API and adds it to the store", async () => {
     mockListCoordinators.mockResolvedValue({ coordinators: [] });
@@ -169,5 +175,41 @@ describe("useCoordinators", () => {
 
     expect(mockDeleteCoordinator).toHaveBeenCalledWith("w1", "c1");
     expect(storeState.removeCoordinator).toHaveBeenCalledWith("c1");
+  });
+});
+
+describe("useCoordinators load errors", () => {
+  beforeEach(resetCoordinatorMocks);
+
+  // Build decision B3: a list load failure shows an inline error with Retry
+  // rather than a silent empty list.
+  it("reports a load error on the initial fetch, and clears it once refresh succeeds", async () => {
+    mockListCoordinators.mockRejectedValueOnce(new Error("network down"));
+
+    const { result } = renderHook(() => useCoordinators("w1"));
+    await waitFor(() => expect(result.current.loadError).toBe(true));
+    expect(storeState.setCoordinators).not.toHaveBeenCalled();
+
+    mockListCoordinators.mockResolvedValueOnce({ coordinators: [coordinator()] });
+    await act(async () => {
+      result.current.refresh();
+    });
+
+    await waitFor(() => expect(result.current.loadError).toBe(false));
+    expect(storeState.setCoordinators).toHaveBeenCalledWith([coordinator()]);
+  });
+
+  it("reports a load error when a retry itself fails again", async () => {
+    mockListCoordinators.mockRejectedValue(new Error("still down"));
+
+    const { result } = renderHook(() => useCoordinators("w1"));
+    await waitFor(() => expect(result.current.loadError).toBe(true));
+
+    await act(async () => {
+      result.current.refresh();
+    });
+
+    await waitFor(() => expect(mockListCoordinators).toHaveBeenCalledTimes(2));
+    expect(result.current.loadError).toBe(true);
   });
 });

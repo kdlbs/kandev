@@ -31,6 +31,7 @@ export function useCoordinators(workspaceId: string | null) {
   const loadedWorkspaceRef = useRef<string | null>(null);
   const inFlightWorkspaceRef = useRef<string | null>(null);
   const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -41,14 +42,16 @@ export function useCoordinators(workspaceId: string | null) {
       .then((result) => {
         if (inFlightWorkspaceRef.current !== workspaceId) return; // stale
         setCoordinators(result.coordinators ?? []);
+        setLoadError(false);
         loadedWorkspaceRef.current = workspaceId;
         setLoadedWorkspaceId(workspaceId);
       })
       .catch(() => {
         if (inFlightWorkspaceRef.current !== workspaceId) return;
-        setCoordinators([]);
-        loadedWorkspaceRef.current = workspaceId;
-        setLoadedWorkspaceId(workspaceId);
+        // Leave loadedWorkspaceRef unset (build decision B3): a failed load
+        // is not "loaded with nothing", so a later Retry runs, not a silent
+        // empty list.
+        setLoadError(true);
       })
       .finally(() => {
         if (inFlightWorkspaceRef.current === workspaceId) {
@@ -94,13 +97,19 @@ export function useCoordinators(workspaceId: string | null) {
       .then((result) => {
         if (inFlightWorkspaceRef.current !== workspaceId) return;
         setCoordinators(result.coordinators ?? []);
+        setLoadError(false);
+        loadedWorkspaceRef.current = workspaceId;
+        setLoadedWorkspaceId(workspaceId);
       })
-      .catch(() => {})
+      .catch(() => {
+        if (inFlightWorkspaceRef.current !== workspaceId) return;
+        setLoadError(true);
+      })
       .finally(() => {
         if (inFlightWorkspaceRef.current === workspaceId) setLoading(false);
       });
   }, [workspaceId, setCoordinators, setLoading]);
 
   const loaded = loadedWorkspaceId === workspaceId;
-  return { items, loaded, loading, create, patch, remove, refresh };
+  return { items, loaded, loading, loadError, create, patch, remove, refresh };
 }
