@@ -86,7 +86,27 @@ for (const restart of [false, true]) {
         claim.metadata.uid,
       );
       if (restart) {
+        const restartLogOffset = fs.readFileSync(backend.logPath, "utf8").length;
         await backend.restart();
+        await expect
+          .poll(
+            () =>
+              fs
+                .readFileSync(backend.logPath, "utf8")
+                .slice(restartLogOffset)
+                .split("\n")
+                .some(
+                  (line) =>
+                    line.includes(task.id) &&
+                    line.includes(sessionId) &&
+                    line.includes("session reconciled for lazy recovery"),
+                ),
+            {
+              timeout: 30_000,
+              message: "Waiting for startup session reconciliation after backend restart",
+            },
+          )
+          .toBe(true);
         await expect
           .poll(
             async () => {
