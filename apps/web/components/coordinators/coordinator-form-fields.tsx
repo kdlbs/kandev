@@ -119,6 +119,7 @@ export function CoordinatorFormFields({
           disabledOptionReason={(profile) =>
             profile.cli_passthrough ? t("coordinator:passthroughDisabledReason") : undefined
           }
+          disabled={disabled}
         />
         <ProfileStatusMessage
           testId="coordinator-agent-profile-status"

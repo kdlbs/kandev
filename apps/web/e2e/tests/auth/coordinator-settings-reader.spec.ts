@@ -130,6 +130,8 @@ test.describe.serial("Coordinators settings tab reader gating", () => {
     await expect(page.getByTestId("coordinator-editor-page")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByLabel("Name")).toBeDisabled();
     await expect(page.getByLabel("Context")).toBeDisabled();
+    await expect(page.getByTestId("coordinator-agent-profile-picker")).toBeDisabled();
+    await expect(page.getByTestId("executor-profile-selector")).toBeDisabled();
     await expect(page.getByTestId("delete-coordinator-button")).toHaveCount(0);
     await expect(page.getByTestId("settings-floating-save")).toHaveCount(0);
 

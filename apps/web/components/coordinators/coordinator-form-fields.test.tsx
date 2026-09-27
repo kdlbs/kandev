@@ -138,6 +138,12 @@ describe("CoordinatorFormFields", () => {
     renderFields({ disabled: true });
     expect((screen.getByLabelText("Name") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText("Context") as HTMLTextAreaElement).disabled).toBe(true);
+    expect(
+      (screen.getByTestId("coordinator-agent-profile-picker") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect((screen.getByTestId("executor-profile-selector") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 
   it("shows the stored executor profile as unavailable when it no longer resolves (B11)", () => {
