@@ -298,6 +298,19 @@ func (s *Service) CoordinatorProfilesReady(ctx context.Context, coordinatorID st
 	return agentStatus == ProfileStatusOK && executorStatus == ProfileStatusOK, nil
 }
 
+// CoordinatorStandingInstructionsData returns coordinatorID's name and
+// standing context for the Standing Instructions system-prompt block
+// (docs/specs/coordinator/system-design/copilot.md#standing-instructions). It
+// carries no workspace scope of its own: the caller is server-side prompt
+// construction for an already-permitted session, not a user-scoped request.
+func (s *Service) CoordinatorStandingInstructionsData(ctx context.Context, coordinatorID string) (string, string, error) {
+	found, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
+	if err != nil {
+		return "", "", err
+	}
+	return found.Name, found.Context, nil
+}
+
 // ListStalls returns a workspace's stall records
 // (needs-you.md#stall-records).
 func (s *Service) ListStalls(ctx context.Context, workspaceID string) ([]*Stall, error) {

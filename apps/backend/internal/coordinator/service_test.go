@@ -681,3 +681,34 @@ func TestService_CoordinatorProfilesReady(t *testing.T) {
 		}
 	})
 }
+
+// TestService_CoordinatorStandingInstructionsData covers the read the
+// Standing Instructions system-prompt block uses
+// (copilot.md#standing-instructions): no workspace scope of its own, since
+// the caller is server-side prompt construction for an already-permitted
+// session, not a user-scoped request.
+func TestService_CoordinatorStandingInstructionsData(t *testing.T) {
+	svc := newServiceForTest(t, nil, nil, nil)
+	ctx := context.Background()
+
+	created := &Coordinator{
+		WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e",
+		Context: "watch the release queue",
+	}
+	if err := svc.store.CreateCoordinator(ctx, created); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+
+	name, coordinatorContext, err := svc.CoordinatorStandingInstructionsData(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("CoordinatorStandingInstructionsData() unexpected error: %v", err)
+	}
+	if name != "Ops" || coordinatorContext != "watch the release queue" {
+		t.Fatalf("CoordinatorStandingInstructionsData() = (%q, %q), want (%q, %q)",
+			name, coordinatorContext, "Ops", "watch the release queue")
+	}
+
+	if _, _, err := svc.CoordinatorStandingInstructionsData(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CoordinatorStandingInstructionsData(missing) error = %v, want ErrNotFound", err)
+	}
+}
