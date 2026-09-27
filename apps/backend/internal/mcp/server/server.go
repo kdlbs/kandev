@@ -738,10 +738,16 @@ func (s *Server) SetMode(mode string) {
 	previousMode := s.mode
 	capabilities := s.profile.Capabilities
 	if isFixedCatalogMode(normalizedMode) {
-		s.legacyModeCapabilities = slices.Clone(capabilities)
-		// Automation and coordinator are fixed coordinator catalogs and never
-		// carry task-local capabilities. The snapshot lets a later legacy
-		// mode change restore the profile that was active before the switch.
+		// Only snapshot when entering a fixed mode from a non-fixed one.
+		// Fixed catalogs never carry task-local capabilities themselves, so a
+		// fixed-to-fixed transition (e.g. coordinator -> automation) would
+		// otherwise re-snapshot the already-nil current capabilities over the
+		// real snapshot taken on the first transition, losing it.
+		if !isFixedCatalogMode(previousMode) {
+			s.legacyModeCapabilities = slices.Clone(capabilities)
+		}
+		// The snapshot lets a later legacy mode change restore the profile
+		// that was active before the switch.
 		capabilities = nil
 	} else if isFixedCatalogMode(previousMode) {
 		capabilities = slices.Clone(s.legacyModeCapabilities)

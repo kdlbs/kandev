@@ -289,7 +289,11 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 		return err
 	}
 	if !s.workspaceDecision(ctx, workspace).CanRead() {
-		return repoerrors.ErrWorkspaceNotFound
+		// Collapse to the workflow's own not-found sentinel, matching
+		// authorizeTaskScope's equivalent branch, so a workflow that exists in
+		// a workspace the caller cannot reach reads identically to one that
+		// does not exist at all.
+		return repoerrors.ErrWorkflowNotFound
 	}
 	return nil
 }

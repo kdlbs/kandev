@@ -153,7 +153,7 @@ func TestWorkspaceScopingTasksAndWorkflows(t *testing.T) {
 	if _, err := svc.GetTask(ctxAs("user-b"), "task-b"); err != nil {
 		t.Fatalf("owner get task: %v", err)
 	}
-	if _, err := svc.ListTasks(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+	if _, err := svc.ListTasks(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
 		t.Fatalf("list foreign workflow tasks: %v", err)
 	}
 	if _, _, err := svc.ListTasksByWorkspace(ctxAs("user-a"), "ws-b", "", "", "", 1, 10, "", false, false, false, false); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
@@ -162,7 +162,7 @@ func TestWorkspaceScopingTasksAndWorkflows(t *testing.T) {
 	if _, err := svc.ListWorkflows(ctxAs("user-a"), "ws-b", false); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
 		t.Fatalf("list foreign workflows: %v", err)
 	}
-	if _, err := svc.GetWorkflow(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+	if _, err := svc.GetWorkflow(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
 		t.Fatalf("get foreign workflow: %v", err)
 	}
 	if err := svc.ArchiveTask(ctxAs("user-a"), "task-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
@@ -206,7 +206,7 @@ func TestAuthorizeWorkflowAccess(t *testing.T) {
 		t.Fatalf("create legacy workflow: %v", err)
 	}
 
-	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
 		t.Fatalf("foreign workflow access: %v", err)
 	}
 	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-b"), "wf-b"); err != nil {

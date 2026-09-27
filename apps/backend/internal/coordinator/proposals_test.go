@@ -22,7 +22,11 @@ import (
 // (nil, nil)). A key absent from both maps returns (nil, nil), matching a
 // foreign-workspace row's "found, but wrong workspace" case once the caller
 // checks WorkspaceID. buildProposalSpec must turn both into the identical
-// *FieldError (SEC-002).
+// *FieldError (SEC-002). fakeWorkflowReader's foreign-workspace fixtures use
+// errs, not workflows: the real WorkflowReader (the scoped task service)
+// denies a foreign workflow inside GetWorkflow itself (authorizeWorkflowID),
+// wrapping the same ErrWorkflowNotFound sentinel as a missing id, so it never
+// actually returns a row with a mismatched WorkspaceID.
 type fakeWorkflowReader struct {
 	workflows map[string]*taskmodels.Workflow
 	errs      map[string]error
@@ -225,14 +229,20 @@ func TestProposeTask_WorkflowNotInWorkspace(t *testing.T) {
 		f := newProposalTestFixture(t)
 		foreign := "wf-foreign"
 		f.svc.SetProposalDeps(
-			fakeWorkflowReader{workflows: map[string]*taskmodels.Workflow{
-				f.workflowID: {ID: f.workflowID, WorkspaceID: f.workspaceID},
-				foreign:      {ID: foreign, WorkspaceID: "ws-other"},
-			}},
+			fakeWorkflowReader{
+				workflows: map[string]*taskmodels.Workflow{
+					f.workflowID: {ID: f.workflowID, WorkspaceID: f.workspaceID},
+				},
+				// The real WorkflowReader (the scoped task service) never returns
+				// a foreign-workspace row: authorizeWorkflowID denies it before
+				// GetWorkflow returns, wrapping the same ErrWorkflowNotFound
+				// sentinel as a genuinely missing id.
+				errs: map[string]error{
+					foreign: fmt.Errorf("%w: %s", repoerrors.ErrWorkflowNotFound, foreign),
+				},
+			},
 			fakeRepositoryReader{}, fakeSourceTaskReader{},
-			fakeWorkflowStepReader{stepsByWorkflow: map[string][]*wfmodels.WorkflowStep{
-				foreign: {{ID: "start", IsStartStep: true}},
-			}},
+			fakeWorkflowStepReader{},
 		)
 		req := f.baseRequest()
 		req.WorkflowID = foreign
@@ -320,16 +330,18 @@ func TestProposeTask_NotFoundAndForeignWorkspaceProduceIdenticalFieldError(t *te
 			fakeWorkflowReader{
 				workflows: map[string]*taskmodels.Workflow{
 					f.workflowID: {ID: f.workflowID, WorkspaceID: f.workspaceID},
-					foreign:      {ID: foreign, WorkspaceID: "ws-other"},
 				},
+				// The real WorkflowReader (the scoped task service) collapses a
+				// foreign-workspace workflow to the same ErrWorkflowNotFound
+				// sentinel as a genuinely missing id (authorizeWorkflowID denies
+				// before GetWorkflow returns), so both keys use the errs map.
 				errs: map[string]error{
+					foreign:      fmt.Errorf("%w: %s", repoerrors.ErrWorkflowNotFound, foreign),
 					"wf-missing": fmt.Errorf("%w: wf-missing", repoerrors.ErrWorkflowNotFound),
 				},
 			},
 			fakeRepositoryReader{}, fakeSourceTaskReader{},
-			fakeWorkflowStepReader{stepsByWorkflow: map[string][]*wfmodels.WorkflowStep{
-				foreign: {{ID: "start", IsStartStep: true}},
-			}},
+			fakeWorkflowStepReader{},
 		)
 
 		reqForeign := f.baseRequest()

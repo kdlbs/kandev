@@ -68,3 +68,25 @@ func TestSetMode_CoordinatorUsesFixedSixToolCatalog(t *testing.T) {
 	assert.ElementsMatch(t, getRegisteredToolNames(cold), getRegisteredToolNames(s))
 	assert.NotContains(t, getRegisteredToolNames(s), "ask_user_question_kandev")
 }
+
+// SetMode's legacy-capability snapshot must survive a fixed-to-fixed
+// transition (coordinator -> automation are both fixed catalogs and never
+// carry task-local capabilities themselves). Before the fix, entering a
+// second fixed mode straight from a first one re-snapshotted the
+// already-nil current capabilities over the real task-mode snapshot taken on
+// the first transition, so returning to task mode restored an empty
+// capability set instead of the original task capabilities.
+func TestSetMode_FixedToFixedTransitionPreservesOriginalTaskCapabilities(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10009, log, "", false, ModeTask)
+	require.Contains(t, getRegisteredToolNames(s), "ask_user_question_kandev")
+
+	s.SetMode(ModeCoordinator)
+	s.SetMode(ModeAutomation)
+	s.SetMode(ModeTask)
+
+	assert.Contains(t, getRegisteredToolNames(s), "ask_user_question_kandev")
+}

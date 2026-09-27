@@ -97,3 +97,30 @@ func TestWrapCreatedSessionPrompt_CoordinatorStandingInstructions(t *testing.T) 
 		assert.Equal(t, "hello coordinator", got)
 	})
 }
+
+// TestEffectivePromptForSession_DoesNotReattachCoordinatorStandingInstructions
+// pins that Standing Instructions is attached only on a coordinator
+// conversation's first turn: wrapCreatedSessionPrompt (and the
+// wrapCoordinatorStandingInstructions it delegates to) is called exactly once
+// in production, from startCreatedSession. effectivePromptForSession is what
+// promptTask uses to compose a continuation prompt on an already-created
+// session; it takes no task and cannot consult
+// SetCoordinatorStandingInstructionsReader, so a second (or later) turn on a
+// coordinator conversation must never see the block re-attached.
+func TestEffectivePromptForSession_DoesNotReattachCoordinatorStandingInstructions(t *testing.T) {
+	svc := &Service{}
+	readerCalled := false
+	svc.SetCoordinatorStandingInstructionsReader(
+		func(context.Context, string, string, string) (string, error) {
+			readerCalled = true
+			return "watch the release queue", nil
+		},
+	)
+	session := &models.TaskSession{ID: "session"}
+
+	got := svc.effectivePromptForSession("session", "what's next?", false, session)
+
+	assert.False(t, readerCalled, "continuation prompt must not consult the Standing Instructions reader")
+	assert.Equal(t, "what's next?", got)
+	assert.NotContains(t, got, "watch the release queue")
+}
