@@ -6,10 +6,10 @@ wave: 16
 depends_on: ["05-durable-input", "06-workspace-observations", "07-task-commands", "13-automation-destination", "15-reference-plugin"]
 plan: "plan.md"
 requirements:
-  - REQ-PLUGINS-COORDINATION-011
+  - REQ-PLUGINS-MANAGED-COORDINATION-011
 acceptance_criteria:
-  - AC-PLUGINS-COORDINATION-011.1
-  - AC-PLUGINS-COORDINATION-011.2
+  - AC-PLUGINS-MANAGED-COORDINATION-011.1
+  - AC-PLUGINS-MANAGED-COORDINATION-011.2
 system_design:
   - ../../specs/plugins/system-design/managed-coordination.md
 ---
@@ -69,7 +69,7 @@ Phone: instance settings, separate full-height view
 
 Phone proposal detail is a full-height view with fixed Approve/Reject actions. Role/profile/executor/scope selection uses drawers. Unsupported profiles show a reason. Duplicate approval reads one receipt; stale proposals require inspection of the new revision. Pause preserves memory and pending inputs.
 
-Applicable criteria: `AC-PLUGINS-COORDINATION-011.1`, `AC-PLUGINS-COORDINATION-011.2`.
+Applicable criteria: `AC-PLUGINS-MANAGED-COORDINATION-011.1`, `AC-PLUGINS-MANAGED-COORDINATION-011.2`.
 
 ## Verification
 

@@ -2,8 +2,8 @@
 status: draft
 system: agents
 requirements:
-  - REQ-AGENTS-MANAGED-TOOLS-001
-  - REQ-AGENTS-MANAGED-TOOLS-002
+  - REQ-AGENTS-MANAGED-TOOL-POLICY-001
+  - REQ-AGENTS-MANAGED-TOOL-POLICY-002
 created: 2026-09-25
 owners:
   - kandev
@@ -15,8 +15,8 @@ owners:
 
 | Requirement                    | Design section                                                            |
 | ------------------------------ | ------------------------------------------------------------------------- |
-| `REQ-AGENTS-MANAGED-TOOLS-001` | [Restricted execution](#restricted-execution)                             |
-| `REQ-AGENTS-MANAGED-TOOLS-002` | [Provider and lifecycle enforcement](#provider-and-lifecycle-enforcement) |
+| `REQ-AGENTS-MANAGED-TOOL-POLICY-001` | [Restricted execution](#restricted-execution)                             |
+| `REQ-AGENTS-MANAGED-TOOL-POLICY-002` | [Provider and lifecycle enforcement](#provider-and-lifecycle-enforcement) |
 
 ## Purpose and boundaries
 

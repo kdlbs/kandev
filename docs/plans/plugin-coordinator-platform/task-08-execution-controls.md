@@ -4,19 +4,17 @@ title: "Guarded execution, recovery, and human interactions"
 status: complete
 wave: 8
 depends_on:
-  [
-    "01-exact-host-foundation",
-    "04-restricted-tools",
-    "06-workspace-observations",
-    "07-task-commands",
-  ]
+  - "01-exact-host-foundation"
+  - "04-restricted-tools"
+  - "06-workspace-observations"
+  - "07-task-commands"
 plan: "plan.md"
 requirements:
-  - REQ-PLUGINS-COORDINATION-006
+  - REQ-PLUGINS-MANAGED-COORDINATION-006
 acceptance_criteria:
-  - AC-PLUGINS-COORDINATION-006.1
-  - AC-PLUGINS-COORDINATION-006.2
-  - AC-PLUGINS-COORDINATION-006.3
+  - AC-PLUGINS-MANAGED-COORDINATION-006.1
+  - AC-PLUGINS-MANAGED-COORDINATION-006.2
+  - AC-PLUGINS-MANAGED-COORDINATION-006.3
 system_design:
   - ../../specs/plugins/system-design/managed-coordination.md
 ---

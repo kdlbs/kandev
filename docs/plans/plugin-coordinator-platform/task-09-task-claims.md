@@ -4,14 +4,16 @@ title: "Task management claims and human takeover"
 status: complete
 wave: 9
 depends_on:
-  ["01-exact-host-foundation", "06-workspace-observations", "07-task-commands"]
+  - "01-exact-host-foundation"
+  - "06-workspace-observations"
+  - "07-task-commands"
 plan: "plan.md"
 requirements:
-  - REQ-TASKS-COORDINATION-001
+  - REQ-TASKS-COMPLETION-003
 acceptance_criteria:
-  - AC-TASKS-COORDINATION-001.1
-  - AC-TASKS-COORDINATION-001.2
-  - AC-TASKS-COORDINATION-001.3
+  - AC-TASKS-COMPLETION-003.11
+  - AC-TASKS-COMPLETION-003.12
+  - AC-TASKS-COMPLETION-003.13
 system_design:
   - ../../specs/tasks/system-design/coordination-controls.md
 ---
@@ -64,7 +66,7 @@ Phone: task detail > completion
 
 Show claims independently from the worker assignee. On phone, the manager and completion summaries share one compact toolbar below the fixed top bar; both 44px actions open their native bottom drawers. Desktop retains full detail rows and dialogs. An override requires a reason and targets one observed move. Stale evidence and an unavailable manager remain visible; no hidden automatic takeover.
 
-Applicable criteria: `AC-TASKS-COORDINATION-001.1`, `AC-TASKS-COORDINATION-001.2`, `AC-TASKS-COORDINATION-001.3`.
+Applicable criteria: `AC-TASKS-COMPLETION-003.11`, `AC-TASKS-COMPLETION-003.12`, `AC-TASKS-COMPLETION-003.13`.
 
 ## Verification
 
@@ -112,7 +114,7 @@ Claim checks outside a mutation transaction allow a former owner to race a trans
 
 ## Inputs
 
-- [Requirements](../../specs/tasks/requirements/coordination-controls.md) and [design](../../specs/tasks/system-design/coordination-controls.md).
+- [Requirements](../../specs/tasks/requirements/task-completion.md) and [design](../../specs/tasks/system-design/coordination-controls.md).
 - [Ownership decision](../../decisions/2026-09-25-plugin-coordination-platform.md).
 - [Source baseline and fork mapping](plan.md#source-baseline-and-fork-mapping).
 

@@ -4,20 +4,18 @@ title: "Native automation delivery to managed conversations"
 status: complete
 wave: 13
 depends_on:
-  [
-    "01-exact-host-foundation",
-    "03-managed-lifetime",
-    "05-durable-input",
-    "06-workspace-observations",
-  ]
+  - "01-exact-host-foundation"
+  - "03-managed-lifetime"
+  - "05-durable-input"
+  - "06-workspace-observations"
 plan: "plan.md"
 requirements:
-  - REQ-OFFICE-PLUGIN-TARGETS-001
+  - REQ-OFFICE-AUTOMATION-TARGETS-001
 acceptance_criteria:
-  - AC-OFFICE-PLUGIN-TARGETS-001.1
-  - AC-OFFICE-PLUGIN-TARGETS-001.2
-  - AC-OFFICE-PLUGIN-TARGETS-001.3
-  - AC-OFFICE-PLUGIN-TARGETS-001.4
+  - AC-OFFICE-AUTOMATION-TARGETS-001.12
+  - AC-OFFICE-AUTOMATION-TARGETS-001.13
+  - AC-OFFICE-AUTOMATION-TARGETS-001.14
+  - AC-OFFICE-AUTOMATION-TARGETS-001.15
 system_design:
   - ../../specs/office/system-design/plugin-conversation-targets.md
 ---
@@ -88,7 +86,7 @@ Phone: automation editor
 
 Use a full-height phone editor and bottom-drawer instance selector. Hide task-only repository/workflow fields for this destination. An unavailable target remains visible with Repair action. History separates delivery from agent outcome.
 
-Applicable criteria: `AC-OFFICE-PLUGIN-TARGETS-001.1`, `AC-OFFICE-PLUGIN-TARGETS-001.2`, `AC-OFFICE-PLUGIN-TARGETS-001.3`, `AC-OFFICE-PLUGIN-TARGETS-001.4`.
+Applicable criteria: `AC-OFFICE-AUTOMATION-TARGETS-001.12`, `AC-OFFICE-AUTOMATION-TARGETS-001.13`, `AC-OFFICE-AUTOMATION-TARGETS-001.14`, `AC-OFFICE-AUTOMATION-TARGETS-001.15`.
 
 ## Verification
 
@@ -135,7 +133,7 @@ Existing automation cleanup owns disposable runs. A shared conversation is only 
 
 ## Inputs
 
-- [Requirements](../../specs/office/requirements/plugin-conversation-targets.md) and [design](../../specs/office/system-design/plugin-conversation-targets.md).
+- [Requirements](../../specs/office/requirements/automation-target-modes.md) and [design](../../specs/office/system-design/plugin-conversation-targets.md).
 - [Ownership decision](../../decisions/2026-09-25-plugin-coordination-platform.md).
 - [Source baseline and fork mapping](plan.md#source-baseline-and-fork-mapping).
 

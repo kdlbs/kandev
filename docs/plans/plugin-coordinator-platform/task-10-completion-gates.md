@@ -4,19 +4,17 @@ title: "Native completion criteria and evidence gates"
 status: complete
 wave: 10
 depends_on:
-  [
-    "01-exact-host-foundation",
-    "06-workspace-observations",
-    "07-task-commands",
-    "09-task-claims",
-  ]
+  - "01-exact-host-foundation"
+  - "06-workspace-observations"
+  - "07-task-commands"
+  - "09-task-claims"
 plan: "plan.md"
 requirements:
-  - REQ-TASKS-COORDINATION-002
+  - REQ-TASKS-COMPLETION-001
 acceptance_criteria:
-  - AC-TASKS-COORDINATION-002.1
-  - AC-TASKS-COORDINATION-002.2
-  - AC-TASKS-COORDINATION-002.3
+  - AC-TASKS-COMPLETION-001.14
+  - AC-TASKS-COMPLETION-001.15
+  - AC-TASKS-COMPLETION-001.16
 system_design:
   - ../../specs/tasks/system-design/coordination-controls.md
 ---
@@ -69,7 +67,7 @@ Phone: task detail > completion
 
 Show claims independently from the worker assignee. Evidence/transfer opens a drawer on phone and a dialog on desktop. An override requires a reason and targets one observed move. Stale evidence and an unavailable manager remain visible; no hidden automatic takeover.
 
-Applicable criteria: `AC-TASKS-COORDINATION-002.1`, `AC-TASKS-COORDINATION-002.2`, `AC-TASKS-COORDINATION-002.3`.
+Applicable criteria: `AC-TASKS-COMPLETION-001.14`, `AC-TASKS-COMPLETION-001.15`, `AC-TASKS-COMPLETION-001.16`.
 
 ## Verification
 
@@ -119,7 +117,7 @@ A UI-only gate is bypassable. Locate and unify all final transition commits befo
 
 ## Inputs
 
-- [Requirements](../../specs/tasks/requirements/coordination-controls.md) and [design](../../specs/tasks/system-design/coordination-controls.md).
+- [Requirements](../../specs/tasks/requirements/task-completion.md) and [design](../../specs/tasks/system-design/coordination-controls.md).
 - [Ownership decision](../../decisions/2026-09-25-plugin-coordination-platform.md).
 - [Source baseline and fork mapping](plan.md#source-baseline-and-fork-mapping).
 

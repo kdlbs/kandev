@@ -4,21 +4,19 @@ title: "Reusable workspace conversation and task-status UI"
 status: complete
 wave: 14
 depends_on:
-  [
-    "02-capability-settings",
-    "03-managed-lifetime",
-    "04-restricted-tools",
-    "05-durable-input",
-    "06-workspace-observations",
-    "08-execution-controls",
-  ]
+  - "02-capability-settings"
+  - "03-managed-lifetime"
+  - "04-restricted-tools"
+  - "05-durable-input"
+  - "06-workspace-observations"
+  - "08-execution-controls"
 plan: "plan.md"
 requirements:
-  - REQ-PLUGINS-COORDINATION-009
+  - REQ-PLUGINS-MANAGED-COORDINATION-009
 acceptance_criteria:
-  - AC-PLUGINS-COORDINATION-009.1
-  - AC-PLUGINS-COORDINATION-009.2
-  - AC-PLUGINS-COORDINATION-009.3
+  - AC-PLUGINS-MANAGED-COORDINATION-009.1
+  - AC-PLUGINS-MANAGED-COORDINATION-009.2
+  - AC-PLUGINS-MANAGED-COORDINATION-009.3
 system_design:
   - ../../specs/plugins/system-design/managed-coordination.md
 ---
@@ -97,7 +95,7 @@ Phone instance/filter selection: bottom drawer
 
 Desktop split composition and phone tabs are required; widths and wording are illustrative. Header/composer are pinned, only the active tab body scrolls, and selectors use bottom drawers. Empty: create an instance. Loading: retain the shell. Disconnected: retain draft and retry identity. Paused: show retained input count and Resume. Revoked/unsupported: explain the blocked capability and link to host settings. Pending human interactions use native shared controls.
 
-Applicable criteria: `AC-PLUGINS-COORDINATION-009.1`, `AC-PLUGINS-COORDINATION-009.2`, `AC-PLUGINS-COORDINATION-009.3`.
+Applicable criteria: `AC-PLUGINS-MANAGED-COORDINATION-009.1`, `AC-PLUGINS-MANAGED-COORDINATION-009.2`, `AC-PLUGINS-MANAGED-COORDINATION-009.3`.
 
 ## Verification
 

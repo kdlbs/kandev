@@ -6,10 +6,10 @@ wave: 1
 depends_on: []
 plan: "plan.md"
 requirements:
-  - REQ-PLUGINS-COORDINATION-001
+  - REQ-PLUGINS-MANAGED-COORDINATION-001
 acceptance_criteria:
-  - AC-PLUGINS-COORDINATION-001.1
-  - AC-PLUGINS-COORDINATION-001.2
+  - AC-PLUGINS-MANAGED-COORDINATION-001.1
+  - AC-PLUGINS-MANAGED-COORDINATION-001.2
 system_design:
   - ../../specs/plugins/system-design/managed-coordination.md
 ---

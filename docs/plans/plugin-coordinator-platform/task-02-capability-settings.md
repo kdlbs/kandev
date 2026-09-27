@@ -6,9 +6,9 @@ wave: 2
 depends_on: ["01-exact-host-foundation"]
 plan: "plan.md"
 requirements:
-  - REQ-PLUGINS-COORDINATION-001
+  - REQ-PLUGINS-MANAGED-COORDINATION-001
 acceptance_criteria:
-  - AC-PLUGINS-COORDINATION-001.3
+  - AC-PLUGINS-MANAGED-COORDINATION-001.3
 system_design:
   - ../../specs/plugins/system-design/managed-coordination.md
 ---
@@ -67,7 +67,7 @@ Phone: same entry, full-height settings
 
 Permission groups and explicit workspace are required. The phone body scrolls; actions stay reachable above the safe area. Saving, stale revision, missing approval, and revoked states appear inline. A plugin cannot render a grant as its own agent action.
 
-Applicable criteria: `AC-PLUGINS-COORDINATION-001.3`.
+Applicable criteria: `AC-PLUGINS-MANAGED-COORDINATION-001.3`.
 
 ## Verification
 

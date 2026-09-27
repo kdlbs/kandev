@@ -2,7 +2,7 @@
 status: draft
 system: office
 requirements:
-  - REQ-OFFICE-PLUGIN-TARGETS-001
+  - REQ-OFFICE-AUTOMATION-TARGETS-001
 created: 2026-09-25
 owners:
   - kandev
@@ -14,7 +14,7 @@ owners:
 
 | Requirement                     | Design section                                |
 | ------------------------------- | --------------------------------------------- |
-| `REQ-OFFICE-PLUGIN-TARGETS-001` | [Destination contract](#destination-contract) |
+| `REQ-OFFICE-AUTOMATION-TARGETS-001` | [Destination contract](#destination-contract) |
 
 ## Purpose and boundaries
 
@@ -100,6 +100,6 @@ credentials in logs.
 
 ## Related documents
 
-- [Requirements](../requirements/plugin-conversation-targets.md)
+- [Requirements](../requirements/automation-target-modes.md)
 - [Implementation plan](../../../plans/plugin-coordinator-platform/plan.md)
 - [Coordination platform decision](../../../decisions/2026-09-25-plugin-coordination-platform.md)

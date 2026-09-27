@@ -2,8 +2,8 @@
 status: draft
 system: tasks
 requirements:
-  - REQ-TASKS-COORDINATION-001
-  - REQ-TASKS-COORDINATION-002
+  - REQ-TASKS-COMPLETION-003
+  - REQ-TASKS-COMPLETION-001
 created: 2026-09-25
 owners:
   - kandev
@@ -15,8 +15,8 @@ owners:
 
 | Requirement                  | Design section                          |
 | ---------------------------- | --------------------------------------- |
-| `REQ-TASKS-COORDINATION-001` | [Management claims](#management-claims) |
-| `REQ-TASKS-COORDINATION-002` | [Completion gates](#completion-gates)   |
+| `REQ-TASKS-COMPLETION-003` | [Management claims](#management-claims) |
+| `REQ-TASKS-COMPLETION-001` | [Completion gates](#completion-gates)   |
 
 ## Purpose and boundaries
 
@@ -118,6 +118,6 @@ blocked completions, and overrides. Metrics use reason/status only, not task IDs
 
 ## Related documents
 
-- [Requirements](../requirements/coordination-controls.md)
+- [Requirements](../requirements/task-completion.md)
 - [Implementation plan](../../../plans/plugin-coordinator-platform/plan.md)
 - [Coordination platform decision](../../../decisions/2026-09-25-plugin-coordination-platform.md)

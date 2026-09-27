@@ -4,19 +4,17 @@ title: "Reference adoption, evidence, writeback, and outcomes"
 status: complete
 wave: 17
 depends_on:
-  [
-    "09-task-claims",
-    "10-completion-gates",
-    "11-workspace-admin",
-    "12-source-writeback",
-    "15-reference-plugin",
-    "16-durable-policy",
-  ]
+  - "09-task-claims"
+  - "10-completion-gates"
+  - "11-workspace-admin"
+  - "12-source-writeback"
+  - "15-reference-plugin"
+  - "16-durable-policy"
 plan: "plan.md"
 requirements:
-  - REQ-PLUGINS-COORDINATION-011
+  - REQ-PLUGINS-MANAGED-COORDINATION-011
 acceptance_criteria:
-  - AC-PLUGINS-COORDINATION-011.3
+  - AC-PLUGINS-MANAGED-COORDINATION-011.3
 system_design:
   - ../../specs/plugins/system-design/managed-coordination.md
 ---
@@ -108,7 +106,7 @@ Phone: task detail > completion
 
 Show claims independently from the worker assignee. On phone, the manager and completion summaries share one compact toolbar below the fixed top bar; both 44px actions open their native bottom drawers. Desktop retains full detail rows and dialogs. An override requires a reason and targets one observed move. Stale evidence and an unavailable manager remain visible; no hidden automatic takeover.
 
-Applicable criteria: `AC-PLUGINS-COORDINATION-011.3`.
+Applicable criteria: `AC-PLUGINS-MANAGED-COORDINATION-011.3`.
 
 ## Verification
 

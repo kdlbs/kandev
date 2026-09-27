@@ -2,18 +2,18 @@
 status: draft
 system: plugins
 requirements:
-  - REQ-PLUGINS-COORDINATION-001
-  - REQ-PLUGINS-COORDINATION-002
-  - REQ-PLUGINS-COORDINATION-003
-  - REQ-PLUGINS-COORDINATION-004
-  - REQ-PLUGINS-COORDINATION-005
-  - REQ-PLUGINS-COORDINATION-006
-  - REQ-PLUGINS-COORDINATION-007
-  - REQ-PLUGINS-COORDINATION-008
-  - REQ-PLUGINS-COORDINATION-009
-  - REQ-PLUGINS-COORDINATION-010
-  - REQ-PLUGINS-COORDINATION-011
-  - REQ-PLUGINS-COORDINATION-012
+  - REQ-PLUGINS-MANAGED-COORDINATION-001
+  - REQ-PLUGINS-MANAGED-COORDINATION-002
+  - REQ-PLUGINS-MANAGED-COORDINATION-003
+  - REQ-PLUGINS-MANAGED-COORDINATION-004
+  - REQ-PLUGINS-MANAGED-COORDINATION-005
+  - REQ-PLUGINS-MANAGED-COORDINATION-006
+  - REQ-PLUGINS-MANAGED-COORDINATION-007
+  - REQ-PLUGINS-MANAGED-COORDINATION-008
+  - REQ-PLUGINS-MANAGED-COORDINATION-009
+  - REQ-PLUGINS-MANAGED-COORDINATION-010
+  - REQ-PLUGINS-MANAGED-COORDINATION-011
+  - REQ-PLUGINS-MANAGED-COORDINATION-012
 created: 2026-09-25
 owners:
   - kandev
@@ -25,18 +25,18 @@ owners:
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLUGINS-COORDINATION-001` | [Authority and exact commands](#authority-and-exact-commands) |
-| `REQ-PLUGINS-COORDINATION-002` | [Conversation lifecycle](#conversation-lifecycle) |
-| `REQ-PLUGINS-COORDINATION-003` | [Ordered input and recovery](#ordered-input-and-recovery) |
-| `REQ-PLUGINS-COORDINATION-004` | [Workspace observations](#workspace-observations) |
-| `REQ-PLUGINS-COORDINATION-005` | [Task commands and execution](#task-commands-and-execution) |
-| `REQ-PLUGINS-COORDINATION-006` | [Task commands and execution](#task-commands-and-execution) |
-| `REQ-PLUGINS-COORDINATION-007` | [Workspace administration and source writeback](#workspace-administration-and-source-writeback) |
-| `REQ-PLUGINS-COORDINATION-008` | [Workspace administration and source writeback](#workspace-administration-and-source-writeback) |
-| `REQ-PLUGINS-COORDINATION-009` | [Host UI](#host-ui) |
-| `REQ-PLUGINS-COORDINATION-010` | [Reference plugin](#reference-plugin) |
-| `REQ-PLUGINS-COORDINATION-011` | [Policy and reconciliation](#policy-and-reconciliation) |
-| `REQ-PLUGINS-COORDINATION-012` | [Independent consumers and compatibility](#independent-consumers-and-compatibility) |
+| `REQ-PLUGINS-MANAGED-COORDINATION-001` | [Authority and exact commands](#authority-and-exact-commands) |
+| `REQ-PLUGINS-MANAGED-COORDINATION-002` | [Conversation lifecycle](#conversation-lifecycle) |
+| `REQ-PLUGINS-MANAGED-COORDINATION-003` | [Ordered input and recovery](#ordered-input-and-recovery) |
+| `REQ-PLUGINS-MANAGED-COORDINATION-004` | [Workspace observations](#workspace-observations) |
+| `REQ-PLUGINS-MANAGED-COORDINATION-005` | [Task commands and execution](#task-commands-and-execution) |
+| `REQ-PLUGINS-MANAGED-COORDINATION-006` | [Task commands and execution](#task-commands-and-execution) |
+| `REQ-PLUGINS-MANAGED-COORDINATION-007` | [Workspace administration and source writeback](#workspace-administration-and-source-writeback) |
+| `REQ-PLUGINS-MANAGED-COORDINATION-008` | [Workspace administration and source writeback](#workspace-administration-and-source-writeback) |
+| `REQ-PLUGINS-MANAGED-COORDINATION-009` | [Host UI](#host-ui) |
+| `REQ-PLUGINS-MANAGED-COORDINATION-010` | [Reference plugin](#reference-plugin) |
+| `REQ-PLUGINS-MANAGED-COORDINATION-011` | [Policy and reconciliation](#policy-and-reconciliation) |
+| `REQ-PLUGINS-MANAGED-COORDINATION-012` | [Independent consumers and compatibility](#independent-consumers-and-compatibility) |
 
 ## Purpose and boundaries
 

@@ -209,4 +209,4 @@ visible task state.
 ## Proposed coordination extension
 
 A proposed managed-conversation destination stores a reference to shared conversation input. It does not acquire ownership of conversation cleanup.
-See the [draft coordination contract](plugin-conversation-targets.md).
+See the [managed-conversation destination design](plugin-conversation-targets.md).

@@ -6,11 +6,11 @@ wave: 6
 depends_on: ["01-exact-host-foundation"]
 plan: "plan.md"
 requirements:
-  - REQ-PLUGINS-COORDINATION-004
+  - REQ-PLUGINS-MANAGED-COORDINATION-004
 acceptance_criteria:
-  - AC-PLUGINS-COORDINATION-004.1
-  - AC-PLUGINS-COORDINATION-004.2
-  - AC-PLUGINS-COORDINATION-004.3
+  - AC-PLUGINS-MANAGED-COORDINATION-004.1
+  - AC-PLUGINS-MANAGED-COORDINATION-004.2
+  - AC-PLUGINS-MANAGED-COORDINATION-004.3
 system_design:
   - ../../specs/plugins/system-design/managed-coordination.md
 ---
