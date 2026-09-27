@@ -188,6 +188,97 @@ func TestDeleteCoordinator_RemovesRowAndProposals(t *testing.T) {
 	}
 }
 
+// TestSetConversationTaskID_CAS proves the compare-and-swap only replaces
+// conversation_task_id when the column currently holds exactly staleTaskID
+// (store.go's own doc comment), including the empty-vs-NULL case, and never
+// matches a NULL column against a non-empty staleTaskID it did not read
+// (docs/specs/coordinator/system-design/copilot.md#conversation-task step 4).
+func TestSetConversationTaskID_CAS(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("empty staleTaskID matches a NULL column", func(t *testing.T) {
+		store := newTestStore(t)
+		c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e"}
+		if err := store.CreateCoordinator(ctx, c); err != nil {
+			t.Fatalf("CreateCoordinator: %v", err)
+		}
+
+		ok, err := store.SetConversationTaskID(ctx, c.ID, "task-new", "")
+		if err != nil {
+			t.Fatalf("SetConversationTaskID: %v", err)
+		}
+		if !ok {
+			t.Fatal("SetConversationTaskID(staleTaskID=\"\") against a NULL column = false, want true")
+		}
+	})
+
+	t.Run("matching non-empty staleTaskID wins", func(t *testing.T) {
+		store := newTestStore(t)
+		taskID := "task-current"
+		c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e", ConversationTaskID: &taskID}
+		if err := store.CreateCoordinator(ctx, c); err != nil {
+			t.Fatalf("CreateCoordinator: %v", err)
+		}
+
+		ok, err := store.SetConversationTaskID(ctx, c.ID, "task-new", taskID)
+		if err != nil {
+			t.Fatalf("SetConversationTaskID: %v", err)
+		}
+		if !ok {
+			t.Fatal("SetConversationTaskID with a matching non-empty staleTaskID = false, want true")
+		}
+	})
+
+	t.Run("non-empty staleTaskID never matches a concurrently cleared NULL column", func(t *testing.T) {
+		store := newTestStore(t)
+		taskID := "task-current"
+		c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e", ConversationTaskID: &taskID}
+		if err := store.CreateCoordinator(ctx, c); err != nil {
+			t.Fatalf("CreateCoordinator: %v", err)
+		}
+		// Simulate a concurrent PatchCoordinator context/profile-change clear
+		// landing between the caller's stale read (staleTaskID="task-current")
+		// and this CAS call.
+		if _, err := store.db.ExecContext(ctx, store.db.Rebind(
+			`UPDATE coordinators SET conversation_task_id = NULL WHERE id = ?`), c.ID); err != nil {
+			t.Fatalf("simulate concurrent clear: %v", err)
+		}
+
+		ok, err := store.SetConversationTaskID(ctx, c.ID, "task-new", taskID)
+		if err != nil {
+			t.Fatalf("SetConversationTaskID: %v", err)
+		}
+		if ok {
+			t.Fatal("SetConversationTaskID with a non-empty staleTaskID against a concurrently cleared NULL column = true, want false")
+		}
+
+		got, err := store.GetCoordinator(ctx, "ws-1", c.ID)
+		if err != nil {
+			t.Fatalf("GetCoordinator: %v", err)
+		}
+		if got.ConversationTaskID != nil {
+			t.Fatalf("ConversationTaskID after refused CAS = %v, want nil (still cleared, not overwritten)", *got.ConversationTaskID)
+		}
+	})
+
+	t.Run("non-empty staleTaskID never matches a mismatched non-empty column", func(t *testing.T) {
+		store := newTestStore(t)
+		taskID := "task-current"
+		c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e", ConversationTaskID: &taskID}
+		if err := store.CreateCoordinator(ctx, c); err != nil {
+			t.Fatalf("CreateCoordinator: %v", err)
+		}
+
+		ok, err := store.SetConversationTaskID(ctx, c.ID, "task-new", "task-other")
+		if err != nil {
+			t.Fatalf("SetConversationTaskID: %v", err)
+		}
+		if ok {
+			t.Fatal("SetConversationTaskID with a mismatched non-empty staleTaskID = true, want false")
+		}
+	})
+}
+
 func TestDeleteCoordinator_UnknownOrRepeatedIsNotFound(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

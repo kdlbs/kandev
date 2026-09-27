@@ -222,8 +222,8 @@ func (s *Store) CoordinatorForConversationTask(ctx context.Context, taskID strin
 func (s *Store) SetConversationTaskID(ctx context.Context, coordinatorID, newTaskID, staleTaskID string) (bool, error) {
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinators SET conversation_task_id = ?
-		WHERE id = ? AND (conversation_task_id IS NULL OR conversation_task_id = ?)`),
-		newTaskID, coordinatorID, staleTaskID)
+		WHERE id = ? AND ((? = '' AND conversation_task_id IS NULL) OR conversation_task_id = ?)`),
+		newTaskID, coordinatorID, staleTaskID, staleTaskID)
 	if err != nil {
 		return false, fmt.Errorf("set conversation task id: %w", err)
 	}
