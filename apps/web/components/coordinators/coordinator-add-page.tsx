@@ -7,6 +7,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useRouter } from "@/lib/routing/client-router";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useCoordinators } from "@/hooks/domains/settings/use-coordinators";
+import { toast } from "@/lib/toast/sonner";
 import {
   buildCreateCoordinatorPayload,
   resolveDefaultAgentProfileId,
@@ -61,7 +62,11 @@ export function CoordinatorAddPage({ workspaceId }: CoordinatorAddPageProps) {
       const created = await create(buildCreateCoordinatorPayload(form));
       router.replace(`/settings/workspaces/${workspaceId}/coordinators/${created.id}`);
     } catch (error) {
-      setFieldError(coordinatorFieldError(error));
+      const nextFieldError = coordinatorFieldError(error);
+      setFieldError(nextFieldError);
+      if (!nextFieldError) {
+        toast.error(t("coordinator:failedToAddCoordinator"));
+      }
     } finally {
       setSaving(false);
     }

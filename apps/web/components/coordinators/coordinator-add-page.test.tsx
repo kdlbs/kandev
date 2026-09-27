@@ -9,6 +9,7 @@ import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 const mockUseCoordinators = vi.fn();
 const mockPush = vi.fn();
 const mockReplace = vi.fn();
+const mockToastError = vi.fn();
 
 vi.mock("@/hooks/domains/settings/use-coordinators", () => ({
   useCoordinators: (...args: unknown[]) => mockUseCoordinators(...args),
@@ -18,6 +19,9 @@ vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
 }));
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mockPush, replace: mockReplace }),
+}));
+vi.mock("@/lib/toast/sonner", () => ({
+  toast: { error: (...args: unknown[]) => mockToastError(...args), success: vi.fn() },
 }));
 
 type StoreState = {
@@ -214,5 +218,19 @@ describe("CoordinatorAddPage", () => {
     );
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Planner");
     expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("toasts and leaves the form usable on a non-400 create failure (network/server error)", async () => {
+    const create = vi.fn().mockRejectedValue(new Error("network down"));
+    setup({ defaultAgentProfileId: "agent-1", defaultExecutorId: "exec-1", create });
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Planner" } });
+    const addButton = screen.getByTestId(ADD_BUTTON_TESTID) as HTMLButtonElement;
+    fireEvent.click(addButton);
+
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(mockToastError).toHaveBeenCalled();
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(addButton.disabled).toBe(false);
   });
 });
