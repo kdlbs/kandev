@@ -3,6 +3,7 @@ import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 test.describe("mobile: bulk session removal", () => {
   test("removes other conversations, then all, through the hosted Sessions sheet", async ({
@@ -66,6 +67,17 @@ test.describe("mobile: bulk session removal", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "mobile bulk session removal");
     await confirmation.getByRole("button", { name: "Cancel" }).tap();
     expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(3);
+
+    // The phone layout continues to 767px, beyond the global menu sizing rule.
+    await testPage.setViewportSize({ width: 700, height: 900 });
+    await primaryActions.click();
+    const removeOthers = testPage.getByRole("menuitem", { name: "Remove Others" });
+    const removeAll = testPage.getByRole("menuitem", { name: "Remove All" });
+    await waitForFiniteAnimations(removeOthers.locator('xpath=ancestor::*[@role="menu"][1]'));
+    expect((await removeOthers.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await removeAll.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await testPage.keyboard.press("Escape");
+    await testPage.setViewportSize({ width: 393, height: 851 });
 
     await primaryActions.click();
     await testPage.getByRole("menuitem", { name: "Remove Others" }).tap();

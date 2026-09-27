@@ -11,13 +11,13 @@ export function MobileBulkSessionMenuItems({
     <>
       <DropdownMenuSeparator />
       <DropdownMenuItem
-        className="cursor-pointer text-destructive focus:text-destructive"
+        className="cursor-pointer text-destructive focus:text-destructive max-md:min-h-[max(44px,2.75rem)] [@media(pointer:coarse)]:min-h-[max(44px,2.75rem)]"
         onSelect={() => onRemoveScope("others")}
       >
         {t("task:removeOthers")}
       </DropdownMenuItem>
       <DropdownMenuItem
-        className="cursor-pointer text-destructive focus:text-destructive"
+        className="cursor-pointer text-destructive focus:text-destructive max-md:min-h-[max(44px,2.75rem)] [@media(pointer:coarse)]:min-h-[max(44px,2.75rem)]"
         onSelect={() => onRemoveScope("all")}
       >
         {t("task:removeAll")}
