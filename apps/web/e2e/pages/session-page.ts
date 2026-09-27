@@ -1026,7 +1026,6 @@ export class SessionPage {
       await button.dispatchEvent("mouseenter", { bubbles: false });
       await button.dispatchEvent("mousemove", { bubbles: true });
       await expect(this.prTopbarPopover()).toBeVisible({ timeout: 1_500 });
-      await button.blur();
     }).toPass({ timeout: 10_000 });
   }
 
