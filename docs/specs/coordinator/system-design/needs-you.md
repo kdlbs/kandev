@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-27
 requirements:
   - REQ-COORDINATOR-NEEDS-YOU-001
   - REQ-COORDINATOR-NEEDS-YOU-002
@@ -64,8 +64,19 @@ and task state; this design consumes them and adds no task field.
   last_event_at, detected_at}]}` ordered by `task_id`. Re-read on each screen
   mount, on **Try again** and on the `task.stalled`-driven
   `coordinator.updated` event (below).
-- **Proposals:** the proposal store of [proposals](proposals.md), fed by
-  `GET .../coordinators/:cid/proposals?status=pending`.
+- **Proposals:** `GET .../coordinators/:cid/proposals?status=pending` through
+  `listProposals` in `apps/web/lib/api/domains/coordinator-api.ts`. Until the
+  proposal store of [proposals](proposals.md)
+  (`hooks/domains/coordinator/use-proposals.ts`) exists, the screens read it
+  through the screen-level inputs hook below; once that store exists, the
+  proposals input is read from it and the hook's own proposals read is
+  removed.
+- **Screen inputs hook:** `apps/web/app/coordinator/use-coordinator-inputs.ts`
+  holds the stall records and pending proposals for the viewed coordinator,
+  each as `{value, loadedAt, error}`: `value` is the last successful response
+  (absent before the first success), `loadedAt` its receive time, and `error`
+  is set while the latest read of that input failed. It never holds tasks,
+  which stay in `kanbanMulti.snapshots`.
 
 ## Classification
 
@@ -117,7 +128,8 @@ Item reference time: proposal `created_at`; stall `last_event_at`; otherwise
 by reference time ascending, then kind rank (proposal 0, question 1, stall 2,
 error 3), then id by code-unit comparison. Queue groups sort by
 `last_activity_at` descending with absent values last, then task id
-ascending. Age is rendered from `now`, re-evaluated every 30 seconds by the
+ascending by the same code-unit comparison (`a < b` on the strings, never
+`localeCompare`). Age is rendered from `now`, re-evaluated every 30 seconds by the
 screen's timer.
 
 The error why-text is "The agent reported an error: " plus
@@ -162,7 +174,13 @@ stall episode replaces the row; an event with an equal or earlier
 nothing, so detection time never moves forward for an episode already
 recorded and a late event never overwrites a newer one. Only when a row was
 inserted or updated (one affected row) does it publish `coordinator.updated`
-for each coordinator of the workspace, so open screens re-read stalls. `detection_only` is ignored: main publishes it as
+for each coordinator of the workspace, so open screens re-read stalls. A
+publish that returns an error is logged at warn with the task, workspace and
+coordinator ids, and the subscriber continues with the next coordinator. The
+row stays written and nothing is retried: a redelivered event changes nothing
+by design, so an open screen shows the stall on its next stalls read (screen
+mount, **Try again**, or any later `coordinator.updated` for that
+coordinator). `detection_only` is ignored: main publishes it as
 `true` on every event, and recording never acts. A payload that fails to parse
 is logged at warn and dropped.
 
@@ -177,8 +195,14 @@ with `detected_at` older than 30 days. There is no timer.
   flag-gated resolver modelled on `resolveNeedsYouInboxRoute`; the pages live in
   `apps/web/app/coordinator/`.
 - The generic route redirects to the first coordinator by the list order, or
-  renders the no-coordinator state. An unknown id renders the same state with a
-  link to the settings list.
+  renders the no-coordinator state. An unknown id renders the no-coordinator
+  state when the workspace has no coordinator, and otherwise the
+  unknown-coordinator state ("This coordinator is not in this workspace.",
+  **See coordinators** linking to `/settings/workspaces/:id/coordinators`, no
+  strip, no list, no **Add a coordinator**). While the coordinator list has not
+  loaded, neither state renders; if its read fails, the route shows "Could not
+  load coordinators." with **Try again**, which re-reads the list
+  (`listCoordinators`). The sidebar entries are unaffected.
 - `components/app-sidebar/app-sidebar-primary-nav.tsx` renders the entries
   inside `AppSidebarFixedNav` after the Inbox row and before the
   collapsed-sidebar Quick Chat row (so before New Task), using
@@ -202,12 +226,17 @@ with `detected_at` older than 30 days. There is no timer.
 
 ## Failure and recovery
 
-Each input keeps its last successful value with its load time. A failed read
-after a successful one shows "Could not load this workspace's tasks. Showing
-what was loaded at <time>." with the oldest load time among the failed inputs.
-A failed first load (no successful value yet for that input) shows "Could not
-load this workspace's tasks." with no time; the lists render from the inputs
-that did load. **Try again** re-issues only the failed reads.
+Each input keeps its last successful value with its load time: tasks through
+`workspaceContextRead` (below), stall records and proposals through
+`use-coordinator-inputs.ts`. One banner shows one line per failed input, in
+the order tasks, stall records, proposals, each with that input's own load
+time (`AC-COORDINATOR-NEEDS-YOU-007.3`), or the timeless sentence when that
+input has never loaded (`AC-COORDINATOR-NEEDS-YOU-007.5`). Times render as
+local `HH:mm`. The lists render from the inputs that did load: a never-loaded
+stall input classifies with no stall rows, a never-loaded proposals input with
+no proposal items. **Try again** re-issues only the failed reads, in parallel;
+each input clears its line when its own read succeeds. A read that fails again
+keeps the previous `value` and `loadedAt`.
 
 The tasks input is read per workflow by `useAllWorkflowSnapshots`, which
 reports one result per workspace refresh through `setWorkspaceSnapshotRead`

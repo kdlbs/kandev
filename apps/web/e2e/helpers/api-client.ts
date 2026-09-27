@@ -17,6 +17,11 @@ import type {
   WorkflowAgentOverrides,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
+import type {
+  Coordinator,
+  CoordinatorListResponse,
+  CreateCoordinatorRequest,
+} from "../../lib/api/domains/coordinator-api";
 import type { SidebarTaskColorAutomation } from "../../lib/task-color-automation-settings";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
 import type {
@@ -516,6 +521,19 @@ export class ApiClient {
 
   async listWorkspaces(): Promise<{ workspaces: Workspace[]; total: number }> {
     return this.request("GET", "/api/v1/workspaces");
+  }
+
+  // --- Coordinator (docs/specs/coordinator/) ---
+
+  async createCoordinator(
+    workspaceId: string,
+    req: CreateCoordinatorRequest,
+  ): Promise<Coordinator> {
+    return this.request("POST", `/api/v1/workspaces/${workspaceId}/coordinators`, req);
+  }
+
+  async listCoordinators(workspaceId: string): Promise<CoordinatorListResponse> {
+    return this.request("GET", `/api/v1/workspaces/${workspaceId}/coordinators`);
   }
 
   async createWorkflow(workspaceId: string, name: string, templateId?: string): Promise<Workflow> {

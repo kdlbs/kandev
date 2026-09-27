@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-26
+last_updated: 2026-09-27
 ---
 
 # Needs you and Queue Requirements
@@ -159,7 +159,7 @@ Mockup:
   Ready to merge expanded, then Done and Other collapsed, each with its count.
 - **AC-COORDINATOR-NEEDS-YOU-004.2:** Within a group, rows shall be ordered by
   last activity time descending, rows without one last, then by task id
-  ascending.
+  ascending, compared bytewise as in `AC-COORDINATOR-NEEDS-YOU-002.4`.
 - **AC-COORDINATOR-NEEDS-YOU-004.3:** A Working row shall show the card, step,
   agent state and last activity. When a task's session is unreadable (its
   status summary is absent, or it has a primary session with no state), the
@@ -226,8 +226,14 @@ Mockup:
 - **AC-COORDINATOR-NEEDS-YOU-006.4:** `/workspaces/:id/coordinator/:coordinatorId`
   shall open Needs you and `/workspaces/:id/coordinator/:coordinatorId/queue`
   Queue; `/workspaces/:id/coordinator` shall open the first coordinator's Needs
-  you, or the no-coordinator state when there is none; an unknown coordinator
-  id shall show the no-coordinator state with a link to the list.
+  you, or the no-coordinator state when there is none. An unknown coordinator
+  id in a workspace with no coordinator shall show the no-coordinator state.
+  An unknown coordinator id in a workspace with at least one coordinator shall
+  say "This coordinator is not in this workspace." with a **See coordinators**
+  link to the workspace's coordinator list in settings, and shall show no count
+  strip, no list and no **Add a coordinator** action. When the workspace's
+  coordinator list cannot be read, the coordinator routes shall say "Could not
+  load coordinators." and offer **Try again**, which re-reads the list.
 - **AC-COORDINATOR-NEEDS-YOU-006.5:** The header shall show the coordinator's
   name, or a selector of the workspace's coordinators when there are several,
   and a **Configure** action to its settings page for managers.
@@ -247,16 +253,24 @@ Mockup:
   see **Add a coordinator**, which opens the add page.
 - **AC-COORDINATOR-NEEDS-YOU-007.3:** When loading tasks, stall records or
   proposals fails after an earlier successful load, the screens shall keep
-  what was loaded, say "Could not load this workspace's tasks. Showing what
-  was loaded at <time>." and offer **Try again**, which retries the failed
-  read only. Tasks load per workflow: when any workflow's tasks fail to load,
+  what was loaded and show one banner with one line per failed input, each
+  with that input's own last load time: tasks: "Could not load this
+  workspace's tasks. Showing what was loaded at <time>."; stall records:
+  "Could not load stall records. Showing what was loaded at <time>.";
+  proposals: "Could not load proposals. Showing what was loaded at <time>.".
+  The banner shall offer one **Try again**, which retries the failed reads
+  only. Tasks load per workflow: when any workflow's tasks fail to load,
   the tasks input has failed, the lists and counts shall be built from the
   tasks of every workflow that has loaded, and **Try again** shall retry only
   the workflows that failed.
 - **AC-COORDINATOR-NEEDS-YOU-007.5:** When a first load fails (nothing was
-  loaded yet for that input), the screens shall say "Could not load this
-  workspace's tasks." with no time and offer **Try again**; when no workflow's
-  tasks have ever loaded, no list and no count strip shall be shown.
+  loaded yet for that input), that input's banner line shall be the same
+  sentence without the "Showing what was loaded" part ("Could not load this
+  workspace's tasks.", "Could not load stall records." or "Could not load
+  proposals.") and the banner shall offer **Try again**. When no workflow's
+  tasks have ever loaded, no list and no count strip shall be shown. When only
+  stall records or proposals have never loaded, the lists and the strip shall
+  be built from the tasks with no stall records or no proposals respectively.
 - **AC-COORDINATOR-NEEDS-YOU-007.4:** When the coordinator's session cannot
   start or resume, both lists shall keep working.
 

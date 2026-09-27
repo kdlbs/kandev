@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -136,9 +137,48 @@ func registerCoordinatorConversation(router *gin.Engine, _ bus.EventBus, svc *co
 }
 
 // registerCoordinatorSubscribers is task 04's named registration function
-// (Build decision 14). No-op until that work package lands.
-func registerCoordinatorSubscribers(_ *gin.Engine, _ bus.EventBus, _ *coordinator.Service, _ *logger.Logger) func(context.Context, time.Time) {
-	return func(context.Context, time.Time) {}
+// (Build decision 14). It subscribes the coordinator package to task.stalled
+// and workspace.deleted as soon as it is called (before the background pass
+// runs), and returns a hook that prunes stall records once the startup pass
+// reaches it and releases both subscriptions when the app context ends
+// (docs/specs/coordinator/system-design/needs-you.md#stall-records,
+// coordinators.md#workspace-deletion).
+func registerCoordinatorSubscribers(_ *gin.Engine, eventBus bus.EventBus, svc *coordinator.Service, log *logger.Logger) func(context.Context, time.Time) {
+	if eventBus == nil || svc == nil {
+		return func(context.Context, time.Time) {}
+	}
+
+	var subs []bus.Subscription
+	if sub, err := coordinator.SubscribeTaskStalled(eventBus, svc, log); err != nil {
+		log.Error("failed to subscribe coordinator to task.stalled", zap.Error(err))
+	} else {
+		subs = append(subs, sub)
+	}
+	if sub, err := coordinator.SubscribeWorkspaceDeleted(eventBus, svc, log); err != nil {
+		log.Error("failed to subscribe coordinator to workspace.deleted", zap.Error(err))
+	} else {
+		subs = append(subs, sub)
+	}
+
+	return func(ctx context.Context, _ time.Time) {
+		go func() {
+			<-ctx.Done()
+			for _, sub := range subs {
+				if sub.IsValid() {
+					_ = sub.Unsubscribe()
+				}
+			}
+		}()
+
+		pruned, err := svc.PruneStalls(ctx, time.Now().UTC())
+		if err != nil {
+			log.Warn("coordinator stall pruning failed", zap.Error(err))
+			return
+		}
+		if pruned > 0 {
+			log.Info("coordinator stall pruning complete", zap.Int64("pruned", pruned))
+		}
+	}
 }
 
 // registerCoordinatorDecisions is task 07's named registration function
