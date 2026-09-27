@@ -54,6 +54,33 @@ func TestPluginExecutorAdmission(t *testing.T) {
 	}
 }
 
+func TestPluginExecutorDispatchRejectsWhenProcessIsNotRunning(t *testing.T) {
+	service, _, _ := newTestService(t)
+	record := &store.Record{
+		Manifest: manifest.Manifest{
+			ID:           "example-provider",
+			Capabilities: manifest.Capabilities{ExecutorProvider: true},
+			ExecutorProviders: []manifest.ExecutorProvider{{
+				Key:             "lambda",
+				ContractVersion: manifest.CurrentExecutorProviderContractVersion,
+			}},
+		},
+		Status: StatusActive,
+	}
+	service.registry.Add(record)
+	called := false
+	err := service.withExecutorProvider(context.Background(), record.ID, "lambda", func(context.Context, *pluginsdk.RemotePlugin, *manifest.ExecutorProvider) error {
+		called = true
+		return nil
+	})
+	if !errors.Is(err, ErrExecutorProviderUnavailable) {
+		t.Fatalf("withExecutorProvider() error = %v, want unavailable", err)
+	}
+	if called {
+		t.Fatal("provider callback ran without an active plugin process")
+	}
+}
+
 func TestPluginExecutorContractProbeRequiresCompleteProvider(t *testing.T) {
 	record := &store.Record{
 		Manifest: manifest.Manifest{

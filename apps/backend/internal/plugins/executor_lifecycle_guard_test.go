@@ -208,8 +208,8 @@ func TestPluginExecutorRetainedResourceBlocksUninstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
-	if err := service.Uninstall(context.Background(), installed.ID); err == nil {
-		t.Fatal("Uninstall() succeeded while cleanup inventory was retained")
+	if err := service.Uninstall(context.Background(), installed.ID); err == nil || !strings.Contains(err.Error(), "normal task cleanup") {
+		t.Fatalf("Uninstall() error = %v; want retained-resource cleanup guidance", err)
 	}
 	if !runtime.Running(installed.ID) {
 		t.Fatal("retention guard stopped the provider before rejecting uninstall")
