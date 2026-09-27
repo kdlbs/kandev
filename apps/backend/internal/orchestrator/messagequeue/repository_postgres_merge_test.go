@@ -15,6 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/testutil"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
 
 // newTestPostgresRepo opens an isolated Postgres schema (skipping unless
@@ -31,6 +32,99 @@ func newTestPostgresRepo(t *testing.T) Repository {
 		t.Fatalf("NewSQLiteRepository(postgres): %v", err)
 	}
 	return repo
+}
+
+func TestPostgresRepository_ReplaceSessionRejectsSnapshotAfterTerminalSettlement(t *testing.T) {
+	base := newTestPostgresRepo(t).(*sqliteRepository)
+	ctx := context.Background()
+	_, err := base.db.Exec(`
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			workflow_step_id TEXT NOT NULL,
+			state TEXT NOT NULL,
+			archived_at TIMESTAMP NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE task_sessions (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			queue_incarnation_id TEXT NOT NULL DEFAULT ''
+		);
+		INSERT INTO tasks VALUES ('task-route', 'step-done', 'COMPLETED', NULL, CURRENT_TIMESTAMP);
+		INSERT INTO task_sessions (id, task_id, queue_incarnation_id)
+		VALUES ('session-route', 'task-route', 'route-incarnation');
+	`)
+	if err != nil {
+		t.Fatalf("create terminal task: %v", err)
+	}
+	repo, err := NewSQLiteRepository(base.db, base.db)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository(postgres with tasks): %v", err)
+	}
+
+	err = repo.ReplaceSession(ctx, "session-route", nil, &PendingMove{
+		ID:                     "old-row-generation",
+		MoveID:                 "stable-route-operation",
+		TaskID:                 "task-route",
+		WorkflowStepID:         "step-done",
+		ExpectedWorkflowStepID: "step-review",
+	})
+	if !errors.Is(err, ErrTaskInactive) {
+		t.Fatalf("ReplaceSession error = %v, want ErrTaskInactive", err)
+	}
+	pending, err := repo.GetPendingMove(ctx, "session-route")
+	if err != nil {
+		t.Fatalf("get pending move: %v", err)
+	}
+	if pending != nil {
+		t.Fatalf("terminal settlement restored pending move: %+v", pending)
+	}
+}
+
+func TestPostgresRepository_ReplaceSessionRestoresPendingMoveEntryOptions(t *testing.T) {
+	base := newTestPostgresRepo(t).(*sqliteRepository)
+	ctx := context.Background()
+	_, err := base.db.Exec(`
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			workflow_step_id TEXT NOT NULL,
+			state TEXT NOT NULL,
+			archived_at TIMESTAMP NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE task_sessions (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			queue_incarnation_id TEXT NOT NULL DEFAULT ''
+		);
+		INSERT INTO tasks VALUES ('task-options', 'step-source', 'IN_PROGRESS', NULL, CURRENT_TIMESTAMP);
+		INSERT INTO task_sessions (id, task_id, queue_incarnation_id)
+		VALUES ('session-options', 'task-options', 'options-incarnation');
+	`)
+	if err != nil {
+		t.Fatalf("create active task: %v", err)
+	}
+	repo, err := NewSQLiteRepository(base.db, base.db)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository(postgres with tasks): %v", err)
+	}
+
+	options := &workflowmove.EntryOptions{ResetContext: true, Instructions: "continue", SkipStepPrompt: true}
+	if err := repo.ReplaceSession(ctx, "session-options", nil, &PendingMove{
+		MoveID: "restore-options", TaskID: "task-options", WorkflowStepID: "step-target",
+		EntryOptions: options,
+	}); err != nil {
+		t.Fatalf("replace session: %v", err)
+	}
+	restored, err := repo.GetPendingMove(ctx, "session-options")
+	if err != nil {
+		t.Fatalf("get restored pending move: %v", err)
+	}
+	if restored == nil || restored.EntryOptions == nil ||
+		!restored.EntryOptions.ResetContext || restored.EntryOptions.Instructions != "continue" ||
+		!restored.EntryOptions.SkipStepPrompt {
+		t.Fatalf("restored entry options = %#v, want complete one-shot overrides", restored)
+	}
 }
 
 // TestPostgresRepository_MergeDrainOrdering_DrainWins asserts the drain-wins

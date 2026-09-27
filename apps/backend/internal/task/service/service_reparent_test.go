@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // reparentFixture spins up a service with a workspace + workflow and returns
@@ -40,6 +42,29 @@ func reparentFixture(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Reposit
 }
 
 func strptr(s string) *string { return &s }
+
+type reparentWriteBarrierRepository struct {
+	*sqliterepo.Repository
+	beforeWrite chan struct{}
+	release     chan struct{}
+	once        sync.Once
+}
+
+func (r *reparentWriteBarrierRepository) UpdateTaskPreservingDeferredLaunch(
+	ctx context.Context, task *models.Task,
+) error {
+	r.once.Do(func() { r.beforeWrite <- struct{}{} })
+	<-r.release
+	return r.Repository.UpdateTaskPreservingDeferredLaunch(ctx, task)
+}
+
+func (r *reparentWriteBarrierRepository) UpdateTaskWithParentPreservingConcurrentFields(
+	ctx context.Context, task *models.Task, preserveTitle, preserveState, preservePosition bool,
+) error {
+	r.once.Do(func() { r.beforeWrite <- struct{}{} })
+	<-r.release
+	return r.Repository.UpdateTaskWithParentPreservingConcurrentFields(ctx, task, preserveTitle, preserveState, preservePosition)
+}
 
 func TestService_UpdateTask_NestsUnderParent(t *testing.T) {
 	svc, eventBus, _, create := reparentFixture(t)
@@ -78,6 +103,89 @@ func TestService_UpdateTask_NestsUnderParent(t *testing.T) {
 	}
 	if data["parent_id"] != parent.ID {
 		t.Errorf("event parent_id = %v, want %q", data["parent_id"], parent.ID)
+	}
+}
+
+func TestService_UpdateTask_ReparentWithDescriptionPreservesLaterTitleAndState(t *testing.T) {
+	svc, _, repo, create := reparentFixture(t)
+	ctx := context.Background()
+	oldParent := create("Old parent")
+	newParent := create("New parent")
+	child := create("Child")
+	if _, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: strptr(oldParent.ID)}); err != nil {
+		t.Fatalf("nest child: %v", err)
+	}
+	barrier := &reparentWriteBarrierRepository{
+		Repository: repo, beforeWrite: make(chan struct{}, 1), release: make(chan struct{}),
+	}
+	svc.tasks = barrier
+	position := 17
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{
+			ParentID:    strptr(newParent.ID),
+			Description: strptr("description written with reparent"),
+			Position:    &position,
+		})
+		result <- err
+	}()
+	<-barrier.beforeWrite
+
+	live, err := repo.GetTask(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetTask(live): %v", err)
+	}
+	live.Title = "Title written after reparent snapshot"
+	live.State = "DONE"
+	if err := repo.UpdateTask(ctx, live); err != nil {
+		t.Fatalf("UpdateTask(live): %v", err)
+	}
+	close(barrier.release)
+	if err := <-result; err != nil {
+		t.Fatalf("UpdateTask(reparent): %v", err)
+	}
+
+	got, err := repo.GetTask(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetTask(after reparent): %v", err)
+	}
+	if got.ParentID != newParent.ID {
+		t.Errorf("ParentID = %q, want %q", got.ParentID, newParent.ID)
+	}
+	if got.Description != "description written with reparent" {
+		t.Errorf("Description = %q, want reparent description", got.Description)
+	}
+	if got.Title != "Title written after reparent snapshot" {
+		t.Errorf("Title = %q, want later title", got.Title)
+	}
+	if got.State != "DONE" {
+		t.Errorf("State = %q, want later state", got.State)
+	}
+	if got.Position != position {
+		t.Errorf("Position = %d, want requested %d", got.Position, position)
+	}
+}
+
+func TestService_UpdateTask_ReparentWritesRequestedTitleAndState(t *testing.T) {
+	svc, _, _, create := reparentFixture(t)
+	ctx := context.Background()
+	parent := create("Parent")
+	child := create("Child")
+	title := "Title written with reparent"
+	state := v1.TaskState("DONE")
+
+	updated, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{
+		ParentID: strptr(parent.ID), Title: &title, State: &state,
+	})
+	if err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+	if updated.Title != title {
+		t.Errorf("Title = %q, want %q", updated.Title, title)
+	}
+	if updated.State != state {
+		t.Errorf("State = %q, want %q", updated.State, state)
 	}
 }
 

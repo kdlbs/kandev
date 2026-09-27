@@ -17,7 +17,7 @@ func cloneTaskMetadata(metadata map[string]interface{}) map[string]interface{} {
 	return cloned
 }
 
-// keeping server-managed deferred-launch, step-handoff, task-handoff, and
+// keeping server-managed terminal retention, deferred-launch, step-handoff, task-handoff, and
 // task-boundary causation records owned by the server. The HTTP PATCH surface
 // may replace ordinary metadata, but it cannot create, replace, or remove
 // these records. It cannot set, reset, or lower the causation carrier: any
@@ -27,6 +27,10 @@ func protectedTaskMetadataUpdate(existing, requested map[string]interface{}) map
 	updated := cloneTaskMetadata(requested)
 	if updated == nil {
 		updated = make(map[string]interface{})
+	}
+	delete(updated, models.MetaKeyTerminalRetention)
+	if held, ok := existing[models.MetaKeyTerminalRetention]; ok {
+		updated[models.MetaKeyTerminalRetention] = held
 	}
 	models.StripOfficeCarrierMetadata(updated)
 	models.RestoreOfficeCarrierMetadata(updated, existing)
@@ -59,6 +63,7 @@ func protectedTaskMetadataUpdate(existing, requested map[string]interface{}) map
 // separate trusted request field and are never accepted from Metadata.
 func protectedTaskMetadataForCreate(metadata map[string]interface{}, trustedHandoff bool) map[string]interface{} {
 	created := cloneTaskMetadata(metadata)
+	delete(created, models.MetaKeyTerminalRetention)
 	models.StripOfficeCarrierMetadata(created)
 	delete(created, models.MetaKeyDeferredLaunch)
 	delete(created, models.MetaKeyStepHandoffCarry)

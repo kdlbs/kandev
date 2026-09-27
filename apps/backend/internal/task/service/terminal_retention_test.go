@@ -1,0 +1,222 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
+)
+
+func TestTerminalRetentionPreventsArchiveCleanupUntilCleared(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	workspace, err := repo.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	const stepID = "step-terminal-retention"
+	if _, err := repo.DB().ExecContext(ctx, `
+		INSERT INTO workflow_steps (id, workflow_id, name, position, auto_archive_after_hours, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, stepID, workspace.OfficeWorkflowID, "Done", 0, 1, now, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"held-task", "ordinary-task"} {
+		if err := repo.CreateTask(ctx, &models.Task{
+			ID: id, WorkspaceID: workspace.ID, WorkflowID: workspace.OfficeWorkflowID,
+			WorkflowStepID: stepID, Title: id,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	held := true
+	if _, err := svc.UpdateTask(ctx, "held-task", &UpdateTaskRequest{TerminalRetention: &held}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.DB().ExecContext(ctx,
+		`UPDATE tasks SET updated_at = ? WHERE id IN (?, ?)`, now.Add(-48*time.Hour), "held-task", "ordinary-task"); err != nil {
+		t.Fatal(err)
+	}
+	handoff := NewHandoffService(repo, repo, nil, nil, nil, nil)
+	handoff.SetTaskResourceCleaner(svc)
+	svc.SetAutoArchiveCoordinator(handoff)
+	svc.runAutoArchive(ctx)
+	for id, wantArchived := range map[string]bool{"held-task": false, "ordinary-task": true} {
+		task, err := repo.GetTask(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (task.ArchivedAt != nil) != wantArchived {
+			t.Fatalf("%s archived = %v, want %v", id, task.ArchivedAt != nil, wantArchived)
+		}
+	}
+	if err := svc.ArchiveTask(ctx, "held-task"); !errors.Is(err, ErrTaskArchiveHeld) {
+		t.Fatalf("direct archive error = %v, want retention hold", err)
+	}
+	if _, err := handoff.ArchiveTaskTree(ctx, "held-task", false); !errors.Is(err, ErrTaskArchiveHeld) {
+		t.Fatalf("cascade archive error = %v, want retention hold", err)
+	}
+	held = false
+	if _, err := svc.UpdateTask(ctx, "held-task", &UpdateTaskRequest{TerminalRetention: &held}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ArchiveTask(ctx, "held-task"); err != nil {
+		t.Fatalf("archive after clearing hold: %v", err)
+	}
+}
+
+func TestTerminalRetentionCannotBeChangedThroughOrdinaryMetadata(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	workspace, err := repo.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const taskID = "metadata-retention-task"
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: taskID, WorkspaceID: workspace.ID, WorkflowID: workspace.OfficeWorkflowID, Title: "Task",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	metadata := map[string]interface{}{models.MetaKeyTerminalRetention: true, "ordinary": "kept"}
+	updated, err := svc.UpdateTask(ctx, taskID, &UpdateTaskRequest{Metadata: metadata})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if models.IsTerminalRetentionHeld(updated.Metadata) || updated.Metadata["ordinary"] != "kept" {
+		t.Fatalf("replacement metadata = %v, want ordinary key without retention hold", updated.Metadata)
+	}
+	updated, err = svc.UpdateTaskMetadata(ctx, taskID, metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if models.IsTerminalRetentionHeld(updated.Metadata) {
+		t.Fatalf("merged metadata created retention hold: %v", updated.Metadata)
+	}
+	held := true
+	updated, err = svc.UpdateTask(ctx, taskID, &UpdateTaskRequest{TerminalRetention: &held})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !models.IsTerminalRetentionHeld(updated.Metadata) {
+		t.Fatal("scoped retention update did not set hold")
+	}
+	updated, err = svc.UpdateTask(ctx, taskID, &UpdateTaskRequest{Metadata: map[string]interface{}{
+		models.MetaKeyTerminalRetention: false,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !models.IsTerminalRetentionHeld(updated.Metadata) {
+		t.Fatalf("replacement metadata cleared retention hold: %v", updated.Metadata)
+	}
+	updated, err = svc.UpdateTaskMetadata(ctx, taskID, map[string]interface{}{models.MetaKeyTerminalRetention: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !models.IsTerminalRetentionHeld(updated.Metadata) {
+		t.Fatalf("merged metadata cleared retention hold: %v", updated.Metadata)
+	}
+}
+
+func TestTerminalRetentionCannotBeSeededByTaskMetadata(t *testing.T) {
+	created := protectedTaskMetadataForCreate(map[string]interface{}{
+		models.MetaKeyTerminalRetention: true, "ordinary": "kept",
+	}, false)
+	if models.IsTerminalRetentionHeld(created) || created["ordinary"] != "kept" {
+		t.Fatalf("created metadata = %v, want ordinary key without retention hold", created)
+	}
+}
+
+func TestHeldChildPreventsParentCascadeArchive(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	workspace, err := repo.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range []*models.Task{
+		{ID: "retention-parent", WorkspaceID: workspace.ID, WorkflowID: workspace.OfficeWorkflowID, Title: "Parent"},
+		{ID: "retention-child", WorkspaceID: workspace.ID, WorkflowID: workspace.OfficeWorkflowID, ParentID: "retention-parent", Title: "Child"},
+	} {
+		if err := repo.CreateTask(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	held := true
+	if _, err := svc.UpdateTask(ctx, "retention-child", &UpdateTaskRequest{TerminalRetention: &held}); err != nil {
+		t.Fatal(err)
+	}
+	handoff := NewHandoffService(repo, repo, nil, nil, nil, nil)
+	if _, err := handoff.ArchiveTaskTree(ctx, "retention-parent", true); !errors.Is(err, ErrTaskArchiveHeld) {
+		t.Fatalf("cascade archive error = %v, want retention hold", err)
+	}
+	for _, id := range []string{"retention-parent", "retention-child"} {
+		task, err := repo.GetTask(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task.ArchivedAt != nil {
+			t.Fatalf("%s archived despite held child", id)
+		}
+	}
+}
+
+func TestTerminalRetentionAddedAfterArchivePreflightPreventsArchive(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	workspace, err := repo.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const taskID = "archive-hold-race"
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: taskID, WorkspaceID: workspace.ID, WorkflowID: workspace.OfficeWorkflowID, Title: taskID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc.tasks = holdBeforeArchiveRepository{TaskRepository: repo, taskID: taskID}
+
+	err = svc.ArchiveTask(ctx, taskID)
+	if !errors.Is(err, ErrTaskArchiveHeld) {
+		t.Fatalf("ArchiveTask error = %v, want terminal retention hold", err)
+	}
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.ArchivedAt != nil {
+		t.Fatal("task was archived after the retention hold committed")
+	}
+}
+
+type holdBeforeArchiveRepository struct {
+	taskrepo.TaskRepository
+	taskID string
+}
+
+func (r holdBeforeArchiveRepository) ArchiveTask(ctx context.Context, taskID string) error {
+	base := r.TaskRepository
+	task, err := base.GetTask(ctx, r.taskID)
+	if err != nil {
+		return err
+	}
+	writer, ok := base.(interface {
+		UpdateTaskTerminalRetentionIfParent(context.Context, string, string, string, bool) (bool, error)
+	})
+	if !ok {
+		return errors.New("task repository does not support terminal retention updates")
+	}
+	updated, err := writer.UpdateTaskTerminalRetentionIfParent(ctx, task.ID, task.ParentID, task.WorkspaceID, true)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return taskrepo.ErrTaskNotFound
+	}
+	return base.ArchiveTask(ctx, taskID)
+}

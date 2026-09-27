@@ -3,7 +3,7 @@ id: "03-agent-executor"
 title: "Agents and execution settings"
 status: complete
 wave: 3
-depends_on: 
+depends_on:
   - 02-preferences
 plan: "plan.md"
 requirements:
