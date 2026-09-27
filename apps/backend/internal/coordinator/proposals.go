@@ -133,11 +133,12 @@ func (s *Service) buildProposalSpec(ctx context.Context, workspaceID string, req
 	}
 
 	workflow, err := s.proposalWorkflows.GetWorkflow(ctx, req.WorkflowID)
-	if err != nil && !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
-		return ProposalSpec{}, fmt.Errorf("get workflow: %w", err)
-	}
-	if workflow == nil || workflow.WorkspaceID != workspaceID {
-		return ProposalSpec{}, &FieldError{Field: "workflow_id", Message: "workflow not found in this workspace"}
+	if _, err := resolveWorkspaceScopedRef(
+		"workflow", workflow, err, repoerrors.ErrWorkflowNotFound,
+		func(w *taskmodels.Workflow) string { return w.WorkspaceID }, workspaceID,
+		&FieldError{Field: "workflow_id", Message: "workflow not found in this workspace"},
+	); err != nil {
+		return ProposalSpec{}, err
 	}
 
 	if err := s.validateProposalSourceTask(ctx, workspaceID, req.SourceTaskID); err != nil {
@@ -168,13 +169,12 @@ func (s *Service) validateProposalSourceTask(ctx context.Context, workspaceID, s
 		return nil
 	}
 	task, err := s.proposalTasks.GetTask(ctx, sourceTaskID)
-	if err != nil && !errors.Is(err, repoerrors.ErrTaskNotFound) {
-		return fmt.Errorf("get source task: %w", err)
-	}
-	if task == nil || task.WorkspaceID != workspaceID {
-		return &FieldError{Field: "source_task_id", Message: "source task not found in this workspace"}
-	}
-	return nil
+	_, err = resolveWorkspaceScopedRef(
+		"source task", task, err, repoerrors.ErrTaskNotFound,
+		func(t *taskmodels.Task) string { return t.WorkspaceID }, workspaceID,
+		&FieldError{Field: "source_task_id", Message: "source task not found in this workspace"},
+	)
+	return err
 }
 
 func (s *Service) validateProposalRepository(ctx context.Context, workspaceID, repositoryID string) error {
@@ -182,13 +182,41 @@ func (s *Service) validateProposalRepository(ctx context.Context, workspaceID, r
 		return nil
 	}
 	repository, err := s.proposalRepositories.GetRepository(ctx, repositoryID)
-	if err != nil && !errors.Is(err, repoerrors.ErrRepositoryNotFound) {
-		return fmt.Errorf("get repository: %w", err)
+	_, err = resolveWorkspaceScopedRef(
+		"repository", repository, err, repoerrors.ErrRepositoryNotFound,
+		func(r *taskmodels.Repository) string { return r.WorkspaceID }, workspaceID,
+		&FieldError{Field: "repository_id", Message: "repository not found in this workspace"},
+	)
+	return err
+}
+
+// resolveWorkspaceScopedRef fetches a proposal-referenced entity and
+// collapses every outcome that means "does not exist for this coordinator's
+// workspace" — a raw notFoundErr, a nil result with no error, or a result
+// belonging to a different workspace — into fieldErr. It is the single path
+// workflow_id, repository_id and source_task_id all resolve through, so a fix
+// to what counts as "not found" is applied once rather than needing to be
+// copied into each field's lookup and risking being missed on one of them,
+// which is exactly what happened to workflow_id alone across SEC-002, R2-A
+// and R3-A.
+//
+// Any other error from the lookup is a genuine failure (a transient database
+// error, for example), not an authorization outcome, and is propagated
+// rather than folded into fieldErr: collapsing it too would hide a real
+// backend problem behind what looks like ordinary input validation.
+func resolveWorkspaceScopedRef[T any](
+	label string,
+	entity *T, err error, notFoundErr error,
+	workspaceOf func(*T) string, workspaceID string,
+	fieldErr *FieldError,
+) (*T, error) {
+	if err != nil && !errors.Is(err, notFoundErr) {
+		return nil, fmt.Errorf("get %s: %w", label, err)
 	}
-	if repository == nil || repository.WorkspaceID != workspaceID {
-		return &FieldError{Field: "repository_id", Message: "repository not found in this workspace"}
+	if entity == nil || workspaceOf(entity) != workspaceID {
+		return nil, fieldErr
 	}
-	return nil
+	return entity, nil
 }
 
 // resolveProposalStep defaults an empty stepID to workflowID's start step,

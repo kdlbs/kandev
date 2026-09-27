@@ -455,6 +455,170 @@ func TestProposeTask_NotFoundAndForeignWorkspaceProduceIdenticalFieldError(t *te
 	})
 }
 
+// TestProposeTask_EveryNotFoundOrUnauthorizedBranchIsIndistinguishable is the
+// class-level regression for SEC-002/R2-A/R3-A: propose_task's four
+// workspace-scoped references (workflow_id, repository_id, source_task_id,
+// step_id) must each produce the identical *FieldError no matter which
+// underlying reason the reference failed to resolve for — missing
+// altogether, belonging to a foreign-but-reachable workspace (both as a
+// scoped caller sees it, denied inside the task-service authorize helpers,
+// and as an unscoped/default-profile caller sees it, caught only by this
+// package's own WorkspaceID comparison), or belonging to an orphaned
+// workspace whose row no longer exists. proposeTaskErrorResponse
+// (internal/mcp/handlers/coordinator_propose.go) maps any *FieldError to
+// ws.ErrorCodeValidation regardless of field, a mapping already covered
+// directly by TestHandleProposeTask_FieldErrorMapsToValidation, so proving
+// every branch below produces a *FieldError (never some other error
+// escaping as ws.ErrorCodeInternalError instead, which is exactly what
+// R3-A's orphaned-workspace branch did) proves the HTTP status is identical
+// across every branch too, without needing to duplicate that mapping test
+// per field.
+func TestProposeTask_EveryNotFoundOrUnauthorizedBranchIsIndistinguishable(t *testing.T) {
+	type branch struct {
+		name  string
+		setup func(f proposalTestFixture, req *ProposeTaskRequest)
+	}
+
+	requireFieldError := func(t *testing.T, err error) *FieldError {
+		t.Helper()
+		var fieldErr *FieldError
+		if !errors.As(err, &fieldErr) {
+			t.Fatalf("error = %v (%T), want a *FieldError (anything else maps to ws.ErrorCodeInternalError at the boundary, not ws.ErrorCodeValidation)", err, err)
+		}
+		return fieldErr
+	}
+
+	runBranches := func(t *testing.T, field string, branches []branch) {
+		t.Helper()
+		results := make([]*FieldError, 0, len(branches))
+		for _, b := range branches {
+			t.Run(b.name, func(t *testing.T) {
+				f := newProposalTestFixture(t)
+				req := f.baseRequest()
+				b.setup(f, &req)
+				_, _, err := f.svc.ProposeTask(context.Background(), f.coordinator.ID, req)
+				fieldErr := requireFieldError(t, err)
+				if fieldErr.Field != field {
+					t.Fatalf("FieldError.Field = %q, want %q", fieldErr.Field, field)
+				}
+				results = append(results, fieldErr)
+			})
+		}
+		for i := 1; i < len(results); i++ {
+			if results[i].Message != results[0].Message {
+				t.Errorf("branch %q message = %q, want identical to branch %q message %q",
+					branches[i].name, results[i].Message, branches[0].name, results[0].Message)
+			}
+		}
+	}
+
+	t.Run("workflow_id", func(t *testing.T) {
+		runBranches(t, "workflow_id", []branch{
+			{"missing", func(f proposalTestFixture, req *ProposeTaskRequest) {
+				req.WorkflowID = "wf-missing"
+			}},
+			{"foreign workspace, scoped caller", func(f proposalTestFixture, req *ProposeTaskRequest) {
+				f.svc.proposalWorkflows = fakeWorkflowReader{
+					workflows: map[string]*taskmodels.Workflow{f.workflowID: {ID: f.workflowID, WorkspaceID: f.workspaceID}},
+					errs: map[string]error{
+						"wf-foreign-scoped": fmt.Errorf("%w: wf-foreign-scoped", repoerrors.ErrWorkflowNotFound),
+					},
+				}
+				req.WorkflowID = "wf-foreign-scoped"
+			}},
+			{"foreign workspace, unscoped caller", func(f proposalTestFixture, req *ProposeTaskRequest) {
+				f.svc.proposalWorkflows = fakeWorkflowReader{
+					workflows: map[string]*taskmodels.Workflow{
+						f.workflowID:          {ID: f.workflowID, WorkspaceID: f.workspaceID},
+						"wf-foreign-unscoped": {ID: "wf-foreign-unscoped", WorkspaceID: "ws-other"},
+					},
+				}
+				req.WorkflowID = "wf-foreign-unscoped"
+			}},
+			{"orphaned workspace", func(f proposalTestFixture, req *ProposeTaskRequest) {
+				f.svc.proposalWorkflows = fakeWorkflowReader{
+					workflows: map[string]*taskmodels.Workflow{f.workflowID: {ID: f.workflowID, WorkspaceID: f.workspaceID}},
+					errs: map[string]error{
+						"wf-orphaned": fmt.Errorf("%w: wf-orphaned", repoerrors.ErrWorkflowNotFound),
+					},
+				}
+				req.WorkflowID = "wf-orphaned"
+			}},
+		})
+	})
+
+	t.Run("repository_id", func(t *testing.T) {
+		runBranches(t, "repository_id", []branch{
+			{"missing", func(f proposalTestFixture, req *ProposeTaskRequest) {
+				req.RepositoryID = "repo-missing"
+			}},
+			{"foreign workspace", func(f proposalTestFixture, req *ProposeTaskRequest) {
+				f.svc.proposalRepositories = fakeRepositoryReader{
+					repositories: map[string]*taskmodels.Repository{
+						f.repository.ID: f.repository,
+						"repo-foreign":  {ID: "repo-foreign", WorkspaceID: "ws-other"},
+					},
+				}
+				req.RepositoryID = "repo-foreign"
+			}},
+			{"orphaned workspace", func(f proposalTestFixture, req *ProposeTaskRequest) {
+				f.svc.proposalRepositories = fakeRepositoryReader{
+					repositories: map[string]*taskmodels.Repository{f.repository.ID: f.repository},
+					errs: map[string]error{
+						"repo-orphaned": fmt.Errorf("%w: repo-orphaned", repoerrors.ErrRepositoryNotFound),
+					},
+				}
+				req.RepositoryID = "repo-orphaned"
+			}},
+		})
+	})
+
+	t.Run("source_task_id", func(t *testing.T) {
+		runBranches(t, "source_task_id", []branch{
+			{"missing", func(f proposalTestFixture, req *ProposeTaskRequest) {
+				req.SourceTaskID = "task-missing"
+			}},
+			{"foreign workspace", func(f proposalTestFixture, req *ProposeTaskRequest) {
+				f.svc.proposalTasks = fakeSourceTaskReader{
+					tasks: map[string]*taskmodels.Task{
+						f.sourceTask.ID: f.sourceTask,
+						"task-foreign":  {ID: "task-foreign", WorkspaceID: "ws-other"},
+					},
+				}
+				req.SourceTaskID = "task-foreign"
+			}},
+			{"orphaned workspace", func(f proposalTestFixture, req *ProposeTaskRequest) {
+				f.svc.proposalTasks = fakeSourceTaskReader{
+					tasks: map[string]*taskmodels.Task{f.sourceTask.ID: f.sourceTask},
+					errs: map[string]error{
+						"task-orphaned": fmt.Errorf("%w: task-orphaned", repoerrors.ErrTaskNotFound),
+					},
+				}
+				req.SourceTaskID = "task-orphaned"
+			}},
+		})
+	})
+
+	// step_id has no separate foreign/orphaned shape to walk: unlike the
+	// other three fields it is not resolved through a workspace-scoped
+	// reader at all. resolveProposalStep checks membership in the already
+	// workspace-validated workflow's own step list
+	// (proposalStepBelongsToWorkflow), so a step id belonging to a real but
+	// different workflow and a step id that does not exist anywhere both
+	// fail that same single membership check and must produce the identical
+	// FieldError.
+	t.Run("step_id", func(t *testing.T) {
+		runBranches(t, ApproveFieldStepID, []branch{
+			{"belongs to a different workflow", func(f proposalTestFixture, req *ProposeTaskRequest) {
+				req.StepID = "step-from-another-workflow"
+			}},
+			{"does not exist anywhere", func(f proposalTestFixture, req *ProposeTaskRequest) {
+				req.StepID = "step-does-not-exist-anywhere"
+			}},
+		})
+	})
+}
+
 // TestProposeTask_StepNotBelongingToWorkflow covers the step-membership
 // clause of AC-COORDINATOR-PROPOSALS-001.3.
 func TestProposeTask_StepNotBelongingToWorkflow(t *testing.T) {
