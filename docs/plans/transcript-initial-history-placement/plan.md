@@ -275,7 +275,10 @@ initial-placement delegation no longer claims it. A coordinator regression
 covers unread-divider placement after that delegation. The focused scroll suite
 passed 147 tests, typecheck and targeted ESLint passed, and the desktop and
 mobile unread-divider E2E tests both passed locally after rebuilding the web
-assets. The follow-up commit and its CI results are pending.
+assets. CI passed on the follow-up commit after fixing this latch: all 53
+executed checks passed, 16 checks were skipped, and none failed or remained
+pending. The failed Kubernetes recovery shard passed when rerun on the same
+head; its first failure was unrelated to the UI scroll changes.
 
 ## Risks
 
