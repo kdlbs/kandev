@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- native scroll behavior and regression cases share one harness. */
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, type Ref } from "react";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "@/lib/types/http";
@@ -326,6 +326,7 @@ function useNativeScrollHarnessPlacement({
   scrollRef,
   items,
   sessionId,
+  dividerBeforeItemKey,
   enabled,
   includeDividerPlacement,
   isProgrammaticScrollLocked,
@@ -339,6 +340,7 @@ function useNativeScrollHarnessPlacement({
   scrollRef: { current: HTMLDivElement | null };
   items: RenderItem[];
   sessionId: string | null;
+  dividerBeforeItemKey: string | null;
   enabled: boolean;
   includeDividerPlacement: boolean;
   isProgrammaticScrollLocked: () => boolean;
@@ -349,15 +351,21 @@ function useNativeScrollHarnessPlacement({
   clampScrollTop: boolean;
   metrics?: NativeScrollMetrics;
 }) {
-  useScrollToDividerOrBottom(scrollRef, includeDividerPlacement ? items.length : 0, null, 0, {
-    enabled,
-    sessionId,
-    isProgrammaticScrollLocked,
-    isVisible,
-    historyRefreshPending,
-    onUserScrollIntent: includeDividerPlacement ? claimReaderPosition : undefined,
-    isReaderPositionClaimed: includeDividerPlacement ? isReaderPositionClaimed : undefined,
-  });
+  useScrollToDividerOrBottom(
+    scrollRef,
+    includeDividerPlacement ? items.length : 0,
+    dividerBeforeItemKey,
+    0,
+    {
+      enabled,
+      sessionId,
+      isProgrammaticScrollLocked,
+      isVisible,
+      historyRefreshPending,
+      onUserScrollIntent: includeDividerPlacement ? claimReaderPosition : undefined,
+      isReaderPositionClaimed: includeDividerPlacement ? isReaderPositionClaimed : undefined,
+    },
+  );
   useLayoutEffect(() => {
     const element = scrollRef.current;
     if (!clampScrollTop || !element || !metrics) return;
@@ -372,6 +380,32 @@ function useNativeScrollHarnessPlacement({
       },
     });
   }, [clampScrollTop, metrics, scrollRef]);
+}
+
+function NativeScrollHarnessContent({
+  scrollRef,
+  sentinelRef,
+  sessionId,
+  dividerBeforeItemKey,
+}: {
+  scrollRef: Ref<HTMLDivElement>;
+  sentinelRef: Ref<HTMLDivElement>;
+  sessionId: string | null;
+  dividerBeforeItemKey: string | null;
+}) {
+  return (
+    <div
+      className="chat-message-list"
+      data-session-id={sessionId ?? undefined}
+      data-testid={NATIVE_SCROLL_MANAGEMENT_TEST_ID}
+      ref={scrollRef}
+      tabIndex={-1}
+    >
+      <div ref={sentinelRef} />
+      {dividerBeforeItemKey ? <div id={`msg-${dividerBeforeItemKey}`} /> : null}
+      <div id="msg-navigation-target" />
+    </div>
+  );
 }
 
 function NativeScrollManagementHarness({
@@ -393,6 +427,7 @@ function NativeScrollManagementHarness({
   isWorking = false,
   clampScrollTop = false,
   includeDividerPlacement = false,
+  dividerBeforeItemKey = null,
 }: {
   items: RenderItem[];
   messages?: Message[];
@@ -414,6 +449,7 @@ function NativeScrollManagementHarness({
   isWorking?: boolean;
   clampScrollTop?: boolean;
   includeDividerPlacement?: boolean;
+  dividerBeforeItemKey?: string | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useNativeScrollMetrics(scrollRef, metrics);
@@ -444,6 +480,7 @@ function NativeScrollManagementHarness({
     scrollRef,
     items,
     sessionId,
+    dividerBeforeItemKey,
     enabled,
     includeDividerPlacement,
     isProgrammaticScrollLocked,
@@ -459,16 +496,12 @@ function NativeScrollManagementHarness({
   setOptionalRef(programmaticLockRef, isProgrammaticScrollLocked);
   setOptionalRef(recoveryRef, showRecovery);
   return (
-    <div
-      className="chat-message-list"
-      data-session-id={sessionId ?? undefined}
-      data-testid={NATIVE_SCROLL_MANAGEMENT_TEST_ID}
-      ref={scrollRef}
-      tabIndex={-1}
-    >
-      <div ref={sentinelRef} />
-      <div id="msg-navigation-target" />
-    </div>
+    <NativeScrollHarnessContent
+      scrollRef={scrollRef}
+      sentinelRef={sentinelRef}
+      sessionId={sessionId}
+      dividerBeforeItemKey={dividerBeforeItemKey}
+    />
   );
 }
 
@@ -609,6 +642,32 @@ describe("useNativeScrollManagement transcript pagination", () => {
     );
 
     expect(metrics.scrollTop).toBe(100);
+  });
+
+  it("does not confuse delegated initial placement with reader ownership", async () => {
+    const metrics = { scrollHeight: 1800, scrollTop: 0, clientHeight: 400 };
+    const getBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.dataset.testid === NATIVE_SCROLL_MANAGEMENT_TEST_ID) return createRect(0, 400);
+      if (this.id === "msg-unread-boundary") return createRect(320 - metrics.scrollTop, 20);
+      return getBoundingClientRect.call(this);
+    });
+
+    render(
+      <NativeScrollManagementHarness
+        items={[transcriptMessage(CACHED_MESSAGE_ID)]}
+        metrics={metrics}
+        sessionId="session-unread-divider"
+        enabled
+        hasUnreadDivider
+        includeDividerPlacement
+        dividerBeforeItemKey="unread-boundary"
+      />,
+    );
+
+    await expect.poll(() => metrics.scrollTop).toBe(320);
   });
 
   it("keeps an explicit message-navigation position when cached history refresh completes", () => {

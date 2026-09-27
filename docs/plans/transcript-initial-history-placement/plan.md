@@ -257,13 +257,25 @@ Post-fixup verification:
 
 - `pnpm exec vitest run components/task/chat/chat-scroll-motion.test.ts components/task/chat/use-chat-scroll-motion.test.tsx components/task/chat/message-list-native.test.tsx components/task/task-chat-panel.scroll-target.test.tsx`: 146 tests passed.
 - `pnpm run typecheck`: passed.
-- Targeted ESLint on changed TS/TSX files: passed with no errors. Four pre-existing complexity/line-count warnings remain in the native scroll manager, its test harness, and divider effect.
+- Targeted ESLint on changed TS/TSX files: passed with zero warnings after extracting helpers that exceeded the native function limits.
 - `pnpm run i18n:ratchet`: passed.
 - `(cd apps/web && pnpm e2e:run --host --project chromium e2e/tests/chat/quick-chat.spec.ts e2e/tests/chat/jump-to-latest.spec.ts e2e/tests/task/threads-composer-disclosure.spec.ts --grep "clarification shortcuts work after clicking the message surface|Jump to latest returns to the newest grouped reply and preserves auto-scroll|archived transcript keeps Jump to latest available without a composer|scrolls long required questions through the Grid footer" --retries=0)`: 7 passed; the managed Vite build passed.
 - `(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-jump-to-latest.spec.ts e2e/tests/chat/mobile-auto-scroll-toggle.spec.ts --grep "phone Jump to latest fits coarse targets|archived phone transcript keeps a reachable Jump to latest control|is reachable and toggles by touch|follows a live turn from the bottom, then pauses after a small upward touch" --retries=0)`: 4 passed.
 - `(cd apps/web && pnpm e2e:run --host --no-build --project chromium e2e/tests/chat/last-prompt-scroll.spec.ts --retries=0)`: 11 passed.
 - `(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-last-prompt-scroll.spec.ts --retries=0)`: 1 passed.
 - `git diff --check`: passed after recording these results.
+
+The first post-push CI run for `dc0f14e8971` found two E2E failures: the desktop
+and mobile visit-start unread-divider tests left the divider outside the
+viewport. Both aggregates failed as a result. The reader-intent check was
+sharing the initial-placement completion latch, so delegating placement to an
+unread divider could be mistaken for explicit reader ownership. A separate
+per-visit reader-position latch now records user input and latest navigation;
+initial-placement delegation no longer claims it. A coordinator regression
+covers unread-divider placement after that delegation. The focused scroll suite
+passed 147 tests, typecheck and targeted ESLint passed, and the desktop and
+mobile unread-divider E2E tests both passed locally after rebuilding the web
+assets. The follow-up commit and its CI results are pending.
 
 ## Risks
 

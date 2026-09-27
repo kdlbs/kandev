@@ -1614,6 +1614,7 @@ function useInitialPlacementLatches(
 ) {
   const visitRef = useRef({ sessionId, token: envSwitchPlacementToken, id: 1 });
   const didInitialScroll = useRef(false);
+  const readerPositionClaimed = useRef(false);
   const provisionalAppliedRef = useRef(false);
   const deferredLayoutRestoreTokenRef = useRef<number | null>(null);
   const [completedVisitId, setCompletedVisitId] = useState<number | null>(null);
@@ -1627,6 +1628,7 @@ function useInitialPlacementLatches(
       id: visitRef.current.id + 1,
     };
     didInitialScroll.current = false;
+    readerPositionClaimed.current = false;
     provisionalAppliedRef.current = false;
     deferredLayoutRestoreTokenRef.current = null;
   } else if (envSwitchPlacementToken !== null) {
@@ -1641,6 +1643,7 @@ function useInitialPlacementLatches(
   }, [isCurrentVisit, visitId]);
   return {
     didInitialScroll,
+    readerPositionClaimed,
     provisionalAppliedRef,
     deferredLayoutRestoreTokenRef,
     isCurrentVisit,
@@ -1674,6 +1677,7 @@ function useReaderPositionClaim(
   envSwitchPlacementToken: number | null,
 ) {
   return useCallback(() => {
+    placementLatches.readerPositionClaimed.current = true;
     placementLatches.didInitialScroll.current = true;
     placementLatches.completeInitialPlacement();
     completeEnvSwitchPlacement(envSwitchPlacementToken);
@@ -1681,7 +1685,7 @@ function useReaderPositionClaim(
 }
 
 function useIsReaderPositionClaimed(placementLatches: InitialPlacementLatches) {
-  return useCallback(() => placementLatches.didInitialScroll.current, [placementLatches]);
+  return useCallback(() => placementLatches.readerPositionClaimed.current, [placementLatches]);
 }
 
 type InitialScrollPositionParams = {
@@ -2039,6 +2043,7 @@ function useScrollToLatestAction(params: {
     if (sessionId && pendingRestore?.sessionId === sessionId) {
       dockviewState.completePendingChatScrollTop(pendingRestore.token, false);
     }
+    placementLatches.readerPositionClaimed.current = true;
     placementLatches.didInitialScroll.current = true;
     placementLatches.completeInitialPlacement();
     completeEnvSwitchPlacement(envSwitchPlacementToken);
