@@ -1,5 +1,54 @@
-import { test, expect } from "../../fixtures/office-fixture";
+import { test as base, expect } from "../../fixtures/test-base";
+import { OfficeApiClient } from "../../helpers/office-api-client";
 import { waitForHttp } from "../../helpers/causal-waits";
+
+type DialogSeed = {
+  workspaceId: string;
+  workspaceName: string;
+  agentId: string;
+};
+
+const test = base.extend<{ dialogSeed: DialogSeed }, { officeApi: OfficeApiClient }>({
+  officeApi: [
+    async ({ backend }, use) => {
+      await use(new OfficeApiClient(backend.baseUrl));
+    },
+    { scope: "worker" },
+  ],
+  dialogSeed: async ({ officeApi, apiClient, seedData, testPage }, use) => {
+    // Wait for the base page fixture to restore the current seed profile before
+    // creating the Office agent that uses it.
+    void testPage;
+    const workspaceName = `New Task Dialog E2E ${Date.now()}`;
+    const result = await officeApi.completeOnboarding({
+      workspaceName,
+      taskPrefix: "NTD",
+      agentName: "CEO",
+      agentProfileId: seedData.agentProfileId,
+      executorPreference: "local_pc",
+    });
+    await apiClient.saveUserSettings({
+      workspace_id: result.workspaceId,
+      workflow_filter_id: seedData.workflowId,
+      keyboard_shortcuts: {},
+      enable_preview_on_click: false,
+    });
+
+    try {
+      await use({
+        workspaceId: result.workspaceId,
+        workspaceName,
+        agentId: result.agentId,
+      });
+    } finally {
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: seedData.workflowId,
+      });
+      await officeApi.deleteWorkspace(result.workspaceId, workspaceName);
+    }
+  },
+});
 
 /**
  * Regression coverage for the "New Task" dialog (ISSUE-7): it used to drop
@@ -28,20 +77,33 @@ async function openNewTaskDialog(testPage: import("@playwright/test").Page) {
   return dialog;
 }
 
+async function createProject(
+  officeApi: OfficeApiClient,
+  workspaceId: string,
+  name: string,
+): Promise<{ id: string; name: string }> {
+  const project = (await officeApi.createProject(workspaceId, name)) as {
+    id: string;
+    name: string;
+  };
+  expect(project.id).toBeTruthy();
+  return project;
+}
+
 test.describe("Office New Task dialog", () => {
   test("creating a task with an assignee seats the runner and shows no stages picker", async ({
     testPage,
     officeApi,
-    officeSeed,
+    dialogSeed,
   }) => {
     // Onboarding does not seed a default project (see
     // office-api-client.ts's createProject doc comment), so the picker needs
     // a real project created up front.
-    const project = (await officeApi.createProject(
-      officeSeed.workspaceId,
+    const project = await createProject(
+      officeApi,
+      dialogSeed.workspaceId,
       "New Task Dialog E2E Success Project",
-    )) as { id: string; name: string };
-    expect(project.id).toBeTruthy();
+    );
 
     const dialog = await openNewTaskDialog(testPage);
 
@@ -55,7 +117,10 @@ test.describe("Office New Task dialog", () => {
     await testPage.getByRole("button", { name: project.name, exact: true }).click();
 
     await dialog.getByRole("button", { name: "Assignee" }).click();
-    await testPage.getByRole("button", { name: "CEO", exact: true }).click();
+    const assignedAgent = await officeApi.getAgent(dialogSeed.agentId);
+    const agentName = typeof assignedAgent.name === "string" ? assignedAgent.name : "";
+    expect(agentName).not.toBe("");
+    await testPage.getByRole("button", { name: agentName, exact: true }).click();
 
     const created = waitForHttp(testPage, "POST", /^\/api\/v1\/tasks$/);
     await dialog.getByTestId("new-task-create-button").click();
@@ -78,20 +143,20 @@ test.describe("Office New Task dialog", () => {
     const stored = (await officeApi.getTask(taskId)) as {
       task: { assigneeAgentProfileId?: string; projectId?: string };
     };
-    expect(stored.task.assigneeAgentProfileId).toBe(officeSeed.agentId);
+    expect(stored.task.assigneeAgentProfileId).toBe(dialogSeed.agentId);
     expect(stored.task.projectId).toBe(project.id);
   });
 
   test("a rejected create surfaces an error toast, not a success toast", async ({
     testPage,
     officeApi,
-    officeSeed,
+    dialogSeed,
   }) => {
-    const project = (await officeApi.createProject(
-      officeSeed.workspaceId,
+    const project = await createProject(
+      officeApi,
+      dialogSeed.workspaceId,
       "New Task Dialog E2E Failure Project",
-    )) as { id: string; name: string };
-    expect(project.id).toBeTruthy();
+    );
 
     const dialog = await openNewTaskDialog(testPage);
 
@@ -99,7 +164,10 @@ test.describe("Office New Task dialog", () => {
     await dialog.getByRole("button", { name: "Project" }).click();
     await testPage.getByRole("button", { name: project.name, exact: true }).click();
     await dialog.getByRole("button", { name: "Assignee" }).click();
-    await testPage.getByRole("button", { name: "CEO", exact: true }).click();
+    const assignedAgent = await officeApi.getAgent(dialogSeed.agentId);
+    const agentName = typeof assignedAgent.name === "string" ? assignedAgent.name : "";
+    expect(agentName).not.toBe("");
+    await testPage.getByRole("button", { name: agentName, exact: true }).click();
 
     // Force the backend to reject the create so the dialog's failure branch
     // (an error toast, draft preserved, dialog stays open) is exercised

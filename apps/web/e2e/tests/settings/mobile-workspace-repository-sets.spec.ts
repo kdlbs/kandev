@@ -5,6 +5,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 test.describe("Mobile workspace repository sets", () => {
   const createdRepositorySetIds = new Set<string>();
@@ -190,7 +191,15 @@ test.describe("Mobile workspace repository sets", () => {
       return target === element || (target instanceof Node && element.contains(target));
     });
     expect(refreshReceivesCenterTap).toBe(true);
+    const refreshResponse = waitForHttp(
+      testPage,
+      "GET",
+      new RegExp(`/api/v1/repositories/${seedData.repositoryId}/branches$`),
+      { predicate: (response) => new URL(response.url()).searchParams.get("refresh") === "true" },
+    );
     await refreshButton.tap({ timeout: 5_000 });
+    expect((await refreshResponse).ok()).toBe(true);
+    await expect(dropdown).toBeVisible();
     await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
 
     const search = dropdown.getByPlaceholder("Search branches...");

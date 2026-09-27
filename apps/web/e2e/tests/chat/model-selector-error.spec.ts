@@ -35,13 +35,19 @@ test.describe("Chat model selector — RPC failure", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
 
     await expect
-      .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
-        const baseline = sessions[0]?.metadata?.acp_config_baseline as
-          | Record<string, string>
-          | undefined;
-        return baseline?.effort;
-      })
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const baseline = sessions[0]?.metadata?.acp_config_baseline as
+            | Record<string, string>
+            | undefined;
+          return baseline?.effort;
+        },
+        {
+          timeout: 30_000,
+          message: "Waiting for the initial session's persisted ACP config baseline",
+        },
+      )
       .toBe("medium");
 
     const trigger = testPage.getByRole("button", { name: "Session model settings" });
