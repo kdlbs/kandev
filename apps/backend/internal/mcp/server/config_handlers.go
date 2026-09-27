@@ -12,6 +12,9 @@ import (
 
 const mcpKeyCallerTaskID = "caller_task_id"
 
+// sharedPromptNameArg names the get_shared_prompt_kandev argument/payload key.
+const sharedPromptNameArg = "name"
+
 func nullableSessionTargetOption() mcp.ToolOption {
 	return func(tool *mcp.Tool) {
 		tool.InputSchema.Properties["session_target"] = map[string]interface{}{
@@ -287,17 +290,17 @@ func (s *Server) registerConfigPromptTools() {
 
 func (s *Server) listSharedPromptsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return s.forwardToBackend(ctx, ws.ActionMCPListSharedPrompts, nil)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPListSharedPrompts, nil)
 	}
 }
 
 func (s *Server) getSharedPromptHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		name := strings.TrimSpace(req.GetString("name", ""))
+		name := strings.TrimSpace(req.GetString(sharedPromptNameArg, ""))
 		if name == "" {
 			return mcp.NewToolResultError("name is required"), nil
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPGetSharedPrompt, map[string]interface{}{"name": name})
+		return s.forwardToBackend(ctx, req, ws.ActionMCPGetSharedPrompt, map[string]interface{}{sharedPromptNameArg: name})
 	}
 }
 
@@ -438,7 +441,7 @@ func (s *Server) createWorkflowHandler() server.ToolHandlerFunc {
 		if desc := req.GetString("description", ""); desc != "" {
 			payload["description"] = desc
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPCreateWorkflow, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPCreateWorkflow, payload)
 	}
 }
 
@@ -455,7 +458,7 @@ func (s *Server) updateWorkflowHandler() server.ToolHandlerFunc {
 		if desc := req.GetString("description", ""); desc != "" {
 			payload["description"] = desc
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPUpdateWorkflow, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPUpdateWorkflow, payload)
 	}
 }
 
@@ -465,7 +468,7 @@ func (s *Server) deleteWorkflowHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("workflow_id is required"), nil
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPDeleteWorkflow, map[string]string{"workflow_id": workflowID})
+		return s.forwardToBackend(ctx, req, ws.ActionMCPDeleteWorkflow, map[string]string{"workflow_id": workflowID})
 	}
 }
 
@@ -483,7 +486,7 @@ func (s *Server) importWorkflowHandler() server.ToolHandlerFunc {
 			"workspace_id": workspaceID,
 			documentArg:    document,
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPImportWorkflow, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPImportWorkflow, payload)
 	}
 }
 
@@ -497,7 +500,7 @@ func (s *Server) exportWorkflowHandler() server.ToolHandlerFunc {
 		if workflowID == "" {
 			return mcp.NewToolResultError("workflow_id is required"), nil
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPExportWorkflow, map[string]string{"workflow_id": workflowID})
+		return s.forwardToBackend(ctx, req, ws.ActionMCPExportWorkflow, map[string]string{"workflow_id": workflowID})
 	}
 }
 
@@ -523,7 +526,7 @@ func (s *Server) createWorkflowStepHandler() server.ToolHandlerFunc {
 		}
 		args := req.GetArguments()
 		copyWorkflowStepArguments(payload, args, "position", "is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "complete_task_on_enter", "wip_limit", "pull_from_step_id", "events")
-		return s.forwardToBackend(ctx, ws.ActionMCPCreateWorkflowStep, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPCreateWorkflowStep, payload)
 	}
 }
 
@@ -545,13 +548,13 @@ func (s *Server) updateWorkflowStepHandler() server.ToolHandlerFunc {
 		}
 		args := req.GetArguments()
 		copyWorkflowStepArguments(payload, args, "is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_archive_after_hours", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "complete_task_on_enter", "wip_limit", "pull_from_step_id", "events")
-		return s.forwardToBackend(ctx, ws.ActionMCPUpdateWorkflowStep, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPUpdateWorkflowStep, payload)
 	}
 }
 
 func (s *Server) listAgentsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return s.forwardToBackend(ctx, ws.ActionMCPListAgents, nil)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPListAgents, nil)
 	}
 }
 
@@ -578,7 +581,7 @@ func (s *Server) createAgentProfileHandler() server.ToolHandlerFunc {
 		if args := req.GetArguments(); args["settings"] != nil {
 			payload["settings"] = args["settings"]
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPCreateAgentProfile, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPCreateAgentProfile, payload)
 	}
 }
 
@@ -595,7 +598,7 @@ func (s *Server) updateAgentHandler() server.ToolHandlerFunc {
 		if path := req.GetString("mcp_config_path", ""); path != "" {
 			payload["mcp_config_path"] = path
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPUpdateAgent, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPUpdateAgent, payload)
 	}
 }
 
@@ -606,7 +609,7 @@ func (s *Server) deleteAgentProfileHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("profile_id is required"), nil
 		}
 		payload := map[string]string{"profile_id": profileID}
-		return s.forwardToBackend(ctx, ws.ActionMCPDeleteAgentProfile, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPDeleteAgentProfile, payload)
 	}
 }
 
@@ -617,7 +620,7 @@ func (s *Server) listAgentProfilesHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("agent_id is required"), nil
 		}
 		payload := map[string]string{"agent_id": agentID}
-		return s.forwardToBackend(ctx, ws.ActionMCPListAgentProfiles, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPListAgentProfiles, payload)
 	}
 }
 
@@ -637,7 +640,7 @@ func (s *Server) updateAgentProfileHandler() server.ToolHandlerFunc {
 		if args := req.GetArguments(); args["auto_approve"] != nil {
 			payload["auto_approve"] = args["auto_approve"]
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPUpdateAgentProfile, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPUpdateAgentProfile, payload)
 	}
 }
 
@@ -648,7 +651,7 @@ func (s *Server) getMcpConfigHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("profile_id is required"), nil
 		}
 		payload := map[string]string{"profile_id": profileID}
-		return s.forwardToBackend(ctx, ws.ActionMCPGetMcpConfig, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPGetMcpConfig, payload)
 	}
 }
 
@@ -666,7 +669,7 @@ func (s *Server) updateMcpConfigHandler() server.ToolHandlerFunc {
 		if args["servers"] != nil {
 			payload["servers"] = args["servers"]
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPUpdateMcpConfig, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPUpdateMcpConfig, payload)
 	}
 }
 
@@ -707,7 +710,7 @@ func (s *Server) moveTaskHandler() server.ToolHandlerFunc {
 		if args := req.GetArguments(); args["entry_options"] != nil {
 			payload["entry_options"] = args["entry_options"]
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPMoveTask, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPMoveTask, payload)
 	}
 }
 
@@ -718,7 +721,7 @@ func (s *Server) deleteTaskHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
 		payload := map[string]string{"task_id": taskID}
-		return s.forwardToBackend(ctx, ws.ActionMCPDeleteTask, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPDeleteTask, payload)
 	}
 }
 
@@ -733,7 +736,7 @@ func (s *Server) updateTaskStateHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("state is required"), nil
 		}
 		payload := map[string]string{"task_id": taskID, "state": state}
-		return s.forwardToBackend(ctx, ws.ActionMCPUpdateTaskState, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPUpdateTaskState, payload)
 	}
 }
 
@@ -743,7 +746,7 @@ func (s *Server) deleteWorkflowStepHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("step_id is required"), nil
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPDeleteWorkflowStep, map[string]string{"step_id": stepID})
+		return s.forwardToBackend(ctx, req, ws.ActionMCPDeleteWorkflowStep, map[string]string{"step_id": stepID})
 	}
 }
 
@@ -762,7 +765,7 @@ func (s *Server) reorderWorkflowStepsHandler() server.ToolHandlerFunc {
 			"workflow_id": workflowID,
 			"step_ids":    stepIDs,
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPReorderWorkflowStep, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPReorderWorkflowStep, payload)
 	}
 }
 
@@ -776,7 +779,7 @@ func (s *Server) archiveTaskHandler() server.ToolHandlerFunc {
 		if s.taskID != "" {
 			payload[mcpKeyCallerTaskID] = s.taskID
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPArchiveTask, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPArchiveTask, payload)
 	}
 }
 
@@ -784,7 +787,7 @@ func (s *Server) archiveTaskHandler() server.ToolHandlerFunc {
 
 func (s *Server) listExecutorsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return s.forwardToBackend(ctx, ws.ActionMCPListExecutors, nil)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPListExecutors, nil)
 	}
 }
 
@@ -794,7 +797,7 @@ func (s *Server) listExecutorProfilesHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("executor_id is required"), nil
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPListExecutorProfiles, map[string]string{"executor_id": executorID})
+		return s.forwardToBackend(ctx, req, ws.ActionMCPListExecutorProfiles, map[string]string{"executor_id": executorID})
 	}
 }
 
@@ -825,7 +828,7 @@ func (s *Server) createExecutorProfileHandler() server.ToolHandlerFunc {
 		if args["config"] != nil {
 			payload["config"] = args["config"]
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPCreateExecutorProfile, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPCreateExecutorProfile, payload)
 	}
 }
 
@@ -852,7 +855,7 @@ func (s *Server) updateExecutorProfileHandler() server.ToolHandlerFunc {
 		if args["config"] != nil {
 			payload["config"] = args["config"]
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPUpdateExecutorProfile, payload)
+		return s.forwardToBackend(ctx, req, ws.ActionMCPUpdateExecutorProfile, payload)
 	}
 }
 
@@ -862,14 +865,16 @@ func (s *Server) deleteExecutorProfileHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("profile_id is required"), nil
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPDeleteExecutorProfile, map[string]string{"profile_id": profileID})
+		return s.forwardToBackend(ctx, req, ws.ActionMCPDeleteExecutorProfile, map[string]string{"profile_id": profileID})
 	}
 }
 
 // forwardToBackend sends a request to the backend and returns the result as JSON text.
-func (s *Server) forwardToBackend(ctx context.Context, action string, payload interface{}) (*mcp.CallToolResult, error) {
+func (s *Server) forwardToBackend(
+	ctx context.Context, req mcp.CallToolRequest, action string, payload interface{},
+) (*mcp.CallToolResult, error) {
 	var result map[string]interface{}
-	if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
+	if err := s.requestPayload(ctx, req, action, payload, &result); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	data, err := json.MarshalIndent(result, "", "  ")

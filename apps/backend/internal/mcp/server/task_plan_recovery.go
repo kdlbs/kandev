@@ -26,7 +26,7 @@ func (s *Server) listTaskPlanRevisionsHandler() server.ToolHandlerFunc {
 			payload["limit"] = req.GetInt("limit", 0)
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTaskPlanRevisions, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPListTaskPlanRevisions, payload, &result); err != nil {
 			return mcp.NewToolResultError(planToolError(err)), nil
 		}
 		data, marshalErr := json.MarshalIndent(result, "", "  ")
@@ -48,7 +48,7 @@ func (s *Server) getTaskPlanRevisionHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("revision_id is required"), nil
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskPlanRevision, map[string]string{
+		if err := s.requestPayload(ctx, req, ws.ActionMCPGetTaskPlanRevision, map[string]string{
 			"task_id": taskID, "revision_id": revisionID,
 		}, &result); err != nil {
 			return mcp.NewToolResultError(planToolError(err)), nil
@@ -98,7 +98,7 @@ func (s *Server) restoreTaskPlanRevisionHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("expected_revision_version is required"), nil
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPRestoreTaskPlanRevision, map[string]string{
+		if err := s.requestPayload(ctx, req, ws.ActionMCPRestoreTaskPlanRevision, map[string]string{
 			"task_id": taskID, "revision_id": revisionID,
 			"expected_version": expectedVersion, "expected_revision_version": expectedRevisionVersion,
 		}, &result); err != nil {

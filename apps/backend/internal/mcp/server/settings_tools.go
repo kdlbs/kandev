@@ -58,7 +58,7 @@ func (s *Server) registerConfigSettingsTools() {
 
 func (s *Server) searchSettingsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return s.forwardToBackend(ctx, ws.ActionMCPSearchSettings, cloneArguments(req.GetArguments()))
+		return s.forwardToBackend(ctx, req, ws.ActionMCPSearchSettings, cloneArguments(req.GetArguments()))
 	}
 }
 
@@ -68,7 +68,7 @@ func (s *Server) describeSettingHandler() server.ToolHandlerFunc {
 		if err != nil || strings.TrimSpace(key) == "" {
 			return mcp.NewToolResultError("key is required"), nil
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPDescribeSetting, cloneArguments(req.GetArguments()))
+		return s.forwardToBackend(ctx, req, ws.ActionMCPDescribeSetting, cloneArguments(req.GetArguments()))
 	}
 }
 
@@ -80,7 +80,7 @@ func (s *Server) getSettingsHandler() server.ToolHandlerFunc {
 		if req.GetArguments()["keys"] == nil {
 			return mcp.NewToolResultError("keys is required"), nil
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPGetSettings, cloneArguments(req.GetArguments()))
+		return s.forwardToBackend(ctx, req, ws.ActionMCPGetSettings, cloneArguments(req.GetArguments()))
 	}
 }
 
@@ -93,7 +93,7 @@ func (s *Server) updateSettingsHandler() server.ToolHandlerFunc {
 		if args["changes"] == nil {
 			return mcp.NewToolResultError("changes is required"), nil
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPUpdateSettings, cloneArguments(args))
+		return s.forwardToBackend(ctx, req, ws.ActionMCPUpdateSettings, cloneArguments(args))
 	}
 }
 
@@ -103,7 +103,7 @@ func (s *Server) listSettingsResourcesHandler() server.ToolHandlerFunc {
 		if err != nil || strings.TrimSpace(resourceType) == "" {
 			return mcp.NewToolResultError("resource_type is required"), nil
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPListSettingsResources, cloneArguments(req.GetArguments()))
+		return s.forwardToBackend(ctx, req, ws.ActionMCPListSettingsResources, cloneArguments(req.GetArguments()))
 	}
 }
 

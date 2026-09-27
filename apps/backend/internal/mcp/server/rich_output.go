@@ -178,7 +178,7 @@ func (s *Server) showRichOutputHandler() server.ToolHandlerFunc {
 		if err := validateRichOutput(req.GetArguments()); err != nil {
 			return mcplib.NewToolResultError(err.Error()), nil
 		}
-		snapshot, err := s.resolveRichOutputCSV(ctx, req.GetArguments())
+		snapshot, err := s.resolveRichOutputCSV(ctx, req, req.GetArguments())
 		if err != nil {
 			return mcplib.NewToolResultError(err.Error()), nil
 		}

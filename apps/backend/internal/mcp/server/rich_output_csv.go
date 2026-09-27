@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	mcplib "github.com/mark3labs/mcp-go/mcp"
 )
 
 const (
@@ -60,6 +61,7 @@ type richOutputCSVSnapshot struct {
 
 func (s *Server) resolveRichOutputCSV(
 	ctx context.Context,
+	req mcplib.CallToolRequest,
 	args map[string]interface{},
 ) (*richOutputCSVSnapshot, error) {
 	presentation, err := decodeRichOutputCSVInput(args)
@@ -72,7 +74,7 @@ func (s *Server) resolveRichOutputCSV(
 		if block.CSV == nil {
 			continue
 		}
-		response, readErr := s.readRichOutputCSV(ctx, block.CSV, cache)
+		response, readErr := s.readRichOutputCSV(ctx, req, block.CSV, cache)
 		if readErr != nil {
 			return nil, readErr
 		}
@@ -106,6 +108,7 @@ func decodeRichOutputCSVInput(args map[string]interface{}) (richOutputCSVPresent
 
 func (s *Server) readRichOutputCSV(
 	ctx context.Context,
+	req mcplib.CallToolRequest,
 	source *richOutputCSVSourceInput,
 	cache map[string]*streams.FileContentResponse,
 ) (*streams.FileContentResponse, error) {
@@ -118,7 +121,7 @@ func (s *Server) readRichOutputCSV(
 		payload["repo"] = source.Repo
 	}
 	var response streams.FileContentResponse
-	if err := s.backend.RequestPayload(ctx, ws.ActionWorkspaceFileContentGet, payload, &response); err != nil {
+	if err := s.requestPayload(ctx, req, ws.ActionWorkspaceFileContentGet, payload, &response); err != nil {
 		return nil, fmt.Errorf("could not read CSV source %s: %w", source.Path, err)
 	}
 	if response.Error != "" {

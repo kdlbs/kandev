@@ -73,7 +73,7 @@ func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Backend returns {workspaces: [...], total: N}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListWorkspaces, nil, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPListWorkspaces, nil, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -91,8 +91,8 @@ func (s *Server) getDiagnosticBundleHandler() server.ToolHandlerFunc {
 			"source": source, "task_id": s.taskID, "session_id": s.sessionID,
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(
-			ctx, ws.ActionMCPGetDiagnosticBundle, payload, &result,
+		if err := s.requestPayload(
+			ctx, req, ws.ActionMCPGetDiagnosticBundle, payload, &result,
 		); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -110,7 +110,7 @@ func (s *Server) listWorkflowsHandler() server.ToolHandlerFunc {
 		payload := map[string]string{"workspace_id": workspaceID}
 		// Backend returns {workflows: [...], total: N}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListWorkflows, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPListWorkflows, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -127,7 +127,7 @@ func (s *Server) listRepositoriesHandler() server.ToolHandlerFunc {
 		payload := map[string]string{"workspace_id": workspaceID}
 		// Backend returns {repositories: [...], total: N}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListRepositories, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPListRepositories, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -144,7 +144,7 @@ func (s *Server) listWorkflowStepsHandler() server.ToolHandlerFunc {
 		payload := map[string]string{"workflow_id": workflowID}
 		// Backend returns {workflow_steps: [...], total: N}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListWorkflowSteps, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPListWorkflowSteps, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -161,7 +161,7 @@ func (s *Server) listTasksHandler() server.ToolHandlerFunc {
 		payload := map[string]string{"workflow_id": workflowID}
 		// Backend returns {tasks: [...], total: N}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTasks, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPListTasks, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -272,7 +272,7 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		}
 
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPCreateTask, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPCreateTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		// The created task's description is the prompt this call just sent;
@@ -303,7 +303,7 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 			payload["deferred_launch_prompt"] = launchPrompt
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTask, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPUpdateTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		// A write tool confirms the write; it is not a way to read a task's
@@ -317,10 +317,10 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 }
 
 func (s *Server) getTaskPRAutomationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(
-			ctx, ws.ActionMCPGetTaskPRAutomation, map[string]interface{}{"task_id": s.taskID}, &result,
+		if err := s.requestPayload(
+			ctx, req, ws.ActionMCPGetTaskPRAutomation, map[string]interface{}{"task_id": s.taskID}, &result,
 		); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -356,7 +356,7 @@ func (s *Server) manageTaskChangeRequestHandler() server.ToolHandlerFunc {
 			}
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPManageTaskChangeRequest, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPManageTaskChangeRequest, payload, &result); err != nil {
 			return backendToolError(err), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -365,10 +365,10 @@ func (s *Server) manageTaskChangeRequestHandler() server.ToolHandlerFunc {
 }
 
 func (s *Server) getTaskChangeRequestsHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(
-			ctx, ws.ActionMCPGetTaskChangeRequests, map[string]interface{}{"task_id": s.taskID}, &result,
+		if err := s.requestPayload(
+			ctx, req, ws.ActionMCPGetTaskChangeRequests, map[string]interface{}{"task_id": s.taskID}, &result,
 		); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -390,7 +390,7 @@ func (s *Server) updateTaskChangeRequestAutomationHandler() server.ToolHandlerFu
 			}
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskChangeRequestAutomation, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPUpdateTaskChangeRequestAutomation, payload, &result); err != nil {
 			return taskChangeRequestAutomationToolError(err), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -501,7 +501,7 @@ func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("at least one PR automation option is required"), nil
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPRAutomation, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPUpdateTaskPRAutomation, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -534,7 +534,7 @@ func (s *Server) reportTaskAutoFixOutcomeHandler(action string) server.ToolHandl
 			"summary":    summary,
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, action, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -569,10 +569,10 @@ func (s *Server) mrAutomationToolError(logMsg string, err error) (*mcp.CallToolR
 }
 
 func (s *Server) getTaskMRAutomationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(
-			ctx, ws.ActionMCPGetTaskMRAutomation, map[string]interface{}{"task_id": s.taskID}, &result,
+		if err := s.requestPayload(
+			ctx, req, ws.ActionMCPGetTaskMRAutomation, map[string]interface{}{"task_id": s.taskID}, &result,
 		); err != nil {
 			return s.mrAutomationToolError("get task MR automation failed", err)
 		}
@@ -636,7 +636,7 @@ func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("at least one MR automation option is required"), nil
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskMRAutomation, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPUpdateTaskMRAutomation, payload, &result); err != nil {
 			return s.mrAutomationToolError("update task MR automation failed", err)
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -667,7 +667,7 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 		copyOptionalStringArg(payload, req, "session_id")
 		copyOptionalStringArg(payload, req, "reply_to_question_id")
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPMessageTask, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPMessageTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -688,7 +688,7 @@ func (s *Server) stopTaskHandler() server.ToolHandlerFunc {
 			"sender_task_id": s.taskID,
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPStopTask, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPStopTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -718,7 +718,7 @@ func (s *Server) spawnSessionHandler() server.ToolHandlerFunc {
 		copyOptionalStringArg(payload, req, agentProfileIDArg)
 		copyOptionalStringArg(payload, req, "name")
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPSpawnSession, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPSpawnSession, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -735,7 +735,7 @@ func (s *Server) getTaskConversationHandler() server.ToolHandlerFunc {
 		payload := buildTaskConversationPayload(req, taskID)
 
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskConversation, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPGetTaskConversation, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -757,7 +757,7 @@ func (s *Server) listTaskSessionsHandler() server.ToolHandlerFunc {
 		}
 
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTaskSessions, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPListTaskSessions, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -774,7 +774,7 @@ func (s *Server) listPendingAgentPermissionsHandler() server.ToolHandlerFunc {
 		payload := map[string]interface{}{mcpKeyTaskID: taskID}
 		copyOptionalStringArg(payload, req, "session_id")
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListPendingAgentPermissions, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPListPendingAgentPermissions, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -793,7 +793,7 @@ func (s *Server) resolveAgentPermissionHandler() server.ToolHandlerFunc {
 			payload[field] = value
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPResolveAgentPermission, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPResolveAgentPermission, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -903,7 +903,7 @@ func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 			"context":    readQuestionContext(req),
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAskParentQuestion, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPAskParentQuestion, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -963,6 +963,48 @@ func (s *Server) clarificationKeepAlive(ctx context.Context, req mcp.CallToolReq
 			"progressToken": token,
 			"progress":      progress,
 			messageArg:      "Waiting for your response in Kandev",
+		})
+	}
+}
+
+// requestPayload is the choke point for a synchronous Kandev call made on
+// behalf of a live agent tool invocation. It wraps BackendClient.RequestPayload
+// with a background keepalive: while the call is in flight (which routinely
+// outlasts the agent MCP client's idle timeout when the backend is detached
+// from agentctl, see AC-PLATFORM-DETACHED-AGENT-CONTINUITY-003.2) it streams
+// periodic MCP progress notifications, resetting the client's idle timer so
+// the call is not aborted mid-flight. ask_user_question_kandev keeps its own
+// bespoke wrapper (distinct token/message and timeout-driven cancellation)
+// instead of calling this helper; the periodic internal plugin-tool sync and
+// the fire-and-forget clarification-timeout notifier are not tied to a live
+// tool call and must not go through it either.
+func (s *Server) requestPayload(ctx context.Context, req mcp.CallToolRequest, action string, payload, result interface{}) error {
+	stop := make(chan struct{})
+	defer close(stop)
+	go emitKeepAlivePings(ctx, stop, askQuestionKeepAliveInterval, s.kandevCallKeepAlive(ctx, req))
+	return s.backend.RequestPayload(ctx, action, payload, result)
+}
+
+// kandevCallKeepAlive builds the keepalive callback used by requestPayload. It
+// mirrors clarificationKeepAlive's progress-token behavior (mirrors the
+// client's own token when present, falls back to a call-scoped one) with a
+// generic waiting message instead of ask_user_question's specific one.
+func (s *Server) kandevCallKeepAlive(ctx context.Context, req mcp.CallToolRequest) func() {
+	srv := server.ServerFromContext(ctx)
+	if srv == nil {
+		return func() {}
+	}
+	var token mcp.ProgressToken = fmt.Sprintf("kandev_call:%s", s.sessionID)
+	if req.Params.Meta != nil && req.Params.Meta.ProgressToken != nil {
+		token = req.Params.Meta.ProgressToken
+	}
+	var progress float64
+	return func() {
+		progress++
+		_ = srv.SendNotificationToClient(ctx, "notifications/progress", map[string]any{
+			"progressToken": token,
+			"progress":      progress,
+			messageArg:      "Waiting for Kandev",
 		})
 	}
 }
@@ -1316,7 +1358,7 @@ func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
 			payload["allow_truncation"] = true
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPCreateTaskPlan, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPCreateTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(planToolError(err)), nil
 		}
 		return planWriteAck("created", result, content), nil
@@ -1340,7 +1382,7 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 		}
 		payload := planReadRequestPayload(taskID, options)
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskPlan, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPGetTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(planToolError(err)), nil
 		}
 
@@ -1443,7 +1485,7 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		}
 
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPlan, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPUpdateTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(planToolError(err)), nil
 		}
 		return planWriteAck("updated", result, content), nil
@@ -1480,7 +1522,7 @@ func (s *Server) editTaskPlanHandler() server.ToolHandlerFunc {
 			payload["allow_truncation"] = true
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPEditTaskPlan, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPEditTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(planToolError(err)), nil
 		}
 		return planWriteAck("edited", result, newText), nil
@@ -1513,7 +1555,7 @@ func (s *Server) deleteTaskPlanHandler() server.ToolHandlerFunc {
 
 		payload := map[string]string{"task_id": taskID}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPDeleteTaskPlan, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPDeleteTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		return mcp.NewToolResultText("Plan deleted successfully."), nil
@@ -1538,7 +1580,7 @@ func (s *Server) showWalkthroughHandler() server.ToolHandlerFunc {
 			"steps":   stepsRaw,
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPShowWalkthrough, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPShowWalkthrough, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -1564,7 +1606,7 @@ func (s *Server) publishReviewFindingsHandler() server.ToolHandlerFunc {
 			"findings": findingsRaw,
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPPublishReviewFindings, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPPublishReviewFindings, payload, &result); err != nil {
 			// A validation failure rejects the whole batch, so the agent can fix
 			// the offending entry and call again.
 			return mcp.NewToolResultError(err.Error()), nil
@@ -1582,7 +1624,7 @@ func (s *Server) getWalkthroughHandler() server.ToolHandlerFunc {
 		}
 		payload := map[string]string{"task_id": taskID}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetWalkthrough, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPGetWalkthrough, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if len(result) == 0 {
@@ -1601,7 +1643,7 @@ func (s *Server) deleteWalkthroughHandler() server.ToolHandlerFunc {
 		}
 		payload := map[string]string{"task_id": taskID}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPDeleteWalkthrough, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPDeleteWalkthrough, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		return mcp.NewToolResultText("Walkthrough deleted successfully."), nil

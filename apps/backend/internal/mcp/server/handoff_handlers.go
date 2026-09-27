@@ -84,7 +84,7 @@ func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
 			"caller_task_id": s.taskID,
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListRelatedTasks, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPListRelatedTasks, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if !req.GetBool("verbose", false) {
@@ -132,7 +132,7 @@ func (s *Server) listTaskDocumentsHandler() server.ToolHandlerFunc {
 			"caller_task_id": s.taskID,
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTaskDocuments, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPListTaskDocuments, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -156,7 +156,7 @@ func (s *Server) getTaskDocumentHandler() server.ToolHandlerFunc {
 			"caller_task_id": s.taskID,
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskDocument, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPGetTaskDocument, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		// If a 'content' field is present, return it directly so the agent
@@ -192,7 +192,7 @@ func (s *Server) writeTaskDocumentHandler() server.ToolHandlerFunc {
 			"caller_task_id": s.taskID,
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPWriteTaskDocument, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPWriteTaskDocument, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

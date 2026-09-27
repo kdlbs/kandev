@@ -1048,7 +1048,7 @@ func (s *Server) registerPluginTools() {
 				StructuredContent map[string]any `json:"structured_content,omitempty"`
 				IsError           bool           `json:"is_error"`
 			}
-			if err := s.backend.RequestPayload(ctx, ws.ActionMCPInvokePluginTool, payload, &result); err != nil {
+			if err := s.requestPayload(ctx, req, ws.ActionMCPInvokePluginTool, payload, &result); err != nil {
 				return nil, err
 			}
 			if result.IsError {
@@ -1699,7 +1699,7 @@ func (s *Server) addWorkspaceSourcesHandler() server.ToolHandlerFunc {
 		// Provenance is server-authored and intentionally absent from the callable schema.
 		payload := map[string]interface{}{mcpKeyTaskID: taskID, "sources": sources, "caller_task_id": s.taskID, "caller_session_id": s.sessionID}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAddWorkspaceSources, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPAddWorkspaceSources, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -1744,7 +1744,7 @@ func (s *Server) addBranchToTaskHandler() server.ToolHandlerFunc {
 			mcpKeyBaseBranch:     req.GetString(mcpKeyBaseBranch, ""),
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAddBranchToTask, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPAddBranchToTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -1792,7 +1792,7 @@ func (s *Server) updateRepositoryBaseBranchHandler() server.ToolHandlerFunc {
 			mcpKeyBaseBranch:       baseBranch,
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateRepositoryBaseBranch, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPUpdateRepositoryBaseBranch, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -1846,7 +1846,7 @@ func (s *Server) setTaskTitleHandler() server.ToolHandlerFunc {
 			titleArg:     title,
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPSetTaskTitle, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPSetTaskTitle, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -1871,7 +1871,7 @@ func (s *Server) stepCompleteHandler() server.ToolHandlerFunc {
 			"blockers":   req.GetString("blockers", ""),
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPStepComplete, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPStepComplete, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

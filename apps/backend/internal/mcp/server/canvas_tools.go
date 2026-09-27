@@ -133,8 +133,8 @@ func (s *Server) registerCanvasStateTools() {
 }
 
 func (s *Server) listCanvasesHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return s.requestCanvasTool(ctx, ws.ActionMCPListCanvases, nil)
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return s.requestCanvasTool(ctx, req, ws.ActionMCPListCanvases, nil)
 	}
 }
 
@@ -144,7 +144,7 @@ func (s *Server) readCanvasAuthoringSkillHandler() server.ToolHandlerFunc {
 		if path := req.GetString(canvasSkillPathArg, ""); path != "" {
 			payload[canvasSkillPathArg] = path
 		}
-		return s.requestCanvasTool(ctx, ws.ActionMCPReadCanvasAuthoringSkill, payload)
+		return s.requestCanvasTool(ctx, req, ws.ActionMCPReadCanvasAuthoringSkill, payload)
 	}
 }
 
@@ -158,7 +158,7 @@ func (s *Server) createCanvasHandler() server.ToolHandlerFunc {
 		if err != nil || summary == "" {
 			return mcp.NewToolResultError("summary is required"), nil
 		}
-		return s.requestCanvasTool(ctx, ws.ActionMCPCreateCanvas, map[string]interface{}{
+		return s.requestCanvasTool(ctx, req, ws.ActionMCPCreateCanvas, map[string]interface{}{
 			canvasTitleArg: title, canvasSummaryArg: summary,
 		})
 	}
@@ -170,7 +170,7 @@ func (s *Server) getCanvasHandler() server.ToolHandlerFunc {
 		if err != nil || canvasID == "" {
 			return mcp.NewToolResultError("canvas_id is required"), nil
 		}
-		return s.requestCanvasTool(ctx, ws.ActionMCPGetCanvas, map[string]interface{}{canvasIDArg: canvasID})
+		return s.requestCanvasTool(ctx, req, ws.ActionMCPGetCanvas, map[string]interface{}{canvasIDArg: canvasID})
 	}
 }
 
@@ -184,7 +184,7 @@ func (s *Server) publishCanvasHandler() server.ToolHandlerFunc {
 		if err != nil || sourcePath == "" {
 			return mcp.NewToolResultError("source_path is required"), nil
 		}
-		return s.requestCanvasTool(ctx, ws.ActionMCPPublishCanvas, map[string]interface{}{
+		return s.requestCanvasTool(ctx, req, ws.ActionMCPPublishCanvas, map[string]interface{}{
 			canvasIDArg: canvasID, canvasSourcePathArg: sourcePath,
 		})
 	}
@@ -200,7 +200,7 @@ func (s *Server) getCanvasStateHandler() server.ToolHandlerFunc {
 		if key := req.GetString(canvasStateKeyArg, ""); key != "" {
 			payload[canvasStateKeyArg] = key
 		}
-		return s.requestCanvasTool(ctx, ws.ActionMCPGetCanvasState, payload)
+		return s.requestCanvasTool(ctx, req, ws.ActionMCPGetCanvasState, payload)
 	}
 }
 
@@ -226,13 +226,15 @@ func (s *Server) setCanvasStateHandler() server.ToolHandlerFunc {
 		} else if present {
 			payload[canvasExpectedRevisionArg] = revision
 		}
-		return s.requestCanvasTool(ctx, ws.ActionMCPSetCanvasState, payload)
+		return s.requestCanvasTool(ctx, req, ws.ActionMCPSetCanvasState, payload)
 	}
 }
 
-func (s *Server) requestCanvasTool(ctx context.Context, action string, payload interface{}) (*mcp.CallToolResult, error) {
+func (s *Server) requestCanvasTool(
+	ctx context.Context, req mcp.CallToolRequest, action string, payload interface{},
+) (*mcp.CallToolResult, error) {
 	var result interface{}
-	if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
+	if err := s.requestPayload(ctx, req, action, payload, &result); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	data, err := json.MarshalIndent(result, "", "  ")

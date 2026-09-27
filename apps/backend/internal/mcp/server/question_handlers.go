@@ -67,7 +67,7 @@ func (s *Server) listPendingQuestionsHandler() server.ToolHandlerFunc {
 		copyOptionalLimitArg(payload, req)
 
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListPendingQuestions, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPListPendingQuestions, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -91,7 +91,7 @@ func (s *Server) answerQuestionHandler() server.ToolHandlerFunc {
 		copyOptionalStringArg(payload, req, "reject_reason")
 
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAnswerQuestion, payload, &result); err != nil {
+		if err := s.requestPayload(ctx, req, ws.ActionMCPAnswerQuestion, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

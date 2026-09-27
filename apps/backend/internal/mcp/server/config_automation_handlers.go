@@ -44,6 +44,6 @@ func (s *Server) registerConfigAutomationTools() {
 	mcp.WithDestructiveHintAnnotation(false)(&tool)
 	mcp.WithIdempotentHintAnnotation(false)(&tool)
 	s.mcpServer.AddTool(tool, s.wrapHandler(tool.Name, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return s.forwardToBackend(ctx, ws.ActionMCPCreateAutomation, req.GetArguments())
+		return s.forwardToBackend(ctx, req, ws.ActionMCPCreateAutomation, req.GetArguments())
 	}))
 }

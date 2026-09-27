@@ -85,7 +85,7 @@ func (s *Server) dispatchDependencyMutation(
 		"depends_on_task_id": dependsOn,
 	}
 	var result map[string]interface{}
-	if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
+	if err := s.requestPayload(ctx, req, action, payload, &result); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	data, _ := json.MarshalIndent(result, "", "  ")
