@@ -141,3 +141,8 @@ clear before a person saves an automation.
 - Converting an existing hidden task into a visible task in place. A target
   change takes effect on the next firing and may replace the continuation.
 - Deleting visible tasks as part of automation deletion.
+
+## Proposed coordination extension
+
+A proposed managed-conversation destination extends the available target choices. Existing task-mode defaults and cleanup ownership remain unchanged.
+See the [draft coordination contract](plugin-conversation-targets.md).

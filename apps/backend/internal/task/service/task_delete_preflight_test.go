@@ -22,6 +22,10 @@ type taskDeletePreflightCleanup struct {
 	inspectCalls      int
 }
 
+func taskDeletePreflightHumanContext() context.Context {
+	return authn.WithIdentity(context.Background(), authn.Identity{UserID: "test-human", Synthetic: true})
+}
+
 func (c *taskDeletePreflightCleanup) OnTaskDeleted(context.Context, string) error { return nil }
 
 func (c *taskDeletePreflightCleanup) GetAllByTaskID(
@@ -111,7 +115,7 @@ func TestTaskDeletePreflightUsesExactScopeAndReportsDirtyWorktrees(t *testing.T)
 	}
 	svc.SetWorktreeCleanup(cleanup)
 
-	clean, err := svc.TaskDeletePreflight(context.Background(), []string{"root"}, false)
+	clean, err := svc.TaskDeletePreflight(taskDeletePreflightHumanContext(), []string{"root"}, false)
 	if err != nil {
 		t.Fatalf("direct preflight: %v", err)
 	}
@@ -119,7 +123,7 @@ func TestTaskDeletePreflightUsesExactScopeAndReportsDirtyWorktrees(t *testing.T)
 		t.Fatal("direct preflight included a child worktree")
 	}
 
-	dirty, err := svc.TaskDeletePreflight(context.Background(), []string{"root", "child", "root"}, true)
+	dirty, err := svc.TaskDeletePreflight(taskDeletePreflightHumanContext(), []string{"root", "child", "root"}, true)
 	if err != nil {
 		t.Fatalf("cascade preflight: %v", err)
 	}
@@ -143,7 +147,7 @@ func TestTaskDeletePreflightTreatsEmptyInventoryAsClean(t *testing.T) {
 	cleanup := &taskDeletePreflightCleanup{worktreesByTaskID: map[string][]*worktree.Worktree{}}
 	svc.SetWorktreeCleanup(cleanup)
 
-	result, err := svc.TaskDeletePreflight(context.Background(), []string{"empty"}, false)
+	result, err := svc.TaskDeletePreflight(taskDeletePreflightHumanContext(), []string{"empty"}, false)
 	if err != nil {
 		t.Fatalf("empty preflight: %v", err)
 	}
@@ -152,6 +156,48 @@ func TestTaskDeletePreflightTreatsEmptyInventoryAsClean(t *testing.T) {
 	}
 	if cleanup.inspectCalls != 1 {
 		t.Fatal("empty inventory did not confirm the inspection capability")
+	}
+}
+
+func TestTaskDeleteConfirmationBindsHumanOptionsAndCurrentTree(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTaskDeletePreflightTask(t, repo, "confirmed-root", "", false)
+	seedTaskDeletePreflightTask(t, repo, "confirmed-child", "confirmed-root", false)
+	svc.SetWorktreeCleanup(&taskDeletePreflightCleanup{worktreesByTaskID: map[string][]*worktree.Worktree{}})
+
+	ctx := taskDeletePreflightHumanContext()
+	preview, err := svc.TaskDeletePreflight(ctx, []string{"confirmed-root"}, false, false)
+	if err != nil || preview.ConfirmationID == "" {
+		t.Fatalf("TaskDeletePreflight = %+v, %v; want a confirmation id", preview, err)
+	}
+	if err := svc.WithTaskDeleteConfirmation(ctx, preview.ConfirmationID, "confirmed-root", false, true, func() error { return nil }); !errors.Is(err, ErrTaskDeleteConfirmationMismatch) {
+		t.Fatalf("confirmation with changed discard option = %v, want mismatch", err)
+	}
+	otherHuman := authn.WithIdentity(context.Background(), authn.Identity{UserID: "other-human", Synthetic: true})
+	if err := svc.WithTaskDeleteConfirmation(otherHuman, preview.ConfirmationID, "confirmed-root", false, false, func() error { return nil }); !errors.Is(err, ErrTaskDeleteConfirmationMismatch) {
+		t.Fatalf("confirmation from another Human = %v, want mismatch", err)
+	}
+	if _, err := repo.DB().ExecContext(context.Background(), "UPDATE tasks SET updated_at = ? WHERE id = ?", time.Now().UTC().Add(time.Second), "confirmed-child"); err != nil {
+		t.Fatalf("change child after preview: %v", err)
+	}
+	if err := svc.WithTaskDeleteConfirmation(ctx, preview.ConfirmationID, "confirmed-root", false, false, func() error { return nil }); !errors.Is(err, ErrTaskDeleteConfirmationStale) {
+		t.Fatalf("confirmation after tree change = %v, want stale", err)
+	}
+
+	fresh, err := svc.TaskDeletePreflight(ctx, []string{"confirmed-root"}, false, false)
+	if err != nil {
+		t.Fatalf("fresh TaskDeletePreflight: %v", err)
+	}
+	deletes := 0
+	deleteRoot := func() error { deletes++; return nil }
+	if err := svc.WithTaskDeleteConfirmation(ctx, fresh.ConfirmationID, "confirmed-root", false, false, deleteRoot); err != nil {
+		t.Fatalf("confirmed delete: %v", err)
+	}
+	if err := svc.WithTaskDeleteConfirmation(ctx, fresh.ConfirmationID, "confirmed-root", false, false, deleteRoot); !errors.Is(err, ErrTaskDeleteConfirmationReplay) {
+		t.Fatalf("replayed confirmation = %v, want replay rejection", err)
+	}
+	if deletes != 1 {
+		t.Fatalf("delete callback calls = %d, want one", deletes)
 	}
 }
 
@@ -173,7 +219,7 @@ func TestTaskDeletePreflightFailsClosedWhenInspectionIsUnavailable(t *testing.T)
 			if tt.cleanup != nil {
 				svc.SetWorktreeCleanup(tt.cleanup)
 			}
-			_, err := svc.TaskDeletePreflight(context.Background(), []string{tt.name}, false)
+			_, err := svc.TaskDeletePreflight(taskDeletePreflightHumanContext(), []string{tt.name}, false)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}

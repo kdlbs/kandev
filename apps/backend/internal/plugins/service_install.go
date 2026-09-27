@@ -187,7 +187,21 @@ func (s *Service) reviewInstalledApprovals(rec *store.Record) error {
 	if err != nil {
 		return err
 	}
-	return ledger.reviewManifestChange(rec.InstallationID, ManifestCapabilityDigest(rec.Manifest), caps, time.Now().UTC(), true)
+	s.approvalEffectMu.Lock()
+	rows, err := ledger.listByInstallation(rec.InstallationID)
+	if err == nil {
+		err = ledger.reviewManifestChange(rec.InstallationID, ManifestCapabilityDigest(rec.Manifest), caps, time.Now().UTC(), true)
+	}
+	s.approvalEffectMu.Unlock()
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if err := s.invalidateManagedConversationPolicy(rec.InstallationID, row.WorkspaceID); err != nil {
+			return fmt.Errorf("plugins: manifest review could not cancel managed conversations in workspace %s: %w", row.WorkspaceID, err)
+		}
+	}
+	return nil
 }
 
 // extractPackage runs pkgtar.Install and registers the extracted version
@@ -429,6 +443,14 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	if err := s.deletePluginAgentConversations(ctx, id); err != nil {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin agent conversations: %w", err)
+	}
+	if rec.InstallationID != "" {
+		if managed := s.managedAgentConversationDeps(); managed != nil {
+			if err := managed.DetachManagedForInstallation(ctx, rec.InstallationID); err != nil {
+				s.reconcileAbortedUninstall(id, wasRunning)
+				return fmt.Errorf("plugins: uninstall aborted, could not detach managed conversation transcripts: %w", err)
+			}
+		}
 	}
 	if err := pkgtar.Remove(s.pluginsDir, id); err != nil {
 		return fmt.Errorf("plugins: remove installed package: %w", err)

@@ -135,6 +135,23 @@ describe("RunsSection run log", () => {
     expect(screen.getByTestId(RUN_OUTCOME).textContent).toContain("Sweep complete");
   });
 
+  it("shows delivery acceptance separately from the eventual conversation outcome", () => {
+    setup([
+      mkRun({
+        id: "run-managed-accepted",
+        task_id: "",
+        status: "triggered",
+        delivery_status: "accepted",
+      }),
+    ]);
+
+    expect(screen.getByTestId("run-delivery-status").textContent).toBe("Accepted");
+    expect(
+      screen.getByTestId("run-row-run-managed-accepted").querySelector("[data-slot='badge']")
+        ?.textContent,
+    ).toContain("Triggered");
+  });
+
   it("prefers the error over the summary when a run failed", () => {
     setup([
       mkRun({

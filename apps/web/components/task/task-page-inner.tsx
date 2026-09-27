@@ -16,6 +16,8 @@ import {
   SessionRecoveryFeedback,
 } from "@/components/task/ensure-session-error";
 import { TaskMoveErrorBanner } from "@/components/task/task-move-error-banner";
+import { TaskManagementClaimRow } from "@/components/task/task-management-claim-row";
+import { TaskCompletionGateRow } from "@/components/task/task-completion-gate-row";
 import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
 import { TaskCommands } from "@/components/task-commands";
@@ -420,6 +422,20 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                 onMoveError={reportTaskMoveError}
               />
             )}
+            <TaskManagementClaimRow
+              taskId={task.id}
+              taskUpdatedAt={task.updated_at}
+              isMobile={isMobile}
+            />
+            <TaskCompletionGateRow
+              taskId={task.id}
+              taskUpdatedAt={task.updated_at}
+              workflowId={task.workflow_id}
+              workflowStepId={task.workflow_step_id}
+              taskState={task.state}
+              workflowSteps={props.workflowSteps}
+              isMobile={isMobile}
+            />
             {taskMoveError !== null && <TaskMoveErrorBanner error={taskMoveError} />}
             {ensureSession.status === "error" && (
               <EnsureSessionErrorBanner

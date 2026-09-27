@@ -420,3 +420,8 @@ path. Exact regression names and commands belong to the linked fix package.
 
 - [Task completion and follow-ups](../../../plans/task-completion/plan.md)
 - [Workspace restoration after completion](../../../plans/completed-workspace-restoration/plan.md)
+
+## Proposed coordination extension
+
+The proposed task-owned evidence gate runs before the completion commit. It preserves this design for tasks without criteria.
+See the [draft coordination contract](coordination-controls.md).

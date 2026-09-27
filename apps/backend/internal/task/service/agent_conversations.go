@@ -5,12 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/pkg/api/v1"
@@ -22,13 +28,27 @@ import (
 // Managed conversation metadata keys, stamped server-side on the backing
 // task's Metadata map.
 const (
-	metaKeyPluginID        = "kandev.plugin_id"
-	metaKeyWorkspaceID     = "kandev.workspace_id"
-	metaKeyConversationKey = "kandev.conversation_key"
-	metaKeyEphemeral       = "kandev.ephemeral"
-	metaKeyManagedByPlugin = "kandev.managed_by_plugin"
-	metaKeyInstructionVer  = "kandev.instruction_version"
+	metaKeyPluginID                = "kandev.plugin_id"
+	metaKeyWorkspaceID             = "kandev.workspace_id"
+	metaKeyConversationKey         = "kandev.conversation_key"
+	metaKeyEphemeral               = "kandev.ephemeral"
+	metaKeyManagedByPlugin         = models.MetaKeyManagedByPlugin
+	metaKeyInstructionVer          = "kandev.instruction_version"
+	metaKeyManagedRetained         = models.MetaKeyManagedRetained
+	metaKeyManagedInstall          = models.MetaKeyManagedInstallationID
+	metaKeyManagedInstance         = models.MetaKeyManagedInstanceKey
+	metaKeyManagedRevision         = models.MetaKeyManagedConversationRevision
+	metaKeyManagedPaused           = models.MetaKeyManagedConversationPaused
+	metaKeyManagedDetached         = models.MetaKeyManagedConversationDetached
+	metaKeyManagedApprovalRevision = models.MetaKeyManagedApprovalRevision
+	metaKeyManagedManifestDigest   = models.MetaKeyManagedManifestDigest
+	metaKeyManagedToolNames        = models.MetaKeyManagedAgentToolNames
+	metaKeyManagedOperation        = "kandev.last_exact_operation"
+	metaKeyManagedPayload          = "kandev.last_exact_payload"
+	metaKeyRetentionMode           = models.MetaKeyManagedRetentionMode
 )
+
+const managedConversationRetentionMode = "retain_on_uninstall"
 
 // defaultAgentConversationTitle is the title for managed conversation
 // backing tasks. Visible only in diagnostic/admin views, never on the
@@ -58,6 +78,7 @@ const (
 	// otherwise cannot back a new conversation. No task or session row is
 	// created.
 	AgentConversationStatusConfigurationRequired = "configuration_required"
+	AgentConversationStatusAlreadyApplied        = "already_applied"
 )
 
 // agentConversationTaskRepo is the narrow task-repository interface for
@@ -145,6 +166,17 @@ type agentConversationDispatcher interface {
 	Deliver(ctx context.Context, taskID string, session *models.TaskSession, text, source, idempotencyID string) (status string, err error)
 }
 
+// agentConversationImmediateDispatcher is the optional race-safe direct
+// prompt path used by exact managed dispatch. It must never add queue work.
+type agentConversationImmediateDispatcher interface {
+	DispatchImmediate(
+		ctx context.Context,
+		taskID string,
+		session *models.TaskSession,
+		text, source, idempotencyID string,
+	) (pluginsdk.ManagedAgentDispatchStatus, error)
+}
+
 // AgentConversationService implements the managed conversation lifecycle:
 // Ensure (create-or-repair), Dispatch, and Delete. It uses narrow
 // repository interfaces to avoid depending on the full task/Service.
@@ -168,8 +200,13 @@ type AgentConversationService struct {
 	// pattern (internal/plugins/host.go) for the same boot-ordering reason:
 	// the orchestrator is constructed after this service. Guarded by mu so
 	// concurrent Dispatch calls observe a consistent value.
-	mu         sync.RWMutex
-	dispatcher agentConversationDispatcher
+	mu                           sync.RWMutex
+	dispatcher                   agentConversationDispatcher
+	managedInputStorage          messagequeue.ManagedInputStorage
+	managedInputIdentityResolver func(context.Context, string, string) (messagequeue.QueueSessionIdentity, error)
+	managedInputMaxPerSession    func() int
+	managedInputQueueNotifier    func(context.Context, string, string)
+	managedInputExecutionStopper func(context.Context, string, string, string) (bool, error)
 
 	dispatchLocksMu sync.Mutex
 	dispatchLocks   map[string]*sync.Mutex
@@ -181,6 +218,8 @@ type AgentConversationService struct {
 	// lifetime of the process.
 	ensureLocksMu sync.Mutex
 	ensureLocks   map[string]*sync.Mutex
+
+	managedExecutionStopper func(context.Context, string) error
 }
 
 // NewAgentConversationService creates a new service with the given dependencies.
@@ -217,6 +256,46 @@ func (s *AgentConversationService) SetTaskDeleter(d agentConversationTaskDeleter
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deleter = d
+}
+
+// SetManagedExecutionStopper wires lifecycle cancellation after the shared
+// orchestrator exists. The callback receives only a host-owned task identity.
+func (s *AgentConversationService) SetManagedExecutionStopper(stop func(context.Context, string) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.managedExecutionStopper = stop
+}
+
+// SetManagedInputStorage wires the durable input receipt store and the queue
+// repository's authoritative session-identity resolver. maxPerSession is read
+// at admission time so managed inputs use the same configured queue limit.
+func (s *AgentConversationService) SetManagedInputStorage(
+	storage messagequeue.ManagedInputStorage,
+	resolveIdentity func(context.Context, string, string) (messagequeue.QueueSessionIdentity, error),
+	maxPerSession func() int,
+) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.managedInputStorage = storage
+	s.managedInputIdentityResolver = resolveIdentity
+	s.managedInputMaxPerSession = maxPerSession
+}
+
+// SetManagedInputNotifier wires the orchestrator wake used after durable
+// admission and when a paused conversation resumes.
+func (s *AgentConversationService) SetManagedInputNotifier(notify func(context.Context, string, string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.managedInputQueueNotifier = notify
+}
+
+// SetManagedInputExecutionStopper wires exact-generation cancellation.
+func (s *AgentConversationService) SetManagedInputExecutionStopper(
+	stop func(context.Context, string, string, string) (bool, error),
+) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.managedInputExecutionStopper = stop
 }
 
 func (s *AgentConversationService) getDispatcher() agentConversationDispatcher {
@@ -359,6 +438,755 @@ func (s *AgentConversationService) Ensure(ctx context.Context, pluginID string, 
 		ConversationKey: spec.ConversationKey,
 		AgentProfileID:  spec.AgentProfileID,
 	}, AgentConversationStatusCreated, nil
+}
+
+// EnsureManaged creates or reconciles a retained conversation keyed by the
+// host-minted installation identity. Its storage and deletion rules are
+// separate from the legacy plugin-id keyed conversation lifecycle.
+func (s *AgentConversationService) EnsureManaged(
+	ctx context.Context,
+	pluginID, installationID string,
+	spec pluginsdk.ManagedAgentConversationSpec,
+	operationID, payloadDigest string,
+) (pluginsdk.ManagedAgentConversationDescriptor, string, error) {
+	spec.AgentToolNames = append([]string(nil), spec.AgentToolNames...)
+	sort.Strings(spec.AgentToolNames)
+	if err := validateManagedConversationIdentity(pluginID, installationID, spec, operationID, payloadDigest); err != nil {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, "", err
+	}
+	key := managedConversationIdentity(installationID, spec.WorkspaceID, spec.InstanceKey)
+	unlock := s.lockEnsureKey(key)
+	defer unlock()
+	prepared, usable, err := s.prepareManagedConversationSpec(ctx, spec)
+	if err != nil {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, "", err
+	}
+	if !usable {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, AgentConversationStatusConfigurationRequired, nil
+	}
+	spec = prepared
+	existing, err := s.findRetainedManagedConversation(ctx, installationID, spec.WorkspaceID, spec.InstanceKey)
+	if err != nil {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, "", err
+	}
+	if existing != nil {
+		return s.reconcileManagedConversation(ctx, pluginID, installationID, existing, spec, operationID, payloadDigest)
+	}
+	return s.createManagedConversation(ctx, pluginID, installationID, spec, operationID, payloadDigest)
+}
+
+func validateManagedConversationIdentity(
+	pluginID, installationID string,
+	spec pluginsdk.ManagedAgentConversationSpec,
+	operationID, payloadDigest string,
+) error {
+	if pluginID == "" || installationID == "" || spec.WorkspaceID == "" || spec.InstanceKey == "" ||
+		strings.TrimSpace(spec.InstanceKey) != spec.InstanceKey || len(spec.InstanceKey) > 128 || operationID == "" || payloadDigest == "" {
+		return status.Error(codes.InvalidArgument, "installation, workspace, and instance key are required")
+	}
+	if spec.ApprovalRevision == 0 || len(spec.ManifestDigest) != 64 || mcpprofile.ValidateManagedToolNames(spec.AgentToolNames) != nil {
+		return status.Error(codes.InvalidArgument, "managed conversation tool policy is invalid")
+	}
+	return nil
+}
+
+func (s *AgentConversationService) prepareManagedConversationSpec(
+	ctx context.Context,
+	spec pluginsdk.ManagedAgentConversationSpec,
+) (pluginsdk.ManagedAgentConversationSpec, bool, error) {
+	workspace, err := s.tasks.GetWorkspace(ctx, spec.WorkspaceID)
+	if err != nil {
+		return spec, false, fmt.Errorf("failed to resolve managed conversation workspace: %w", err)
+	}
+	if workspace == nil {
+		return spec, false, status.Error(codes.NotFound, "workspace not found")
+	}
+	profileID, usable, err := s.resolveEffectiveProfile(ctx, spec.WorkspaceID, spec.AgentProfileID)
+	spec.AgentProfileID = profileID
+	return spec, usable, err
+}
+
+func (s *AgentConversationService) createManagedConversation(
+	ctx context.Context,
+	pluginID, installationID string,
+	spec pluginsdk.ManagedAgentConversationSpec,
+	operationID, payloadDigest string,
+) (pluginsdk.ManagedAgentConversationDescriptor, string, error) {
+	if spec.ExpectedRevision != 0 {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, "", status.Error(codes.Aborted, "managed conversation revision is stale")
+	}
+	conversation := s.newManagedConversationTask(pluginID, installationID, spec, operationID, payloadDigest)
+	if err := s.tasks.CreateTask(ctx, conversation); err != nil {
+		existing, findErr := s.findRetainedManagedConversation(ctx, installationID, spec.WorkspaceID, spec.InstanceKey)
+		if findErr == nil && existing != nil {
+			return s.reconcileManagedConversation(ctx, pluginID, installationID, existing, spec, operationID, payloadDigest)
+		}
+		return pluginsdk.ManagedAgentConversationDescriptor{}, "", fmt.Errorf("failed to insert managed conversation task: %w", err)
+	}
+	primary, err := s.createManagedPrimarySession(ctx, conversation.ID, spec)
+	if err != nil {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, "", fmt.Errorf("failed to create managed conversation session: %w", err)
+	}
+	s.publishTaskCreated(ctx, conversation)
+	return managedConversationDescriptor(installationID, conversation, primary), AgentConversationStatusCreated, nil
+}
+
+// GetManaged returns a conversation only when both its installation and
+// workspace match the request.
+func (s *AgentConversationService) GetManaged(
+	ctx context.Context, installationID, workspaceID, instanceKey string,
+) (pluginsdk.ManagedAgentConversationDescriptor, error) {
+	task, err := s.findRetainedManagedConversation(ctx, installationID, workspaceID, instanceKey)
+	if err != nil {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, err
+	}
+	if task == nil {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, status.Error(codes.NotFound, "managed conversation not found")
+	}
+	if managedConversationDetached(task) {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, status.Error(codes.NotFound, "managed conversation not found")
+	}
+	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, task.ID)
+	if err != nil {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, err
+	}
+	return managedConversationDescriptor(installationID, task, primary), nil
+}
+
+// ListManaged returns installation-owned conversations for one workspace in
+// stable task-id order.
+func (s *AgentConversationService) ListManaged(
+	ctx context.Context, installationID, workspaceID string,
+) ([]pluginsdk.ManagedAgentConversationDescriptor, error) {
+	if installationID == "" || workspaceID == "" {
+		return nil, status.Error(codes.InvalidArgument, "installation and workspace are required")
+	}
+	tasks, err := s.listRetainedManagedConversations(ctx, installationID, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].ID < tasks[j].ID })
+	out := make([]pluginsdk.ManagedAgentConversationDescriptor, 0, len(tasks))
+	for _, task := range tasks {
+		if managedConversationDetached(task) {
+			continue
+		}
+		primary, err := s.sess.GetPrimarySessionByTaskID(ctx, task.ID)
+		if errors.Is(err, taskrepo.ErrNoPrimarySession) {
+			primary = nil
+		} else if err != nil {
+			return nil, err
+		}
+		out = append(out, managedConversationDescriptor(installationID, task, primary))
+	}
+	return out, nil
+}
+
+// SetManagedPaused changes only the desired admission state. Stopping a live
+// generation is a separate execution-control operation.
+//
+//nolint:cyclop // Pause changes update desired state and conversation revision as one command.
+func (s *AgentConversationService) SetManagedPaused(
+	ctx context.Context, installationID, workspaceID, instanceKey string, expectedRevision uint64, paused bool, operationID, payloadDigest string,
+) (pluginsdk.ManagedAgentConversationDescriptor, error) {
+	unlock := s.lockEnsureKey(managedConversationIdentity(installationID, workspaceID, instanceKey))
+	defer unlock()
+	task, err := s.findRetainedManagedConversation(ctx, installationID, workspaceID, instanceKey)
+	if err != nil {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, err
+	}
+	if task == nil {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, status.Error(codes.NotFound, "managed conversation not found")
+	}
+	if managedConversationDetached(task) {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, status.Error(codes.NotFound, "managed conversation not found")
+	}
+	if operationID == "" || payloadDigest == "" {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, status.Error(codes.InvalidArgument, "managed conversation operation identity is required")
+	}
+	if managedConversationOperationMatches(task, operationID, payloadDigest) {
+		primary, err := s.sess.GetPrimarySessionByTaskID(ctx, task.ID)
+		if errors.Is(err, taskrepo.ErrNoPrimarySession) || primary == nil {
+			spec := managedConversationSpecFromTask(task)
+			primary, err = s.createManagedPrimarySession(ctx, task.ID, spec)
+		}
+		if err != nil {
+			return pluginsdk.ManagedAgentConversationDescriptor{}, err
+		}
+		descriptor := managedConversationDescriptor(installationID, task, primary)
+		if !paused && primary != nil {
+			s.notifyManagedInputQueue(ctx, task.ID, primary.ID)
+		}
+		return descriptor, nil
+	}
+	revision := managedConversationRevision(task)
+	if revision != expectedRevision {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, status.Error(codes.Aborted, "managed conversation revision is stale")
+	}
+	if managedConversationPaused(task) != paused {
+		setManagedConversationValue(task, metaKeyManagedPaused, paused)
+		setManagedConversationValue(task, metaKeyManagedRevision, strconv.FormatUint(revision+1, 10))
+	}
+	setManagedConversationValue(task, metaKeyManagedOperation, operationID)
+	setManagedConversationValue(task, metaKeyManagedPayload, payloadDigest)
+	task.UpdatedAt = time.Now().UTC()
+	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, fmt.Errorf("failed to save managed conversation pause state: %w", err)
+	}
+	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, task.ID)
+	if err != nil {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, err
+	}
+	descriptor := managedConversationDescriptor(installationID, task, primary)
+	if !paused && primary != nil {
+		s.notifyManagedInputQueue(ctx, task.ID, primary.ID)
+	}
+	return descriptor, nil
+}
+
+// DeleteManaged removes one retained conversation only at the expected
+// revision. Host lifecycle cleanup deliberately does not call this method.
+func (s *AgentConversationService) DeleteManaged(
+	ctx context.Context, installationID, workspaceID, instanceKey string, expectedRevision uint64, _, _ string,
+) error {
+	unlock := s.lockEnsureKey(managedConversationIdentity(installationID, workspaceID, instanceKey))
+	defer unlock()
+	task, err := s.findRetainedManagedConversation(ctx, installationID, workspaceID, instanceKey)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return status.Error(codes.NotFound, "managed conversation not found")
+	}
+	if managedConversationDetached(task) {
+		return status.Error(codes.NotFound, "managed conversation not found")
+	}
+	if managedConversationRevision(task) != expectedRevision {
+		return status.Error(codes.Aborted, "managed conversation revision is stale")
+	}
+	if err := s.deleteManagedConversationTask(ctx, s.getTaskDeleter(), task.ID); err != nil {
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			return nil
+		}
+		return fmt.Errorf("failed to delete managed conversation: %w", err)
+	}
+	return nil
+}
+
+// PauseManagedForInstallation blocks new turns and stops any current execution
+// while preserving queued work and the host-owned transcript.
+func (s *AgentConversationService) PauseManagedForInstallation(ctx context.Context, installationID string) error {
+	if installationID == "" {
+		return status.Error(codes.InvalidArgument, "installation_id is required")
+	}
+	tasks, err := s.tasks.ListEphemeralTasksAllWorkspaces(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list retained conversations for pause: %w", err)
+	}
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].ID < tasks[j].ID })
+	for _, candidate := range tasks {
+		if candidate == nil || candidate.Metadata == nil {
+			continue
+		}
+		workspaceID, _ := candidate.Metadata[metaKeyWorkspaceID].(string)
+		if !isRetainedManagedConversation(candidate, installationID, workspaceID, "") {
+			continue
+		}
+		unlock := s.lockEnsureKey(managedConversationIdentity(installationID, workspaceID,
+			models.StringFromAny(candidate.Metadata[metaKeyManagedInstance])))
+		task, findErr := s.findRetainedManagedConversation(ctx, installationID, workspaceID,
+			models.StringFromAny(candidate.Metadata[metaKeyManagedInstance]))
+		if findErr != nil {
+			unlock()
+			return findErr
+		}
+		if task == nil || managedConversationDetached(task) {
+			unlock()
+			continue
+		}
+		if !managedConversationPaused(task) {
+			setManagedConversationValue(task, metaKeyManagedPaused, true)
+			setManagedConversationValue(task, metaKeyManagedRevision,
+				strconv.FormatUint(managedConversationRevision(task)+1, 10))
+			task.UpdatedAt = time.Now().UTC()
+			if err := s.tasks.UpdateTask(ctx, task); err != nil {
+				unlock()
+				return fmt.Errorf("failed to pause managed conversation %s: %w", task.ID, err)
+			}
+		}
+		stopErr := s.stopManagedConversationExecution(ctx, task)
+		unlock()
+		if stopErr != nil {
+			return stopErr
+		}
+	}
+	return nil
+}
+
+// InvalidateManagedForInstallationWorkspace blocks new turns for every
+// retained conversation whose approval revision has changed, and stops any
+// live generation through the normal runtime lifecycle.
+func (s *AgentConversationService) InvalidateManagedForInstallationWorkspace(ctx context.Context, installationID, workspaceID string) error {
+	if installationID == "" || workspaceID == "" {
+		return status.Error(codes.InvalidArgument, "installation_id and workspace_id are required")
+	}
+	tasks, err := s.tasks.ListEphemeralTasksAllWorkspaces(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list retained conversations for policy invalidation: %w", err)
+	}
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].ID < tasks[j].ID })
+	var invalidationErrors []error
+	for _, candidate := range tasks {
+		if candidate == nil || candidate.Metadata == nil || models.StringFromAny(candidate.Metadata[metaKeyWorkspaceID]) != workspaceID {
+			continue
+		}
+		instanceKey := models.StringFromAny(candidate.Metadata[metaKeyManagedInstance])
+		if !isRetainedManagedConversation(candidate, installationID, workspaceID, instanceKey) {
+			continue
+		}
+		unlock := s.lockEnsureKey(managedConversationIdentity(installationID, workspaceID, instanceKey))
+		current, findErr := s.findRetainedManagedConversation(ctx, installationID, workspaceID, instanceKey)
+		if findErr != nil {
+			unlock()
+			invalidationErrors = append(invalidationErrors, findErr)
+			continue
+		}
+		if current == nil || managedConversationDetached(current) {
+			unlock()
+			continue
+		}
+		if invalidated, _ := current.Metadata[models.MetaKeyManagedPolicyInvalidated].(bool); !invalidated {
+			setManagedConversationValue(current, models.MetaKeyManagedPolicyInvalidated, true)
+			setManagedConversationValue(current, metaKeyManagedRevision,
+				strconv.FormatUint(managedConversationRevision(current)+1, 10))
+			setManagedConversationValue(current, metaKeyManagedOperation, "")
+			setManagedConversationValue(current, metaKeyManagedPayload, "")
+			current.UpdatedAt = time.Now().UTC()
+			if updateErr := s.tasks.UpdateTask(ctx, current); updateErr != nil {
+				invalidationErrors = append(invalidationErrors, fmt.Errorf("failed to invalidate managed conversation %s: %w", current.ID, updateErr))
+			}
+		}
+		if stopErr := s.stopManagedConversationExecution(ctx, current); stopErr != nil {
+			invalidationErrors = append(invalidationErrors, stopErr)
+		}
+		unlock()
+	}
+	return errors.Join(invalidationErrors...)
+}
+
+// DetachManagedForInstallation revokes execution ownership after uninstall
+// while preserving a paused host-owned transcript for native read-only access.
+func (s *AgentConversationService) DetachManagedForInstallation(ctx context.Context, installationID string) error {
+	if installationID == "" {
+		return status.Error(codes.InvalidArgument, "installation_id is required")
+	}
+	tasks, err := s.tasks.ListEphemeralTasksAllWorkspaces(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list retained conversations for uninstall: %w", err)
+	}
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].ID < tasks[j].ID })
+	for _, task := range tasks {
+		if task == nil || task.Metadata == nil {
+			continue
+		}
+		workspaceID, _ := task.Metadata[metaKeyWorkspaceID].(string)
+		if !isRetainedManagedConversation(task, installationID, workspaceID, "") {
+			continue
+		}
+		instanceKey := models.StringFromAny(task.Metadata[metaKeyManagedInstance])
+		unlock := s.lockEnsureKey(managedConversationIdentity(installationID, workspaceID, instanceKey))
+		current, findErr := s.findRetainedManagedConversation(ctx, installationID, workspaceID, instanceKey)
+		if findErr != nil {
+			unlock()
+			return findErr
+		}
+		if current == nil {
+			unlock()
+			continue
+		}
+		if !managedConversationDetached(current) {
+			setManagedConversationValue(current, metaKeyManagedDetached, true)
+			setManagedConversationValue(current, metaKeyManagedPaused, true)
+			setManagedConversationValue(current, metaKeyManagedRevision,
+				strconv.FormatUint(managedConversationRevision(current)+1, 10))
+			current.UpdatedAt = time.Now().UTC()
+			if err := s.tasks.UpdateTask(ctx, current); err != nil {
+				unlock()
+				return fmt.Errorf("failed to detach managed conversation %s: %w", current.ID, err)
+			}
+		}
+		stopErr := s.stopManagedConversationExecution(ctx, current)
+		unlock()
+		if stopErr != nil {
+			return stopErr
+		}
+	}
+	return nil
+}
+
+func (s *AgentConversationService) stopManagedConversationExecution(ctx context.Context, task *models.Task) error {
+	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, task.ID)
+	if errors.Is(err, taskrepo.ErrNoPrimarySession) || (err == nil && primary == nil) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to inspect managed conversation session %s: %w", task.ID, err)
+	}
+	if primary.State != models.TaskSessionStateRunning && primary.State != models.TaskSessionStateStarting && primary.AgentExecutionID == "" {
+		return nil
+	}
+	s.mu.RLock()
+	stop := s.managedExecutionStopper
+	s.mu.RUnlock()
+	if stop == nil {
+		return status.Error(codes.Unavailable, "managed conversation execution stopper is unavailable")
+	}
+	if err := stop(ctx, task.ID); err != nil {
+		return fmt.Errorf("failed to stop managed conversation execution %s: %w", task.ID, err)
+	}
+	return nil
+}
+
+func (s *AgentConversationService) newManagedConversationTask(
+	pluginID, installationID string, spec pluginsdk.ManagedAgentConversationSpec, operationID, payloadDigest string,
+) *models.Task {
+	metadata := map[string]interface{}{
+		metaKeyPluginID: pluginID, metaKeyWorkspaceID: spec.WorkspaceID,
+		metaKeyConversationKey: spec.InstanceKey, metaKeyEphemeral: true,
+		metaKeyManagedByPlugin: pluginID, metaKeyManagedRetained: true,
+		metaKeyManagedInstall: installationID, metaKeyManagedInstance: spec.InstanceKey,
+		metaKeyManagedRevision: "1", metaKeyManagedPaused: false, models.MetaKeyManagedConversationDetached: false,
+		metaKeyManagedApprovalRevision:  strconv.FormatUint(spec.ApprovalRevision, 10),
+		metaKeyManagedManifestDigest:    spec.ManifestDigest,
+		metaKeyManagedToolNames:         append([]string(nil), spec.AgentToolNames...),
+		metaKeyRetentionMode:            managedConversationRetentionMode,
+		metaKeyManagedOperation:         operationID,
+		metaKeyManagedPayload:           payloadDigest,
+		models.MetaKeyAgentProfileID:    spec.AgentProfileID,
+		models.MetaKeyExecutorID:        spec.ExecutorID,
+		models.MetaKeyExecutorProfileID: spec.ExecutorProfileID,
+		metaKeyInstructionVer:           spec.InstructionVersion,
+	}
+	if spec.BasePrompt != "" {
+		metadata["kandev.base_prompt"] = spec.BasePrompt
+	}
+	return &models.Task{
+		ID:          managedConversationTaskID(installationID, spec.WorkspaceID, spec.InstanceKey),
+		WorkspaceID: spec.WorkspaceID,
+		Title:       defaultAgentConversationTitle + " - " + spec.InstanceKey,
+		State:       v1.TaskStateCreated, Priority: "medium", IsEphemeral: true,
+		Origin: models.TaskOriginManual, Metadata: metadata,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+}
+
+func (s *AgentConversationService) createManagedPrimarySession(
+	ctx context.Context, taskID string, spec pluginsdk.ManagedAgentConversationSpec,
+) (*models.TaskSession, error) {
+	primary := &models.TaskSession{
+		ID: conversationPrimarySessionID(taskID), TaskID: taskID,
+		AgentProfileID: spec.AgentProfileID, ExecutorID: spec.ExecutorID,
+		ExecutorProfileID: spec.ExecutorProfileID, State: models.TaskSessionStateCreated,
+		IsPrimary: true, StartedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := s.sess.CreateTaskSession(ctx, primary); err != nil {
+		return nil, err
+	}
+	return primary, nil
+}
+
+func (s *AgentConversationService) reconcileManagedConversation(
+	ctx context.Context,
+	pluginID, installationID string,
+	task *models.Task,
+	spec pluginsdk.ManagedAgentConversationSpec,
+	operationID, payloadDigest string,
+) (pluginsdk.ManagedAgentConversationDescriptor, string, error) {
+	if !isCurrentManagedConversation(task, installationID, spec) {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, "", status.Error(codes.NotFound, "managed conversation not found")
+	}
+	currentRevision := managedConversationRevision(task)
+	primary, err := s.managedConversationPrimary(ctx, task.ID)
+	if err != nil {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, "", err
+	}
+	if managedConversationOperationMatches(task, operationID, payloadDigest) {
+		primary, err = s.repairManagedConversationSession(ctx, task, spec, primary)
+		if err != nil {
+			return pluginsdk.ManagedAgentConversationDescriptor{}, "", err
+		}
+		return managedConversationDescriptor(installationID, task, primary), AgentConversationStatusAlreadyApplied, nil
+	}
+	if currentRevision != spec.ExpectedRevision {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, "", status.Error(codes.Aborted, "managed conversation revision is stale")
+	}
+	changed := managedConversationConfigChanged(task, spec)
+	if changed && !managedConversationSessionIdle(primary) {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, "", status.Error(codes.FailedPrecondition, "managed conversation launch settings can change only while idle")
+	}
+	primary, created, err := s.ensureManagedConversationSession(ctx, task, spec, primary, changed)
+	if err != nil {
+		return pluginsdk.ManagedAgentConversationDescriptor{}, "", err
+	}
+	changed = changed || created
+	if changed {
+		if err := s.persistManagedConversationSpec(ctx, task, pluginID, spec, currentRevision, operationID, payloadDigest); err != nil {
+			return pluginsdk.ManagedAgentConversationDescriptor{}, "", err
+		}
+	}
+	return managedConversationDescriptor(installationID, task, primary), AgentConversationStatusExists, nil
+}
+
+func isCurrentManagedConversation(task *models.Task, installationID string, spec pluginsdk.ManagedAgentConversationSpec) bool {
+	return isRetainedManagedConversation(task, installationID, spec.WorkspaceID, spec.InstanceKey) &&
+		!managedConversationDetached(task)
+}
+
+func (s *AgentConversationService) managedConversationPrimary(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, taskID)
+	if errors.Is(err, taskrepo.ErrNoPrimarySession) {
+		return nil, nil
+	}
+	return primary, err
+}
+
+func (s *AgentConversationService) repairManagedConversationSession(
+	ctx context.Context,
+	task *models.Task,
+	spec pluginsdk.ManagedAgentConversationSpec,
+	primary *models.TaskSession,
+) (*models.TaskSession, error) {
+	if primary != nil {
+		return primary, nil
+	}
+	primary, err := s.createManagedPrimarySession(ctx, task.ID, spec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to repair managed conversation session: %w", err)
+	}
+	return primary, nil
+}
+
+func managedConversationSessionIdle(primary *models.TaskSession) bool {
+	return primary == nil || (primary.State != models.TaskSessionStateRunning &&
+		primary.State != models.TaskSessionStateStarting && primary.AgentExecutionID == "")
+}
+
+func (s *AgentConversationService) ensureManagedConversationSession(
+	ctx context.Context,
+	task *models.Task,
+	spec pluginsdk.ManagedAgentConversationSpec,
+	primary *models.TaskSession,
+	changed bool,
+) (*models.TaskSession, bool, error) {
+	if primary == nil {
+		created, err := s.createManagedPrimarySession(ctx, task.ID, spec)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to repair managed conversation session: %w", err)
+		}
+		return created, true, nil
+	}
+	if !changed {
+		return primary, false, nil
+	}
+	primary.AgentProfileID, primary.ExecutorID, primary.ExecutorProfileID = spec.AgentProfileID, spec.ExecutorID, spec.ExecutorProfileID
+	primary.UpdatedAt = time.Now().UTC()
+	if err := s.sess.UpdateTaskSession(ctx, primary); err != nil {
+		return nil, false, fmt.Errorf("failed to update managed conversation launch settings: %w", err)
+	}
+	return primary, false, nil
+}
+
+func (s *AgentConversationService) persistManagedConversationSpec(
+	ctx context.Context,
+	task *models.Task,
+	pluginID string,
+	spec pluginsdk.ManagedAgentConversationSpec,
+	currentRevision uint64,
+	operationID, payloadDigest string,
+) error {
+	setManagedConversationValue(task, models.MetaKeyAgentProfileID, spec.AgentProfileID)
+	setManagedConversationValue(task, models.MetaKeyExecutorID, spec.ExecutorID)
+	setManagedConversationValue(task, models.MetaKeyExecutorProfileID, spec.ExecutorProfileID)
+	setManagedConversationValue(task, "kandev.base_prompt", spec.BasePrompt)
+	setManagedConversationValue(task, metaKeyInstructionVer, spec.InstructionVersion)
+	setManagedConversationValue(task, metaKeyManagedByPlugin, pluginID)
+	setManagedConversationValue(task, metaKeyManagedApprovalRevision, strconv.FormatUint(spec.ApprovalRevision, 10))
+	setManagedConversationValue(task, metaKeyManagedManifestDigest, spec.ManifestDigest)
+	setManagedConversationValue(task, metaKeyManagedToolNames, append([]string(nil), spec.AgentToolNames...))
+	setManagedConversationValue(task, models.MetaKeyManagedPolicyInvalidated, false)
+	setManagedConversationValue(task, metaKeyManagedRevision, strconv.FormatUint(currentRevision+1, 10))
+	setManagedConversationValue(task, metaKeyManagedOperation, operationID)
+	setManagedConversationValue(task, metaKeyManagedPayload, payloadDigest)
+	task.UpdatedAt = time.Now().UTC()
+	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+		return fmt.Errorf("failed to persist managed conversation settings: %w", err)
+	}
+	return nil
+}
+
+func (s *AgentConversationService) findRetainedManagedConversation(
+	ctx context.Context, installationID, workspaceID, instanceKey string,
+) (*models.Task, error) {
+	var found *models.Task
+	err := s.eachEphemeralTask(ctx, workspaceID, func(task *models.Task) bool {
+		if isRetainedManagedConversation(task, installationID, workspaceID, instanceKey) {
+			found = task
+			return false
+		}
+		return true
+	})
+	return found, err
+}
+
+func (s *AgentConversationService) listRetainedManagedConversations(
+	ctx context.Context, installationID, workspaceID string,
+) ([]*models.Task, error) {
+	var found []*models.Task
+	err := s.eachEphemeralTask(ctx, workspaceID, func(task *models.Task) bool {
+		if isRetainedManagedConversation(task, installationID, workspaceID, "") {
+			found = append(found, task)
+		}
+		return true
+	})
+	return found, err
+}
+
+func managedConversationOperationMatches(task *models.Task, operationID, payloadDigest string) bool {
+	if task == nil || task.Metadata == nil || operationID == "" || payloadDigest == "" {
+		return false
+	}
+	return models.StringFromAny(task.Metadata[metaKeyManagedOperation]) == operationID &&
+		models.StringFromAny(task.Metadata[metaKeyManagedPayload]) == payloadDigest
+}
+
+func managedConversationSpecFromTask(task *models.Task) pluginsdk.ManagedAgentConversationSpec {
+	metadata := task.Metadata
+	return pluginsdk.ManagedAgentConversationSpec{
+		WorkspaceID: task.WorkspaceID, InstanceKey: models.StringFromAny(metadata[metaKeyManagedInstance]),
+		ApprovalRevision:   managedConversationUint(metadata[metaKeyManagedApprovalRevision]),
+		ManifestDigest:     models.StringFromAny(metadata[metaKeyManagedManifestDigest]),
+		AgentToolNames:     managedConversationToolNames(metadata[metaKeyManagedToolNames]),
+		AgentProfileID:     models.StringFromAny(metadata[models.MetaKeyAgentProfileID]),
+		ExecutorID:         models.StringFromAny(metadata[models.MetaKeyExecutorID]),
+		ExecutorProfileID:  models.StringFromAny(metadata[models.MetaKeyExecutorProfileID]),
+		BasePrompt:         models.StringFromAny(metadata["kandev.base_prompt"]),
+		InstructionVersion: models.StringFromAny(metadata[metaKeyInstructionVer]),
+	}
+}
+
+func (s *AgentConversationService) eachEphemeralTask(ctx context.Context, workspaceID string, visit func(*models.Task) bool) error {
+	if workspaceID == "" {
+		return status.Error(codes.InvalidArgument, "workspace_id is required")
+	}
+	for page := 1; ; page++ {
+		tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, "", "", "", page, managedConversationPageSize, "", false, true, true, false)
+		if err != nil {
+			return err
+		}
+		for _, task := range tasks {
+			if !visit(task) {
+				return nil
+			}
+		}
+		if len(tasks) < managedConversationPageSize || page*managedConversationPageSize >= total {
+			return nil
+		}
+	}
+}
+
+func managedConversationConfigChanged(task *models.Task, spec pluginsdk.ManagedAgentConversationSpec) bool {
+	metadata := task.Metadata
+	return models.StringFromAny(metadata[models.MetaKeyAgentProfileID]) != spec.AgentProfileID ||
+		models.StringFromAny(metadata[models.MetaKeyExecutorID]) != spec.ExecutorID ||
+		models.StringFromAny(metadata[models.MetaKeyExecutorProfileID]) != spec.ExecutorProfileID ||
+		models.StringFromAny(metadata["kandev.base_prompt"]) != spec.BasePrompt ||
+		models.StringFromAny(metadata[metaKeyInstructionVer]) != spec.InstructionVersion ||
+		managedConversationUint(metadata[metaKeyManagedApprovalRevision]) != spec.ApprovalRevision ||
+		models.StringFromAny(metadata[metaKeyManagedManifestDigest]) != spec.ManifestDigest ||
+		!slices.Equal(managedConversationToolNames(metadata[metaKeyManagedToolNames]), spec.AgentToolNames) ||
+		metadata[models.MetaKeyManagedPolicyInvalidated] == true
+}
+
+func managedConversationDescriptor(
+	installationID string, task *models.Task, session *models.TaskSession,
+) pluginsdk.ManagedAgentConversationDescriptor {
+	metadata := task.Metadata
+	descriptor := pluginsdk.ManagedAgentConversationDescriptor{
+		InstallationID: installationID, TaskID: task.ID, WorkspaceID: task.WorkspaceID,
+		InstanceKey:        models.StringFromAny(metadata[metaKeyManagedInstance]),
+		Revision:           managedConversationRevision(task),
+		AgentProfileID:     models.StringFromAny(metadata[models.MetaKeyAgentProfileID]),
+		ExecutorID:         models.StringFromAny(metadata[models.MetaKeyExecutorID]),
+		ExecutorProfileID:  models.StringFromAny(metadata[models.MetaKeyExecutorProfileID]),
+		BasePrompt:         models.StringFromAny(metadata["kandev.base_prompt"]),
+		InstructionVersion: models.StringFromAny(metadata[metaKeyInstructionVer]),
+		DesiredPaused:      managedConversationPaused(task),
+		RetentionMode:      models.StringFromAny(metadata[metaKeyRetentionMode]),
+		Detached:           managedConversationDetached(task),
+		AgentToolNames:     managedConversationToolNames(metadata[metaKeyManagedToolNames]),
+	}
+	if session != nil {
+		descriptor.SessionID = session.ID
+	}
+	return descriptor
+}
+
+func managedConversationUint(value any) uint64 {
+	parsed, _ := strconv.ParseUint(models.StringFromAny(value), 10, 64)
+	return parsed
+}
+
+func managedConversationToolNames(value any) []string {
+	if value == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	if err := json.Unmarshal(encoded, &names); err != nil {
+		return nil
+	}
+	sort.Strings(names)
+	return names
+}
+
+func managedConversationRevision(task *models.Task) uint64 {
+	revision, err := strconv.ParseUint(models.StringFromAny(task.Metadata[metaKeyManagedRevision]), 10, 64)
+	if err != nil || revision == 0 {
+		return 1
+	}
+	return revision
+}
+
+func managedConversationPaused(task *models.Task) bool {
+	paused, _ := task.Metadata[metaKeyManagedPaused].(bool)
+	return paused
+}
+
+func managedConversationDetached(task *models.Task) bool {
+	detached, _ := task.Metadata[metaKeyManagedDetached].(bool)
+	return detached
+}
+
+func setManagedConversationValue(task *models.Task, key string, value interface{}) {
+	if task.Metadata == nil {
+		task.Metadata = make(map[string]interface{})
+	}
+	if value == "" {
+		delete(task.Metadata, key)
+		return
+	}
+	task.Metadata[key] = value
+}
+
+func managedConversationTaskID(installationID, workspaceID, instanceKey string) string {
+	return conversationIdentity("managed-task", installationID, workspaceID, instanceKey)
+}
+
+func managedConversationIdentity(installationID, workspaceID, instanceKey string) string {
+	return installationID + "/" + workspaceID + "/" + instanceKey
 }
 
 // resolveEffectiveProfile converts an optional plugin profile into a concrete
@@ -882,6 +1710,9 @@ func isManagedConversation(task *models.Task, pluginID, workspaceID, conversatio
 	if task == nil || task.Metadata == nil {
 		return false
 	}
+	if retained, _ := task.Metadata[metaKeyManagedRetained].(bool); retained {
+		return false
+	}
 	pID, _ := task.Metadata[metaKeyPluginID].(string)
 	wID, _ := task.Metadata[metaKeyWorkspaceID].(string)
 	cKey, _ := task.Metadata[metaKeyConversationKey].(string)
@@ -897,9 +1728,25 @@ func isManagedConversationOwnedByPlugin(task *models.Task, pluginID string) bool
 	if task == nil || task.Metadata == nil {
 		return false
 	}
+	if retained, _ := task.Metadata[metaKeyManagedRetained].(bool); retained {
+		return false
+	}
 	pID, _ := task.Metadata[metaKeyPluginID].(string)
 	ephemeral, _ := task.Metadata[metaKeyEphemeral].(bool)
 	return pID == pluginID && ephemeral
+}
+
+func isRetainedManagedConversation(task *models.Task, installationID, workspaceID, instanceKey string) bool {
+	if task == nil || task.Metadata == nil || installationID == "" || workspaceID == "" {
+		return false
+	}
+	retained, _ := task.Metadata[metaKeyManagedRetained].(bool)
+	ephemeral, _ := task.Metadata[metaKeyEphemeral].(bool)
+	installedBy, _ := task.Metadata[metaKeyManagedInstall].(string)
+	workspace, _ := task.Metadata[metaKeyWorkspaceID].(string)
+	instance, _ := task.Metadata[metaKeyManagedInstance].(string)
+	return retained && ephemeral && installedBy == installationID && workspace == workspaceID &&
+		(instanceKey == "" || instance == instanceKey)
 }
 
 // claimOccurrenceKey atomically claims an occurrence key for

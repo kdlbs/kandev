@@ -36,6 +36,8 @@ type httpWorkspaceSourcesRequest struct {
 	Sources []json.RawMessage `json:"sources"`
 }
 
+const taskDeleteConfirmationHeader = "X-Kandev-Task-Delete-Confirmation"
+
 type workspaceSourceJSON struct {
 	Kind           string `json:"kind"`
 	RepositoryID   string `json:"repository_id"`
@@ -1796,11 +1798,12 @@ func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
 }
 
 type httpMoveTaskRequest struct {
-	WorkflowID     string                        `json:"workflow_id"`
-	WorkflowStepID string                        `json:"workflow_step_id"`
-	Position       int                           `json:"position"`
-	EntryOptions   *workflowmove.EntryOptions    `json:"entry_options,omitempty"`
-	WorkflowChange *models.WorkflowChangeRequest `json:"workflow_change,omitempty"`
+	WorkflowID         string                                     `json:"workflow_id"`
+	WorkflowStepID     string                                     `json:"workflow_step_id"`
+	Position           int                                        `json:"position"`
+	EntryOptions       *workflowmove.EntryOptions                 `json:"entry_options,omitempty"`
+	WorkflowChange     *models.WorkflowChangeRequest              `json:"workflow_change,omitempty"`
+	CompletionOverride *service.TaskCompletionMoveOverrideRequest `json:"completion_override,omitempty"`
 }
 
 // httpReorderStepTasksRequest is the frozen reorder request contract
@@ -1881,9 +1884,16 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 			StepHistoryActor:          wfmodels.StepTransitionActorHuman,
 			EntryOptions:              body.EntryOptions,
 			WorkflowChange:            body.WorkflowChange,
+			CompletionOverride:        body.CompletionOverride,
 		},
 	)
 	if err != nil {
+		if errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked) ||
+			errors.Is(err, taskrepository.ErrTaskCompletionCriteriaConflict) ||
+			errors.Is(err, taskrepository.ErrTaskCompletionHumanConfirmationRequired) {
+			h.handleCompletionGateError(c, err)
+			return
+		}
 		handleSelectedMoveError(c, h.logger, err)
 		return
 	}
@@ -1913,45 +1923,37 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	taskID := c.Param("id")
 	cascade := cascadeQueryParam(c)
 	discardWorktreeChanges := discardWorktreeChangesQueryParam(c)
-	// Office task-handoffs phase 6: route through HandoffService.DeleteTaskTree
-	// when wired so descendant runs are cancelled, group memberships are
-	// released with reason=deleted, and the cleanup state machine fires.
-	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.DeleteTaskTreeWithOptions(
-			deleteCtx, taskID, cascade, service.DeleteTaskOptions{
-				DiscardWorktreeChanges: discardWorktreeChanges,
-			},
-		); err != nil {
-			if !isCascadePostCommitError(err) {
-				handleNotFound(c, h.logger, err, "task not deleted")
-				return
+	err := h.service.WithTaskDeleteConfirmation(
+		deleteCtx, c.GetHeader(taskDeleteConfirmationHeader), taskID, cascade, discardWorktreeChanges,
+		func() error {
+			options := service.DeleteTaskOptions{DiscardWorktreeChanges: discardWorktreeChanges}
+			if h.handoffSvc != nil {
+				_, err := h.handoffSvc.DeleteTaskTreeWithOptions(deleteCtx, taskID, cascade, options)
+				return err
 			}
+			return h.service.DeleteTaskWithOptions(deleteCtx, taskID, options)
+		},
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrTaskDeleteConfirmationRequired):
+			c.JSON(http.StatusPreconditionRequired, gin.H{"error": "current task deletion preview is required"})
+		case errors.Is(err, service.ErrTaskDeleteConfirmationIdentity):
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "task deletion confirmation requires an authenticated user"})
+		case errors.Is(err, service.ErrTaskDeleteConfirmationExpired),
+			errors.Is(err, service.ErrTaskDeleteConfirmationStale),
+			errors.Is(err, service.ErrTaskDeleteConfirmationReplay),
+			errors.Is(err, service.ErrTaskDeleteConfirmationMismatch):
+			c.JSON(http.StatusConflict, gin.H{"error": "task deletion preview is no longer current"})
+		case isCascadePostCommitError(err):
 			h.logger.Warn("task deleted but post-commit housekeeping failed",
 				zap.String("task_id", taskID), zap.Error(err))
 			c.JSON(http.StatusServiceUnavailable, gin.H{
-				responseKeySuccess: false,
-				responseKeyPending: true,
-				"task_id":          taskID,
+				responseKeySuccess: false, responseKeyPending: true, "task_id": taskID,
 			})
-			return
+		default:
+			handleNotFound(c, h.logger, err, "task not deleted")
 		}
-		c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
-		return
-	}
-	if err := h.service.DeleteTaskWithOptions(deleteCtx, taskID, service.DeleteTaskOptions{
-		DiscardWorktreeChanges: discardWorktreeChanges,
-	}); err != nil {
-		if isCascadePostCommitError(err) {
-			h.logger.Warn("task deleted but post-commit housekeeping failed",
-				zap.String("task_id", taskID), zap.Error(err))
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				responseKeySuccess: false,
-				responseKeyPending: true,
-				"task_id":          taskID,
-			})
-			return
-		}
-		handleNotFound(c, h.logger, err, "task not deleted")
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})

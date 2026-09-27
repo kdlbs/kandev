@@ -60,6 +60,8 @@ const (
 	// ModeAutomation registers the fixed workspace coordinator catalog for
 	// scheduled automation agents.
 	ModeAutomation = mcpmode.Automation
+	// ModeManagedConversation exposes only the selected plugin agent tools.
+	ModeManagedConversation = "managed-conversation"
 )
 
 const pluginToolArgumentsKey = "arguments"
@@ -225,7 +227,7 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 }
 
 func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, profileContext mcpprofile.Context, options ...ServerOption) *Server {
-	profileContext = mcpprofile.New(profileContext.Surface, profileContext.Capabilities, profileContext.Providers)
+	profileContext = mcpprofile.Normalize(profileContext)
 	if setter, ok := backend.(backendSessionSetter); ok {
 		setter.SetSessionID(sessionID)
 	}
@@ -339,6 +341,8 @@ func (s *Server) restoreCanonicalToolName(request *mcp.CallToolRequest) {
 
 func modeForProfile(profileContext mcpprofile.Context) string {
 	switch profileContext.Surface {
+	case mcpprofile.SurfaceManagedConversation:
+		return ModeManagedConversation
 	case mcpprofile.SurfaceConfiguration:
 		return ModeConfig
 	case mcpprofile.SurfaceExternal:
@@ -725,6 +729,9 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 func (s *Server) SetMode(mode string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
+		return
+	}
 
 	normalizedMode := normalizeMode(mode)
 	if s.mode == normalizedMode {
@@ -788,7 +795,7 @@ func (s *Server) SetProviders(providerValues []string) {
 func (s *Server) Profile() mcpprofile.Context {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return mcpprofile.New(s.profile.Surface, s.profile.Capabilities, s.profile.Providers)
+	return mcpprofile.Normalize(s.profile)
 }
 
 // SetProfile replaces the complete profile and rebuilds the tool registry in
@@ -798,7 +805,10 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	profileContext = mcpprofile.New(profileContext.Surface, profileContext.Capabilities, profileContext.Providers)
+	profileContext = mcpprofile.Normalize(profileContext)
+	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
+		return
+	}
 	if sameProfile(s.profile, profileContext) {
 		return
 	}
@@ -827,6 +837,18 @@ func sameProfile(left, right mcpprofile.Context) bool {
 	}
 	for i := range left.Providers {
 		if left.Providers[i] != right.Providers[i] {
+			return false
+		}
+	}
+	if (left.ManagedToolPolicy == nil) != (right.ManagedToolPolicy == nil) {
+		return false
+	}
+	if left.ManagedToolPolicy != nil {
+		leftPolicy, rightPolicy := left.ManagedToolPolicy, right.ManagedToolPolicy
+		if leftPolicy.PluginID != rightPolicy.PluginID || leftPolicy.InstallationID != rightPolicy.InstallationID ||
+			leftPolicy.WorkspaceID != rightPolicy.WorkspaceID || leftPolicy.InstanceKey != rightPolicy.InstanceKey ||
+			leftPolicy.ConversationRevision != rightPolicy.ConversationRevision || leftPolicy.ApprovalRevision != rightPolicy.ApprovalRevision ||
+			leftPolicy.ManifestDigest != rightPolicy.ManifestDigest || !slices.Equal(leftPolicy.AgentToolNames, rightPolicy.AgentToolNames) {
 			return false
 		}
 	}
@@ -913,7 +935,7 @@ func validatePluginToolSurfaces(name string, surfaces []string) error {
 	}
 	seen := make(map[string]struct{}, len(surfaces))
 	for _, surface := range surfaces {
-		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice {
+		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice && surface != plugintools.SurfaceManaged {
 			return fmt.Errorf("%s has unsupported surface %q", name, surface)
 		}
 		if _, ok := seen[surface]; ok {
@@ -963,6 +985,10 @@ func (s *Server) registerPluginTools() {
 	}
 	for _, definition := range snapshot.Tools {
 		if !pluginToolSupportsSurface(definition, string(s.profile.Surface)) {
+			continue
+		}
+		if s.profile.Surface == mcpprofile.SurfaceManagedConversation &&
+			(s.profile.ManagedToolPolicy == nil || !s.profile.ManagedToolPolicy.Allows(definition.PluginID, definition.LocalName)) {
 			continue
 		}
 		tool := mcp.NewToolWithRawSchema(definition.ExposedName, definition.Description, definition.InputSchema)
@@ -1074,6 +1100,9 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 	office := surfaceEnabled(mcpprofile.SurfaceOfficeTask)
 	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
 	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
+	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
+		return nil
+	}
 	return []profileToolGroup{
 		{name: "configuration-automations", enabled: config, register: func(s *Server) { s.registerConfigAutomationTools() }},
 		{name: "automation", enabled: automation, register: func(s *Server) { s.registerAutomationTools() }},

@@ -51,3 +51,35 @@ func TestListRuns_ReturnsRepositoryAndDedupReason_WithTasksTablePresent(t *testi
 	require.Equal(t, "selector_no_match: acme/unconfigured-webapp", runs[0].RepositoryReason)
 	require.Equal(t, "dedup_unresolved", runs[0].DedupReason)
 }
+
+func TestListRuns_PreservesManagedDeliveryReceipt_WithTasksTablePresent(t *testing.T) {
+	root := t.TempDir()
+	sqlDB, err := db.OpenSQLite(filepath.Join(root, "runs.db"))
+	require.NoError(t, err)
+	sqlxDB := sqlx.NewDb(sqlDB, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+
+	_, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cleanup() })
+
+	store, err := NewStore(sqlxDB, sqlxDB)
+	require.NoError(t, err)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-1", Name: "daily coordinator", Enabled: true}
+	require.NoError(t, store.CreateAutomation(ctx, a))
+	run := &AutomationRun{
+		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTriggered,
+		ManagedConversationID: "conversation-1", ManagedInputID: "input-1",
+		DeliveryStatus: ManagedDeliveryAccepted, DeliveryAttempts: 1,
+	}
+	require.NoError(t, store.CreateRun(ctx, run))
+
+	runs, err := store.ListRuns(ctx, a.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	require.Equal(t, "conversation-1", runs[0].ManagedConversationID)
+	require.Equal(t, "input-1", runs[0].ManagedInputID)
+	require.Equal(t, ManagedDeliveryAccepted, runs[0].DeliveryStatus)
+	require.Equal(t, 1, runs[0].DeliveryAttempts)
+}

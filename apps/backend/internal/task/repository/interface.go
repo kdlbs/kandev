@@ -15,6 +15,13 @@ import (
 var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
+var ErrTaskVersionConflict = repoerrors.ErrTaskVersionConflict
+var ErrTaskManagementClaimConflict = repoerrors.ErrTaskManagementClaimConflict
+var ErrTaskManagementClaimOwned = repoerrors.ErrTaskManagementClaimOwned
+var ErrTaskCompletionGateBlocked = repoerrors.ErrTaskCompletionGateBlocked
+var ErrTaskCompletionCriteriaConflict = repoerrors.ErrTaskCompletionCriteriaConflict
+var ErrTaskCompletionEvidenceChanged = repoerrors.ErrTaskCompletionEvidenceChanged
+var ErrTaskCompletionHumanConfirmationRequired = repoerrors.ErrTaskCompletionHumanConfirmationRequired
 var ErrNoPrimarySession = repoerrors.ErrNoPrimarySession
 var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
@@ -224,6 +231,80 @@ type TaskRepository interface {
 	// for a failed read, a stale compatibility snapshot, a failed lock, a
 	// failed write, or a failed commit.
 	SwitchTaskRunner(ctx context.Context, req models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error)
+}
+
+// ExactTaskOperationRepository atomically couples a task update to a durable
+// operation identity. It is an optional extension so other repository
+// implementations can adopt exact commands independently of the broad CRUD
+// interface.
+type ExactTaskOperationRepository interface {
+	UpdateTaskExactOperation(
+		ctx context.Context,
+		task *models.Task,
+		workspaceID, expectedResourceVersion, operationID, payloadDigest string,
+		fence ...TaskManagementClaimFence,
+	) (alreadyApplied bool, err error)
+}
+
+// TaskManagementClaimRepository owns task management claims and their audit
+// history. Claim changes compare the task and claim resource versions in one
+// database transaction.
+type TaskManagementClaimRepository interface {
+	ChangeTaskManagementClaim(ctx context.Context, change models.TaskManagementClaimChange) (*models.TaskManagementClaim, error)
+	GetTaskManagementClaim(ctx context.Context, taskID string) (*models.TaskManagementClaim, error)
+	ListTaskManagementClaimHistory(ctx context.Context, taskID string) ([]*models.TaskManagementClaimHistory, error)
+}
+
+// TaskCompletionGateRepository owns criteria, typed evidence, and append-only
+// audit history. Completion writers call the same repository's transaction
+// guard so service-level previews cannot authorize stale evidence.
+type TaskCompletionGateRepository interface {
+	SetTaskCompletionCriteria(ctx context.Context, change models.TaskCompletionCriteriaChange) (*models.TaskCompletionGateSnapshot, error)
+	VerifyTaskCompletionCriterion(ctx context.Context, change models.TaskCompletionEvidenceChange) (*models.TaskCompletionGateSnapshot, error)
+	GetTaskCompletionGate(ctx context.Context, taskID string) (*models.TaskCompletionGateSnapshot, error)
+	ListTaskCompletionGateHistory(ctx context.Context, taskID string) ([]*models.TaskCompletionGateHistory, error)
+}
+
+// ExactTaskCompletionGateRepository atomically applies plugin completion
+// commands, claim fences, task resource versions, and replay receipts.
+type ExactTaskCompletionGateRepository interface {
+	SetTaskCompletionCriteriaExact(ctx context.Context, change models.TaskCompletionCriteriaChange) (*models.TaskCompletionGateSnapshot, bool, error)
+	VerifyTaskCompletionCriterionExact(ctx context.Context, change models.TaskCompletionEvidenceChange) (*models.TaskCompletionGateSnapshot, bool, error)
+}
+
+// TaskManagementClaimFence proves which manager generation authorized an
+// exact plugin task mutation. A zero-value fence is valid only when the task
+// has no active management claim.
+type TaskManagementClaimFence = models.TaskManagementClaimFence
+
+// ExactTaskMoveOperationRepository persists a workflow move operation in the
+// same transaction as WIP admission and the task row update.
+type ExactTaskMoveOperationRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionExact(
+		ctx context.Context,
+		task *models.Task,
+		sourceStepID, targetStepID string,
+		limit int,
+		admittedState *v1.TaskState,
+		queueExitPending bool,
+		expectedWorkflowID string,
+		workspaceID, expectedResourceVersion, operationID, payloadDigest string,
+		claimFence ...TaskManagementClaimFence,
+	) (admitted bool, alreadyApplied bool, err error)
+}
+
+// ExactTaskArchiveRepository couples archive admission, queue purge, and its
+// durable exact operation identity in one task database transaction.
+type ExactTaskArchiveRepository interface {
+	ArchiveTaskExact(
+		ctx context.Context,
+		taskID, workspaceID, expectedResourceVersion, operationID, payloadDigest string,
+		claimFence ...TaskManagementClaimFence,
+	) (alreadyApplied bool, err error)
+	GetTaskCommandOperation(
+		ctx context.Context,
+		workspaceID, taskID, operationID, payloadDigest string,
+	) (resourceVersion string, found bool, err error)
 }
 
 // TaskPriorityRepository updates a task's priority without replacing the

@@ -43,8 +43,7 @@ type DisableResult struct {
 }
 
 // Disable stops id's process (if running) and transitions it to
-// StatusDisabled. Idempotent: a no-op (nil error) if id is already
-// disabled.
+// StatusDisabled. Repeated calls reapply idempotent lifecycle reconciliation.
 func (s *Service) Disable(id string) error {
 	_, err := s.DisableWithResult(id)
 	return err
@@ -74,20 +73,36 @@ func (s *Service) DisableWithResult(id string) (DisableResult, error) {
 	if err != nil {
 		return result, err
 	}
-	if rec.Status == StatusDisabled {
-		result.Disabled = true
-		return result, nil
-	}
-	if err := s.cancelAutomationDeliveries(id); err != nil {
-		return result, err
+	if rec.Status == StatusActive || rec.Status == StatusError {
+		// Deny new Host effects before stopping the plugin or reconciling its
+		// retained conversations. Exact effects hold this guard through their
+		// domain mutation.
+		s.approvalEffectMu.Lock()
+		statusErr := s.SetStatus(id, StatusDisabled)
+		s.approvalEffectMu.Unlock()
+		if statusErr != nil {
+			return result, statusErr
+		}
+		rec.Status = StatusDisabled
 	}
 	if s.runtime != nil {
 		s.runtime.Stop(id)
 	}
+	if err := s.cancelAutomationDeliveries(id); err != nil {
+		return result, err
+	}
+	if rec.InstallationID != "" {
+		if managed := s.managedAgentConversationDeps(); managed != nil {
+			if err := managed.PauseManagedForInstallation(context.Background(), rec.InstallationID); err != nil {
+				_ = s.SetStatus(id, StatusError)
+				s.notifyDeliverer()
+				return fmt.Errorf("plugins: disable could not pause managed conversations: %w", err)
+			}
+		}
+	}
 	if err := s.deletePluginAgentConversations(context.Background(), id); err != nil {
-		// The plugin is already stopped, so leaving its record active would
-		// advertise a runtime that cannot serve requests. Keep the failed cleanup
-		// visible and let a later Disable retry remove the remaining conversations.
+		// Keep failed cleanup visible and let a later Disable retry remove the
+		// remaining legacy conversations.
 		if setErr := s.SetStatus(id, StatusError); setErr != nil {
 			s.log.Warn("plugins: could not mark plugin errored after disable cleanup failure",
 				zap.String("plugin_id", id), zap.Error(setErr))
@@ -95,8 +110,10 @@ func (s *Service) DisableWithResult(id string) (DisableResult, error) {
 		s.notifyDeliverer()
 		return result, fmt.Errorf("plugins: disable aborted, could not purge plugin agent conversations: %w", err)
 	}
-	if err := s.SetStatus(id, StatusDisabled); err != nil {
-		return result, err
+	if rec.Status != StatusDisabled {
+		if err := s.SetStatus(id, StatusDisabled); err != nil {
+			return result, err
+		}
 	}
 	s.notifyDeliverer()
 	s.notifyAgentToolCatalogChanged()

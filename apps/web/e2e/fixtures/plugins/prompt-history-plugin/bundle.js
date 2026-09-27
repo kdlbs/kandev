@@ -72,6 +72,7 @@
 
   var FIXTURE_REPOSITORY_ID = "fixture-repository";
   var FIXTURE_HELLO_PATH = "/plugins/e2e-hello";
+  var FIXTURE_MANAGED_CHAT_PATH = "/plugins/e2e-managed-chat";
   var FIXTURE_SIDEBAR_SECTION = "sidebar-footer";
   var PROVIDER_ID = "fixture-source-control";
   var FIXTURE_ACTION_ICON_PATH = "M5 12h14M12 5v14";
@@ -208,6 +209,300 @@
             },
             "toast error",
           ),
+        );
+      }
+
+      function ManagedChatPage() {
+        var config = window.__e2eManagedChatConfig || {};
+        var workspaceId = config.workspaceId || host.store.getState().workspaces.activeId || "";
+        var agentProfileId = config.agentProfileId || "";
+        var instances = Array.isArray(config.instances) ? config.instances : [];
+        var selection = React.useState(config.selectedInstanceKey || "");
+        var selectedKey = selection[0];
+        var setSelectedKey = selection[1];
+        var initialSnapshot = {
+          workspaceId: workspaceId,
+          instanceKey: selectedKey,
+          taskId: "",
+          sessionId: null,
+          revision: 0,
+          sessionResourceVersion: "",
+          state: "loading",
+          pendingInteractions: [],
+        };
+        var snapshotState = React.useState(initialSnapshot);
+        var snapshot = snapshotState[0];
+        var setSnapshot = snapshotState[1];
+        var selectedKeyRef = React.useRef(selectedKey);
+        var loadGeneration = React.useRef(0);
+
+        function publishSnapshot(next) {
+          setSnapshot(next);
+        }
+
+        function invoke(key, body) {
+          return host.api.invokeAction(key, { workspaceId: workspaceId, body: body });
+        }
+
+        function mapInput(receipt) {
+          return {
+            hostInputId: receipt.host_input_id,
+            occurrenceKey: receipt.occurrence_key || "",
+            sequence: receipt.sequence || 0,
+            origin: receipt.origin,
+            payload: receipt.payload || "",
+            coalesceKey: receipt.coalesce_key || "",
+            conversationRevision: receipt.conversation_revision || 0,
+            state: receipt.state,
+            createdAt: receipt.created_at || "",
+            updatedAt: receipt.updated_at || "",
+            queueEntryId: receipt.queue_entry_id || "",
+            executionId: receipt.execution_id || "",
+            turnId: receipt.turn_id || "",
+            supersededBy: receipt.superseded_by || "",
+          };
+        }
+
+        function mapInteractionOption(option) {
+          return {
+            id: option.option_id,
+            label: option.label,
+            description: option.description || undefined,
+          };
+        }
+
+        function mapInteraction(interaction) {
+          return {
+            id: interaction.id,
+            kind: interaction.kind,
+            title: interaction.title || "",
+            context: interaction.context || undefined,
+            expectedResourceVersion: interaction.resource_version || "",
+            agentDisconnected: interaction.agent_disconnected,
+            options: (interaction.options || []).map(mapInteractionOption),
+            questions: (interaction.questions || []).map(function (question) {
+              return {
+                id: question.id,
+                title: question.title || "",
+                prompt: question.prompt || undefined,
+                options: (question.options || []).map(mapInteractionOption),
+              };
+            }),
+          };
+        }
+
+        function managedState(response, reason) {
+          if (response.managed_conversation_supported) {
+            return response.desired_paused ? "paused" : "ready";
+          }
+          return reason === "capability_not_approved" ? "revoked" : "unsupported";
+        }
+
+        function mapSnapshot(response, instanceKey) {
+          var reason = response.managed_conversation_reason || "";
+          var state = managedState(response, reason);
+          return {
+            workspaceId: workspaceId,
+            instanceKey: response.instance_key || instanceKey,
+            taskId: response.task_id || "",
+            sessionId: response.session_id || null,
+            revision: response.revision || 0,
+            sessionResourceVersion: response.session_resource_version || "",
+            executionId: response.execution_id || undefined,
+            sessionState: response.session_state || undefined,
+            state: state,
+            readOnly: false,
+            statusReason: reason || undefined,
+            recoverySupported: response.recovery_supported || false,
+            recoveryReason: response.recovery_reason || undefined,
+            pendingInteractions: (response.pending_interactions || []).map(mapInteraction),
+          };
+        }
+
+        function readStatus(instanceKey) {
+          return invoke("managed-conversation-status", { instance_key: instanceKey }).then(
+            function (response) {
+              var next = mapSnapshot(response, instanceKey);
+              if (selectedKeyRef.current === instanceKey) publishSnapshot(next);
+              return next;
+            },
+          );
+        }
+
+        function checkCommand(result) {
+          if (["APPLIED", "ALREADY_APPLIED", "NO_CHANGE"].indexOf(result.status) === -1) {
+            throw new Error(result.reason || "Managed conversation command was not accepted");
+          }
+        }
+
+        function loadInstance(instanceKey) {
+          var generation = ++loadGeneration.current;
+          selectedKeyRef.current = instanceKey;
+          publishSnapshot({
+            workspaceId: workspaceId,
+            instanceKey: instanceKey,
+            taskId: "",
+            sessionId: null,
+            revision: 0,
+            sessionResourceVersion: "",
+            state: "loading",
+            pendingInteractions: [],
+          });
+          return invoke("managed-conversation-ensure", {
+            instance_key: instanceKey,
+            agent_profile_id: agentProfileId,
+          })
+            .then(function () {
+              return invoke("managed-conversation-status", { instance_key: instanceKey });
+            })
+            .then(function (response) {
+              if (generation === loadGeneration.current)
+                publishSnapshot(mapSnapshot(response, instanceKey));
+            })
+            .catch(function () {
+              if (generation === loadGeneration.current) {
+                publishSnapshot({
+                  workspaceId: workspaceId,
+                  instanceKey: instanceKey,
+                  taskId: "",
+                  sessionId: null,
+                  revision: 0,
+                  sessionResourceVersion: "",
+                  state: "unavailable",
+                  pendingInteractions: [],
+                });
+              }
+            });
+        }
+
+        React.useEffect(
+          function () {
+            void loadInstance(selectedKey);
+          },
+          [selectedKey],
+        );
+
+        var controller = {
+          getStatus: function () {
+            return readStatus(selectedKeyRef.current);
+          },
+          listInputs: function (input) {
+            return invoke("managed-conversation-inputs", {
+              instance_key: selectedKeyRef.current,
+              sequence_cursor: input.sequenceCursor,
+              limit: input.limit,
+            }).then(function (response) {
+              return {
+                inputs: (response.inputs || []).map(mapInput),
+                nextSequenceCursor: response.next_sequence_cursor || 0,
+                hasMore: response.has_more || false,
+              };
+            });
+          },
+          enqueue: function (input) {
+            return invoke("managed-conversation-enqueue", {
+              instance_key: selectedKeyRef.current,
+              request_id: input.requestId,
+              idempotency_key: input.idempotencyKey,
+              expected_revision: input.expectedConversationRevision,
+              occurrence_key: input.occurrenceKey,
+              payload: input.payload,
+            }).then(function (response) {
+              checkCommand(response);
+              if (!response.input) throw new Error("Host did not return an input receipt");
+              return { receipt: mapInput(response.input) };
+            });
+          },
+          cancelInput: function (input) {
+            return invoke("managed-conversation-cancel", {
+              instance_key: selectedKeyRef.current,
+              request_id: input.requestId,
+              idempotency_key: input.idempotencyKey,
+              expected_revision: input.expectedConversationRevision,
+              host_input_id: input.hostInputId,
+              expected_execution_id: input.expectedExecutionId,
+            }).then(checkCommand);
+          },
+          setPaused: function (input) {
+            var key = input.paused ? "managed-conversation-pause" : "managed-conversation-resume";
+            return invoke(key, {
+              instance_key: selectedKeyRef.current,
+              request_id: input.requestId,
+              idempotency_key: input.idempotencyKey,
+              expected_revision: input.expectedConversationRevision,
+            }).then(function (result) {
+              checkCommand(result);
+              return readStatus(selectedKeyRef.current);
+            });
+          },
+          recover: function (input) {
+            return invoke("managed-conversation-recover", {
+              instance_key: selectedKeyRef.current,
+              request_id: input.requestId,
+              idempotency_key: input.idempotencyKey,
+              expected_revision: input.expectedConversationRevision,
+              expected_session_resource_version: input.expectedSessionResourceVersion,
+              expected_execution_id: input.expectedExecutionId,
+            }).then(function (result) {
+              checkCommand(result);
+              return readStatus(selectedKeyRef.current);
+            });
+          },
+          respondToPermission: function (input) {
+            return invoke("managed-conversation-permission-response", {
+              instance_key: selectedKeyRef.current,
+              request_id: input.requestId,
+              interaction_id: input.interactionId,
+              expected_resource_version: input.expectedResourceVersion,
+              option_id: input.optionId,
+              cancelled: input.cancelled,
+              human_response_receipt_id: input.humanResponseReceiptId,
+            }).then(checkCommand);
+          },
+          answerClarification: function (input) {
+            return invoke("managed-conversation-clarification-response", {
+              instance_key: selectedKeyRef.current,
+              request_id: input.requestId,
+              interaction_id: input.interactionId,
+              expected_resource_version: input.expectedResourceVersion,
+              answers: input.answers.map(function (answer) {
+                return {
+                  question_id: answer.questionId,
+                  selected_options: answer.selectedOptions,
+                  custom_text: answer.customText,
+                };
+              }),
+              human_response_receipt_id: input.humanResponseReceiptId,
+            }).then(checkCommand);
+          },
+        };
+
+        var taskPanels = snapshot.taskId
+          ? jsx(
+              React.Fragment,
+              null,
+              jsx(ui.WorkspaceTaskStatus, { taskId: snapshot.taskId }),
+              jsx(ui.WorkspaceTaskUsage, {
+                taskId: snapshot.taskId,
+                sessionId: snapshot.sessionId,
+              }),
+            )
+          : null;
+
+        return jsx(
+          "div",
+          {
+            className: "flex h-[calc(100dvh-3.5rem)] min-h-0 min-w-0 flex-col overflow-hidden",
+            "data-testid": "fixture-managed-chat-page",
+          },
+          jsx(ui.WorkspaceAgentChat, {
+            conversation: snapshot,
+            controller: controller,
+            instances: instances,
+            onSelectInstance: setSelectedKey,
+            tasksPanel: taskPanels,
+            onStatus: publishSnapshot,
+          }),
         );
       }
 
@@ -1191,6 +1486,7 @@
         section: FIXTURE_SIDEBAR_SECTION,
       });
       registry.registerRoute(FIXTURE_HELLO_PATH, PluginPage);
+      registry.registerRoute(FIXTURE_MANAGED_CHAT_PATH, ManagedChatPage);
       registry.registerComponent("task-sidebar", SidebarSlot);
       registry.registerComponent("main-top-bar", MainTopBarSlot);
       registry.registerComponent("main-top-bar", LegacyCompatibilitySlot);

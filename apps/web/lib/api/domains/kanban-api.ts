@@ -227,15 +227,18 @@ export async function updateTaskRepositoryBaseBranch(
 export type DeleteTaskParams = {
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
+  confirmationId?: string;
 };
 
 export type TaskDeletePreflightResponse = {
   requires_discard_consent: boolean;
+  confirmation_id: string;
 };
 
 export async function getTaskDeletePreflight(
   taskIds: string[],
   cascade: boolean,
+  discardWorktreeChanges = false,
   options?: ApiRequestOptions,
 ) {
   return fetchJson<TaskDeletePreflightResponse>("/api/v1/tasks/delete-preflight", {
@@ -243,7 +246,11 @@ export async function getTaskDeletePreflight(
     cache: "no-store",
     init: {
       method: "POST",
-      body: JSON.stringify({ task_ids: taskIds, cascade }),
+      body: JSON.stringify({
+        task_ids: taskIds,
+        cascade,
+        discard_worktree_changes: discardWorktreeChanges,
+      }),
       ...(options?.init ?? {}),
     },
   });
@@ -260,10 +267,33 @@ export async function deleteTask(
     queryParams.set("discard_worktree_changes", "true");
   }
   const query = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  const headers = new Headers(options?.init?.headers);
+  if (params?.confirmationId) {
+    headers.set("X-Kandev-Task-Delete-Confirmation", params.confirmationId);
+  }
   return fetchJson<void>(`/api/v1/tasks/${taskId}${query}`, {
     ...options,
-    init: { method: "DELETE", ...(options?.init ?? {}) },
+    init: { method: "DELETE", ...options?.init, headers },
   });
+}
+
+/**
+ * Deletes a task after a native app action has already confirmed that outcome
+ * (for example, closing a quick-chat session). Dialog-driven deletion should
+ * pass its preview ticket directly to `deleteTask` instead.
+ */
+export async function deleteTaskAfterUserAction(
+  taskId: string,
+  params?: DeleteTaskParams,
+  options?: ApiRequestOptions,
+) {
+  const preview = await getTaskDeletePreflight(
+    [taskId],
+    params?.cascade ?? false,
+    params?.discardWorktreeChanges ?? false,
+    options,
+  );
+  return deleteTask(taskId, { ...params, confirmationId: preview.confirmation_id }, options);
 }
 
 /** One-shot values applied when a task enters the destination workflow step. */
@@ -287,6 +317,12 @@ export type MoveTaskPayload = {
   position?: number;
   entry_options?: WorkflowMoveEntryOptions | null;
   workflow_change?: WorkflowChangePayload | null;
+  completion_override?: TaskCompletionMoveOverride | null;
+};
+
+export type TaskCompletionMoveOverride = {
+  expected_revision: number;
+  reason: string;
 };
 
 /** Move response fields added by the one-shot entry-options transport. */

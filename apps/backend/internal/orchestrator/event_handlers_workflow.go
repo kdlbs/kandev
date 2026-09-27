@@ -5587,6 +5587,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	if task == nil || (!task.WIPAdmitted && task.QueuedForStepID != "") {
 		return queueDrainSkipped
 	}
+	if managedConversationBlocksQueueDispatch(task) {
+		return queueDrainPaused
+	}
 	queueIdentity, ok := s.resolveQueueDrainIdentity(ctx, taskID, sessionID, identity)
 	if !ok {
 		return queueDrainSkipped
@@ -5602,6 +5605,19 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 		return queueDrainDispatched
 	}
 	return queueDrainSkipped
+}
+
+func managedConversationBlocksQueueDispatch(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	retained, _ := task.Metadata[models.MetaKeyManagedRetained].(bool)
+	if !retained {
+		return false
+	}
+	paused, pausedOK := task.Metadata[models.MetaKeyManagedConversationPaused].(bool)
+	detached, _ := task.Metadata[models.MetaKeyManagedConversationDetached].(bool)
+	return !pausedOK || paused || detached
 }
 
 // dispatchTakenQueuedMessageForSession validates the captured session

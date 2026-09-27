@@ -57,6 +57,14 @@ var ErrAgentProfileNotFound = errors.New("automation: agent profile not found")
 
 var ErrInvalidContinuationPolicy = errors.New("automation: invalid continuation policy")
 
+var (
+	ErrManagedScheduleNotFound            = errors.New("automation: managed schedule not found")
+	ErrManagedScheduleRevisionConflict    = errors.New("automation: managed schedule revision conflict")
+	ErrManagedScheduleIdempotencyConflict = errors.New("automation: managed schedule idempotency conflict")
+	ErrManagedScheduleInvalid             = errors.New("automation: managed schedule is invalid")
+	ErrManagedDestinationUnavailable      = errors.New("automation: managed conversation destination is unavailable")
+)
+
 // ErrAutomationRunNotDispatchable means the run was stopped or otherwise
 // settled before its agent turn could be started. The event handler must not
 // launch work for this run.
@@ -154,6 +162,23 @@ type AgentProfileLookup interface {
 	AgentProfileExists(ctx context.Context, profileID string) (bool, error)
 }
 
+// ManagedConversationDestinationResolver binds a portable plugin/instance
+// reference to the current workspace-owned conversation identity.
+type ManagedConversationDestinationResolver interface {
+	ResolveManagedConversationDestination(ctx context.Context, workspaceID, pluginID, instanceKey string, expectedRevision uint64) (installationID, conversationID string, paused bool, err error)
+}
+
+type ManagedAutomationInputReceipt struct {
+	InputID string
+	State   string
+	Paused  bool
+}
+
+type ManagedConversationAutomationDelivery interface {
+	EnqueueManagedAutomationInput(ctx context.Context, schedule *Automation, occurrenceID, payload string) (ManagedAutomationInputReceipt, error)
+	ReadManagedAutomationInput(ctx context.Context, schedule *Automation, inputID string) (ManagedAutomationInputReceipt, error)
+}
+
 // Service coordinates automation operations.
 type Service struct {
 	pluginAutomation PluginAutomationProvider
@@ -184,7 +209,9 @@ type Service struct {
 	// agentProfileLookup validates agent_profile_id on create/update. Nil =
 	// validation skipped, like workflowLocator above and unlike repoLookup —
 	// see validateAgentProfileID for why this one does not fail closed.
-	agentProfileLookup AgentProfileLookup
+	agentProfileLookup         AgentProfileLookup
+	managedDestinationResolver ManagedConversationDestinationResolver
+	managedAutomationDelivery  ManagedConversationAutomationDelivery
 
 	// authorizeWorkspace gates automation access by workspace ownership
 	// (opt-in auth). Nil = unscoped (internal schedulers/pollers, auth
@@ -304,6 +331,17 @@ func (s *Service) authorizeWorkflowStepOwnership(ctx context.Context, workspaceI
 // agent_profile_id on create/update.
 func (s *Service) SetAgentProfileLookup(l AgentProfileLookup) {
 	s.agentProfileLookup = l
+}
+
+// SetManagedConversationDestinationResolver wires host-owned destination
+// admission and delivery resolution. Managed targets fail closed when it is
+// absent.
+func (s *Service) SetManagedConversationDestinationResolver(resolver ManagedConversationDestinationResolver) {
+	s.managedDestinationResolver = resolver
+}
+
+func (s *Service) SetManagedConversationAutomationDelivery(delivery ManagedConversationAutomationDelivery) {
+	s.managedAutomationDelivery = delivery
 }
 
 // validateAgentProfileID rejects a binding to an agent profile that is not
@@ -440,14 +478,22 @@ func (s *Service) authorizeAutomation(ctx context.Context, id string) error {
 
 // CreateAutomation creates an automation with its initial triggers.
 func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationRequest) (*Automation, error) {
+	if req == nil {
+		return nil, errors.New("automation request is required")
+	}
+	if err := s.authorizeWs(ctx, req.WorkspaceID); err != nil {
+		return nil, err
+	}
+	return s.createAutomation(ctx, req, "", "", "")
+}
+
+//nolint:cyclop,funlen,gocognit // The creation boundary preserves provider, trigger, destination, and idempotency checks in order.
+func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationRequest, ownerInstallationID, operationID, payloadDigest string) (*Automation, error) {
 	if req.Name == "" {
 		return nil, fmt.Errorf("name is required")
 	}
 	if req.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required")
-	}
-	if err := s.authorizeWs(ctx, req.WorkspaceID); err != nil {
-		return nil, err
 	}
 
 	maxRuns := req.MaxConcurrentRuns
@@ -465,6 +511,22 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 	taskMode := req.TaskMode
 	if taskMode == "" {
 		taskMode = TaskModeAutomationRun
+	}
+	if err := validateManagedDestination(taskMode, req.ManagedDestination); err != nil {
+		return nil, err
+	}
+	var destinationInstallationID, destinationConversationID string
+	if taskMode == TaskModeManagedConversation {
+		if s.managedDestinationResolver == nil {
+			return nil, ErrManagedDestinationUnavailable
+		}
+		var resolveErr error
+		destinationInstallationID, destinationConversationID, _, resolveErr = s.managedDestinationResolver.ResolveManagedConversationDestination(
+			ctx, req.WorkspaceID, req.ManagedDestination.PluginID, req.ManagedDestination.InstanceKey, req.ManagedDestination.Revision,
+		)
+		if resolveErr != nil || destinationInstallationID == "" || destinationConversationID == "" {
+			return nil, errors.Join(ErrManagedDestinationUnavailable, resolveErr)
+		}
 	}
 	repositories, err := s.resolveAutomationRepositories(ctx, req.WorkspaceID, req.Repositories, req.RepositoryIDs)
 	if err != nil {
@@ -484,32 +546,44 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 	// Hidden automation runs may omit a workflow. Visible normal tasks require
 	// one, and when a workflow is supplied its ownership and optional starting
 	// step are still checked.
-	if err := s.authorizeWorkflowOwnership(ctx, req.WorkspaceID, req.WorkflowID); err != nil {
-		return nil, err
-	}
-	if err := s.authorizeWorkflowStepOwnership(ctx, req.WorkspaceID, req.WorkflowID, req.WorkflowStepID); err != nil {
-		return nil, err
+	if taskMode != TaskModeManagedConversation {
+		if err := s.authorizeWorkflowOwnership(ctx, req.WorkspaceID, req.WorkflowID); err != nil {
+			return nil, err
+		}
+		if err := s.authorizeWorkflowStepOwnership(ctx, req.WorkspaceID, req.WorkflowID, req.WorkflowStepID); err != nil {
+			return nil, err
+		}
 	}
 	a := &Automation{
-		WorkspaceID:        req.WorkspaceID,
-		Name:               req.Name,
-		Description:        req.Description,
-		WorkflowID:         req.WorkflowID,
-		WorkflowStepID:     req.WorkflowStepID,
-		AgentProfileID:     req.AgentProfileID,
-		ExecutorProfileID:  req.ExecutorProfileID,
-		TaskMode:           taskMode,
-		RepositoryMode:     repositoryMode,
-		Repositories:       repositories,
-		RepositoryIDs:      repositoryIDs,
-		Prompt:             req.Prompt,
-		TaskTitleTemplate:  req.TaskTitleTemplate,
-		Enabled:            true,
-		MaxConcurrentRuns:  maxRuns,
-		ContinuationPolicy: continuationPolicy,
+		ID:                               req.ID,
+		WorkspaceID:                      req.WorkspaceID,
+		Name:                             req.Name,
+		Description:                      req.Description,
+		WorkflowID:                       req.WorkflowID,
+		WorkflowStepID:                   req.WorkflowStepID,
+		AgentProfileID:                   req.AgentProfileID,
+		ExecutorProfileID:                req.ExecutorProfileID,
+		TaskMode:                         taskMode,
+		ManagedDestination:               req.ManagedDestination,
+		ManagedOwnerInstallationID:       ownerInstallationID,
+		ManagedDestinationInstallationID: destinationInstallationID,
+		ManagedDestinationConversationID: destinationConversationID,
+		RepositoryMode:                   repositoryMode,
+		Repositories:                     repositories,
+		RepositoryIDs:                    repositoryIDs,
+		Prompt:                           req.Prompt,
+		TaskTitleTemplate:                req.TaskTitleTemplate,
+		Enabled:                          true,
+		MaxConcurrentRuns:                maxRuns,
+		ContinuationPolicy:               continuationPolicy,
 	}
-	if err := s.validateAgentProfileID(ctx, req.AgentProfileID); err != nil {
-		return nil, err
+	if req.Enabled != nil {
+		a.Enabled = *req.Enabled
+	}
+	if taskMode != TaskModeManagedConversation {
+		if err := s.validateAgentProfileID(ctx, req.AgentProfileID); err != nil {
+			return nil, err
+		}
 	}
 	kinds := make([]TriggerType, 0, len(req.Triggers))
 	for _, trigger := range req.Triggers {
@@ -539,22 +613,20 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 			return nil, err
 		}
 	}
-	if err := s.store.CreateAutomation(ctx, a); err != nil {
-		return nil, fmt.Errorf("create automation: %w", err)
-	}
-
-	for _, ts := range req.Triggers {
-		t := &AutomationTrigger{
-			AutomationID: a.ID,
-			Type:         ts.Type,
-			Config:       ts.Config,
-			Enabled:      ts.Enabled,
+	if ownerInstallationID != "" {
+		if _, err := s.store.CreateManagedSchedule(ctx, a, req.Triggers, operationID, payloadDigest); err != nil {
+			return nil, fmt.Errorf("create managed schedule: %w", err)
 		}
-		if err := s.store.CreateTrigger(ctx, t); err != nil {
-			s.logger.Error("failed to create trigger during automation creation",
-				zap.String("automation_id", a.ID),
-				zap.String("type", string(ts.Type)),
-				zap.Error(err))
+	} else {
+		if err := s.store.CreateAutomation(ctx, a); err != nil {
+			return nil, fmt.Errorf("create automation: %w", err)
+		}
+		for _, ts := range req.Triggers {
+			t := &AutomationTrigger{AutomationID: a.ID, Type: ts.Type, Config: ts.Config, Enabled: ts.Enabled}
+			if err := s.store.CreateTrigger(ctx, t); err != nil {
+				s.logger.Error("failed to create trigger during automation creation",
+					zap.String("automation_id", a.ID), zap.String("type", string(ts.Type)), zap.Error(err))
+			}
 		}
 	}
 
@@ -566,6 +638,13 @@ func (s *Service) GetAutomation(ctx context.Context, id string) (*Automation, er
 	if err := s.authorizeAutomation(ctx, id); err != nil {
 		return nil, err
 	}
+	return s.store.GetAutomation(ctx, id)
+}
+
+// GetAutomationForDispatch reads the schedule for host-owned event delivery.
+// It is not exposed through browser or plugin routes; those use authorized
+// GetAutomation.
+func (s *Service) GetAutomationForDispatch(ctx context.Context, id string) (*Automation, error) {
 	return s.store.GetAutomation(ctx, id)
 }
 
@@ -612,6 +691,29 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	if req.TaskMode != nil {
 		taskMode = *req.TaskMode
 	}
+	managedDestination := existing.ManagedDestination
+	if req.TaskMode != nil && taskMode != TaskModeManagedConversation {
+		managedDestination = nil
+	}
+	if req.ManagedDestination != nil {
+		managedDestination = req.ManagedDestination
+	}
+	if err := validateManagedDestination(taskMode, managedDestination); err != nil {
+		return nil, err
+	}
+	destinationInstallationID, destinationConversationID := "", ""
+	if taskMode == TaskModeManagedConversation {
+		if s.managedDestinationResolver == nil {
+			return nil, ErrManagedDestinationUnavailable
+		}
+		var resolveErr error
+		destinationInstallationID, destinationConversationID, _, resolveErr = s.managedDestinationResolver.ResolveManagedConversationDestination(
+			ctx, existing.WorkspaceID, managedDestination.PluginID, managedDestination.InstanceKey, managedDestination.Revision,
+		)
+		if resolveErr != nil || destinationInstallationID == "" || destinationConversationID == "" {
+			return nil, errors.Join(ErrManagedDestinationUnavailable, resolveErr)
+		}
+	}
 	repositories := existing.Repositories
 	if req.Repositories != nil || req.RepositoryIDs != nil {
 		repositories, err = s.resolveAutomationRepositories(
@@ -656,6 +758,19 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 		maxRuns = *req.MaxConcurrentRuns
 	}
 	storeReq := req
+	if taskMode != existing.TaskMode || managedDestination != existing.ManagedDestination {
+		clone := *storeReq
+		clone.ManagedDestination = managedDestination
+		clone.ManagedDestinationInstallationID = destinationInstallationID
+		clone.ManagedDestinationConversationID = destinationConversationID
+		storeReq = &clone
+	} else if taskMode == TaskModeManagedConversation {
+		clone := *storeReq
+		clone.ManagedDestination = managedDestination
+		clone.ManagedDestinationInstallationID = destinationInstallationID
+		clone.ManagedDestinationConversationID = destinationConversationID
+		storeReq = &clone
+	}
 	if policy == ContinuationPolicyReuseThread && maxRuns <= 0 {
 		maxRuns = 1
 		normalized := 1
@@ -867,6 +982,13 @@ func (s *Service) ReconcileOpenRuns(ctx context.Context) error {
 	}
 	for _, run := range runs {
 		if run == nil {
+			continue
+		}
+		managedDestination, lookupErr := s.store.IsManagedConversationAutomation(ctx, run.AutomationID)
+		if lookupErr != nil {
+			return fmt.Errorf("inspect automation destination for run %s: %w", run.ID, lookupErr)
+		}
+		if managedDestination {
 			continue
 		}
 		if run.TriggerType == TriggerTypePluginEvent {
@@ -1508,6 +1630,10 @@ func (s *Service) RecordFilteredTrigger(
 		TriggerData:  triggerData,
 		ErrorMessage: fmt.Sprintf("filter_rejected: %d", rejectedIndex),
 		DisplayTitle: RenderRunDisplayTitle(a, triggerType, triggerData),
+	}
+	if a.TaskMode == TaskModeManagedConversation {
+		run.DeliveryStatus = ManagedDeliveryPending
+		run.ManagedConversationID = a.ManagedDestinationConversationID
 	}
 	return s.store.CreateRun(ctx, run)
 }

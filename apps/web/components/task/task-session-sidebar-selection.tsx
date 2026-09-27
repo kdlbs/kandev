@@ -36,10 +36,14 @@ export function useBulkConfirmDialog(
   );
 
   const confirm = useCallback(
-    async ({ cascade, discardWorktreeChanges }: TaskActionOptions & { cascade: boolean }) => {
+    async ({
+      cascade,
+      discardWorktreeChanges,
+      confirmationId,
+    }: TaskActionOptions & { cascade: boolean }) => {
       if (!state) return;
       try {
-        await run(state.ids, { cascade, discardWorktreeChanges });
+        await run(state.ids, { cascade, discardWorktreeChanges, confirmationId });
       } catch (error) {
         console.error("Bulk action failed:", error);
       } finally {

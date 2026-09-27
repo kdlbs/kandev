@@ -124,6 +124,13 @@ interface PluginHostApi {
     baseUrl: string;
   };
   ui: PluginUIApi; // named curated host components; no open Record index
+  conversation: PluginConversationApi;
+  // Optional on older hosts. Browser reads use the authenticated task API and
+  // return bounded canonical projections; they do not expose app-store state.
+  queries?: PluginHostQueriesApi;
+  // Optional on older hosts. Issues a single-use receipt after native
+  // session.control authorization for a pending human interaction.
+  interactions?: PluginHostInteractionsApi;
   // Plugin-scoped locale and translation API. Components use the reactive
   // hook; registry getters may use the imperative translator.
   i18n: {
@@ -821,7 +828,7 @@ notification to the current plugin generation and task-panel session context.
       retry(): void;
     }
 
-    interface PluginSessionTurnsState {
+interface PluginSessionTurnsState {
       turns: readonly PluginConversationTurn[];
       loading: boolean;
       hydrated: boolean;
@@ -989,6 +996,186 @@ interface NavItem {
   path: string;
   icon?: PluginIcon;
   section?: PluginNavSection;
+}
+
+interface PluginTaskStatusSnapshot {
+  taskId: string;
+  title: string;
+  state: string;
+  workflowStepId?: string;
+  statusSummary?: {
+    revision: number;
+    foregroundActivity?: string;
+    activeSubagentCount?: number;
+    queuedPromptCount?: number;
+    completionGate?: { verifiedCount: number; criteriaCount: number; blocked: boolean };
+    activeError?: { preview: string; category?: string };
+  } | null;
+}
+
+interface PluginTaskUsageSnapshot {
+  taskId: string;
+  sessionId?: string;
+  tokensIn: number;
+  tokensCachedRead: number;
+  tokensCachedWrite: number;
+  tokensOut: number;
+  tokensThought: number;
+  tokensTotal: number;
+  /** Integer hundredths of a cent. */
+  costSubcents: number;
+  eventCount: number;
+  estimatedEventCount: number;
+  unpricedEventCount: number;
+  outputTokensComplete: boolean;
+  firstEventAt?: string | null;
+  lastEventAt?: string | null;
+}
+
+interface PluginQueryState<Value> {
+  data: Value | null;
+  loading: boolean;
+  error: string | null;
+  refetch(): Promise<void>;
+}
+
+interface PluginHostQueriesApi {
+  useTaskStatus(taskId: string | null): PluginQueryState<PluginTaskStatusSnapshot>;
+  useTaskUsage(taskId: string | null, sessionId?: string | null): PluginQueryState<PluginTaskUsageSnapshot>;
+}
+
+interface PluginManagedConversationSnapshot {
+  workspaceId: string;
+  instanceKey: string;
+  taskId: string;
+  sessionId: string | null;
+  revision: number;
+  sessionResourceVersion: string;
+  executionId?: string;
+  sessionState?: string;
+  state: "loading" | "ready" | "paused" | "disconnected" | "revoked" | "unsupported" | "unavailable" | "detached";
+  readOnly?: boolean;
+  statusReason?: string;
+  recoverySupported?: boolean;
+  recoveryReason?: string;
+  pendingInteractions: readonly PluginManagedConversationInteraction[];
+}
+
+interface PluginManagedConversationOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+interface PluginManagedConversationQuestion {
+  id: string;
+  title: string;
+  prompt?: string;
+  options?: readonly PluginManagedConversationOption[];
+}
+
+interface PluginManagedConversationClarificationAnswer {
+  questionId: string;
+  selectedOptions?: readonly string[];
+  customText?: string;
+}
+
+interface PluginManagedConversationInputIntent {
+  requestId: string;
+  idempotencyKey: string;
+  occurrenceKey: string;
+  origin: "human";
+  payload: string;
+}
+
+interface PluginHostV2ManagedAgentInputReceipt {
+  hostInputId: string;
+  occurrenceKey: string;
+  sequence: number;
+  origin: "human" | "automation" | "periodic" | "interaction";
+  payload: string;
+  conversationRevision: number;
+  state: "accepted" | "running" | "completed" | "failed" | "cancelled" | "uncertain";
+  executionId: string;
+}
+
+interface PluginManagedConversationController {
+  getStatus(): Promise<PluginManagedConversationSnapshot>;
+  listInputs(input: { sequenceCursor: number; limit: number }): Promise<{
+    inputs: readonly PluginHostV2ManagedAgentInputReceipt[];
+    nextSequenceCursor: number;
+    hasMore: boolean;
+  }>;
+  enqueue(input: PluginManagedConversationInputIntent & { expectedConversationRevision: number }): Promise<{ receipt: PluginHostV2ManagedAgentInputReceipt }>;
+  cancelInput(input: {
+    requestId: string;
+    idempotencyKey: string;
+    expectedConversationRevision: number;
+    hostInputId: string;
+    expectedExecutionId?: string;
+  }): Promise<{ receipt: PluginHostV2ManagedAgentInputReceipt }>;
+  setPaused(input: { requestId: string; idempotencyKey: string; expectedConversationRevision: number; paused: boolean }): Promise<PluginManagedConversationSnapshot>;
+  recover(input: {
+    requestId: string;
+    idempotencyKey: string;
+    expectedConversationRevision: number;
+    expectedSessionResourceVersion: string;
+    expectedExecutionId: string;
+  }): Promise<PluginManagedConversationSnapshot>;
+  respondToPermission(input: {
+    requestId: string; interactionId: string; expectedResourceVersion: string;
+    optionId?: string; cancelled?: boolean; humanResponseReceiptId: string;
+  }): Promise<void>;
+  answerClarification(input: {
+    requestId: string; interactionId: string; expectedResourceVersion: string;
+    answers: readonly PluginManagedConversationClarificationAnswer[]; humanResponseReceiptId: string;
+  }): Promise<void>;
+}
+
+interface PluginManagedConversationInteraction {
+  id: string;
+  kind: "permission" | "clarification";
+  title: string;
+  context?: string;
+  expectedResourceVersion: string;
+  options?: readonly PluginManagedConversationOption[];
+  questions?: readonly PluginManagedConversationQuestion[];
+  agentDisconnected?: boolean;
+}
+
+interface PluginWorkspaceAgentChatProps {
+  conversation: PluginManagedConversationSnapshot;
+  controller: PluginManagedConversationController;
+  instances?: readonly { key: string; label: string }[];
+  onSelectInstance?(instanceKey: string): void;
+  tasksPanel?: React.ReactNode;
+  outcomesPanel?: React.ReactNode;
+  onStatus?(status: PluginManagedConversationSnapshot): void;
+}
+
+interface PluginHumanInteractionResponseInput {
+  workspaceId: string;
+  interactionId: string;
+  expectedResourceVersion: string;
+  response:
+    | { kind: "permission"; optionId: string; cancelled?: false }
+    | { kind: "permission"; optionId?: never; cancelled: true }
+    | { kind: "clarification"; answers: readonly PluginManagedConversationClarificationAnswer[] };
+}
+
+interface PluginHostInteractionsApi {
+  issueResponseReceipt(input: PluginHumanInteractionResponseInput): Promise<{
+    id: string;
+    interactionId: string;
+    resourceVersion: string;
+    expiresAt: string;
+  }>;
+}
+
+interface PluginUIApi {
+  WorkspaceAgentChat: React.ComponentType<PluginWorkspaceAgentChatProps>;
+  WorkspaceTaskStatus: React.ComponentType<{ taskId: string }>;
+  WorkspaceTaskUsage: React.ComponentType<{ taskId: string; sessionId?: string | null }>;
 }
 
 // Configuration for the kandev-style title bar the host renders above a plugin
@@ -1799,6 +1986,31 @@ defaults, or the bare component when the route opted out (`topbar: false`).
   `user.settings.updated`).
 
 ## Security posture (documented, enforced where cheap)
+
+Backend exact commands use the optional Go `pluginsdk.ExactHost` extension. The
+frontend `PluginHostApi` does not expose privileged Host gRPC calls. The
+`PluginHostV2*` TypeScript interfaces are data contracts for a plugin's own
+backend-to-UI projection; they do not confer authority. See the
+[gRPC Host v2 contract](GRPC-CONTRACT.md#host-v2-exact-task-update) for exact
+task updates, source-identified creation, labels, human assignment, workflow
+moves, archive, and task completion criteria/evidence. See [task completion gates](GRPC-CONTRACT.md#host-v2-task-completion-gates) and [managed conversation lifetime](GRPC-CONTRACT.md#host-v2-managed-conversation-lifetime)
+for installation-scoped identity, revision checks, workspace approval, and
+retention behavior. Go plugins use the exact Host v2 methods for durable managed
+conversation input; the browser API does not expose these privileged calls. See
+[managed conversation inputs](GRPC-CONTRACT.md#host-v2-managed-conversation-inputs)
+for receipt, cancellation, and immediate-dispatch behavior. Go plugins can also
+manage installation-owned schedules with separate automation grants; see
+[managed conversation schedules](GRPC-CONTRACT.md#host-v2-managed-conversation-schedules)
+for schedule ownership, revision, delivery, and portable-binding rules. They can also
+use the optional snapshot-bound [exact workspace observation contract](GRPC-CONTRACT.md#host-v2-exact-workspace-observations)
+to reconcile tasks, sessions, interactions, sanitized messages, relations,
+pending moves, change-request evidence, and usage. These reads do not create a
+privileged browser API; a plugin must project any data its UI needs through its
+own backend. Exact run, stop, recovery, transition cancellation, and provider
+mode commands use the workspace-approved execution extension. Exact permission
+and clarification responses also require a short-lived human response receipt
+from the authenticated native UI; legacy v1 response methods return
+`PermissionDenied`. See [execution controls and human responses](GRPC-CONTRACT.md#host-v2-execution-controls-and-human-responses).
 
 Plugin JS runs in the kandev origin with store access — this is the accepted
 tradeoff of option C. v1 mitigations: only **active, operator-installed** plugins

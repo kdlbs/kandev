@@ -181,3 +181,8 @@ executor, or change physical workspace ownership.
 
 - [Task completion and follow-ups](../../../plans/task-completion/plan.md)
 - [Workspace restoration after completion](../../../plans/completed-workspace-restoration/plan.md)
+
+## Proposed coordination extension
+
+The proposed optional evidence gate is specified separately. It narrows admission to completing steps without changing tasks that have no criteria.
+See the [draft coordination contract](coordination-controls.md).

@@ -10,6 +10,8 @@ import {
   type FetchedSessionData,
 } from "@/lib/ssr/session-page-state";
 import { useTranslation } from "react-i18next";
+import { isDetachedManagedConversation } from "@/lib/plugins/retained-managed-conversation";
+import { RetainedManagedConversationTranscript } from "@/components/plugins/retained-managed-conversation-transcript";
 
 type TaskDetailRouteProps = {
   taskId: string;
@@ -100,18 +102,22 @@ export function TaskDetailRoute({
       {initialState ? (
         <StateHydrator initialState={initialState} sessionId={activeSessionId ?? undefined} />
       ) : null}
-      <KanbanTaskShell
-        task={task}
-        taskId={taskId}
-        sessionId={activeSessionId}
-        initialRepositories={extractInitialRepositories(initialState, task)}
-        initialScripts={extractInitialScripts(initialState, task)}
-        initialTerminals={data?.initialTerminals ?? []}
-        defaultLayouts={{}}
-        initialLayout={layout}
-        urlSimple={simple}
-        urlMode={mode}
-      />
+      {task && isDetachedManagedConversation(task) ? (
+        <RetainedManagedConversationTranscript task={task} sessionId={activeSessionId} />
+      ) : (
+        <KanbanTaskShell
+          task={task}
+          taskId={taskId}
+          sessionId={activeSessionId}
+          initialRepositories={extractInitialRepositories(initialState, task)}
+          initialScripts={extractInitialScripts(initialState, task)}
+          initialTerminals={data?.initialTerminals ?? []}
+          defaultLayouts={{}}
+          initialLayout={layout}
+          urlSimple={simple}
+          urlMode={mode}
+        />
+      )}
     </>
   );
 }

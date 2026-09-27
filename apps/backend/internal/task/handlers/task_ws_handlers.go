@@ -460,12 +460,13 @@ func (h *TaskHandlers) wsArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 }
 
 type wsMoveTaskRequest struct {
-	ID             string                        `json:"id"`
-	WorkflowID     string                        `json:"workflow_id"`
-	WorkflowStepID string                        `json:"workflow_step_id"`
-	Position       int                           `json:"position"`
-	EntryOptions   *workflowmove.EntryOptions    `json:"entry_options,omitempty"`
-	WorkflowChange *models.WorkflowChangeRequest `json:"workflow_change,omitempty"`
+	ID                 string                                     `json:"id"`
+	WorkflowID         string                                     `json:"workflow_id"`
+	WorkflowStepID     string                                     `json:"workflow_step_id"`
+	Position           int                                        `json:"position"`
+	EntryOptions       *workflowmove.EntryOptions                 `json:"entry_options,omitempty"`
+	WorkflowChange     *models.WorkflowChangeRequest              `json:"workflow_change,omitempty"`
+	CompletionOverride *service.TaskCompletionMoveOverrideRequest `json:"completion_override,omitempty"`
 }
 
 func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -494,9 +495,14 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 			StepHistoryActor:          wfmodels.StepTransitionActorHuman,
 			EntryOptions:              req.EntryOptions,
 			WorkflowChange:            req.WorkflowChange,
+			CompletionOverride:        req.CompletionOverride,
 		},
 	)
 	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) || errors.Is(err, repoerrors.ErrTaskCompletionCriteriaConflict) ||
+			errors.Is(err, repoerrors.ErrTaskCompletionHumanConfirmationRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "Task completion requirements changed or are not satisfied", map[string]interface{}{"error_code": "task_completion_gate_blocked"})
+		}
 		if code, msgText, ok := moveEntryOptionsWSError(err); ok {
 			return ws.NewError(msg.ID, msg.Action, code, msgText, nil)
 		}
@@ -579,6 +585,9 @@ func (h *TaskHandlers) wsUpdateTaskState(ctx context.Context, msg *ws.Message) (
 
 	task, err := h.service.UpdateTaskState(ctx, req.ID, v1.TaskState(req.State))
 	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "Task completion requirements are not satisfied", map[string]interface{}{"error_code": "task_completion_gate_blocked"})
+		}
 		h.logger.Error("failed to update task state", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task state", nil)
 	}

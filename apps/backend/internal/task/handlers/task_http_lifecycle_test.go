@@ -125,6 +125,7 @@ func newHTTPTaskHandlers(t *testing.T, repo *httpTaskRepo) *TaskHandlers {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo, ResourceCleanups: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorktreeCleanup(authzDeleteCleanup{})
 	return &TaskHandlers{service: svc, logger: log}
 }
 
@@ -473,13 +474,14 @@ func TestHTTPDeleteTaskDeletesAndReportsMissingTasks(t *testing.T) {
 	repo := &httpTaskRepo{}
 	h := newHTTPTaskHandlers(t, repo)
 
-	c, rec := taskRequestAs(t, "", http.MethodDelete, "/api/v1/tasks/task-b", "task-b")
+	c, rec := taskRequestAs(t, "user-b", http.MethodDelete, "/api/v1/tasks/task-b", "task-b")
+	authorizeTaskDeletePreview(t, h, c, "task-b")
 	h.httpDeleteTask(c)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, `{"success":true}`, rec.Body.String())
 	require.Equal(t, []string{"task-b"}, repo.deleted)
 
-	missingCtx, missingRec := taskRequestAs(t, "", http.MethodDelete, "/api/v1/tasks/nope", "nope")
+	missingCtx, missingRec := taskRequestAs(t, "user-b", http.MethodDelete, "/api/v1/tasks/nope", "nope")
 	h.httpDeleteTask(missingCtx)
 	require.Equal(t, http.StatusNotFound, missingRec.Code)
 	require.JSONEq(t, `{"error":"task not deleted"}`, missingRec.Body.String())
