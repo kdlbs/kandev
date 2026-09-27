@@ -1164,7 +1164,14 @@ func (r *SSHExecutor) resetTrackedManagedBrokerResume(
 			return brokerPreflight(preflightCtx, state.client, req, SSHRemotePlatform{})
 		})
 		if err != nil {
-			if r.isTransportLost(state) {
+			// The preflight context and the transport backstop share a
+			// deadline. If the preflight's context wins the race, its SSH
+			// call can return context.DeadlineExceeded before the backstop
+			// marks the client lost. Treat either outcome as an abandoned
+			// preflight and close the client so no wedged channel survives.
+			if r.isTransportLost(state) || errors.Is(err, context.DeadlineExceeded) {
+				r.markTransportLost(state)
+				_ = r.closeClientOnce(state)
 				return ErrSSHTransportLost
 			}
 			return err
