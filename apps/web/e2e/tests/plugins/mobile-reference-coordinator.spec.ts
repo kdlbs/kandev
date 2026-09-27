@@ -39,7 +39,7 @@ test.describe("reference coordinator on phone", () => {
     );
     alternateProfileId = alternateProfile.id;
 
-    await testPage.goto("/plugins/kandev-plugin-coordinator");
+    await testPage.goto("/plugins/kandev-plugin-coordinator-template");
     await testPage.getByTestId("coordinator-add-instance").tap();
     await expect(testPage.getByTestId("coordinator-settings")).toBeVisible();
     await testPage.getByTestId("coordinator-field-name").fill("Delivery lead");
@@ -88,7 +88,9 @@ test.describe("reference coordinator on phone", () => {
     const pauseResponses: string[] = [];
     testPage.on("response", async (response) => {
       if (
-        response.url().endsWith("/api/plugins/kandev-plugin-coordinator/actions/conversation.pause")
+        response
+          .url()
+          .endsWith("/api/plugins/kandev-plugin-coordinator-template/actions/conversation.pause")
       ) {
         pauseResponses.push(`${response.status()}: ${await response.text()}`);
       }

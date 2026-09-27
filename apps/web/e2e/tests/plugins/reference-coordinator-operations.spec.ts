@@ -34,7 +34,7 @@ test("desktop coordinator adopts a linked task, writes to Jira, and reports outc
     taskId = linkedTask.taskId;
     watchId = linkedTask.watchId;
 
-    await testPage.goto("/plugins/kandev-plugin-coordinator");
+    await testPage.goto("/plugins/kandev-plugin-coordinator-template");
     await expect(testPage.getByTestId("coordinator-external-task-id")).toBeVisible();
     await testPage.getByTestId("coordinator-external-task-id").fill(taskId);
     await testPage.getByTestId("coordinator-adopt-external-task").click();

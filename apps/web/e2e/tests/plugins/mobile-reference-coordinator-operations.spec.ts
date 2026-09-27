@@ -35,7 +35,7 @@ test("phone coordinator adopts a task, submits evidence, and shows its outcome",
       instructions: "Claim selected tasks and report current evidence.",
     });
 
-    await testPage.goto("/plugins/kandev-plugin-coordinator");
+    await testPage.goto("/plugins/kandev-plugin-coordinator-template");
     await testPage.getByRole("tab", { name: "Tasks" }).tap();
     await testPage.getByTestId("coordinator-external-task-id").fill(taskId);
     await testPage.getByTestId("coordinator-adopt-external-task").tap();

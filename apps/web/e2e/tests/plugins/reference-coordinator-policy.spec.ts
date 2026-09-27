@@ -27,7 +27,7 @@ test("reference coordinator records and approves one durable proposal", async ({
     description: "Check the release notes and report missing steps.",
   });
 
-  await testPage.goto("/plugins/kandev-plugin-coordinator");
+  await testPage.goto("/plugins/kandev-plugin-coordinator-template");
   const proposals = testPage.getByTestId("coordinator-proposal-list");
   await expect(proposals).toContainText("Review the deployment notes");
   await proposals.getByTestId("coordinator-proposal-approve").click();
