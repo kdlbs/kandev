@@ -1,0 +1,70 @@
+"use client";
+
+import { useMemo } from "react";
+import { classify, type ClassifyResult } from "@/lib/coordinator/attention";
+import { useCoordinatorInputs } from "./use-coordinator-inputs";
+import { useCoordinatorTasks } from "./use-coordinator-tasks";
+import { useNowTick } from "./use-now-tick";
+
+export type CoordinatorInputKind = "tasks" | "stalls" | "proposals";
+
+export type CoordinatorInputStatus = {
+  kind: CoordinatorInputKind;
+  error: boolean;
+  loadedAt: number | undefined;
+};
+
+export type UseCoordinatorAttentionResult = {
+  classification: ClassifyResult;
+  /** The name of each task's current step, keyed by task id (Adoption decision 3). */
+  stepNameByTaskId: Map<string, string>;
+  /** True once the tasks input has never had a successful read. */
+  tasksNeverLoaded: boolean;
+  /** Per-input status, in the banner order tasks, stall records, proposals. */
+  inputs: CoordinatorInputStatus[];
+  /** Re-issues only the reads currently in an error state, in parallel. */
+  retryFailed: () => void;
+};
+
+/**
+ * Combines the coordinator's three screen inputs (tasks, stall records,
+ * pending proposals) with the 30-second age timer into one classification
+ * result for the Needs you and Queue screens (docs/specs/coordinator/
+ * system-design/needs-you.md#classification, #failure-and-recovery).
+ */
+export function useCoordinatorAttention(
+  workspaceId: string | null,
+  coordinatorId: string | null,
+): UseCoordinatorAttentionResult {
+  const tasksInput = useCoordinatorTasks(workspaceId);
+  const {
+    stalls,
+    proposals,
+    retryFailed: retryStallsAndProposals,
+  } = useCoordinatorInputs(workspaceId, coordinatorId);
+  const now = useNowTick();
+
+  const classification = useMemo(
+    () => classify(tasksInput.tasks, stalls.value ?? [], proposals.value ?? [], now),
+    [tasksInput.tasks, stalls.value, proposals.value, now],
+  );
+
+  const inputs: CoordinatorInputStatus[] = [
+    { kind: "tasks", error: tasksInput.error, loadedAt: tasksInput.loadedAt },
+    { kind: "stalls", error: stalls.error, loadedAt: stalls.loadedAt },
+    { kind: "proposals", error: proposals.error, loadedAt: proposals.loadedAt },
+  ];
+
+  const retryFailed = () => {
+    if (tasksInput.error) tasksInput.retry();
+    retryStallsAndProposals();
+  };
+
+  return {
+    classification,
+    stepNameByTaskId: tasksInput.stepNameByTaskId,
+    tasksNeverLoaded: tasksInput.loadedAt === undefined,
+    inputs,
+    retryFailed,
+  };
+}
