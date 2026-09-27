@@ -119,3 +119,9 @@ Validation passed:
 The branch-progress cache now expires stale entries when branch queries resume.
 `TestBatchedBranchQueryProgressExpiresAfterTTL` failed before this correction
 and passed afterward.
+
+The existing retry-boundary test uses the asynchronous automatic scheduler.
+It now waits for the workspace job to leave the in-flight map before checking
+the persisted retry deadline. This removes a race between the provider call
+and the durable result read. The test passed 100 repeated runs and 10
+race-enabled runs.

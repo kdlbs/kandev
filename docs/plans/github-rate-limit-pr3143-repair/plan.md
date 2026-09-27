@@ -17,22 +17,21 @@ legacy_specs: []
 
 Repair confirmed defects without replacing principal-wide admission or the
 Workflow Sync retry owner. All six work orders are implemented and verified.
-The implementation was initially left local and uncommitted as requested.
-See Delivery results for the current PR state.
+At the implementation handoff, the repair remained local and uncommitted as
+requested. The later PR delivery and CI follow-up are recorded below.
 
 ## Review basis
 
 - PR: https://github.com/kdlbs/kandev/pull/3143
 - Related issue: https://github.com/kdlbs/kandev/issues/3176
 - Previous inspected head: `fa960ef6edff762a0a768c4e4a60b531dc199921`.
-- Current contributor head: `ffd4f76be095db4291cdf762082c8365097d5478`.
-- Current fetched main: `359b5ffdbb6e25592bc3a46d88db1dbf94ff103c`.
-- Merge base: `04b722121ad50f0dcb41c7c16d8bd6ca5c4b93df`.
+- Contributor head at implementation start: `ffd4f76be095db4291cdf762082c8365097d5478`.
+- Main used for the rebase: `359b5ffdbb6e25592bc3a46d88db1dbf94ff103c`.
+- Merge base before rebase: `04b722121ad50f0dcb41c7c16d8bd6ca5c4b93df`.
 - Local branch: `feature/fix-workflow-sync-gi-d0x-ea3dzi7c`.
 - Backup: `backup/pr-3143-before-rebase-20260927` preserves the earlier checkout.
 - The PR was open and non-draft at the start of implementation. The local branch
-  has since been rebased to remove unrelated changes; it is not pushed and its
-  current head is `95a30d761b88bab0fd6795e97ba6a5146cf0e6f7`.
+  was rebased to remove unrelated changes and later pushed as recorded below.
 
 The initial rebase attempt stopped at commit `4765502cf`, the first of 78
 commits. Conflicts affected GitHub clients and specification indexes. Task 01
@@ -208,5 +207,27 @@ worktree was uncommitted. The Delivery results section records later actions.
   Sync retry and suspension state remains durable.
 - This was a focused repair and verification, not a full-file review or
   exhaustive security audit of every PR path.
-- The local branch history and worktree differ from the remote PR until an
-  explicitly authorized delivery action updates it.
+- At the implementation handoff, the local branch differed from the remote PR.
+  The delivery record below captures the later update.
+
+## Delivery results and CI follow-up
+
+The repair was pushed over SSH to
+`yattdev/kandev:feature/fix-workflow-sync-gi-d0x` at
+`70b4c8f3d4a871d77e70e89253725cc72fd60265`, with an exact lease against the
+previous contributor head. The requested summary comment was posted at
+https://github.com/kdlbs/kandev/pull/3143#issuecomment-5856508770.
+
+At the latest metadata refresh, PR #3143 was open, non-draft, mergeable, and
+based on `a749a1accc919ce6b9ec35ab4308b5b5095ce08f`. It had no unresolved
+review threads. Its
+Backend Tests run failed in
+`TestSyncDueConfigsSkipsProviderUntilNextAttempt`. The test observed the
+provider call before the asynchronous scheduler persisted the retry deadline.
+This was a test synchronization race. The regression now waits for the worker
+to leave the in-flight map before it reads the persisted result.
+
+The corrected test passed 100 repeated runs, the complete Workflow Sync
+package passed, and the corrected test passed 10 race-enabled runs. Pushing the
+follow-up starts a new CI run. E2E jobs on the previous head were still in
+progress when this follow-up was prepared.

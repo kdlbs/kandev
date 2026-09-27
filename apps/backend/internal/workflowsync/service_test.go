@@ -494,9 +494,17 @@ func TestSyncDueConfigsSkipsProviderUntilNextAttempt(t *testing.T) {
 	svc.now = func() time.Time { return now }
 	svc.jitter = func(time.Duration) time.Duration { return 0 }
 	configureWorkspace(t, svc, "ws-1")
+	waitForSync := func(wantCalls int) {
+		assert.Eventually(t, func() bool {
+			svc.automaticMu.Lock()
+			inFlight := svc.automaticInFlight["ws-1"] != nil
+			svc.automaticMu.Unlock()
+			return provider.callCount() == wantCalls && !inFlight
+		}, time.Second, time.Millisecond)
+	}
 
 	svc.SyncDueConfigs(context.Background())
-	assert.Eventually(t, func() bool { return provider.callCount() == 1 }, time.Second, time.Millisecond)
+	waitForSync(1)
 	require.Equal(t, 1, provider.callCount())
 	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
@@ -504,11 +512,11 @@ func TestSyncDueConfigsSkipsProviderUntilNextAttempt(t *testing.T) {
 	require.Equal(t, now.Add(150*time.Second), *cfg.NextAttemptAt)
 
 	svc.SyncDueConfigs(context.Background())
-	assert.Eventually(t, func() bool { return provider.callCount() == 1 }, time.Second, time.Millisecond)
+	waitForSync(1)
 	require.Equal(t, 1, provider.callCount(), "same-tick retry reached the provider")
 	now = *cfg.NextAttemptAt
 	svc.SyncDueConfigs(context.Background())
-	assert.Eventually(t, func() bool { return provider.callCount() == 2 }, time.Second, time.Millisecond)
+	waitForSync(2)
 	require.Equal(t, 2, provider.callCount(), "retry did not run at next_attempt_at")
 }
 
